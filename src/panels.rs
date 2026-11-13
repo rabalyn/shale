@@ -638,6 +638,13 @@ impl ShaleApp {
                     changed |= ui.checkbox(&mut self.cfg.new_notes_next_to_current, "Create notes from red links next to the current note (instead of the vault root)").changed();
                     changed |= ui.checkbox(&mut self.cfg.update_links_on_rename, "Update links in other notes when renaming").changed();
                     ui.add_space(8.0);
+                    ui.label(egui::RichText::new("People").color(theme::MUTED));
+                    ui.horizontal(|ui| {
+                        ui.label("People folder");
+                        changed |= ui.add(egui::TextEdit::singleline(&mut self.cfg.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0)).on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.").changed();
+                    });
+                    ui.label(muted("Type [[p followed by a name to pick a person from this folder (or make a new contact note).").size(12.0));
+                    ui.add_space(8.0);
                     ui.label(egui::RichText::new("Appearance").color(theme::MUTED));
                     changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
                     changed |= ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed();

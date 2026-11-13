@@ -30,8 +30,12 @@ mod panels;
 mod pdfexport;
 mod pdfview;
 mod pdfwrite;
+mod people;
 mod reader;
 mod theme;
+#[cfg(test)]
+mod utf8_tests;
+mod tagwords;
 mod tb_store;
 mod vault;
 #[cfg(target_os = "linux")]

@@ -120,6 +120,8 @@ pub enum Action {
     OpenVault(PathBuf),
     /// Look at the vault folder again (e.g. after a file was copied in).
     Rescan,
+    /// make a contact note in the people folder (from `[[p Name`)
+    CreatePerson(String),
 }
 
 #[derive(Default)]
@@ -169,6 +171,12 @@ pub struct ShaleApp {
     /// drops being read in the background, and where they were dropped
     /// a drop from another program is being read
     drop_busy: bool,
+    /// words typical for each tag (learned from the vault, see tagwords)
+    pub tag_words: Option<crate::tagwords::TagWords>,
+    tag_job: Option<std::sync::mpsc::Receiver<crate::tagwords::TagWords>>,
+    tag_root: Option<PathBuf>,
+    tag_gen: u64,
+    tag_at: Option<Instant>,
     pending_drops: Vec<(std::sync::mpsc::Receiver<(Vec<crate::import::Item>, Vec<String>)>, Option<(PathBuf, Option<PathBuf>)>)>,
     pub scenes: SceneCache,
     pub modal: Option<Modal>,
@@ -246,6 +254,11 @@ impl ShaleApp {
             fake_drops: vec![],
             pending_drops: vec![],
             drop_busy: false,
+            tag_words: None,
+            tag_job: None,
+            tag_root: None,
+            tag_gen: u64::MAX,
+            tag_at: None,
             scenes: SceneCache::default(),
             modal: None,
             actions: vec![],
@@ -864,6 +877,7 @@ impl ShaleApp {
                 Action::OpenVault(p) => self.open_vault(&p),
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::Rescan => self.rescan(),
+                Action::CreatePerson(name) => self.create_person(&name),
             }
         }
     }
@@ -1170,6 +1184,7 @@ impl eframe::App for ShaleApp {
         }
         self.modals(ui);
         self.handle_drops(ui);
+        self.learn_tags_tick();
         self.paint_toasts(ui);
         self.process_actions();
     }
@@ -1186,6 +1201,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
         EditorAction::OpenLink { target, heading, new_tab } => app_actions.push(Action::OpenLink { target, heading, from: Some(from.to_path_buf()), new_tab }),
         EditorAction::OpenUrl(url) => crate::lists::open_in_browser(&url),
         EditorAction::FilesChanged => app_actions.push(Action::Rescan),
+        EditorAction::CreatePerson(name) => app_actions.push(Action::CreatePerson(name)),
     }
 }
 

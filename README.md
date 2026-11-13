@@ -19,10 +19,20 @@ See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
 ## Download
 
-The newest build for Linux (x86_64) is on the
-[latest release](https://github.com/rabalyn/shale/releases/tag/latest): download
-`shale-linux-x86_64.tar.gz`, unpack it and run `./shale/shale`. It is built automatically by
-GitHub Actions on every push (`.github/workflows/build.yml`).
+Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
+with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`,
+unpack it and run `./shale/shale`. The newest build of `main` (between releases) is the
+[latest build](https://github.com/rabalyn/shale/releases/tag/latest). Both are made by GitHub
+Actions (`.github/workflows/build.yml`).
+
+### Making a release
+
+1. Raise `version` in `Cargo.toml` ([semver](https://semver.org/): before 1.0, new features raise
+   the middle number, fixes the last one) and run `cargo build` (updates `Cargo.lock`).
+2. Move the notes from `## [Unreleased]` in `CHANGELOG.md` to a new `## [x.y.z] - date` section.
+3. Commit, then run `sh make-release.sh`: it tags the commit `vx.y.z` and pushes. GitHub builds it
+   and creates the release page with that section as its notes (the build stops if the tag and
+   `Cargo.toml` disagree or the changelog has no notes for the version).
 
 ## Build and run
 

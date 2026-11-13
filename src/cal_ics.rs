@@ -171,6 +171,24 @@ fn cn_or_mail(params: &[(String, String)], value: &str) -> String {
     }
 }
 
+/// "Name <mail>" (as read) back to `ORGANIZER;CN="Name":mailto:mail`, keeping the real address.
+fn person_line(prop: &str, who: &str) -> String {
+    let who = who.trim();
+    let (name, mail) = match (who.rfind('<'), who.ends_with('>')) {
+        (Some(p), true) => (who[..p].trim(), who[p + 1..who.len() - 1].trim()),
+        _ if who.contains('@') && !who.contains(' ') => ("", who),
+        _ => (who, ""),
+    };
+    // the reader splits parameters at ';' and the value at the first ':'
+    let name = name.trim_matches('"').replace('"', "'").replace([';', ':'], " ");
+    let cn = if name.is_empty() { String::new() } else if name.contains(',') { format!(";CN=\"{name}\"") } else { format!(";CN={name}") };
+    if mail.is_empty() {
+        format!("{prop}{cn}:mailto:")
+    } else {
+        format!("{prop}{cn}:mailto:{mail}")
+    }
+}
+
 /// All VEVENTs of an iCalendar text.
 pub fn parse_ics(text: &str) -> Vec<Event> {
     let mut out = Vec::new();
@@ -404,10 +422,10 @@ pub fn to_ics(name: &str, events: &[Event]) -> String {
             lines.push(format!("URL:{}", e.url));
         }
         if !e.organizer.is_empty() {
-            lines.push(format!("ORGANIZER;CN={}:mailto:organizer@example.com", e.organizer.replace([';', ':', ','], " ")));
+            lines.push(person_line("ORGANIZER", &e.organizer));
         }
         for a in &e.attendees {
-            lines.push(format!("ATTENDEE;CN={}:mailto:attendee@example.com", a.replace([';', ':', ','], " ")));
+            lines.push(person_line("ATTENDEE", a));
         }
         if let Some(r) = &e.rrule {
             lines.push(format!("RRULE:{r}"));
@@ -441,6 +459,15 @@ mod tests {
         assert_eq!(a.description, "Line one\nLine two that is quite long and is folded onto the next line");
         assert_eq!(a.organizer, "Ada <ada@example.com>");
         assert_eq!(a.attendees, vec!["Bob B <bob@example.com>".to_string()]);
+        // written back with the real addresses (CalDAV servers keep what we send)
+        let again = parse_ics(&to_ics("x", &[a.clone()]));
+        assert_eq!(again[0].organizer, "Ada <ada@example.com>");
+        assert_eq!(again[0].attendees, a.attendees);
+        let odd = Event { organizer: "Müller, Hans <h@x.de>".into(), attendees: vec!["solo@x.de".into(), "Nur Name".into()], ..a.clone() };
+        let back = parse_ics(&to_ics("x", &[odd]));
+        assert_eq!(back[0].organizer, "Müller, Hans <h@x.de>");
+        assert_eq!(back[0].attendees[0], "solo@x.de");
+        assert!(back[0].attendees[1].starts_with("Nur Name"));
         assert_eq!(a.end - a.start, 90 * 60);
         assert_eq!(a.start, days_from_civil(2026, 11, 12) * 86_400 + 13 * 3600);
         let trip = &ev[1];

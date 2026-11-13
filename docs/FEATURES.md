@@ -117,6 +117,32 @@ built-in demo vault (`shale --screenshot out.png`).
   in its properties, links to the attachments and the original message, and the text of the
   message. The tag list counts these tags too.
 
+## People (contact notes)
+
+![People list](screenshots/people-picker.png)
+
+- Contact notes live in the **people folder** (default `Adressbuch`, changeable in Settings).
+- Type `[[p ` and a name to pick a person from that folder. The link that is written is a normal
+  `[[Name]]` link, so other markdown tools understand it too. "New contact" makes a contact note
+  from a template (e-mail, phone, organization, notes).
+- When importing, the sender, recipients, organizer and attendees are found and matched to
+  contact notes (by e-mail address anywhere in the note, else by name; "Müller, Hans" = "Hans
+  Müller"). Known contacts and new senders are ticked; for ticked people without a note one is
+  made. The imported note gets a "People" line with links, so each contact note's backlinks show
+  every mail and meeting with that person. Automatic senders like "noreply" are left out.
+
+![Import with people and tags](screenshots/people-import.png)
+
+## Tags found automatically (no server, no AI)
+
+- Tags of the vault that are written in the imported text are set right away
+  (`#lecture-hall-b` for "Lecture Hall B", the last part of nested tags too).
+- Shale also learns, from the notes in the vault, which words are typical for each tag (words in
+  most notes with the tag and rarely elsewhere) and suggests those tags when an import contains
+  several of these words. It is plain counting: the same notes always give the same suggestions.
+  It is learned again in the background now and then and kept in `.shale/tag-words.json` in the
+  vault.
+
 ## Keyboard
 
 | Keys | Action |

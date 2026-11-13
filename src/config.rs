@@ -64,6 +64,8 @@ pub struct Config {
     pub last_import_folder: String,
     /// Tags used for imports, most recent first.
     pub recent_tags: Vec<String>,
+    /// Folder of the contact notes (for `[[p …` links and people found when importing).
+    pub people_dir: String,
 }
 
 impl Default for Config {
@@ -87,6 +89,7 @@ impl Default for Config {
             input_log: false,
             last_import_folder: String::new(),
             recent_tags: vec![],
+            people_dir: crate::people::DEFAULT_DIR.into(),
         }
     }
 }

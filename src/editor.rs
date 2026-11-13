@@ -334,6 +334,8 @@ pub enum EditorAction {
     OpenUrl(String),
     /// A file was copied into the vault; the file list should be refreshed.
     FilesChanged,
+    /// `[[p Name` picked "new contact": make a contact note in the people folder
+    CreatePerson(String),
 }
 
 #[derive(Default)]
@@ -352,6 +354,12 @@ pub struct NoteEditor {
     ac_dismissed: Option<usize>,
     ac_sel: usize,
     ac_items: Vec<(String, bool)>,
+    /// what the list shows for each item (the people list shows names, not link texts)
+    ac_labels: Vec<String>,
+    /// the open list is the `[[p` people list
+    ac_people: bool,
+    /// folder of the contact notes (`[[p` lists these; set from the app's settings)
+    pub people_dir: String,
     /// Put the cursor here (char index) on the next frame and scroll to it.
     pub pending_cursor: Option<usize>,
     pub request_focus: bool,
@@ -386,7 +394,7 @@ struct MediaPicker {
 
 impl NoteEditor {
     pub fn new(id: egui::Id) -> Self {
-        NoteEditor { id, cache: Cache::default(), ac_active: false, ac_start: None, ac_dismissed: None, ac_sel: 0, ac_items: vec![], pending_cursor: None, request_focus: false, last_layout: None, media: MediaPicker::default(), inline_images: false, dark_canvas: true, last_cursor: None }
+        NoteEditor { id, cache: Cache::default(), ac_active: false, ac_start: None, ac_dismissed: None, ac_sel: 0, ac_items: vec![], ac_labels: vec![], ac_people: false, people_dir: crate::people::DEFAULT_DIR.into(), pending_cursor: None, request_focus: false, last_layout: None, media: MediaPicker::default(), inline_images: false, dark_canvas: true, last_cursor: None }
     }
 
     /// Is the `[!` file picker popup on screen?
@@ -846,25 +854,57 @@ impl NoteEditor {
                     self.ac_sel = 0;
                 }
                 self.ac_active = true;
-                let mut items: Vec<(i32, String)> = vault
-                    .files
-                    .iter()
-                    .filter(|f| f.kind != crate::vault::FileKind::Other || q.contains('.'))
-                    .filter_map(|f| markdown::fuzzy_score(&q, &f.link_name).map(|s| (s, f.link_name.clone())))
-                    .collect();
-                items.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-                items.dedup_by(|a, b| a.1 == b.1);
-                let mut list: Vec<(String, bool)> = items.into_iter().take(8).map(|(_, n)| (n, true)).collect();
-                let qt = q.trim();
-                if !qt.is_empty() && !list.iter().any(|(n, _)| n.eq_ignore_ascii_case(qt)) {
-                    list.push((qt.to_string(), false));
+                // `[[p Name`: only the contact notes in the people folder
+                let people_q = q.strip_prefix("p ").map(|r| r.to_string());
+                self.ac_people = people_q.is_some();
+                let mut labels: Vec<String> = Vec::new();
+                let mut list: Vec<(String, bool)> = Vec::new();
+                if let Some(pq) = people_q {
+                    let dir = self.people_dir.trim().trim_matches('/').to_lowercase();
+                    let prefix = format!("{dir}/");
+                    let mut items: Vec<(i32, String, std::path::PathBuf)> = vault
+                        .files
+                        .iter()
+                        .filter(|f| f.kind == crate::vault::FileKind::Note && !dir.is_empty() && crate::vault::rel_to_string(&f.rel).to_lowercase().starts_with(&prefix))
+                        .filter_map(|f| markdown::fuzzy_score(&pq, &f.display_name()).map(|s| (s, f.display_name(), f.rel.clone())))
+                        .collect();
+                    items.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+                    for (_, name, rel) in items.into_iter().take(8) {
+                        let link = crate::people::link_to(vault, &rel);
+                        list.push((link.trim_start_matches("[[").trim_end_matches("]]").to_string(), true));
+                        labels.push(name);
+                    }
+                    let qt = pq.trim();
+                    if !qt.is_empty() && !labels.iter().any(|n| n.eq_ignore_ascii_case(qt)) {
+                        list.push((markdown::link_safe_name(qt), false));
+                        labels.push(format!("＋ New contact “{}” in {}", markdown::link_safe_name(qt), self.people_dir.trim().trim_matches('/')));
+                    }
+                } else {
+                    let mut items: Vec<(i32, String)> = vault
+                        .files
+                        .iter()
+                        .filter(|f| f.kind != crate::vault::FileKind::Other || q.contains('.'))
+                        .filter_map(|f| markdown::fuzzy_score(&q, &f.link_name).map(|s| (s, f.link_name.clone())))
+                        .collect();
+                    items.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+                    items.dedup_by(|a, b| a.1 == b.1);
+                    list = items.into_iter().take(8).map(|(_, n)| (n, true)).collect();
+                    let qt = q.trim();
+                    if !qt.is_empty() && !list.iter().any(|(n, _)| n.eq_ignore_ascii_case(qt)) {
+                        list.push((qt.to_string(), false));
+                    }
+                    labels = list.iter().map(|(n, e)| if *e { n.clone() } else { format!("＋ Create “{n}”") }).collect();
                 }
                 self.ac_items = list;
+                self.ac_labels = labels;
                 if self.ac_sel >= self.ac_items.len() {
                     self.ac_sel = 0;
                 }
                 if let Some(pick) = ac_pick {
-                    if let Some((name, _)) = self.ac_items.get(pick).cloned() {
+                    if let Some((name, exists)) = self.ac_items.get(pick).cloned() {
+                        if self.ac_people && !exists {
+                            action = Some(EditorAction::CreatePerson(name.clone()));
+                        }
                         let cur_byte = markdown::char_to_byte(text, cursor.unwrap_or(0));
                         let closes = text[cur_byte..].starts_with("]]");
                         let insert = if closes { name.clone() } else { format!("{name}]]") };
@@ -884,12 +924,12 @@ impl NoteEditor {
                     egui::Area::new(self.id.with("ac")).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
                         egui::Frame::popup(ui.style()).show(ui, |ui| {
                             ui.set_min_width(260.0);
-                            for (i, (name, exists)) in self.ac_items.iter().enumerate() {
-                                let label = if *exists {
-                                    egui::RichText::new(name).color(theme::TEXT)
-                                } else {
-                                    egui::RichText::new(format!("＋ Create “{name}”")).color(theme::LINK_MISSING)
-                                };
+                            if self.ac_people {
+                                ui.label(egui::RichText::new(format!("People in “{}”", self.people_dir.trim().trim_matches('/'))).small().color(theme::MUTED));
+                            }
+                            for (i, (_, exists)) in self.ac_items.iter().enumerate() {
+                                let text = self.ac_labels.get(i).cloned().unwrap_or_default();
+                                let label = if *exists { egui::RichText::new(text).color(theme::TEXT) } else { egui::RichText::new(text).color(theme::LINK_MISSING) };
                                 if ui.selectable_label(i == self.ac_sel, label).clicked() {
                                     clicked = Some(i);
                                 }
@@ -898,7 +938,10 @@ impl NoteEditor {
                         });
                     });
                     if let Some(i) = clicked {
-                        if let Some((name, _)) = self.ac_items.get(i).cloned() {
+                        if let Some((name, exists)) = self.ac_items.get(i).cloned() {
+                            if self.ac_people && !exists {
+                                action = Some(EditorAction::CreatePerson(name.clone()));
+                            }
                             let cur_byte = markdown::char_to_byte(text, c);
                             let closes = text[cur_byte..].starts_with("]]");
                             let insert = if closes { name.clone() } else { format!("{name}]]") };
@@ -1624,6 +1667,40 @@ mod tests {
         let enter = Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![enter]);
         assert_eq!(text, "See [[Ideas]]");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn double_brackets_p_lists_people() {
+        let (mut v, d) = vault_for_tests("people");
+        std::fs::create_dir_all(d.join("Adressbuch")).unwrap();
+        std::fs::write(d.join("Adressbuch/Hans Müller.md"), "# Hans Müller\n").unwrap();
+        std::fs::write(d.join("Adressbuch/Anna Schmidt.md"), "# Anna\n").unwrap();
+        std::fs::write(d.join("Müllabfuhr.md"), "not a person\n").unwrap();
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let enter = Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("tp"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("Met [[p Mü".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert_eq!(ed.ac_labels, vec!["Hans Müller".to_string(), "＋ New contact “Mü” in Adressbuch".into()], "only the people folder");
+        h.frame(&mut ed, &mut text, &v, rel, vec![enter.clone()]);
+        assert_eq!(text, "Met [[Hans Müller]]", "a normal link (the p is only for the list)");
+        // a new person: the link plus a request to make the contact note
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("tp2"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[[p Jörg Weiß".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        let (_, act) = h.frame(&mut ed, &mut text, &v, rel, vec![enter]);
+        assert_eq!(text, "[[Jörg Weiß]]");
+        assert!(matches!(act, Some(EditorAction::CreatePerson(n)) if n == "Jörg Weiß"));
         let _ = std::fs::remove_dir_all(&d);
     }
 

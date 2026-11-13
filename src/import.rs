@@ -30,6 +30,8 @@ pub struct Item {
     pub att_on: Vec<bool>,
     /// imported before, as this note
     pub already: Option<PathBuf>,
+    /// the people of an e-mail or event (linked to their contact notes)
+    pub people: Vec<crate::people::Person>,
 }
 
 impl Item {
@@ -39,6 +41,17 @@ impl Item {
             Source::Event { .. } => "Event",
             Source::Files(_) => "Files",
             Source::Text(_) => "Text",
+        }
+    }
+
+    /// The text to look for tags in: subject, message, attachment names; event title, place,
+    /// notes; file names; the text.
+    pub fn tag_text(&self) -> String {
+        match &self.source {
+            Source::Email { mail, .. } => format!("{}\n{}\n{}", mail.subject, mail.text, mail.attachments.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(" ")),
+            Source::Event { event, .. } => format!("{}\n{}\n{}", event.summary, event.location, event.description),
+            Source::Files(p) => p.iter().map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(" "),
+            Source::Text(t) => t.clone(),
         }
     }
 
@@ -117,12 +130,12 @@ pub fn email_item(mail: Mail, original: (String, Vec<u8>)) -> Item {
     let title = safe_title(&format!("{} {subject}", ymd_text(date)));
     // small pictures inside the text are mostly logos in signatures
     let att_on = mail.attachments.iter().map(|a| !(a.inline && a.data.len() < 30_000)).collect();
-    Item { source: Source::Email { mail, original }, include: true, title, att_on, already: None }
+    Item { source: Source::Email { mail, original }, include: true, title, att_on, already: None, people: vec![] }
 }
 
 pub fn event_item(event: Event, calendar: String, original: Option<(String, Vec<u8>)>) -> Item {
     let title = safe_title(&format!("{} {}", ymd_text(event_ymd(&event)), if event.summary.trim().is_empty() { "Event" } else { event.summary.trim() }));
-    Item { source: Source::Event { event, calendar, original }, include: true, title, att_on: vec![], already: None }
+    Item { source: Source::Event { event, calendar, original }, include: true, title, att_on: vec![], already: None, people: vec![] }
 }
 
 fn files_item(paths: Vec<PathBuf>) -> Item {
@@ -131,13 +144,13 @@ fn files_item(paths: Vec<PathBuf>) -> Item {
     } else {
         format!("{} Files", ymd_text(today_ymd()))
     };
-    Item { source: Source::Files(paths), include: true, title: safe_title(&title), att_on: vec![], already: None }
+    Item { source: Source::Files(paths), include: true, title: safe_title(&title), att_on: vec![], already: None, people: vec![] }
 }
 
 fn text_item(text: String) -> Item {
     let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("Text");
     let title = safe_title(&format!("{} {}", ymd_text(today_ymd()), first.chars().take(60).collect::<String>()));
-    Item { source: Source::Text(text), include: true, title, att_on: vec![], already: None }
+    Item { source: Source::Text(text), include: true, title, att_on: vec![], already: None, people: vec![] }
 }
 
 fn calendar_items(ics: &[u8], calendar: &str, file_name: &str) -> Vec<Item> {
@@ -381,11 +394,27 @@ fn looks_like_mail(s: &str) -> bool {
     head.iter().any(|l| l.starts_with("from:")) && head.iter().any(|l| l.starts_with("subject:") || l.starts_with("message-id:"))
 }
 
+/// Find the people of e-mails and events and their contact notes in the people folder `dir`.
+pub fn find_people(vault: &Vault, dir: &str, items: &mut [Item]) {
+    let contacts = crate::people::Contacts::index(vault, dir);
+    for it in items.iter_mut() {
+        if !it.people.is_empty() {
+            continue;
+        }
+        it.people = match &it.source {
+            Source::Email { mail, .. } => crate::people::of_mail(mail, &contacts),
+            Source::Event { event, .. } => crate::people::of_event(event, &contacts),
+            _ => vec![],
+        };
+    }
+}
+
 /// Mark items that were imported before (same message / event) and leave them out by default.
 pub fn mark_duplicates(vault: &Vault, items: &mut [Item]) {
     for it in items.iter_mut() {
         let Some(m) = it.marker() else { continue };
-        let found = vault.notes.iter().find(|(_, n)| n.text.lines().take(40).any(|l| l.trim() == m)).map(|(p, _)| p.clone());
+        // the same note every time (first path in order), whatever order the index has
+        let found = vault.notes.iter().filter(|(_, n)| n.text.lines().take(40).any(|l| l.trim() == m)).map(|(p, _)| p.clone()).min();
         if let Some(p) = found {
             it.already = Some(p);
             it.include = false;
@@ -447,6 +476,8 @@ pub struct Options {
     pub tags: Vec<String>,
     /// keep the original .eml / .ics next to the attachments
     pub keep_original: bool,
+    /// where contact notes are (and new ones are made)
+    pub people_dir: String,
 }
 
 fn link_line(rel: &Path) -> String {
@@ -454,7 +485,7 @@ fn link_line(rel: &Path) -> String {
 }
 
 /// The note for an e-mail (attachment links already made).
-pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], original: Option<&Path>) -> String {
+pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], original: Option<&Path>, people: &[String]) -> String {
     let subject = if mail.subject.trim().is_empty() { "(no subject)" } else { mail.subject.trim() };
     let date = mail.date.map(|d| local_stamp(d, false)).unwrap_or_default();
     let mut s = front(
@@ -469,6 +500,9 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
         }
     }
     s.push_str(&format!("- **Date:** {}\n", if date.is_empty() { mail.date_raw.clone() } else { date }));
+    if !people.is_empty() {
+        s.push_str(&format!("- **People:** {}\n", people.join(", ")));
+    }
     if !attachments.is_empty() || original.is_some() {
         s.push_str("\n## Attachments\n\n");
         for a in attachments {
@@ -485,7 +519,7 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
     s
 }
 
-pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&Path>) -> String {
+pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&Path>, people: &[String]) -> String {
     let stamp = |v: i64| if e.all_day { ymd_text(t::civil_from_days(v.div_euclid(86_400))) } else { local_stamp(v, false) };
     let end = if e.all_day { e.end - 86_400 } else { e.end };
     let mut s = front(
@@ -494,6 +528,9 @@ pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(if e.summary.is_empty() { "Event" } else { &e.summary })));
     s.push_str(&format!("- **When:** {}\n", crate::cal_ui::when_text(&occ_of(e))));
+    if !people.is_empty() {
+        s.push_str(&format!("- **People:** {}\n", people.join(", ")));
+    }
     if let Some(r) = &e.rrule {
         s.push_str(&format!("- **Repeats:** {}\n", crate::cal_ui::rrule_text(r)));
     }
@@ -527,6 +564,19 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> (Vec<PathBuf>, 
     let root = vault.root.clone();
     for it in items.iter().filter(|i| i.include) {
         let title = if safe_title(&it.title).is_empty() { "Imported".to_string() } else { safe_title(&it.title) };
+        // contact notes (made when needed) and links to them
+        let mut people: Vec<String> = Vec::new();
+        for p in it.people.iter().filter(|p| p.on) {
+            match crate::people::ensure_note(vault, &o.people_dir, p) {
+                Ok(rel) => {
+                    let link = crate::people::link_to(vault, &rel);
+                    if !people.contains(&link) {
+                        people.push(link);
+                    }
+                }
+                Err(e) => errors.push(e),
+            }
+        }
         let result: Result<String, String> = (|| {
             Ok(match &it.source {
                 Source::Email { mail, original } => {
@@ -538,14 +588,14 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> (Vec<PathBuf>, 
                         }
                     }
                     let orig = if o.keep_original { Some(media::save_bytes(&root, &original.0, &original.1, date).map_err(|e| format!("could not save the message file: {e}"))?) } else { None };
-                    email_note(mail, &o.tags, &atts, orig.as_deref())
+                    email_note(mail, &o.tags, &atts, orig.as_deref(), &people)
                 }
                 Source::Event { event, calendar, original } => {
                     let orig = match (o.keep_original, original) {
                         (true, Some((name, data))) => Some(media::save_bytes(&root, name, data, event_ymd(event)).map_err(|e| format!("could not save the calendar file: {e}"))?),
                         _ => None,
                     };
-                    event_note(event, calendar, &o.tags, orig.as_deref())
+                    event_note(event, calendar, &o.tags, orig.as_deref(), &people)
                 }
                 Source::Files(paths) => {
                     let date = today_ymd();
@@ -610,7 +660,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "2026-11-13 Neubau Hörsaal B – Pläne Stand 3");
         assert_eq!(items[0].att_on, vec![false, true, true], "the tiny inline logo is left out");
-        let o = Options { folder: PathBuf::from("Projekte/Neubau B"), tags: parse_tags("neubau-b, plaene"), keep_original: true };
+        let o = Options { folder: PathBuf::from("Projekte/Neubau B"), tags: parse_tags("neubau-b, plaene"), keep_original: true, people_dir: "Adressbuch".into() };
         let (made, errs) = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made, vec![PathBuf::from("Projekte/Neubau B/2026-11-13 Neubau Hörsaal B – Pläne Stand 3.md")]);
@@ -624,6 +674,17 @@ mod tests {
         assert!(!text.contains("inline-1.png"));
         assert!(text.contains("## Message\n\nHallo zusammen,"));
         assert!(v.root.join("z_media/2026/11/261113_Grundriß EG.pdf").exists());
+        assert!(!text.contains("**People:**"), "nobody ticked yet (people are found by find_people)");
+        // with people: the sender gets a contact note and is linked
+        let mut again = items.clone();
+        again[0].title = "second".into();
+        find_people(&v, "Adressbuch", &mut again);
+        assert_eq!(again[0].people.iter().map(|p| (p.name.as_str(), p.on)).collect::<Vec<_>>(), vec![("Hans Müller", true), ("Medientechnik", false), ("Bauamt", false)]);
+        let (made2, errs) = import(&mut v, &again, &o);
+        assert!(errs.is_empty(), "{errs:?}");
+        let text2 = std::fs::read_to_string(v.abs(&made2[0])).unwrap();
+        assert!(text2.contains("- **People:** [[Hans Müller]]\n"), "{text2}");
+        assert!(v.abs(std::path::Path::new("Adressbuch/Hans Müller.md")).exists());
         // the tags count in the vault (from the note's properties)
         v.rescan();
         let tags: Vec<String> = v.all_tags().into_iter().map(|t| t.0).collect();
@@ -649,7 +710,7 @@ mod tests {
         items.extend(more);
         let (snips, _) = items_from_drop("text/plain", "Beamer tauschen\nim Hörsaal".as_bytes());
         items.extend(snips);
-        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true };
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, people_dir: "Adressbuch".into() };
         let (made, errs) = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 3);

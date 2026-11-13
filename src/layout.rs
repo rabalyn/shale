@@ -572,6 +572,7 @@ impl ShaleApp {
                     }
                 } else {
                     tab.editor.inline_images = self.cfg.inline_images;
+                    tab.editor.people_dir = self.cfg.people_dir.clone();
                     tab.editor.dark_canvas = self.cfg.dark_canvas;
                     let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
                     if changed {
@@ -622,7 +623,7 @@ impl ShaleApp {
             if self.cfg.input_log {
                 ui.label(egui::RichText::new("● recording keys").size(11.5).color(theme::LINK_MISSING)).on_hover_text(crate::config::input_log_path().to_string_lossy());
             }
-            ui.label(small(format!("build {}", crate::config::build_stamp())));
+            ui.label(small(format!("Shale {} · build {}", env!("CARGO_PKG_VERSION"), crate::config::build_stamp())));
         });
     }
 

@@ -49,7 +49,7 @@ impl ShaleApp {
             let mut all = v.all_tags();
             all.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
             for (t, _) in all {
-                if !out.iter().any(|o| o.eq_ignore_ascii_case(&t)) {
+                if t != "person" && !out.iter().any(|o| o.eq_ignore_ascii_case(&t)) {
                     out.push(t);
                 }
             }
@@ -66,7 +66,8 @@ impl ShaleApp {
             return;
         };
         import::mark_duplicates(v, &mut items);
-        if let Some(Modal::Import(d)) = &mut self.modal {
+        import::find_people(v, &self.cfg.people_dir, &mut items);
+        if let Some(Modal::Import(mut d)) = self.modal.take() {
             d.items.extend(items);
             d.notes.extend(notes);
             if let Some((folder, note)) = zone {
@@ -76,17 +77,93 @@ impl ShaleApp {
                     d.link_on = true;
                 }
             }
+            self.suggest_tags(&mut d);
+            self.modal = Some(Modal::Import(d));
             return;
         }
         let (folder, link_into, link_on) = match zone {
             Some((f, note)) => (rel_to_string(&f), note.clone(), note.is_some()),
             None => {
                 let open_note = self.current_path().filter(|p| p.extension().map(|e| e == "md").unwrap_or(false));
-                let folder = if self.cfg.last_import_folder.is_empty() { rel_to_string(&self.current_folder()) } else { self.cfg.last_import_folder.clone() };
+                let mut folder = if self.cfg.last_import_folder.is_empty() { rel_to_string(&self.current_folder()) } else { self.cfg.last_import_folder.clone() };
+                // not into the contacts because a contact note happens to be open
+                let pd = self.cfg.people_dir.trim().trim_matches('/').to_lowercase();
+                if !pd.is_empty() && (folder.to_lowercase() == pd || folder.to_lowercase().starts_with(&format!("{pd}/"))) {
+                    folder.clear();
+                }
                 (folder, open_note, false)
             }
         };
-        self.modal = Some(Modal::Import(Box::new(ImportDialog::new(items, notes, folder, String::new(), link_into, link_on))));
+        let mut d = Box::new(ImportDialog::new(items, notes, folder, String::new(), link_into, link_on));
+        d.people_dir = self.cfg.people_dir.clone();
+        self.suggest_tags(&mut d);
+        self.modal = Some(Modal::Import(d));
+    }
+
+    /// Tags for the dialog's items: the vault's tags written in them are put in right away, the
+    /// learned ones offered as suggestions.
+    pub fn suggest_tags(&self, d: &mut ImportDialog) {
+        let Some(v) = &self.vault else { return };
+        let text: String = d.items.iter().filter(|i| i.include).map(|i| i.tag_text()).collect::<Vec<_>>().join("\n");
+        let known: Vec<String> = v.all_tags().into_iter().map(|t| t.0).filter(|t| !t.eq_ignore_ascii_case("person")).collect();
+        let mut tags = import::parse_tags(&d.tags);
+        for t in crate::tagwords::direct(&known, &text) {
+            if !d.auto_tags.contains(&t) {
+                d.auto_tags.push(t.clone());
+                if !tags.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
+                    tags.push(t);
+                }
+            }
+        }
+        d.tags = tags.join(", ");
+        d.suggested = self.tag_words.as_ref().map(|tw| crate::tagwords::suggest(tw, &text, &d.auto_tags)).unwrap_or_default();
+    }
+
+    /// Learn the tag words again now and then (in the background), and keep them in the vault.
+    pub fn learn_tags_tick(&mut self) {
+        if let Some(rx) = &self.tag_job {
+            match rx.try_recv() {
+                Ok(tw) => {
+                    if let Some(v) = &self.vault {
+                        let _ = crate::tagwords::save(&v.root, &tw);
+                    }
+                    self.tag_words = Some(tw);
+                    self.tag_job = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.tag_job = None,
+                Err(_) => {}
+            }
+        }
+        let Some(v) = &self.vault else { return };
+        if self.tag_root.as_deref() != Some(v.root.as_path()) {
+            // another vault: start with what was learned there before
+            self.tag_root = Some(v.root.clone());
+            self.tag_words = crate::tagwords::load(&v.root);
+            self.tag_gen = u64::MAX;
+            self.tag_at = None;
+        }
+        let due = self.tag_job.is_none() && v.generation != self.tag_gen && self.tag_at.map(|t| t.elapsed() > std::time::Duration::from_secs(120)).unwrap_or(true);
+        if due {
+            self.tag_gen = v.generation;
+            self.tag_at = Some(std::time::Instant::now());
+            let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::tagwords::learn_from_vault(&notes));
+            });
+            self.tag_job = Some(rx);
+        }
+    }
+
+    /// A contact note for `[[p Name` (made in the people folder).
+    pub fn create_person(&mut self, name: &str) {
+        let dir = self.cfg.people_dir.clone();
+        let Some(v) = &mut self.vault else { return };
+        let p = crate::people::Person { name: name.trim().to_string(), email: String::new(), role: crate::people::Role::From, existing: None, on: true };
+        match crate::people::ensure_note(v, &dir, &p) {
+            Ok(rel) => self.toast(format!("Contact note “{}” made", rel_to_string(&rel))),
+            Err(e) => self.toast(e),
+        }
     }
 
     /// Apply what the Import dialog asked for. True when it should close.
@@ -99,10 +176,14 @@ impl ShaleApp {
                 if let Some(v) = &self.vault {
                     import::mark_duplicates(v, &mut items);
                 }
+                if let Some(v) = &self.vault {
+                    import::find_people(v, &self.cfg.people_dir, &mut items);
+                }
                 if !items.is_empty() {
                     d.add_path.clear();
                 }
                 d.items.extend(items);
+                self.suggest_tags(d);
                 d.notes = notes;
                 false
             }
@@ -115,7 +196,7 @@ impl ShaleApp {
                     }
                 };
                 let tags = import::parse_tags(&d.tags);
-                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original };
+                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.cfg.people_dir.clone() };
                 let Some(v) = &mut self.vault else { return true };
                 let (made, errors) = import::import(v, &d.items, &opts);
                 if made.is_empty() {

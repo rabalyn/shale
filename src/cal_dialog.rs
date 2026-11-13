@@ -273,11 +273,17 @@ fn parse_date(s: &str) -> Option<i64> {
 }
 
 /// "9", "09", "9:30", "09:30", "0930" → seconds after midnight.
+/// For tests: the time field's parser.
+#[cfg(test)]
+pub fn parse_time_text(s: &str) -> Option<i64> {
+    parse_time(s)
+}
+
 fn parse_time(s: &str) -> Option<i64> {
     let s = s.trim();
     let (h, m) = match s.split_once(':') {
         Some((h, m)) => (h.parse::<i64>().ok()?, m.parse::<i64>().ok()?),
-        None if s.len() == 4 => (s[..2].parse().ok()?, s[2..].parse().ok()?),
+        None if s.len() == 4 => (s.get(..2)?.parse().ok()?, s.get(2..)?.parse().ok()?),
         None => (s.parse().ok()?, 0),
     };
     ((0..24).contains(&h) && (0..60).contains(&m)).then_some(h * 3600 + m * 60)

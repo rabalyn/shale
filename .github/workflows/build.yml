@@ -1,10 +1,14 @@
-# Builds Shale on every push to main and publishes the newest build as the "latest" release,
-# so it can be downloaded from any machine: https://github.com/<owner>/<repo>/releases/tag/latest
+# Builds Shale and publishes it on GitHub:
+# - every push to main: the newest build as the rolling pre-release "latest"
+#   https://github.com/<owner>/<repo>/releases/tag/latest
+# - every version tag (v0.2.0, …): a proper release page named after the version, with that
+#   version's notes from CHANGELOG.md (the tag must match the version in Cargo.toml)
 name: build
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -16,6 +20,18 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check the version and the release notes (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CARGO=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "$TAG" != "$CARGO" ]; then
+            echo "::error::tag v$TAG does not match the version $CARGO in Cargo.toml"
+            exit 1
+          fi
+          sh .github/release-notes.sh "$TAG" > release-notes.md
+          cat release-notes.md
 
       - name: Libraries for the window (Wayland, X11, OpenGL)
         run: |
@@ -36,7 +52,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist/shale
-          cp target/release/shale LICENSE README.md dist/shale/
+          cp target/release/shale LICENSE README.md CHANGELOG.md dist/shale/
           cp -r docs dist/shale/
           tar -C dist -czf shale-linux-x86_64.tar.gz shale
 
@@ -45,16 +61,32 @@ jobs:
           name: shale-linux-x86_64
           path: shale-linux-x86_64.tar.gz
 
-      - name: Publish as the "latest" release
+      - name: Publish the version's release page (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          NOTES="Newest build of ${GITHUB_SHA::7} ($(date -u '+%Y-%m-%d %H:%M UTC')). Download shale-linux-x86_64.tar.gz, unpack it and run ./shale/shale"
+          VERSION="${GITHUB_REF_NAME#v}"
+          ASSET="shale-${VERSION}-linux-x86_64.tar.gz"
+          cp shale-linux-x86_64.tar.gz "$ASSET"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "Shale $VERSION" --notes-file release-notes.md
+            gh release upload "$GITHUB_REF_NAME" "$ASSET" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$ASSET" --title "Shale $VERSION" --notes-file release-notes.md --verify-tag
+          fi
+
+      - name: Publish as the "latest" build (main only)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="Newest build of ${GITHUB_SHA::7} from main ($(date -u '+%Y-%m-%d %H:%M UTC')), not a release. Download shale-linux-x86_64.tar.gz, unpack it and run ./shale/shale. Released versions and their notes are on the Releases page."
           if gh release view latest >/dev/null 2>&1; then
             gh release upload latest shale-linux-x86_64.tar.gz --clobber
-            gh release edit latest --notes "$NOTES" --target "$GITHUB_SHA"
+            gh release edit latest --notes "$NOTES" --target "$GITHUB_SHA" --prerelease
           else
-            gh release create latest shale-linux-x86_64.tar.gz --prerelease --title "Latest build" --notes "$NOTES" --target "$GITHUB_SHA"
+            gh release create latest shale-linux-x86_64.tar.gz --prerelease --title "Latest build (main)" --notes "$NOTES" --target "$GITHUB_SHA"
           fi
           # move the tag to this build
           git tag -f latest "$GITHUB_SHA"

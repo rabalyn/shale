@@ -21,6 +21,12 @@ pub struct ImportDialog {
     pub notes: Vec<String>,
     pub error: Option<String>,
     pub rects: Vec<(String, Rect)>,
+    /// tags found written in the items (put into `tags` automatically)
+    pub auto_tags: Vec<String>,
+    /// learned suggestions: (tag, the words that point to it)
+    pub suggested: Vec<(String, Vec<String>)>,
+    /// the people folder (shown in the people list)
+    pub people_dir: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -33,7 +39,7 @@ pub enum ImportAction {
 
 impl ImportDialog {
     pub fn new(items: Vec<Item>, notes: Vec<String>, folder: String, tags: String, link_into: Option<PathBuf>, link_on: bool) -> Self {
-        ImportDialog { items, folder, tags, keep_original: true, link_into, link_on, add_path: String::new(), notes, error: None, rects: vec![] }
+        ImportDialog { items, folder, tags, keep_original: true, link_into, link_on, add_path: String::new(), notes, error: None, rects: vec![], auto_tags: vec![], suggested: vec![], people_dir: crate::people::DEFAULT_DIR.into() }
     }
 
     pub fn count(&self) -> usize {
@@ -91,6 +97,18 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                 if let Some(p) = &it.already {
                     ui.label(egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))).size(12.0).color(theme::LINK_MISSING));
                 }
+                if !it.people.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
+                        ui.label(egui::RichText::new("People").size(12.0).color(theme::MUTED)).on_hover_text("Ticked people are linked from the note; those without a contact note get one in the people folder");
+                        for (k, p) in it.people.iter_mut().enumerate() {
+                            let what = if p.existing.is_some() { "" } else { " (new)" };
+                            let label = egui::RichText::new(format!("{}{what}", p.name)).size(12.5).color(if p.existing.is_some() { theme::LINK } else { theme::TEXT });
+                            let tip = format!("{} · {}{}", p.role.label(), if p.email.is_empty() { "no address" } else { p.email.as_str() }, if p.existing.is_some() { " · has a contact note" } else { " · a contact note will be made" });
+                            rec(format!("person:{i}:{k}"), ui.checkbox(&mut p.on, label)).on_hover_text(tip);
+                        }
+                    });
+                }
                 if let Source::Email { mail, .. } = &it.source {
                     for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
                         let label = format!("{}  ({}, {}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" });
@@ -146,6 +164,29 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             }
         });
         ui.end_row();
+        if !d.suggested.is_empty() || !d.auto_tags.is_empty() {
+            ui.label(muted("Suggested"));
+            ui.vertical(|ui| {
+                if !d.auto_tags.is_empty() {
+                    ui.label(egui::RichText::new(format!("Added because they appear in the text: {}", d.auto_tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" "))).size(11.5).color(theme::FAINT));
+                }
+                let current = import::parse_tags(&d.tags);
+                let mut add = None;
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                    for (t, why) in &d.suggested {
+                        let on = current.iter().any(|c| c.eq_ignore_ascii_case(t));
+                        if rec(format!("suggest:{t}"), ui.selectable_label(on, egui::RichText::new(format!("#{t}")).size(12.0))).on_hover_text(format!("Notes with this tag often mention: {}", why.join(", "))).clicked() {
+                            add = Some(t.clone());
+                        }
+                    }
+                });
+                if let Some(t) = add {
+                    d.toggle_tag(&t);
+                }
+            });
+            ui.end_row();
+        }
     });
     rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
     if let Some(n) = &d.link_into {
@@ -238,6 +279,14 @@ mod tests {
         assert_eq!(import::parse_tags(&d.tags), vec!["beamer", "status"]);
         h.click("tag:status", &mut d, &folders, &tags);
         assert_eq!(import::parse_tags(&d.tags), vec!["beamer"], "clicking a tag again takes it out");
+        // people and suggested tags
+        d.items[0].people = vec![crate::people::Person { name: "Hans Müller".into(), email: "h@x.de".into(), role: crate::people::Role::From, existing: None, on: true }];
+        d.suggested = vec![("av-technik".into(), vec!["leinwand".into(), "projektor".into()])];
+        h.frame(vec![], &mut d, &folders, &tags);
+        h.click("person:0:0", &mut d, &folders, &tags);
+        assert!(!d.items[0].people[0].on, "a person can be left out");
+        h.click("suggest:av-technik", &mut d, &folders, &tags);
+        assert_eq!(import::parse_tags(&d.tags), vec!["beamer", "av-technik"], "a suggestion is added with a click");
         h.click("keep", &mut d, &folders, &tags);
         assert!(!d.keep_original);
         h.click("link", &mut d, &folders, &tags);

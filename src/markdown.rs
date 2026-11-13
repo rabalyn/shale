@@ -276,8 +276,8 @@ fn find_due(text: &str) -> Option<String> {
     for key in ["📅", "due:", "@due("] {
         if let Some(p) = text.find(key) {
             let rest = text[p + key.len()..].trim_start();
-            if rest.len() >= 10 {
-                let d = &rest[..10];
+            // (get: the 10th byte may be inside a character, as in "due:Müllabfuhr")
+            if let Some(d) = rest.get(..10) {
                 let ok = d.bytes().enumerate().all(|(i, c)| if i == 4 || i == 7 { c == b'-' } else { c.is_ascii_digit() });
                 if ok {
                     return Some(d.to_string());
