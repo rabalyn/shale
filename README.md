@@ -1,5 +1,7 @@
 # Shale
 
+[![build](https://github.com/rabalyn/shale/actions/workflows/build.yml/badge.svg)](https://github.com/rabalyn/shale/actions/workflows/build.yml)
+
 A native Rust notes app for the Linux desktop (MIT licensed). Your vault is a plain folder of
 markdown files. Notes link to each other with `[[wiki links]]`.
 
