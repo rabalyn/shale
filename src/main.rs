@@ -1,0 +1,100 @@
+//! Shale — a native Rust notes vault (MIT licensed).
+//!
+//! Usage:
+//!   shale                       open the last vault (or the start screen)
+//!   shale --vault <folder>      open a specific folder as vault
+//!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
+//!   shale --screenshot out.png --view tasks|graph|drawing|reading   (same, other view)
+
+mod app;
+mod cal_dav;
+mod cal_dialog;
+mod cal_ics;
+mod cal_store;
+mod cal_ui;
+mod cal_time;
+mod config;
+mod drawing;
+mod drawing_layout;
+mod editor;
+mod export_dialog;
+mod graph;
+mod import;
+mod import_dialog;
+mod layout;
+mod lists;
+mod mail;
+mod markdown;
+mod media;
+mod panels;
+mod pdfexport;
+mod pdfview;
+mod pdfwrite;
+mod reader;
+mod theme;
+mod tb_store;
+mod vault;
+#[cfg(target_os = "linux")]
+mod wl_drop;
+
+use eframe::egui;
+use std::path::PathBuf;
+
+fn main() -> eframe::Result {
+    let mut screenshot: Option<PathBuf> = None;
+    let mut vault: Option<PathBuf> = None;
+    let mut view: Option<String> = None;
+    let mut keys: Option<String> = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--screenshot" => screenshot = args.next().map(PathBuf::from),
+            "--vault" => vault = args.next().map(PathBuf::from),
+            // testing aid for screenshots: tasks | graph | drawing | reading
+            "--view" => view = args.next(),
+            // testing aid with --screenshot: scripted typing, e.g. "text:[!/|key:Down|key:Tab"
+            "--keys" => keys = args.next(),
+            "-h" | "--help" => {
+                println!("shale [--vault <folder>] [--screenshot <file.png>]");
+                return Ok(());
+            }
+            other if !other.starts_with('-') && vault.is_none() => vault = Some(PathBuf::from(other)),
+            _ => {}
+        }
+    }
+
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("Shale")
+        .with_app_id("shale")
+        .with_inner_size([1360.0, 840.0])
+        .with_min_inner_size([720.0, 480.0]);
+    if screenshot.is_some() {
+        // Don't steal focus from whatever the person is doing.
+        viewport = viewport.with_active(false);
+        #[cfg(target_os = "windows")]
+        {
+            viewport = viewport.with_window_level(egui::WindowLevel::AlwaysOnBottom);
+        }
+    }
+    #[allow(unused_mut)]
+    let mut options = eframe::NativeOptions { viewport, ..Default::default() };
+    #[cfg(target_os = "macos")]
+    if screenshot.is_some() {
+        use winit::platform::macos::EventLoopBuilderExtMacOS;
+        options.event_loop_builder = Some(Box::new(|b| {
+            b.with_activate_ignoring_other_apps(false);
+        }));
+    }
+    let opts = app::Options { screenshot, vault, view, keys };
+    #[cfg(target_os = "linux")]
+    {
+        // Our own event loop, so drops from other programs can be listened for on Wayland
+        // before the clipboard helper starts (see wl_drop).
+        let event_loop = winit::event_loop::EventLoop::<eframe::UserEvent>::with_user_event().build().map_err(eframe::Error::WinitEventLoop)?;
+        wl_drop::attach(&event_loop);
+        let mut app = eframe::create_native("Shale", options, Box::new(move |cc| Ok(Box::new(app::ShaleApp::new(cc, opts)))), &event_loop);
+        event_loop.run_app(&mut app).map_err(eframe::Error::WinitEventLoop)
+    }
+    #[cfg(not(target_os = "linux"))]
+    eframe::run_native("Shale", options, Box::new(move |cc| Ok(Box::new(app::ShaleApp::new(cc, opts)))))
+}

@@ -1,0 +1,17 @@
+/target
+app/target
+.DS_Store
+.idea
+converted_del.png
+fast_image.*
+cross/
+converted_risc_o.png
+converted_risc.png
+pkg/
+wasm/target/
+wasm/pkg/
+Cargo.lock
+app/Cargo.lock
+pic-scale-py/.venv
+*.so
+pic-scale-js/node_modules

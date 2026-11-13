@@ -1,0 +1,33 @@
+[package]
+name = "hayro-jbig2"
+version = "0.4.0"
+description = "A memory-safe, pure-Rust JBIG2 decoder."
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+readme = "README.md"
+exclude = ["/tests/", "/generate_huffman_tables.py"]
+autotests = false
+
+[features]
+default = ["std", "image", "simd"]
+std = []
+simd = ["fearless_simd", "std"]
+image = ["dep:image", "std"]
+
+[dependencies]
+fearless_simd = { workspace = true, optional = true }
+hayro-ccitt = { workspace = true }
+image = { workspace = true, default-features = false, optional = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+image = { workspace = true, default-features = false, features = ["png"] }
+
+[[test]]
+name = "tests"
+path = "tests/main.rs"
