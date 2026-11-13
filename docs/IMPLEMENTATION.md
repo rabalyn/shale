@@ -57,6 +57,10 @@ Drawings are **not** the Excalidraw web app. There is no browser view, no JavaSc
 
 Dependencies of the whole app are only `eframe`/egui (window and UI), `serde`/`serde_json` (files), `dirs` (config and cache folders), `image` (pictures and screenshots) and `libc` on Unix (local date).
 
+## Search shortcut
+
+- [x] **Ctrl+Shift+F always puts the cursor in the search box** (also the ribbon's search button), even when a search is already there, and selects the old search: typing replaces it, an arrow key keeps it to change it. Before, the box only got focus while it was empty. Tested: a UI test (focus moved away, shortcut, box focused with all 6 characters selected, typing replaces, arrow key + typing changes) and in the real window with scripted keys (`--keys` now takes several modifiers, e.g. `key:ctrl+shift+F`).
+
 ## Publishing and builds
 
 - `docs/FEATURES.md`: every feature with screenshots (in `docs/screenshots/`, made with `--screenshot` and `--keys` from the demo vault).

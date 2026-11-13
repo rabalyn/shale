@@ -174,9 +174,19 @@ impl ShaleApp {
         }
     }
 
-    fn search_panel(&mut self, ui: &mut Ui) {
+    pub(crate) fn search_panel(&mut self, ui: &mut Ui) {
         ui.label(egui::RichText::new("Search").size(13.0).color(theme::MUTED));
-        let r = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search all notes…").desired_width(f32::INFINITY));
+        let id = egui::Id::unique("search-input");
+        if std::mem::take(&mut self.focus_search) {
+            // Ctrl+Shift+F: always into the box, with the old search selected (type to replace it,
+            // or press an arrow key to change it)
+            let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+            let n = self.search.chars().count();
+            st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
+            st.store(ui.ctx(), id);
+            ui.ctx().memory_mut(|m| m.request_focus(id));
+        }
+        let r = ui.add(egui::TextEdit::singleline(&mut self.search).id(id).hint_text("Search all notes…").desired_width(f32::INFINITY));
         if self.search.is_empty() && !r.has_focus() {
             r.request_focus();
         }
@@ -876,3 +886,50 @@ mod tests {
 }
 
 pub fn _views(_: View) {}
+
+#[cfg(test)]
+mod search_tests {
+    use crate::app::{Options, ShaleApp};
+    use eframe::egui::{self, Event, Key, Modifiers, Pos2, RawInput, Rect, Vec2};
+
+    #[test]
+    fn the_search_shortcut_always_focuses_and_selects_the_old_search() {
+        let d = std::env::temp_dir().join(format!("shale-search-focus-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        crate::vault::write_sample_vault(&d).unwrap();
+        let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut frame = |app: &mut ShaleApp, events: Vec<Event>| {
+            t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), time: Some(t), events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.search_panel(ui));
+            });
+            out.textures_delta.clear();
+        };
+        app.search = "garden".into();
+        frame(&mut app, vec![]);
+        // focus elsewhere (as after working in a note), then the shortcut
+        ctx.memory_mut(|m| m.surrender_focus(egui::Id::unique("search-input")));
+        frame(&mut app, vec![]);
+        let id = egui::Id::unique("search-input");
+        assert!(!ctx.memory(|m| m.has_focus(id)));
+        app.focus_search = true;
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        assert!(ctx.memory(|m| m.has_focus(id)), "the box has focus although it isn't empty");
+        let range = egui::text_edit::TextEditState::load(&ctx, id).and_then(|s| s.cursor.char_range()).unwrap();
+        assert_eq!((range.primary.index.0.min(range.secondary.index.0), range.primary.index.0.max(range.secondary.index.0)), (0, 6), "the old search is selected");
+        // typing replaces it
+        frame(&mut app, vec![Event::Text("compost".into())]);
+        assert_eq!(app.search, "compost");
+        // an arrow key keeps it and moves the cursor
+        app.focus_search = true;
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![Event::Key { key: Key::ArrowRight, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+        frame(&mut app, vec![Event::Text("s".into())]);
+        assert_eq!(app.search, "composts");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}

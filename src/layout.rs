@@ -269,6 +269,7 @@ impl ShaleApp {
             if icon_button(ui, Icon::Search, 30.0, search, "Search all notes (Ctrl+Shift+F)").clicked() {
                 self.left = LeftPanel::Search;
                 self.cfg.show_left = true;
+                self.focus_search = true;
             }
             let tags = self.cfg.show_left && self.left == LeftPanel::Tags;
             if icon_button(ui, Icon::Tags, 30.0, tags, "Tags").clicked() {

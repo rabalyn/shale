@@ -142,6 +142,8 @@ pub struct ShaleApp {
     pub right: RightPanel,
     pub expanded: HashSet<PathBuf>,
     pub search: String,
+    /// focus the search box (and select its text) in the next frame
+    pub focus_search: bool,
     pub tasks: TasksFilter,
     pub graph: GraphView,
     pub local_graph: GraphView,
@@ -226,6 +228,7 @@ impl ShaleApp {
             right: RightPanel::Backlinks,
             expanded: HashSet::new(),
             search: String::new(),
+            focus_search: false,
             tasks: TasksFilter::default(),
             graph: GraphView::new(false),
             local_graph: GraphView::new(true),
@@ -909,6 +912,7 @@ impl ShaleApp {
         if search {
             self.left = LeftPanel::Search;
             self.cfg.show_left = true;
+            self.focus_search = true;
         }
         if save {
             self.flush_all();
@@ -966,12 +970,18 @@ impl ShaleApp {
         }
         let Some(step) = self.script.pop_front() else { return };
         let key_event = |name: &str| {
-            let (mods, k) = match name.split_once('+') {
-                Some(("shift", k)) => (Modifiers::SHIFT, k),
-                Some(("alt", k)) => (Modifiers::ALT, k),
-                Some(("ctrl", k)) => (Modifiers::COMMAND, k),
-                _ => (Modifiers::NONE, name),
-            };
+            // "ctrl+shift+F": any number of modifiers before the key
+            let mut mods = Modifiers::NONE;
+            let mut k = name;
+            while let Some((m, rest)) = k.split_once('+') {
+                match m {
+                    "shift" => mods.shift = true,
+                    "alt" => mods.alt = true,
+                    "ctrl" => mods = mods | Modifiers::COMMAND,
+                    _ => break,
+                }
+                k = rest;
+            }
             let key = Key::from_name(k).unwrap_or(Key::Escape);
             vec![
                 egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: mods },
