@@ -125,12 +125,13 @@ fn percent_decode(s: &str) -> String {
 
 /// Strip a trailing `.md` from a link target (case-insensitive).
 pub fn strip_md_ext(name: &str) -> &str {
-    if name.len() > 3 && name[name.len() - 3..].eq_ignore_ascii_case(".md") {
+    if name.len() > 3 && name.is_char_boundary(name.len() - 3) && name[name.len() - 3..].eq_ignore_ascii_case(".md") {
         &name[..name.len() - 3]
     } else {
         name
     }
 }
+
 
 /// Find every internal link in `text`, skipping fenced and inline code.
 pub fn find_links(text: &str) -> Vec<LinkSpan> {
