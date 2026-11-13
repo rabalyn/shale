@@ -10,13 +10,23 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SourceKind {
     /// an .ics file on this computer
     Local { file: PathBuf },
     /// a calendar on a CalDAV server
+    /// (the password is kept in the system keyring when there is one; see `secrets`)
     Caldav { url: String, username: String, password: String },
+}
+
+impl std::fmt::Debug for SourceKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SourceKind::Local { file } => f.debug_struct("Local").field("file", file).finish(),
+            SourceKind::Caldav { url, username, password } => f.debug_struct("Caldav").field("url", url).field("username", username).field("password", &cal_dav::redacted(password)).finish(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -61,6 +71,18 @@ fn run_job(f: impl FnOnce() -> Result<String, String> + Send + 'static, ctx: Opt
     job
 }
 
+/// A new server address / version tag for the event with this uid, learned from a write.
+type Fix = (String, String, String, Option<String>);
+
+/// The result of loading one CalDAV calendar.
+#[derive(Debug)]
+struct Loaded {
+    /// None: unchanged since the last load
+    events: Option<Vec<Event>>,
+    tag: Option<String>,
+    read_only: Option<bool>,
+}
+
 /// Where a calendar's events are written.
 #[derive(Clone)]
 enum Target {
@@ -86,18 +108,23 @@ fn local_write(file: &std::path::Path, name: &str, events: &[Event]) -> Result<(
 /// Write an event into a calendar. `parts`: the event first, then the other parts of the same
 /// series (changed single dates), which are always kept together. `in_place`: the event is
 /// already in this calendar and is replaced; otherwise it is created.
-fn write_to(target: &Target, parts: &[Event], in_place: bool) -> Result<(), String> {
-    let Some(e) = parts.first() else { return Ok(()) };
+/// For CalDAV: returns the event's address and new version tag.
+fn write_to(target: &Target, parts: &[Event], in_place: bool) -> Result<Option<(String, Option<String>)>, String> {
+    let Some(e) = parts.first() else { return Ok(None) };
     match target {
         Target::Local { file, name } => {
             let mut evs = local_read(file)?;
             evs.retain(|x| x.uid != e.uid);
             evs.extend(parts.iter().map(|p| Event { href: None, etag: None, ..p.clone() }));
-            local_write(file, name, &evs)
+            local_write(file, name, &evs).map(|_| None)
         }
         Target::Dav { url, acct } => {
-            let existing = if in_place { e.href.as_deref().map(|h| (h, e.etag.as_deref())) } else { None };
-            cal_dav::put_event(url, acct, parts, existing).map(|_| ())
+            let existing = match (in_place, e.href.as_deref()) {
+                (true, Some(h)) => Some((h, e.etag.as_deref())),
+                (true, None) => return Err("the event's address on the server is unknown; refresh the calendar and try again".into()),
+                (false, _) => None,
+            };
+            cal_dav::put_event(url, acct, parts, existing).map(Some)
         }
     }
 }
@@ -143,7 +170,7 @@ impl Occ {
     }
 }
 
-type Pending = Arc<Mutex<Vec<(String, Result<Vec<Event>, String>)>>>;
+type Pending = Arc<Mutex<Vec<(String, Result<Loaded, String>)>>>;
 
 pub struct CalendarStore {
     pub sources: Vec<CalendarSource>,
@@ -157,6 +184,12 @@ pub struct CalendarStore {
     again: HashSet<String>,
     /// when each CalDAV calendar was last loaded (its own sync timer)
     last_sync: HashMap<String, Instant>,
+    /// version tag of each CalDAV calendar at its last load, and the day the loaded range starts
+    known: HashMap<String, (String, i64)>,
+    /// CalDAV calendars the server says this account can't change
+    pub read_only: HashSet<String>,
+    /// addresses / version tags learned from writes, applied in `poll`
+    fixes: Arc<Mutex<Vec<Fix>>>,
     /// bumped whenever events change
     pub generation: u64,
     /// where new local calendars are created
@@ -165,7 +198,7 @@ pub struct CalendarStore {
 
 impl CalendarStore {
     pub fn new(sources: Vec<CalendarSource>, local_dir: PathBuf) -> Self {
-        let mut s = CalendarStore { sources, events: HashMap::new(), status: HashMap::new(), pending: Default::default(), inflight: HashSet::new(), again: HashSet::new(), last_sync: HashMap::new(), generation: 0, local_dir };
+        let mut s = CalendarStore { sources, events: HashMap::new(), status: HashMap::new(), pending: Default::default(), inflight: HashSet::new(), again: HashSet::new(), last_sync: HashMap::new(), known: HashMap::new(), read_only: HashSet::new(), fixes: Default::default(), generation: 0, local_dir };
         s.reload_local();
         s
     }
@@ -182,6 +215,11 @@ impl CalendarStore {
         self.sources = sources;
         self.events.retain(|id, _| self.sources.iter().any(|s| s.id == *id));
         self.last_sync.retain(|id, _| self.sources.iter().any(|s| s.id == *id));
+        for id in &fresh {
+            self.known.remove(id);
+        }
+        self.known.retain(|id, _| self.sources.iter().any(|s| s.id == *id));
+        self.read_only.retain(|id| self.sources.iter().any(|s| s.id == *id));
         self.reload_local();
         for id in fresh {
             self.refresh_source(&id);
@@ -232,11 +270,38 @@ impl CalendarStore {
         self.status.insert(s.id.clone(), "syncing…".into());
         let today = t::today();
         let (from, to) = ((today - 120) * 86_400, (today + 400) * 86_400);
+        // the loaded range moves with the days: a calendar loaded on another day is loaded fully
+        let known = self.known.get(&s.id).filter(|(_, day)| *day == today).map(|(tag, _)| tag.clone());
         let (id, url, acct, pending) = (s.id.clone(), url.clone(), Account { url: url.clone(), username: username.clone(), password: password.clone() }, self.pending.clone());
         std::thread::spawn(move || {
-            let r = cal_dav::fetch_events(&url, &acct, from, to);
+            // a failing state request (old servers) just means: load everything
+            let st = cal_dav::calendar_state(&url, &acct).unwrap_or_default();
+            let r = if st.tag.is_some() && st.tag == known {
+                Ok(Loaded { events: None, tag: st.tag, read_only: st.read_only })
+            } else {
+                cal_dav::fetch_events(&url, &acct, from, to).map(|ev| Loaded { events: Some(ev), tag: st.tag, read_only: st.read_only })
+            };
             pending.lock().unwrap().push((id, r));
         });
+    }
+
+    /// Load a calendar again now, completely (also when the server says nothing changed).
+    pub fn sync_now(&mut self, id: &str) {
+        self.known.remove(id);
+        self.refresh_source(id);
+    }
+
+    /// Apply the addresses / version tags learned from finished writes.
+    fn apply_fixes(&mut self) -> bool {
+        let fixes: Vec<Fix> = std::mem::take(&mut *self.fixes.lock().unwrap());
+        let changed = !fixes.is_empty();
+        for (source, uid, href, etag) in fixes {
+            for e in self.events.get_mut(&source).into_iter().flatten().filter(|e| e.uid == uid) {
+                e.href = Some(href.clone());
+                e.etag = etag.clone();
+            }
+        }
+        changed
     }
 
     /// CalDAV calendars whose own sync timer has run out (or that were never loaded).
@@ -259,14 +324,35 @@ impl CalendarStore {
             self.refresh_source(&id);
         }
         let done: Vec<_> = std::mem::take(&mut *self.pending.lock().unwrap());
-        let changed = !done.is_empty();
+        let changed = !done.is_empty() | self.apply_fixes();
         for (id, r) in done {
             self.inflight.remove(&id);
             match r {
-                Ok(ev) => {
+                Ok(sync) => {
                     let (_, secs) = t::utc_to_local(t::now());
-                    self.status.insert(id.clone(), format!("{} events · synced {}", ev.len(), t::hhmm(secs)));
-                    self.events.insert(id, ev);
+                    match sync.read_only {
+                        Some(true) => {
+                            self.read_only.insert(id.clone());
+                        }
+                        Some(false) => {
+                            self.read_only.remove(&id);
+                        }
+                        None => {}
+                    }
+                    match sync.tag {
+                        Some(tag) => {
+                            self.known.insert(id.clone(), (tag, t::today()));
+                        }
+                        None => {
+                            self.known.remove(&id);
+                        }
+                    }
+                    if let Some(ev) = sync.events {
+                        self.events.insert(id.clone(), ev);
+                    }
+                    let n = self.events.get(&id).map(|v| v.len()).unwrap_or(0);
+                    let ro = if self.read_only.contains(&id) { " · read-only" } else { "" };
+                    self.status.insert(id.clone(), format!("{n} events{ro} · synced {}", t::hhmm(secs)));
                 }
                 Err(e) => {
                     self.status.insert(id, e);
@@ -349,8 +435,16 @@ impl CalendarStore {
     ///   worked removed from the old one — so a failure never loses the event.
     pub fn save_event(&self, target_id: &str, event: Event, original: Option<(String, Event)>, ctx: Option<eframe::egui::Context>) -> Result<Job, String> {
         let (target, target_name) = self.target(target_id)?;
+        if self.read_only.contains(target_id) {
+            return Err(format!("“{target_name}” is read-only; choose another calendar"));
+        }
         let moved_from = match &original {
-            Some((sid, old)) if sid != target_id => Some((self.target(sid)?, old.clone())),
+            Some((sid, old)) if sid != target_id => {
+                if self.read_only.contains(sid) {
+                    return Err("the event's calendar is read-only, so it can't be moved out of it".into());
+                }
+                Some((self.target(sid)?, old.clone()))
+            }
             _ => None,
         };
         let in_place = original.is_some() && moved_from.is_none();
@@ -365,9 +459,13 @@ impl CalendarStore {
                 p.etag = None;
             }
         }
+        let (fixes, fix_source, uid) = (self.fixes.clone(), target_id.to_string(), event.uid.clone());
         Ok(run_job(
             move || {
-                write_to(&target, &parts, in_place).map_err(|e| format!("Could not save to “{target_name}”: {e}"))?;
+                let written = write_to(&target, &parts, in_place).map_err(|e| format!("Could not save to “{target_name}”: {e}"))?;
+                if let Some((href, etag)) = written {
+                    fixes.lock().unwrap().push((fix_source, uid, href, etag));
+                }
                 if let Some(((old_target, old_name), old)) = moved_from {
                     // the event is safe in the new calendar either way
                     return Ok(match remove_from(&old_target, &old) {
@@ -384,15 +482,21 @@ impl CalendarStore {
     /// Remove an event in the background (local or CalDAV).
     pub fn delete_event(&self, source_id: &str, event: Event, ctx: Option<eframe::egui::Context>) -> Result<Job, String> {
         let (target, name) = self.target(source_id)?;
+        if self.read_only.contains(source_id) {
+            return Err(format!("“{name}” is read-only"));
+        }
         Ok(run_job(move || remove_from(&target, &event).map(|_| "Event deleted".to_string()).map_err(|e| format!("Could not delete the event from “{name}”: {e}")), ctx))
     }
 
     /// After a save / delete: load the touched calendars again.
     pub fn after_write(&mut self, ids: &[String]) {
+        if self.apply_fixes() {
+            self.generation += 1;
+        }
         self.reload_local();
         for id in ids {
             if self.sources.iter().any(|s| s.id == *id && !s.is_local()) {
-                self.refresh_source(id);
+                self.sync_now(id);
             }
         }
     }
@@ -585,8 +689,8 @@ pub(crate) mod tests {
         wait(&store.save_event(&local.id, on_server.clone(), Some(("rw".into(), on_server)), None).unwrap()).unwrap();
         store.reload_local();
         assert!(store.find(&local.id, "u1").is_some());
-        // (the REPORTs in between are the calendars syncing)
-        let calls: Vec<String> = log.lock().unwrap().iter().filter(|c| !c.starts_with("REPORT")).cloned().collect();
+        // (the PROPFINDs / REPORTs in between are the calendars syncing)
+        let calls: Vec<String> = log.lock().unwrap().iter().filter(|c| !c.starts_with("REPORT") && !c.starts_with("PROPFIND")).cloned().collect();
         assert_eq!(calls, vec!["PUT /ro/u1.ics".to_string(), "PUT /rw/u1.ics".into(), "DELETE /rw/u1.ics".into()]);
     }
 
@@ -644,6 +748,70 @@ pub(crate) mod tests {
         let occ = store.occurrences(today, today);
         assert_eq!(occ.len(), 1, "status: {:?}", store.status);
         assert_eq!(store.event(&occ[0]).unwrap().summary, "Remote day");
+    }
+
+    #[test]
+    fn unchanged_calendars_are_not_downloaded_again_and_read_only_ones_refuse_writes() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let reports = Arc::new(Mutex::new(0usize));
+        let r2 = reports.clone();
+        let (base, _h) = crate::cal_dav::tests::mock_http(10, move |m, _, _, _| match m {
+            "PROPFIND" => (207, r#"<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:response><d:href>/ro/</d:href><d:propstat><d:prop><cs:getctag>7</cs:getctag><d:current-user-privilege-set><d:privilege><d:read/></d:privilege></d:current-user-privilege-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#.into()),
+            _ => {
+                *r2.lock().unwrap() += 1;
+                (207, r#"<d:multistatus xmlns:d="DAV:"/>"#.into())
+            }
+        });
+        let mut store = CalendarStore::new(vec![], tmp("ctag"));
+        store.set_sources(vec![dav_source("ro", format!("{base}/ro/"))]);
+        let settle = |store: &mut CalendarStore| {
+            for _ in 0..300 {
+                store.poll();
+                if !store.is_loading() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        settle(&mut store);
+        assert_eq!(*reports.lock().unwrap(), 1);
+        assert!(store.read_only.contains("ro"));
+        assert!(store.status["ro"].contains("read-only"), "{:?}", store.status);
+        store.refresh_source("ro");
+        settle(&mut store);
+        assert_eq!(*reports.lock().unwrap(), 1, "same ctag: not downloaded again");
+        store.sync_now("ro");
+        settle(&mut store);
+        assert_eq!(*reports.lock().unwrap(), 2, "Sync now always downloads");
+        let e = Event { uid: "x".into(), summary: "X".into(), start: 1_800_000_000, end: 1_800_001_800, ..Default::default() };
+        let err = store.save_event("ro", e, None, None).unwrap_err();
+        assert!(err.contains("read-only"), "{err}");
+    }
+
+    #[test]
+    fn a_write_keeps_the_new_version_tag() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let (base, _h) = crate::cal_dav::tests::mock_http_with(3, |m, _, _, _| match m {
+            "PUT" => (204, "ETag: \"v2\"\r\n".into(), String::new()),
+            _ => (404, String::new(), String::new()),
+        });
+        let mut store = CalendarStore::new(vec![], tmp("etag"));
+        store.sources = vec![dav_source("a", format!("{base}/a/"))];
+        let e = Event { uid: "u".into(), summary: "U".into(), start: 1_800_000_000, end: 1_800_001_800, href: Some(format!("{base}/a/u.ics")), etag: Some("\"v1\"".into()), ..Default::default() };
+        store.events.insert("a".into(), vec![e.clone()]);
+        wait(&store.save_event("a", e.clone(), Some(("a".into(), e)), None).unwrap()).unwrap();
+        assert!(store.apply_fixes());
+        assert_eq!(store.events["a"][0].etag.as_deref(), Some("\"v2\""));
+    }
+
+    #[test]
+    fn passwords_stay_out_of_debug_output() {
+        let s = format!("{:?}", dav_source("a", "https://x/".into()).kind);
+        assert!(!s.contains("\"x\"") && s.contains("***"), "{s}");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! App settings, saved as JSON in the user's config folder (~/.config/shale/config.json).
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// How the file tree is ordered.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -116,31 +116,81 @@ pub fn build_stamp() -> String {
     format!("{y:04}-{m:02}-{d:02} {:02}:{:02} UTC", rem / 3600, rem % 3600 / 60)
 }
 
+/// Make the folder of a private file, readable only by the owner.
+fn private_dir(path: &Path) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    Ok(())
+}
+
+/// Open a file only the owner can read and write (created that way, never readable by others
+/// for a moment). `append`: add to it, otherwise start it empty.
+pub fn open_private(path: &Path, append: bool) -> std::io::Result<std::fs::File> {
+    private_dir(path)?;
+    let mut o = std::fs::OpenOptions::new();
+    o.create(true);
+    if append {
+        o.append(true);
+    } else {
+        o.write(true).truncate(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    let f = o.open(path)?;
+    #[cfg(unix)]
+    {
+        // an older file may have been created with wider permissions
+        use std::os::unix::fs::PermissionsExt;
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(f)
+}
+
+/// Replace a private file in one step: written to a temporary file next to it (owner-only),
+/// then renamed over it, so a crash never leaves a half-written file.
+pub fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let mut f = open_private(&tmp, false)?;
+    f.write_all(data)?;
+    f.sync_all()?;
+    drop(f);
+    std::fs::rename(&tmp, path)
+}
+
 pub fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("shale").join("config.json"))
 }
 
 impl Config {
     pub fn load() -> Config {
-        config_path()
+        let mut c: Config = config_path()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        crate::secrets::load_passwords(&mut c.calendars);
+        c
     }
 
     pub fn save(&self) {
-        if let Some(p) = config_path() {
-            if let Some(dir) = p.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            if let Ok(s) = serde_json::to_string_pretty(self) {
-                let _ = std::fs::write(&p, s);
-                // the file may hold CalDAV passwords: only the owner may read it
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
-                }
+        let Some(p) = config_path() else { return };
+        // CalDAV passwords go to the system keyring when there is one
+        let mut out = self.clone();
+        out.calendars = crate::secrets::for_file(&self.calendars);
+        if let Ok(s) = serde_json::to_string_pretty(&out) {
+            if let Err(e) = write_private(&p, s.as_bytes()) {
+                eprintln!("could not save the settings: {e}");
             }
         }
     }
@@ -165,6 +215,24 @@ mod tests {
         assert!(!c.ctrl_to_follow);
         assert!(c.inline_images);
         assert_eq!(c.file_sort, FileSort::NameAsc);
+    }
+
+    #[test]
+    fn private_files_are_owner_only_and_replaced_whole() {
+        let dir = std::env::temp_dir().join(format!("shale-private-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let p = dir.join("sub").join("config.json");
+        write_private(&p, b"one").unwrap();
+        write_private(&p, b"two").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "two");
+        assert!(!dir.join("sub").join("config.json.tmp").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(std::fs::metadata(p.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

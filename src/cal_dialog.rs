@@ -43,6 +43,10 @@ impl CalendarDialog {
     }
 
     fn start_discovery(&mut self) {
+        if let Err(e) = cal_dav::check_url(self.dav_url.trim()) {
+            self.message = Some(format!("Can't use this address: {e}"));
+            return;
+        }
         let acct = Account { url: self.dav_url.trim().to_string(), username: self.dav_user.clone(), password: self.dav_pass.clone() };
         let slot: Discovery = Arc::new(Mutex::new(None));
         let s2 = slot.clone();
@@ -185,18 +189,32 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         }
         if rec("dav-add-url".into(), ui.add_enabled(!busy && !d.dav_url.trim().is_empty(), egui::Button::new("Add this address as one calendar"))).clicked() {
             let url = d.dav_url.trim().to_string();
-            let name = url.trim_end_matches('/').rsplit('/').next().unwrap_or("Calendar").to_string();
-            d.add_caldav(url, name, None);
-            d.message = Some("Added. Press Done to save.".into());
+            match cal_dav::check_url(&url) {
+                Ok(_) => {
+                    let name = url.trim_end_matches('/').rsplit('/').next().unwrap_or("Calendar").to_string();
+                    d.add_caldav(url, name, None);
+                    d.dav_pass.clear();
+                    d.message = Some("Added. Press Done to save.".into());
+                }
+                Err(e) => d.message = Some(format!("Can't use this address: {e}")),
+            }
         }
         if busy {
             ui.spinner();
         }
     });
     if !d.found.is_empty() {
+        let entered = d.dav_url.trim().to_string();
         for (i, (c, on)) in d.found.iter_mut().enumerate() {
             ui.horizontal(|ui| {
                 rec(format!("found:{i}"), ui.checkbox(on, &c.name)).on_hover_text(&c.url);
+                // the password goes wherever the calendar is: say so when that's another server
+                if !cal_dav::same_server(&c.url, &entered) {
+                    ui.label(egui::RichText::new(format!("on {}", cal_dav::host_of(&c.url))).size(12.0).color(theme::LINK_MISSING)).on_hover_text("This calendar is on another server than the address you entered; your user name and password will be sent there.");
+                }
+                if c.read_only {
+                    ui.label(muted("read-only"));
+                }
             });
         }
         if rec("dav-add-found".into(), ui.button("Add selected calendars")).clicked() {
@@ -205,6 +223,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
                 d.add_caldav(c.url, c.name, c.color);
             }
             d.found.clear();
+            d.dav_pass.clear();
             d.message = Some("Added. Press Done to save.".into());
         }
     }
@@ -212,7 +231,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         ui.label(muted(m));
     }
     ui.label(muted(&format!("New CalDAV calendars sync every {DEFAULT_SYNC_MINUTES} minutes; change it per calendar above. Saving an event syncs its calendar right away.")));
-    ui.label(muted("Passwords are stored in the settings file on this computer (readable only by you)."));
+    ui.label(muted(&format!("Only https:// addresses are accepted (http:// only for a server on this computer). {}", crate::secrets::where_stored())));
     ui.separator();
     rec("week-monday".into(), ui.checkbox(&mut d.week_monday, "Weeks start on Monday"));
     ui.add_space(6.0);
@@ -467,9 +486,10 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             let current_name = current.map(|s| s.name.clone()).unwrap_or_else(|| "(choose a calendar)".into());
             let combo = egui::ComboBox::from_id_salt("event-cal").width(320.0).selected_text(current_name).show_ui(ui, |ui| {
                 for s in &store.sources {
-                    let kind = if s.is_local() { "local" } else { "CalDAV" };
+                    let read_only = store.read_only.contains(&s.id);
+                    let kind = if s.is_local() { "local" } else if read_only { "CalDAV, read-only" } else { "CalDAV" };
                     let label = egui::RichText::new(format!("● {}   ({kind})", s.name)).color(crate::drawing::parse_color(&s.color).unwrap_or(theme::TEXT));
-                    if rec(&format!("cal:{}", s.name), ui.selectable_label(d.calendar == s.id, label)).clicked() {
+                    if rec(&format!("cal:{}", s.name), ui.add_enabled(!read_only || d.calendar == s.id, egui::Button::selectable(d.calendar == s.id, label))).clicked() {
                         d.calendar = s.id.clone();
                         d.error = None;
                     }

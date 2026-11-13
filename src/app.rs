@@ -764,7 +764,7 @@ impl ShaleApp {
             }
             CalDialogAction::SyncNow(id) => {
                 self.calendar.set_sources(d.sources.clone());
-                self.calendar.refresh_source(&id);
+                self.calendar.sync_now(&id);
                 false
             }
             CalDialogAction::FillSample(id) => {
@@ -1087,12 +1087,25 @@ impl ShaleApp {
             env("XKB_DEFAULT_LAYOUT"),
             env("LANG"),
         );
-        let _ = std::fs::write(path, header);
+        if let Ok(mut f) = crate::config::open_private(&path, false) {
+            use std::io::Write;
+            let _ = f.write_all(header.as_bytes());
+        }
     }
 
     /// Append the keyboard-related events of this frame, plus the editor's picker state.
     fn log_input(&mut self, raw: &egui::RawInput) {
         use std::io::Write;
+        // the calendar settings hold the CalDAV password field: record nothing typed there
+        // (not even key names, they would spell the password)
+        if matches!(self.modal, Some(Modal::Calendars(_))) {
+            if raw.events.iter().any(|e| matches!(e, egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Ime(_))) {
+                if let Ok(mut f) = crate::config::open_private(&crate::config::input_log_path(), true) {
+                    let _ = writeln!(f, "frame {} | (input in the calendar settings is not recorded)", self.frames);
+                }
+            }
+            return;
+        }
         let lines: Vec<String> = raw
             .events
             .iter()
@@ -1115,7 +1128,7 @@ impl ShaleApp {
             }
             _ => "no note open".into(),
         };
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(crate::config::input_log_path()) {
+        if let Ok(mut f) = crate::config::open_private(&crate::config::input_log_path(), true) {
             let _ = writeln!(f, "frame {} | before: {state}", self.frames);
             for l in lines {
                 let _ = writeln!(f, "    {l}");

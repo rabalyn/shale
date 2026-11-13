@@ -1179,7 +1179,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parlance",
  "read-fonts 0.41.0",
- "roxmltree",
+ "roxmltree 0.21.2",
  "smallvec",
  "windows",
  "windows-core",
@@ -2940,6 +2940,12 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "roxmltree"
 version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
@@ -3117,6 +3123,7 @@ dependencies = [
  "image",
  "libc",
  "miniz_oxide 0.8.9",
+ "roxmltree 0.20.0",
  "serde",
  "serde_json",
  "ttf-parser",

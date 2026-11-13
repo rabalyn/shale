@@ -35,6 +35,7 @@ mod reader;
 mod theme;
 #[cfg(test)]
 mod utf8_tests;
+mod secrets;
 mod tagwords;
 mod tb_store;
 mod vault;

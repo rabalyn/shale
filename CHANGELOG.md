@@ -9,6 +9,30 @@ The release page of each version on GitHub shows its section from this file.
 
 ## [Unreleased]
 
+### Security
+- CalDAV passwords are kept in the system keyring (Secret Service via `secret-tool`) instead of
+  the settings file; without a keyring they stay in the owner-only settings file as before.
+- Only `https://` CalDAV addresses are accepted (`http://` only for a server on this computer);
+  addresses with a user name or password inside are refused.
+- The password is never sent to another server: event addresses from the server must be on the
+  calendar's own server, and redirects may only go to https.
+- `~/.curlrc` is no longer read for CalDAV requests, version tags with line breaks are refused
+  (no header injection), and server answers are limited to 50 MB.
+- The keyboard recording (troubleshooting) no longer records anything typed in the calendar
+  settings, and its file is readable only by its owner.
+- The settings file is written owner-only from the start and replaced in one step (no window
+  where it is readable by others, no half-written file after a crash).
+
+### Fixed
+- CalDAV: a real XML parser reads the server's answers (namespaces, CDATA, comments); document
+  type declarations are refused.
+- CalDAV discovery follows the address the server redirected to, leaves out task-only lists and
+  marks read-only calendars; read-only calendars can't be chosen for saving.
+- CalDAV: the new version tag of a saved event is kept, an event without a known version tag is
+  checked before it is overwritten, and different event IDs never share a file on the server.
+- CalDAV calendars that didn't change (same ctag / sync-token) aren't downloaded again; "Sync now"
+  always downloads.
+
 ## [0.2.0] - 2026-11-13
 
 ### Added
