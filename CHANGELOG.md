@@ -9,6 +9,8 @@ The release page of each version on GitHub shows its section from this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
 ### Security
 - CalDAV passwords are kept in the system keyring (Secret Service via `secret-tool`) instead of
   the settings file; without a keyring they stay in the owner-only settings file as before.
@@ -79,6 +81,7 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/rabalyn/shale/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rabalyn/shale/compare/6851a04...v0.2.0
 [0.1.0]: https://github.com/rabalyn/shale/tree/6851a043e3c1f98af9b92575a43a93202b3b13b7

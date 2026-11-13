@@ -167,7 +167,9 @@ pub fn resolve(base: &str, href: &str) -> String {
 /// Largest answer accepted from a server.
 const MAX_BYTES: &str = "52428800";
 const MARK: &str = "\n__SHALE__";
-const WRITE_OUT: &str = "\n__SHALE__%{http_code}\t%{url_effective}\t%header{etag}";
+// (%{size_header}: bytes of all response headers, which `-i` puts before the body; works with
+// any curl, unlike %header{…} which needs curl 7.84)
+const WRITE_OUT: &str = "\n__SHALE__%{http_code}\t%{size_header}\t%{url_effective}";
 const OTHER_SERVER: &str = "the event's address on the server points to a different server; Shale does not send your password there";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -229,7 +231,7 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
     let protos = if origin.scheme == "http" { "=http,https" } else { "=https" };
     let mut child = Command::new("curl")
         // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
-        .args(["-q", "-sS", "-L", "--max-redirs", "5", "--proto", protos, "--proto-redir", protos])
+        .args(["-q", "-sS", "-i", "-L", "--max-redirs", "5", "--proto", protos, "--proto-redir", protos])
         .args(["--connect-timeout", "10", "--max-time", "30", "--max-filesize", MAX_BYTES])
         .args(["-X", method, "-w", WRITE_OUT, "-K", "-", url])
         .stdin(Stdio::piped())
@@ -240,16 +242,19 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
     child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| e.to_string())?;
     drop(cfg);
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let raw = &out.stdout;
     let stderr = || String::from_utf8_lossy(&out.stderr).trim().to_string();
-    let Some(pos) = text.rfind(MARK) else {
+    let Some(pos) = raw.windows(MARK.len()).rposition(|w| w == MARK.as_bytes()) else {
         let err = stderr();
         return Err(if err.is_empty() { "no answer from the server".into() } else { err });
     };
-    let tail = &text[pos + MARK.len()..];
-    let (code, rest) = tail.split_once('\t').unwrap_or((tail, ""));
-    let (effective, etag) = rest.rsplit_once('\t').unwrap_or((rest, ""));
+    let tail = String::from_utf8_lossy(&raw[pos + MARK.len()..]).into_owned();
+    let mut fields = tail.splitn(3, '\t');
+    let (code, header_len, effective) = (fields.next().unwrap_or(""), fields.next().unwrap_or(""), fields.next().unwrap_or(""));
     let status: u16 = code.trim().parse().unwrap_or(0);
+    let header_len = header_len.trim().parse::<usize>().unwrap_or(0).min(pos);
+    let etag = last_header(&String::from_utf8_lossy(&raw[..header_len]), "etag").unwrap_or_default();
+    let body = String::from_utf8_lossy(&raw[header_len..pos]).into_owned();
     if status == 0 {
         let err = stderr();
         return Err(if err.is_empty() { "could not reach the server".into() } else { err });
@@ -258,7 +263,17 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
     if effective != url {
         check_url(&effective).map_err(|e| format!("the server redirected to an address that is not allowed: {e}"))?;
     }
-    Ok(Response { status, body: text[..pos].to_string(), url: effective, etag: clean_etag(etag) })
+    Ok(Response { status, body, url: effective, etag: clean_etag(&etag) })
+}
+
+/// A header of the last response in curl's `-i` output (after redirects and "100 Continue").
+fn last_header(headers: &str, name: &str) -> Option<String> {
+    let block = headers.replace("\r\n", "\n");
+    let last = block.split("\n\n").filter(|b| !b.trim().is_empty()).last()?;
+    last.lines().skip(1).find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        k.trim().eq_ignore_ascii_case(name).then(|| v.trim().to_string())
+    })
 }
 
 fn check(r: &Response, requested: &str) -> Result<(), String> {
@@ -852,6 +867,23 @@ pub(crate) mod tests {
         put_event(&acct2.url, &acct2, std::slice::from_ref(&e), Some((&format!("{b2}/c/a.ics"), None))).unwrap();
         assert_eq!(h2.join().unwrap(), vec!["PROPFIND /c/a.ics".to_string(), "PUT /c/a.ics".into()]);
         assert_eq!(h.join().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn headers_come_from_the_last_answer() {
+        assert_eq!(last_header("HTTP/1.1 301 Moved\r\nETag: \"old\"\r\nLocation: /b\r\n\r\nHTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\netag: \"new\"\r\n\r\n", "etag").as_deref(), Some("\"new\""));
+        assert_eq!(last_header("HTTP/2 204\r\n\r\n", "etag"), None);
+        if !has_curl() {
+            return;
+        }
+        let (base, _h) = mock_http_with(2, |_, path, _, _| match path {
+            "/a" => (301, "Location: /b\r\nETag: \"old\"\r\n".into(), String::new()),
+            _ => (207, "ETag: \"new\"\r\n".into(), "<x>HTTP/1.1 200 OK\r\n\r\nnot a header</x>".into()),
+        });
+        let acct = Account { url: base.clone(), username: String::new(), password: String::new() };
+        let r = request("PROPFIND", &format!("{base}/a"), "0", "<x/>", &acct).unwrap();
+        assert_eq!((r.status, r.etag.as_deref(), r.url.as_str()), (207, Some("\"new\""), format!("{base}/b").as_str()));
+        assert_eq!(r.body, "<x>HTTP/1.1 200 OK\r\n\r\nnot a header</x>");
     }
 
     #[test]
