@@ -40,17 +40,20 @@ case "${1:-}" in
     $COMPOSE -f compose.yaml up -d
     wait_for 127.0.0.1 10993 90 || { echo "Dovecot did not come up on 127.0.0.1:10993 (see: $0 logs)" >&2; exit 1; }
     wait_for 127.0.0.1 18080 90 || { echo "the OAuth2 provider did not come up on 127.0.0.1:18080 (see: $0 logs)" >&2; exit 1; }
+    wait_for 127.0.0.1 18025 90 || { echo "the mail sink (Mailpit) did not come up on 127.0.0.1:18025 (see: $0 logs)" >&2; exit 1; }
     echo "Mail test environment is up. See tests/mail-env/README.md for the accounts."
     ;;
   down) $COMPOSE -f compose.yaml down ;;
   reset) $COMPOSE -f compose.yaml down -v ;;
   revoke)
-    # Dovecot shares the provider's network, so it is stopped first and started last
-    $COMPOSE -f compose.yaml stop dovecot oauth
+    # Dovecot and the sink share the provider's network, so they are stopped first and started last
+    $COMPOSE -f compose.yaml stop dovecot mailpit oauth
     $COMPOSE -f compose.yaml start oauth
     wait_for 127.0.0.1 18080 60 || { echo "the OAuth2 provider did not come back" >&2; exit 1; }
+    $COMPOSE -f compose.yaml start mailpit
     $COMPOSE -f compose.yaml start dovecot
     wait_for 127.0.0.1 10993 60 || { echo "Dovecot did not come back" >&2; exit 1; }
+    wait_for 127.0.0.1 18025 60 || { echo "the mail sink did not come back" >&2; exit 1; }
     sleep 2
     echo "The provider was restarted: all tokens it handed out are invalid now."
     ;;

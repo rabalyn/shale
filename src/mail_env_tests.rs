@@ -477,3 +477,188 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
     }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+// ------------------------------------------------------------ phase 3: sending (MAIL-160)
+
+const SUBMISSIONS_PORT: u16 = 10465;
+const SUBMISSION_PORT: u16 = 10587;
+const MAILPIT: &str = "http://127.0.0.1:18025/api/v1";
+
+/// SMTP to Dovecot's submission service, trusting the test CA (test code only).
+struct EnvSmtp {
+    port: u16,
+    security: MailSecurity,
+    auth: Arc<dyn AuthFactory>,
+}
+
+impl crate::mail_send::SmtpConnector for EnvSmtp {
+    fn connect(&self) -> Result<crate::smtp_client::Smtp, crate::smtp_client::SmtpError> {
+        let settings = ConnectSettings { host: "localhost".into(), port: self.port, security: self.security, limits: Limits { io_timeout: Duration::from_secs(60), ..Limits::default() } };
+        crate::mail_send::connect_with_retry(self.auth.as_ref(), |a| crate::smtp_client::Smtp::connect_test(&settings, ca_cert(), a))
+    }
+}
+
+fn curl(args: &[&str]) -> Vec<u8> {
+    let out = Command::new("curl").arg("-s").args(args).output().expect("curl");
+    assert!(out.status.success(), "curl {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    out.stdout
+}
+
+/// What Mailpit (the sink behind the submission service) holds: its JSON listing.
+fn sink_messages() -> Vec<serde_json::Value> {
+    let v: serde_json::Value = serde_json::from_slice(&curl(&[&format!("{MAILPIT}/messages?limit=200")])).expect("Mailpit answers JSON");
+    v["messages"].as_array().cloned().unwrap_or_default()
+}
+
+fn clear_sink() {
+    curl(&["-X", "DELETE", &format!("{MAILPIT}/messages")]);
+}
+
+/// Take the test mails out of a user's Sent folder again (the seeded mailbox must stay as it was).
+fn clean_sent(user: &str, tag: &str) {
+    let _ = doveadm(&["expunge", "-u", user, "mailbox", "Sent", "header", "Subject", tag], None);
+}
+
+/// One whole send against the real servers: compose, outbox, SMTP through Dovecot's submission service into the
+/// sink, the Sent copy by APPEND, and what arrived checked byte for byte.
+fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &str) {
+    let (dir, store) = temp_store(&format!("send-{tag}"));
+    let now = crate::cal_time::now();
+    let subject = format!("Shale send test ✓ Grüße {tag}");
+    clean_sent(&acct.user, "Shale send test");
+    clear_sink();
+
+    // the folders (Sent is the special-use one) and their numbering are known before sending
+    discover_folders(&store, &imap, &acct.id, &acct.name).expect("folders");
+    let sum = sync(&store, &acct.id, &imap);
+    assert!(sum.errors.is_empty(), "{:?}", sum.errors);
+    let sent_before = dovecot_view(&acct.user, "Sent");
+
+    // a mail with a non-ASCII subject and body, a hidden recipient and an attachment of binary bytes
+    let bin: Vec<u8> = (0..20_000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+    let mut d = crate::mail_send::new_draft(acct);
+    d.to = "Bob Müller <bob@example.org>".into();
+    d.cc = "carol@example.org".into();
+    d.bcc = "hidden@example.org".into();
+    d.subject = subject.clone();
+    d.body = "Hallo Bob,\n\nanbei der Plan. Schöne Grüße aus Köln — ÄÖÜ ß € 日本語\n".into();
+    d.attachments.push(crate::compose::Att { name: "Plan Größe.pdf".into(), mime: "application/pdf".into(), data: Arc::new(bin.clone()), ..Default::default() });
+    let ob = crate::outbox::Outbox::new(&dir);
+    let item = crate::mail_send::queue_draft(&ob, acct, &d, 0, now, &crate::mail_store::today_string()).expect("queued");
+    let eml = ob.read_eml(&acct.id, &item.id).unwrap();
+
+    // sent exactly once
+    let r = crate::mail_send::send_due(&ob, &store, acct, &smtp, now);
+    assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
+    let again = crate::mail_send::send_due(&ob, &store, acct, &smtp, now + 5);
+    assert_eq!(again, crate::mail_send::SendReport::default());
+
+    // what arrived in the sink (Mailpit gets it from Dovecot's submission service)
+    let mut got = vec![];
+    for _ in 0..40 {
+        got = sink_messages();
+        if !got.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    assert_eq!(got.len(), 1, "exactly one mail arrived: {got:?}");
+    let m = &got[0];
+    let addrs = |k: &str| -> Vec<String> { m[k].as_array().map(|a| a.iter().filter_map(|x| x["Address"].as_str().map(String::from)).collect()).unwrap_or_default() };
+    assert_eq!((addrs("To"), addrs("Cc"), addrs("Bcc")), (vec!["bob@example.org".to_string()], vec!["carol@example.org".to_string()], vec!["hidden@example.org".to_string()]), "the envelope: Bcc got the mail");
+    assert_eq!(m["Subject"].as_str(), Some(subject.as_str()), "the non-ASCII subject arrived intact");
+    let raw = curl(&[&format!("{MAILPIT}/message/{}/raw", m["ID"].as_str().expect("an id"))]);
+    let our_head_end = eml.windows(4).position(|w| w == b"\r\n\r\n").expect("headers end") + 2;
+    let our_head = &eml[..our_head_end];
+    assert!(!String::from_utf8_lossy(our_head).to_lowercase().contains("bcc"), "Shale's own headers have no Bcc");
+    // the headers Shale built arrive byte for byte. The sink (Mailpit) and Dovecot add their own lines in front
+    // (Return-Path, Received, and Mailpit shows the envelope's Bcc recipients as a Bcc line): none of that is Shale's.
+    let at = raw.windows(our_head.len()).position(|w| w == our_head).expect("Shale's header block arrived unchanged");
+    let before = String::from_utf8_lossy(&raw[..at]).to_lowercase();
+    let after = String::from_utf8_lossy(&raw[at..]).to_lowercase();
+    assert!(!after.contains("bcc:") && !after.contains("hidden@example.org"), "no Bcc in the mail itself:\n{after}");
+    assert!(
+        before.contains("received:") && before.lines().all(|l| l.starts_with(' ') || l.starts_with('\t') || l.is_empty() || ["return-path:", "received:", "bcc:", "by ", "for "].iter().any(|p| l.starts_with(p))),
+        "only the servers' own lines come before: {before}"
+    );
+    let headers = String::from_utf8_lossy(our_head).to_lowercase();
+    assert!(headers.contains(&format!("message-id: {}", item.message_id.to_lowercase())), "our Message-ID survived: {headers}");
+    assert!(!headers.contains("user-agent") && !headers.contains("disposition-notification"), "{headers}");
+    let parsed = crate::mail::parse(&raw);
+    assert_eq!(parsed.subject, subject);
+    assert!(parsed.from.contains(&acct.from_address) && parsed.to.contains("Müller") && parsed.to.contains("bob@example.org") && parsed.cc.contains("carol@example.org"), "{parsed:?}");
+    assert!(parsed.text.contains("Schöne Grüße aus Köln — ÄÖÜ ß € 日本語"), "{}", parsed.text);
+    assert_eq!(parsed.attachments.len(), 1);
+    assert_eq!((parsed.attachments[0].name.as_str(), parsed.attachments[0].mime.as_str()), ("Plan Größe.pdf", "application/pdf"));
+    assert_eq!(parsed.attachments[0].data, bin, "the attachment is intact");
+    // the part of the message Shale built is what arrived (the server only adds a Received header)
+    let body_of = |b: &[u8]| b[b.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4..].to_vec();
+    assert_eq!(body_of(&raw), body_of(&eml), "the body is byte for byte what was in the outbox");
+
+    // the Sent copy: appended once, flagged read, the same bytes; the local row has the server's UID
+    let r = mail_ops::run_pending(&store, &imap, &acct.id);
+    assert_eq!((r.done, r.failed.len()), (1, 0), "{r:?}");
+    let sent_now = dovecot_view(&acct.user, "Sent");
+    let ours: Vec<&String> = sent_now.iter().filter(|l| l.contains("Shale send test")).collect();
+    assert_eq!(ours.len(), 1, "exactly one copy in Sent: {sent_now:?}");
+    assert!(ours[0].contains("\\Seen"), "{}", ours[0]);
+    assert_eq!(sent_now.len(), sent_before.len() + 1, "nothing else changed in Sent");
+    assert_eq!(mail_ops::run_pending(&store, &imap, &acct.id), mail_ops::OpsReport::default(), "nothing is appended a second time");
+    let sum = sync(&store, &acct.id, &imap);
+    assert!(sum.errors.is_empty(), "{:?}", sum.errors);
+    let rows = store.reader().unwrap().folders(Some(&acct.id)).unwrap();
+    let mine: Vec<MessageSummary> = messages(&store, &rows, "Sent").into_iter().filter(|m| m.subject == subject).collect();
+    assert_eq!(mine.len(), 1, "one row in the list after a sync: {mine:?}");
+    assert_eq!(store.read_raw(&mine[0]).unwrap(), eml, "the stored copy is the exact sent message");
+    assert!(sink_messages().len() == 1, "and still only one mail was sent");
+
+    clean_sent(&acct.user, "Shale send test");
+    clear_sink();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: MAIL-160
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_password_and_oauth_accounts_send_with_an_attachment_and_dovecot_has_one_sent_copy_each() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    // the password account sends over STARTTLS (587): nothing, AUTH included, goes before the upgrade
+    let pw = MailAccount {
+        id: "mailenv-send-pw".into(),
+        name: "Alice".into(),
+        host: "localhost".into(),
+        port: IMAPS_PORT,
+        user: "alice@shale.test".into(),
+        smtp_host: "localhost".into(),
+        smtp_port: SUBMISSION_PORT,
+        smtp_security: MailSecurity::StartTls,
+        from_name: "Alice Ünïcode".into(),
+        from_address: "alice@shale.test".into(),
+        ..MailAccount::default()
+    };
+    let auth: Arc<dyn AuthFactory> = Arc::new(PasswordAuth { user: pw.user.clone(), password: "shale-test-pw".into() });
+    send_end_to_end(&pw, EnvSmtp { port: SUBMISSION_PORT, security: MailSecurity::StartTls, auth: auth.clone() }, EnvConnector { auth: auth.clone() }, &format!("pw{}", std::process::id()));
+    // a wrong password is an authentication error from the real submission service
+    let bad = EnvSmtp { port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, auth: Arc::new(PasswordAuth { user: pw.user.clone(), password: "nope".into() }) };
+    assert!(matches!(crate::mail_send::SmtpConnector::connect(&bad).err(), Some(crate::smtp_client::SmtpError::Auth(_))));
+    // the production certificate check refuses the test CA, as for IMAP
+    let mut a = auth.authenticator().unwrap();
+    let settings = ConnectSettings { host: "localhost".into(), port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, limits: Limits::default() };
+    assert!(matches!(crate::smtp_client::Smtp::connect(&settings, a.as_mut()).err(), Some(crate::smtp_client::SmtpError::Tls(_))));
+
+    // the OAuth2 account sends over implicit TLS (465) with the token of its sign-in
+    let mut oa = oauth_account();
+    oa.id = "mailenv-send-oauth".into();
+    oa.smtp_host = "localhost".into();
+    oa.smtp_port = SUBMISSIONS_PORT;
+    oa.from_address = "oauth@shale.test".into();
+    secrets::clear_mail_secret(&oa.id, MailSecret::RefreshToken);
+    oauth::forget_source(&oa.id);
+    sign_in_headless(&oa).expect("the sign-in");
+    let source = oauth::shared_source(&oa.id, OAuthConfig::for_account(&oa, None).unwrap());
+    let factory: Arc<dyn AuthFactory> = Arc::new(OAuthFactory { user: oa.user.clone(), host: "localhost".into(), port: SUBMISSIONS_PORT, source: source.clone() });
+    let imap_factory: Arc<dyn AuthFactory> = Arc::new(OAuthFactory { user: oa.user.clone(), host: "localhost".into(), port: IMAPS_PORT, source });
+    send_end_to_end(&oa, EnvSmtp { port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, auth: factory }, EnvConnector { auth: imap_factory }, &format!("oauth{}", std::process::id()));
+    secrets::clear_mail_secret(&oa.id, MailSecret::RefreshToken);
+    oauth::forget_source(&oa.id);
+}

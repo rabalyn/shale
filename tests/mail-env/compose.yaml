@@ -1,4 +1,5 @@
-# Shale's local mail test environment (MAIL-090): Dovecot with TLS and seeded mailboxes, and a
+# Shale's local mail test environment (MAIL-090, MAIL-160): Dovecot with TLS and seeded mailboxes,
+# its "submission" service (SMTP for sending, MAIL-160) that relays into a sink (Mailpit), and a
 # pretend OAuth2 provider. Everything listens on 127.0.0.1 only.
 #
 #   ./mail-env.sh up        start (makes the certificates and seeds the mailboxes the first time)
@@ -34,6 +35,20 @@ services:
       - ./dovecot/users:/etc/dovecot/users:ro,Z
       - ./certs:/certs:ro,Z
 
+  # the sink behind Dovecot's submission service (phase 3, sending): it accepts every mail on
+  # localhost:1025 (inside the shared network) and shows what arrived through its API, published
+  # below as http://127.0.0.1:18025. Pinned image.
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.27.9
+    network_mode: "service:oauth"
+    depends_on:
+      oauth:
+        condition: service_started
+    environment:
+      MP_SMTP_BIND_ADDR: "127.0.0.1:1025"
+      MP_UI_BIND_ADDR: "0.0.0.0:8025"
+      MP_MAX_MESSAGES: "500"
+
   # pretend OAuth2/OIDC provider (navikt/mock-oauth2-server): a real browser sign-in page at
   # http://localhost:18080/default/authorize
   oauth:
@@ -42,6 +57,9 @@ services:
       - "127.0.0.1:18080:18080" # the provider
       - "127.0.0.1:10993:31993" # Dovecot: IMAP over TLS
       - "127.0.0.1:10143:31143" # Dovecot: IMAP with STARTTLS
+      - "127.0.0.1:10465:31465" # Dovecot submission: SMTP over TLS (sending)
+      - "127.0.0.1:10587:31587" # Dovecot submission: SMTP with STARTTLS (sending)
+      - "127.0.0.1:18025:8025" # Mailpit: its API shows what the sending tests delivered
     environment:
       SERVER_PORT: "18080"
       JSON_CONFIG_PATH: /config/oauth.json

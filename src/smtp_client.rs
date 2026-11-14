@@ -86,7 +86,9 @@ impl Reply {
 /// The gate every command passes before it is sent (MAIL-122).
 pub fn check_command(cmd: &str) -> Result<()> {
     let refuse = |why: &str| Err(SmtpError::Protocol(format!("refused to send a command: {why}")));
-    if cmd.contains(['\r', '\n', '\0']) || cmd.len() > 600 {
+    // an OAuth2 token makes the AUTH line long (several KB for some providers); everything else is short
+    let max = if cmd.starts_with("AUTH ") { 16 << 10 } else { 600 };
+    if cmd.contains(['\r', '\n', '\0']) || cmd.len() > max {
         return refuse("a line break, NUL or length");
     }
     let addr_ok = |a: &str| !a.is_empty() && a.len() <= 320 && a.is_ascii() && !a.contains(|c: char| c.is_control() || c.is_whitespace() || matches!(c, '<' | '>' | '"' | ',' | ';' | '\\'));
@@ -425,5 +427,8 @@ mod tests {
             assert!(check_command(bad).is_err(), "{bad:?}");
         }
         assert!(check_command(&format!("RCPT TO:<{}@x.de>", "a".repeat(400))).is_err());
+        // a long OAuth2 token fits in AUTH, and nowhere else
+        assert!(check_command(&format!("AUTH XOAUTH2 {}", "A".repeat(4000))).is_ok());
+        assert!(check_command(&format!("AUTH XOAUTH2 {}", "A".repeat(20_000))).is_err());
     }
 }

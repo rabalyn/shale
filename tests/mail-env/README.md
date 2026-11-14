@@ -1,12 +1,13 @@
 # Mail test environment
 
-A local Dovecot (IMAP over TLS, seeded mailboxes) and a pretend OAuth2 provider, to try Shale's
-mail view and OAuth2 sign-in end to end without a real account (MAIL-090…092). Everything listens
+A local Dovecot (IMAP over TLS, seeded mailboxes), its `submission` service (SMTP, for sending) that
+relays into a mail sink (Mailpit), and a pretend OAuth2 provider, to try Shale's mail view, OAuth2
+sign-in and sending end to end without a real account (MAIL-090…092, MAIL-160). Everything listens
 on `127.0.0.1` only. The credentials below are test values; the certificate authority is made
 here and is for this environment only.
 
 Needs `podman-compose` (or `docker compose`), `openssl` and `curl`. The images are pinned:
-`dovecot/dovecot:2.4.1`, `navikt/mock-oauth2-server:2.3.0`, `alpine:3.24.2` (for seeding).
+`dovecot/dovecot:2.4.1`, `navikt/mock-oauth2-server:2.3.0`, `axllent/mailpit:v1.27.9`, `alpine:3.24.2` (for seeding).
 
 ## Start and stop
 
@@ -36,6 +37,25 @@ stay unseen: Shale only uses `EXAMINE` and `BODY.PEEK`), a flagged one, a mail f
 from 1200 days ago (outside the 3-year window, not fetched), a 6 MB mail with an attachment, an
 HTML-only mail, a mail with ISO-8859-1 (non-UTF-8) headers and body, a nested folder with an old and a
 new mail. Trash and Junk are not synced until you open them.
+
+## Sending (SMTP)
+
+Dovecot's `submission` service takes mail from the same two users, signs them in with the same
+password or OAuth2 token (`PLAIN`, `XOAUTH2`, `OAUTHBEARER`; only after TLS) and relays what they send to
+**Mailpit**, a sink that accepts everything and shows it through an API. Nothing leaves this computer.
+
+| | Port on 127.0.0.1 |
+|---|---|
+| SMTP over TLS (submissions) | **10465** |
+| SMTP with STARTTLS (submission) | **10587** |
+| Mailpit's API and web page | **18025** (http://127.0.0.1:18025 shows every mail the tests sent) |
+
+In Shale's account settings, Sending (SMTP): server `localhost`, TLS and port `10465` (or STARTTLS and `10587`),
+your name and an address; the sign-in is the one of the account. "Test connection" signs in to
+SMTP as well. Send a mail to anyone: it arrives in Mailpit (a Bcc recipient is shown there as `Bcc`, because
+the sink sees the envelope), and a copy lands in the user's Sent folder in Dovecot (Shale appends it).
+Delete the mails in Mailpit with the page's button or `curl -X DELETE http://127.0.0.1:18025/api/v1/messages`.
+The Sent copies of a manual try stay in the seeded Sent folder: `doveadm expunge` can remove them, or `reset`.
 
 ## Trust the certificate
 
@@ -78,7 +98,14 @@ tests/mail-env/mail-env.sh up
 cargo test -- --ignored mail_env
 ```
 
-Three tests in `src/mail_env_tests.rs` (ignored by default, so `cargo test` never needs containers).
+Four tests in `src/mail_env_tests.rs` (ignored by default, so `cargo test` never needs containers).
+The fourth (phase 3, MAIL-160) sends from both accounts through the submission service (the password account
+over STARTTLS on 10587, the OAuth2 account over TLS on 10465): a mail with a non-ASCII subject and text, a Bcc and
+a binary attachment. It reads what arrived from Mailpit's API (the envelope with the Bcc recipient, the
+decoded subject, Shale's header block byte for byte with no Bcc in it, the body byte for byte, the attachment intact),
+checks that Dovecot's Sent folder got exactly one copy (read, the same bytes, appended once and not again), that a
+second run sends nothing, that a wrong password is an authentication error and that the production
+certificate check refuses the test CA; it removes its Sent copies and empties Mailpit afterwards.
 The third (phase 2, MAIL-113) makes two scratch mailboxes (`Scratch`, `Scratch2`) and puts test mail
 into them with `doveadm save`, then marks, flags, moves, deletes (to Trash) and deletes forever through
 Shale's own code, checks Dovecot after each step and that the seeded mailboxes are the same at the end;
@@ -98,6 +125,8 @@ renews its access token, is refused for another user's name, and after `revoke` 
   provider's network so that it reaches it at `http://localhost:18080`, the very address the browser
   uses: the provider writes that address into its tokens as the issuer, and Dovecot checks it. All
   ports are therefore published on the `oauth` service.
+- `mailpit` shares the provider's network too (as `localhost:1025` for Dovecot's relay; its API is
+  published as 18025). `mail-env.sh revoke` restarts it together with the provider.
 - `dovecot/dovecot.conf` (Dovecot 2.4): TLS required, `PLAIN` for the password user from
   `dovecot/users`, `XOAUTH2` and `OAUTHBEARER` through an `oauth2` passdb that asks the provider's
   userinfo endpoint with the token on every sign-in.
