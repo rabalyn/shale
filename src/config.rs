@@ -68,6 +68,14 @@ impl MailSecurity {
             MailSecurity::StartTls => 143,
         }
     }
+
+    /// The usual port of the mail submission service (SMTP) for this mode (MAIL-120).
+    pub fn smtp_default_port(self) -> u16 {
+        match self {
+            MailSecurity::ImplicitTls => 465,
+            MailSecurity::StartTls => 587,
+        }
+    }
 }
 
 /// One IMAP account. The password is not here: it is in the keyring (`secrets::mail_secret`).

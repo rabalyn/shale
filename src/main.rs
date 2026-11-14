@@ -13,7 +13,6 @@ mod cal_ics;
 mod cal_store;
 mod cal_time;
 mod cal_ui;
-#[allow(dead_code)] // used by the compose window in a later commit of phase 3
 mod compose;
 mod config;
 mod drawing;
@@ -34,13 +33,13 @@ mod jobs;
 mod layout;
 mod lists;
 mod mail;
+mod mail_compose;
 mod mail_db;
 mod mail_demo;
 mod mail_dialog;
 #[cfg(test)]
 mod mail_env_tests;
 mod mail_ops;
-#[allow(dead_code)] // used by the mail view in a later commit of phase 3
 mod mail_send;
 mod mail_store;
 mod mail_ui;
@@ -55,7 +54,6 @@ mod oauth;
 #[cfg(test)]
 mod oauth_fake_tests;
 mod opener;
-#[allow(dead_code)] // used by the compose window in a later commit of phase 3
 mod outbox;
 mod panels;
 mod pdfexport;
@@ -65,7 +63,6 @@ mod people;
 mod reader;
 mod recovery;
 mod secrets;
-#[allow(dead_code)] // used by the sending job in a later commit of phase 3
 mod smtp_client;
 #[cfg(test)]
 mod smtp_fake_tests;

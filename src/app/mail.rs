@@ -16,6 +16,16 @@ impl ShaleApp {
         if self.mail.tick(&self.cfg, wanted) {
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
         }
+        // what the mail view needs to know of the vault: files to attach, people to complete (MAIL-127, MAIL-128)
+        match &self.vault {
+            Some(v) if self.mail.vault.as_ref().is_none_or(|i| i.generation != v.generation || i.root != v.root) => {
+                let files = v.files.iter().take(50_000).map(|f| (crate::vault::rel_to_string(&f.rel), f.kind == crate::vault::FileKind::Note)).collect();
+                let people = crate::people::addresses(v, &self.vdata.settings.people_dir);
+                self.mail.vault = Some(crate::mail_compose::VaultInfo { root: v.root.clone(), generation: v.generation, files, people });
+            }
+            None => self.mail.vault = None,
+            _ => {}
+        }
         for n in std::mem::take(&mut self.mail.notices) {
             self.toast(n);
         }
@@ -25,7 +35,9 @@ impl ShaleApp {
         for a in self.cfg.mail_accounts.clone() {
             self.mail.probe_sign_in(&a);
         }
-        self.modal = Some(Modal::MailAccounts(Box::new(MailDialog::new(self.cfg.mail_accounts.clone(), self.cfg.mail_sync_minutes, secrets::keyring_available()).with_read_settings(self.cfg.mail_mark_read, self.cfg.mail_mark_read_secs))));
+        self.modal = Some(Modal::MailAccounts(Box::new(
+            MailDialog::new(self.cfg.mail_accounts.clone(), self.cfg.mail_sync_minutes, secrets::keyring_available()).with_read_settings(self.cfg.mail_mark_read, self.cfg.mail_mark_read_secs).with_undo_secs(self.cfg.mail_undo_secs),
+        )));
     }
 
     /// Apply an action of the account settings. Returns true when the dialog should close.
@@ -40,6 +52,9 @@ impl ShaleApp {
                     let mut acct = acct;
                     if let Ok(p) = d.ports.get(i).map(|p| p.trim()).unwrap_or("").parse::<u16>() {
                         acct.port = p;
+                    }
+                    if let Ok(p) = d.smtp_ports.get(i).map(|p| p.trim()).unwrap_or("").parse::<u16>() {
+                        acct.smtp_port = p;
                     }
                     self.mail.test_connection(&acct, typed);
                 }
@@ -77,6 +92,7 @@ impl ShaleApp {
                 self.cfg.mail_sync_minutes = minutes;
                 self.cfg.mail_mark_read = d.mark_read;
                 self.cfg.mail_mark_read_secs = d.read_delay().unwrap_or(2);
+                self.cfg.mail_undo_secs = d.undo_delay().unwrap_or(10);
                 for id in std::mem::take(&mut d.removed) {
                     self.mail.forget_account(&id);
                     self.toast(format!("The account was removed. Its mail already copied stays in {}.", self.mail.root.display()));

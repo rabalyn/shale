@@ -5,9 +5,11 @@
 //! index, so a steady frame costs no query. The reading pane shows plain text only.
 
 use crate::app::muted;
+use crate::compose::Kind;
 use crate::config::Config;
 use crate::imap_sync::{FolderKind, NO_PASSWORD};
 use crate::mail::display_name;
+use crate::mail_compose::{LocalOut, LocalView};
 use crate::mail_db::{MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
 use crate::mail_ui::*;
 use crate::theme;
@@ -26,6 +28,7 @@ fn pending_word(kind: &str) -> &'static str {
     match kind {
         "flags" => "saving…",
         "move" => "moving…",
+        "append" => "saving to Sent…",
         _ => "deleting…",
     }
 }
@@ -71,6 +74,25 @@ impl MailView {
             });
             body.min.y = strip.max.y;
         }
+        // a mail that waits in the outbox can still be taken back (MAIL-134)
+        if let Some((_, _, text)) = crate::mail_compose::queued_text(&self.local_items, crate::cal_time::now()) {
+            let strip = Rect::from_min_size(body.min, Vec2::new(body.width(), 30.0));
+            let mut undo = false;
+            ui.scope_builder(UiBuilder::new().max_rect(strip).layout(Layout::left_to_right(Align::Center)), |ui| {
+                ui.set_clip_rect(strip.intersect(ui.clip_rect()));
+                ui.add_space(10.0);
+                ui.label(RichText::new(text).size(12.5).color(theme::TEXT));
+                let r = ui.small_button("Undo send");
+                rects.push(("mail:undo-send".into(), r.rect));
+                if r.clicked() {
+                    undo = true;
+                }
+            });
+            body.min.y = strip.max.y;
+            if undo {
+                self.undo_newest();
+            }
+        }
         match &self.store {
             StoreState::Failed(e) => {
                 let e = e.clone();
@@ -97,6 +119,10 @@ impl MailView {
                     }
                 });
             }
+            StoreState::Ready(_) if self.compose.is_some() => {
+                let out = self.compose_view(ui, cfg, body, &mut rects);
+                self.apply_compose_out(cfg, out);
+            }
             StoreState::Ready(_) => {
                 self.panes(ui, cfg, body, &mut actions, &mut rects);
                 self.mover_window(ui, cfg, &mut rects);
@@ -111,6 +137,10 @@ impl MailView {
 
     fn handle_keys(&mut self, ui: &mut Ui, cfg: &Config, modal_open: bool, actions: &mut Vec<MailAction>) {
         let ctx = ui.ctx().clone();
+        // while a mail is being written the compose window has the keyboard (MAIL-150)
+        if self.compose.is_some() {
+            return;
+        }
         let search_id = egui::Id::unique("mail-search");
         let in_search = ctx.memory(|m| m.has_focus(search_id));
         if in_search && !modal_open {
@@ -142,6 +172,32 @@ impl MailView {
                 i.consume_key(Modifiers::NONE, Key::I),
             )
         });
+        // phase 3 keys: `c` compose, `r` reply, Shift+R reply all, Shift+F forward (`f` stays the flag key)
+        let (compose, reply, reply_all, forward) = ui.input_mut(|i| {
+            let plain = |i: &mut egui::InputState, k: Key| !i.modifiers.any() && i.consume_key(Modifiers::NONE, k);
+            // the Shift keys first: a plain pattern would take them too (egui ignores an extra Shift)
+            let ra = i.consume_key(Modifiers::SHIFT, Key::R);
+            let fw = i.consume_key(Modifiers::SHIFT, Key::F);
+            let c = plain(i, Key::C);
+            let r = plain(i, Key::R);
+            (c, r, ra, fw)
+        });
+        if compose || reply || reply_all || forward {
+            // the letter that came with the key must not be typed into the window that opens
+            ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(_))));
+        }
+        if compose {
+            self.compose_new(cfg);
+        }
+        if reply {
+            self.start_reply(Kind::Reply);
+        }
+        if reply_all {
+            self.start_reply(Kind::ReplyAll);
+        }
+        if forward {
+            self.start_reply(Kind::Forward);
+        }
         // phase 2 keys: no modifier at all, so Ctrl+D and Shift+S stay free (MAIL-110)
         let (read, flag, del, mv) = ui.input_mut(|i| {
             let mut plain = |k: Key| !i.modifiers.any() && i.consume_key(Modifiers::NONE, k);
@@ -234,6 +290,11 @@ impl MailView {
             if r.on_hover_text("Fetch new mail from the server (read-only)").clicked() {
                 self.start_sync_all(cfg);
             }
+        }
+        let r = ui.add_enabled(ready, egui::Button::new("Compose"));
+        rec(rects, "mail:compose", &r);
+        if r.on_hover_text("Write a new mail (c)").clicked() {
+            self.compose_new(cfg);
         }
         let r = ui.button("Accounts…");
         rec(rects, "mail:accounts", &r);
@@ -371,6 +432,7 @@ impl MailView {
 
     fn folder_pane(&mut self, ui: &mut Ui, cfg: &Config, rects: &mut Vec<(String, Rect)>) {
         let mut chosen: Option<i64> = None;
+        let mut chosen_local: Option<LocalView> = None;
         egui::ScrollArea::vertical().id_salt("mail-folders").auto_shrink([false, false]).show(ui, |ui| {
             for a in &cfg.mail_accounts {
                 let title = if a.name.is_empty() { a.host.clone() } else { a.name.clone() };
@@ -386,7 +448,7 @@ impl MailView {
                         let (depth, _) = self.tree_entry(f);
                         ui.horizontal(|ui| {
                             ui.add_space(depth as f32 * 12.0);
-                            let r = ui.selectable_label(self.folder == Some(f.id), text);
+                            let r = ui.selectable_label(self.local_view.is_none() && self.folder == Some(f.id), text);
                             rec(rects, format!("mail:folder:{}", f.id), &r);
                             let kind = crate::imap_sync::kind_of(f);
                             let tip = match kind {
@@ -402,15 +464,43 @@ impl MailView {
                             }
                         });
                     }
+                    // what is being written and what waits to be sent (MAIL-151)
+                    let drafts = self.local_drafts.iter().filter(|d| d.account == a.id).count();
+                    let out = self.outbox_count(&a.id);
+                    let attention = crate::mail_compose::attention(&self.local_items, &a.id);
+                    for (key, label, view, n, warn) in [("drafts", "Drafts", LocalView::Drafts(a.id.clone()), drafts, false), ("outbox", "Outbox", LocalView::Outbox(a.id.clone()), out, attention)] {
+                        let text = if n > 0 { format!("{label}  ({n})") } else { label.to_string() };
+                        let rt = if warn {
+                            RichText::new(text).color(theme::LINK_MISSING).strong()
+                        } else if n > 0 {
+                            RichText::new(text).strong().color(theme::TEXT_STRONG)
+                        } else {
+                            RichText::new(text).color(theme::MUTED)
+                        };
+                        let r = ui.selectable_label(self.local_view.as_ref() == Some(&view), rt);
+                        rec(rects, format!("mail:{key}:{}", a.id), &r);
+                        if r.clicked() {
+                            chosen_local = Some(view);
+                        }
+                    }
                 });
             }
         });
         if let Some(id) = chosen {
             self.select_folder(cfg, id);
         }
+        if let Some(v) = chosen_local {
+            self.select_local(v);
+        }
     }
 
     fn list_pane(&mut self, ui: &mut Ui, cfg: &Config, actions: &mut Vec<MailAction>, rects: &mut Vec<(String, Rect)>) {
+        if self.local_view.is_some() {
+            let mut out = LocalOut::default();
+            self.local_list(ui, crate::cal_time::now(), rects, &mut out);
+            self.apply_local_out(out);
+            return;
+        }
         let title = match (&self.results, self.folder.and_then(|f| self.folder_row(f))) {
             (Some(r), _) => format!("{} result{}{}", r.len(), if r.len() == 1 { "" } else { "s" }, if r.len() >= SEARCH_LIMIT { " (the newest are shown)" } else { "" }),
             (None, Some(f)) => format!("{}  ·  {} message{}", folder_label(f), self.total, if self.total == 1 { "" } else { "s" }),
@@ -604,7 +694,7 @@ impl MailView {
             p.rect_filled(Rect::from_min_size(rect.min, Vec2::new(4.0, rect.height())), 0, theme::ACCENT);
         }
         p.line_segment([Pos2::new(rect.min.x, rect.max.y), Pos2::new(rect.max.x, rect.max.y)], Stroke::new(1.0, theme::BORDER));
-        let leaving = m.pending.as_deref().is_some_and(|k| k != "flags");
+        let leaving = m.pending.as_deref().is_some_and(|k| k != "flags" && k != "append");
         let dim = if m.gone_on_server || leaving { 0.45 } else { 1.0 };
         let unread = !m.is_seen() && m.state != STATE_TOO_LARGE;
         let strong = |c: Color32| c.gamma_multiply(dim);
@@ -666,6 +756,20 @@ impl MailView {
     }
 
     fn reading_pane(&mut self, ui: &mut Ui, cfg: &Config, actions: &mut Vec<MailAction>, rects: &mut Vec<(String, Rect)>) {
+        match &self.local_view {
+            Some(LocalView::Outbox(_)) => {
+                let mut out = LocalOut::default();
+                self.outbox_detail(ui, crate::cal_time::now(), rects, &mut out);
+                self.apply_local_out(out);
+                return;
+            }
+            Some(LocalView::Drafts(_)) => {
+                ui.add_space(30.0);
+                ui.label(muted("Open a draft to go on writing it. Drafts are saved by themselves while you write."));
+                return;
+            }
+            None => {}
+        }
         let Some(open) = self.open.as_ref() else {
             ui.add_space(30.0);
             ui.label(muted("Select a message to read it (Enter opens the one under the cursor)."));
@@ -682,6 +786,7 @@ impl MailView {
         let all_trash = targets.iter().all(|m| self.in_trash(m));
         let mut open_att: Option<usize> = None;
         let mut save_att: Option<usize> = None;
+        let mut answer: Option<Kind> = None;
         egui::ScrollArea::vertical().id_salt("mail-read").auto_shrink([false, false]).show(ui, |ui| {
             ui.label(RichText::new(if msg.subject.trim().is_empty() { "(no subject)" } else { msg.subject.as_str() }).size(19.0).color(theme::TEXT_STRONG));
             ui.add_space(4.0);
@@ -717,6 +822,20 @@ impl MailView {
                 }
                 if ui.button("Close").clicked() {
                     close = true;
+                }
+                // answering needs the message text (MAIL-126)
+                let ready = msg.state == STATE_FULL;
+                for (key, label, kind, tip) in [
+                    ("mail:reply", "Reply", Kind::Reply, "Answer the sender (r)"),
+                    ("mail:reply-all", "Reply all", Kind::ReplyAll, "Answer everyone (Shift+R)"),
+                    ("mail:forward", "Forward", Kind::Forward, "Forward with the attachments (Shift+F)"),
+                ] {
+                    let r = ui.add_enabled(ready, egui::Button::new(label));
+                    rec(rects, key, &r);
+                    let r = if ready { r.on_hover_text(tip) } else { r.on_disabled_hover_text("Load the message first") };
+                    if r.clicked() {
+                        answer = Some(kind);
+                    }
                 }
             });
             ui.horizontal_wrapped(|ui| {
@@ -811,6 +930,9 @@ impl MailView {
                 None => {}
             }
         });
+        if let Some(k) = answer {
+            self.start_reply(k);
+        }
         if load {
             self.load_message(cfg, &msg);
         }

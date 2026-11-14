@@ -130,6 +130,12 @@ pub fn bare_address(entry: &str) -> Option<String> {
     entry.trim().parse::<Mailbox>().ok().map(|m| m.email.to_string().to_lowercase())
 }
 
+/// Name and address of one entry of a list typed or read from a header (the name may be empty).
+pub fn name_and_address(entry: &str) -> Option<(String, String)> {
+    let m = entry.trim().parse::<Mailbox>().ok()?;
+    Some((m.name.unwrap_or_default(), m.email.to_string()))
+}
+
 /// The sender's mailbox from the two fields of the account.
 pub fn sender(name: &str, addr: &str) -> Result<Mailbox, ComposeError> {
     check_header_text("From name", name)?;

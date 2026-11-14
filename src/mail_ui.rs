@@ -12,14 +12,18 @@
 //! view enqueues, starts a job per account, shows the optimistic state and the waiting marker, and
 //! tells the person when the server refused something.
 
+use crate::compose::{self, Kind};
 use crate::config::{Config, MailAccount};
 use crate::imap_client::decode_mutf7;
 use crate::imap_client::MailFlag;
 use crate::imap_sync::{self, ConnectorFactory, FolderKind, LazyConnector, Progress, SyncOptions, SyncSummary, NO_PASSWORD};
 use crate::mail::Mail;
-use crate::mail_db::{FolderRow, MessageSummary, STATE_HEADER, STATE_TOO_LARGE};
+use crate::mail_compose::{Ask, Compose, ComposeOut, Field, LocalOut, LocalView, VaultInfo};
+use crate::mail_db::{FolderRow, MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
 use crate::mail_ops::{self, Action, Confirmed, OpsReport};
+use crate::mail_send::{self, SendReport, SmtpConnector};
 use crate::mail_store::{MailStore, Reader};
+use crate::outbox::{DraftInfo, Item, Outbox, Recovery, State};
 use eframe::egui;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -190,7 +194,8 @@ enum Event {
     },
     Tested {
         account: String,
-        result: Result<usize, String>,
+        /// The folders found, and how signing in to SMTP went (None: the account has no SMTP server set).
+        result: Result<(usize, Option<Result<(), String>>), String>,
     },
     Secret {
         account: String,
@@ -214,6 +219,40 @@ enum Event {
         account: String,
         result: Result<OpsReport, String>,
     },
+    /// The start-up check of drafts and outbox is done (MAIL-130, MAIL-133).
+    Recovered(Result<Recovery, String>),
+    /// A run of `mail_send::send_due` ended.
+    Sent {
+        account: String,
+        result: Result<SendReport, String>,
+    },
+    /// The mail to answer or forward has been read.
+    ReplyMail {
+        kind: Kind,
+        msg: Box<MessageSummary>,
+        result: Result<Box<Mail>, String>,
+    },
+}
+
+/// Makes the SMTP connector of an account (tests plug in the pretend server).
+pub type SmtpFactory = Arc<dyn Fn(&MailAccount, Option<String>) -> Result<Arc<dyn SmtpConnector>, String> + Send + Sync>;
+
+pub fn real_smtp_factory() -> SmtpFactory {
+    Arc::new(mail_send::connector_for_account)
+}
+
+/// Builds its connector when the first connection is made (inside the job: the keyring may be slow).
+struct LazySmtp {
+    factory: SmtpFactory,
+    account: MailAccount,
+    session: Option<String>,
+}
+
+impl SmtpConnector for LazySmtp {
+    fn connect(&self) -> Result<crate::smtp_client::Smtp, crate::smtp_client::SmtpError> {
+        let c = (self.factory)(&self.account, self.session.clone()).map_err(crate::smtp_client::SmtpError::Auth)?;
+        c.connect()
+    }
 }
 
 pub struct MailView {
@@ -288,6 +327,24 @@ pub struct MailView {
     pub forever: Option<ForeverAsk>,
     /// Actions the server refused or that could not be done, until the person dismisses them.
     pub problems: Vec<String>,
+    // phase 3: writing and sending (ADR-0010)
+    pub smtp_factory: SmtpFactory,
+    pub compose: Option<Compose>,
+    pub outbox: Option<Arc<Outbox>>,
+    /// The start-up check is done: nothing is sent before.
+    recovered: bool,
+    pub local_drafts: Vec<DraftInfo>,
+    pub local_items: Vec<Item>,
+    local_dirty: bool,
+    last_local: Option<Instant>,
+    pub local_view: Option<LocalView>,
+    pub outbox_sel: Option<(String, String)>,
+    send_running: HashSet<String>,
+    /// Account ids and their names, for the lists (set every frame by the app).
+    pub account_names: HashMap<String, String>,
+    pub vault: Option<VaultInfo>,
+    /// Drafts and outbox entries were announced once at start.
+    announced_local: bool,
 }
 
 /// Opening the store and the jobs report errors as text; a panic in a job is one too.
@@ -351,6 +408,20 @@ impl MailView {
             mover: None,
             forever: None,
             problems: vec![],
+            smtp_factory: real_smtp_factory(),
+            compose: None,
+            outbox: None,
+            recovered: false,
+            local_drafts: vec![],
+            local_items: vec![],
+            local_dirty: false,
+            last_local: None,
+            local_view: None,
+            outbox_sel: None,
+            send_running: HashSet::new(),
+            account_names: HashMap::new(),
+            vault: None,
+            announced_local: false,
         }
     }
 
@@ -407,6 +478,7 @@ impl MailView {
         }
         self.poll_syncs();
         self.tick_ops(cfg);
+        self.tick_local(cfg);
         // the automatic sync (MAIL-058)
         if let (Some(_), true, minutes) = (self.ready_store(), !cfg.mail_accounts.is_empty(), cfg.mail_sync_minutes) {
             if minutes > 0 && self.last_auto.is_none_or(|t| t.elapsed() >= Duration::from_secs(u64::from(minutes) * 60)) {
@@ -444,6 +516,9 @@ impl MailView {
             || self.read_timer.is_some()
             || !self.ops_running.is_empty()
             || self.pending_total > 0
+            || self.compose.is_some()
+            || !self.send_running.is_empty()
+            || self.local_items.iter().any(|i| matches!(i.state, State::Queued | State::Sending))
     }
 
     fn handle(&mut self, ev: Event, cfg: &Config) {
@@ -456,6 +531,7 @@ impl MailView {
                 }
                 self.reader = s.reader().ok();
                 self.store = StoreState::Ready(s);
+                self.start_recovery();
                 self.refresh();
                 if self.folder.is_none() {
                     self.select_first_folder(cfg);
@@ -590,11 +666,56 @@ impl MailView {
                 }
                 self.dirty = true;
             }
+            Event::Recovered(r) => {
+                self.recovered = true;
+                match r {
+                    Ok(rec) => {
+                        if !rec.unsure.is_empty() {
+                            self.notices.push(format!("{} mail{} may have been sent when Shale was closed: look in the Outbox before sending again.", rec.unsure.len(), if rec.unsure.len() == 1 { "" } else { "s" }));
+                        }
+                    }
+                    Err(e) => self.problems.push(format!("The check of drafts and outbox failed: {e}")),
+                }
+                self.local_dirty = true;
+                self.refresh_local();
+                if !std::mem::replace(&mut self.announced_local, true) && !self.local_drafts.is_empty() {
+                    let n = self.local_drafts.len();
+                    self.notices.push(format!("{n} unsent draft{} found: open Drafts to continue writing.", if n == 1 { "" } else { "s" }));
+                }
+            }
+            Event::Sent { account, result } => {
+                self.send_running.remove(&account);
+                self.local_dirty = true;
+                match result {
+                    Ok(r) => {
+                        if !r.sent.is_empty() {
+                            self.notices.push(format!("{} mail{} sent.", r.sent.len(), if r.sent.len() == 1 { "" } else { "s" }));
+                        }
+                        for (_, e) in &r.failed {
+                            self.problems.push(format!("A mail was not sent: {e} (see the Outbox)"));
+                        }
+                        if !r.unsure.is_empty() {
+                            self.problems.push("A mail may have been sent: the server did not answer. Look in your Sent folder, then use the Outbox to send it again or discard it.".to_string());
+                        }
+                        self.notices.extend(r.notes);
+                        // the copy for the Sent folder goes to the server like the other waiting actions
+                        self.mark_dirty();
+                        self.start_ops(cfg, &account);
+                    }
+                    Err(e) => self.problems.push(format!("Sending failed inside Shale: {e}")),
+                }
+            }
+            Event::ReplyMail { kind, msg, result } => match result {
+                Ok(mail) => self.open_answer(cfg, kind, &msg, &mail),
+                Err(e) => self.problems.push(format!("The mail could not be read for the answer: {e}")),
+            },
             Event::Tested { account, result } => {
                 self.tests.insert(
                     account,
                     match result {
-                        Ok(n) => TestState::Ok(format!("Connected. The account has {n} folder{}.", if n == 1 { "" } else { "s" })),
+                        Ok((n, None)) => TestState::Ok(format!("Connected. The account has {n} folder{}.", if n == 1 { "" } else { "s" })),
+                        Ok((n, Some(Ok(())))) => TestState::Ok(format!("Connected. The account has {n} folder{}. Sending works: signed in to the SMTP server.", if n == 1 { "" } else { "s" })),
+                        Ok((n, Some(Err(e)))) => TestState::Failed(format!("Reading works ({n} folder{}), but the SMTP server (sending) said: {e}", if n == 1 { "" } else { "s" })),
                         Err(e) => TestState::Failed(e),
                     },
                 );
@@ -841,6 +962,7 @@ impl MailView {
     /// Show the folder `id` (MAIL-056: a folder that is not synced is listed on demand).
     pub fn select_folder(&mut self, cfg: &Config, id: i64) {
         self.clear_search();
+        self.local_view = None;
         self.folder = Some(id);
         self.cursor = None;
         self.marked.clear();
@@ -1049,7 +1171,16 @@ impl MailView {
         let id = account.id.clone();
         let display = if account.name.is_empty() { account.host.clone() } else { account.name.clone() };
         let id2 = id.clone();
-        self.spawn(move || imap_sync::discover_folders(&store, &connector, &id, &display).map(|f| f.len()), move |r| Event::Tested { account: id2, result: flatten(r) });
+        let smtp = (!account.smtp_host.trim().is_empty()).then(|| LazySmtp { factory: self.smtp_factory.clone(), account: account.clone(), session: self.session_pw.get(&account.id).cloned() });
+        self.spawn(
+            move || -> Result<(usize, Option<Result<(), String>>), String> {
+                let n = imap_sync::discover_folders(&store, &connector, &id, &display).map(|f| f.len())?;
+                // sending: connect and sign in, never send (MAIL-121)
+                let s = smtp.map(|c| mail_send::test_connection(&c).map(|_| ()));
+                Ok((n, s))
+            },
+            move |r| Event::Tested { account: id2, result: flatten(r) },
+        );
     }
 
     /// "Sign in in the browser": the whole OAuth2 flow as a job (MAIL-086). `secret` is the
@@ -1375,6 +1506,458 @@ impl MailView {
         let n = self.pending_total;
         Some(format!("{n} change{} waiting for the server", if n == 1 { " is" } else { "s are" }))
     }
+
+    // ------------------------------------------------------------ phase 3: writing and sending (ADR-0010)
+
+    /// The check of drafts and outbox at start-up: a mail found in `Sending` becomes `Unsure`, a cut-off undo or
+    /// queuing is finished. Nothing is sent before it is done.
+    fn start_recovery(&mut self) {
+        let ob = Arc::new(Outbox::new(&self.root));
+        self.outbox = Some(ob.clone());
+        self.recovered = false;
+        self.spawn(move || ob.recover(crate::cal_time::now(), &crate::mail_store::today_string()), |r| Event::Recovered(flatten(r)));
+    }
+
+    /// Read the lists of drafts and outbox entries from disk (small files; done when something changed).
+    pub fn refresh_local(&mut self) {
+        self.local_dirty = false;
+        self.last_local = Some(Instant::now());
+        if let Some(ob) = &self.outbox {
+            self.local_drafts = ob.list_drafts(None);
+            self.local_items = ob.list(None);
+        }
+        if let Some((a, i)) = self.outbox_sel.clone() {
+            if !self.local_items.iter().any(|x| x.account == a && x.id == i) {
+                self.outbox_sel = None;
+            }
+        }
+    }
+
+    /// Every frame: the lists, the autosave of the draft, and sending what is due.
+    fn tick_local(&mut self, cfg: &Config) {
+        for a in &cfg.mail_accounts {
+            if !self.account_names.contains_key(&a.id) {
+                self.account_names.insert(a.id.clone(), if a.name.is_empty() { a.host.clone() } else { a.name.clone() });
+            }
+        }
+        if self.outbox.is_none() {
+            return;
+        }
+        let busy_lists = self.local_items.iter().any(|i| matches!(i.state, State::Queued | State::Sending));
+        if self.local_dirty || (busy_lists && self.last_local.is_none_or(|t| t.elapsed() >= Duration::from_millis(500))) {
+            self.refresh_local();
+        }
+        // the draft is saved after a pause in typing (MAIL-130)
+        if let Some(c) = &self.compose {
+            if c.unsaved() && c.ask.is_none() && c.last_edit.is_some_and(|t| t.elapsed() >= crate::mail_compose::AUTOSAVE_AFTER) {
+                self.compose_save();
+            }
+        }
+        if !self.recovered {
+            return;
+        }
+        let now = crate::cal_time::now();
+        for a in &cfg.mail_accounts {
+            let due = self.local_items.iter().any(|i| i.account == a.id && ((i.state == State::Queued && i.send_after <= now) || (i.state == State::Sent && !i.copy_done)));
+            if due {
+                self.start_send(a);
+            }
+        }
+    }
+
+    /// Send the due mails of an account as a job (one at a time per account).
+    fn start_send(&mut self, account: &MailAccount) {
+        if self.send_running.contains(&account.id) {
+            return;
+        }
+        let (Some(store), Some(ob)) = (self.ready_store(), self.outbox.clone()) else { return };
+        self.send_running.insert(account.id.clone());
+        let connector = LazySmtp { factory: self.smtp_factory.clone(), account: account.clone(), session: self.session_pw.get(&account.id).cloned() };
+        let acct = account.clone();
+        let id = account.id.clone();
+        self.spawn(move || mail_send::send_due(&ob, &store, &acct, &connector, crate::cal_time::now()), move |r| Event::Sent { account: id, result: r });
+    }
+
+    /// The addresses to complete from: the people notes of the vault, then the addresses in the mail index (newest first).
+    fn collect_contacts(&self) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = vec![];
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut add = |n: &str, a: &str| {
+            let key = a.trim().to_lowercase();
+            if key.contains('@') && seen.insert(key.clone()) && out.len() < 3000 {
+                out.push((n.trim().to_string(), a.trim().to_string()));
+            }
+        };
+        if let Some(v) = &self.vault {
+            for (n, a) in &v.people {
+                add(n, a);
+            }
+        }
+        if let Some(r) = &self.reader {
+            if let Ok(mut st) = r.conn().prepare("SELECT from_addr, to_addr, cc_addr FROM messages ORDER BY date DESC LIMIT 3000") {
+                if let Ok(rows) = st.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))) {
+                    for (f, t, c) in rows.flatten() {
+                        for list in [f, t, c] {
+                            for part in compose::split_list(&list) {
+                                if let Some((n, a)) = compose::name_and_address(&part) {
+                                    add(&n, &a);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn open_compose(&mut self, mut c: Compose, focus: Field) -> bool {
+        if self.compose.is_some() {
+            self.notices.push("Finish or close the mail you are writing first.".into());
+            return false;
+        }
+        c.contacts = self.collect_contacts();
+        c.focus = Some(focus);
+        self.compose = Some(c);
+        true
+    }
+
+    fn account_for_new(&self, cfg: &Config) -> Option<MailAccount> {
+        let from_folder = self.folder.and_then(|f| self.folder_row(f)).map(|f| f.account.clone());
+        from_folder.and_then(|id| cfg.mail_accounts.iter().find(|a| a.id == id)).or(cfg.mail_accounts.first()).cloned()
+    }
+
+    /// `c`: a new mail from the account of the open folder (MAIL-150).
+    pub fn compose_new(&mut self, cfg: &Config) {
+        let Some(a) = self.account_for_new(cfg) else {
+            self.notices.push("Add a mail account first.".into());
+            return;
+        };
+        self.open_compose(Compose::new(mail_send::new_draft(&a)), Field::To);
+    }
+
+    /// `r`, `Shift+R`, `Shift+F`: answer or forward the open message, or the one under the cursor.
+    pub fn start_reply(&mut self, kind: Kind) {
+        let msg = self.open.as_ref().map(|o| o.msg.clone()).or_else(|| self.cursor_message());
+        let (Some(msg), Some(store)) = (msg, self.ready_store()) else { return };
+        if self.compose.is_some() {
+            self.notices.push("Finish or close the mail you are writing first.".into());
+            return;
+        }
+        if msg.state != STATE_FULL || msg.path.is_empty() {
+            self.notices.push("Load the message first: it was not downloaded.".into());
+            return;
+        }
+        let m = Box::new(msg.clone());
+        self.spawn(move || store.read_mail(&msg).map(Box::new).map_err(|e| e.0), move |r| Event::ReplyMail { kind, msg: m, result: flatten(r) });
+    }
+
+    fn open_answer(&mut self, cfg: &Config, kind: Kind, msg: &MessageSummary, mail: &Mail) {
+        let Some(a) = cfg.mail_accounts.iter().find(|a| a.id == msg.account) else { return };
+        let (name, addr) = mail_send::sender_of(a);
+        let d = compose::answer(kind, mail, &a.id, &name, &addr, &a.signature);
+        self.open_compose(Compose::new(d), if kind == Kind::Forward { Field::To } else { Field::Body });
+    }
+
+    /// Open a saved draft in a compose window.
+    pub fn open_draft(&mut self, account: &str, id: &str) {
+        let Some(ob) = self.outbox.clone() else { return };
+        match ob.load_draft(account, id) {
+            Ok((d, problems)) => {
+                let mut c = Compose::from_saved(d, crate::cal_time::now());
+                c.notes = problems;
+                self.open_compose(c, Field::Body);
+            }
+            Err(e) => self.problems.push(format!("The draft could not be opened: {e}")),
+        }
+    }
+
+    /// Save the draft now. Returns false if that failed (the window stays open and says so).
+    pub fn compose_save(&mut self) -> bool {
+        let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_mut()) else { return false };
+        if !c.has_content() && c.saved_rev.is_none() {
+            return true; // nothing typed that anyone would miss: no draft file
+        }
+        let now = crate::cal_time::now();
+        match ob.save_draft(&c.draft, now) {
+            Ok(()) => {
+                // the sender changed: the draft is in the new account's folder, the old files are put away after that
+                if let Some(old) = c.saved_account.clone().filter(|o| o != &c.draft.account) {
+                    let _ = ob.discard_draft(&old, &c.draft.id, &crate::mail_store::today_string());
+                }
+                c.saved_account = Some(c.draft.account.clone());
+                c.saved_rev = Some(c.rev);
+                c.saved_at = Some(now);
+                self.local_dirty = true;
+                true
+            }
+            Err(e) => {
+                c.error = Some(format!("The draft could not be saved: {e}"));
+                false
+            }
+        }
+    }
+
+    /// Esc or Close: with changes the person is asked (MAIL-131).
+    pub fn compose_close(&mut self) {
+        let Some(c) = self.compose.as_mut() else { return };
+        if c.ask.is_some() {
+            return;
+        }
+        if c.rev > 0 && (c.has_content() || c.saved_rev.is_some()) {
+            c.ask = Some(Ask::Close);
+        } else {
+            self.compose = None;
+            self.local_dirty = true;
+        }
+    }
+
+    fn compose_keep(&mut self) {
+        if self.compose_save() {
+            self.compose = None;
+            self.local_dirty = true;
+        } else if let Some(c) = self.compose.as_mut() {
+            c.ask = None;
+        }
+    }
+
+    fn compose_discard(&mut self) {
+        // even a discarded draft goes through the trash folder, never into nothing: it is saved first if it was not
+        if self.compose.as_ref().is_some_and(|c| c.unsaved() && c.has_content()) {
+            self.compose_save();
+        }
+        let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_ref()) else { return };
+        let date = crate::mail_store::today_string();
+        // every account folder the draft may be in
+        let mut failed = None;
+        for acct in [c.saved_account.clone(), Some(c.draft.account.clone())].into_iter().flatten().collect::<HashSet<_>>() {
+            if let Err(e) = ob.discard_draft(&acct, &c.draft.id, &date) {
+                failed = Some(e);
+            }
+        }
+        match failed {
+            None => {
+                self.compose = None;
+                self.local_dirty = true;
+            }
+            Some(e) => {
+                if let Some(c) = self.compose.as_mut() {
+                    c.error = Some(format!("The draft could not be moved to the trash folder: {e}"));
+                    c.ask = None;
+                }
+            }
+        }
+    }
+
+    /// Send pressed (MAIL-132, MAIL-135): check it, ask what has to be asked, then queue it.
+    pub fn compose_send(&mut self, cfg: &Config) {
+        let Some(c) = self.compose.as_mut() else { return };
+        let Some(a) = cfg.mail_accounts.iter().find(|a| a.id == c.draft.account) else {
+            c.error = Some("The account of this mail does not exist any more.".into());
+            return;
+        };
+        if a.smtp_host.trim().is_empty() {
+            c.error = Some("This account has no SMTP server yet: set it in the account settings (Sending).".into());
+            return;
+        }
+        // build it once to find out what is wrong with it
+        if let Err(e) = compose::finalize_plain(&c.draft, &compose::BuildOptions { now: crate::cal_time::now(), user_agent: a.user_agent_header, ..Default::default() }) {
+            c.error = Some(e.0);
+            return;
+        }
+        let questions = compose::confirmations(&c.draft);
+        if questions.is_empty() {
+            self.compose_queue(cfg);
+        } else {
+            c.ask = Some(Ask::Confirm(questions));
+        }
+    }
+
+    fn compose_queue(&mut self, cfg: &Config) {
+        let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_mut()) else { return };
+        let Some(a) = cfg.mail_accounts.iter().find(|a| a.id == c.draft.account) else { return };
+        c.ask = None;
+        let now = crate::cal_time::now();
+        match mail_send::queue_draft(&ob, a, &c.draft, cfg.mail_undo_secs, now, &crate::mail_store::today_string()) {
+            Ok(item) => {
+                if let Some(old) = c.saved_account.clone().filter(|o| o != &item.account) {
+                    let _ = ob.discard_draft(&old, &item.id, &crate::mail_store::today_string());
+                }
+                self.compose = None;
+                self.refresh_local();
+            }
+            Err(e) => c.error = Some(format!("The mail could not be put in the outbox: {e}")),
+        }
+    }
+
+    /// What the compose view asked for in this frame.
+    pub fn apply_compose_out(&mut self, cfg: &Config, out: ComposeOut) {
+        if out.cancel_ask {
+            if let Some(c) = self.compose.as_mut() {
+                c.ask = None;
+            }
+        }
+        if let Some(id) = out.account {
+            if let (Some(c), Some(a)) = (self.compose.as_mut(), cfg.mail_accounts.iter().find(|a| a.id == id)) {
+                let (name, addr) = mail_send::sender_of(a);
+                (c.draft.account, c.draft.from_name, c.draft.from_addr) = (id, name, addr);
+                c.touch();
+            }
+        }
+        if let Some(i) = out.remove_att {
+            if let Some(c) = self.compose.as_mut() {
+                if i < c.draft.attachments.len() {
+                    c.draft.attachments.remove(i);
+                    c.touch();
+                }
+            }
+        }
+        if out.attach_path {
+            let path = self.compose.as_ref().map(|c| c.path.trim().to_string()).unwrap_or_default();
+            let r = read_for_attachment(std::path::Path::new(&path));
+            if let Some(c) = self.compose.as_mut() {
+                match r.and_then(|a| c.add_attachment(a)) {
+                    Ok(()) => c.path.clear(),
+                    Err(e) => c.error = Some(e),
+                }
+            }
+        }
+        if let Some(rel) = out.attach_vault {
+            let note = self.vault.as_ref().is_some_and(|v| v.files.iter().any(|(f, n)| f == &rel && *n));
+            let r = self
+                .vault
+                .as_ref()
+                .map(|v| read_for_attachment(&v.root.join(&rel)).map(|a| if note { compose::att_from_note(a.name.trim_end_matches(".md"), &String::from_utf8_lossy(&a.data)) } else { a }))
+                .unwrap_or_else(|| Err("No vault is open.".into()));
+            if let Some(c) = self.compose.as_mut() {
+                match r.and_then(|a| c.add_attachment(a)) {
+                    Ok(()) => c.picker = None,
+                    Err(e) => c.error = Some(e),
+                }
+            }
+        }
+        if out.save {
+            self.compose_save();
+        }
+        if out.confirm_yes {
+            let more = self.compose.as_mut().and_then(|c| match &mut c.ask {
+                Some(Ask::Confirm(q)) if q.len() > 1 => {
+                    q.remove(0);
+                    Some(())
+                }
+                _ => None,
+            });
+            if more.is_none() {
+                self.compose_queue(cfg);
+            }
+        }
+        if out.send {
+            self.compose_send(cfg);
+        }
+        if out.keep_and_close {
+            self.compose_keep();
+        }
+        if out.discard_and_close {
+            self.compose_discard();
+        }
+        if out.close {
+            self.compose_close();
+        }
+    }
+
+    /// Actions of the drafts and outbox lists.
+    pub fn apply_local_out(&mut self, out: LocalOut) {
+        let Some(ob) = self.outbox.clone() else { return };
+        let now = crate::cal_time::now();
+        let date = crate::mail_store::today_string();
+        if let Some(k) = out.select {
+            self.outbox_sel = Some(k);
+        }
+        if let Some((a, i)) = out.open_draft {
+            self.open_draft(&a, &i);
+        }
+        if let Some((a, i)) = out.discard_draft {
+            if let Err(e) = ob.discard_draft(&a, &i, &date) {
+                self.problems.push(format!("The draft could not be discarded: {e}"));
+            }
+        }
+        let mut back_to_editor: Option<Result<crate::compose::Draft, String>> = None;
+        if let Some((a, i)) = out.undo {
+            back_to_editor = Some(ob.undo(&a, &i, now, &date));
+        }
+        if let Some((a, i)) = out.edit {
+            back_to_editor = Some(ob.edit(&a, &i, now, &date));
+        }
+        if let Some((a, i)) = out.retry {
+            if let Err(e) = ob.retry(&a, &i, now) {
+                self.problems.push(format!("Retry: {e}"));
+            }
+        }
+        if let Some((a, i)) = out.send_again {
+            if let Err(e) = ob.send_again(&a, &i, now) {
+                self.problems.push(format!("Send again: {e}"));
+            }
+        }
+        if let Some((a, i)) = out.discard {
+            if let Err(e) = ob.discard(&a, &i, &date) {
+                self.problems.push(format!("Discard: {e}"));
+            }
+        }
+        match back_to_editor {
+            Some(Ok(d)) => {
+                let (acct, id) = (d.account.clone(), d.id.clone());
+                if self.compose.is_some() {
+                    self.notices.push("The mail was taken back. It is in Drafts.".into());
+                } else {
+                    self.open_draft(&acct, &id);
+                }
+            }
+            Some(Err(e)) => self.problems.push(format!("The mail could not be taken back: {e}")),
+            None => {}
+        }
+        self.refresh_local();
+    }
+
+    /// Undo send for the newest waiting mail (the strip's button).
+    pub fn undo_newest(&mut self) {
+        if let Some((a, i, _)) = crate::mail_compose::queued_text(&self.local_items, crate::cal_time::now()) {
+            self.apply_local_out(LocalOut { undo: Some((a, i)), ..Default::default() });
+        }
+    }
+
+    /// Tests: the start-up check of drafts and outbox is done.
+    #[cfg(test)]
+    pub fn outbox_ready(&self) -> bool {
+        self.recovered
+    }
+
+    /// Open Drafts or Outbox of an account in the middle pane.
+    pub fn select_local(&mut self, view: LocalView) {
+        self.clear_search();
+        self.local_view = Some(view);
+        self.cursor = None;
+        self.marked.clear();
+        self.open = None;
+        self.refresh_local();
+    }
+
+    /// Entries of the outbox that are not finished (the number in the folder list).
+    pub fn outbox_count(&self, account: &str) -> usize {
+        self.local_items.iter().filter(|i| i.account == account && i.state != State::Sent).count()
+    }
+}
+
+/// A file on disk as an attachment (MAIL-127).
+fn read_for_attachment(path: &std::path::Path) -> Result<compose::Att, String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{} is not a file", path.display()));
+    }
+    if meta.len() as usize > compose::MAX_ATTACHMENTS_TOTAL {
+        return Err(format!("{} is bigger than {} MB", path.display(), compose::MAX_ATTACHMENTS_TOTAL >> 20));
+    }
+    let data = crate::fsutil::read(path).map_err(|e| e.to_string())?;
+    Ok(compose::att_from_file(&path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "attachment".into()), data))
 }
 
 fn key_account(folders: &[FolderRow], folder: i64) -> String {

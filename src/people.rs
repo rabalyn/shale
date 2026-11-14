@@ -138,6 +138,26 @@ pub fn emails_in(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Name and e-mail address of every address in the contact notes of `dir`, for completing addresses
+/// when writing a mail (MAIL-128): the note's name with each address found in its text.
+pub fn addresses(vault: &Vault, dir: &str) -> Vec<(String, String)> {
+    let dir = dir.trim().trim_matches('/');
+    if dir.is_empty() {
+        return vec![];
+    }
+    let prefix = format!("{}/", dir.to_lowercase());
+    let mut notes: Vec<(&PathBuf, &crate::vault::NoteIndex)> = vault.notes.iter().filter(|(p, _)| rel_to_string(p).to_lowercase().starts_with(&prefix)).collect();
+    notes.sort_by(|a, b| a.0.cmp(b.0));
+    let mut out = vec![];
+    for (p, n) in notes {
+        let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        for e in emails_in(&n.text) {
+            out.push((clean_name(&stem), e));
+        }
+    }
+    out
+}
+
 impl Contacts {
     pub fn index(vault: &Vault, dir: &str) -> Self {
         let dir = dir.trim().trim_matches('/');

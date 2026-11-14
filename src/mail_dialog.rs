@@ -14,6 +14,10 @@ pub struct MailDialog {
     pub accounts: Vec<MailAccount>,
     /// The port of each account as typed.
     pub ports: Vec<String>,
+    /// The SMTP port of each account as typed (MAIL-120).
+    pub smtp_ports: Vec<String>,
+    /// Seconds a sent mail waits in the outbox, as typed (MAIL-134).
+    pub undo_secs: String,
     pub sel: Option<usize>,
     /// Passwords typed this time, by account id; saved when the dialog is closed with Done.
     pub passwords: HashMap<String, String>,
@@ -51,8 +55,24 @@ pub enum MailDialogAction {
 impl MailDialog {
     pub fn new(accounts: Vec<MailAccount>, minutes: u32, keyring: bool) -> MailDialog {
         let ports = accounts.iter().map(|a| a.port.to_string()).collect();
+        let smtp_ports = accounts.iter().map(|a| a.smtp_port.to_string()).collect();
         let sel = if accounts.is_empty() { None } else { Some(0) };
-        MailDialog { accounts, ports, sel, passwords: HashMap::new(), client_secrets: HashMap::new(), removed: vec![], minutes: minutes.to_string(), mark_read: true, mark_read_secs: "2".into(), error: None, keyring, rects: vec![] }
+        MailDialog {
+            accounts,
+            ports,
+            smtp_ports,
+            undo_secs: "10".into(),
+            sel,
+            passwords: HashMap::new(),
+            client_secrets: HashMap::new(),
+            removed: vec![],
+            minutes: minutes.to_string(),
+            mark_read: true,
+            mark_read_secs: "2".into(),
+            error: None,
+            keyring,
+            rects: vec![],
+        }
     }
 
     /// The "mark as read when opened" settings the dialog starts with.
@@ -60,6 +80,17 @@ impl MailDialog {
         self.mark_read = on;
         self.mark_read_secs = secs.to_string();
         self
+    }
+
+    /// The undo-send time the dialog starts with.
+    pub fn with_undo_secs(mut self, secs: u32) -> MailDialog {
+        self.undo_secs = secs.to_string();
+        self
+    }
+
+    /// The undo-send time in seconds, if it is a number.
+    pub fn undo_delay(&self) -> Result<u32, String> {
+        self.undo_secs.trim().parse::<u32>().ok().filter(|s| *s <= 600).ok_or_else(|| "“Undo send” must be a whole number of seconds (0 = send at once, at most 600).".to_string())
     }
 
     /// The delay as a number of seconds, if it is one.
@@ -77,6 +108,7 @@ impl MailDialog {
         let id = self.fresh_id(store_root);
         self.accounts.push(MailAccount { id, ..MailAccount::default() });
         self.ports.push("993".into());
+        self.smtp_ports.push("465".into());
         self.sel = Some(self.accounts.len() - 1);
     }
 
@@ -92,12 +124,24 @@ impl MailDialog {
             a.security = MailSecurity::ImplicitTls;
             self.ports[i] = port.to_string();
         }
+        // sending: the preset's SMTP server, unless the account has one of its own (MAIL-120)
+        let smtp_presets = [OAuthProvider::Google, OAuthProvider::Microsoft].map(crate::oauth::preset_smtp);
+        let a = &mut self.accounts[i];
+        let is_preset_smtp = a.smtp_host.trim().is_empty() || smtp_presets.iter().flatten().any(|(h, ..)| *h == a.smtp_host.trim());
+        if let (true, Some((host, port, sec, stores))) = (is_preset_smtp, crate::oauth::preset_smtp(a.oauth_provider)) {
+            a.smtp_host = host.to_string();
+            a.smtp_port = port;
+            a.smtp_security = sec;
+            a.server_stores_sent = stores;
+            self.smtp_ports[i] = port.to_string();
+        }
     }
 
     pub fn remove(&mut self, i: usize) {
         if i < self.accounts.len() {
             let a = self.accounts.remove(i);
             self.ports.remove(i);
+            self.smtp_ports.remove(i);
             self.removed.push(a.id);
             self.sel = if self.accounts.is_empty() { None } else { Some(i.min(self.accounts.len() - 1)) };
         }
@@ -105,7 +149,7 @@ impl MailDialog {
 
     /// Check what was typed and put the ports into the accounts; the reason if something is wrong.
     pub fn validate(&mut self) -> Result<u32, String> {
-        for (a, p) in self.accounts.iter_mut().zip(&self.ports) {
+        for ((a, p), sp) in self.accounts.iter_mut().zip(&self.ports).zip(&self.smtp_ports) {
             let label = if a.name.trim().is_empty() { a.host.clone() } else { a.name.clone() };
             if a.host.trim().is_empty() {
                 return Err("Every account needs a server (host name).".into());
@@ -125,8 +169,20 @@ impl MailDialog {
             a.host = a.host.trim().to_string();
             a.user = a.user.trim().to_string();
             a.name = a.name.trim().to_string();
+            // sending: optional, but what is typed must make sense
+            a.smtp_host = a.smtp_host.trim().to_string();
+            a.smtp_port = sp.trim().parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("“{label}”: the SMTP port must be a number between 1 and 65535."))?;
+            a.from_name = a.from_name.trim().to_string();
+            a.from_address = a.from_address.trim().to_string();
+            if !a.from_address.is_empty() {
+                crate::compose::sender(&a.from_name, &a.from_address).map_err(|e| format!("“{label}”: {e}"))?;
+            }
+            if a.from_name.contains(['\r', '\n']) {
+                return Err(format!("“{label}”: the sender name may not contain a line break."));
+            }
         }
         self.read_delay()?;
+        self.undo_delay()?;
         self.minutes.trim().parse::<u32>().map_err(|_| "“Sync every” must be a whole number of minutes (0 = never).".to_string())
     }
 }
@@ -203,6 +259,12 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
             let r = ui.add_enabled(d.mark_read, egui::TextEdit::singleline(&mut d.mark_read_secs).desired_width(36.0));
             rects.push(("md:mark-read-secs".into(), r.rect));
             ui.label("seconds (the server is told; 0 = at once)");
+        });
+        ui.horizontal(|ui| {
+            ui.label("Undo send: a sent mail waits");
+            let r = ui.add(egui::TextEdit::singleline(&mut d.undo_secs).desired_width(36.0));
+            rects.push(("md:undo-secs".into(), r.rect));
+            ui.label("seconds in the outbox, where you can take it back (0 = send at once)");
         });
     });
     if let Some(e) = &d.error {
@@ -285,6 +347,53 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
             oauth_rows(ui, d, i, &id, rects);
         }
     });
+    // sending (MAIL-120): folded away until it is needed, so the form stays short
+    ui.add_space(8.0);
+    let open_now = !d.accounts[i].smtp_host.trim().is_empty();
+    let head = egui::CollapsingHeader::new(RichText::new("Sending (SMTP)").color(theme::TEXT)).id_salt(("mail-smtp", i)).default_open(open_now).show(ui, |ui| {
+        egui::Grid::new(("mail-smtp-form", i)).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+            ui.label("SMTP server");
+            let r = ui.add(egui::TextEdit::singleline(&mut d.accounts[i].smtp_host).hint_text("smtp.example.com (empty: this account does not send)").desired_width(300.0));
+            rects.push(("md:smtp-host".into(), r.rect));
+            ui.end_row();
+            ui.label("Security");
+            ui.horizontal(|ui| {
+                for (sec, text) in [(MailSecurity::ImplicitTls, "TLS (usually port 465)"), (MailSecurity::StartTls, "STARTTLS (usually port 587)")] {
+                    let r = ui.radio(d.accounts[i].smtp_security == sec, text);
+                    rects.push((format!("md:smtp-sec:{sec:?}"), r.rect));
+                    if r.clicked() && d.accounts[i].smtp_security != sec {
+                        if d.smtp_ports[i].trim() == d.accounts[i].smtp_security.smtp_default_port().to_string() {
+                            d.smtp_ports[i] = sec.smtp_default_port().to_string();
+                        }
+                        d.accounts[i].smtp_security = sec;
+                    }
+                }
+            });
+            ui.end_row();
+            ui.label("Port");
+            let r = ui.add(egui::TextEdit::singleline(&mut d.smtp_ports[i]).desired_width(70.0));
+            rects.push(("md:smtp-port".into(), r.rect));
+            ui.end_row();
+            ui.label("Your name");
+            let r = ui.add(egui::TextEdit::singleline(&mut d.accounts[i].from_name).hint_text("as the recipient sees it").desired_width(300.0));
+            rects.push(("md:from-name".into(), r.rect));
+            ui.end_row();
+            ui.label("Your address");
+            let r = ui.add(egui::TextEdit::singleline(&mut d.accounts[i].from_address).hint_text("empty: the user name, if it is an address").desired_width(300.0));
+            rects.push(("md:from-addr".into(), r.rect));
+            ui.end_row();
+            ui.label("Signature");
+            let r = ui.add(egui::TextEdit::multiline(&mut d.accounts[i].signature).desired_rows(3).desired_width(300.0));
+            rects.push(("md:signature".into(), r.rect));
+            ui.end_row();
+        });
+        let r = ui.checkbox(&mut d.accounts[i].server_stores_sent, "The server saves sent mail in Sent by itself (Gmail does): Shale then does not add a copy");
+        rects.push(("md:server-stores".into(), r.rect));
+        let r = ui.checkbox(&mut d.accounts[i].user_agent_header, "Add a User-Agent header (tells the recipient this was written with Shale; off for privacy)");
+        rects.push(("md:user-agent".into(), r.rect));
+        ui.label(muted("Sending always uses an encrypted connection and the sign-in above (the same password, or the same OAuth2 sign-in). “Test connection” also signs in to the SMTP server; it never sends a mail.").size(12.0));
+    });
+    rects.push(("md:smtp-header".into(), head.header_response.rect));
     if d.accounts[i].auth == MailAuth::OAuth2 {
         ui.label(muted("Shale needs an OAuth2 client ID that you register yourself with Google or Microsoft (see the README). Shale opens your browser for the sign-in and keeps only a refresh token, in the system keyring.").size(12.0));
         sign_in_row(ui, i, &id, mail, rects, out);

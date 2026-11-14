@@ -90,7 +90,11 @@ pub fn needs_sign_in(text: &str) -> bool {
 pub fn preset(provider: OAuthProvider) -> Option<(&'static str, &'static str, &'static str)> {
     match provider {
         OAuthProvider::Google => Some(("https://accounts.google.com/o/oauth2/v2/auth", "https://oauth2.googleapis.com/token", "https://mail.google.com/")),
-        OAuthProvider::Microsoft => Some(("https://login.microsoftonline.com/common/oauth2/v2.0/authorize", "https://login.microsoftonline.com/common/oauth2/v2.0/token", "https://outlook.office.com/IMAP.AccessAsUser.All offline_access")),
+        OAuthProvider::Microsoft => Some((
+            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+            "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+            "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
+        )),
         OAuthProvider::Custom => None,
     }
 }
@@ -100,6 +104,15 @@ pub fn preset_server(provider: OAuthProvider) -> Option<(&'static str, u16)> {
     match provider {
         OAuthProvider::Google => Some(("imap.gmail.com", 993)),
         OAuthProvider::Microsoft => Some(("outlook.office365.com", 993)),
+        OAuthProvider::Custom => None,
+    }
+}
+
+/// The SMTP server of a preset provider: (host, port, security, the server keeps sent mail itself) (MAIL-120).
+pub fn preset_smtp(provider: OAuthProvider) -> Option<(&'static str, u16, crate::config::MailSecurity, bool)> {
+    match provider {
+        OAuthProvider::Google => Some(("smtp.gmail.com", 465, crate::config::MailSecurity::ImplicitTls, true)),
+        OAuthProvider::Microsoft => Some(("smtp.office365.com", 587, crate::config::MailSecurity::StartTls, false)),
         OAuthProvider::Custom => None,
     }
 }
@@ -881,7 +894,7 @@ mod tests {
         let m = OAuthConfig::for_account(&MailAccount { oauth_provider: OAuthProvider::Microsoft, oauth_client_id: "x".into(), ..MailAccount::default() }, None).unwrap();
         assert_eq!(m.auth_url, "https://login.microsoftonline.com/common/oauth2/v2.0/authorize");
         assert_eq!(m.token_url, "https://login.microsoftonline.com/common/oauth2/v2.0/token");
-        assert_eq!(m.scope, "https://outlook.office.com/IMAP.AccessAsUser.All offline_access");
+        assert_eq!(m.scope, "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access");
         assert_eq!(preset_server(OAuthProvider::Google), Some(("imap.gmail.com", 993)));
         assert_eq!(preset_server(OAuthProvider::Microsoft), Some(("outlook.office365.com", 993)));
     }

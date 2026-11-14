@@ -311,6 +311,7 @@ impl Outbox {
         self.write(&self.path("outbox", &item.account, &item.id, ".json")?, &json)
     }
 
+    #[cfg(test)]
     pub fn get(&self, account: &str, id: &str) -> Option<Item> {
         let _g = lock();
         self.get_unlocked(account, id)

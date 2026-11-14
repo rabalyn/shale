@@ -121,6 +121,8 @@ impl W {
         app.cfg.mail_mark_read = false;
         let offline = Arc::new(std::sync::atomic::AtomicBool::new(false));
         app.mail.factory = factory(offline.clone());
+        // no test may reach a real SMTP server: the sending tests plug in the pretend one
+        app.mail.smtp_factory = Arc::new(|_, _| Err("no SMTP server in this test".to_string()));
         app.mail.opts = SyncOptions { now: Some(NOW), batch_size: 2, ..SyncOptions::default() };
         let account = MailAccount { id: format!("t-{tag}"), name: "Test mail".into(), host: "localhost".into(), port: server.port, user: "ada".into(), ..MailAccount::default() };
         if with_account {
@@ -1015,6 +1017,12 @@ fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks
     w.typ("md:port", &w.server.port.to_string());
     w.typ("md:user", "ada");
     w.click("md:auth-oauth2");
+    // the Google preset also fills the SMTP server; this test is about reading, and must never reach a real server
+    if let Some(Modal::MailAccounts(d)) = &mut w.app.modal {
+        assert_eq!(d.accounts[0].smtp_host, "smtp.gmail.com", "the preset fills the SMTP server (MAIL-120)");
+        assert!(d.accounts[0].server_stores_sent);
+        d.accounts[0].smtp_host.clear();
+    }
     w.click("md:provider:Custom");
     assert!(!w.has("md:password"), "an OAuth2 account has no password field");
     // nothing typed yet: the sign-in is refused with a clear message
@@ -1459,4 +1467,432 @@ fn the_account_settings_have_the_mark_as_read_setting_and_its_delay() {
     assert!(w.app.modal.is_none());
     assert!(!w.app.cfg.mail_mark_read);
     assert_eq!(w.app.cfg.mail_mark_read_secs, 5);
+}
+
+// ---------------------------------------------------------------- phase 3: writing and sending (MAIL-120…MAIL-151)
+
+use crate::mail_compose::LocalView;
+use crate::outbox::State as OutState;
+use crate::smtp_fake_tests::FakeSmtp;
+
+/// An app with the pretend IMAP server synced and a pretend SMTP server wired in; the undo time is `undo` seconds.
+fn compose_world(tag: &str, undo: u32) -> (W, FakeSmtp) {
+    let mut w = W::new(tag, true);
+    let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
+    {
+        let a = &mut w.app.cfg.mail_accounts[0];
+        a.smtp_host = "localhost".into();
+        a.smtp_port = smtp.port;
+        a.from_name = "Ada Lovelace".into();
+        a.from_address = "ada@example.com".into();
+        a.signature = "Ada".into();
+    }
+    w.app.cfg.mail_undo_secs = undo;
+    let (settings, user, password) = {
+        let g = smtp.state();
+        (smtp.settings(), g.user.clone(), g.password.clone())
+    };
+    w.app.mail.smtp_factory = Arc::new(move |_, _| {
+        Ok(Arc::new(crate::mail_send::tests::TestSmtp { settings: settings.clone(), user: user.clone(), password: password.clone(), connects: std::sync::atomic::AtomicUsize::new(0) }) as Arc<dyn crate::mail_send::SmtpConnector>)
+    });
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    w.until("the start-up check is done", |a| a.mail.outbox.is_some() && a.mail.outbox_ready());
+    w.frame(vec![]);
+    (w, smtp)
+}
+
+impl W {
+    /// A key with the text the keyboard would type with it.
+    fn press_text(&mut self, key: Key, modifiers: Modifiers, text: &str) {
+        self.frame(vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }, Event::Text(text.into())]);
+        self.frame(vec![]);
+    }
+
+    fn compose_field(&self, f: &str) -> String {
+        let c = self.app.mail.compose.as_ref().expect("a compose window is open");
+        match f {
+            "to" => c.draft.to.clone(),
+            "cc" => c.draft.cc.clone(),
+            "bcc" => c.draft.bcc.clone(),
+            "subject" => c.draft.subject.clone(),
+            _ => c.draft.body.clone(),
+        }
+    }
+
+    /// Type into the body, above the signature.
+    fn write_body(&mut self, text: &str) {
+        self.click("mail:compose:body");
+        self.press(Key::ArrowUp, Modifiers::COMMAND);
+        self.type_text(text);
+    }
+
+    fn compose_open(&self) -> bool {
+        self.app.mail.compose.is_some()
+    }
+
+    fn ctrl_enter(&mut self) {
+        self.frame(vec![Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }]);
+        self.frame(vec![]);
+    }
+
+    fn esc(&mut self) {
+        self.frame(vec![Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+        self.frame(vec![]);
+    }
+
+    fn items(&self) -> Vec<crate::outbox::Item> {
+        crate::outbox::Outbox::new(&self.app.mail.root).list(None)
+    }
+
+    fn drafts_on_disk(&self) -> Vec<crate::outbox::DraftInfo> {
+        crate::outbox::Outbox::new(&self.app.mail.root).list_drafts(None)
+    }
+}
+
+// spec: MAIL-150, MAIL-151, MAIL-132, MAIL-141
+#[test]
+fn compose_with_c_complete_an_address_send_with_ctrl_enter_and_the_mail_appears_in_sent() {
+    let (mut w, smtp) = compose_world("send1", 1);
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    assert!(w.compose_open(), "c opens a new mail");
+    assert_eq!(w.compose_field("to"), "", "the letter c was not typed into the window");
+    assert!(w.shows("Ada Lovelace") && w.shows("ada@example.com"), "the sender is shown");
+    assert!(w.compose_field("body").contains("-- \nAda"), "the signature is below the cursor");
+    // completion: "bo" offers Bob, from the addresses in the mail index; a click takes it
+    w.click("mail:compose:to");
+    w.type_text("bo");
+    w.frame(vec![]);
+    assert!(w.has("mail:suggest:0"), "a suggestion is offered for what is typed");
+    w.click("mail:suggest:0");
+    assert!(w.compose_field("to").contains("bob@x.de"), "{}", w.compose_field("to"));
+    w.typ("mail:compose:subject", "Plans für Köln");
+    w.write_body("Hello Bob, the plans are ready.");
+    w.ctrl_enter();
+    assert!(!w.compose_open(), "Ctrl+Enter sends: the window closes");
+    assert_eq!(w.items().len(), 1);
+    assert!(w.has("mail:undo-send") || w.items()[0].state != OutState::Queued, "the mail waits for the undo time");
+    // sent after the undo time, exactly once
+    w.until("the mail was sent", |_| !smtp.state().received.is_empty());
+    w.until("the outbox says sent and the copy is made", |a| a.mail.pending_total == 0 && !a.mail.busy_with_ops() && crate::outbox::Outbox::new(&a.mail.root).list(None).iter().all(|i| i.state == OutState::Sent && i.copy_done));
+    assert_eq!(smtp.state().received.len(), 1);
+    let got = crate::mail::parse(&smtp.state().received[0].data);
+    assert_eq!(got.subject, "Plans für Köln");
+    assert!(got.to.contains("bob@x.de") && got.text.contains("Hello Bob, the plans are ready."), "{got:?}");
+    assert_eq!(smtp.state().received[0].rcpts, vec!["bob@x.de"]);
+    w.settle_ops();
+    // the Sent folder on the server has it, flagged read, once; and the list shows it
+    let on = w.server.state().messages("Sent");
+    assert_eq!(on.len(), 2, "the seeded one and ours");
+    assert_eq!(on.iter().filter(|m| crate::mail::parse(&m.2).subject == "Plans für Köln").count(), 1);
+    w.open_folder("Sent");
+    w.until("the Sent list has it", |a| a.mail.total == 2);
+    assert!(w.subjects().contains(&"Plans für Köln".to_string()));
+}
+
+// spec: MAIL-126, MAIL-150
+#[test]
+fn reply_reply_all_and_forward_start_with_the_right_fields_and_quote_the_original() {
+    let (mut w, _smtp) = compose_world("answer1", 10);
+    w.open_mail("Invoice 2026"); // from Bob, to ada
+    w.click("mail:reply");
+    assert!(
+        w.compose_open() || {
+            w.until("the answer opens", |a| a.mail.compose.is_some());
+            true
+        }
+    );
+    assert_eq!(w.compose_field("to"), "Bob <bob@x.de>");
+    assert_eq!(w.compose_field("subject"), "Re: Invoice 2026");
+    let body = w.compose_field("body");
+    assert!(body.contains(" wrote:\n> Please pay the invoice for the lecture hall."), "{body}");
+    let d = w.app.mail.compose.as_ref().unwrap().draft.clone();
+    assert_eq!(d.in_reply_to, "<10-Invoice-2026@fake>");
+    assert_eq!(d.references, vec!["<10-Invoice-2026@fake>"]);
+    // Esc on an untouched answer closes without asking and leaves no draft
+    w.esc();
+    assert!(!w.compose_open(), "a mail the person has not typed into closes without a question");
+    assert!(w.drafts_on_disk().is_empty());
+    // Shift+R: reply all (the mail went to ada only: the same as a reply); Shift+F: forward with the attachment of another mail
+    w.press_text(Key::R, Modifiers::SHIFT, "R");
+    w.until("reply all opens", |a| a.mail.compose.is_some());
+    assert_eq!(w.compose_field("to"), "Bob <bob@x.de>");
+    w.esc();
+    w.open_mail("Report attached");
+    w.press_text(Key::F, Modifiers::SHIFT, "F");
+    w.until("forward opens", |a| a.mail.compose.is_some());
+    assert_eq!(w.compose_field("subject"), "Fwd: Report attached");
+    assert_eq!(w.compose_field("to"), "");
+    let atts = w.app.mail.compose.as_ref().unwrap().draft.attachments.clone();
+    assert_eq!((atts.len(), atts[0].name.as_str(), atts[0].data.as_slice()), (1, "report.pdf", &b"Hello PDF"[..]), "the original's attachment comes along");
+    assert!(w.shows("report.pdf"));
+    w.esc();
+    // f is still the flag key
+    assert!(!w.compose_open());
+    w.open_mail("Lunch plans");
+    w.press_text(Key::F, Modifiers::NONE, "f");
+    w.settle_ops();
+    assert!(w.server_flags("INBOX", 2).contains(&"\\Flagged".to_string()), "plain f flags, Shift+F forwards");
+}
+
+// spec: MAIL-134
+#[test]
+fn undo_send_pulls_the_mail_back_into_the_editor_and_nothing_goes_out() {
+    let (mut w, smtp) = compose_world("undo1", 30);
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Take me back");
+    w.write_body("precious words");
+    w.click("mail:compose:send");
+    assert!(!w.compose_open(), "{:?} {:?}", w.app.mail.compose.as_ref().map(|c| c.error.clone()), w.app.mail.compose.as_ref().map(|c| (c.draft.to.clone(), c.draft.subject.clone(), c.ask.clone())));
+    w.until("the strip with Undo shows", |a| a.mail.rects.iter().any(|r| r.0 == "mail:undo-send"));
+    assert_eq!(w.items()[0].state, OutState::Queued);
+    w.click("mail:undo-send");
+    w.until("the editor is back", |a| a.mail.compose.is_some());
+    assert_eq!((w.compose_field("subject").as_str(), w.compose_field("to").as_str()), ("Take me back", "bob@x.de"));
+    assert!(w.compose_field("body").contains("precious words"));
+    assert!(w.items().is_empty(), "the outbox is empty again");
+    for _ in 0..30 {
+        w.frame(vec![]);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(smtp.state().received.is_empty() && smtp.state().commands.is_empty(), "nothing was sent, not even a connection");
+    // 0 seconds: sent at once (no strip needed)
+    w.app.cfg.mail_undo_secs = 0;
+    w.click("mail:compose:send");
+    w.until("sent at once", |_| smtp.state().received.len() == 1);
+}
+
+// spec: MAIL-135
+#[test]
+fn a_forgotten_attachment_an_empty_subject_and_an_empty_body_each_ask_before_sending() {
+    let (mut w, smtp) = compose_world("confirm1", 0);
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Plans");
+    w.write_body("Please see the attached plan.");
+    w.click("mail:compose:send");
+    assert!(w.has("mail:compose:confirm-yes"), "the text mentions an attachment, nothing is attached");
+    w.settle();
+    assert!(w.shows("mentions an attachment"));
+    assert!(w.compose_open() && w.items().is_empty() && smtp.state().commands.is_empty());
+    w.click("mail:compose:confirm-no");
+    assert!(w.compose_open() && !w.has("mail:compose:confirm-yes"), "back to the mail");
+    // no subject and attachment words: two questions, one after the other
+    w.click("mail:compose:subject");
+    w.press(Key::A, Modifiers::COMMAND);
+    w.press(Key::Delete, Modifiers::NONE);
+    assert_eq!(w.compose_field("subject"), "");
+    w.ctrl_enter();
+    w.settle();
+    assert!(w.shows("no subject"));
+    w.click("mail:compose:confirm-yes");
+    w.settle();
+    assert!(w.shows("mentions an attachment"), "the next question");
+    w.click("mail:compose:confirm-yes");
+    assert!(!w.compose_open(), "now it goes");
+    w.until("sent", |_| smtp.state().received.len() == 1);
+    // an empty body
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Only a subject");
+    w.click("mail:compose:body");
+    w.press(Key::A, Modifiers::COMMAND);
+    w.press(Key::Delete, Modifiers::NONE);
+    w.click("mail:compose:send");
+    w.settle();
+    assert!(w.shows("has no text"), "an empty body asks");
+    w.click("mail:compose:confirm-no");
+    // an attachment from the vault answers the reminder
+    w.type_text("see attached");
+    w.typ("mail:compose:att-path", &w.dir.join("Welcome.md").to_string_lossy());
+    w.click("mail:compose:att-add");
+    assert_eq!(w.app.mail.compose.as_ref().unwrap().draft.attachments.len(), 1);
+    w.click("mail:compose:send");
+    assert!(!w.has("mail:compose:confirm-yes"), "nothing to ask: the attachment is there");
+    w.until("the second mail was sent", |_| smtp.state().received.len() == 2);
+    let m = crate::mail::parse(&smtp.state().received[1].data);
+    assert_eq!((m.attachments.len(), m.attachments[0].name.as_str()), (1, "Welcome.md"));
+}
+
+// spec: MAIL-130, MAIL-131
+#[test]
+fn closing_with_changes_asks_keep_or_discard_and_nothing_is_lost_either_way() {
+    let (mut w, _smtp) = compose_world("close1", 10);
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.esc();
+    assert!(!w.compose_open(), "nothing typed: closes without a question");
+    assert!(w.drafts_on_disk().is_empty());
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:subject", "Unsent thoughts");
+    w.esc();
+    assert!(w.compose_open() && w.has("mail:compose:keep") && w.has("mail:compose:discard"), "asked: keep draft / discard");
+    // Esc again (or Keep writing) goes back to the mail
+    w.esc();
+    assert!(w.compose_open() && !w.has("mail:compose:keep"));
+    // Discard: the draft goes to the trash folder, not away
+    w.esc();
+    w.click("mail:compose:discard");
+    assert!(!w.compose_open());
+    assert!(w.drafts_on_disk().is_empty());
+    let trashed: Vec<_> = std::fs::read_dir(w.app.mail.root.join(".trash")).unwrap().flatten().collect();
+    assert!(!trashed.is_empty(), "the discarded draft is in .trash");
+    // Keep draft: it is in Drafts, and a click opens it again with everything in it
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:subject", "Kept for later");
+    w.write_body("half a sentence");
+    w.click("mail:compose:close");
+    w.click("mail:compose:keep");
+    assert!(!w.compose_open());
+    let acct = w.account.id.clone();
+    assert_eq!(w.drafts_on_disk().len(), 1);
+    w.until("the folder list has Drafts (1)", |a| a.mail.rects.iter().any(|r| r.0 == format!("mail:drafts:{}", acct)));
+    w.click(&format!("mail:drafts:{acct}"));
+    w.until("the draft is listed", |a| a.mail.rects.iter().any(|r| r.0 == "mail:draft:0"));
+    assert!(w.shows("Kept for later"));
+    w.click("mail:draft:0");
+    w.until("the draft opens", |a| a.mail.compose.is_some());
+    assert_eq!(w.compose_field("subject"), "Kept for later");
+    assert!(w.compose_field("body").contains("half a sentence"));
+    // closing it again without a change asks nothing and keeps it
+    w.esc();
+    assert!(!w.compose_open());
+    assert_eq!(w.drafts_on_disk().len(), 1);
+    assert!(matches!(w.app.mail.local_view, Some(LocalView::Drafts(_))));
+}
+
+// spec: MAIL-130
+#[test]
+fn a_draft_is_saved_by_itself_after_a_pause_and_a_crash_leaves_it_in_drafts() {
+    let (mut w, _smtp) = compose_world("autosave1", 10);
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:subject", "Autosaved");
+    w.write_body("typed before the crash");
+    assert!(w.drafts_on_disk().is_empty(), "not yet: the pause has not passed");
+    w.until("the draft was saved by itself", |a| crate::outbox::Outbox::new(&a.mail.root).list_drafts(None).len() == 1);
+    // the program dies here: a new run finds it
+    let root = w.app.mail.root.clone();
+    let ob = crate::outbox::Outbox::new(&root);
+    let r = ob.recover(NOW, "2026-11-14").unwrap();
+    assert_eq!(r, crate::outbox::Recovery::default());
+    let drafts = ob.list_drafts(None);
+    assert_eq!(drafts.len(), 1);
+    let (d, problems) = ob.load_draft(&drafts[0].account, &drafts[0].id).unwrap();
+    assert!(problems.is_empty());
+    assert_eq!(d.subject, "Autosaved");
+    assert!(d.body.contains("typed before the crash"));
+    // a new mail view announces what it finds
+    let mut view = crate::mail_ui::MailView::new(root);
+    view.open_store();
+    let cfg = w.app.cfg.clone();
+    let start = Instant::now();
+    while view.notices.iter().all(|n| !n.contains("unsent draft")) {
+        view.tick(&cfg, true);
+        assert!(start.elapsed() < Duration::from_secs(20), "the restored draft is announced: {:?}", view.notices);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(view.local_drafts.len(), 1);
+}
+
+// spec: MAIL-133, MAIL-136
+#[test]
+fn a_mail_that_may_have_been_sent_waits_for_the_person_and_a_failed_one_can_be_retried() {
+    let (mut w, smtp) = compose_world("unsure1", 0);
+    smtp.state().drop_after_data = true;
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Did it go");
+    w.write_body("hello");
+    w.ctrl_enter();
+    w.until("the mail is unsure", |a| a.mail.local_items.iter().any(|i| i.state == OutState::Unsure));
+    assert_eq!(smtp.state().received.len(), 1, "it did arrive: nobody could have known");
+    assert!(w.app.mail.problems.iter().any(|p| p.contains("may have been sent")));
+    let acct = w.account.id.clone();
+    w.click(&format!("mail:outbox:{acct}"));
+    w.until("the entry is listed", |a| a.mail.rects.iter().any(|r| r.0 == "mail:outbox:0"));
+    w.click("mail:outbox:0");
+    w.frame(vec![]);
+    assert!(w.shows("may have been sent") && w.shows("Check your Sent folder"), "the entry says what to do");
+    // nothing resends it by itself
+    for _ in 0..40 {
+        w.frame(vec![]);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(smtp.state().received.len(), 1);
+    // Send again is the person's choice
+    smtp.state().drop_after_data = false;
+    w.click("mail:outbox:send-again");
+    w.until("sent again", |_| smtp.state().received.len() == 2);
+    // a refused recipient: failed, with the server's words, retry sends
+    smtp.state().fail_rcpt = Some("bob@x.de".into());
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Refused");
+    w.write_body("hello");
+    w.ctrl_enter();
+    w.until("the mail failed", |a| a.mail.local_items.iter().any(|i| i.subject == "Refused" && i.state == OutState::Failed));
+    assert!(w.app.mail.problems.iter().any(|p| p.contains("550")));
+    w.frame(vec![]);
+    w.until("both entries listed", |a| a.mail.local_items.iter().filter(|i| i.state != OutState::Sent).count() >= 1);
+    let i = w.app.mail.local_items.iter().filter(|i| i.account == acct).position(|i| i.subject == "Refused").unwrap();
+    w.click(&format!("mail:outbox:{i}"));
+    w.frame(vec![]);
+    assert!(w.shows("was not sent") && w.shows("550"));
+    smtp.state().fail_rcpt = None;
+    w.click("mail:outbox:retry");
+    w.until("the retry went out", |_| smtp.state().received.len() == 3);
+}
+
+// spec: MAIL-120, MAIL-121
+#[test]
+fn the_account_settings_have_the_sending_section_with_presets_and_test_connection_signs_in_to_smtp() {
+    let mut w = W::new("smtp-dialog", false);
+    let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
+    let (settings, user, password) = {
+        let g = smtp.state();
+        (smtp.settings(), g.user.clone(), g.password.clone())
+    };
+    w.app.mail.smtp_factory = Arc::new(move |_, _| {
+        Ok(Arc::new(crate::mail_send::tests::TestSmtp { settings: settings.clone(), user: user.clone(), password: password.clone(), connects: std::sync::atomic::AtomicUsize::new(0) }) as Arc<dyn crate::mail_send::SmtpConnector>)
+    });
+    w.app.open_mail_settings();
+    w.settle();
+    w.click("md:add");
+    w.typ("md:host", "localhost");
+    w.typ("md:port", &w.server.port.to_string());
+    w.typ("md:user", "ada");
+    w.typ("md:password", PASSWORD);
+    // the Sending section is folded; opening it shows the fields
+    assert!(!w.has("md:smtp-host"));
+    w.click("md:smtp-header");
+    w.settle();
+    w.typ("md:smtp-host", "localhost");
+    w.typ("md:smtp-port", &smtp.port.to_string());
+    w.typ("md:from-name", "Ada Lovelace");
+    w.typ("md:from-addr", "ada@example.com");
+    w.click("md:test");
+    w.until("the test ends", |a| a.mail.tests.values().any(|t| matches!(t, TestState::Ok(_) | TestState::Failed(_))));
+    let t = w.app.mail.tests.values().next().unwrap();
+    assert!(
+        matches!(t, TestState::Ok(m) if m.contains("Sending works")),
+        "{}",
+        match t {
+            TestState::Failed(e) => e.clone(),
+            TestState::Ok(m) => m.clone(),
+            _ => "?".into(),
+        }
+    );
+    assert!(smtp.state().received.is_empty(), "testing never sends a mail");
+    assert!(smtp.commands().iter().all(|c| !c.starts_with("MAIL FROM") && !c.starts_with("DATA")), "{:?}", smtp.commands());
+    assert!(smtp.commands().iter().any(|c| c.starts_with("AUTH")));
+    // a wrong password for SMTP is told in words
+    smtp.state().password = "other".into();
+    w.click("md:test");
+    w.until("the second test ends", |a| a.mail.tests.values().any(|t| matches!(t, TestState::Failed(_))));
+    let TestState::Failed(e) = w.app.mail.tests.values().next().unwrap() else { unreachable!() };
+    assert!(e.contains("Reading works") && e.contains("535"), "{e}");
+    // Done saves the sending settings
+    w.click("md:done");
+    let a = &w.app.cfg.mail_accounts[0];
+    assert_eq!((a.smtp_host.as_str(), a.smtp_port, a.from_name.as_str(), a.from_address.as_str()), ("localhost", smtp.port, "Ada Lovelace", "ada@example.com"));
 }
