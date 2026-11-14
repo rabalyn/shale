@@ -88,3 +88,23 @@ Phase 1a covers the store, the read-only sync and their tests. Phase 1b (MAIL-04
 |---|---|---|---|---|
 | MAIL-070 | "Import to vault" (button, key `i`) on the open mail, or on the marked mails, hands the stored `.eml` bytes to the Import dialog exactly as a dropped `.eml` file: the same items, so duplicates (IMP-005), attachments (IMP-004) and people (PPL-*) work the same. Nothing is written to the vault until Import is pressed. | IS NOW | `mail_ui.rs`, `app.rs`, `import.rs` | `mail_ui_tests.rs::import_hands_the_stored_mail_to_the_import_dialog_and_writes_nothing_until_import_is_pressed` |
 | MAIL-071 | Messages that are not downloaded (headers only, too large) are not imported; the dialog says how many were left out and why. | IS NOW | `app.rs` | `mail_ui_tests.rs::import_hands_the_stored_mail_to_the_import_dialog_and_writes_nothing_until_import_is_pressed` |
+
+## OAuth2 sign-in (MAIL-08x, phase 1c)
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| MAIL-080 | OAuth2 uses the authorization-code flow with PKCE (`S256`, RFC 7636) and a random `state`. The sign-in page opens in the system browser through `opener.rs` only; the redirect goes to `http://127.0.0.1:<random port>/`. | SHOULD BE | `oauth.rs`, `opener.rs` | — |
+| MAIL-081 | The redirect listener binds to 127.0.0.1 only, accepts exactly one valid callback (path `/`, matching `state`, Host `127.0.0.1:<port>`), answers anything else with an error page and goes on listening, gives up after a timeout and can be cancelled. A denied sign-in (`error=access_denied`) ends the flow with a clear message. | SHOULD BE | `oauth.rs` | — |
+| MAIL-082 | The code is exchanged, and the access token refreshed, over HTTPS through the system `curl` (the form on its standard input, no redirects followed, `-q`). Endpoints must be `https://`; `http://localhost` or `127.0.0.1` is allowed only for the Custom provider. Tokens are never logged and `Debug` output hides them. | SHOULD BE | `oauth.rs`, `cal_dav.rs` | — |
+| MAIL-083 | The refresh token is kept in the keyring (`MailSecret::RefreshToken`), the client secret too; the access token only in memory. The access token is renewed shortly before it expires and once more when the server rejects it (the connection is retried once). A refresh token that was revoked or expired gives the message "sign-in expired or was revoked, sign in again". | SHOULD BE | `oauth.rs`, `imap_sync.rs`, `secrets.rs` | — |
+| MAIL-084 | Sign-in is `XOAUTH2` or `OAUTHBEARER` (RFC 7628), chosen from `CAPABILITY` (`OAUTHBEARER` preferred). The server's error challenge is answered as the specification says and the final `NO` is reported with the server's reason. | SHOULD BE | `oauth.rs`, `imap_client.rs` | — |
+| MAIL-085 | Providers are the presets Google and Microsoft, or Custom (endpoints, scope typed by hand). Shale has no built-in client IDs: the client ID (and, for Google, the client secret) is a per-account setting. | SHOULD BE | `oauth.rs`, `config.rs` | — |
+| MAIL-086 | The account settings offer OAuth2: provider, client ID, client secret, "Sign in in the browser" (a job with a waiting note and a Cancel button; it shows who signed in when the token response says so). "Test connection" and every sync work with OAuth2. An expired or revoked sign-in says so and offers "Sign in again". | SHOULD BE | `mail_dialog.rs`, `mail_ui.rs` | — |
+
+## Local test environment (MAIL-09x)
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| MAIL-090 | `tests/mail-env/` starts Dovecot (TLS, seeded mailboxes, a password user and an OAuth2 user) and a local OAuth2 provider with `podman-compose` (or `docker compose`); the README says how to use it by hand. | SHOULD BE | `tests/mail-env/` | — |
+| MAIL-091 | `cargo test -- --ignored mail_env` syncs both accounts against it and checks folders, the 3-year window, Trash and Junk, a large mail, an HTML-only mail, that the server's flags are unchanged afterwards, the OAuth2 login and the error after a revoked token. It is skipped unless asked for. | SHOULD BE | `src/mail_env_tests.rs` | — |
+| MAIL-092 | The production code has no switch to skip or loosen the certificate check; the test environment's certificate is trusted only by test code (an extra root), or by the operating system's store when a person trusts it by hand. | SHOULD BE | `imap_client.rs` | — |
