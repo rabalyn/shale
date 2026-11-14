@@ -136,12 +136,10 @@ pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base
                 continue;
             }
         }
-        if rest.starts_with("**") || rest.starts_with("__") {
-            if st.bold || rest[2..].contains(&rest[..2]) {
-                st.bold = !st.bold;
-                i += 2;
-                continue;
-            }
+        if (rest.starts_with("**") || rest.starts_with("__")) && (st.bold || rest[2..].contains(&rest[..2])) {
+            st.bold = !st.bold;
+            i += 2;
+            continue;
         }
         if rest.starts_with("~~") && (st.strike && !strike_all || rest[2..].contains("~~")) {
             st.strike = !st.strike;

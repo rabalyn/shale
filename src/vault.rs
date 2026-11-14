@@ -67,6 +67,9 @@ pub fn rel_to_string(p: &Path) -> String {
     p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
 }
 
+/// A note with search hits: (note, [(line, byte offset of the match in the line, line text)]).
+pub type SearchHit = (PathBuf, Vec<(usize, usize, String)>);
+
 /// For one note, during a rename or move: its path after the change, its text, and each link
 /// that resolved with the file it must point to after the change.
 type RewritePlan = (PathBuf, String, Vec<(LinkSpan, PathBuf)>);
@@ -471,7 +474,7 @@ impl Vault {
 
     /// Full-text search, ignoring case: (note, [(line, byte offset of the match in that line,
     /// the line's text)]), at most 20 lines per note.
-    pub fn search(&self, query: &str) -> Vec<(PathBuf, Vec<(usize, usize, String)>)> {
+    pub fn search(&self, query: &str) -> Vec<SearchHit> {
         let q = query.trim().to_lowercase();
         if q.is_empty() {
             return vec![];

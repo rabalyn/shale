@@ -121,10 +121,8 @@ fn servers(profile: &Path) -> Vec<Server> {
             "hostname" => s.host = val,
             "userName" => s.user = val,
             "type" => s.kind = val,
-            "directory-rel" => {
-                if s.dir.as_os_str().is_empty() || !s.dir.is_dir() {
-                    s.dir = profile.join(val.trim_start_matches("[ProfD]"));
-                }
+            "directory-rel" if s.dir.as_os_str().is_empty() || !s.dir.is_dir() => {
+                s.dir = profile.join(val.trim_start_matches("[ProfD]"));
             }
             "directory" => s.dir = PathBuf::from(val),
             _ => {}
@@ -660,7 +658,7 @@ mod tests {
         let first = msg("Erste", "eins");
         let second = msg("Hörsaal B – Pläne", ">From the architects\n>From here on");
         std::fs::write(prof.join("Mail/Local Folders/Inbox.sbd/Projekte"), format!("{first}{second}")).unwrap();
-        let found = find_in(&[root.clone()], &[format!("mailbox-message://nobody@Local%20Folders/Inbox/Projekte#{}", first.len())], None).unwrap();
+        let found = find_in(std::slice::from_ref(&root), &[format!("mailbox-message://nobody@Local%20Folders/Inbox/Projekte#{}", first.len())], None).unwrap();
         assert_eq!(found.len(), 1);
         let text = String::from_utf8_lossy(&found[0]);
         assert!(text.starts_with("X-Mozilla-Status") && text.contains("Subject: Hörsaal B – Pläne") && text.contains("\nFrom the architects\nFrom here on") && !text.contains("eins"), "{text}");
@@ -669,26 +667,26 @@ mod tests {
         let b = msg("Something else", "no");
         let c = msg("Bau Hörsaal B: Stand 4", "older");
         std::fs::write(prof.join("ImapMail/imap.uni.example/INBOX.sbd/Bau"), format!("{c}{b}{a}")).unwrap();
-        let found = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Bau Hörsaal B_ Stand 4.eml")).unwrap();
+        let found = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Bau Hörsaal B_ Stand 4.eml")).unwrap();
         assert_eq!(found.len(), 2, "both messages with that subject");
         assert!(String::from_utf8_lossy(&found[1]).contains("newest"));
         // not there: says where it looked and what to turn on
-        let err = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Missing.eml")).unwrap_err();
+        let err = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Missing.eml")).unwrap_err();
         assert!(err.contains("Keep messages") && err.contains("Bau") && err.contains("no index file") && err.contains("Missing.eml"), "{err}");
         // with Thunderbird's index: found by its UID, whatever the file name says
         let off = (c.len() + b.len()) as u64;
         let msf = format!("// <!-- <mdb:mork:z v=\"1.4\"/> -->\n< <(a=c)> // (f=iso-8859-1)\n  (B8=subject)(B9=message-id)(BA=storeToken)>\n<(A0=whatever)(A1={}@x)>\n{{1:^80 {{(k^BE:c)(s=9)}}\n  [4D(^B8^A0)(^B9^A1)(^BA=12)]\n  [4E(^B8=Other)(^BA=0)]}}\n@$${{2{{@\n[-4D(^B8^A0)(^B9^A1)(^BA={off})]\n@$$}}2}}@\n", fold("=?UTF-8?Q?Bau_H=C3=B6rsaal_B=3A_Stand_4?=").len());
         std::fs::write(prof.join("ImapMail/imap.uni.example/INBOX.sbd/Bau.msf"), msf).unwrap();
-        let found = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Something.eml")).unwrap();
+        let found = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Something.eml")).unwrap();
         assert_eq!(found.len(), 1);
         assert!(String::from_utf8_lossy(&found[0]).contains("newest"), "the later row (position {off}) counts");
         // the position is out of date: found by its Message-ID
         let msf2 = std::fs::read_to_string(prof.join("ImapMail/imap.uni.example/INBOX.sbd/Bau.msf")).unwrap().replace(&format!("(^BA={off})"), "(^BA=3)");
         std::fs::write(prof.join("ImapMail/imap.uni.example/INBOX.sbd/Bau.msf"), msf2).unwrap();
-        let found = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], None).unwrap();
+        let found = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], None).unwrap();
         assert!(String::from_utf8_lossy(&found[0]).contains("newest"));
         // a message the index doesn't know
-        let err = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#79".to_string()], None).unwrap_err();
+        let err = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#79".to_string()], None).unwrap_err();
         assert!(err.contains("not in Thunderbird's index"), "{err}");
         let _ = std::fs::remove_dir_all(&root);
     }

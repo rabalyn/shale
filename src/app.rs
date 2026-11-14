@@ -228,6 +228,7 @@ pub struct ShaleApp {
     tag_root: Option<PathBuf>,
     tag_gen: u64,
     tag_at: Option<Instant>,
+    #[allow(clippy::type_complexity)]
     pending_drops: Vec<(std::sync::mpsc::Receiver<(Vec<crate::import::Item>, Vec<String>)>, Option<(PathBuf, Option<PathBuf>)>)>,
     pub scenes: SceneCache,
     pub modal: Option<Modal>,
@@ -659,10 +660,8 @@ impl ShaleApp {
         let Some(v) = self.vault.as_mut() else { return };
         let wait = Duration::from_millis(800);
         for (rel, doc) in self.notes.iter_mut() {
-            if doc.dirty && doc.last_edit.elapsed() > wait {
-                if v.write_note(rel, &doc.text).is_ok() {
-                    doc.dirty = false;
-                }
+            if doc.dirty && doc.last_edit.elapsed() > wait && v.write_note(rel, &doc.text).is_ok() {
+                doc.dirty = false;
             }
         }
         for (rel, d) in self.drawings.iter_mut() {
@@ -1192,7 +1191,7 @@ impl ShaleApp {
 impl ShaleApp {
     /// Testing aid (`--keys`): add the next scripted step to this frame's input.
     fn feed_script(&mut self, raw: &mut egui::RawInput) {
-        if self.script.is_empty() || self.frames < 30 || self.frames % 6 != 0 {
+        if self.script.is_empty() || self.frames < 30 || !self.frames.is_multiple_of(6) {
             return;
         }
         let Some(step) = self.script.pop_front() else { return };
@@ -1204,7 +1203,7 @@ impl ShaleApp {
                 match m {
                     "shift" => mods.shift = true,
                     "alt" => mods.alt = true,
-                    "ctrl" => mods = mods | Modifiers::COMMAND,
+                    "ctrl" => mods |= Modifiers::COMMAND,
                     _ => break,
                 }
                 k = rest;

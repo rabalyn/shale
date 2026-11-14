@@ -313,10 +313,8 @@ impl Vim {
         if !keep_col {
             self.want_col = None;
         }
-        if self.mode == Mode::Normal || self.visual() {
-            if new != pos {
-                self.cursor = if self.visual() { new.min(c.len().saturating_sub(1)) } else { clamp_normal(&c, new) };
-            }
+        if (self.mode == Mode::Normal || self.visual()) && new != pos {
+            self.cursor = if self.visual() { new.min(c.len().saturating_sub(1)) } else { clamp_normal(&c, new) };
         }
         fx.moved |= self.cursor != before;
     }
@@ -352,13 +350,11 @@ impl Vim {
                 self.cursor = s;
                 fx.changed = true;
             }
-            'x' => {
-                if pos < line_end(c, pos) {
-                    replace_chars(text, pos, pos + 1, "");
-                    let c2: Vec<char> = text.chars().collect();
-                    self.cursor = clamp_normal(&c2, pos);
-                    fx.changed = true;
-                }
+            'x' if pos < line_end(c, pos) => {
+                replace_chars(text, pos, pos + 1, "");
+                let c2: Vec<char> = text.chars().collect();
+                self.cursor = clamp_normal(&c2, pos);
+                fx.changed = true;
             }
             'v' | 'V' => {
                 self.mode = if ch == 'v' { Mode::Visual } else { Mode::VisualLine };
@@ -390,8 +386,8 @@ impl Vim {
                 if line {
                     if db < c.len() {
                         db += 1;
-                    } else if da > 0 {
-                        da -= 1;
+                    } else {
+                        da = da.saturating_sub(1);
                     }
                 }
                 let mut taken = char_range_text(text, a, b);
@@ -444,7 +440,7 @@ impl Vim {
     }
 
     /// Keys while `:` or `/` is being typed.
-    fn command_key(&mut self, k: VimKey, text: &mut String, fx: &mut Effects) {
+    fn command_key(&mut self, k: VimKey, text: &mut str, fx: &mut Effects) {
         let Some((kind, mut line)) = self.cmdline.take() else { return };
         match k {
             VimKey::Esc => {}

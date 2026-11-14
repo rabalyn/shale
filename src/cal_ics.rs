@@ -479,7 +479,7 @@ mod tests {
         assert_eq!(a.organizer, "Ada <ada@example.com>");
         assert_eq!(a.attendees, vec!["Bob B <bob@example.com>".to_string()]);
         // written back with the real addresses (CalDAV servers keep what we send)
-        let again = parse_ics(&to_ics("x", &[a.clone()]));
+        let again = parse_ics(&to_ics("x", std::slice::from_ref(a)));
         assert_eq!(again[0].organizer, "Ada <ada@example.com>");
         assert_eq!(again[0].attendees, a.attendees);
         let odd = Event { organizer: "Müller, Hans <h@x.de>".into(), attendees: vec!["solo@x.de".into(), "Nur Name".into()], ..a.clone() };
@@ -539,7 +539,7 @@ mod tests {
         assert_eq!(back[0].summary, ev[0].summary);
         assert_eq!(back[0].description, ev[0].description);
         assert_eq!(back[0].start, ev[0].start);
-        assert_eq!(back[1].all_day, true);
+        assert!(back[1].all_day);
         assert_eq!(back[1].end, ev[1].end);
         assert_eq!(back[2].rrule, ev[2].rrule);
         assert_eq!(occurrences(&back[2], 0, i64::MAX / 2).len(), 5);

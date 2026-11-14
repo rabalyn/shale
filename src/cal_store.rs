@@ -643,10 +643,10 @@ pub(crate) mod tests {
         // add and delete
         let e = Event { uid: "mine".into(), summary: "Dentist".into(), start: t::local_to_utc(today + 5, 8 * 3600), end: t::local_to_utc(today + 5, 9 * 3600), ..Default::default() };
         wait(&store.save_event(&src.id, e.clone(), None, None).unwrap()).unwrap();
-        store.after_write(&[src.id.clone()]);
+        store.after_write(std::slice::from_ref(&src.id));
         assert!(store.occurrences(today + 5, today + 5).iter().any(|o| store.event(o).unwrap().summary == "Dentist"));
         wait(&store.delete_event(&src.id, e, None).unwrap()).unwrap();
-        store.after_write(&[src.id.clone()]);
+        store.after_write(std::slice::from_ref(&src.id));
         assert!(!store.occurrences(today + 5, today + 5).iter().any(|o| store.event(o).unwrap().summary == "Dentist"));
         // disabled calendars are hidden
         let mut off = src.clone();
@@ -718,7 +718,7 @@ pub(crate) mod tests {
         // a local event
         let e = Event { uid: "u1".into(), summary: "Plan".into(), start: 1_800_000_000, end: 1_800_001_800, ..Default::default() };
         wait(&store.save_event(&local.id, e.clone(), None, None).unwrap()).unwrap();
-        store.after_write(&[local.id.clone()]);
+        store.after_write(std::slice::from_ref(&local.id));
         // move it to the read-only calendar: refused, and it is still in the local calendar
         let err = wait(&store.save_event("ro", e.clone(), Some((local.id.clone(), e.clone())), None).unwrap()).unwrap_err();
         assert!(err.contains("permission"), "{err}");

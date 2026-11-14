@@ -298,10 +298,10 @@ pub struct View {
     pub zoom: f32,
 }
 impl View {
-    pub fn to_screen(&self, p: Pos2) -> Pos2 {
+    pub fn to_screen(self, p: Pos2) -> Pos2 {
         self.origin + (p.to_vec2() + self.offset) * self.zoom
     }
-    pub fn to_world(&self, p: Pos2) -> Pos2 {
+    pub fn to_world(self, p: Pos2) -> Pos2 {
         ((p - self.origin) / self.zoom - self.offset).to_pos2()
     }
 }
