@@ -1,4 +1,4 @@
-# Spec: Vault, files, data on disk, settings (VAULT, DATA, CFG)
+# Spec: Vault, files, data on disk, settings, git sync (VAULT, DATA, CFG, SYNC)
 
 **IS NOW** = true of the code today (⚠ = known defect, described as it behaves) ·
 **SHOULD BE** = agreed target. Format: [ADR-0001](../decisions/0001-spec-driven-development.md).
@@ -56,3 +56,28 @@ of the rule.
 | CFG-003 | A settings file that fails to parse is replaced by defaults; the next save overwrites it (calendars lost). | IS NOW ⚠ | `config.rs:178-181` | untested |
 | CFG-004 | A broken settings file is kept as `config.json.broken-<date>` and the user is told; settings carry `"version"` and migrate explicitly with tests. | SHOULD BE | — | [ADR-0005](../decisions/0005-where-state-lives.md) |
 | CFG-005 | Per-vault state (people folder, last import folder, recent tags, open tabs) lives in `<vault>/.shale/`, not in the global config. Today it is global. | SHOULD BE | `config.rs:51, 64-69` | ADR-0005 |
+| CFG-006 | Vault settings (people folder, git sync settings) are in `<vault>/.shale/settings.json`; session state (open tabs, last import folder, recent tags) is in `<vault>/.shale/state.json`. Both carry `"version": N` and are migrated step by step on load, one tested function per step; both are written atomically. | SHOULD BE | — | [ADR-0005](../decisions/0005-where-state-lives.md) |
+| CFG-007 | A settings or state file written by a newer Shale (higher version) is used but never overwritten, and the user is told; fields this Shale does not know are written back unchanged. | SHOULD BE | — | ADR-0005, ADR-0003 |
+| CFG-008 | The first time a vault is opened after the upgrade, the per-vault fields of the old global config move into that vault's `.shale/` files (unless it already has them) and are removed from the global config. | SHOULD BE | — | ADR-0005 |
+
+## Git sync (SYNC)
+
+Decisions: [ADR-0008](../decisions/0008-git-sync.md).
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| SYNC-001 | git is run as the system `git` program with an argument list (never a shell), stdin closed, `GIT_TERMINAL_PROMPT=0`, and `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE` removed; the vault is always the repository touched. | SHOULD BE | — | — |
+| SYNC-002 | Sync is active when `<vault>/.git` exists and `sync.enabled` is on (default on); it runs when the vault opens, every `sync.interval_minutes` (default 5, at least 1) and on "Sync now". A repository in a parent folder is not used. | SHOULD BE | — | — |
+| SYNC-003 | Without git installed the settings say so, and nothing else changes. | SHOULD BE | — | — |
+| SYNC-004 | Entering a remote URL in the settings runs `git init` when needed and sets `origin`; only https/http/ssh/git/file URLs, scp-style `user@host:path` and absolute paths are accepted (no leading `-`, no whitespace or control characters, no `transport::` helpers). | SHOULD BE | — | — |
+| SYNC-005 | A sync refuses to start, and changes nothing, while a merge, rebase, cherry-pick or revert is in progress or HEAD is detached. | SHOULD BE | — | — |
+| SYNC-006 | A sync commits every change in the vault, `.shale/*` included and Shale's temporary files (`.shale-tmp-*`) excluded, with the message `<prefix>Sync from <host>: <n> file(s)<suffix>`; without a git identity it commits as `Shale <shale@localhost>`. | SHOULD BE | — | — |
+| SYNC-007 | With a remote, a sync fetches, then fast-forwards or merges (unrelated histories allowed), then pushes; a remote without the branch gets it with upstream set. | SHOULD BE | — | — |
+| SYNC-008 | A file changed on both sides keeps the remote version at its path and the local version as `Name (conflict YYYY-MM-DD HHMM).ext` next to it (`.excalidraw.md` kept whole, a taken name gets a number); both are committed and pushed; no file ever contains conflict markers. | SHOULD BE | — | — |
+| SYNC-009 | A file deleted on one side and changed on the other is kept with the changed content. | SHOULD BE | — | — |
+| SYNC-010 | A conflict in `.shale/state.json` keeps the local version and makes no copy. | SHOULD BE | — | — |
+| SYNC-011 | If resolving a merge fails, the merge is aborted and the tree is back at the local commit, which holds every local change. | SHOULD BE | — | — |
+| SYNC-012 | A sync never force-pushes; a rejected push leaves both histories intact and the next sync merges. | SHOULD BE | — | — |
+| SYNC-013 | Before a sync the app saves all buffers; it does not autosave while the sync changes files; afterwards open notes and drawings without edits are reloaded, and a buffer edited meanwhile is saved as a conflict copy, never over the synced file. | SHOULD BE | — | — |
+| SYNC-014 | Every sync result is shown: the last sync time or git's error in the settings, and a message when files came in or conflict copies were made. | SHOULD BE | — | — |
+| SYNC-015 | Settings: `sync.enabled`, `sync.interval_minutes`, `sync.commit_prefix`, `sync.commit_suffix` live in `.shale/settings.json` (synced); the remote URL is git's own `origin`. | SHOULD BE | — | — |
