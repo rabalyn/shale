@@ -17,6 +17,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0007](0007-mail-client.md) | A built-in mail view (IMAP), and later sending and signing | Proposed |
 | [0008](0008-git-sync.md) | Integrated git sync | Proposed |
 | [0009](0009-mail-server-writes.md) | Mail phase 2: writing to the server (flags, move, delete) | Proposed |
+| [0010](0010-sending-mail.md) | Mail phase 3: writing and sending mail (SMTP) | Proposed |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.
