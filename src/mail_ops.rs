@@ -141,6 +141,10 @@ pub fn enqueue(store: &MailStore, msgs: &[MessageSummary], action: &Action, now:
             out.notes.push(format!("“{label}” is already gone from the server"));
             continue;
         }
+        if cur.pending.as_deref() == Some("append") {
+            out.notes.push(format!("“{label}” is still being saved to the server"));
+            continue;
+        }
         if cur.pending.as_deref().is_some_and(|k| k != "flags") {
             out.notes.push(format!("“{label}” is already waiting to be moved"));
             continue;
@@ -397,6 +401,7 @@ fn exec_group(store: &MailStore, client: &mut Client, group: &[PendingRow], all:
         "flags" => exec_flags(client, &folder, group, &uids, all),
         "move" | "delete" => exec_move(store, client, &folder, group, &uids),
         "expunge" => exec_expunge(store, client, &folder, group, &uids),
+        "append" => exec_append(store, client, &folder, group),
         other => Err(Fail::Refused(format!("an action of kind {other:?} is not known to this version"))),
     }
 }
@@ -675,8 +680,111 @@ fn exec_expunge(store: &MailStore, client: &mut Client, folder: &FolderRow, grou
     Ok(d)
 }
 
+// ---------------------------------------------------------------- the copy of a sent mail (ADR-0010)
+
+/// UIDs from here up are the local copies of sent mail that the server has not got yet. No server numbers
+/// messages that high, so they never meet a real UID; the sync leaves them alone while the append waits.
+pub const SYNTHETIC_UID_BASE: u32 = 4_000_000_000;
+
+/// The Sent folder of an account: the special-use `\Sent` one, else the usual names (MAIL-141).
+pub fn sent_folder(folders: &[FolderRow]) -> Option<&FolderRow> {
+    let special = folders.iter().find(|f| f.special_use.as_deref().unwrap_or("").to_ascii_lowercase().split(' ').any(|a| a == "\\sent"));
+    special.or_else(|| {
+        folders.iter().find(|f| {
+            let shown = crate::imap_client::decode_mutf7(&f.name);
+            let last = shown.rsplit(['/', '.']).next().unwrap_or(&shown).trim().to_lowercase();
+            matches!(last.as_str(), "sent" | "sent items" | "sent messages" | "sent mail" | "gesendet" | "gesendete objekte" | "gesendete elemente" | "gesendete nachrichten")
+        })
+    })
+}
+
+/// A mail has been sent: store its exact bytes as a message of the Sent folder (it shows in the list at once)
+/// and record the append for the server, in one transaction (MAIL-141). Returns the folder's name, or None
+/// when the account has no Sent folder that Shale knows. A copy that is recorded already (same Message-ID in that
+/// folder) is not recorded twice.
+pub fn record_sent_copy(store: &MailStore, account: &str, raw: &[u8], now: i64) -> Result<Option<String>, String> {
+    let reader = store.reader().map_err(err)?;
+    let folders = reader.folders(Some(account)).map_err(err)?;
+    let Some(sent) = sent_folder(&folders) else { return Ok(None) };
+    let mid = crate::mail_store::index_fields(raw, Some(now)).0.message_id;
+    if !mid.is_empty() && mail_db::has_message_id(reader.conn(), sent.id, &mid).map_err(err)? {
+        return Ok(Some(sent.name.clone()));
+    }
+    let uv = sent.uidvalidity.unwrap_or(0);
+    let uid = mail_db::max_uid_from(reader.conn(), sent.id, uv, SYNTHETIC_UID_BASE).map_err(err)?.map_or(SYNTHETIC_UID_BASE, |m| m + 1);
+    let nm = store.save_message(sent, uv, uid, raw, "\\Seen", Some(now)).map_err(err)?;
+    let row = PendingRow {
+        id: 0,
+        account: account.into(),
+        kind: "append".into(),
+        folder: sent.id,
+        uidvalidity: uv,
+        uid,
+        target: Some(sent.name.clone()),
+        flags_add: "\\Seen".into(),
+        flags_remove: String::new(),
+        prev_flags: String::new(),
+        created: now,
+        attempts: 0,
+        last_error: None,
+    };
+    store.commit(vec![Op::message(nm), Op::PendingAdd(Box::new(row))]).map_err(err)?;
+    Ok(Some(sent.name.clone()))
+}
+
+/// Append the recorded copies to the server. A copy that the server has (by Message-ID) is not appended again,
+/// so a connection that broke after the server stored it never makes a second copy. A send is never repeated
+/// because of anything here: this only copies.
+fn exec_append(store: &MailStore, client: &mut Client, folder: &FolderRow, group: &[PendingRow]) -> Result<Done, Fail> {
+    let reader = store.reader().map_err(|e| Fail::Retry(err(e)))?;
+    let mut d = Done::default();
+    for p in group {
+        let target = p.target.clone().unwrap_or_else(|| folder.name.clone());
+        let label = crate::mail_ui::folder_label_of(&target);
+        let Some(msg) = reader.message_at(p.folder, p.uidvalidity, p.uid).map_err(|e| Fail::Refused(err(e)))? else {
+            d.ops.push(Op::PendingDone { id: p.id });
+            continue; // the local copy is gone: nothing to append
+        };
+        let raw = store.read_raw(&msg).map_err(|e| Fail::Refused(format!("The mail was sent, but its local copy could not be read for the copy to “{label}”: {e}")))?;
+        let sel = client.examine(&target).map_err(classify)?;
+        let find = |client: &mut Client| -> Result<Option<u32>, Fail> {
+            if msg.message_id.is_empty() {
+                return Ok(None);
+            }
+            Ok(client.uid_search_message_id(&msg.message_id).map_err(classify)?.into_iter().max())
+        };
+        let (uv, uid) = match find(client)? {
+            Some(u) => (sel.uidvalidity, Some(u)),
+            None => {
+                let out = client.write(&WriteCmd::Append { folder: target.clone(), flags: flags_from(&p.flags_add), bytes: raw.clone() }).map_err(|e| match classify(e) {
+                    Fail::Refused(t) => Fail::Refused(format!("The mail was sent, but the copy to “{label}” could not be saved there: {t}")),
+                    retry => retry,
+                })?;
+                match out.appenduid {
+                    Some((v, u)) => (v, Some(u)),
+                    None => (sel.uidvalidity, find(client)?),
+                }
+            }
+        };
+        // the synthetic row goes; the server's own row replaces it if its number is known and fits the folder
+        if !msg.path.is_empty() {
+            d.archive.push(msg.path.clone());
+        }
+        d.ops.push(Op::Remove { folder: p.folder, uidvalidity: p.uidvalidity, uid: p.uid });
+        if let Some(u) = uid {
+            if folder.uidvalidity == Some(uv) && reader.message_at(p.folder, uv, u).map_err(|e| Fail::Refused(err(e)))?.is_none() {
+                let nm = store.save_message(folder, uv, u, &raw, "\\Seen", msg.date).map_err(|e| Fail::Retry(err(e)))?;
+                d.ops.push(Op::message(nm));
+            }
+        }
+        d.ops.push(Op::PendingDone { id: p.id });
+        d.done += 1;
+    }
+    Ok(d)
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::config::MailSecurity;
     use crate::imap_client::{ConnectSettings, PlainAuth};

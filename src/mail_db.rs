@@ -508,6 +508,16 @@ pub fn pending_uids(c: &Connection, folder: i64, uidvalidity: u32) -> Result<Has
     Ok(rows)
 }
 
+/// Is there a message with this Message-ID in the folder (any UIDVALIDITY)?
+pub fn has_message_id(c: &Connection, folder: i64, message_id: &str) -> Result<bool> {
+    Ok(c.query_row("SELECT EXISTS (SELECT 1 FROM messages WHERE folder = ?1 AND message_id = ?2)", params![folder, message_id], |r| r.get(0))?)
+}
+
+/// The highest UID at or above `from` in a folder's UIDVALIDITY, if there is one.
+pub fn max_uid_from(c: &Connection, folder: i64, uidvalidity: u32, from: u32) -> Result<Option<u32>> {
+    Ok(c.query_row("SELECT MAX(uid) FROM messages WHERE folder = ?1 AND uidvalidity = ?2 AND uid >= ?3", params![folder, uidvalidity, from], |r| r.get::<_, Option<u32>>(0))?)
+}
+
 /// One message by its row id (any folder, any UIDVALIDITY).
 pub fn message_by_id(c: &Connection, id: i64) -> Result<Option<MessageSummary>> {
     Ok(c.query_row(&format!("SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder WHERE m.id = ?1"), [id], summary_from).optional()?)

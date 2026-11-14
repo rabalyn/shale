@@ -147,7 +147,14 @@ impl Connector for ImapConnector {
 /// (OAuth2 accounts only).
 pub fn connector_for_account(account: &MailAccount, limits: Limits, typed_secret: Option<String>) -> Result<ImapConnector, String> {
     let settings = ConnectSettings { host: account.host.clone(), port: account.port, security: account.security, limits };
-    let auth: Arc<dyn AuthFactory> = match account.auth {
+    let auth = auth_factory(account, typed_secret, &account.host, account.port)?;
+    Ok(ImapConnector { settings, auth })
+}
+
+/// How an account signs in, for the server at `host:port` (IMAP, or SMTP for sending: the same password,
+/// or the same OAuth2 sign-in, whichever server it is used with).
+pub fn auth_factory(account: &MailAccount, typed_secret: Option<String>, host: &str, port: u16) -> Result<Arc<dyn AuthFactory>, String> {
+    Ok(match account.auth {
         MailAuth::Password => {
             let password = crate::secrets::mail_secret(&account.id, crate::secrets::MailSecret::Password).ok_or("no password for this account in the keyring")?;
             Arc::new(PasswordAuth { user: account.user.clone(), password })
@@ -156,10 +163,9 @@ pub fn connector_for_account(account: &MailAccount, limits: Limits, typed_secret
             let secret = typed_secret.filter(|s| !s.is_empty()).or_else(|| crate::secrets::mail_secret(&account.id, crate::secrets::MailSecret::ClientSecret));
             let cfg = crate::oauth::OAuthConfig::for_account(account, secret).map_err(|e| e.to_string())?;
             let source = crate::oauth::shared_source(&account.id, cfg);
-            Arc::new(crate::oauth::OAuthFactory { user: account.user.clone(), host: account.host.clone(), port: account.port, source })
+            Arc::new(crate::oauth::OAuthFactory { user: account.user.clone(), host: host.to_string(), port, source })
         }
-    };
-    Ok(ImapConnector { settings, auth })
+    })
 }
 
 // ---------------------------------------------------------------- which folders

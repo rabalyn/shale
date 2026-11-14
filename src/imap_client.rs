@@ -260,7 +260,17 @@ pub enum WriteCmd {
     ExpungeUids {
         uids: Vec<u32>,
     },
+    /// `APPEND`: put a message into a folder, such as the copy of a sent mail into Sent (ADR-0010,
+    /// MAIL-140). Needs no `SELECT`. The literal is sent only after the server's `+`.
+    Append {
+        folder: String,
+        flags: Vec<MailFlag>,
+        bytes: Vec<u8>,
+    },
 }
+
+/// The biggest message `APPEND` will send (a literal this size is announced before it is sent).
+pub const MAX_APPEND: usize = 100 << 20;
 
 fn checked_set(uids: &[u32]) -> Result<String> {
     if uids.is_empty() {
@@ -290,6 +300,16 @@ impl WriteCmd {
             WriteCmd::Copy { uids, to } => format!("UID COPY {} {}", checked_set(uids)?, name(to)?),
             WriteCmd::MarkDeleted { uids, set } => format!("UID STORE {} {}FLAGS (\\Deleted)", checked_set(uids)?, if *set { '+' } else { '-' }),
             WriteCmd::ExpungeUids { uids } => format!("UID EXPUNGE {}", checked_set(uids)?),
+            WriteCmd::Append { folder, flags, bytes } => {
+                if bytes.is_empty() || bytes.len() > MAX_APPEND {
+                    return Err(ImapError::Refused(format!("a message of {} bytes cannot be appended", bytes.len())));
+                }
+                if bytes.contains(&0) {
+                    return Err(ImapError::Refused("a NUL byte in a message to append".into()));
+                }
+                let fl = if flags.is_empty() { String::new() } else { format!(" ({})", flags.iter().map(|f| f.as_str()).collect::<Vec<_>>().join(" ")) };
+                format!("APPEND {}{fl} {{{}}}", name(folder)?, bytes.len())
+            }
         })
     }
 }
@@ -339,6 +359,27 @@ pub fn check_write(cmd: &str) -> Result<()> {
             _ => refuse("a malformed SELECT"),
         };
     }
+    if let Some(rest) = cmd.strip_prefix("APPEND ") {
+        // APPEND "folder" [(\Seen \Flagged)] {n}: a quoted folder, only these flags, a synchronising literal of a sane size
+        let Some((n, tail)) = quoted_prefix(rest) else { return refuse("a malformed APPEND") };
+        let tail = tail.strip_prefix(' ').unwrap_or("!");
+        let lit = match tail.strip_prefix('(') {
+            Some(t) => {
+                let Some((flags, after)) = t.split_once(") ") else { return refuse("a malformed APPEND") };
+                let list: Vec<&str> = flags.split(' ').collect();
+                if list.is_empty() || !list.iter().all(|f| matches!(*f, "\\Seen" | "\\Flagged")) {
+                    return refuse("APPEND flags other than read and flagged");
+                }
+                after
+            }
+            None => tail,
+        };
+        let size = lit.strip_prefix('{').and_then(|l| l.strip_suffix('}'));
+        return match size {
+            Some(d) if !n.is_empty() && !d.is_empty() && d.len() <= 9 && d.bytes().all(|b| b.is_ascii_digit()) && d.parse::<usize>().is_ok_and(|v| v > 0 && v <= MAX_APPEND) => Ok(()),
+            _ => refuse("a malformed or too big APPEND literal"),
+        };
+    }
     let Some(rest) = cmd.strip_prefix("UID ") else { return refuse("not a command the write path sends") };
     if let Some(args) = rest.strip_prefix("EXPUNGE ") {
         return if plain_uid_set(args) { Ok(()) } else { refuse("UID EXPUNGE needs a plain set of UIDs") };
@@ -380,6 +421,8 @@ pub struct WriteOutcome {
     pub modified: Vec<u32>,
     /// The flags the server reported (`STORE` answers).
     pub flags: Vec<Fetched>,
+    /// `APPENDUID` (`Append`): the folder's UIDVALIDITY and the UID the message got.
+    pub appenduid: Option<(u32, u32)>,
 }
 
 /// `[COPYUID <uidvalidity of the target> <source uids> <new uids>]`, the two lists in the same order.
@@ -1431,6 +1474,9 @@ impl Client {
     /// without `MOVE`; and by [`check_write`]: anything but the exact shapes of [`WriteCmd`].
     pub fn write(&mut self, cmd: &WriteCmd) -> Result<WriteOutcome> {
         let text = cmd.to_command()?;
+        if let WriteCmd::Append { bytes, .. } = cmd {
+            return self.append(&text, bytes);
+        }
         match cmd {
             WriteCmd::Select { .. } => {}
             _ if self.writable.is_none() => return Err(ImapError::Refused("no folder is open for writing".into())),
@@ -1474,6 +1520,49 @@ impl Client {
             out.selected = Some(sel);
         }
         Ok(out)
+    }
+
+    /// `APPEND`: the command with its literal size, then (after the server's `+`) the bytes.
+    fn append(&mut self, text: &str, bytes: &[u8]) -> Result<WriteOutcome> {
+        let tag = self.next_tag();
+        self.send(&tag, text, Gate::Write)?;
+        let tagged = |r: &RawResponse| r.text.strip_prefix(tag.as_bytes()).and_then(|x| x.strip_prefix(b" ")).map(|rest| String::from_utf8_lossy(rest).into_owned());
+        loop {
+            let r = self.wire.read_response(self.limits.max_small_literal)?;
+            if r.text.starts_with(b"+") {
+                break;
+            }
+            if let Some(t) = tagged(&r) {
+                // refused before the literal (too big, no such folder, quota ...): nothing was sent
+                return Err(ImapError::Server(t));
+            }
+            if r.text.starts_with(b"* BYE") {
+                return Err(ImapError::Connection("the server ended the connection".into()));
+            }
+        }
+        let mut data = Vec::with_capacity(bytes.len() + 2);
+        data.extend_from_slice(bytes);
+        data.extend_from_slice(b"\r\n");
+        self.wire.io.write_all(&data).and_then(|_| self.wire.io.flush()).map_err(io_error)?;
+        loop {
+            let r = self.wire.read_response(self.limits.max_small_literal)?;
+            if let Some(t) = tagged(&r) {
+                if !t.get(..2).is_some_and(|w| w.eq_ignore_ascii_case("OK")) {
+                    return Err(ImapError::Server(t));
+                }
+                let mut out = WriteOutcome::default();
+                if let Some(arg) = status_code(&t, "APPENDUID") {
+                    let mut p = arg.split_whitespace();
+                    if let (Some(v), Some(u)) = (p.next().and_then(|x| x.parse().ok()), p.next().and_then(|x| x.parse().ok())) {
+                        out.appenduid = Some((v, u));
+                    }
+                }
+                return Ok(out);
+            }
+            if r.text.starts_with(b"* BYE") {
+                return Err(ImapError::Connection("the server ended the connection".into()));
+            }
+        }
     }
 
     pub fn can_move(&self) -> bool {

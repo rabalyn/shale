@@ -5,7 +5,8 @@
 //! with switches for a server without `MOVE` or without `UIDPLUS`. It records every command it
 //! receives, so tests can check that the client never sends anything that changes a mailbox
 //! where it must not. A plain `EXPUNGE` is answered `NO` (and shows in the log: it must never come).
-//! Other things it should never see (`APPEND`, `DELETE` …) are answered `NO` as well.
+//! `APPEND` (phase 3, the Sent copy) stores the message and answers with `APPENDUID`. Other things it
+//! should never see (`DELETE` …) are answered `NO`.
 
 use crate::cal_time::{civil_from_days, days_from_civil};
 use crate::config::MailSecurity;
@@ -75,6 +76,12 @@ pub struct FakeState {
     pub hang_up_on: Option<String>,
     /// After a `UID COPY` or `UID MOVE` the server forgets to say `COPYUID` (a server without UIDPLUS does this anyway).
     pub no_copyuid: bool,
+    /// Every `APPEND` that was accepted: (folder, bytes).
+    pub appended: Vec<(String, Vec<u8>)>,
+    /// After storing an appended message the connection is closed without the answer (the message *is* there).
+    pub hang_up_after_append: bool,
+    /// The server does not say `APPENDUID` (also the case without `UIDPLUS`).
+    pub no_appenduid: bool,
 }
 
 pub struct FakeServer {
@@ -218,6 +225,9 @@ impl FakeServer {
             fail_next_write: None,
             hang_up_on: None,
             no_copyuid: false,
+            appended: vec![],
+            hang_up_after_append: false,
+            no_appenduid: false,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let (st, sp) = (state.clone(), stop.clone());
@@ -556,7 +566,46 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                 }
             }
             // everything that could change a mailbox: the client must never get here
-            "STORE" | "EXPUNGE" | "COPY" | "MOVE" | "APPEND" | "DELETE" | "CREATE" | "RENAME" | "CLOSE" => write!(out, "{tag} NO the pretend server is read-only\r\n")?,
+            "APPEND" => {
+                // APPEND "folder" [(flags)] {n}: answer `+`, take the n bytes, store, answer with APPENDUID
+                let args = rest.split_once(' ').map(|x| x.1).unwrap_or("");
+                let name = unquote(args.split(" (").next().unwrap_or("").split(" {").next().unwrap_or("").trim());
+                let flags: Vec<String> = args.split_once('(').and_then(|x| x.1.split_once(')')).map(|x| x.0.split_whitespace().map(String::from).collect()).unwrap_or_default();
+                let n: usize = args.rsplit_once('{').and_then(|x| x.1.trim_end_matches('}').trim_end_matches('+').parse().ok()).unwrap_or(0);
+                {
+                    let mut g = st.lock().unwrap();
+                    if let Some(why) = g.fail_next_write.take() {
+                        write!(r.get_mut(), "{tag} NO {why}\r\n")?;
+                        continue;
+                    }
+                    if !g.folders.iter().any(|f| f.name == name) {
+                        write!(r.get_mut(), "{tag} NO [TRYCREATE] no such folder\r\n")?;
+                        continue;
+                    }
+                }
+                write!(r.get_mut(), "+ Ready for literal data\r\n")?;
+                r.get_mut().flush()?;
+                let mut buf = vec![0u8; n];
+                r.read_exact(&mut buf)?;
+                let mut rest_of_line = String::new();
+                r.read_line(&mut rest_of_line)?;
+                let (answer, hang) = {
+                    let mut g = st.lock().unwrap();
+                    let uv = g.folders.iter().find(|f| f.name == name).map(|f| f.uidvalidity).unwrap_or(0);
+                    let uid = g.add_message(&name, buf.clone(), 1_794_657_600);
+                    if !flags.is_empty() {
+                        let fl: Vec<&str> = flags.iter().map(String::as_str).collect();
+                        g.set_flags(&name, uid, &fl);
+                    }
+                    g.appended.push((name.clone(), buf));
+                    (if g.uidplus && !g.no_appenduid { format!("{tag} OK [APPENDUID {uv} {uid}] append done\r\n") } else { format!("{tag} OK append done\r\n") }, g.hang_up_after_append)
+                };
+                if hang {
+                    return Ok(Next::Done);
+                }
+                write!(r.get_mut(), "{answer}")?;
+            }
+            "STORE" | "EXPUNGE" | "COPY" | "MOVE" | "DELETE" | "CREATE" | "RENAME" | "CLOSE" => write!(out, "{tag} NO the pretend server is read-only\r\n")?,
             _ => write!(out, "{tag} BAD unknown command\r\n")?,
         }
         r.get_mut().flush()?;
@@ -1105,6 +1154,9 @@ mod tests {
             (WriteCmd::MarkDeleted { uids: vec![4], set: true }, "UID STORE 4 +FLAGS (\\Deleted)"),
             (WriteCmd::MarkDeleted { uids: vec![4], set: false }, "UID STORE 4 -FLAGS (\\Deleted)"),
             (WriteCmd::ExpungeUids { uids: vec![4, 5] }, "UID EXPUNGE 4:5"),
+            (WriteCmd::Append { folder: "Sent".into(), flags: vec![MailFlag::Seen], bytes: b"Subject: x\r\n\r\nhi\r\n".to_vec() }, "APPEND \"Sent\" (\\Seen) {18}"),
+            (WriteCmd::Append { folder: "Sent Items".into(), flags: vec![], bytes: vec![b'x'; 7] }, "APPEND \"Sent Items\" {7}"),
+            (WriteCmd::Append { folder: "a\"b".into(), flags: vec![MailFlag::Seen, MailFlag::Flagged], bytes: vec![b'x'; 1] }, "APPEND \"a\\\"b\" (\\Seen \\Flagged) {1}"),
         ];
         for (c, text) in cmds {
             let built = c.to_command().unwrap();
@@ -1119,6 +1171,11 @@ mod tests {
             WriteCmd::Select { folder: "a\r\nb".into() },
             WriteCmd::StoreFlags { uids: vec![1], add: true, flags: vec![], unchanged_since: None },
             WriteCmd::StoreFlags { uids: vec![], add: true, flags: vec![MailFlag::Seen], unchanged_since: None },
+            WriteCmd::Append { folder: "Sent".into(), flags: vec![], bytes: vec![] },
+            WriteCmd::Append { folder: "Sent".into(), flags: vec![], bytes: b"a\0b".to_vec() },
+            WriteCmd::Append { folder: String::new(), flags: vec![], bytes: b"x".to_vec() },
+            WriteCmd::Append { folder: "a\nb".into(), flags: vec![], bytes: b"x".to_vec() },
+            WriteCmd::Append { folder: "Sent".into(), flags: vec![], bytes: vec![b'x'; crate::imap_client::MAX_APPEND + 1] },
         ] {
             assert!(matches!(bad.to_command(), Err(ImapError::Refused(_))), "{bad:?}");
         }
@@ -1149,7 +1206,19 @@ mod tests {
             "SELECT \"INBOX\" extra",
             "EXAMINE \"INBOX\"",
             "DELETE \"INBOX\"",
-            "APPEND \"INBOX\" {5}",
+            "APPEND \"INBOX\" {5+}",
+            "APPEND INBOX {5}",
+            "APPEND \"INBOX\" (\\Deleted) {5}",
+            "APPEND \"INBOX\" (\\Seen \\Draft) {5}",
+            "APPEND \"INBOX\" () {5}",
+            "APPEND \"INBOX\" {0}",
+            "APPEND \"INBOX\" {104857601}",
+            "APPEND \"INBOX\" {1234567890}",
+            "APPEND \"INBOX\" {5}\r\nDELETE \"INBOX\"",
+            "APPEND \"INBOX\" \"14-Nov-2026 12:00:00 +0000\" {5}",
+            "APPEND \"\" {5}",
+            "APPEND \"INBOX\"",
+            "APPEND \"INBOX\" {5} extra",
             "CLOSE",
             "UID FETCH 1 (BODY[])",
             "",
@@ -1176,14 +1245,15 @@ mod tests {
         assert!(all.len() > 20);
         for p in all {
             let src = std::fs::read_to_string(&p).unwrap();
-            let code = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+            let code = src.split("#[cfg(test)]\nmod tests").next().unwrap().split("#[cfg(test)]\npub(crate) mod tests").next().unwrap();
             let name = p.file_name().unwrap().to_string_lossy().to_string();
             if name.ends_with("_tests.rs") {
                 continue; // test-only files (the pretend server answers these commands)
             }
             if name == "imap_client.rs" {
                 // inside the client: the write gate is passed in exactly one place
-                assert_eq!(code.matches("Gate::Write").count(), 2, "Gate::Write: the check in `send` and the one call in `write`");
+                assert_eq!(code.matches("Gate::Write").count(), 3, "Gate::Write: the check in `send`, the call in `write` and the one in `append` (called only from `write`)");
+                assert_eq!(code.matches("self.append(").count(), 1, "`append` is reached from `write` only");
                 assert_eq!(code.matches("fn run_gated").count(), 1);
                 assert!(!code.contains("\"EXPUNGE\"") && !code.contains("format!(\"EXPUNGE"), "plain EXPUNGE is not a thing here");
                 continue;
@@ -1310,5 +1380,50 @@ mod tests {
         assert!(matches!(err, ImapError::Connection(_)), "{err}");
         assert_eq!(server.state().messages("INBOX").len(), 4);
         assert_eq!(server.state().messages("Trash").len(), 0);
+    }
+
+    // spec: MAIL-140
+    #[test]
+    fn append_needs_no_select_sends_the_literal_after_the_plus_and_says_the_new_uid() {
+        let server = seeded_for_writes(MailSecurity::ImplicitTls);
+        server.state().add_folder("Sent", &["\\Sent"]);
+        let mut c = connect(&server).unwrap();
+        let mail = b"From: ada@example.com\r\nSubject: Hello\r\nMessage-ID: <a@x>\r\n\r\nBody with a literal } and {5} in it\r\n".to_vec();
+        let out = c.write(&WriteCmd::Append { folder: "Sent".into(), flags: vec![MailFlag::Seen], bytes: mail.clone() }).unwrap();
+        assert_eq!(out.appenduid, Some((1000, 1)));
+        let on = server.state().messages("Sent");
+        assert_eq!(on.len(), 1);
+        assert_eq!((on[0].1.clone(), on[0].2.clone()), (vec!["\\Seen".to_string()], mail.clone()), "the exact bytes, flagged read");
+        let verbs = server.state().verbs();
+        assert!(verbs.iter().any(|v| v == &format!("APPEND \"Sent\" (\\Seen) {{{}}}", mail.len())), "{verbs:?}");
+        assert!(!verbs.iter().any(|v| v.starts_with("SELECT")), "no folder is opened for an append: {verbs:?}");
+        // a second append works on the same connection, and without UIDPLUS there is no APPENDUID
+        server.state().no_appenduid = true;
+        let out = c.write(&WriteCmd::Append { folder: "Sent".into(), flags: vec![], bytes: mail }).unwrap();
+        assert_eq!(out.appenduid, None);
+        assert_eq!(server.state().messages("Sent").len(), 2);
+        assert_eq!(server.state().appended.len(), 2);
+    }
+
+    // spec: MAIL-140
+    #[test]
+    fn an_append_the_server_refuses_before_the_literal_sends_nothing_and_a_hang_up_is_a_connection_error() {
+        let server = seeded_for_writes(MailSecurity::ImplicitTls);
+        server.state().add_folder("Sent", &["\\Sent"]);
+        let mut c = connect(&server).unwrap();
+        let w = |c: &mut Client, f: &str| c.write(&WriteCmd::Append { folder: f.into(), flags: vec![MailFlag::Seen], bytes: b"Subject: x\r\n\r\nhi\r\n".to_vec() });
+        server.state().fail_next_write = Some("[OVERQUOTA] full".into());
+        let e = w(&mut c, "Sent").err().unwrap();
+        assert!(matches!(&e, ImapError::Server(t) if t.contains("OVERQUOTA")), "{e}");
+        let e = w(&mut c, "Nowhere").err().unwrap();
+        assert!(matches!(&e, ImapError::Server(t) if t.contains("TRYCREATE")), "{e}");
+        assert!(server.state().appended.is_empty());
+        // the connection is still in step: the next append works
+        w(&mut c, "Sent").unwrap();
+        // the server stores the message and dies before the answer: an error for the client, the message is there
+        server.state().hang_up_after_append = true;
+        let e = w(&mut c, "Sent").err().unwrap();
+        assert!(matches!(e, ImapError::Connection(_)), "{e}");
+        assert_eq!(server.state().messages("Sent").len(), 2);
     }
 }

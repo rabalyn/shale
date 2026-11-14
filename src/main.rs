@@ -40,6 +40,8 @@ mod mail_dialog;
 #[cfg(test)]
 mod mail_env_tests;
 mod mail_ops;
+#[allow(dead_code)] // used by the mail view in a later commit of phase 3
+mod mail_send;
 mod mail_store;
 mod mail_ui;
 #[cfg(test)]
