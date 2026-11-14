@@ -41,3 +41,8 @@ Because of this:
 - Writing into `.shale/` changes the vault folder. Users who keep vaults in git may want
   `.shale/state.json` in `.gitignore`; FEATURES must say so.
 - **Open**: should the media folder name (`z_media`) become a setting at all? (OPEN-004)
+
+## Decisions
+
+- settings for the vault should stay in the vault, so that we can achieve same behaviour of the vault on every machine.
+- I say that it needs to be part of a git-sync feature, to add the <vault>/.shale/* files with a sync. we will add a git sync later, I want that anyway. please keep this behaviour for later use - shale has integrated git sync. you need git setup on your OS to use, you can add a git repo url via the shale GUI or simply git init in the folder and our git sync will auto sync changes. the used commit messages will be configurable in the settings to get a defined prefix and/or suffix. git sync intervall is configurable.

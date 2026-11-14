@@ -63,3 +63,9 @@ note outside the vault. Typing `../../x` or `/tmp/x` as the new name moves it th
 ## Open
 
 - Should Shale offer "fix this link" for red path links whose name exists elsewhere? (OPEN-003)
+
+## Decisions
+
+- implement proposed Decisions. I agree to these changes, they are sensible.
+- I would say it would be best to fix links as soon as possible. best case the update is automatic possible and does not need user interaction at all, right?
+  - fix this link should rise where no auto-fix is possible
