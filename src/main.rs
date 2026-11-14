@@ -4,7 +4,7 @@
 //!   shale                       open the last vault (or the start screen)
 //!   shale --vault <folder>      open a specific folder as vault
 //!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
-//!   shale --screenshot out.png --view tasks|graph|drawing|reading   (same, other view)
+//!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
 
 mod app;
 mod cal_dav;
@@ -33,6 +33,7 @@ mod layout;
 mod lists;
 mod mail;
 mod mail_db;
+mod mail_demo;
 mod mail_dialog;
 mod mail_store;
 mod mail_ui;

@@ -112,6 +112,49 @@ built-in demo vault (`shale --screenshot out.png`).
 
 ![Calendar in the sidebar](screenshots/calendar-sidebar.png)
 
+## Mail (read-only)
+
+![The mail view](screenshots/mail-view.png)
+
+- The **Mail** button in the ribbon (or Ctrl+Shift+M) opens a three-pane view: accounts and
+  folders with their unread counts, the list of messages (newest first) and the message itself
+  as plain text. Shale reads your mail over IMAP and keeps a local copy next to the other
+  program data (`~/.local/share/shale/mail`), so it works offline and search is instant.
+- **It only reads.** Shale never changes anything on the server, not even the "read" mark: it
+  does not delete, move, flag or send. Passwords are checked over a TLS connection with the
+  system's certificate store; there is no unencrypted option.
+- **No HTML, no tracking.** The message text comes from the plain text part, or from the HTML
+  turned into text. Nothing is rendered, no pictures are fetched, no scripts run. An attachment
+  is opened from a private temporary copy through your default program (never a program or
+  script), or saved into the vault's media folder.
+- **The local copy is not encrypted** (like Thunderbird's). Use full-disk encryption.
+
+![Mail accounts](screenshots/mail-accounts.png)
+
+- **Accounts…** adds an account: server, port (993 with TLS, 143 with STARTTLS), user name and
+  password. The password goes into the system keyring. Without a keyring Shale says so and asks
+  again each time it starts, keeping it in memory only; it is never written to the settings
+  file. OAuth2 sign-in (Google, Microsoft) comes in a later step. **Test connection** checks the
+  login and lists the folders.
+- The first sync fetches the mail of the last three years, newest first, several folders at once,
+  and can be stopped and resumed. **Sync** and the status bar show the progress; new mail is also
+  fetched every 10 minutes (changeable, 0 = off) while Shale runs. A mail deleted on the server
+  stays here, dimmed, with a note.
+- Choose which folders are synced with the tick boxes. **Trash, Junk and Gmail's "All Mail" are
+  not synced automatically**: when you open one, its list is loaded from the server, and a
+  message is downloaded when you press **Load this message**. The same button appears for a
+  message over the size limit (200 MB).
+- **Search** (the field above the list, or `/`): words, `"phrases"`, `from:`, `to:`, `subject:`
+  and `body:`; ignores case and accents. Choose all folders or only the open one.
+- **Import to vault** (button, or `i`) hands the mail to the same Import dialog as a dragged
+  `.eml` file: attachments, people and tags work the same, a mail that was imported before is
+  recognised, and nothing is written until you press Import. Mark several mails (Space or
+  Ctrl+click) to import them together.
+- Keys while no text field has the keyboard: j / k or ↑ / ↓ move in the list, Enter opens the
+  message, Space marks it, Ctrl+J / Ctrl+K go to the next / previous folder, `/` goes to the
+  search field (↓ or Enter there go into the results), `i` imports, Esc steps back (closes the
+  message, then clears the search).
+
 ## Importing e-mails, events and files (for project tracking)
 
 ![Import dialog](screenshots/import-dialog.png)
@@ -204,6 +247,7 @@ built-in demo vault (`shale --screenshot out.png`).
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back |
 | Alt+← / Alt+→ | Back / forward |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |

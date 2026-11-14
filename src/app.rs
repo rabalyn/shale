@@ -400,6 +400,16 @@ impl ShaleApp {
                 app.calendar.set_sources(app.cfg.calendars.clone());
                 let _ = app.calendar.fill_sample(&id);
             }
+            // screenshots: a made-up mail store and account (no server, no real mail)
+            if app.screenshot.is_some() && opts.view.as_deref() == Some("mail") && app.cfg.mail_accounts.is_empty() {
+                match crate::mail_demo::seed(&app.mail.root) {
+                    Ok(()) => {
+                        app.cfg.mail_accounts = vec![crate::config::MailAccount { id: crate::mail_demo::ACCOUNT.into(), name: "Demo mail".into(), host: "imap.example.com".into(), user: "ada@example.com".into(), ..Default::default() }];
+                        app.cfg.mail_sync_minutes = 0;
+                    }
+                    Err(e) => eprintln!("could not make the demo mail: {e}"),
+                }
+            }
             match opts.view.as_deref() {
                 Some("calendar") => app.show_view(View::Calendar, false),
                 Some("mail") => app.show_view(View::Mail, false),

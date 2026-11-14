@@ -901,6 +901,12 @@ fn folders_are_ordered_with_the_inbox_first_and_sub_folders_under_their_parent()
     assert_eq!(crate::mail_ui::folder_depth(&mk("Work/Plans/2026", None)), 2);
     assert_eq!(crate::mail_ui::folder_label(&mk("Work/Plans", None)), "Plans");
     assert_eq!(crate::mail_ui::folder_label(&mk("Gesendet &AOQ-", None)), "Gesendet ä");
+    // a folder whose parent is not a folder shows its whole path; one with a parent shows its own name
+    v.folders.push(mk("Projects/Hall B", None));
+    let of = |v: &crate::mail_ui::MailView, n: &str| v.tree_entry(v.folders.iter().find(|f| f.name == n).unwrap());
+    assert_eq!(of(&v, "Projects/Hall B"), (0, "Projects/Hall B".to_string()));
+    assert_eq!(of(&v, "Work/Plans"), (1, "Plans".to_string()));
+    assert_eq!(of(&v, "INBOX"), (0, "INBOX".to_string()));
 }
 
 // spec: MAIL-052

@@ -16,6 +16,9 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   (`📅 2026-12-01` or `due:2026-12-01`).
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
   and a graph of the whole vault.
+- **Mail (read-only)**: read your IMAP mail next to your notes, search it, and turn a mail into a
+  note with one key. Shale keeps a local copy of the mail and never changes anything on the
+  server. **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
 
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
@@ -51,7 +54,8 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading` (with `--screenshot`) chooses which view to capture.
+- `--view tasks|graph|drawing|reading|calendar|mail` (with `--screenshot`) chooses which view to
+  capture; `mail` uses a made-up mail store (no server, no real mail).
 
 ## Keyboard
 
@@ -62,6 +66,7 @@ Other options:
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |

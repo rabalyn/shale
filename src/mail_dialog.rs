@@ -4,7 +4,7 @@
 use crate::app::muted;
 use crate::config::{MailAccount, MailAuth, MailSecurity};
 use crate::imap_sync::{kind_of, FolderKind};
-use crate::mail_ui::{folder_depth, folder_label, MailView, TestState};
+use crate::mail_ui::{MailView, TestState};
 use crate::theme;
 use eframe::egui::{self, Rect, RichText, Ui};
 use std::collections::HashMap;
@@ -264,8 +264,9 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
             let never = matches!(kind, FolderKind::Trash | FolderKind::Junk);
             let mut on = f.sync_enabled && !never;
             ui.horizontal(|ui| {
-                ui.add_space(folder_depth(f) as f32 * 14.0);
-                let r = ui.add_enabled(!never, egui::Checkbox::new(&mut on, folder_label(f)));
+                let (depth, label) = mail.tree_entry(f);
+                ui.add_space(depth as f32 * 14.0);
+                let r = ui.add_enabled(!never, egui::Checkbox::new(&mut on, label));
                 rects.push((format!("md:folder:{}", f.id), r.rect));
                 if r.changed() {
                     *out = Some(MailDialogAction::ToggleFolder { folder: f.id, enabled: on });

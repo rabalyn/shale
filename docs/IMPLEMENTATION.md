@@ -29,6 +29,15 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 | `src/cal_ui.rs` | The calendar panel: month/week/day views in sizes S/M/L, navigation, double-click to create an event, the event details popup (Edit, Delete). |
 | `src/cal_dialog.rs` | The "Calendars" settings dialog (with the sync interval per CalDAV calendar) and the event dialog for new and existing events. |
 | `src/mail.rs` | Reading e-mail messages (.eml): headers with encoded words (UTF-8, Latin-1/-15, Windows-1252), multipart bodies, base64 / quoted-printable, attachment names (also RFC 2231 and encoded), attached messages, dates, and HTML-only mails turned into readable text. |
+| `src/imap_client.rs` | A small blocking IMAP client on rustls (system certificate check): only read-only commands, enforced in one place; size limits for lines and literals. |
+| `src/imap_sync.rs` | The read-only sync (several connections, newest first, resumable), on-demand listing of Trash/Junk, single-message download, folder discovery for "Test connection". |
+| `src/mail_db.rs`, `src/mail_store.rs` | The local mail copy: one `.eml` file per message plus an SQLite index with full-text search, one writer thread, crash-safe order, repair and backups. |
+| `src/mail_ui.rs` | State and jobs behind the mail view: store opening, folder counts, the page cache of the list, the open message, search, syncs and the timer, password prompt. |
+| `src/mail_view.rs` | Drawing the mail view (folders, virtual message list, reading pane) and its keys. |
+| `src/mail_dialog.rs` | The mail account settings (accounts, password, Test connection, folder tick boxes). |
+| `src/app/mail.rs` | The mail view in the app: settings actions, saving attachments to the vault, handing mails to the Import dialog. |
+| `src/mail_demo.rs` | The made-up mail store for `--screenshot --view mail`. |
+| `src/recovery.rs` | Text that could not be saved at exit, put aside and announced at the next start. |
 | `src/import.rs` | Turning e-mails, calendar events, files and text into tagged notes (with attachments in the media folder), spotting things imported before, reading what other programs drop. |
 | `src/import_dialog.rs` | The Import dialog: what to import (with attachment choices), note names, folder, tags, options. |
 | `src/app/drops.rs` | Drop handling in the window: drop zones (folders, notes, the editor), the drop highlight, events dragged out of the calendar, running the import, linking the new notes. |

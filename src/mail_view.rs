@@ -314,10 +314,11 @@ impl MailView {
                     }
                     for f in &folders {
                         let (total, unread) = self.counts.get(&f.id).copied().unwrap_or((0, 0));
-                        let label = folder_label(f);
+                        let label = self.tree_entry(f).1;
                         let text = if unread > 0 { RichText::new(format!("{label}  ({unread})")).strong().color(theme::TEXT_STRONG) } else { RichText::new(label).color(theme::TEXT) };
+                        let (depth, _) = self.tree_entry(f);
                         ui.horizontal(|ui| {
-                            ui.add_space(folder_depth(f) as f32 * 12.0);
+                            ui.add_space(depth as f32 * 12.0);
                             let r = ui.selectable_label(self.folder == Some(f.id), text);
                             rec(rects, format!("mail:folder:{}", f.id), &r);
                             let kind = crate::imap_sync::kind_of(f);
@@ -553,7 +554,7 @@ impl MailView {
             line(ui, "Date", &date);
             line(ui, "Folder", &format!("{} ({})", folder_label_of(&msg.folder), cfg.mail_accounts.iter().find(|a| a.id == msg.account).map(|a| a.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| msg.account.clone())));
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let can = msg.state == STATE_FULL;
                 let r = ui.add_enabled(can || !self.marked.is_empty(), egui::Button::new("Import to vault"));
                 rec(rects, "mail:import", &r);
@@ -606,7 +607,7 @@ impl MailView {
                     if !l.mail.attachments.is_empty() {
                         ui.label(muted(format!("{} attachment{}", l.mail.attachments.len(), if l.mail.attachments.len() == 1 { "" } else { "s" })).size(12.5));
                         for (i, a) in l.mail.attachments.iter().enumerate() {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label(RichText::new(if a.name.is_empty() { "(unnamed)" } else { a.name.as_str() }).color(theme::TEXT));
                                 ui.label(muted(size_text(a.data.len() as u64)).size(12.0));
                                 let o = ui.small_button("Open");

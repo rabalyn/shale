@@ -11,6 +11,21 @@ The release page of each version on GitHub shows its section from this file.
 
 ### Added
 
+- **Mail view (read-only)**: read your IMAP mail in Shale. Ribbon button or Ctrl+Shift+M opens
+  accounts and folders (with unread counts), a fast message list (50,000 messages are fine) and
+  a plain-text reading pane with the attachments. Accounts are set up in "Accounts…" (password
+  in the system keyring, or asked per session without one; OAuth2 comes later) with a "Test
+  connection" button and a tick box per folder. Mail is synced in the background (on a button and
+  every 10 minutes), Trash, Junk and Gmail's All Mail are listed only when you open them, and a
+  message is downloaded with "Load this message". Search understands `from:`, `to:`, `subject:`
+  and "phrases". "Import to vault" (or `i`) hands a mail, or all marked mails, to the Import
+  dialog like a dragged `.eml`. j / k, Enter, Space, Ctrl+J / Ctrl+K, `/` and Esc work without
+  the mouse. Shale never changes anything on the server, shows no HTML and loads nothing from the
+  web. **The local mail copy is not encrypted: use full-disk encryption.**
+- **Unsaved text is no longer lost at exit**: if a note still cannot be saved when Shale quits,
+  its text is written to `~/.local/share/shale/recovery/<date>/…` (never over anything) and the
+  next start tells you, with a link to the folder.
+- `--screenshot … --view mail` shows the mail view with a made-up mail store.
 - **Drag and drop in the file list**: drag notes, drawings, files or whole folders onto a folder
   to move them there (onto a note: next to it; onto empty space: to the top of the vault). A
   closed folder opens when you hold the pointer on it, the list scrolls at its edges, and links

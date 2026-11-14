@@ -581,6 +581,22 @@ impl MailView {
         v
     }
 
+    /// Where a folder sits in its account's tree: how deep, and what it is called there. A
+    /// folder whose parent is not a folder of its own (the server lists `Projects/Hall B`
+    /// without `Projects`) shows its whole path under the nearest folder that exists.
+    pub fn tree_entry(&self, f: &FolderRow) -> (usize, String) {
+        let shown = decode_mutf7(&f.name);
+        let d = f.delimiter.clone().unwrap_or_else(|| "/".into());
+        let parts: Vec<&str> = shown.split(d.as_str()).collect();
+        for cut in (1..parts.len()).rev() {
+            let prefix = parts[..cut].join(&d);
+            if self.folders.iter().any(|o| o.account == f.account && decode_mutf7(&o.name) == prefix) {
+                return (cut, parts[cut..].join(&d));
+            }
+        }
+        (0, shown)
+    }
+
     pub fn folder_row(&self, id: i64) -> Option<&FolderRow> {
         self.folders.iter().find(|f| f.id == id)
     }
