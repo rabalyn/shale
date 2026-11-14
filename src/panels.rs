@@ -256,6 +256,7 @@ impl ShaleApp {
         for (rel, name, kind) in files {
             let active = current.as_deref() == Some(rel.as_path());
             let badge = match kind {
+                FileKind::Drawing if crate::canvas::is_canvas_path(&rel) => "canvas",
                 FileKind::Drawing => "drawing",
                 FileKind::Other => rel.extension().and_then(|e| e.to_str()).unwrap_or(""),
                 FileKind::Note => "",
@@ -839,7 +840,53 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) => {}
+            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) => {}
+            Modal::ConvertCanvas { rel, new_tab, always, existing } => {
+                let resp = egui::Modal::new(egui::Id::unique("convert-canvas")).show(&ctx, |ui| {
+                    ui.set_width(460.0);
+                    let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    ui.label(egui::RichText::new("Convert to an editable drawing?").size(16.0));
+                    ui.label(format!("“{name}” is an Obsidian Canvas. Shale shows canvases read-only."));
+                    match existing.as_ref() {
+                        Some(copy) => ui.label(format!("It was converted before: “{}”.", rel_to_string(copy))),
+                        None => ui.label(format!("Converting makes the drawing “{}” next to it (Obsidian opens it with the Excalidraw plugin). The canvas file is not changed.", crate::canvas::drawing_name_for(rel))),
+                    };
+                    ui.add_space(6.0);
+                    ui.checkbox(always, "Always convert canvases when opening them").on_hover_text("Also in Settings → Drawings");
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        let convert = if existing.is_some() { "Open the drawing" } else { "Convert" };
+                        if ui.button(convert).clicked() {
+                            if *always {
+                                self.cfg.auto_convert_canvas = true;
+                                self.save_config();
+                            }
+                            let (r, t) = (rel.clone(), *new_tab);
+                            match existing.clone() {
+                                Some(copy) => self.actions.push(Action::Open { rel: copy, new_tab: t }),
+                                None => self.actions.push(Action::ConvertCanvas { rel: r, new_tab: t }),
+                            }
+                            keep = false;
+                        }
+                        if existing.is_some() && ui.button("Convert again").on_hover_text("Make another drawing from the canvas as it is now").clicked() {
+                            self.actions.push(Action::ConvertCanvas { rel: rel.clone(), new_tab: *new_tab });
+                            keep = false;
+                        }
+                        let ro = ui.add_enabled(!*always, egui::Button::new("Open read-only")).on_disabled_hover_text("Untick “Always convert” to open it read-only");
+                        if ro.clicked() {
+                            let (r, t) = (rel.clone(), *new_tab);
+                            self.open_canvas_read_only(&r, t);
+                            keep = false;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            keep = false;
+                        }
+                    });
+                });
+                if resp.should_close() {
+                    keep = false;
+                }
+            }
             Modal::Settings { vault_path } => {
                 let resp = egui::Modal::new(egui::Id::unique("settings")).show(&ctx, |ui| {
                     ui.set_width(520.0);
@@ -895,6 +942,12 @@ impl ShaleApp {
                     ui.label(muted("Type [[p followed by a name to pick a person from this folder (or make a new contact note).").size(12.0));
                     ui.add_space(8.0);
                     changed |= self.sync_settings_ui(ui);
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Drawings").color(theme::MUTED));
+                    changed |= ui
+                        .checkbox(&mut self.cfg.auto_convert_canvas, "Convert Obsidian canvases to editable drawings when opening them (instead of asking)")
+                        .on_hover_text("Off: Shale asks, and can show the canvas read-only. The canvas file is never changed.")
+                        .changed();
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Appearance").color(theme::MUTED));
                     changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
@@ -969,6 +1022,20 @@ impl ShaleApp {
                 }
             }
             if resp.should_close() {
+                keep = false;
+            }
+        }
+        if let Modal::Social(d) = &mut modal {
+            let accounts = self.cfg.social_accounts.clone();
+            let resp = egui::Modal::new(egui::Id::unique("social-accounts")).show(&ctx, |ui| crate::social::accounts_ui::show(ui, d, &accounts));
+            let close_asked = resp.should_close();
+            if let Some(a) = resp.inner {
+                if self.social_dialog_action(a) {
+                    keep = false;
+                }
+            }
+            // Esc / clicking outside closes it, but not while a sign-in is running
+            if close_asked && !d.busy() {
                 keep = false;
             }
         }
@@ -1467,6 +1534,78 @@ mod search_tests {
         frame(&mut app, vec![Event::Key { key: Key::ArrowRight, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
         frame(&mut app, vec![Event::Text("s".into())]);
         assert_eq!(app.search, "composts");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod canvas_dialog_tests {
+    use super::*;
+    use egui::{Event, PointerButton, RawInput};
+
+    /// One frame of the dialogs; returns every labelled widget on screen (from the accessibility tree).
+    fn frame(ctx: &egui::Context, app: &mut ShaleApp, t: &mut f64, events: Vec<Event>) -> Vec<(String, Rect)> {
+        *t += 0.05;
+        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(*t), events, ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| app.modals(ui));
+        });
+        out.textures_delta.clear();
+        let tree = out.platform_output.accesskit_update.expect("accessibility is on");
+        tree.nodes.iter().filter_map(|(_, n)| Some((n.label()?.to_string(), n.bounds().map(|b| Rect::from_min_max(Pos2::new(b.x0 as f32, b.y0 as f32), Pos2::new(b.x1 as f32, b.y1 as f32)))?))).collect()
+    }
+
+    /// The widgets on screen once the dialog has settled (a new window is laid out unseen first).
+    fn look(ctx: &egui::Context, app: &mut ShaleApp, t: &mut f64) -> Vec<(String, Rect)> {
+        frame(ctx, app, t, vec![]);
+        frame(ctx, app, t, vec![])
+    }
+
+    fn click(ctx: &egui::Context, app: &mut ShaleApp, t: &mut f64, label: &str) {
+        let shown = look(ctx, app, t);
+        let r = shown.iter().find(|(l, _)| l == label).unwrap_or_else(|| panic!("no {label:?} on screen: {:?}", shown.iter().map(|x| &x.0).collect::<Vec<_>>())).1;
+        let p = r.center();
+        let btn = |pressed| Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        frame(ctx, app, t, vec![Event::PointerMoved(p)]);
+        frame(ctx, app, t, vec![btn(true)]);
+        frame(ctx, app, t, vec![btn(false)]);
+    }
+
+    // spec: DRAW-012, DRAW-013
+    #[test]
+    fn the_canvas_question_and_its_tick_box() {
+        let (mut app, d) = crate::app::tests::app_with_canvas("canvas-dialog");
+        let canvas = Path::new("Maps/Map.canvas");
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut t = 0.0;
+        // Cancel opens nothing
+        app.open(canvas, false);
+        click(&ctx, &mut app, &mut t, "Cancel");
+        assert!(app.modal.is_none() && app.actions.is_empty());
+        assert_ne!(app.current_path().as_deref(), Some(canvas));
+        // "Open read-only" opens it read-only
+        app.open(canvas, false);
+        let shown: Vec<String> = look(&ctx, &mut app, &mut t).into_iter().map(|x| x.0).collect();
+        for want in ["Convert", "Open read-only", "Cancel", "Always convert canvases when opening them"] {
+            assert!(shown.iter().any(|l| l == want), "{want:?} missing: {shown:?}");
+        }
+        click(&ctx, &mut app, &mut t, "Open read-only");
+        assert!(app.modal.is_none());
+        assert_eq!(app.current_path().as_deref(), Some(canvas));
+        assert!(app.drawings[canvas].read_only.is_some());
+        // ticking "always" greys out read-only; Convert then turns the setting on and converts
+        app.drawings.remove(canvas);
+        app.open(Path::new("Welcome.md"), false);
+        app.open(canvas, false);
+        click(&ctx, &mut app, &mut t, "Always convert canvases when opening them");
+        assert!(matches!(&app.modal, Some(Modal::ConvertCanvas { always: true, .. })));
+        click(&ctx, &mut app, &mut t, "Open read-only");
+        assert!(app.modal.is_some(), "read-only can't be chosen while “always convert” is ticked");
+        assert!(!app.cfg.auto_convert_canvas);
+        click(&ctx, &mut app, &mut t, "Convert");
+        assert!(app.modal.is_none() && app.cfg.auto_convert_canvas);
+        assert!(matches!(app.actions.as_slice(), [Action::ConvertCanvas { rel, .. }] if rel == canvas));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

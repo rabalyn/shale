@@ -19,6 +19,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0009](0009-mail-server-writes.md) | Mail phase 2: writing to the server (flags, move, delete) | Proposed |
 | [0010](0010-sending-mail.md) | Mail phase 3: writing and sending mail (SMTP) | Proposed |
 | [0011](0011-mail-encryption.md) | Mail phase 4: OpenPGP and S/MIME with the system's GnuPG | Proposed |
+| [0012](0012-social-feeds.md) | Social feeds: Mastodon and Bluesky, saved as notes | Proposed |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.

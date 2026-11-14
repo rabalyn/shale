@@ -74,7 +74,7 @@ fn text_functions_never_cut_a_character() {
             let _ = lists::move_lines(&s, b..b, true);
             let _ = lists::move_lines(&s, b..s.len(), false);
             let _ = media::media_query(&s, b);
-            let _ = editor::link_query(&s, k);
+            let _ = crate::link_assist::link_query(&s, k);
             let _ = markdown::byte_to_char(&s, b);
             let _ = markdown::char_to_byte(&s, k);
         }

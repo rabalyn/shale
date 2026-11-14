@@ -32,6 +32,8 @@ fn account_of(s: &CalendarSource) -> Option<(String, String)> {
 const CALDAV: &str = "shale-caldav";
 /// Keyring application name of mail account secrets.
 const MAIL: &str = "shale-mail";
+/// Keyring application name of social account secrets: calendars, mail and social accounts never see each other's entries.
+const SOCIAL: &str = "shale-social";
 
 /// What a mail account secret is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -141,6 +143,40 @@ pub fn keyring_available() -> bool {
     backend::available()
 }
 
+// ---------------------------------------------------------------- social accounts (Mastodon / Bluesky)
+
+/// The access token (Mastodon) or app password (Bluesky) of a social account, from the keyring.
+/// `server` is the account's server address as stored in `social::Account::server`.
+pub fn social_lookup(server: &str, handle: &str) -> Option<String> {
+    backend::lookup(SOCIAL, server, handle)
+}
+
+/// Put the secret of a social account into the keyring. False when no keyring works (the caller
+/// then keeps it in the owner-only settings file, see `social_store_or_keep`).
+pub fn social_store(server: &str, handle: &str, secret: &str) -> bool {
+    backend::store(SOCIAL, server, handle, secret)
+}
+
+/// Remove the secret of a social account from the keyring (when the account is removed).
+pub fn social_clear(server: &str, handle: &str) {
+    backend::clear(SOCIAL, server, handle)
+}
+
+/// What goes into the settings file for the secret: empty when the keyring has it now, the
+/// secret itself (the file is readable only by its owner) when no keyring works.
+pub fn social_store_or_keep(server: &str, handle: &str, secret: &str) -> String {
+    if social_store(server, handle, secret) {
+        String::new()
+    } else {
+        secret.to_string()
+    }
+}
+
+/// The secret of a social account: from the keyring, else the one kept in the settings file.
+pub fn social_secret(server: &str, handle: &str, from_file: &str) -> String {
+    social_lookup(server, handle).unwrap_or_else(|| from_file.to_string())
+}
+
 /// Where passwords end up, for the settings dialog.
 pub fn where_stored() -> &'static str {
     if backend::available() {
@@ -207,7 +243,16 @@ mod backend {
         if !available() {
             return false;
         }
-        let label = format!("{}: {user} on {server}", if app == "shale-caldav" { "Shale CalDAV" } else { "Shale mail" });
+        let label = format!(
+            "{}: {user} on {server}",
+            if app == super::CALDAV {
+                "Shale CalDAV"
+            } else if app == super::SOCIAL {
+                "Shale social"
+            } else {
+                "Shale mail"
+            }
+        );
         let mut args = vec!["store", "--label", label.as_str()];
         args.extend(attrs(app, server, user));
         // the stored password must read back exactly (no trailing newline is added)
@@ -232,9 +277,10 @@ mod backend {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    pub static FAKE: Mutex<Option<HashMap<(String, String, String), String>>> = Mutex::new(None);
+    type Key = (String, String, String);
+    pub static FAKE: Mutex<Option<HashMap<Key, String>>> = Mutex::new(None);
 
-    fn key(app: &str, server: &str, user: &str) -> (String, String, String) {
+    fn key(app: &str, server: &str, user: &str) -> Key {
         (app.to_string(), server.to_string(), user.to_string())
     }
 
@@ -276,6 +322,18 @@ mod backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: SEC-003
+    #[test]
+    fn social_secrets_have_their_own_keyring_entries() {
+        assert!(social_store("https://social.test", "ada@social.test", "tok-1"));
+        assert_eq!(social_lookup("https://social.test", "ada@social.test").as_deref(), Some("tok-1"));
+        assert_eq!(backend::lookup(CALDAV, "https://social.test", "ada@social.test"), None, "not mixed up with calendars");
+        assert_eq!(social_store_or_keep("https://social.test", "ada@social.test", "tok-2"), "");
+        assert_eq!(social_secret("https://social.test", "ada@social.test", "file"), "tok-2");
+        social_clear("https://social.test", "ada@social.test");
+        assert_eq!(social_secret("https://social.test", "ada@social.test", "file"), "file");
+    }
 
     fn dav(id: &str, url: &str, user: &str, pw: &str) -> CalendarSource {
         CalendarSource { id: id.into(), name: id.into(), color: "#000000".into(), enabled: true, sync_minutes: 15, kind: SourceKind::Caldav { url: url.into(), username: user.into(), password: pw.into() } }

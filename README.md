@@ -14,6 +14,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **To-do list for the whole vault**: every `- [ ] task` from every note in one list.
   Tick tasks off there (the change is saved to the note), filter them, and sort by due date
   (`📅 2026-12-01` or `due:2026-12-01`).
+- **Feeds**: read your Mastodon and Bluesky timelines in Shale and save a post (or a whole
+  thread by one author) as a note, with its pictures and a link back to the post.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
   and a graph of the whole vault.
 - **Mail**: read your IMAP mail next to your notes, search it, mark it read, flag, move or delete
@@ -86,8 +88,10 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading|calendar|mail` (with `--screenshot`) chooses which view to
-  capture; `mail` uses a made-up mail store (no server, no real mail).
+- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import` (with `--screenshot`) chooses which
+  view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
+  `social-import` made-up posts; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
+  shows a canvas without the question, and `convert:<file>.canvas` converts it first.
 
 ## Keyboard
 

@@ -197,6 +197,7 @@ impl ShaleApp {
                     }
                 };
                 let tags = import::parse_tags(&d.tags);
+                let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
                 let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.vdata.settings.people_dir.clone() };
                 let Some(v) = &mut self.vault else { return true };
                 let (made, errors) = import::import(v, &d.items, &opts);
@@ -210,7 +211,24 @@ impl ShaleApp {
                     }
                 }
                 // remember the folder and tags for next time
-                self.vdata.state.last_import_folder = rel_to_string(&folder);
+                // remember whether replies of others were wanted (only asked when there were some)
+                if let Some(on) = d
+                    .items
+                    .iter()
+                    .filter(|i| i.include)
+                    .filter_map(|i| match &i.source {
+                        import::Source::Social { saved, replies, .. } if !saved.replies.is_empty() => Some(*replies),
+                        _ => None,
+                    })
+                    .next_back()
+                {
+                    self.cfg.social_replies = on;
+                }
+                if social_only {
+                    self.vdata.state.last_social_folder = rel_to_string(&folder);
+                } else {
+                    self.vdata.state.last_import_folder = rel_to_string(&folder);
+                }
                 for t in tags.iter().rev() {
                     self.vdata.state.recent_tags.retain(|o| !o.eq_ignore_ascii_case(t));
                     self.vdata.state.recent_tags.insert(0, t.clone());

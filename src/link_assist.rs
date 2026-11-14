@@ -1,0 +1,584 @@
+//! Link helpers for any text box: `[[` suggests notes and drawings, `[[p ` suggests people,
+//! `[!` / `[[!` opens the file picker. Used by the note editor and by text in drawings.
+//!
+//! A text box that wants the helpers calls, each frame:
+//! 1. [`LinkAssist::take_keys`] before the text box is drawn (the popups need the arrow keys,
+//!    Enter, Tab and Esc before the text box sees them),
+//! 2. [`LinkAssist::arm`] right before the text box (after any other change to the text),
+//! 3. [`LinkAssist::after`] with the text box's output (popups, picking, safety net).
+
+use crate::editor::EditorAction;
+use crate::markdown;
+use crate::theme;
+use crate::vault::Vault;
+use eframe::egui::{self, Key, Modifiers, Ui, Vec2};
+use egui::text::{CCursor, CCursorRange};
+use std::path::Path;
+
+/// State of the `[!path` file picker.
+#[derive(Default)]
+pub(crate) struct MediaPicker {
+    pub(crate) active: bool,
+    pub(crate) sel: usize,
+    pub(crate) items: Vec<crate::media::Entry>,
+    /// (folder, partial) the items were listed for
+    key: Option<(std::path::PathBuf, String)>,
+    /// Esc pressed for the picker starting at this byte
+    dismissed: Option<usize>,
+    /// cursor (byte) when the picker was last shown
+    cursor: Option<usize>,
+    /// the popup was drawn in the last frame
+    shown: bool,
+    /// byte where the `[!` of the shown picker starts
+    start: Option<usize>,
+    error: Option<String>,
+}
+
+/// What [`LinkAssist::take_keys`] did this frame.
+#[derive(Default)]
+pub struct Keys {
+    /// the text changed (a pick or a Tab completion)
+    pub changed: bool,
+    pub action: Option<EditorAction>,
+    /// the file picker took a key
+    pub handled: bool,
+    /// the file picker is open: Enter / Tab must not reach other helpers of the text box
+    pub picker_open: bool,
+    /// an entry of the `[[` list is being picked
+    pub picking: bool,
+}
+
+pub struct LinkAssist {
+    /// id of the text box the helpers work on
+    pub id: egui::Id,
+    /// folder of the contact notes (`[[p` lists these; set from the app's settings)
+    pub people_dir: String,
+    pub(crate) ac_active: bool,
+    /// byte where the `[[` of the open suggestions starts
+    ac_start: Option<usize>,
+    /// Esc was pressed for the suggestions starting at this byte
+    ac_dismissed: Option<usize>,
+    ac_sel: usize,
+    ac_items: Vec<(String, bool)>,
+    /// what the list shows for each item (the people list shows names, not link texts)
+    pub(crate) ac_labels: Vec<String>,
+    /// the open list is the `[[p` people list
+    ac_people: bool,
+    pub(crate) media: MediaPicker,
+    /// this frame: the `[[` entry picked by keyboard
+    ac_pick: Option<usize>,
+    /// this frame: the text going into the text box, and the picker state then
+    text_before: String,
+    picker_before: Option<(usize, usize, String)>,
+}
+
+impl LinkAssist {
+    pub fn new(id: egui::Id) -> Self {
+        LinkAssist {
+            id,
+            people_dir: crate::people::DEFAULT_DIR.into(),
+            ac_active: false,
+            ac_start: None,
+            ac_dismissed: None,
+            ac_sel: 0,
+            ac_items: vec![],
+            ac_labels: vec![],
+            ac_people: false,
+            media: MediaPicker::default(),
+            ac_pick: None,
+            text_before: String::new(),
+            picker_before: None,
+        }
+    }
+
+    /// Is the `[!` file picker popup on screen?
+    pub fn picker_visible(&self) -> bool {
+        self.media.shown
+    }
+
+    /// Is a suggestion list or the file picker open?
+    pub fn is_open(&self) -> bool {
+        self.media.active || self.ac_active
+    }
+
+    /// Short description of the picker state (testing aid).
+    pub fn debug_state(&self) -> String {
+        format!(
+            "picker active={} shown={} sel={} items={} dismissed={:?} start={:?} | suggestions active={} (input method is switched off while either is open)",
+            self.media.active,
+            self.media.shown,
+            self.media.sel,
+            self.media.items.len(),
+            self.media.dismissed,
+            self.media.start,
+            self.ac_active
+        )
+    }
+
+    fn set_cursor_byte(&self, ui: &Ui, text: &str, byte: usize) {
+        let c = markdown::byte_to_char(text, byte);
+        let mut state = egui::text_edit::TextEditState::load(ui.ctx(), self.id).unwrap_or_default();
+        state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(c))));
+        state.store(ui.ctx(), self.id);
+    }
+
+    /// Before the text box: take the keys the open popups need.
+    pub fn take_keys(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault) -> Keys {
+        let mut out = Keys::default();
+        self.ac_pick = None;
+        if self.ac_active && !self.ac_items.is_empty() {
+            let n = self.ac_items.len();
+            ui.input_mut(|i| {
+                if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
+                    self.ac_sel = (self.ac_sel + 1) % n;
+                }
+                if i.consume_key(Modifiers::NONE, Key::ArrowUp) {
+                    self.ac_sel = (self.ac_sel + n - 1) % n;
+                }
+                if i.consume_key(Modifiers::NONE, Key::Enter) || i.consume_key(Modifiers::NONE, Key::Tab) {
+                    self.ac_pick = Some(self.ac_sel.min(n - 1));
+                }
+                if i.consume_key(Modifiers::NONE, Key::Escape) {
+                    self.ac_active = false;
+                    self.ac_dismissed = self.ac_start;
+                }
+            });
+        }
+        out.picking = self.ac_pick.is_some();
+
+        // `[!path` file picker: Tab completes, arrows choose, Enter picks, Esc closes.
+        let home = dirs::home_dir().unwrap_or_default();
+        // Esc closes the picker whenever it was on screen, whatever state the cursor is in.
+        if self.media.shown && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            self.media.dismissed = self.media.start;
+            self.media.active = false;
+            self.media.shown = false;
+            out.handled = true;
+        }
+        if self.media.active {
+            let cur = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).filter(|r| r.is_empty()).map(|r| markdown::char_to_byte(text, r.primary.index.0)).or(self.media.cursor);
+            if let Some((cb, (start, typed))) = cur.and_then(|cb| crate::media::media_query(text, cb).map(|q| (cb, q))) {
+                let n = self.media.items.len();
+                let (down, up, tab, enter, esc) = ui.input_mut(|i| {
+                    (
+                        n > 0 && i.consume_key(Modifiers::NONE, Key::ArrowDown),
+                        n > 0 && i.consume_key(Modifiers::NONE, Key::ArrowUp),
+                        i.consume_key(Modifiers::NONE, Key::Tab),
+                        n > 0 && i.consume_key(Modifiers::NONE, Key::Enter),
+                        i.consume_key(Modifiers::NONE, Key::Escape),
+                    )
+                });
+                if down {
+                    self.media.sel = (self.media.sel + 1) % n;
+                }
+                if up {
+                    self.media.sel = (self.media.sel + n - 1) % n;
+                }
+                if esc {
+                    self.media.dismissed = Some(start);
+                    self.media.active = false;
+                }
+                if tab {
+                    out.changed |= self.media_tab(ui, text, vault, &home, start, cb, &typed);
+                }
+                if enter {
+                    if let Some(e) = self.media.items.get(self.media.sel.min(n - 1)).cloned() {
+                        let (c, a) = self.media_accept(ui, text, vault, &home, start, cb, &typed, &e);
+                        out.changed |= c;
+                        if a.is_some() {
+                            out.action = a;
+                        }
+                    }
+                }
+                // only count as handled when the picker actually took a key
+                out.handled = down || up || tab || enter || esc;
+                out.picker_open = true;
+            } else {
+                self.media.active = false;
+            }
+        }
+        out
+    }
+
+    /// Right before the text box is drawn: remember the text and picker state going in, for the
+    /// safety net in [`LinkAssist::after`]. `handled` = [`Keys::handled`] of this frame.
+    pub fn arm(&mut self, text: &str, handled: bool) {
+        self.text_before = text.to_string();
+        self.picker_before = if self.media.active && !handled { self.media.cursor.and_then(|cb| crate::media::media_query(text, cb).map(|(st, typed)| (cb, st, typed))) } else { None };
+    }
+
+    /// After the text box: the `[[` list and the `[!` picker. `typing` = keys type text (not
+    /// vim's normal mode); `handled` = [`Keys::handled`] of this frame.
+    pub fn after(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault, output: &egui::text_edit::TextEditOutput, typing: bool, handled: bool) -> (bool, Option<EditorAction>) {
+        let mut changed = false;
+        let mut action = None;
+        let resp = &output.response.response;
+        let home = dirs::home_dir().unwrap_or_default();
+        let mut media_handled = handled;
+        if media_handled && self.media.active && !resp.has_focus() {
+            ui.ctx().memory_mut(|m| m.request_focus(self.id));
+            ui.ctx().request_repaint();
+        }
+
+        // --- [[ suggestions
+        let cursor = output.cursor_range.filter(|r| r.is_empty()).map(|r| r.primary.index.0);
+        let query = if resp.has_focus() && typing { cursor.and_then(|c| link_query(text, c)) } else { None };
+        // a dismissed `[[` stays closed until that `[[` is gone from the text
+        if let Some(d) = self.ac_dismissed {
+            if !text.get(d.saturating_sub(2)..).map(|t| t.starts_with("[[")).unwrap_or(false) {
+                self.ac_dismissed = None;
+            }
+        }
+        let query = query.filter(|(qs, _)| Some(*qs) != self.ac_dismissed);
+        match query {
+            Some((qstart_byte, q)) => {
+                self.ac_start = Some(qstart_byte);
+                if !self.ac_active {
+                    self.ac_sel = 0;
+                }
+                self.ac_active = true;
+                self.fill_suggestions(vault, &q);
+                if self.ac_sel >= self.ac_items.len() {
+                    self.ac_sel = 0;
+                }
+                let picked = if let Some(pick) = self.ac_pick.take() {
+                    Some(pick)
+                } else if !self.ac_items.is_empty() {
+                    let c = cursor.unwrap_or(0);
+                    let r = output.galley.pos_from_cursor(CCursor::new(c));
+                    let pos = output.galley_pos + r.left_bottom().to_vec2() + Vec2::new(0.0, 4.0);
+                    let clicked = self.suggestion_popup(ui, pos);
+                    if clicked.is_some() {
+                        ui.ctx().memory_mut(|m| m.request_focus(self.id));
+                    }
+                    clicked
+                } else {
+                    None
+                };
+                if let Some((name, exists)) = picked.and_then(|i| self.ac_items.get(i).cloned()) {
+                    if self.ac_people && !exists {
+                        action = Some(EditorAction::CreatePerson(name.clone()));
+                    }
+                    let cur_byte = markdown::char_to_byte(text, cursor.unwrap_or(0));
+                    let closes = text[cur_byte..].starts_with("]]");
+                    let insert = if closes { name.clone() } else { format!("{name}]]") };
+                    text.replace_range(qstart_byte..cur_byte, &insert);
+                    self.set_cursor_byte(ui, text, qstart_byte + name.len() + 2);
+                    changed = true;
+                    self.ac_active = false;
+                }
+            }
+            None => {
+                self.ac_active = false;
+                self.ac_start = None;
+            }
+        }
+
+        // --- [! picker safety net: if a key reached the text box instead of the picker, undo what
+        // the text box did with it and do the picker's job instead.
+        let armed = self.picker_before.is_some();
+        if let Some((pcb, pstart, ptyped)) = self.picker_before.take() {
+            let before = std::mem::take(&mut self.text_before);
+            let inserted = |what: &str| text.len() == before.len() + what.len() && text.get(..pcb) == before.get(..pcb) && text.get(pcb..pcb + what.len()) == Some(what) && text.get(pcb + what.len()..) == before.get(pcb..);
+            let (k_down, k_up, k_esc) = ui.input(|i| (i.key_pressed(Key::ArrowDown), i.key_pressed(Key::ArrowUp), i.key_pressed(Key::Escape)));
+            if inserted("\t") {
+                *text = before.clone();
+                self.set_cursor_byte(ui, text, pcb);
+                self.media_tab(ui, text, vault, &home, pstart, pcb, &ptyped);
+                changed = true;
+                media_handled = true;
+            } else if inserted("\n") || inserted("\r\n") || inserted("\r") {
+                *text = before.clone();
+                self.set_cursor_byte(ui, text, pcb);
+                let n = self.media.items.len();
+                if let Some(e) = self.media.items.get(self.media.sel.min(n.saturating_sub(1))).cloned() {
+                    let (_, a) = self.media_accept(ui, text, vault, &home, pstart, pcb, &ptyped, &e);
+                    if a.is_some() {
+                        action = a;
+                    }
+                }
+                changed = true;
+                media_handled = true;
+            } else if k_esc {
+                self.media.dismissed = Some(pstart);
+                self.media.active = false;
+                media_handled = true;
+            } else if (k_down || k_up) && *text == before {
+                let n = self.media.items.len();
+                if n > 0 {
+                    self.media.sel = if k_down { (self.media.sel + 1) % n } else { (self.media.sel + n - 1) % n };
+                }
+                self.set_cursor_byte(ui, text, pcb);
+                media_handled = true;
+                ui.ctx().request_repaint();
+            }
+            // keep the text box focused while the picker is in use (unless the person clicked away)
+            if self.media.active && !resp.has_focus() && !ui.input(|i| i.pointer.any_pressed()) {
+                ui.ctx().memory_mut(|m| m.request_focus(self.id));
+                ui.ctx().request_repaint();
+            }
+        }
+
+        // --- [! file picker popup
+        self.media.shown = false;
+        let cur_byte = output.cursor_range.filter(|r| r.is_empty()).map(|r| markdown::char_to_byte(text, r.primary.index.0));
+        let keep = (media_handled || armed) && self.media.active;
+        if std::env::var_os("SHALE_DEBUG").is_some() {
+            if let Some(cb) = cur_byte {
+                if crate::media::media_query(text, cb).is_some() && !resp.has_focus() && !keep {
+                    eprintln!("picker hidden because the text box has no focus: focused={:?} me={:?} t={:.2}", ui.ctx().memory(|m| m.focused()), self.id, ui.input(|i| i.time));
+                }
+            }
+        }
+        let mq = if (resp.has_focus() || keep) && typing { cur_byte.or(self.media.cursor).and_then(|cb| crate::media::media_query(text, cb).map(|q| (cb, q))) } else { None };
+        match mq {
+            Some((cb, (start, typed))) if self.media.dismissed != Some(start) => {
+                let (dir, partial, _) = crate::media::split_typed(&typed, &vault.root, &home);
+                let key = (dir.clone(), partial.clone());
+                if self.media.key.as_ref() != Some(&key) {
+                    self.media.items = crate::media::list_matches(&dir, &partial);
+                    self.media.key = Some(key);
+                    self.media.sel = 0;
+                    self.media.error = None;
+                }
+                self.media.active = true;
+                self.media.shown = true;
+                self.media.start = Some(start);
+                self.media.cursor = Some(cb);
+                let shown_dir = if typed.starts_with("~") {
+                    format!("~/{}", dir.strip_prefix(&home).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
+                } else {
+                    format!("vault/{}", dir.strip_prefix(&vault.root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
+                };
+                let r = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(text, cb)));
+                let pos = output.galley_pos + r.left_bottom().to_vec2() + Vec2::new(0.0, 4.0);
+                let (clicked, close) = self.picker_popup(ui, pos, &shown_dir, typed.is_empty());
+                if close {
+                    self.media.dismissed = Some(start);
+                    self.media.active = false;
+                    self.media.shown = false;
+                    ui.ctx().memory_mut(|m| m.request_focus(self.id));
+                    ui.ctx().request_repaint();
+                } else if let Some(e) = clicked {
+                    let (c, a) = self.media_accept(ui, text, vault, &home, start, cb, &typed, &e);
+                    changed |= c;
+                    if a.is_some() {
+                        action = a;
+                    }
+                    ui.ctx().memory_mut(|m| m.request_focus(self.id));
+                }
+            }
+            Some(_) => self.media.active = false,
+            None => {
+                self.media.active = false;
+                self.media.key = None;
+                self.media.cursor = None;
+                // forget a dismissal only once that `[!` is gone from the text, so a brief loss of
+                // focus or a cursor jump doesn't bring the closed picker back
+                if let Some(d) = self.media.dismissed {
+                    if !text.get(d..).map(|t| t.starts_with("[!")).unwrap_or(false) {
+                        self.media.dismissed = None;
+                    }
+                }
+            }
+        }
+        // While a suggestion popup is open, switch the desktop input method (IBus, Fcitx, dead
+        // keys) off for this window: otherwise it may keep Esc and the arrow keys for itself and
+        // hand Tab / Enter over as typed text.
+        if self.is_open() {
+            ui.ctx().output_mut(|o| o.ime = None);
+        }
+        if ui.input(|i| i.key_pressed(Key::Escape)) && self.media.shown {
+            // an Esc that arrived after the popup was drawn this frame: close on the next frame
+            ui.ctx().request_repaint();
+        }
+        (changed, action)
+    }
+
+    /// The `[[` list for query `q`: notes and drawings, or people for `[[p `.
+    fn fill_suggestions(&mut self, vault: &Vault, q: &str) {
+        let people_q = q.strip_prefix("p ").map(|r| r.to_string());
+        self.ac_people = people_q.is_some();
+        let mut labels: Vec<String> = Vec::new();
+        let mut list: Vec<(String, bool)> = Vec::new();
+        if let Some(pq) = people_q {
+            let dir = self.people_dir.trim().trim_matches('/').to_lowercase();
+            let prefix = format!("{dir}/");
+            let mut items: Vec<(i32, String, std::path::PathBuf)> = vault
+                .files
+                .iter()
+                .filter(|f| f.kind == crate::vault::FileKind::Note && !dir.is_empty() && crate::vault::rel_to_string(&f.rel).to_lowercase().starts_with(&prefix))
+                .filter_map(|f| markdown::fuzzy_score(&pq, &f.display_name()).map(|s| (s, f.display_name(), f.rel.clone())))
+                .collect();
+            items.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+            for (_, name, rel) in items.into_iter().take(8) {
+                let link = crate::people::link_to(vault, &rel);
+                list.push((link.trim_start_matches("[[").trim_end_matches("]]").to_string(), true));
+                labels.push(name);
+            }
+            let qt = pq.trim();
+            if !qt.is_empty() && !labels.iter().any(|n| n.eq_ignore_ascii_case(qt)) {
+                list.push((markdown::link_safe_name(qt), false));
+                labels.push(format!("＋ New contact “{}” in {}", markdown::link_safe_name(qt), self.people_dir.trim().trim_matches('/')));
+            }
+        } else {
+            let mut items: Vec<(i32, String)> = vault.files.iter().filter(|f| f.kind != crate::vault::FileKind::Other || q.contains('.')).filter_map(|f| markdown::fuzzy_score(q, &f.link_name).map(|s| (s, f.link_name.clone()))).collect();
+            items.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+            items.dedup_by(|a, b| a.1 == b.1);
+            list = items.into_iter().take(8).map(|(_, n)| (n, true)).collect();
+            let qt = q.trim();
+            if !qt.is_empty() && !list.iter().any(|(n, _)| n.eq_ignore_ascii_case(qt)) {
+                list.push((qt.to_string(), false));
+            }
+            labels = list.iter().map(|(n, e)| if *e { n.clone() } else { format!("＋ Create “{n}”") }).collect();
+        }
+        self.ac_items = list;
+        self.ac_labels = labels;
+    }
+
+    /// Draw the `[[` list at `pos`; returns the entry clicked.
+    fn suggestion_popup(&self, ui: &Ui, pos: egui::Pos2) -> Option<usize> {
+        let mut clicked = None;
+        egui::Area::new(self.id.with("ac")).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(260.0);
+                if self.ac_people {
+                    ui.label(egui::RichText::new(format!("People in “{}”", self.people_dir.trim().trim_matches('/'))).small().color(theme::MUTED));
+                }
+                for (i, (_, exists)) in self.ac_items.iter().enumerate() {
+                    let text = self.ac_labels.get(i).cloned().unwrap_or_default();
+                    let label = if *exists { egui::RichText::new(text).color(theme::TEXT) } else { egui::RichText::new(text).color(theme::LINK_MISSING) };
+                    if ui.selectable_label(i == self.ac_sel, label).clicked() {
+                        clicked = Some(i);
+                    }
+                }
+                ui.label(egui::RichText::new("↑↓ to move · Enter to pick · Esc to close").small().color(theme::FAINT));
+            });
+        });
+        clicked
+    }
+
+    /// Draw the `[!` picker at `pos`; returns (entry clicked, close clicked).
+    fn picker_popup(&self, ui: &Ui, pos: egui::Pos2, shown_dir: &str, nothing_typed: bool) -> (Option<crate::media::Entry>, bool) {
+        let mut clicked: Option<crate::media::Entry> = None;
+        let mut close = false;
+        egui::Area::new(self.id.with("media")).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(320.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("Insert file from {shown_dir}")).small().color(theme::MUTED));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("×").on_hover_text("Close (Esc)").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+                if nothing_typed {
+                    ui.label(egui::RichText::new("Type / for the vault or ~/ for your home folder").small().color(theme::FAINT));
+                }
+                if self.media.items.is_empty() {
+                    ui.label(egui::RichText::new("Nothing matches here").color(theme::FAINT));
+                }
+                let total = self.media.items.len();
+                let first = self.media.sel.saturating_sub(9).min(total.saturating_sub(12));
+                for (i, e) in self.media.items.iter().enumerate().skip(first).take(12) {
+                    let label = if e.is_dir {
+                        egui::RichText::new(format!("▸ {}/", e.name)).color(theme::TEXT)
+                    } else if crate::media::is_image(Path::new(&e.name)) {
+                        egui::RichText::new(format!("▣ {}", e.name)).color(theme::LINK)
+                    } else {
+                        egui::RichText::new(format!("  {}", e.name)).color(theme::TEXT)
+                    };
+                    if ui.selectable_label(i == self.media.sel, label).clicked() {
+                        clicked = Some(e.clone());
+                    }
+                }
+                if total > 12 {
+                    ui.label(egui::RichText::new(format!("{total} matches")).small().color(theme::FAINT));
+                }
+                if let Some(err) = &self.media.error {
+                    ui.colored_label(theme::LINK_MISSING, err);
+                }
+                ui.label(egui::RichText::new("Tab completes the path · ↑↓ choose · Enter picks · Esc closes").small().color(theme::FAINT));
+                ui.label(egui::RichText::new("Files from outside the vault are copied to z_media/").small().color(theme::FAINT));
+            });
+        });
+        (clicked, close)
+    }
+
+    /// Tab in the `[!` picker: only ever completes the path, never finishes the link.
+    /// 1) extend to the longest common part / unique match (like zsh);
+    /// 2) otherwise put the highlighted entry into the path (folders get a `/`).
+    #[allow(clippy::too_many_arguments)]
+    fn media_tab(&mut self, ui: &Ui, text: &mut String, vault: &Vault, home: &Path, start: usize, cursor: usize, typed: &str) -> bool {
+        let n = self.media.items.len();
+        let (_, _, typed_dir) = crate::media::split_typed(typed, &vault.root, home);
+        let completed = crate::media::tab_complete(typed, &vault.root, home).or_else(|| {
+            let e = self.media.items.get(self.media.sel.min(n.saturating_sub(1)))?;
+            let full = format!("{typed_dir}{}{}", e.name, if e.is_dir { "/" } else { "" });
+            (full != typed).then_some(full)
+        });
+        match completed {
+            Some(done) => {
+                text.replace_range(start + 2..cursor, &done);
+                self.set_cursor_byte(ui, text, start + 2 + done.len());
+                self.media.sel = 0;
+                self.media.key = None;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Pick an entry in the `[!` picker: folders open, files are brought into the vault and linked.
+    #[allow(clippy::too_many_arguments)]
+    fn media_accept(&mut self, ui: &Ui, text: &mut String, vault: &Vault, home: &Path, start: usize, cursor: usize, typed: &str, e: &crate::media::Entry) -> (bool, Option<EditorAction>) {
+        let (dir, _partial, typed_dir) = crate::media::split_typed(typed, &vault.root, home);
+        if e.is_dir {
+            let done = format!("{typed_dir}{}/", e.name);
+            text.replace_range(start + 2..cursor, &done);
+            self.set_cursor_byte(ui, text, start + 2 + done.len());
+            return (true, None);
+        }
+        match crate::media::import_file(&vault.root, &dir.join(&e.name), crate::media::local_date()) {
+            Ok(rel) => {
+                let link = crate::media::link_for(&rel);
+                // `[[!…` written as the start marker: replace the extra `[` too
+                let begin = if start > 0 && text[..start].ends_with('[') { start - 1 } else { start };
+                // swallow closing brackets right after the path (`]` or `]]`)
+                let rest = &text[cursor..];
+                let end = cursor
+                    + if rest.starts_with("]]") {
+                        2
+                    } else if rest.starts_with(']') {
+                        1
+                    } else {
+                        0
+                    };
+                text.replace_range(begin..end, &link);
+                self.set_cursor_byte(ui, text, begin + link.len());
+                self.media.active = false;
+                self.media.key = None;
+                (true, Some(EditorAction::FilesChanged))
+            }
+            Err(err) => {
+                self.media.error = Some(format!("Could not add the file: {err}"));
+                (false, None)
+            }
+        }
+    }
+}
+
+/// If the cursor sits right after an unfinished `[[query`, returns (byte where the query starts, query).
+pub fn link_query(text: &str, cursor_char: usize) -> Option<(usize, String)> {
+    let cb = markdown::char_to_byte(text, cursor_char);
+    let line_start = text[..cb].rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let before = &text[line_start..cb];
+    let open = before.rfind("[[")?;
+    let q = &before[open + 2..];
+    // `[[!…` is the file picker, not a note link
+    if q.starts_with('!') || q.contains("]]") || q.contains('|') || q.contains('[') || q.chars().count() > 80 {
+        return None;
+    }
+    Some((line_start + open + 2, q.to_string()))
+}

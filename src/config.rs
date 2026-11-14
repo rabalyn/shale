@@ -237,6 +237,14 @@ pub struct Config {
     /// The date and time the person typed the consent to decrypted local storage (ADR-0011, MAIL-180);
     /// None = encryption is off: nothing is decrypted.
     pub mail_encryption_consent: Option<String>,
+    /// Opening an Obsidian canvas converts it to an editable drawing without asking.
+    pub auto_convert_canvas: bool,
+    /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
+    pub social_accounts: Vec<crate::social::SocialAccountEntry>,
+    /// The account and feed shown last in the feed view.
+    pub social_last: Option<(String, String)>,
+    /// Include replies from other people when saving a post (the last choice in the Import dialog).
+    pub social_replies: bool,
     // Per-vault fields of older versions, read only to move them into the vault that is opened
     // first (CFG-008); dropped from the file after that.
     #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
@@ -281,6 +289,10 @@ impl Default for Config {
             mail_mark_read_secs: 2,
             mail_undo_secs: 10,
             mail_encryption_consent: None,
+            auto_convert_canvas: false,
+            social_accounts: vec![],
+            social_last: None,
+            social_replies: false,
             legacy_open_files: None,
             legacy_last_import_folder: None,
             legacy_recent_tags: None,
@@ -418,6 +430,24 @@ mod tests {
         assert!(serde_json::from_str::<Config>(r#"{"mail_accounts": [{"smtp_security": "Plain"}]}"#).is_err(), "there is no plain-text sending");
         let back = serde_json::to_string(&c).unwrap();
         assert_eq!(serde_json::from_str::<Config>(&back).unwrap().mail_accounts, c.mail_accounts);
+    }
+
+    // spec: SOC-003
+    #[test]
+    fn social_accounts_are_saved_without_secrets_that_the_keyring_holds() {
+        use crate::social::{Account, Network, SocialAccountEntry};
+        let in_keyring = SocialAccountEntry { account: Account::new(Network::Mastodon, "https://m.test", "ada@m.test", "Ada"), secret: String::new() };
+        let kept = SocialAccountEntry { account: Account::new(Network::Bluesky, "https://bsky.social", "ada.bsky.social", ""), secret: "app-pw-123".into() };
+        let c = Config { social_accounts: vec![in_keyring.clone(), kept.clone()], social_last: Some(("a".into(), "home".into())), ..Config::default() };
+        let json = serde_json::to_string(&c).unwrap();
+        assert_eq!(json.matches("\"secret\"").count(), 1, "only the account without a keyring has a secret in the file: {json}");
+        let back: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.social_accounts, vec![in_keyring, kept]);
+        assert_eq!(back.social_last, Some(("a".into(), "home".into())));
+        assert!(!format!("{:?}", back.social_accounts).contains("app-pw-123"), "never in debug output");
+        // an old file has none
+        let old: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
+        assert!(old.social_accounts.is_empty() && old.social_last.is_none());
     }
 
     // spec: CFG-002

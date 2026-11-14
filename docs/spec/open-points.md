@@ -33,8 +33,8 @@ here.
 | OPEN-006 | inotify file watching instead of 3 s polling? | Narrows the conflict window and saves work on big vaults; not a replacement for DATA-003. |
 | OPEN-007 | Platform policy: Linux only, or keep the macOS/Windows code paths alive (and test them)? | `Cargo.toml` has macOS deps; `lists.rs` has Windows code; CI is Linux only. |
 | OPEN-008 | Trash: restore from within Shale, and empty it after N days? | VAULT-019 records the origin first. |
-| ~~OPEN-009~~ | ~~`.excalidraw.md` (Obsidian Excalidraw plugin) files: support or document as unsupported?~~ | Decided 2026-11-14: supported (DRAW-007, DRAW-008). Left open: links and pictures inside them (DRAW-010, OPEN-014). |
-| OPEN-014 | Count `[[links]]` in plugin drawings' texts as links (backlinks from drawings), and show their embedded pictures? | DRAW-010. |
+| ~~OPEN-009~~ | ~~`.excalidraw.md` (Obsidian Excalidraw plugin) files: support or document as unsupported?~~ | Decided 2026-11-14: supported (DRAW-007, DRAW-008). Links and pictures inside them: OPEN-014. |
+| ~~OPEN-014~~ | ~~Count `[[links]]` in drawings' texts as links, and show pictures embedded in plugin drawings?~~ | Decided 2026-11-14: yes, canvases included; canvases are still never written, so a rename names the canvases left behind (DRAW-016, DRAW-017, DRAW-018). |
 | OPEN-010 | Calendar: single-occurrence edits (CAL-007), moving events by dragging, reminders — which first? | Backlog from IMPLEMENTATION.md. |
 | OPEN-011 | Module restructuring (feature folders, splitting `ShaleApp`): do it along the way (proposed) or as one dedicated change? | ADR-0006 §6. |
 | OPEN-012 | Add a test that checks spec IDs against test names (every ID used or marked `untested`)? | Prevents spec drift ([ADR-0001](../decisions/0001-spec-driven-development.md) §5). |
@@ -48,7 +48,7 @@ here.
 Editor: blockquote continuation, indent width setting, live preview hiding syntax, tables,
 auto-pairing brackets, find and replace in a note, spell check, paste images. Links: block
 links (`#^id`), heading scroll in reading view, hover previews. Tasks: priorities, recurring
-tasks, grouping. Graph: colour groups, filters, Barnes–Hut. Drawings: images, frames, groups,
+tasks, grouping. Graph: colour groups, filters, Barnes–Hut. Drawings: SVG/PDF pictures, frames, groups,
 elbow arrows, labels on arrows, rotation handles, PNG/SVG export, copy/paste between drawings.
 Other: command palette, daily notes, templates, light theme, split panes, packaging (.desktop,
 Flatpak), native folder picker.

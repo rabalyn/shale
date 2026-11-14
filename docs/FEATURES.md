@@ -57,6 +57,16 @@ built-in demo vault (`shale --screenshot out.png`).
 - Drawings of the Obsidian Excalidraw plugin (`.excalidraw.md`, compressed or not) open in the
   drawing editor too, and are saved in the plugin's own format, so Obsidian keeps reading them.
   Links like `[[Drawing.excalidraw]]` and embeds `![[Drawing.excalidraw]]` find them.
+- Links inside drawings: type `[[` in a label or text for note suggestions, `[[p ` for people
+  and `[!` for the file picker, just like in notes. A shape or text with a link gets a small ↗
+  mark; click it (or Ctrl+click the shape) to open the note, Shift for a new tab.
+- Links in drawings and canvases count like links in notes: the linked note lists the drawing
+  under Backlinks, and the graph shows the connection. Renaming or moving a note updates the
+  links in drawings too; canvases are never changed, so the message names any canvas that still
+  points to the old name.
+- Pictures in drawings show up: pictures of Obsidian Excalidraw drawings (from the vault) and of
+  excalidraw.com files (stored in the file), also in drawings embedded in notes and in PDF
+  export.
 - Tools on keys 1–0: hand, select, rectangle, diamond, ellipse, arrow, line, pen, text, eraser.
 - The style panel sets stroke and fill colours, fill style, stroke width, outline pattern,
   sloppiness, corners, label font, size, colour, background and alignment, opacity, and the
@@ -64,6 +74,21 @@ built-in demo vault (`shale --screenshot out.png`).
 - Double-click a shape to label it. Arrows snap to shapes and follow them when shapes move.
   Hold Shift to keep lines at 45° steps.
 - "Auto arrange" untangles a diagram; "Spread out" and "Pull together" change the spacing.
+
+### Obsidian canvases
+
+![A canvas shown read-only](screenshots/canvas.png)
+
+- Obsidian Canvas files (`.canvas`) open in the drawing view: cards with their colours, groups,
+  file and web cards (click them to follow), and the arrows between cards with their labels.
+- Opening one asks whether to convert it. **Convert** makes an editable drawing
+  `Name.excalidraw.md` next to it (Obsidian opens it with the Excalidraw plugin); **Open
+  read-only** just shows it. The canvas file itself is never changed. Opening the canvas again
+  offers the drawing made before.
+- Tick "Always convert canvases when opening them" (also in Settings → Drawings) to skip the
+  question.
+
+![The question when a canvas is opened](screenshots/canvas-convert.png)
 
 ## To-do list across all notes
 
@@ -293,6 +318,32 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Each e-mail becomes a note named "date subject" with the sender, recipients and date, the tags
   in its properties, links to the attachments and the original message, and the text of the
   message. The tag list counts these tags too.
+
+## Feeds: read Mastodon and Bluesky, save posts to the vault
+
+![The feed view](screenshots/social-feed.png)
+
+- The ribbon's speech-bubble button opens **Feeds**. **Accounts…** adds a Mastodon account (type
+  the server, open the sign-in page in the browser, paste the code it shows; or paste an access
+  token) or a Bluesky account (handle and an **app password** from Settings → Privacy and
+  security → App passwords, never your main password). Secrets go to the system keyring.
+- Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and your
+  saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
+  previews have a play mark), quoted posts and link cards. A content warning stays closed until
+  you click Show. The next page loads when you reach the end of the list; Refresh starts over.
+- **Save to vault** copies the post, and the whole thread when it is a thread by one author,
+  into the Import dialog: choose the folder (default `Social`), tags and which pictures to
+  bring along. **Open in browser** and **Copy link** are next to it.
+
+![Saving two posts](screenshots/social-import.png)
+
+- Tick **Include replies from others (N)** to add a "Replies" section with other people's
+  answers, nested like a conversation (off by default; Shale remembers your choice). Their
+  pictures are linked, not downloaded.
+- The note has the author, the date, a **Source** link back to the post, the text (a thread:
+  every post in order, numbered), the pictures saved in `z_media/` and their descriptions. A post
+  that was saved before, also as part of a thread, is marked "Imported before".
+- Try it without an account: `shale --screenshot out.png --view social` shows made-up posts.
 
 ## People (contact notes)
 

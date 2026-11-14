@@ -101,6 +101,9 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                             .color(theme::LINK_MISSING),
                     );
                 }
+                if let Some(w) = it.warning() {
+                    ui.add(egui::Label::new(egui::RichText::new(w).size(12.0).color(theme::LINK_MISSING)).wrap());
+                }
                 if !it.people.is_empty() {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
@@ -117,6 +120,16 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                     for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
                         let label = format!("{}  ({}, {}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" });
                         rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5)));
+                    }
+                }
+                if let Source::Social { saved, replies, .. } = &mut it.source {
+                    if !saved.replies.is_empty() {
+                        rec(format!("replies:{i}"), ui.checkbox(replies, egui::RichText::new(format!("Include replies from others ({})", saved.replies.len())).size(12.5)))
+                            .on_hover_text("Adds a Replies section with other people's answers to the thread, nested; their pictures are only linked");
+                    }
+                    for (k, (m, on)) in saved.media.iter().zip(it.att_on.iter_mut()).enumerate() {
+                        let label = format!("{}  ({})", m.file_name, size_text(m.data.len()));
+                        rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5))).on_hover_text("Untick to leave this file out; the note then links to its web address");
                     }
                 }
             });
@@ -192,7 +205,9 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             ui.end_row();
         }
     });
-    rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
+    if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. })) {
+        rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
+    }
     if let Some(n) = &d.link_into {
         let name = crate::markdown::strip_md_ext(&n.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).to_string();
         rec("link".into(), ui.checkbox(&mut d.link_on, format!("Add links to the new notes in “{name}”")));
@@ -300,5 +315,23 @@ mod tests {
         assert_eq!(h.click("add", &mut d, &folders, &tags), Some(ImportAction::AddPath));
         assert_eq!(h.click("import", &mut d, &folders, &tags), Some(ImportAction::Import));
         assert_eq!(h.click("cancel", &mut d, &folders, &tags), Some(ImportAction::Cancel));
+    }
+
+    // spec: SOC-020
+    #[test]
+    fn the_replies_option_is_off_by_default_and_only_there_when_there_are_replies() {
+        use crate::social::demo;
+        let posts = demo::posts();
+        let items = vec![import::social_item(demo::saved(&posts[4]), "Mastodon", false), import::social_item(demo::saved(&posts[3]), "Mastodon", false)];
+        let mut d = ImportDialog::new(items, vec![], "Social".into(), String::new(), None, false);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(d.rects.iter().any(|r| r.0 == "replies:0"));
+        assert!(!d.rects.iter().any(|r| r.0 == "replies:1"), "no replies, no option");
+        assert!(matches!(d.items[0].source, Source::Social { replies: false, .. }));
+        h.click("replies:0", &mut d, &[], &[]);
+        assert!(matches!(d.items[0].source, Source::Social { replies: true, .. }));
+        // a remembered "on" applies only to posts that have replies
+        assert!(matches!(import::social_item(demo::saved(&posts[3]), "Mastodon", true).source, Source::Social { replies: false, .. }));
     }
 }

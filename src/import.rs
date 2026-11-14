@@ -25,6 +25,12 @@ pub enum Source {
     },
     Files(Vec<PathBuf>),
     Text(String),
+    /// a Mastodon / Bluesky post (or thread) with its pictures; `network` is "Mastodon" / "Bluesky"
+    Social {
+        saved: crate::social::note::SavedPost,
+        network: &'static str,
+        replies: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -42,12 +48,14 @@ pub struct Item {
 }
 
 impl Item {
-    pub fn kind(&self) -> &'static str {
-        match self.source {
-            Source::Email { .. } => "E-mail",
-            Source::Event { .. } => "Event",
-            Source::Files(_) => "Files",
-            Source::Text(_) => "Text",
+    pub fn kind(&self) -> std::borrow::Cow<'static, str> {
+        match &self.source {
+            Source::Email { .. } => "E-mail".into(),
+            Source::Event { .. } => "Event".into(),
+            Source::Files(_) => "Files".into(),
+            Source::Text(_) => "Text".into(),
+            Source::Social { saved, .. } if saved.thread.len() > 1 => format!("Thread ({} posts)", saved.thread.len()).into(),
+            Source::Social { .. } => "Post".into(),
         }
     }
 
@@ -59,6 +67,9 @@ impl Item {
             Source::Event { event, .. } => format!("{}\n{}\n{}", event.summary, event.location, event.description),
             Source::Files(p) => p.iter().map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(" "),
             Source::Text(t) => t.clone(),
+            Source::Social { saved, .. } => {
+                saved.thread.iter().map(|p| format!("{}\n{}", crate::social::markup::plain_text(&p.text_markdown), p.media.iter().map(|m| m.alt.as_str()).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n")
+            }
         }
     }
 
@@ -75,6 +86,30 @@ impl Item {
             }
             Source::Files(p) => p.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(", "),
             Source::Text(s) => format!("{} characters of text", s.chars().count()),
+            Source::Social { saved, network, .. } => {
+                let first = &saved.thread[0];
+                let n = saved.media.len();
+                let when = if first.created_at == 0 { String::new() } else { format!(" · {}", local_stamp(first.created_at, false)) };
+                format!("{} (@{}) on {network}{when}{}", first.author.name(), first.author.handle, if n > 0 { format!(" · {n} file{}", if n == 1 { "" } else { "s" }) } else { String::new() })
+            }
+        }
+    }
+
+    /// Something that went wrong while the post was fetched (pictures, the thread), if anything.
+    pub fn warning(&self) -> Option<String> {
+        let Source::Social { saved, .. } = &self.source else { return None };
+        let mut parts = vec![];
+        if let Some(e) = &saved.thread_error {
+            parts.push(format!("The rest of the thread could not be fetched ({e}); only this post is saved."));
+        }
+        if !saved.failed_media.is_empty() {
+            let n = saved.failed_media.len();
+            parts.push(format!("{n} picture{} or video{} could not be downloaded; the note links to {} instead.", if n == 1 { "" } else { "s" }, if n == 1 { "" } else { "s" }, if n == 1 { "it" } else { "them" }));
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" "))
         }
     }
 
@@ -114,7 +149,7 @@ fn local_ymd(utc: i64) -> (i32, u32, u32) {
 }
 
 /// "2026-11-13 10:22" (local time), or just the date.
-fn local_stamp(utc: i64, date_only: bool) -> String {
+pub(crate) fn local_stamp(utc: i64, date_only: bool) -> String {
     let (day, secs) = t::utc_to_local(utc);
     let d = ymd_text(t::civil_from_days(day));
     if date_only {
@@ -132,7 +167,7 @@ fn event_ymd(e: &Event) -> (i32, u32, u32) {
     }
 }
 
-fn safe_title(s: &str) -> String {
+pub(crate) fn safe_title(s: &str) -> String {
     let s: String = s.chars().map(|c| if c == '/' || c == '\n' || c == '\r' || c == '\t' { ' ' } else { c }).collect();
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     let s: String = s.chars().take(90).collect();
@@ -154,6 +189,14 @@ pub fn eml_item(raw: Vec<u8>, file_name: Option<&str>) -> Item {
     let m = mail::parse(&raw);
     let name = file_name.map(String::from).unwrap_or_else(|| format!("{}.eml", if m.subject.trim().is_empty() { "message".to_string() } else { safe_title(&m.subject) }));
     email_item(m, (name, raw))
+}
+
+/// An item for a saved post or thread (see `social::note::fetch_saved`). All its files are ticked.
+/// `replies`: include the replies of other people (the dialog's tick box; off by default).
+pub fn social_item(saved: crate::social::note::SavedPost, network: &'static str, replies: bool) -> Item {
+    let title = crate::social::note::post_title(&saved.thread[0]);
+    let att_on = vec![true; saved.media.len()];
+    Item { source: Source::Social { replies: replies && !saved.replies.is_empty(), saved, network }, include: true, title, att_on, already: None, people: vec![] }
 }
 
 pub fn event_item(event: Event, calendar: String, original: Option<(String, Vec<u8>)>) -> Item {
@@ -436,9 +479,14 @@ pub fn find_people(vault: &Vault, dir: &str, items: &mut [Item]) {
 /// Mark items that were imported before (same message / event) and leave them out by default.
 pub fn mark_duplicates(vault: &Vault, items: &mut [Item]) {
     for it in items.iter_mut() {
-        let Some(m) = it.marker() else { continue };
         // the same note every time (first path in order), whatever order the index has
-        let found = vault.notes.iter().filter(|(_, n)| n.text.lines().take(40).any(|l| l.trim() == m)).map(|(p, _)| p.clone()).min();
+        let found = if let Source::Social { saved, .. } = &it.source {
+            // any post of the thread, also when it was saved as part of another thread
+            vault.notes.iter().filter(|(_, n)| saved.thread.iter().any(|p| crate::social::note::note_has_post(&n.text, &p.id))).map(|(p, _)| p.clone()).min()
+        } else {
+            let Some(m) = it.marker() else { continue };
+            vault.notes.iter().filter(|(_, n)| n.text.lines().take(40).any(|l| l.trim() == m)).map(|(p, _)| p.clone()).min()
+        };
         if let Some(p) = found {
             it.already = Some(p);
             it.include = false;
@@ -465,12 +513,12 @@ pub fn clean_folder(s: &str) -> Result<PathBuf, String> {
     crate::vault_path::VaultPath::parse(s).map(|p| p.into_path_buf()).map_err(|e| e.to_string())
 }
 
-fn yaml(s: &str) -> String {
+pub(crate) fn yaml(s: &str) -> String {
     let one_line: String = s.chars().map(|c| if c == '\n' || c == '\r' { ' ' } else { c }).collect();
     format!("\"{}\"", one_line.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn front(lines: &[(&str, String)], tags: &[String]) -> String {
+pub(crate) fn front(lines: &[(&str, String)], tags: &[String]) -> String {
     let mut s = String::from("---\n");
     for (k, v) in lines {
         if !v.is_empty() {
@@ -644,6 +692,19 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> (Vec<PathBuf>, 
                     s.push_str(&format!("\n# {title}\n\n{}\n", text.trim()));
                     s
                 }
+                Source::Social { saved, replies, .. } => {
+                    // only the ticked files are saved; the others stay links to their web address
+                    let date = crate::social::note::media_date(saved);
+                    let mut chosen = crate::social::note::SavedPost { media: vec![], failed_media: vec![], thread_error: None, replies: if *replies { saved.replies.clone() } else { vec![] }, ..saved.clone() };
+                    let mut paths = vec![];
+                    for (m, on) in saved.media.iter().zip(&it.att_on) {
+                        if *on {
+                            paths.push(media::save_bytes(&root, &m.file_name, &m.data, date).map_err(|e| format!("could not save “{}”: {e}", m.file_name))?);
+                            chosen.media.push(m.clone());
+                        }
+                    }
+                    crate::social::note::post_note(&chosen, &paths, &o.tags, &people)
+                }
             })
         })();
         match result {
@@ -769,6 +830,61 @@ mod tests {
         let _ = std::fs::remove_file(&src);
     }
 
+    // spec: SOC-011, SOC-012
+    #[test]
+    fn a_saved_post_becomes_a_note_with_pictures_and_a_second_import_is_spotted() {
+        use crate::social::demo;
+        let mut v = temp_vault("social");
+        let posts = demo::posts();
+        let mut items = vec![social_item(demo::saved(&posts[4]), "Mastodon", false), social_item(demo::saved(&posts[3]), "Mastodon", false)];
+        assert_eq!((items[0].kind().as_ref(), items[1].kind().as_ref()), ("Thread (3 posts)", "Post"));
+        assert_eq!((items[0].att_on.clone(), items[1].att_on.clone()), (vec![true], vec![true, true]));
+        assert!(items[0].detail().contains("Grace Hopper") && items[0].detail().contains("Mastodon") && items[0].detail().contains("1 file"), "{}", items[0].detail());
+        assert!(items[0].tag_text().contains("plain text files"));
+        assert!(items[0].warning().is_none());
+        items[1].att_on[1] = false;
+        // a problem while fetching shows as a warning
+        let mut broken = demo::saved(&posts[3]);
+        broken.thread_error = Some("offline".into());
+        broken.failed_media.push(crate::social::note::FailedMedia { url: "https://x.test/a.jpg".into(), error: "gone".into(), post: 0, item: 0 });
+        let w = social_item(broken, "Mastodon", false).warning().unwrap();
+        assert!(w.contains("offline") && w.contains("1 picture or video could not be downloaded"), "{w}");
+        let o = Options { folder: PathBuf::from("Social"), tags: parse_tags("social, reading"), keep_original: false, people_dir: "Adressbuch".into() };
+        let (made, errs) = import(&mut v, &items, &o);
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!(made.len(), 2);
+        let thread = std::fs::read_to_string(v.abs(&made[0])).unwrap();
+        assert!(thread.contains("type: social-post\n") && thread.contains("post-id: \"demo-thread-1\"\n") && thread.contains("thread-ids: [\"demo-thread-1\", \"demo-thread-2\", \"demo-thread-3\"]\n"), "{thread}");
+        assert!(thread.contains("tags: [social, reading]\n") && thread.contains("- **Thread:** 3 posts by @grace@fosstodon.org\n"), "{thread}");
+        assert!(thread.contains("- **Source:** [https://demo.social/@grace/demo-thread-1](https://demo.social/@grace/demo-thread-1)\n"), "{thread}");
+        assert!(thread.contains("**3/3**") && thread.contains("![[z_media/"), "{thread}");
+        let single = std::fs::read_to_string(v.abs(&made[1])).unwrap();
+        assert_eq!(single.matches("![[z_media/").count(), 1, "the unticked picture is not saved: {single}");
+        assert!(single.contains("*The same hill a minute later, more purple*"), "its description stays: {single}");
+        let saved: Vec<_> = std::fs::read_dir(v.root.join("z_media")).unwrap().flatten().flat_map(|y| std::fs::read_dir(y.path()).unwrap().flatten().flat_map(|m| std::fs::read_dir(m.path()).unwrap().flatten())).collect();
+        assert_eq!(saved.len(), 2, "one file for the thread, one for the post");
+        // replies of others: off by default, then on
+        let mut with = social_item(demo::saved(&posts[4]), "Mastodon", false);
+        assert!(matches!(with.source, Source::Social { replies: false, .. }), "off by default");
+        assert!(!thread.contains("## Replies") && !thread.contains("replies:"));
+        if let Source::Social { replies, .. } = &mut with.source {
+            *replies = true;
+        }
+        with.title = "with replies".into();
+        let (m3, errs) = import(&mut v, &[with], &o);
+        assert!(errs.is_empty(), "{errs:?}");
+        let t3 = std::fs::read_to_string(v.abs(&m3[0])).unwrap();
+        assert!(t3.contains("replies: 3\n") && t3.contains("## Replies") && t3.contains("Plain files, yes") && t3.contains(">> **[Grace Hopper"), "{t3}");
+        // the same thread again, and one post of it alone: both are marked, the other post is not
+        v.rescan();
+        let mut again = vec![social_item(demo::saved(&posts[4]), "Mastodon", false), social_item(demo::saved(&demo::thread()[1]), "Mastodon", false), social_item(demo::saved(&posts[0]), "Mastodon", false)];
+        mark_duplicates(&v, &mut again);
+        assert_eq!(again[0].already.as_deref(), Some(made[0].as_path()));
+        assert_eq!(again[1].already.as_deref(), Some(made[0].as_path()), "a post that is part of a saved thread");
+        assert!(!again[0].include && !again[1].include);
+        assert!(again[2].already.is_none() && again[2].include);
+    }
+
     // spec: IMP-008
     #[test]
     fn a_thunderbird_drag_with_an_empty_file_list() {
@@ -833,7 +949,7 @@ mod tests {
         // calendar data (as dragged out of a calendar program)
         let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x1\r\nDTSTART:20261202T090000Z\r\nDTEND:20261202T100000Z\r\nSUMMARY:Abnahme Hörsaal\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let (items, _) = items_from_drop("text/calendar", ics.as_bytes());
-        assert_eq!((items.len(), items[0].kind()), (1, "Event"));
+        assert_eq!((items.len(), &*items[0].kind()), (1, "Event"));
         assert_eq!(items_from_drop("text/plain", ics.as_bytes()).0[0].kind(), "Event");
         // only a link into the mail program: explained
         let (items, notes) = items_from_drop("text/plain", b"imap-message://ada@mail.uni.example/INBOX#4711");

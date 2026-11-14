@@ -165,7 +165,7 @@ pub fn resolve(base: &str, href: &str) -> String {
 // ---------------------------------------------------------------- HTTP through curl
 
 /// Largest answer accepted from a server.
-const MAX_BYTES: &str = "52428800";
+const MAX_BYTES: u64 = 52_428_800;
 const MARK: &str = "\n__SHALE__";
 // (%{size_header}: bytes of all response headers, which `-i` puts before the body; works with
 // any curl, unlike %header{…} which needs curl 7.84)
@@ -202,7 +202,7 @@ pub fn request(method: &str, url: &str, depth: &str, body: &str, acct: &Account)
     request_with(method, url, &[&format!("Depth: {depth}"), "Content-Type: application/xml; charset=utf-8"], body, acct)
 }
 
-/// One HTTP request with any headers.
+/// One HTTP request with any headers; the answer's body as text.
 pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account) -> Result<Response, String> {
     request_opts(method, url, headers, body, acct, true)
 }
@@ -210,6 +210,31 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
 /// Like [`request_with`]; `follow` = false never follows a redirect (the OAuth2 token endpoint:
 /// its form holds secrets and must go only where it was addressed).
 pub fn request_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, follow: bool) -> Result<Response, String> {
+    let r = request_bytes_opts(method, url, headers, body, acct, MAX_BYTES, follow)?;
+    Ok(Response { status: r.status, body: String::from_utf8_lossy(&r.body).into_owned(), url: r.url, etag: r.etag })
+}
+
+/// The answer to `request_bytes`: the body is raw (pictures, video).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BytesResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+    /// where the answer came from in the end (after redirects)
+    pub url: String,
+    pub etag: Option<String>,
+    /// the Content-Type header of the answer (without parameters, lower case)
+    pub content_type: Option<String>,
+}
+
+/// One HTTP request with any headers and a binary answer of at most `max_bytes` (bigger answers
+/// are an error). All the security rules of this file apply; a header `Authorization: …` is only
+/// accepted when the answer finally comes from the same server (curl itself drops it on a
+/// redirect to another server).
+pub fn request_bytes(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64) -> Result<BytesResponse, String> {
+    request_bytes_opts(method, url, headers, body, acct, max_bytes, true)
+}
+
+fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64, follow: bool) -> Result<BytesResponse, String> {
     let origin = check_url(url)?;
     if !method.chars().all(|c| c.is_ascii_uppercase()) || method.is_empty() {
         return Err(format!("bad request method {method:?}"));
@@ -233,14 +258,16 @@ pub fn request_opts(method: &str, url: &str, headers: &[&str], body: &str, acct:
     for h in headers {
         cfg.push_str(&format!("header = {}\n", curl_quote(h)));
     }
+    let with_auth = headers.iter().any(|h| h.trim_start().to_ascii_lowercase().starts_with("authorization:"));
     // a local http server may redirect to http; the final address is checked below
     let protos = if origin.scheme == "http" { "=http,https" } else { "=https" };
+    let max_time = if max_bytes > 10_000_000 { "300" } else { "30" };
     let mut child = Command::new("curl")
         // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
         .args(["-q", "-sS", "-i"])
         .args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] })
         .args(["--proto", protos, "--proto-redir", protos])
-        .args(["--connect-timeout", "10", "--max-time", "30", "--max-filesize", MAX_BYTES])
+        .args(["--connect-timeout", "10", "--max-time", max_time, "--max-filesize", &max_bytes.to_string()])
         .args(["-X", method, "-w", WRITE_OUT, "-K", "-", url])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -261,17 +288,25 @@ pub fn request_opts(method: &str, url: &str, headers: &[&str], body: &str, acct:
     let (code, header_len, effective) = (fields.next().unwrap_or(""), fields.next().unwrap_or(""), fields.next().unwrap_or(""));
     let status: u16 = code.trim().parse().unwrap_or(0);
     let header_len = header_len.trim().parse::<usize>().unwrap_or(0).min(pos);
-    let etag = last_header(&String::from_utf8_lossy(&raw[..header_len]), "etag").unwrap_or_default();
-    let body = String::from_utf8_lossy(&raw[header_len..pos]).into_owned();
+    let head = String::from_utf8_lossy(&raw[..header_len]).into_owned();
+    let etag = last_header(&head, "etag").unwrap_or_default();
+    let content_type = last_header(&head, "content-type").map(|c| c.split(';').next().unwrap_or("").trim().to_ascii_lowercase()).filter(|c| !c.is_empty() && !has_control(c));
+    let body = raw[header_len..pos].to_vec();
     if status == 0 {
         let err = stderr();
         return Err(if err.is_empty() { "could not reach the server".into() } else { err });
     }
+    if body.len() as u64 > max_bytes {
+        return Err(format!("the answer is bigger than {} MB", max_bytes / 1_000_000));
+    }
     let effective = if effective.trim().is_empty() { url.to_string() } else { effective.trim().to_string() };
     if effective != url {
         check_url(&effective).map_err(|e| format!("the server redirected to an address that is not allowed: {e}"))?;
+        if with_auth && !same_server(&effective, url) {
+            return Err(format!("the server sent the request on to {}; Shale does not send your access token to another server", host_of(&effective)));
+        }
     }
-    Ok(Response { status, body, url: effective, etag: clean_etag(&etag) })
+    Ok(BytesResponse { status, body, url: effective, etag: clean_etag(&etag), content_type })
 }
 
 /// A header of the last response in curl's `-i` output (after redirects and "100 Continue").

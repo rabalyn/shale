@@ -13,7 +13,8 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 | `src/app.rs` | App state: tabs and history, open note buffers, autosave, outside-change detection, actions (open, follow link, create, rename, trash, toggle task), screenshot mode. Includes app-level tests. |
 | `src/layout.rs` | Window layout: ribbon, tab bar, view header, note view (inline title plus editor or reading view), status bar, toasts, painted icons, start screen. |
 | `src/panels.rs` | Left sidebar (file tree, search, tags), right sidebar (backlinks and unlinked mentions, outgoing links, outline, local graph), the vault-wide task list and the dialogs (quick switcher, rename, new folder, trash, settings). |
-| `src/editor.rs` | Markdown editor: live colouring, blue and red links, clicking links and checkboxes, `[[` suggestions. Includes headless UI tests that simulate mouse clicks and typing. |
+| `src/editor.rs` | Markdown editor: live colouring, blue and red links, clicking links and checkboxes. Includes headless UI tests that simulate mouse clicks and typing. |
+| `src/link_assist.rs` | The `[[` note suggestions, `[[p ` people list and `[!` file picker for any text box (notes and drawing texts): takes the popup keys before the text box, draws the popups, and has a safety net for keys that reach the text box anyway. |
 | `src/reader.rs` | Reading view: rendered markdown with clickable links, checkboxes, embedded drawings and notes. |
 | `src/lists.rs` | Smart editing: continue lists on Enter, Tab and Shift+Tab indent for lists and heading levels, web-link parsing, opening the browser. |
 | `src/media.rs` | The `[!` file picker: path splitting (`/` = vault root, `~/` = home), shell-style Tab completion, copying files into `z_media/<year>/<month>/<YYMMDD>_<name>`, link text, local date. |
@@ -50,12 +51,16 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 | `src/recovery.rs` | Text that could not be saved at exit, put aside and announced at the next start. |
 | `src/import.rs` | Turning e-mails, calendar events, files and text into tagged notes (with attachments in the media folder), spotting things imported before, reading what other programs drop. |
 | `src/import_dialog.rs` | The Import dialog: what to import (with attachment choices), note names, folder, tags, options. |
+| `src/social/` | Mastodon and Bluesky: `mod.rs` (data model, `Client`, HTTP, self-thread), `mastodon.rs`, `bluesky.rs`, `markup.rs` (HTML to Markdown), `note.rs` (fetch a post with its thread and media, write the note), `state.rs` (feed state and background jobs), `feed_ui.rs` (the Feeds view), `accounts_ui.rs` (the accounts dialog), `images.rs` (picture cache with 4 workers), `demo.rs` (made-up posts for screenshots and tests). `src/app/social.rs` connects it to the app and the Import dialog. |
 | `src/app/drops.rs` | Drop handling in the window: drop zones (folders, notes, the editor), the drop highlight, events dragged out of the calendar, running the import, linking the new notes. |
 | `src/wl_drop.rs` | Drag and drop from other programs on Wayland (Linux), on the window's own Wayland connection; reads every useful kind a drop offers. |
 | `src/tb_store.rs` | Finding a dragged message in Thunderbird's own folders on this computer (profiles, accounts from prefs.js, mbox and maildir folders, Thunderbird's folder index `.msf` in its "Mork" format: message key/UID → Message-ID and position; local folders by position, subject as the last resort). |
 | `src/markdown.rs` | Pure parsing: links, tasks, tags, headings, link renaming, fuzzy matching. |
 | `src/vault.rs` | Folder scanning, link index (resolution, backlinks, unlinked mentions, outgoing links), tasks, tags, search, create, rename (with link rewriting), trash, graph data, sample vault. |
 | `src/drawing.rs` | Excalidraw-compatible scene model (serde, unknown fields kept), hand-drawn renderer, canvas editor (tools, selection, resize, undo and redo, properties panel). |
+| `src/drawing_links.rs` | Child module of `drawing`: links of elements (text or Excalidraw `link` field), the ↗ link marks and following them, and the read-only view used for Obsidian canvases. |
+| `src/drawing_pictures.rs` | Pictures in drawings: where each `image` element's picture comes from (plugin `## Embedded Files` or a `dataURL`), as textures for painting and as images for PDF export. |
+| `src/canvas.rs` | Obsidian Canvas (`.canvas`, JSON Canvas 1.0): turns cards and edges into an Excalidraw scene, writes the converted `.excalidraw.md` copy (marked `shale-converted-from` in its front matter) and finds it again. |
 | `src/graph.rs` | Force-directed graph used for the global graph and the local graph. |
 | `src/config.rs` | Settings saved to `~/.config/shale/config.json`. |
 | `src/theme.rs` | Colours and egui style. |
@@ -71,9 +76,11 @@ Drawings are **not** the Excalidraw web app. There is no browser view, no JavaSc
 - **Reading and writing**: `serde` structs for the scene and its elements. Fields this editor doesn't know about are kept as they are and written back, so a file made on excalidraw.com survives a round trip.
 - **Drawing**: shapes become point outlines. The "sketchy" look is a seeded wobble with a double stroke, plus hatch and cross-hatch fills computed by clipping parallel lines to the shape. The seed comes from the element's `seed`, so the look doesn't flicker. This is a lookalike of the hand-drawn style, not a port of the rough.js library.
 - **Editor**: tools (hand, select, rectangle, diamond, ellipse, arrow, line, pen, text, eraser), selection and resize, a style panel, undo and redo, pan and zoom, a dark canvas.
-- **Code layout**: `src/drawing.rs` (file format, rendering, editor core), `src/drawing_connect.rs` (labels, connections, line endings, style panel, arrange buttons; a child module so it can use the editor's internals), `src/drawing_layout.rs` (pure geometry: anchors, crossing count, auto layout, spread).
+- **Code layout**: `src/drawing.rs` (file format, rendering, editor core), `src/drawing_connect.rs` (labels, connections, line endings, style panel, arrange buttons; a child module so it can use the editor's internals), `src/drawing_layout.rs` (pure geometry: anchors, crossing count, auto layout, spread), `src/drawing_links.rs` (links in drawings, read-only view).
 - **In notes**: `![[Sketch.excalidraw]]` renders the same shapes as a thumbnail in the reading view.
-- **Not covered yet**: images, frames, groups, elbow (right-angled) arrows, labels on arrows, rotation handles, export to PNG/SVG. The Obsidian plugin's `.excalidraw.md` files are read and written by `src/excalidraw_md.rs`. Unknown element types are drawn as a dashed box and kept in the file unchanged.
+- **Pictures**: `src/drawing_pictures.rs` finds the picture of each `image` element (the plugin's `## Embedded Files` section, read into `Scene::embedded`, or a `dataURL` in the scene's `files`) and loads it as a texture for painting or as an image for the PDF.
+- **Links in the index**: `Vault::drawings` holds the links of every drawing and canvas (`drawing::link_lines`: one line per element text or `link` field with a link), next to the notes; backlinks, the graph, rename and move use both. Rename and move rewrite drawings with `drawing::rewrite_link_texts` in the file's own format, never canvases.
+- **Not covered yet**: frames, groups, elbow (right-angled) arrows, labels on arrows, rotation handles, export to PNG/SVG. The Obsidian plugin's `.excalidraw.md` files are read and written by `src/excalidraw_md.rs`. Obsidian canvases (`.canvas`) are converted to a scene by `src/canvas.rs` and only shown read-only (or converted into a new `.excalidraw.md`); Shale never writes a canvas. Unknown element types are drawn as a dashed box and kept in the file unchanged.
 
 Dependencies of the whole app are only `eframe`/egui (window and UI), `serde`/`serde_json` (files), `dirs` (config and cache folders), `image` (pictures and screenshots) and `libc` on Unix (local date).
 
@@ -257,7 +264,7 @@ Not covered by automated tests yet: drag gestures in the drawing canvas, the gra
 
 - Calendar: changing a single date of a repeating event (edits apply to the whole series; deleting removes the series), dragging events to move or resize them, a time picker (times are typed, e.g. 9:30), reminders, VTIMEZONE blocks with non-Olson names (such zones are treated as local time), BYMONTHDAY/BYSETPOS-style rules, and linking events to notes (for example daily notes).
 
-1. ~~**Excalidraw plugin files**~~: done (`src/excalidraw_md.rs`, specs DRAW-007 to DRAW-010). Still open: links and pictures inside them.
+1. ~~**Excalidraw plugin files**~~: done (`src/excalidraw_md.rs`, specs DRAW-007 to DRAW-009). Links inside drawings can be typed, followed and count as backlinks; pictures are shown (DRAW-014 to DRAW-018, OPEN-014).
 2. **Drawing features**: arrow binding to shapes, multi-point lines (click-to-add points), rotation handles, text inside shapes (`containerId`), images, groups, copy and paste between drawings, export to PNG or SVG, and a hand-drawn font (text uses the UI font).
 3. **Editor**: images shown inside the editor itself (now only in the reading view and on hover), `[!/` cannot reach folders outside the vault and home (for example `/mnt`) — add a prefix for that if needed, drag-and-drop or paste of images into notes, blockquote continuation on Enter, a setting for indent width or tabs, true live-preview (hiding syntax on lines without the cursor), bold font weight (bold is shown brighter and slightly spaced because the default font has no bold), tables, images in notes (`![[pic.png]]`), auto-pairing brackets, find and replace inside a note, spell check.
 4. **Links**: links to blocks (`#^id`), heading links that scroll in the reading view (they scroll in the editor), hover previews of linked notes.

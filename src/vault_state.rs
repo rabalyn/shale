@@ -189,6 +189,8 @@ pub struct VaultState {
     pub open_files: Vec<String>,
     /// The folder used for the last import (vault-relative).
     pub last_import_folder: String,
+    /// The folder used for the last saved post (vault-relative); empty: "Social".
+    pub last_social_folder: String,
     /// Tags used for imports, most recent first.
     pub recent_tags: Vec<String>,
     #[serde(flatten)]
@@ -197,7 +199,7 @@ pub struct VaultState {
 
 impl Default for VaultState {
     fn default() -> Self {
-        VaultState { version: Self::CURRENT, open_files: vec![], last_import_folder: String::new(), recent_tags: vec![], other: Map::new() }
+        VaultState { version: Self::CURRENT, open_files: vec![], last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
     }
 }
 
