@@ -358,8 +358,9 @@ impl Vault {
         v
     }
 
-    /// Full-text search: (note, [(line, text)]).
-    pub fn search(&self, query: &str) -> Vec<(PathBuf, Vec<(usize, String)>)> {
+    /// Full-text search, ignoring case: (note, [(line, byte offset of the match in that line,
+    /// the line's text)]), at most 20 lines per note.
+    pub fn search(&self, query: &str) -> Vec<(PathBuf, Vec<(usize, usize, String)>)> {
         let q = query.trim().to_lowercase();
         if q.is_empty() {
             return vec![];
@@ -370,8 +371,8 @@ impl Vault {
             let mut lines = Vec::new();
             if let Some(n) = self.notes.get(&f.rel) {
                 for (i, line) in n.text.lines().enumerate() {
-                    if line.to_lowercase().contains(&q) {
-                        lines.push((i, line.trim().to_string()));
+                    if let Some(col) = markdown::find_ci(line, &q) {
+                        lines.push((i, col, line.trim().to_string()));
                         if lines.len() >= 20 {
                             break;
                         }

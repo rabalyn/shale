@@ -62,6 +62,7 @@ Other options:
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Previous / next note in the folder (in the file list's sort order) |
+| ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Alt+← / Alt+→ | Back / forward |

@@ -15,6 +15,10 @@ The release page of each version on GitHub shows its section from this file.
   to move them there (onto a note: next to it; onto empty space: to the top of the vault). A
   closed folder opens when you hold the pointer on it, the list scrolls at its edges, and links
   written as a path to anything that moved are updated (links by name keep working anyway).
+- **Browse search results with the keyboard**: ↓ or Enter in the search box goes into the
+  results; j / k move from hit to hit, Ctrl+J / Ctrl+K jump to the next / previous file, and
+  Enter opens the note with the cursor on the found text, ready to type. Esc goes back to the
+  box. All hits of a note are listed now (up to 20), not only the first 6.
 - **Obsidian Excalidraw drawings** (`.excalidraw.md`) open in the drawing editor instead of as a
   note, also when their data is compressed. Saving keeps the plugin's file layout (front
   matter, compression, embedded files) and updates its text list, so Obsidian keeps reading the

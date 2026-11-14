@@ -112,6 +112,8 @@ pub enum Action {
     NewDrawing { folder: PathBuf, embed_into: Option<PathBuf> },
     ToggleTask { rel: PathBuf, offset: usize },
     GotoLine { rel: PathBuf, line: usize },
+    /// open a note with the cursor at `col` (byte offset) of `line`, keyboard in the editor
+    GotoMatch { rel: PathBuf, line: usize, col: usize },
     ShowView(View),
     CloseTab(usize),
     Rename(PathBuf),
@@ -146,6 +148,10 @@ pub struct ShaleApp {
     pub right: RightPanel,
     pub expanded: HashSet<PathBuf>,
     pub search: String,
+    /// the selected stop in the search results while they are browsed with the keyboard
+    pub search_sel: Option<usize>,
+    /// scroll the selected search result into view on the next frame
+    pub(crate) search_scroll: bool,
     /// focus the search box (and select its text) in the next frame
     pub focus_search: bool,
     pub tasks: TasksFilter,
@@ -244,6 +250,8 @@ impl ShaleApp {
             right: RightPanel::Backlinks,
             expanded: HashSet::new(),
             search: String::new(),
+            search_sel: None,
+            search_scroll: false,
             focus_search: false,
             tasks: TasksFilter::default(),
             graph: GraphView::new(false),
@@ -533,9 +541,20 @@ impl ShaleApp {
     }
 
     pub fn goto_line(&mut self, rel: &Path, line: usize) {
+        self.goto_match(rel, line, 0);
+    }
+
+    /// Open `rel` with the cursor at byte `col` of `line` (clamped to the line) and the keyboard
+    /// in the editor.
+    pub fn goto_match(&mut self, rel: &Path, line: usize, col: usize) {
         self.open(rel, false);
         if let (Some(doc), Some(tab)) = (self.notes.get(rel), self.tabs.get_mut(self.active)) {
-            let byte = markdown::line_start_byte(&doc.text, line);
+            let start = markdown::line_start_byte(&doc.text, line);
+            let line_len = doc.text[start..].find('\n').unwrap_or(doc.text.len() - start);
+            let mut byte = start + col.min(line_len);
+            while !doc.text.is_char_boundary(byte) {
+                byte -= 1;
+            }
             tab.editor.pending_cursor = Some(markdown::byte_to_char(&doc.text, byte));
             tab.reading = false;
         }
@@ -947,6 +966,7 @@ impl ShaleApp {
                 Action::NewDrawing { folder, embed_into } => self.new_drawing(&folder, embed_into),
                 Action::ToggleTask { rel, offset } => self.toggle_task(&rel, offset),
                 Action::GotoLine { rel, line } => self.goto_line(&rel, line),
+                Action::GotoMatch { rel, line, col } => self.goto_match(&rel, line, col),
                 Action::ShowView(v) => self.show_view(v, false),
                 Action::CloseTab(i) => self.close_tab(i),
                 Action::Rename(rel) => {

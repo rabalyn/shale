@@ -161,6 +161,7 @@ built-in demo vault (`shale --screenshot out.png`).
 | Ctrl+, | Settings |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Previous / next note in the folder (in the file list's sort order) |
+| ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Alt+← / Alt+→ | Back / forward |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |

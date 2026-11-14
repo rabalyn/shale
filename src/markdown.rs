@@ -481,6 +481,18 @@ pub fn link_safe_name(name: &str) -> String {
     s.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
+/// Byte offset of the first place in `line` where `query_lower` (already lowercase) starts,
+/// ignoring case: also for letters whose lowercase form has another length (`ẞ`, `İ`).
+pub fn find_ci(line: &str, query_lower: &str) -> Option<usize> {
+    if query_lower.is_empty() {
+        return Some(0);
+    }
+    line.char_indices().map(|(i, _)| i).find(|&i| {
+        let mut rest = line[i..].chars().flat_map(char::to_lowercase);
+        query_lower.chars().all(|q| rest.next() == Some(q))
+    })
+}
+
 pub fn sanitize_note_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
@@ -625,6 +637,16 @@ mod tests {
     }
 
     // spec: EDIT-001
+    // spec: NAV-009
+    #[test]
+    fn find_ignores_case_also_for_other_letters() {
+        assert_eq!(find_ci("first Apple", "apple"), Some(6));
+        assert_eq!(find_ci("  Ünïcode ÄPFEL", "äpfel"), Some("  Ünïcode ".len()));
+        assert_eq!(find_ci("Die STRAẞE", "straße"), Some(4));
+        assert_eq!(find_ci("nothing", "apple"), None);
+        assert_eq!(find_ci("x", ""), Some(0));
+    }
+
     #[test]
     fn fuzzy() {
         assert!(fuzzy_score("al", "Alpha").unwrap() > fuzzy_score("al", "Total").unwrap());
