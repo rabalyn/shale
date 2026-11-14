@@ -1,4 +1,4 @@
-//! A small blocking IMAP client that can only read (ADR-0007, MAIL-020 to MAIL-025).
+//! A small blocking IMAP client (ADR-0007, ADR-0009, MAIL-020 to MAIL-025, MAIL-100 to MAIL-103).
 //!
 //! It speaks the part of IMAP4rev1 that phase 1 needs: `CAPABILITY`, `STARTTLS`, sign-in,
 //! `LIST`, `EXAMINE`, `UID SEARCH` and `UID FETCH`, with `CONDSTORE` where the server has it.
@@ -14,6 +14,12 @@
 //!   (`rustls-platform-verifier`); the production path has no switch to relax that.
 //! - **Bounded.** Lines, literals (message bodies) and waiting time have limits. A message over
 //!   the limit is skipped without being read into memory, and the connection stays usable.
+//!
+//! **Writing** (phase 2, ADR-0009) has its own single gate: [`Client::write`] takes a typed
+//! [`WriteCmd`], builds the command text from it and sends it only after [`check_write`] accepted
+//! its exact shape. Nothing else in the program can send a command that changes a mailbox: the read
+//! path (`run`) is bound to [`check_read_only`], and the write path is a private function reached only
+//! from `write`. Plain `EXPUNGE` does not exist here: only `UID EXPUNGE` of a given set.
 //!
 //! Signing in goes through the [`Authenticator`] hook: [`PlainAuth`] for passwords now, XOAUTH2
 //! in phase 1c.
@@ -73,6 +79,9 @@ pub enum ImapError {
     Server(String),
     /// The client itself refused to send a command because it could change the server.
     Refused(String),
+    /// The folder is not the one the local copy knows (its `UIDVALIDITY` changed): the UIDs we
+    /// hold mean other messages now, so nothing is written.
+    Stale(String),
 }
 
 impl fmt::Display for ImapError {
@@ -84,6 +93,7 @@ impl fmt::Display for ImapError {
             ImapError::Protocol(s) => write!(f, "unexpected answer from the server: {s}"),
             ImapError::Server(s) => write!(f, "the server said: {s}"),
             ImapError::Refused(s) => write!(f, "refused to send a command that could change the mailbox: {s}"),
+            ImapError::Stale(s) => write!(f, "{s}"),
         }
     }
 }
@@ -201,6 +211,204 @@ pub fn check_read_only(cmd: &str) -> Result<()> {
         },
         _ => refuse("not a read-only command"),
     }
+}
+
+// ---------------------------------------------------------------- the write gate
+
+/// The flags a person can set or clear: read and flagged (MAIL-102).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MailFlag {
+    Seen,
+    Flagged,
+}
+
+impl MailFlag {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MailFlag::Seen => "\\Seen",
+            MailFlag::Flagged => "\\Flagged",
+        }
+    }
+}
+
+/// Everything that can change a mailbox, as data. The command text is made from this and from
+/// nothing else (MAIL-101). Sets of UIDs are sorted and never contain `*`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WriteCmd {
+    /// Open a folder for writing (`SELECT`); reading uses `EXAMINE`.
+    Select { folder: String },
+    StoreFlags { uids: Vec<u32>, add: bool, flags: Vec<MailFlag>, unchanged_since: Option<u64> },
+    /// `UID MOVE` (needs the `MOVE` capability).
+    Move { uids: Vec<u32>, to: String },
+    /// `UID COPY`: the first step of the fallback for a server without `MOVE`.
+    Copy { uids: Vec<u32>, to: String },
+    /// Set (`set: true`) or clear `\Deleted`: only the fallback of a move and "delete forever".
+    MarkDeleted { uids: Vec<u32>, set: bool },
+    /// `UID EXPUNGE`: removes exactly these UIDs, and only if they carry `\Deleted` (needs `UIDPLUS`).
+    ExpungeUids { uids: Vec<u32> },
+}
+
+fn checked_set(uids: &[u32]) -> Result<String> {
+    if uids.is_empty() {
+        return Err(ImapError::Refused("an empty set of messages".into()));
+    }
+    if uids.contains(&0) {
+        return Err(ImapError::Refused("a message number of 0".into()));
+    }
+    Ok(uid_set(uids))
+}
+
+impl WriteCmd {
+    /// The command line (without tag). Errors for an empty set, UID 0, an empty name or no flags.
+    pub fn to_command(&self) -> Result<String> {
+        let name = |n: &str| if n.is_empty() { Err(ImapError::Refused("an empty folder name".into())) } else { quote(n) };
+        Ok(match self {
+            WriteCmd::Select { folder } => format!("SELECT {}", name(folder)?),
+            WriteCmd::StoreFlags { uids, add, flags, unchanged_since } => {
+                if flags.is_empty() {
+                    return Err(ImapError::Refused("no flags".into()));
+                }
+                let cond = unchanged_since.map(|m| format!("(UNCHANGEDSINCE {m}) ")).unwrap_or_default();
+                let fl: Vec<&str> = flags.iter().map(|f| f.as_str()).collect();
+                format!("UID STORE {} {cond}{}FLAGS ({})", checked_set(uids)?, if *add { '+' } else { '-' }, fl.join(" "))
+            }
+            WriteCmd::Move { uids, to } => format!("UID MOVE {} {}", checked_set(uids)?, name(to)?),
+            WriteCmd::Copy { uids, to } => format!("UID COPY {} {}", checked_set(uids)?, name(to)?),
+            WriteCmd::MarkDeleted { uids, set } => format!("UID STORE {} {}FLAGS (\\Deleted)", checked_set(uids)?, if *set { '+' } else { '-' }),
+            WriteCmd::ExpungeUids { uids } => format!("UID EXPUNGE {}", checked_set(uids)?),
+        })
+    }
+}
+
+/// A quoted string at the start of `s` (with `\` escapes) and what follows it.
+fn quoted_prefix(s: &str) -> Option<(String, &str)> {
+    let mut chars = s.char_indices();
+    if chars.next()?.1 != '"' {
+        return None;
+    }
+    let mut out = String::new();
+    let mut esc = false;
+    for (i, c) in chars {
+        if esc {
+            out.push(c);
+            esc = false;
+        } else if c == '\\' {
+            esc = true;
+        } else if c == '"' {
+            return Some((out, &s[i + 1..]));
+        } else {
+            out.push(c);
+        }
+    }
+    None
+}
+
+/// A set that is only numbers, `,` and `:` (never `*`), each part a UID or a range of two.
+fn plain_uid_set(s: &str) -> bool {
+    !s.is_empty()
+        && s.split(',').all(|part| {
+            let nums: Vec<&str> = part.split(':').collect();
+            (nums.len() == 1 || nums.len() == 2) && nums.iter().all(|n| !n.is_empty() && n.len() <= 10 && n.bytes().all(|b| b.is_ascii_digit()) && n.parse::<u64>().is_ok_and(|v| v > 0))
+        })
+}
+
+/// The gate of the write path (MAIL-101): accepts exactly the commands [`WriteCmd::to_command`] builds
+/// and refuses everything else, plain `EXPUNGE` and `*` in a set included.
+pub fn check_write(cmd: &str) -> Result<()> {
+    let refuse = |why: &str| Err(ImapError::Refused(format!("{why}: {}", cmd.split_whitespace().take(2).collect::<Vec<_>>().join(" "))));
+    if cmd.contains(['\r', '\n', '\0']) {
+        return refuse("line break in a command");
+    }
+    if let Some(rest) = cmd.strip_prefix("SELECT ") {
+        return match quoted_prefix(rest) {
+            Some((n, "")) if !n.is_empty() => Ok(()),
+            _ => refuse("a malformed SELECT"),
+        };
+    }
+    let Some(rest) = cmd.strip_prefix("UID ") else { return refuse("not a command the write path sends") };
+    if let Some(args) = rest.strip_prefix("EXPUNGE ") {
+        return if plain_uid_set(args) { Ok(()) } else { refuse("UID EXPUNGE needs a plain set of UIDs") };
+    }
+    if let Some(args) = rest.strip_prefix("MOVE ").or_else(|| rest.strip_prefix("COPY ")) {
+        let Some((set, folder)) = args.split_once(' ') else { return refuse("a malformed move or copy") };
+        return match quoted_prefix(folder) {
+            Some((n, "")) if plain_uid_set(set) && !n.is_empty() => Ok(()),
+            _ => refuse("a malformed move or copy"),
+        };
+    }
+    if let Some(args) = rest.strip_prefix("STORE ") {
+        let Some((set, mut tail)) = args.split_once(' ') else { return refuse("a malformed STORE") };
+        if !plain_uid_set(set) {
+            return refuse("STORE needs a plain set of UIDs");
+        }
+        if let Some(t) = tail.strip_prefix("(UNCHANGEDSINCE ") {
+            let Some((n, after)) = t.split_once(") ") else { return refuse("a malformed STORE") };
+            if n.is_empty() || n.len() > 20 || !n.bytes().all(|b| b.is_ascii_digit()) {
+                return refuse("a malformed STORE");
+            }
+            tail = after;
+        }
+        let Some(list) = tail.strip_prefix("+FLAGS (").or_else(|| tail.strip_prefix("-FLAGS (")).and_then(|t| t.strip_suffix(')')) else { return refuse("STORE only adds or removes flags") };
+        let flags: Vec<&str> = list.split(' ').collect();
+        return if !flags.is_empty() && flags.iter().all(|f| matches!(*f, "\\Seen" | "\\Flagged" | "\\Deleted")) { Ok(()) } else { refuse("a flag that is not read, flagged or deleted") };
+    }
+    refuse("not a command the write path sends")
+}
+
+/// What a write told back.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WriteOutcome {
+    /// `Select`: what the server said about the folder.
+    pub selected: Option<Selected>,
+    /// `COPYUID` (`Move`, `Copy`): the UIDs the messages got in the target folder.
+    pub copyuid: Option<CopyUid>,
+    /// `STORE` with `UNCHANGEDSINCE`: the UIDs that were not changed because another client changed them first.
+    pub modified: Vec<u32>,
+    /// The flags the server reported (`STORE` answers).
+    pub flags: Vec<Fetched>,
+}
+
+/// `[COPYUID <uidvalidity of the target> <source uids> <new uids>]`, the two lists in the same order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CopyUid {
+    pub uidvalidity: u32,
+    pub from: Vec<u32>,
+    pub to: Vec<u32>,
+}
+
+/// `1:3,7` → `[1, 2, 3, 7]` (at most 100,000 entries; None if it is not a plain set).
+pub fn parse_uid_set(s: &str) -> Option<Vec<u32>> {
+    let mut out = Vec::new();
+    for part in s.split(',') {
+        let (a, b) = match part.split_once(':') {
+            Some((a, b)) => (a.parse::<u32>().ok()?, b.parse::<u32>().ok()?),
+            None => {
+                let n = part.parse::<u32>().ok()?;
+                (n, n)
+            }
+        };
+        let (lo, hi) = (a.min(b), a.max(b));
+        if out.len() as u64 + (hi - lo) as u64 + 1 > 100_000 {
+            return None;
+        }
+        out.extend(lo..=hi);
+    }
+    Some(out)
+}
+
+fn parse_copyuid(arg: &str) -> Option<CopyUid> {
+    let mut p = arg.split_whitespace();
+    let uidvalidity = p.next()?.parse().ok()?;
+    let from = parse_uid_set(p.next()?)?;
+    let to = parse_uid_set(p.next()?)?;
+    (from.len() == to.len()).then_some(CopyUid { uidvalidity, from, to })
+}
+
+/// The text inside `[CODE ...]` of a status line, if it has that code.
+fn status_code<'a>(text: &'a str, code: &str) -> Option<&'a str> {
+    let start = text.find(&format!("[{code} "))? + code.len() + 2;
+    let end = start + text[start..].find(']')?;
+    Some(&text[start..end])
 }
 
 // ---------------------------------------------------------------- reading answers
@@ -735,6 +943,22 @@ pub fn decode_mutf7(s: &str) -> String {
     out
 }
 
+fn absorb_select(sel: &mut Selected, have_validity: &mut bool, u: &Untagged) {
+    match u {
+        Untagged::Exists(n) => sel.exists = *n,
+        Untagged::Status { code: Some((c, arg)), .. } => match c.as_str() {
+            "UIDVALIDITY" => {
+                sel.uidvalidity = arg.parse().unwrap_or(0);
+                *have_validity = true;
+            }
+            "UIDNEXT" => sel.uidnext = arg.parse().unwrap_or(0),
+            "HIGHESTMODSEQ" => sel.highestmodseq = arg.parse().ok(),
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
 /// A list of UIDs as an IMAP set: `[1,2,3,7,9,10]` → `1:3,7,9:10` (sorted, no duplicates).
 pub fn uid_set(uids: &[u32]) -> String {
     let mut v = uids.to_vec();
@@ -837,6 +1061,15 @@ pub struct Client {
     secure: bool,
     tag: u32,
     limits: Limits,
+    /// The folder opened with `SELECT` for writing; cleared by `EXAMINE`.
+    writable: Option<String>,
+}
+
+/// Which gate a command passes before it is sent.
+#[derive(Clone, Copy)]
+enum Gate {
+    ReadOnly,
+    Write,
 }
 
 /// How a command ended.
@@ -887,7 +1120,7 @@ impl Client {
     }
 
     fn new(io: Io, secure: bool, limits: &Limits) -> Client {
-        Client { wire: Wire::new(io, limits.max_line), caps: HashSet::new(), secure, tag: 0, limits: limits.clone() }
+        Client { wire: Wire::new(io, limits.max_line), caps: HashSet::new(), secure, tag: 0, limits: limits.clone(), writable: None }
     }
 
     fn read_greeting(&mut self) -> Result<()> {
@@ -939,16 +1172,23 @@ impl Client {
         format!("S{}", self.tag)
     }
 
-    fn send(&mut self, tag: &str, cmd: &str) -> Result<()> {
-        check_read_only(cmd)?;
+    fn send(&mut self, tag: &str, cmd: &str, gate: Gate) -> Result<()> {
+        match gate {
+            Gate::ReadOnly => check_read_only(cmd)?,
+            Gate::Write => check_write(cmd)?,
+        }
         let line = format!("{tag} {cmd}\r\n");
         self.wire.io.write_all(line.as_bytes()).and_then(|_| self.wire.io.flush()).map_err(io_error)
     }
 
     /// Send a command and hand every untagged answer to `on` until the tagged one comes.
-    fn run(&mut self, cmd: &str, literal_limit: u64, mut on: impl FnMut(Untagged) -> Result<()>) -> Result<Completion> {
+    fn run(&mut self, cmd: &str, literal_limit: u64, on: impl FnMut(Untagged) -> Result<()>) -> Result<Completion> {
+        self.run_gated(cmd, literal_limit, Gate::ReadOnly, on)
+    }
+
+    fn run_gated(&mut self, cmd: &str, literal_limit: u64, gate: Gate, mut on: impl FnMut(Untagged) -> Result<()>) -> Result<Completion> {
         let tag = self.next_tag();
-        self.send(&tag, cmd)?;
+        self.send(&tag, cmd, gate)?;
         loop {
             let r = self.wire.read_response(literal_limit)?;
             if let Some(rest) = r.text.strip_prefix(tag.as_bytes()).and_then(|x| x.strip_prefix(b" ")) {
@@ -1010,9 +1250,9 @@ impl Client {
         let tag = self.next_tag();
         let initial = auth.initial_response();
         if self.caps.contains("SASL-IR") {
-            self.send(&tag, &format!("AUTHENTICATE {mech} {}", base64_encode(&initial)))?;
+            self.send(&tag, &format!("AUTHENTICATE {mech} {}", base64_encode(&initial)), Gate::ReadOnly)?;
         } else {
-            self.send(&tag, &format!("AUTHENTICATE {mech}"))?;
+            self.send(&tag, &format!("AUTHENTICATE {mech}"), Gate::ReadOnly)?;
         }
         let mut sent_initial = self.caps.contains("SASL-IR");
         // what the server said when it refused the token (XOAUTH2 / OAUTHBEARER send the reason
@@ -1062,20 +1302,9 @@ impl Client {
         let opt = if self.has_capability("CONDSTORE") { " (CONDSTORE)" } else { "" };
         let mut sel = Selected::default();
         let mut have_validity = false;
+        self.writable = None; // a folder opened with EXAMINE is read-only, and replaces the selected one
         self.run_ok(&format!("EXAMINE {}{opt}", quote(name)?), self.limits.max_small_literal, |u| {
-            match u {
-                Untagged::Exists(n) => sel.exists = n,
-                Untagged::Status { code: Some((c, arg)), .. } => match c.as_str() {
-                    "UIDVALIDITY" => {
-                        sel.uidvalidity = arg.parse().unwrap_or(0);
-                        have_validity = true;
-                    }
-                    "UIDNEXT" => sel.uidnext = arg.parse().unwrap_or(0),
-                    "HIGHESTMODSEQ" => sel.highestmodseq = arg.parse().ok(),
-                    _ => {}
-                },
-                _ => {}
-            }
+            absorb_select(&mut sel, &mut have_validity, &u);
             Ok(())
         })?;
         if !have_validity {
@@ -1130,6 +1359,114 @@ impl Client {
             _ => Ok(()),
         })?;
         Ok(())
+    }
+
+    /// Which of these UIDs exist in the folder that is open (read-only `UID SEARCH`).
+    pub fn uid_exists(&mut self, uids: &[u32]) -> Result<Vec<u32>> {
+        if uids.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut v = Vec::new();
+        self.run_ok(&format!("UID SEARCH UID {}", uid_set(uids)), self.limits.max_small_literal, |u| {
+            if let Untagged::Search(n) = u {
+                v.extend(n);
+            }
+            Ok(())
+        })?;
+        v.retain(|u| uids.contains(u));
+        Ok(v)
+    }
+
+    /// The flags (and, with CONDSTORE, the modification sequence) of these UIDs.
+    pub fn uid_fetch_flags_of(&mut self, uids: &[u32]) -> Result<Vec<Fetched>> {
+        if uids.is_empty() {
+            return Ok(vec![]);
+        }
+        let item = if self.has_capability("CONDSTORE") { "UID FLAGS MODSEQ" } else { "UID FLAGS" };
+        let mut out = Vec::new();
+        self.run_ok(&format!("UID FETCH {} ({item})", uid_set(uids)), self.limits.max_small_literal, |u| {
+            if let Untagged::Fetch(f) = u {
+                if uids.contains(&f.uid) {
+                    out.push(f);
+                }
+            }
+            Ok(())
+        })?;
+        Ok(out)
+    }
+
+    /// The UIDs of messages with this `Message-ID` in the folder that is open (to verify a copy).
+    pub fn uid_search_message_id(&mut self, message_id: &str) -> Result<Vec<u32>> {
+        let mut v = Vec::new();
+        self.run_ok(&format!("UID SEARCH HEADER Message-ID {}", quote(message_id)?), self.limits.max_small_literal, |u| {
+            if let Untagged::Search(n) = u {
+                v.extend(n);
+            }
+            Ok(())
+        })?;
+        Ok(v)
+    }
+
+    /// The one way to change a mailbox (MAIL-101). Refused here, before anything is sent: a write
+    /// to a folder that was not opened with `Select`, `UID EXPUNGE` without `UIDPLUS`, `UID MOVE`
+    /// without `MOVE`; and by [`check_write`]: anything but the exact shapes of [`WriteCmd`].
+    pub fn write(&mut self, cmd: &WriteCmd) -> Result<WriteOutcome> {
+        let text = cmd.to_command()?;
+        match cmd {
+            WriteCmd::Select { .. } => {}
+            _ if self.writable.is_none() => return Err(ImapError::Refused("no folder is open for writing".into())),
+            WriteCmd::ExpungeUids { .. } if !self.has_capability("UIDPLUS") => return Err(ImapError::Refused("the server has no UIDPLUS, so single messages cannot be removed safely".into())),
+            WriteCmd::Move { .. } if !self.has_capability("MOVE") => return Err(ImapError::Refused("the server has no MOVE".into())),
+            _ => {}
+        }
+        let mut out = WriteOutcome::default();
+        let mut sel = Selected::default();
+        let mut have_validity = false;
+        let is_select = matches!(cmd, WriteCmd::Select { .. });
+        if is_select {
+            self.writable = None;
+        }
+        let c = self.run_gated(&text, self.limits.max_small_literal, Gate::Write, |u| {
+            match &u {
+                Untagged::Status { code: Some((c, arg)), .. } if c == "COPYUID" => out.copyuid = parse_copyuid(arg),
+                Untagged::Fetch(f) => out.flags.push(f.clone()),
+                _ => {}
+            }
+            absorb_select(&mut sel, &mut have_validity, &u);
+            Ok(())
+        })?;
+        if !c.ok {
+            return Err(ImapError::Server(c.text));
+        }
+        if let Some(arg) = status_code(&c.text, "COPYUID") {
+            out.copyuid = parse_copyuid(arg);
+        }
+        if let Some(arg) = status_code(&c.text, "MODIFIED") {
+            out.modified = parse_uid_set(arg.trim()).unwrap_or_default();
+        }
+        if let WriteCmd::Select { folder } = cmd {
+            if !have_validity {
+                return Err(ImapError::Protocol("the server did not say the folder's UIDVALIDITY".into()));
+            }
+            if c.text.contains("[READ-ONLY]") {
+                return Err(ImapError::Server(format!("{} is read-only on this server", folder)));
+            }
+            self.writable = Some(folder.clone());
+            out.selected = Some(sel);
+        }
+        Ok(out)
+    }
+
+    pub fn can_move(&self) -> bool {
+        self.has_capability("MOVE")
+    }
+
+    pub fn can_expunge_uids(&self) -> bool {
+        self.has_capability("UIDPLUS")
+    }
+
+    pub fn has_condstore(&self) -> bool {
+        self.has_capability("CONDSTORE")
     }
 
     /// Say goodbye (errors do not matter any more).

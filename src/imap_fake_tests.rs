@@ -1,8 +1,11 @@
 //! A pretend IMAP server for tests: real TCP and real TLS (a throw-away certificate), enough of
 //! IMAP4rev1 for the sync (`CAPABILITY`, `STARTTLS`, `LOGIN`, `AUTHENTICATE PLAIN`, `LIST`,
-//! `EXAMINE`, `UID SEARCH`, `UID FETCH`, optionally `CONDSTORE`). It records every command it
-//! receives, so tests can check that the client never sends anything that changes a mailbox.
-//! Commands it should never see (`SELECT`, `STORE` …) are answered `NO`.
+//! `EXAMINE`, `UID SEARCH`, `UID FETCH`, optionally `CONDSTORE`) and, for phase 2, the writes:
+//! `SELECT`, `UID STORE` (with `UNCHANGEDSINCE`), `UID COPY` (`COPYUID`), `UID MOVE`, `UID EXPUNGE`,
+//! with switches for a server without `MOVE` or without `UIDPLUS`. It records every command it
+//! receives, so tests can check that the client never sends anything that changes a mailbox
+//! where it must not. A plain `EXPUNGE` is answered `NO` (and shows in the log: it must never come).
+//! Other things it should never see (`APPEND`, `DELETE` …) are answered `NO` as well.
 
 use crate::cal_time::{civil_from_days, days_from_civil};
 use crate::config::MailSecurity;
@@ -61,6 +64,17 @@ pub struct FakeState {
     pub oauth_error_answers: Vec<Vec<u8>>,
     /// The mechanism of every `AUTHENTICATE` received.
     pub auth_mechs: Vec<String>,
+    /// Offer `MOVE` (RFC 6851).
+    pub move_cap: bool,
+    /// Offer `UIDPLUS` (`UID EXPUNGE`, `COPYUID`).
+    pub uidplus: bool,
+    /// The next write command (STORE, COPY, MOVE, EXPUNGE) is answered `NO` with this text.
+    pub fail_next_write: Option<String>,
+    /// The connection is closed, without an answer and without doing anything, when a command with
+    /// this verb (`UID MOVE`, `UID EXPUNGE` …) arrives.
+    pub hang_up_on: Option<String>,
+    /// After a `UID COPY` or `UID MOVE` the server forgets to say `COPYUID` (a server without UIDPLUS does this anyway).
+    pub no_copyuid: bool,
 }
 
 pub struct FakeServer {
@@ -144,6 +158,23 @@ impl FakeState {
         }
     }
 
+    /// Another client moves a message: it leaves `from` and arrives in `to` with a new UID. Returns the new UID.
+    pub fn move_message(&mut self, from: &str, to: &str, uid: u32) -> Option<u32> {
+        let f = self.folder_mut(from);
+        let pos = f.msgs.iter().position(|m| m.uid == uid)?;
+        let m = f.msgs.remove(pos);
+        f.highestmodseq += 1;
+        let (flags, date, raw) = (m.flags, m.internal_date, m.raw);
+        let new = self.add_message(to, raw, date);
+        self.set_flags(to, new, &flags.iter().map(String::as_str).collect::<Vec<_>>());
+        Some(new)
+    }
+
+    /// The messages of a folder: (uid, flags, raw).
+    pub fn messages(&self, folder: &str) -> Vec<(u32, Vec<String>, Vec<u8>)> {
+        self.folders.iter().find(|f| f.name == folder).map(|f| f.msgs.iter().map(|m| (m.uid, m.flags.clone(), m.raw.clone())).collect()).unwrap_or_default()
+    }
+
     /// The server lost its numbering: new UIDVALIDITY, messages renumbered from 1.
     pub fn renumber(&mut self, folder: &str, new_validity: u32) {
         let f = self.folder_mut(folder);
@@ -182,6 +213,11 @@ impl FakeServer {
             oauth_mechs: vec!["XOAUTH2", "OAUTHBEARER"],
             oauth_error_answers: vec![],
             auth_mechs: vec![],
+            move_cap: true,
+            uidplus: true,
+            fail_next_write: None,
+            hang_up_on: None,
+            no_copyuid: false,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let (st, sp) = (state.clone(), stop.clone());
@@ -293,6 +329,7 @@ fn in_set(set: &str, uid: u32, max: u32) -> bool {
 
 fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tls: bool) -> std::io::Result<Next> {
     let mut selected: Option<String> = None;
+    let mut rw = false;
     let mut line = String::new();
     loop {
         line.clear();
@@ -305,6 +342,15 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
         let upper = rest.to_ascii_uppercase();
         let mut words = upper.split_whitespace();
         let verb = words.next().unwrap_or("").to_string();
+        {
+            let sub = if verb == "UID" { words.clone().next().unwrap_or("") } else { "" };
+            let full = if sub.is_empty() { verb.clone() } else { format!("{verb} {sub}") };
+            let mut g = st.lock().unwrap();
+            if g.hang_up_on.as_deref() == Some(full.as_str()) {
+                g.hang_up_on = None;
+                return Ok(Next::Done);
+            }
+        }
         let out = r.get_mut();
         match verb.as_str() {
             "CAPABILITY" => {
@@ -317,6 +363,12 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                 caps.extend(oauth.iter().map(String::as_str));
                 if g.condstore {
                     caps.push("CONDSTORE");
+                }
+                if g.move_cap {
+                    caps.push("MOVE");
+                }
+                if g.uidplus {
+                    caps.push("UIDPLUS");
                 }
                 if !tls {
                     caps.push("STARTTLS");
@@ -397,20 +449,25 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                 }
                 write!(out, "{tag} OK list done\r\n")?;
             }
-            "EXAMINE" => {
+            "EXAMINE" | "SELECT" => {
                 let name = unquote(rest.trim_start_matches(|c: char| !c.is_whitespace()).trim().split(" (").next().unwrap_or(""));
                 let g = st.lock().unwrap();
                 match g.folders.iter().find(|f| f.name == name && !g.refuse_examine.contains(&name)) {
                     Some(f) => {
                         selected = Some(name);
+                        rw = verb == "SELECT";
                         write!(out, "* {} EXISTS\r\n* OK [UIDVALIDITY {}] ok\r\n* OK [UIDNEXT {}] ok\r\n", f.msgs.len(), f.uidvalidity, f.uidnext)?;
                         if g.condstore {
                             write!(out, "* OK [HIGHESTMODSEQ {}] ok\r\n", f.highestmodseq)?;
                         }
-                        write!(out, "{tag} OK [READ-ONLY] examined\r\n")?;
+                        write!(out, "{tag} OK [{}] done\r\n", if rw { "READ-WRITE" } else { "READ-ONLY" })?;
                     }
                     None => write!(out, "{tag} NO no such folder\r\n")?,
                 }
+            }
+            "UID" if matches!(words.clone().next(), Some("STORE" | "COPY" | "MOVE" | "EXPUNGE")) => {
+                let sub = words.next().unwrap_or("").to_string();
+                write_command(r.get_mut(), st, &selected, rw, tag, rest, &sub)?;
             }
             "UID" => {
                 let sub = words.next().unwrap_or("");
@@ -427,12 +484,16 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                                 f.msgs.iter().filter(|m| m.internal_date >= from).map(|m| m.uid).collect()
                             }
                             Some("UID") => {
-                                let from: u32 = args.get(1).and_then(|a| a.split(':').next()).and_then(|a| a.parse().ok()).unwrap_or(1);
-                                let mut v: Vec<u32> = f.msgs.iter().filter(|m| m.uid >= from).map(|m| m.uid).collect();
-                                if v.is_empty() && max > 0 {
+                                let set = args.get(1).copied().unwrap_or("");
+                                let mut v: Vec<u32> = f.msgs.iter().filter(|m| in_set(set, m.uid, max)).map(|m| m.uid).collect();
+                                if v.is_empty() && max > 0 && set.ends_with(":*") {
                                     v.push(max); // `n:*` always includes the last message
                                 }
                                 v
+                            }
+                            Some("HEADER") => {
+                                let want = unquote(&args[2.min(args.len())..].join(" ")).to_ascii_lowercase();
+                                f.msgs.iter().filter(|m| String::from_utf8_lossy(&m.raw).to_ascii_lowercase().lines().any(|l| l.starts_with("message-id:") && l.contains(&want))).map(|m| m.uid).collect()
                             }
                             _ => vec![],
                         };
@@ -495,10 +556,136 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                 }
             }
             // everything that could change a mailbox: the client must never get here
-            "SELECT" | "STORE" | "EXPUNGE" | "COPY" | "MOVE" | "APPEND" | "DELETE" | "CREATE" | "RENAME" | "CLOSE" => write!(out, "{tag} NO the pretend server is read-only\r\n")?,
+            "STORE" | "EXPUNGE" | "COPY" | "MOVE" | "APPEND" | "DELETE" | "CREATE" | "RENAME" | "CLOSE" => write!(out, "{tag} NO the pretend server is read-only\r\n")?,
             _ => write!(out, "{tag} BAD unknown command\r\n")?,
         }
         r.get_mut().flush()?;
+    }
+}
+
+/// `UID STORE`, `UID COPY`, `UID MOVE` and `UID EXPUNGE`.
+fn write_command<W: Write>(out: &mut W, st: &Arc<Mutex<FakeState>>, selected: &Option<String>, rw: bool, tag: &str, rest: &str, sub: &str) -> std::io::Result<()> {
+    let mut g = st.lock().unwrap();
+    if let Some(why) = g.fail_next_write.take() {
+        return write!(out, "{tag} NO {why}\r\n");
+    }
+    let Some(name) = selected.clone() else { return write!(out, "{tag} NO no folder selected\r\n") };
+    if !rw {
+        return write!(out, "{tag} NO [READONLY] the folder was opened read-only\r\n");
+    }
+    if sub == "MOVE" && !g.move_cap || sub == "EXPUNGE" && !g.uidplus {
+        return write!(out, "{tag} BAD unknown command\r\n");
+    }
+    let (condstore, uidplus, no_copyuid) = (g.condstore, g.uidplus, g.no_copyuid);
+    let args = rest.splitn(3, ' ').nth(2).unwrap_or("");
+    let set = args.split_whitespace().next().unwrap_or("").to_string();
+    let Some(fi) = g.folders.iter().position(|f| f.name == name) else { return write!(out, "{tag} NO no such folder\r\n") };
+    let max = g.folders[fi].msgs.iter().map(|m| m.uid).max().unwrap_or(0);
+    match sub {
+        "STORE" => {
+            let tail = args[set.len()..].trim();
+            let (unchanged, tail) = match tail.strip_prefix("(UNCHANGEDSINCE ") {
+                Some(t) => {
+                    let (n, after) = t.split_once(')').unwrap_or(("0", ""));
+                    (n.trim().parse::<u64>().ok(), after.trim())
+                }
+                None => (None, tail),
+            };
+            let add = tail.starts_with('+');
+            let list: Vec<String> = tail.split_once('(').map(|x| x.1.trim_end_matches(')').split_whitespace().map(String::from).collect()).unwrap_or_default();
+            let mut modified = vec![];
+            let mut resp = String::new();
+            let f = &mut g.folders[fi];
+            let ids: Vec<u32> = f.msgs.iter().map(|m| m.uid).collect();
+            let mut bump = 0;
+            let mut changed: Vec<(usize, u32)> = vec![];
+            for (i, m) in f.msgs.iter_mut().enumerate() {
+                if !in_set(&set, m.uid, max) {
+                    continue;
+                }
+                if unchanged.is_some_and(|u| m.modseq > u) {
+                    modified.push(m.uid);
+                    continue;
+                }
+                for fl in &list {
+                    let has = m.flags.iter().any(|x| x.eq_ignore_ascii_case(fl));
+                    if add && !has {
+                        m.flags.push(fl.clone());
+                    } else if !add && has {
+                        m.flags.retain(|x| !x.eq_ignore_ascii_case(fl));
+                    }
+                }
+                bump += 1;
+                changed.push((i, m.uid));
+            }
+            let base = f.highestmodseq;
+            for (n, (i, uid)) in changed.iter().enumerate() {
+                let ms = base + 1 + n as u64;
+                f.msgs[*i].modseq = ms;
+                let seq = ids.iter().position(|u| u == uid).unwrap_or(0) + 1;
+                resp.push_str(&format!("* {seq} FETCH (UID {uid} FLAGS ({}){})\r\n", f.msgs[*i].flags.join(" "), if condstore { format!(" MODSEQ ({ms})") } else { String::new() }));
+            }
+            f.highestmodseq += bump;
+            write!(out, "{resp}")?;
+            if modified.is_empty() {
+                write!(out, "{tag} OK stored\r\n")
+            } else {
+                write!(out, "{tag} OK [MODIFIED {}] conditional store failed\r\n", modified.iter().map(u32::to_string).collect::<Vec<_>>().join(","))
+            }
+        }
+        "COPY" | "MOVE" => {
+            let dest = unquote(args[set.len()..].trim());
+            let Some(di) = g.folders.iter().position(|f| f.name == dest) else { return write!(out, "{tag} NO [TRYCREATE] no such folder\r\n") };
+            if di == fi {
+                return write!(out, "{tag} NO cannot copy into the same folder\r\n");
+            }
+            let picked: Vec<FakeMessage> = g.folders[fi].msgs.iter().filter(|m| in_set(&set, m.uid, max)).cloned().collect();
+            let (mut from, mut to) = (vec![], vec![]);
+            for m in &picked {
+                let d = &mut g.folders[di];
+                let uid = d.uidnext;
+                d.uidnext += 1;
+                d.highestmodseq += 1;
+                let ms = d.highestmodseq;
+                d.msgs.push(FakeMessage { uid, flags: m.flags.clone(), internal_date: m.internal_date, raw: m.raw.clone(), modseq: ms });
+                from.push(m.uid);
+                to.push(uid);
+            }
+            let uv = g.folders[di].uidvalidity;
+            let codes = if uidplus && !no_copyuid && !from.is_empty() { Some(format!("[COPYUID {uv} {} {}]", crate::imap_client::uid_set(&from), crate::imap_client::uid_set(&to))) } else { None };
+            if sub == "MOVE" {
+                let before: Vec<u32> = g.folders[fi].msgs.iter().map(|m| m.uid).collect();
+                g.folders[fi].msgs.retain(|m| !from.contains(&m.uid));
+                g.folders[fi].highestmodseq += 1;
+                if let Some(c) = &codes {
+                    write!(out, "* OK {c} moved\r\n")?;
+                }
+                for (seq, u) in before.iter().enumerate().rev() {
+                    if from.contains(u) {
+                        write!(out, "* {} EXPUNGE\r\n", seq + 1)?;
+                    }
+                }
+                write!(out, "{tag} OK moved\r\n")
+            } else {
+                match codes {
+                    Some(c) => write!(out, "{tag} OK {c} copied\r\n"),
+                    None => write!(out, "{tag} OK copied\r\n"),
+                }
+            }
+        }
+        "EXPUNGE" => {
+            let f = &mut g.folders[fi];
+            let before: Vec<(u32, bool)> = f.msgs.iter().map(|m| (m.uid, in_set(&set, m.uid, max) && m.flags.iter().any(|x| x.eq_ignore_ascii_case("\\Deleted")))).collect();
+            f.msgs.retain(|m| !(in_set(&set, m.uid, max) && m.flags.iter().any(|x| x.eq_ignore_ascii_case("\\Deleted"))));
+            f.highestmodseq += 1;
+            for (seq, (_, gone)) in before.iter().enumerate().rev() {
+                if *gone {
+                    write!(out, "* {} EXPUNGE\r\n", seq + 1)?;
+                }
+            }
+            write!(out, "{tag} OK expunged\r\n")
+        }
+        _ => write!(out, "{tag} BAD unknown command\r\n"),
     }
 }
 
@@ -885,5 +1072,243 @@ mod tests {
         let n = server.state().connections;
         assert!(matches!(go(&Pw), Err(ImapError::Auth(_))));
         assert_eq!(server.state().connections - n, 1);
+    }
+
+    // ------------------------------------------------------------ phase 2: the write gate
+
+    fn seeded_for_writes(security: MailSecurity) -> FakeServer {
+        let server = FakeServer::start(security);
+        {
+            let mut s = server.state();
+            s.add_folder("INBOX", &[]);
+            s.add_folder("Trash", &["\\Trash"]);
+            for i in 0..4 {
+                s.add_message("INBOX", message(&format!("w{i}"), "Bob <bob@x.de>", "hello"), 1_700_000_000 + i * 86_400);
+            }
+        }
+        server
+    }
+
+    fn written(server: &FakeServer) -> Vec<String> {
+        server.state().verbs().into_iter().filter(|v| ["SELECT", "UID STORE", "UID MOVE", "UID COPY", "UID EXPUNGE", "EXPUNGE", "STORE"].iter().any(|w| v.starts_with(w))).collect()
+    }
+
+    // spec: MAIL-101
+    #[test]
+    fn typed_commands_become_exact_text_and_the_write_gate_takes_only_those_shapes() {
+        let cmds = [
+            (WriteCmd::Select { folder: "INBOX".into() }, "SELECT \"INBOX\""),
+            (WriteCmd::StoreFlags { uids: vec![3, 1, 2, 7], add: true, flags: vec![MailFlag::Seen], unchanged_since: None }, "UID STORE 1:3,7 +FLAGS (\\Seen)"),
+            (WriteCmd::StoreFlags { uids: vec![5], add: false, flags: vec![MailFlag::Seen, MailFlag::Flagged], unchanged_since: Some(42) }, "UID STORE 5 (UNCHANGEDSINCE 42) -FLAGS (\\Seen \\Flagged)"),
+            (WriteCmd::Move { uids: vec![9], to: "Tra\"sh\\x".into() }, "UID MOVE 9 \"Tra\\\"sh\\\\x\""),
+            (WriteCmd::Copy { uids: vec![9, 10], to: "Trash".into() }, "UID COPY 9:10 \"Trash\""),
+            (WriteCmd::MarkDeleted { uids: vec![4], set: true }, "UID STORE 4 +FLAGS (\\Deleted)"),
+            (WriteCmd::MarkDeleted { uids: vec![4], set: false }, "UID STORE 4 -FLAGS (\\Deleted)"),
+            (WriteCmd::ExpungeUids { uids: vec![4, 5] }, "UID EXPUNGE 4:5"),
+        ];
+        for (c, text) in cmds {
+            let built = c.to_command().unwrap();
+            assert_eq!(built, text);
+            check_write(&built).unwrap_or_else(|e| panic!("{built}: {e}"));
+        }
+        // the typed constructors refuse nonsense before anything is built
+        for bad in [
+            WriteCmd::ExpungeUids { uids: vec![] },
+            WriteCmd::ExpungeUids { uids: vec![0] },
+            WriteCmd::Move { uids: vec![1], to: String::new() },
+            WriteCmd::Select { folder: "a\r\nb".into() },
+            WriteCmd::StoreFlags { uids: vec![1], add: true, flags: vec![], unchanged_since: None },
+            WriteCmd::StoreFlags { uids: vec![], add: true, flags: vec![MailFlag::Seen], unchanged_since: None },
+        ] {
+            assert!(matches!(bad.to_command(), Err(ImapError::Refused(_))), "{bad:?}");
+        }
+        // and the gate itself refuses everything else, plain EXPUNGE and `*` first
+        for bad in [
+            "EXPUNGE",
+            "expunge",
+            "UID EXPUNGE 1:*",
+            "UID EXPUNGE *",
+            "UID EXPUNGE ",
+            "UID EXPUNGE 1,",
+            "UID EXPUNGE 0",
+            "UID STORE 1:* +FLAGS (\\Seen)",
+            "UID STORE 1 FLAGS (\\Seen)",
+            "UID STORE 1 FLAGS.SILENT (\\Seen)",
+            "UID STORE 1 +FLAGS (\\Recent)",
+            "UID STORE 1 +FLAGS (\\Seen \\Answered)",
+            "UID STORE 1 +FLAGS ()",
+            "UID STORE 1 +FLAGS (\\Seen)\r\nEXPUNGE",
+            "UID STORE 1 (UNCHANGEDSINCE x) +FLAGS (\\Seen)",
+            "STORE 1 +FLAGS (\\Seen)",
+            "UID MOVE 1:* \"Trash\"",
+            "UID MOVE 1 Trash",
+            "UID MOVE 1 \"Trash\" extra",
+            "UID MOVE 1 \"\"",
+            "UID COPY 1 \"Trash\"\r\nDELETE x",
+            "SELECT INBOX",
+            "SELECT \"INBOX\" extra",
+            "EXAMINE \"INBOX\"",
+            "DELETE \"INBOX\"",
+            "APPEND \"INBOX\" {5}",
+            "CLOSE",
+            "UID FETCH 1 (BODY[])",
+            "",
+        ] {
+            assert!(matches!(check_write(bad), Err(ImapError::Refused(_))), "{bad:?} must be refused");
+        }
+    }
+
+    // spec: MAIL-101
+    #[test]
+    fn no_text_of_a_write_command_exists_outside_the_typed_enum() {
+        fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    files(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut all = vec![];
+        files(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut all);
+        assert!(all.len() > 20);
+        for p in all {
+            let src = std::fs::read_to_string(&p).unwrap();
+            let code = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+            let name = p.file_name().unwrap().to_string_lossy().to_string();
+            if name.ends_with("_tests.rs") {
+                continue; // test-only files (the pretend server answers these commands)
+            }
+            if name == "imap_client.rs" {
+                // inside the client: the write gate is passed in exactly one place
+                assert_eq!(code.matches("Gate::Write").count(), 2, "Gate::Write: the check in `send` and the one call in `write`");
+                assert_eq!(code.matches("fn run_gated").count(), 1);
+                assert!(!code.contains("\"EXPUNGE\"") && !code.contains("format!(\"EXPUNGE"), "plain EXPUNGE is not a thing here");
+                continue;
+            }
+            for (i, l) in code.lines().enumerate() {
+                let t = l.trim_start();
+                if t.starts_with("//") {
+                    continue;
+                }
+                for banned in ["\"UID STORE", "\"UID MOVE", "\"UID COPY", "\"UID EXPUNGE", "\"EXPUNGE", "\"STORE "] {
+                    assert!(!l.contains(banned), "{name}:{}: a write command typed by hand: {l}", i + 1);
+                }
+            }
+        }
+    }
+
+    // spec: MAIL-101, MAIL-102
+    #[test]
+    fn select_is_used_only_for_a_write_and_flags_are_stored_with_unchangedsince() {
+        let server = seeded_for_writes(MailSecurity::ImplicitTls);
+        let mut c = connect(&server).unwrap();
+        // writing before a SELECT is refused on the client and nothing reaches the server
+        let err = c.write(&WriteCmd::StoreFlags { uids: vec![1], add: true, flags: vec![MailFlag::Seen], unchanged_since: None }).err().unwrap();
+        assert!(matches!(err, ImapError::Refused(_)), "{err}");
+        c.examine("INBOX").unwrap();
+        let err = c.write(&WriteCmd::StoreFlags { uids: vec![1], add: true, flags: vec![MailFlag::Seen], unchanged_since: None }).err().unwrap();
+        assert!(matches!(err, ImapError::Refused(_)), "an EXAMINEd folder is not writable: {err}");
+        assert!(written(&server).is_empty());
+
+        let sel = c.write(&WriteCmd::Select { folder: "INBOX".into() }).unwrap().selected.unwrap();
+        assert_eq!((sel.uidvalidity, sel.uidnext), (1000, 5));
+        let out = c.write(&WriteCmd::StoreFlags { uids: vec![1, 2], add: true, flags: vec![MailFlag::Seen, MailFlag::Flagged], unchanged_since: sel.highestmodseq }).unwrap();
+        assert!(out.modified.is_empty());
+        assert_eq!(out.flags.len(), 2);
+        let on_server = server.state().messages("INBOX");
+        assert_eq!(on_server[0].1, vec!["\\Seen", "\\Flagged"]);
+        assert_eq!(on_server[2].1, Vec::<String>::new(), "others are untouched");
+        // the other client changes message 2; our conditional store of it is refused, message 3 goes through
+        server.state().set_flags("INBOX", 2, &["\\Answered"]);
+        let out = c.write(&WriteCmd::StoreFlags { uids: vec![2, 3], add: false, flags: vec![MailFlag::Seen], unchanged_since: sel.highestmodseq }).unwrap();
+        assert_eq!(out.modified, vec![2]);
+        assert_eq!(server.state().messages("INBOX")[1].1, vec!["\\Answered"], "message 2 was not changed by our store");
+        // flags that were read back include the modification sequence, for a second try
+        let again = c.uid_fetch_flags_of(&[2]).unwrap();
+        assert_eq!(again.len(), 1);
+        let ms = again[0].modseq.expect("CONDSTORE gives MODSEQ");
+        let out = c.write(&WriteCmd::StoreFlags { uids: vec![2], add: true, flags: vec![MailFlag::Seen], unchanged_since: Some(ms) }).unwrap();
+        assert!(out.modified.is_empty());
+        // examining again drops write mode
+        c.examine("INBOX").unwrap();
+        assert!(matches!(c.write(&WriteCmd::MarkDeleted { uids: vec![1], set: true }), Err(ImapError::Refused(_))));
+        let verbs = written(&server);
+        assert_eq!(verbs.iter().filter(|v| v.starts_with("SELECT")).count(), 1, "{verbs:?}");
+        assert!(verbs.iter().all(|v| !v.starts_with("EXPUNGE") && !v.starts_with("STORE ")), "{verbs:?}");
+    }
+
+    // spec: MAIL-103
+    #[test]
+    fn move_and_copy_say_the_new_uids_and_a_server_without_move_refuses_move_before_sending_it() {
+        let server = seeded_for_writes(MailSecurity::ImplicitTls);
+        let mut c = connect(&server).unwrap();
+        c.write(&WriteCmd::Select { folder: "INBOX".into() }).unwrap();
+        let out = c.write(&WriteCmd::Copy { uids: vec![1, 2], to: "Trash".into() }).unwrap();
+        let cu = out.copyuid.expect("COPYUID");
+        assert_eq!((cu.uidvalidity, cu.from.clone(), cu.to.clone()), (1000, vec![1, 2], vec![1, 2]));
+        assert_eq!(server.state().messages("INBOX").len(), 4, "a copy leaves the original");
+        let out = c.write(&WriteCmd::Move { uids: vec![3], to: "Trash".into() }).unwrap();
+        assert_eq!(out.copyuid.unwrap().to, vec![3]);
+        assert_eq!(server.state().messages("INBOX").iter().map(|m| m.0).collect::<Vec<_>>(), vec![1, 2, 4]);
+        // no such target: the server says NO and nothing moved
+        let err = c.write(&WriteCmd::Move { uids: vec![4], to: "Nowhere".into() }).err().unwrap();
+        assert!(matches!(err, ImapError::Server(_)), "{err}");
+        c.logout();
+
+        server.state().move_cap = false;
+        let mut c = connect(&server).unwrap();
+        c.write(&WriteCmd::Select { folder: "INBOX".into() }).unwrap();
+        assert!(!c.can_move());
+        let before = written(&server).len();
+        assert!(matches!(c.write(&WriteCmd::Move { uids: vec![1], to: "Trash".into() }), Err(ImapError::Refused(_))));
+        assert_eq!(written(&server).len(), before, "the refused MOVE never reached the server");
+    }
+
+    // spec: MAIL-105
+    #[test]
+    fn uid_expunge_removes_only_the_uids_asked_for_and_never_without_uidplus() {
+        let server = seeded_for_writes(MailSecurity::ImplicitTls);
+        // another program has flagged message 3 as deleted and not expunged it yet
+        server.state().set_flags("INBOX", 3, &["\\Deleted"]);
+        let mut c = connect(&server).unwrap();
+        c.write(&WriteCmd::Select { folder: "INBOX".into() }).unwrap();
+        c.write(&WriteCmd::MarkDeleted { uids: vec![1], set: true }).unwrap();
+        c.write(&WriteCmd::ExpungeUids { uids: vec![1] }).unwrap();
+        let left: Vec<u32> = server.state().messages("INBOX").iter().map(|m| m.0).collect();
+        assert_eq!(left, vec![2, 3, 4], "only UID 1 is gone; the other client's \\Deleted mail 3 survives");
+        // a UID that is not flagged is not removed by UID EXPUNGE either
+        c.write(&WriteCmd::ExpungeUids { uids: vec![2] }).unwrap();
+        assert_eq!(server.state().messages("INBOX").len(), 3);
+        assert!(written(&server).iter().all(|v| v != "EXPUNGE"));
+        c.logout();
+
+        server.state().uidplus = false;
+        let mut c = connect(&server).unwrap();
+        c.write(&WriteCmd::Select { folder: "INBOX".into() }).unwrap();
+        assert!(!c.can_expunge_uids());
+        let before = written(&server).len();
+        let err = c.write(&WriteCmd::ExpungeUids { uids: vec![3] }).err().unwrap();
+        assert!(matches!(err, ImapError::Refused(_)), "{err}");
+        assert_eq!(written(&server).len(), before);
+        assert_eq!(server.state().messages("INBOX").len(), 3, "nothing was expunged");
+    }
+
+    // spec: MAIL-107
+    #[test]
+    fn a_server_that_says_no_or_hangs_up_during_a_write_is_an_error_and_changes_nothing() {
+        let server = seeded_for_writes(MailSecurity::ImplicitTls);
+        let mut c = connect(&server).unwrap();
+        c.write(&WriteCmd::Select { folder: "INBOX".into() }).unwrap();
+        server.state().fail_next_write = Some("[UNAVAILABLE] try later".into());
+        let err = c.write(&WriteCmd::Move { uids: vec![1], to: "Trash".into() }).err().unwrap();
+        assert!(matches!(&err, ImapError::Server(t) if t.contains("UNAVAILABLE")), "{err}");
+        server.state().hang_up_on = Some("UID MOVE".into());
+        let err = c.write(&WriteCmd::Move { uids: vec![1], to: "Trash".into() }).err().unwrap();
+        assert!(matches!(err, ImapError::Connection(_)), "{err}");
+        assert_eq!(server.state().messages("INBOX").len(), 4);
+        assert_eq!(server.state().messages("Trash").len(), 0);
     }
 }
