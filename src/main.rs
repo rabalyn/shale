@@ -13,6 +13,8 @@ mod cal_ics;
 mod cal_store;
 mod cal_time;
 mod cal_ui;
+#[allow(dead_code)] // used by the compose window in a later commit of phase 3
+mod compose;
 mod config;
 mod drawing;
 mod drawing_layout;

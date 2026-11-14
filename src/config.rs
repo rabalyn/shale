@@ -91,6 +91,20 @@ pub struct MailAccount {
     pub oauth_auth_url: String,
     pub oauth_token_url: String,
     pub oauth_scope: String,
+    /// Sending (phase 3, MAIL-120): the SMTP server. The sign-in is the one above (same
+    /// password, or the same OAuth2 sign-in). Never plain text: 465 implicit TLS or 587 STARTTLS.
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_security: MailSecurity,
+    /// The sender: name and address (empty address = the user name, if it is an address).
+    pub from_name: String,
+    pub from_address: String,
+    /// Added below a new mail (and above the quote of a reply).
+    pub signature: String,
+    /// The server saves a copy of what is sent in Sent by itself (Gmail): Shale then does not append one.
+    pub server_stores_sent: bool,
+    /// Add a `User-Agent` header to sent mail (off: privacy).
+    pub user_agent_header: bool,
 }
 
 impl Default for MailAccount {
@@ -108,6 +122,14 @@ impl Default for MailAccount {
             oauth_auth_url: String::new(),
             oauth_token_url: String::new(),
             oauth_scope: String::new(),
+            smtp_host: String::new(),
+            smtp_port: 465,
+            smtp_security: MailSecurity::ImplicitTls,
+            from_name: String::new(),
+            from_address: String::new(),
+            signature: String::new(),
+            server_stores_sent: false,
+            user_agent_header: false,
         }
     }
 }
@@ -154,6 +176,8 @@ pub struct Config {
     pub mail_mark_read: bool,
     /// ... after this many seconds (0 = at once).
     pub mail_mark_read_secs: u32,
+    /// Seconds a sent mail waits in the outbox, where it can still be pulled back (0 = send at once) (MAIL-134).
+    pub mail_undo_secs: u32,
     // Per-vault fields of older versions, read only to move them into the vault that is opened
     // first (CFG-008); dropped from the file after that.
     #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
@@ -196,6 +220,7 @@ impl Default for Config {
             mail_sync_minutes: 10,
             mail_mark_read: true,
             mail_mark_read_secs: 2,
+            mail_undo_secs: 10,
             legacy_open_files: None,
             legacy_last_import_folder: None,
             legacy_recent_tags: None,

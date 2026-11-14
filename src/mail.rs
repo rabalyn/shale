@@ -23,6 +23,9 @@ pub struct Mail {
     /// when it was sent (UTC seconds), if the date could be read
     pub date: Option<i64>,
     pub message_id: String,
+    /// `Reply-To` and `References` as written (replies, MAIL-126)
+    pub reply_to: String,
+    pub references: String,
     /// the message text (plain text; HTML-only mails are converted)
     pub text: String,
     pub attachments: Vec<Attachment>,
@@ -683,6 +686,8 @@ pub fn parse(raw: &[u8]) -> Mail {
         date: parse_date(&date_raw),
         date_raw,
         message_id: header(&h, "message-id").unwrap_or("").trim().to_string(),
+        reply_to: get("reply-to"),
+        references: header(&h, "references").unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" "),
         text: text.trim_end().to_string(),
         attachments: w.attachments,
     }
