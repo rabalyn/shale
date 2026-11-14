@@ -1134,37 +1134,6 @@ fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks
     crate::oauth::forget_source(&id);
 }
 
-#[test]
-fn zz_debug() {
-    let ctx = egui::Context::default();
-    crate::theme::apply(&ctx);
-    let mut t = 0.0;
-    let mail = crate::mail_ui::MailView::new(std::env::temp_dir().join("zz-unused"));
-    let mut d = crate::mail_dialog::MailDialog::new(vec![], 10, true);
-    let mut frame = |events: Vec<Event>, d: &mut crate::mail_dialog::MailDialog| {
-        t += 0.05;
-        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(t), events, ..Default::default() };
-        let mut out = ctx.run_ui(raw, |ui| {
-            egui::CentralPanel::default().show(ui, |_| {});
-            egui::Modal::new(egui::Id::unique("m")).show(ui.ctx(), |ui| {
-                crate::mail_dialog::show(ui, d, &mail);
-            });
-        });
-        out.textures_delta.clear();
-    };
-    for _ in 0..4 {
-        frame(vec![], &mut d);
-    }
-    let at = d.rects.iter().find(|r| r.0 == "md:add").unwrap().1;
-    let p = at.center();
-    let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
-    for ev in [vec![Event::PointerMoved(p)], vec![b(true)], vec![b(false)], vec![]] {
-        eprintln!("--- frame");
-        frame(ev, &mut d);
-        eprintln!("accounts {}", d.accounts.len());
-    }
-}
-
 // ------------------------------------------------------------ phase 2: flags, move, delete
 
 /// A synced window with the Inbox open, the first row under the cursor.

@@ -410,6 +410,10 @@ fn fail(result: &Mutex<SyncSummary>, progress: &Sender<Progress>, folder: &str, 
 /// (old files and rows stay, under the old number).
 fn adopt_validity(store: &MailStore, row: &FolderRow, sel: &Selected, now: i64) -> Result<FolderRow, String> {
     let mut row = row.clone();
+    if sel.uidvalidity == crate::mail_db::LOCAL_UIDVALIDITY {
+        // RFC 3501 does not allow 0; 0 is where Shale keeps its own copies of sent mail apart from the server's
+        return Err("the server reports UIDVALIDITY 0, which is not allowed".into());
+    }
     if row.uidvalidity != Some(sel.uidvalidity) {
         row.uidvalidity = Some(sel.uidvalidity);
         row.uidnext = None;
@@ -491,6 +495,9 @@ fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts:
 
     if complete && had_rows {
         compare_with_server(store, client, &row, &sel, opts)?;
+    }
+    if complete {
+        crate::mail_ops::drop_local_copies_seen_on_server(store, row.id, uv)?;
     }
     let keep = row.uidvalidity == Some(uv);
     store

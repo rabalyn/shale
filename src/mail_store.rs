@@ -575,7 +575,7 @@ fn adopt_uidvalidity(conn: &mut Connection, f: &FolderRow, fpath: &Path) -> Resu
     if current.uidvalidity.is_some() {
         return Ok(());
     }
-    let newest = sorted_dir(fpath).iter().filter_map(|(n, _)| n.parse::<u32>().ok()).max();
+    let newest = sorted_dir(fpath).iter().filter_map(|(n, _)| n.parse::<u32>().ok()).filter(|n| *n != mail_db::LOCAL_UIDVALIDITY).max();
     if let Some(uv) = newest {
         mail_db::apply_batch(conn, &[Op::FolderState { folder: f.id, uidvalidity: Some(uv), uidnext: None, highestmodseq: None, last_sync: 0 }], None)?;
     }

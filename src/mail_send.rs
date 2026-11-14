@@ -290,7 +290,7 @@ pub mod tests {
         assert_eq!(e.store.read_raw(&sent[0]).unwrap(), eml);
         assert!(e.pending().is_empty());
         // the local trash holds the synthetic file; nothing was deleted
-        assert!(!e.dir.join(format!("acct1/Sent/1000/{}.eml", mail_ops::SYNTHETIC_UID_BASE)).exists());
+        assert!(!e.dir.join(format!("acct1/Sent/0/{}.eml", mail_ops::SYNTHETIC_UID_BASE)).exists());
         // and a sync afterwards agrees: one message, no duplicate
         let (tx, _rx) = std::sync::mpsc::channel();
         crate::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
@@ -314,6 +314,66 @@ pub mod tests {
         let r = mail_ops::enqueue(&e.store, &sent, &mail_ops::Action::SetFlags { add: vec![crate::imap_client::MailFlag::Flagged], remove: vec![] }, NOW).unwrap();
         assert_eq!(r.queued, 0);
         assert!(r.notes[0].contains("being saved"), "{:?}", r.notes);
+    }
+
+    // spec: MAIL-141
+    #[test]
+    fn a_local_sent_copy_lives_under_uidvalidity_zero_so_a_real_uid_in_its_range_cannot_touch_it() {
+        let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
+        let (e, ob) = with_sent("s0a");
+        queue(&ob, "Mine", "local text");
+        send_due(&ob, &e.store, &account(), &connector(&smtp), NOW);
+        let local = sent_list(&e);
+        assert_eq!((local.len(), local[0].uidvalidity), (1, crate::mail_db::LOCAL_UIDVALIDITY));
+        let local_raw = e.store.read_raw(&local[0]).unwrap();
+        // a server that really numbers a message with the very same UID in its own UIDVALIDITY
+        let folder = e.folder("Sent");
+        let uv = folder.uidvalidity.unwrap();
+        assert_ne!(uv, 0);
+        let nm = e.store.save_message(&folder, uv, local[0].uid, b"Subject: other\r\nMessage-ID: <other@x>\r\n\r\nserver text\r\n", "", Some(NOW)).unwrap();
+        e.store.commit(vec![crate::mail_db::Op::message(nm)]).unwrap();
+        let both = e.store.reader().unwrap().message_at(folder.id, 0, local[0].uid).unwrap().expect("the local copy is still there");
+        assert_eq!(e.store.read_raw(&both).unwrap(), local_raw, "its row and its file are untouched");
+        let real = e.store.reader().unwrap().message_at(folder.id, uv, local[0].uid).unwrap().unwrap();
+        assert_ne!(real.path, both.path, "own file paths");
+        assert!(String::from_utf8_lossy(&e.store.read_raw(&real).unwrap()).contains("server text"));
+        assert_eq!(sent_list(&e).len(), 2, "both are listed");
+    }
+
+    // spec: MAIL-141
+    #[test]
+    fn the_sync_replaces_a_local_sent_copy_by_the_servers_copy_with_the_same_message_id_and_keeps_the_file() {
+        let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
+        let (e, ob) = with_sent("s0b");
+        let item = queue(&ob, "Same id", "text");
+        let eml = ob.read_eml("acct1", &item.id).unwrap();
+        send_due(&ob, &e.store, &account(), &connector(&smtp), NOW);
+        let local = sent_list(&e);
+        let local_path = e.dir.join(&local[0].path);
+        assert!(local_path.is_file());
+        // the server got its copy some other way (and the append no longer waits): the next sync replaces the local one
+        e.server.state().add_message("Sent", eml.clone(), NOW);
+        let ids: Vec<i64> = e.pending().iter().map(|p| p.id).collect();
+        e.store.commit(ids.into_iter().map(|id| crate::mail_db::Op::PendingDone { id }).collect()).unwrap();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let sum = crate::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
+        assert!(sum.errors.is_empty(), "{:?}", sum.errors);
+        let now = sent_list(&e);
+        assert_eq!(now.len(), 1, "one message, not two");
+        assert_ne!(now[0].uidvalidity, 0, "it is the server's");
+        assert_eq!(e.store.read_raw(&now[0]).unwrap(), eml);
+        assert!(!local_path.exists(), "the local file moved out of the store");
+        let trash = e.dir.join(".trash");
+        let found = std::fs::read_dir(&trash).unwrap().flatten().any(|d| walk_has(&d.path(), &eml));
+        assert!(found, "the local copy is in the local trash, never deleted");
+    }
+
+    fn walk_has(p: &std::path::Path, bytes: &[u8]) -> bool {
+        if p.is_dir() {
+            std::fs::read_dir(p).into_iter().flatten().flatten().any(|d| walk_has(&d.path(), bytes))
+        } else {
+            std::fs::read(p).map(|b| b == bytes).unwrap_or(false)
+        }
     }
 
     // spec: MAIL-142

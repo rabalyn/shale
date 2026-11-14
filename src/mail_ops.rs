@@ -682,8 +682,12 @@ fn exec_expunge(store: &MailStore, client: &mut Client, folder: &FolderRow, grou
 
 // ---------------------------------------------------------------- the copy of a sent mail (ADR-0010)
 
-/// UIDs from here up are the local copies of sent mail that the server has not got yet. No server numbers
-/// messages that high, so they never meet a real UID; the sync leaves them alone while the append waits.
+/// Local copies of sent mail that the server has not got yet are kept under UIDVALIDITY 0
+/// ([`mail_db::LOCAL_UIDVALIDITY`], which a server may not use), with their own file path
+/// `<uidvalidity 0>/<uid>.eml`, so no real message can overwrite or merge with one (the index key is
+/// folder, UIDVALIDITY, UID). Their UIDs start here, so a list lookup by UID alone finds them apart from
+/// real ones in practice too. The sync leaves them alone while the append waits, and replaces them by
+/// the server's copy once it has seen one with the same Message-ID ([`drop_local_copies_seen_on_server`]).
 pub const SYNTHETIC_UID_BASE: u32 = 4_000_000_000;
 
 /// The Sent folder of an account: the special-use `\Sent` one, else the usual names (MAIL-141).
@@ -710,7 +714,7 @@ pub fn record_sent_copy(store: &MailStore, account: &str, raw: &[u8], now: i64) 
     if !mid.is_empty() && mail_db::has_message_id(reader.conn(), sent.id, &mid).map_err(err)? {
         return Ok(Some(sent.name.clone()));
     }
-    let uv = sent.uidvalidity.unwrap_or(0);
+    let uv = mail_db::LOCAL_UIDVALIDITY;
     let uid = mail_db::max_uid_from(reader.conn(), sent.id, uv, SYNTHETIC_UID_BASE).map_err(err)?.map_or(SYNTHETIC_UID_BASE, |m| m + 1);
     let nm = store.save_message(sent, uv, uid, raw, "\\Seen", Some(now)).map_err(err)?;
     let row = PendingRow {
@@ -730,6 +734,25 @@ pub fn record_sent_copy(store: &MailStore, account: &str, raw: &[u8], now: i64) 
     };
     store.commit(vec![Op::message(nm), Op::PendingAdd(Box::new(row))]).map_err(err)?;
     Ok(Some(sent.name.clone()))
+}
+
+/// The server has a message with the Message-ID of a local copy of a sent mail (and nothing waits for the
+/// copy): the server's row stands, the local row goes and its file moves to the local trash, never deleted.
+/// Returns how many were replaced.
+pub fn drop_local_copies_seen_on_server(store: &MailStore, folder: i64, uidvalidity: u32) -> Result<usize, String> {
+    let reader = store.reader().map_err(err)?;
+    let seen = mail_db::local_copies_seen_on_server(reader.conn(), folder, uidvalidity).map_err(err)?;
+    if seen.is_empty() {
+        return Ok(0);
+    }
+    store.commit(seen.iter().map(|(uid, _)| Op::Remove { folder, uidvalidity: mail_db::LOCAL_UIDVALIDITY, uid: *uid }).collect()).map_err(err)?;
+    let date = today_string();
+    for (_, rel) in &seen {
+        if !rel.is_empty() {
+            store.archive_file(rel, &date).map_err(err)?;
+        }
+    }
+    Ok(seen.len())
 }
 
 /// Append the recorded copies to the server. A copy that the server has (by Message-ID) is not appended again,

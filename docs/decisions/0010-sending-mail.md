@@ -173,8 +173,12 @@ window: `Ctrl+Enter` send, `Esc` close (with the draft rule).
 - The compose window uses a plain multi-line text field, not the note editor (which is bound to notes and a vault), and has no
   vim-style editing. Attachments are added by path, from a list of the vault's files, or as a note; dropping files onto the
   window is not done.
-- The local Sent copy has a UID of 4,000,000,000 and up (`SYNTHETIC_UID_BASE`) until the server's UID is known. A flag action on
-  it is refused while the append waits. If the server did not say `APPENDUID` the UID is found by Message-ID; if that fails
+- The local Sent copy is kept under UIDVALIDITY 0 (`mail_db::LOCAL_UIDVALIDITY`, which RFC 3501 forbids a server to use) with a UID of
+  4,000,000,000 and up (`SYNTHETIC_UID_BASE`) and its own file `<account>/<folder>/0/<uid>.eml`, until the server's UID is known. The index key is
+  (folder, UIDVALIDITY, UID), so a real server message can never overwrite or merge with it (changed in ADR-0011 step 0; before, it shared the
+  server's UIDVALIDITY and relied on the range). The folder list shows rows of UIDVALIDITY 0 next to the current ones. The next sync replaces a
+  local copy whose Message-ID the server has (and for which no append waits) by the server's row; the local file moves to `.trash/`.
+  A flag action on it is refused while the append waits. If the server did not say `APPENDUID` the UID is found by Message-ID; if that fails
   the local copy goes to `.trash/` and the next sync brings the server's own.
 - Drafts are autosaved on the window's thread (small JSON and the `.eml`; attachments are capped at 25 MB together).
 - The outbox lock is per process: two Shale programs on the same mail folder are not supported.

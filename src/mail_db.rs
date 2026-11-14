@@ -513,6 +513,23 @@ pub fn has_message_id(c: &Connection, folder: i64, message_id: &str) -> Result<b
     Ok(c.query_row("SELECT EXISTS (SELECT 1 FROM messages WHERE folder = ?1 AND message_id = ?2)", params![folder, message_id], |r| r.get(0))?)
 }
 
+/// The UIDVALIDITY of the local-only copies of sent mail (ADR-0011 step 0): RFC 3501 forbids a server to use 0,
+/// so a copy kept under it can never meet a row or a file of the server, however high a real UID is.
+pub const LOCAL_UIDVALIDITY: u32 = 0;
+
+/// Local-only copies in a folder that nothing waits for any more and whose Message-ID the server's own
+/// (fully fetched) copy in `uidvalidity` has: `(uid, path)`. The sync replaces them by the server's copy.
+pub fn local_copies_seen_on_server(c: &Connection, folder: i64, uidvalidity: u32) -> Result<Vec<(u32, String)>> {
+    let mut st = c.prepare(
+        "SELECT l.uid, l.path FROM messages l
+         WHERE l.folder = ?1 AND l.uidvalidity = 0 AND l.message_id <> ''
+           AND NOT EXISTS (SELECT 1 FROM pending_ops p WHERE p.folder = l.folder AND p.uidvalidity = 0 AND p.uid = l.uid)
+           AND EXISTS (SELECT 1 FROM messages s WHERE s.folder = l.folder AND s.uidvalidity = ?2 AND s.message_id = l.message_id AND s.state = 0 AND s.missing_file = 0)",
+    )?;
+    let rows = st.query_map(params![folder, uidvalidity], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 /// The highest UID at or above `from` in a folder's UIDVALIDITY, if there is one.
 pub fn max_uid_from(c: &Connection, folder: i64, uidvalidity: u32, from: u32) -> Result<Option<u32>> {
     Ok(c.query_row("SELECT MAX(uid) FROM messages WHERE folder = ?1 AND uidvalidity = ?2 AND uid >= ?3", params![folder, uidvalidity, from], |r| r.get::<_, Option<u32>>(0))?)
@@ -628,7 +645,7 @@ fn summary_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<MessageSummary> {
 /// messages of an older one are copies the sync has fetched again (their files stay on disk).
 pub fn list(c: &Connection, folder: i64, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
     let mut st = c.prepare(&format!(
-        "SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity
+        "SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0)
          WHERE m.folder = ?1 ORDER BY m.date DESC, m.uid DESC LIMIT ?2 OFFSET ?3"
     ))?;
     let rows = st.query_map(params![folder, limit as i64, offset as i64], summary_from)?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -639,7 +656,7 @@ pub fn list(c: &Connection, folder: i64, limit: usize, offset: usize) -> Result<
 pub fn search(c: &Connection, query: &str, folder: Option<i64>, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
     let Some(q) = fts_query(query) else { return Ok(vec![]) };
     let mut st = c.prepare(&format!(
-        "SELECT {MSG_COLS} FROM mail_fts JOIN messages m ON m.id = mail_fts.rowid JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity
+        "SELECT {MSG_COLS} FROM mail_fts JOIN messages m ON m.id = mail_fts.rowid JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0)
          WHERE mail_fts MATCH ?1 AND (?2 IS NULL OR m.folder = ?2) ORDER BY m.date DESC, m.uid DESC LIMIT ?3 OFFSET ?4"
     ))?;
     let rows = st.query_map(params![q, folder, limit as i64, offset as i64], summary_from)?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -648,7 +665,12 @@ pub fn search(c: &Connection, query: &str, folder: Option<i64>, limit: usize, of
 
 /// One message by folder and UID in the folder's current UIDVALIDITY.
 pub fn message(c: &Connection, folder: i64, uid: u32) -> Result<Option<MessageSummary>> {
-    Ok(c.query_row(&format!("SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity WHERE m.folder = ?1 AND m.uid = ?2"), params![folder, uid], summary_from).optional()?)
+    Ok(c.query_row(
+        &format!("SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0) WHERE m.folder = ?1 AND m.uid = ?2 ORDER BY m.uidvalidity DESC LIMIT 1"),
+        params![folder, uid],
+        summary_from,
+    )
+    .optional()?)
 }
 
 /// Per folder: (messages shown in its list, how many of them are unread). One pass over the
@@ -656,7 +678,7 @@ pub fn message(c: &Connection, folder: i64, uid: u32) -> Result<Option<MessageSu
 pub fn folder_counts(c: &Connection) -> Result<HashMap<i64, (i64, i64)>> {
     let mut st = c.prepare(
         "SELECT m.folder, COUNT(*), SUM(CASE WHEN instr(lower(' ' || m.flags || ' '), ' \\seen ') = 0 THEN 1 ELSE 0 END)
-         FROM messages m JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity GROUP BY m.folder",
+         FROM messages m JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0) GROUP BY m.folder",
     )?;
     let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, (r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0)))))?.collect::<rusqlite::Result<HashMap<_, _>>>()?;
     Ok(rows)
@@ -664,14 +686,14 @@ pub fn folder_counts(c: &Connection) -> Result<HashMap<i64, (i64, i64)>> {
 
 /// How many messages a folder's list has.
 pub fn count_folder(c: &Connection, folder: i64) -> Result<i64> {
-    Ok(c.query_row("SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity WHERE m.folder = ?1", [folder], |r| r.get(0))?)
+    Ok(c.query_row("SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0) WHERE m.folder = ?1", [folder], |r| r.get(0))?)
 }
 
 /// How many messages of the folder's list come before this one (its row number in the list).
 pub fn position_in_list(c: &Connection, folder: i64, date: Option<i64>, uid: u32) -> Result<i64> {
     let d = date.unwrap_or(i64::MIN);
     Ok(c.query_row(
-        "SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity
+        "SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0)
          WHERE m.folder = ?1 AND (COALESCE(m.date, -9223372036854775807) > ?2 OR (COALESCE(m.date, -9223372036854775807) = ?2 AND m.uid > ?3))",
         params![folder, d.max(-9223372036854775807), uid],
         |r| r.get(0),
@@ -998,14 +1020,21 @@ mod tests {
             add(&mut c, f.id, uid, fields("s", "a@x.de", "b", uid as i64 * 10));
         }
         // a copy from before a UIDVALIDITY change
-        let old = NewMessage { folder: f.id, uidvalidity: 0, uid: 9, path: "old.eml".into(), state: 0, flags: String::new(), size: 1, parsed: true, fields: fields("old", "a@x.de", "b", 999) };
+        let old = NewMessage { folder: f.id, uidvalidity: 7, uid: 9, path: "old.eml".into(), state: 0, flags: String::new(), size: 1, parsed: true, fields: fields("old", "a@x.de", "b", 999) };
         apply_batch(&mut c, &[Op::message(old)], None).unwrap();
-        let page = |off| list(&c, f.id, 2, off).unwrap().iter().map(|m| m.uid).collect::<Vec<_>>();
-        assert_eq!(page(0), vec![5, 4]);
-        assert_eq!(page(2), vec![3, 2]);
-        assert_eq!(page(4), vec![1]);
-        assert_eq!(page(6), Vec::<u32>::new());
-        assert!(search(&c, "old", None, 10, 0).unwrap().is_empty());
+        {
+            let page = |off| list(&c, f.id, 2, off).unwrap().iter().map(|m| m.uid).collect::<Vec<_>>();
+            assert_eq!(page(0), vec![5, 4]);
+            assert_eq!(page(2), vec![3, 2]);
+            assert_eq!(page(4), vec![1]);
+            assert_eq!(page(6), Vec::<u32>::new());
+            assert!(search(&c, "old", None, 10, 0).unwrap().is_empty());
+        }
+        // a local copy of sent mail (UIDVALIDITY 0) always shows
+        let local = NewMessage { folder: f.id, uidvalidity: LOCAL_UIDVALIDITY, uid: 4_000_000_000, path: "0/x.eml".into(), state: 0, flags: String::new(), size: 1, parsed: true, fields: fields("mine", "a@x.de", "b", 1000) };
+        apply_batch(&mut c, &[Op::message(local)], None).unwrap();
+        let first = list(&c, f.id, 2, 0).unwrap().iter().map(|m| m.uid).collect::<Vec<_>>();
+        assert_eq!(first, vec![4_000_000_000, 5]);
     }
 
     #[test]
