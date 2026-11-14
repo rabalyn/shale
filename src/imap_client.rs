@@ -996,7 +996,7 @@ pub fn decode_mutf7(s: &str) -> String {
             out.push('&');
         } else {
             let bytes = crate::mail::base64_decode(code.replace(',', "/").as_bytes());
-            let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+            let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
             out.extend(char::decode_utf16(units).map(|r| r.unwrap_or('\u{FFFD}')));
         }
         rest = &after[end + 1..];

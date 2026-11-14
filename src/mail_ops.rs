@@ -1432,8 +1432,7 @@ pub(crate) mod tests {
             let _ = sync_account(&e.store, "acct1", "Test", &e.conn, &opts, &tx, &AtomicBool::new(false));
         };
         for step in 0..steps {
-            let what;
-            match rng.below(14) {
+            let what = match rng.below(14) {
                 0..=2 => {
                     let f = folders[rng.below(3)];
                     let list = e.list(f);
@@ -1443,7 +1442,7 @@ pub(crate) mod tests {
                         let a = if rng.below(2) == 0 { Action::SetFlags { add: vec![flag], remove: vec![] } } else { Action::SetFlags { add: vec![], remove: vec![flag] } };
                         let _ = enqueue(&e.store, &[msg], &a, NOW);
                     }
-                    what = "flag";
+                    "flag"
                 }
                 3..=5 => {
                     let f = folders[rng.below(2)]; // Trash only deletes forever
@@ -1455,7 +1454,7 @@ pub(crate) mod tests {
                         let picked: Vec<MessageSummary> = picked.into_iter().filter(|p| seen.insert(p.id)).collect();
                         let _ = enqueue(&e.store, &picked, &Action::Delete, NOW);
                     }
-                    what = "delete";
+                    "delete"
                 }
                 6 => {
                     let list = e.list("INBOX");
@@ -1463,7 +1462,7 @@ pub(crate) mod tests {
                         let target = folders[1 + rng.below(2)];
                         let _ = enqueue(&e.store, &[list[rng.below(list.len())].clone()], &Action::MoveTo { folder: target.into() }, NOW);
                     }
-                    what = "move";
+                    "move"
                 }
                 7 => {
                     // browse Trash, then delete forever one or two (sometimes with a wrong count: must be refused)
@@ -1488,7 +1487,7 @@ pub(crate) mod tests {
                             Err(_) => assert!(wrong),
                         }
                     }
-                    what = "forever";
+                    "forever"
                 }
                 8 | 9 => {
                     // send the queue, sometimes with the network down or the server failing
@@ -1503,7 +1502,7 @@ pub(crate) mod tests {
                     e.conn.offline.store(false, Ordering::SeqCst);
                     e.server.state().fail_next_write = None;
                     e.server.state().hang_up_on = None;
-                    what = "run";
+                    "run"
                 }
                 10 => {
                     // another program moves a mail
@@ -1513,7 +1512,7 @@ pub(crate) mod tests {
                         let u = uids[rng.below(uids.len())];
                         e.server.state().move_message(from, to, u);
                     }
-                    what = "other moves";
+                    "other moves"
                 }
                 11 => {
                     // another program flags a mail \Deleted (and does not expunge it)
@@ -1524,7 +1523,7 @@ pub(crate) mod tests {
                         e.server.state().set_flags("INBOX", u, &["\\Deleted"]);
                         m.foreign_deleted.extend(message_id_of(&raw));
                     }
-                    what = "other flags deleted";
+                    "other flags deleted"
                 }
                 12 => {
                     arrivals += 1;
@@ -1532,7 +1531,7 @@ pub(crate) mod tests {
                     e.server.state().add_message("INBOX", message(&id, "Eve <eve@x.de>", "new"), NOW - DAY);
                     m.known.insert(format!("<{id}@fake>"));
                     sync(&e);
-                    what = "arrival and sync";
+                    "arrival and sync"
                 }
                 _ => {
                     // another program deletes a mail that we already hold a copy of
@@ -1545,9 +1544,9 @@ pub(crate) mod tests {
                         m.foreign_deleted.remove(&id);
                         m.other_deleted.insert(id);
                     }
-                    what = "other deletes";
+                    "other deletes"
                 }
-            }
+            };
             check(&e, &mut m, seed, step, what);
         }
         // everything settles once the server behaves: nothing waits, nothing was lost
