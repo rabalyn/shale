@@ -1,10 +1,14 @@
-//! CalDAV passwords in the system keyring instead of the settings file.
+//! CalDAV and mail account secrets in the system keyring instead of the settings file.
 //!
 //! On Linux the Secret Service (GNOME Keyring, KWallet, KeePassXC …) is used through the
 //! `secret-tool` program; the password goes to it on standard input, never on the command line.
 //! One entry per account (server + user name), shared by all calendars of that account.
 //! Where no keyring is available the password stays in the settings file, which only its
 //! owner can read.
+//!
+//! Mail accounts (`mail_secret`, `set_mail_secret`, `clear_mail_secret`) keep one entry per
+//! account id and kind (password, later an OAuth2 refresh token). They never go to the settings
+//! file: without a keyring the caller has to ask again.
 //!
 //! In memory, `SourceKind::Caldav::password` always holds the real password: `load_passwords`
 //! fills it in after reading the settings, `for_file` takes it out again before writing them.
@@ -22,6 +26,50 @@ fn account_of(s: &CalendarSource) -> Option<(String, String)> {
     }
     let o = cal_dav::Origin::parse(url).ok()?;
     Some((format!("{}://{}:{}", o.scheme, o.host, o.port), username.clone()))
+}
+
+#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
+/// Keyring application name of CalDAV passwords.
+const CALDAV: &str = "shale-caldav";
+/// Keyring application name of mail account secrets.
+const MAIL: &str = "shale-mail";
+
+#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
+/// What a mail account secret is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MailSecret {
+    Password,
+    /// For the OAuth2 sign-in (phase 1c).
+    RefreshToken,
+}
+
+#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
+impl MailSecret {
+    fn name(self) -> &'static str {
+        match self {
+            MailSecret::Password => "password",
+            MailSecret::RefreshToken => "refresh-token",
+        }
+    }
+}
+
+#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
+/// The secret of a mail account, if the keyring has it.
+pub fn mail_secret(account_id: &str, kind: MailSecret) -> Option<String> {
+    backend::lookup(MAIL, account_id, kind.name())
+}
+
+#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
+/// Put a mail account secret into the keyring. False if that did not work (no keyring, or the
+/// unlock was refused): the secret is then not saved anywhere.
+pub fn set_mail_secret(account_id: &str, kind: MailSecret, secret: &str) -> bool {
+    backend::store(MAIL, account_id, kind.name(), secret)
+}
+
+#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
+/// Remove a mail account secret (the account was deleted).
+pub fn clear_mail_secret(account_id: &str, kind: MailSecret) {
+    backend::clear(MAIL, account_id, kind.name());
 }
 
 /// Passwords this run knows to be in the keyring (read from or written to it).
@@ -43,7 +91,7 @@ pub fn load_passwords(sources: &mut [CalendarSource]) {
         if !password.is_empty() {
             continue;
         }
-        let found = cache.entry(acct.clone()).or_insert_with(|| backend::lookup(&acct.0, &acct.1)).clone();
+        let found = cache.entry(acct.clone()).or_insert_with(|| backend::lookup(CALDAV, &acct.0, &acct.1)).clone();
         if let Some(p) = found {
             known().get_or_insert_with(HashMap::new).insert(acct, p.clone());
             *password = p;
@@ -70,7 +118,7 @@ pub fn for_file(sources: &[CalendarSource]) -> Vec<CalendarSource> {
         let refused = refused.get_or_insert_with(HashMap::new);
         let stored = map.get(&acct) == Some(password)
             || (refused.get(&acct) != Some(password) && {
-                let ok = backend::store(&acct.0, &acct.1, password);
+                let ok = backend::store(CALDAV, &acct.0, &acct.1, password);
                 if ok {
                     map.insert(acct.clone(), password.clone());
                     refused.remove(&acct);
@@ -85,7 +133,7 @@ pub fn for_file(sources: &[CalendarSource]) -> Vec<CalendarSource> {
     }
     let unused: Vec<(String, String)> = map.keys().filter(|a| !used.contains(*a)).cloned().collect();
     for a in unused {
-        backend::clear(&a.0, &a.1);
+        backend::clear(CALDAV, &a.0, &a.1);
         map.remove(&a);
     }
     out
@@ -106,8 +154,8 @@ mod backend {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    fn attrs<'a>(server: &'a str, user: &'a str) -> [&'a str; 6] {
-        ["application", "shale-caldav", "server", server, "user", user]
+    fn attrs<'a>(app: &'a str, server: &'a str, user: &'a str) -> [&'a str; 6] {
+        ["application", app, "server", server, "user", user]
     }
 
     /// Run secret-tool with `input` on stdin. Gives up after a while (an unlock prompt left open).
@@ -144,29 +192,29 @@ mod backend {
         })
     }
 
-    pub fn lookup(server: &str, user: &str) -> Option<String> {
+    pub fn lookup(app: &str, server: &str, user: &str) -> Option<String> {
         let mut args = vec!["lookup"];
-        args.extend(attrs(server, user));
+        args.extend(attrs(app, server, user));
         match run(&args, None) {
             Some((true, p)) if !p.is_empty() => Some(p),
             _ => None,
         }
     }
 
-    pub fn store(server: &str, user: &str, password: &str) -> bool {
+    pub fn store(app: &str, server: &str, user: &str, password: &str) -> bool {
         if !available() {
             return false;
         }
-        let label = format!("Shale CalDAV: {user} on {server}");
+        let label = format!("{}: {user} on {server}", if app == "shale-caldav" { "Shale CalDAV" } else { "Shale mail" });
         let mut args = vec!["store", "--label", label.as_str()];
-        args.extend(attrs(server, user));
+        args.extend(attrs(app, server, user));
         // the stored password must read back exactly (no trailing newline is added)
-        matches!(run(&args, Some(password)), Some((true, _))) && lookup(server, user).as_deref() == Some(password)
+        matches!(run(&args, Some(password)), Some((true, _))) && lookup(app, server, user).as_deref() == Some(password)
     }
 
-    pub fn clear(server: &str, user: &str) {
+    pub fn clear(app: &str, server: &str, user: &str) {
         let mut args = vec!["clear"];
-        args.extend(attrs(server, user));
+        args.extend(attrs(app, server, user));
         let _ = run(&args, None);
     }
 }
@@ -177,21 +225,25 @@ mod backend {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    pub static FAKE: Mutex<Option<HashMap<(String, String), String>>> = Mutex::new(None);
+    pub static FAKE: Mutex<Option<HashMap<(String, String, String), String>>> = Mutex::new(None);
+
+    fn key(app: &str, server: &str, user: &str) -> (String, String, String) {
+        (app.to_string(), server.to_string(), user.to_string())
+    }
 
     pub fn available() -> bool {
         true
     }
-    pub fn lookup(server: &str, user: &str) -> Option<String> {
-        FAKE.lock().unwrap().as_ref()?.get(&(server.to_string(), user.to_string())).cloned()
+    pub fn lookup(app: &str, server: &str, user: &str) -> Option<String> {
+        FAKE.lock().unwrap().as_ref()?.get(&key(app, server, user)).cloned()
     }
-    pub fn store(server: &str, user: &str, password: &str) -> bool {
-        FAKE.lock().unwrap().get_or_insert_with(HashMap::new).insert((server.into(), user.into()), password.into());
+    pub fn store(app: &str, server: &str, user: &str, password: &str) -> bool {
+        FAKE.lock().unwrap().get_or_insert_with(HashMap::new).insert(key(app, server, user), password.into());
         true
     }
-    pub fn clear(server: &str, user: &str) {
+    pub fn clear(app: &str, server: &str, user: &str) {
         if let Some(m) = FAKE.lock().unwrap().as_mut() {
-            m.remove(&(server.to_string(), user.to_string()));
+            m.remove(&key(app, server, user));
         }
     }
 }
@@ -202,13 +254,13 @@ mod backend {
     pub fn available() -> bool {
         false
     }
-    pub fn lookup(_: &str, _: &str) -> Option<String> {
+    pub fn lookup(_: &str, _: &str, _: &str) -> Option<String> {
         None
     }
-    pub fn store(_: &str, _: &str, _: &str) -> bool {
+    pub fn store(_: &str, _: &str, _: &str, _: &str) -> bool {
         false
     }
-    pub fn clear(_: &str, _: &str) {}
+    pub fn clear(_: &str, _: &str, _: &str) {}
 }
 
 #[cfg(test)]
@@ -226,13 +278,29 @@ mod tests {
         let file = for_file(&sources);
         let json = serde_json::to_string(&file).unwrap();
         assert!(!json.contains("s3cret"), "no password in the settings file: {json}");
-        assert_eq!(backend::lookup("https://dav.example.com:443", "ada").as_deref(), Some("s3cret"), "one entry for the account");
+        assert_eq!(backend::lookup(CALDAV, "https://dav.example.com:443", "ada").as_deref(), Some("s3cret"), "one entry for the account");
         // reading the settings back
         let mut loaded: Vec<CalendarSource> = serde_json::from_str(&json).unwrap();
         load_passwords(&mut loaded);
         assert_eq!(loaded, sources);
         // the account is removed: its keyring entry goes too
         let _ = for_file(&sources[2..]);
-        assert_eq!(backend::lookup("https://dav.example.com:443", "ada"), None);
+        assert_eq!(backend::lookup(CALDAV, "https://dav.example.com:443", "ada"), None);
+    }
+
+    // spec: MAIL-021
+    #[test]
+    fn mail_secrets_have_their_own_entries() {
+        assert!(set_mail_secret("acct-1", MailSecret::Password, "pw-1"));
+        assert!(set_mail_secret("acct-1", MailSecret::RefreshToken, "tok-1"));
+        assert_eq!(mail_secret("acct-1", MailSecret::Password).as_deref(), Some("pw-1"));
+        assert_eq!(mail_secret("acct-1", MailSecret::RefreshToken).as_deref(), Some("tok-1"));
+        assert_eq!(mail_secret("acct-2", MailSecret::Password), None);
+        // a CalDAV entry of the same names is a different entry
+        assert_eq!(backend::lookup(CALDAV, "acct-1", "password"), None);
+        clear_mail_secret("acct-1", MailSecret::Password);
+        assert_eq!(mail_secret("acct-1", MailSecret::Password), None);
+        assert_eq!(mail_secret("acct-1", MailSecret::RefreshToken).as_deref(), Some("tok-1"));
+        clear_mail_secret("acct-1", MailSecret::RefreshToken);
     }
 }

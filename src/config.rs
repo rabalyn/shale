@@ -29,6 +29,58 @@ impl FileSort {
     }
 }
 
+/// How a mail account signs in.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MailAuth {
+    /// Password or app password, kept in the keyring.
+    #[default]
+    Password,
+    /// OAuth2 (XOAUTH2); the sign-in itself comes with phase 1c.
+    OAuth2,
+}
+
+/// How the connection to the mail server is secured. There is no plain-text choice.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MailSecurity {
+    /// TLS from the first byte (port 993).
+    #[default]
+    ImplicitTls,
+    /// Plain start, then the upgrade to TLS is mandatory (port 143); nothing is sent before it.
+    StartTls,
+}
+
+impl MailSecurity {
+    /// The usual port for this mode.
+    #[allow(dead_code)] // used by the account settings (phase 1b)
+    pub fn default_port(self) -> u16 {
+        match self {
+            MailSecurity::ImplicitTls => 993,
+            MailSecurity::StartTls => 143,
+        }
+    }
+}
+
+/// One IMAP account. The password is not here: it is in the keyring (`secrets::mail_secret`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct MailAccount {
+    /// Stable name of the account; used for its folder in the mail store (letters, digits, `-`, `_`).
+    pub id: String,
+    /// What the account is called in the window.
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub auth: MailAuth,
+    pub security: MailSecurity,
+}
+
+impl Default for MailAccount {
+    fn default() -> Self {
+        MailAccount { id: String::new(), name: String::new(), host: String::new(), port: 993, user: String::new(), auth: MailAuth::Password, security: MailSecurity::ImplicitTls }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
@@ -68,6 +120,8 @@ pub struct Config {
     pub people_dir: String,
     /// Vim-style editing in notes: normal / insert / visual mode (off by default).
     pub vim_mode: bool,
+    /// IMAP accounts of the mail view.
+    pub mail_accounts: Vec<MailAccount>,
 }
 
 impl Default for Config {
@@ -93,6 +147,7 @@ impl Default for Config {
             recent_tags: vec![],
             people_dir: crate::people::DEFAULT_DIR.into(),
             vim_mode: false,
+            mail_accounts: vec![],
         }
     }
 }
@@ -191,6 +246,20 @@ mod tests {
             assert_eq!(std::fs::metadata(p.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: MAIL-020
+    #[test]
+    fn mail_accounts_load_and_have_no_plain_text_mode() {
+        let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada"}]}"#).unwrap();
+        let a = &c.mail_accounts[0];
+        assert_eq!((a.port, a.auth, a.security), (993, MailAuth::Password, MailSecurity::ImplicitTls));
+        assert_eq!(MailSecurity::StartTls.default_port(), 143);
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.mail_accounts, c.mail_accounts);
+        // there is no way to ask for an unencrypted connection, and no password field to leak
+        assert!(serde_json::from_str::<Config>(r#"{"mail_accounts": [{"security": "Plain"}]}"#).is_err());
+        assert!(!serde_json::to_string(&c).unwrap().contains("password"));
     }
 
     // spec: VAULT-006

@@ -89,6 +89,12 @@ pub fn open_read(path: impl AsRef<Path>) -> io::Result<File> {
     File::open(path).map_err(|e| named(path, e))
 }
 
+/// Flush a file this program did not write itself (a copy another library made, such as a
+/// database backup) to disk. The error says which file.
+pub fn sync_file(path: &Path) -> io::Result<()> {
+    File::open(path).and_then(|f| f.sync_all()).map_err(|e| named(path, e))
+}
+
 /// Make a folder (and its parents) that only the owner can enter (mode 0700). A folder that
 /// exists gets its permissions tightened.
 pub fn ensure_private_dir(path: &Path) -> io::Result<()> {

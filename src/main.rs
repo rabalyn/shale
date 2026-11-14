@@ -27,6 +27,8 @@ mod jobs;
 mod layout;
 mod lists;
 mod mail;
+mod mail_db;
+mod mail_store;
 mod markdown;
 mod media;
 #[cfg(test)]
