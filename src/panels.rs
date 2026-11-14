@@ -19,6 +19,9 @@ impl ShaleApp {
     }
 
     fn file_explorer(&mut self, ui: &mut Ui) {
+        // dropping anywhere on the file list (outside a folder) moves to the top of the vault
+        let panel = ui.available_rect_before_wrap();
+        self.tree_targets.push((panel, PathBuf::new(), false));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let folder = self.current_folder();
@@ -52,6 +55,19 @@ impl ShaleApp {
         let avail = ui.available_height() - bottom_h;
         egui::ScrollArea::vertical().max_height(avail).auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
+            // dragging near the top or bottom edge scrolls the list
+            if egui::DragAndDrop::has_payload_of_type::<TreeDrag>(ui.ctx()) {
+                if let Some(p) = ui.ctx().input(|i| i.pointer.latest_pos()) {
+                    let clip = ui.clip_rect();
+                    if clip.x_range().contains(p.x) {
+                        let dy = if p.y < clip.top() + 28.0 { 8.0 } else if p.y > clip.bottom() - 28.0 { -8.0 } else { 0.0 };
+                        if dy != 0.0 {
+                            ui.scroll_with_delta(Vec2::new(0.0, dy));
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                }
+            }
             let root = PathBuf::new();
             let r = self.tree(ui, &root, 0);
             // right-click on empty space
@@ -78,6 +94,24 @@ impl ShaleApp {
         });
     }
 
+    /// The files of a folder in the order the file list shows them (its sort setting).
+    pub(crate) fn sorted_files_in(&self, dir: &Path) -> Vec<(PathBuf, String, FileKind)> {
+        let Some(v) = &self.vault else { return vec![] };
+        let sort = self.cfg.file_sort;
+        let mut entries: Vec<&crate::vault::FileEntry> = v.files.iter().filter(|f| f.rel.parent() == Some(dir)).collect();
+        entries.sort_by(|a, b| sort_order(sort, &a.display_name().to_lowercase(), &b.display_name().to_lowercase(), (a.created, a.modified), (b.created, b.modified)));
+        entries.into_iter().map(|f| (f.rel.clone(), f.display_name(), f.kind)).collect()
+    }
+
+    /// The note (or drawing) before (`step` -1) or after (+1) `rel` in its folder, in the file
+    /// list's order. Attachments (PDFs, pictures…) are skipped.
+    pub(crate) fn neighbour_note(&self, rel: &Path, step: i32) -> Option<PathBuf> {
+        let dir = rel.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let list: Vec<PathBuf> = self.sorted_files_in(&dir).into_iter().filter(|(_, _, k)| *k != FileKind::Other).map(|(p, _, _)| p).collect();
+        let i = list.iter().position(|p| p == rel)? as i32 + step;
+        (i >= 0).then(|| list.get(i as usize).cloned()).flatten()
+    }
+
     fn tree(&mut self, ui: &mut Ui, dir: &Path, depth: usize) {
         let Some(v) = &self.vault else { return };
         let sort = self.cfg.file_sort;
@@ -87,15 +121,17 @@ impl ShaleApp {
             let (ta, tb) = (v.folder_times.get(a).copied().unwrap_or_default(), v.folder_times.get(b).copied().unwrap_or_default());
             sort_order(sort, &fname(a), &fname(b), ta, tb)
         });
-        let mut entries: Vec<&crate::vault::FileEntry> = v.files.iter().filter(|f| f.rel.parent() == Some(dir)).collect();
-        entries.sort_by(|a, b| sort_order(sort, &a.display_name().to_lowercase(), &b.display_name().to_lowercase(), (a.created, a.modified), (b.created, b.modified)));
-        let files: Vec<(PathBuf, String, FileKind)> = entries.into_iter().map(|f| (f.rel.clone(), f.display_name(), f.kind)).collect();
+        let files = self.sorted_files_in(dir);
         let current = self.current_path();
         for f in folders {
             let open = self.expanded.contains(&f);
             let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let resp = tree_row(ui, depth, &name, Some(open), false, theme::TEXT, "");
             self.add_drop_zone(resp.rect.intersect(ui.clip_rect()), f.clone(), None);
+            self.tree_targets.push((resp.rect.intersect(ui.clip_rect()), f.clone(), !open));
+            if resp.drag_started() {
+                egui::DragAndDrop::set_payload(ui.ctx(), TreeDrag(f.clone()));
+            }
             if resp.clicked() {
                 if open {
                     self.expanded.remove(&f);
@@ -139,6 +175,11 @@ impl ShaleApp {
             };
             let color = if kind == FileKind::Other { theme::MUTED } else { theme::TEXT };
             let resp = tree_row(ui, depth, &name, None, active, color, badge);
+            // dropping on a file puts the dragged thing next to it
+            self.tree_targets.push((resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), false));
+            if resp.drag_started() {
+                egui::DragAndDrop::set_payload(ui.ctx(), TreeDrag(rel.clone()));
+            }
             self.add_drop_zone(resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), (kind == FileKind::Note).then(|| rel.clone()));
             if resp.clicked() {
                 let new_tab = ui.input(|i| i.modifiers.command);
@@ -769,9 +810,14 @@ fn section_header(ui: &mut Ui, t: &str) {
 }
 
 /// One row in the file tree. `open` is Some for folders.
+/// A file or folder being dragged in the file list.
+#[derive(Clone, Debug)]
+pub struct TreeDrag(pub PathBuf);
+
 fn tree_row(ui: &mut Ui, depth: usize, name: &str, open: Option<bool>, active: bool, color: egui::Color32, badge: &str) -> egui::Response {
     let h = 26.0;
-    let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click());
+    // click to open, drag to move into another folder
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click_and_drag());
     if active {
         ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_ACTIVE);
     } else if resp.hovered() {
@@ -893,6 +939,100 @@ mod tests {
 }
 
 pub fn _views(_: View) {}
+
+#[cfg(test)]
+mod move_tests {
+    use crate::app::{Options, ShaleApp};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn moving_notes_and_folders_into_folders() {
+        let d = std::env::temp_dir().join(format!("shale-move-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        crate::vault::write_sample_vault(&d).unwrap();
+        std::fs::create_dir_all(d.join("Archiv")).unwrap();
+        std::fs::create_dir_all(d.join("Projects/Sub")).unwrap();
+        std::fs::write(d.join("Projects/Sub/Detail.md"), "back to [[Projects/Garden plan|the plan]]\n").unwrap();
+        std::fs::write(d.join("Links.md"), "[[Projects/Garden plan]] · [[Garden plan]] · [Plan](Projects/Garden%20plan.md) · [[Projects/Sub/Detail]]\n").unwrap();
+        let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
+        app.vault.as_mut().unwrap().rescan();
+        let read = |p: &str| std::fs::read_to_string(d.join(p)).unwrap();
+        // a note into a folder, while it is open
+        app.open(Path::new("Ideas.md"), false);
+        assert_eq!(app.move_into(Path::new("Ideas.md"), Path::new("Archiv")).unwrap(), PathBuf::from("Archiv/Ideas.md"));
+        assert!(d.join("Archiv/Ideas.md").exists() && !d.join("Ideas.md").exists());
+        assert_eq!(app.current_path(), Some(PathBuf::from("Archiv/Ideas.md")), "the open tab follows");
+        assert!(app.vault.as_ref().unwrap().exists("Ideas", None), "links by name keep working");
+        // a whole folder into another one: path links to it and inside it follow
+        let to = app.move_into(Path::new("Projects"), Path::new("Archiv")).unwrap();
+        assert_eq!(to, PathBuf::from("Archiv/Projects"));
+        assert!(d.join("Archiv/Projects/Sub/Detail.md").exists());
+        assert_eq!(read("Links.md"), "[[Archiv/Projects/Garden plan]] · [[Garden plan]] · [Plan](Archiv/Projects/Garden%20plan.md) · [[Archiv/Projects/Sub/Detail]]\n");
+        assert_eq!(read("Archiv/Projects/Sub/Detail.md"), "back to [[Archiv/Projects/Garden plan|the plan]]\n", "links inside the moved folder too");
+        let v = app.vault.as_ref().unwrap();
+        for n in v.notes.values() {
+            for (l, r) in n.links.iter().zip(&n.resolved) {
+                if l.target.contains("Garden plan") || l.target.contains("Detail") {
+                    assert!(r.is_some(), "{} still resolves", l.target);
+                }
+            }
+        }
+        assert!(app.expanded.contains(Path::new("Archiv")));
+        // back to the top of the vault
+        app.move_into(Path::new("Archiv/Ideas.md"), Path::new("")).unwrap();
+        assert!(d.join("Ideas.md").exists());
+        // refused: into itself, and a name that is taken
+        assert!(app.move_into(Path::new("Archiv"), Path::new("Archiv/Projects")).unwrap_err().contains("itself"));
+        std::fs::write(d.join("Archiv/Welcome.md"), "other\n").unwrap();
+        app.vault.as_mut().unwrap().rescan();
+        assert!(app.move_into(Path::new("Welcome.md"), Path::new("Archiv")).unwrap_err().contains("already has"));
+        assert!(d.join("Welcome.md").exists(), "nothing moved");
+        // into the folder it is in already: nothing happens
+        assert_eq!(app.move_into(Path::new("Welcome.md"), Path::new("")).unwrap(), PathBuf::from("Welcome.md"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod neighbour_tests {
+    use crate::app::{Options, ShaleApp};
+    use crate::config::FileSort;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn ctrl_h_and_l_follow_the_file_list_order() {
+        let d = std::env::temp_dir().join(format!("shale-neighbour-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        crate::vault::write_sample_vault(&d).unwrap();
+        std::fs::write(d.join("photo.png"), b"x").unwrap();
+        // modified times: Welcome oldest … Daily log newest
+        let base = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_790_000_000);
+        for (i, f) in ["Welcome.md", "Sketch.excalidraw", "photo.png", "Ideas.md", "Daily log.md"].iter().enumerate() {
+            std::fs::File::options().write(true).open(d.join(f)).unwrap().set_modified(base + std::time::Duration::from_secs(i as u64 * 60)).unwrap();
+        }
+        let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
+        app.vault.as_mut().unwrap().rescan();
+        let p = |s: &str| Some(PathBuf::from(s));
+        app.cfg.file_sort = FileSort::NameAsc;
+        assert_eq!(app.neighbour_note(Path::new("Ideas.md"), 1), p("Sketch.excalidraw"));
+        assert_eq!(app.neighbour_note(Path::new("Sketch.excalidraw"), 1), p("Welcome.md"), "the picture in between is skipped");
+        assert_eq!(app.neighbour_note(Path::new("Ideas.md"), -1), p("Daily log.md"));
+        assert_eq!(app.neighbour_note(Path::new("Daily log.md"), -1), None, "first in the folder");
+        assert_eq!(app.neighbour_note(Path::new("Welcome.md"), 1), None, "last in the folder");
+        assert_eq!(app.neighbour_note(Path::new("Projects/Garden plan.md"), 1), None, "only notes of the same folder");
+        app.cfg.file_sort = FileSort::ModifiedDesc;
+        assert_eq!(app.neighbour_note(Path::new("Daily log.md"), 1), p("Ideas.md"), "newest first");
+        assert_eq!(app.neighbour_note(Path::new("Ideas.md"), 1), p("Sketch.excalidraw"));
+        assert_eq!(app.neighbour_note(Path::new("Sketch.excalidraw"), 1), p("Welcome.md"));
+        // the shortcut action opens it in the current tab
+        app.open(Path::new("Daily log.md"), false);
+        app.open_neighbour(1);
+        assert_eq!(app.current_path(), p("Ideas.md"));
+        app.open_neighbour(-1);
+        assert_eq!(app.current_path(), p("Daily log.md"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
 
 #[cfg(test)]
 mod search_tests {

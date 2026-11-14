@@ -451,6 +451,75 @@ impl Vault {
 
     /// Rename/move a file or folder. When `update_links`, links in other notes are rewritten.
     /// Returns the notes whose text was rewritten.
+    /// Move a file or a whole folder into the folder `into` (keeping its name). Links written as
+    /// a path (`[[Projects/Plan]]`, `[x](Projects/Plan.md)`) to anything that moved are changed to
+    /// the new place; links by name keep working as they are. Returns the new path and the notes
+    /// whose text changed.
+    pub fn move_into(&mut self, from: &Path, into: &Path) -> io::Result<(PathBuf, Vec<PathBuf>)> {
+        let name = from.file_name().ok_or_else(|| io::Error::other("nothing to move"))?;
+        let to = into.join(name);
+        if to == from {
+            return Ok((to, vec![]));
+        }
+        if into.starts_with(from) {
+            return Err(io::Error::other("a folder can't go into itself"));
+        }
+        if self.abs(&to).exists() {
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("“{}” already has a “{}”", if into.as_os_str().is_empty() { "the vault".into() } else { rel_to_string(into) }, name.to_string_lossy())));
+        }
+        let is_dir = self.abs(from).is_dir();
+        let moved = |p: &Path| -> Option<PathBuf> {
+            if p == from {
+                Some(to.clone())
+            } else if is_dir {
+                p.strip_prefix(from).ok().map(|rest| to.join(rest))
+            } else {
+                None
+            }
+        };
+        // path links to what moves, before the move: (note now, its new path, [(range, new text)])
+        let mut edits: Vec<(PathBuf, PathBuf, Vec<(std::ops::Range<usize>, String)>)> = Vec::new();
+        for (src, n) in &self.notes {
+            let mut ranges = Vec::new();
+            for (l, r) in n.links.iter().zip(&n.resolved) {
+                let (Some(r), true) = (r, l.target.contains('/')) else { continue };
+                let Some(new) = moved(r) else { continue };
+                let old_text = &n.text[l.target_range.clone()];
+                let mut t = rel_to_string(&new);
+                if !old_text.to_ascii_lowercase().ends_with(".md") {
+                    t = markdown::strip_md_ext(&t).to_string();
+                }
+                if l.markdown_style {
+                    t = t.replace(' ', "%20");
+                }
+                ranges.push((l.target_range.clone(), t));
+            }
+            if !ranges.is_empty() {
+                let now = moved(src).unwrap_or_else(|| src.clone());
+                edits.push((src.clone(), now, ranges));
+            }
+        }
+        if let Some(p) = self.abs(&to).parent() {
+            fs::create_dir_all(p)?;
+        }
+        fs::rename(self.abs(from), self.abs(&to))?;
+        let mut changed = Vec::new();
+        for (src, now, mut ranges) in edits {
+            let Some(text) = self.notes.get(&src).map(|n| n.text.clone()) else { continue };
+            ranges.sort_by_key(|r| std::cmp::Reverse(r.0.start));
+            let mut out = text;
+            for (r, t) in ranges {
+                if out.is_char_boundary(r.start) && out.is_char_boundary(r.end) && r.end <= out.len() {
+                    out.replace_range(r, &t);
+                }
+            }
+            fs::write(self.abs(&now), &out)?;
+            changed.push(now);
+        }
+        self.rescan();
+        Ok((to, changed))
+    }
+
     pub fn rename(&mut self, from: &Path, to: &Path, update_links: bool) -> io::Result<Vec<PathBuf>> {
         let abs_from = self.abs(from);
         let abs_to = self.abs(to);

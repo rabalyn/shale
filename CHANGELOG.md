@@ -9,6 +9,21 @@ The release page of each version on GitHub shows its section from this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Drag and drop in the file list**: drag notes, drawings, files or whole folders onto a folder
+  to move them there (onto a note: next to it; onto empty space: to the top of the vault). A
+  closed folder opens when you hold the pointer on it, the list scrolls at its edges, and links
+  written as a path to anything that moved are updated (links by name keep working anyway).
+- **Ctrl+H / Ctrl+L** (like vim's h / l) open the note before / after the current one in its
+  folder, in the file list's sort order (by name or by date); attachments are skipped. At the
+  first or last note a short message says so.
+
+### Changed
+
+- Dragging something Shale can't take (like a browser tab) across the window no longer leaves a
+  message behind; a hint at the pointer says so while it is over the window.
+
 ## [0.3.0] - 2026-11-13
 
 ### Security

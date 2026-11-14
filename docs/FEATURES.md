@@ -15,6 +15,11 @@ built-in demo vault (`shale --screenshot out.png`).
 - Lists continue when you press Enter (also numbered lists and to-dos `- [ ]` / `1. [ ]`).
   Tab and Shift+Tab indent list items or change heading levels, and Alt+↑/↓ move lines.
 - Web links (`[text](https://…)`) open in your browser.
+- Drag notes, drawings, files and folders in the file list to move them into another folder.
+  Links that point to them by path are updated.
+
+![Moving a note into a folder](screenshots/tree-drag.png)
+
 - Back and forward with the mouse side buttons or Alt+←/→. You can sort the file list by name,
   date modified or date created.
 
@@ -152,6 +157,7 @@ built-in demo vault (`shale --screenshot out.png`).
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+F | Search all notes |
+| Ctrl+H / Ctrl+L | Previous / next note in the folder (in the file list's sort order) |
 | Alt+← / Alt+→ | Back / forward |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |

@@ -122,6 +122,8 @@ pub enum Action {
     Rescan,
     /// make a contact note in the people folder (from `[[p Name`)
     CreatePerson(String),
+    /// move a file or folder into a folder (drag and drop in the file list)
+    Move { from: PathBuf, into: PathBuf },
 }
 
 #[derive(Default)]
@@ -160,11 +162,17 @@ pub struct ShaleApp {
     ctx: Option<egui::Context>,
     /// where things can be dropped this frame
     drop_zones: Vec<drops::DropZone>,
+    /// file list drop targets this frame: (row, folder to move into, a closed folder row)
+    pub(crate) tree_targets: Vec<(egui::Rect, PathBuf, bool)>,
+    /// a closed folder hovered while dragging, since when (it opens after a moment)
+    tree_hover: Option<(PathBuf, Instant)>,
     calendar_areas: Vec<egui::Rect>,
     /// something from another program is dragged over the window (Wayland)
     ext_hover: Option<egui::Pos2>,
     /// the kinds the last drag from another program offered
     last_offered: Vec<String>,
+    /// something Shale can't take is dragged over the window: where, and what it offers
+    ext_refused: Option<(egui::Pos2, Vec<String>)>,
     /// test drops from `--keys` (handled like drops from other programs)
     #[cfg(target_os = "linux")]
     fake_drops: Vec<crate::wl_drop::DropEvent>,
@@ -247,9 +255,12 @@ impl ShaleApp {
             last_event_calendar: None,
             ctx: None,
             drop_zones: vec![],
+            tree_targets: vec![],
+            tree_hover: None,
             calendar_areas: vec![],
             ext_hover: None,
             last_offered: vec![],
+            ext_refused: None,
             #[cfg(target_os = "linux")]
             fake_drops: vec![],
             pending_drops: vec![],
@@ -626,6 +637,20 @@ impl ShaleApp {
             return Ok(());
         }
         let changed = v.rename(rel, &to, self.cfg.update_links_on_rename && !is_dir).map_err(|e| e.to_string())?;
+        self.after_move(rel, &to, is_dir, &changed);
+        if !changed.is_empty() {
+            self.toast(format!("Renamed and updated links in {} note(s)", changed.len()));
+        } else {
+            self.toast(format!("Renamed to “{}”", markdown::strip_md_ext(&file_name)));
+        }
+        self.remember_open_files();
+        Ok(())
+    }
+
+    /// After a file or folder moved from `rel` to `to`: open notes, drawings and tabs follow it,
+    /// and open notes whose text changed on disk (updated links) are reloaded.
+    fn after_move(&mut self, rel: &Path, to: &Path, is_dir: bool, changed: &[PathBuf]) {
+        let to = to.to_path_buf();
         // move open buffers and tabs
         let remap = |p: &Path| -> Option<PathBuf> {
             if p == rel {
@@ -667,18 +692,39 @@ impl ShaleApp {
             t.title_for = None;
         }
         let v = self.vault.as_ref().unwrap();
-        for c in &changed {
+        for c in changed {
             if let (Some(doc), Some(n)) = (self.notes.get_mut(c), v.notes.get(c)) {
                 doc.text = n.text.clone();
             }
         }
-        if !changed.is_empty() {
-            self.toast(format!("Renamed and updated links in {} note(s)", changed.len()));
-        } else {
-            self.toast(format!("Renamed to “{}”", markdown::strip_md_ext(&file_name)));
+        // open folders in the file list move along
+        let exp: Vec<PathBuf> = self.expanded.iter().cloned().collect();
+        for e in exp {
+            if let Ok(rest) = e.strip_prefix(rel) {
+                self.expanded.remove(&e);
+                self.expanded.insert(to.join(rest));
+            }
         }
+    }
+
+    /// Move a note, drawing, file or folder into another folder (drag and drop in the file list).
+    pub fn move_into(&mut self, rel: &Path, into: &Path) -> Result<PathBuf, String> {
+        if rel.parent().unwrap_or(Path::new("")) == into {
+            return Ok(rel.to_path_buf());
+        }
+        self.flush_all();
+        let v = self.vault.as_mut().ok_or("no vault")?;
+        let is_dir = v.abs(rel).is_dir();
+        let (to, changed) = v.move_into(rel, into).map_err(|e| e.to_string())?;
+        self.after_move(rel, &to, is_dir, &changed);
+        if !into.as_os_str().is_empty() {
+            self.expanded.insert(into.to_path_buf());
+        }
+        let name = rel.file_name().map(|n| markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
+        let place = if into.as_os_str().is_empty() { "the vault".to_string() } else { format!("“{}”", rel_to_string(into)) };
+        self.toast(if changed.is_empty() { format!("Moved “{name}” to {place}") } else { format!("Moved “{name}” to {place} and updated links in {} note(s)", changed.len()) });
         self.remember_open_files();
-        Ok(())
+        Ok(to)
     }
 
     pub fn trash(&mut self, rel: &Path) {
@@ -699,6 +745,23 @@ impl ShaleApp {
                 self.remember_open_files();
             }
             Err(e) => self.toast(format!("Could not move to trash: {e}")),
+        }
+    }
+
+    /// Open the note before (-1) or after (+1) the current one in the file list (same folder,
+    /// the list's sort order), in the same tab.
+    pub fn open_neighbour(&mut self, step: i32) {
+        let Some(cur) = self.current_path() else { return };
+        match self.neighbour_note(&cur, step) {
+            Some(rel) => {
+                if let Some(parent) = rel.parent() {
+                    if !parent.as_os_str().is_empty() {
+                        self.expanded.insert(parent.to_path_buf());
+                    }
+                }
+                self.open(&rel, false);
+            }
+            None => self.toast(if step < 0 { "This is the first note in its folder" } else { "This is the last note in its folder" }),
         }
     }
 
@@ -878,6 +941,11 @@ impl ShaleApp {
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::Rescan => self.rescan(),
                 Action::CreatePerson(name) => self.create_person(&name),
+                Action::Move { from, into } => {
+                    if let Err(e) = self.move_into(&from, &into) {
+                        self.toast(format!("Could not move: {e}"));
+                    }
+                }
             }
         }
     }
@@ -885,6 +953,8 @@ impl ShaleApp {
     fn shortcuts(&mut self, ui: &Ui) {
         // mouse side buttons: back / forward through the notes opened in this tab
         let (mouse_back, mouse_fwd) = ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2)));
+        // Ctrl+H / Ctrl+L (like vim's h / l): the note before / after this one in the file list
+        let (prev_note, next_note) = ui.input_mut(|i| (i.consume_key(Modifiers::COMMAND, Key::H), i.consume_key(Modifiers::COMMAND, Key::L)));
         let (quick, new_note, toggle, back, fwd, close, search, save, settings) = ui.input_mut(|i| {
             (
                 i.consume_key(Modifiers::COMMAND, Key::O),
@@ -912,6 +982,9 @@ impl ShaleApp {
             if let Some(t) = self.tabs.get_mut(self.active) {
                 t.reading = !t.reading;
             }
+        }
+        if prev_note || next_note {
+            self.open_neighbour(if prev_note { -1 } else { 1 });
         }
         if back || mouse_back {
             self.go_back();
@@ -1152,6 +1225,7 @@ impl eframe::App for ShaleApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.drop_zones.clear();
         self.calendar_areas.clear();
+        self.tree_targets.clear();
         self.screenshot_tick(ui);
         self.shortcuts(ui);
         self.autosave();
