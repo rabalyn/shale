@@ -21,6 +21,10 @@ mod excalidraw_md;
 mod export_dialog;
 mod fsutil;
 mod graph;
+mod imap_client;
+#[cfg(test)]
+mod imap_fake_tests;
+mod imap_sync;
 mod import;
 mod import_dialog;
 mod jobs;

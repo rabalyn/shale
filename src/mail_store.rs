@@ -845,7 +845,7 @@ mod tests {
     // spec: MAIL-009
     #[test]
     fn nothing_here_deletes_a_message_file() {
-        let sources = [include_str!("mail_store.rs")];
+        let sources = [include_str!("mail_store.rs"), include_str!("imap_sync.rs")];
         for src in sources {
             let code = src.split("#[cfg(test)]").next().unwrap();
             let removals: Vec<&str> = code.lines().filter(|l| !l.trim_start().starts_with("//") && (l.contains("remove_file") || l.contains("remove_dir"))).collect();
