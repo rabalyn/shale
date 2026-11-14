@@ -76,6 +76,8 @@ pub struct Config {
     pub social_last: Option<(String, String)>,
     /// The folder used for the last saved post (vault-relative); empty: "Social".
     pub last_social_folder: String,
+    /// Include replies from other people when saving a post (the last choice in the Import dialog).
+    pub social_replies: bool,
 }
 
 impl Default for Config {
@@ -105,6 +107,7 @@ impl Default for Config {
             social_accounts: vec![],
             social_last: None,
             last_social_folder: String::new(),
+            social_replies: false,
         }
     }
 }

@@ -121,14 +121,22 @@ pub fn timeline(server: &str, token: &str, feed: &Feed, cursor: Option<&str>) ->
     Ok(Page { posts, cursor: next })
 }
 
-/// The self-thread of a post (see `social::self_thread`).
-pub fn thread(server: &str, token: &str, post: &Post) -> Result<Vec<Post>, String> {
+/// The self-thread and the replies of other people.
+pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
     let server = base(server)?;
     if post.id.is_empty() || !post.id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err("bad post id".into());
     }
     let v = api("GET", &format!("{server}/api/v1/statuses/{}/context", post.id), Some(token), None)?;
-    Ok(thread_from_context(post, &v, &server))
+    let t = thread_from_context(post, &v, &server);
+    let r = replies_from_context(&t, &v, &server);
+    Ok((t, r))
+}
+
+/// The replies of other people from a `/context` answer, as a tree (see `conversation`).
+pub fn replies_from_context(thread: &[Post], context: &Value, server: &str) -> Vec<Reply> {
+    let all: Vec<Post> = context["descendants"].as_array().into_iter().flatten().filter_map(|s| parse_status(s, server)).collect();
+    conversation(thread, &all)
 }
 
 /// The thread from a `/context` answer. (Separate so it can be tested with fixtures.)
@@ -254,6 +262,9 @@ mod tests {
         let root = parse_status(&status("3", "1", "ada", "2024-05-17T10:02:00Z", Some("2"), "<p>answer 2/3</p>"), "https://m.test").unwrap();
         let t = thread_from_context(&root, &ctx, "https://m.test");
         assert_eq!(t.iter().map(|p| p.text_markdown.as_str()).collect::<Vec<_>>(), ["answer 1/3", "answer 2/3", "answer 3/3"]);
+        // spec: SOC-019: cy's reply, and the author's own answer to it, but not the thread itself
+        let r = replies_from_context(&t, &ctx, "https://m.test");
+        assert_eq!(r.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("nice", 0), ("reply to cy", 1)]);
     }
 
     #[test]
@@ -299,7 +310,7 @@ mod tests {
         assert!(next.posts.is_empty() && next.cursor.is_none());
         let first = page.posts.last().unwrap();
         assert_eq!(first.id, "100");
-        let th = c.thread(first).unwrap();
+        let th = c.thread_with_replies(first).unwrap().0;
         assert_eq!(th.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["100", "101"]);
         let m = Media { kind: MediaKind::Image, url: format!("{base}/files/a.png"), preview_url: String::new(), alt: String::new(), file_name_hint: "a.png".into(), blob_cid: None };
         let (bytes, _) = c.download_media(first, &m).unwrap();

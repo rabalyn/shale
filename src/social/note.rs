@@ -44,21 +44,24 @@ pub struct SavedPost {
     pub failed_media: Vec<FailedMedia>,
     /// why only the one post was saved, when the thread could not be fetched
     pub thread_error: Option<String>,
+    /// replies of other people below the thread (their media is not downloaded, only linked);
+    /// they go into the note only when they are still here (the Import dialog can drop them)
+    pub replies: Vec<Reply>,
 }
 
 /// Fetch the self-thread of `post` and download all media of all its posts (blocking: use a
 /// background thread). Problems with single files or the thread are not fatal, see the fields.
 pub fn fetch_saved(client: &mut Client, post: &Post) -> SavedPost {
-    let (mut thread, thread_error) = match client.thread(post) {
-        Ok(t) if t.iter().any(|p| p.id == post.id) => (t, None),
-        Ok(_) => (vec![post.clone()], None),
-        Err(e) => (vec![post.clone()], Some(e)),
+    let (mut thread, thread_error, replies) = match client.thread_with_replies(post) {
+        Ok((t, r)) if t.iter().any(|p| p.id == post.id) => (t, None, r),
+        Ok(_) => (vec![post.clone()], None, vec![]),
+        Err(e) => (vec![post.clone()], Some(e), vec![]),
     };
     // the post as the feed showed it (same content; keeps the card and counters the user saw)
     if thread.len() == 1 {
         thread[0] = Post { reposted_by: None, ..post.clone() };
     }
-    let mut saved = SavedPost { thread, reposted_by: post.reposted_by.clone(), media: vec![], failed_media: vec![], thread_error };
+    let mut saved = SavedPost { thread, reposted_by: post.reposted_by.clone(), media: vec![], failed_media: vec![], thread_error, replies };
     let mut n = 0;
     for (pi, p) in saved.thread.clone().iter().enumerate() {
         for (mi, m) in p.media.iter().enumerate() {
@@ -205,6 +208,42 @@ fn post_body(saved: &SavedPost, pi: usize, rel: &[PathBuf]) -> String {
     blocks.join("\n\n")
 }
 
+/// "## Replies": each reply as a header line and its text inside nested block quotes (one level
+/// per depth, at most 4); pictures and videos are only linked. Empty without replies.
+fn replies_section(saved: &SavedPost) -> String {
+    if saved.replies.is_empty() {
+        return String::new();
+    }
+    let mut s = format!("\n## Replies\n");
+    for r in &saved.replies {
+        let p = &r.post;
+        let mut head = vec![format!("**{}**", md_link(&format!("{} (@{})", p.author.name(), p.author.handle), &p.author.profile_url))];
+        if p.created_at != 0 {
+            head.push(local_stamp(p.created_at, false));
+        }
+        if !p.url.is_empty() {
+            head.push(md_link("link", &p.url));
+        }
+        let mut lines = vec![head.join(" · "), String::new()];
+        if let Some(cw) = &p.content_warning {
+            lines.push(format!("CW: {cw}"));
+            lines.push(String::new());
+        }
+        if !p.text_markdown.trim().is_empty() {
+            lines.extend(p.text_markdown.trim().lines().map(String::from));
+        }
+        for m in &p.media {
+            lines.push(if m.alt.trim().is_empty() { plain_link(kind_word(m.kind), &m.url) } else { format!("{} — {}", plain_link(kind_word(m.kind), &m.url), m.alt.trim().replace('\n', " ")) });
+        }
+        let prefix = ">".repeat(r.depth.min(3) + 1);
+        s.push('\n');
+        for l in lines {
+            s.push_str(&if l.is_empty() { format!("{prefix}\n") } else { format!("{prefix} {l}\n") });
+        }
+    }
+    s
+}
+
 /// The note for a saved post or thread. `media_rel_paths`: where each of `saved.media` was saved
 /// in the vault (same order). `tags` and `people_links` (e.g. `[[Ada Lovelace]]`) as for e-mails.
 pub fn post_note(saved: &SavedPost, media_rel_paths: &[PathBuf], tags: &[String], people_links: &[String]) -> String {
@@ -222,6 +261,7 @@ pub fn post_note(saved: &SavedPost, media_rel_paths: &[PathBuf], tags: &[String]
             ("url", yaml(&first.url)),
             ("post-id", yaml(&first.id)),
             ("thread", if n > 1 { n.to_string() } else { String::new() }),
+            ("replies", if saved.replies.is_empty() { String::new() } else { saved.replies.len().to_string() }),
             ("thread-ids", if n > 1 { format!("[{}]", saved.thread.iter().map(|p| yaml(&p.id)).collect::<Vec<_>>().join(", ")) } else { String::new() }),
         ],
         tags,
@@ -261,6 +301,7 @@ pub fn post_note(saved: &SavedPost, media_rel_paths: &[PathBuf], tags: &[String]
             s.push_str(&format!("\n{}\n\n{}\n", head.join(" · "), post_body(saved, i, media_rel_paths)));
         }
     }
+    s.push_str(&replies_section(saved));
     if !saved.failed_media.is_empty() || saved.thread_error.is_some() {
         // the note says what is missing instead of silently lacking it
         s.push_str("\n> [!warning] Not everything could be saved\n");
@@ -280,7 +321,7 @@ mod tests {
     use super::*;
 
     fn saved_of(thread: Vec<Post>) -> SavedPost {
-        SavedPost { thread, reposted_by: None, media: vec![], failed_media: vec![], thread_error: None }
+        SavedPost { thread, reposted_by: None, media: vec![], failed_media: vec![], thread_error: None, replies: vec![] }
     }
 
     fn media(kind: MediaKind, url: &str, alt: &str) -> Media {
@@ -393,6 +434,28 @@ mod tests {
         saved.failed_media.clear();
         saved.media = vec![SavedMedia { file_name: "v.mp4".into(), data: vec![], post: 0, item: 0 }];
         assert!(post_note(&saved, &[], &[], &[]).contains("[video](https://f.test/v.mp4)"));
+    }
+
+    // spec: SOC-020
+    #[test]
+    fn replies_are_a_quoted_section_only_when_there_are_some() {
+        let mut saved = saved_of(vec![post("p1", "ada", 1_715_941_800, None)]);
+        let plain = post_note(&saved, &[], &[], &[]);
+        assert!(!plain.contains("## Replies") && !plain.contains("replies:"), "{plain}");
+        let mut r1 = post("c1", "cy", 1_715_941_900, Some("p1"));
+        r1.media = vec![media(MediaKind::Image, "https://f.test/pic.jpg", "a cat")];
+        let r2 = post("c2", "dee", 1_715_942_000, Some("c1"));
+        let deep = post("c3", "eve", 1_715_942_100, Some("c2"));
+        saved.replies = vec![Reply { post: r1, depth: 0 }, Reply { post: r2, depth: 1 }, Reply { post: deep, depth: 9 }];
+        let n = post_note(&saved, &[], &[], &[]);
+        assert!(n.contains("replies: 3\n") && n.contains("\n## Replies\n"), "{n}");
+        assert!(n.contains("\n> **[CY (@cy@m.test)](https://m.test/@cy)** · ") && n.contains(" · [link](https://m.test/@cy/c1)\n>\n> text of c1\n> [image](https://f.test/pic.jpg) — a cat\n"), "{n}");
+        assert!(n.contains("\n>> **[DEE") && n.contains("\n>> text of c2\n"), "{n}");
+        assert!(n.contains("\n>>>> **[EVE") && !n.contains(">>>>> "), "depth is capped at 4 levels: {n}");
+        assert!(n.find("## Replies").unwrap() > n.find("text of p1").unwrap());
+        assert!(!n.contains("![["), "no files for replies");
+        // the thread ids stay the only ones that count for duplicates
+        assert!(!note_has_post(&n, "c1"));
     }
 
     #[test]

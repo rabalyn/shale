@@ -41,7 +41,8 @@ impl ShaleApp {
         if self.social.saved.is_empty() || !free {
             return;
         }
-        let items: Vec<_> = std::mem::take(&mut self.social.saved).into_iter().map(|(s, network)| crate::import::social_item(s, network)).collect();
+        let replies = self.cfg.social_replies;
+        let items: Vec<_> = std::mem::take(&mut self.social.saved).into_iter().map(|(s, network)| crate::import::social_item(s, network, replies)).collect();
         // a dialog that is open keeps its folder; otherwise the folder used for posts last time
         let zone = if matches!(self.modal, Some(Modal::Import(_))) { None } else { Some((PathBuf::from(if self.cfg.last_social_folder.is_empty() { "Social" } else { self.cfg.last_social_folder.as_str() }), None)) };
         self.open_import(items, vec![], zone);

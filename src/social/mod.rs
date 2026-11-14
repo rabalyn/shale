@@ -416,6 +416,48 @@ pub fn self_thread(root: Post, ancestors: Vec<Post>, descendants: Vec<Post>) -> 
     chain
 }
 
+/// Most replies of other people that are kept with a saved post.
+pub const MAX_REPLIES: usize = 300;
+
+/// A reply of somebody else (or a reply of the author to somebody else), shown below the thread.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Reply {
+    pub post: Post,
+    /// 0: answers a post of the thread itself; 1: answers a reply of depth 0 …
+    pub depth: usize,
+}
+
+/// The conversation below the self-`thread`: `descendants` (all replies below the chosen post, in
+/// any order) without the posts of the thread itself, depth first, oldest first among siblings.
+/// Replies whose parent is not in the fetched context are left out.
+pub fn conversation(thread: &[Post], descendants: &[Post]) -> Vec<Reply> {
+    let in_thread: std::collections::HashSet<&str> = thread.iter().map(|p| p.id.as_str()).collect();
+    let mut kids: std::collections::HashMap<&str, Vec<&Post>> = std::collections::HashMap::new();
+    for p in descendants.iter().filter(|p| !in_thread.contains(p.id.as_str())) {
+        if let Some(parent) = &p.reply_to {
+            kids.entry(parent.as_str()).or_default().push(p);
+        }
+    }
+    for v in kids.values_mut() {
+        v.sort_by_key(|p| p.created_at);
+    }
+    fn walk<'a>(id: &str, depth: usize, kids: &std::collections::HashMap<&str, Vec<&'a Post>>, seen: &mut std::collections::HashSet<String>, out: &mut Vec<Reply>) {
+        for p in kids.get(id).into_iter().flatten() {
+            if out.len() >= MAX_REPLIES || !seen.insert(p.id.clone()) {
+                continue;
+            }
+            out.push(Reply { post: Post { reposted_by: None, ..(*p).clone() }, depth });
+            walk(&p.id, depth + 1, kids, seen, out);
+        }
+    }
+    let mut out = vec![];
+    let mut seen = std::collections::HashSet::new();
+    for t in thread {
+        walk(&t.id, 0, &kids, &mut seen, &mut out);
+    }
+    out
+}
+
 // ---------------------------------------------------------------- the client
 
 /// A signed-in account ready to use: one type for both networks. It is `Clone + Send`: give a
@@ -466,11 +508,12 @@ impl Client {
         }
     }
 
-    /// The whole self-thread of a post (see `self_thread`), in reading order, including the post.
-    pub fn thread(&mut self, post: &Post) -> Result<Vec<Post>, String> {
+    /// The whole self-thread of a post (see `self_thread`), in reading order, including the post, and the
+    /// replies of other people below it (see `conversation`).
+    pub fn thread_with_replies(&mut self, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::thread(&self.account.server, token, post),
-            Backend::Bluesky(api) => bluesky::thread(api, post),
+            Backend::Mastodon { token } => mastodon::thread_full(&self.account.server, token, post),
+            Backend::Bluesky(api) => bluesky::thread_full(api, post),
         }
     }
 
@@ -559,6 +602,19 @@ pub(crate) mod tests {
         assert!(!format!("{b:?}").contains("pw-secret-2"));
         let json = serde_json::to_string(&c.account).unwrap();
         assert!(json.contains("mastodon") && !json.contains("tok-secret"));
+    }
+
+    // spec: SOC-019
+    #[test]
+    fn replies_of_others_are_a_tree_without_the_authors_own_thread() {
+        let p = |id: &str, a: &str, t: i64, r: &str| post(id, a, t, Some(r));
+        let thread = vec![post("a1", "ada", 1, None), p("a2", "ada", 2, "a1")];
+        let desc = vec![p("c2", "cy", 6, "c1"), p("c1", "cy", 3, "a2"), p("d1", "dee", 4, "a1"), p("a2", "ada", 2, "a1"), p("e1", "eve", 7, "c2"), p("x", "zed", 8, "missing"), p("a9", "ada", 9, "c1")];
+        let r = conversation(&thread, &desc);
+        let shape: Vec<(&str, usize)> = r.iter().map(|r| (r.post.id.as_str(), r.depth)).collect();
+        // under a1: d1; under a2: c1 → (a9 at time 9 after c2 at 6) c2 → e1; the orphan x is dropped
+        assert_eq!(shape, [("d1", 0), ("c1", 0), ("c2", 1), ("e1", 2), ("a9", 1)]);
+        assert!(conversation(&thread, &[]).is_empty());
     }
 
     #[test]

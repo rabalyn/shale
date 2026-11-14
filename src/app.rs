@@ -337,7 +337,7 @@ impl ShaleApp {
                     app.show_view(View::Social, false);
                     if v == "social-import" {
                         let posts = crate::social::demo::posts();
-                        let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon")).collect();
+                        let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon", false)).collect();
                         app.open_import(items, vec![], Some((PathBuf::from("Social"), None)));
                     }
                 }

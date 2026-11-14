@@ -16,7 +16,7 @@ The release page of each version on GitHub shows its section from this file.
   quotes, link cards, content warnings and "boosted by". The next page loads when you reach the
   end. **Save to vault** opens the Import dialog with the post, or the whole thread when it is a
   thread by one author, its pictures (each can be unticked) and a **Source** link back; posts
-  saved before are marked. Accounts are added in the dialog **Accounts…**: Mastodon with a code
+  saved before are marked. An option adds other people's replies as a nested "Replies" section. Accounts are added in the dialog **Accounts…**: Mastodon with a code
   from the server's page (or an access token), Bluesky with an app password; secrets go to the
   system keyring. `--view social` and `--view social-import` (with `--screenshot`) show it with
   made-up posts. The `--keys` script got a `scroll:N` step.

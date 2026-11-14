@@ -19,7 +19,7 @@ pub enum Source {
     Files(Vec<PathBuf>),
     Text(String),
     /// a Mastodon / Bluesky post (or thread) with its pictures; `network` is "Mastodon" / "Bluesky"
-    Social { saved: crate::social::note::SavedPost, network: &'static str },
+    Social { saved: crate::social::note::SavedPost, network: &'static str, replies: bool },
 }
 
 #[derive(Clone, Debug)]
@@ -73,7 +73,7 @@ impl Item {
             }
             Source::Files(p) => p.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(", "),
             Source::Text(s) => format!("{} characters of text", s.chars().count()),
-            Source::Social { saved, network } => {
+            Source::Social { saved, network, .. } => {
                 let first = &saved.thread[0];
                 let n = saved.media.len();
                 let when = if first.created_at == 0 { String::new() } else { format!(" · {}", local_stamp(first.created_at, false)) };
@@ -159,10 +159,11 @@ pub fn email_item(mail: Mail, original: (String, Vec<u8>)) -> Item {
 }
 
 /// An item for a saved post or thread (see `social::note::fetch_saved`). All its files are ticked.
-pub fn social_item(saved: crate::social::note::SavedPost, network: &'static str) -> Item {
+/// `replies`: include the replies of other people (the dialog's tick box; off by default).
+pub fn social_item(saved: crate::social::note::SavedPost, network: &'static str, replies: bool) -> Item {
     let title = crate::social::note::post_title(&saved.thread[0]);
     let att_on = vec![true; saved.media.len()];
-    Item { source: Source::Social { saved, network }, include: true, title, att_on, already: None, people: vec![] }
+    Item { source: Source::Social { replies: replies && !saved.replies.is_empty(), saved, network }, include: true, title, att_on, already: None, people: vec![] }
 }
 
 pub fn event_item(event: Event, calendar: String, original: Option<(String, Vec<u8>)>) -> Item {
@@ -650,10 +651,10 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> (Vec<PathBuf>, 
                     s.push_str(&format!("\n# {title}\n\n{}\n", text.trim()));
                     s
                 }
-                Source::Social { saved, .. } => {
+                Source::Social { saved, replies, .. } => {
                     // only the ticked files are saved; the others stay links to their web address
                     let date = crate::social::note::media_date(saved);
-                    let mut chosen = crate::social::note::SavedPost { media: vec![], failed_media: vec![], thread_error: None, ..saved.clone() };
+                    let mut chosen = crate::social::note::SavedPost { media: vec![], failed_media: vec![], thread_error: None, replies: if *replies { saved.replies.clone() } else { vec![] }, ..saved.clone() };
                     let mut paths = vec![];
                     for (m, on) in saved.media.iter().zip(&it.att_on) {
                         if *on {
@@ -785,7 +786,7 @@ mod tests {
         use crate::social::demo;
         let mut v = temp_vault("social");
         let posts = demo::posts();
-        let mut items = vec![social_item(demo::saved(&posts[4]), "Mastodon"), social_item(demo::saved(&posts[3]), "Mastodon")];
+        let mut items = vec![social_item(demo::saved(&posts[4]), "Mastodon", false), social_item(demo::saved(&posts[3]), "Mastodon", false)];
         assert_eq!((items[0].kind().as_ref(), items[1].kind().as_ref()), ("Thread (3 posts)", "Post"));
         assert_eq!((items[0].att_on.clone(), items[1].att_on.clone()), (vec![true], vec![true, true]));
         assert!(items[0].detail().contains("Grace Hopper") && items[0].detail().contains("Mastodon") && items[0].detail().contains("1 file"), "{}", items[0].detail());
@@ -796,7 +797,7 @@ mod tests {
         let mut broken = demo::saved(&posts[3]);
         broken.thread_error = Some("offline".into());
         broken.failed_media.push(crate::social::note::FailedMedia { url: "https://x.test/a.jpg".into(), error: "gone".into(), post: 0, item: 0 });
-        let w = social_item(broken, "Mastodon").warning().unwrap();
+        let w = social_item(broken, "Mastodon", false).warning().unwrap();
         assert!(w.contains("offline") && w.contains("1 picture or video could not be downloaded"), "{w}");
         let o = Options { folder: PathBuf::from("Social"), tags: parse_tags("social, reading"), keep_original: false, people_dir: "Adressbuch".into() };
         let (made, errs) = import(&mut v, &items, &o);
@@ -812,9 +813,21 @@ mod tests {
         assert!(single.contains("*The same hill a minute later, more purple*"), "its description stays: {single}");
         let saved: Vec<_> = std::fs::read_dir(v.root.join("z_media")).unwrap().flatten().flat_map(|y| std::fs::read_dir(y.path()).unwrap().flatten().flat_map(|m| std::fs::read_dir(m.path()).unwrap().flatten())).collect();
         assert_eq!(saved.len(), 2, "one file for the thread, one for the post");
+        // replies of others: off by default, then on
+        let mut with = social_item(demo::saved(&posts[4]), "Mastodon", false);
+        assert!(matches!(with.source, Source::Social { replies: false, .. }), "off by default");
+        assert!(!thread.contains("## Replies") && !thread.contains("replies:"));
+        if let Source::Social { replies, .. } = &mut with.source {
+            *replies = true;
+        }
+        with.title = "with replies".into();
+        let (m3, errs) = import(&mut v, &[with], &o);
+        assert!(errs.is_empty(), "{errs:?}");
+        let t3 = std::fs::read_to_string(v.abs(&m3[0])).unwrap();
+        assert!(t3.contains("replies: 3\n") && t3.contains("## Replies") && t3.contains("Plain files, yes") && t3.contains(">> **[Grace Hopper"), "{t3}");
         // the same thread again, and one post of it alone: both are marked, the other post is not
         v.rescan();
-        let mut again = vec![social_item(demo::saved(&posts[4]), "Mastodon"), social_item(demo::saved(&demo::thread()[1]), "Mastodon"), social_item(demo::saved(&posts[0]), "Mastodon")];
+        let mut again = vec![social_item(demo::saved(&posts[4]), "Mastodon", false), social_item(demo::saved(&demo::thread()[1]), "Mastodon", false), social_item(demo::saved(&posts[0]), "Mastodon", false)];
         mark_duplicates(&v, &mut again);
         assert_eq!(again[0].already.as_deref(), Some(made[0].as_path()));
         assert_eq!(again[1].already.as_deref(), Some(made[0].as_path()), "a post that is part of a saved thread");

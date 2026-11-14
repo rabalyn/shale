@@ -114,6 +114,17 @@ pub fn posts() -> Vec<Post> {
     out
 }
 
+/// Replies of other people to the demo thread (a small tree).
+pub fn replies() -> Vec<Reply> {
+    let mut a = post("demo-reply-1", author("alan@mathstodon.xyz", "Alan Turing", 0.9), 80, "Plain files, yes. I would add: write the *why* next to the *what*.");
+    a.reply_to = Some("demo-thread-2".into());
+    let mut b = post("demo-reply-2", author("grace@fosstodon.org", "Grace Hopper", 1.3), 70, "Good point, I do that in my notes.");
+    b.reply_to = Some("demo-reply-1".into());
+    let mut c = post("demo-reply-3", author("ken@demo.social", "Ken Thompson", 2.4), 60, "Same here. Plain text and grep.");
+    c.reply_to = Some("demo-thread-3".into());
+    vec![Reply { post: a, depth: 0 }, Reply { post: b, depth: 1 }, Reply { post: c, depth: 0 }]
+}
+
 /// What `Client::save` would fetch for a demo post: its thread and its pictures (read from the files).
 pub fn saved(p: &Post) -> SavedPost {
     let thread = if p.id == thread_id() { thread() } else { vec![Post { reposted_by: None, ..p.clone() }] };
@@ -125,5 +136,6 @@ pub fn saved(p: &Post) -> SavedPost {
             }
         }
     }
-    SavedPost { thread, reposted_by: p.reposted_by.clone(), media, failed_media: vec![], thread_error: None }
+    let replies = if p.id == thread_id() { replies() } else { vec![] };
+    SavedPost { thread, reposted_by: p.reposted_by.clone(), media, failed_media: vec![], thread_error: None, replies }
 }

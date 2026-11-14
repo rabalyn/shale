@@ -194,10 +194,19 @@ fn parse_feed_item(item: &Value) -> Option<Post> {
 
 // ---------------------------------------------------------------- threads
 
-/// The self-thread of a post (see `social::self_thread`).
-pub fn thread(api: &mut Api, post: &Post) -> Result<Vec<Post>, String> {
+/// The self-thread and the replies of other people.
+pub fn thread_full(api: &mut Api, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
     let v = api.get("app.bsky.feed.getPostThread", &[("uri", &post.id), ("depth", "10"), ("parentHeight", "80")])?;
-    Ok(thread_from_response(post, &v))
+    let t = thread_from_response(post, &v);
+    let r = replies_from_response(&t, &v);
+    Ok((t, r))
+}
+
+/// The replies of other people from a `getPostThread` answer, as a tree (see `conversation`).
+pub fn replies_from_response(thread: &[Post], resp: &Value) -> Vec<Reply> {
+    let mut all = Vec::new();
+    collect_replies(&resp["thread"], &mut all);
+    conversation(thread, &all)
 }
 
 /// The thread from a `getPostThread` answer. (Separate so it can be tested with fixtures.)
@@ -453,7 +462,7 @@ mod tests {
         let uri = format!("at://{did}/app.bsky.feed.post/{n}");
         let mut record = json!({"$type": "app.bsky.feed.post", "text": txt, "createdAt": at});
         if let Some(r) = reply_to {
-            record["reply"] = json!({"parent": {"uri": format!("at://{did}/app.bsky.feed.post/{r}"), "cid": "c"}, "root": {"uri": "at://x/y/z", "cid": "c"}});
+            record["reply"] = json!({"parent": {"uri": if r.starts_with("at://") { r.to_string() } else { format!("at://{did}/app.bsky.feed.post/{r}") }, "cid": "c"}, "root": {"uri": "at://x/y/z", "cid": "c"}});
         }
         json!({"uri": uri, "cid": format!("cid{n}"), "author": {"did": did, "handle": handle, "displayName": handle.to_uppercase(), "avatar": "https://cdn.test/av.jpg"}, "record": record, "replyCount": 1, "repostCount": 2, "likeCount": 3, "indexedAt": at})
     }
@@ -510,12 +519,15 @@ mod tests {
             "parent": {"$type": "app.bsky.feed.defs#threadViewPost", "post": post_view("p1", d, "ada.test", &format!("{t}1:00Z"), Some("b0"), "post p1"),
                 "parent": {"$type": "app.bsky.feed.defs#threadViewPost", "post": post_view("b0", "did:plc:bob", "bob.test", &format!("{t}0:00Z"), None, "post b0")}},
             "replies": [
-                reply("c1", ("did:plc:cy", "cy.test"), 3, "p2", vec![reply("a9", (d, "ada.test"), 9, "c1", vec![])]),
-                reply("p3", (d, "ada.test"), 4, "p2", vec![reply("p4", (d, "ada.test"), 5, "p3", vec![]), reply("c2", ("did:plc:cy", "cy.test"), 6, "p3", vec![])]),
+                reply("c1", ("did:plc:cy", "cy.test"), 3, "at://did:plc:ada/app.bsky.feed.post/p2", vec![reply("a9", (d, "ada.test"), 9, "at://did:plc:cy/app.bsky.feed.post/c1", vec![])]),
+                reply("p3", (d, "ada.test"), 4, "p2", vec![reply("p4", (d, "ada.test"), 5, "p3", vec![]), reply("c2", ("did:plc:cy", "cy.test"), 6, "at://did:plc:ada/app.bsky.feed.post/p3", vec![])]),
                 {"$type": "app.bsky.feed.defs#notFoundPost", "uri": "at://x/y/z", "notFound": true}]}});
         let root = parse_post_view(&resp["thread"]["post"]).unwrap();
         let th = thread_from_response(&root, &resp);
         assert_eq!(th.iter().map(|p| p.text_markdown.as_str()).collect::<Vec<_>>(), ["post p1", "post p2", "post p3", "post p4"]);
+        // spec: SOC-019: cy's replies (also under the author's p3), and the author's answer to cy
+        let r = replies_from_response(&th, &resp);
+        assert_eq!(r.iter().map(|r| (r.post.text_markdown.as_str(), r.depth)).collect::<Vec<_>>(), [("post c1", 0), ("post a9", 1), ("post c2", 0)]);
     }
 
     #[test]
@@ -593,7 +605,7 @@ mod tests {
         assert_eq!((p.text_markdown.as_str(), p.reposted_by.as_ref().unwrap().handle.as_str()), ("Grüße 😀 https://e.com/x", "cy.test"));
         let next = c.timeline(&feeds[0], page.cursor.as_deref()).unwrap();
         assert!(next.posts.is_empty() && next.cursor.is_none());
-        let th = c.thread(p).unwrap();
+        let th = c.thread_with_replies(p).unwrap().0;
         assert_eq!(th.iter().map(|p| p.text_markdown.as_str()).collect::<Vec<_>>(), ["Grüße 😀 https://e.com/x", "part two"]);
         let (bytes, _) = c.download_media(&th[0], &th[0].media[0]).unwrap();
         assert_eq!(bytes, b"JPEGDATA");

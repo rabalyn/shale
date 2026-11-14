@@ -210,6 +210,13 @@ impl ShaleApp {
                     }
                 }
                 // remember the folder and tags for next time
+                // remember whether replies of others were wanted (only asked when there were some)
+                if let Some(on) = d.items.iter().filter(|i| i.include).filter_map(|i| match &i.source {
+                    import::Source::Social { saved, replies, .. } if !saved.replies.is_empty() => Some(*replies),
+                    _ => None,
+                }).last() {
+                    self.cfg.social_replies = on;
+                }
                 if social_only {
                     self.cfg.last_social_folder = rel_to_string(&folder);
                 } else {

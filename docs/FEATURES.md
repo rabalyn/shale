@@ -179,6 +179,9 @@ built-in demo vault (`shale --screenshot out.png`).
 
 ![Saving two posts](screenshots/social-import.png)
 
+- Tick **Include replies from others (N)** to add a "Replies" section with other people's
+  answers, nested like a conversation (off by default; Shale remembers your choice). Their
+  pictures are linked, not downloaded.
 - The note has the author, the date, a **Source** link back to the post, the text (a thread:
   every post in order, numbered), the pictures saved in `z_media/` and their descriptions. A post
   that was saved before, also as part of a thread, is marked "Imported before".

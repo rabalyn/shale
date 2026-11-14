@@ -118,7 +118,10 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                         rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5)));
                     }
                 }
-                if let Source::Social { saved, .. } = &it.source {
+                if let Source::Social { saved, replies, .. } = &mut it.source {
+                    if !saved.replies.is_empty() {
+                        rec(format!("replies:{i}"), ui.checkbox(replies, egui::RichText::new(format!("Include replies from others ({})", saved.replies.len())).size(12.5))).on_hover_text("Adds a Replies section with other people's answers to the thread, nested; their pictures are only linked");
+                    }
                     for (k, (m, on)) in saved.media.iter().zip(it.att_on.iter_mut()).enumerate() {
                         let label = format!("{}  ({})", m.file_name, size_text(m.data.len()));
                         rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5))).on_hover_text("Untick to leave this file out; the note then links to its web address");
@@ -307,5 +310,23 @@ mod tests {
         assert_eq!(h.click("add", &mut d, &folders, &tags), Some(ImportAction::AddPath));
         assert_eq!(h.click("import", &mut d, &folders, &tags), Some(ImportAction::Import));
         assert_eq!(h.click("cancel", &mut d, &folders, &tags), Some(ImportAction::Cancel));
+    }
+
+    // spec: SOC-020
+    #[test]
+    fn the_replies_option_is_off_by_default_and_only_there_when_there_are_replies() {
+        use crate::social::demo;
+        let posts = demo::posts();
+        let items = vec![import::social_item(demo::saved(&posts[4]), "Mastodon", false), import::social_item(demo::saved(&posts[3]), "Mastodon", false)];
+        let mut d = ImportDialog::new(items, vec![], "Social".into(), String::new(), None, false);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(d.rects.iter().any(|r| r.0 == "replies:0"));
+        assert!(!d.rects.iter().any(|r| r.0 == "replies:1"), "no replies, no option");
+        assert!(matches!(d.items[0].source, Source::Social { replies: false, .. }));
+        h.click("replies:0", &mut d, &[], &[]);
+        assert!(matches!(d.items[0].source, Source::Social { replies: true, .. }));
+        // a remembered "on" applies only to posts that have replies
+        assert!(matches!(import::social_item(demo::saved(&posts[3]), "Mastodon", true).source, Source::Social { replies: false, .. }));
     }
 }

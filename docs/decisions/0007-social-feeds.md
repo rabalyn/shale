@@ -32,8 +32,11 @@ no TLS or OAuth crates.
    any `Authorization` header. The token goes only to the account's own server.
 5. **Self-thread rule**: "the whole thread" means the posts of the same author around the
    chosen one: the unbroken run above it, then that author's replies to posts already in the
-   thread. Other people's replies are not saved; they would make a note about a conversation, not
-   about a post.
+   thread. Other people's replies are not saved unless the user ticks "Include replies from others"
+   in the Import dialog (off by default, the last choice is remembered). They come from the same
+   thread request, are kept as a tree (at most 300, depth as fetched), and go into a "## Replies"
+   section of nested block quotes; their pictures are linked, not downloaded, so a busy thread
+   does not pull hundreds of files.
 6. **Note format**: one note per post or thread, in the front matter `type: social-post`,
    `network`, `author`, `url`, `post-id`, and for threads `thread-ids`. The body has a **Source**
    link back, the text, and `![[z_media/…]]` embeds. A file that is not saved stays a link.
