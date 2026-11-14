@@ -36,9 +36,7 @@ enum Msg {
 }
 
 pub struct SocialState {
-    /// the account shown (its id)
-    pub account: Option<String>,
-    /// the feed chosen for each account (feed ids)
+    /// the feed shown last for each account (feed ids): what a tab shows that names no feed
     pub feed_of: HashMap<String, String>,
     pub feeds: HashMap<String, FeedsState>,
     pub timelines: HashMap<(String, String), Timeline>,
@@ -79,7 +77,6 @@ impl SocialState {
     pub fn new(cache_dir: PathBuf) -> SocialState {
         let (tx, rx) = channel();
         SocialState {
-            account: None,
             feed_of: HashMap::new(),
             feeds: HashMap::new(),
             timelines: HashMap::new(),
@@ -97,30 +94,19 @@ impl SocialState {
         }
     }
 
-    /// The selected account, if it still exists; otherwise the first one (or the one used last).
-    pub fn current<'a>(&mut self, accounts: &'a [SocialAccountEntry], last: Option<&(String, String)>) -> Option<&'a SocialAccountEntry> {
-        if self.account.as_ref().map(|a| accounts.iter().any(|e| &e.account.id == a)) != Some(true) {
-            let want = last.map(|l| l.0.clone());
-            self.account = accounts.iter().find(|e| Some(&e.account.id) == want.as_ref()).or(accounts.first()).map(|e| e.account.id.clone());
-            if let (Some(l), Some(a)) = (last, &self.account) {
-                if &l.0 == a {
-                    self.feed_of.entry(a.clone()).or_insert_with(|| l.1.clone());
-                }
-            }
-        }
-        accounts.iter().find(|e| Some(&e.account.id) == self.account.as_ref())
+    /// The account a tab shows: its own if it still exists, else the one used last, else the first.
+    pub fn account_for<'a>(accounts: &'a [SocialAccountEntry], want: Option<&str>, last: Option<&(String, String)>) -> Option<&'a SocialAccountEntry> {
+        let find = |id: Option<&str>| id.and_then(|id| accounts.iter().find(|e| e.account.id == id));
+        find(want).or_else(|| find(last.map(|l| l.0.as_str()))).or(accounts.first())
     }
 
-    /// The feed chosen for the account: the remembered one, else the first.
-    pub fn feed(&self, account: &str) -> Option<Feed> {
+    /// The feed a tab shows for the account: the one it names, else the feed shown last for the
+    /// account, else the first. None until the feed list is known.
+    pub fn resolve_feed(&self, account: &str, want: &str, last: Option<&(String, String)>) -> Option<Feed> {
         let FeedsState::Ready(list) = self.feeds.get(account)? else { return None };
-        self.feed_of.get(account).and_then(|id| list.iter().find(|f| &f.id == id)).or(list.first()).cloned()
-    }
-
-    pub fn selection(&self) -> Option<(String, String)> {
-        let a = self.account.clone()?;
-        let f = self.feed(&a)?;
-        Some((a, f.id))
+        let by_id = |id: &str| list.iter().find(|f| f.id == id);
+        let remembered = self.feed_of.get(account).map(String::as_str).or(last.filter(|l| l.0 == account).map(|l| l.1.as_str()));
+        by_id(want).or_else(|| remembered.and_then(by_id)).or(list.first()).cloned()
     }
 
     /// Forget everything about an account (removed).
@@ -129,9 +115,6 @@ impl SocialState {
         self.feeds.remove(account);
         self.feed_of.remove(account);
         self.timelines.retain(|k, _| k.0 != account);
-        if self.account.as_deref() == Some(account) {
-            self.account = None;
-        }
     }
 
     fn client_source(&self, e: &SocialAccountEntry) -> impl FnOnce() -> Client + Send + 'static {
@@ -285,7 +268,6 @@ impl SocialState {
     pub fn load_demo(&mut self, account: &SocialAccountEntry) {
         self.demo = true;
         let id = account.account.id.clone();
-        self.account = Some(id.clone());
         self.feeds.insert(id.clone(), FeedsState::Ready(super::demo::feeds()));
         self.feed_of.insert(id.clone(), "home".into());
         self.timelines.insert((id, "home".into()), Timeline { posts: super::demo::posts(), cursor: None, loading: false, loaded: true, error: None });

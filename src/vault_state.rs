@@ -187,6 +187,8 @@ pub struct VaultState {
     pub version: u64,
     /// Notes open when the app was closed (vault-relative, '/' separated).
     pub open_files: Vec<String>,
+    /// Feeds tabs open when the app was closed (SOC-024); older files have none.
+    pub open_feeds: Vec<crate::social::FeedRef>,
     /// The folder used for the last import (vault-relative).
     pub last_import_folder: String,
     /// The folder used for the last saved post (vault-relative); empty: "Social".
@@ -199,7 +201,7 @@ pub struct VaultState {
 
 impl Default for VaultState {
     fn default() -> Self {
-        VaultState { version: Self::CURRENT, open_files: vec![], last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
+        VaultState { version: Self::CURRENT, open_files: vec![], open_feeds: vec![], last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
     }
 }
 
@@ -366,6 +368,15 @@ mod tests {
         assert_eq!(s.version, 1);
         assert_eq!(s.open_files, vec!["a.md".to_string()]);
         assert_eq!(s.recent_tags, vec!["x".to_string()]);
+        assert!(s.open_feeds.is_empty(), "files from before Feeds tabs have none");
+    }
+
+    // spec: SOC-024
+    #[test]
+    fn feeds_tabs_are_part_of_the_state_and_unknown_fields_are_kept() {
+        let (s, _) = parse::<VaultState>(br#"{"version": 1, "open_feeds": [{"account": "a", "feed": "home"}], "future": 7}"#).unwrap();
+        assert_eq!(s.open_feeds, vec![crate::social::FeedRef { account: "a".into(), feed: "home".into() }]);
+        assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"future\""));
     }
 
     // spec: CFG-006

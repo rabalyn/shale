@@ -1,27 +1,72 @@
 //! The feed view in the app: showing it, the accounts dialog, and saved posts going to the
 //! Import dialog.
 
-use super::{Modal, ShaleApp};
+use super::{Modal, ShaleApp, View};
 use crate::social::accounts_ui::DialogAction;
-use crate::social::feed_ui::{self, Ask};
+use crate::social::feed_ui::{self, Ask, TabCtx};
+use crate::social::state::FeedsState;
+use crate::social::FeedRef;
 use eframe::egui::{Context, Ui};
 use std::path::PathBuf;
 
 impl ShaleApp {
-    pub fn social_view(&mut self, ui: &mut Ui) {
+    /// The Feeds tab on screen: `feed` is what its view says.
+    pub fn social_view(&mut self, ui: &mut Ui, feed: Option<FeedRef>) {
         let accounts = self.cfg.social_accounts.clone();
-        let last = self.cfg.social_last.clone();
-        for a in feed_ui::show(ui, &mut self.social, &accounts, last.as_ref()) {
+        let tab = TabCtx { id: self.tabs.get(self.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone() };
+        for a in feed_ui::show(ui, &mut self.social, &accounts, &tab) {
             match a {
                 Ask::Accounts => self.open_social_accounts(),
+                Ask::Pick { feed, new_tab } => self.open_feed(feed, new_tab),
+                Ask::Resolve(feed) => self.set_tab_feed(feed),
             }
         }
-        // remember the feed shown last
-        let now = self.social.selection();
-        if now.is_some() && now != self.cfg.social_last {
+    }
+
+    /// Show a feed the user chose: in this tab (a step in its history) or in a new tab.
+    pub fn open_feed(&mut self, feed: FeedRef, new_tab: bool) {
+        self.note_feed(&feed);
+        self.show_view(View::Social(Some(feed)), new_tab);
+        self.remember_open_files();
+    }
+
+    /// The tab named no feed (or one that is gone): this is the one it shows. No history step.
+    fn set_tab_feed(&mut self, feed: FeedRef) {
+        self.note_feed(&feed);
+        if let Some(t) = self.tabs.get_mut(self.active).filter(|t| matches!(t.view, View::Social(_))) {
+            t.view = View::Social(Some(feed));
+        }
+        self.remember_open_files();
+    }
+
+    /// Remember the feed shown last (the next tab without a feed starts with it).
+    fn note_feed(&mut self, feed: &FeedRef) {
+        let now = Some((feed.account.clone(), feed.feed.clone()));
+        if !feed.feed.is_empty() && now != self.cfg.social_last {
             self.cfg.social_last = now;
             self.save_config();
         }
+    }
+
+    /// The title of a Feeds tab: "Mastodon · Home" (with the handle when two accounts share a
+    /// network), "Feeds" while nothing is known yet.
+    pub fn social_title(&self, feed: Option<&FeedRef>) -> String {
+        let accounts = &self.cfg.social_accounts;
+        let Some(f) = feed.filter(|f| !f.feed.is_empty()) else { return "Feeds".into() };
+        let Some(e) = accounts.iter().find(|e| e.account.id == f.account) else { return "Feeds".into() };
+        let title = match self.social.feeds.get(&f.account) {
+            Some(FeedsState::Ready(list)) => list.iter().find(|x| x.id == f.feed).map(|x| x.title.clone()),
+            _ => None,
+        };
+        let Some(title) = title else { return "Feeds".into() };
+        let shared = accounts.iter().filter(|x| x.account.network == e.account.network).count() > 1;
+        let who = if shared { format!("@{}", e.account.handle) } else { e.account.network.label().to_string() };
+        format!("{who} · {title}")
+    }
+
+    /// The feeds of the open Feeds tabs, in tab order (for the state file).
+    pub fn open_feed_refs(&self) -> Vec<FeedRef> {
+        self.tabs.iter().filter_map(|t| if let View::Social(Some(f)) = &t.view { Some(f.clone()) } else { None }).filter(|f| !f.feed.is_empty()).collect()
     }
 
     pub fn open_social_accounts(&mut self) {
@@ -59,7 +104,10 @@ impl ShaleApp {
                 self.cfg.social_accounts.retain(|x| x.account.id != id);
                 self.cfg.social_accounts.push(e);
                 self.social.forget(&id);
-                self.social.account = Some(id);
+                // the tab that is open shows the new account
+                if matches!(self.tabs.get(self.active).map(|t| &t.view), Some(View::Social(_))) {
+                    self.open_feed(FeedRef { account: id, feed: String::new() }, false);
+                }
                 self.save_config();
                 self.toast(format!("Added @{name}"));
                 false

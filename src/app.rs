@@ -39,8 +39,8 @@ pub enum View {
     Graph,
     Calendar,
     Mail,
-    /// Mastodon / Bluesky feeds
-    Social,
+    /// Mastodon / Bluesky feeds: the feed of this tab (None: not chosen yet, the last one is shown)
+    Social(Option<crate::social::FeedRef>),
 }
 
 impl View {
@@ -278,6 +278,8 @@ pub struct ShaleApp {
     drop_zones: Vec<drops::DropZone>,
     /// file list drop targets this frame: (row, folder to move into, a closed folder row)
     pub(crate) tree_targets: Vec<(egui::Rect, PathBuf, bool)>,
+    /// where the tabs of the tab bar are, and their close marks (for tests)
+    pub(crate) tab_rects: Vec<(egui::Rect, egui::Rect)>,
     /// a closed folder hovered while dragging, since when (it opens after a moment)
     tree_hover: Option<(PathBuf, Instant)>,
     calendar_areas: Vec<egui::Rect>,
@@ -388,6 +390,7 @@ impl ShaleApp {
             ctx: None,
             drop_zones: vec![],
             tree_targets: vec![],
+            tab_rects: vec![],
             tree_hover: None,
             calendar_areas: vec![],
             ext_hover: None,
@@ -455,7 +458,7 @@ impl ShaleApp {
                     let demo = crate::social::demo::account();
                     app.cfg.social_accounts = vec![demo.clone()];
                     app.social.load_demo(&demo);
-                    app.show_view(View::Social, false);
+                    app.show_view(View::Social(None), false);
                     if v == "social-import" {
                         let posts = crate::social::demo::posts();
                         let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon", false)).collect();
@@ -556,6 +559,8 @@ impl ShaleApp {
                 self.active = 0;
                 self.cfg.remember_vault(path.to_path_buf());
                 let reopen: Vec<String> = self.vdata.state.open_files.clone();
+                // (opening a note rewrites the saved lists, so read both first)
+                let reopen_feeds: Vec<crate::social::FeedRef> = self.vdata.state.open_feeds.clone();
                 for (i, f) in reopen.iter().enumerate() {
                     let rel = PathBuf::from(f);
                     if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
@@ -567,6 +572,12 @@ impl ShaleApp {
                     } else {
                         self.open(&rel, i > 0);
                     }
+                }
+                // Feeds tabs come back after the note tabs (the accounts must still exist)
+                let known: Vec<crate::social::FeedRef> = reopen_feeds.into_iter().filter(|f| self.cfg.social_accounts.iter().any(|e| e.account.id == f.account)).collect();
+                for f in known {
+                    let new_tab = !self.tabs.is_empty();
+                    self.show_view(View::Social(Some(f)), new_tab);
                 }
                 if self.tabs.is_empty() {
                     let first = self.vault.as_ref().and_then(|v| v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone()));
@@ -597,8 +608,24 @@ impl ShaleApp {
             self.new_tab(view);
             return;
         }
+        // the Feeds button shows a Feeds tab that exists (the current one first); the same feed
+        // may be open in several tabs, so a feed is never "found" by equality
+        if view == View::Social(None) {
+            // (a new tab, still empty, becomes a second Feeds tab instead)
+            let i = if self.tabs[self.active].view == View::Empty {
+                None
+            } else if matches!(self.tabs[self.active].view, View::Social(_)) {
+                Some(self.active)
+            } else {
+                self.tabs.iter().position(|t| matches!(t.view, View::Social(_)))
+            };
+            if let Some(i) = i {
+                self.active = i;
+                return;
+            }
+        }
         // reuse a tab already showing it
-        if let Some(i) = self.tabs.iter().position(|t| t.view == view) {
+        if let Some(i) = self.tabs.iter().position(|t| t.view == view && !matches!(t.view, View::Social(_))) {
             self.active = i;
             return;
         }
@@ -728,6 +755,7 @@ impl ShaleApp {
             return;
         }
         self.vdata.state.open_files = self.tabs.iter().filter_map(|t| t.view.path().map(rel_to_string)).collect();
+        self.vdata.state.open_feeds = self.open_feed_refs();
     }
 
     pub fn current_path(&self) -> Option<PathBuf> {
@@ -1410,6 +1438,7 @@ impl ShaleApp {
                 t.fwd.push(cur);
             }
         }
+        self.remember_open_files();
     }
 
     pub fn go_forward(&mut self) {
@@ -1419,6 +1448,7 @@ impl ShaleApp {
                 t.back.push(cur);
             }
         }
+        self.remember_open_files();
     }
 
     fn process_actions(&mut self) {
@@ -2081,7 +2111,7 @@ pub(crate) mod tests {
         assert!(dlg.items[0].already.is_some() && !dlg.items[0].include);
         // removing the account forgets it
         app.social_dialog_action(DialogAction::Remove(entry.account.id.clone()));
-        assert!(app.cfg.social_accounts.is_empty() && app.social.account.is_none());
+        assert!(app.cfg.social_accounts.is_empty() && !app.social.feeds.contains_key(&entry.account.id));
         let _ = std::fs::remove_dir_all(&d);
     }
 

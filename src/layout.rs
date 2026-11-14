@@ -329,8 +329,8 @@ impl ShaleApp {
             if icon_button(ui, Icon::Tasks, 30.0, cur == Some(View::Tasks), "To-do list across all notes").clicked() {
                 self.actions.push(Action::ShowView(View::Tasks));
             }
-            if icon_button(ui, Icon::Social, 30.0, cur == Some(View::Social), "Feeds: read Mastodon and Bluesky and save posts to the vault").clicked() {
-                self.actions.push(Action::ShowView(View::Social));
+            if icon_button(ui, Icon::Social, 30.0, matches!(cur, Some(View::Social(_))), "Feeds: read Mastodon and Bluesky and save posts to the vault").clicked() {
+                self.actions.push(Action::ShowView(View::Social(None)));
             }
             if icon_button(ui, Icon::Import, 30.0, matches!(self.modal, Some(Modal::Import(_))), "Import e-mails, events and files (or drop them on the window)").clicked() {
                 self.open_import(vec![], vec![], None);
@@ -362,7 +362,7 @@ impl ShaleApp {
             View::Graph => "Graph".into(),
             View::Calendar => "Calendar".into(),
             View::Mail => "Mail".into(),
-            View::Social => "Feeds".into(),
+            View::Social(f) => self.social_title(f.as_ref()),
             View::Note(p) | View::Drawing(p) => self.vault.as_ref().and_then(|v| v.file(p).map(|f| f.display_name())).unwrap_or_else(|| rel_to_string(p)),
         }
     }
@@ -377,6 +377,7 @@ impl ShaleApp {
         let n = self.tabs.len().max(1);
         let tab_w = ((bar.width() - 50.0) / n as f32).clamp(60.0, 220.0);
         let mut close = None;
+        self.tab_rects.clear();
         for i in 0..self.tabs.len() {
             let title = self.tab_title(&self.tabs[i].view);
             let dirty = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.dirty).unwrap_or(false) || self.drawings.get(p).map(|d| d.dirty).unwrap_or(false)).unwrap_or(false);
@@ -395,6 +396,7 @@ impl ShaleApp {
             child.painter().with_clip_rect(Rect::from_min_max(text_rect.min, Pos2::new(text_rect.max.x - 18.0, text_rect.max.y))).galley(Pos2::new(text_rect.min.x, r.center().y - galley.size().y / 2.0), galley, theme::TEXT);
             let cr = Rect::from_center_size(Pos2::new(r.max.x - 14.0, r.center().y), Vec2::splat(16.0));
             let close_resp = child.interact(cr, child.scope_id().with(("tab-close", self.tabs[i].id)), Sense::click());
+            self.tab_rects.push((r, cr));
             let failed = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.save_error.is_some()).unwrap_or(false) || self.drawings.get(p).map(|d| d.save_error.is_some()).unwrap_or(false)).unwrap_or(false);
             if failed && dirty && !close_resp.hovered() {
                 // not saved, and the save failed: a red mark instead of the grey dot (DATA-009)
@@ -534,7 +536,7 @@ impl ShaleApp {
                 }
             }
             View::Tasks => self.tasks_view(ui),
-            View::Social => self.social_view(ui),
+            View::Social(f) => self.social_view(ui, f.clone()),
             View::Calendar => {
                 let monday = self.cfg.week_starts_monday;
                 let mut act = None;

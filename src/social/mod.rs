@@ -23,6 +23,8 @@ pub mod markup;
 pub mod mastodon;
 pub mod note;
 pub mod state;
+#[cfg(test)]
+mod ui_tests;
 
 use crate::cal_dav::{self, check_url, same_server, Origin};
 use crate::cal_time as t;
@@ -199,6 +201,14 @@ pub struct Feed {
     /// "home" / "list:<id>" (Mastodon); "timeline" / the feed's `at://` address (Bluesky)
     pub id: String,
     pub title: String,
+}
+
+/// The feed a Feeds tab shows: an account (its id) and one of its feeds ("" = the feed used last
+/// for the account, or the first; the tab fills it in once the feeds are known).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FeedRef {
+    pub account: String,
+    pub feed: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

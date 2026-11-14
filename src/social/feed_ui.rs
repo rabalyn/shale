@@ -4,7 +4,7 @@
 
 use super::images::ImageCache;
 use super::state::{post_key, FeedsState, SocialState};
-use super::{MediaKind, Network, Post, SocialAccountEntry};
+use super::{FeedRef, MediaKind, Network, Post, SocialAccountEntry};
 use crate::media;
 use crate::theme;
 use eframe::egui::text::{LayoutJob, TextFormat};
@@ -16,6 +16,19 @@ use std::collections::HashSet;
 pub enum Ask {
     /// open the "Feed accounts" dialog
     Accounts,
+    /// the user chose a feed: show it in this tab, or in a new one
+    Pick { feed: FeedRef, new_tab: bool },
+    /// the tab named no feed (or one that is gone): this is the one shown; no history step
+    Resolve(FeedRef),
+}
+
+/// What the view needs to know about the tab it is shown in.
+pub struct TabCtx {
+    /// the tab's number: its scroll position belongs to it
+    pub id: u64,
+    pub feed: Option<FeedRef>,
+    /// the account and feed shown last (from the settings)
+    pub last: Option<(String, String)>,
 }
 
 /// Open a web address in the browser, only if it is http(s) (the address came from a server).
@@ -419,14 +432,14 @@ fn account_label(e: &SocialAccountEntry) -> String {
     format!("{} · @{}", e.account.network.label(), e.account.handle)
 }
 
-/// The whole view. `last`: the account and feed shown last time (from the settings).
-pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], last: Option<&(String, String)>) -> Vec<Ask> {
+/// The whole view of one tab.
+pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], tab: &TabCtx) -> Vec<Ask> {
     let mut asks = vec![];
     let ctx = ui.ctx().clone();
     st.rects.clear();
     let full = ui.available_width();
     let width = (full - 32.0).clamp(280.0, 700.0);
-    let Some(entry) = st.current(accounts, last).cloned() else {
+    let Some(entry) = SocialState::account_for(accounts, tab.feed.as_ref().map(|f| f.account.as_str()), tab.last.as_ref()).cloned() else {
         // no account yet
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.25);
@@ -447,47 +460,65 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     if st.images.is_none() {
         st.images = Some(ImageCache::new(&ctx, st.cache_dir.clone()));
     }
-    let feed = st.feed(&aid);
+    let want = tab.feed.as_ref().filter(|f| f.account == aid).map(|f| f.feed.as_str()).unwrap_or("");
+    let feed = st.resolve_feed(&aid, want, tab.last.as_ref());
     if let Some(f) = &feed {
+        let shown = FeedRef { account: aid.clone(), feed: f.id.clone() };
+        st.feed_of.insert(aid.clone(), f.id.clone());
+        if tab.feed.as_ref() != Some(&shown) {
+            asks.push(Ask::Resolve(shown));
+        }
         st.ensure_timeline(&ctx, &entry, f);
     }
     // ---- top bar
     ui.add_space(8.0);
     let mut refresh = false;
     let mut retry_feeds = false;
-    let mut pick_account = None;
-    let mut pick_feed: Option<String> = None;
+    let mut pick: Option<(FeedRef, bool)> = None;
     column(ui, width, |ui| {
         ui.horizontal(|ui| {
-            let c = egui::ComboBox::from_id_salt("social-account").selected_text(account_label(&entry)).width(210.0).show_ui(ui, |ui| {
+            let c = egui::ComboBox::from_id_salt(("social-account", tab.id)).selected_text(account_label(&entry)).width(210.0).show_ui(ui, |ui| {
                 for e in accounts {
                     if ui.selectable_label(e.account.id == aid, account_label(e)).clicked() {
-                        pick_account = Some(e.account.id.clone());
+                        pick = Some((FeedRef { account: e.account.id.clone(), feed: String::new() }, false));
                     }
                 }
             });
             st.rects.push(("account-combo".into(), c.response.rect));
+            let mut seen_rects: Vec<(String, Rect)> = vec![];
             match st.feeds.get(&aid) {
                 Some(FeedsState::Ready(list)) => {
                     let name = feed.as_ref().map(|f| f.title.clone()).unwrap_or_default();
-                    let c = egui::ComboBox::from_id_salt("social-feed").selected_text(name).width(180.0).show_ui(ui, |ui| {
+                    let c = egui::ComboBox::from_id_salt(("social-feed", tab.id)).selected_text(name).width(180.0).show_ui(ui, |ui| {
                         for f in list {
-                            if ui.selectable_label(feed.as_ref().map(|c| c.id == f.id).unwrap_or(false), &f.title).clicked() {
-                                pick_feed = Some(f.id.clone());
-                            }
+                            ui.horizontal(|ui| {
+                                let r = ui.selectable_label(feed.as_ref().map(|c| c.id == f.id).unwrap_or(false), &f.title);
+                                seen_rects.push((format!("feed:{}", f.id), r.rect));
+                                // Shift+click and middle-click open a new tab, as for links in notes
+                                let new_tab = r.middle_clicked() || (r.clicked() && ui.input(|i| i.modifiers.shift));
+                                if r.clicked() || r.middle_clicked() {
+                                    pick = Some((FeedRef { account: aid.clone(), feed: f.id.clone() }, new_tab));
+                                }
+                                let b = ui.small_button("New tab").on_hover_text("Open this feed in a new tab");
+                                seen_rects.push((format!("feed-new-tab:{}", f.id), b.rect));
+                                if b.clicked() {
+                                    pick = Some((FeedRef { account: aid.clone(), feed: f.id.clone() }, true));
+                                }
+                            });
                         }
                     });
-                    st.rects.push(("feed-combo".into(), c.response.rect));
+                    seen_rects.push(("feed-combo".into(), c.response.rect));
                 }
                 Some(FeedsState::Failed(_)) => {
                     let r = ui.button("Reload feeds");
-                    st.rects.push(("reload-feeds".into(), r.rect));
+                    seen_rects.push(("reload-feeds".into(), r.rect));
                     retry_feeds = r.clicked();
                 }
                 _ => {
                     ui.spinner();
                 }
             }
+            st.rects.extend(seen_rects);
             let r = ui.add_enabled(feed.is_some(), egui::Button::new("Refresh"));
             st.rects.push(("refresh".into(), r.rect));
             refresh = r.on_hover_text("Load the newest posts again").clicked();
@@ -503,11 +534,8 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             ui.add(egui::Label::new(RichText::new(format!("Could not load the feeds: {e}")).color(theme::LINK_MISSING)).wrap());
         }
     });
-    if let Some(a) = pick_account {
-        st.account = Some(a);
-    }
-    if let Some(f) = pick_feed {
-        st.feed_of.insert(aid.clone(), f);
+    if let Some((feed, new_tab)) = pick {
+        asks.push(Ask::Pick { feed, new_tab });
     }
     if retry_feeds {
         st.reload_feeds(&ctx, &entry);
@@ -530,7 +558,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
         let SocialState { images, revealed, saving, rects, .. } = st;
         let Some(images) = images.as_ref() else { return asks };
         let mut cx = Cx { images, revealed, saving, rects, now: crate::cal_time::now() };
-        egui::ScrollArea::vertical().id_salt(("social-scroll", &aid, &feed.id)).auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt(("social-scroll", tab.id, &aid, &feed.id)).auto_shrink([false, false]).show(ui, |ui| {
             column(ui, width, |ui| {
                 ui.spacing_mut().item_spacing.y = 10.0;
                 for (i, p) in posts.iter().enumerate() {
@@ -603,25 +631,35 @@ mod tests {
     struct H {
         ctx: egui::Context,
         t: f64,
+        /// the tab shown (a `Resolve` answer fills in its feed, as the app does)
+        tab: TabCtx,
     }
 
     impl H {
         fn new() -> H {
             let ctx = egui::Context::default();
             crate::theme::install_fonts(&ctx);
-            H { ctx, t: 0.0 }
+            H { ctx, t: 0.0, tab: TabCtx { id: 1, feed: None, last: None } }
         }
         fn frame(&mut self, events: Vec<Ev>, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
             self.t += 0.05;
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 4000.0))), time: Some(self.t), events, ..Default::default() };
             let mut asks = vec![];
+            let tab = &self.tab;
             let mut out = self.ctx.run_ui(raw, |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    asks = show(ui, st, accounts, None);
+                    asks = show(ui, st, accounts, tab);
                 });
             });
             out.textures_delta.clear();
-            asks
+            let mut keep = vec![];
+            for a in asks {
+                match a {
+                    Ask::Resolve(f) => self.tab.feed = Some(f),
+                    a => keep.push(a),
+                }
+            }
+            keep
         }
         fn click(&mut self, key: &str, st: &mut SocialState, accounts: &[SocialAccountEntry]) -> Vec<Ask> {
             let p = st.rects.iter().rev().find(|r| r.0 == key).unwrap_or_else(|| panic!("no {key}: {:?}", st.rects.iter().map(|r| &r.0).collect::<Vec<_>>())).1.center();
@@ -686,7 +724,6 @@ mod tests {
         // a server that refuses at once (nothing is sent anywhere)
         let e = SocialAccountEntry { account: Account::new(Network::Mastodon, "https://localhost:9", "ada@localhost", "Ada"), secret: "x".into() };
         let accounts = vec![e.clone()];
-        st.account = Some(e.account.id.clone());
         st.feeds.insert(e.account.id.clone(), FeedsState::Ready(demo::feeds()));
         let key = (e.account.id.clone(), "home".to_string());
         st.timelines.insert(key.clone(), super::super::state::Timeline { posts: demo::posts(), cursor: Some("next".into()), loading: false, loaded: true, error: None });
