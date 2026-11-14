@@ -63,6 +63,8 @@ pub struct Timeline {
     pub filling: bool,
     /// the last check failed (the list stays as it is)
     pub check_error: Option<String>,
+    /// when a check (or the first page) last went well
+    pub last_checked: Option<Instant>,
     /// checks that failed in a row
     pub failures: u32,
     /// when the next check is due; None: not planned yet
@@ -155,6 +157,8 @@ pub struct SocialState {
     pub rects: Vec<(String, Rect)>,
     /// where the posts of the list shown are, by `post_key` (for tests)
     pub post_rects: Vec<(String, Rect)>,
+    /// the screen rectangle of the list's viewport (for tests)
+    pub list_rect: Rect,
     /// how often the feeds open in tabs are checked for new posts (zero: never)
     pub check_every: Duration,
     /// the posts of a pretend server (screenshots, tests); None: the real account
@@ -196,6 +200,7 @@ impl SocialState {
             messages: vec![],
             rects: vec![],
             post_rects: vec![],
+            list_rect: Rect::NOTHING,
             check_every: Duration::from_secs(300),
             source: None,
             anchors: HashMap::new(),
@@ -474,6 +479,7 @@ impl SocialState {
                                 t.posts.extend(fresh);
                             }
                             t.loaded = true;
+                            t.last_checked.get_or_insert_with(Instant::now);
                         }
                         Err(e) => t.error = Some(e),
                     }
@@ -489,6 +495,7 @@ impl SocialState {
                         Ok(fresh) => {
                             t.failures = 0;
                             t.check_error = None;
+                            t.last_checked = Some(Instant::now());
                             t.next_check = Some(Instant::now() + every);
                             t.absorb(fresh);
                         }

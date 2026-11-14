@@ -342,6 +342,36 @@ fn new_posts_wait_behind_a_button_and_showing_them_keeps_the_view_still() {
     assert!((w.post_y(&anchor2) - y2).abs() < 1.0, "it stays there");
 }
 
+// spec: SOC-027
+#[test]
+fn the_button_sits_in_a_row_of_its_own_and_the_list_does_not_move_when_it_comes_and_goes() {
+    let mut w = W::new("row");
+    // at the top: the first post is the one the old button used to cover
+    let list0 = w.app.social.list_rect;
+    let (first, y0) = w.top_post();
+    assert!(w.rects_has("up-to-date") && !w.rects_has("new-posts"), "the row says it is up to date");
+    w.script.newer.lock().unwrap().push(("home".into(), fresh(&["n2", "n1"])));
+    w.click("check-now");
+    w.until_waiting(&home(), 2);
+    let button = w.rect("new-posts");
+    assert!(!w.rects_has("up-to-date"));
+    let same = |w: &W, what: &str| {
+        let l = w.app.social.list_rect;
+        assert!((l.min.y - list0.min.y).abs() < 0.5 && (l.height() - list0.height()).abs() < 0.5, "{what}: list {l:?} vs {list0:?}");
+        assert!((w.post_y(&first) - y0).abs() < 0.5, "{what}: post at {} vs {y0}", w.post_y(&first));
+    };
+    same(&w, "while the button is shown");
+    // the button is above the list and covers no post
+    assert!(button.max.y <= w.app.social.list_rect.min.y + 0.5, "{button:?} vs {:?}", w.app.social.list_rect);
+    for (k, r) in &w.app.social.post_rects {
+        assert!(!r.intersects(button), "the button covers {k}: {r:?} vs {button:?}");
+    }
+    w.click("new-posts");
+    w.frames(10);
+    assert!(!w.rects_has("new-posts"));
+    same(&w, "after the click");
+}
+
 // spec: SOC-028
 #[test]
 fn the_view_stays_still_when_the_height_of_the_new_posts_changes_later() {

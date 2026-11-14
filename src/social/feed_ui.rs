@@ -59,6 +59,18 @@ pub fn open_web(url: &str) {
     }
 }
 
+/// The height of the row above the list that holds the button for new posts.
+const NEW_ROW_HEIGHT: f32 = 28.0;
+
+/// "just now", "2 min ago", "3 h ago".
+fn checked_ago(secs: u64) -> String {
+    match secs {
+        0..60 => "just now".into(),
+        60..3600 => format!("{} min ago", secs / 60),
+        _ => format!("{} h ago", secs / 3600),
+    }
+}
+
 /// "now", "5m", "3h", "2d", or the date.
 pub fn age_text(at: i64, now: i64) -> String {
     let s = now - at;
@@ -583,7 +595,43 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     ui.add_space(6.0);
     let Some(feed) = feed else { return asks };
     // ---- posts
+    // ---- the row for new posts: always there, of one height, so the list never moves when the button comes and goes
     let key = (aid.clone(), feed.id.clone());
+    let waiting = st.timelines.get(&key).map(|t| t.waiting.len()).unwrap_or(0);
+    let mut show_new = tab.keys && waiting > 0 && !ctx.egui_wants_keyboard_input() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Period));
+    {
+        let (checking, check_error, last) = st.timelines.get(&key).map(|t| (t.checking, t.check_error.clone(), t.last_checked)).unwrap_or((false, None, None));
+        let size = Vec2::new(ui.available_width(), NEW_ROW_HEIGHT);
+        ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.set_min_size(size);
+            ui.set_max_height(NEW_ROW_HEIGHT);
+            if waiting > 0 {
+                let label = format!("{waiting} new post{} — show", if waiting == 1 { "" } else { "s" });
+                let r = ui.add(egui::Button::new(RichText::new(label).strong().color(theme::TEXT_STRONG)).fill(theme::ACCENT).corner_radius(12).min_size(Vec2::new(0.0, 24.0)));
+                st.rects.push(("new-posts".into(), r.rect));
+                show_new |= r.on_hover_text("Put the new posts above the list (key: .). The view stays where it is.").clicked();
+            } else {
+                ui.add_space(5.0);
+                if let Some(e) = &check_error {
+                    let r = ui.add(egui::Label::new(RichText::new(format!("Could not look for new posts: {e}")).size(11.5).color(theme::LINK_MISSING)).truncate());
+                    st.rects.push(("check-error".into(), r.rect));
+                } else if checking {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new().size(12.0));
+                        ui.label(RichText::new("Checking…").size(11.5).color(theme::MUTED));
+                    });
+                } else {
+                    let text = match last {
+                        Some(t) => format!("Up to date · checked {}", checked_ago(t.elapsed().as_secs())),
+                        None => "Up to date".to_string(),
+                    };
+                    let r = ui.label(RichText::new(text).size(11.5).color(theme::MUTED));
+                    st.rects.push(("up-to-date".into(), r.rect));
+                    ctx.request_repaint_after(std::time::Duration::from_secs(20));
+                }
+            }
+        });
+    }
     let posts = st.timelines.get_mut(&key).map(|t| std::mem::take(&mut t.posts)).unwrap_or_default();
     let (loading, loaded, error, has_more, filling) = st.timelines.get(&key).map(|t| (t.loading, t.loaded, t.error.clone(), t.cursor.is_some(), t.filling)).unwrap_or((false, false, None, false, false));
     let gaps: HashSet<String> = st.timelines.get(&key).map(|t| t.gaps.iter().map(|g| g.above.clone()).collect()).unwrap_or_default();
@@ -689,26 +737,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     }
     st.anchors.insert(tab.id, anchor);
     st.post_rects = post_rects;
-    // ---- the button for new posts, floating over the top of the list
-    let waiting = st.timelines.get(&key).map(|t| t.waiting.len()).unwrap_or(0);
-    let check_error = st.timelines.get(&key).and_then(|t| t.check_error.clone());
-    let mut show_new = tab.keys && waiting > 0 && !ctx.egui_wants_keyboard_input() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Period));
-    if waiting > 0 || check_error.is_some() {
-        egui::Area::new(ui.scope_id().with(("social-new-posts", tab.id))).order(egui::Order::Middle).fixed_pos(egui::pos2(out.inner_rect.center().x, out.inner_rect.min.y + 8.0)).pivot(egui::Align2::CENTER_TOP).show(&ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                if waiting > 0 {
-                    let label = format!("{waiting} new post{} — show", if waiting == 1 { "" } else { "s" });
-                    let r = ui.add(egui::Button::new(RichText::new(label).strong().color(theme::TEXT_STRONG)).fill(theme::ACCENT).corner_radius(14).min_size(Vec2::new(0.0, 28.0)));
-                    st.rects.push(("new-posts".into(), r.rect));
-                    show_new |= r.on_hover_text("Put the new posts above the list (key: .). The view stays where it is.").clicked();
-                }
-                if let Some(e) = &check_error {
-                    let r = ui.label(RichText::new(format!("Could not look for new posts: {e}")).size(11.5).color(theme::LINK_MISSING).background_color(theme::BG_SECONDARY));
-                    st.rects.push(("check-error".into(), r.rect));
-                }
-            });
-        });
-    }
+    st.list_rect = out.inner_rect;
     if show_new {
         st.show_waiting(&key);
         ctx.request_repaint();

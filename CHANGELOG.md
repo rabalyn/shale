@@ -95,7 +95,8 @@ The release page of each version on GitHub shows its section from this file.
   position and history ("New tab" next to each feed in the picker, Shift+click or middle-click),
   titled "Mastodon · Home" with the number of waiting posts, and open Feeds tabs are restored at
   the next start. Every 5 minutes (setting in **Accounts…**, 0 = off) the feeds open in tabs look
-  for newer posts and show "N new posts — show" at the top of the list instead of inserting
+  for newer posts and show "N new posts — show" in a row above the list (which says "Up to date ·
+  checked 2 min ago" otherwise, so the list never moves and no post is covered) instead of inserting
   them; clicking it (or `.`) puts them above while the post you were reading stays at the same
   place on the screen. **Refresh** is now **Check now** (it no longer jumps to the top);
   **⋯ → Reload from the top** replaces the list.

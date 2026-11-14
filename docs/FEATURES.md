@@ -338,8 +338,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   start.
 - **New posts wait, they do not jump in**: every 5 minutes (change it in **Accounts…**, 0 =
   never) each feed that is open in a tab, also in the background, looks for newer posts. They
-  appear as a button "12 new posts — show" at the top of the list (or press `.`); the list does
-  not change until you click. Then the new posts go above and the post you were reading stays
+  appear as a button "12 new posts — show" in a row above the list (or press `.`); the row is
+  always there ("Up to date · checked 2 min ago" when nothing waits), so the list never moves
+  and nothing is covered, and it does not change until you click. Then the new posts go above and the post you were reading stays
   exactly where it is, so you can scroll up slowly. **Check now** looks right away;
   **⋯ → Reload from the top** replaces the list. If more than 200 posts came in on Bluesky,
   **Load more in between** fills the gap.
