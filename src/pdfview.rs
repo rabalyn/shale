@@ -75,7 +75,7 @@ pub fn pdf_pages(ctx: &egui::Context, abs: &Path, max_pages: usize) -> PdfState 
             map.insert(key.clone(), j.clone());
             let (path, jc, ctx2) = (abs.to_path_buf(), j.clone(), ctx.clone());
             std::thread::spawn(move || {
-                let result = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|d| render_pages(d, max_pages, 1.5));
+                let result = crate::fsutil::read(&path).map_err(|e| e.to_string()).and_then(|d| render_pages(d, max_pages, 1.5));
                 *jc.lock().unwrap() = Job::Done(result);
                 ctx2.request_repaint();
             });

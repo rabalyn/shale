@@ -91,7 +91,7 @@ enum Target {
 }
 
 fn local_read(file: &std::path::Path) -> Result<Vec<Event>, String> {
-    match std::fs::read_to_string(file) {
+    match crate::fsutil::read_to_string(file) {
         Ok(t) => Ok(cal_ics::parse_ics(&t)),
         Err(_) if !file.exists() => Ok(vec![]),
         Err(e) => Err(format!("could not read {}: {e}", file.display())),
@@ -102,7 +102,7 @@ fn local_write(file: &std::path::Path, name: &str, events: &[Event]) -> Result<(
     if let Some(d) = file.parent() {
         std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
     }
-    std::fs::write(file, cal_ics::to_ics(name, events)).map_err(|e| format!("could not save {}: {e}", file.display()))
+    crate::fsutil::write_atomic(file, cal_ics::to_ics(name, events).as_bytes()).map_err(|e| format!("could not save {}: {e}", file.display()))
 }
 
 /// Write an event into a calendar. `parts`: the event first, then the other parts of the same
@@ -229,7 +229,7 @@ impl CalendarStore {
     pub fn reload_local(&mut self) {
         for s in &self.sources {
             if let SourceKind::Local { file } = &s.kind {
-                match std::fs::read_to_string(file) {
+                match crate::fsutil::read_to_string(file) {
                     Ok(text) => {
                         self.events.insert(s.id.clone(), cal_ics::parse_ics(&text));
                         self.status.remove(&s.id);
@@ -413,7 +413,7 @@ impl CalendarStore {
         if let Some(d) = file.parent() {
             std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
         }
-        std::fs::write(file, cal_ics::to_ics(&s.name, &events)).map_err(|e| e.to_string())?;
+        crate::fsutil::write_atomic(file, cal_ics::to_ics(&s.name, &events).as_bytes()).map_err(|e| e.to_string())?;
         self.events.insert(id.to_string(), events);
         self.generation += 1;
         Ok(())

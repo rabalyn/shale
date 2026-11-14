@@ -151,7 +151,7 @@ pub fn file_in(vault_root: &std::path::Path) -> std::path::PathBuf {
 }
 
 pub fn load(vault_root: &std::path::Path) -> Option<TagWords> {
-    serde_json::from_str(&std::fs::read_to_string(file_in(vault_root)).ok()?).ok()
+    serde_json::from_str(&crate::fsutil::read_to_string(file_in(vault_root)).ok()?).ok()
 }
 
 pub fn save(vault_root: &std::path::Path, tw: &TagWords) -> std::io::Result<()> {
@@ -159,7 +159,7 @@ pub fn save(vault_root: &std::path::Path, tw: &TagWords) -> std::io::Result<()> 
     if let Some(d) = p.parent() {
         std::fs::create_dir_all(d)?;
     }
-    std::fs::write(p, serde_json::to_string_pretty(tw).unwrap_or_default())
+    crate::fsutil::write_atomic(&p, serde_json::to_string_pretty(tw).unwrap_or_default().as_bytes())
 }
 
 #[cfg(test)]

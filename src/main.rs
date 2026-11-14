@@ -19,6 +19,7 @@ mod excalidraw_md;
 mod drawing_layout;
 mod editor;
 mod export_dialog;
+mod fsutil;
 mod graph;
 mod import;
 mod import_dialog;

@@ -1,5 +1,6 @@
 //! The vault: a folder of markdown notes and drawings, plus an index of links, tasks and tags.
 
+use crate::fsutil;
 use crate::markdown::{self, LinkSpan, Task};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -130,7 +131,7 @@ impl Vault {
             let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
             let up_to_date = self.notes.get(&f.rel).map(|n| n.mtime == mtime && mtime.is_some()).unwrap_or(false);
             if !up_to_date {
-                let text = fs::read_to_string(&abs).unwrap_or_default();
+                let text = fsutil::read_to_string(&abs).unwrap_or_default();
                 let differs = self.notes.get(&f.rel).map(|n| n.text != text).unwrap_or(true);
                 let entry = self.notes.entry(f.rel.clone()).or_default();
                 entry.mtime = mtime;
@@ -420,7 +421,7 @@ impl Vault {
         if let Some(p) = abs.parent() {
             fs::create_dir_all(p)?;
         }
-        fs::write(&abs, content)?;
+        fsutil::write_atomic(&abs, content.as_bytes())?;
         self.rescan();
         Ok(rel.to_path_buf())
     }
@@ -437,7 +438,7 @@ impl Vault {
         if let Some(p) = abs.parent() {
             fs::create_dir_all(p)?;
         }
-        fs::write(&abs, text)?;
+        fsutil::write_atomic(&abs, text.as_bytes())?;
         let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
         self.set_note_text(rel, text);
         if let Some(n) = self.notes.get_mut(rel) {
@@ -451,7 +452,7 @@ impl Vault {
         if let Some(p) = abs.parent() {
             fs::create_dir_all(p)?;
         }
-        fs::write(abs, data)
+        fsutil::write_atomic(&abs, data.as_bytes())
     }
 
     /// Rename/move a file or folder. When `update_links`, links in other notes are rewritten.
@@ -507,7 +508,7 @@ impl Vault {
         if let Some(p) = self.abs(&to).parent() {
             fs::create_dir_all(p)?;
         }
-        fs::rename(self.abs(from), self.abs(&to))?;
+        fsutil::rename_noreplace(&self.abs(from), &self.abs(&to))?;
         let mut changed = Vec::new();
         for (src, now, mut ranges) in edits {
             let Some(text) = self.notes.get(&src).map(|n| n.text.clone()) else { continue };
@@ -518,7 +519,7 @@ impl Vault {
                     out.replace_range(r, &t);
                 }
             }
-            fs::write(self.abs(&now), &out)?;
+            fsutil::write_atomic(&self.abs(&now), out.as_bytes())?;
             changed.push(now);
         }
         self.rescan();
@@ -545,7 +546,7 @@ impl Vault {
         } else {
             vec![]
         };
-        fs::rename(&abs_from, &abs_to)?;
+        fsutil::rename_noreplace(&abs_from, &abs_to)?;
         let mut changed = Vec::new();
         if let Some(old) = old_entry {
             let new_name = link_name_of(to, old.kind);
@@ -558,7 +559,7 @@ impl Vault {
                     };
                     let (new_text, n) = markdown::rename_links(&text, &old.link_name, &new_name);
                     if n > 0 {
-                        fs::write(self.abs(&src_now), &new_text)?;
+                        fsutil::write_atomic(&self.abs(&src_now), new_text.as_bytes())?;
                         changed.push(src_now);
                     }
                 }
@@ -579,7 +580,7 @@ impl Vault {
             dest = trash.join(format!("{i} {name}"));
             i += 1;
         }
-        fs::rename(self.abs(rel), dest)?;
+        fsutil::rename_noreplace(&self.abs(rel), &dest)?;
         self.rescan();
         Ok(())
     }
@@ -678,7 +679,10 @@ pub fn write_sample_vault(root: &Path) -> io::Result<()> {
     for (name, content) in files {
         let p = root.join(name);
         if !p.exists() {
-            fs::write(p, content)?;
+            match fsutil::create_new(&p, content.as_bytes()) {
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                r => r?,
+            }
         }
     }
     // a small generated picture, embedded in the welcome note
@@ -694,7 +698,12 @@ pub fn write_sample_vault(root: &Path) -> io::Result<()> {
                 image::Rgba([(90.0 + 120.0 * t) as u8, (80.0 + 40.0 * (1.0 - t)) as u8, 230, 255])
             }
         });
-        img.save(&pic).map_err(io::Error::other)?;
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png).map_err(io::Error::other)?;
+        match fsutil::create_new(&pic, png.get_ref()) {
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            r => r?,
+        }
     }
     Ok(())
 }

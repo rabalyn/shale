@@ -87,7 +87,7 @@ impl egui::DroppedFile for ScriptDrop {
         &self.0
     }
     fn bytes(&self) -> Result<Vec<u8>, String> {
-        std::fs::read(&self.0).map_err(|e| e.to_string())
+        crate::fsutil::read(&self.0).map_err(|e| e.to_string())
     }
 }
 
@@ -449,7 +449,7 @@ impl ShaleApp {
             FileKind::Drawing => {
                 if !self.drawings.contains_key(rel) {
                     // a file that can't be read opens read-only (never an empty drawing that overwrites it)
-                    let doc = match std::fs::read_to_string(v.abs(rel)) {
+                    let doc = match crate::fsutil::read_to_string(v.abs(rel)) {
                         Ok(text) => DrawingDoc::new(rel.to_path_buf(), &text),
                         Err(e) => DrawingDoc::unreadable(rel.to_path_buf(), &e.to_string()),
                     };
@@ -947,7 +947,7 @@ impl ShaleApp {
         if let Some(dir) = out.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("Could not create the folder: {e}"))?;
         }
-        std::fs::write(&out, bytes).map_err(|e| format!("Could not save the PDF: {e}"))?;
+        crate::fsutil::write_atomic(&out, &bytes).map_err(|e| format!("Could not save the PDF: {e}"))?;
         if let Some(v) = self.vault.as_mut() {
             v.rescan();
         }
@@ -1106,7 +1106,9 @@ impl ShaleApp {
                         if let Some(dir) = path.parent() {
                             let _ = std::fs::create_dir_all(dir);
                         }
-                        if let Err(e) = buf.save(&path) {
+                        let mut png = std::io::Cursor::new(Vec::new());
+                        let saved = buf.write_to(&mut png, image::ImageFormat::Png).map_err(|e| e.to_string()).and_then(|_| crate::fsutil::write_atomic(&path, png.get_ref()).map_err(|e| e.to_string()));
+                        if let Err(e) = saved {
                             eprintln!("could not save screenshot: {e}");
                         }
                     }
@@ -1181,7 +1183,7 @@ impl ShaleApp {
             #[cfg(target_os = "linux")]
             if let Some((mime, data)) = rest.split_once(':') {
                 let at = self.ctx.as_ref().and_then(|c| c.input(|i| i.pointer.latest_pos())).unwrap_or_default();
-                let data = if let Some(f) = data.strip_prefix('@') { std::fs::read(f).unwrap_or_default() } else { data.replace("\\n", "\n").into_bytes() };
+                let data = if let Some(f) = data.strip_prefix('@') { crate::fsutil::read(f).unwrap_or_default() } else { data.replace("\\n", "\n").into_bytes() };
                 let mut parts = vec![(mime.to_string(), data)];
                 // more kinds follow as ";;kind:data"
                 if let Some(pos) = parts[0].1.windows(2).position(|w| w == b";;") {
@@ -1236,7 +1238,7 @@ impl ShaleApp {
             env("XKB_DEFAULT_LAYOUT"),
             env("LANG"),
         );
-        if let Ok(mut f) = crate::config::open_private(&path, false) {
+        if let Ok(mut f) = crate::fsutil::open_private_log(&path, false) {
             use std::io::Write;
             let _ = f.write_all(header.as_bytes());
         }
@@ -1249,7 +1251,7 @@ impl ShaleApp {
         // (not even key names, they would spell the password)
         if matches!(self.modal, Some(Modal::Calendars(_))) {
             if raw.events.iter().any(|e| matches!(e, egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Ime(_))) {
-                if let Ok(mut f) = crate::config::open_private(&crate::config::input_log_path(), true) {
+                if let Ok(mut f) = crate::fsutil::open_private_log(&crate::config::input_log_path(), true) {
                     let _ = writeln!(f, "frame {} | (input in the calendar settings is not recorded)", self.frames);
                 }
             }
@@ -1277,7 +1279,7 @@ impl ShaleApp {
             }
             _ => "no note open".into(),
         };
-        if let Ok(mut f) = crate::config::open_private(&crate::config::input_log_path(), true) {
+        if let Ok(mut f) = crate::fsutil::open_private_log(&crate::config::input_log_path(), true) {
             let _ = writeln!(f, "frame {} | before: {state}", self.frames);
             for l in lines {
                 let _ = writeln!(f, "    {l}");

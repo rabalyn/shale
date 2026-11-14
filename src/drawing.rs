@@ -149,7 +149,7 @@ impl Scene {
     }
     /// Read a drawing file (any of the two formats).
     pub fn read_file(abs: &Path) -> Result<Scene, String> {
-        let text = std::fs::read_to_string(abs).map_err(|e| e.to_string())?;
+        let text = crate::fsutil::read_to_string(abs).map_err(|e| e.to_string())?;
         Scene::from_file_text(abs, &text)
     }
     pub fn live(&self) -> impl Iterator<Item = &Element> {

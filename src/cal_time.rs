@@ -149,7 +149,7 @@ fn zone(tzid: &str) -> Option<std::sync::Arc<Zone>> {
     } else {
         ["/usr/share/zoneinfo", "/usr/lib/zoneinfo", "/usr/share/lib/zoneinfo"]
             .iter()
-            .find_map(|dir| std::fs::read(std::path::Path::new(dir).join(clean)).ok())
+            .find_map(|dir| crate::fsutil::read(std::path::Path::new(dir).join(clean)).ok())
             .and_then(|d| parse_tzif(&d))
             .map(std::sync::Arc::new)
     };

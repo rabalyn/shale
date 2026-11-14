@@ -8,7 +8,6 @@
 //! messages share it, all of them are offered (the newest ticked).
 
 use crate::mail;
-use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -105,7 +104,7 @@ struct Server {
 }
 
 fn servers(profile: &Path) -> Vec<Server> {
-    let Ok(prefs) = std::fs::read_to_string(profile.join("prefs.js")) else { return vec![] };
+    let Ok(prefs) = crate::fsutil::read_to_string(profile.join("prefs.js")) else { return vec![] };
     let mut map: std::collections::BTreeMap<String, Server> = Default::default();
     for line in prefs.lines() {
         let Some(rest) = line.trim().strip_prefix("user_pref(\"mail.server.") else { continue };
@@ -212,7 +211,7 @@ fn clean_message(mut raw: Vec<u8>) -> Vec<u8> {
 
 /// The message starting at `offset` in an mbox file.
 fn read_at(file: &Path, offset: u64) -> Option<Vec<u8>> {
-    let mut f = File::open(file).ok()?;
+    let mut f = crate::fsutil::open_read(file).ok()?;
     f.seek(SeekFrom::Start(offset)).ok()?;
     let mut r = BufReader::new(f.take(200 << 20));
     let mut out = Vec::new();
@@ -249,7 +248,7 @@ fn subject_matches(subject: &str, wanted: &str) -> bool {
 
 /// Messages in an mbox file whose headers pass `pick`.
 fn scan_mbox(file: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
-    let Ok(f) = File::open(file) else { return vec![] };
+    let Ok(f) = crate::fsutil::open_read(file) else { return vec![] };
     let mut r = BufReader::with_capacity(1 << 20, f);
     let mut found = Vec::new();
     let mut cur: Vec<u8> = Vec::new();
@@ -303,14 +302,14 @@ fn scan_maildir(dir: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
     for sub in ["cur", "new"] {
         let Ok(rd) = std::fs::read_dir(dir.join(sub)) else { continue };
         for e in rd.flatten() {
-            let Ok(mut f) = File::open(e.path()) else { continue };
+            let Ok(mut f) = crate::fsutil::open_read(e.path()) else { continue };
             let mut head = vec![0u8; 64 * 1024];
             let n = f.read(&mut head).unwrap_or(0);
             head.truncate(n);
             let text = String::from_utf8_lossy(&head).replace("\r\n", "\n");
             let headers = text.split("\n\n").next().unwrap_or("").to_string();
             if pick(&headers) {
-                if let Ok(all) = std::fs::read(e.path()) {
+                if let Ok(all) = crate::fsutil::read(e.path()) {
                     out.push(clean_message(all));
                 }
             }
@@ -513,7 +512,7 @@ fn by_index(place: &Path, row: &std::collections::HashMap<String, String>) -> Op
             }
         } else {
             for sub in ["cur", "new"] {
-                if let Ok(raw) = std::fs::read(place.join(sub).join(token.trim())) {
+                if let Ok(raw) = crate::fsutil::read(place.join(sub).join(token.trim())) {
                     let raw = clean_message(raw);
                     if ok(&raw) {
                         return Some(raw);
@@ -564,7 +563,7 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
             let mut index_subject = None;
             if let Some(k) = r.key {
                 let idx = index_of(&p);
-                match std::fs::read(&idx) {
+                match crate::fsutil::read(&idx) {
                     Ok(bytes) => match mork_rows(&bytes).get(&k) {
                         Some(row) => {
                             if let Some(raw) = by_index(&p, row) {

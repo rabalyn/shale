@@ -181,11 +181,11 @@ pub fn items_from_paths(paths: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
         }
         let ext = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
         match ext.as_str() {
-            "eml" => match std::fs::read(p) {
+            "eml" => match crate::fsutil::read(p) {
                 Ok(raw) => items.push(email_item(mail::parse(&raw), (name, raw))),
                 Err(e) => notes.push(format!("Could not read “{name}”: {e}")),
             },
-            "ics" => match std::fs::read(p) {
+            "ics" => match crate::fsutil::read(p) {
                 Ok(raw) => {
                     let found = calendar_items(&raw, &name, &name);
                     if found.is_empty() {

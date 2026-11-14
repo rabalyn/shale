@@ -8,7 +8,7 @@ here.
 
 | # | Spec IDs | What | Why first | ADR |
 |---|---|---|---|---|
-| 1 | DATA-004 | Atomic writes everywhere | A crash mid-write is the only failure that destroys a whole note | [0003](../decisions/0003-data-safety.md) |
+| 1 | ~~DATA-004~~ | ~~Atomic writes everywhere~~ (done, DATA-004 and DATA-010) | A crash mid-write is the only failure that destroys a whole note | [0003](../decisions/0003-data-safety.md) |
 | 2 | DATA-003, DATA-002 | Conflict copy instead of silently overwriting outside changes; reload drawings too | Silent lost updates with Syncthing / git / a second editor | 0003 |
 | 3 | DATA-008, DATA-009 | Unreadable notes read-only; never swallow write errors | First keystroke can destroy a non-UTF-8 file | 0003 |
 | 4 | VAULT-018 | One checked vault path type at every user input | Rename can move a note out of the vault | [0004](../decisions/0004-link-resolution-and-paths.md) |
@@ -39,6 +39,9 @@ here.
 | OPEN-011 | Module restructuring (feature folders, splitting `ShaleApp`): do it along the way (proposed) or as one dedicated change? | ADR-0006 §6. |
 | OPEN-012 | Add a test that checks spec IDs against test names (every ID used or marked `untested`)? | Prevents spec drift ([ADR-0001](../decisions/0001-spec-driven-development.md) §5). |
 | OPEN-013 | Rename/move rewrites links in notes on disk while an open, dirty buffer of the same note exists — which wins? | Related to DATA-003; needs a test either way. |
+| ~~OPEN-015~~ | ~~Mail: support OAuth2 in the first phase or later?~~ | Decided 2026-11-14: phase 1 ([ADR-0007](../decisions/0007-mail-client.md) §7). |
+| ~~OPEN-016~~ | ~~Mail: big attachments with the message or on demand?~~ | Decided 2026-11-14: with the message. |
+| ~~OPEN-017~~ | ~~Mail: index decrypted mails?~~ | Decided 2026-11-14: yes, after typed consent (ADR-0007 §6). |
 
 ## Backlog carried over from IMPLEMENTATION.md (still open after checking)
 

@@ -254,7 +254,7 @@ impl ShaleApp {
             return;
         }
         let Some(v) = &mut self.vault else { return };
-        let old = std::fs::read_to_string(v.abs(note)).unwrap_or_default();
+        let old = crate::fsutil::read_to_string(v.abs(note)).unwrap_or_default();
         if let Err(e) = v.write_note(note, &join(&old)) {
             self.toast(format!("Could not add the links: {e}"));
         }

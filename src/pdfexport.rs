@@ -413,7 +413,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                         continue;
                     }
                 } else if crate::pdfview::is_pdf(&t) {
-                    if let Ok(r) = std::fs::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdfview::render_pages(d, 40, 2.0)) {
+                    if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdfview::render_pages(d, 40, 2.0)) {
                         for img in r.images {
                             let [iw, ih] = img.size;
                             let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
