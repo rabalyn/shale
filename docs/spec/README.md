@@ -9,6 +9,7 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 | [links-and-editor.md](links-and-editor.md) | Link syntax and resolution, editing, navigation and keys | LINK, EDIT, NAV |
 | [features.md](features.md) | Tasks, drawings, calendar, network security, import, people, tags, PDF | TASK, DRAW, CAL, SEC, IMP, PPL, TAG, PDF |
 | [engineering.md](engineering.md) | Build and release, background jobs, performance | BUILD, JOB, PERF |
+| [mail.md](mail.md) | Local mail store, IMAP account and sync | MAIL |
 | [open-points.md](open-points.md) | Undecided questions and the ordered SHOULD BE work list | OPEN |
 
 ## Rules for editing

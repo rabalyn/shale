@@ -16,6 +16,13 @@ ttf-parser = "0.25"
 miniz_oxide = "0.8"
 roxmltree = "0.20"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp"] }
+rusqlite = { version = "0.42.0", features = ["bundled"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.7.1"
+
+[dev-dependencies]
+# self-signed certificate for the pretend mail server in tests
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 
 # Always strict: CI builds with RUSTFLAGS="-D warnings" and runs clippy with -D warnings.
 [lints.rust]

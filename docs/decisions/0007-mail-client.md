@@ -111,6 +111,19 @@ connection or run `IDLE`. Proposed:
   thread model) and `async-imap` (the best maintained one, used by Delta Chat, on a
   single-threaded runtime inside the sync thread). Criterion: maintenance status and `CONDSTORE`,
   `QRESYNC`, `IDLE` and literal size limits.
+- **Spike result (2026-11-14)**: neither candidate fits, so Shale ships a small blocking IMAP
+  client of its own (`imap_client.rs`, about 600 lines) on `rustls` 0.23 (`ring` provider) and
+  `rustls-platform-verifier` 0.7. `imap` is still `3.0.0-alpha.15` (years of alphas, `native-tls`
+  by default, no `CONDSTORE`/`QRESYNC` support, no limit on literal sizes). `async-imap` 0.12 is
+  maintained, but needs an async runtime (tokio or async-std, a large new dependency for one
+  thread), parses whole literals into memory and has no size limit either. `imap-codec`/`imap-next`
+  are still alphas. What phase 1 needs is small and fixed (`CAPABILITY`, `LOGIN`/`AUTHENTICATE`,
+  `LIST`, `EXAMINE`, `UID SEARCH`, `UID FETCH`), and owning it gives three things no crate offers:
+  a literal size limit that skips a too-big message without reading it, the read-only guarantee
+  enforced in one place (every command is checked against an allowlist before it is sent, see
+  MAIL-023) and an authenticator hook for XOAUTH2 (phase 1c). `IDLE` and `QRESYNC` are not
+  implemented (deletions are found with `UID SEARCH ALL`); both can be added later without
+  touching the rest. `rusqlite` 0.42 with `bundled` has FTS5 (checked by a test, MAIL-015).
 - **Index**: `rusqlite` with the `bundled` feature (SQLite with FTS5 compiled in).
 - **Sending** (phase 3): `lettre` (SMTP and building MIME messages).
 
