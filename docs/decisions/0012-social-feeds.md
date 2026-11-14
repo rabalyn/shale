@@ -51,6 +51,20 @@ no TLS or OAuth crates.
 9. **Opening links**: only `http` and `https` addresses from a server are handed to the system
    through `opener::open_url`; the Mastodon sign-in page opens through `opener::open_signin_url`.
 
+10. **Feeds in tabs and new posts** (SOC-021 to SOC-029): the feed belongs to the tab
+    (`View::Social(Option<FeedRef>)`), so each tab has its own scroll and history, and open feed
+    tabs are saved in `state.json` (`open_feeds`). A timer checks every feed open in a tab (also
+    in the background) for posts newer than the newest known one: Mastodon with `min_id` (the
+    page directly above the newest timeline entry, so the block is contiguous), Bluesky from
+    the first page down to the first known post (a limit of 200 per check can leave a gap, filled
+    page by page on request). New posts wait in the timeline and are only inserted when the user
+    asks. The view is kept still by *scroll anchoring*: each frame the post at the top of the
+    window and its distance from the window's top are remembered; when that post moves because
+    posts above it changed in height (inserted, a picture arrived) the scroll offset is set back
+    in a second pass of the same frame (`Context::request_discard`; without a second pass, in the
+    next frame). A scroll by the user moves the anchor with it. Posts and pages can come from a
+    `Source` (screenshots, tests) instead of a `Client`.
+
 ## Consequences
 
 - No new dependencies. A machine without `curl` can't use the feeds (as for CalDAV).

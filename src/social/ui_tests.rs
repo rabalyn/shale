@@ -2,14 +2,37 @@
 //! The window runs headless (`ShaleApp::run_frame`); controls are clicked with real pointer
 //! events at the places the view reports in `SocialState::rects` and `ShaleApp::tab_rects`.
 
-use super::state::Timeline;
+use super::state::{post_key, Source, Timeline};
 use super::tests::post;
-use super::{demo, FeedRef, Post};
+use super::{demo, Feed, FeedRef, Fresh, Page, Post, Since};
 use crate::app::{Options, ShaleApp, View};
 use eframe::egui::{self, Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, RawInput, Rect, Vec2};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// A pretend server: what the next checks find (per feed) and what a first page holds.
+#[derive(Default)]
+pub(crate) struct Script {
+    pub newer: Mutex<Vec<(String, Fresh)>>,
+    pub first_page: Mutex<Option<Page>>,
+}
+
+impl Source for Script {
+    fn page(&self, _feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
+        Ok(if cursor.is_none() { self.first_page.lock().unwrap().clone().unwrap_or_default() } else { Page::default() })
+    }
+    fn newer(&self, feed: &Feed, _since: &Since) -> Result<Fresh, String> {
+        let mut q = self.newer.lock().unwrap();
+        Ok(match q.iter().position(|(f, _)| *f == feed.id) {
+            Some(i) => q.remove(i).1,
+            None => Fresh::default(),
+        })
+    }
+}
 
 pub(crate) struct W {
+    pub script: Arc<Script>,
     pub app: ShaleApp,
     pub ctx: egui::Context,
     t: f64,
@@ -40,11 +63,13 @@ impl W {
         app.cfg.social_accounts = vec![entry.clone()];
         app.social.load_demo(&entry);
         for (f, p) in [("home", "h"), ("list:1", "l")] {
-            app.social.timelines.insert((entry.account.id.clone(), f.into()), Timeline { posts: feed_posts(p, 40), cursor: None, loading: false, loaded: true, ..Default::default() });
+            app.social.timelines.insert((entry.account.id.clone(), f.into()), Timeline { posts: feed_posts(p, 40), loaded: true, ..Default::default() });
         }
         let ctx = egui::Context::default();
         crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, dir };
+        let script = Arc::new(Script::default());
+        app.social.source = Some(script.clone());
+        let mut w = W { script, app, ctx, t: 0.0, dir };
         w.app.show_view(View::Social(None), false);
         w.frames(4);
         w
@@ -232,4 +257,219 @@ fn open_feed_tabs_come_back_and_an_old_state_file_still_loads() {
         assert_eq!(old.tabs.len(), 1 + feeds, "{json}");
         assert!(matches!(old.tabs[0].view, View::Note(_)));
     }
+}
+
+// ---- new posts
+
+fn fresh(ids: &[&str]) -> Fresh {
+    Fresh { posts: ids.iter().map(|i| post(i, "carol", 2000 - i.len() as i64, None)).collect(), ..Default::default() }
+}
+
+fn key_of(id: &str) -> String {
+    post_key(&post(id, "carol", 0, None))
+}
+
+impl W {
+    /// Wait until a feed has `n` new posts waiting.
+    fn until_waiting(&mut self, feed: &FeedRef, n: usize) {
+        let start = Instant::now();
+        while self.app.social.waiting_count(&feed.account, &feed.feed) != n {
+            self.frames(1);
+            assert!(start.elapsed() < Duration::from_secs(10), "no new posts came");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.frames(2);
+    }
+
+    /// The post at the top of the window: its key and the screen y of its top edge.
+    fn top_post(&self) -> (String, f32) {
+        let id = self.app.tabs[self.app.active].id;
+        let k = self.app.social.anchors[&id].key.clone();
+        let y = self.post_y(&k);
+        (k, y)
+    }
+
+    fn post_y(&self, key: &str) -> f32 {
+        self.app.social.post_rects.iter().find(|(k, _)| k == key).unwrap_or_else(|| panic!("{key} is not in the list")).1.min.y
+    }
+
+    fn posts(&self, feed: &FeedRef) -> Vec<String> {
+        self.app.social.timelines[&(feed.account.clone(), feed.feed.clone())].posts.iter().map(|p| p.id.clone()).collect()
+    }
+}
+
+// spec: SOC-027, SOC-028, SOC-023, SOC-029
+#[test]
+fn new_posts_wait_behind_a_button_and_showing_them_keeps_the_view_still() {
+    let mut w = W::new("newposts");
+    w.scroll(900.0);
+    let (anchor, y0) = w.top_post();
+    assert!(anchor.starts_with('h'), "{anchor}");
+    // "Check now" finds two posts; the list does not change, nor does the view
+    w.script.newer.lock().unwrap().push(("home".into(), fresh(&["n2", "n1"])));
+    w.click("check-now");
+    w.until_waiting(&home(), 2);
+    assert!(w.rects_has("new-posts"));
+    assert_eq!(w.title(0), "Mastodon · Home (2)");
+    assert_eq!(w.posts(&home()).len(), 40);
+    assert!((w.post_y(&anchor) - y0).abs() < 1.0, "the list did not move");
+    // a second check adds to the waiting posts
+    w.script.newer.lock().unwrap().push(("home".into(), fresh(&["n3"])));
+    w.click("check-now");
+    w.until_waiting(&home(), 3);
+    assert!((w.post_y(&anchor) - y0).abs() < 1.0);
+    // clicking the button: the posts go above, the top post of the window stays where it is,
+    // frame by frame
+    let p = w.rect("new-posts").center();
+    w.frame(vec![Event::PointerMoved(p)]);
+    let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    w.frame(vec![b(true)]);
+    w.frame(vec![b(false)]);
+    for i in 0..30 {
+        assert!((w.post_y(&anchor) - y0).abs() < 1.0, "frame {i}: {} vs {y0}", w.post_y(&anchor));
+        w.frames(1);
+    }
+    let shown = w.posts(&home());
+    assert_eq!(&shown[..4], ["n3", "n2", "n1", "h0"], "the new posts are above, newest first");
+    assert!(w.post_y(&key_of("n1")) < y0 - 50.0, "above the window, not in it");
+    assert_eq!(w.title(0), "Mastodon · Home");
+    assert!(!w.rects_has("new-posts"), "the button is gone");
+    // scrolling up now moves the posts as the hand moves; nothing else moves
+    w.scroll(-120.0);
+    assert!((w.post_y(&anchor) - (y0 + 120.0)).abs() < 2.0, "{} vs {}", w.post_y(&anchor), y0 + 120.0);
+    let (anchor2, y2) = w.top_post();
+    w.frames(10);
+    assert!((w.post_y(&anchor2) - y2).abs() < 1.0, "it stays there");
+}
+
+// spec: SOC-028
+#[test]
+fn the_view_stays_still_when_the_height_of_the_new_posts_changes_later() {
+    let mut w = W::new("heights");
+    w.scroll(500.0);
+    let (anchor, y0) = w.top_post();
+    // a new post with a content warning: its height changes when it is opened (as a picture's does when it arrives)
+    let mut cw = post("cw", "carol", 5, None);
+    cw.content_warning = Some("long".into());
+    cw.text_markdown = "a long text. ".repeat(80);
+    w.script.newer.lock().unwrap().push(("home".into(), Fresh { posts: vec![cw.clone(), post("n1", "carol", 4, None)], ..Default::default() }));
+    w.click("check-now");
+    w.until_waiting(&home(), 2);
+    w.click("new-posts");
+    assert!((w.post_y(&anchor) - y0).abs() < 1.0);
+    for open in [true, false, true] {
+        if open {
+            w.app.social.revealed.insert(post_key(&cw));
+        } else {
+            w.app.social.revealed.clear();
+        }
+        for i in 0..5 {
+            w.frames(1);
+            assert!((w.post_y(&anchor) - y0).abs() < 1.0, "open={open} frame {i}: {} vs {y0}", w.post_y(&anchor));
+        }
+    }
+}
+
+// spec: SOC-029
+#[test]
+fn check_now_never_jumps_and_reload_from_the_top_does_replace_the_list() {
+    let mut w = W::new("reload");
+    w.scroll(700.0);
+    let (anchor, y0) = w.top_post();
+    w.click("check-now");
+    w.frames(10);
+    assert_eq!(w.posts(&home()).len(), 40);
+    assert!((w.post_y(&anchor) - y0).abs() < 1.0, "no jump to the top");
+    assert!(!w.rects_has("new-posts"), "nothing new: no button");
+    // the menu next to it
+    *w.script.first_page.lock().unwrap() = Some(Page { posts: feed_posts("r", 12), cursor: None, top: None });
+    w.click("feed-menu");
+    w.click("reload");
+    let start = Instant::now();
+    while w.posts(&home()).first().map(|p| p.as_str()) != Some("r0") {
+        w.frames(1);
+        assert!(start.elapsed() < Duration::from_secs(10), "the first page did not come");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    w.frames(5);
+    assert_eq!(w.posts(&home()).len(), 12);
+    let top = w.post_y(&key_of_h("r0"));
+    assert!(top > 0.0 && top < 200.0, "back at the top: {top}");
+}
+
+fn key_of_h(id: &str) -> String {
+    post_key(&post(id, "bob", 0, None))
+}
+
+impl W {
+    fn rects_has(&self, key: &str) -> bool {
+        self.app.social.rects.iter().any(|r| r.0 == key)
+    }
+}
+
+// spec: SOC-028
+#[test]
+fn the_period_key_shows_the_new_posts_unless_a_dialog_is_open() {
+    let mut w = W::new("key");
+    w.script.newer.lock().unwrap().push(("home".into(), fresh(&["n1"])));
+    w.click("check-now");
+    w.until_waiting(&home(), 1);
+    let key = |pressed| Event::Key { key: egui::Key::Period, physical_key: Some(egui::Key::Period), pressed, repeat: false, modifiers: Modifiers::NONE };
+    w.app.modal = Some(crate::app::Modal::Social(Box::default()));
+    w.frames(3);
+    w.frame(vec![key(true)]);
+    w.frame(vec![key(false)]);
+    w.frames(3);
+    assert_eq!(w.app.social.waiting_count(&home().account, "home"), 1, "a dialog has the keys");
+    w.app.modal = None;
+    w.frames(3);
+    w.frame(vec![key(true)]);
+    w.frame(vec![key(false)]);
+    w.frames(3);
+    assert_eq!(w.posts(&home())[0], "n1");
+    assert_eq!(w.app.social.waiting_count(&home().account, "home"), 0);
+}
+
+// spec: SOC-025, SOC-023
+#[test]
+fn a_feed_in_a_background_tab_is_checked_on_time_and_its_tab_title_shows_the_count() {
+    let mut w = W::new("background");
+    w.click("feed-combo");
+    w.click("feed-new-tab:list:1");
+    assert_eq!(w.app.active, 1);
+    // the first tab (Home) is in the background now: its timer comes due
+    w.script.newer.lock().unwrap().push(("home".into(), fresh(&["n1", "n2", "n3"])));
+    w.script.newer.lock().unwrap().push(("list:1".into(), fresh(&["x1"])));
+    for f in [home(), list()] {
+        w.app.social.timelines.get_mut(&(f.account, f.feed)).unwrap().next_check = Some(Instant::now());
+    }
+    w.until_waiting(&home(), 3);
+    w.until_waiting(&list(), 1);
+    assert_eq!((w.title(0), w.title(1)), ("Mastodon · Home (3)".to_string(), "Mastodon · List: Rust people (1)".to_string()));
+    // switched off in the settings: nothing is asked for any more
+    w.app.cfg.social_check_minutes = 0;
+    w.script.newer.lock().unwrap().push(("home".into(), fresh(&["n9"])));
+    w.app.social.timelines.get_mut(&(home().account, home().feed)).unwrap().next_check = Some(Instant::now());
+    w.frames(10);
+    std::thread::sleep(Duration::from_millis(50));
+    w.frames(5);
+    assert_eq!(w.app.social.waiting_count(&home().account, "home"), 3);
+    // the setting is made in the accounts dialog
+    w.app.social_dialog_action(crate::social::accounts_ui::DialogAction::CheckMinutes(7));
+    assert_eq!(w.app.cfg.social_check_minutes, 7);
+}
+
+// spec: SOC-028
+#[test]
+fn without_a_second_pass_the_view_is_put_back_in_the_next_frame() {
+    let mut w = W::new("onepass");
+    w.ctx.options_mut(|o| o.max_passes = 1.try_into().unwrap());
+    w.scroll(900.0);
+    let (anchor, y0) = w.top_post();
+    w.script.newer.lock().unwrap().push(("home".into(), fresh(&["n2", "n1"])));
+    w.click("check-now");
+    w.until_waiting(&home(), 2);
+    w.click("new-posts");
+    w.frames(3);
+    assert!((w.post_y(&anchor) - y0).abs() < 1.0, "{} vs {y0}", w.post_y(&anchor));
 }

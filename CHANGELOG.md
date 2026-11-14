@@ -91,6 +91,14 @@ The release page of each version on GitHub shows its section from this file.
   from the server's page (or an access token), Bluesky with an app password; secrets go to the
   system keyring. `--view social` and `--view social-import` (with `--screenshot`) show it with
   made-up posts. The `--keys` script got a `scroll:N` step.
+- **Several feeds in tabs, and new posts that wait**: each Feeds tab keeps its own feed, scroll
+  position and history ("New tab" next to each feed in the picker, Shift+click or middle-click),
+  titled "Mastodon · Home" with the number of waiting posts, and open Feeds tabs are restored at
+  the next start. Every 5 minutes (setting in **Accounts…**, 0 = off) the feeds open in tabs look
+  for newer posts and show "N new posts — show" at the top of the list instead of inserting
+  them; clicking it (or `.`) puts them above while the post you were reading stays at the same
+  place on the screen. **Refresh** is now **Check now** (it no longer jumps to the top);
+  **⋯ → Reload from the top** replaces the list.
 - **Drag and drop in the file list**: drag notes, drawings, files or whole folders onto a folder
   to move them there (onto a note: next to it; onto empty space: to the top of the vault). A
   closed folder opens when you hold the pointer on it, the list scrolls at its edges, and links

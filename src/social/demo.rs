@@ -125,6 +125,30 @@ pub fn posts() -> Vec<Post> {
     out
 }
 
+/// Three posts that arrive while the demo runs, newest first (SOC-027).
+pub fn new_posts() -> Vec<Post> {
+    let grace = author("grace@fosstodon.org", "Grace Hopper", 1.3);
+    let ada = author("ada@demo.social", "Ada Demo", 0.4);
+    let mut a = post("demo-new-3", grace, 1, "Just now: the notes app does not need a server, a login or a subscription. It needs a folder.");
+    a.like_count = 2;
+    let b = post("demo-new-2", ada, 3, "Reading in the train. Back in the evening.");
+    let c = post("demo-new-1", author("alan@mathstodon.xyz", "Alan Turing", 0.9), 5, "Does anyone have a good proof that this list is not infinite?");
+    vec![a, b, c]
+}
+
+/// A pretend server for the demo: nothing older than the posts shown, and the first check finds
+/// the posts of `new_posts`.
+pub struct DemoSource;
+
+impl super::state::Source for DemoSource {
+    fn page(&self, _feed: &Feed, _cursor: Option<&str>) -> Result<Page, String> {
+        Ok(Page::default())
+    }
+    fn newer(&self, _feed: &Feed, since: &Since) -> Result<Fresh, String> {
+        Ok(Fresh { posts: new_posts().into_iter().filter(|p| !since.known.contains(&super::state::post_key(p))).collect(), ..Default::default() })
+    }
+}
+
 /// Replies of other people to the demo thread (a small tree).
 pub fn replies() -> Vec<Reply> {
     let mut a = post("demo-reply-1", author("alan@mathstodon.xyz", "Alan Turing", 0.9), 80, "Plain files, yes. I would add: write the *why* next to the *what*.");

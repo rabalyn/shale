@@ -1027,7 +1027,8 @@ impl ShaleApp {
         }
         if let Modal::Social(d) = &mut modal {
             let accounts = self.cfg.social_accounts.clone();
-            let resp = egui::Modal::new(egui::Id::unique("social-accounts")).show(&ctx, |ui| crate::social::accounts_ui::show(ui, d, &accounts));
+            let check_minutes = self.cfg.social_check_minutes;
+            let resp = egui::Modal::new(egui::Id::unique("social-accounts")).show(&ctx, |ui| crate::social::accounts_ui::show(ui, d, &accounts, check_minutes));
             let close_asked = resp.should_close();
             if let Some(a) = resp.inner {
                 if self.social_dialog_action(a) {

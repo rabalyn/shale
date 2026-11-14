@@ -8,12 +8,13 @@ use crate::social::state::FeedsState;
 use crate::social::FeedRef;
 use eframe::egui::{Context, Ui};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 impl ShaleApp {
     /// The Feeds tab on screen: `feed` is what its view says.
     pub fn social_view(&mut self, ui: &mut Ui, feed: Option<FeedRef>) {
         let accounts = self.cfg.social_accounts.clone();
-        let tab = TabCtx { id: self.tabs.get(self.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone() };
+        let tab = TabCtx { id: self.tabs.get(self.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone(), keys: self.modal.is_none() };
         for a in feed_ui::show(ui, &mut self.social, &accounts, &tab) {
             match a {
                 Ask::Accounts => self.open_social_accounts(),
@@ -61,7 +62,10 @@ impl ShaleApp {
         let Some(title) = title else { return "Feeds".into() };
         let shared = accounts.iter().filter(|x| x.account.network == e.account.network).count() > 1;
         let who = if shared { format!("@{}", e.account.handle) } else { e.account.network.label().to_string() };
-        format!("{who} · {title}")
+        match self.social.waiting_count(&f.account, &f.feed) {
+            0 => format!("{who} · {title}"),
+            n => format!("{who} · {title} ({n})"),
+        }
     }
 
     /// The feeds of the open Feeds tabs, in tab order (for the state file).
@@ -82,6 +86,10 @@ impl ShaleApp {
         for m in std::mem::take(&mut self.social.messages) {
             self.toast(m);
         }
+        // the feeds open in tabs look for new posts every few minutes
+        self.social.check_every = Duration::from_secs(u64::from(self.cfg.social_check_minutes) * 60);
+        let (accounts, open) = (self.cfg.social_accounts.clone(), self.open_feed_refs());
+        self.social.tick(ctx, &accounts, &open, Instant::now());
         let free = matches!(self.modal, None | Some(Modal::Import(_)));
         if self.social.saved.is_empty() || !free {
             return;
@@ -110,6 +118,11 @@ impl ShaleApp {
                 }
                 self.save_config();
                 self.toast(format!("Added @{name}"));
+                false
+            }
+            DialogAction::CheckMinutes(m) => {
+                self.cfg.social_check_minutes = m;
+                self.save_config();
                 false
             }
             DialogAction::Remove(id) => {

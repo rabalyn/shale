@@ -245,6 +245,8 @@ pub struct Config {
     pub social_last: Option<(String, String)>,
     /// Include replies from other people when saving a post (the last choice in the Import dialog).
     pub social_replies: bool,
+    /// Minutes between looks for new posts in the feeds open in tabs (0 = never, SOC-025).
+    pub social_check_minutes: u32,
     // Per-vault fields of older versions, read only to move them into the vault that is opened
     // first (CFG-008); dropped from the file after that.
     #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
@@ -293,6 +295,7 @@ impl Default for Config {
             social_accounts: vec![],
             social_last: None,
             social_replies: false,
+            social_check_minutes: 5,
             legacy_open_files: None,
             legacy_last_import_folder: None,
             legacy_recent_tags: None,
@@ -448,6 +451,7 @@ mod tests {
         // an old file has none
         let old: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
         assert!(old.social_accounts.is_empty() && old.social_last.is_none());
+        assert_eq!(old.social_check_minutes, 5, "files from before the checks use the default");
     }
 
     // spec: CFG-002

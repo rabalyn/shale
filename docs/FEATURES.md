@@ -330,7 +330,19 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and your
   saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
   previews have a play mark), quoted posts and link cards. A content warning stays closed until
-  you click Show. The next page loads when you reach the end of the list; Refresh starts over.
+  you click Show. The next page loads when you reach the end of the list.
+- **Several feeds at once**: every Feeds tab has its own feed, scroll position and back/forward
+  history. Next to each feed in the picker, **New tab** (or Shift+click / middle-click on the
+  entry) opens it in another tab; the same feed may be open twice. The tab is called
+  "Mastodon · Home" and gets "(12)" when 12 new posts wait. Open Feeds tabs come back at the next
+  start.
+- **New posts wait, they do not jump in**: every 5 minutes (change it in **Accounts…**, 0 =
+  never) each feed that is open in a tab, also in the background, looks for newer posts. They
+  appear as a button "12 new posts — show" at the top of the list (or press `.`); the list does
+  not change until you click. Then the new posts go above and the post you were reading stays
+  exactly where it is, so you can scroll up slowly. **Check now** looks right away;
+  **⋯ → Reload from the top** replaces the list. If more than 200 posts came in on Bluesky,
+  **Load more in between** fills the gap.
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.

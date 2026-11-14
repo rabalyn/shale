@@ -43,6 +43,8 @@ pub enum DialogAction {
     Added(SocialAccountEntry),
     /// remove the account with this id
     Remove(String),
+    /// the number of minutes between looks for new posts was changed (0 = never)
+    CheckMinutes(u32),
 }
 
 fn spawn(ctx: &egui::Context, f: impl FnOnce() -> JobResult + Send + 'static) -> Receiver<JobResult> {
@@ -166,7 +168,8 @@ impl Default for SocialDialog {
     }
 }
 
-pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry]) -> Option<DialogAction> {
+/// `check_minutes`: how often the feeds open in tabs look for new posts (a setting of the app).
+pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], check_minutes: u32) -> Option<DialogAction> {
     let mut rects: Vec<(String, Rect)> = Vec::new();
     let mut rec = |k: String, r: egui::Response| -> egui::Response {
         rects.push((k, r.rect));
@@ -200,6 +203,14 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry]) 
             });
         });
     }
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(muted("Look for new posts every"));
+        let mut m = check_minutes;
+        if rec("check-minutes".into(), ui.add(egui::DragValue::new(&mut m).range(0..=240).suffix(" min"))).on_hover_text("0 = never. Only feeds open in a tab are checked, and only while Shale runs.").changed() && action.is_none() {
+            action = Some(DialogAction::CheckMinutes(m));
+        }
+    });
     ui.separator();
     // ---- add
     ui.label(egui::RichText::new("Add an account").size(14.0).color(theme::TEXT));
@@ -302,7 +313,7 @@ mod tests {
         let mut res = None;
         let mut out = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                res = show(ui, d, accounts);
+                res = show(ui, d, accounts, 5);
             });
         });
         out.textures_delta.clear();

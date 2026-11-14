@@ -30,6 +30,7 @@ use crate::cal_dav::{self, check_url, same_server, Origin};
 use crate::cal_time as t;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 
 // ---------------------------------------------------------------- data model
 
@@ -216,6 +217,33 @@ pub struct Page {
     pub posts: Vec<Post>,
     /// pass it to `timeline` for the next (older) page; None at the end
     pub cursor: Option<String>,
+    /// Mastodon: the id of the newest timeline entry of the page (a boost has its own id, not the
+    /// one of the post); what the next check for newer posts asks after. None on Bluesky.
+    pub top: Option<String>,
+}
+
+/// The most posts one check for newer posts brings in (SOC-026).
+pub const MAX_NEW: usize = 200;
+
+/// What a check for newer posts is told about the posts already there.
+#[derive(Clone, Debug, Default)]
+pub struct Since {
+    /// Mastodon: the id of the newest timeline entry known (`Page::top`)
+    pub top: Option<String>,
+    /// Bluesky: the keys (`state::post_key`) of the posts known, in the list or waiting
+    pub known: HashSet<String>,
+}
+
+/// What a check for newer posts found.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Fresh {
+    /// the new posts, newest first
+    pub posts: Vec<Post>,
+    /// Mastodon: the id of the newest timeline entry now known
+    pub top: Option<String>,
+    /// Bluesky: the check stopped at its limit before it met a known post; this cursor continues
+    /// below the last of `posts`
+    pub gap: Option<String>,
 }
 
 // ---------------------------------------------------------------- HTTP
@@ -525,6 +553,14 @@ impl Client {
         match &mut self.backend {
             Backend::Mastodon { token } => mastodon::timeline(&self.account.server, token, feed, cursor),
             Backend::Bluesky(api) => bluesky::timeline(api, feed, cursor),
+        }
+    }
+
+    /// The posts newer than the known ones, newest first, at most `MAX_NEW` (see `Fresh`).
+    pub fn newer(&mut self, feed: &Feed, since: &Since) -> Result<Fresh, String> {
+        match &mut self.backend {
+            Backend::Mastodon { token } => mastodon::newer(&self.account.server, token, feed, since.top.as_deref(), MAX_NEW),
+            Backend::Bluesky(api) => bluesky::newer(api, feed, &since.known, MAX_NEW),
         }
     }
 
