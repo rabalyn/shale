@@ -623,6 +623,7 @@ pub(crate) mod tests {
         Command::new("curl").arg("--version").output().is_ok()
     }
 
+    // spec: SEC-001, SEC-004
     #[test]
     fn only_https_or_this_computer() {
         for ok in ["https://dav.example.com/cal/", "HTTPS://Dav.Example.com:8443/x", "http://localhost:5232/", "http://127.0.0.1:1/a", "http://[::1]:8080/", "http://radicale.localhost/"] {
@@ -641,6 +642,7 @@ pub(crate) mod tests {
         assert!(err.contains("https"), "{err}");
     }
 
+    // spec: SEC-001
     #[test]
     fn headers_with_line_breaks_are_refused() {
         let acct = Account { url: String::new(), username: "ada".into(), password: "pw".into() };
@@ -652,6 +654,7 @@ pub(crate) mod tests {
         assert!(request("PROPFIND", "http://127.0.0.1:1/", "0", "", &bad_user).is_err());
     }
 
+    // spec: SEC-007
     #[test]
     fn passwords_stay_out_of_debug_output() {
         let acct = Account { url: "https://x".into(), username: "ada".into(), password: "hunter2".into() };
@@ -659,6 +662,7 @@ pub(crate) mod tests {
         assert!(!s.contains("hunter2") && s.contains("***"), "{s}");
     }
 
+    // spec: SEC-001
     #[test]
     fn xml_and_addresses() {
         let x = r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/cal/work/</d:href><d:propstat><d:prop><d:displayname>Work &amp; more</d:displayname><d:resourcetype><d:collection/><cal:calendar xmlns:cal="urn:ietf:params:xml:ns:caldav"/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response><d:response><d:href>/cal/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response></d:multistatus>"#;
@@ -676,6 +680,7 @@ pub(crate) mod tests {
         assert!(calendars_in(&responses(&parse(other_ns).unwrap()), "https://h.example/").0.is_empty());
     }
 
+    // spec: CAL-002
     #[test]
     fn task_lists_and_read_only_calendars() {
         let x = r##"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/">
@@ -692,6 +697,7 @@ pub(crate) mod tests {
         assert_eq!((found[1].name.as_str(), found[1].read_only), ("work", false));
     }
 
+    // spec: SEC-008
     #[test]
     fn event_files_never_collide() {
         assert_eq!(event_file("abc-123@x"), event_file("abc-123@x"));
@@ -800,6 +806,7 @@ pub(crate) mod tests {
         (base, h)
     }
 
+    // spec: CAL-002, SEC-002
     #[test]
     fn discovers_and_fetches_from_a_server() {
         if !has_curl() {
@@ -821,6 +828,7 @@ pub(crate) mod tests {
         assert_eq!(seen.len(), 4);
     }
 
+    // spec: CAL-004, CAL-011
     #[test]
     fn writes_and_removes_events() {
         if !has_curl() {
@@ -869,6 +877,7 @@ pub(crate) mod tests {
         assert_eq!(h.join().unwrap().len(), 5);
     }
 
+    // spec: CAL-004
     #[test]
     fn headers_come_from_the_last_answer() {
         assert_eq!(last_header("HTTP/1.1 301 Moved\r\nETag: \"old\"\r\nLocation: /b\r\n\r\nHTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\netag: \"new\"\r\n\r\n", "etag").as_deref(), Some("\"new\""));
@@ -886,6 +895,7 @@ pub(crate) mod tests {
         assert_eq!(r.body, "<x>HTTP/1.1 200 OK\r\n\r\nnot a header</x>");
     }
 
+    // spec: CAL-004
     #[test]
     fn fetched_events_know_their_address() {
         if !has_curl() {
@@ -919,6 +929,7 @@ END:VCALENDAR
         assert_eq!((ev[1].href.as_deref(), ev[1].etag.as_deref()), (None, None), "an address on another server is not kept");
     }
 
+    // spec: CAL-002
     #[test]
     fn calendar_state_reads_tag_and_permission() {
         if !has_curl() {
@@ -932,6 +943,7 @@ END:VCALENDAR
         assert_eq!(st, CalState { tag: Some("ctag:42".into()), read_only: Some(true) });
     }
 
+    // spec: CAL-010
     #[test]
     fn unreachable_server_is_an_error() {
         if !has_curl() {

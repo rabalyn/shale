@@ -207,6 +207,7 @@ impl Config {
 mod tests {
     use super::*;
 
+    // spec: CFG-001
     #[test]
     fn old_config_files_still_load() {
         let c: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
@@ -217,6 +218,7 @@ mod tests {
         assert_eq!(c.file_sort, FileSort::NameAsc);
     }
 
+    // spec: CFG-002
     #[test]
     fn private_files_are_owner_only_and_replaced_whole() {
         let dir = std::env::temp_dir().join(format!("shale-private-{}", std::process::id()));
@@ -235,6 +237,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // spec: VAULT-006
     #[test]
     fn recent_list_is_unique() {
         let mut c = Config::default();

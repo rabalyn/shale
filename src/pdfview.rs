@@ -131,6 +131,7 @@ pub(crate) fn sample_pdf() -> Vec<u8> {
 mod tests {
     use super::*;
 
+    // spec: PDF-002
     #[test]
     fn renders_pages() {
         let r = render_pages(sample_pdf(), 2, 1.0).unwrap();
@@ -140,6 +141,7 @@ mod tests {
         assert!(render_pages(b"not a pdf".to_vec(), 1, 1.0).is_err());
     }
 
+    // spec: JOB-001, PDF-002
     #[test]
     fn background_rendering_becomes_ready() {
         let dir = std::env::temp_dir().join(format!("shale-pdfview-{}", std::process::id()));

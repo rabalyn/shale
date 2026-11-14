@@ -15,9 +15,19 @@ The release page of each version on GitHub shows its section from this file.
   to move them there (onto a note: next to it; onto empty space: to the top of the vault). A
   closed folder opens when you hold the pointer on it, the list scrolls at its edges, and links
   written as a path to anything that moved are updated (links by name keep working anyway).
+- **Obsidian Excalidraw drawings** (`.excalidraw.md`) open in the drawing editor instead of as a
+  note, also when their data is compressed. Saving keeps the plugin's file layout (front
+  matter, compression, embedded files) and updates its text list, so Obsidian keeps reading the
+  drawing. `[[Drawing.excalidraw]]` links and embeds find these files.
 - **Ctrl+H / Ctrl+L** (like vim's h / l) open the note before / after the current one in its
   folder, in the file list's sort order (by name or by date); attachments are skipped. At the
   first or last note a short message says so.
+
+### Fixed
+
+- Opening a drawing with arrows no longer rewrites its file; only an edit does.
+- A drawing file that can't be read now opens read-only with the reason, instead of as an empty
+  drawing that would replace the file on the first edit.
 
 ### Changed
 

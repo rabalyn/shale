@@ -688,6 +688,7 @@ pub fn display_name(addr: &str) -> String {
 pub(crate) mod tests {
     use super::*;
 
+    // spec: IMP-010
     #[test]
     fn decoders() {
         assert_eq!(base64_decode(b"SGFsbG8g\r\nV2VsdA=="), b"Hallo Welt");
@@ -700,6 +701,7 @@ pub(crate) mod tests {
         assert_eq!(decode_charset(&[0xFC], "utf-8"), "ü", "broken UTF-8 is read as Windows-1252");
     }
 
+    // spec: IMP-010
     #[test]
     fn params_and_dates() {
         let (m, p) = parse_params("attachment; filename*0*=UTF-8''Grundri%C3%9F%20EG; filename*1*=%2Epdf");
@@ -716,6 +718,7 @@ pub(crate) mod tests {
         assert_eq!(parse_date("nonsense"), None);
     }
 
+    // spec: IMP-010
     #[test]
     fn html_mails_become_readable_text() {
         let t = html_to_text("<html><head><style>p{color:red}</style></head><body><p>Hallo&nbsp;Team,</p><p>die <b>Pläne</b> sind\n  da:<br>Bau&nbsp;B</p><ul><li>Beamer</li><li>Audio</li></ul><a href=\"https://example.org/x\">Link</a><!-- x --></body></html>");
@@ -781,6 +784,7 @@ Text\r\n\
         .into_bytes()
     }
 
+    // spec: IMP-010
     #[test]
     fn a_thunderbird_message_with_attachments() {
         let m = parse(&sample_eml());
@@ -798,6 +802,7 @@ Text\r\n\
         assert_eq!(m.attachments[0].data, b"\x89PNG\r\n\x1a\n");
     }
 
+    // spec: IMP-010
     #[test]
     fn html_only_and_single_part_messages() {
         let m = parse(b"Subject: Hi\nContent-Type: text/html; charset=iso-8859-1\nContent-Transfer-Encoding: quoted-printable\n\n<div>Gr=FC=DFe</div>");

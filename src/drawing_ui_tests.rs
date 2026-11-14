@@ -68,6 +68,7 @@ fn el<'a>(d: &'a DrawingDoc, id: &str) -> &'a Element {
     d.scene.elements.iter().find(|e| e.id == id).unwrap()
 }
 
+// spec: DRAW-005
 #[test]
 fn stroke_color_buttons() {
     let (mut h, mut d) = setup();
@@ -77,6 +78,7 @@ fn stroke_color_buttons() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn shape_background_buttons() {
     let (mut h, mut d) = setup();
@@ -86,6 +88,7 @@ fn shape_background_buttons() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn fill_buttons() {
     let (mut h, mut d) = setup();
@@ -95,6 +98,7 @@ fn fill_buttons() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn stroke_width_buttons_and_slider() {
     let (mut h, mut d) = setup();
@@ -107,6 +111,7 @@ fn stroke_width_buttons_and_slider() {
     assert!(el(&d, "s1").stroke_width < 1.0, "slider at the left end sets a thin line, got {}", el(&d, "s1").stroke_width);
 }
 
+// spec: DRAW-005
 #[test]
 fn outline_pattern_dropdown() {
     let (mut h, mut d) = setup();
@@ -117,6 +122,7 @@ fn outline_pattern_dropdown() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn sloppiness_buttons() {
     let (mut h, mut d) = setup();
@@ -126,6 +132,7 @@ fn sloppiness_buttons() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn corner_buttons() {
     let (mut h, mut d) = setup();
@@ -135,6 +142,7 @@ fn corner_buttons() {
     assert_eq!(el(&d, "s1").extra["roundness"]["type"], 3);
 }
 
+// spec: DRAW-005
 #[test]
 fn label_font_buttons() {
     let (mut h, mut d) = setup();
@@ -144,6 +152,7 @@ fn label_font_buttons() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn label_size_buttons() {
     let (mut h, mut d) = setup();
@@ -153,6 +162,7 @@ fn label_size_buttons() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn label_text_color_buttons() {
     let (mut h, mut d) = setup();
@@ -162,6 +172,7 @@ fn label_text_color_buttons() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn label_background_buttons() {
     let (mut h, mut d) = setup();
@@ -171,6 +182,7 @@ fn label_background_buttons() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn label_align_buttons() {
     let (mut h, mut d) = setup();
@@ -180,6 +192,7 @@ fn label_align_buttons() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn opacity_slider() {
     let (mut h, mut d) = setup();
@@ -188,6 +201,7 @@ fn opacity_slider() {
     assert!(el(&d, "s1").opacity < 50.0, "opacity slider moved to the left end, got {}", el(&d, "s1").opacity);
 }
 
+// spec: DRAW-005
 #[test]
 fn action_to_front_and_to_back() {
     let (mut h, mut d) = setup();
@@ -199,6 +213,7 @@ fn action_to_front_and_to_back() {
     assert_eq!(pos(&d, "s1"), 0, "rectangle at the back");
 }
 
+// spec: DRAW-005
 #[test]
 fn action_duplicate() {
     let (mut h, mut d) = setup();
@@ -208,6 +223,7 @@ fn action_duplicate() {
     assert_ne!(d.selection, vec!["s1".to_string()], "the copy is selected");
 }
 
+// spec: DRAW-005
 #[test]
 fn action_remove() {
     let (mut h, mut d) = setup();
@@ -216,6 +232,7 @@ fn action_remove() {
     assert!(el(&d, "s2").is_deleted, "its label goes too");
 }
 
+// spec: DRAW-005
 #[test]
 fn action_edit_label() {
     let (mut h, mut d) = setup();
@@ -223,6 +240,7 @@ fn action_edit_label() {
     assert_eq!(d.editing_text.as_deref(), Some("s2"));
 }
 
+// spec: DRAW-005
 #[test]
 fn line_end_dropdowns() {
     let (mut h, mut d) = setup();
@@ -238,6 +256,7 @@ fn line_end_dropdowns() {
     }
 }
 
+// spec: DRAW-005
 #[test]
 fn clicking_the_panel_background_keeps_the_selection() {
     let (mut h, mut d) = setup();
@@ -246,6 +265,7 @@ fn clicking_the_panel_background_keeps_the_selection() {
     assert_eq!(d.selection, vec!["s1".to_string()], "a click on the panel must not reach the canvas");
 }
 
+// spec: DRAW-005
 #[test]
 fn toolbar_buttons() {
     let (mut h, mut d) = setup();
@@ -260,6 +280,7 @@ fn toolbar_buttons() {
     assert!(!d.tool_locked);
 }
 
+// spec: DRAW-005
 #[test]
 fn zoom_buttons() {
     let (mut h, mut d) = setup();
@@ -277,6 +298,7 @@ fn zoom_buttons() {
     assert!(view.to_screen(b.center()).x < 1400.0, "fit brings the drawing back into view");
 }
 
+// spec: DRAW-005
 #[test]
 fn undo_and_redo_buttons() {
     let (mut h, mut d) = setup();
@@ -288,6 +310,7 @@ fn undo_and_redo_buttons() {
     assert_eq!(el(&d, "s1").stroke_color, "#e03131", "redo button");
 }
 
+// spec: DRAW-005
 #[test]
 fn arrange_buttons() {
     let (mut h, mut d) = setup();
@@ -302,4 +325,29 @@ fn arrange_buttons() {
     assert!(centre_gap(&d) < spread - 10.0, "pull together");
     h.click(&mut d, "arrange");
     assert!(d.layout_msg.as_deref().unwrap_or("").starts_with("Arranged"), "auto arrange: {:?}", d.layout_msg);
+}
+
+// spec: DRAW-008, DRAW-009
+#[test]
+fn opening_a_drawing_changes_nothing_until_it_is_edited() {
+    let mut h = H::new();
+    // Shale's own format and an Obsidian plugin drawing (with an arrow bound to two shapes)
+    for (name, text) in [("ui.excalidraw", SAMPLE_SCENE), ("Plan.excalidraw.md", include_str!("testdata/plugin-drawing.excalidraw.md"))] {
+        let mut d = DrawingDoc::new(PathBuf::from(name), text);
+        assert!(d.error.is_none(), "{name}: {:?}", d.error);
+        h.settle(&mut d);
+        assert!(!d.dirty, "{name}: just looking at it must not count as a change");
+        // a real edit does, and the plugin drawing is saved in the plugin's layout
+        let shape = d.scene.live().find(|e| e.kind == "rectangle").unwrap().id.clone();
+        d.selection = vec![shape.clone()];
+        h.settle(&mut d);
+        h.click(&mut d, "stroke:#e03131");
+        assert!(d.dirty, "{name}: an edit is a change");
+        let saved = d.file_text().unwrap();
+        let back = Scene::from_file_text(Path::new(name), &saved).unwrap();
+        assert_eq!(back.live().find(|e| e.id == shape).unwrap().stroke_color, "#e03131");
+        if name.ends_with(".md") {
+            assert!(saved.starts_with("---\n\nexcalidraw-plugin: parsed") && saved.contains("## Text Elements\nrectangle ^"));
+        }
+    }
 }

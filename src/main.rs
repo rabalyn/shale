@@ -15,6 +15,7 @@ mod cal_ui;
 mod cal_time;
 mod config;
 mod drawing;
+mod excalidraw_md;
 mod drawing_layout;
 mod editor;
 mod export_dialog;
@@ -33,6 +34,8 @@ mod pdfwrite;
 mod people;
 mod reader;
 mod theme;
+#[cfg(test)]
+mod notes_vault_tests;
 #[cfg(test)]
 mod utf8_tests;
 mod secrets;

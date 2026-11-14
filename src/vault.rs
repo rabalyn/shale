@@ -30,7 +30,7 @@ impl FileEntry {
     pub fn display_name(&self) -> String {
         match self.kind {
             FileKind::Note => self.link_name.clone(),
-            FileKind::Drawing => self.link_name.trim_end_matches(".excalidraw").to_string(),
+            FileKind::Drawing => crate::excalidraw_md::drawing_stem(&self.link_name).to_string(),
             FileKind::Other => self.link_name.clone(),
         }
     }
@@ -66,10 +66,10 @@ pub fn rel_to_string(p: &Path) -> String {
 
 fn kind_of(path: &Path) -> FileKind {
     let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-    if name.ends_with(".md") {
-        FileKind::Note
-    } else if name.ends_with(".excalidraw") {
+    if crate::excalidraw_md::is_drawing_path(path) {
         FileKind::Drawing
+    } else if name.ends_with(".md") {
+        FileKind::Note
     } else {
         FileKind::Other
     }
@@ -79,6 +79,8 @@ fn link_name_of(path: &Path, kind: FileKind) -> String {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     match kind {
         FileKind::Note => markdown::strip_md_ext(&name).to_string(),
+        // Obsidian links to `Plan.excalidraw.md` as `[[Plan.excalidraw]]`
+        FileKind::Drawing => crate::excalidraw_md::strip_suffix_ci(&name, ".md").unwrap_or(&name).to_string(),
         _ => name,
     }
 }
@@ -163,10 +165,9 @@ impl Vault {
         self.name_index.clear();
         for f in &self.files {
             self.name_index.entry(f.link_name.to_lowercase()).or_default().push(f.rel.clone());
-            if f.kind == FileKind::Note {
-                // `Sketch.excalidraw.md` is reachable as `Sketch.excalidraw` already by stem;
-                // also allow the full file name `Note.md`.
-                let full = f.rel.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            // also allow the full file name (`Note.md`, `Plan.excalidraw.md`)
+            let full = f.rel.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            if full != f.link_name.to_lowercase() {
                 self.name_index.entry(full).or_default().push(f.rel.clone());
             }
         }
@@ -396,13 +397,16 @@ impl Vault {
         for p in parts {
             dir.push(p);
         }
-        let is_drawing = file.to_lowercase().ends_with(".excalidraw");
-        let file_name = if is_drawing { file.clone() } else { format!("{}.md", markdown::strip_md_ext(&file)) };
-        let mut candidate = dir.join(&file_name);
+        let (stem, ext) = if let Some(s) = crate::excalidraw_md::strip_suffix_ci(&file, ".excalidraw.md") {
+            (s.to_string(), "excalidraw.md")
+        } else if let Some(s) = crate::excalidraw_md::strip_suffix_ci(&file, ".excalidraw") {
+            (s.to_string(), "excalidraw")
+        } else {
+            (markdown::strip_md_ext(&file).to_string(), "md")
+        };
+        let mut candidate = dir.join(format!("{stem}.{ext}"));
         let mut i = 1;
         while self.abs(&candidate).exists() {
-            let stem = if is_drawing { file.trim_end_matches(".excalidraw").to_string() } else { markdown::strip_md_ext(&file).to_string() };
-            let ext = if is_drawing { "excalidraw" } else { "md" };
             candidate = dir.join(format!("{stem} {i}.{ext}"));
             i += 1;
         }
@@ -705,6 +709,7 @@ mod tests {
         d
     }
 
+    // spec: LINK-002, LINK-003, LINK-007, VAULT-002
     #[test]
     fn resolve_and_backlinks() {
         let d = temp_vault("resolve");
@@ -724,6 +729,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    // spec: TASK-003
     #[test]
     fn tasks_across_vault() {
         let d = temp_vault("tasks");
@@ -736,6 +742,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    // spec: VAULT-011, VAULT-013, VAULT-017
     #[test]
     fn create_from_missing_link_and_rename() {
         let d = temp_vault("rename");
@@ -762,6 +769,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    // spec: LINK-011
     #[test]
     fn graph_has_edges() {
         let d = temp_vault("graph");
@@ -773,6 +781,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    // spec: VAULT-005, DATA-002
     #[test]
     fn outside_change_is_detected() {
         let d = temp_vault("outside");

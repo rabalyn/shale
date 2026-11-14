@@ -54,7 +54,7 @@ Drawings are **not** the Excalidraw web app. There is no browser view, no JavaSc
 - **Editor**: tools (hand, select, rectangle, diamond, ellipse, arrow, line, pen, text, eraser), selection and resize, a style panel, undo and redo, pan and zoom, a dark canvas.
 - **Code layout**: `src/drawing.rs` (file format, rendering, editor core), `src/drawing_connect.rs` (labels, connections, line endings, style panel, arrange buttons; a child module so it can use the editor's internals), `src/drawing_layout.rs` (pure geometry: anchors, crossing count, auto layout, spread).
 - **In notes**: `![[Sketch.excalidraw]]` renders the same shapes as a thumbnail in the reading view.
-- **Not covered yet**: images, frames, groups, elbow (right-angled) arrows, labels on arrows, rotation handles, export to PNG/SVG, and the Excalidraw plugin's `.excalidraw.md` files (see "Missing / next steps"). Unknown element types are drawn as a dashed box and kept in the file unchanged.
+- **Not covered yet**: images, frames, groups, elbow (right-angled) arrows, labels on arrows, rotation handles, export to PNG/SVG. The Obsidian plugin's `.excalidraw.md` files are read and written by `src/excalidraw_md.rs`. Unknown element types are drawn as a dashed box and kept in the file unchanged.
 
 Dependencies of the whole app are only `eframe`/egui (window and UI), `serde`/`serde_json` (files), `dirs` (config and cache folders), `image` (pictures and screenshots) and `libc` on Unix (local date).
 
@@ -238,7 +238,7 @@ Not covered by automated tests yet: drag gestures in the drawing canvas, the gra
 
 - Calendar: changing a single date of a repeating event (edits apply to the whole series; deleting removes the series), dragging events to move or resize them, a time picker (times are typed, e.g. 9:30), reminders, VTIMEZONE blocks with non-Olson names (such zones are treated as local time), BYMONTHDAY/BYSETPOS-style rules, and linking events to notes (for example daily notes).
 
-1. **Excalidraw plugin files** (`.excalidraw.md` with compressed JSON): these are currently treated as plain notes. Opening them would need LZ-String decompression and the plugin's markdown layout.
+1. ~~**Excalidraw plugin files**~~: done (`src/excalidraw_md.rs`, specs DRAW-007 to DRAW-010). Still open: links and pictures inside them.
 2. **Drawing features**: arrow binding to shapes, multi-point lines (click-to-add points), rotation handles, text inside shapes (`containerId`), images, groups, copy and paste between drawings, export to PNG or SVG, and a hand-drawn font (text uses the UI font).
 3. **Editor**: images shown inside the editor itself (now only in the reading view and on hover), `[!/` cannot reach folders outside the vault and home (for example `/mnt`) — add a prefix for that if needed, drag-and-drop or paste of images into notes, blockquote continuation on Enter, a setting for indent width or tabs, true live-preview (hiding syntax on lines without the cursor), bold font weight (bold is shown brighter and slightly spaced because the default font has no bold), tables, images in notes (`![[pic.png]]`), auto-pairing brackets, find and replace inside a note, spell check.
 4. **Links**: links to blocks (`#^id`), heading links that scroll in the reading view (they scroll in the editor), hover previews of linked notes.

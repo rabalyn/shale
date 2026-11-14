@@ -392,6 +392,7 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
 mod tests {
     use super::*;
 
+    // spec: IMP-009
     #[test]
     fn picks_the_most_useful_kind() {
         let o = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
@@ -406,6 +407,7 @@ mod tests {
         assert!(early("text/uri-list") && early("text/x-moz-url"), "everything is asked for while dragging");
     }
 
+    // spec: IMP-009
     #[test]
     fn reads_several_transfers_at_once_with_a_time_limit() {
         let pipe = || {

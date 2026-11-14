@@ -301,6 +301,8 @@ impl ShaleApp {
                 Some("tasks") => app.show_view(View::Tasks, false),
                 Some("graph") => app.show_view(View::Graph, false),
                 Some("drawing") => app.open(Path::new("Sketch.excalidraw"), false),
+                // any file of the vault, e.g. `--view "open:Excalidraw/Plan.excalidraw.md"`
+                Some(v) if v.starts_with("open:") => app.open(Path::new(&v["open:".len()..]), false),
                 Some("reading") => {
                     if let Some(t) = app.tabs.get_mut(app.active) {
                         t.reading = true;
@@ -428,8 +430,12 @@ impl ShaleApp {
             }
             FileKind::Drawing => {
                 if !self.drawings.contains_key(rel) {
-                    let json = std::fs::read_to_string(v.abs(rel)).unwrap_or_default();
-                    self.drawings.insert(rel.to_path_buf(), DrawingDoc::new(rel.to_path_buf(), &json));
+                    // a file that can't be read opens read-only (never an empty drawing that overwrites it)
+                    let doc = match std::fs::read_to_string(v.abs(rel)) {
+                        Ok(text) => DrawingDoc::new(rel.to_path_buf(), &text),
+                        Err(e) => DrawingDoc::unreadable(rel.to_path_buf(), &e.to_string()),
+                    };
+                    self.drawings.insert(rel.to_path_buf(), doc);
                 }
                 self.show_view(View::Drawing(rel.to_path_buf()), new_tab);
             }
@@ -473,8 +479,13 @@ impl ShaleApp {
     pub fn create_note(&mut self, folder: &Path, name: &str, new_tab: bool) -> Option<PathBuf> {
         let v = self.vault.as_mut()?;
         let rel = v.new_note_path(folder, name);
-        let is_drawing = rel.extension().map(|e| e == "excalidraw").unwrap_or(false);
-        let content = if is_drawing { crate::drawing::Scene::default().to_json() } else { String::new() };
+        let content = if crate::excalidraw_md::is_plugin_file(&rel) {
+            crate::excalidraw_md::new_file(&crate::drawing::Scene::default())
+        } else if crate::excalidraw_md::is_drawing_path(&rel) {
+            crate::drawing::Scene::default().to_json()
+        } else {
+            String::new()
+        };
         match v.create_file(&rel, &content) {
             Ok(rel) => {
                 let shown = v.file(&rel).map(|f| f.display_name()).unwrap_or_default();
@@ -558,10 +569,14 @@ impl ShaleApp {
         }
         for (rel, d) in self.drawings.iter_mut() {
             if d.dirty {
-                let json = d.scene.to_json();
-                if v.write_raw(rel, &json).is_ok() {
-                    d.dirty = false;
-                    self.scenes.put(rel, d.scene.clone());
+                match d.file_text() {
+                    Ok(text) => {
+                        if v.write_raw(rel, &text).is_ok() {
+                            d.dirty = false;
+                            self.scenes.put(rel, d.scene.clone());
+                        }
+                    }
+                    Err(e) => eprintln!("save failed for {}: {e}", rel_to_string(rel)),
                 }
             }
         }
@@ -579,10 +594,11 @@ impl ShaleApp {
         }
         for (rel, d) in self.drawings.iter_mut() {
             if d.dirty && d.last_edit.elapsed() > wait {
-                let json = d.scene.to_json();
-                if v.write_raw(rel, &json).is_ok() {
-                    d.dirty = false;
-                    self.scenes.put(rel, d.scene.clone());
+                if let Ok(text) = d.file_text() {
+                    if v.write_raw(rel, &text).is_ok() {
+                        d.dirty = false;
+                        self.scenes.put(rel, d.scene.clone());
+                    }
                 }
             }
         }
@@ -624,10 +640,12 @@ impl ShaleApp {
         let file_name = match kind {
             Some(FileKind::Note) => format!("{}.md", markdown::strip_md_ext(&new_name)),
             Some(FileKind::Drawing) => {
-                if new_name.to_lowercase().ends_with(".excalidraw") {
-                    new_name.clone()
+                // keep the format: an Obsidian `.excalidraw.md` drawing stays one
+                let stem = crate::excalidraw_md::drawing_stem(&new_name);
+                if crate::excalidraw_md::is_plugin_file(rel) {
+                    format!("{stem}.excalidraw.md")
                 } else {
-                    format!("{new_name}.excalidraw")
+                    format!("{stem}.excalidraw")
                 }
             }
             _ => new_name.clone(),
@@ -851,7 +869,7 @@ impl ShaleApp {
         let drawing = f.kind == FileKind::Drawing;
         let name = f.display_name();
         let opts = if drawing {
-            let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| std::fs::read_to_string(v.abs(rel)).ok().and_then(|s| crate::drawing::Scene::parse(&s).ok())).unwrap_or_default();
+            let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| crate::drawing::Scene::read_file(&v.abs(rel)).ok()).unwrap_or_default();
             crate::pdfexport::ExportOptions::for_drawing(&scene)
         } else {
             crate::pdfexport::ExportOptions::for_note()
@@ -867,7 +885,7 @@ impl ShaleApp {
         let bytes = if d.drawing {
             let scene = match self.drawings.get(&d.rel) {
                 Some(doc) => doc.scene.clone(),
-                None => crate::drawing::Scene::parse(&std::fs::read_to_string(v.abs(&d.rel)).map_err(|e| e.to_string())?)?,
+                None => crate::drawing::Scene::read_file(&v.abs(&d.rel))?,
             };
             crate::pdfexport::export_drawing(&scene, &d.name, &d.opts)?
         } else {
@@ -1325,6 +1343,7 @@ mod tests {
         (app, d)
     }
 
+    // spec: LINK-005, NAV-001
     #[test]
     fn blue_link_opens_existing_note() {
         let (mut app, d) = test_app("open");
@@ -1336,6 +1355,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: LINK-005
     #[test]
     fn red_link_creates_note_and_turns_blue() {
         let (mut app, d) = test_app("create");
@@ -1353,6 +1373,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: TASK-003
     #[test]
     fn task_toggle_and_drawing_embed() {
         let (mut app, d) = test_app("tasks");
@@ -1370,6 +1391,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: VAULT-013
     #[test]
     fn rename_keeps_open_buffers_in_step() {
         let (mut app, d) = test_app("rename");
@@ -1393,6 +1415,7 @@ mod export_tests {
         (ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false), d)
     }
 
+    // spec: PDF-003
     #[test]
     fn export_menu_entry_opens_the_dialog_and_writes_a_pdf() {
         for (rel, tag) in [("Welcome.md", "note"), ("Sketch.excalidraw", "drawing")] {
@@ -1412,6 +1435,7 @@ mod export_tests {
         }
     }
 
+    // spec: PDF-001
     #[test]
     fn export_reports_a_bad_path() {
         let (mut app, d) = test_app("badpath");

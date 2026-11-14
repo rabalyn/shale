@@ -80,5 +80,11 @@ The mouse wheel pans and Ctrl+wheel zooms. Hold Space and drag to pan.
 cargo test
 ```
 
+The tests also run against a real vault if there is one: put notes, drawings and files into
+`notes/` next to `Cargo.toml` (it is not committed), or point `SHALE_TEST_VAULT` at a folder.
+Each test works on a copy, so the vault itself is never changed. Without such a folder those
+tests pass with a note.
+
 See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for what is done, what is tested and what is
-still missing.
+still missing. What Shale guarantees is in the specs ([docs/spec/](docs/spec/README.md)), and
+why it is built that way is in the decision records ([docs/decisions/](docs/decisions/README.md)).

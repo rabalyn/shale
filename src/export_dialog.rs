@@ -182,6 +182,7 @@ mod tests {
         (h, d)
     }
 
+    // spec: PDF-001
     #[test]
     fn note_dialog_controls() {
         let (mut h, mut d) = setup(false);
@@ -213,6 +214,7 @@ mod tests {
         assert_eq!(h.last, DialogResult::Cancel);
     }
 
+    // spec: PDF-001
     #[test]
     fn drawing_dialog_controls() {
         let (mut h, mut d) = setup(true);

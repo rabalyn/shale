@@ -32,8 +32,7 @@ impl SceneCache {
         let mtime = std::fs::metadata(&abs).and_then(|m| m.modified()).ok();
         let stale = self.map.get(rel).map(|(m, _)| *m != mtime).unwrap_or(true);
         if stale {
-            let text = std::fs::read_to_string(&abs).ok()?;
-            let scene = Scene::parse(&text).ok()?;
+            let scene = Scene::read_file(&abs).ok()?;
             self.map.insert(rel.to_path_buf(), (mtime, scene));
         }
         self.map.get(rel).map(|(_, s)| s)
@@ -50,7 +49,7 @@ pub fn scene_cached(ctx: &egui::Context, abs: &Path) -> Option<std::sync::Arc<Sc
     if let Some(s) = ctx.data(|d| d.get_temp::<Option<std::sync::Arc<Scene>>>(id)) {
         return s;
     }
-    let scene = std::fs::read_to_string(abs).ok().and_then(|t| Scene::parse(&t).ok()).map(std::sync::Arc::new);
+    let scene = Scene::read_file(abs).ok().map(std::sync::Arc::new);
     ctx.data_mut(|d| d.insert_temp(id, scene.clone()));
     scene
 }

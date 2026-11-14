@@ -4,7 +4,7 @@
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Key, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 #[path = "drawing_connect.rs"]
@@ -137,6 +137,20 @@ impl Scene {
     }
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_default()
+    }
+    /// The scene of a drawing file's text: `.excalidraw` JSON, or a `.excalidraw.md` file of the
+    /// Obsidian Excalidraw plugin.
+    pub fn from_file_text(path: &Path, text: &str) -> Result<Scene, String> {
+        if crate::excalidraw_md::is_plugin_file(path) {
+            crate::excalidraw_md::read(text)
+        } else {
+            Scene::parse(text)
+        }
+    }
+    /// Read a drawing file (any of the two formats).
+    pub fn read_file(abs: &Path) -> Result<Scene, String> {
+        let text = std::fs::read_to_string(abs).map_err(|e| e.to_string())?;
+        Scene::from_file_text(abs, &text)
     }
     pub fn live(&self) -> impl Iterator<Item = &Element> {
         self.elements.iter().filter(|e| !e.is_deleted)
@@ -724,15 +738,23 @@ pub struct DrawingDoc {
     props_rect: Option<Rect>,
     /// screen rect of every button / control drawn this frame, by name (used by the UI tests)
     pub ui_rects: Vec<(String, Rect)>,
+    /// for an Obsidian `.excalidraw.md` drawing: the file as read (its layout is kept on save)
+    plugin_file: Option<String>,
+    /// the first frame (which tidies bindings without counting as an edit) is done
+    settled: bool,
 }
 
 impl DrawingDoc {
-    pub fn new(rel: PathBuf, json: &str) -> DrawingDoc {
-        let (scene, error) = match Scene::parse(json) {
+    /// `text` is the file's content (`.excalidraw` JSON or an Obsidian `.excalidraw.md` file).
+    pub fn new(rel: PathBuf, text: &str) -> DrawingDoc {
+        let (scene, error) = match Scene::from_file_text(&rel, text) {
             Ok(s) => (s, None),
             Err(e) => (Scene::default(), Some(format!("Could not read this drawing: {e}"))),
         };
+        let plugin_file = crate::excalidraw_md::is_plugin_file(&rel).then(|| text.to_string());
         DrawingDoc {
+            plugin_file,
+            settled: false,
             rel,
             scene,
             error,
@@ -766,6 +788,24 @@ impl DrawingDoc {
             self.undo.remove(0);
         }
         self.redo.clear();
+    }
+
+    /// A file that could not be read: shown with the reason, never written.
+    pub fn unreadable(rel: PathBuf, why: &str) -> DrawingDoc {
+        let mut d = DrawingDoc::new(rel, "");
+        d.error = Some(format!("Could not read this drawing: {why}"));
+        d
+    }
+
+    /// What to write to the file: JSON, or the Obsidian plugin's markdown layout.
+    pub fn file_text(&self) -> Result<String, String> {
+        if self.error.is_some() {
+            return Err("the drawing could not be read, so it is not written".into());
+        }
+        match &self.plugin_file {
+            Some(original) => crate::excalidraw_md::write(original, &self.scene),
+            None => Ok(self.scene.to_json()),
+        }
     }
 
     fn changed(&mut self) {
@@ -976,6 +1016,10 @@ impl DrawingDoc {
                 e.width = galley.size().x as f64;
                 e.height = galley.size().y as f64;
                 e.extra.insert("originalText".into(), json!(text.clone()));
+                // the Obsidian plugin keeps the text with link markup here; keep it in step
+                if e.extra.contains_key("rawText") {
+                    e.extra.insert("rawText".into(), json!(text.clone()));
+                }
                 e.text = Some(text);
             }
         }
@@ -1119,11 +1163,13 @@ impl DrawingDoc {
             }
         }
 
-        // keep labels centred and connections attached
+        // keep labels centred and connections attached; the first pass after opening only tidies
+        // the scene in memory, so looking at a drawing never rewrites its file
         self.sync_labels(ui.ctx());
-        if self.update_bindings() {
+        if self.update_bindings() && self.settled {
             self.changed();
         }
+        self.settled = true;
         if self.remeasure_free_text {
             self.remeasure_free_text = false;
             let ctx = ui.ctx().clone();
@@ -1870,6 +1916,7 @@ pub fn paint_tool_icon(p: &egui::Painter, r: Rect, t: Tool, c: Color32) {
 mod tests {
     use super::*;
 
+    // spec: DRAW-001, DATA-005
     #[test]
     fn sample_parses_and_round_trips() {
         let s = Scene::parse(SAMPLE_SCENE).unwrap();
@@ -1885,6 +1932,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(&s2.to_json()).unwrap()["custom"], 5);
     }
 
+    // spec: DRAW-001, DATA-005
     #[test]
     fn new_elements_have_excalidraw_fields() {
         let mut d = DrawingDoc::new(PathBuf::from("x.excalidraw"), "");
@@ -1898,6 +1946,7 @@ mod tests {
         assert!(tv.get("fontSize").is_some() && tv.get("text").is_some() && tv.get("originalText").is_some());
     }
 
+    // spec: DATA-007
     #[test]
     fn empty_file_is_empty_scene() {
         let s = Scene::parse("").unwrap();
@@ -1906,6 +1955,7 @@ mod tests {
         assert!(Scene::parse("{not json").is_err());
     }
 
+    // spec: DRAW-006
     #[test]
     fn undo_redo() {
         let mut d = DrawingDoc::new(PathBuf::from("x.excalidraw"), SAMPLE_SCENE);
@@ -1936,6 +1986,7 @@ mod tests {
         assert!(!hit(&s.elements[2], Pos2::new(340.0, 140.0), 4.0));
     }
 
+    // spec: DRAW-002
     #[test]
     fn hatching_stays_inside() {
         let poly = vec![Pos2::new(0.0, 0.0), Pos2::new(100.0, 0.0), Pos2::new(100.0, 50.0), Pos2::new(0.0, 50.0)];

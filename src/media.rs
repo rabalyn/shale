@@ -216,6 +216,7 @@ pub fn link_for(rel: &Path) -> String {
 mod tests {
     use super::*;
 
+    // spec: VAULT-012
     #[test]
     fn saved_names_work_in_links() {
         let root = std::env::temp_dir().join(format!("shale-media-hash-{}", std::process::id()));
@@ -243,6 +244,7 @@ mod tests {
         d
     }
 
+    // spec: EDIT-002
     #[test]
     fn query_detection() {
         assert_eq!(media_query("x [!~/Pic", 9), Some((2, "~/Pic".into())));
@@ -252,6 +254,7 @@ mod tests {
         assert_eq!(media_query("[!/a] after", 11), None);
     }
 
+    // spec: EDIT-002
     #[test]
     fn splitting_paths() {
         let v = Path::new("/vault");
@@ -262,6 +265,7 @@ mod tests {
         assert_eq!(split_typed("/Projects/G", v, h), (PathBuf::from("/vault/Projects"), "G".into(), "/Projects/".into()));
     }
 
+    // spec: EDIT-002
     #[test]
     fn tab_completion_like_a_shell() {
         let home = tmp("home");
@@ -280,6 +284,7 @@ mod tests {
         let _ = fs::remove_dir_all(&vault);
     }
 
+    // spec: EDIT-003
     #[test]
     fn importing_copies_into_dated_media_folder() {
         let home = tmp("src");
@@ -302,6 +307,7 @@ mod tests {
         let _ = fs::remove_dir_all(&vault);
     }
 
+    // spec: EDIT-003
     #[test]
     fn local_date_is_sane() {
         let (y, m, d) = local_date();

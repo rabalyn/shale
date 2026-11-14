@@ -250,6 +250,7 @@ mod tests {
         }
     }
 
+    // spec: IMP-001
     #[test]
     fn every_control_of_the_import_dialog() {
         let (items, _) = import::items_from_drop("message/rfc822", &crate::mail::tests::sample_eml());

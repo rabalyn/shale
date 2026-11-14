@@ -420,6 +420,7 @@ mod tests {
         ("rectangle".to_string(), r(x, y))
     }
 
+    // spec: DRAW-004
     #[test]
     fn anchors_are_on_the_shape() {
         let rect = r(0.0, 0.0);
@@ -435,6 +436,7 @@ mod tests {
         assert_eq!((i, j), (2, 6), "facing edge middles");
     }
 
+    // spec: DRAW-004
     #[test]
     fn crossings_are_counted() {
         // an X: 0-3 and 1-2 cross
@@ -446,6 +448,7 @@ mod tests {
         assert_eq!(count_crossings(&nodes2, &[(0, 2)]), 1);
     }
 
+    // spec: DRAW-004
     #[test]
     fn auto_layout_untangles_and_stops() {
         // a crossed layout: two rows with the connections in an X
@@ -463,6 +466,7 @@ mod tests {
         assert!(!overlaps(&res.rects, 1.0));
     }
 
+    // spec: DRAW-004
     #[test]
     fn bigger_graph_gets_no_worse() {
         let mut nodes = vec![];
@@ -475,6 +479,7 @@ mod tests {
         assert!(!overlaps(&res.rects, 1.0));
     }
 
+    // spec: DRAW-004
     #[test]
     fn spreading_keeps_shapes_apart() {
         let nodes = vec![node(0.0, 0.0), node(200.0, 0.0), node(100.0, 200.0)];

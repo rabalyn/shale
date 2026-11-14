@@ -602,6 +602,7 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
 mod tests {
     use super::*;
 
+    // spec: IMP-008
     #[test]
     fn reads_thunderbird_folder_indexes() {
         let msf = b"// <!-- <mdb:mork:z v=\"1.4\"/> -->\n< <(a=c)> // (f=iso-8859-1)\n  (80=ns:msg:db:row:scope:msgs:all)(81=subject)(82=message-id)\n  (83=storeToken)>\n<(91=Pl$C3$A4ne \\) Stand\\\n 4)(92=abc@x)>\n{1:^80 {(k^84:c)(s=9)}\n  [1F(^81^91)(^82^92)(^83=1234)]\n  [20:^80(^81=Zweite)(^83=99)]}\n";
@@ -612,6 +613,7 @@ mod tests {
         assert_eq!(rows[&0x20]["subject"], "Zweite");
     }
 
+    // spec: IMP-008
     #[test]
     fn reads_thunderbird_links() {
         let r = parse_link("mailbox-message://nobody@Local%20Folders/Inbox/Projekte#4711").unwrap();
@@ -629,6 +631,7 @@ mod tests {
         format!("From - Thu Nov 12 10:00:00 2026\nX-Mozilla-Status: 0001\nSubject: {subject}\nMessage-ID: <{}@x>\n\n{body}\n\n", fold(subject).len())
     }
 
+    // spec: IMP-008
     #[test]
     fn finds_messages_in_a_profile() {
         let root = std::env::temp_dir().join(format!("shale-tb-{}", std::process::id()));

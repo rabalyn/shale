@@ -608,6 +608,7 @@ mod tests {
         rects.iter().find(|r| r.0 == key).map(|r| r.1).unwrap_or_else(|| panic!("no {key}: {:?}", rects.iter().map(|r| &r.0).collect::<Vec<_>>()))
     }
 
+    // spec: CAL-010
     #[test]
     fn calendar_dialog_controls() {
         let store = CalendarStore::new(vec![], std::env::temp_dir().join(format!("shale-caldlg-{}", std::process::id())));
@@ -659,6 +660,7 @@ mod tests {
         assert_eq!(h.click(rect(&d.rects, "done"), |ui| show(ui, &mut d, &store)), Some(CalDialogAction::Done));
     }
 
+    // spec: CAL-010
     #[test]
     fn find_calendars_button_uses_the_server() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -700,6 +702,7 @@ mod tests {
         panic!("the save did not finish")
     }
 
+    // spec: CAL-005, CAL-008
     #[test]
     fn event_dialog_fields() {
         let dir = std::env::temp_dir().join(format!("shale-evdlg-{}", std::process::id()));
@@ -764,6 +767,7 @@ mod tests {
         assert_eq!(h.click(rect(&d.rects, "cancel"), |ui| show_event(ui, &mut d, &mut store)), Some(EventResult::Cancel));
     }
 
+    // spec: CAL-004
     #[test]
     fn event_dialog_shows_write_errors_and_saves_elsewhere() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {

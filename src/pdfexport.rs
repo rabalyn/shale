@@ -393,7 +393,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                 let kind = vault.file(&t).map(|f| f.kind).unwrap_or(FileKind::Other);
                 let max_h = (w.h - 2.0 * w.m) * 0.8;
                 if kind == FileKind::Drawing {
-                    if let Some(scene) = std::fs::read_to_string(&abs).ok().and_then(|s| Scene::parse(&s).ok()) {
+                    if let Ok(scene) = Scene::read_file(&abs) {
                         if let Some(b) = scene.bounds() {
                             let b = b.expand(20.0);
                             let k = (cw / b.width()).min(max_h / b.height()).min(0.75);
@@ -706,6 +706,7 @@ mod tests {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos() as u64
     }
 
+    // spec: PDF-001
     #[test]
     fn note_export_has_title_text_links_and_pages() {
         let (v, d) = vault();
@@ -724,6 +725,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: PDF-001
     #[test]
     fn note_export_options_change_the_pages() {
         let (v, d) = vault();
@@ -743,6 +745,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: PDF-001
     #[test]
     fn drawing_export_fit_and_paper() {
         let scene = Scene::parse(crate::drawing::SAMPLE_SCENE).unwrap();

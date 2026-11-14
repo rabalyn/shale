@@ -219,6 +219,7 @@ mod tests {
         CalendarSource { id: id.into(), name: id.into(), color: "#000000".into(), enabled: true, sync_minutes: 15, kind: SourceKind::Caldav { url: url.into(), username: user.into(), password: pw.into() } }
     }
 
+    // spec: SEC-003
     #[test]
     fn passwords_go_to_the_keyring_and_come_back() {
         let sources = vec![dav("a", "https://dav.example.com/cal/a/", "ada", "s3cret"), dav("b", "https://DAV.example.com:443/cal/b/", "ada", "s3cret"), dav("anon", "https://pub.example.com/c/", "", "")];

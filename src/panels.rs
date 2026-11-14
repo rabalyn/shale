@@ -908,6 +908,7 @@ pub fn today() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    // spec: NAV-003
     #[test]
     fn sorting_modes() {
         use crate::config::FileSort::*;
@@ -923,6 +924,7 @@ mod tests {
         assert_eq!(super::sort_order(ModifiedDesc, "a", "b", old, new), Less);
     }
 
+    // spec: TASK-002
     #[test]
     fn due_is_stripped() {
         assert_eq!(super::strip_due("Write 📅 2026-12-01"), "Write");
@@ -930,6 +932,7 @@ mod tests {
         assert_eq!(super::strip_due("plain"), "plain");
     }
 
+    // spec: TASK-002
     #[test]
     fn today_looks_like_a_date() {
         let t = super::today().unwrap();
@@ -945,6 +948,7 @@ mod move_tests {
     use crate::app::{Options, ShaleApp};
     use std::path::{Path, PathBuf};
 
+    // spec: VAULT-015
     #[test]
     fn moving_notes_and_folders_into_folders() {
         let d = std::env::temp_dir().join(format!("shale-move-{}", std::process::id()));
@@ -999,6 +1003,7 @@ mod neighbour_tests {
     use crate::config::FileSort;
     use std::path::{Path, PathBuf};
 
+    // spec: NAV-002
     #[test]
     fn ctrl_h_and_l_follow_the_file_list_order() {
         let d = std::env::temp_dir().join(format!("shale-neighbour-{}", std::process::id()));
@@ -1039,6 +1044,7 @@ mod search_tests {
     use crate::app::{Options, ShaleApp};
     use eframe::egui::{self, Event, Key, Modifiers, Pos2, RawInput, Rect, Vec2};
 
+    // spec: NAV-004
     #[test]
     fn the_search_shortcut_always_focuses_and_selects_the_old_search() {
         let d = std::env::temp_dir().join(format!("shale-search-focus-{}", std::process::id()));

@@ -640,6 +640,7 @@ mod tests {
         Vault::open(&d).unwrap()
     }
 
+    // spec: IMP-006
     #[test]
     fn tags_and_folders() {
         assert_eq!(parse_tags("bau-b, #Beamer  status;Bau-B 2026 projekt/hörsaal"), vec!["bau-b", "Beamer", "status", "projekt/hörsaal"]);
@@ -647,6 +648,7 @@ mod tests {
         assert!(clean_folder("../x").is_err());
     }
 
+    // spec: IMP-003, IMP-004, IMP-005, TAG-001
     #[test]
     fn an_email_becomes_a_tagged_note_with_its_attachments() {
         let mut v = temp_vault("mail");
@@ -696,6 +698,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // spec: IMP-003
     #[test]
     fn events_files_and_text() {
         let mut v = temp_vault("ev");
@@ -726,6 +729,7 @@ mod tests {
         let _ = std::fs::remove_file(&src);
     }
 
+    // spec: IMP-008
     #[test]
     fn a_thunderbird_drag_with_an_empty_file_list() {
         // what Thunderbird (through the X11 bridge) sends: no file, a link, a file name
@@ -770,6 +774,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // spec: IMP-009
     #[test]
     fn what_other_programs_drop() {
         let p = std::env::temp_dir().join(format!("shale drop {}.eml", std::process::id()));

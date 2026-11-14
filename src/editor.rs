@@ -658,7 +658,7 @@ impl NoteEditor {
                     let [tw, th] = tex.size_vec2().into();
                     let size = fit(tw, th, 420.0);
                     images.push((l.range.clone(), size.y + 6.0, Art::Tex(tex), size));
-                } else if p.extension().map(|e| e == "excalidraw").unwrap_or(false) {
+                } else if crate::excalidraw_md::is_drawing_path(&p) {
                     let Some(scene) = crate::reader::scene_cached(ui.ctx(), &abs) else { continue };
                     let Some(b) = scene.bounds() else { continue };
                     let b = b.expand(20.0);
@@ -1233,6 +1233,7 @@ mod tests {
         a
     }
 
+    // spec: LINK-005
     #[test]
     fn clicking_links_in_the_editor() {
         let (v, d) = vault_for_tests("click");
@@ -1255,6 +1256,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-007
     #[test]
     fn clicking_a_checkbox_in_the_editor_ticks_it() {
         let (v, d) = vault_for_tests("check");
@@ -1272,6 +1274,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-005
     #[test]
     fn enter_and_tab_keep_lists_going() {
         let (v, d) = vault_for_tests("lists");
@@ -1304,6 +1307,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-005
     #[test]
     fn alt_arrows_move_lines() {
         let (v, d) = vault_for_tests("move");
@@ -1322,6 +1326,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-002
     #[test]
     fn file_picker_completes_paths_and_links_the_file() {
         let (v, d) = vault_for_tests("picker");
@@ -1347,6 +1352,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-002
     #[test]
     fn file_picker_arrows_and_tab_keep_working() {
         let (v, d) = vault_for_tests("picker2");
@@ -1376,6 +1382,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-006
     #[test]
     fn inline_images_show_until_the_cursor_enters_the_link() {
         let (v, d) = vault_for_tests("inline");
@@ -1406,6 +1413,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-002
     #[test]
     fn escape_closes_the_file_picker() {
         let (v, d) = vault_for_tests("esc");
@@ -1442,6 +1450,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-002
     #[test]
     fn picker_safety_net_when_keys_reach_the_text_box() {
         // On some desktops the keys arrive as plain typed text instead of key presses.
@@ -1476,6 +1485,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-002
     #[test]
     fn double_bracket_bang_opens_only_the_file_picker() {
         // `[[!` must not also open the note suggestions (they took the keys away from the picker)
@@ -1519,6 +1529,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-006
     #[test]
     fn drawings_and_pdfs_show_inline_like_pictures() {
         let (v, d) = vault_for_tests("inline-art");
@@ -1552,6 +1563,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-006
     #[test]
     fn typing_keeps_pictures_in_place() {
         // regression: on every keypress the picture became link text for one frame, so it
@@ -1586,6 +1598,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-006
     #[test]
     fn remapping_follows_edits() {
         let keys = vec![("![[a.png]]".to_string(), 50.0), ("![[b.png]]".to_string(), 60.0)];
@@ -1605,6 +1618,7 @@ mod tests {
         assert!(remap_images("![[c.png]]", &keys).is_empty());
     }
 
+    // spec: EDIT-001
     #[test]
     fn escape_closes_the_note_suggestions() {
         let (v, d) = vault_for_tests("acesc");
@@ -1636,6 +1650,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-009
     #[test]
     fn clicking_a_web_link_opens_the_browser_action() {
         let (v, d) = vault_for_tests("web");
@@ -1652,6 +1667,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-001
     #[test]
     fn typing_double_brackets_suggests_and_completes() {
         let (v, d) = vault_for_tests("ac");
@@ -1670,6 +1686,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: PPL-001, EDIT-004
     #[test]
     fn double_brackets_p_lists_people() {
         let (mut v, d) = vault_for_tests("people");
@@ -1704,6 +1721,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-001
     #[test]
     fn link_query_detects_open_brackets() {
         let t = "hello [[Wor";
@@ -1716,6 +1734,7 @@ mod tests {
         assert_eq!(link_query(t4, 2), Some((2, String::new())));
     }
 
+    // spec: LINK-004
     #[test]
     fn highlight_colours_links() {
         let text = "See [[Yes]] and [[No]]";
@@ -1737,6 +1756,7 @@ mod tests {
         assert_eq!(pos, text.len());
     }
 
+    // spec: LINK-004
     #[test]
     fn highlight_handles_unicode_and_headings() {
         let text = "# Überschrift\n- [x] erledigt **fett** `code`\n```\n[[nolink]]\n```";

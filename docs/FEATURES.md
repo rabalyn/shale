@@ -43,6 +43,9 @@ built-in demo vault (`shale --screenshot out.png`).
 ![A drawing with the style panel](screenshots/drawing.png)
 
 - Hand-drawn style sketches, saved as standard `.excalidraw` files.
+- Drawings of the Obsidian Excalidraw plugin (`.excalidraw.md`, compressed or not) open in the
+  drawing editor too, and are saved in the plugin's own format, so Obsidian keeps reading them.
+  Links like `[[Drawing.excalidraw]]` and embeds `![[Drawing.excalidraw]]` find them.
 - Tools on keys 1–0: hand, select, rectangle, diamond, ellipse, arrow, line, pen, text, eraser.
 - The style panel sets stroke and fill colours, fill style, stroke width, outline pattern,
   sloppiness, corners, label font, size, colour, background and alignment, opacity, and the

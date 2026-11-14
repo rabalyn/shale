@@ -1,0 +1,51 @@
+# Open points and SHOULD BE work list
+
+Questions that are not decided yet, and the SHOULD BE rules in the order the 2026-11-14 review
+suggests doing them. When a point is decided it becomes an ADR or a spec rule and is struck out
+here.
+
+## Suggested order of SHOULD BE work
+
+| # | Spec IDs | What | Why first | ADR |
+|---|---|---|---|---|
+| 1 | DATA-004 | Atomic writes everywhere | A crash mid-write is the only failure that destroys a whole note | [0003](../decisions/0003-data-safety.md) |
+| 2 | DATA-003, DATA-002 | Conflict copy instead of silently overwriting outside changes; reload drawings too | Silent lost updates with Syncthing / git / a second editor | 0003 |
+| 3 | DATA-008, DATA-009 | Unreadable notes read-only; never swallow write errors | First keystroke can destroy a non-UTF-8 file | 0003 |
+| 4 | VAULT-018 | One checked vault path type at every user input | Rename can move a note out of the vault | [0004](../decisions/0004-link-resolution-and-paths.md) |
+| 5 | VAULT-016, VAULT-013 | One link rewrite routine by resolution (folder rename included) | Rename corrupts path links and rewrites wrong links | 0004 |
+| 6 | LINK-010, LINK-008 | Explicit resolution rules, no silent name fallback, show ambiguity | Blue links that open the wrong note | 0004 |
+| 7 | CFG-004, CFG-005 | Config version, keep broken file, per-vault state into `.shale/` | One parse error wipes calendars | [0005](../decisions/0005-where-state-lives.md) |
+| 8 | JOB-002 | Panic-safe background jobs | Endless spinners | [0006](../decisions/0006-engineering-baseline.md) |
+| 9 | SEC-006 | Allowlist for `xdg-open` | Server- and mail-supplied URLs/files opened unchecked | 0006 |
+| 10 | BUILD-004, BUILD-006 | CI on PRs, clippy/fmt gates, drop vendor/ | Zero-warnings rule enforced, security updates possible | 0006 |
+| 11 | PERF-001, PERF-002 | Cache derived data, fix O(n²) rescan | Big vaults | 0006 |
+| 12 | — | Docs restructure | Stop drift | [0002](../decisions/0002-documentation-structure.md) |
+
+## Open questions (not decided)
+
+| ID | Question | Notes |
+|---|---|---|
+| OPEN-001 | Accept ADRs 0002–0006 as a whole, or one by one? | All are *Proposed*. |
+| OPEN-002 | Conflict handling: conflict copy (proposed) or a merge view later? | A copy is simple and loses nothing; a merge view could build on it. |
+| OPEN-003 | Offer "fix this link" for red path links whose name exists elsewhere (after LINK-010 turns them red)? | Softens the visible change of ADR-0004. |
+| OPEN-004 | Should the media folder (`z_media/<YYYY>/<MM>/`) become a vault setting? | Today it is fixed; Obsidian users may expect their attachment folder. |
+| OPEN-005 | Symbolic links in vaults: follow or show? | VAULT-007/008. Following needs loop and escape guards. |
+| OPEN-006 | inotify file watching instead of 3 s polling? | Narrows the conflict window and saves work on big vaults; not a replacement for DATA-003. |
+| OPEN-007 | Platform policy: Linux only, or keep the macOS/Windows code paths alive (and test them)? | `Cargo.toml` has macOS deps; `lists.rs` has Windows code; CI is Linux only. |
+| OPEN-008 | Trash: restore from within Shale, and empty it after N days? | VAULT-019 records the origin first. |
+| ~~OPEN-009~~ | ~~`.excalidraw.md` (Obsidian Excalidraw plugin) files: support or document as unsupported?~~ | Decided 2026-11-14: supported (DRAW-007, DRAW-008). Left open: links and pictures inside them (DRAW-010, OPEN-014). |
+| OPEN-014 | Count `[[links]]` in plugin drawings' texts as links (backlinks from drawings), and show their embedded pictures? | DRAW-010. |
+| OPEN-010 | Calendar: single-occurrence edits (CAL-007), moving events by dragging, reminders — which first? | Backlog from IMPLEMENTATION.md. |
+| OPEN-011 | Module restructuring (feature folders, splitting `ShaleApp`): do it along the way (proposed) or as one dedicated change? | ADR-0006 §6. |
+| OPEN-012 | Add a test that checks spec IDs against test names (every ID used or marked `untested`)? | Prevents spec drift ([ADR-0001](../decisions/0001-spec-driven-development.md) §5). |
+| OPEN-013 | Rename/move rewrites links in notes on disk while an open, dirty buffer of the same note exists — which wins? | Related to DATA-003; needs a test either way. |
+
+## Backlog carried over from IMPLEMENTATION.md (still open after checking)
+
+Editor: blockquote continuation, indent width setting, live preview hiding syntax, tables,
+auto-pairing brackets, find and replace in a note, spell check, paste images. Links: block
+links (`#^id`), heading scroll in reading view, hover previews. Tasks: priorities, recurring
+tasks, grouping. Graph: colour groups, filters, Barnes–Hut. Drawings: images, frames, groups,
+elbow arrows, labels on arrows, rotation handles, PNG/SVG export, copy/paste between drawings.
+Other: command palette, daily notes, templates, light theme, split panes, packaging (.desktop,
+Flatpak), native folder picker.

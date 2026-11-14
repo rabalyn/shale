@@ -880,6 +880,7 @@ mod tests {
         assert_eq!(store.event(&v.popup.as_ref().unwrap().occ).unwrap().summary, "Lunch with Sam");
     }
 
+    // spec: CAL-011
     #[test]
     fn week_view_blocks_and_delete_from_popup() {
         let (store, _) = store_with_samples("week");
@@ -911,6 +912,7 @@ mod tests {
         assert_eq!(v.mode, Mode::Day);
     }
 
+    // spec: CAL-008
     #[test]
     fn next_half_hour_rounds_up() {
         let d = days_from_civil(2026, 11, 13);
@@ -922,6 +924,7 @@ mod tests {
         assert_eq!(next_half_hour(at(23, 45)), t::local_to_utc(d + 1, 0));
     }
 
+    // spec: CAL-008
     #[test]
     fn double_click_creates_events_in_every_view() {
         let (store, _) = store_with_samples("dbl");

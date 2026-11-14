@@ -181,6 +181,7 @@ pub fn long_date(days: i64) -> String {
 mod tests {
     use super::*;
 
+    // spec: CAL-009
     #[test]
     fn civil_round_trip() {
         assert_eq!(days_from_civil(1970, 1, 1), 0);
@@ -198,6 +199,7 @@ mod tests {
         assert_eq!(hhmm(14 * 3600 + 5 * 60), "14:05");
     }
 
+    // spec: CAL-009
     #[test]
     fn named_zones_from_zoneinfo() {
         if zone("Europe/Berlin").is_none() {
@@ -213,6 +215,7 @@ mod tests {
         assert!(zone("../etc/passwd").is_none());
     }
 
+    // spec: CAL-009
     #[test]
     fn local_round_trip() {
         let d = days_from_civil(2026, 3, 10);

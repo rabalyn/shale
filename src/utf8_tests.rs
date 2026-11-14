@@ -31,6 +31,7 @@ fn boundaries(s: &str) -> Vec<usize> {
     s.char_indices().map(|(i, _)| i).chain(std::iter::once(s.len())).collect()
 }
 
+// spec: VAULT-010, DATA-006
 #[test]
 fn text_functions_never_cut_a_character() {
     for s in samples() {
@@ -81,6 +82,7 @@ fn text_functions_never_cut_a_character() {
     }
 }
 
+// spec: DATA-006
 #[test]
 fn reading_view_and_pdf_export_take_any_text() {
     let d = std::env::temp_dir().join(format!("shale-utf8-{}", std::process::id()));
