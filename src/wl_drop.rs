@@ -386,12 +386,10 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
                     send(DropEvent::Drop { x, y, parts, offered: unique(&offered), report });
                 });
             }
-            E::Selection { id } => {
+            E::Selection { id: Some(o) } => {
                 // the clipboard: handled by egui's clipboard helper
-                if let Some(o) = id {
-                    state.offers.remove(&o.id());
-                    o.destroy();
-                }
+                state.offers.remove(&o.id());
+                o.destroy();
             }
             _ => {}
         }

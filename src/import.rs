@@ -218,7 +218,7 @@ pub fn items_from_paths(paths: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
 
 /// Text from a drop: UTF-8, or UTF-16 (which some programs send).
 pub fn text_of(data: &[u8]) -> String {
-    let utf16 = data.starts_with(&[0xFF, 0xFE]) || (data.len() >= 4 && data.len() % 2 == 0 && data[1] == 0 && data[3] == 0);
+    let utf16 = data.starts_with(&[0xFF, 0xFE]) || (data.len() >= 4 && data.len().is_multiple_of(2) && data[1] == 0 && data[3] == 0);
     if utf16 {
         let units: Vec<u16> = data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         String::from_utf16_lossy(&units).trim_start_matches('\u{feff}').trim_end_matches('\0').to_string()
@@ -690,7 +690,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let eml = dir.join("Neubau Hörsaal B.eml");
         std::fs::write(&eml, &raw).unwrap();
-        let (mut items, notes) = items_from_paths(&[eml.clone()]);
+        let (mut items, notes) = items_from_paths(std::slice::from_ref(&eml));
         assert!(notes.is_empty());
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "2026-11-13 Neubau Hörsaal B – Pläne Stand 3");
@@ -751,7 +751,7 @@ mod tests {
         // a file next to it
         let src = v.root.join("..").join(format!("shale-import-plan-{}.pdf", std::process::id()));
         std::fs::write(&src, b"%PDF-1.4").unwrap();
-        let (more, _) = items_from_paths(&[src.clone()]);
+        let (more, _) = items_from_paths(std::slice::from_ref(&src));
         items.extend(more);
         let (snips, _) = items_from_drop("text/plain", "Beamer tauschen\nim Hörsaal".as_bytes());
         items.extend(snips);
@@ -792,7 +792,7 @@ mod tests {
             ("application/x-moz-file-promise-dest-filename".to_string(), b"Neubau Hoersaal B.eml".to_vec()),
             ("text/plain".to_string(), link.clone().into_bytes()),
         ];
-        let (items, notes) = items_from_parts_in(&parts, &[root.clone()]);
+        let (items, notes) = items_from_parts_in(&parts, std::slice::from_ref(&root));
         assert_eq!(items.len(), 1, "{notes:?}");
         assert!(items[0].title.ends_with("Stand 3"), "{}", items[0].title);
         match &items[0].source {
@@ -805,7 +805,7 @@ mod tests {
         }
         // not found: explained, no text note made of the link
         let parts = vec![("text/plain".to_string(), b"imap-message://ada@imap.x/INBOX#5".to_vec())];
-        let (items, notes) = items_from_parts_in(&parts, &[root.clone()]);
+        let (items, notes) = items_from_parts_in(&parts, std::slice::from_ref(&root));
         assert!(items.is_empty() && notes[0].contains("only a link"), "{notes:?}");
         // nothing at all: shows what was sent
         let (items, notes) = items_from_parts_in(&[("text/uri-list".into(), vec![]), ("STRING".into(), vec![])], &[]);

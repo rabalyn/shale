@@ -76,7 +76,7 @@ impl ShaleApp {
                 }
             }
             let root = PathBuf::new();
-            let r = self.tree(ui, &root, 0);
+            self.tree(ui, &root, 0);
             // right-click on empty space
             let rest = ui.allocate_response(Vec2::new(ui.available_width(), (ui.available_height()).max(40.0)), Sense::click());
             rest.context_menu(|ui| {
@@ -93,7 +93,6 @@ impl ShaleApp {
                     ui.close();
                 }
             });
-            let _ = r;
         });
         ui.separator();
         ui.horizontal(|ui| {
@@ -601,7 +600,7 @@ impl ShaleApp {
         let done = all.len() - open;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let full = ui.available_width();
-            let col = (full - 32.0).min(860.0).max(200.0);
+            let col = (full - 32.0).clamp(200.0, 860.0);
             let pad = ((full - col) / 2.0).max(16.0);
             ui.horizontal(|ui| {
                 ui.add_space(pad);

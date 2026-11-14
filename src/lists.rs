@@ -2,7 +2,7 @@
 //! - Enter continues a list (`- `, `* `, `+ `, `1. `, `1) `, with or without `[ ]`),
 //!   and Enter on an empty item ends the list (or outdents it first).
 //! - Tab / Shift+Tab indent / outdent list items and raise / lower heading levels.
-//! Also finds web links (`[name](https://…)` and bare `https://…`).
+//!   Also finds web links (`[name](https://…)` and bare `https://…`).
 
 use std::ops::Range;
 
@@ -333,7 +333,7 @@ pub fn find_web_links(text: &str) -> Vec<WebLink> {
                     e -= 1;
                 }
                 i = s + len.max(1);
-                if in_code(s) || taken.iter().any(|r| r.contains(&s)) || line[..s].ends_with("](") || line[..s].ends_with('<') && false {
+                if in_code(s) || taken.iter().any(|r| r.contains(&s)) || line[..s].ends_with("](") {
                     continue;
                 }
                 let url = &line[s..e];
@@ -395,9 +395,10 @@ pub fn move_lines(text: &str, sel: Range<usize>, up: bool) -> Option<(String, Ra
 }
 
 /// Fix indentation and numbering of the list that contains lines `a..=b`.
+#[allow(clippy::needless_range_loop)] // the loop also looks at neighbouring lines and writes back by index
 fn normalize_list_around(lines: &mut [String], a: usize, b: usize) {
     let is_item = |l: &str| list_prefix(l).is_some();
-    if !(a..=b).any(|i| is_item(&lines[i])) && !(a > 0 && is_item(&lines[a - 1])) && !(b + 1 < lines.len() && is_item(&lines[b + 1])) {
+    if !((a..=b).any(|i| is_item(&lines[i])) || (a > 0 && is_item(&lines[a - 1])) || (b + 1 < lines.len() && is_item(&lines[b + 1]))) {
         return;
     }
     let mut start = a;

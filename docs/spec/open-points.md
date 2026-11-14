@@ -17,7 +17,7 @@ here.
 | 7 | CFG-004, CFG-005 | Config version, keep broken file, per-vault state into `.shale/` | One parse error wipes calendars | [0005](../decisions/0005-where-state-lives.md) |
 | 8 | ~~JOB-002~~ | ~~Panic-safe background jobs~~ (done) | Endless spinners | [0006](../decisions/0006-engineering-baseline.md) |
 | 9 | ~~SEC-006~~ | ~~Allowlist for `xdg-open`~~ (done) | Server- and mail-supplied URLs/files opened unchecked | 0006 |
-| 10 | BUILD-004, BUILD-006 | CI on PRs, clippy/fmt gates, drop vendor/ | Zero-warnings rule enforced, security updates possible | 0006 |
+| 10 | ~~BUILD-004~~, BUILD-006 | ~~CI on PRs, clippy/fmt gates~~ (done), drop vendor/ | Zero-warnings rule enforced, security updates possible | 0006 |
 | 11 | PERF-001, PERF-002 | Cache derived data, fix O(n²) rescan | Big vaults | 0006 |
 | 12 | — | Docs restructure | Stop drift | [0002](../decisions/0002-documentation-structure.md) |
 

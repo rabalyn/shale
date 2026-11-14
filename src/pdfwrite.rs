@@ -186,7 +186,7 @@ impl Page {
             (true, false) => "f",
             _ => "S",
         };
-        let _ = write!(self.ops, "{op} Q\n");
+        let _ = writeln!(self.ops, "{op} Q");
     }
 
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, fill: Option<Rgba>, stroke: Option<(Rgba, f32)>) {
@@ -225,7 +225,7 @@ impl Page {
                 page.stroke_color(color, size * 0.03);
             }
             let hex: String = run.chars().filter_map(win_ansi).map(|b| format!("{b:02x}")).collect();
-            let _ = write!(page.ops, "q BT /{} {:.2} Tf {} Tr 1 0 {skew} 1 {:.2} {:.2} Tm <{hex}> Tj ET Q\n", font_res(kind), size, if bold { 2 } else { 0 }, run_x, page.y(y));
+            let _ = writeln!(page.ops, "q BT /{} {:.2} Tf {} Tr 1 0 {skew} 1 {:.2} {:.2} Tm <{hex}> Tj ET Q", font_res(kind), size, if bold { 2 } else { 0 }, run_x, page.y(y));
             run.clear();
         };
         for c in s.chars() {
@@ -265,7 +265,7 @@ impl Page {
     /// Place an image (from `Doc::add_image`) into the rect.
     pub fn image(&mut self, index: usize, x: f32, y: f32, w: f32, h: f32) {
         self.images.insert(index);
-        let _ = write!(self.ops, "q {:.2} 0 0 {:.2} {:.2} {:.2} cm /Im{index} Do Q\n", w, h, x, self.y(y + h));
+        let _ = writeln!(self.ops, "q {:.2} 0 0 {:.2} {:.2} {:.2} cm /Im{index} Do Q", w, h, x, self.y(y + h));
     }
 
     /// A clickable link to a web address over the rect.

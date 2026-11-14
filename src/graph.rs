@@ -132,6 +132,7 @@ impl GraphView {
             force[*b] -= f;
         }
         let mut total = 0.0;
+        #[allow(clippy::needless_range_loop)] // i also indexes self.pos and self.vel
         for i in 0..n {
             force[i] -= self.pos[i] * 0.012;
             if Some(i) == self.dragging {

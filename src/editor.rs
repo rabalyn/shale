@@ -1013,10 +1013,10 @@ impl NoteEditor {
                         ui.label(egui::RichText::new(hint).small().color(theme::MUTED));
                     });
                 }
-                if resp.clicked() && web.is_some() {
+                if let (true, Some(web)) = (resp.clicked(), web.as_ref()) {
                     let follow = if ctrl_to_follow { modifiers.command } else { !modifiers.command };
                     if follow {
-                        action = Some(EditorAction::OpenUrl(web.unwrap().url));
+                        action = Some(EditorAction::OpenUrl(web.url.clone()));
                     }
                 } else if resp.clicked() {
                     if let Some((l, _)) = link {

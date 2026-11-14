@@ -585,19 +585,19 @@ mod tests {
     #[test]
     fn reads_report_errors_with_the_name() {
         let d = tmp("read");
-        let e = read(&d.join("missing.md")).unwrap_err();
+        let e = read(d.join("missing.md")).unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::NotFound);
         assert!(e.to_string().contains("missing.md"));
         fs::write(d.join("bad.md"), [0x66, 0xff, 0xfe]).unwrap();
-        let e = read_to_string(&d.join("bad.md")).unwrap_err();
+        let e = read_to_string(d.join("bad.md")).unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::InvalidData);
         assert!(e.to_string().contains("bad.md"));
-        assert_eq!(read(&d.join("bad.md")).unwrap(), vec![0x66, 0xff, 0xfe]);
+        assert_eq!(read(d.join("bad.md")).unwrap(), vec![0x66, 0xff, 0xfe]);
         assert!(read(&d).is_err(), "a folder is not readable as a file");
         fs::write(d.join("ok.md"), "Müll").unwrap();
-        assert_eq!(read_to_string(&d.join("ok.md")).unwrap(), "Müll");
+        assert_eq!(read_to_string(d.join("ok.md")).unwrap(), "Müll");
         fs::write(d.join("empty.md"), "").unwrap();
-        assert_eq!(read_to_string(&d.join("empty.md")).unwrap(), "");
+        assert_eq!(read_to_string(d.join("empty.md")).unwrap(), "");
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -617,7 +617,7 @@ mod tests {
                 let mut seen = 0;
                 while !stop.load(Ordering::Relaxed) {
                     let data = fs::read(&*p).unwrap();
-                    assert!(c.iter().any(|x| *x == data), "torn read of {} bytes", data.len());
+                    assert!(c.contains(&data), "torn read of {} bytes", data.len());
                     seen += 1;
                 }
                 seen
@@ -639,7 +639,7 @@ mod tests {
         stop.store(true, Ordering::Relaxed);
         assert!(reader.join().unwrap() > 0);
         let last = fs::read(&*p).unwrap();
-        assert!(contents.iter().any(|x| *x == last));
+        assert!(contents.contains(&last));
         assert_eq!(names(&d), vec!["shared.md"], "no temporary files left");
         let _ = fs::remove_dir_all(&d);
     }

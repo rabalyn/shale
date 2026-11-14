@@ -17,6 +17,23 @@ miniz_oxide = "0.8"
 roxmltree = "0.20"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp"] }
 
+# Always strict: CI builds with RUSTFLAGS="-D warnings" and runs clippy with -D warnings.
+[lints.rust]
+# an unsafe fn body is not automatically an unsafe block: every unsafe call is spelled out
+unsafe_op_in_unsafe_fn = "deny"
+# a Result that is dropped unseen is how write errors get lost
+unused_must_use = "deny"
+
+[lints.clippy]
+# debugging leftovers and unfinished code must not reach main
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+# the egui drawing code passes many small values and returns tuples; wrapping them in types
+# would only add churn, so these two readability lints stay off
+type_complexity = "allow"
+too_many_arguments = "allow"
+
 [profile.dev]
 opt-level = 1
 
