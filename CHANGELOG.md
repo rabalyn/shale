@@ -29,8 +29,20 @@ The release page of each version on GitHub shows its section from this file.
 - **Vim-style editing** (Settings, off by default): notes open in normal mode with h j k l,
   w b W B, 0 $, gg G, `:line`, `/search` with n / N, i a I A o O to type, x, visual mode (v, V)
   with d to cut and y to copy to the clipboard, and p to paste.
+- **Git sync**: connect a vault to a git repository in Settings (or `git init` it yourself) and
+  Shale commits, merges and pushes on its own, every few minutes and on "Sync now". Conflicts
+  become conflict copies next to the note; nothing is force-pushed or overwritten. The interval
+  and a commit message prefix / suffix are settings.
+- **Vault settings live in the vault**: `.shale/settings.json` (people folder, git sync) and
+  `.shale/state.json` (open notes, last import folder, recent tags), versioned and upgraded on
+  load, so a synced vault behaves the same everywhere. They move there from the global settings
+  on the first start.
 
 ### Fixed
+
+- A settings file that can't be read is no longer replaced by defaults on the next save (which
+  lost the calendars): it is kept as `config.json.broken-<date>` and you are told. Settings from
+  a newer Shale are no longer overwritten.
 
 - Opening a drawing with arrows no longer rewrites its file; only an edit does.
 - A drawing file that can't be read now opens read-only with the reason, instead of as an empty

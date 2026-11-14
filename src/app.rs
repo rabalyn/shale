@@ -78,6 +78,7 @@ pub enum RightPanel {
 }
 
 mod drops;
+mod sync;
 
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
@@ -173,6 +174,10 @@ pub struct TasksFilter {
 pub struct ShaleApp {
     pub cfg: Config,
     pub persist_config: bool,
+    /// The open vault's own settings and session state (`<vault>/.shale/`, ADR-0005).
+    pub vdata: crate::vault_state::VaultData,
+    /// Git sync of the open vault (ADR-0008).
+    pub sync: sync::SyncState,
     pub vault: Option<Vault>,
     pub tabs: Vec<Tab>,
     pub active: usize,
@@ -262,7 +267,7 @@ impl ShaleApp {
     /// Set up the app without a window. `persist` = read/write the user's config file.
     pub fn build(opts: Options, persist: bool) -> Self {
         let screenshot = opts.screenshot.clone();
-        let mut cfg = if persist { Config::load() } else { Config::default() };
+        let (mut cfg, cfg_problem) = if persist { Config::load() } else { (Config::default(), None) };
         let persist_config = persist;
         // screenshots and scripted checks of vim-lite: SHALE_VIM=1 turns it on
         if opts.screenshot.is_some() && std::env::var("SHALE_VIM").as_deref() == Ok("1") {
@@ -283,6 +288,8 @@ impl ShaleApp {
         let mut app = ShaleApp {
             cfg: cfg.clone(),
             persist_config,
+            vdata: crate::vault_state::VaultData::default(),
+            sync: sync::SyncState::default(),
             vault: None,
             tabs: vec![],
             active: 0,
@@ -335,6 +342,9 @@ impl ShaleApp {
             shot_done: Arc::new(AtomicBool::new(false)),
             script: opts.keys.as_deref().map(|k| k.split('|').map(|x| x.to_string()).collect()).unwrap_or_default(),
         };
+        if let Some(p) = cfg_problem {
+            app.toast(p);
+        }
         if let Some(p) = vault_path {
             app.open_vault(&p);
             if app.screenshot.is_some() {
@@ -380,10 +390,31 @@ impl ShaleApp {
         self.toasts.push((msg.into(), Instant::now()));
     }
 
-    pub fn save_config(&self) {
+    /// Save the global config and the open vault's `.shale/` files.
+    pub fn save_config(&mut self) {
         if self.persist_config {
             self.cfg.save();
+            if let Err(e) = self.vdata.save() {
+                self.toast(e);
+            }
         }
+    }
+
+    /// Load the vault's own settings and state; the first vault opened after an upgrade takes
+    /// over the per-vault fields of the old global config (CFG-008).
+    fn load_vault_data(&mut self, root: &Path) {
+        let (mut d, problems) = crate::vault_state::VaultData::load(root);
+        for p in problems {
+            self.toast(p);
+        }
+        let legacy = self.cfg.take_legacy();
+        if !legacy.is_empty() && !d.writable() {
+            // keep them in the global config until a vault can take them
+            self.cfg.restore_legacy(legacy);
+        } else if !legacy.is_empty() {
+            d.adopt_legacy(&legacy);
+        }
+        self.vdata = d;
     }
 
     pub fn open_vault(&mut self, path: &Path) {
@@ -391,13 +422,21 @@ impl ShaleApp {
         match Vault::open(path) {
             Ok(v) => {
                 let had_files = !v.files.is_empty();
+                // the vault being left keeps its open tabs
+                self.remember_open_files();
+                if self.persist_config {
+                    if let Err(e) = self.vdata.save() {
+                        self.toast(e);
+                    }
+                }
+                self.load_vault_data(&v.root);
                 self.vault = Some(v);
                 self.tabs.clear();
                 self.notes.clear();
                 self.drawings.clear();
                 self.active = 0;
                 self.cfg.remember_vault(path.to_path_buf());
-                let reopen: Vec<String> = self.cfg.open_files.clone();
+                let reopen: Vec<String> = self.vdata.state.open_files.clone();
                 for (i, f) in reopen.iter().enumerate() {
                     let rel = PathBuf::from(f);
                     if self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
@@ -414,6 +453,7 @@ impl ShaleApp {
                 if !had_files {
                     self.toast("Empty vault opened. Create a note with Ctrl+N.");
                 }
+                self.sync_vault_opened();
                 self.save_config();
             }
             Err(e) => self.toast(format!("Could not open vault: {e}")),
@@ -500,8 +540,11 @@ impl ShaleApp {
         self.remember_open_files();
     }
 
-    fn remember_open_files(&mut self) {
-        self.cfg.open_files = self.tabs.iter().filter_map(|t| t.view.path().map(rel_to_string)).collect();
+    pub(crate) fn remember_open_files(&mut self) {
+        if self.vault.is_none() {
+            return;
+        }
+        self.vdata.state.open_files = self.tabs.iter().filter_map(|t| t.view.path().map(rel_to_string)).collect();
     }
 
     pub fn current_path(&self) -> Option<PathBuf> {
@@ -621,6 +664,7 @@ impl ShaleApp {
 
     /// Toggle a checkbox in any note (open buffer or file on disk).
     pub fn toggle_task(&mut self, rel: &Path, offset: usize) {
+        self.wait_for_sync_tree();
         let Some(v) = self.vault.as_mut() else { return };
         if let Some(doc) = self.notes.get_mut(rel) {
             if markdown::toggle_task_at(&mut doc.text, offset) {
@@ -636,6 +680,7 @@ impl ShaleApp {
     }
 
     pub fn flush_all(&mut self) {
+        self.wait_for_sync_tree();
         let Some(v) = self.vault.as_mut() else { return };
         for (rel, doc) in self.notes.iter_mut() {
             if doc.dirty {
@@ -661,6 +706,10 @@ impl ShaleApp {
     }
 
     fn autosave(&mut self) {
+        // never save into the middle of a git merge (SYNC-013); the buffers stay dirty meanwhile
+        if self.sync.tree_busy.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let Some(v) = self.vault.as_mut() else { return };
         let wait = Duration::from_millis(800);
         for (rel, doc) in self.notes.iter_mut() {
@@ -1381,6 +1430,8 @@ impl eframe::App for ShaleApp {
         self.screenshot_tick(ui);
         self.shortcuts(ui);
         self.autosave();
+        let ctx = ui.ctx().clone();
+        self.sync_tick(&ctx);
         if self.calendar.poll() {
             ui.ctx().request_repaint();
         }
@@ -1429,6 +1480,7 @@ impl eframe::App for ShaleApp {
     }
 
     fn on_exit(&mut self) {
+        // flush_all waits for a running sync's merge step first
         self.flush_all();
         self.remember_open_files();
         self.save_config();
