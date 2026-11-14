@@ -42,6 +42,8 @@ mod notes_vault_tests;
 #[cfg(test)]
 mod utf8_tests;
 mod secrets;
+#[allow(dead_code)] // the feed screens that use the whole API come next
+mod social;
 mod tagwords;
 mod tb_store;
 mod vault;

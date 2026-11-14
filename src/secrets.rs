@@ -14,6 +14,10 @@ use crate::cal_store::{CalendarSource, SourceKind};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+/// Keyring "application" attributes: calendars and social accounts never see each other's entries.
+const CALDAV: &str = "shale-caldav";
+const SOCIAL: &str = "shale-social";
+
 /// The account a calendar belongs to: (server, user name). None without a user name.
 fn account_of(s: &CalendarSource) -> Option<(String, String)> {
     let SourceKind::Caldav { url, username, .. } = &s.kind else { return None };
@@ -43,7 +47,7 @@ pub fn load_passwords(sources: &mut [CalendarSource]) {
         if !password.is_empty() {
             continue;
         }
-        let found = cache.entry(acct.clone()).or_insert_with(|| backend::lookup(&acct.0, &acct.1)).clone();
+        let found = cache.entry(acct.clone()).or_insert_with(|| backend::lookup(CALDAV, &acct.0, &acct.1)).clone();
         if let Some(p) = found {
             known().get_or_insert_with(HashMap::new).insert(acct, p.clone());
             *password = p;
@@ -70,7 +74,7 @@ pub fn for_file(sources: &[CalendarSource]) -> Vec<CalendarSource> {
         let refused = refused.get_or_insert_with(HashMap::new);
         let stored = map.get(&acct) == Some(password)
             || (refused.get(&acct) != Some(password) && {
-                let ok = backend::store(&acct.0, &acct.1, password);
+                let ok = backend::store(CALDAV, &acct.0, &acct.1, password);
                 if ok {
                     map.insert(acct.clone(), password.clone());
                     refused.remove(&acct);
@@ -85,10 +89,45 @@ pub fn for_file(sources: &[CalendarSource]) -> Vec<CalendarSource> {
     }
     let unused: Vec<(String, String)> = map.keys().filter(|a| !used.contains(*a)).cloned().collect();
     for a in unused {
-        backend::clear(&a.0, &a.1);
+        backend::clear(CALDAV, &a.0, &a.1);
         map.remove(&a);
     }
     out
+}
+
+// ---------------------------------------------------------------- social accounts (Mastodon / Bluesky)
+
+/// The access token (Mastodon) or app password (Bluesky) of a social account, from the keyring.
+/// `server` is the account's server address as stored in `social::Account::server`.
+#[allow(dead_code)] // used by the social feed screens
+pub fn social_lookup(server: &str, handle: &str) -> Option<String> {
+    backend::lookup(SOCIAL, server, handle)
+}
+
+/// Put the secret of a social account into the keyring. False when no keyring works (the caller
+/// then keeps it in the owner-only settings file, see `social_store_or_keep`).
+#[allow(dead_code)] // used by the social feed screens
+pub fn social_store(server: &str, handle: &str, secret: &str) -> bool {
+    backend::store(SOCIAL, server, handle, secret)
+}
+
+/// Remove the secret of a social account from the keyring (when the account is removed).
+#[allow(dead_code)] // used by the social feed screens
+pub fn social_clear(server: &str, handle: &str) {
+    backend::clear(SOCIAL, server, handle)
+}
+
+/// What goes into the settings file for the secret: empty when the keyring has it now, the
+/// secret itself (the file is readable only by its owner) when no keyring works.
+#[allow(dead_code)] // used by the social feed screens
+pub fn social_store_or_keep(server: &str, handle: &str, secret: &str) -> String {
+    if social_store(server, handle, secret) { String::new() } else { secret.to_string() }
+}
+
+/// The secret of a social account: from the keyring, else the one kept in the settings file.
+#[allow(dead_code)] // used by the social feed screens
+pub fn social_secret(server: &str, handle: &str, from_file: &str) -> String {
+    social_lookup(server, handle).unwrap_or_else(|| from_file.to_string())
 }
 
 /// Where passwords end up, for the settings dialog.
@@ -106,8 +145,8 @@ mod backend {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    fn attrs<'a>(server: &'a str, user: &'a str) -> [&'a str; 6] {
-        ["application", "shale-caldav", "server", server, "user", user]
+    fn attrs<'a>(app: &'a str, server: &'a str, user: &'a str) -> [&'a str; 6] {
+        ["application", app, "server", server, "user", user]
     }
 
     /// Run secret-tool with `input` on stdin. Gives up after a while (an unlock prompt left open).
@@ -144,29 +183,29 @@ mod backend {
         })
     }
 
-    pub fn lookup(server: &str, user: &str) -> Option<String> {
+    pub fn lookup(app: &str, server: &str, user: &str) -> Option<String> {
         let mut args = vec!["lookup"];
-        args.extend(attrs(server, user));
+        args.extend(attrs(app, server, user));
         match run(&args, None) {
             Some((true, p)) if !p.is_empty() => Some(p),
             _ => None,
         }
     }
 
-    pub fn store(server: &str, user: &str, password: &str) -> bool {
+    pub fn store(app: &str, server: &str, user: &str, password: &str) -> bool {
         if !available() {
             return false;
         }
-        let label = format!("Shale CalDAV: {user} on {server}");
+        let label = format!("{}: {user} on {server}", if app == super::SOCIAL { "Shale social" } else { "Shale CalDAV" });
         let mut args = vec!["store", "--label", label.as_str()];
-        args.extend(attrs(server, user));
+        args.extend(attrs(app, server, user));
         // the stored password must read back exactly (no trailing newline is added)
-        matches!(run(&args, Some(password)), Some((true, _))) && lookup(server, user).as_deref() == Some(password)
+        matches!(run(&args, Some(password)), Some((true, _))) && lookup(app, server, user).as_deref() == Some(password)
     }
 
-    pub fn clear(server: &str, user: &str) {
+    pub fn clear(app: &str, server: &str, user: &str) {
         let mut args = vec!["clear"];
-        args.extend(attrs(server, user));
+        args.extend(attrs(app, server, user));
         let _ = run(&args, None);
     }
 }
@@ -177,21 +216,26 @@ mod backend {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    pub static FAKE: Mutex<Option<HashMap<(String, String), String>>> = Mutex::new(None);
+    type Key = (String, String, String);
+    pub static FAKE: Mutex<Option<HashMap<Key, String>>> = Mutex::new(None);
+
+    fn key(app: &str, server: &str, user: &str) -> Key {
+        (app.to_string(), server.to_string(), user.to_string())
+    }
 
     pub fn available() -> bool {
         true
     }
-    pub fn lookup(server: &str, user: &str) -> Option<String> {
-        FAKE.lock().unwrap().as_ref()?.get(&(server.to_string(), user.to_string())).cloned()
+    pub fn lookup(app: &str, server: &str, user: &str) -> Option<String> {
+        FAKE.lock().unwrap().as_ref()?.get(&key(app, server, user)).cloned()
     }
-    pub fn store(server: &str, user: &str, password: &str) -> bool {
-        FAKE.lock().unwrap().get_or_insert_with(HashMap::new).insert((server.into(), user.into()), password.into());
+    pub fn store(app: &str, server: &str, user: &str, password: &str) -> bool {
+        FAKE.lock().unwrap().get_or_insert_with(HashMap::new).insert(key(app, server, user), password.into());
         true
     }
-    pub fn clear(server: &str, user: &str) {
+    pub fn clear(app: &str, server: &str, user: &str) {
         if let Some(m) = FAKE.lock().unwrap().as_mut() {
-            m.remove(&(server.to_string(), user.to_string()));
+            m.remove(&key(app, server, user));
         }
     }
 }
@@ -202,18 +246,30 @@ mod backend {
     pub fn available() -> bool {
         false
     }
-    pub fn lookup(_: &str, _: &str) -> Option<String> {
+    pub fn lookup(_: &str, _: &str, _: &str) -> Option<String> {
         None
     }
-    pub fn store(_: &str, _: &str, _: &str) -> bool {
+    pub fn store(_: &str, _: &str, _: &str, _: &str) -> bool {
         false
     }
-    pub fn clear(_: &str, _: &str) {}
+    pub fn clear(_: &str, _: &str, _: &str) {}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: SEC-003
+    #[test]
+    fn social_secrets_have_their_own_keyring_entries() {
+        assert!(social_store("https://social.test", "ada@social.test", "tok-1"));
+        assert_eq!(social_lookup("https://social.test", "ada@social.test").as_deref(), Some("tok-1"));
+        assert_eq!(backend::lookup(CALDAV, "https://social.test", "ada@social.test"), None, "not mixed up with calendars");
+        assert_eq!(social_store_or_keep("https://social.test", "ada@social.test", "tok-2"), "");
+        assert_eq!(social_secret("https://social.test", "ada@social.test", "file"), "tok-2");
+        social_clear("https://social.test", "ada@social.test");
+        assert_eq!(social_secret("https://social.test", "ada@social.test", "file"), "file");
+    }
 
     fn dav(id: &str, url: &str, user: &str, pw: &str) -> CalendarSource {
         CalendarSource { id: id.into(), name: id.into(), color: "#000000".into(), enabled: true, sync_minutes: 15, kind: SourceKind::Caldav { url: url.into(), username: user.into(), password: pw.into() } }
@@ -226,13 +282,13 @@ mod tests {
         let file = for_file(&sources);
         let json = serde_json::to_string(&file).unwrap();
         assert!(!json.contains("s3cret"), "no password in the settings file: {json}");
-        assert_eq!(backend::lookup("https://dav.example.com:443", "ada").as_deref(), Some("s3cret"), "one entry for the account");
+        assert_eq!(backend::lookup(CALDAV, "https://dav.example.com:443", "ada").as_deref(), Some("s3cret"), "one entry for the account");
         // reading the settings back
         let mut loaded: Vec<CalendarSource> = serde_json::from_str(&json).unwrap();
         load_passwords(&mut loaded);
         assert_eq!(loaded, sources);
         // the account is removed: its keyring entry goes too
         let _ = for_file(&sources[2..]);
-        assert_eq!(backend::lookup("https://dav.example.com:443", "ada"), None);
+        assert_eq!(backend::lookup(CALDAV, "https://dav.example.com:443", "ada"), None);
     }
 }

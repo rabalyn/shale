@@ -107,7 +107,7 @@ fn local_ymd(utc: i64) -> (i32, u32, u32) {
 }
 
 /// "2026-11-13 10:22" (local time), or just the date.
-fn local_stamp(utc: i64, date_only: bool) -> String {
+pub(crate) fn local_stamp(utc: i64, date_only: bool) -> String {
     let (day, secs) = t::utc_to_local(utc);
     let d = ymd_text(t::civil_from_days(day));
     if date_only { d } else { format!("{d} {}", t::hhmm(secs)) }
@@ -117,7 +117,7 @@ fn event_ymd(e: &Event) -> (i32, u32, u32) {
     if e.all_day { t::civil_from_days(e.start.div_euclid(86_400)) } else { local_ymd(e.start) }
 }
 
-fn safe_title(s: &str) -> String {
+pub(crate) fn safe_title(s: &str) -> String {
     let s: String = s.chars().map(|c| if c == '/' || c == '\n' || c == '\r' || c == '\t' { ' ' } else { c }).collect();
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     let s: String = s.chars().take(90).collect();
@@ -451,12 +451,12 @@ pub fn clean_folder(s: &str) -> Result<PathBuf, String> {
     Ok(p)
 }
 
-fn yaml(s: &str) -> String {
+pub(crate) fn yaml(s: &str) -> String {
     let one_line: String = s.chars().map(|c| if c == '\n' || c == '\r' { ' ' } else { c }).collect();
     format!("\"{}\"", one_line.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn front(lines: &[(&str, String)], tags: &[String]) -> String {
+pub(crate) fn front(lines: &[(&str, String)], tags: &[String]) -> String {
     let mut s = String::from("---\n");
     for (k, v) in lines {
         if !v.is_empty() {
