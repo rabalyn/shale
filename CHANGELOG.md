@@ -37,6 +37,11 @@ The release page of each version on GitHub shows its section from this file.
 - **Links in drawings**: `[[` note suggestions, `[[p ` people and the `[!` file picker work in
   drawing labels and texts. Shapes and texts with a link show a ↗ mark; click it (or Ctrl+click
   the shape) to open the note or web page.
+- **Drawings in backlinks and the graph**: links in drawings and canvases count like links in
+  notes. Renaming or moving a note updates the links in drawings as well; canvases are never
+  changed, and the message names those still pointing to the old name.
+- **Pictures in drawings**: pictures in Obsidian Excalidraw drawings and excalidraw.com files are
+  shown instead of a dashed box, also in embeds and PDF export.
 
 ### Fixed
 

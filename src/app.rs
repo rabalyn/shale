@@ -752,12 +752,8 @@ impl ShaleApp {
             return Ok(());
         }
         let changed = v.rename(rel, &to, self.cfg.update_links_on_rename && !is_dir).map_err(|e| e.to_string())?;
-        self.after_move(rel, &to, is_dir, &changed);
-        if !changed.is_empty() {
-            self.toast(format!("Renamed and updated links in {} note(s)", changed.len()));
-        } else {
-            self.toast(format!("Renamed to “{}”", markdown::strip_md_ext(&file_name)));
-        }
+        self.after_move(rel, &to, is_dir, &changed.changed);
+        self.toast(format!("Renamed to “{}”{}", markdown::strip_md_ext(&file_name), links_message(&changed, "name")));
         self.remember_open_files();
         Ok(())
     }
@@ -811,6 +807,13 @@ impl ShaleApp {
             if let (Some(doc), Some(n)) = (self.notes.get_mut(c), v.notes.get(c)) {
                 doc.text = n.text.clone();
             }
+            // an open drawing whose links were rewritten shows the file as it is now (it was saved
+            // before the rename, so nothing is lost)
+            if self.drawings.contains_key(c) {
+                if let Ok(text) = std::fs::read_to_string(v.abs(c)) {
+                    self.drawings.insert(c.clone(), DrawingDoc::new(c.clone(), &text));
+                }
+            }
         }
         // open folders in the file list move along
         let exp: Vec<PathBuf> = self.expanded.iter().cloned().collect();
@@ -831,13 +834,13 @@ impl ShaleApp {
         let v = self.vault.as_mut().ok_or("no vault")?;
         let is_dir = v.abs(rel).is_dir();
         let (to, changed) = v.move_into(rel, into).map_err(|e| e.to_string())?;
-        self.after_move(rel, &to, is_dir, &changed);
+        self.after_move(rel, &to, is_dir, &changed.changed);
         if !into.as_os_str().is_empty() {
             self.expanded.insert(into.to_path_buf());
         }
         let name = rel.file_name().map(|n| markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
         let place = if into.as_os_str().is_empty() { "the vault".to_string() } else { format!("“{}”", rel_to_string(into)) };
-        self.toast(if changed.is_empty() { format!("Moved “{name}” to {place}") } else { format!("Moved “{name}” to {place} and updated links in {} note(s)", changed.len()) });
+        self.toast(format!("Moved “{name}” to {place}{}", links_message(&changed, "place")));
         self.remember_open_files();
         Ok(to)
     }
@@ -1003,7 +1006,7 @@ impl ShaleApp {
                 Some(doc) => doc.scene.clone(),
                 None => crate::drawing::Scene::read_file(&v.abs(&d.rel))?,
             };
-            crate::pdfexport::export_drawing(&scene, &d.name, &d.opts)?
+            crate::pdfexport::export_drawing(&scene, &d.name, &d.opts, &crate::drawing_pictures::images(&scene, v, &d.rel))?
         } else {
             let text = self.notes.get(&d.rel).map(|n| n.text.clone()).or_else(|| v.notes.get(&d.rel).map(|n| n.text.clone())).unwrap_or_default();
             crate::pdfexport::export_note(v, &d.rel, &text, &d.opts)?
@@ -1430,6 +1433,19 @@ impl eframe::App for ShaleApp {
     }
 }
 
+/// The end of a rename / move message: which files got new links, which canvases did not.
+fn links_message(u: &crate::vault::LinkUpdate, old: &str) -> String {
+    let mut out = String::new();
+    if !u.changed.is_empty() {
+        out.push_str(&format!(" and updated links in {} file(s)", u.changed.len()));
+    }
+    if !u.canvases.is_empty() {
+        let names: Vec<String> = u.canvases.iter().map(|c| format!("“{}”", rel_to_string(c))).collect();
+        out.push_str(&format!(". Still linking to the old {old} (canvases are never changed): {}", names.join(", ")));
+    }
+    out
+}
+
 pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from: &Path) {
     match a {
         EditorAction::OpenLink { target, heading, new_tab } => app_actions.push(Action::OpenLink { target, heading, from: Some(from.to_path_buf()), new_tab }),
@@ -1578,6 +1594,22 @@ pub(crate) mod tests {
         // renaming keeps it a canvas
         app.rename(canvas, "Network").unwrap();
         assert_eq!(std::fs::read_to_string(d.join("Maps/Network.canvas")).unwrap(), CANVAS);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: DRAW-017
+    #[test]
+    fn rename_updates_an_open_drawing_and_names_the_canvas_left_behind() {
+        let (mut app, d) = test_app("rename-drawing");
+        let scene = crate::drawing::SAMPLE_SCENE.replace("\"Idea\"", "\"see [[Ideas]]\"");
+        std::fs::write(d.join("Map.excalidraw"), scene).unwrap();
+        app.rescan();
+        app.open(Path::new("Map.excalidraw"), false);
+        app.rename(Path::new("Ideas.md"), "Thoughts").unwrap();
+        let shown: Vec<String> = app.drawings[Path::new("Map.excalidraw")].scene.live().filter_map(|e| e.text.clone()).collect();
+        assert!(shown.contains(&"see [[Thoughts]]".to_string()), "the open drawing shows the new link: {shown:?}");
+        let msg = &app.toasts.last().unwrap().0;
+        assert!(msg.contains("updated links in") && msg.contains("“Overview.canvas”") && msg.contains("canvases are never changed"), "{msg}");
         let _ = std::fs::remove_dir_all(&d);
     }
 

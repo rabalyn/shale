@@ -154,7 +154,9 @@ pub fn read(text: &str) -> Result<Scene, String> {
             }
         }
     }
-    serde_json::from_value(value).map_err(|e| format!("the drawing data is not valid: {e}"))
+    let mut scene: Scene = serde_json::from_value(value).map_err(|e| format!("the drawing data is not valid: {e}"))?;
+    scene.embedded = crate::drawing_pictures::embedded_files(text);
+    Ok(scene)
 }
 
 /// A stable 8-character id (letters and digits) for an id the plugin can't use.

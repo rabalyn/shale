@@ -60,6 +60,13 @@ built-in demo vault (`shale --screenshot out.png`).
 - Links inside drawings: type `[[` in a label or text for note suggestions, `[[p ` for people
   and `[!` for the file picker, just like in notes. A shape or text with a link gets a small ↗
   mark; click it (or Ctrl+click the shape) to open the note, Shift for a new tab.
+- Links in drawings and canvases count like links in notes: the linked note lists the drawing
+  under Backlinks, and the graph shows the connection. Renaming or moving a note updates the
+  links in drawings too; canvases are never changed, so the message names any canvas that still
+  points to the old name.
+- Pictures in drawings show up: pictures of Obsidian Excalidraw drawings (from the vault) and of
+  excalidraw.com files (stored in the file), also in drawings embedded in notes and in PDF
+  export.
 - Tools on keys 1–0: hand, select, rectangle, diamond, ellipse, arrow, line, pen, text, eraser.
 - The style panel sets stroke and fill colours, fill style, stroke width, outline pattern,
   sloppiness, corners, label font, size, colour, background and alignment, opacity, and the

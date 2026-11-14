@@ -12,7 +12,7 @@ mod connect;
 use connect::*;
 #[path = "drawing_links.rs"]
 mod links;
-pub use links::DrawingAction;
+pub use links::{link_lines, rewrite_link_texts, DrawingAction};
 
 /// Excalidraw font id of a text element (1 hand-drawn, 2 normal, 3 code).
 pub fn font_family_of_pub(e: &Element) -> u64 {
@@ -73,6 +73,10 @@ pub struct Scene {
     pub files: Map<String, Value>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+    /// Pictures of an Obsidian plugin drawing: (fileId, link target) from its `## Embedded Files`
+    /// section. Not part of the scene JSON.
+    #[serde(skip)]
+    pub embedded: Vec<(String, String)>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -127,7 +131,7 @@ impl Default for Scene {
         let mut app_state = Map::new();
         app_state.insert("viewBackgroundColor".into(), json!("#ffffff"));
         app_state.insert("gridSize".into(), Value::Null);
-        Scene { kind: d_type(), version: 2, source: "shale".into(), elements: vec![], app_state, files: Map::new(), extra: Map::new() }
+        Scene { kind: d_type(), version: 2, source: "shale".into(), elements: vec![], app_state, files: Map::new(), extra: Map::new(), embedded: vec![] }
     }
 }
 
@@ -446,18 +450,18 @@ fn paint_grid(painter: &egui::Painter, rect: Rect, view: &View, dark: bool) {
 }
 
 /// Paint all elements. `dark` turns colours into their dark-canvas variants.
-pub fn paint_scene(painter: &egui::Painter, scene: &Scene, view: &View, dark: bool, skip_id: Option<&str>) {
+pub fn paint_scene(painter: &egui::Painter, scene: &Scene, view: &View, dark: bool, skip_id: Option<&str>, pics: &crate::drawing_pictures::Pictures) {
     let mut shapes = Vec::new();
     for e in scene.live() {
         if Some(e.id.as_str()) == skip_id {
             continue;
         }
-        paint_element(painter, e, view, dark, &mut shapes);
+        paint_element(painter, e, view, dark, pics, &mut shapes);
     }
     painter.extend(shapes);
 }
 
-pub(crate) fn paint_element(painter: &egui::Painter, e: &Element, view: &View, dark: bool, out: &mut Vec<Shape>) {
+pub(crate) fn paint_element(painter: &egui::Painter, e: &Element, view: &View, dark: bool, pics: &crate::drawing_pictures::Pictures, out: &mut Vec<Shape>) {
     let col = |s: &str| parse_color(s).map(|c| if dark { dark_variant(c) } else { c }).map(|c| with_opacity(c, e.opacity));
     let stroke_col = col(&e.stroke_color).unwrap_or(Color32::TRANSPARENT);
     let width = (e.stroke_width as f32 * view.zoom).max(0.6);
@@ -557,9 +561,15 @@ pub(crate) fn paint_element(painter: &egui::Painter, e: &Element, view: &View, d
             out.push(Shape::galley(anchor, galley, stroke_col));
         }
         _ => {
-            // Unknown element types (images, frames, ...): draw a dashed placeholder box.
             let b = e.bounds();
             let r = Rect::from_min_max(view.to_screen(b.min), view.to_screen(b.max));
+            let picture = if e.kind == "image" { e.extra.get("fileId").and_then(|v| v.as_str()).and_then(|id| pics.get(id)) } else { None };
+            if let Some(tex) = picture {
+                let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+                out.push(Shape::image(*tex, r, uv, with_opacity(Color32::WHITE, e.opacity)));
+                return;
+            }
+            // Unknown element types (frames, pictures that can't be shown, ...): a dashed box.
             let pts = vec![r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
             out.extend(Shape::dashed_line(&pts, Stroke::new(1.0, Color32::GRAY), 6.0, 4.0));
         }
@@ -567,7 +577,7 @@ pub(crate) fn paint_element(painter: &egui::Painter, e: &Element, view: &View, d
 }
 
 /// Paint a whole scene fitted into `rect` (used for embeds in notes).
-pub fn paint_thumbnail(painter: &egui::Painter, scene: &Scene, rect: Rect, dark: bool) {
+pub fn paint_thumbnail(painter: &egui::Painter, scene: &Scene, rect: Rect, dark: bool, pics: &crate::drawing_pictures::Pictures) {
     let Some(b) = scene.bounds() else {
         painter.text(rect.center(), Align2::CENTER_CENTER, "Empty drawing", FontId::proportional(13.0), Color32::GRAY);
         return;
@@ -577,7 +587,7 @@ pub fn paint_thumbnail(painter: &egui::Painter, scene: &Scene, rect: Rect, dark:
     let content = b.size() * zoom;
     let origin = rect.center() - content / 2.0;
     let view = View { origin, offset: -b.min.to_vec2(), zoom };
-    paint_scene(&painter.with_clip_rect(rect), scene, &view, dark, None);
+    paint_scene(&painter.with_clip_rect(rect), scene, &view, dark, None, pics);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1211,7 +1221,8 @@ impl DrawingDoc {
                 e.height = sz.y as f64;
             }
         }
-        paint_scene(&painter, &self.scene, &view, dark, self.editing_text.as_deref());
+        let pics = crate::drawing_pictures::textures(ui.ctx(), &self.scene, vault, &self.rel);
+        paint_scene(&painter, &self.scene, &view, dark, self.editing_text.as_deref(), &pics);
         let on_mark = self.paint_links(ui, &painter, &view, &resp, vault);
 
         // ---- pointer

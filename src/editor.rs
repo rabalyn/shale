@@ -324,7 +324,8 @@ fn to_format(f: Fmt, base: f32) -> TextFormat {
 /// Something shown in place of an embed link in the editor.
 enum Art {
     Tex(egui::TextureHandle),
-    Scene(Arc<crate::drawing::Scene>),
+    /// a drawing and its path (its pictures are found from there)
+    Scene(Arc<crate::drawing::Scene>, std::path::PathBuf),
     /// first page of a PDF, and its page count
     Pdf(egui::TextureHandle, usize),
 }
@@ -657,7 +658,7 @@ impl NoteEditor {
                     let Some(b) = scene.bounds() else { continue };
                     let b = b.expand(20.0);
                     let size = fit(b.width().max(40.0), b.height().max(40.0), 420.0);
-                    images.push((l.range.clone(), size.y + 6.0, Art::Scene(scene), size));
+                    images.push((l.range.clone(), size.y + 6.0, Art::Scene(scene, p.clone()), size));
                 } else if crate::pdfview::is_pdf(&p) {
                     match crate::pdfview::pdf_pages(ui.ctx(), &abs, 1) {
                         crate::pdfview::PdfState::Ready { pages, total } if !pages.is_empty() => {
@@ -726,10 +727,11 @@ impl NoteEditor {
                     Art::Tex(tex) => {
                         painter.image(tex.id(), rect, uv, Color32::WHITE);
                     }
-                    Art::Scene(scene) => {
+                    Art::Scene(scene, at) => {
                         let bg = if self.dark_canvas { Color32::from_rgb(18, 18, 18) } else { Color32::WHITE };
                         painter.rect_filled(rect, 6.0, bg);
-                        crate::drawing::paint_thumbnail(&painter, scene, rect.shrink(4.0), self.dark_canvas);
+                        let pics = crate::drawing_pictures::textures(ui.ctx(), scene, vault, at);
+                        crate::drawing::paint_thumbnail(&painter, scene, rect.shrink(4.0), self.dark_canvas, &pics);
                     }
                     Art::Pdf(tex, total) => {
                         painter.image(tex.id(), rect, uv, Color32::WHITE);

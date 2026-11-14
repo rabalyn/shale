@@ -12,6 +12,7 @@ use crate::pdfwrite::{Doc, FontKind, Image, Page, Rgba};
 use crate::theme;
 use crate::vault::{FileKind, Vault};
 use eframe::egui::{self, Color32, Pos2, Shape, Vec2};
+use std::collections::HashMap;
 use std::path::Path;
 
 const MM: f32 = 72.0 / 25.4;
@@ -307,10 +308,7 @@ impl<'a> Writer<'a> {
         let (w, h) = (img.width() as f32, img.height() as f32);
         let k = (self.cw() / (w * 0.75)).min(max_h / (h * 0.75)).min(1.0) * 0.75;
         let (dw, dh) = (w * k, h * k);
-        let has_alpha = img.pixels().any(|p| p[3] < 255);
-        let rgb: Vec<u8> = img.pixels().flat_map(|p| [p[0], p[1], p[2]]).collect();
-        let alpha = has_alpha.then(|| img.pixels().map(|p| p[3]).collect());
-        let idx = self.doc.add_image(Image { width: img.width(), height: img.height(), rgb, alpha });
+        let idx = self.doc.add_image(pdf_image(&img));
         self.need(dh + 6.0);
         let (x, y) = (self.m, self.y);
         self.p().image(idx, x, y, dw, dh);
@@ -400,7 +398,8 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                             let dh = b.height() * k;
                             w.need(dh + 6.0);
                             let (x, y) = (x0 + (cw - b.width() * k) / 2.0, w.y);
-                            draw_scene(w.p(), &scene, [x, y, b.width() * k, dh], false, None);
+                            let pics = add_pictures(&mut w.doc, &crate::drawing_pictures::images(&scene, vault, &t));
+                            draw_scene(w.p(), &scene, [x, y, b.width() * k, dh], false, None, &pics);
                             w.y += dh + 8.0;
                         }
                     }
@@ -517,8 +516,22 @@ fn finish(mut doc: Doc, opts: &ExportOptions) -> Result<Vec<u8>, String> {
 
 // ---------------------------------------------------------------- drawings
 
+/// A picture in the PDF writer's form (alpha only when it is used).
+fn pdf_image(img: &image::RgbaImage) -> Image {
+    let has_alpha = img.pixels().any(|p| p[3] < 255);
+    let rgb: Vec<u8> = img.pixels().flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let alpha = has_alpha.then(|| img.pixels().map(|p| p[3]).collect());
+    Image { width: img.width(), height: img.height(), rgb, alpha }
+}
+
+/// Add a drawing's pictures to the document: fileId → image index.
+fn add_pictures(doc: &mut Doc, pictures: &HashMap<String, image::RgbaImage>) -> HashMap<String, usize> {
+    pictures.iter().map(|(id, img)| (id.clone(), doc.add_image(pdf_image(img)))).collect()
+}
+
 /// Draw a scene into `area` = [x, y, width, height] (points, from the page's top-left).
-pub fn draw_scene(page: &mut Page, scene: &Scene, area: [f32; 4], dark: bool, bg: Option<Rgba>) {
+/// `pictures`: the scene's pictures already added to the document (fileId → image index).
+pub fn draw_scene(page: &mut Page, scene: &Scene, area: [f32; 4], dark: bool, bg: Option<Rgba>, pictures: &HashMap<String, usize>) {
     let Some(b) = scene.bounds() else { return };
     let b = b.expand(20.0);
     let zoom = (area[2] / b.width()).min(area[3] / b.height());
@@ -529,12 +542,18 @@ pub fn draw_scene(page: &mut Page, scene: &Scene, area: [f32; 4], dark: bool, bg
     }
     let ctx = egui::Context::default();
     let painter = egui::Painter::new(ctx, egui::LayerId::background(), egui::Rect::EVERYTHING);
+    let no_textures = crate::drawing_pictures::Pictures::new();
     for e in scene.live() {
-        if e.kind == "text" {
+        let picture = if e.kind == "image" { e.extra.get("fileId").and_then(|v| v.as_str()).and_then(|id| pictures.get(id)) } else { None };
+        if let Some(&idx) = picture {
+            let b = e.bounds();
+            let (p, q) = (view.to_screen(b.min), view.to_screen(b.max));
+            page.image(idx, p.x, p.y, q.x - p.x, q.y - p.y);
+        } else if e.kind == "text" {
             draw_text_element(page, e, &view, dark);
         } else {
             let mut shapes = Vec::new();
-            drawing::paint_element(&painter, e, &view, dark, &mut shapes);
+            drawing::paint_element(&painter, e, &view, dark, &no_textures, &mut shapes);
             for s in &shapes {
                 emit_shape(page, s);
             }
@@ -624,8 +643,8 @@ fn draw_text_element(page: &mut Page, e: &Element, view: &View, dark: bool) {
     }
 }
 
-/// Export a drawing to PDF bytes.
-pub fn export_drawing(scene: &Scene, title: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
+/// Export a drawing to PDF bytes. `pictures`: its pictures by fileId (`drawing_pictures::images`).
+pub fn export_drawing(scene: &Scene, title: &str, opts: &ExportOptions, pictures: &HashMap<String, image::RgbaImage>) -> Result<Vec<u8>, String> {
     let b = scene.bounds().ok_or("The drawing is empty")?.expand(20.0);
     let m = opts.margin_mm * MM;
     let natural = Vec2::new(b.width(), b.height()) * 0.75; // 100% = screen pixels at 96 dpi
@@ -652,7 +671,8 @@ pub fn export_drawing(scene: &Scene, title: &str, opts: &ExportOptions) -> Resul
     if let Some(bg) = page_bg {
         doc.page(p).rect(0.0, 0.0, pw, ph, Some(bg), None);
     }
-    draw_scene(doc.page(p), scene, [m + (aw - dw) / 2.0, m + (ah - dh) / 2.0, dw, dh], dark, None);
+    let pics = add_pictures(&mut doc, pictures);
+    draw_scene(doc.page(p), scene, [m + (aw - dw) / 2.0, m + (ah - dh) / 2.0, dw, dh], dark, None, &pics);
     finish(doc, &ExportOptions { page_numbers: false, ..opts.clone() })
 }
 
@@ -745,11 +765,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: DRAW-018
+    #[test]
+    fn drawing_pictures_are_in_the_pdf() {
+        let scene = Scene::parse(r#"{"type":"excalidraw","version":2,"elements":[{"id":"a","type":"image","x":0,"y":0,"width":200,"height":100,"fileId":"f"}]}"#).unwrap();
+        let red = image::RgbaImage::from_pixel(4, 2, image::Rgba([230, 20, 20, 255]));
+        let reds = |bytes: &[u8]| {
+            let (w, h, px) = render(bytes).remove(0);
+            (0..(w * h) as usize).filter(|i| px[i * 4] > 200 && px[i * 4 + 1] < 60).count() as f32 / (w * h) as f32
+        };
+        let with = export_drawing(&scene, "P", &ExportOptions::for_drawing(&scene), &HashMap::from([("f".to_string(), red)])).unwrap();
+        // 200×100 of a 240×140 drawing, inside the page margins
+        assert!(reds(&with) > 0.25, "the picture is drawn: {} of the page is red", reds(&with));
+        let without = export_drawing(&scene, "P", &ExportOptions::for_drawing(&scene), &HashMap::new()).unwrap();
+        assert_eq!(reds(&without), 0.0, "a missing picture is only a dashed box");
+    }
+
     // spec: PDF-001
     #[test]
     fn drawing_export_fit_and_paper() {
         let scene = Scene::parse(crate::drawing::SAMPLE_SCENE).unwrap();
-        let fit = export_drawing(&scene, "Sketch", &ExportOptions::for_drawing(&scene)).unwrap();
+        let fit = export_drawing(&scene, "Sketch", &ExportOptions::for_drawing(&scene), &HashMap::new()).unwrap();
         let p = render(&fit);
         assert_eq!(p.len(), 1);
         let (w, h, px) = &p[0];
@@ -760,14 +796,14 @@ mod tests {
             px[i * 4 + 2] > 150 && px[i * 4] < 80 && x < *w / 2
         });
         assert!(blue, "rectangle stroke rendered");
-        let a4 = export_drawing(&scene, "Sketch", &ExportOptions { paper: Paper::A4, landscape: true, ..ExportOptions::for_drawing(&scene) }).unwrap();
+        let a4 = export_drawing(&scene, "Sketch", &ExportOptions { paper: Paper::A4, landscape: true, ..ExportOptions::for_drawing(&scene) }, &HashMap::new()).unwrap();
         let p = render(&a4);
         assert_eq!((p[0].0, p[0].1), (421, 297), "A4 landscape");
-        let dark = export_drawing(&scene, "Sketch", &ExportOptions { background: Background::Dark, ..ExportOptions::for_drawing(&scene) }).unwrap();
+        let dark = export_drawing(&scene, "Sketch", &ExportOptions { background: Background::Dark, ..ExportOptions::for_drawing(&scene) }, &HashMap::new()).unwrap();
         let p = render(&dark);
         assert!(p[0].2[0] < 40, "dark background");
         assert!(String::from_utf8_lossy(&dark).contains("/MediaBox"));
-        assert!(export_drawing(&Scene::default(), "x", &ExportOptions::for_drawing(&Scene::default())).is_err());
+        assert!(export_drawing(&Scene::default(), "x", &ExportOptions::for_drawing(&Scene::default()), &HashMap::new()).is_err());
     }
 }
 
@@ -785,7 +821,7 @@ mod preview {
         let rel = Path::new("Welcome.md");
         let note = export_note(&v, rel, &v.notes[rel].text.clone(), &ExportOptions::for_note()).unwrap();
         let scene = Scene::parse(crate::drawing::SAMPLE_SCENE).unwrap();
-        let drawing = export_drawing(&scene, "Sketch", &ExportOptions::for_drawing(&scene)).unwrap();
+        let drawing = export_drawing(&scene, "Sketch", &ExportOptions::for_drawing(&scene), &HashMap::new()).unwrap();
         for (name, bytes) in [("note", note), ("drawing", drawing)] {
             std::fs::write(d.join(format!("{name}.pdf")), &bytes).unwrap();
             let r = crate::pdfview::render_pages(bytes, 3, 1.2).unwrap();

@@ -55,6 +55,74 @@ pub fn element_link(scene: &Scene, e: &Element) -> Option<ElementLink> {
     None
 }
 
+/// The texts of an element that may hold links, as stored: the plugin's raw text (with link
+/// markup) wins over the original text, which wins over the shown text; then the `link` field.
+fn link_texts(e: &Element) -> impl Iterator<Item = &str> {
+    let field = |k: &str| e.extra.get(k).and_then(Value::as_str);
+    let text = field("rawText").or_else(|| field("originalText")).or(e.text.as_deref());
+    text.into_iter().chain(field("link"))
+}
+
+/// The links of a drawing for the vault's link index: one line per element text or `link` field
+/// that holds a link. A bare note name in a `link` field becomes `[[name]]`; web addresses are left
+/// out (they are not vault links).
+pub fn link_lines(scene: &Scene) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for e in scene.live() {
+        for t in link_texts(e) {
+            let t = t.trim().replace('\n', " ");
+            let line = if crate::markdown::find_links(&t).iter().any(|l| !l.target.is_empty()) {
+                t
+            } else if !t.is_empty() && !t.contains("://") && e.extra.get("link").and_then(Value::as_str).map(str::trim) == Some(t.as_str()) {
+                format!("[[{t}]]")
+            } else {
+                continue;
+            };
+            if !lines.contains(&line) {
+                lines.push(line);
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+/// Apply `edit` to every text of a drawing file that can hold a link (shown, original and raw
+/// text, `link` field). Returns the new file text in the file's own format, or None if nothing
+/// changed. Canvases are never rewritten (an error).
+pub fn rewrite_link_texts(rel: &std::path::Path, file_text: &str, edit: &dyn Fn(&str) -> String) -> Result<Option<String>, String> {
+    if crate::canvas::is_canvas_path(rel) {
+        return Err("canvases are never written".into());
+    }
+    let mut scene = Scene::from_file_text(rel, file_text)?;
+    let mut any = false;
+    for e in scene.elements.iter_mut() {
+        if let Some(t) = &e.text {
+            let new = edit(t);
+            if new != *t {
+                e.text = Some(new);
+                any = true;
+            }
+        }
+        for key in ["originalText", "rawText", "link"] {
+            if let Some(t) = e.extra.get(key).and_then(Value::as_str) {
+                let new = edit(t);
+                if new != t {
+                    e.extra.insert(key.into(), json!(new));
+                    any = true;
+                }
+            }
+        }
+    }
+    if !any {
+        return Ok(None);
+    }
+    if crate::excalidraw_md::is_plugin_file(rel) {
+        crate::excalidraw_md::write(file_text, &scene).map(Some)
+    } else {
+        Ok(Some(scene.to_json()))
+    }
+}
+
 /// Screen rect of the link mark of an element with world bounds `b`.
 fn mark_rect(view: &View, b: Rect) -> Rect {
     Rect::from_center_size(view.to_screen(Pos2::new(b.max.x, b.min.y)), Vec2::splat(18.0))
@@ -135,7 +203,8 @@ impl DrawingDoc {
         // tidy labels and connections in memory only: the file is never written
         self.sync_labels(ui.ctx());
         self.update_bindings();
-        paint_scene(&painter, &self.scene, &view, dark, None);
+        let pics = crate::drawing_pictures::textures(ui.ctx(), &self.scene, vault, &self.rel);
+        paint_scene(&painter, &self.scene, &view, dark, None, &pics);
         let on_mark = self.paint_links(ui, &painter, &view, &resp, vault);
         let tol = 6.0 / self.zoom;
         if resp.clicked() {

@@ -55,9 +55,35 @@ pub struct Vault {
     /// (created, modified) of each folder, for sorting the file tree.
     pub folder_times: HashMap<PathBuf, (Option<SystemTime>, Option<SystemTime>)>,
     pub notes: HashMap<PathBuf, NoteIndex>,
+    /// Links of drawings and canvases: `text` holds one line per element text or link that has a
+    /// link (see `drawing::link_lines`); `tasks` and `tags` stay empty.
+    pub drawings: HashMap<PathBuf, NoteIndex>,
     name_index: HashMap<String, Vec<PathBuf>>,
     /// Bumped whenever anything in the index changes; UI caches key off this.
     pub generation: u64,
+}
+
+/// A link target to change: (its range in the indexed text, old target text, new target text).
+type TargetEdit = (std::ops::Range<usize>, String, String);
+
+/// Replace the targets of links in `text`: each (old target text, new target text) pair.
+fn replace_link_targets(text: &str, pairs: &[(String, String)]) -> String {
+    let mut out = text.to_string();
+    for l in markdown::find_links(text).into_iter().rev() {
+        if let Some((_, new)) = pairs.iter().find(|(old, _)| *old == text[l.target_range.clone()]) {
+            out.replace_range(l.target_range, new);
+        }
+    }
+    out
+}
+
+/// What a rename or move did to links elsewhere.
+#[derive(Debug, Default)]
+pub struct LinkUpdate {
+    /// notes and drawings whose links were rewritten (their new paths)
+    pub changed: Vec<PathBuf>,
+    /// canvases that still link to the old name or place (canvases are never written)
+    pub canvases: Vec<PathBuf>,
 }
 
 pub fn rel_to_string(p: &Path) -> String {
@@ -117,10 +143,19 @@ impl Vault {
         folders.sort_by_key(|f| rel_to_string(f).to_lowercase());
         let mut changed = Vec::new();
         let mut seen = HashSet::new();
+        let mut drawings_changed = Vec::new();
+        let mut seen_drawings = HashSet::new();
         let mut structure_changed = files.len() != self.files.len() || folders != self.folders;
         for f in &files {
             if !structure_changed && !self.files.iter().any(|o| o.rel == f.rel) {
                 structure_changed = true;
+            }
+            if f.kind == FileKind::Drawing {
+                seen_drawings.insert(f.rel.clone());
+                if self.index_drawing(&f.rel) {
+                    drawings_changed.push(f.rel.clone());
+                }
+                continue;
             }
             if f.kind != FileKind::Note {
                 continue;
@@ -140,20 +175,24 @@ impl Vault {
                 }
             }
         }
-        let before = self.notes.len();
+        let before = self.notes.len() + self.drawings.len();
         self.notes.retain(|k, _| seen.contains(k));
-        if before != self.notes.len() {
+        self.drawings.retain(|k, _| seen_drawings.contains(k));
+        if before != self.notes.len() + self.drawings.len() {
             structure_changed = true;
         }
         self.files = files;
         self.folders = folders;
-        if structure_changed || !changed.is_empty() {
+        if structure_changed || !changed.is_empty() || !drawings_changed.is_empty() {
             self.rebuild_name_index();
             if structure_changed {
                 self.reparse_all();
             } else {
                 for c in &changed {
                     self.reparse(c);
+                }
+                for c in &drawings_changed {
+                    self.reparse_drawing(c);
                 }
             }
             self.generation += 1;
@@ -178,6 +217,40 @@ impl Vault {
         for k in keys {
             self.reparse(&k);
         }
+        let keys: Vec<PathBuf> = self.drawings.keys().cloned().collect();
+        for k in keys {
+            self.reparse_drawing(&k);
+        }
+    }
+
+    /// Read a drawing's links again if the file changed. Returns true if its links changed.
+    fn index_drawing(&mut self, rel: &Path) -> bool {
+        let abs = self.root.join(rel);
+        let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
+        if self.drawings.get(rel).is_some_and(|d| d.mtime == mtime && mtime.is_some()) {
+            return false;
+        }
+        // an unreadable drawing simply has no links
+        let text = fs::read_to_string(&abs).ok().and_then(|t| crate::drawing::Scene::from_file_text(rel, &t).ok()).map(|s| crate::drawing::link_lines(&s)).unwrap_or_default();
+        let entry = self.drawings.entry(rel.to_path_buf()).or_default();
+        entry.mtime = mtime;
+        let differs = entry.text != text;
+        entry.text = text;
+        differs
+    }
+
+    fn reparse_drawing(&mut self, rel: &Path) {
+        let Some(d) = self.drawings.get(rel) else { return };
+        let links = markdown::find_links(&d.text);
+        let resolved = links.iter().map(|l| self.resolve(&l.target, Some(rel))).collect();
+        let d = self.drawings.get_mut(rel).unwrap();
+        d.links = links;
+        d.resolved = resolved;
+    }
+
+    /// Notes and drawings with their link index.
+    fn linkers(&self) -> impl Iterator<Item = (&PathBuf, &NoteIndex)> {
+        self.notes.iter().chain(self.drawings.iter())
     }
 
     fn reparse(&mut self, rel: &Path) {
@@ -256,10 +329,11 @@ impl Vault {
         self.resolve(target, from).is_some()
     }
 
-    /// Notes linking to `rel`: (source, [(line number, line text)]).
+    /// Notes and drawings linking to `rel`: (source, [(line number, line text)]). For a drawing
+    /// the line is the text of the element with the link.
     pub fn backlinks(&self, rel: &Path) -> Vec<(PathBuf, Vec<(usize, String)>)> {
         let mut out = Vec::new();
-        for (src, n) in &self.notes {
+        for (src, n) in self.linkers() {
             let mut lines = Vec::new();
             for (l, r) in n.links.iter().zip(n.resolved.iter()) {
                 if r.as_deref() == Some(rel) && src != rel {
@@ -319,9 +393,9 @@ impl Vault {
         out
     }
 
-    /// Outgoing links of a note: (display text, target, resolved path).
+    /// Outgoing links of a note or drawing: (display text, target, resolved path).
     pub fn outgoing(&self, rel: &Path) -> Vec<(String, String, Option<PathBuf>)> {
-        let Some(n) = self.notes.get(rel) else { return vec![] };
+        let Some(n) = self.notes.get(rel).or_else(|| self.drawings.get(rel)) else { return vec![] };
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for (l, r) in n.links.iter().zip(n.resolved.iter()) {
@@ -455,16 +529,15 @@ impl Vault {
     }
 
     /// Rename/move a file or folder. When `update_links`, links in other notes are rewritten.
-    /// Returns the notes whose text was rewritten.
     /// Move a file or a whole folder into the folder `into` (keeping its name). Links written as
     /// a path (`[[Projects/Plan]]`, `[x](Projects/Plan.md)`) to anything that moved are changed to
-    /// the new place; links by name keep working as they are. Returns the new path and the notes
-    /// whose text changed.
-    pub fn move_into(&mut self, from: &Path, into: &Path) -> io::Result<(PathBuf, Vec<PathBuf>)> {
+    /// the new place (in notes and drawings); links by name keep working as they are. Returns the
+    /// new path and what happened to links elsewhere.
+    pub fn move_into(&mut self, from: &Path, into: &Path) -> io::Result<(PathBuf, LinkUpdate)> {
         let name = from.file_name().ok_or_else(|| io::Error::other("nothing to move"))?;
         let to = into.join(name);
         if to == from {
-            return Ok((to, vec![]));
+            return Ok((to, LinkUpdate::default()));
         }
         if into.starts_with(from) {
             return Err(io::Error::other("a folder can't go into itself"));
@@ -482,9 +555,9 @@ impl Vault {
                 None
             }
         };
-        // path links to what moves, before the move: (note now, its new path, [(range, new text)])
-        let mut edits: Vec<(PathBuf, PathBuf, Vec<(std::ops::Range<usize>, String)>)> = Vec::new();
-        for (src, n) in &self.notes {
+        // path links to what moves, before the move: (file now, its new path, [(range, old target, new target)])
+        let mut edits: Vec<(PathBuf, PathBuf, Vec<TargetEdit>)> = Vec::new();
+        for (src, n) in self.linkers() {
             let mut ranges = Vec::new();
             for (l, r) in n.links.iter().zip(&n.resolved) {
                 let (Some(r), true) = (r, l.target.contains('/')) else { continue };
@@ -497,7 +570,7 @@ impl Vault {
                 if l.markdown_style {
                     t = t.replace(' ', "%20");
                 }
-                ranges.push((l.target_range.clone(), t));
+                ranges.push((l.target_range.clone(), old_text.to_string(), t));
             }
             if !ranges.is_empty() {
                 let now = moved(src).unwrap_or_else(|| src.clone());
@@ -508,24 +581,48 @@ impl Vault {
             fs::create_dir_all(p)?;
         }
         fs::rename(self.abs(from), self.abs(&to))?;
-        let mut changed = Vec::new();
+        let mut done = LinkUpdate::default();
         for (src, now, mut ranges) in edits {
+            if self.drawings.contains_key(&src) {
+                // a drawing: change each link target in its texts (the index holds only a summary)
+                let pairs: Vec<(String, String)> = ranges.into_iter().map(|(_, old, new)| (old, new)).collect();
+                self.rewrite_drawing(&now, &mut done, &|t: &str| replace_link_targets(t, &pairs))?;
+                continue;
+            }
             let Some(text) = self.notes.get(&src).map(|n| n.text.clone()) else { continue };
             ranges.sort_by_key(|r| std::cmp::Reverse(r.0.start));
             let mut out = text;
-            for (r, t) in ranges {
+            for (r, _, t) in ranges {
                 if out.is_char_boundary(r.start) && out.is_char_boundary(r.end) && r.end <= out.len() {
                     out.replace_range(r, &t);
                 }
             }
             fs::write(self.abs(&now), &out)?;
-            changed.push(now);
+            done.changed.push(now);
         }
         self.rescan();
-        Ok((to, changed))
+        Ok((to, done))
     }
 
-    pub fn rename(&mut self, from: &Path, to: &Path, update_links: bool) -> io::Result<Vec<PathBuf>> {
+    /// Rewrite the link texts of the drawing at `rel` with `edit` (canvases are only noted, never
+    /// written).
+    fn rewrite_drawing(&self, rel: &Path, done: &mut LinkUpdate, edit: &dyn Fn(&str) -> String) -> io::Result<()> {
+        if crate::canvas::is_canvas_path(rel) {
+            done.canvases.push(rel.to_path_buf());
+            return Ok(());
+        }
+        let abs = self.abs(rel);
+        let original = fs::read_to_string(&abs)?;
+        if let Some(text) = crate::drawing::rewrite_link_texts(rel, &original, edit).map_err(io::Error::other)? {
+            fs::write(&abs, text)?;
+            done.changed.push(rel.to_path_buf());
+        }
+        Ok(())
+    }
+
+    /// Rename `from` to `to`. With `update_links`, links to it in notes and drawings get the new
+    /// name (canvases are only reported).
+    pub fn rename(&mut self, from: &Path, to: &Path, update_links: bool) -> io::Result<LinkUpdate> {
         let abs_from = self.abs(from);
         let abs_to = self.abs(to);
         if abs_to.exists() {
@@ -537,8 +634,7 @@ impl Vault {
         let old_entry = self.file(from).cloned();
         // Who links here, before the move.
         let linkers: Vec<PathBuf> = if update_links && old_entry.is_some() {
-            self.notes
-                .iter()
+            self.linkers()
                 .filter(|(_, n)| n.resolved.iter().any(|r| r.as_deref() == Some(from)))
                 .map(|(p, _)| p.clone())
                 .collect()
@@ -546,12 +642,16 @@ impl Vault {
             vec![]
         };
         fs::rename(&abs_from, &abs_to)?;
-        let mut changed = Vec::new();
+        let mut done = LinkUpdate::default();
         if let Some(old) = old_entry {
             let new_name = link_name_of(to, old.kind);
             if new_name != old.link_name {
                 for src in linkers {
                     let src_now = if src == from { to.to_path_buf() } else { src.clone() };
+                    if self.drawings.contains_key(&src) {
+                        self.rewrite_drawing(&src_now, &mut done, &|t: &str| markdown::rename_links(t, &old.link_name, &new_name).0)?;
+                        continue;
+                    }
                     let text = match self.notes.get(&src) {
                         Some(n) => n.text.clone(),
                         None => continue,
@@ -559,13 +659,13 @@ impl Vault {
                     let (new_text, n) = markdown::rename_links(&text, &old.link_name, &new_name);
                     if n > 0 {
                         fs::write(self.abs(&src_now), &new_text)?;
-                        changed.push(src_now);
+                        done.changed.push(src_now);
                     }
                 }
             }
         }
         self.rescan();
-        Ok(changed)
+        Ok(done)
     }
 
     /// Move a file or folder to `<vault>/.trash/` instead of deleting it for good.
@@ -596,7 +696,7 @@ impl Vault {
             nodes.push(GraphNode { key: rel_to_string(&f.rel), label: f.display_name(), rel: Some(f.rel.clone()), kind: f.kind });
         }
         let mut edges = HashSet::new();
-        for (src, n) in &self.notes {
+        for (src, n) in self.linkers() {
             let Some(&a) = idx.get(&rel_to_string(src)) else { continue };
             for (l, r) in n.links.iter().zip(n.resolved.iter()) {
                 let b = match r {
@@ -729,6 +829,83 @@ mod tests {
         d
     }
 
+    /// The sample vault plus `Plain.excalidraw` (label "see [[Ideas]]", a `link` field to the
+    /// garden plan by path) and `Plugin.excalidraw.md` (the same, in the plugin's format).
+    fn vault_with_drawings(tag: &str) -> (PathBuf, Vault) {
+        let d = temp_vault(tag);
+        write_sample_vault(&d).unwrap();
+        let mut scene = crate::drawing::Scene::parse(&crate::drawing::SAMPLE_SCENE.replace("\"Idea\"", "\"see [[Ideas]]\"")).unwrap();
+        scene.elements[3].extra.insert("link".into(), serde_json::json!("[[Projects/Garden plan]]"));
+        fs::write(d.join("Plain.excalidraw"), scene.to_json()).unwrap();
+        fs::write(d.join("Plugin.excalidraw.md"), crate::excalidraw_md::new_file(&scene)).unwrap();
+        let v = Vault::open(&d).unwrap();
+        (d, v)
+    }
+
+    fn texts(v: &Vault, rel: &str) -> Vec<String> {
+        crate::drawing::Scene::read_file(&v.abs(Path::new(rel))).unwrap().live().filter_map(|e| e.text.clone()).collect()
+    }
+
+    // spec: DRAW-016
+    #[test]
+    fn drawings_and_canvases_link_like_notes() {
+        let (d, v) = vault_with_drawings("drawing-links");
+        let bl = v.backlinks(Path::new("Ideas.md"));
+        let from = |rel: &str| bl.iter().find(|(p, _)| p == Path::new(rel)).map(|(_, lines)| lines.iter().map(|l| l.1.clone()).collect::<Vec<_>>());
+        assert_eq!(from("Plain.excalidraw"), Some(vec!["see [[Ideas]]".to_string()]), "the label's text is the line");
+        assert_eq!(from("Plugin.excalidraw.md"), Some(vec!["see [[Ideas]]".to_string()]));
+        assert_eq!(from("Overview.canvas"), Some(vec!["[[Ideas.md]]".to_string()]), "canvas file cards count");
+        // the link field counts too, and the drawing has outgoing links
+        assert!(v.backlinks(Path::new("Projects/Garden plan.md")).iter().any(|(p, _)| p == Path::new("Plain.excalidraw")));
+        let out: Vec<String> = v.outgoing(Path::new("Plain.excalidraw")).into_iter().map(|o| o.1).collect();
+        assert_eq!(out, vec!["Ideas".to_string(), "Projects/Garden plan".into()]);
+        // graph edges from drawings and canvases
+        let (nodes, edges) = v.graph(false);
+        let at = |rel: &str| nodes.iter().position(|n| n.rel.as_deref() == Some(Path::new(rel))).unwrap();
+        let edge = |a: &str, b: &str| edges.contains(&(at(a).min(at(b)), at(a).max(at(b))));
+        assert!(edge("Plain.excalidraw", "Ideas.md") && edge("Overview.canvas", "Ideas.md") && edge("Plugin.excalidraw.md", "Projects/Garden plan.md"));
+        // a drawing changed on disk is read again
+        let mut v = v;
+        let changed = fs::read_to_string(d.join("Plain.excalidraw")).unwrap().replace("see [[Ideas]]", "see [[Daily log]]");
+        fs::write(d.join("Plain.excalidraw"), changed).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        fs::File::options().write(true).open(d.join("Plain.excalidraw")).unwrap().set_modified(later).unwrap();
+        v.rescan();
+        assert!(v.backlinks(Path::new("Daily log.md")).iter().any(|(p, _)| p == Path::new("Plain.excalidraw")));
+        assert!(!v.backlinks(Path::new("Ideas.md")).iter().any(|(p, _)| p == Path::new("Plain.excalidraw")));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DRAW-017
+    #[test]
+    fn renaming_and_moving_update_drawings_but_not_canvases() {
+        let (d, mut v) = vault_with_drawings("drawing-rename");
+        let canvas_before = fs::read_to_string(d.join("Overview.canvas")).unwrap();
+        let done = v.rename(Path::new("Ideas.md"), Path::new("Thoughts.md"), true).unwrap();
+        for rel in ["Plain.excalidraw", "Plugin.excalidraw.md"] {
+            assert!(done.changed.contains(&PathBuf::from(rel)), "{rel}: {done:?}");
+            assert!(texts(&v, rel).contains(&"see [[Thoughts]]".to_string()), "{rel}: {:?}", texts(&v, rel));
+        }
+        // the plugin file keeps its layout, and its text list has the new link
+        let plugin = fs::read_to_string(d.join("Plugin.excalidraw.md")).unwrap();
+        assert!(plugin.starts_with("---\n\nexcalidraw-plugin: parsed") && plugin.contains("```compressed-json") && plugin.contains("see [[Thoughts]] ^"));
+        // the canvas is reported, not written
+        assert_eq!(done.canvases, vec![PathBuf::from("Overview.canvas")]);
+        assert_eq!(fs::read_to_string(d.join("Overview.canvas")).unwrap(), canvas_before);
+        assert!(v.backlinks(Path::new("Thoughts.md")).iter().any(|(p, _)| p == Path::new("Plain.excalidraw")));
+        // moving the garden plan: path links in drawings follow, the canvas is reported again
+        fs::create_dir_all(d.join("Archive")).unwrap();
+        v.rescan();
+        let (_, done) = v.move_into(Path::new("Projects/Garden plan.md"), Path::new("Archive")).unwrap();
+        assert!(done.changed.contains(&PathBuf::from("Plain.excalidraw")), "{done:?}");
+        let link = |rel: &str| crate::drawing::Scene::read_file(&v.abs(Path::new(rel))).unwrap().elements[3].extra["link"].clone();
+        assert_eq!(link("Plain.excalidraw"), serde_json::json!("[[Archive/Garden plan]]"));
+        assert_eq!(link("Plugin.excalidraw.md"), serde_json::json!("[[Archive/Garden plan]]"));
+        assert_eq!(done.canvases, vec![PathBuf::from("Overview.canvas")]);
+        assert_eq!(fs::read_to_string(d.join("Overview.canvas")).unwrap(), canvas_before);
+        let _ = fs::remove_dir_all(&d);
+    }
+
     // spec: LINK-002, LINK-003, LINK-007, VAULT-002
     #[test]
     fn resolve_and_backlinks() {
@@ -774,7 +951,7 @@ mod tests {
         assert!(v.exists("Reading list", None));
         // rename Ideas -> Thoughts updates links elsewhere
         let changed = v.rename(Path::new("Ideas.md"), Path::new("Thoughts.md"), true).unwrap();
-        assert!(!changed.is_empty());
+        assert!(!changed.changed.is_empty());
         let welcome = &v.notes[Path::new("Welcome.md")].text;
         assert!(welcome.contains("[[Thoughts|blue]]"));
         assert!(welcome.contains("[[Thoughts]]"));

@@ -18,6 +18,7 @@ mod config;
 mod drawing;
 mod excalidraw_md;
 mod drawing_layout;
+mod drawing_pictures;
 mod editor;
 mod export_dialog;
 mod graph;
