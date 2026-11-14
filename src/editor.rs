@@ -82,7 +82,7 @@ fn inline_pairs(line: &str, off: usize, fmts: &mut [Fmt], code: &[Range<usize>])
         }
     }
     // single * or _ italics (not part of ** and not list markers)
-    for m in [b'*', b'_'] {
+    for m in *b"*_" {
         let mut i = 0;
         while i < b.len() {
             let is_single = |j: usize| b[j] == m && (j == 0 || b[j - 1] != m) && (j + 1 >= b.len() || b[j + 1] != m);
