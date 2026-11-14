@@ -11,13 +11,13 @@ mod cal_dav;
 mod cal_dialog;
 mod cal_ics;
 mod cal_store;
-mod cal_ui;
 mod cal_time;
+mod cal_ui;
 mod config;
 mod drawing;
-mod excalidraw_md;
 mod drawing_layout;
 mod editor;
+mod excalidraw_md;
 mod export_dialog;
 mod fsutil;
 mod graph;
@@ -29,6 +29,8 @@ mod lists;
 mod mail;
 mod markdown;
 mod media;
+#[cfg(test)]
+mod notes_vault_tests;
 mod opener;
 mod panels;
 mod pdfexport;
@@ -36,14 +38,12 @@ mod pdfview;
 mod pdfwrite;
 mod people;
 mod reader;
-mod theme;
-#[cfg(test)]
-mod notes_vault_tests;
-#[cfg(test)]
-mod utf8_tests;
 mod secrets;
 mod tagwords;
 mod tb_store;
+mod theme;
+#[cfg(test)]
+mod utf8_tests;
 mod vault;
 mod vim;
 #[cfg(target_os = "linux")]
@@ -75,11 +75,7 @@ fn main() -> eframe::Result {
         }
     }
 
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Shale")
-        .with_app_id("shale")
-        .with_inner_size([1360.0, 840.0])
-        .with_min_inner_size([720.0, 480.0]);
+    let mut viewport = egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size([1360.0, 840.0]).with_min_inner_size([720.0, 480.0]);
     if screenshot.is_some() {
         // Don't steal focus from whatever the person is doing.
         viewport = viewport.with_active(false);

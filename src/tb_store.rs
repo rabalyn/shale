@@ -91,7 +91,11 @@ pub fn parse_link(link: &str) -> Option<MsgRef> {
 /// Where Thunderbird keeps its profiles.
 pub fn default_roots() -> Vec<PathBuf> {
     let Some(home) = dirs::home_dir() else { return vec![] };
-    [".thunderbird", ".var/app/org.mozilla.Thunderbird/.thunderbird", ".var/app/net.thunderbird.Thunderbird/.thunderbird", "snap/thunderbird/common/.thunderbird", ".mozilla-thunderbird"].iter().map(|p| home.join(p)).filter(|p| p.is_dir()).collect()
+    [".thunderbird", ".var/app/org.mozilla.Thunderbird/.thunderbird", ".var/app/net.thunderbird.Thunderbird/.thunderbird", "snap/thunderbird/common/.thunderbird", ".mozilla-thunderbird"]
+        .iter()
+        .map(|p| home.join(p))
+        .filter(|p| p.is_dir())
+        .collect()
 }
 
 /// A mail account's folder on disk, from the profile's prefs.js.
@@ -319,7 +323,11 @@ fn scan_maildir(dir: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
 }
 
 fn scan(place: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
-    if place.is_dir() { scan_maildir(place, pick) } else { scan_mbox(place, pick) }
+    if place.is_dir() {
+        scan_maildir(place, pick)
+    } else {
+        scan_mbox(place, pick)
+    }
 }
 
 fn bare_id(s: &str) -> String {
@@ -427,7 +435,11 @@ pub fn mork_rows(b: &[u8]) -> Rows {
                             let (id, j) = mork_token(b, i + 1, b"=)");
                             if j < b.len() && b[j] == b'=' {
                                 let (v, k) = mork_literal(b, j + 1);
-                                if is_cols { cols.insert(id, v) } else { vals.insert(id, v) };
+                                if is_cols {
+                                    cols.insert(id, v)
+                                } else {
+                                    vals.insert(id, v)
+                                };
                                 i = k;
                             } else {
                                 i = j + 1;
@@ -593,7 +605,11 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
     if seen.is_empty() && why.is_empty() {
         why.push(format!("no Thunderbird folder for “{}” on this computer", refs[0].folder.join("/")));
     }
-    let hint = if not_offline || refs.iter().any(|r| r.imap) { " For IMAP accounts, Thunderbird keeps the text only with “Keep messages for this account on this computer” (Account settings → Synchronization & Storage; also per folder under Folder properties → Synchronization)." } else { "" };
+    let hint = if not_offline || refs.iter().any(|r| r.imap) {
+        " For IMAP accounts, Thunderbird keeps the text only with “Keep messages for this account on this computer” (Account settings → Synchronization & Storage; also per folder under Folder properties → Synchronization)."
+    } else {
+        ""
+    };
     Err(format!("the message was not found: {}.{hint} (Link: {}; file name: {})", why.join("; "), links.join(" "), file_name.unwrap_or("none")))
 }
 

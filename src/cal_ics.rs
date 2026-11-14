@@ -35,7 +35,11 @@ pub struct Event {
 #[cfg(test)]
 impl Event {
     pub fn start_day(&self) -> i64 {
-        if self.all_day { self.start.div_euclid(86_400) } else { t::utc_to_local(self.start).0 }
+        if self.all_day {
+            self.start.div_euclid(86_400)
+        } else {
+            t::utc_to_local(self.start).0
+        }
     }
     /// Last day the event touches (inclusive).
     pub fn end_day(&self) -> i64 {
@@ -181,7 +185,13 @@ fn person_line(prop: &str, who: &str) -> String {
     };
     // the reader splits parameters at ';' and the value at the first ':'
     let name = name.trim_matches('"').replace('"', "'").replace([';', ':'], " ");
-    let cn = if name.is_empty() { String::new() } else if name.contains(',') { format!(";CN=\"{name}\"") } else { format!(";CN={name}") };
+    let cn = if name.is_empty() {
+        String::new()
+    } else if name.contains(',') {
+        format!(";CN=\"{name}\"")
+    } else {
+        format!(";CN={name}")
+    };
     if mail.is_empty() {
         format!("{prop}{cn}:mailto:")
     } else {
@@ -339,7 +349,13 @@ pub fn occurrences(e: &Event, from: i64, to: i64) -> Vec<Occurrence> {
             "DAILY" => push(base_day + k * interval, &mut out),
             "WEEKLY" => {
                 let week_start = base_day - t::weekday(base_day) as i64 + k * 7 * interval;
-                let days: Vec<u32> = if byday.is_empty() { vec![t::weekday(base_day)] } else { let mut d = byday.clone(); d.sort(); d };
+                let days: Vec<u32> = if byday.is_empty() {
+                    vec![t::weekday(base_day)]
+                } else {
+                    let mut d = byday.clone();
+                    d.sort();
+                    d
+                };
                 let mut ok = true;
                 for wd in days {
                     if !push(week_start + wd as i64, &mut out) {
@@ -351,11 +367,19 @@ pub fn occurrences(e: &Event, from: i64, to: i64) -> Vec<Occurrence> {
             }
             "MONTHLY" => {
                 let (y, m) = t::add_months(by, bm, (k * interval) as i32);
-                if bd <= t::days_in_month(y, m) { push(days_from_civil(y, m, bd), &mut out) } else { true }
+                if bd <= t::days_in_month(y, m) {
+                    push(days_from_civil(y, m, bd), &mut out)
+                } else {
+                    true
+                }
             }
             "YEARLY" => {
                 let y = by + (k * interval) as i32;
-                if bd <= t::days_in_month(y, bm) { push(days_from_civil(y, bm, bd), &mut out) } else { true }
+                if bd <= t::days_in_month(y, bm) {
+                    push(days_from_civil(y, bm, bd), &mut out)
+                } else {
+                    true
+                }
             }
             _ => {
                 if overlaps(e.start) {
@@ -404,14 +428,8 @@ pub fn to_ics(name: &str, events: &[Event]) -> String {
     s.push_str("\r\n");
     let stamp = fmt_dt(t::now(), false);
     for e in events {
-        let mut lines = vec![
-            "BEGIN:VEVENT".to_string(),
-            format!("UID:{}", e.uid),
-            format!("DTSTAMP{stamp}"),
-            format!("DTSTART{}", fmt_dt(e.start, e.all_day)),
-            format!("DTEND{}", fmt_dt(e.end, e.all_day)),
-            format!("SUMMARY:{}", escape(&e.summary)),
-        ];
+        let mut lines =
+            vec!["BEGIN:VEVENT".to_string(), format!("UID:{}", e.uid), format!("DTSTAMP{stamp}"), format!("DTSTART{}", fmt_dt(e.start, e.all_day)), format!("DTEND{}", fmt_dt(e.end, e.all_day)), format!("SUMMARY:{}", escape(&e.summary))];
         if !e.location.is_empty() {
             lines.push(format!("LOCATION:{}", escape(&e.location)));
         }

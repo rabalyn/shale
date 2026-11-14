@@ -162,10 +162,18 @@ pub struct Occ {
 
 impl Occ {
     pub fn start_day(&self) -> i64 {
-        if self.all_day { self.start.div_euclid(86_400) } else { t::utc_to_local(self.start).0 }
+        if self.all_day {
+            self.start.div_euclid(86_400)
+        } else {
+            t::utc_to_local(self.start).0
+        }
     }
     pub fn end_day(&self) -> i64 {
-        if self.all_day { ((self.end - 1).div_euclid(86_400)).max(self.start_day()) } else { t::utc_to_local((self.end - 1).max(self.start)).0 }
+        if self.all_day {
+            ((self.end - 1).div_euclid(86_400)).max(self.start_day())
+        } else {
+            t::utc_to_local((self.end - 1).max(self.start)).0
+        }
     }
 }
 
@@ -197,7 +205,20 @@ pub struct CalendarStore {
 
 impl CalendarStore {
     pub fn new(sources: Vec<CalendarSource>, local_dir: PathBuf) -> Self {
-        let mut s = CalendarStore { sources, events: HashMap::new(), status: HashMap::new(), pending: Default::default(), inflight: HashSet::new(), again: HashSet::new(), last_sync: HashMap::new(), known: HashMap::new(), read_only: HashSet::new(), fixes: Default::default(), generation: 0, local_dir };
+        let mut s = CalendarStore {
+            sources,
+            events: HashMap::new(),
+            status: HashMap::new(),
+            pending: Default::default(),
+            inflight: HashSet::new(),
+            again: HashSet::new(),
+            last_sync: HashMap::new(),
+            known: HashMap::new(),
+            read_only: HashSet::new(),
+            fixes: Default::default(),
+            generation: 0,
+            local_dir,
+        };
         s.reload_local();
         s
     }
@@ -205,12 +226,8 @@ impl CalendarStore {
     /// Use a changed list of calendars. CalDAV calendars that are new, newly shown or point
     /// somewhere else are loaded; the others keep their events and sync timers.
     pub fn set_sources(&mut self, sources: Vec<CalendarSource>) {
-        let fresh: Vec<String> = sources
-            .iter()
-            .filter(|n| n.enabled && !n.is_local())
-            .filter(|n| !self.sources.iter().any(|o| o.id == n.id && o.enabled && o.kind == n.kind) || !self.events.contains_key(&n.id))
-            .map(|n| n.id.clone())
-            .collect();
+        let fresh: Vec<String> =
+            sources.iter().filter(|n| n.enabled && !n.is_local()).filter(|n| !self.sources.iter().any(|o| o.id == n.id && o.enabled && o.kind == n.kind) || !self.events.contains_key(&n.id)).map(|n| n.id.clone()).collect();
         self.sources = sources;
         self.events.retain(|id, _| self.sources.iter().any(|s| s.id == *id));
         self.last_sync.retain(|id, _| self.sources.iter().any(|s| s.id == *id));
@@ -541,16 +558,38 @@ pub fn sample_events(today: i64) -> Vec<Event> {
     let monday = today - t::weekday(today) as i64;
     let mut v = vec![
         Event { rrule: Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=60".into()), description: "Quick round: yesterday, today, blockers.".into(), location: "Video call".into(), ..timed(&id("standup"), monday, 9, 0, 15, "Team standup") },
-        Event { location: "Room 2.14".into(), description: "Walk through the new layout.\nBring the printed mock-ups.".into(), organizer: "Ada Lovelace <ada@example.com>".into(), attendees: vec!["Grace Hopper <grace@example.com>".into(), "Alan Turing <alan@example.com>".into()], ..timed(&id("review"), today, 10, 0, 90, "Design review") },
+        Event {
+            location: "Room 2.14".into(),
+            description: "Walk through the new layout.\nBring the printed mock-ups.".into(),
+            organizer: "Ada Lovelace <ada@example.com>".into(),
+            attendees: vec!["Grace Hopper <grace@example.com>".into(), "Alan Turing <alan@example.com>".into()],
+            ..timed(&id("review"), today, 10, 0, 90, "Design review")
+        },
         Event { location: "Café Lindgren".into(), ..timed(&id("lunch"), today, 12, 30, 60, "Lunch with Sam") },
         Event { description: "No meetings — deep work.".into(), ..timed(&id("focus"), today, 14, 0, 120, "Focus time") },
         timed(&id("supplier"), today, 15, 0, 30, "Call with supplier"),
         timed(&id("gym"), today, 18, 0, 60, "Gym"),
-        Event { url: "https://example.com/webinar".into(), organizer: "Events team <events@example.com>".into(), description: "Join with the link below.".into(), ..timed(&id("webinar"), today + 3, 16, 0, 60, "Webinar: Writing better notes") },
+        Event {
+            url: "https://example.com/webinar".into(),
+            organizer: "Events team <events@example.com>".into(),
+            description: "Join with the link below.".into(),
+            ..timed(&id("webinar"), today + 3, 16, 0, 60, "Webinar: Writing better notes")
+        },
         Event { location: "Messe Berlin".into(), ..all_day(&id("conf"), today + 7, 3, "Conference") },
         all_day(&id("holiday"), today + 14, 1, "Public holiday"),
         Event { rrule: Some("FREQ=WEEKLY".into()), location: "Library".into(), ..timed(&id("book"), monday + 3, 19, 0, 90, "Book club") },
-        Event { rrule: Some("FREQ=MONTHLY".into()), ..all_day(&id("rent"), { let (y, m, _) = t::civil_from_days(today); days_from_civil(y, m, 1) }, 1, "Pay rent") },
+        Event {
+            rrule: Some("FREQ=MONTHLY".into()),
+            ..all_day(
+                &id("rent"),
+                {
+                    let (y, m, _) = t::civil_from_days(today);
+                    days_from_civil(y, m, 1)
+                },
+                1,
+                "Pay rent",
+            )
+        },
         all_day(&id("deadline"), today + 1, 1, "Report deadline"),
     ];
     // a busy day with many short meetings
@@ -753,7 +792,14 @@ pub(crate) mod tests {
         let (y, m, d) = t::civil_from_days(today);
         let ics = format!("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:r1\r\nDTSTART;VALUE=DATE:{y:04}{m:02}{d:02}\r\nSUMMARY:Remote day\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
         let (base, _h) = crate::cal_dav::tests::mock_server(ics);
-        let src = CalendarSource { id: "dav1".into(), name: "Work".into(), color: "#1971c2".into(), enabled: true, sync_minutes: DEFAULT_SYNC_MINUTES, kind: SourceKind::Caldav { url: format!("{base}/calendars/ada/work/"), username: "ada".into(), password: "x".into() } };
+        let src = CalendarSource {
+            id: "dav1".into(),
+            name: "Work".into(),
+            color: "#1971c2".into(),
+            enabled: true,
+            sync_minutes: DEFAULT_SYNC_MINUTES,
+            kind: SourceKind::Caldav { url: format!("{base}/calendars/ada/work/"), username: "ada".into(), password: "x".into() },
+        };
         let mut store = CalendarStore::new(vec![src], tmp("dav"));
         store.refresh_remote();
         for _ in 0..200 {
@@ -775,12 +821,14 @@ pub(crate) mod tests {
         }
         let reports = Arc::new(Mutex::new(0usize));
         let r2 = reports.clone();
-        let (base, _h) = crate::cal_dav::tests::mock_http(10, move |m, _, _, _| match m {
+        let (base, _h) = crate::cal_dav::tests::mock_http(10, move |m, _, _, _| {
+            match m {
             "PROPFIND" => (207, r#"<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:response><d:href>/ro/</d:href><d:propstat><d:prop><cs:getctag>7</cs:getctag><d:current-user-privilege-set><d:privilege><d:read/></d:privilege></d:current-user-privilege-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#.into()),
             _ => {
                 *r2.lock().unwrap() += 1;
                 (207, r#"<d:multistatus xmlns:d="DAV:"/>"#.into())
             }
+        }
         });
         let mut store = CalendarStore::new(vec![], tmp("ctag"));
         store.set_sources(vec![dav_source("ro", format!("{base}/ro/"))]);

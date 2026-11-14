@@ -356,12 +356,7 @@ fn responses<'a, 'i>(doc: &'a Document<'i>) -> Vec<Resp<'a, 'i>> {
         .filter(|n| is_el(n, DAV, "response"))
         .map(|r| {
             let href = child(r, DAV, "href").map(text_of).unwrap_or_default().trim().to_string();
-            let props = r
-                .children()
-                .filter(|c| is_el(c, DAV, "propstat"))
-                .filter(|ps| child(*ps, DAV, "status").map(|s| status_ok(&text_of(s))).unwrap_or(true))
-                .filter_map(|ps| child(ps, DAV, "prop"))
-                .collect();
+            let props = r.children().filter(|c| is_el(c, DAV, "propstat")).filter(|ps| child(*ps, DAV, "status").map(|s| status_ok(&text_of(s))).unwrap_or(true)).filter_map(|ps| child(ps, DAV, "prop")).collect();
             Resp { href, props }
         })
         .collect()
@@ -629,7 +624,18 @@ pub(crate) mod tests {
         for ok in ["https://dav.example.com/cal/", "HTTPS://Dav.Example.com:8443/x", "http://localhost:5232/", "http://127.0.0.1:1/a", "http://[::1]:8080/", "http://radicale.localhost/"] {
             assert!(check_url(ok).is_ok(), "{ok}");
         }
-        for bad in ["http://dav.example.com/", "http://127.0.0.1.evil.com/", "http://localhost.evil.com/", "ftp://x/", "file:///etc/passwd", "https://ada:pw@dav.example.com/", "https://dav.example.com/a b", "https://dav.example.com/\r\nX: y", "-K/etc/passwd", "https:///x"] {
+        for bad in [
+            "http://dav.example.com/",
+            "http://127.0.0.1.evil.com/",
+            "http://localhost.evil.com/",
+            "ftp://x/",
+            "file:///etc/passwd",
+            "https://ada:pw@dav.example.com/",
+            "https://dav.example.com/a b",
+            "https://dav.example.com/\r\nX: y",
+            "-K/etc/passwd",
+            "https:///x",
+        ] {
             assert!(check_url(bad).is_err(), "{bad}");
         }
         assert!(same_server("https://H.example/a", "https://h.example:443/b"));
@@ -867,7 +873,9 @@ pub(crate) mod tests {
         assert!(err.contains("different server"), "{err}");
         // a missing version tag is looked up before changing in place
         let (b2, h2) = mock_http(2, |method, _, headers, _| match method {
-            "PROPFIND" => (207, r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/c/a.ics</d:href><d:propstat><d:prop><d:getetag>"now"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#.into()),
+            "PROPFIND" => {
+                (207, r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/c/a.ics</d:href><d:propstat><d:prop><d:getetag>"now"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#.into())
+            }
             "PUT" if headers.to_ascii_lowercase().contains("if-match: \"now\"") => (204, String::new()),
             _ => (500, String::new()),
         });
@@ -902,7 +910,9 @@ pub(crate) mod tests {
             return;
         }
         let (base, _h) = mock_http(1, |_, _, _, _| {
-            (207, r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/cal/rw/a.ics</d:href><d:propstat><d:prop><d:getetag>"e1"</d:getetag><c:calendar-data>BEGIN:VCALENDAR
+            (
+                207,
+                r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/cal/rw/a.ics</d:href><d:propstat><d:prop><d:getetag>"e1"</d:getetag><c:calendar-data>BEGIN:VCALENDAR
 BEGIN:VEVENT
 UID:a
 DTSTART:20261113T090000Z
@@ -918,7 +928,9 @@ DTEND:20261113T103000Z
 SUMMARY:B <elsewhere>
 END:VEVENT
 END:VCALENDAR
-]]></c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>"#.to_string())
+]]></c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>"#
+                    .to_string(),
+            )
         });
         let acct = Account { url: base.clone(), username: String::new(), password: String::new() };
         let ev = fetch_events(&format!("{base}/cal/rw/"), &acct, 0, i64::MAX / 4).unwrap();

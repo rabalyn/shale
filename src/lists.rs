@@ -207,7 +207,11 @@ pub fn indent(text: &str, sel: Range<usize>, outdent: bool) -> Option<(String, R
         let new_line: String;
         if let Some(level) = crate::markdown::heading_level(l) {
             new_line = if outdent {
-                if level > 1 { l[1..].to_string() } else { l.to_string() }
+                if level > 1 {
+                    l[1..].to_string()
+                } else {
+                    l.to_string()
+                }
             } else if level < 6 {
                 format!("#{l}")
             } else {
@@ -216,7 +220,11 @@ pub fn indent(text: &str, sel: Range<usize>, outdent: bool) -> Option<(String, R
         } else if list_prefix(l).is_some() {
             new_line = if outdent {
                 let (t, removed) = outdent_line(l);
-                if removed == 0 { t } else { renumber_marker(&t, &out, line_start_out) }
+                if removed == 0 {
+                    t
+                } else {
+                    renumber_marker(&t, &out, line_start_out)
+                }
             } else {
                 renumber_marker(&format!("{INDENT}{l}"), &out, line_start_out)
             };

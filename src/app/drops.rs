@@ -336,7 +336,9 @@ impl ShaleApp {
             if items.is_empty() && !self.last_offered.is_empty() {
                 notes.push(format!("It offered: {}", self.last_offered.join(", ")));
                 if self.last_offered.iter().any(|o| o == "DELETE" || o == "STRING") {
-                    notes.push("That program runs through X11 (XWayland). If it still sends nothing, start it as a Wayland program (for Thunderbird: MOZ_ENABLE_WAYLAND=1), or drag the message to a folder first and drop the .eml file.".into());
+                    notes.push(
+                        "That program runs through X11 (XWayland). If it still sends nothing, start it as a Wayland program (for Thunderbird: MOZ_ENABLE_WAYLAND=1), or drag the message to a folder first and drop the .eml file.".into(),
+                    );
                 }
             }
             self.last_offered.clear();

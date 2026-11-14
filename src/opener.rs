@@ -60,12 +60,66 @@ pub fn check_url(url: &str) -> Result<String, String> {
 
 /// File types that start a program or script. Never opened, whoever offers them.
 const PROGRAM_EXTENSIONS: &[&str] = &[
-    "desktop", "sh", "bash", "zsh", "csh", "ksh", "fish", "exe", "bat", "cmd", "com", "appimage", "jar", "py", "pyc", "pl", "pm", "rb", "run", "bin", "msi", "scr", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "hta", "cpl", "lnk", "reg", "app", "command", "workflow", "action", "pkg", "dmg", "deb", "rpm", "php", "jnlp", "elf", "out", "so", "dll", "url", "webloc", "terminal", "service", "flatpakref", "snap",
+    "desktop",
+    "sh",
+    "bash",
+    "zsh",
+    "csh",
+    "ksh",
+    "fish",
+    "exe",
+    "bat",
+    "cmd",
+    "com",
+    "appimage",
+    "jar",
+    "py",
+    "pyc",
+    "pl",
+    "pm",
+    "rb",
+    "run",
+    "bin",
+    "msi",
+    "scr",
+    "ps1",
+    "psm1",
+    "vbs",
+    "vbe",
+    "js",
+    "jse",
+    "wsf",
+    "wsh",
+    "hta",
+    "cpl",
+    "lnk",
+    "reg",
+    "app",
+    "command",
+    "workflow",
+    "action",
+    "pkg",
+    "dmg",
+    "deb",
+    "rpm",
+    "php",
+    "jnlp",
+    "elf",
+    "out",
+    "so",
+    "dll",
+    "url",
+    "webloc",
+    "terminal",
+    "service",
+    "flatpakref",
+    "snap",
 ];
 
 /// Document types that are safe to open even if the file system marks them executable.
 const DOCUMENT_EXTENSIONS: &[&str] = &[
-    "pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "txt", "md", "csv", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "mp3", "mp4", "m4a", "wav", "ogg", "flac", "mkv", "webm", "mov", "avi", "eml", "ics", "vcf", "zip", "epub",
+    "pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "txt", "md", "csv", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "mp3", "mp4", "m4a", "wav", "ogg", "flac", "mkv", "webm", "mov", "avi", "eml",
+    "ics", "vcf", "zip", "epub",
 ];
 
 fn extension(path: &Path) -> String {
@@ -218,8 +272,27 @@ mod tests {
         assert_eq!(check_url("www.example.com").unwrap(), "https://www.example.com");
         assert_eq!(check_url("WWW.Example.com").unwrap(), "https://WWW.Example.com");
         for bad in [
-            "", "   ", "file:///etc/passwd", "javascript:alert(1)", "ftp://example.com", "data:text/html,hi", "smb://host/share", "ssh://host", "tel:123", "vscode://open", "/etc/passwd", "example.com", "-n", "--help",
-            "https://example.com\nfile:///etc/passwd", "https://exa\0mple.com", "http://x\r\ny", "https://a\u{7f}b", "ht tp://x", "https//x", "x-scheme:http://a",
+            "",
+            "   ",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ftp://example.com",
+            "data:text/html,hi",
+            "smb://host/share",
+            "ssh://host",
+            "tel:123",
+            "vscode://open",
+            "/etc/passwd",
+            "example.com",
+            "-n",
+            "--help",
+            "https://example.com\nfile:///etc/passwd",
+            "https://exa\0mple.com",
+            "http://x\r\ny",
+            "https://a\u{7f}b",
+            "ht tp://x",
+            "https//x",
+            "x-scheme:http://a",
         ] {
             assert!(check_url(bad).is_err(), "{bad:?} must be refused");
         }
@@ -256,7 +329,31 @@ mod tests {
     #[test]
     fn programs_and_desktop_files_are_never_opened() {
         let root = tmp("programs");
-        for name in ["a.desktop", "run.sh", "setup.EXE", "x.bat", "x.cmd", "x.com", "app.AppImage", "t.jar", "s.py", "s.pl", "s.rb", "i.run", "d.bin", "m.msi", "p.ps1", "v.vbs", "j.js", "l.lnk", "Thing.app", "a.command", "x.deb", "x.rpm", "x.service"] {
+        for name in [
+            "a.desktop",
+            "run.sh",
+            "setup.EXE",
+            "x.bat",
+            "x.cmd",
+            "x.com",
+            "app.AppImage",
+            "t.jar",
+            "s.py",
+            "s.pl",
+            "s.rb",
+            "i.run",
+            "d.bin",
+            "m.msi",
+            "p.ps1",
+            "v.vbs",
+            "j.js",
+            "l.lnk",
+            "Thing.app",
+            "a.command",
+            "x.deb",
+            "x.rpm",
+            "x.service",
+        ] {
             fs::write(root.join(name), "x").unwrap();
             assert!(check_vault_file(&root.join(name), &root).is_err(), "{name} must be refused");
         }

@@ -132,7 +132,6 @@ pub fn strip_md_ext(name: &str) -> &str {
     }
 }
 
-
 /// Find every internal link in `text`, skipping fenced and inline code.
 pub fn find_links(text: &str) -> Vec<LinkSpan> {
     let code = fenced_code_lines(text);
@@ -360,11 +359,7 @@ pub fn find_tags(text: &str) -> Vec<(Range<usize>, String)> {
         while i < b.len() {
             if b[i] == b'#' && (i == 0 || b[i - 1] == b' ' || b[i - 1] == b'\t' || b[i - 1] == b'(') && !in_ranges(i, &codes) {
                 let rest = &line[i + 1..];
-                let len: usize = rest
-                    .char_indices()
-                    .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '/')
-                    .map(|(_, c)| c.len_utf8())
-                    .sum();
+                let len: usize = rest.char_indices().take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '/').map(|(_, c)| c.len_utf8()).sum();
                 let tag = &rest[..len];
                 if len > 0 && !tag.chars().all(|c| c.is_ascii_digit()) {
                     out.push((off + i..off + i + 1 + len, tag.to_string()));
@@ -417,7 +412,11 @@ pub fn rename_links(text: &str, old: &str, new: &str) -> (String, usize) {
         let replacement = if l.markdown_style {
             let had_ext = text[l.target_range.clone()].to_ascii_lowercase().ends_with(".md");
             let enc = new.replace(' ', "%20");
-            if had_ext { format!("{enc}.md") } else { enc }
+            if had_ext {
+                format!("{enc}.md")
+            } else {
+                enc
+            }
         } else {
             new.to_string()
         };
@@ -494,10 +493,7 @@ pub fn find_ci(line: &str, query_lower: &str) -> Option<usize> {
 }
 
 pub fn sanitize_note_name(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .map(|c| if matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0') { '-' } else { c })
-        .collect();
+    let cleaned: String = name.chars().map(|c| if matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0') { '-' } else { c }).collect();
     cleaned.trim().trim_matches('.').trim().to_string()
 }
 

@@ -14,8 +14,15 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug)]
 pub enum Source {
     /// `original`: file name and bytes of the message (kept when asked to)
-    Email { mail: Mail, original: (String, Vec<u8>) },
-    Event { event: Event, calendar: String, original: Option<(String, Vec<u8>)> },
+    Email {
+        mail: Mail,
+        original: (String, Vec<u8>),
+    },
+    Event {
+        event: Event,
+        calendar: String,
+        original: Option<(String, Vec<u8>)>,
+    },
     Files(Vec<PathBuf>),
     Text(String),
 }
@@ -110,11 +117,19 @@ fn local_ymd(utc: i64) -> (i32, u32, u32) {
 fn local_stamp(utc: i64, date_only: bool) -> String {
     let (day, secs) = t::utc_to_local(utc);
     let d = ymd_text(t::civil_from_days(day));
-    if date_only { d } else { format!("{d} {}", t::hhmm(secs)) }
+    if date_only {
+        d
+    } else {
+        format!("{d} {}", t::hhmm(secs))
+    }
 }
 
 fn event_ymd(e: &Event) -> (i32, u32, u32) {
-    if e.all_day { t::civil_from_days(e.start.div_euclid(86_400)) } else { local_ymd(e.start) }
+    if e.all_day {
+        t::civil_from_days(e.start.div_euclid(86_400))
+    } else {
+        local_ymd(e.start)
+    }
 }
 
 fn safe_title(s: &str) -> String {
@@ -139,11 +154,7 @@ pub fn event_item(event: Event, calendar: String, original: Option<(String, Vec<
 }
 
 fn files_item(paths: Vec<PathBuf>) -> Item {
-    let title = if paths.len() == 1 {
-        paths[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "File".into())
-    } else {
-        format!("{} Files", ymd_text(today_ymd()))
-    };
+    let title = if paths.len() == 1 { paths[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "File".into()) } else { format!("{} Files", ymd_text(today_ymd())) };
     Item { source: Source::Files(paths), include: true, title: safe_title(&title), att_on: vec![], already: None, people: vec![] }
 }
 
@@ -307,10 +318,15 @@ pub fn items_from_parts_in(parts: &[(String, Vec<u8>)], tb_roots: &[PathBuf]) ->
                     .collect();
                 if n > 1 {
                     // the newest is most likely the dragged one
-                    let newest = items.iter().enumerate().max_by_key(|(_, it)| match &it.source {
-                        Source::Email { mail, .. } => mail.date.unwrap_or(i64::MIN),
-                        _ => i64::MIN,
-                    }).map(|(i, _)| i).unwrap_or(0);
+                    let newest = items
+                        .iter()
+                        .enumerate()
+                        .max_by_key(|(_, it)| match &it.source {
+                            Source::Email { mail, .. } => mail.date.unwrap_or(i64::MIN),
+                            _ => i64::MIN,
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
                     for (i, it) in items.iter_mut().enumerate() {
                         it.include = i == newest;
                     }
@@ -489,7 +505,15 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
     let subject = if mail.subject.trim().is_empty() { "(no subject)" } else { mail.subject.trim() };
     let date = mail.date.map(|d| local_stamp(d, false)).unwrap_or_default();
     let mut s = front(
-        &[("type", "email".into()), ("subject", yaml(subject)), ("from", yaml(&mail.from)), ("to", if mail.to.is_empty() { String::new() } else { yaml(&mail.to) }), ("cc", if mail.cc.is_empty() { String::new() } else { yaml(&mail.cc) }), ("date", date.clone()), ("message-id", if mail.message_id.is_empty() { String::new() } else { yaml(&mail.message_id) })],
+        &[
+            ("type", "email".into()),
+            ("subject", yaml(subject)),
+            ("from", yaml(&mail.from)),
+            ("to", if mail.to.is_empty() { String::new() } else { yaml(&mail.to) }),
+            ("cc", if mail.cc.is_empty() { String::new() } else { yaml(&mail.cc) }),
+            ("date", date.clone()),
+            ("message-id", if mail.message_id.is_empty() { String::new() } else { yaml(&mail.message_id) }),
+        ],
         tags,
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(subject)));
@@ -523,7 +547,16 @@ pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&
     let stamp = |v: i64| if e.all_day { ymd_text(t::civil_from_days(v.div_euclid(86_400))) } else { local_stamp(v, false) };
     let end = if e.all_day { e.end - 86_400 } else { e.end };
     let mut s = front(
-        &[("type", "event".into()), ("title", yaml(&e.summary)), ("start", stamp(e.start)), ("end", stamp(end.max(e.start))), ("all-day", if e.all_day { "true".into() } else { String::new() }), ("location", if e.location.is_empty() { String::new() } else { yaml(&e.location) }), ("calendar", yaml(calendar)), ("event-uid", if e.uid.is_empty() { String::new() } else { yaml(&event_key(e)) })],
+        &[
+            ("type", "event".into()),
+            ("title", yaml(&e.summary)),
+            ("start", stamp(e.start)),
+            ("end", stamp(end.max(e.start))),
+            ("all-day", if e.all_day { "true".into() } else { String::new() }),
+            ("location", if e.location.is_empty() { String::new() } else { yaml(&e.location) }),
+            ("calendar", yaml(calendar)),
+            ("event-uid", if e.uid.is_empty() { String::new() } else { yaml(&event_key(e)) }),
+        ],
         tags,
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(if e.summary.is_empty() { "Event" } else { &e.summary })));
@@ -703,7 +736,16 @@ mod tests {
     fn events_files_and_text() {
         let mut v = temp_vault("ev");
         let day = t::days_from_civil(2026, 12, 2);
-        let e = Event { uid: "ev-1@x".into(), summary: "Baubesprechung".into(), location: "Raum 1.12".into(), description: "Agenda: Medientechnik".into(), start: t::local_to_utc(day, 10 * 3600), end: t::local_to_utc(day, 11 * 3600), attendees: vec!["A".into(), "B".into()], ..Default::default() };
+        let e = Event {
+            uid: "ev-1@x".into(),
+            summary: "Baubesprechung".into(),
+            location: "Raum 1.12".into(),
+            description: "Agenda: Medientechnik".into(),
+            start: t::local_to_utc(day, 10 * 3600),
+            end: t::local_to_utc(day, 11 * 3600),
+            attendees: vec!["A".into(), "B".into()],
+            ..Default::default()
+        };
         let mut items = vec![event_item(e.clone(), "Work".into(), Some(("x.ics".into(), cal_ics::to_ics("", std::slice::from_ref(&e)).into_bytes())))];
         assert_eq!(items[0].title, "2026-12-02 Baubesprechung");
         // a file next to it

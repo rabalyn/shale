@@ -335,7 +335,11 @@ pub fn parse_date(s: &str) -> Option<i64> {
     let off = if let Some(z) = zone.strip_prefix('+').or_else(|| zone.strip_prefix('-')) {
         let v: i64 = z.get(..4).and_then(|z| z.parse().ok()).unwrap_or(0);
         let o = (v / 100) * 3600 + (v % 100) * 60;
-        if zone.starts_with('-') { -o } else { o }
+        if zone.starts_with('-') {
+            -o
+        } else {
+            o
+        }
     } else {
         match zone.to_ascii_uppercase().as_str() {
             "EST" => -5 * 3600,
@@ -476,7 +480,11 @@ pub fn html_to_text(html: &str) -> String {
                     let href = raw_tag.split_once("href=").map(|(_, r)| {
                         let r = r.trim_start();
                         let q = r.chars().next().unwrap_or(' ');
-                        if q == '"' || q == '\'' { r[1..].split(q).next().unwrap_or("").to_string() } else { r.split_whitespace().next().unwrap_or("").to_string() }
+                        if q == '"' || q == '\'' {
+                            r[1..].split(q).next().unwrap_or("").to_string()
+                        } else {
+                            r.split_whitespace().next().unwrap_or("").to_string()
+                        }
                     });
                     link = href.map(|h| (decode_entities(&h), out.len()));
                 }
@@ -588,7 +596,11 @@ struct Walk {
 fn clean_name(n: &str) -> String {
     let n: String = n.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '\0'..='\x1f') { '_' } else { c }).collect();
     let n = n.trim().trim_start_matches('.').to_string();
-    if n.is_empty() { "attachment".into() } else { n }
+    if n.is_empty() {
+        "attachment".into()
+    } else {
+        n
+    }
 }
 
 fn ext_for(mime: &str) -> &'static str {

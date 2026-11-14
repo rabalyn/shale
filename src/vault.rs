@@ -338,11 +338,7 @@ impl Vault {
 
     /// Every task in every note, sorted by note path.
     pub fn all_tasks(&self) -> Vec<(PathBuf, Task)> {
-        let mut out: Vec<(PathBuf, Task)> = self
-            .notes
-            .iter()
-            .flat_map(|(p, n)| n.tasks.iter().map(move |t| (p.clone(), t.clone())))
-            .collect();
+        let mut out: Vec<(PathBuf, Task)> = self.notes.iter().flat_map(|(p, n)| n.tasks.iter().map(move |t| (p.clone(), t.clone()))).collect();
         out.sort_by(|a, b| rel_to_string(&a.0).to_lowercase().cmp(&rel_to_string(&b.0).to_lowercase()).then(a.1.line.cmp(&b.1.line)));
         out
     }
@@ -537,15 +533,7 @@ impl Vault {
         }
         let old_entry = self.file(from).cloned();
         // Who links here, before the move.
-        let linkers: Vec<PathBuf> = if update_links && old_entry.is_some() {
-            self.notes
-                .iter()
-                .filter(|(_, n)| n.resolved.iter().any(|r| r.as_deref() == Some(from)))
-                .map(|(p, _)| p.clone())
-                .collect()
-        } else {
-            vec![]
-        };
+        let linkers: Vec<PathBuf> = if update_links && old_entry.is_some() { self.notes.iter().filter(|(_, n)| n.resolved.iter().any(|r| r.as_deref() == Some(from))).map(|(p, _)| p.clone()).collect() } else { vec![] };
         fsutil::rename_noreplace(&abs_from, &abs_to)?;
         let mut changed = Vec::new();
         if let Some(old) = old_entry {

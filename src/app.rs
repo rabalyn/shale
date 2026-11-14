@@ -106,14 +106,37 @@ pub enum Modal {
 pub enum Action {
     /// open the "Export to PDF" dialog for a note or drawing
     Export(PathBuf),
-    Open { rel: PathBuf, new_tab: bool },
-    OpenLink { target: String, heading: Option<String>, from: Option<PathBuf>, new_tab: bool },
-    NewNote { folder: PathBuf },
-    NewDrawing { folder: PathBuf, embed_into: Option<PathBuf> },
-    ToggleTask { rel: PathBuf, offset: usize },
-    GotoLine { rel: PathBuf, line: usize },
+    Open {
+        rel: PathBuf,
+        new_tab: bool,
+    },
+    OpenLink {
+        target: String,
+        heading: Option<String>,
+        from: Option<PathBuf>,
+        new_tab: bool,
+    },
+    NewNote {
+        folder: PathBuf,
+    },
+    NewDrawing {
+        folder: PathBuf,
+        embed_into: Option<PathBuf>,
+    },
+    ToggleTask {
+        rel: PathBuf,
+        offset: usize,
+    },
+    GotoLine {
+        rel: PathBuf,
+        line: usize,
+    },
     /// open a note with the cursor at `col` (byte offset) of `line`, keyboard in the editor
-    GotoMatch { rel: PathBuf, line: usize, col: usize },
+    GotoMatch {
+        rel: PathBuf,
+        line: usize,
+        col: usize,
+    },
     ShowView(View),
     CloseTab(usize),
     Rename(PathBuf),
@@ -127,7 +150,10 @@ pub enum Action {
     /// make a contact note in the people folder (from `[[p Name`)
     CreatePerson(String),
     /// move a file or folder into a folder (drag and drop in the file list)
-    Move { from: PathBuf, into: PathBuf },
+    Move {
+        from: PathBuf,
+        into: PathBuf,
+    },
 }
 
 #[derive(Default)]
@@ -372,9 +398,7 @@ impl ShaleApp {
                     }
                 }
                 if self.tabs.is_empty() {
-                    let first = self.vault.as_ref().and_then(|v| {
-                        v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone())
-                    });
+                    let first = self.vault.as_ref().and_then(|v| v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone()));
                     match first {
                         Some(r) => self.open(&r, false),
                         None => self.new_tab(View::Empty),
@@ -392,16 +416,7 @@ impl ShaleApp {
     pub fn new_tab(&mut self, view: View) {
         let id = self.next_tab_id;
         self.next_tab_id += 1;
-        self.tabs.push(Tab {
-            id,
-            view,
-            back: vec![],
-            fwd: vec![],
-            reading: false,
-            editor: NoteEditor::new(egui::Id::unique(("note-editor", id))),
-            title_buf: String::new(),
-            title_for: None,
-        });
+        self.tabs.push(Tab { id, view, back: vec![], fwd: vec![], reading: false, editor: NoteEditor::new(egui::Id::unique(("note-editor", id))), title_buf: String::new(), title_for: None });
         self.active = self.tabs.len() - 1;
     }
 
@@ -486,9 +501,7 @@ impl ShaleApp {
     pub fn open_link(&mut self, target: &str, heading: Option<String>, from: Option<PathBuf>, new_tab: bool) {
         let Some(v) = &self.vault else { return };
         if let Some(rel) = v.resolve(target, from.as_deref()) {
-            let line = heading.and_then(|h| {
-                v.notes.get(&rel).and_then(|n| markdown::find_headings(&n.text).into_iter().find(|(_, _, t)| t.eq_ignore_ascii_case(&h)).map(|x| x.0))
-            });
+            let line = heading.and_then(|h| v.notes.get(&rel).and_then(|n| markdown::find_headings(&n.text).into_iter().find(|(_, _, t)| t.eq_ignore_ascii_case(&h)).map(|x| x.0)));
             self.open(&rel, new_tab);
             if let Some(line) = line {
                 self.goto_line(&rel, line);
@@ -849,13 +862,7 @@ impl ShaleApp {
             CalAction::OpenLarge => self.show_view(View::Calendar, false),
             CalAction::NewEventAt(start) => {
                 let srcs = &self.calendar.sources;
-                let target = self
-                    .last_event_calendar
-                    .as_ref()
-                    .and_then(|id| srcs.iter().find(|s| s.id == *id))
-                    .or_else(|| srcs.iter().find(|s| s.enabled))
-                    .or_else(|| srcs.first())
-                    .map(|s| s.id.clone());
+                let target = self.last_event_calendar.as_ref().and_then(|id| srcs.iter().find(|s| s.id == *id)).or_else(|| srcs.iter().find(|s| s.enabled)).or_else(|| srcs.first()).map(|s| s.id.clone());
                 match target {
                     Some(id) => self.modal = Some(Modal::Event(Box::new(crate::cal_dialog::EventDialog::new_at(id, start)))),
                     None => self.open_calendar_settings(),
@@ -1037,9 +1044,7 @@ impl ShaleApp {
         let (mouse_back, mouse_fwd) = ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2)));
         // Ctrl+H / Ctrl+L (like vim's h / l): keyboard into the sidebar / back into the editor;
         // Ctrl+Shift+B: the file list
-        let (to_sidebar, to_editor, files) = ui.input_mut(|i| {
-            (i.consume_key(Modifiers::COMMAND, Key::H), i.consume_key(Modifiers::COMMAND, Key::L), i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::B))
-        });
+        let (to_sidebar, to_editor, files) = ui.input_mut(|i| (i.consume_key(Modifiers::COMMAND, Key::H), i.consume_key(Modifiers::COMMAND, Key::L), i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::B)));
         let (quick, new_note, toggle, back, fwd, close, search, save, settings) = ui.input_mut(|i| {
             (
                 i.consume_key(Modifiers::COMMAND, Key::O),
@@ -1163,10 +1168,7 @@ impl ShaleApp {
                 k = rest;
             }
             let key = Key::from_name(k).unwrap_or(Key::Escape);
-            vec![
-                egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: mods },
-                egui::Event::Key { key, physical_key: Some(key), pressed: false, repeat: false, modifiers: mods },
-            ]
+            vec![egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: mods }, egui::Event::Key { key, physical_key: Some(key), pressed: false, repeat: false, modifiers: mods }]
         };
         if let Some(t) = step.strip_prefix("text:") {
             raw.events.push(egui::Event::Text(t.to_string()));
@@ -1404,7 +1406,6 @@ pub fn graph_click(app_actions: &mut Vec<Action>, c: GraphClick) {
 pub fn muted(t: impl Into<String>) -> egui::RichText {
     egui::RichText::new(t).color(theme::MUTED)
 }
-
 
 #[cfg(test)]
 mod tests {
