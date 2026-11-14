@@ -33,6 +33,8 @@ pub struct Att {
     pub mime: String,
     #[serde(skip)]
     pub data: Arc<Vec<u8>>,
+    /// The name of the file that holds the bytes beside a saved draft or mail (set by the outbox).
+    pub file: String,
 }
 
 /// A mail as the person is writing it.
@@ -223,6 +225,20 @@ pub fn finalize_plain(draft: &Draft, opts: &BuildOptions) -> Result<Built, Compo
 
 /// Build the message of a draft (MAIL-124, MAIL-125).
 pub fn build(draft: &Draft, opts: &BuildOptions) -> Result<Built, ComposeError> {
+    // a draft is saved whatever is in it (never lose a text): what cannot be a header is left out of its message file
+    let mut draft = draft.clone();
+    if opts.lenient {
+        let clean = |s: &str| s.replace(['\r', '\n', '\0'], " ");
+        draft.subject = clean(&draft.subject);
+        draft.in_reply_to = clean(&draft.in_reply_to);
+        draft.from_name = clean(&draft.from_name);
+        for a in draft.attachments.iter_mut() {
+            a.name = clean(&a.name);
+        }
+        let ok = |list: &str| split_list(&clean(list)).into_iter().filter(|p| p.parse::<Mailbox>().is_ok()).collect::<Vec<_>>().join(", ");
+        (draft.to, draft.cc, draft.bcc) = (ok(&draft.to), ok(&draft.cc), ok(&draft.bcc));
+    }
+    let draft = &draft;
     check_header_text("Subject", &draft.subject)?;
     check_header_text("In-Reply-To", &draft.in_reply_to)?;
     let to = parse_list("To", &draft.to)?;
@@ -471,7 +487,7 @@ pub fn answer(kind: Kind, orig: &Mail, account: &str, from_name: &str, from_addr
 }
 
 fn att_of(a: &MailAttachment) -> Att {
-    Att { name: if a.name.is_empty() { "attachment".into() } else { a.name.clone() }, mime: if a.mime.is_empty() { "application/octet-stream".into() } else { a.mime.clone() }, data: Arc::new(a.data.clone()) }
+    Att { name: if a.name.is_empty() { "attachment".into() } else { a.name.clone() }, mime: if a.mime.is_empty() { "application/octet-stream".into() } else { a.mime.clone() }, data: Arc::new(a.data.clone()), ..Att::default() }
 }
 
 /// A file name and a type for an attachment from a path.
@@ -498,13 +514,13 @@ pub fn att_from_file(name: &str, data: Vec<u8>) -> Att {
         "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         _ => "application/octet-stream",
     };
-    Att { name: name.rsplit('/').next().unwrap_or(name).to_string(), mime: mime.into(), data: Arc::new(data) }
+    Att { name: name.rsplit('/').next().unwrap_or(name).to_string(), mime: mime.into(), data: Arc::new(data), ..Att::default() }
 }
 
 /// "Attach note": the note's markdown as `text/markdown` (MAIL-127).
 pub fn att_from_note(file_name: &str, markdown: &str) -> Att {
     let name = if file_name.to_lowercase().ends_with(".md") { file_name.to_string() } else { format!("{file_name}.md") };
-    Att { name, mime: "text/markdown".into(), data: Arc::new(markdown.as_bytes().to_vec()) }
+    Att { name, mime: "text/markdown".into(), data: Arc::new(markdown.as_bytes().to_vec()), ..Att::default() }
 }
 
 /// The name of an attachment as a safe file name (for the files beside a draft).
@@ -554,7 +570,7 @@ mod tests {
         d.from_name = "Ada\r\nBcc: x@y.z".into();
         assert!(build(&d, &opts()).is_err());
         let mut d = draft();
-        d.attachments.push(Att { name: "a\r\nb.txt".into(), mime: "text/plain".into(), data: Arc::new(vec![1]) });
+        d.attachments.push(Att { name: "a\r\nb.txt".into(), mime: "text/plain".into(), data: Arc::new(vec![1]), ..Att::default() });
         assert!(build(&d, &opts()).is_err());
     }
 
@@ -649,7 +665,7 @@ mod tests {
         let mut d = draft();
         let bin: Vec<u8> = (0..=255u8).cycle().take(5000).collect();
         d.attachments = vec![
-            Att { name: "Grundriß EG.pdf".into(), mime: "application/pdf".into(), data: Arc::new(bin.clone()) },
+            Att { name: "Grundriß EG.pdf".into(), mime: "application/pdf".into(), data: Arc::new(bin.clone()), ..Att::default() },
             att_from_note("Meeting notes", "# Notes\n\n- one\n- zwei äöü\n"),
             att_from_file("/home/x/picture.png", vec![0x89, b'P', b'N', b'G', 0, 1, 2]),
         ];
@@ -667,7 +683,7 @@ mod tests {
         assert_eq!(m.attachments[2].mime, "image/png");
         assert_eq!(m.attachments[2].data, vec![0x89, b'P', b'N', b'G', 0, 1, 2]);
         // too much is refused with words
-        d.attachments = vec![Att { name: "big".into(), mime: "x/y".into(), data: Arc::new(vec![0; MAX_ATTACHMENTS_TOTAL + 1]) }];
+        d.attachments = vec![Att { name: "big".into(), mime: "x/y".into(), data: Arc::new(vec![0; MAX_ATTACHMENTS_TOTAL + 1]), ..Att::default() }];
         assert!(build(&d, &opts()).unwrap_err().0.contains("bigger than"));
     }
 
@@ -777,7 +793,7 @@ mod tests {
         assert!(confirmations(&d).is_empty());
         // with an attachment there is nothing to forget, and an attachment alone is a body
         d.body = "see attached".into();
-        d.attachments.push(Att { name: "a".into(), mime: "x/y".into(), data: Arc::new(vec![1]) });
+        d.attachments.push(Att { name: "a".into(), mime: "x/y".into(), data: Arc::new(vec![1]), ..Att::default() });
         assert!(confirmations(&d).is_empty());
         d.body = String::new();
         assert!(confirmations(&d).is_empty());

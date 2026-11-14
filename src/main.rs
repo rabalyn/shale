@@ -53,6 +53,8 @@ mod oauth;
 #[cfg(test)]
 mod oauth_fake_tests;
 mod opener;
+#[allow(dead_code)] // used by the compose window in a later commit of phase 3
+mod outbox;
 mod panels;
 mod pdfexport;
 mod pdfview;

@@ -51,9 +51,10 @@ pub fn today_string() -> String {
 
 // ---------------------------------------------------------------- names on disk
 
-/// An account id is used as a folder name: letters, digits, `-` and `_` only.
+/// An account id is used as a folder name: letters, digits, `-` and `_` only. `drafts` and `outbox`
+/// are the folders of phase 3 (ADR-0010) and cannot be account ids.
 pub fn valid_account_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    !id.is_empty() && !matches!(id, "drafts" | "outbox") && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// The directory name of an IMAP folder: the name with everything but letters, digits, `-` and
@@ -656,7 +657,7 @@ mod tests {
         assert!(d.starts_with("long-") && d.len() < 40);
         assert_eq!(folder_dir_name(&long), d, "stable");
         assert_ne!(folder_dir_name(&"y".repeat(400)), d);
-        assert!(valid_account_id("acct-1_x") && !valid_account_id("../x") && !valid_account_id("") && !valid_account_id("a/b"));
+        assert!(valid_account_id("acct-1_x") && !valid_account_id("../x") && !valid_account_id("") && !valid_account_id("a/b") && !valid_account_id("drafts") && !valid_account_id("outbox"));
     }
 
     // spec: MAIL-002, MAIL-003
