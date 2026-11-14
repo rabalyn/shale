@@ -38,6 +38,17 @@ built-in demo vault (`shale --screenshot out.png`).
 - Export notes and drawings to PDF (paper size, margins, fonts and more in a dialog), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash.
 
+## Keyboard only: sidebar, file list and vim-style editing
+
+- Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back into the note. Ctrl+Shift+B opens
+  the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
+  folder to folder, Space opens or closes a folder, Enter opens a file.
+- In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
+- **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
+  W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
+  start typing, Esc stops; x deletes a character; v and V select with the same motions, d cuts
+  and y copies to the clipboard, p pastes. The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
+
 ## Drawings
 
 ![A drawing with the style panel](screenshots/drawing.png)
@@ -160,7 +171,8 @@ built-in demo vault (`shale --screenshot out.png`).
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+F | Search all notes |
-| Ctrl+H / Ctrl+L | Previous / next note in the folder (in the file list's sort order) |
+| Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Alt+← / Alt+→ | Back / forward |
 | Alt+↑ / Alt+↓ | Move the current line |

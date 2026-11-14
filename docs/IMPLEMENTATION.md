@@ -76,7 +76,7 @@ Dependencies of the whole app are only `eframe`/egui (window and UI), `serde`/`s
 
 ## Previous / next note
 
-- [x] **Ctrl+H / Ctrl+L** open the note (or drawing) before / after the current one in the same folder, in exactly the file list's order (`sorted_files_in`, shared with the file tree, so name and date sorting are respected); attachments are skipped; at the ends a toast says "first / last note in its folder". Opens in the same tab (Back goes back). Tests: name order, the picture in between skipped, both ends, a note in another folder, newest-first order by modification time, the action opening the notes; real window: Ctrl+H twice from Welcome to Ideas.
+- ~~Ctrl+H / Ctrl+L open the previous / next note in the folder~~: removed before release; Ctrl+H / Ctrl+L now switch the keyboard between sidebar and editor (spec NAV-002 retired, NAV-010 to NAV-012).
 
 ## Search shortcut
 

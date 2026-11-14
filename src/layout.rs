@@ -572,6 +572,7 @@ impl ShaleApp {
                     }
                 } else {
                     tab.editor.inline_images = self.cfg.inline_images;
+                    tab.editor.vim_enabled = self.cfg.vim_mode;
                     tab.editor.people_dir = self.cfg.people_dir.clone();
                     tab.editor.dark_canvas = self.cfg.dark_canvas;
                     let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
@@ -602,6 +603,10 @@ impl ShaleApp {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 14.0;
             let small = |t: String| egui::RichText::new(t).size(11.5).color(theme::MUTED);
+            // vim-lite mode (or the command being typed) of the open note
+            if let Some(status) = self.tabs.get(self.active).and_then(|t| t.editor.vim_status()) {
+                ui.label(egui::RichText::new(status).size(11.5).monospace().color(theme::ACCENT));
+            }
             if let (Some(rel), Some(v)) = (self.current_path(), &self.vault) {
                 if let Some(doc) = self.notes.get(&rel) {
                     let words = doc.text.split_whitespace().count();

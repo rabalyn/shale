@@ -152,6 +152,10 @@ pub struct ShaleApp {
     pub search_sel: Option<usize>,
     /// scroll the selected search result into view on the next frame
     pub(crate) search_scroll: bool,
+    /// the selected row of the file list while it has the keyboard (Ctrl+H, Ctrl+Shift+B)
+    pub tree_sel: Option<PathBuf>,
+    /// scroll the selected file list row into view on the next frame
+    pub(crate) tree_scroll: bool,
     /// focus the search box (and select its text) in the next frame
     pub focus_search: bool,
     pub tasks: TasksFilter,
@@ -225,6 +229,10 @@ impl ShaleApp {
         let screenshot = opts.screenshot.clone();
         let mut cfg = if persist { Config::load() } else { Config::default() };
         let persist_config = persist;
+        // screenshots and scripted checks of vim-lite: SHALE_VIM=1 turns it on
+        if opts.screenshot.is_some() && std::env::var("SHALE_VIM").as_deref() == Ok("1") {
+            cfg.vim_mode = true;
+        }
         // Which vault to open: --vault, else (normal start) the last one, else a demo for screenshots.
         let vault_path = match (&opts.vault, &screenshot) {
             (Some(v), _) => Some(v.clone()),
@@ -252,6 +260,8 @@ impl ShaleApp {
             search: String::new(),
             search_sel: None,
             search_scroll: false,
+            tree_sel: None,
+            tree_scroll: false,
             focus_search: false,
             tasks: TasksFilter::default(),
             graph: GraphView::new(false),
@@ -787,18 +797,37 @@ impl ShaleApp {
 
     /// Open the note before (-1) or after (+1) the current one in the file list (same folder,
     /// the list's sort order), in the same tab.
-    pub fn open_neighbour(&mut self, step: i32) {
-        let Some(cur) = self.current_path() else { return };
-        match self.neighbour_note(&cur, step) {
-            Some(rel) => {
-                if let Some(parent) = rel.parent() {
-                    if !parent.as_os_str().is_empty() {
-                        self.expanded.insert(parent.to_path_buf());
-                    }
+    /// Put the keyboard into the left sidebar (Ctrl+H, Ctrl+Shift+B): browse the file list with
+    /// the open note selected, or type in the search box.
+    pub fn focus_sidebar(&mut self, ctx: &egui::Context) {
+        self.cfg.show_left = true;
+        if let Some(f) = ctx.memory(|m| m.focused()) {
+            ctx.memory_mut(|m| m.surrender_focus(f));
+        }
+        match self.left {
+            LeftPanel::Files => {
+                let cur = self.current_path();
+                // the open note's folders open, so it can be selected
+                let mut p = cur.as_deref().and_then(|c| c.parent());
+                while let Some(d) = p.filter(|d| !d.as_os_str().is_empty()) {
+                    self.expanded.insert(d.to_path_buf());
+                    p = d.parent();
                 }
-                self.open(&rel, false);
+                let rows = self.visible_tree_rows();
+                self.tree_sel = cur.filter(|c| rows.iter().any(|(r, _)| r == c)).or_else(|| rows.first().map(|(r, _)| r.clone()));
+                self.tree_scroll = true;
             }
-            None => self.toast(if step < 0 { "This is the first note in its folder" } else { "This is the last note in its folder" }),
+            LeftPanel::Search => self.focus_search = true,
+            LeftPanel::Tags => {}
+        }
+    }
+
+    /// Put the keyboard back into the editor of the open note (Ctrl+L).
+    pub fn focus_editor(&mut self) {
+        self.tree_sel = None;
+        self.search_sel = None;
+        if let Some(t) = self.tabs.get_mut(self.active) {
+            t.editor.request_focus = true;
         }
     }
 
@@ -991,8 +1020,11 @@ impl ShaleApp {
     fn shortcuts(&mut self, ui: &Ui) {
         // mouse side buttons: back / forward through the notes opened in this tab
         let (mouse_back, mouse_fwd) = ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2)));
-        // Ctrl+H / Ctrl+L (like vim's h / l): the note before / after this one in the file list
-        let (prev_note, next_note) = ui.input_mut(|i| (i.consume_key(Modifiers::COMMAND, Key::H), i.consume_key(Modifiers::COMMAND, Key::L)));
+        // Ctrl+H / Ctrl+L (like vim's h / l): keyboard into the sidebar / back into the editor;
+        // Ctrl+Shift+B: the file list
+        let (to_sidebar, to_editor, files) = ui.input_mut(|i| {
+            (i.consume_key(Modifiers::COMMAND, Key::H), i.consume_key(Modifiers::COMMAND, Key::L), i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::B))
+        });
         let (quick, new_note, toggle, back, fwd, close, search, save, settings) = ui.input_mut(|i| {
             (
                 i.consume_key(Modifiers::COMMAND, Key::O),
@@ -1021,8 +1053,14 @@ impl ShaleApp {
                 t.reading = !t.reading;
             }
         }
-        if prev_note || next_note {
-            self.open_neighbour(if prev_note { -1 } else { 1 });
+        if files {
+            self.left = LeftPanel::Files;
+            self.focus_sidebar(ui.ctx());
+        } else if to_sidebar {
+            self.focus_sidebar(ui.ctx());
+        }
+        if to_editor {
+            self.focus_editor();
         }
         if back || mouse_back {
             self.go_back();

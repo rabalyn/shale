@@ -19,6 +19,7 @@ impl ShaleApp {
     }
 
     fn file_explorer(&mut self, ui: &mut Ui) {
+        self.tree_keys(ui);
         // dropping anywhere on the file list (outside a folder) moves to the top of the vault
         let panel = ui.available_rect_before_wrap();
         self.tree_targets.push((panel, PathBuf::new(), false));
@@ -103,17 +104,9 @@ impl ShaleApp {
         entries.into_iter().map(|f| (f.rel.clone(), f.display_name(), f.kind)).collect()
     }
 
-    /// The note (or drawing) before (`step` -1) or after (+1) `rel` in its folder, in the file
-    /// list's order. Attachments (PDFs, pictures…) are skipped.
-    pub(crate) fn neighbour_note(&self, rel: &Path, step: i32) -> Option<PathBuf> {
-        let dir = rel.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        let list: Vec<PathBuf> = self.sorted_files_in(&dir).into_iter().filter(|(_, _, k)| *k != FileKind::Other).map(|(p, _, _)| p).collect();
-        let i = list.iter().position(|p| p == rel)? as i32 + step;
-        (i >= 0).then(|| list.get(i as usize).cloned()).flatten()
-    }
-
-    fn tree(&mut self, ui: &mut Ui, dir: &Path, depth: usize) {
-        let Some(v) = &self.vault else { return };
+    /// The subfolders of a folder in the order the file list shows them.
+    pub(crate) fn sorted_folders_in(&self, dir: &Path) -> Vec<PathBuf> {
+        let Some(v) = &self.vault else { return vec![] };
         let sort = self.cfg.file_sort;
         let mut folders: Vec<PathBuf> = v.folders.iter().filter(|f| f.parent() == Some(dir)).cloned().collect();
         let fname = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
@@ -121,12 +114,101 @@ impl ShaleApp {
             let (ta, tb) = (v.folder_times.get(a).copied().unwrap_or_default(), v.folder_times.get(b).copied().unwrap_or_default());
             sort_order(sort, &fname(a), &fname(b), ta, tb)
         });
+        folders
+    }
+
+    /// The rows the file list shows right now, top to bottom: (path, is a folder).
+    pub(crate) fn visible_tree_rows(&self) -> Vec<(PathBuf, bool)> {
+        fn walk(app: &ShaleApp, dir: &Path, out: &mut Vec<(PathBuf, bool)>) {
+            for f in app.sorted_folders_in(dir) {
+                out.push((f.clone(), true));
+                if app.expanded.contains(&f) {
+                    walk(app, &f, out);
+                }
+            }
+            out.extend(app.sorted_files_in(dir).into_iter().map(|(p, _, _)| (p, false)));
+        }
+        let mut out = Vec::new();
+        walk(self, Path::new(""), &mut out);
+        out
+    }
+
+    /// Keys while the file list has the keyboard: j / k files, Ctrl+J / Ctrl+K folders, Space
+    /// opens or closes a folder, Enter opens, Esc back to the editor.
+    fn tree_keys(&mut self, ui: &Ui) {
+        let Some(sel) = self.tree_sel.clone() else { return };
+        if ui.ctx().memory(|m| m.focused().is_some()) {
+            // something else took the keyboard (a click into the editor, a dialog)
+            self.tree_sel = None;
+            return;
+        }
+        let rows = self.visible_tree_rows();
+        let Some(cur) = rows.iter().position(|(r, _)| *r == sel).or(if rows.is_empty() { None } else { Some(0) }) else {
+            self.tree_sel = None;
+            return;
+        };
+        let (next, prev, next_dir, prev_dir, space, enter, esc) = ui.input_mut(|i| {
+            (
+                i.consume_key(Modifiers::NONE, Key::J) | i.consume_key(Modifiers::NONE, Key::ArrowDown),
+                i.consume_key(Modifiers::NONE, Key::K) | i.consume_key(Modifiers::NONE, Key::ArrowUp),
+                i.consume_key(Modifiers::COMMAND, Key::J),
+                i.consume_key(Modifiers::COMMAND, Key::K),
+                i.consume_key(Modifiers::NONE, Key::Space),
+                i.consume_key(Modifiers::NONE, Key::Enter),
+                i.consume_key(Modifiers::NONE, Key::Escape),
+            )
+        });
+        // the next row of the wanted kind in that direction (stays put at the ends)
+        let step = |down: bool, dirs: bool| -> usize {
+            let pick = |i: &usize| rows[*i].1 == dirs;
+            let found = if down { (cur + 1..rows.len()).find(pick) } else { (0..cur).rev().find(pick) };
+            found.unwrap_or(cur)
+        };
+        let new = if next_dir {
+            step(true, true)
+        } else if prev_dir {
+            step(false, true)
+        } else if next {
+            step(true, false)
+        } else if prev {
+            step(false, false)
+        } else {
+            cur
+        };
+        let (path, is_dir) = rows[new].clone();
+        self.tree_scroll |= new != cur;
+        self.tree_sel = Some(path.clone());
+        if (space || enter) && is_dir {
+            if !self.expanded.remove(&path) {
+                self.expanded.insert(path);
+            }
+        } else if enter {
+            self.actions.push(Action::Open { rel: path, new_tab: false });
+            self.focus_editor();
+        } else if esc {
+            self.focus_editor();
+        }
+    }
+
+    /// Outline the row selected by the keyboard (and scroll to it once after it changed).
+    fn mark_tree_sel(&mut self, ui: &Ui, rel: &Path, resp: &egui::Response) {
+        if self.tree_sel.as_deref() == Some(rel) {
+            ui.painter().rect_stroke(resp.rect, CornerRadius::same(4), egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+            if std::mem::take(&mut self.tree_scroll) {
+                resp.scroll_to_me(Some(egui::Align::Center));
+            }
+        }
+    }
+
+    fn tree(&mut self, ui: &mut Ui, dir: &Path, depth: usize) {
+        let folders = self.sorted_folders_in(dir);
         let files = self.sorted_files_in(dir);
         let current = self.current_path();
         for f in folders {
             let open = self.expanded.contains(&f);
             let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let resp = tree_row(ui, depth, &name, Some(open), false, theme::TEXT, "");
+            self.mark_tree_sel(ui, &f, &resp);
             self.add_drop_zone(resp.rect.intersect(ui.clip_rect()), f.clone(), None);
             self.tree_targets.push((resp.rect.intersect(ui.clip_rect()), f.clone(), !open));
             if resp.drag_started() {
@@ -175,6 +257,7 @@ impl ShaleApp {
             };
             let color = if kind == FileKind::Other { theme::MUTED } else { theme::TEXT };
             let resp = tree_row(ui, depth, &name, None, active, color, badge);
+            self.mark_tree_sel(ui, &rel, &resp);
             // dropping on a file puts the dragged thing next to it
             self.tree_targets.push((resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), false));
             if resp.drag_started() {
@@ -783,6 +866,7 @@ impl ShaleApp {
                     changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
                     changed |= ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed();
                     changed |= ui.checkbox(&mut self.cfg.inline_images, "Show embedded images inside the editor (the link text appears while the cursor is on it)").changed();
+                    changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing: notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back").changed();
                     ui.horizontal(|ui| {
                         ui.label("Text size");
                         changed |= ui.add(egui::Slider::new(&mut self.cfg.font_size, 12.0..=24.0)).changed();
@@ -1091,43 +1175,90 @@ mod move_tests {
 }
 
 #[cfg(test)]
-mod neighbour_tests {
-    use crate::app::{Options, ShaleApp};
-    use crate::config::FileSort;
+mod tree_key_tests {
+    use crate::app::{Action, LeftPanel, Options, ShaleApp};
+    use eframe::egui::{self, Event, Key, Modifiers, Pos2, RawInput, Rect, Vec2};
     use std::path::{Path, PathBuf};
 
-    // spec: NAV-002
+    const CTRL: Modifiers = Modifiers { alt: false, ctrl: true, shift: false, mac_cmd: false, command: true };
+
+    // spec: NAV-010, NAV-011, NAV-012
     #[test]
-    fn ctrl_h_and_l_follow_the_file_list_order() {
-        let d = std::env::temp_dir().join(format!("shale-neighbour-{}", std::process::id()));
+    fn the_file_list_is_browsed_with_j_k_ctrl_j_k_and_space() {
+        let d = std::env::temp_dir().join(format!("shale-tree-keys-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        crate::vault::write_sample_vault(&d).unwrap();
-        std::fs::write(d.join("photo.png"), b"x").unwrap();
-        // modified times: Welcome oldest … Daily log newest
-        let base = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_790_000_000);
-        for (i, f) in ["Welcome.md", "Sketch.excalidraw", "photo.png", "Ideas.md", "Daily log.md"].iter().enumerate() {
-            std::fs::File::options().write(true).open(d.join(f)).unwrap().set_modified(base + std::time::Duration::from_secs(i as u64 * 60)).unwrap();
+        for f in ["A/a1.md", "A/a2.md", "B/b1.md", "r1.md", "r2.md"] {
+            std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap();
+            std::fs::write(d.join(f), "x\n").unwrap();
         }
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
-        app.vault.as_mut().unwrap().rescan();
+        app.left = LeftPanel::Files;
+        app.open(Path::new("r1.md"), false);
+        app.expanded.clear(); // the start opened a first note (and its folder)
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut press = |app: &mut ShaleApp, k: Key, m: Modifiers| {
+            t += 0.05;
+            let mut events = vec![Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: m }];
+            if !m.ctrl && matches!(k, Key::J | Key::K) {
+                events.push(Event::Text(format!("{k:?}").to_lowercase()));
+            }
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 600.0))), time: Some(t), events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| app.file_explorer(ui));
+            });
+            out.textures_delta.clear();
+            app.tree_sel.clone()
+        };
         let p = |s: &str| Some(PathBuf::from(s));
-        app.cfg.file_sort = FileSort::NameAsc;
-        assert_eq!(app.neighbour_note(Path::new("Ideas.md"), 1), p("Sketch.excalidraw"));
-        assert_eq!(app.neighbour_note(Path::new("Sketch.excalidraw"), 1), p("Welcome.md"), "the picture in between is skipped");
-        assert_eq!(app.neighbour_note(Path::new("Ideas.md"), -1), p("Daily log.md"));
-        assert_eq!(app.neighbour_note(Path::new("Daily log.md"), -1), None, "first in the folder");
-        assert_eq!(app.neighbour_note(Path::new("Welcome.md"), 1), None, "last in the folder");
-        assert_eq!(app.neighbour_note(Path::new("Projects/Garden plan.md"), 1), None, "only notes of the same folder");
-        app.cfg.file_sort = FileSort::ModifiedDesc;
-        assert_eq!(app.neighbour_note(Path::new("Daily log.md"), 1), p("Ideas.md"), "newest first");
-        assert_eq!(app.neighbour_note(Path::new("Ideas.md"), 1), p("Sketch.excalidraw"));
-        assert_eq!(app.neighbour_note(Path::new("Sketch.excalidraw"), 1), p("Welcome.md"));
-        // the shortcut action opens it in the current tab
-        app.open(Path::new("Daily log.md"), false);
-        app.open_neighbour(1);
-        assert_eq!(app.current_path(), p("Ideas.md"));
-        app.open_neighbour(-1);
-        assert_eq!(app.current_path(), p("Daily log.md"));
+        // Ctrl+H / Ctrl+Shift+B: the file list gets the keyboard with the open note selected
+        app.focus_sidebar(&ctx);
+        assert_eq!(app.tree_sel, p("r1.md"));
+        // rows: A, B (closed folders), r1, r2. j / k only stop on files
+        assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("r2.md"));
+        assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("r2.md"), "stops at the end");
+        assert_eq!(press(&mut app, Key::K, Modifiers::NONE), p("r1.md"));
+        assert_eq!(press(&mut app, Key::K, Modifiers::NONE), p("r1.md"), "no file above r1 (only folders)");
+        // Ctrl+J / Ctrl+K only stop on folders
+        assert_eq!(press(&mut app, Key::K, CTRL), p("B"));
+        assert_eq!(press(&mut app, Key::K, CTRL), p("A"));
+        assert_eq!(press(&mut app, Key::J, CTRL), p("B"));
+        assert_eq!(press(&mut app, Key::K, CTRL), p("A"));
+        // Space opens the folder; its files join the rows
+        press(&mut app, Key::Space, Modifiers::NONE);
+        assert!(app.expanded.contains(Path::new("A")));
+        assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("A/a1.md"));
+        assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("A/a2.md"));
+        assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("r1.md"), "B is a folder: skipped");
+        assert_eq!(press(&mut app, Key::J, CTRL), p("r1.md"), "no folder below");
+        assert_eq!(press(&mut app, Key::K, CTRL), p("B"));
+        press(&mut app, Key::Space, Modifiers::NONE);
+        assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("B/b1.md"));
+        // Space again closes A (select it first); Enter on a file opens it, keyboard to the editor
+        press(&mut app, Key::K, CTRL);
+        press(&mut app, Key::K, CTRL);
+        assert_eq!(app.tree_sel, p("A"));
+        press(&mut app, Key::Space, Modifiers::NONE);
+        assert!(!app.expanded.contains(Path::new("A")));
+        assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("B/b1.md"));
+        app.actions.clear();
+        assert_eq!(press(&mut app, Key::Enter, Modifiers::NONE), None, "Enter leaves the file list");
+        assert!(matches!(app.actions.first(), Some(Action::Open { rel, .. }) if rel == Path::new("B/b1.md")));
+        assert!(app.tabs[app.active].editor.request_focus, "…and the editor gets the keyboard");
+        // Esc and Ctrl+L also give the keyboard back; a click elsewhere ends browsing
+        app.focus_sidebar(&ctx);
+        assert!(app.tree_sel.is_some());
+        assert_eq!(press(&mut app, Key::Escape, Modifiers::NONE), None);
+        app.focus_sidebar(&ctx);
+        app.focus_editor();
+        assert_eq!(app.tree_sel, None);
+        app.focus_sidebar(&ctx);
+        ctx.memory_mut(|m| m.request_focus(egui::Id::unique("somewhere else")));
+        assert_eq!(press(&mut app, Key::J, Modifiers::NONE), None);
+        // in the search panel, Ctrl+H means the search box
+        app.left = LeftPanel::Search;
+        app.focus_sidebar(&ctx);
+        assert!(app.focus_search);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

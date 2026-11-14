@@ -371,6 +371,16 @@ pub struct NoteEditor {
     /// Draw embedded drawings on a dark canvas (set from the app's settings).
     pub dark_canvas: bool,
     last_cursor: Option<(usize, usize)>,
+    /// vim-lite editing is on (set from the app's settings)
+    pub vim_enabled: bool,
+    pub vim: crate::vim::Vim,
+    /// the editor had the keyboard last frame / when it lost it (seconds)
+    vim_was_focused: bool,
+    vim_lost_at: Option<f64>,
+    /// the cursor range vim put into the text box last (a different one means a mouse click)
+    vim_expected: Option<(usize, usize)>,
+    /// scroll this char into view after the text box was drawn
+    vim_scroll: Option<usize>,
 }
 
 /// State of the `[!path` file picker.
@@ -394,7 +404,7 @@ struct MediaPicker {
 
 impl NoteEditor {
     pub fn new(id: egui::Id) -> Self {
-        NoteEditor { id, cache: Cache::default(), ac_active: false, ac_start: None, ac_dismissed: None, ac_sel: 0, ac_items: vec![], ac_labels: vec![], ac_people: false, people_dir: crate::people::DEFAULT_DIR.into(), pending_cursor: None, request_focus: false, last_layout: None, media: MediaPicker::default(), inline_images: false, dark_canvas: true, last_cursor: None }
+        NoteEditor { id, cache: Cache::default(), ac_active: false, ac_start: None, ac_dismissed: None, ac_sel: 0, ac_items: vec![], ac_labels: vec![], ac_people: false, people_dir: crate::people::DEFAULT_DIR.into(), pending_cursor: None, request_focus: false, last_layout: None, media: MediaPicker::default(), inline_images: false, dark_canvas: true, last_cursor: None, vim_enabled: false, vim: crate::vim::Vim::default(), vim_was_focused: false, vim_lost_at: None, vim_expected: None, vim_scroll: None }
     }
 
     /// Is the `[!` file picker popup on screen?
@@ -470,6 +480,150 @@ impl NoteEditor {
                 (false, None)
             }
         }
+    }
+
+    /// Typing goes into the text (vim-lite off, or in insert mode).
+    fn typing(&self) -> bool {
+        !self.vim_enabled || self.vim.mode == crate::vim::Mode::Insert
+    }
+
+    /// The vim mode (or command) for the status bar, while this editor has the keyboard.
+    pub fn vim_status(&self) -> Option<String> {
+        (self.vim_enabled && self.vim_was_focused).then(|| self.vim.status())
+    }
+
+    fn text_cursor(&self, ui: &Ui) -> Option<(usize, usize)> {
+        egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).map(|r| (r.primary.index.0, r.secondary.index.0))
+    }
+
+    /// Put vim's cursor or selection into the text box.
+    fn vim_apply_cursor(&mut self, ui: &Ui, text: &str) {
+        let range = if self.vim.visual() {
+            let (a, b) = self.vim.selection(text);
+            // the cursor is drawn at the moving end
+            if self.vim.cursor >= self.vim.anchor() {
+                CCursorRange::two(CCursor::new(a), CCursor::new(b))
+            } else {
+                CCursorRange::two(CCursor::new(b), CCursor::new(a))
+            }
+        } else {
+            CCursorRange::one(CCursor::new(self.vim.cursor))
+        };
+        let mut state = egui::text_edit::TextEditState::load(ui.ctx(), self.id).unwrap_or_default();
+        state.cursor.set_char_range(Some(range));
+        state.store(ui.ctx(), self.id);
+        self.vim_expected = Some((range.primary.index.0, range.secondary.index.0));
+    }
+
+    /// Vim-lite for this frame: outside insert mode every key goes to vim instead of the text.
+    /// Returns true when the text changed.
+    fn vim_frame(&mut self, ui: &mut Ui, text: &mut String) -> bool {
+        use crate::vim::{Effects, Mode, VimKey};
+        let focused = ui.ctx().memory(|m| m.has_focus(self.id));
+        let now = ui.input(|i| i.time);
+        if focused && !self.vim_was_focused {
+            // the note got the keyboard: normal mode (a blink of lost focus keeps insert mode)
+            let blink = self.vim.mode == Mode::Insert && self.vim_lost_at.is_some_and(|t| now - t < 0.5);
+            if !blink {
+                let cur = self.text_cursor(ui).map(|c| c.0).unwrap_or(0);
+                self.vim.reset(text, cur);
+                self.vim_apply_cursor(ui, text);
+            }
+        }
+        if !focused && self.vim_was_focused {
+            self.vim_lost_at = Some(now);
+        }
+        self.vim_was_focused = focused;
+        if !focused {
+            return false;
+        }
+        if self.vim.mode == Mode::Insert {
+            // Esc back to normal mode (an open popup took its Esc already, above)
+            if !self.ac_active && !self.media.shown && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+                let cur = self.text_cursor(ui).map(|c| c.0).unwrap_or(0);
+                self.vim.leave_insert(text, cur);
+                self.vim_apply_cursor(ui, text);
+            }
+            return false;
+        }
+        // where the text box has the cursor: a click there moves vim's cursor (and ends visual)
+        if let Some(tc) = self.text_cursor(ui) {
+            if Some(tc) != self.vim_expected {
+                if self.vim.visual() {
+                    self.vim.reset(text, tc.0);
+                } else {
+                    self.vim.set_cursor(text, tc.0);
+                }
+                self.vim_apply_cursor(ui, text);
+            }
+        }
+        // take every key that would type or move in the text box; Ctrl/Alt chords stay
+        let paste_pending = self.vim.paste_pending;
+        let (keys, pastes) = ui.input_mut(|i| {
+            let (mut keys, mut pastes) = (Vec::new(), Vec::new());
+            i.events.retain(|e| match e {
+                egui::Event::Text(t) => {
+                    keys.extend(t.chars().map(VimKey::Char));
+                    false
+                }
+                egui::Event::Key { key, pressed, modifiers, .. } if !(modifiers.ctrl || modifiers.command || modifiers.alt || modifiers.mac_cmd) => {
+                    if *pressed {
+                        let k = match key {
+                            Key::Escape => Some(VimKey::Esc),
+                            Key::Enter => Some(VimKey::Enter),
+                            Key::Backspace => Some(VimKey::Backspace),
+                            Key::ArrowLeft => Some(VimKey::Left),
+                            Key::ArrowRight => Some(VimKey::Right),
+                            Key::ArrowUp => Some(VimKey::Up),
+                            Key::ArrowDown => Some(VimKey::Down),
+                            _ => None,
+                        };
+                        keys.extend(k);
+                    }
+                    false
+                }
+                egui::Event::Paste(p) if paste_pending => {
+                    pastes.push(p.clone());
+                    false
+                }
+                egui::Event::Ime(_) => false,
+                _ => true,
+            });
+            (keys, pastes)
+        });
+        let mut fx = Effects::default();
+        for p in pastes {
+            self.vim.paste(&p, text, &mut fx);
+        }
+        let mut typed_after = String::new();
+        for k in keys {
+            if self.vim.mode == Mode::Insert {
+                // keys after `i` in the same frame are typed (scripted input sends them together)
+                if let VimKey::Char(ch) = k {
+                    typed_after.push(ch);
+                }
+                continue;
+            }
+            self.vim.key(k, text, &mut fx);
+        }
+        if let Some(c) = fx.copy.take() {
+            ui.ctx().copy_text(c);
+        }
+        if fx.request_paste {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+        }
+        self.vim_apply_cursor(ui, text);
+        if !typed_after.is_empty() {
+            ui.input_mut(|i| i.events.push(egui::Event::Text(typed_after)));
+        }
+        if fx.moved || fx.changed {
+            self.vim_scroll = Some(self.vim.cursor);
+        }
+        if self.vim.mode != Mode::Insert {
+            // no input method outside insert mode: keys must arrive as they are
+            ui.ctx().output_mut(|o| o.ime = None);
+        }
+        fx.changed
     }
 
     fn refresh_links(&mut self, text: &str, vault: &Vault, rel: &Path) {
@@ -571,6 +725,11 @@ impl NoteEditor {
             } else {
                 self.media.active = false;
             }
+        }
+
+        if self.vim_enabled && self.vim_frame(ui, text) {
+            changed = true;
+            self.refresh_links(text, vault, rel);
         }
 
         // Smart lists and headings: Enter continues a list, Tab / Shift+Tab indent or change levels,
@@ -766,7 +925,16 @@ impl NoteEditor {
             ui.ctx().memory_mut(|m| m.request_focus(self.id));
             ui.ctx().request_repaint();
         }
-        if let Some(c) = self.pending_cursor.take() {
+        // normal mode: a block on the character under the cursor
+        if self.vim_enabled && resp.has_focus() && self.vim.mode == crate::vim::Mode::Normal {
+            let c = self.vim.cursor;
+            let here = output.galley.pos_from_cursor(CCursor::new(c));
+            let next = output.galley.pos_from_cursor(CCursor::new(c + 1));
+            let w = if (next.min.y - here.min.y).abs() < 1.0 && next.min.x > here.min.x { next.min.x - here.min.x } else { base_size * 0.55 };
+            let block = Rect::from_min_size(output.galley_pos + here.min.to_vec2(), Vec2::new(w, here.height()));
+            ui.painter().rect_filled(block, 1.0, theme::ACCENT.gamma_multiply(0.45));
+        }
+        if let Some(c) = self.pending_cursor.take().or(self.vim_scroll.take()) {
             let r = output.galley.pos_from_cursor(CCursor::new(c));
             let screen = r.translate(output.galley_pos.to_vec2());
             ui.scroll_to_rect(screen.expand(60.0), Some(egui::Align::Center));
@@ -839,7 +1007,7 @@ impl NoteEditor {
 
         // --- [[ suggestions
         let cursor = output.cursor_range.filter(|r| r.is_empty()).map(|r| r.primary.index.0);
-        let query = if resp.has_focus() { cursor.and_then(|c| link_query(text, c)) } else { None };
+        let query = if resp.has_focus() && self.typing() { cursor.and_then(|c| link_query(text, c)) } else { None };
         // a dismissed `[[` stays closed until that `[[` is gone from the text
         if let Some(d) = self.ac_dismissed {
             if !text.get(d.saturating_sub(2)..).map(|t| t.starts_with("[[")).unwrap_or(false) {
@@ -1018,7 +1186,7 @@ impl NoteEditor {
                 }
             }
         }
-        let mq = if resp.has_focus() || keep { cur_byte.or(self.media.cursor).and_then(|cb| crate::media::media_query(text, cb).map(|q| (cb, q))) } else { None };
+        let mq = if (resp.has_focus() || keep) && self.typing() { cur_byte.or(self.media.cursor).and_then(|cb| crate::media::media_query(text, cb).map(|q| (cb, q))) } else { None };
         match mq {
             Some((cb, (start, typed))) if self.media.dismissed != Some(start) => {
                 let (dir, partial, typed_dir) = crate::media::split_typed(&typed, &vault.root, &home);
@@ -1231,6 +1399,91 @@ mod tests {
         h.frame(ed, text, v, rel, click_events(p, true));
         let (_, a) = h.frame(ed, text, v, rel, click_events(p, false));
         a
+    }
+
+    /// Run one frame of the editor alone; returns what it copied and whether it asked for a paste.
+    fn vim_frame(ctx: &egui::Context, t: &mut f64, ed: &mut NoteEditor, text: &mut String, v: &Vault, events: Vec<Event>) -> (Option<String>, bool) {
+        *t += 0.05;
+        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(*t), events, ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ed.show(ui, text, v, Path::new("Welcome.md"), 15.0, false);
+            });
+        });
+        out.textures_delta.clear();
+        let copied = out.platform_output.commands.iter().find_map(|c| match c {
+            egui::OutputCommand::CopyText(s) => Some(s.clone()),
+            _ => None,
+        });
+        let paste = out.viewport_output.values().any(|vo| vo.commands.iter().any(|c| matches!(c, egui::ViewportCommand::RequestPaste)));
+        (copied, paste)
+    }
+
+    // spec: EDIT-010, EDIT-011, EDIT-012, EDIT-013, EDIT-014
+    #[test]
+    fn vim_lite_in_the_real_editor() {
+        let (v, d) = vault_for_tests("vim");
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut ed = NoteEditor::new(egui::Id::unique("vim-ed"));
+        ed.vim_enabled = true;
+        let mut text = String::from("alpha beta\ngamma delta\nsee [[Ide");
+        let cursor = |ctx: &egui::Context, ed: &NoteEditor| egui::text_edit::TextEditState::load(ctx, ed.id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0).unwrap();
+        let typed = |s: &str| vec![Event::Text(s.into())];
+        let key = |k: Key| vec![Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }];
+        ed.pending_cursor = Some(0);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        assert_eq!(ed.vim_status().as_deref(), Some("NORMAL"), "a note that gets the keyboard is in normal mode");
+        // motions move the text box's cursor and type nothing
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("w"));
+        assert_eq!(cursor(&ctx, &ed), 6);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("j"));
+        assert_eq!(cursor(&ctx, &ed), 17, "same column on the next line");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::ArrowUp));
+        assert_eq!(cursor(&ctx, &ed), 6, "arrow keys are motions too");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Enter));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Backspace));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("q z"));
+        assert_eq!(text, "alpha beta\ngamma delta\nsee [[Ide", "no key types in normal mode");
+        assert_eq!(cursor(&ctx, &ed), 16, "Enter = j, Backspace = h");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("l"));
+        // i: typing; Esc: back to normal on the typed character
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("i"));
+        assert_eq!(ed.vim_status().as_deref(), Some("INSERT"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("X"));
+        assert_eq!(text, "alpha beta\ngamma Xdelta\nsee [[Ide");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Escape));
+        assert_eq!((ed.vim_status().as_deref(), cursor(&ctx, &ed)), (Some("NORMAL"), 17));
+        // visual + d: the selection goes to the clipboard
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("0"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("v"));
+        assert_eq!(ed.vim_status().as_deref(), Some("VISUAL"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("w"));
+        let (copied, _) = vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("d"));
+        assert_eq!(copied.as_deref(), Some("gamma X"));
+        assert_eq!(text, "alpha beta\ndelta\nsee [[Ide");
+        // p asks the window for the clipboard and puts what arrives after the cursor
+        let (_, asked) = vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("p"));
+        assert!(asked, "p sends RequestPaste");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste("ZZ".into())]);
+        assert_eq!(text, "alpha beta\ndZZelta\nsee [[Ide");
+        // :line and /search
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed(":3"));
+        assert_eq!(ed.vim_status().as_deref(), Some(":3"), "the command shows while it is typed");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Enter));
+        assert_eq!(cursor(&ctx, &ed), 19, "start of line 3 (\"see [[Ide\")");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("/BETA"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Enter));
+        assert_eq!(cursor(&ctx, &ed), 6);
+        // the [[ suggestions stay closed in normal mode and open while typing
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("G$"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        assert!(!ed.ac_active, "no suggestions in normal mode, although the cursor is in [[Ide");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("A"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        assert!(ed.ac_active, "insert mode: the suggestions open");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: LINK-005

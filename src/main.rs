@@ -42,6 +42,7 @@ mod secrets;
 mod tagwords;
 mod tb_store;
 mod vault;
+mod vim;
 #[cfg(target_os = "linux")]
 mod wl_drop;
 

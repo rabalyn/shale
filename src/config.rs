@@ -66,6 +66,8 @@ pub struct Config {
     pub recent_tags: Vec<String>,
     /// Folder of the contact notes (for `[[p …` links and people found when importing).
     pub people_dir: String,
+    /// Vim-style editing in notes: normal / insert / visual mode (off by default).
+    pub vim_mode: bool,
 }
 
 impl Default for Config {
@@ -90,6 +92,7 @@ impl Default for Config {
             last_import_folder: String::new(),
             recent_tags: vec![],
             people_dir: crate::people::DEFAULT_DIR.into(),
+            vim_mode: false,
         }
     }
 }

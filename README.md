@@ -61,7 +61,8 @@ Other options:
 | Ctrl+O | Quick switcher (find or create a note) |
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
-| Ctrl+H / Ctrl+L | Previous / next note in the folder (in the file list's sort order) |
+| Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
@@ -70,6 +71,12 @@ Other options:
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |
 | Middle-click on a link | Open it in a new tab |
+
+With **Vim-style editing** turned on in Settings, a note you go to is in normal mode:
+h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / N go to the next /
+previous hit; i a I A o O start typing and Esc stops; x deletes a character; v / V select (the
+motions extend the selection), then d cuts and y copies to the clipboard; p pastes it. The
+status bar shows the mode.
 
 In a drawing: V/1 select, H hand, R/2 rectangle, D/3 diamond, O/4 ellipse, A/5 arrow, L/6 line,
 P/7 pen, T/8 text, E/0 eraser. Ctrl+Z/Ctrl+Shift+Z undo/redo, Ctrl+D duplicate, Delete removes.

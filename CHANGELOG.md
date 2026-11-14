@@ -23,9 +23,12 @@ The release page of each version on GitHub shows its section from this file.
   note, also when their data is compressed. Saving keeps the plugin's file layout (front
   matter, compression, embedded files) and updates its text list, so Obsidian keeps reading the
   drawing. `[[Drawing.excalidraw]]` links and embeds find these files.
-- **Ctrl+H / Ctrl+L** (like vim's h / l) open the note before / after the current one in its
-  folder, in the file list's sort order (by name or by date); attachments are skipped. At the
-  first or last note a short message says so.
+- **Keyboard-only navigation**: Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back
+  into the note, and Ctrl+Shift+B opens the file list. There j / k go from file to file,
+  Ctrl+J / Ctrl+K from folder to folder, Space opens or closes a folder and Enter opens a file.
+- **Vim-style editing** (Settings, off by default): notes open in normal mode with h j k l,
+  w b W B, 0 $, gg G, `:line`, `/search` with n / N, i a I A o O to type, x, visual mode (v, V)
+  with d to cut and y to copy to the clipboard, and p to paste.
 
 ### Fixed
 
