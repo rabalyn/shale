@@ -662,3 +662,141 @@ fn mail_env_password_and_oauth_accounts_send_with_an_attachment_and_dovecot_has_
     secrets::clear_mail_secret(&oa.id, MailSecret::RefreshToken);
     oauth::forget_source(&oa.id);
 }
+
+// ------------------------------------------------------------ phase 4: signed and encrypted mail (MAIL-198)
+
+/// One signed and encrypted mail of one standard through the real submission service into the sink, and the copy in Dovecot's Sent.
+fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
+    use crate::config::CryptoStandard;
+    use crate::gpg::testkit::{no_cancel, TestHome};
+    use crate::mail_crypto::{process, Encryption};
+    let (alice, bob, carol) = (TestHome::new(), TestHome::new(), TestHome::new());
+    let (a_key, b_key, c_key) = match std {
+        CryptoStandard::OpenPgp => {
+            let (a, b, c) = (alice.gen_pgp("Alice Shale", "alice@shale.test", "never", None), bob.gen_pgp("Bob", "bob@example.org", "never", None), carol.gen_pgp("Carol", "carol@example.org", "never", None));
+            alice.share_pgp_with(&bob, &a);
+            alice.share_pgp_with(&carol, &a);
+            bob.share_pgp_with(&alice, &b);
+            carol.share_pgp_with(&alice, &c);
+            (a, b, c)
+        }
+        CryptoStandard::Smime => {
+            let (a, b) = (alice.gen_smime("Alice Shale", "alice@shale.test"), bob.gen_smime("Bob", "bob@example.org"));
+            alice.share_smime_with(&bob, &a);
+            bob.share_smime_with(&alice, &b);
+            (a, b, String::new())
+        }
+    };
+    let mut acct = MailAccount {
+        id: format!("mailenv-crypto-{tag}"),
+        name: "Alice".into(),
+        host: "localhost".into(),
+        port: IMAPS_PORT,
+        user: "alice@shale.test".into(),
+        smtp_host: "localhost".into(),
+        smtp_port: SUBMISSION_PORT,
+        smtp_security: MailSecurity::StartTls,
+        from_name: "Alice Shale".into(),
+        from_address: "alice@shale.test".into(),
+        ..MailAccount::default()
+    };
+    match std {
+        CryptoStandard::OpenPgp => acct.pgp_key = a_key.clone(),
+        CryptoStandard::Smime => acct.smime_key = a_key.clone(),
+    }
+    let auth: Arc<dyn AuthFactory> = Arc::new(PasswordAuth { user: acct.user.clone(), password: "shale-test-pw".into() });
+    let smtp = EnvSmtp { port: SUBMISSION_PORT, security: MailSecurity::StartTls, auth: auth.clone() };
+    let imap = EnvConnector { auth: auth.clone() };
+    let (dir, store) = temp_store(&format!("crypto-{tag}"));
+    let now = crate::cal_time::now();
+    let subject = format!("Shale crypto test ✓ {tag}");
+    clean_sent(&acct.user, "Shale crypto test");
+    clear_sink();
+    discover_folders(&store, &imap, &acct.id, &acct.name).expect("folders");
+    let sum = sync(&store, &acct.id, &imap);
+    assert!(sum.errors.is_empty(), "{:?}", sum.errors);
+    let sent_before = dovecot_view(&acct.user, "Sent");
+
+    // signed and encrypted for Bob (To), and with OpenPGP for Carol on Bcc (a hidden recipient)
+    let mut d = crate::mail_send::new_draft(&acct);
+    d.to = "Bob <bob@example.org>".into();
+    if std == CryptoStandard::OpenPgp {
+        d.bcc = "carol@example.org".into();
+    }
+    d.subject = subject.clone();
+    let marker = format!("zq{}x{}", std::process::id(), if std == CryptoStandard::OpenPgp { "pgp" } else { "smime" });
+    let secret = format!("the secret plan {marker} — Grüße aus Köln");
+    d.body = format!("{secret}\n");
+    (d.sign, d.encrypt, d.standard) = (true, true, std);
+    let ob = crate::outbox::Outbox::new(&dir);
+    let item = crate::mail_send::queue_with(&ob, &alice.g, &acct, &d, 0, now, &crate::mail_store::today_string(), &no_cancel()).expect("signed and encrypted");
+    let eml = ob.read_eml(&acct.id, &item.id).unwrap();
+    assert!(!String::from_utf8_lossy(&eml).contains(&marker), "nothing readable in the outbox");
+    let r = crate::mail_send::send_due(&ob, &store, &acct, &smtp, now);
+    assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
+
+    // what the sink got from Dovecot's submission service: our message, byte for byte after the servers' own lines
+    let mut got = vec![];
+    for _ in 0..40 {
+        got = sink_messages();
+        if !got.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    assert_eq!(got.len(), 1, "exactly one mail arrived: {got:?}");
+    let raw = curl(&[&format!("{MAILPIT}/message/{}/raw", got[0]["ID"].as_str().expect("an id"))]);
+    let at = raw.windows(8).position(|w| w == &eml[..8]).expect("our message starts somewhere in what arrived");
+    let arrived = &raw[at..];
+    assert_eq!(arrived, &eml[..], "the signed and encrypted message arrived unchanged: a relay that touched a byte would break it");
+
+    // every recipient reads it and the signature is Alice's
+    let mut readers: Vec<(&str, &TestHome)> = vec![("bob", &bob)];
+    if std == CryptoStandard::OpenPgp {
+        readers.push(("carol (Bcc)", &carol));
+    }
+    for (name, h) in readers {
+        let o = process(&h.g, arrived, true, &no_cancel(), now);
+        assert_eq!(o.security.encryption, Encryption::Decrypted(std), "{name}: {:?}", o.security);
+        assert_eq!(o.security.lines.len(), 1, "{name}: {:?}", o.security);
+        assert_eq!((o.security.lines[0].sig.state, o.security.lines[0].from_ok), (crate::gpg::SigState::Good, Some(true)), "{name}: {:?}", o.security);
+        assert_eq!(crate::mail::parse(o.display.as_ref().unwrap()).text, secret, "{name}");
+    }
+    let _ = (b_key, c_key);
+
+    // the copy in Dovecot's Sent folder: appended once, and Alice can read it (the mail was also encrypted to her)
+    let r = mail_ops::run_pending(&store, &imap, &acct.id);
+    assert_eq!((r.done, r.failed.len()), (1, 0), "{r:?}");
+    let sent_now = dovecot_view(&acct.user, "Sent");
+    assert_eq!(sent_now.iter().filter(|l| l.contains("Shale crypto test")).count(), 1, "{sent_now:?}");
+    assert_eq!(sent_now.len(), sent_before.len() + 1);
+    let sum = sync(&store, &acct.id, &imap);
+    assert!(sum.errors.is_empty(), "{:?}", sum.errors);
+    let rows = store.reader().unwrap().folders(Some(&acct.id)).unwrap();
+    let mine: Vec<MessageSummary> = messages(&store, &rows, "Sent").into_iter().filter(|m| m.subject == subject).collect();
+    assert_eq!(mine.len(), 1, "{mine:?}");
+    let stored = store.read_raw(&mine[0]).unwrap();
+    assert_eq!(stored, eml, "the copy from Dovecot is the exact sent message");
+    let o = process(&alice.g, &stored, true, &no_cancel(), now);
+    assert_eq!(o.security.encryption, Encryption::Decrypted(std), "{:?}", o.security);
+    assert_eq!(crate::mail::parse(o.display.as_ref().expect("the Sent copy decrypts")).text, secret);
+    // and storing it: the decrypted copy lands beside the original, searchable
+    store.save_decrypted(&mine[0], o.display.as_ref().unwrap(), &o.security, &crate::mail_store::today_string()).unwrap();
+    assert_eq!(store.reader().unwrap().search(&marker, None, 5, 0).unwrap().len(), 1, "the text of the encrypted Sent mail is found by search");
+
+    clean_sent(&acct.user, "Shale crypto test");
+    clear_sink();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: MAIL-198
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_decrypts_and_the_sent_copy_decrypts() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    if !crate::gpg::testkit::have_gnupg() {
+        panic!("gpg, gpgsm and gpgconf are needed for this test");
+    }
+    crypto_end_to_end(crate::config::CryptoStandard::OpenPgp, &format!("pgp{}", std::process::id()));
+    crypto_end_to_end(crate::config::CryptoStandard::Smime, &format!("smime{}", std::process::id()));
+}

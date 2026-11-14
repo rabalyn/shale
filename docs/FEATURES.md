@@ -228,6 +228,48 @@ built-in demo vault (`shale --screenshot out.png`).
   to the server in the background (an account that keeps sent mail itself, like Gmail, is switched off
   from that). If that save fails the mail is still sent, never sent again, and the copy is retried.
 
+### Signed and encrypted mail (phase 4)
+
+Shale uses the **GnuPG on your computer**: `gpg` for OpenPGP (PGP/MIME) and `gpgsm` for S/MIME, with
+your own keys, smartcards and the usual passphrase dialog (`gpg-agent` / pinentry). Shale never sees a
+key or a passphrase, never looks a key up on the network by itself, and tells you in words if `gpg` or
+`gpgsm` is missing.
+
+- **Reading.** A strip above the mail says what GnuPG found, in its own colours, never from anything in
+  the mail: a valid signature (who, which key, how far you trust it), a **bad** one (the mail was changed
+  or forged), a signer whose key you do not have, an expired or revoked key, a mail that is signed only in
+  part, a signature by somebody other than the sender, and inline OpenPGP (signed text in the body), which
+  is marked as weaker. Checking a signature needs no setting and stores nothing. A body text that says
+  "Good signature from…" is just text and shows no strip.
+- **Encrypted mail** needs one decision first. In **Accounts…, Encryption** a red banner says
+  **"ENCRYPTED MAILS WILL ALWAYS BE STORED DECRYPTED LOCALLY"**: a decrypted mail is kept next to the encrypted
+  original (`<number>.decrypted.eml`) and its text goes into the search index, unencrypted, in the mail folder
+  (protected by the folder's permissions and your full-disk encryption). It is switched on only when you type
+  `I agree to decrypted local storage` exactly. Until then an encrypted mail shows "Encrypted — enable
+  encryption in the settings", and nothing is decrypted or stored. Withdrawing the consent stops decrypting; it
+  deletes nothing (the copies you have stay, are shown and searched). Mails are decrypted when you open them,
+  in the background; a passphrase or PIN dialog may open, and Cancel stops it.
+- **Safe by construction** (EFAIL): only a mail that is encrypted as a whole is decrypted; a mail that mixes an
+  encrypted part with other parts or text is not decrypted and says so; decrypted text is shown as its own
+  message and never joined with anything else of the mail; there is no HTML and no link is followed or
+  made clickable. Signed-and-encrypted mail works in both orders and when OpenPGP does both at once.
+- **Writing.** Set the key of an account in Accounts…, the account, *Signing and encrypting* (the lists come
+  from `gpg --list-secret-keys` and `gpgsm --list-secret-keys`), plus "sign new mail by default" and the
+  preferred standard. In a new mail: **Sign**, **Encrypt** and (with both kinds of key) the standard. For
+  every address in To, Cc and Bcc the window shows whether a key was found in your local keyring (with its
+  trust) or not. Encrypting needs a key for **every** recipient, Cc and Bcc included, and always also
+  encrypts for you, so the copy in Sent stays readable. OpenPGP Bcc recipients are hidden recipients; S/MIME
+  lists every certificate, so with a Bcc it asks first. Signing and encrypting run in the background (the
+  passphrase dialog is GnuPG's), the window stays as it is and Cancel stops it; if anything fails nothing
+  goes to the Outbox and nothing you typed is lost. What is signed is exactly what is sent (quoted-printable or
+  base64 for anything a mail server might rewrite). The **subject and the addresses of an encrypted mail
+  are not encrypted** (protected headers are not supported).
+- **Your keys and Thunderbird.** Thunderbird keeps OpenPGP keys in its own store. Export your secret key in
+  Thunderbird (Account settings, End-to-End Encryption, "Backup secret key to file") and run
+  `gpg --import backup.asc`; the keys of others the same way, or by hand with `gpg --locate-keys name@example.org`
+  (also WKD). S/MIME: Thunderbird's certificate manager, Backup, then `gpgsm --import backup.p12` and the
+  issuer's fingerprint in `~/.gnupg/trustlist.txt`. The Encryption settings say all this too.
+
 ## Importing e-mails, events and files (for project tracking)
 
 ![Import dialog](screenshots/import-dialog.png)

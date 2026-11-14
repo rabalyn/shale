@@ -22,6 +22,14 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   changes anything on the server, only your own actions do (delete always means the Trash folder;
   a sent mail is never sent twice, and a mail that may or may not have gone out is shown to you
   instead of being guessed). **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
+  **Signed and encrypted mail** (OpenPGP and S/MIME) works through the GnuPG on your computer
+  (`gpg`, `gpgsm`, your keys, your passphrase dialog): signatures are checked and shown in a strip above
+  the mail, you can sign and encrypt what you send, and nothing is fetched from key servers by itself.
+  **Read this first: with encryption switched on (Accounts…, Encryption; you must type a sentence to
+  confirm), encrypted mails WILL ALWAYS BE STORED DECRYPTED LOCALLY** (the decrypted copy and its search
+  text lie unencrypted in the mail folder, next to the encrypted original). Without that switch nothing
+  is decrypted. To use your Thunderbird keys, export them there and import them into GnuPG
+  (`gpg --import backup.asc`; S/MIME: `gpgsm --import backup.p12`), see below.
   Sign in with a password or with OAuth2 (Google, Microsoft). Shale has no OAuth2 client IDs of
   its own yet, so you register one (about five minutes, free):
   - *Google:* Cloud console, new project, OAuth consent screen (External, Testing, add yourself as
@@ -36,6 +44,13 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   - Enter the Application (client) ID in Shale (Accounts…, OAuth2, Microsoft); no secret needed.
   Details in [docs/FEATURES.md](docs/FEATURES.md). A local test mail server with an OAuth2
   provider (podman) is in [tests/mail-env](tests/mail-env/README.md).
+  - *Your keys from Thunderbird:* Thunderbird keeps OpenPGP keys in its own store, not in GnuPG's. In
+    Thunderbird: Account settings, End-to-End Encryption, your key, "Backup secret key to file" (the
+    public keys of others: the key manager, Export). Then `gpg --import file.asc`. S/MIME certificates:
+    Settings, Privacy & Security, Manage S/MIME Certificates, Backup; then `gpgsm --import file.p12`
+    and put the fingerprint of the issuer (for a self-signed one: of the certificate) into
+    `~/.gnupg/trustlist.txt`. In Shale: Accounts…, the account, "Signing and encrypting": pick the key.
+    Keys of your correspondents: `gpg --locate-keys name@example.org` (Shale never looks them up itself).
 
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 

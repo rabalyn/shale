@@ -80,7 +80,7 @@ text inside them is unescaped (`\x3a`) and shown as plain text.
 | `multipart/encrypted; protocol="application/pgp-encrypted"` | PGP/MIME encrypted (also signed, when the OpenPGP message is) | `gpg --decrypt` |
 | `multipart/signed; protocol="application/pkcs7-signature"` (or `x-pkcs7-signature`) | S/MIME detached signature | `gpgsm --verify` |
 | `application/pkcs7-mime; smime-type=enveloped-data` (or no smime-type) | S/MIME encrypted | `gpgsm --decrypt` |
-| `application/pkcs7-mime; smime-type=signed-data` | S/MIME opaque signed | `gpgsm --decrypt` (it extracts and verifies) |
+| `application/pkcs7-mime; smime-type=signed-data` | S/MIME opaque signed | `gpgsm --verify --output -` (verifies and extracts the content in one call; never uses a secret key) |
 | a text body that is one `-----BEGIN PGP …-----` block | inline OpenPGP, signed (`PGP SIGNED MESSAGE`) or encrypted (`PGP MESSAGE`) | `gpg --verify` / `gpg --decrypt`; read-only and **weaker** (nothing proves what else the mail contains) |
 
 - **The signed bytes are the exact raw bytes of the signed part**, as stored in the `.eml`: from the part's first
@@ -125,8 +125,10 @@ text inside them is unescaped (`\x3a`) and shown as plain text.
   asks `gpg` for a verdict; nothing is stored. (It needs `gpg`, which may ask nothing: verification never
   needs a secret key, so no dialog opens.)
 - **With consent**: the original `.eml` stays untouched. The decrypted entity, wrapped with the outer headers, is
-  written next to it as `<uid>.decrypted.eml` (atomically through `fsutil`, never replacing a file: the
-  name is derived from the original's, so there is exactly one), and the **search text of the mail is the
+  written next to it as `<uid>.decrypted.eml` (atomically through `fsutil`; a different copy that is already
+  there goes to `.trash/` first, nothing is overwritten silently), with `<uid>.decrypted.json` beside it: the
+  signature results GnuPG gave when the mail was decrypted (and when), so that reopening the mail does not need
+  GnuPG, a passphrase dialog or the key again and still shows what was found then. The **search text of the mail is the
   decrypted text** (index body and attachment names, from the sibling; subject, from, to stay the outer ones).
   The sibling follows the original wherever the original goes: when a message is moved or deleted (the file goes
   to `.trash/`), its sibling goes with it, and a rebuilt index reads the sibling when it exists.
@@ -216,6 +218,25 @@ server and, gated, over the container environment (Dovecot submission to Mailpit
 - **Showing decrypted text inside the outer mail's rendering.** Rejected: that is the EFAIL pattern.
 - **Verifying inline PGP as if it were PGP/MIME.** Rejected: an inline signature covers only the block, so the strip says
   so and calls it weaker.
+
+## Implementation notes
+
+- `gpgsm` has no `END_ENCRYPTION` status and, for a message it has no key for, only says `DECRYPTION_FAILED`: S/MIME
+  encryption counts as done on exit code 0 with output and no `INV_RECP`/`ERROR`, and a failed S/MIME decryption is
+  reported as "no certificate of yours fits, or the data is damaged" (`NoKeyOrDamaged`).
+- `gpgsm --verify --output -` is how an opaque S/MIME message is read (`gpgsm --decrypt` refuses signed-data).
+- The OpenPGP user ids and the S/MIME subject come from `--list-keys --with-colons`; the signer's addresses are compared
+  with the From address (`from_ok`), and a mismatch is shown, never silently accepted.
+- **Several keys for one address**: the most trusted usable one is taken (the first on a tie); expired, revoked, disabled and
+  never-trusted (OpenPGP) keys are never used. `--trust-model always` is passed for OpenPGP encryption to the keys the
+  person has in the keyring, because batch `gpg` refuses uncertified keys; the compose window shows "not certified".
+- Sign and encrypt in OpenPGP is one `gpg --sign --encrypt` (as Thunderbird does); S/MIME is signed first (detached,
+  `multipart/signed`) and then encrypted. Reading handles all of these and encrypt-then-sign.
+- A GnuPG call ends when its time is up or the cancel flag is set; the child is killed, and the readers of its output
+  report over channels, so a helper process that keeps a pipe open cannot hold the call up.
+- The tests that need `gpg`, `gpgsm` and `gpgconf` return at once when they are missing (the CI image has them).
+- Not done: protected headers, a server-side key lookup (WKD/keyservers) by Shale itself, S/MIME certificate chain
+  building and CRL/OCSP in the tests, key generation or import from inside Shale, GPGME.
 
 ## Open risks (kept short)
 

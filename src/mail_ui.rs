@@ -407,6 +407,8 @@ pub struct MailView {
     /// The person has typed the consent to decrypted local storage (set from the settings every frame).
     pub consent: bool,
     crypto_cancel: Option<Arc<AtomicBool>>,
+    /// The message GnuPG is being asked about (a result for another message is not the running one's).
+    crypto_id: Option<i64>,
     crypto_running: bool,
     /// What GnuPG is and has (read when the settings open).
     pub gnupg_info: Option<GnupgInfo>,
@@ -492,6 +494,7 @@ impl MailView {
             gnupg: Gnupg::default(),
             consent: false,
             crypto_cancel: None,
+            crypto_id: None,
             crypto_running: false,
             gnupg_info: None,
             gnupg_probing: false,
@@ -654,9 +657,12 @@ impl MailView {
                 }
             }
             Event::Crypto { id, result } => {
-                if self.open.as_ref().is_some_and(|o| o.msg.id == id) {
+                if self.crypto_id == Some(id) {
                     self.crypto_running = false;
+                    self.crypto_id = None;
                     self.crypto_cancel = None;
+                }
+                if self.open.as_ref().is_some_and(|o| o.msg.id == id) {
                     if let Some(o) = self.open.as_mut() {
                         o.body = match result {
                             Ok(l) => Body::Ready(l),
@@ -1210,6 +1216,7 @@ impl MailView {
         self.cancel_crypto();
         let cancel = Arc::new(AtomicBool::new(false));
         self.crypto_cancel = Some(cancel.clone());
+        self.crypto_id = Some(msg.id);
         self.crypto_running = true;
         let (g, consent, id) = (self.gnupg.clone(), self.consent, msg.id);
         self.spawn(move || crypto_job(&store, &g, &msg, consent, &cancel).map(Arc::new), move |r| Event::Crypto { id, result: flatten(r) });

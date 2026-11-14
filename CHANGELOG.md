@@ -39,6 +39,25 @@ The release page of each version on GitHub shows its section from this file.
   `src/compose.rs`, `src/smtp_client.rs` (own small SMTP client; `lettre` only builds the message),
   `src/outbox.rs`, `src/mail_send.rs`, a randomized safety test, and the container test environment
   now has Dovecot's submission service with a Mailpit sink.
+- **Mail: signed and encrypted mail** (phase 4, OpenPGP and S/MIME with the system's GnuPG: `gpg`,
+  `gpgsm`, `gpg-agent`; no key or passphrase ever passes through Shale, no key lookup on the network).
+  A status strip above the mail shows what GnuPG found (valid with signer, fingerprint and trust; bad;
+  unknown, expired or revoked key; partly signed; not the sender's address; inline OpenPGP as weaker), built
+  from GnuPG's status lines only. Encrypted mail is decrypted when opened, in a job (a passphrase dialog
+  may open, Cancel stops it), but **only after the consent in Accounts…, Encryption**: a red banner
+  ("encrypted mails WILL ALWAYS BE STORED DECRYPTED LOCALLY") and the exact sentence
+  `I agree to decrypted local storage`. The decrypted copy is stored beside the untouched original and
+  indexed for search; withdrawing the consent stops decrypting and deletes nothing. EFAIL-safe: only
+  wholly encrypted mail is decrypted, decrypted text is its own message, nothing is joined. Writing: Sign
+  and Encrypt in the compose window (key found / no key per recipient from the local keyrings, Bcc
+  included, always also encrypted to yourself), account key pickers, PGP/MIME (RFC 3156) and S/MIME (RFC 8551)
+  built in the sending pipeline with the signed bytes exactly the bytes sent. Signing runs in a job and a
+  failure keeps the mail in the window. The subject of an encrypted mail is not encrypted. New: ADR-0011,
+  `src/gpg.rs`, `src/mail_crypto.rs`; tests with real keys in a temp `GNUPGHOME` and one against the
+  container environment. Your Thunderbird keys: `gpg --import` (README and the settings explain).
+- **Fixed**: the local copy of a sent mail, which waits for the server's own, is kept under UIDVALIDITY 0 with
+  its own file, so a real server UID can never overwrite or merge with it; the next sync replaces it by the
+  server's copy (same Message-ID) and keeps the local file in `.trash/`.
 - **Mail: read, flag, move and delete** (phase 2, two-way). `u` read / unread, `s` or `f` flag,
   `d` or Delete to Trash, `m` move (a folder picker you type into), on the open mail, the one
   under the cursor or all marked mails; also as buttons, in the right-click menu of a row and in

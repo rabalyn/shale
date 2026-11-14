@@ -57,6 +57,13 @@ the sink sees the envelope), and a copy lands in the user's Sent folder in Dovec
 Delete the mails in Mailpit with the page's button or `curl -X DELETE http://127.0.0.1:18025/api/v1/messages`.
 The Sent copies of a manual try stay in the seeded Sent folder: `doveadm expunge` can remove them, or `reset`.
 
+## Signed and encrypted mail (phase 4)
+
+`cargo test -- --ignored mail_env` also sends a signed and encrypted OpenPGP mail and a signed and encrypted
+S/MIME mail through the submission service into Mailpit (keys are made in a throw-away `GNUPGHOME`, needs
+`gpg`, `gpgsm` and `gpgconf` on the host), checks that the message arrived byte for byte, that it verifies and
+decrypts for the recipients, and that the copy in Dovecot's Sent folder decrypts for the sender (MAIL-198).
+
 ## Trust the certificate
 
 Shale checks server certificates with the operating system's trust store and has no switch to skip

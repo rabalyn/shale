@@ -2233,3 +2233,37 @@ fn compose_toggles_show_the_key_of_every_recipient_refuse_a_missing_one_and_send
         assert!(crate::mail::parse(o.display.as_ref().unwrap()).text.starts_with("the secret plan"), "{name}");
     }
 }
+
+// spec: MAIL-171
+#[test]
+fn a_gnupg_call_that_waits_for_a_dialog_never_blocks_the_window_and_cancel_stops_it() {
+    use std::os::unix::fs::PermissionsExt;
+    // a stand-in for gpg that never answers, like one waiting for a passphrase dialog nobody sees
+    let dir = std::env::temp_dir().join(format!("shale-slowgpg-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("slow-gpg");
+    std::fs::write(&script, "#!/bin/sh\nexec sleep 60\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut w = W::new("slow-gpg", true);
+    w.app.mail.gnupg = crate::gpg::Gnupg { gpg: script.to_string_lossy().into_owned(), gpgsm: script.to_string_lossy().into_owned(), home: None };
+    w.app.cfg.mail_encryption_consent = Some("2026-11-14 12:00".into());
+    let alice = TestHome::new();
+    let signed = testmail::pgp_signed(&alice, &alice.gen_pgp("Alice Test", "alice@example.org", "never", None), testmail::ENTITY);
+    add_inbox_mail(&w, "Plans", signed);
+    w.sync_and_wait();
+    w.open_mail("Plans");
+    // GnuPG is "waiting": the window keeps drawing frames, says so, and offers Cancel
+    for _ in 0..10 {
+        w.frame(vec![]);
+    }
+    assert!(matches!(w.app.mail.open.as_ref().map(|o| &o.body), Some(Body::Ready(l)) if l.security.working.is_some()));
+    assert!(w.shows("Checking the signature") && w.has("mail:sec:cancel"));
+    let t = Instant::now();
+    w.click("mail:sec:cancel");
+    w.until("the call ends after Cancel", |a| matches!(a.mail.open.as_ref().map(|o| &o.body), Some(Body::Ready(l)) if l.security.working.is_none()));
+    assert!(t.elapsed() < Duration::from_secs(10), "the child was killed, not waited for");
+    w.frame(vec![]);
+    assert!(w.shows("Cancelled."), "the strip says what happened");
+    let _ = std::fs::remove_dir_all(&dir);
+}
