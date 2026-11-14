@@ -2,7 +2,7 @@
 
 **IS NOW** = true today (⚠ = known gap) · **SHOULD BE** = agreed target.
 Tests are named `file.rs::test_fn`. QRESYNC and IDLE are not implemented in 1a (MAIL-035 uses CONDSTORE plus `UID SEARCH ALL`). Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Decision: [ADR-0007](../decisions/0007-mail-client.md).
-Phase 1a covers the store, the read-only sync and their tests; there is no mail window yet (phase 1b) and no OAuth2 sign-in (phase 1c).
+Phase 1a covers the store, the read-only sync and their tests. Phase 1b (MAIL-040…) is the mail window: account settings, the mail view, search and "Import to vault". There is no OAuth2 sign-in yet (phase 1c) and nothing writes to a server.
 
 ## Local store (MAIL-00x, MAIL-01x)
 
@@ -49,3 +49,42 @@ Phase 1a covers the store, the read-only sync and their tests; there is no mail 
 | MAIL-037 | A sync reports progress (folder, done, total, errors) over a channel and stops between batches when cancelled; an error in one folder does not stop the others. | IS NOW | `imap_sync.rs` | `imap_sync.rs::an_error_in_one_folder_does_not_stop_the_others`, `imap_sync.rs::a_cancelled_sync_resumes_with_what_is_missing`, `imap_sync.rs::the_first_sync_stores_files_and_rows_skips_trash_junk_and_all_and_reports_progress` |
 | MAIL-038 | A message bigger than the size limit (default 200 MB) is not stored; its row says "too large" so it is not downloaded again and again. | IS NOW | `imap_sync.rs` | `imap_sync.rs::a_message_over_the_limit_is_not_stored_and_not_fetched_again` |
 | MAIL-039 | The sync job ends with a summary even if it panics (`jobs`), and a backup is made only after a sync that finished without error. | IS NOW | `imap_sync.rs` | `imap_sync.rs::the_background_job_always_ends_with_a_summary`, `imap_sync.rs::an_error_in_one_folder_does_not_stop_the_others` |
+
+
+## Accounts in the window (MAIL-04x)
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| MAIL-040 | The mail account settings add, edit and remove accounts: display name, host, port (993 for implicit TLS, 143 when the mode is switched to STARTTLS, and always editable), user, security (implicit TLS or STARTTLS, no plain-text choice) and sign-in. OAuth2 is shown disabled with "coming in a later step". | SHOULD BE | `mail_dialog.rs` | |
+| MAIL-041 | A typed password goes to the keyring (`set_mail_secret`), never into the settings file. Without a keyring the dialog says so and the password is kept in memory for this session only (asked again at the next start). The key recording (`input_log`) writes nothing while the dialog is open. | SHOULD BE | `mail_dialog.rs`, `mail_ui.rs`, `app.rs` | |
+| MAIL-042 | "Test connection" runs as a background job, shows what it found (or the error in words) and records the account's folders, so the per-folder sync checkboxes exist before the first sync. Trash, Junk and Gmail's All Mail are shown unticked with the explanation "never synced automatically; loaded when you open it". A checkbox change is saved in the index at once. | SHOULD BE | `mail_dialog.rs`, `imap_sync.rs` | |
+| MAIL-043 | Removing an account clears its keyring entry and its settings; its local mail copy stays on disk (MAIL-009) and says where. | SHOULD BE | `mail_dialog.rs`, `app.rs` | |
+
+## The mail view (MAIL-05x)
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| MAIL-050 | The mail view is a main view like the calendar (ribbon button, Ctrl+Shift+M): accounts and folders on the left, the message list in the middle, the reading pane on the right. The store is opened by a background job, never in the middle of a frame; until it is ready the view says so. | SHOULD BE | `mail_ui.rs`, `layout.rs`, `app.rs` | |
+| MAIL-051 | Folders are listed under their account (indented by depth, Inbox first) with the number of unread mails where the flags are known. The counts are read when something changed (store ready, sync progress, listing), not in every frame. | SHOULD BE | `mail_ui.rs`, `mail_db.rs` | |
+| MAIL-052 | The message list shows date, sender, subject and an attachment marker, newest first. Only the rows on screen are drawn and only their pages (200 messages) are read from the index; a steady frame runs no query, so 50,000 messages stay smooth. | SHOULD BE | `mail_ui.rs` | |
+| MAIL-053 | The reading pane shows the headers, the plain text of `mail.rs` (no HTML is ever rendered, no remote content is ever loaded; very long text is cut with a note) and the attachment list. A message that cannot be read says why. Reading and parsing run in a background job. | SHOULD BE | `mail_ui.rs` | |
+| MAIL-054 | An attachment opens through `opener::open_temp_copy` (a private temp copy, the SEC-006 checks) or is saved into the vault's media folder with the media code. | SHOULD BE | `mail_ui.rs`, `app.rs` | |
+| MAIL-055 | A message that is headers only (Trash, Junk) or too large shows a "Load this message" button; it runs `fetch_message` as a job and the message opens when it arrived. The button also says why (too large: size and limit). | SHOULD BE | `mail_ui.rs` | |
+| MAIL-056 | Opening a folder that is never synced automatically (Trash, Junk, Gmail's All Mail unless ticked) runs `fetch_folder_listing` as a job once per run, with a "loading" note, a refresh button and the error if it failed. | SHOULD BE | `mail_ui.rs` | |
+| MAIL-057 | A mail that is `gone_on_server` is drawn dimmed in the list and the reading pane says it was deleted on the server and this is the local copy. | SHOULD BE | `mail_ui.rs` | |
+| MAIL-058 | The Sync button starts a sync of every account as a job; the status bar and the view show the progress (folder, done of total, errors) and a Cancel button; the run always ends with a summary, also after an error (wrong password, no network). A sync also starts by itself every N minutes (setting, default 10, 0 = off) while the app runs, never two at once for the same account. | SHOULD BE | `mail_ui.rs`, `config.rs` | |
+| MAIL-059 | An account without a known password asks for it (kept in memory for this session) instead of failing with a puzzling message. | SHOULD BE | `mail_ui.rs` | |
+
+## Search and keys (MAIL-06x)
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| MAIL-060 | The search field over the list searches all folders or only the open one (a switch) with the syntax of `Reader::search` (`from:`, `to:`, `subject:`, `"phrases"`, MAIL-010…MAIL-012). It waits for a pause in typing (debounce), runs as a background job, and its result list behaves like the message list (open, keys, import). | SHOULD BE | `mail_ui.rs` | |
+| MAIL-061 | Keys in the mail view while no text field has the keyboard: j / k or the arrow keys move in the list, Enter opens the message, Space marks it for a multi-selection, Ctrl+J / Ctrl+K go to the next / previous folder, `/` goes into the search field, `i` imports, Esc steps back (leaves the field, closes the message, clears the search). In the search field ↓ or Enter go into the results. | SHOULD BE | `mail_ui.rs` | |
+
+## Import to vault (MAIL-07x)
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| MAIL-070 | "Import to vault" (button, key `i`) on the open mail, or on the marked mails, hands the stored `.eml` bytes to the Import dialog exactly as a dropped `.eml` file: the same items, so duplicates (IMP-005), attachments (IMP-004) and people (PPL-*) work the same. Nothing is written to the vault until Import is pressed. | SHOULD BE | `mail_ui.rs`, `app.rs`, `import.rs` | |
+| MAIL-071 | Messages that are not downloaded (headers only, too large) are not imported; the dialog says how many were left out and why. | SHOULD BE | `app.rs` | |
