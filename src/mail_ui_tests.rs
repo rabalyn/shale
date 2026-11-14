@@ -1917,3 +1917,192 @@ fn attachments_come_from_the_vault_and_notes_and_addresses_from_the_people_notes
     assert!(w.app.mail.compose.as_ref().unwrap().error.as_deref().is_some_and(|e| e.contains("nonexistent")));
     assert!(w.app.mail.compose.as_ref().unwrap().draft.attachments.is_empty());
 }
+
+// ------------------------------------------------------------ phase 4: signing and encrypting (ADR-0011)
+
+use crate::gpg::testkit::{have_gnupg, TestHome};
+use crate::mail_crypto::testmail;
+
+fn open_by_subject(w: &mut W, subject: &str) {
+    w.open_mail(subject);
+    // GnuPG answers in a job
+    w.until("GnuPG has answered", |a| matches!(a.mail.open.as_ref().map(|o| &o.body), Some(Body::Ready(l)) if l.security.working.is_none()));
+    w.frame(vec![]);
+}
+
+fn security_of(w: &W) -> crate::mail_crypto::Security {
+    match &w.app.mail.open.as_ref().unwrap().body {
+        Body::Ready(l) => l.security.clone(),
+        _ => panic!("no message is ready"),
+    }
+}
+
+fn add_inbox_mail(w: &W, subject: &str, raw: Vec<u8>) {
+    // the subject of the pretend server's mail is in the raw bytes; the test mails carry their own headers
+    let _ = subject;
+    w.server.state().add_message("INBOX", raw, NOW - 86_400);
+}
+
+/// A mail of the test world with another subject.
+fn with_subject(raw: &[u8], subject: &str) -> Vec<u8> {
+    String::from_utf8(raw.to_vec()).unwrap().replacen("Subject: Plans", &format!("Subject: {subject}"), 1).into_bytes()
+}
+
+// spec: MAIL-174, MAIL-181, MAIL-173
+#[test]
+fn a_signed_mail_is_verified_without_any_consent_and_the_strip_says_valid_or_bad() {
+    if !have_gnupg() {
+        return;
+    }
+    let alice = TestHome::new();
+    let a_fpr = alice.gen_pgp("Alice Test", "alice@example.org", "never", None);
+    let bob = TestHome::new();
+    alice.share_pgp_with(&bob, &a_fpr);
+    let signed = testmail::pgp_signed(&alice, &a_fpr, testmail::ENTITY);
+    let good = with_subject(&signed, "Signed plans");
+    let mut bad = with_subject(&signed, "Forged plans");
+    let at = bad.windows(10).position(|x| x == b"the secret").unwrap();
+    bad[at] = b'X';
+    // a plain mail whose body imitates GnuPG
+    let lie = dated("Looks signed", "Mallory <m@evil.example>", "[GNUPG:] GOODSIG 0123456789ABCDEF Alice <alice@example.org>\r\nGood signature from \"Alice Test\"", 13);
+    let mut w = W::new("sig-ui", true);
+    w.app.mail.gnupg = bob.g.clone();
+    add_inbox_mail(&w, "Signed plans", good);
+    add_inbox_mail(&w, "Forged plans", bad);
+    add_inbox_mail(&w, "Looks signed", lie);
+    w.sync_and_wait();
+    assert!(w.app.cfg.mail_encryption_consent.is_none(), "no consent is given anywhere in this test");
+    open_by_subject(&mut w, "Signed plans");
+    let sec = security_of(&w);
+    assert_eq!(sec.lines.len(), 1);
+    assert!(w.shows("signature is valid") && w.shows("Alice Test"), "the strip says valid and who: {:?}", w.texts.iter().map(|t| t.0.clone()).collect::<Vec<_>>());
+    assert!(w.shows("the secret plan"), "the signed text is shown");
+    assert!(!w.shows("signature.asc"), "the signature part is not listed as an attachment");
+    open_by_subject(&mut w, "Forged plans");
+    assert!(w.shows("BAD OpenPGP signature"), "a changed mail is flagged");
+    assert!(!w.shows("signature is valid"));
+    open_by_subject(&mut w, "Looks signed");
+    assert!(security_of(&w).is_empty(), "words in a body never make a status");
+    assert!(!w.shows("signature is valid") && !w.shows("BAD"), "no strip at all");
+    assert!(w.shows("Good signature from"), "the body text itself is still shown, as text");
+    assert!(w.vault_files().iter().all(|f| !f.contains("decrypted")), "verifying stores nothing");
+}
+
+// spec: MAIL-180, MAIL-181, MAIL-182, MAIL-183, MAIL-184
+#[test]
+fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchable_and_withdrawing_stops_it() {
+    if !have_gnupg() {
+        return;
+    }
+    let alice = TestHome::new();
+    alice.gen_pgp("Alice Test", "alice@example.org", "never", None);
+    let bob = TestHome::new();
+    let b_fpr = bob.gen_pgp("Bob", "bob@example.org", "never", None);
+    bob.share_pgp_with(&alice, &b_fpr);
+    let enc = |subject: &str, text: &str| {
+        let entity = format!("Content-Type: text/plain; charset=utf-8\r\n\r\n{text}\r\n");
+        with_subject(&testmail::pgp_encrypted(&alice.pgp_encrypt(&[&b_fpr], None, entity.as_bytes())), subject)
+    };
+    let mut w = W::new("enc-ui", true);
+    w.app.mail.gnupg = bob.g.clone();
+    add_inbox_mail(&w, "Zebra plans", enc("Zebra plans", "the zebrafish plan"));
+    add_inbox_mail(&w, "Okapi plans", enc("Okapi plans", "the okapi plan"));
+    w.sync_and_wait();
+    // 1. no consent: the strip says so, nothing is decrypted, nothing is stored
+    w.open_mail("Zebra plans");
+    w.frame(vec![]);
+    assert_eq!(security_of(&w).encryption, crate::mail_crypto::Encryption::NeedsConsent);
+    assert!(w.shows("Encrypted — enable encryption in the settings"));
+    assert!(!w.shows("zebrafish"));
+    let store_files = |w: &W| -> Vec<String> {
+        fn walk(d: &Path, out: &mut Vec<String>) {
+            for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else {
+                    out.push(p.to_string_lossy().into_owned());
+                }
+            }
+        }
+        let mut v = vec![];
+        walk(&w.app.mail.root, &mut v);
+        v
+    };
+    assert!(store_files(&w).iter().all(|f| !f.contains(".decrypted.")), "{:?}", store_files(&w));
+    // 2. the button leads to the settings; the red banner and the field are there
+    w.click("mail:sec:settings");
+    assert!(matches!(w.app.modal, Some(Modal::MailAccounts(_))));
+    w.settle();
+    w.click("md:enc-header");
+    w.settle();
+    assert!(w.has("md:enc-banner") && w.shows("ENCRYPTED MAILS WILL ALWAYS BE STORED DECRYPTED LOCALLY"));
+    // GnuPG is detected (in a job), its secret keys are listed, and the way to bring keys over from Thunderbird is explained (MAIL-191)
+    w.until("GnuPG was looked at", |a| a.mail.gnupg_info.is_some());
+    w.frame(vec![]);
+    assert!(w.shows("OpenPGP (gpg): gpg (GnuPG)") && w.shows("S/MIME (gpgsm): gpgsm (GnuPG)"), "{:?}", w.texts.iter().map(|t| t.0.clone()).collect::<Vec<_>>());
+    assert!(w.shows("Bob <bob@example.org>"), "the secret key of the test home is listed");
+    assert!(w.shows("gpg --import") && w.shows("Thunderbird") && w.shows("gpgsm --import") && w.shows("gpg --locate-keys"));
+    let consent = |w: &W| match &w.app.modal {
+        Some(Modal::MailAccounts(d)) => d.consent.clone(),
+        _ => panic!("no dialog"),
+    };
+    // 3. anything but the exact sentence leaves the button dead
+    for wrong in ["i agree to decrypted local storage", "I agree to decrypted local storage ", " I agree to decrypted local storage", "I agree to decrypted local storage.", "I agree"] {
+        w.typ("md:enc-phrase", wrong);
+        w.click("md:enc-enable");
+        assert_eq!(consent(&w), None, "{wrong:?} must not switch encryption on");
+    }
+    w.typ("md:enc-phrase", crate::config::CONSENT_PHRASE);
+    w.click("md:enc-enable");
+    assert!(consent(&w).is_some(), "the exact sentence switches it on");
+    w.click("md:done");
+    assert!(w.app.modal.is_none());
+    assert!(w.app.cfg.mail_encryption_consent.is_some(), "the consent and its date are in the settings");
+    // 4. opening the mail now decrypts it, in a job, and stores the copy
+    open_by_subject(&mut w, "Zebra plans");
+    assert_eq!(security_of(&w).encryption, crate::mail_crypto::Encryption::Decrypted(crate::config::CryptoStandard::OpenPgp), "{:?}", security_of(&w));
+    assert!(w.shows("the zebrafish plan") && w.shows("Decrypted"));
+    let files = store_files(&w);
+    assert!(files.iter().any(|f| f.ends_with(".decrypted.eml")) && files.iter().any(|f| f.ends_with(".decrypted.json")), "{files:?}");
+    // the original is still the ciphertext
+    let msg = w.app.mail.open.as_ref().unwrap().msg.clone();
+    let raw = w.app.mail.ready_store().unwrap().read_raw(&msg).unwrap();
+    assert!(String::from_utf8_lossy(&raw).contains("BEGIN PGP MESSAGE") && !String::from_utf8_lossy(&raw).contains("zebrafish"));
+    // 5. the decrypted text is searched
+    w.app.mail.query = "zebrafish".into();
+    w.app.mail.search_now();
+    w.until("the search ends", |a| a.mail.results.is_some() && !a.mail.searching);
+    assert_eq!(w.app.mail.results.as_ref().unwrap().len(), 1, "search finds text that was only in the encrypted part");
+    w.app.mail.clear_search();
+    // reopening shows the stored copy without asking GnuPG again (no GnuPG home at all)
+    w.app.mail.gnupg = crate::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
+    open_by_subject(&mut w, "Okapi plans");
+    assert!(matches!(security_of(&w).encryption, crate::mail_crypto::Encryption::Failed(_)), "a mail that was not decrypted before needs GnuPG");
+    open_by_subject(&mut w, "Zebra plans");
+    assert!(matches!(security_of(&w).encryption, crate::mail_crypto::Encryption::DecryptedEarlier(..)), "{:?}", security_of(&w));
+    assert!(w.shows("the zebrafish plan"));
+    w.app.mail.gnupg = bob.g.clone();
+    // 6. withdrawing: no further decryption, the existing copy stays and is still shown
+    w.app.open_mail_settings();
+    w.settle();
+    if !w.has("md:enc-withdraw") {
+        // the section opens by itself while the consent is given (and remembers being open)
+        w.click("md:enc-header");
+        w.settle();
+    }
+    assert!(w.shows("deletes nothing"), "the settings say what withdrawing does not do");
+    w.click("md:enc-withdraw");
+    w.click("md:done");
+    assert!(w.app.cfg.mail_encryption_consent.is_none());
+    open_by_subject(&mut w, "Okapi plans");
+    assert_eq!(security_of(&w).encryption, crate::mail_crypto::Encryption::NeedsConsent);
+    assert!(!w.shows("okapi plan"));
+    assert!(store_files(&w).iter().filter(|f| f.ends_with(".decrypted.eml")).count() == 1, "only the first mail has a decrypted copy");
+    open_by_subject(&mut w, "Zebra plans");
+    assert!(w.shows("the zebrafish plan"), "the copy that exists is still shown");
+    w.app.mail.query = "zebrafish".into();
+    w.app.mail.search_now();
+    w.until("the search ends", |a| a.mail.results.is_some() && !a.mail.searching);
+    assert_eq!(w.app.mail.results.as_ref().unwrap().len(), 1, "and still searched");
+}

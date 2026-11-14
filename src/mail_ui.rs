@@ -14,11 +14,13 @@
 
 use crate::compose::{self, Kind};
 use crate::config::{Config, MailAccount};
+use crate::gpg::Gnupg;
 use crate::imap_client::decode_mutf7;
 use crate::imap_client::MailFlag;
 use crate::imap_sync::{self, ConnectorFactory, FolderKind, LazyConnector, Progress, SyncOptions, SyncSummary, NO_PASSWORD};
 use crate::mail::Mail;
 use crate::mail_compose::{Ask, Compose, ComposeOut, Field, LocalOut, LocalView, VaultInfo};
+use crate::mail_crypto::{self, Encryption, Security, Structure};
 use crate::mail_db::{FolderRow, MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
 use crate::mail_ops::{self, Action, Confirmed, OpsReport};
 use crate::mail_send::{self, SendReport, SmtpConnector};
@@ -59,6 +61,46 @@ pub struct Loaded {
     /// The text as shown (cut at `TEXT_CAP`).
     pub shown: String,
     pub cut: bool,
+    /// What GnuPG says about signatures and encryption (ADR-0011); empty for a plain mail.
+    pub security: Security,
+}
+
+/// What GnuPG is and has on this computer (MAIL-191): the versions and the secret keys, for the settings.
+#[derive(Clone, Debug, Default)]
+pub struct GnupgInfo {
+    /// Per standard: the version line, or why the program cannot be used.
+    pub pgp: Option<Result<String, String>>,
+    pub smime: Option<Result<String, String>>,
+    pub pgp_keys: Vec<crate::gpg::KeyInfo>,
+    pub smime_keys: Vec<crate::gpg::KeyInfo>,
+}
+
+impl GnupgInfo {
+    pub fn version(&self, s: crate::config::CryptoStandard) -> Option<&Result<String, String>> {
+        match s {
+            crate::config::CryptoStandard::OpenPgp => self.pgp.as_ref(),
+            crate::config::CryptoStandard::Smime => self.smime.as_ref(),
+        }
+    }
+    pub fn keys(&self, s: crate::config::CryptoStandard) -> &[crate::gpg::KeyInfo] {
+        match s {
+            crate::config::CryptoStandard::OpenPgp => &self.pgp_keys,
+            crate::config::CryptoStandard::Smime => &self.smime_keys,
+        }
+    }
+}
+
+/// Read what GnuPG has: used by the settings and by the tests.
+pub fn probe_gnupg(g: &Gnupg) -> GnupgInfo {
+    use crate::config::CryptoStandard::{OpenPgp, Smime};
+    let cancel = AtomicBool::new(false);
+    let one = |s| match g.version(s) {
+        Ok(v) => (Some(Ok(v)), g.list_keys(s, true, None, &cancel).unwrap_or_default()),
+        Err(e) => (Some(Err(e.to_string())), vec![]),
+    };
+    let (pgp, pgp_keys) = one(OpenPgp);
+    let (smime, smime_keys) = one(Smime);
+    GnupgInfo { pgp, smime, pgp_keys, smime_keys }
 }
 
 /// What the reading pane has for the open message.
@@ -226,6 +268,13 @@ enum Event {
         account: String,
         result: Result<SendReport, String>,
     },
+    /// GnuPG has been asked about this message (signatures, decryption).
+    Crypto {
+        id: i64,
+        result: Result<Arc<Loaded>, String>,
+    },
+    /// What GnuPG is and has on this computer.
+    Gnupg(Result<GnupgInfo, String>),
     /// The mail to answer or forward has been read.
     ReplyMail {
         kind: Kind,
@@ -342,6 +391,16 @@ pub struct MailView {
     send_running: HashSet<String>,
     /// Account ids and their names, for the lists (set every frame by the app).
     pub account_names: HashMap<String, String>,
+    // phase 4: signing and encrypting (ADR-0011)
+    /// How GnuPG is called (tests give it a temp home).
+    pub gnupg: Gnupg,
+    /// The person has typed the consent to decrypted local storage (set from the settings every frame).
+    pub consent: bool,
+    crypto_cancel: Option<Arc<AtomicBool>>,
+    crypto_running: bool,
+    /// What GnuPG is and has (read when the settings open).
+    pub gnupg_info: Option<GnupgInfo>,
+    gnupg_probing: bool,
     pub vault: Option<VaultInfo>,
     /// Drafts and outbox entries were announced once at start.
     announced_local: bool,
@@ -420,6 +479,12 @@ impl MailView {
             outbox_sel: None,
             send_running: HashSet::new(),
             account_names: HashMap::new(),
+            gnupg: Gnupg::default(),
+            consent: false,
+            crypto_cancel: None,
+            crypto_running: false,
+            gnupg_info: None,
+            gnupg_probing: false,
             vault: None,
             announced_local: false,
         }
@@ -473,6 +538,7 @@ impl MailView {
         if wanted || !cfg.mail_accounts.is_empty() {
             self.open_store();
         }
+        self.consent = cfg.mail_encryption_consent.is_some();
         while let Ok(ev) = self.rx.try_recv() {
             self.handle(ev, cfg);
         }
@@ -513,6 +579,8 @@ impl MailView {
             || self.tests.values().any(|t| matches!(t, TestState::Running))
             || self.signins.values().any(|t| matches!(t, SignInState::Waiting { .. }))
             || matches!(self.open.as_ref().map(|o| &o.body), Some(Body::Loading))
+            || self.crypto_running
+            || self.gnupg_probing
             || self.read_timer.is_some()
             || !self.ops_running.is_empty()
             || self.pending_total > 0
@@ -554,15 +622,44 @@ impl MailView {
             }
             Event::Search { .. } => {}
             Event::Message { id, result } => {
+                let mut check = None;
                 if let Some(o) = self.open.as_mut().filter(|o| o.msg.id == id) {
                     o.body = match result {
-                        Ok(l) => Body::Ready(l),
+                        Ok(l) => {
+                            if l.security.working.is_some() {
+                                check = Some(o.msg.clone());
+                            }
+                            Body::Ready(l)
+                        }
                         Err(e) => Body::Failed(e),
                     };
                     // the message is on screen: it counts as read after the delay (MAIL-109)
                     if matches!(o.body, Body::Ready(_)) && !o.msg.is_seen() && !o.msg.gone_on_server {
                         self.read_timer = Some((id, Instant::now()));
                     }
+                }
+                if let Some(msg) = check {
+                    self.start_crypto(msg);
+                }
+            }
+            Event::Crypto { id, result } => {
+                if self.open.as_ref().is_some_and(|o| o.msg.id == id) {
+                    self.crypto_running = false;
+                    self.crypto_cancel = None;
+                    if let Some(o) = self.open.as_mut() {
+                        o.body = match result {
+                            Ok(l) => Body::Ready(l),
+                            Err(e) => Body::Failed(e),
+                        };
+                    }
+                    // the decrypted copy changed what the index knows: the list and the counts are read again
+                    self.dirty = true;
+                }
+            }
+            Event::Gnupg(r) => {
+                self.gnupg_probing = false;
+                if let Ok(info) = r {
+                    self.gnupg_info = Some(info);
                 }
             }
             Event::Fetched { key, retry, result } => {
@@ -1049,23 +1146,48 @@ impl MailView {
         };
         let id = msg.id;
         let loading = matches!(body, Body::Loading);
+        self.cancel_crypto();
         self.open = Some(OpenMail { msg: msg.clone(), body });
         if loading {
             if let Some(store) = self.ready_store() {
-                self.spawn(
-                    move || {
-                        let mail = store.read_mail(&msg).map_err(|e| e.0)?;
-                        let (shown, cut) = cut_text(&mail.text);
-                        Ok::<_, String>(Arc::new(Loaded { mail, shown, cut }))
-                    },
-                    move |r| Event::Message { id, result: flatten(r) },
-                );
+                let consent = self.consent;
+                self.spawn(move || read_for_pane(&store, &msg, consent).map(Arc::new), move |r| Event::Message { id, result: flatten(r) });
             }
         }
     }
 
     pub fn close_message(&mut self) {
+        self.cancel_crypto();
         self.open = None;
+    }
+
+    /// Ask GnuPG about the open message in a job (MAIL-171, MAIL-173, MAIL-182): signatures, and decryption when the
+    /// consent is given. The window never waits for it; a passphrase dialog may open meanwhile.
+    fn start_crypto(&mut self, msg: MessageSummary) {
+        let Some(store) = self.ready_store() else { return };
+        self.cancel_crypto();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.crypto_cancel = Some(cancel.clone());
+        self.crypto_running = true;
+        let (g, consent, id) = (self.gnupg.clone(), self.consent, msg.id);
+        self.spawn(move || crypto_job(&store, &g, &msg, consent, &cancel).map(Arc::new), move |r| Event::Crypto { id, result: flatten(r) });
+    }
+
+    /// The Cancel button of the status strip, and leaving the message: stop what GnuPG is doing (the child is killed).
+    pub fn cancel_crypto(&mut self) {
+        if let Some(c) = self.crypto_cancel.take() {
+            c.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Find out what GnuPG is and has (a job): the settings show it (MAIL-191).
+    pub fn detect_gnupg(&mut self) {
+        if self.gnupg_probing {
+            return;
+        }
+        self.gnupg_probing = true;
+        let g = self.gnupg.clone();
+        self.spawn(move || Ok::<_, String>(probe_gnupg(&g)), |r| Event::Gnupg(flatten(r)));
     }
 
     /// "Load this message": fetch the whole message from the server (MAIL-055).
@@ -1960,6 +2082,83 @@ fn read_for_attachment(path: &std::path::Path) -> Result<compose::Att, String> {
     Ok(compose::att_from_file(&path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "attachment".into()), data))
 }
 
+/// Read a message for the reading pane (a job). A message that was decrypted before comes from its decrypted copy, with
+/// the result found then. Anything else that has a signature or is encrypted starts out as "checking" and is
+/// handed to GnuPG afterwards; an encrypted mail without the consent never is (MAIL-181).
+fn read_for_pane(store: &MailStore, msg: &MessageSummary, consent: bool) -> Result<Loaded, String> {
+    let raw = store.read_raw(msg).map_err(|e| e.0)?;
+    let structure = mail_crypto::classify(&raw);
+    if let Some((bytes, info)) = store.read_decrypted(msg) {
+        let std = match &structure {
+            Structure::Encrypted { standard, .. } => *standard,
+            _ => crate::config::CryptoStandard::OpenPgp,
+        };
+        let mut sec = info.unwrap_or_else(|| {
+            let mut s = Security::new();
+            s.notes.push("The signature result of the original mail was not stored with this copy.".into());
+            s
+        });
+        let when = sec.checked;
+        sec.encryption = Encryption::DecryptedEarlier(std, when);
+        return Ok(loaded(mail_parse(&bytes)?, sec));
+    }
+    let mut mail = mail_parse(&raw)?;
+    let mut sec = Security::new();
+    match &structure {
+        Structure::Plain => {}
+        Structure::Encrypted { .. } | Structure::InlineEncrypted { .. } if !consent => {
+            sec.encryption = Encryption::NeedsConsent;
+            hide_content(&mut mail);
+        }
+        Structure::Encrypted { .. } | Structure::InlineEncrypted { .. } => {
+            sec.working = Some("Decrypting… (a passphrase or PIN dialog may open; Cancel stops it)".into());
+            hide_content(&mut mail);
+        }
+        Structure::Mixed { .. } | Structure::Signed { .. } | Structure::OpaqueSigned { .. } | Structure::InlineSigned { .. } => sec.working = Some("Checking the signature…".into()),
+    }
+    Ok(loaded(mail, sec))
+}
+
+/// An encrypted mail that is not decrypted shows no body and no attachments: what is in it is ciphertext.
+fn hide_content(m: &mut Mail) {
+    m.text.clear();
+    m.attachments.clear();
+}
+
+fn mail_parse(raw: &[u8]) -> Result<Mail, String> {
+    crate::jobs::catch(|| crate::mail::parse(raw))
+}
+
+fn loaded(mail: Mail, security: Security) -> Loaded {
+    let (shown, cut) = cut_text(&mail.text);
+    Loaded { mail, shown, cut, security }
+}
+
+/// The job behind the status strip: GnuPG over the message, and with the consent the decrypted copy stored.
+fn crypto_job(store: &MailStore, g: &Gnupg, msg: &MessageSummary, consent: bool, cancel: &AtomicBool) -> Result<Loaded, String> {
+    let raw = store.read_raw(msg).map_err(|e| e.0)?;
+    let now = crate::cal_time::now();
+    let mut out = mail_crypto::process(g, &raw, consent, cancel, now);
+    if out.decrypted && consent {
+        if let Some(d) = &out.display {
+            if let Err(e) = store.save_decrypted(msg, d, &out.security, &crate::mail_store::today_string()) {
+                out.security.notes.push(format!("The decrypted copy could not be stored (search will not find this mail's text): {e}"));
+            }
+        }
+    }
+    let mut mail = match &out.display {
+        Some(d) => mail_parse(d)?,
+        None => mail_parse(&raw)?,
+    };
+    if out.display.is_none()
+        && matches!(out.security.encryption, Encryption::NeedsConsent | Encryption::Failed(_) | Encryption::NotDecrypted(_))
+        && matches!(mail_crypto::classify(&raw), Structure::Encrypted { .. } | Structure::InlineEncrypted { .. })
+    {
+        hide_content(&mut mail);
+    }
+    Ok(loaded(mail, out.security))
+}
+
 fn key_account(folders: &[FolderRow], folder: i64) -> String {
     folders.iter().find(|f| f.id == folder).map(|f| f.account.clone()).unwrap_or_default()
 }
@@ -2016,6 +2215,11 @@ pub fn full_date(ts: i64) -> String {
     let (day, secs) = t::utc_to_local(ts);
     let (y, m, d) = t::civil_from_days(day);
     format!("{y:04}-{m:02}-{d:02} {}", t::hhmm(secs))
+}
+
+/// A fingerprint in groups of four, for people to compare.
+pub fn short_fingerprint(fp: &str) -> String {
+    fp.to_ascii_uppercase().as_bytes().chunks(4).map(|c| String::from_utf8_lossy(c).into_owned()).collect::<Vec<_>>().join(" ")
 }
 
 /// Bytes as "12 KB" / "3.4 MB".

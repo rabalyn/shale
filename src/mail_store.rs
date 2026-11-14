@@ -108,6 +108,16 @@ pub fn eml_rel_path(account: &str, folder_name: &str, uidvalidity: u32, uid: u32
     format!("{account}/{}/{uidvalidity}/{uid}.eml", folder_dir_name(folder_name))
 }
 
+/// The decrypted copy of a message file (ADR-0011 §3, MAIL-183): `<uid>.eml` → `<uid>.decrypted.eml`.
+pub fn decrypted_rel(path: &str) -> Option<String> {
+    path.strip_suffix(".eml").map(|s| format!("{s}.decrypted.eml"))
+}
+
+/// What was found when it was decrypted (the signature results): `<uid>.decrypted.json`.
+pub fn decrypted_info_rel(path: &str) -> Option<String> {
+    path.strip_suffix(".eml").map(|s| format!("{s}.decrypted.json"))
+}
+
 // ---------------------------------------------------------------- parsing for the index
 
 /// What the index keeps of a raw message, and whether it could be read at all. This never
@@ -288,8 +298,19 @@ impl MailStore {
 
     /// Put a message file out of the way without deleting it (MAIL-106): it moves, by
     /// `fsutil::rename_noreplace`, to `<root>/.trash/<date>/<rel>` (a number is added to the name
-    /// if that exists). Returns the new place, or None if there was no such file.
+    /// if that exists). Returns the new place, or None if there was no such file. Its decrypted copy and the
+    /// result that goes with it (MAIL-183) move with it.
     pub fn archive_file(&self, rel: &str, date: &str) -> Result<Option<PathBuf>> {
+        let moved = self.archive_one(rel, date)?;
+        if moved.is_some() {
+            for sib in [decrypted_rel(rel), decrypted_info_rel(rel)].into_iter().flatten() {
+                self.archive_one(&sib, date)?;
+            }
+        }
+        Ok(moved)
+    }
+
+    fn archive_one(&self, rel: &str, date: &str) -> Result<Option<PathBuf>> {
         let rel_path = Path::new(rel);
         if rel.is_empty() || rel_path.is_absolute() || rel_path.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
             return Err(MailError(format!("not a path inside the mail store: {rel:?}")));
@@ -305,7 +326,8 @@ impl MailStore {
                 Ok(()) => return Ok(Some(dest)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     let stem = rel_path.file_stem().and_then(|s| s.to_str()).unwrap_or("message");
-                    dest = dest.with_file_name(format!("{stem}-{n}.eml"));
+                    let ext = rel_path.extension().and_then(|s| s.to_str()).unwrap_or("eml");
+                    dest = dest.with_file_name(format!("{stem}-{n}.{ext}"));
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -321,10 +343,51 @@ impl MailStore {
         Ok(fsutil::read(self.abs_path(&m.path))?)
     }
 
-    /// Read and parse a message.
+    /// Read and parse a message. A message that was decrypted before is read from its decrypted copy.
     pub fn read_mail(&self, m: &MessageSummary) -> Result<mail::Mail> {
-        let raw = self.read_raw(m)?;
+        let raw = match self.read_decrypted(m) {
+            Some((bytes, _)) => bytes,
+            None => self.read_raw(m)?,
+        };
         crate::jobs::catch(|| mail::parse(&raw)).map_err(MailError)
+    }
+
+    /// The decrypted copy of a message and the result found when it was made, if there is one (MAIL-183).
+    pub fn read_decrypted(&self, m: &MessageSummary) -> Option<(Vec<u8>, Option<crate::mail_crypto::Security>)> {
+        let bytes = fsutil::read(self.abs_path(&decrypted_rel(&m.path)?)).ok()?;
+        let info = decrypted_info_rel(&m.path).and_then(|r| fsutil::read(self.abs_path(&r)).ok()).and_then(|b| serde_json::from_slice(&b).ok());
+        Some((bytes, info))
+    }
+
+    /// Store the decrypted copy next to the original and index its text (MAIL-183). The original is not touched. A
+    /// different copy that is there already goes to the local trash first: nothing is overwritten silently.
+    pub fn save_decrypted(&self, m: &MessageSummary, bytes: &[u8], sec: &crate::mail_crypto::Security, date: &str) -> Result<()> {
+        let (Some(rel), Some(info)) = (decrypted_rel(&m.path), decrypted_info_rel(&m.path)) else { return Err(MailError("this message has no file".into())) };
+        let path = self.abs_path(&rel);
+        if let Ok(old) = fsutil::read(&path) {
+            if old != bytes {
+                self.archive_one(&rel, date)?;
+            }
+        }
+        fsutil::write_atomic(&path, bytes)?;
+        let json = serde_json::to_vec(sec).map_err(|e| MailError(e.to_string()))?;
+        fsutil::write_atomic(&self.abs_path(&info), &json)?;
+        let (f, _) = index_fields(bytes, None);
+        self.commit(vec![Op::Body { folder: m.folder_id, uidvalidity: m.uidvalidity, uid: m.uid, body: f.body, attachments: f.attachments, has_attachments: f.has_attachments }])
+    }
+
+    /// The message `old` has a new file (it was moved): its decrypted copy and result go along. The index operation that
+    /// restores the search text is returned for the caller to commit after the row of the new message (MAIL-183).
+    pub fn carry_decrypted(&self, old: &MessageSummary, new: &NewMessage) -> Option<Op> {
+        let (bytes, info) = self.read_decrypted(old)?;
+        fsutil::write_atomic(&self.abs_path(&decrypted_rel(&new.path)?), &bytes).ok()?;
+        if let Some(sec) = info {
+            if let (Some(r), Ok(json)) = (decrypted_info_rel(&new.path), serde_json::to_vec(&sec)) {
+                let _ = fsutil::write_atomic(&self.abs_path(&r), &json);
+            }
+        }
+        let (f, _) = index_fields(&bytes, None);
+        Some(Op::Body { folder: new.folder, uidvalidity: new.uidvalidity, uid: new.uid, body: f.body, attachments: f.attachments, has_attachments: f.has_attachments })
     }
 }
 
@@ -551,7 +614,12 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
                         continue;
                     }
                     let Ok(raw) = fsutil::read(&path) else { continue };
-                    let (fields, parsed) = index_fields(&raw, None);
+                    let (mut fields, parsed) = index_fields(&raw, None);
+                    // a decrypted copy next to it gives the search text (MAIL-183)
+                    if let Some(sib) = decrypted_rel(&format!("{account}/{fdir}/{uv}/{file}")).and_then(|r| fsutil::read(root.join(r)).ok()) {
+                        let (d, _) = index_fields(&sib, None);
+                        (fields.body, fields.attachments, fields.has_attachments) = (d.body, d.attachments, d.has_attachments);
+                    }
                     batch.push(Op::message(NewMessage { folder: f.id, uidvalidity: uv, uid, path: format!("{account}/{fdir}/{uv}/{file}"), state: STATE_FULL, flags: String::new(), size: raw.len() as u64, parsed, fields }));
                     total += 1;
                     if batch.len() >= RECONCILE_BATCH {
@@ -919,6 +987,69 @@ mod tests {
         assert_eq!(folder.uidvalidity, Some(9));
         assert_eq!(r.list(folder.id, 10, 0).unwrap().len(), 2, "the old UIDVALIDITY is not listed");
         assert_eq!(r.count_messages().unwrap(), 3, "but its file is still indexed");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn decrypted_security() -> crate::mail_crypto::Security {
+        let mut sec = crate::mail_crypto::Security::new();
+        sec.encryption = crate::mail_crypto::Encryption::Decrypted(crate::config::CryptoStandard::OpenPgp);
+        sec.checked = 1_794_657_600;
+        sec
+    }
+
+    // spec: MAIL-183
+    #[test]
+    fn a_decrypted_copy_is_stored_beside_the_untouched_original_and_its_text_is_searchable() {
+        let root = temp_root("decrypted");
+        let store = MailStore::open(&root).unwrap();
+        let f = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
+        let ciphertext = sample("Plans", "a@x.de", "-----BEGIN PGP MESSAGE-----");
+        put(&store, &f, 1, &ciphertext);
+        let msg = store.reader().unwrap().message(f.id, 1).unwrap().unwrap();
+        assert!(store.reader().unwrap().search("zebrafish", None, 5, 0).unwrap().is_empty());
+        let plain = sample("Plans", "a@x.de", "the zebrafish plan");
+        store.save_decrypted(&msg, &plain, &decrypted_security(), "2026-11-14").unwrap();
+        assert_eq!(std::fs::read(root.join(&msg.path)).unwrap(), ciphertext, "the original is untouched");
+        assert_eq!(std::fs::read(root.join("acct1/INBOX/7/1.decrypted.eml")).unwrap(), plain);
+        assert!(root.join("acct1/INBOX/7/1.decrypted.json").is_file());
+        let hits = store.reader().unwrap().search("zebrafish", None, 5, 0).unwrap();
+        assert_eq!(hits.len(), 1, "the decrypted text is searched");
+        assert_eq!(hits[0].subject, "Plans", "subject and people stay the outer ones");
+        // read_mail shows the decrypted copy; the raw is still the ciphertext
+        assert_eq!(store.read_mail(&msg).unwrap().text, "the zebrafish plan");
+        assert_eq!(store.read_raw(&msg).unwrap(), ciphertext);
+        let (bytes, sec) = store.read_decrypted(&msg).unwrap();
+        assert_eq!((bytes, sec.unwrap().checked), (plain.clone(), 1_794_657_600));
+        // a different copy never replaces the old one silently: the old one goes to the local trash
+        let other = sample("Plans", "a@x.de", "another body");
+        store.save_decrypted(&msg, &other, &decrypted_security(), "2026-11-14").unwrap();
+        assert_eq!(std::fs::read(root.join("acct1/INBOX/7/1.decrypted.eml")).unwrap(), other);
+        let trashed = std::fs::read(root.join(".trash/2026-11-14/acct1/INBOX/7/1.decrypted.eml")).unwrap();
+        assert_eq!(trashed, plain);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: MAIL-183
+    #[test]
+    fn the_decrypted_copy_follows_the_original_into_the_local_trash_and_a_rebuilt_index_reads_it() {
+        let root = temp_root("decrypted2");
+        let store = MailStore::open(&root).unwrap();
+        let f = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
+        put(&store, &f, 1, &sample("Plans", "a@x.de", "cipher"));
+        let msg = store.reader().unwrap().message(f.id, 1).unwrap().unwrap();
+        store.save_decrypted(&msg, &sample("Plans", "a@x.de", "the zebrafish plan"), &decrypted_security(), "2026-11-14").unwrap();
+        // the index is lost and rebuilt from the files: the search text comes from the decrypted copy
+        drop(store);
+        let _ = std::fs::remove_file(root.join("index.sqlite"));
+        let store = MailStore::open(&root).unwrap();
+        assert_eq!(store.reader().unwrap().search("zebrafish", None, 5, 0).unwrap().len(), 1);
+        // archiving the original takes both siblings along, nothing is deleted
+        let msg = store.reader().unwrap().list(store.reader().unwrap().folders(None).unwrap()[0].id, 10, 0).unwrap().remove(0);
+        store.archive_file(&msg.path, "2026-11-15").unwrap().unwrap();
+        for f in ["1.eml", "1.decrypted.eml", "1.decrypted.json"] {
+            assert!(!root.join("acct1/INBOX/7").join(f).exists(), "{f} left");
+            assert!(root.join(".trash/2026-11-15/acct1/INBOX/7").join(f).is_file(), "{f} not in the trash");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

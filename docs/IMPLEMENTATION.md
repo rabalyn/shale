@@ -43,6 +43,8 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 | `src/outbox.rs` | Drafts and the outbox on disk: atomic saves, the state machine queued/sending/sent/failed/unsure/undone, undo send, start-up recovery, put-away instead of delete; tested with a crash at every durable step. |
 | `src/mail_send.rs` | The sending job (state written before the first byte, no automatic retry, phase-exact outcomes) and the Sent copy (local row plus an `append` action in `pending_ops`). |
 | `src/mail_compose.rs` | The compose view, address completion, the keep/discard and confirmation questions, the Drafts and Outbox lists. |
+| `src/gpg.rs` | GnuPG as programs (ADR-0011): `gpg` / `gpgsm` with argument lists, data on stdin, results from `[GNUPG:]` status lines only, time-outs and cancel (the child is killed), no network key lookup; key lists, signature verification, decryption. Also the test kit that makes a temp `GNUPGHOME` with generated keys. |
+| `src/mail_crypto.rs` | Reading signed and encrypted mail: what the top level is (PGP/MIME, S/MIME, inline OpenPGP), the job that asks GnuPG, the `Security` facts for the status strip, the decrypted message shown as its own message (EFAIL rules). |
 | `src/app/mail.rs` | The mail view in the app: settings actions, saving attachments to the vault, handing mails to the Import dialog. |
 | `src/mail_demo.rs` | The made-up mail store for `--screenshot --view mail`. |
 | `src/recovery.rs` | Text that could not be saved at exit, put aside and announced at the next start. |

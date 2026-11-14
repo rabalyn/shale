@@ -78,6 +78,33 @@ impl MailSecurity {
     }
 }
 
+/// The two standards for signing and encrypting mail (ADR-0011): OpenPGP (`gpg`) and S/MIME (`gpgsm`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum CryptoStandard {
+    #[default]
+    OpenPgp,
+    Smime,
+}
+
+impl CryptoStandard {
+    pub fn label(self) -> &'static str {
+        match self {
+            CryptoStandard::OpenPgp => "OpenPGP",
+            CryptoStandard::Smime => "S/MIME",
+        }
+    }
+    /// The GnuPG program that does it.
+    pub fn program(self) -> &'static str {
+        match self {
+            CryptoStandard::OpenPgp => "gpg",
+            CryptoStandard::Smime => "gpgsm",
+        }
+    }
+}
+
+/// What a person has to type, exactly, to switch encryption on (ADR-0011 §3, OPEN-017).
+pub const CONSENT_PHRASE: &str = "I agree to decrypted local storage";
+
 /// One IMAP account. The password is not here: it is in the keyring (`secrets::mail_secret`).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
@@ -113,6 +140,13 @@ pub struct MailAccount {
     pub server_stores_sent: bool,
     /// Add a `User-Agent` header to sent mail (off: privacy).
     pub user_agent_header: bool,
+    /// Signing and encrypting (phase 4, MAIL-190): the fingerprint of the OpenPGP key and of the S/MIME
+    /// certificate in GnuPG that belong to this account (empty: none), sign new mail by default, and which
+    /// standard a new mail uses.
+    pub pgp_key: String,
+    pub smime_key: String,
+    pub sign_by_default: bool,
+    pub preferred_standard: CryptoStandard,
 }
 
 impl Default for MailAccount {
@@ -138,6 +172,10 @@ impl Default for MailAccount {
             signature: String::new(),
             server_stores_sent: false,
             user_agent_header: false,
+            pgp_key: String::new(),
+            smime_key: String::new(),
+            sign_by_default: false,
+            preferred_standard: CryptoStandard::OpenPgp,
         }
     }
 }
@@ -186,6 +224,9 @@ pub struct Config {
     pub mail_mark_read_secs: u32,
     /// Seconds a sent mail waits in the outbox, where it can still be pulled back (0 = send at once) (MAIL-134).
     pub mail_undo_secs: u32,
+    /// The date and time the person typed the consent to decrypted local storage (ADR-0011, MAIL-180);
+    /// None = encryption is off: nothing is decrypted.
+    pub mail_encryption_consent: Option<String>,
     // Per-vault fields of older versions, read only to move them into the vault that is opened
     // first (CFG-008); dropped from the file after that.
     #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
@@ -229,6 +270,7 @@ impl Default for Config {
             mail_mark_read: true,
             mail_mark_read_secs: 2,
             mail_undo_secs: 10,
+            mail_encryption_consent: None,
             legacy_open_files: None,
             legacy_last_import_folder: None,
             legacy_recent_tags: None,

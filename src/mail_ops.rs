@@ -527,7 +527,9 @@ fn exec_move(store: &MailStore, client: &mut Client, folder: &FolderRow, group: 
                                     d.ops.push(Op::FolderState { folder: trow.id, uidvalidity: Some(uv), uidnext: None, highestmodseq: None, last_sync: 0 });
                                 }
                                 if trow.uidvalidity.is_none() || trow.uidvalidity == Some(uv) {
+                                    let carried = store.carry_decrypted(&msg, &nm);
                                     d.ops.push(Op::message(nm));
+                                    d.ops.extend(carried);
                                 }
                             }
                             Err(e) => d.notes.push(format!("the local copy of “{}” could not be written to the new folder (the next sync fetches it there): {e}", short(&msg.subject))),
@@ -1055,6 +1057,29 @@ pub(crate) mod tests {
         assert_eq!(std::fs::read(&kept[0]).unwrap(), raw);
         assert!(kept[0].to_string_lossy().contains(".trash"));
         assert!(e.pending().is_empty());
+    }
+
+    // spec: MAIL-183
+    #[test]
+    fn a_decrypted_copy_follows_its_message_when_it_is_moved_and_stays_searchable() {
+        let e = env("move-decrypted");
+        let m = e.by_uid("INBOX", 2);
+        let plain = b"From: Bob <bob@x.de>\r\nTo: ada@example.com\r\nSubject: mail 2\r\nMessage-ID: <mail-2@fake>\r\nContent-Type: text/plain\r\n\r\nthe zebrafish plan\r\n";
+        e.store.save_decrypted(&m, plain, &crate::mail_crypto::Security::new(), "2026-11-14").unwrap();
+        assert_eq!(e.store.reader().unwrap().search("zebrafish", None, 5, 0).unwrap().len(), 1);
+        assert_eq!(enqueue(&e.store, std::slice::from_ref(&m), &Action::MoveTo { folder: "Archive".into() }, NOW).unwrap().queued, 1);
+        let r = e.run();
+        assert_eq!((r.done, r.remaining), (1, 0), "{r:?}");
+        let moved = e.list("Archive");
+        assert_eq!(moved.len(), 1);
+        // the copy is beside the message's new file, and the old one's copy went to the local trash with it
+        assert_eq!(e.store.read_decrypted(&moved[0]).unwrap().0, plain);
+        assert_eq!(e.store.read_mail(&moved[0]).unwrap().text, "the zebrafish plan");
+        let hits = e.store.reader().unwrap().search("zebrafish", None, 5, 0).unwrap();
+        assert_eq!((hits.len(), hits[0].folder.as_str()), (1, "Archive"), "found in its new folder");
+        let kept = local_trash_files(&e.dir);
+        assert!(kept.iter().any(|p| p.to_string_lossy().ends_with("2.decrypted.eml")), "{kept:?}");
+        assert!(!e.store.abs_path(&m.path).exists());
     }
 
     // spec: MAIL-103, MAIL-105

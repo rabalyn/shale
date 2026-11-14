@@ -29,6 +29,12 @@ pub struct MailDialog {
     /// "Mark as read when opened" and its delay in seconds as typed (MAIL-109).
     pub mark_read: bool,
     pub mark_read_secs: String,
+    /// The consent to decrypted local storage as it will be saved with Done: the date it was typed, or None (MAIL-180).
+    pub consent: Option<String>,
+    /// What is typed in the consent field.
+    pub consent_phrase: String,
+    /// The Encryption section was just opened: scroll it into view.
+    scroll_enc: bool,
     pub error: Option<String>,
     /// Is there a system keyring to keep passwords in?
     pub keyring: bool,
@@ -45,6 +51,8 @@ pub enum MailDialogAction {
     SignIn(usize),
     /// Stop waiting for the browser of account `i`.
     CancelSignIn(usize),
+    /// Look again for GnuPG and its keys (MAIL-191).
+    DetectGnupg,
     /// Tick or untick a folder.
     ToggleFolder {
         folder: i64,
@@ -69,6 +77,9 @@ impl MailDialog {
             minutes: minutes.to_string(),
             mark_read: true,
             mark_read_secs: "2".into(),
+            consent: None,
+            consent_phrase: String::new(),
+            scroll_enc: false,
             error: None,
             keyring,
             rects: vec![],
@@ -80,6 +91,33 @@ impl MailDialog {
         self.mark_read = on;
         self.mark_read_secs = secs.to_string();
         self
+    }
+
+    /// The consent that is stored in the settings now.
+    pub fn with_consent(mut self, consent: Option<String>) -> MailDialog {
+        self.consent = consent;
+        self
+    }
+
+    /// Does what is typed equal the consent phrase exactly (case, spaces and all)?
+    pub fn phrase_ok(&self) -> bool {
+        self.consent_phrase == crate::config::CONSENT_PHRASE
+    }
+
+    /// The "Enable encryption" button: only with the exact phrase (MAIL-180). Returns whether it was switched on.
+    pub fn give_consent(&mut self, now: i64) -> bool {
+        if !self.phrase_ok() {
+            return false;
+        }
+        self.consent = Some(crate::mail_ui::full_date(now));
+        self.consent_phrase.clear();
+        true
+    }
+
+    /// Withdraw the consent: decryption stops, nothing already decrypted is deleted (MAIL-184).
+    pub fn withdraw_consent(&mut self) {
+        self.consent = None;
+        self.consent_phrase.clear();
     }
 
     /// The undo-send time the dialog starts with.
@@ -266,6 +304,8 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
             rects.push(("md:undo-secs".into(), r.rect));
             ui.label("seconds in the outbox, where you can take it back (0 = send at once)");
         });
+        ui.add_space(6.0);
+        encryption_section(ui, d, mail, &mut rects, &mut out);
     });
     if let Some(e) = &d.error {
         ui.add_space(4.0);
@@ -551,4 +591,98 @@ fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec
         }
     });
     ui.add_space(4.0);
+}
+
+/// The Encryption section (MAIL-180, MAIL-184, MAIL-191): what GnuPG there is, the red warning and the consent
+/// field, the keys, and how to bring keys over from Thunderbird.
+fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec<(String, Rect)>, out: &mut Option<MailDialogAction>) {
+    use crate::config::CryptoStandard;
+    let head = egui::CollapsingHeader::new(RichText::new("Encryption (OpenPGP and S/MIME)").color(theme::TEXT)).id_salt("mail-encryption").default_open(d.consent.is_some()).show(ui, |ui| {
+        ui.label(muted("Shale signs, verifies, encrypts and decrypts with the GnuPG on this computer (gpg for OpenPGP, gpgsm for S/MIME). It never sees your keys or passphrases: GnuPG and its passphrase dialog do that. Verifying a signature needs no setting; decrypting does.").size(12.0));
+        ui.add_space(4.0);
+        // the red warning, always visible when the section is open
+        let red = egui::Color32::from_rgb(200, 40, 40);
+        let r = egui::Frame::new().fill(egui::Color32::from_rgb(90, 20, 20)).stroke(egui::Stroke::new(2.0, red)).corner_radius(egui::CornerRadius::same(4)).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new("ENCRYPTED MAILS WILL ALWAYS BE STORED DECRYPTED LOCALLY").strong().size(15.0).color(egui::Color32::from_rgb(255, 150, 150)));
+            ui.label(RichText::new("Once a mail is decrypted, its decrypted copy and its text for the search are kept on this computer, unencrypted, in the mail folder (only you can enter it; full-disk encryption is what protects it). The encrypted original stays as it is. Mails are decrypted when you open them, not before.").color(theme::TEXT).size(12.5));
+        });
+        rects.push(("md:enc-banner".into(), r.response.rect));
+        ui.add_space(4.0);
+        if let Some(when) = d.consent.clone() {
+            ui.label(RichText::new(format!("Encryption is on (agreed {when}).")).color(theme::TAG));
+            let r = ui.button("Withdraw consent");
+            rects.push(("md:enc-withdraw".into(), r.rect));
+            if r.clicked() {
+                d.withdraw_consent();
+            }
+            ui.label(muted("Withdrawing stops decrypting new mails. It deletes nothing: mails that were already decrypted keep their decrypted copies and search text on this computer, and are still shown. Click Done to save.").size(12.0));
+        } else {
+            ui.label("To switch encryption on, type exactly:");
+            ui.label(RichText::new(crate::config::CONSENT_PHRASE).strong().color(theme::TEXT_STRONG));
+            ui.horizontal(|ui| {
+                let r = ui.add(egui::TextEdit::singleline(&mut d.consent_phrase).desired_width(300.0).hint_text("type the sentence above"));
+                rects.push(("md:enc-phrase".into(), r.rect));
+                let ok = d.phrase_ok();
+                let r = ui.add_enabled(ok, egui::Button::new("Enable encryption"));
+                rects.push(("md:enc-enable".into(), r.rect));
+                if r.clicked() {
+                    d.give_consent(crate::cal_time::now());
+                }
+            });
+            ui.label(muted("Without it, encrypted mail shows “Encrypted — enable encryption in the settings” and nothing is decrypted or stored. Click Done to save.").size(12.0));
+        }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("GnuPG on this computer").color(theme::TEXT));
+            let r = ui.small_button("Check again");
+            rects.push(("md:enc-detect".into(), r.rect));
+            if r.clicked() {
+                *out = Some(MailDialogAction::DetectGnupg);
+            }
+        });
+        match &mail.gnupg_info {
+            None => {
+                ui.label(muted("Looking…"));
+            }
+            Some(info) => {
+                for std in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
+                    match info.version(std) {
+                        Some(Ok(v)) => {
+                            ui.label(RichText::new(format!("{} ({}): {v}", std.label(), std.program())).color(theme::TEXT).size(12.5));
+                            let keys = info.keys(std);
+                            if keys.is_empty() {
+                                ui.label(muted("  no secret keys found: signing and decrypting need one; see below to import yours").size(12.0));
+                            }
+                            for k in keys {
+                                let note = if k.usable() { "" } else { " (expired, revoked or disabled)" };
+                                ui.label(muted(format!("  {} · {}{note}", k.label(), crate::mail_ui::short_fingerprint(&k.fingerprint))).size(12.0));
+                            }
+                        }
+                        Some(Err(e)) => {
+                            ui.label(RichText::new(format!("{}: {e}", std.label())).color(theme::LINK_MISSING).size(12.5));
+                        }
+                        None => {}
+                    }
+                }
+            }
+        }
+        ui.add_space(6.0);
+        ui.label(RichText::new("Bringing your keys here").color(theme::TEXT));
+        ui.label(
+            muted(
+                "Thunderbird keeps its OpenPGP keys in its own store, not in GnuPG's. To use the same keys: in Thunderbird open Account settings → End-to-End Encryption, choose your key, “Backup secret key to file”, then run   gpg --import backup.asc   (and import the public keys of your correspondents the same way). S/MIME certificates: Thunderbird → Settings → Privacy & Security → Manage S/MIME Certificates → Backup, then   gpgsm --import backup.p12   and add the issuer's fingerprint to ~/.gnupg/trustlist.txt. Shale never fetches keys from the network by itself; to look one up by hand use   gpg --locate-keys name@example.org   (WKD).",
+            )
+            .size(12.0),
+        );
+    });
+    rects.push(("md:enc-header".into(), head.header_response.rect));
+    if head.header_response.clicked() {
+        d.scroll_enc = true;
+    }
+    if let (true, Some(body)) = (d.scroll_enc, &head.body_response) {
+        // the form scrolls; bring the opened section to the top of what is visible
+        ui.scroll_to_rect(body.rect, Some(egui::Align::Min));
+        d.scroll_enc = false;
+    }
 }

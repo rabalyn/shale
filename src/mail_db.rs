@@ -323,6 +323,16 @@ pub enum Op {
         id: i64,
         error: String,
     },
+    /// The search text of a message is replaced by that of its decrypted copy (ADR-0011 §3): body and attachment
+    /// names (subject, from, to and cc stay the outer ones).
+    Body {
+        folder: i64,
+        uidvalidity: u32,
+        uid: u32,
+        body: String,
+        attachments: String,
+        has_attachments: bool,
+    },
     /// The message is not in this folder any more (it moved or was deleted): its row and its
     /// search entry go. The caller has taken care of the file (it is never deleted).
     Remove {
@@ -457,6 +467,18 @@ fn apply_op(tx: &rusqlite::Transaction<'_>, op: &Op) -> Result<()> {
         }
         Op::PendingTried { id, error } => {
             tx.execute("UPDATE pending_ops SET attempts = attempts + 1, last_error = ?2 WHERE id = ?1", params![id, error])?;
+        }
+        Op::Body { folder, uidvalidity, uid, body, attachments, has_attachments } => {
+            let row: Option<(i64, String, String, String, String)> = tx
+                .query_row("SELECT id, subject, from_addr, to_addr, cc_addr FROM messages WHERE folder = ?1 AND uidvalidity = ?2 AND uid = ?3", params![folder, uidvalidity, uid], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })
+                .optional()?;
+            if let Some((id, subject, from, to, cc)) = row {
+                tx.execute("DELETE FROM mail_fts WHERE rowid = ?1", [id])?;
+                tx.execute("INSERT INTO mail_fts (rowid, subject, from_addr, to_addr, cc_addr, body, attachments) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![id, subject, from, to, cc, body, attachments])?;
+                tx.execute("UPDATE messages SET has_attachments = ?2 WHERE id = ?1", params![id, *has_attachments as i64])?;
+            }
         }
         Op::Remove { folder, uidvalidity, uid } => {
             let id: Option<i64> = tx.query_row("SELECT id FROM messages WHERE folder = ?1 AND uidvalidity = ?2 AND uid = ?3", params![folder, uidvalidity, uid], |r| r.get(0)).optional()?;

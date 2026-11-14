@@ -22,6 +22,7 @@ mod excalidraw_md;
 mod export_dialog;
 mod fsutil;
 mod gitsync;
+mod gpg;
 mod graph;
 mod imap_client;
 #[cfg(test)]
@@ -34,6 +35,7 @@ mod layout;
 mod lists;
 mod mail;
 mod mail_compose;
+mod mail_crypto;
 mod mail_db;
 mod mail_demo;
 mod mail_dialog;

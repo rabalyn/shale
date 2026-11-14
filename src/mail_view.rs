@@ -787,6 +787,7 @@ impl MailView {
         let mut open_att: Option<usize> = None;
         let mut save_att: Option<usize> = None;
         let mut answer: Option<Kind> = None;
+        let mut strip = StripOut::default();
         egui::ScrollArea::vertical().id_salt("mail-read").auto_shrink([false, false]).show(ui, |ui| {
             ui.label(RichText::new(if msg.subject.trim().is_empty() { "(no subject)" } else { msg.subject.as_str() }).size(19.0).color(theme::TEXT_STRONG));
             ui.add_space(4.0);
@@ -898,6 +899,7 @@ impl MailView {
                 }
                 Some(Body::Ready(l)) => {
                     let l = l.clone();
+                    security_strip(ui, &l.security, rects, &mut strip);
                     if !l.mail.attachments.is_empty() {
                         ui.label(muted(format!("{} attachment{}", l.mail.attachments.len(), if l.mail.attachments.len() == 1 { "" } else { "s" })).size(12.5));
                         for (i, a) in l.mail.attachments.iter().enumerate() {
@@ -930,6 +932,12 @@ impl MailView {
                 None => {}
             }
         });
+        if strip.cancel {
+            self.cancel_crypto();
+        }
+        if strip.settings {
+            actions.push(MailAction::OpenAccounts);
+        }
         if let Some(k) = answer {
             self.start_reply(k);
         }
@@ -1089,6 +1097,53 @@ impl MailView {
 struct FolderRowPick(usize);
 
 /// A tiny paper clip, drawn with lines (the default fonts have no such symbol).
+/// What the status strip asked for.
+#[derive(Default)]
+struct StripOut {
+    cancel: bool,
+    settings: bool,
+}
+
+/// The status strip above a signed or encrypted mail (MAIL-174): built from GnuPG's verdicts only, in its own widget and colours,
+/// never from anything in the mail. Each line is a framed label; a body text can not be drawn in here.
+fn security_strip(ui: &mut Ui, sec: &crate::mail_crypto::Security, rects: &mut Vec<(String, Rect)>, out: &mut StripOut) {
+    use crate::mail_crypto::{Encryption, Level};
+    if sec.is_empty() {
+        return;
+    }
+    for (i, (level, text)) in sec.describe().into_iter().enumerate() {
+        let (color, fill) = match level {
+            Level::Good => (Color32::from_rgb(110, 205, 130), Color32::from_rgb(30, 52, 38)),
+            Level::Warn => (Color32::from_rgb(235, 185, 85), Color32::from_rgb(58, 48, 28)),
+            Level::Bad => (theme::LINK_MISSING, Color32::from_rgb(66, 32, 32)),
+            Level::Info => (theme::MUTED, theme::BG_SECONDARY),
+        };
+        let r = egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, color)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(text).color(color).size(12.5));
+        });
+        rects.push((format!("mail:sec:{i}"), r.response.rect));
+        ui.add_space(3.0);
+    }
+    ui.horizontal(|ui| {
+        if sec.working.is_some() {
+            let b = ui.button("Cancel");
+            rec(rects, "mail:sec:cancel", &b);
+            if b.on_hover_text("Stop waiting for GnuPG (a passphrase dialog may still be open)").clicked() {
+                out.cancel = true;
+            }
+        }
+        if sec.encryption == Encryption::NeedsConsent {
+            let b = ui.button("Encryption settings…");
+            rec(rects, "mail:sec:settings", &b);
+            if b.clicked() {
+                out.settings = true;
+            }
+        }
+    });
+    ui.add_space(4.0);
+}
+
 fn paint_clip(p: &egui::Painter, c: Pos2, color: Color32) {
     let s = Stroke::new(1.2, color);
     let r = Rect::from_center_size(c, Vec2::new(7.0, 13.0));

@@ -35,8 +35,12 @@ impl ShaleApp {
         for a in self.cfg.mail_accounts.clone() {
             self.mail.probe_sign_in(&a);
         }
+        self.mail.detect_gnupg();
         self.modal = Some(Modal::MailAccounts(Box::new(
-            MailDialog::new(self.cfg.mail_accounts.clone(), self.cfg.mail_sync_minutes, secrets::keyring_available()).with_read_settings(self.cfg.mail_mark_read, self.cfg.mail_mark_read_secs).with_undo_secs(self.cfg.mail_undo_secs),
+            MailDialog::new(self.cfg.mail_accounts.clone(), self.cfg.mail_sync_minutes, secrets::keyring_available())
+                .with_read_settings(self.cfg.mail_mark_read, self.cfg.mail_mark_read_secs)
+                .with_undo_secs(self.cfg.mail_undo_secs)
+                .with_consent(self.cfg.mail_encryption_consent.clone()),
         )));
     }
 
@@ -68,6 +72,10 @@ impl ShaleApp {
                 }
                 false
             }
+            MailDialogAction::DetectGnupg => {
+                self.mail.detect_gnupg();
+                false
+            }
             MailDialogAction::CancelSignIn(i) => {
                 if let Some(a) = d.accounts.get(i) {
                     self.mail.cancel_sign_in(&a.id);
@@ -93,6 +101,7 @@ impl ShaleApp {
                 self.cfg.mail_mark_read = d.mark_read;
                 self.cfg.mail_mark_read_secs = d.read_delay().unwrap_or(2);
                 self.cfg.mail_undo_secs = d.undo_delay().unwrap_or(10);
+                self.cfg.mail_encryption_consent = d.consent.clone();
                 for id in std::mem::take(&mut d.removed) {
                     self.mail.forget_account(&id);
                     self.toast(format!("The account was removed. Its mail already copied stays in {}.", self.mail.root.display()));
@@ -164,7 +173,8 @@ impl ShaleApp {
                         skipped += 1;
                         continue;
                     }
-                    match store.read_raw(m) {
+                    // a mail that was decrypted before is imported as the decrypted copy
+                    match store.read_decrypted(m).map(|d| d.0).map(Ok).unwrap_or_else(|| store.read_raw(m)) {
                         Ok(raw) => items.push(crate::import::eml_item(raw, None)),
                         Err(e) => notes.push(format!("Could not read “{}”: {e}", if m.subject.trim().is_empty() { "(no subject)" } else { m.subject.as_str() })),
                     }

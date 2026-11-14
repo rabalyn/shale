@@ -197,7 +197,7 @@ fn pct_decode(s: &str) -> Vec<u8> {
 // ---------------------------------------------------------------- headers
 
 /// Split into (headers, body). Headers: (lower-case name, unfolded raw value).
-fn split_message(raw: &[u8]) -> (Vec<(String, String)>, &[u8]) {
+pub(crate) fn split_message(raw: &[u8]) -> (Vec<(String, String)>, &[u8]) {
     let mut i = 0;
     let mut lines: Vec<String> = Vec::new();
     // an mbox "From " line before the headers
@@ -250,7 +250,7 @@ fn header<'a>(h: &'a [(String, String)], name: &str) -> Option<&'a str> {
 
 /// `text/plain; charset="utf-8"; name*0*=…` → ("text/plain", params). RFC 2231 parameters
 /// (charset'' and continuations) are put together and decoded.
-fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
+pub(crate) fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
     let mut parts = Vec::new();
     let mut cur = String::new();
     let mut quoted = false;
@@ -314,7 +314,7 @@ fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
     (main, params)
 }
 
-fn param<'a>(p: &'a [(String, String)], name: &str) -> Option<&'a str> {
+pub(crate) fn param<'a>(p: &'a [(String, String)], name: &str) -> Option<&'a str> {
     p.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str())
 }
 
@@ -544,7 +544,7 @@ pub fn html_to_text(html: &str) -> String {
 
 // ---------------------------------------------------------------- the message tree
 
-fn transfer_decode(body: &[u8], enc: &str) -> Vec<u8> {
+pub(crate) fn transfer_decode(body: &[u8], enc: &str) -> Vec<u8> {
     match enc.trim().to_ascii_lowercase().as_str() {
         "base64" => base64_decode(body),
         "quoted-printable" => qp_decode(body, false),
@@ -552,7 +552,7 @@ fn transfer_decode(body: &[u8], enc: &str) -> Vec<u8> {
     }
 }
 
-fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
+pub(crate) fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
     let delim = format!("--{boundary}");
     let mut parts = Vec::new();
     let mut start: Option<usize> = None;
