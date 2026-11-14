@@ -10,6 +10,9 @@ use std::time::Instant;
 #[path = "drawing_connect.rs"]
 mod connect;
 use connect::*;
+#[path = "drawing_links.rs"]
+mod links;
+pub use links::DrawingAction;
 
 /// Excalidraw font id of a text element (1 hand-drawn, 2 normal, 3 code).
 pub fn font_family_of_pub(e: &Element) -> u64 {
@@ -138,11 +141,13 @@ impl Scene {
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
-    /// The scene of a drawing file's text: `.excalidraw` JSON, or a `.excalidraw.md` file of the
-    /// Obsidian Excalidraw plugin.
+    /// The scene of a drawing file's text: `.excalidraw` JSON, a `.excalidraw.md` file of the
+    /// Obsidian Excalidraw plugin, or an Obsidian `.canvas`.
     pub fn from_file_text(path: &Path, text: &str) -> Result<Scene, String> {
         if crate::excalidraw_md::is_plugin_file(path) {
             crate::excalidraw_md::read(text)
+        } else if crate::canvas::is_canvas_path(path) {
+            crate::canvas::to_scene(text)
         } else {
             Scene::parse(text)
         }
@@ -417,6 +422,26 @@ fn stroke_shapes(points: Vec<Pos2>, stroke: Stroke, style: &str, out: &mut Vec<S
         "longdash" => out.extend(Shape::dashed_line(&points, stroke, stroke.width * 8.0 + 14.0, stroke.width * 3.0 + 6.0)),
         "dashdot" => out.extend(Shape::dashed_line_with_offset(&points, stroke, &[stroke.width * 5.0 + 10.0, stroke.width * 0.6 + 0.8], &[stroke.width * 2.0 + 4.0, stroke.width * 2.0 + 4.0], 0.0)),
         _ => out.push(Shape::line(points, stroke)),
+    }
+}
+
+/// The dotted grid behind a drawing.
+fn paint_grid(painter: &egui::Painter, rect: Rect, view: &View, dark: bool) {
+    let grid = 20.0 * view.zoom;
+    if grid > 7.0 {
+        let dot = if dark { Color32::from_gray(42) } else { Color32::from_gray(222) };
+        let start = view.to_screen(Pos2::ZERO);
+        let ox = (start.x - rect.min.x).rem_euclid(grid);
+        let oy = (start.y - rect.min.y).rem_euclid(grid);
+        let mut y = rect.min.y + oy;
+        while y < rect.max.y {
+            let mut x = rect.min.x + ox;
+            while x < rect.max.x {
+                painter.circle_filled(Pos2::new(x, y), 0.9, dot);
+                x += grid;
+            }
+            y += grid;
+        }
     }
 }
 
@@ -742,6 +767,10 @@ pub struct DrawingDoc {
     plugin_file: Option<String>,
     /// the first frame (which tidies bindings without counting as an edit) is done
     settled: bool,
+    /// shown but never edited or written (an Obsidian canvas); the reason is shown on screen
+    pub read_only: Option<String>,
+    /// `[[`, `[[p ` and `[!` helpers while a text is edited
+    assist: crate::link_assist::LinkAssist,
 }
 
 impl DrawingDoc {
@@ -752,7 +781,10 @@ impl DrawingDoc {
             Err(e) => (Scene::default(), Some(format!("Could not read this drawing: {e}"))),
         };
         let plugin_file = crate::excalidraw_md::is_plugin_file(&rel).then(|| text.to_string());
+        let read_only = crate::canvas::is_canvas_path(&rel).then(|| "Obsidian canvas · read-only".to_string());
         DrawingDoc {
+            read_only,
+            assist: crate::link_assist::LinkAssist::new(egui::Id::unique("draw-text")),
             plugin_file,
             settled: false,
             rel,
@@ -801,6 +833,9 @@ impl DrawingDoc {
     pub fn file_text(&self) -> Result<String, String> {
         if self.error.is_some() {
             return Err("the drawing could not be read, so it is not written".into());
+        }
+        if self.read_only.is_some() {
+            return Err("an Obsidian canvas is shown read-only and never written".into());
         }
         match &self.plugin_file {
             Some(original) => crate::excalidraw_md::write(original, &self.scene),
@@ -1027,19 +1062,8 @@ impl DrawingDoc {
         self.changed();
     }
 
-    /// Draw the full editor into `ui`. `dark` = dark canvas.
-    pub fn ui(&mut self, ui: &mut Ui, dark: bool) {
-        if let Some(err) = &self.error {
-            ui.colored_label(Color32::from_rgb(255, 120, 120), err);
-            ui.label("The file was not changed. Fix or delete it to draw here.");
-            return;
-        }
-        self.ui_rects.clear();
-        let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-        let bg = if dark { Color32::from_rgb(18, 18, 18) } else { Color32::WHITE };
-        let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, CornerRadius::ZERO, bg);
-
+    /// The first frame: show the whole drawing.
+    fn fit_once(&mut self, rect: Rect) {
         if !self.centered {
             self.centered = true;
             if let Some(b) = self.scene.bounds() {
@@ -1050,6 +1074,45 @@ impl DrawingDoc {
                 self.offset = Vec2::new(260.0, 120.0);
             }
         }
+    }
+
+    /// Wheel: scroll pans, ctrl+wheel / pinch zooms.
+    fn wheel(&mut self, ui: &Ui, rect: Rect, resp: &egui::Response) {
+        if resp.contains_pointer() {
+            let (zoom_delta, scroll, hover) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta(), i.pointer.hover_pos()));
+            if zoom_delta != 1.0 {
+                if let Some(hp) = hover {
+                    let v = View { origin: rect.min, offset: self.offset, zoom: self.zoom };
+                    let before = v.to_world(hp);
+                    self.zoom = (self.zoom * zoom_delta).clamp(0.1, 10.0);
+                    let after = View { zoom: self.zoom, ..v }.to_world(hp);
+                    self.offset += after - before;
+                }
+            } else if scroll != Vec2::ZERO {
+                self.offset += scroll / self.zoom;
+            }
+        }
+    }
+
+    /// Draw the view into `ui`: the editor, or the read-only view. `dark` = dark canvas; `vault`
+    /// is used for link colours and the `[[` / `[!` helpers.
+    pub fn ui(&mut self, ui: &mut Ui, dark: bool, vault: &crate::vault::Vault) -> Option<DrawingAction> {
+        if let Some(err) = &self.error {
+            ui.colored_label(Color32::from_rgb(255, 120, 120), err);
+            ui.label("The file was not changed. Fix or delete it to draw here.");
+            return None;
+        }
+        if self.read_only.is_some() {
+            return self.ui_read_only(ui, dark, vault);
+        }
+        let mut action = None;
+        self.ui_rects.clear();
+        let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        self.ui_rects.push(("canvas".into(), rect));
+        let bg = if dark { Color32::from_rgb(18, 18, 18) } else { Color32::WHITE };
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, CornerRadius::ZERO, bg);
+        self.fit_once(rect);
 
         // ---- keyboard
         let typing = ui.ctx().egui_wants_keyboard_input();
@@ -1128,40 +1191,9 @@ impl DrawingDoc {
             }
         }
 
-        // ---- wheel: scroll pans, ctrl+wheel / pinch zooms
-        if resp.contains_pointer() {
-            let (zoom_delta, scroll, hover) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta(), i.pointer.hover_pos()));
-            if zoom_delta != 1.0 {
-                if let Some(hp) = hover {
-                    let v = View { origin: rect.min, offset: self.offset, zoom: self.zoom };
-                    let before = v.to_world(hp);
-                    self.zoom = (self.zoom * zoom_delta).clamp(0.1, 10.0);
-                    let after = View { zoom: self.zoom, ..v }.to_world(hp);
-                    self.offset += after - before;
-                }
-            } else if scroll != Vec2::ZERO {
-                self.offset += scroll / self.zoom;
-            }
-        }
+        self.wheel(ui, rect, &resp);
         let view = View { origin: rect.min, offset: self.offset, zoom: self.zoom };
-
-        // dotted grid hint
-        let grid = 20.0 * self.zoom;
-        if grid > 7.0 {
-            let dot = if dark { Color32::from_gray(42) } else { Color32::from_gray(222) };
-            let start = view.to_screen(Pos2::ZERO);
-            let ox = (start.x - rect.min.x).rem_euclid(grid);
-            let oy = (start.y - rect.min.y).rem_euclid(grid);
-            let mut y = rect.min.y + oy;
-            while y < rect.max.y {
-                let mut x = rect.min.x + ox;
-                while x < rect.max.x {
-                    painter.circle_filled(Pos2::new(x, y), 0.9, dot);
-                    x += grid;
-                }
-                y += grid;
-            }
-        }
+        paint_grid(&painter, rect, &view, dark);
 
         // keep labels centred and connections attached; the first pass after opening only tidies
         // the scene in memory, so looking at a drawing never rewrites its file
@@ -1180,6 +1212,7 @@ impl DrawingDoc {
             }
         }
         paint_scene(&painter, &self.scene, &view, dark, self.editing_text.as_deref());
+        let on_mark = self.paint_links(ui, &painter, &view, &resp, vault);
 
         // ---- pointer
         let space_down = !typing && ui.input(|i| i.key_down(Key::Space));
@@ -1212,8 +1245,14 @@ impl DrawingDoc {
         }
         if resp.clicked() || resp.double_clicked() {
             if let Some(sp) = resp.interact_pointer_pos() {
-                let wp = view.to_world(sp);
-                self.click(ui, wp, tol, shift, resp.double_clicked());
+                // a link mark, or Ctrl+click on an element with a link, follows the link
+                let follow = if resp.clicked() && self.editing_text.is_none() { self.follow_click(ui, &view, sp, tol) } else { None };
+                if follow.is_some() {
+                    action = follow;
+                } else {
+                    let wp = view.to_world(sp);
+                    self.click(ui, wp, tol, shift, resp.double_clicked());
+                }
             }
         }
 
@@ -1240,21 +1279,37 @@ impl DrawingDoc {
                 };
                 let w = r.width();
                 let mut child = ui.new_child(UiBuilder::new().max_rect(r));
-                let te = egui::TextEdit::multiline(&mut self.text_buf)
+                // `[[`, `[[p ` and `[!` work here as in notes; the popups take their keys first
+                let te_id = egui::Id::unique(("draw-text", id.clone()));
+                self.assist.id = te_id;
+                let keys = self.assist.take_keys(&mut child, &mut self.text_buf, vault);
+                if let Some(a) = keys.action {
+                    action = Some(DrawingAction::Editor(a));
+                }
+                self.assist.arm(&self.text_buf, keys.handled);
+                let out = egui::TextEdit::multiline(&mut self.text_buf)
                     .align(egui::Align2([align, egui::Align::TOP]))
                     .font(fid)
                     .text_color(color)
                     .frame(egui::Frame::NONE)
                     .desired_width(w)
                     .desired_rows(1)
-                    .id(egui::Id::unique(("draw-text", id.clone())));
-                let out = child.add(te);
+                    // Esc and Tab stay with the text box (the popups and the commit handle them)
+                    .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
+                    .id(te_id)
+                    .show(&mut child);
+                let (_, a) = self.assist.after(&mut child, &mut self.text_buf, vault, &out, true, keys.handled);
+                if let Some(a) = a {
+                    action = Some(DrawingAction::Editor(a));
+                }
+                let out = out.response.response;
                 painter.rect_stroke(r, CornerRadius::same(2), Stroke::new(1.0, ACCENT), StrokeKind::Outside);
-                if !out.has_focus() && !out.lost_focus() {
+                let popup = self.assist.is_open();
+                if !out.has_focus() && (!out.lost_focus() || popup) {
                     out.request_focus();
                 }
                 let esc = ui.input(|i| i.key_pressed(Key::Escape));
-                if out.lost_focus() || esc {
+                if (out.lost_focus() && !popup) || esc {
                     self.commit_text(ui);
                 }
             }
@@ -1312,6 +1367,8 @@ impl DrawingDoc {
         if resp.hovered() {
             let icon = if space_down || matches!(self.drag, Drag::Pan) {
                 egui::CursorIcon::Grabbing
+            } else if on_mark {
+                egui::CursorIcon::PointingHand
             } else {
                 match self.tool {
                     Tool::Hand => egui::CursorIcon::Grab,
@@ -1334,6 +1391,7 @@ impl DrawingDoc {
         self.properties(ui, rect, dark);
         self.zoom_bar(ui, rect, dark);
         self.arrange_bar(ui, rect, dark);
+        action
     }
 
     fn begin_drag(&mut self, sp: Pos2, wp: Pos2, view: &View, tol: f32, shift: bool) {
@@ -1819,6 +1877,9 @@ impl DrawingDoc {
                     }
                 });
             });
+            if self.read_only.is_some() {
+                return;
+            }
             Self::panel_frame(dark).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let b = ui.add_enabled(!self.undo.is_empty(), egui::Button::new("Undo"));

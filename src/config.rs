@@ -68,6 +68,8 @@ pub struct Config {
     pub people_dir: String,
     /// Vim-style editing in notes: normal / insert / visual mode (off by default).
     pub vim_mode: bool,
+    /// Opening an Obsidian canvas converts it to an editable drawing without asking.
+    pub auto_convert_canvas: bool,
 }
 
 impl Default for Config {
@@ -93,6 +95,7 @@ impl Default for Config {
             recent_tags: vec![],
             people_dir: crate::people::DEFAULT_DIR.into(),
             vim_mode: false,
+            auto_convert_canvas: false,
         }
     }
 }

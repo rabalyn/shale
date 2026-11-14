@@ -57,6 +57,9 @@ built-in demo vault (`shale --screenshot out.png`).
 - Drawings of the Obsidian Excalidraw plugin (`.excalidraw.md`, compressed or not) open in the
   drawing editor too, and are saved in the plugin's own format, so Obsidian keeps reading them.
   Links like `[[Drawing.excalidraw]]` and embeds `![[Drawing.excalidraw]]` find them.
+- Links inside drawings: type `[[` in a label or text for note suggestions, `[[p ` for people
+  and `[!` for the file picker, just like in notes. A shape or text with a link gets a small ↗
+  mark; click it (or Ctrl+click the shape) to open the note, Shift for a new tab.
 - Tools on keys 1–0: hand, select, rectangle, diamond, ellipse, arrow, line, pen, text, eraser.
 - The style panel sets stroke and fill colours, fill style, stroke width, outline pattern,
   sloppiness, corners, label font, size, colour, background and alignment, opacity, and the
@@ -64,6 +67,21 @@ built-in demo vault (`shale --screenshot out.png`).
 - Double-click a shape to label it. Arrows snap to shapes and follow them when shapes move.
   Hold Shift to keep lines at 45° steps.
 - "Auto arrange" untangles a diagram; "Spread out" and "Pull together" change the spacing.
+
+### Obsidian canvases
+
+![A canvas shown read-only](screenshots/canvas.png)
+
+- Obsidian Canvas files (`.canvas`) open in the drawing view: cards with their colours, groups,
+  file and web cards (click them to follow), and the arrows between cards with their labels.
+- Opening one asks whether to convert it. **Convert** makes an editable drawing
+  `Name.excalidraw.md` next to it (Obsidian opens it with the Excalidraw plugin); **Open
+  read-only** just shows it. The canvas file itself is never changed. Opening the canvas again
+  offers the drawing made before.
+- Tick "Always convert canvases when opening them" (also in Settings → Drawings) to skip the
+  question.
+
+![The question when a canvas is opened](screenshots/canvas-convert.png)
 
 ## To-do list across all notes
 

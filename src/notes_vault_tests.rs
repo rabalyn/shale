@@ -190,7 +190,7 @@ fn essence(s: &Scene) -> (BTreeSet<(String, String)>, BTreeSet<String>) {
     (shapes, texts)
 }
 
-// spec: DRAW-001, DRAW-007, DRAW-008, DATA-005
+// spec: DRAW-001, DRAW-007, DRAW-008, DRAW-011, DATA-005
 #[test]
 fn notes_every_drawing_opens_and_saves_without_loss() {
     with_vault("drawings", |root, v| {
@@ -208,6 +208,13 @@ fn notes_every_drawing_opens_and_saves_without_loss() {
             let doc = DrawingDoc::new(rel.clone(), &original);
             if let Some(e) = &doc.error {
                 problems.push(format!("{name}: does not open in the drawing editor: {e}"));
+                continue;
+            }
+            if doc.read_only.is_some() {
+                // a canvas: shown, never written
+                if doc.file_text().is_ok() {
+                    problems.push(format!("{name}: a read-only drawing would be written"));
+                }
                 continue;
             }
             // save (to the copy) and read again: nothing may be lost

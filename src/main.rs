@@ -8,6 +8,7 @@
 
 mod app;
 mod cal_dav;
+mod canvas;
 mod cal_dialog;
 mod cal_ics;
 mod cal_store;
@@ -23,6 +24,7 @@ mod graph;
 mod import;
 mod import_dialog;
 mod layout;
+mod link_assist;
 mod lists;
 mod mail;
 mod markdown;

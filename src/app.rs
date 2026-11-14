@@ -101,6 +101,8 @@ pub enum Modal {
     Calendars(Box<crate::cal_dialog::CalendarDialog>),
     Event(Box<crate::cal_dialog::EventDialog>),
     Import(Box<crate::import_dialog::ImportDialog>),
+    /// an Obsidian canvas is being opened: convert it or open it read-only?
+    ConvertCanvas { rel: PathBuf, new_tab: bool, always: bool, existing: Option<PathBuf> },
 }
 
 pub enum Action {
@@ -126,6 +128,8 @@ pub enum Action {
     CreatePerson(String),
     /// move a file or folder into a folder (drag and drop in the file list)
     Move { from: PathBuf, into: PathBuf },
+    /// make an editable drawing from an Obsidian canvas and open it
+    ConvertCanvas { rel: PathBuf, new_tab: bool },
 }
 
 #[derive(Default)]
@@ -321,6 +325,12 @@ impl ShaleApp {
                 Some("drawing") => app.open(Path::new("Sketch.excalidraw"), false),
                 // any file of the vault, e.g. `--view "open:Excalidraw/Plan.excalidraw.md"`
                 Some(v) if v.starts_with("open:") => app.open(Path::new(&v["open:".len()..]), false),
+                // a canvas shown read-only without the question, e.g. `--view "read-only:Map.canvas"`
+                Some(v) if v.starts_with("read-only:") => app.open_canvas_read_only(Path::new(&v["read-only:".len()..]), false),
+                // a canvas converted to a drawing (as the "Convert" button does), e.g. `--view "convert:Map.canvas"`
+                Some(v) if v.starts_with("convert:") => {
+                    app.convert_canvas(Path::new(&v["convert:".len()..]), false);
+                }
                 Some("reading") => {
                     if let Some(t) = app.tabs.get_mut(app.active) {
                         t.reading = true;
@@ -365,7 +375,13 @@ impl ShaleApp {
                 let reopen: Vec<String> = self.cfg.open_files.clone();
                 for (i, f) in reopen.iter().enumerate() {
                     let rel = PathBuf::from(f);
-                    if self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
+                    if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
+                        continue;
+                    }
+                    // a canvas tab comes back as it was left: read-only, without the question
+                    if crate::canvas::is_canvas_path(&rel) {
+                        self.open_canvas_read_only(&rel, i > 0);
+                    } else {
                         self.open(&rel, i > 0);
                     }
                 }
@@ -446,6 +462,18 @@ impl ShaleApp {
                 }
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
             }
+            FileKind::Drawing if crate::canvas::is_canvas_path(rel) && !self.drawings.contains_key(rel) => {
+                // a canvas: open the copy converted earlier, convert it, or ask
+                let existing = crate::canvas::find_converted(v, rel);
+                match existing {
+                    Some(copy) if self.cfg.auto_convert_canvas => self.open(&copy, new_tab),
+                    None if self.cfg.auto_convert_canvas => {
+                        self.convert_canvas(rel, new_tab);
+                    }
+                    _ => self.modal = Some(Modal::ConvertCanvas { rel: rel.to_path_buf(), new_tab, always: false, existing }),
+                }
+                return;
+            }
             FileKind::Drawing => {
                 if !self.drawings.contains_key(rel) {
                     // a file that can't be read opens read-only (never an empty drawing that overwrites it)
@@ -463,6 +491,44 @@ impl ShaleApp {
             }
         }
         self.remember_open_files();
+    }
+
+    /// Show an Obsidian canvas read-only (no question asked).
+    pub fn open_canvas_read_only(&mut self, rel: &Path, new_tab: bool) {
+        let Some(v) = &self.vault else { return };
+        let doc = match std::fs::read_to_string(v.abs(rel)) {
+            Ok(text) => DrawingDoc::new(rel.to_path_buf(), &text),
+            Err(e) => DrawingDoc::unreadable(rel.to_path_buf(), &e.to_string()),
+        };
+        self.drawings.insert(rel.to_path_buf(), doc);
+        self.show_view(View::Drawing(rel.to_path_buf()), new_tab);
+        self.remember_open_files();
+    }
+
+    /// Make `Name.excalidraw.md` next to the canvas `rel` and open it. The canvas is not changed.
+    pub fn convert_canvas(&mut self, rel: &Path, new_tab: bool) -> Option<PathBuf> {
+        let v = self.vault.as_mut()?;
+        let made = std::fs::read_to_string(v.abs(rel)).map_err(|e| e.to_string()).and_then(|text| crate::canvas::converted_file(rel, &text)).and_then(|content| {
+            let to = v.new_note_path(rel.parent().unwrap_or(Path::new("")), &crate::canvas::drawing_name_for(rel));
+            v.create_file(&to, &content).map_err(|e| e.to_string())
+        });
+        match made {
+            Ok(to) => {
+                self.toast(format!("Converted to “{}” (the canvas is unchanged)", rel_to_string(&to)));
+                // the canvas's read-only tab (if open) shows the new drawing instead
+                if let Some(i) = self.tabs.iter().position(|t| t.view.path() == Some(rel)) {
+                    self.active = i;
+                    self.open(&to, false);
+                } else {
+                    self.open(&to, new_tab);
+                }
+                Some(to)
+            }
+            Err(e) => {
+                self.toast(format!("Could not convert the canvas: {e}"));
+                None
+            }
+        }
     }
 
     fn remember_open_files(&mut self) {
@@ -669,10 +735,12 @@ impl ShaleApp {
         let file_name = match kind {
             Some(FileKind::Note) => format!("{}.md", markdown::strip_md_ext(&new_name)),
             Some(FileKind::Drawing) => {
-                // keep the format: an Obsidian `.excalidraw.md` drawing stays one
+                // keep the format: an Obsidian `.excalidraw.md` drawing or `.canvas` stays one
                 let stem = crate::excalidraw_md::drawing_stem(&new_name);
                 if crate::excalidraw_md::is_plugin_file(rel) {
                     format!("{stem}.excalidraw.md")
+                } else if crate::canvas::is_canvas_path(rel) {
+                    format!("{stem}.canvas")
                 } else {
                     format!("{stem}.excalidraw")
                 }
@@ -1008,6 +1076,9 @@ impl ShaleApp {
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::Rescan => self.rescan(),
                 Action::CreatePerson(name) => self.create_person(&name),
+                Action::ConvertCanvas { rel, new_tab } => {
+                    self.convert_canvas(&rel, new_tab);
+                }
                 Action::Move { from, into } => {
                     if let Err(e) = self.move_into(&from, &into) {
                         self.toast(format!("Could not move: {e}"));
@@ -1390,10 +1461,10 @@ pub fn muted(t: impl Into<String>) -> egui::RichText {
 
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn test_app(tag: &str) -> (ShaleApp, PathBuf) {
+    pub(crate) fn test_app(tag: &str) -> (ShaleApp, PathBuf) {
         let d = std::env::temp_dir().join(format!("shale-app-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         vault::write_sample_vault(&d).unwrap();
@@ -1446,6 +1517,67 @@ mod tests {
         app.flush_all();
         let ideas = std::fs::read_to_string(d.join("Ideas.md")).unwrap();
         assert!(ideas.contains("![[Drawing.excalidraw]]"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    pub(crate) const CANVAS: &str = r#"{"nodes":[{"id":"a","type":"text","text":"devices","x":0,"y":0,"width":250,"height":60},{"id":"b","type":"file","file":"Ideas.md","x":0,"y":200,"width":250,"height":60}],"edges":[{"id":"e","fromNode":"a","toNode":"b"}]}"#;
+
+    /// The sample vault with `Maps/Map.canvas`.
+    pub(crate) fn app_with_canvas(tag: &str) -> (ShaleApp, PathBuf) {
+        let (mut app, d) = test_app(tag);
+        std::fs::create_dir_all(d.join("Maps")).unwrap();
+        std::fs::write(d.join("Maps/Map.canvas"), CANVAS).unwrap();
+        app.rescan();
+        (app, d)
+    }
+
+    // spec: DRAW-011, DRAW-012, DRAW-013
+    #[test]
+    fn opening_a_canvas_asks_converts_and_never_changes_it() {
+        let (mut app, d) = app_with_canvas("canvas");
+        let canvas = Path::new("Maps/Map.canvas");
+        assert_eq!(app.vault.as_ref().unwrap().file(canvas).map(|f| f.kind), Some(FileKind::Drawing));
+        // the question comes first; nothing is opened yet
+        app.open(canvas, false);
+        assert!(matches!(&app.modal, Some(Modal::ConvertCanvas { existing: None, always: false, .. })));
+        assert_ne!(app.current_path().as_deref(), Some(canvas));
+        // read-only
+        app.modal = None;
+        app.open_canvas_read_only(canvas, false);
+        assert_eq!(app.current_path().as_deref(), Some(canvas));
+        assert!(app.drawings[canvas].read_only.is_some());
+        app.flush_all();
+        // convert: a plugin drawing next to it, shown in the canvas's tab; the canvas is unchanged
+        let to = app.convert_canvas(canvas, false).unwrap();
+        assert_eq!(to, Path::new("Maps/Map.excalidraw.md"));
+        assert_eq!(app.current_path(), Some(to.clone()));
+        assert_eq!(app.tabs.iter().filter(|t| t.view.path() == Some(canvas)).count(), 0, "the canvas tab now shows the drawing");
+        let made = std::fs::read_to_string(d.join(&to)).unwrap();
+        assert!(crate::canvas::is_converted_from(&made, canvas));
+        assert!(app.drawings[&to].read_only.is_none() && app.drawings[&to].error.is_none());
+        assert_eq!(std::fs::read_to_string(d.join(canvas)).unwrap(), CANVAS);
+        // opening the canvas again offers the copy made before
+        app.drawings.remove(canvas);
+        app.open(canvas, false);
+        assert!(matches!(&app.modal, Some(Modal::ConvertCanvas { existing: Some(e), .. }) if *e == to));
+        // with the setting on: no question, the copy opens, no second copy
+        app.modal = None;
+        app.cfg.auto_convert_canvas = true;
+        app.open(Path::new("Welcome.md"), false);
+        app.open(canvas, false);
+        assert!(app.modal.is_none());
+        assert_eq!(app.current_path(), Some(to.clone()));
+        assert!(!d.join("Maps/Map 1.excalidraw.md").exists());
+        // …and without a copy it converts right away
+        app.drawings.remove(&to);
+        std::fs::remove_file(d.join(&to)).unwrap();
+        app.rescan();
+        app.open(canvas, false);
+        assert!(app.modal.is_none() && d.join(&to).exists());
+        assert_eq!(std::fs::read_to_string(d.join(canvas)).unwrap(), CANVAS);
+        // renaming keeps it a canvas
+        app.rename(canvas, "Network").unwrap();
+        assert_eq!(std::fs::read_to_string(d.join("Maps/Network.canvas")).unwrap(), CANVAS);
         let _ = std::fs::remove_dir_all(&d);
     }
 

@@ -10,7 +10,7 @@ of the rule.
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
 | VAULT-001 | A vault is any folder. Opening a path that does not exist creates it. | IS NOW | `Vault::open` | untested (create-if-missing) |
-| VAULT-002 | Drawings are `*.excalidraw` and `*.excalidraw.md` (Obsidian Excalidraw plugin), notes are all other `*.md`; every other file is an attachment. | IS NOW | `vault::kind_of`, `excalidraw_md::is_drawing_path` | `vault.rs::resolve_and_backlinks` (partly), `excalidraw_md.rs::plugin_files_are_drawings`, `notes_vault_tests.rs::notes_every_file_is_listed_and_every_note_is_readable` |
+| VAULT-002 | Drawings are `*.excalidraw`, `*.excalidraw.md` (Obsidian Excalidraw plugin) and `*.canvas` (Obsidian Canvas, read-only, DRAW-011), notes are all other `*.md`; every other file is an attachment. | IS NOW | `vault::kind_of`, `excalidraw_md::is_drawing_path` | `vault.rs::resolve_and_backlinks` (partly), `excalidraw_md.rs::plugin_files_are_drawings`, `notes_vault_tests.rs::notes_every_file_is_listed_and_every_note_is_readable` |
 | VAULT-003 | Files and folders whose name starts with `.` are ignored (`.git`, `.obsidian`, `.trash`, `.shale`). | IS NOW | `vault::walk` | untested |
 | VAULT-004 | Shale's per-vault data lives in `<vault>/.shale/` (today only `tag-words.json`). | IS NOW | `tagwords.rs` | `tagwords.rs::learns_typical_words_and_suggests_tags` (save/load) |
 | VAULT-005 | The vault is re-scanned every 3 s; files with an unchanged modification time are not re-read. | IS NOW | `ShaleApp` `last_scan`, `Vault::rescan` | `vault.rs::outside_change_is_detected` (partly: no interval) |

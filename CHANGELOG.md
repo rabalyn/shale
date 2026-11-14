@@ -29,6 +29,14 @@ The release page of each version on GitHub shows its section from this file.
 - **Vim-style editing** (Settings, off by default): notes open in normal mode with h j k l,
   w b W B, 0 $, gg G, `:line`, `/search` with n / N, i a I A o O to type, x, visual mode (v, V)
   with d to cut and y to copy to the clipboard, and p to paste.
+- **Obsidian canvases** (`.canvas`) open in the drawing view, read-only: cards with their
+  colours, groups, file and web cards, and labelled arrows. Opening one asks whether to convert
+  it into an editable `Name.excalidraw.md` drawing next to it (the canvas is never changed); a
+  tick box, also in Settings → Drawings, makes that automatic. A copy made earlier is offered
+  instead of a second one.
+- **Links in drawings**: `[[` note suggestions, `[[p ` people and the `[!` file picker work in
+  drawing labels and texts. Shapes and texts with a link show a ↗ mark; click it (or Ctrl+click
+  the shape) to open the note or web page.
 
 ### Fixed
 
@@ -38,6 +46,8 @@ The release page of each version on GitHub shows its section from this file.
 
 ### Changed
 
+- The `[[`, `[[p ` and `[!` helpers moved out of the note editor into their own module
+  (`src/link_assist.rs`) so drawings can use them; notes behave as before.
 - Dragging something Shale can't take (like a browser tab) across the window no longer leaves a
   message behind; a hint at the pointer says so while it is over the window.
 

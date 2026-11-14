@@ -31,15 +31,16 @@ pub fn is_plugin_file(p: &Path) -> bool {
     strip_suffix_ci(&file_name(p), ".excalidraw.md").is_some()
 }
 
-/// Any drawing Shale opens in the drawing editor: `*.excalidraw` or `*.excalidraw.md`.
+/// Any drawing Shale opens in the drawing view: `*.excalidraw`, `*.excalidraw.md`, or an
+/// Obsidian canvas (`*.canvas`, shown read-only).
 pub fn is_drawing_path(p: &Path) -> bool {
     let n = file_name(p);
-    strip_suffix_ci(&n, ".excalidraw").is_some() || strip_suffix_ci(&n, ".excalidraw.md").is_some()
+    strip_suffix_ci(&n, ".excalidraw").is_some() || strip_suffix_ci(&n, ".excalidraw.md").is_some() || crate::canvas::is_canvas_path(p)
 }
 
-/// The drawing's name without `.excalidraw` / `.excalidraw.md`.
+/// The drawing's name without `.excalidraw` / `.excalidraw.md` / `.canvas`.
 pub fn drawing_stem(name: &str) -> &str {
-    strip_suffix_ci(name, ".excalidraw.md").or_else(|| strip_suffix_ci(name, ".excalidraw")).unwrap_or(name)
+    strip_suffix_ci(name, ".excalidraw.md").or_else(|| strip_suffix_ci(name, ".excalidraw")).or_else(|| strip_suffix_ci(name, ".canvas")).unwrap_or(name)
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -51,7 +51,9 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading` (with `--screenshot`) chooses which view to capture.
+- `--view tasks|graph|drawing|reading` (with `--screenshot`) chooses which view to capture;
+  `open:<file>` opens a file of the vault, `read-only:<file>.canvas` shows a canvas without the
+  question, and `convert:<file>.canvas` converts it first.
 
 ## Keyboard
 

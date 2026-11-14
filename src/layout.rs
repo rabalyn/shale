@@ -470,10 +470,13 @@ impl ShaleApp {
             View::Note(rel) => self.note_view(ui, rel),
             View::Drawing(rel) => {
                 let dark = self.cfg.dark_canvas;
-                if let Some(d) = self.drawings.get_mut(&rel) {
-                    d.ui(ui, dark);
-                } else {
-                    self.actions.push(Action::Open { rel, new_tab: false });
+                match (self.drawings.get_mut(&rel), &self.vault) {
+                    (Some(d), Some(v)) => match d.ui(ui, dark, v) {
+                        Some(crate::drawing::DrawingAction::Editor(a)) => handle_editor_action(&mut self.actions, a, &rel),
+                        Some(crate::drawing::DrawingAction::ConvertCanvas) => self.actions.push(Action::ConvertCanvas { rel, new_tab: false }),
+                        None => {}
+                    },
+                    _ => self.actions.push(Action::Open { rel, new_tab: false }),
                 }
             }
             View::Tasks => self.tasks_view(ui),
@@ -573,7 +576,7 @@ impl ShaleApp {
                 } else {
                     tab.editor.inline_images = self.cfg.inline_images;
                     tab.editor.vim_enabled = self.cfg.vim_mode;
-                    tab.editor.people_dir = self.cfg.people_dir.clone();
+                    tab.editor.assist.people_dir = self.cfg.people_dir.clone();
                     tab.editor.dark_canvas = self.cfg.dark_canvas;
                     let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
                     if changed {

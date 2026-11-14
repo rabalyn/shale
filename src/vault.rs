@@ -657,9 +657,27 @@ fn walk(root: &Path, rel: &Path, files: &mut Vec<FileEntry>, folders: &mut Vec<P
 }
 
 /// Write a small welcome vault that shows off links, tasks and a drawing.
+/// An Obsidian canvas for the demo vault (cards, a group, a web link and labelled edges).
+const SAMPLE_CANVAS: &str = r##"{
+	"nodes":[
+		{"id":"grp","type":"group","label":"This season","x":-40,"y":-60,"width":700,"height":300},
+		{"id":"plan","type":"file","file":"Projects/Garden plan.md","x":0,"y":0,"width":240,"height":70,"color":"4"},
+		{"id":"seeds","type":"text","text":"Order seeds\nby March","x":380,"y":0,"width":240,"height":70,"color":"3"},
+		{"id":"bed","type":"text","text":"Build raised bed","x":380,"y":140,"width":240,"height":70},
+		{"id":"ideas","type":"file","file":"Ideas.md","x":0,"y":320,"width":240,"height":70,"color":"6"},
+		{"id":"web","type":"link","url":"https://example.com","x":380,"y":320,"width":240,"height":70}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"plan","fromSide":"right","toNode":"seeds","toSide":"left","label":"first"},
+		{"id":"e2","fromNode":"seeds","fromSide":"bottom","toNode":"bed","toSide":"top"},
+		{"id":"e3","fromNode":"ideas","fromSide":"top","toNode":"plan","toSide":"bottom","label":"grew from","color":"6"},
+		{"id":"e4","fromNode":"ideas","fromSide":"right","toNode":"web","toSide":"left","toEnd":"none"}
+	]
+}"##;
+
 pub fn write_sample_vault(root: &Path) -> io::Result<()> {
     fs::create_dir_all(root.join("Projects"))?;
-    let files: [(&str, &str); 5] = [
+    let files: [(&str, &str); 6] = [
         (
             "Welcome.md",
             "# Welcome to your vault\n\nThis vault is just a folder of plain **markdown** files.\n\n- Links to notes that exist are [[Ideas|blue]] like [[Ideas]].\n- Links to notes that don't exist yet are red, like [[Reading list]]. Click one to create it.\n- Type `[[` to get suggestions while you write.\n- Web links open in your browser: [an example site](https://example.com)\n\n![[z_media/sample-gradient.png]]\n\n## Things to try\n- [ ] Click a red link to create a note\n- [x] Open the vault\n- [ ] Draw something in [[Sketch.excalidraw]]\n- [ ] Open the task list from the left ribbon\n\n## Lists help you type\n1. [x] Press Enter at the end of a list item to start the next one\n2. [ ] Press Tab to indent it, Shift+Tab to bring it back\n3. [ ] In a heading, Tab adds a level and Shift+Tab removes one\n4. [ ] Alt+Up / Alt+Down moves the current line\n5. [ ] Type [! then ~/ to pick a picture from your home folder (Tab completes)\n\n![[Sketch.excalidraw]]\n\n#getting-started\n",
@@ -674,6 +692,7 @@ pub fn write_sample_vault(root: &Path) -> io::Result<()> {
         ),
         ("Daily log.md", "# Daily log\n\n- Met with team, see [[Ideas]]\n- [ ] Follow up on [[Garden plan]]\n"),
         ("Sketch.excalidraw", crate::drawing::SAMPLE_SCENE),
+        ("Overview.canvas", SAMPLE_CANVAS),
     ];
     for (name, content) in files {
         let p = root.join(name);

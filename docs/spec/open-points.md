@@ -34,7 +34,7 @@ here.
 | OPEN-007 | Platform policy: Linux only, or keep the macOS/Windows code paths alive (and test them)? | `Cargo.toml` has macOS deps; `lists.rs` has Windows code; CI is Linux only. |
 | OPEN-008 | Trash: restore from within Shale, and empty it after N days? | VAULT-019 records the origin first. |
 | ~~OPEN-009~~ | ~~`.excalidraw.md` (Obsidian Excalidraw plugin) files: support or document as unsupported?~~ | Decided 2026-11-14: supported (DRAW-007, DRAW-008). Left open: links and pictures inside them (DRAW-010, OPEN-014). |
-| OPEN-014 | Count `[[links]]` in plugin drawings' texts as links (backlinks from drawings), and show their embedded pictures? | DRAW-010. |
+| OPEN-014 | Count `[[links]]` in drawings' texts as links (backlinks and graph edges from drawings, rename updates them), and show pictures embedded in plugin drawings? Links can be followed since DRAW-015. | DRAW-010. |
 | OPEN-010 | Calendar: single-occurrence edits (CAL-007), moving events by dragging, reminders — which first? | Backlog from IMPLEMENTATION.md. |
 | OPEN-011 | Module restructuring (feature folders, splitting `ShaleApp`): do it along the way (proposed) or as one dedicated change? | ADR-0006 §6. |
 | OPEN-012 | Add a test that checks spec IDs against test names (every ID used or marked `untested`)? | Prevents spec drift ([ADR-0001](../decisions/0001-spec-driven-development.md) §5). |
