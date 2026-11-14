@@ -529,10 +529,27 @@ impl ShaleApp {
                     ui.add_space(10.0);
                     section_header(ui, &format!("Not created yet  {}", missing.len()));
                     for (display, target, _) in missing {
-                        let resp = ui.add(egui::Label::new(egui::RichText::new(display).color(theme::LINK_MISSING)).sense(Sense::click())).on_hover_text("Click to create this note").on_hover_cursor(egui::CursorIcon::PointingHand);
-                        if resp.clicked() {
-                            self.actions.push(Action::OpenLink { target, heading: None, from: Some(rel.clone()), new_tab: false });
-                        }
+                        // a path link whose name exists in other places: offer them (LINK-012)
+                        let candidates = v.fix_candidates(&target, Some(&rel));
+                        ui.horizontal_wrapped(|ui| {
+                            let resp = ui.add(egui::Label::new(egui::RichText::new(display).color(theme::LINK_MISSING)).sense(Sense::click())).on_hover_text("Click to create this note").on_hover_cursor(egui::CursorIcon::PointingHand);
+                            if resp.clicked() {
+                                self.actions.push(Action::OpenLink { target: target.clone(), heading: None, from: Some(rel.clone()), new_tab: false });
+                            }
+                            if !candidates.is_empty() {
+                                ui.menu_button(egui::RichText::new("Fix link").small(), |ui| {
+                                    ui.label(muted("Point the link at:").size(12.0));
+                                    for c in &candidates {
+                                        if ui.button(markdown::strip_md_ext(&rel_to_string(c))).clicked() {
+                                            self.actions.push(Action::FixLink { note: rel.clone(), target: target.clone(), to: c.clone() });
+                                            ui.close();
+                                        }
+                                    }
+                                })
+                                .response
+                                .on_hover_text(format!("No file at this path; {} file(s) have this name", candidates.len()));
+                            }
+                        });
                     }
                 });
             }
@@ -780,17 +797,15 @@ impl ShaleApp {
                     let enter = ui.input(|i| i.key_pressed(Key::Enter));
                     ui.horizontal(|ui| {
                         if (ui.button("Create").clicked() || enter) && !name.trim().is_empty() {
-                            let rel = parent.join(markdown::sanitize_note_name(name));
-                            if let Some(v) = self.vault.as_mut() {
-                                match v.create_folder(&rel) {
-                                    Ok(()) => {
-                                        self.expanded.insert(rel.clone());
-                                        if let Some(p) = rel.parent() {
-                                            self.expanded.insert(p.to_path_buf());
-                                        }
+                            match self.create_folder(parent, name) {
+                                Ok(rel) => {
+                                    let mut p = Some(rel.as_path());
+                                    while let Some(dir) = p.filter(|d| !d.as_os_str().is_empty()) {
+                                        self.expanded.insert(dir.to_path_buf());
+                                        p = dir.parent();
                                     }
-                                    Err(e) => self.toasts.push((format!("Could not create folder: {e}"), std::time::Instant::now())),
                                 }
+                                Err(e) => self.toasts.push((format!("Could not create folder: {e}"), std::time::Instant::now())),
                             }
                             keep = false;
                         }
@@ -854,6 +869,9 @@ impl ShaleApp {
                     ui.add_space(8.0);
                     if ui.button("Close this vault (back to the start screen)").clicked() {
                         self.flush_all();
+                        self.remember_open_files();
+                        self.save_config();
+                        self.vdata = crate::vault_state::VaultData::default();
                         self.vault = None;
                         self.tabs.clear();
                         self.cfg.vault = None;
@@ -870,11 +888,13 @@ impl ShaleApp {
                     ui.horizontal(|ui| {
                         ui.label("People folder");
                         changed |= ui
-                            .add(egui::TextEdit::singleline(&mut self.cfg.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0))
+                            .add(egui::TextEdit::singleline(&mut self.vdata.settings.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0))
                             .on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.")
                             .changed();
                     });
                     ui.label(muted("Type [[p followed by a name to pick a person from this folder (or make a new contact note).").size(12.0));
+                    ui.add_space(8.0);
+                    changed |= self.sync_settings_ui(ui);
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Appearance").color(theme::MUTED));
                     changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();

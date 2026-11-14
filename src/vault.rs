@@ -2,6 +2,7 @@
 
 use crate::fsutil;
 use crate::markdown::{self, LinkSpan, Task};
+use crate::vault_path::VaultPath;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -57,12 +58,57 @@ pub struct Vault {
     pub folder_times: HashMap<PathBuf, (Option<SystemTime>, Option<SystemTime>)>,
     pub notes: HashMap<PathBuf, NoteIndex>,
     name_index: HashMap<String, Vec<PathBuf>>,
+    /// Lowercase vault path (`projects/plan.md` and `projects/plan`) -> file.
+    path_index: HashMap<String, PathBuf>,
     /// Bumped whenever anything in the index changes; UI caches key off this.
     pub generation: u64,
 }
 
 pub fn rel_to_string(p: &Path) -> String {
     p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
+}
+
+/// A note with search hits: (note, [(line, byte offset of the match in the line, line text)]).
+pub type SearchHit = (PathBuf, Vec<(usize, usize, String)>);
+
+/// For one note, during a rename or move: its path after the change, its text, and each link
+/// that resolved with the file it must point to after the change.
+type RewritePlan = (PathBuf, String, Vec<(LinkSpan, PathBuf)>);
+
+/// Does a link target start with `./` or `../` (relative to the linking note)?
+fn is_relative_link(target: &str) -> bool {
+    target.starts_with("./") || target.starts_with("../")
+}
+
+/// `base` joined with the `/`-separated `target`, with `.` and `..` worked out, as a
+/// `/`-separated string. `None` if it climbs above the vault root.
+pub fn normalize_path(base: &Path, target: &str) -> Option<String> {
+    let mut parts: Vec<String> = base.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    for p in target.split('/') {
+        match p {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            p => parts.push(p.to_string()),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/// The way from the folder `from_dir` to `to`, written with `../` (or `./` when it goes down).
+fn relative_link(from_dir: &Path, to: &Path) -> String {
+    let a: Vec<_> = from_dir.components().collect();
+    let b: Vec<_> = to.components().collect();
+    let same = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let mut out: Vec<String> = vec!["..".into(); a.len() - same];
+    out.extend(b[same..].iter().map(|c| c.as_os_str().to_string_lossy().into_owned()));
+    let s = out.join("/");
+    if s.starts_with("../") {
+        s
+    } else {
+        format!("./{s}")
+    }
 }
 
 fn kind_of(path: &Path) -> FileKind {
@@ -164,6 +210,7 @@ impl Vault {
 
     fn rebuild_name_index(&mut self) {
         self.name_index.clear();
+        self.path_index.clear();
         for f in &self.files {
             self.name_index.entry(f.link_name.to_lowercase()).or_default().push(f.rel.clone());
             // also allow the full file name (`Note.md`, `Plan.excalidraw.md`)
@@ -171,6 +218,12 @@ impl Vault {
             if full != f.link_name.to_lowercase() {
                 self.name_index.entry(full).or_default().push(f.rel.clone());
             }
+            let path = rel_to_string(&f.rel).to_lowercase();
+            if let Some(short) = crate::excalidraw_md::strip_suffix_ci(&path, ".md") {
+                // an exact file name wins over `X.md` written without its `.md`
+                self.path_index.entry(short.to_string()).or_insert_with(|| f.rel.clone());
+            }
+            self.path_index.insert(path, f.rel.clone());
         }
     }
 
@@ -213,44 +266,78 @@ impl Vault {
     }
 
     /// Find the file a link target points to. `from` is the note containing the link.
+    ///
+    /// A target without `/` is a name (LINK-002). A target with `/` is a path (LINK-010): from the
+    /// vault root, or from the linking note when it starts with `./` or `../`; the linking note's
+    /// folder is tried as a base only when the root path does not exist. A path never falls back
+    /// to the name.
     pub fn resolve(&self, target: &str, from: Option<&Path>) -> Option<PathBuf> {
         let target = target.trim();
         if target.is_empty() {
             return from.map(|p| p.to_path_buf());
         }
+        let from_dir = from.and_then(|f| f.parent()).unwrap_or(Path::new(""));
         if target.contains('/') {
+            let find = |p: Option<String>| p.and_then(|p| self.path_index.get(&p.to_lowercase()).cloned());
+            if is_relative_link(target) {
+                return find(normalize_path(from_dir, target));
+            }
             let t = target.trim_start_matches('/');
-            let lower = t.to_lowercase();
-            // vault-absolute path, then relative to the linking note's folder
-            let mut bases = vec![PathBuf::new()];
-            if let Some(dir) = from.and_then(|f| f.parent()) {
-                bases.insert(0, dir.to_path_buf());
-            }
-            for base in bases {
-                for f in &self.files {
-                    let rel = rel_to_string(&f.rel).to_lowercase();
-                    let b = rel_to_string(&base).to_lowercase();
-                    let want = if b.is_empty() { lower.clone() } else { format!("{b}/{lower}") };
-                    if rel == want || rel == format!("{want}.md") {
-                        return Some(f.rel.clone());
-                    }
-                }
-            }
-            // Fall back to file-name only.
-            let name = t.rsplit('/').next().unwrap_or(t);
-            return self.resolve(name, from);
+            return find(normalize_path(Path::new(""), t)).or_else(|| if from.is_some() && !target.starts_with('/') { find(normalize_path(from_dir, t)) } else { None });
         }
         let cands = self.name_index.get(&target.to_lowercase())?;
         if cands.len() == 1 {
             return Some(cands[0].clone());
         }
-        let from_dir = from.and_then(|f| f.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
         let mut best = cands.clone();
         best.sort_by_key(|c| {
             let same = c.parent().map(|p| p == from_dir).unwrap_or(false);
             (!same, c.components().count(), rel_to_string(c))
         });
         best.into_iter().next()
+    }
+
+    /// For a link by name that several files share: how many, and the one it opens (LINK-008).
+    pub fn ambiguity(&self, target: &str, from: Option<&Path>) -> Option<(usize, PathBuf)> {
+        let t = target.trim();
+        if t.is_empty() || t.contains('/') {
+            return None;
+        }
+        let n = self.name_index.get(&t.to_lowercase())?.len();
+        if n < 2 {
+            return None;
+        }
+        Some((n, self.resolve(t, from)?))
+    }
+
+    /// Files a red path link might have meant: those whose name is the link's last part
+    /// (LINK-012). Empty for links that resolve or are not paths.
+    pub fn fix_candidates(&self, target: &str, from: Option<&Path>) -> Vec<PathBuf> {
+        let t = target.trim();
+        if !t.contains('/') || self.resolve(t, from).is_some() {
+            return vec![];
+        }
+        let name = t.rsplit('/').next().unwrap_or(t);
+        let mut c = self.name_index.get(&name.to_lowercase()).cloned().unwrap_or_default();
+        c.sort_by_key(|p| rel_to_string(p).to_lowercase());
+        c
+    }
+
+    /// Extra line for a link's tooltip: the name is shared (LINK-008), or a red path link has
+    /// several possible targets (LINK-012).
+    pub fn link_hint(&self, target: &str, from: Option<&Path>) -> Option<String> {
+        let what = |paths: &[PathBuf]| if paths.iter().all(|p| self.file(p).map(|f| f.kind == FileKind::Note).unwrap_or(false)) { "notes" } else { "files" };
+        if let Some((n, opens)) = self.ambiguity(target, from) {
+            let all = self.name_index.get(&target.trim().to_lowercase()).cloned().unwrap_or_default();
+            let shown = self.file(&opens).map(|f| markdown::strip_md_ext(&rel_to_string(&f.rel)).to_string()).unwrap_or_default();
+            return Some(format!("{n} {} are called “{}” – opens {shown}", what(&all), target.trim()));
+        }
+        let c = self.fix_candidates(target, from);
+        if c.len() > 1 {
+            let name = target.trim().rsplit('/').next().unwrap_or("");
+            return Some(format!("Nothing at this path; {} {} are called “{name}” – pick one with “Fix link” in Outgoing links", c.len(), what(&c)));
+        }
+        None
     }
 
     pub fn exists(&self, target: &str, from: Option<&Path>) -> bool {
@@ -357,7 +444,7 @@ impl Vault {
 
     /// Full-text search, ignoring case: (note, [(line, byte offset of the match in that line,
     /// the line's text)]), at most 20 lines per note.
-    pub fn search(&self, query: &str) -> Vec<(PathBuf, Vec<(usize, usize, String)>)> {
+    pub fn search(&self, query: &str) -> Vec<SearchHit> {
         let q = query.trim().to_lowercase();
         if q.is_empty() {
             return vec![];
@@ -384,7 +471,11 @@ impl Vault {
     }
 
     /// Pick a path for a new note called `name` (may contain folders) inside `folder`.
+    /// The result is always inside the vault (VAULT-018): `..` and empty parts of `name` are
+    /// dropped, and a `folder` outside the vault is replaced by the vault root.
     pub fn new_note_path(&self, folder: &Path, name: &str) -> PathBuf {
+        let folder = VaultPath::new(folder).unwrap_or_default();
+        let folder = folder.as_path();
         let name = name.trim().trim_start_matches('/');
         let mut parts: Vec<String> = name.split('/').map(markdown::sanitize_note_name).filter(|s| !s.is_empty()).collect();
         if parts.is_empty() {
@@ -422,8 +513,8 @@ impl Vault {
         Ok(rel.to_path_buf())
     }
 
-    pub fn create_folder(&mut self, rel: &Path) -> io::Result<()> {
-        fs::create_dir_all(self.abs(rel))?;
+    pub fn create_folder(&mut self, rel: &VaultPath) -> io::Result<()> {
+        fs::create_dir_all(self.abs(rel.as_path()))?;
         self.rescan();
         Ok(())
     }
@@ -451,12 +542,9 @@ impl Vault {
         fsutil::write_atomic(&abs, data.as_bytes())
     }
 
-    /// Rename/move a file or folder. When `update_links`, links in other notes are rewritten.
-    /// Returns the notes whose text was rewritten.
-    /// Move a file or a whole folder into the folder `into` (keeping its name). Links written as
-    /// a path (`[[Projects/Plan]]`, `[x](Projects/Plan.md)`) to anything that moved are changed to
-    /// the new place; links by name keep working as they are. Returns the new path and the notes
-    /// whose text changed.
+    /// Move a file or a whole folder into the folder `into` (keeping its name). Links are kept
+    /// pointing at what they pointed to (VAULT-015, VAULT-016). Returns the new path and the
+    /// notes whose text changed.
     pub fn move_into(&mut self, from: &Path, into: &Path) -> io::Result<(PathBuf, Vec<PathBuf>)> {
         let name = from.file_name().ok_or_else(|| io::Error::other("nothing to move"))?;
         let to = into.join(name);
@@ -469,92 +557,159 @@ impl Vault {
         if self.abs(&to).exists() {
             return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("“{}” already has a “{}”", if into.as_os_str().is_empty() { "the vault".into() } else { rel_to_string(into) }, name.to_string_lossy())));
         }
+        let changed = self.relocate(from, &to, true)?;
+        Ok((to, changed))
+    }
+
+    /// Rename a file or folder (`to` is its new vault path). When `update_links`, links are
+    /// kept pointing at what they pointed to (VAULT-013, VAULT-016). Returns the notes whose
+    /// text was rewritten.
+    pub fn rename(&mut self, from: &Path, to: &Path, update_links: bool) -> io::Result<Vec<PathBuf>> {
+        self.relocate(from, to, update_links)
+    }
+
+    /// The one rewrite routine for rename and move (VAULT-016). Before the change, every link
+    /// that resolves is noted with the file it points to (after the change: its new place if it
+    /// moved). After the change, each link that would now resolve somewhere else is rewritten to
+    /// the shortest form that resolves to that file. Links that were red are left alone.
+    fn relocate(&mut self, from: &Path, to: &Path, update_links: bool) -> io::Result<Vec<PathBuf>> {
+        if self.abs(to).exists() {
+            // never replace anything (a rename onto an empty folder would succeed otherwise)
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "a file with that name already exists"));
+        }
         let is_dir = self.abs(from).is_dir();
         let moved = |p: &Path| -> Option<PathBuf> {
             if p == from {
-                Some(to.clone())
+                Some(to.to_path_buf())
             } else if is_dir {
                 p.strip_prefix(from).ok().map(|rest| to.join(rest))
             } else {
                 None
             }
         };
-        // path links to what moves, before the move: (note now, its new path, [(range, new text)])
-        let mut edits: Vec<(PathBuf, PathBuf, Vec<(std::ops::Range<usize>, String)>)> = Vec::new();
-        for (src, n) in &self.notes {
-            let mut ranges = Vec::new();
-            for (l, r) in n.links.iter().zip(&n.resolved) {
-                let (Some(r), true) = (r, l.target.contains('/')) else { continue };
-                let Some(new) = moved(r) else { continue };
-                let old_text = &n.text[l.target_range.clone()];
-                let mut t = rel_to_string(&new);
-                if !old_text.to_ascii_lowercase().ends_with(".md") {
-                    t = markdown::strip_md_ext(&t).to_string();
+        let mut plan: Vec<RewritePlan> = Vec::new();
+        if update_links {
+            for (src, n) in &self.notes {
+                let links: Vec<(LinkSpan, PathBuf)> = n.links.iter().zip(&n.resolved).filter_map(|(l, r)| r.as_ref().map(|r| (l.clone(), moved(r).unwrap_or_else(|| r.clone())))).collect();
+                if !links.is_empty() {
+                    plan.push((moved(src).unwrap_or_else(|| src.clone()), n.text.clone(), links));
                 }
-                if l.markdown_style {
-                    t = t.replace(' ', "%20");
-                }
-                ranges.push((l.target_range.clone(), t));
-            }
-            if !ranges.is_empty() {
-                let now = moved(src).unwrap_or_else(|| src.clone());
-                edits.push((src.clone(), now, ranges));
             }
         }
-        if let Some(p) = self.abs(&to).parent() {
+        if let Some(p) = self.abs(to).parent() {
             fs::create_dir_all(p)?;
         }
-        fsutil::rename_noreplace(&self.abs(from), &self.abs(&to))?;
-        let mut changed = Vec::new();
-        for (src, now, mut ranges) in edits {
-            let Some(text) = self.notes.get(&src).map(|n| n.text.clone()) else { continue };
-            ranges.sort_by_key(|r| std::cmp::Reverse(r.0.start));
-            let mut out = text;
-            for (r, t) in ranges {
-                if out.is_char_boundary(r.start) && out.is_char_boundary(r.end) && r.end <= out.len() {
-                    out.replace_range(r, &t);
-                }
-            }
-            fsutil::write_atomic(&self.abs(&now), out.as_bytes())?;
-            changed.push(now);
-        }
+        fsutil::rename_noreplace(&self.abs(from), &self.abs(to))?;
         self.rescan();
-        Ok((to, changed))
+        let mut changed = Vec::new();
+        for (src, text, links) in plan {
+            // changed on disk in the meantime: leave it alone rather than edit the wrong place
+            if self.notes.get(&src).map(|n| n.text != text).unwrap_or(true) {
+                continue;
+            }
+            let edits: Vec<_> = links
+                .iter()
+                .filter(|(l, want)| self.resolve(&l.target, Some(&src)).as_deref() != Some(want.as_path()))
+                .map(|(l, want)| {
+                    let written = self.link_text_for(&markdown::written_target(&text, l), want, &src);
+                    (l.target_range.clone(), markdown::replace_target(&text, l, &written))
+                })
+                .collect();
+            if self.rewrite_note(&src, &text, edits)? {
+                changed.push(src);
+            }
+        }
+        Ok(changed)
     }
 
-    pub fn rename(&mut self, from: &Path, to: &Path, update_links: bool) -> io::Result<Vec<PathBuf>> {
-        let abs_from = self.abs(from);
-        let abs_to = self.abs(to);
-        if abs_to.exists() {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "a file with that name already exists"));
-        }
-        if let Some(p) = abs_to.parent() {
-            fs::create_dir_all(p)?;
-        }
-        let old_entry = self.file(from).cloned();
-        // Who links here, before the move.
-        let linkers: Vec<PathBuf> = if update_links && old_entry.is_some() { self.notes.iter().filter(|(_, n)| n.resolved.iter().any(|r| r.as_deref() == Some(from))).map(|(p, _)| p.clone()).collect() } else { vec![] };
-        fsutil::rename_noreplace(&abs_from, &abs_to)?;
-        let mut changed = Vec::new();
-        if let Some(old) = old_entry {
-            let new_name = link_name_of(to, old.kind);
-            if new_name != old.link_name {
-                for src in linkers {
-                    let src_now = if src == from { to.to_path_buf() } else { src.clone() };
-                    let text = match self.notes.get(&src) {
-                        Some(n) => n.text.clone(),
-                        None => continue,
-                    };
-                    let (new_text, n) = markdown::rename_links(&text, &old.link_name, &new_name);
-                    if n > 0 {
-                        fsutil::write_atomic(&self.abs(&src_now), new_text.as_bytes())?;
-                        changed.push(src_now);
-                    }
-                }
+    /// How a link that was written as `written` in the note `src` should be written so it
+    /// resolves to `want`: the shortest such form. A name stays a name (unless another file of
+    /// that name would win), a path keeps its folder part, a `./`/`../` path stays relative,
+    /// and a `.md` is kept or left out as before.
+    pub fn link_text_for(&self, written: &str, want: &Path, src: &Path) -> String {
+        let had_md = written.len() > 3 && written.is_char_boundary(written.len() - 3) && written[written.len() - 3..].eq_ignore_ascii_case(".md");
+        let shape = |s: String| if had_md { s } else { markdown::strip_md_ext(&s).to_string() };
+        let ok = |s: &str| self.resolve(s, Some(src)).as_deref() == Some(want);
+        let full = shape(rel_to_string(want));
+        if is_relative_link(written.trim()) {
+            let rel = shape(relative_link(src.parent().unwrap_or(Path::new("")), want));
+            if ok(&rel) {
+                return rel;
+            }
+        } else if !written.contains('/') || !full.contains('/') {
+            // by name: the file name alone, if that finds the right file from here
+            let name = shape(want.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+            if ok(&name) {
+                return name;
             }
         }
-        self.rescan();
-        Ok(changed)
+        if full.contains('/') {
+            full
+        } else {
+            // a note at the top of the vault, whose name finds another file: `/Plan`
+            format!("/{full}")
+        }
+    }
+
+    /// Apply `edits` (range in `text` -> new text) to the note `rel`, whose text is `text`, write
+    /// it in one step and update the index. Returns whether anything changed.
+    fn rewrite_note(&mut self, rel: &Path, text: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> io::Result<bool> {
+        edits.sort_by_key(|e| std::cmp::Reverse(e.0.start));
+        let mut out = text.to_string();
+        for (r, t) in edits {
+            if r.end <= out.len() && out.is_char_boundary(r.start) && out.is_char_boundary(r.end) {
+                out.replace_range(r, &t);
+            }
+        }
+        if out == text {
+            return Ok(false);
+        }
+        let abs = self.abs(rel);
+        fsutil::write_atomic(&abs, out.as_bytes())?;
+        let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
+        self.set_note_text(rel, &out);
+        if let Some(n) = self.notes.get_mut(rel) {
+            n.mtime = mtime;
+        }
+        Ok(true)
+    }
+
+    /// Fix the red path links of the note `rel` whose file name exists exactly once in the vault
+    /// (LINK-012): each is rewritten to point at that file. Returns how many were fixed.
+    pub fn auto_fix_links(&mut self, rel: &Path) -> io::Result<usize> {
+        let Some(n) = self.notes.get(rel) else { return Ok(0) };
+        let text = n.text.clone();
+        let mut edits = Vec::new();
+        for (l, r) in n.links.iter().zip(&n.resolved) {
+            if r.is_some() {
+                continue;
+            }
+            if let [only] = self.fix_candidates(&l.target, Some(rel)).as_slice() {
+                let written = self.link_text_for(&markdown::written_target(&text, l), only, rel);
+                edits.push((l.target_range.clone(), markdown::replace_target(&text, l, &written)));
+            }
+        }
+        let count = edits.len();
+        Ok(if self.rewrite_note(rel, &text, edits)? { count } else { 0 })
+    }
+
+    /// Point every red link with the target `target` in the note `rel` at the file `to` (the
+    /// "Fix link" action of LINK-012). Returns how many links changed.
+    pub fn fix_link(&mut self, rel: &Path, target: &str, to: &Path) -> io::Result<usize> {
+        let Some(n) = self.notes.get(rel) else { return Ok(0) };
+        let text = n.text.clone();
+        let edits: Vec<_> = n
+            .links
+            .iter()
+            .zip(&n.resolved)
+            .filter(|(l, r)| r.is_none() && l.target == target)
+            .map(|(l, _)| {
+                let written = self.link_text_for(&markdown::written_target(&text, l), to, rel);
+                (l.target_range.clone(), markdown::replace_target(&text, l, &written))
+            })
+            .collect();
+        let count = edits.len();
+        Ok(if self.rewrite_note(rel, &text, edits)? { count } else { 0 })
     }
 
     /// Move a file or folder to `<vault>/.trash/` instead of deleting it for good.
@@ -794,6 +949,195 @@ mod tests {
         let changed = v.rescan();
         assert_eq!(changed, vec![PathBuf::from("Daily log.md")]);
         assert_eq!(v.notes[Path::new("Daily log.md")].links[0].target, "New");
+        let _ = fs::remove_dir_all(&d);
+    }
+    /// A vault made of `(path, text)` files.
+    fn vault_with(tag: &str, files: &[(&str, &str)]) -> (Vault, PathBuf) {
+        let d = temp_vault(tag);
+        for (p, t) in files {
+            let abs = d.join(p);
+            fs::create_dir_all(abs.parent().unwrap()).unwrap();
+            fs::write(abs, t).unwrap();
+        }
+        (Vault::open(&d).unwrap(), d)
+    }
+
+    fn text(v: &Vault, rel: &str) -> String {
+        v.notes[Path::new(rel)].text.clone()
+    }
+
+    fn res(v: &Vault, target: &str, from: &str) -> Option<String> {
+        v.resolve(target, Some(Path::new(from))).map(|p| rel_to_string(&p))
+    }
+
+    // spec: LINK-002
+    #[test]
+    fn name_ties_prefer_same_folder_then_fewest_levels_then_path() {
+        let (v, d) = vault_with("ties", &[("b/Plan.md", ""), ("a/Plan.md", ""), ("x/y/Plan.md", ""), ("x/y/Note.md", ""), ("Top.md", ""), ("q/Note.md", "")]);
+        assert_eq!(res(&v, "plan", "x/y/Note.md").as_deref(), Some("x/y/Plan.md"), "same folder first");
+        assert_eq!(res(&v, "Plan", "Top.md").as_deref(), Some("a/Plan.md"), "then fewest levels, then path");
+        assert_eq!(res(&v, "Plan.md", "Top.md").as_deref(), Some("a/Plan.md"), ".md is ignored");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-003, LINK-010
+    #[test]
+    fn path_links_resolve_from_the_root_and_never_fall_back_to_the_name() {
+        let (v, d) = vault_with("paths", &[("Projects/Plan.md", ""), ("Projects/Sub/Plan.md", ""), ("Sub/Plan.md", ""), ("Projects/Note.md", ""), ("Top.md", "")]);
+        // from the vault root first, even when the linking note's folder has a match too
+        assert_eq!(res(&v, "Sub/Plan", "Projects/Note.md").as_deref(), Some("Sub/Plan.md"));
+        assert_eq!(res(&v, "projects/plan.md", "Top.md").as_deref(), Some("Projects/Plan.md"), "case and .md");
+        assert_eq!(res(&v, "/Projects/Plan", "Top.md").as_deref(), Some("Projects/Plan.md"));
+        // the linking note's folder only when the root path does not exist
+        assert_eq!(res(&v, "Sub/Plan", "Top.md").as_deref(), Some("Sub/Plan.md"));
+        fs::remove_dir_all(d.join("Sub")).unwrap();
+        let mut v = v;
+        v.rescan();
+        assert_eq!(res(&v, "Sub/Plan", "Projects/Note.md").as_deref(), Some("Projects/Sub/Plan.md"));
+        // no fallback to the name: `Archive/Plan` is red although notes called Plan exist
+        assert_eq!(res(&v, "Archive/Plan", "Top.md"), None);
+        assert_eq!(res(&v, "/Sub/Plan", "Projects/Note.md"), None, "a leading / is the vault root only");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-003, LINK-010
+    #[test]
+    fn dot_paths_resolve_relative_to_the_linking_note() {
+        let (v, d) = vault_with("dots", &[("a/b/Note.md", ""), ("a/Other.md", ""), ("a/b/Same.md", ""), ("Same.md", ""), ("Root.md", "")]);
+        assert_eq!(res(&v, "../Other", "a/b/Note.md").as_deref(), Some("a/Other.md"));
+        assert_eq!(res(&v, "./Same", "a/b/Note.md").as_deref(), Some("a/b/Same.md"));
+        assert_eq!(res(&v, "../../Root.md", "a/b/Note.md").as_deref(), Some("Root.md"));
+        assert_eq!(res(&v, "./x/../Same", "a/b/Note.md").as_deref(), Some("a/b/Same.md"), "`..` in the middle");
+        assert_eq!(res(&v, "../../../Root", "a/b/Note.md"), None, "above the vault is red");
+        assert_eq!(res(&v, "./Other", "a/b/Note.md"), None, "no fallback to the name");
+        assert_eq!(normalize_path(Path::new("a/b"), "../../.."), None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-008
+    #[test]
+    fn ambiguous_names_are_explained() {
+        let (v, d) = vault_with("ambig", &[("Projects/Plan.md", ""), ("Archive/Old/Plan.md", ""), ("Solo.md", ""), ("Top.md", "")]);
+        let (n, opens) = v.ambiguity("plan", Some(Path::new("Top.md"))).unwrap();
+        assert_eq!((n, rel_to_string(&opens).as_str()), (2, "Projects/Plan.md"));
+        assert_eq!(v.link_hint("Plan", Some(Path::new("Top.md"))).unwrap(), "2 notes are called “Plan” – opens Projects/Plan");
+        assert_eq!(v.ambiguity("Solo", None), None);
+        assert_eq!(v.link_hint("Solo", None), None);
+        assert_eq!(v.ambiguity("Projects/Plan", None), None, "a path is never ambiguous");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-013, VAULT-016
+    #[test]
+    fn rename_rewrites_links_by_what_they_resolve_to() {
+        let (mut v, d) = vault_with("byres", &[("Projects/Old.md", ""), ("Archive/Old.md", ""), ("Projects/Index.md", "[[Old]] [[Archive/Old]] [[Projects/Old]] [[ÄRGER]]"), ("Ärger.md", ""), ("Top.md", "[[Projects/Old]] [[ärger|a]]")]);
+        // `[[Old]]` in Projects/Index means Projects/Old (same folder); `[[Archive/Old]]` does not
+        let changed = v.rename(Path::new("Projects/Old.md"), Path::new("Projects/New.md"), true).unwrap();
+        assert_eq!(text(&v, "Projects/Index.md"), "[[New]] [[Archive/Old]] [[Projects/New]] [[ÄRGER]]");
+        assert_eq!(text(&v, "Top.md"), "[[Projects/New]] [[ärger|a]]");
+        assert_eq!(changed.len(), 2);
+        // Unicode case: `[[ÄRGER]]` and `[[ärger]]` point at Ärger.md
+        v.rename(Path::new("Ärger.md"), Path::new("Groll.md"), true).unwrap();
+        assert_eq!(text(&v, "Projects/Index.md"), "[[New]] [[Archive/Old]] [[Projects/New]] [[Groll]]");
+        assert_eq!(text(&v, "Top.md"), "[[Projects/New]] [[Groll|a]]");
+        // the setting off: nothing is rewritten
+        v.rename(Path::new("Groll.md"), Path::new("Wut.md"), false).unwrap();
+        assert!(text(&v, "Top.md").contains("[[Groll|a]]"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-016
+    #[test]
+    fn rename_keeps_folder_alias_heading_brackets_and_md() {
+        let (mut v, d) = vault_with("keep", &[("Projects/Old.md", ""), ("Top.md", "[[Projects/Old#Goal|the plan]] [[Projects/Old.md]] ![[Projects/Old]] [x](Projects/Old.md#Intro) [y](<Projects/Old.md>) [z](Projects/Old)")]);
+        v.rename(Path::new("Projects/Old.md"), Path::new("Projects/New Plan.md"), true).unwrap();
+        assert_eq!(text(&v, "Top.md"), "[[Projects/New Plan#Goal|the plan]] [[Projects/New Plan.md]] ![[Projects/New Plan]] [x](Projects/New%20Plan.md#Intro) [y](<Projects/New Plan.md>) [z](Projects/New%20Plan)");
+        let n = &v.notes[Path::new("Top.md")];
+        assert!(n.resolved.iter().all(|r| r.as_deref() == Some(Path::new("Projects/New Plan.md"))), "every link still finds the note");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-016
+    #[test]
+    fn rename_keeps_other_links_pointing_where_they_did() {
+        // renaming Projects/Draft to Plan would make `[[Plan]]` in Projects/ find it instead of
+        // the top-level Plan: that link becomes a path
+        let (mut v, d) = vault_with("steal", &[("Plan.md", ""), ("Projects/Draft.md", ""), ("Projects/Index.md", "[[Plan]] [[Draft]]"), ("Top.md", "[[Draft]] [[Plan]]")]);
+        v.rename(Path::new("Projects/Draft.md"), Path::new("Projects/Plan.md"), true).unwrap();
+        assert_eq!(text(&v, "Projects/Index.md"), "[[/Plan]] [[Plan]]");
+        // from the top level, `Plan` still finds Plan.md; the renamed note needs its folder
+        assert_eq!(text(&v, "Top.md"), "[[Projects/Plan]] [[Plan]]");
+        assert_eq!(res(&v, "/Plan", "Projects/Index.md").as_deref(), Some("Plan.md"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-016
+    #[test]
+    fn folder_rename_rewrites_links_to_its_contents() {
+        let (mut v, d) = vault_with("folder", &[("Projects/Plan.md", "[[./Sub/Deep]]"), ("Projects/Sub/Deep.md", ""), ("Top.md", "[[Projects/Plan]] [[Plan]] [x](Projects/Sub/Deep.md) [[Projects]]")]);
+        let changed = v.rename(Path::new("Projects"), Path::new("Work"), true).unwrap();
+        assert_eq!(text(&v, "Top.md"), "[[Work/Plan]] [[Plan]] [x](Work/Sub/Deep.md) [[Projects]]");
+        assert_eq!(text(&v, "Work/Plan.md"), "[[./Sub/Deep]]", "relative links inside the folder still work");
+        assert_eq!(changed, vec![PathBuf::from("Top.md")]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-015, VAULT-016
+    #[test]
+    fn moving_a_note_keeps_its_relative_links_working() {
+        let (mut v, d) = vault_with("relmove", &[("a/Note.md", "[[../Root]] [[./Sib]] [[Sib]] [[a/Sib]]"), ("a/Sib.md", ""), ("Root.md", ""), ("b/Sib.md", "")]);
+        let (to, changed) = v.move_into(Path::new("a/Note.md"), Path::new("b")).unwrap();
+        assert_eq!(to, PathBuf::from("b/Note.md"));
+        // `[[Sib]]` would now find b/Sib: it keeps pointing at a/Sib with a path
+        assert_eq!(text(&v, "b/Note.md"), "[[../Root]] [[../a/Sib]] [[a/Sib]] [[a/Sib]]");
+        assert_eq!(changed, vec![PathBuf::from("b/Note.md")]);
+        // into a deeper folder
+        v.create_folder(&VaultPath::parse("c/d").unwrap()).unwrap();
+        v.move_into(Path::new("b/Note.md"), Path::new("c/d")).unwrap();
+        assert_eq!(text(&v, "c/d/Note.md"), "[[../../Root]] [[../../a/Sib]] [[a/Sib]] [[a/Sib]]");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-014
+    #[test]
+    fn rename_never_replaces_an_existing_file_or_folder() {
+        let (mut v, d) = vault_with("noreplace", &[("A.md", "a"), ("B.md", "b")]);
+        fs::create_dir_all(d.join("Empty")).unwrap();
+        assert!(v.rename(Path::new("A.md"), Path::new("B.md"), true).is_err());
+        v.rescan();
+        assert!(v.rename(Path::new("A.md"), Path::new("Empty"), true).is_err());
+        assert_eq!(fs::read_to_string(d.join("B.md")).unwrap(), "b");
+        assert_eq!(fs::read_to_string(d.join("A.md")).unwrap(), "a");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-012
+    #[test]
+    fn broken_path_links_with_one_candidate_are_fixed() {
+        let (mut v, d) = vault_with("fix1", &[("Projects/Plan.md", ""), ("Notes/Index.md", "[[Archive/Plan#Goal|plan]] [x](../Archive/Plan.md) [[Archive/Gone]] [[Plan]]")]);
+        let rel = Path::new("Notes/Index.md");
+        assert_eq!(v.fix_candidates("Archive/Plan", Some(rel)), vec![PathBuf::from("Projects/Plan.md")]);
+        assert_eq!(v.auto_fix_links(rel).unwrap(), 2);
+        assert_eq!(text(&v, "Notes/Index.md"), "[[Projects/Plan#Goal|plan]] [x](../Projects/Plan.md) [[Archive/Gone]] [[Plan]]");
+        assert_eq!(fs::read_to_string(d.join(rel)).unwrap(), text(&v, "Notes/Index.md"), "written to disk");
+        assert_eq!(v.auto_fix_links(rel).unwrap(), 0, "nothing left to fix");
+        assert!(fs::read_dir(d.join("Notes")).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains("shale-tmp")), "no temporary file left");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-012
+    #[test]
+    fn broken_path_links_with_several_candidates_are_left_for_the_user() {
+        let (mut v, d) = vault_with("fix2", &[("a/Plan.md", ""), ("b/Plan.md", ""), ("Index.md", "[[Archive/Plan]]")]);
+        let rel = Path::new("Index.md");
+        assert_eq!(v.auto_fix_links(rel).unwrap(), 0);
+        assert_eq!(text(&v, "Index.md"), "[[Archive/Plan]]");
+        assert_eq!(v.fix_candidates("Archive/Plan", Some(rel)).len(), 2);
+        assert!(v.link_hint("Archive/Plan", Some(rel)).unwrap().contains("Fix link"));
+        // the user picks one
+        assert_eq!(v.fix_link(rel, "Archive/Plan", Path::new("b/Plan.md")).unwrap(), 1);
+        assert_eq!(text(&v, "Index.md"), "[[b/Plan]]");
+        assert_eq!(v.fix_candidates("b/Plan", Some(rel)), Vec::<PathBuf>::new());
         let _ = fs::remove_dir_all(&d);
     }
 }

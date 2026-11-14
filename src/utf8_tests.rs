@@ -44,7 +44,10 @@ fn text_functions_never_cut_a_character() {
         let _ = markdown::link_safe_name(&s);
         let _ = markdown::sanitize_note_name(&s);
         let _ = markdown::fuzzy_score("mü", &s);
-        let _ = markdown::rename_links(&s, "Müll", "Müllabfuhr");
+        for l in markdown::find_links(&s) {
+            let _ = markdown::written_target(&s, &l);
+            let _ = markdown::replace_target(&s, &l, "Müllabfuhr");
+        }
         for l in s.lines() {
             let _ = markdown::parse_task_line(l);
             let _ = markdown::heading_level(l);

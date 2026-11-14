@@ -44,7 +44,7 @@ impl ShaleApp {
 
     /// Tags to offer: the recently used ones, then the vault's most used ones.
     pub fn tag_choices(&self) -> Vec<String> {
-        let mut out: Vec<String> = self.cfg.recent_tags.clone();
+        let mut out: Vec<String> = self.vdata.state.recent_tags.clone();
         if let Some(v) = &self.vault {
             let mut all = v.all_tags();
             all.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
@@ -66,7 +66,7 @@ impl ShaleApp {
             return;
         };
         import::mark_duplicates(v, &mut items);
-        import::find_people(v, &self.cfg.people_dir, &mut items);
+        import::find_people(v, &self.vdata.settings.people_dir, &mut items);
         if let Some(Modal::Import(mut d)) = self.modal.take() {
             d.items.extend(items);
             d.notes.extend(notes);
@@ -85,9 +85,9 @@ impl ShaleApp {
             Some((f, note)) => (rel_to_string(&f), note.clone(), note.is_some()),
             None => {
                 let open_note = self.current_path().filter(|p| p.extension().map(|e| e == "md").unwrap_or(false));
-                let mut folder = if self.cfg.last_import_folder.is_empty() { rel_to_string(&self.current_folder()) } else { self.cfg.last_import_folder.clone() };
+                let mut folder = if self.vdata.state.last_import_folder.is_empty() { rel_to_string(&self.current_folder()) } else { self.vdata.state.last_import_folder.clone() };
                 // not into the contacts because a contact note happens to be open
-                let pd = self.cfg.people_dir.trim().trim_matches('/').to_lowercase();
+                let pd = self.vdata.settings.people_dir.trim().trim_matches('/').to_lowercase();
                 if !pd.is_empty() && (folder.to_lowercase() == pd || folder.to_lowercase().starts_with(&format!("{pd}/"))) {
                     folder.clear();
                 }
@@ -95,7 +95,7 @@ impl ShaleApp {
             }
         };
         let mut d = Box::new(ImportDialog::new(items, notes, folder, String::new(), link_into, link_on));
-        d.people_dir = self.cfg.people_dir.clone();
+        d.people_dir = self.vdata.settings.people_dir.clone();
         self.suggest_tags(&mut d);
         self.modal = Some(Modal::Import(d));
     }
@@ -157,7 +157,7 @@ impl ShaleApp {
 
     /// A contact note for `[[p Name` (made in the people folder).
     pub fn create_person(&mut self, name: &str) {
-        let dir = self.cfg.people_dir.clone();
+        let dir = self.vdata.settings.people_dir.clone();
         let Some(v) = &mut self.vault else { return };
         let p = crate::people::Person { name: name.trim().to_string(), email: String::new(), role: crate::people::Role::From, existing: None, on: true };
         match crate::people::ensure_note(v, &dir, &p) {
@@ -177,7 +177,7 @@ impl ShaleApp {
                     import::mark_duplicates(v, &mut items);
                 }
                 if let Some(v) = &self.vault {
-                    import::find_people(v, &self.cfg.people_dir, &mut items);
+                    import::find_people(v, &self.vdata.settings.people_dir, &mut items);
                 }
                 if !items.is_empty() {
                     d.add_path.clear();
@@ -196,7 +196,7 @@ impl ShaleApp {
                     }
                 };
                 let tags = import::parse_tags(&d.tags);
-                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.cfg.people_dir.clone() };
+                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.vdata.settings.people_dir.clone() };
                 let Some(v) = &mut self.vault else { return true };
                 let (made, errors) = import::import(v, &d.items, &opts);
                 if made.is_empty() {
@@ -209,12 +209,12 @@ impl ShaleApp {
                     }
                 }
                 // remember the folder and tags for next time
-                self.cfg.last_import_folder = rel_to_string(&folder);
+                self.vdata.state.last_import_folder = rel_to_string(&folder);
                 for t in tags.iter().rev() {
-                    self.cfg.recent_tags.retain(|o| !o.eq_ignore_ascii_case(t));
-                    self.cfg.recent_tags.insert(0, t.clone());
+                    self.vdata.state.recent_tags.retain(|o| !o.eq_ignore_ascii_case(t));
+                    self.vdata.state.recent_tags.insert(0, t.clone());
                 }
-                self.cfg.recent_tags.truncate(30);
+                self.vdata.state.recent_tags.truncate(30);
                 self.save_config();
                 let place = if folder.as_os_str().is_empty() { "the vault".to_string() } else { format!("“{}”", rel_to_string(&folder)) };
                 self.toast(if made.len() == 1 { format!("Imported 1 note into {place}") } else { format!("Imported {} notes into {place}", made.len()) });

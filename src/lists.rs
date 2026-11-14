@@ -2,7 +2,8 @@
 //! - Enter continues a list (`- `, `* `, `+ `, `1. `, `1) `, with or without `[ ]`),
 //!   and Enter on an empty item ends the list (or outdents it first).
 //! - Tab / Shift+Tab indent / outdent list items and raise / lower heading levels.
-//!   Also finds web links (`[name](https://…)` and bare `https://…`).
+//!
+//! Also finds web links (`[name](https://…)` and bare `https://…`).
 
 use std::ops::Range;
 
@@ -411,6 +412,7 @@ fn normalize_list_around(lines: &mut [String], a: usize, b: usize) {
     }
     // indentation: at most one level deeper than the item above
     let mut prev_indent: Option<usize> = None;
+    #[allow(clippy::needless_range_loop)] // lines[i] is replaced inside the loop
     for i in start..=end {
         let Some(p) = list_prefix(&lines[i]) else {
             prev_indent = None;

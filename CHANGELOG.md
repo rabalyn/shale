@@ -29,15 +29,38 @@ The release page of each version on GitHub shows its section from this file.
 - **Vim-style editing** (Settings, off by default): notes open in normal mode with h j k l,
   w b W B, 0 $, gg G, `:line`, `/search` with n / N, i a I A o O to type, x, visual mode (v, V)
   with d to cut and y to copy to the clipboard, and p to paste.
+- **Git sync**: connect a vault to a git repository in Settings (or `git init` it yourself) and
+  Shale commits, merges and pushes on its own, every few minutes and on "Sync now". Conflicts
+  become conflict copies next to the note; nothing is force-pushed or overwritten. The interval
+  and a commit message prefix / suffix are settings.
+- **Vault settings live in the vault**: `.shale/settings.json` (people folder, git sync) and
+  `.shale/state.json` (open notes, last import folder, recent tags), versioned and upgraded on
+  load, so a synced vault behaves the same everywhere. They move there from the global settings
+  on the first start.
 
 ### Fixed
+
+- A settings file that can't be read is no longer replaced by defaults on the next save (which
+  lost the calendars): it is kept as `config.json.broken-<date>` and you are told. Settings from
+  a newer Shale are no longer overwritten.
 
 - Opening a drawing with arrows no longer rewrites its file; only an edit does.
 - A drawing file that can't be read now opens read-only with the reason, instead of as an empty
   drawing that would replace the file on the first edit.
+- Renaming a note rewrites only the links that really pointed to it, keeps their folder part
+  (`[[Projects/Old]]` → `[[Projects/New]]`), their `#heading` in markdown links, `<…>` and
+  `.md`, and compares names with Unicode case. Renaming a **folder** now updates links to the
+  notes inside it, and moving a note keeps its own `../` links working.
+- A rename can no longer move a note out of the vault (`../../x`, `/tmp/x`), and a new folder
+  name can't point outside it either.
 
 ### Changed
 
+- **Path links are stricter**: `[[Archive/Plan]]` is now red when `Archive/Plan.md` does not
+  exist, instead of quietly opening some other note called “Plan”. `./` and `../` links work
+  relative to the note. If exactly one note has that name, the link is fixed automatically
+  when you open the note; if several do, the Outgoing links panel offers “Fix link”.
+- The tooltip of a link says when several notes share its name and which one it opens.
 - Dragging something Shale can't take (like a browser tab) across the window no longer leaves a
   message behind; a hint at the pointer says so while it is over the window.
 

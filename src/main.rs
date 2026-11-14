@@ -20,6 +20,7 @@ mod editor;
 mod excalidraw_md;
 mod export_dialog;
 mod fsutil;
+mod gitsync;
 mod graph;
 mod imap_client;
 #[cfg(test)]
@@ -51,6 +52,8 @@ mod theme;
 #[cfg(test)]
 mod utf8_tests;
 mod vault;
+mod vault_path;
+mod vault_state;
 mod vim;
 #[cfg(target_os = "linux")]
 mod wl_drop;

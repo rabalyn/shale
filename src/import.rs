@@ -453,18 +453,8 @@ pub fn parse_tags(s: &str) -> Vec<String> {
 
 /// A folder typed in the dialog → a safe vault-relative folder.
 pub fn clean_folder(s: &str) -> Result<PathBuf, String> {
-    let mut p = PathBuf::new();
-    for part in s.split(['/', '\\']) {
-        let part = part.trim();
-        if part.is_empty() || part == "." {
-            continue;
-        }
-        if part == ".." {
-            return Err("The folder can't go above the vault (“..”).".into());
-        }
-        p.push(crate::markdown::sanitize_note_name(part));
-    }
-    Ok(p)
+    // the one check for typed vault paths (VAULT-018)
+    crate::vault_path::VaultPath::parse(s).map(|p| p.into_path_buf()).map_err(|e| e.to_string())
 }
 
 fn yaml(s: &str) -> String {
