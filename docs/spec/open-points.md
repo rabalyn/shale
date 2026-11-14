@@ -9,8 +9,8 @@ here.
 | # | Spec IDs | What | Why first | ADR |
 |---|---|---|---|---|
 | 1 | ~~DATA-004~~ | ~~Atomic writes everywhere~~ (done, DATA-004 and DATA-010) | A crash mid-write is the only failure that destroys a whole note | [0003](../decisions/0003-data-safety.md) |
-| 2 | DATA-003, DATA-002 | Conflict copy instead of silently overwriting outside changes; reload drawings too | Silent lost updates with Syncthing / git / a second editor | 0003 |
-| 3 | DATA-008, DATA-009 | Unreadable notes read-only; never swallow write errors | First keystroke can destroy a non-UTF-8 file | 0003 |
+| 2 | ~~DATA-003, DATA-002~~ | ~~Conflict copy instead of silently overwriting outside changes; reload drawings too~~ (done) | Silent lost updates with Syncthing / git / a second editor | 0003 |
+| 3 | ~~DATA-008, DATA-009~~ | ~~Unreadable notes read-only; never swallow write errors~~ (done) | First keystroke can destroy a non-UTF-8 file | 0003 |
 | 4 | ~~VAULT-018~~ | One checked vault path type at every user input | Rename can move a note out of the vault | [0004](../decisions/0004-link-resolution-and-paths.md) |
 | 5 | ~~VAULT-016, VAULT-013~~ | One link rewrite routine by resolution (folder rename included) | Rename corrupts path links and rewrites wrong links | 0004 |
 | 6 | ~~LINK-010, LINK-008~~ | Explicit resolution rules, no silent name fallback, show ambiguity | Blue links that open the wrong note | 0004 |
@@ -26,7 +26,7 @@ here.
 | ID | Question | Notes |
 |---|---|---|
 | OPEN-001 | Accept ADRs 0002–0006 as a whole, or one by one? | All are *Proposed*. |
-| OPEN-002 | Conflict handling: conflict copy (proposed) or a merge view later? | A copy is simple and loses nothing; a merge view could build on it. |
+| ~~OPEN-002~~ | ~~Conflict handling: conflict copy (proposed) or a merge view later?~~ | Decided 2026-11-14 by the owner's acceptance of [ADR-0003](../decisions/0003-data-safety.md): a conflict copy (DATA-003). A merge view could still build on it later. |
 | ~~OPEN-003~~ | ~~Offer "fix this link" for red path links whose name exists elsewhere (after LINK-010 turns them red)?~~ | Decided 2026-11-14: links are fixed automatically, without asking, whenever the target is unambiguous; "Fix link" is offered only where it is not (LINK-012). |
 | OPEN-004 | Should the media folder (`z_media/<YYYY>/<MM>/`) become a vault setting? | Today it is fixed; Obsidian users may expect their attachment folder. |
 | OPEN-005 | Symbolic links in vaults: follow or show? | VAULT-007/008. Following needs loop and escape guards. |

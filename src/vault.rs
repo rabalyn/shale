@@ -47,6 +47,61 @@ pub struct NoteIndex {
     pub resolved: Vec<Option<PathBuf>>,
     pub tasks: Vec<Task>,
     pub tags: Vec<String>,
+    /// Why the file could not be read (invalid UTF-8, no permission). `text` is empty then, and
+    /// the file is never written (DATA-008).
+    pub unreadable: Option<String>,
+}
+
+/// A fingerprint of a file's content (length and a 64-bit hash). A buffer remembers the stamp of
+/// what it loaded or saved last; a different stamp on disk at save time means another program
+/// changed the file (DATA-003). Content, not the modification time, so a sync tool that only
+/// touches a file causes no conflict, and a change within the same clock tick is still seen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Stamp {
+    len: u64,
+    hash: u64,
+}
+
+impl Stamp {
+    pub fn of_bytes(bytes: &[u8]) -> Stamp {
+        // FNV-1a, 64 bit
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in bytes {
+            h ^= u64::from(*b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        Stamp { len: bytes.len() as u64, hash: h }
+    }
+
+    pub fn of(text: &str) -> Stamp {
+        Stamp::of_bytes(text.as_bytes())
+    }
+}
+
+/// The result of [`Vault::save_checked`].
+#[derive(Debug)]
+pub enum Saved {
+    /// The file now holds the text (or already did).
+    Written(Stamp),
+    /// The file had been changed by another program. The buffer's text is in `copy`; the other
+    /// program's version stays at the path and is `theirs` (`Err` with the reason when it is not
+    /// readable text).
+    Conflict { copy: PathBuf, theirs: Result<String, String> },
+}
+
+/// Write `bytes` as `Name (conflict YYYY-MM-DD HHMM).ext` next to `rel` (under `root`), with a
+/// number added when the name is taken. Never replaces a file. Returns the path (relative).
+pub fn write_conflict_copy(root: &Path, rel: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
+    let stamp = crate::gitsync::stamp_now();
+    let mut tried: Vec<PathBuf> = Vec::new();
+    loop {
+        let copy = crate::gitsync::conflict_name(rel, &stamp, |p| root.join(p).exists() || tried.contains(&p.to_path_buf()));
+        match fsutil::create_new(&root.join(&copy), bytes) {
+            Ok(()) => return Ok(copy),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => tried.push(copy),
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -62,6 +117,9 @@ pub struct Vault {
     path_index: HashMap<String, PathBuf>,
     /// Bumped whenever anything in the index changes; UI caches key off this.
     pub generation: u64,
+    /// Notes the last rename or move could not update: (path after the change, reason). Reset by
+    /// every rename and move; the notes that were updated are the call's result (VAULT-016).
+    pub failed_rewrites: Vec<(PathBuf, String)>,
 }
 
 pub fn rel_to_string(p: &Path) -> String {
@@ -109,6 +167,18 @@ fn relative_link(from_dir: &Path, to: &Path) -> String {
     } else {
         format!("./{s}")
     }
+}
+
+/// `edits` (range in `text` -> new text) applied to `text`; ranges that don't fit are skipped.
+fn apply_edits(text: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> String {
+    edits.sort_by_key(|e| std::cmp::Reverse(e.0.start));
+    let mut out = text.to_string();
+    for (r, t) in edits {
+        if r.end <= out.len() && out.is_char_boundary(r.start) && out.is_char_boundary(r.end) {
+            out.replace_range(r, &t);
+        }
+    }
+    out
 }
 
 fn kind_of(path: &Path) -> FileKind {
@@ -175,14 +245,20 @@ impl Vault {
             seen.insert(f.rel.clone());
             let abs = self.root.join(&f.rel);
             let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
-            let up_to_date = self.notes.get(&f.rel).map(|n| n.mtime == mtime && mtime.is_some()).unwrap_or(false);
+            // a note that could not be read is tried again every time (the cause may be gone)
+            let up_to_date = self.notes.get(&f.rel).map(|n| n.mtime == mtime && mtime.is_some() && n.unreadable.is_none()).unwrap_or(false);
             if !up_to_date {
-                let text = fsutil::read_to_string(&abs).unwrap_or_default();
-                let differs = self.notes.get(&f.rel).map(|n| n.text != text).unwrap_or(true);
+                // never an empty text for a file that could not be read (DATA-008)
+                let (text, unreadable) = match fsutil::read_to_string(&abs) {
+                    Ok(t) => (t, None),
+                    Err(e) => (String::new(), Some(e.to_string())),
+                };
+                let differs = self.notes.get(&f.rel).map(|n| n.text != text || n.unreadable != unreadable).unwrap_or(true);
                 let entry = self.notes.entry(f.rel.clone()).or_default();
                 entry.mtime = mtime;
                 if differs {
                     entry.text = text;
+                    entry.unreadable = unreadable;
                     changed.push(f.rel.clone());
                 }
             }
@@ -502,13 +578,14 @@ impl Vault {
         candidate
     }
 
-    /// Create a file with content; makes parent folders. Returns its relative path.
+    /// Create a file with content; makes parent folders. Never replaces an existing file
+    /// (`AlreadyExists`). Returns its relative path.
     pub fn create_file(&mut self, rel: &Path, content: &str) -> io::Result<PathBuf> {
         let abs = self.abs(rel);
         if let Some(p) = abs.parent() {
             fs::create_dir_all(p)?;
         }
-        fsutil::write_atomic(&abs, content.as_bytes())?;
+        fsutil::create_new(&abs, content.as_bytes())?;
         self.rescan();
         Ok(rel.to_path_buf())
     }
@@ -519,27 +596,67 @@ impl Vault {
         Ok(())
     }
 
-    /// Write a note to disk and keep the index in step (so the write is not seen as an outside change).
-    pub fn write_note(&mut self, rel: &Path, text: &str) -> io::Result<()> {
+    /// Save a buffer (a note, or a drawing's file text) whose last known disk content was `base`
+    /// (DATA-003, DATA-008). The file is read first:
+    /// - it can't be read (invalid UTF-8 is fine for the check, a permission error is not): an
+    ///   error, nothing is written, so bytes Shale could not read are never replaced;
+    /// - it is missing, unchanged since `base`, or already holds `text`: the text is written;
+    /// - it was changed by another program: the buffer goes to a conflict copy next to it, the
+    ///   other version stays at the path (`Saved::Conflict`), nothing is overwritten.
+    ///
+    /// The index follows for notes. (Another program can still write between the check and the
+    /// rename; that window is microseconds, and the loser is then a conflict at the next save.)
+    pub fn save_checked(&mut self, rel: &Path, text: &str, base: Stamp) -> io::Result<Saved> {
         let abs = self.abs(rel);
-        if let Some(p) = abs.parent() {
-            fs::create_dir_all(p)?;
+        let disk = match fsutil::read(&abs) {
+            Ok(b) => Some(b),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e),
+        };
+        if let Some(bytes) = &disk {
+            if Stamp::of_bytes(bytes) != base && bytes != text.as_bytes() {
+                let copy = write_conflict_copy(&self.root, rel, text.as_bytes())?;
+                let theirs = String::from_utf8(bytes.clone()).map_err(|_| "it is not readable text".to_string());
+                self.rescan();
+                return Ok(Saved::Conflict { copy, theirs });
+            }
         }
-        fsutil::write_atomic(&abs, text.as_bytes())?;
-        let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
+        if disk.as_deref() != Some(text.as_bytes()) {
+            if let Some(p) = abs.parent() {
+                fs::create_dir_all(p)?;
+            }
+            fsutil::write_atomic(&abs, text.as_bytes())?;
+        }
+        self.index_written(rel, text);
+        Ok(Saved::Written(Stamp::of(text)))
+    }
+
+    /// Change a note that has no open buffer: `f` gets the text on disk (read now, not from the
+    /// index) and returns the new text, or `None` for no change. A note that can't be read is
+    /// an error and stays as it is. Returns whether the file changed.
+    pub fn edit_note(&mut self, rel: &Path, f: impl FnOnce(&str) -> Option<String>) -> io::Result<bool> {
+        let abs = self.abs(rel);
+        let old = fsutil::read_to_string(&abs)?;
+        let Some(new) = f(&old) else { return Ok(false) };
+        if new == old {
+            return Ok(false);
+        }
+        fsutil::write_atomic(&abs, new.as_bytes())?;
+        self.index_written(rel, &new);
+        Ok(true)
+    }
+
+    /// Keep the index in step with a note just written (so the write is not seen as an outside change).
+    fn index_written(&mut self, rel: &Path, text: &str) {
+        if kind_of(rel) != FileKind::Note {
+            return;
+        }
+        let mtime = fs::metadata(self.abs(rel)).and_then(|m| m.modified()).ok();
         self.set_note_text(rel, text);
         if let Some(n) = self.notes.get_mut(rel) {
             n.mtime = mtime;
+            n.unreadable = None;
         }
-        Ok(())
-    }
-
-    pub fn write_raw(&mut self, rel: &Path, data: &str) -> io::Result<()> {
-        let abs = self.abs(rel);
-        if let Some(p) = abs.parent() {
-            fs::create_dir_all(p)?;
-        }
-        fsutil::write_atomic(&abs, data.as_bytes())
     }
 
     /// Move a file or a whole folder into the folder `into` (keeping its name). Links are kept
@@ -596,15 +713,18 @@ impl Vault {
                 }
             }
         }
+        self.failed_rewrites.clear();
         if let Some(p) = self.abs(to).parent() {
             fs::create_dir_all(p)?;
         }
         fsutil::rename_noreplace(&self.abs(from), &self.abs(to))?;
         self.rescan();
-        let mut changed = Vec::new();
+        // 1. work out every new text (nothing is written yet)
+        let mut prepared: Vec<(PathBuf, String, String)> = Vec::new();
         for (src, text, links) in plan {
             // changed on disk in the meantime: leave it alone rather than edit the wrong place
             if self.notes.get(&src).map(|n| n.text != text).unwrap_or(true) {
+                self.failed_rewrites.push((src, "it was changed by another program meanwhile".into()));
                 continue;
             }
             let edits: Vec<_> = links
@@ -615,8 +735,26 @@ impl Vault {
                     (l.target_range.clone(), markdown::replace_target(&text, l, &written))
                 })
                 .collect();
-            if self.rewrite_note(&src, &text, edits)? {
-                changed.push(src);
+            let new = apply_edits(&text, edits);
+            if new != text {
+                prepared.push((src, text, new));
+            }
+        }
+        // 2. check that every one of them is still what the plan was made from
+        let mut ready = Vec::new();
+        for (src, old, new) in prepared {
+            match fsutil::read_to_string(self.abs(&src)) {
+                Ok(d) if d == old => ready.push((src, old, new)),
+                Ok(_) => self.failed_rewrites.push((src, "it was changed by another program meanwhile".into())),
+                Err(e) => self.failed_rewrites.push((src, e.to_string())),
+            }
+        }
+        // 3. write them; one failing does not stop the others, and the caller is told which
+        let mut changed = Vec::new();
+        for (src, old, new) in ready {
+            match self.write_rewrite(&src, &old, &new) {
+                Ok(()) => changed.push(src),
+                Err(e) => self.failed_rewrites.push((src, e.to_string())),
             }
         }
         Ok(changed)
@@ -651,26 +789,25 @@ impl Vault {
         }
     }
 
+    /// Write `new` over the note `rel` if it still holds `old` on disk, and update the index.
+    fn write_rewrite(&mut self, rel: &Path, old: &str, new: &str) -> io::Result<()> {
+        let abs = self.abs(rel);
+        if fsutil::read_to_string(&abs)? != old {
+            return Err(io::Error::other("it was changed by another program meanwhile"));
+        }
+        fsutil::write_atomic(&abs, new.as_bytes())?;
+        self.index_written(rel, new);
+        Ok(())
+    }
+
     /// Apply `edits` (range in `text` -> new text) to the note `rel`, whose text is `text`, write
     /// it in one step and update the index. Returns whether anything changed.
-    fn rewrite_note(&mut self, rel: &Path, text: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> io::Result<bool> {
-        edits.sort_by_key(|e| std::cmp::Reverse(e.0.start));
-        let mut out = text.to_string();
-        for (r, t) in edits {
-            if r.end <= out.len() && out.is_char_boundary(r.start) && out.is_char_boundary(r.end) {
-                out.replace_range(r, &t);
-            }
-        }
+    fn rewrite_note(&mut self, rel: &Path, text: &str, edits: Vec<(std::ops::Range<usize>, String)>) -> io::Result<bool> {
+        let out = apply_edits(text, edits);
         if out == text {
             return Ok(false);
         }
-        let abs = self.abs(rel);
-        fsutil::write_atomic(&abs, out.as_bytes())?;
-        let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
-        self.set_note_text(rel, &out);
-        if let Some(n) = self.notes.get_mut(rel) {
-            n.mtime = mtime;
-        }
+        self.write_rewrite(rel, text, &out)?;
         Ok(true)
     }
 

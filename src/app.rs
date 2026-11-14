@@ -7,10 +7,11 @@ use crate::graph::{GraphClick, GraphView};
 use crate::markdown;
 use crate::reader::{ReaderAction, SceneCache};
 use crate::theme;
-use crate::vault::{self, rel_to_string, FileKind, Vault};
+use crate::vault::{self, rel_to_string, FileKind, Saved, Vault};
 use crate::vault_path::VaultPath;
 use eframe::egui::{self, Key, Modifiers, Ui};
 use std::collections::{HashMap, HashSet};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -59,6 +60,28 @@ pub struct NoteDoc {
     pub text: String,
     pub dirty: bool,
     pub last_edit: Instant,
+    /// What the file held when this buffer was loaded or last saved; a different content on
+    /// disk at save time is a conflict (DATA-003).
+    pub base: crate::vault::Stamp,
+    /// Why the file could not be read: the note is read-only and never written (DATA-008).
+    pub unreadable: Option<String>,
+    /// Why the last save failed; the buffer stays dirty and the tab is marked (DATA-009).
+    pub save_error: Option<String>,
+}
+
+impl NoteDoc {
+    pub fn loaded(text: String, unreadable: Option<String>) -> NoteDoc {
+        NoteDoc { base: crate::vault::Stamp::of(&text), text, dirty: false, last_edit: Instant::now(), unreadable, save_error: None }
+    }
+
+    /// Take the text now on disk (the buffer had no edits to keep, or they are saved elsewhere).
+    pub fn reload(&mut self, text: String, unreadable: Option<String>) {
+        self.base = crate::vault::Stamp::of(&text);
+        self.text = text;
+        self.dirty = false;
+        self.unreadable = unreadable;
+        self.save_error = None;
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -247,6 +270,8 @@ pub struct ShaleApp {
     frames: u32,
     shot_requested: bool,
     shot_done: Arc<AtomicBool>,
+    /// the last failure to save the global settings (shown once)
+    cfg_error: Option<String>,
     /// scripted input steps for tests of the real window
     script: std::collections::VecDeque<String>,
 }
@@ -340,6 +365,7 @@ impl ShaleApp {
             frames: 0,
             shot_requested: false,
             shot_done: Arc::new(AtomicBool::new(false)),
+            cfg_error: None,
             script: opts.keys.as_deref().map(|k| k.split('|').map(|x| x.to_string()).collect()).unwrap_or_default(),
         };
         if let Some(p) = cfg_problem {
@@ -393,7 +419,15 @@ impl ShaleApp {
     /// Save the global config and the open vault's `.shale/` files.
     pub fn save_config(&mut self) {
         if self.persist_config {
-            self.cfg.save();
+            // shown once per message, not at every save
+            if let Err(e) = self.cfg.save() {
+                if self.cfg_error.as_deref() != Some(e.as_str()) {
+                    self.toast(e.clone());
+                }
+                self.cfg_error = Some(e);
+            } else {
+                self.cfg_error = None;
+            }
             if let Err(e) = self.vdata.save() {
                 self.toast(e);
             }
@@ -508,8 +542,9 @@ impl ShaleApp {
                     // red path links whose file name exists exactly once are fixed (LINK-012);
                     // there is no buffer for this note yet, so nothing unsaved is in the way
                     let fixed = self.vault.as_mut().map(|v| v.auto_fix_links(rel));
-                    let text = self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| n.text.clone()).unwrap_or_default();
-                    self.notes.insert(rel.to_path_buf(), NoteDoc { text, dirty: false, last_edit: Instant::now() });
+                    // a note that could not be read opens read-only, never as an empty note (DATA-008)
+                    let (text, unreadable) = self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| (n.text.clone(), n.unreadable.clone())).unwrap_or_default();
+                    self.notes.insert(rel.to_path_buf(), NoteDoc::loaded(text, unreadable));
                     match fixed {
                         Some(Ok(n)) if n > 0 => self.toast(format!("Fixed {n} link(s) whose note had moved")),
                         Some(Err(e)) => self.toast(format!("Could not fix links: {e}")),
@@ -626,7 +661,7 @@ impl ShaleApp {
         }
         let name = v.file(&rel).map(|f| f.link_name.clone()).unwrap_or_default();
         if let Some(note) = embed_into {
-            if let Some(doc) = self.notes.get_mut(&note) {
+            if let Some(doc) = self.notes.get_mut(&note).filter(|d| d.unreadable.is_none()) {
                 if !doc.text.ends_with('\n') && !doc.text.is_empty() {
                     doc.text.push('\n');
                 }
@@ -665,42 +700,125 @@ impl ShaleApp {
     /// Toggle a checkbox in any note (open buffer or file on disk).
     pub fn toggle_task(&mut self, rel: &Path, offset: usize) {
         self.wait_for_sync_tree();
-        let Some(v) = self.vault.as_mut() else { return };
         if let Some(doc) = self.notes.get_mut(rel) {
-            if markdown::toggle_task_at(&mut doc.text, offset) {
-                let _ = v.write_note(rel, &doc.text);
+            if doc.unreadable.is_some() {
+                self.toast(format!("“{}” could not be read, so it is not changed", rel_to_string(rel)));
+            } else if markdown::toggle_task_at(&mut doc.text, offset) {
+                doc.dirty = true;
+                doc.last_edit = Instant::now();
+                let text = doc.text.clone();
+                if let Some(v) = self.vault.as_mut() {
+                    v.set_note_text(rel, &text);
+                }
+                self.save_note(rel);
+            }
+        } else if let Some(v) = self.vault.as_mut() {
+            // no buffer: the file as it is on disk now, and only if it is what the index showed
+            let seen = v.notes.get(rel).map(|n| n.text.clone());
+            let r = v.edit_note(rel, |disk| {
+                if Some(disk) != seen.as_deref() {
+                    return None;
+                }
+                let mut t = disk.to_string();
+                markdown::toggle_task_at(&mut t, offset).then_some(t)
+            });
+            if let Err(e) = r {
+                self.toast(format!("Could not change “{}”: {e}", rel_to_string(rel)));
+            }
+        }
+    }
+
+    /// Save the buffer of the note `rel` now (DATA-003, DATA-008, DATA-009). A conflict with a
+    /// change made by another program is saved as a copy and the buffer takes the other
+    /// version; a failure keeps the buffer dirty, marks the tab and is shown once.
+    pub fn save_note(&mut self, rel: &Path) {
+        let (Some(v), Some(doc)) = (self.vault.as_mut(), self.notes.get_mut(rel)) else { return };
+        if !doc.dirty {
+            return;
+        }
+        let name = rel_to_string(rel);
+        if doc.unreadable.is_some() {
+            // not editable in the UI; if a buffer got edits anyway they are never written over the file
+            doc.save_error = Some(format!("“{name}” could not be read, so it is never overwritten"));
+            return;
+        }
+        let msg = match v.save_checked(rel, &doc.text, doc.base) {
+            Ok(Saved::Written(stamp)) => {
+                doc.base = stamp;
                 doc.dirty = false;
+                doc.save_error = None;
+                None
             }
-        } else if let Some(n) = v.notes.get(rel) {
-            let mut t = n.text.clone();
-            if markdown::toggle_task_at(&mut t, offset) {
-                let _ = v.write_note(rel, &t);
+            Ok(Saved::Conflict { copy, theirs }) => {
+                let (text, unreadable) = match theirs {
+                    Ok(t) => (t, None),
+                    Err(why) => (String::new(), Some(why)),
+                };
+                doc.reload(text, unreadable);
+                Some(conflict_message(&name, &rel_to_string(&copy)))
             }
+            Err(e) => {
+                let m = format!("Could not save “{name}”: {e}. Your changes are kept in the open note.");
+                let first = doc.save_error.as_deref() != Some(m.as_str());
+                doc.save_error = Some(m.clone());
+                doc.last_edit = Instant::now(); // try again in a moment
+                first.then_some(m)
+            }
+        };
+        if let Some(m) = msg {
+            self.toast(m);
+        }
+    }
+
+    /// Like [`ShaleApp::save_note`], for an open drawing.
+    pub fn save_drawing(&mut self, rel: &Path) {
+        let (Some(v), Some(d)) = (self.vault.as_mut(), self.drawings.get_mut(rel)) else { return };
+        if !d.dirty {
+            return;
+        }
+        let name = rel_to_string(rel);
+        let msg = match d.file_text().map_err(io::Error::other).and_then(|text| v.save_checked(rel, &text, d.base)) {
+            Ok(Saved::Written(stamp)) => {
+                d.base = stamp;
+                d.dirty = false;
+                d.save_error = None;
+                self.scenes.put(rel, d.scene.clone());
+                None
+            }
+            Ok(Saved::Conflict { copy, theirs }) => {
+                *d = match theirs {
+                    Ok(t) => DrawingDoc::new(rel.to_path_buf(), &t),
+                    Err(why) => DrawingDoc::unreadable(rel.to_path_buf(), &why),
+                };
+                self.scenes.put(rel, d.scene.clone());
+                Some(conflict_message(&name, &rel_to_string(&copy)))
+            }
+            Err(e) => {
+                let m = format!("Could not save “{name}”: {e}. Your changes are kept in the open drawing.");
+                let first = d.save_error.as_deref() != Some(m.as_str());
+                d.save_error = Some(m.clone());
+                d.last_edit = Instant::now();
+                first.then_some(m)
+            }
+        };
+        if let Some(m) = msg {
+            self.toast(m);
         }
     }
 
     pub fn flush_all(&mut self) {
         self.wait_for_sync_tree();
-        let Some(v) = self.vault.as_mut() else { return };
-        for (rel, doc) in self.notes.iter_mut() {
-            if doc.dirty {
-                if let Err(e) = v.write_note(rel, &doc.text) {
-                    eprintln!("save failed for {}: {e}", rel_to_string(rel));
-                }
-                doc.dirty = false;
-            }
+        let dirty_notes: Vec<PathBuf> = self.notes.iter().filter(|(_, d)| d.dirty).map(|(r, _)| r.clone()).collect();
+        for rel in dirty_notes {
+            self.save_note(&rel);
         }
-        for (rel, d) in self.drawings.iter_mut() {
-            if d.dirty {
-                match d.file_text() {
-                    Ok(text) => {
-                        if v.write_raw(rel, &text).is_ok() {
-                            d.dirty = false;
-                            self.scenes.put(rel, d.scene.clone());
-                        }
-                    }
-                    Err(e) => eprintln!("save failed for {}: {e}", rel_to_string(rel)),
-                }
+        let dirty_drawings: Vec<PathBuf> = self.drawings.iter().filter(|(_, d)| d.dirty).map(|(r, _)| r.clone()).collect();
+        for rel in dirty_drawings {
+            self.save_drawing(&rel);
+        }
+        for (rel, d) in &self.notes {
+            if let (true, Some(e)) = (d.dirty, &d.save_error) {
+                eprintln!("{e} ({})", rel_to_string(rel));
             }
         }
     }
@@ -710,26 +828,20 @@ impl ShaleApp {
         if self.sync.tree_busy.load(std::sync::atomic::Ordering::SeqCst) {
             return;
         }
-        let Some(v) = self.vault.as_mut() else { return };
         let wait = Duration::from_millis(800);
-        for (rel, doc) in self.notes.iter_mut() {
-            if doc.dirty && doc.last_edit.elapsed() > wait && v.write_note(rel, &doc.text).is_ok() {
-                doc.dirty = false;
-            }
+        let notes: Vec<PathBuf> = self.notes.iter().filter(|(_, d)| d.dirty && d.last_edit.elapsed() > wait).map(|(r, _)| r.clone()).collect();
+        for rel in notes {
+            self.save_note(&rel);
         }
-        for (rel, d) in self.drawings.iter_mut() {
-            if d.dirty && d.last_edit.elapsed() > wait {
-                if let Ok(text) = d.file_text() {
-                    if v.write_raw(rel, &text).is_ok() {
-                        d.dirty = false;
-                        self.scenes.put(rel, d.scene.clone());
-                    }
-                }
-            }
+        let drawings: Vec<PathBuf> = self.drawings.iter().filter(|(_, d)| d.dirty && d.last_edit.elapsed() > wait).map(|(r, _)| r.clone()).collect();
+        for rel in drawings {
+            self.save_drawing(&rel);
         }
     }
 
-    /// Pick up changes made by other programs.
+    /// Pick up changes made by other programs: notes and drawings without unsaved edits are
+    /// reloaded (DATA-002); one with unsaved edits keeps them and becomes a conflict copy when
+    /// it is saved (DATA-003).
     fn rescan(&mut self) {
         let Some(v) = self.vault.as_mut() else { return };
         let changed = v.rescan();
@@ -737,9 +849,27 @@ impl ShaleApp {
             if let Some(doc) = self.notes.get_mut(&rel) {
                 if !doc.dirty {
                     if let Some(n) = v.notes.get(&rel) {
-                        doc.text = n.text.clone();
+                        doc.reload(n.text.clone(), n.unreadable.clone());
                     }
                 }
+            }
+        }
+        for (rel, d) in self.drawings.iter_mut() {
+            if d.dirty {
+                continue;
+            }
+            let meta = std::fs::metadata(v.abs(rel)).ok().map(|m| (m.modified().ok(), m.len()));
+            if meta == d.seen && d.error.is_none() {
+                continue;
+            }
+            d.seen = meta;
+            match crate::fsutil::read_to_string(v.abs(rel)) {
+                Ok(text) if crate::vault::Stamp::of(&text) != d.base || d.error.is_some() => {
+                    let fresh = DrawingDoc::new(rel.clone(), &text);
+                    self.scenes.put(rel, fresh.scene.clone());
+                    *d = fresh;
+                }
+                _ => {}
             }
         }
         // tabs pointing at files that vanished
@@ -779,8 +909,11 @@ impl ShaleApp {
             return Ok(());
         }
         let changed = v.rename(rel, &to, self.cfg.update_links_on_rename).map_err(|e| e.to_string())?;
+        let failed = v.failed_rewrites.clone();
         self.after_move(rel, &to, is_dir, &changed);
-        if !changed.is_empty() {
+        if let Some(m) = rewrite_problems("Renamed", &changed, &failed) {
+            self.toast(m);
+        } else if !changed.is_empty() {
             self.toast(format!("Renamed and updated links in {} note(s)", changed.len()));
         } else {
             self.toast(format!("Renamed to “{}”", markdown::strip_md_ext(&file_name)));
@@ -808,7 +941,7 @@ impl ShaleApp {
         match v.fix_link(note, target, to) {
             Ok(n) => {
                 if let (Some(doc), Some(idx)) = (self.notes.get_mut(note), v.notes.get(note)) {
-                    doc.text = idx.text.clone();
+                    doc.reload(idx.text.clone(), idx.unreadable.clone());
                 }
                 let shown = markdown::strip_md_ext(&rel_to_string(to)).to_string();
                 self.toast(if n > 0 { format!("The link now points to “{shown}”") } else { "Nothing to fix".to_string() });
@@ -864,7 +997,7 @@ impl ShaleApp {
         let v = self.vault.as_ref().unwrap();
         for c in changed {
             if let (Some(doc), Some(n)) = (self.notes.get_mut(c), v.notes.get(c)) {
-                doc.text = n.text.clone();
+                doc.reload(n.text.clone(), n.unreadable.clone());
             }
         }
         // open folders in the file list move along
@@ -886,7 +1019,11 @@ impl ShaleApp {
         let v = self.vault.as_mut().ok_or("no vault")?;
         let is_dir = v.abs(rel).is_dir();
         let (to, changed) = v.move_into(rel, into).map_err(|e| e.to_string())?;
+        let failed = v.failed_rewrites.clone();
         self.after_move(rel, &to, is_dir, &changed);
+        if let Some(m) = rewrite_problems("Moved", &changed, &failed) {
+            self.toast(m);
+        }
         if !into.as_os_str().is_empty() {
             self.expanded.insert(into.to_path_buf());
         }
@@ -1487,6 +1624,22 @@ impl eframe::App for ShaleApp {
     }
 }
 
+/// After a rename or move that could not update the links in every note (VAULT-016): exactly
+/// which notes were updated and which were not. `None` when all went well.
+fn rewrite_problems(what: &str, changed: &[PathBuf], failed: &[(PathBuf, String)]) -> Option<String> {
+    if failed.is_empty() {
+        return None;
+    }
+    let not: Vec<String> = failed.iter().map(|(p, why)| format!("“{}” ({why})", rel_to_string(p))).collect();
+    let done = if changed.is_empty() { "no note was updated".to_string() } else { format!("updated: {}", changed.iter().map(|p| format!("“{}”", rel_to_string(p))).collect::<Vec<_>>().join(", ")) };
+    Some(format!("{what}, but the links in {} note(s) could not be updated: {}. {done}. Links in those notes may point to the old name.", failed.len(), not.join(", ")))
+}
+
+/// The message after a save found the file changed by another program (DATA-003).
+fn conflict_message(name: &str, copy: &str) -> String {
+    format!("“{name}” was changed by another program while you were editing it. Your version is saved as “{copy}”; the other version stays in “{name}”.")
+}
+
 pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from: &Path) {
     match a {
         EditorAction::OpenLink { target, heading, new_tab } => app_actions.push(Action::OpenLink { target, heading, from: Some(from.to_path_buf()), new_tab }),
@@ -1515,6 +1668,9 @@ pub fn graph_click(app_actions: &mut Vec<Action>, c: GraphClick) {
 pub fn muted(t: impl Into<String>) -> egui::RichText {
     egui::RichText::new(t).color(theme::MUTED)
 }
+
+#[cfg(test)]
+mod data_tests;
 
 #[cfg(test)]
 mod tests {

@@ -213,13 +213,16 @@ impl ShaleApp {
                             }
                         }
                         if ui.button("Create vault with sample notes").clicked() {
-                            let _ = std::fs::create_dir_all(&path);
-                            let _ = crate::vault::write_sample_vault(&path);
-                            self.actions.push(Action::OpenVault(path.clone()));
+                            match std::fs::create_dir_all(&path).and_then(|()| crate::vault::write_sample_vault(&path)) {
+                                Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
+                                Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                            }
                         }
                         if ui.button("Create empty vault").clicked() {
-                            let _ = std::fs::create_dir_all(&path);
-                            self.actions.push(Action::OpenVault(path.clone()));
+                            match std::fs::create_dir_all(&path) {
+                                Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
+                                Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                            }
                         }
                     });
                     if !self.cfg.recent.is_empty() {
@@ -366,7 +369,11 @@ impl ShaleApp {
             child.painter().with_clip_rect(Rect::from_min_max(text_rect.min, Pos2::new(text_rect.max.x - 18.0, text_rect.max.y))).galley(Pos2::new(text_rect.min.x, r.center().y - galley.size().y / 2.0), galley, theme::TEXT);
             let cr = Rect::from_center_size(Pos2::new(r.max.x - 14.0, r.center().y), Vec2::splat(16.0));
             let close_resp = child.interact(cr, child.scope_id().with(("tab-close", self.tabs[i].id)), Sense::click());
-            if dirty && !close_resp.hovered() {
+            let failed = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.save_error.is_some()).unwrap_or(false) || self.drawings.get(p).map(|d| d.save_error.is_some()).unwrap_or(false)).unwrap_or(false);
+            if failed && dirty && !close_resp.hovered() {
+                // not saved, and the save failed: a red mark instead of the grey dot (DATA-009)
+                child.painter().circle_filled(cr.center(), 4.5, theme::LINK_MISSING);
+            } else if dirty && !close_resp.hovered() {
                 child.painter().circle_filled(cr.center(), 3.5, theme::MUTED);
             } else if resp.hovered() || active || close_resp.hovered() {
                 if close_resp.hovered() {
@@ -587,6 +594,11 @@ impl ShaleApp {
                     let reading = tab.reading;
                     let Some(vault) = self.vault.as_mut() else { return };
                     let Some(doc) = self.notes.get_mut(&rel) else { return };
+                    if let Some(why) = &doc.unreadable {
+                        // never shown as an empty note that the next keystroke would save over the file (DATA-008)
+                        ui.label(egui::RichText::new(format!("This note could not be read ({why}). It is shown read-only, and Shale will not change the file.")).color(theme::LINK_MISSING));
+                        return;
+                    }
                     if reading {
                         let text = doc.text.clone();
                         if let Some(a) = reader::show(ui, &text, vault, &rel, &mut self.scenes, base, dark) {
@@ -637,10 +649,20 @@ impl ShaleApp {
                     ui.label(small(format!("{words} words")));
                     let bl = v.backlinks(&rel).len();
                     ui.label(small(format!("{bl} backlink{}", if bl == 1 { "" } else { "s" })));
-                    ui.label(small(if doc.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
+                    if doc.unreadable.is_some() {
+                        ui.label(egui::RichText::new("Read-only: could not be read").size(11.5).color(theme::LINK_MISSING));
+                    } else if let (true, Some(e)) = (doc.dirty, &doc.save_error) {
+                        ui.label(egui::RichText::new("Not saved").size(11.5).color(theme::LINK_MISSING)).on_hover_text(e);
+                    } else {
+                        ui.label(small(if doc.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
+                    }
                 } else if let Some(d) = self.drawings.get(&rel) {
                     ui.label(small(format!("{} elements", d.scene.live().count())));
-                    ui.label(small(if d.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
+                    if let (true, Some(e)) = (d.dirty, &d.save_error) {
+                        ui.label(egui::RichText::new("Not saved").size(11.5).color(theme::LINK_MISSING)).on_hover_text(e);
+                    } else {
+                        ui.label(small(if d.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
+                    }
                 }
             }
             if let Some(v) = &self.vault {

@@ -449,6 +449,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // spec: CFG-004
+    #[test]
+    fn a_broken_settings_file_is_kept_aside_too_and_never_overwritten() {
+        let root = tmp("broken-settings");
+        let p = VaultData::settings_path(&root);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        crate::fsutil::write_atomic(&p, b"{ \"sync\": [oops").unwrap();
+        let (mut d, problems) = VaultData::load(&root);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(d.settings, VaultSettings::default());
+        let kept: Vec<_> = std::fs::read_dir(root.join(".shale")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("settings.json.broken-")).collect();
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(std::fs::read(root.join(".shale").join(&kept[0])).unwrap(), b"{ \"sync\": [oops");
+        // the next save writes the defaults to the path and leaves the kept file alone
+        d.settings.people_dir = "x".into();
+        d.save().unwrap();
+        assert_eq!(std::fs::read(root.join(".shale").join(&kept[0])).unwrap(), b"{ \"sync\": [oops");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     // spec: CFG-008
     #[test]
     fn legacy_fields_fill_only_files_the_vault_did_not_have() {

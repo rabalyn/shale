@@ -159,21 +159,19 @@ impl ShaleApp {
                 continue;
             }
             let abs = root.join(rel);
-            let stamp = gitsync::stamp_now();
-            let taken = |p: &Path| root.join(p).exists() || copies.iter().any(|c| c == p);
             // edited while the sync ran: the buffer goes to a conflict copy, never over the file
             let note_copy = match self.notes.get(rel) {
-                Some(doc) if doc.dirty => Some((gitsync::conflict_name(rel, &stamp, taken), doc.text.clone().into_bytes())),
+                Some(doc) if doc.dirty => Some(doc.text.clone().into_bytes()),
                 _ => None,
             };
             let drawing_copy = match self.drawings.get(rel) {
-                Some(d) if d.dirty => d.file_text().ok().map(|t| (gitsync::conflict_name(rel, &stamp, taken), t.into_bytes())),
+                Some(d) if d.dirty => d.file_text().ok().map(String::into_bytes),
                 _ => None,
             };
             let mut keep_buffer = false;
-            if let Some((copy, bytes)) = note_copy.or(drawing_copy) {
-                match crate::fsutil::write_atomic(&root.join(&copy), &bytes) {
-                    Ok(()) => copies.push(copy),
+            if let Some(bytes) = note_copy.or(drawing_copy) {
+                match crate::vault::write_conflict_copy(root, rel, &bytes) {
+                    Ok(copy) => copies.push(copy),
                     Err(e) => {
                         failures.push(format!("Could not save your edits of “{}” as a copy: {e}", rel_to_string(rel)));
                         keep_buffer = true;
@@ -183,10 +181,18 @@ impl ShaleApp {
             if keep_buffer {
                 continue;
             }
-            let Ok(text) = crate::fsutil::read_to_string(&abs) else { continue };
+            let text = match crate::fsutil::read_to_string(&abs) {
+                Ok(t) => t,
+                Err(e) => {
+                    // read-only with the reason, never an empty buffer (DATA-008)
+                    if let Some(doc) = self.notes.get_mut(rel) {
+                        doc.reload(String::new(), Some(e.to_string()));
+                    }
+                    continue;
+                }
+            };
             if let Some(doc) = self.notes.get_mut(rel) {
-                doc.text = text;
-                doc.dirty = false;
+                doc.reload(text, None);
             } else if self.drawings.contains_key(rel) {
                 let d = DrawingDoc::new(rel.clone(), &text);
                 self.scenes.put(rel, d.scene.clone());
@@ -383,6 +389,51 @@ mod tests {
         wait(&mut app);
         gitsync::sync(&git, &a, &opts, &busy).unwrap();
         assert_eq!(crate::fsutil::read_to_string(a.join(&copies[0])).unwrap(), "typed during the sync\n");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: DATA-003, SYNC-013
+    #[test]
+    fn a_pull_under_unsaved_edits_gives_a_conflict_copy_even_if_autosave_comes_first() {
+        let root = std::env::temp_dir().join(format!("shale-app-sync-pull-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let git = hermetic();
+        let remote = root.join("remote.git");
+        std::fs::create_dir_all(&remote).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet", "--bare"]).arg(&remote).envs(git.env.iter().cloned()).status().unwrap().success());
+        let (a, b) = (root.join("a"), root.join("b"));
+        for v in [&a, &b] {
+            std::fs::create_dir_all(v).unwrap();
+            gitsync::connect(&git, v, remote.to_str().unwrap()).unwrap();
+        }
+        crate::fsutil::write_atomic(&a.join("N.md"), b"base\n").unwrap();
+        let busy = AtomicBool::new(false);
+        let opts = gitsync::Options { host: "a".into(), stamp: "2026-11-14 1200".into(), ..Default::default() };
+        gitsync::sync(&git, &a, &opts, &busy).unwrap();
+        let mut app = app_on(&b);
+        app.start_sync();
+        wait(&mut app);
+        app.open(Path::new("N.md"), false);
+        crate::fsutil::write_atomic(&a.join("N.md"), b"remote edit\n").unwrap();
+        gitsync::sync(&git, &a, &opts, &busy).unwrap();
+
+        // typing, then the pull lands in the folder (the sync result is not collected yet) and
+        // the autosave of the buffer runs first
+        let doc = app.notes.get_mut(Path::new("N.md")).unwrap();
+        doc.text = "typed edit\n".into();
+        doc.dirty = true;
+        doc.last_edit = Instant::now() - Duration::from_secs(5);
+        let rep = gitsync::sync(&git, &b, &opts, &busy).unwrap();
+        app.autosave();
+        assert_eq!(crate::fsutil::read_to_string(b.join("N.md")).unwrap(), "remote edit\n", "the pulled file is not overwritten");
+        let copies: Vec<_> = std::fs::read_dir(&b).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("N (conflict ")).collect();
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        assert_eq!(crate::fsutil::read_to_string(b.join(&copies[0])).unwrap(), "typed edit\n");
+        // the result is collected afterwards: no second copy, the buffer shows the pulled text
+        app.after_sync(&b, Ok(rep));
+        assert_eq!(app.notes[Path::new("N.md")].text, "remote edit\n");
+        let copies: Vec<_> = std::fs::read_dir(&b).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("N (conflict ")).collect();
+        assert_eq!(copies.len(), 1, "{copies:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -128,8 +128,9 @@ impl ShaleApp {
                     self.toast(format!("Learning tag words failed: {e}"));
                 }
                 Ok(Ok(tw)) => {
-                    if let Some(v) = &self.vault {
-                        let _ = crate::tagwords::save(&v.root, &tw);
+                    let saved = self.vault.as_ref().map(|v| crate::tagwords::save(&v.root, &tw));
+                    if let Some(Err(e)) = saved {
+                        self.toast(format!("Could not save the tag words: {e}"));
                     }
                     self.tag_words = Some(tw);
                     self.tag_job = None;
@@ -254,8 +255,8 @@ impl ShaleApp {
             return;
         }
         let Some(v) = &mut self.vault else { return };
-        let old = crate::fsutil::read_to_string(v.abs(note)).unwrap_or_default();
-        if let Err(e) = v.write_note(note, &join(&old)) {
+        // the file as it is now; one that can't be read is left alone
+        if let Err(e) = v.edit_note(note, |old| Some(join(old))) {
             self.toast(format!("Could not add the links: {e}"));
         }
     }

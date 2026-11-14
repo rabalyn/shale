@@ -244,19 +244,17 @@ impl Config {
         self.legacy_recent_tags = l.recent_tags;
     }
 
-    pub fn save(&self) {
+    /// Write the settings. A failure is returned for the caller to show (DATA-009).
+    pub fn save(&self) -> Result<(), String> {
         if self.read_only {
-            return;
+            return Ok(());
         }
-        let Some(p) = config_path() else { return };
+        let Some(p) = config_path() else { return Ok(()) };
         // CalDAV passwords go to the system keyring when there is one
         let mut out = self.clone();
         out.calendars = crate::secrets::for_file(&self.calendars);
-        if let Ok(s) = serde_json::to_string_pretty(&out) {
-            if let Err(e) = write_private(&p, s.as_bytes()) {
-                eprintln!("could not save the settings: {e}");
-            }
-        }
+        let s = serde_json::to_string_pretty(&out).map_err(|e| format!("could not save the settings: {e}"))?;
+        write_private(&p, s.as_bytes()).map_err(|e| format!("could not save the settings: {e}"))
     }
 
     pub fn remember_vault(&mut self, path: PathBuf) {

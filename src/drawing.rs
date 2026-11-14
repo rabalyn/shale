@@ -748,6 +748,12 @@ pub struct DrawingDoc {
     pub error: Option<String>,
     pub dirty: bool,
     pub last_edit: Instant,
+    /// What the file held when it was loaded or last saved (DATA-003).
+    pub base: crate::vault::Stamp,
+    /// Size and modification time of the file when last looked at (DATA-002).
+    pub seen: Option<(Option<std::time::SystemTime>, u64)>,
+    /// Why the last save failed; the drawing stays dirty (DATA-009).
+    pub save_error: Option<String>,
     undo: Vec<Vec<Element>>,
     redo: Vec<Vec<Element>>,
     pub offset: Vec2,
@@ -793,6 +799,9 @@ impl DrawingDoc {
             error,
             dirty: false,
             last_edit: Instant::now(),
+            base: crate::vault::Stamp::of(text),
+            seen: None,
+            save_error: None,
             undo: vec![],
             redo: vec![],
             offset: Vec2::ZERO,
