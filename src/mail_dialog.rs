@@ -35,6 +35,8 @@ pub struct MailDialog {
     pub consent_phrase: String,
     /// The Encryption section was just opened: scroll it into view.
     scroll_enc: bool,
+    /// The same for the key pickers of an account.
+    scroll_keys: bool,
     pub error: Option<String>,
     /// Is there a system keyring to keep passwords in?
     pub keyring: bool,
@@ -80,6 +82,7 @@ impl MailDialog {
             consent: None,
             consent_phrase: String::new(),
             scroll_enc: false,
+            scroll_keys: false,
             error: None,
             keyring,
             rects: vec![],
@@ -467,6 +470,18 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
             None => {}
         }
     });
+    // signing and encrypting (MAIL-190): which key of GnuPG belongs to this account
+    ui.add_space(4.0);
+    let have_key = !d.accounts[i].pgp_key.is_empty() || !d.accounts[i].smime_key.is_empty();
+    let head = egui::CollapsingHeader::new(RichText::new("Signing and encrypting").color(theme::TEXT)).id_salt(("mail-keys", i)).default_open(have_key).show(ui, |ui| key_rows(ui, d, i, mail, rects));
+    rects.push(("md:keys-header".into(), head.header_response.rect));
+    if head.header_response.clicked() {
+        d.scroll_keys = true;
+    }
+    if let (true, Some(body)) = (d.scroll_keys, &head.body_response) {
+        ui.scroll_to_rect(body.rect, Some(egui::Align::Min));
+        d.scroll_keys = false;
+    }
     // which folders are synced
     let folders = mail.account_folders(&id);
     ui.add_space(6.0);
@@ -685,4 +700,75 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
         ui.scroll_to_rect(body.rect, Some(egui::Align::Min));
         d.scroll_enc = false;
     }
+}
+
+/// The key pickers of an account (MAIL-190): the OpenPGP key and the S/MIME certificate, sign by default, the preferred standard.
+fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &mut Vec<(String, Rect)>) {
+    use crate::config::CryptoStandard;
+    let Some(info) = &mail.gnupg_info else {
+        ui.label(muted("Looking for GnuPG…").size(12.0));
+        return;
+    };
+    for std in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
+        let tag = if std == CryptoStandard::OpenPgp { "pgp" } else { "smime" };
+        ui.horizontal(|ui| {
+            ui.label(if std == CryptoStandard::OpenPgp { "OpenPGP key" } else { "S/MIME certificate" });
+            match info.version(std) {
+                Some(Ok(_)) => {
+                    let keys: Vec<_> = info.keys(std).iter().filter(|k| k.usable() && k.can_sign).collect();
+                    let cur = match std {
+                        CryptoStandard::OpenPgp => d.accounts[i].pgp_key.clone(),
+                        CryptoStandard::Smime => d.accounts[i].smime_key.clone(),
+                    };
+                    let shown = if cur.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        keys.iter()
+                            .find(|k| k.fingerprint.eq_ignore_ascii_case(&cur))
+                            .map(|k| format!("{} · {}", k.label(), crate::mail_ui::short_fingerprint(&k.fingerprint)))
+                            .unwrap_or_else(|| format!("{} (not in the keyring)", crate::mail_ui::short_fingerprint(&cur)))
+                    };
+                    let r = egui::ComboBox::from_id_salt(("mail-key", tag, i)).width(360.0).selected_text(shown).show_ui(ui, |ui| {
+                        let r = ui.selectable_label(cur.is_empty(), "(none)");
+                        rects.push((format!("md:{tag}-key:none"), r.rect));
+                        let mut pick: Option<String> = r.clicked().then(String::new);
+                        for k in &keys {
+                            let r = ui.selectable_label(k.fingerprint.eq_ignore_ascii_case(&cur), format!("{} · {}", k.label(), crate::mail_ui::short_fingerprint(&k.fingerprint)));
+                            rects.push((format!("md:{tag}-key:{}", k.fingerprint), r.rect));
+                            if r.clicked() {
+                                pick = Some(k.fingerprint.clone());
+                            }
+                        }
+                        pick
+                    });
+                    rects.push((format!("md:{tag}-key"), r.response.rect));
+                    if let Some(Some(p)) = r.inner {
+                        match std {
+                            CryptoStandard::OpenPgp => d.accounts[i].pgp_key = p,
+                            CryptoStandard::Smime => d.accounts[i].smime_key = p,
+                        }
+                    }
+                }
+                Some(Err(e)) => {
+                    ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING).size(12.5));
+                }
+                None => {
+                    ui.label(muted("Looking…").size(12.0));
+                }
+            }
+        });
+    }
+    ui.horizontal(|ui| {
+        let r = ui.checkbox(&mut d.accounts[i].sign_by_default, "Sign new mail by default");
+        rects.push(("md:sign-default".into(), r.rect));
+        ui.label("Standard:");
+        for std in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
+            let r = ui.radio(d.accounts[i].preferred_standard == std, std.label());
+            rects.push((format!("md:std:{std:?}"), r.rect));
+            if r.clicked() {
+                d.accounts[i].preferred_standard = std;
+            }
+        }
+    });
+    ui.label(muted("Shale uses the key from your GnuPG; the passphrase is asked by GnuPG's own dialog. Encrypted mail is always also encrypted to this key, so the copy in Sent stays readable. Import keys with gpg --import / gpgsm --import (see Encryption below).").size(12.0));
 }

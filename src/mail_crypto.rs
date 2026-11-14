@@ -615,6 +615,252 @@ pub fn synthesize(outer: &[u8], entity: &[u8]) -> Vec<u8> {
     out
 }
 
+// ---------------------------------------------------------------- writing: sign and encrypt (ADR-0011 §4)
+
+use crate::compose::{Built, ComposeError, Draft};
+use crate::gpg::KeyInfo;
+
+/// A recipient and the key the mail is encrypted to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Recip {
+    pub address: String,
+    pub fingerprint: String,
+    /// Bcc only: OpenPGP then puts no key id for this recipient in the message (the others cannot tell who was on Bcc).
+    pub hidden: bool,
+}
+
+/// What to do with a mail before it goes out.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Plan {
+    pub standard: CryptoStandard,
+    /// Sign with this key (fingerprint).
+    pub sign: Option<String>,
+    /// Encrypt to these (every recipient and the sender's own key).
+    pub encrypt: Option<Vec<Recip>>,
+}
+
+/// The key found for one address in the local keyrings (MAIL-192).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyLookup {
+    pub address: String,
+    pub key: Option<KeyInfo>,
+    /// GnuPG could not be asked (the words).
+    pub error: Option<String>,
+}
+
+/// Can a mail be encrypted to this key?
+fn encryptable(k: &KeyInfo, s: CryptoStandard) -> bool {
+    k.usable() && k.can_encrypt && !(s == CryptoStandard::OpenPgp && k.validity == 'n')
+}
+
+fn rank(k: &KeyInfo) -> u8 {
+    match k.validity {
+        'u' => 5,
+        'f' => 4,
+        'm' => 3,
+        'n' => 0,
+        _ => 2,
+    }
+}
+
+/// The best key for an address among the keys the keyring has for it: usable, able to encrypt, the most trusted
+/// (the first on a tie). None if there is none.
+pub fn best_key(keys: Vec<KeyInfo>, s: CryptoStandard) -> Option<KeyInfo> {
+    let mut ok: Vec<KeyInfo> = keys.into_iter().filter(|k| encryptable(k, s)).collect();
+    ok.sort_by_key(|k| std::cmp::Reverse(rank(k)));
+    ok.into_iter().next()
+}
+
+/// Look the addresses up in the local keyring of the standard, and nowhere else.
+pub fn lookup_keys(g: &Gnupg, s: CryptoStandard, addresses: &[String], cancel: &AtomicBool) -> Vec<KeyLookup> {
+    addresses
+        .iter()
+        .map(|a| match g.list_keys(s, false, Some(a), cancel) {
+            Ok(keys) => KeyLookup { address: a.clone(), key: best_key(keys, s), error: None },
+            Err(e) => KeyLookup { address: a.clone(), key: None, error: Some(e.to_string()) },
+        })
+        .collect()
+}
+
+/// The addresses a draft is going to: (address, on Bcc only). In order, each once.
+pub fn recipients_of(d: &Draft) -> Vec<(String, bool)> {
+    let addrs = |list: &str| -> Vec<String> { crate::compose::split_list(list).iter().filter_map(|e| crate::compose::bare_address(e)).map(|a| a.to_ascii_lowercase()).collect() };
+    let (to, cc, bcc) = (addrs(&d.to), addrs(&d.cc), addrs(&d.bcc));
+    let mut out: Vec<(String, bool)> = Vec::new();
+    for a in to.iter().chain(&cc) {
+        if !out.iter().any(|o| &o.0 == a) {
+            out.push((a.clone(), false));
+        }
+    }
+    for a in &bcc {
+        if !out.iter().any(|o| &o.0 == a) {
+            out.push((a.clone(), true));
+        }
+    }
+    out
+}
+
+/// Find the keys to encrypt a draft to (MAIL-193): one for every recipient, Cc and Bcc included, and the sender's own, so the
+/// Sent copy stays readable. Refused, in words, when an address has no usable key. Only local keyrings are asked.
+pub fn resolve_recipients(g: &Gnupg, d: &Draft, own_fingerprint: &str, cancel: &AtomicBool) -> Result<Vec<Recip>, String> {
+    let s = d.standard;
+    let wanted = recipients_of(d);
+    if wanted.is_empty() {
+        return Err("Add at least one recipient".into());
+    }
+    let addresses: Vec<String> = wanted.iter().map(|w| w.0.clone()).collect();
+    let found = lookup_keys(g, s, &addresses, cancel);
+    if let Some(e) = found.iter().find_map(|f| f.error.clone()) {
+        return Err(e);
+    }
+    let missing: Vec<&str> = found.iter().filter(|f| f.key.is_none()).map(|f| f.address.as_str()).collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "No usable {} key in your keyring for: {}. The mail was not encrypted and not sent. Import the key (for example “{} --import file”, or fetch it by hand with “gpg --locate-keys address”), or switch Encrypt off.",
+            s.label(),
+            missing.join(", "),
+            s.program()
+        ));
+    }
+    let mut out: Vec<Recip> = Vec::new();
+    for ((address, bcc_only), f) in wanted.into_iter().zip(found) {
+        let fingerprint = f.key.map(|k| k.fingerprint).unwrap_or_default();
+        match out.iter_mut().find(|r| r.fingerprint == fingerprint) {
+            Some(r) => r.hidden &= bcc_only,
+            None => out.push(Recip { address, fingerprint, hidden: bcc_only }),
+        }
+    }
+    // the sender's own key: the Sent copy has to stay readable
+    let own = g.key_info(s, own_fingerprint, cancel).map_err(|e| e.to_string())?;
+    match own {
+        Some(k) if encryptable(&k, s) => {
+            if !out.iter().any(|r| r.fingerprint.eq_ignore_ascii_case(&k.fingerprint)) {
+                out.push(Recip { address: "(you)".into(), fingerprint: k.fingerprint, hidden: false });
+            }
+        }
+        _ => {
+            return Err(format!(
+                "The {} key chosen for this account cannot be used to encrypt (it is missing from the keyring, expired or revoked). Choose another in the account settings (Encryption); your own copy must stay readable.",
+                s.label()
+            ))
+        }
+    }
+    Ok(out)
+}
+
+fn b64_wrapped(data: &[u8]) -> String {
+    let t = crate::imap_client::base64_encode(data);
+    t.as_bytes().chunks(76).map(|c| String::from_utf8_lossy(c).into_owned()).collect::<Vec<_>>().join("\r\n")
+}
+
+/// Armored text with CRLF line ends (GnuPG writes LF).
+fn crlf_text(data: &[u8]) -> String {
+    String::from_utf8_lossy(data).replace("\r\n", "\n").replace('\n', "\r\n")
+}
+
+/// A boundary that occurs in none of `texts`.
+fn boundary(texts: &[&[u8]]) -> String {
+    loop {
+        let b = format!("=-=shale-{}", crate::compose::random_hex(10));
+        if !texts.iter().any(|t| t.windows(b.len()).any(|w| w == b.as_bytes())) {
+            return b;
+        }
+    }
+}
+
+/// The signed or encrypted message made of a built one (MAIL-194): its MIME entity (the `Content-*` headers and the body, byte for
+/// byte as built) is signed and/or encrypted, and the message gets the same other headers and a new MIME structure. This is the
+/// hook of `compose::finalize`.
+pub fn apply(g: &Gnupg, plan: &Plan, built: Built, cancel: &AtomicBool) -> Result<Built, ComposeError> {
+    let err = |e: String| ComposeError(e);
+    let e = split_raw(&built.bytes);
+    let mut entity: Vec<u8> = Vec::new();
+    let mut outer: Vec<u8> = Vec::new();
+    for (name, bytes) in &e.headers {
+        if name.starts_with("content-") {
+            entity.extend_from_slice(bytes);
+            entity.extend_from_slice(b"\r\n");
+        } else if name != "mime-version" {
+            outer.extend_from_slice(bytes);
+            outer.extend_from_slice(b"\r\n");
+        }
+    }
+    entity.extend_from_slice(b"\r\n");
+    entity.extend_from_slice(e.body);
+    // the bytes that are signed are the bytes that are sent: CRLF, nothing else touched
+    let entity = canonical_crlf(&entity);
+    let std = plan.standard;
+    let sign_key = plan.sign.as_deref();
+    let mut content_type: String;
+    let mut body: Vec<u8>;
+    // what is encrypted, if anything: for S/MIME it is the signed entity (sign, then encrypt)
+    let mut to_encrypt: Vec<u8> = entity.clone();
+    let mut encrypt_signs_too = false;
+    match (sign_key, &plan.encrypt, std) {
+        (Some(_), Some(_), CryptoStandard::OpenPgp) => {
+            encrypt_signs_too = true; // one OpenPGP message that is signed and encrypted
+            content_type = String::new();
+            body = vec![];
+        }
+        (Some(k), _, _) => {
+            let sig = g.sign_detached(std, k, &entity, cancel).map_err(err)?;
+            let b = boundary(&[&entity, &sig]);
+            let (protocol, micalg, sig_headers, sig_body) = match std {
+                CryptoStandard::OpenPgp => (
+                    "application/pgp-signature",
+                    "pgp-sha256",
+                    "Content-Type: application/pgp-signature; name=\"signature.asc\"\r\nContent-Description: OpenPGP digital signature\r\nContent-Disposition: attachment; filename=\"signature.asc\"",
+                    crlf_text(&sig),
+                ),
+                CryptoStandard::Smime => (
+                    "application/pkcs7-signature",
+                    "sha-256",
+                    "Content-Type: application/pkcs7-signature; name=\"smime.p7s\"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=\"smime.p7s\"\r\nContent-Description: S/MIME Cryptographic Signature",
+                    b64_wrapped(&sig),
+                ),
+            };
+            content_type = format!("multipart/signed; protocol=\"{protocol}\"; micalg={micalg}; boundary=\"{b}\"");
+            body = Vec::new();
+            body.extend_from_slice(format!("--{b}\r\n").as_bytes());
+            body.extend_from_slice(&entity);
+            body.extend_from_slice(format!("\r\n--{b}\r\n{sig_headers}\r\n\r\n{sig_body}\r\n--{b}--\r\n").as_bytes());
+            to_encrypt = [format!("Content-Type: {content_type}\r\n\r\n").as_bytes(), &body].concat();
+        }
+        (None, _, _) => {
+            content_type = String::new();
+            body = vec![];
+        }
+    }
+    if let Some(recips) = &plan.encrypt {
+        let to: Vec<(String, bool)> = recips.iter().map(|r| (r.fingerprint.clone(), r.hidden)).collect();
+        let cipher = g.encrypt(std, &to, if encrypt_signs_too { sign_key } else { None }, &canonical_crlf(&to_encrypt), cancel).map_err(err)?;
+        match std {
+            CryptoStandard::OpenPgp => {
+                let b = boundary(&[&cipher]);
+                content_type = format!("multipart/encrypted; protocol=\"application/pgp-encrypted\"; boundary=\"{b}\"");
+                body = format!(
+                    "--{b}\r\nContent-Type: application/pgp-encrypted\r\nContent-Description: PGP/MIME version identification\r\n\r\nVersion: 1\r\n\r\n--{b}\r\nContent-Type: application/octet-stream; name=\"encrypted.asc\"\r\nContent-Description: OpenPGP encrypted message\r\nContent-Disposition: inline; filename=\"encrypted.asc\"\r\n\r\n{}\r\n--{b}--\r\n",
+                    crlf_text(&cipher)
+                )
+                .into_bytes();
+            }
+            CryptoStandard::Smime => {
+                content_type = "application/pkcs7-mime; smime-type=enveloped-data; name=\"smime.p7m\"".into();
+                body = format!("{}\r\n", b64_wrapped(&cipher)).into_bytes();
+            }
+        }
+    }
+    let mut out = outer;
+    out.extend_from_slice(b"MIME-Version: 1.0\r\n");
+    out.extend_from_slice(format!("Content-Type: {content_type}\r\n").as_bytes());
+    if plan.encrypt.is_some() && std == CryptoStandard::Smime {
+        out.extend_from_slice(b"Content-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=\"smime.p7m\"\r\nContent-Description: S/MIME Encrypted Message\r\n");
+    }
+    out.extend_from_slice(b"\r\n");
+    out.extend_from_slice(&body);
+    Ok(Built { bytes: out, ..built })
+}
+
 /// Mails made with the real GnuPG programs, for the tests of this module and of the mail view.
 #[cfg(test)]
 pub(crate) mod testmail {
@@ -993,6 +1239,262 @@ mod tests {
         let o = run(&alice.g, &mail, true);
         assert!(matches!(o.security.encryption, Encryption::Failed(_)), "{:?}", o.security);
         let _ = a_fpr;
+    }
+
+    // ---- writing ----
+
+    use crate::compose::{BuildOptions, Draft};
+
+    fn opts() -> BuildOptions {
+        BuildOptions { now: NOW, message_id: Some("<fixed@example.org>".into()), safe_transfer: true, ..Default::default() }
+    }
+
+    fn draft(to: &str, cc: &str, bcc: &str, body: &str) -> Draft {
+        Draft {
+            id: "d1".into(),
+            account: "a".into(),
+            from_name: "Alice Test".into(),
+            from_addr: "alice@example.org".into(),
+            to: to.into(),
+            cc: cc.into(),
+            bcc: bcc.into(),
+            subject: "Plans für Köln".into(),
+            body: body.into(),
+            ..Default::default()
+        }
+    }
+
+    /// The MIME entity (`Content-*` headers and body) of a built message.
+    fn entity_of(bytes: &[u8]) -> Vec<u8> {
+        let e = split_raw(bytes);
+        let mut v = Vec::new();
+        for (n, b) in &e.headers {
+            if n.starts_with("content-") {
+                v.extend_from_slice(b);
+                v.extend_from_slice(b"\r\n");
+            }
+        }
+        v.extend_from_slice(b"\r\n");
+        v.extend_from_slice(e.body);
+        v
+    }
+
+    fn made(g: &Gnupg, plan: &Plan, d: &Draft) -> Built {
+        crate::compose::finalize(d, &opts(), &|b| apply(g, plan, b, &no_cancel())).expect("the mail is made")
+    }
+
+    fn recip(address: &str, fpr: &str, hidden: bool) -> Recip {
+        Recip { address: address.into(), fingerprint: fpr.into(), hidden }
+    }
+
+    /// Two people who know each other's OpenPGP keys, for the writing tests.
+    fn pgp_pair() -> (TestHome, String, TestHome, String) {
+        let (alice, bob) = (TestHome::new(), TestHome::new());
+        let a = alice.gen_pgp("Alice Test", "alice@example.org", "never", None);
+        let b = bob.gen_pgp("Bob", "bob@example.org", "never", None);
+        alice.share_pgp_with(&bob, &a);
+        bob.share_pgp_with(&alice, &b);
+        (alice, a, bob, b)
+    }
+
+    fn smime_pair() -> (TestHome, String, TestHome, String) {
+        let (alice, bob) = (TestHome::new(), TestHome::new());
+        let a = alice.gen_smime("Alice S/MIME", "alice@example.org");
+        let b = bob.gen_smime("Bob S/MIME", "bob@example.org");
+        alice.share_smime_with(&bob, &a);
+        bob.share_smime_with(&alice, &b);
+        (alice, a, bob, b)
+    }
+
+    // spec: MAIL-194, MAIL-197
+    #[test]
+    fn a_signed_mail_carries_the_built_entity_byte_for_byte_and_verifies_for_both_standards() {
+        if !have_gnupg() {
+            return;
+        }
+        let d = draft("Bob <bob@example.org>", "", "", "Hello Bob, the plans are ready. Grüße!");
+        let plain = crate::compose::finalize_plain(&d, &opts()).unwrap();
+        for (std, (alice, a, bob, _b)) in [(CryptoStandard::OpenPgp, pgp_pair()), (CryptoStandard::Smime, smime_pair())] {
+            let plan = Plan { standard: std, sign: Some(a.clone()), encrypt: None };
+            let out = made(&alice.g, &plan, &Draft { standard: std, ..d.clone() });
+            // the signed part is the entity lettre built, unchanged, and everything else of the message stays
+            match classify(&out.bytes) {
+                Structure::Signed { standard, signed, scope, .. } => {
+                    assert_eq!((standard, scope), (std, Scope::Whole));
+                    assert_eq!(signed, entity_of(&plain.bytes), "{std:?}: the bytes that are signed are the bytes that were built");
+                }
+                other => panic!("{other:?}"),
+            }
+            let (po, pp) = (split_raw(&out.bytes), split_raw(&plain.bytes));
+            for h in ["from", "to", "subject", "date", "message-id"] {
+                assert_eq!(po.value(h), pp.value(h), "{h}");
+            }
+            assert!(po.value("content-type").unwrap().starts_with("multipart/signed; protocol=\""), "{:?}", po.value("content-type"));
+            assert_eq!(out.bytes.iter().filter(|b| **b == b'\n').count(), out.bytes.windows(2).filter(|w| w == b"\r\n").count(), "CRLF only: every line feed has its carriage return");
+            assert!(!String::from_utf8_lossy(&out.bytes).to_ascii_lowercase().contains("8bit"), "only 7bit, quoted-printable or base64");
+            assert_eq!((out.recipients.clone(), out.message_id.clone()), (plain.recipients.clone(), plain.message_id.clone()));
+            // the recipient checks it
+            let o = run(&bob.g, &out.bytes, false);
+            let l = only_line(&o);
+            assert_eq!((l.sig.state, l.from_ok), (SigState::Good, Some(true)), "{std:?}: {:?}", o.security);
+            assert!(mail::parse(o.display.as_ref().unwrap()).text.contains("Grüße"));
+            // one changed byte in what was sent breaks it
+            let mut bad = out.bytes.clone();
+            let at = bad.windows(5).position(|w| w == b"plans").unwrap();
+            bad[at] = b'P';
+            assert_eq!(only_line(&run(&bob.g, &bad, false)).sig.state, SigState::Bad);
+        }
+    }
+
+    // spec: MAIL-194
+    #[test]
+    fn trailing_blanks_and_long_lines_make_the_text_quoted_printable_so_a_relay_cannot_break_the_signature() {
+        if !have_gnupg() {
+            return;
+        }
+        let (alice, a, bob, _b) = pgp_pair();
+        let body = format!("trailing blanks here   \nand a tab\t\n{}\nend", "long line of words ".repeat(20));
+        let d = draft("bob@example.org", "", "", &body);
+        let plan = Plan { standard: CryptoStandard::OpenPgp, sign: Some(a), encrypt: None };
+        let out = made(&alice.g, &plan, &d);
+        // the signed text part is quoted-printable (it is the first part of the multipart/signed)
+        let text_part = match classify(&out.bytes) {
+            Structure::Signed { signed, .. } => String::from_utf8(signed).unwrap(),
+            other => panic!("{other:?}"),
+        };
+        assert!(text_part.to_ascii_lowercase().contains("content-transfer-encoding: quoted-printable"), "{text_part}");
+        assert!(text_part.lines().all(|l| !l.ends_with(' ') && !l.ends_with('\t')), "no trailing blank in what is signed");
+        assert!(text_part.lines().all(|l| l.len() <= 78));
+        // a relay that strips trailing blanks and re-wraps nothing: still good
+        let relayed: String = String::from_utf8_lossy(&out.bytes).split("\r\n").map(|l| l.trim_end_matches([' ', '\t']).to_string()).collect::<Vec<_>>().join("\r\n");
+        let o = run(&bob.g, relayed.as_bytes(), false);
+        assert_eq!(only_line(&o).sig.state, SigState::Good, "{:?}", o.security);
+        let shown = mail::parse(o.display.as_ref().unwrap()).text;
+        assert!(shown.contains("trailing blanks here   \nand a tab\t\n"), "the person's text comes back as typed: {shown:?}");
+    }
+
+    // spec: MAIL-193, MAIL-194, MAIL-197
+    #[test]
+    fn an_encrypted_mail_decrypts_for_every_recipient_and_for_the_sender_with_both_standards() {
+        if !have_gnupg() {
+            return;
+        }
+        let d = draft("Bob <bob@example.org>", "carol@example.org", "", "the secret plan");
+        // OpenPGP: Bob, Carol (Bcc, hidden) and Alice herself
+        let (alice, a, bob, b) = pgp_pair();
+        let carol = TestHome::new();
+        let c = carol.gen_pgp("Carol", "carol@example.org", "never", None);
+        carol.share_pgp_with(&alice, &c);
+        alice.share_pgp_with(&carol, &a);
+        let plan = Plan { standard: CryptoStandard::OpenPgp, sign: None, encrypt: Some(vec![recip("bob@example.org", &b, false), recip("carol@example.org", &c, true), recip("(you)", &a, false)]) };
+        let out = made(&alice.g, &plan, &Draft { bcc: "carol@example.org".into(), cc: String::new(), ..d.clone() });
+        assert!(matches!(classify(&out.bytes), Structure::Encrypted { standard: CryptoStandard::OpenPgp, .. }));
+        assert!(!String::from_utf8_lossy(&out.bytes).contains("the secret plan"), "nothing readable in what is sent");
+        assert!(!split_raw(&out.bytes).headers.iter().any(|h| h.0 == "bcc"), "Bcc is never a header");
+        assert_eq!(split_raw(&out.bytes).value("subject").map(|s| mail::decode_words(&s)), Some("Plans für Köln".to_string()), "the subject is in the clear (protected headers are out of scope)");
+        for (name, h) in [("bob", &bob), ("carol", &carol), ("alice", &alice)] {
+            let o = run(&h.g, &out.bytes, true);
+            assert_eq!(o.security.encryption, Encryption::Decrypted(CryptoStandard::OpenPgp), "{name}: {:?}", o.security);
+            assert_eq!(mail::parse(o.display.as_ref().unwrap()).text, "the secret plan", "{name}");
+        }
+        assert!(!alice.list_packets(&split_pgp_cipher(&out.bytes)).to_ascii_uppercase().contains(&c[c.len() - 16..]), "the Bcc recipient's key id is not in the message");
+        // S/MIME: Bob and Alice
+        let (alice, a, bob, b) = smime_pair();
+        let plan = Plan { standard: CryptoStandard::Smime, sign: None, encrypt: Some(vec![recip("bob@example.org", &b, false), recip("(you)", &a, false)]) };
+        let out = made(&alice.g, &plan, &Draft { standard: CryptoStandard::Smime, ..d.clone() });
+        assert!(matches!(classify(&out.bytes), Structure::Encrypted { standard: CryptoStandard::Smime, .. }));
+        for (name, h) in [("bob", &bob), ("alice", &alice)] {
+            let o = run(&h.g, &out.bytes, true);
+            assert_eq!(o.security.encryption, Encryption::Decrypted(CryptoStandard::Smime), "{name}: {:?}", o.security);
+            assert_eq!(mail::parse(o.display.as_ref().unwrap()).text, "the secret plan", "{name}");
+        }
+    }
+
+    /// The armored OpenPGP message of a PGP/MIME mail.
+    fn split_pgp_cipher(mail: &[u8]) -> Vec<u8> {
+        match classify(mail) {
+            Structure::Encrypted { data, .. } => data,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // spec: MAIL-176, MAIL-194, MAIL-197
+    #[test]
+    fn signed_and_encrypted_mail_is_made_for_both_standards_and_read_back_with_its_signature() {
+        if !have_gnupg() {
+            return;
+        }
+        let d = draft("bob@example.org", "", "", "the secret plan, signed");
+        for (std, (alice, a, bob, b)) in [(CryptoStandard::OpenPgp, pgp_pair()), (CryptoStandard::Smime, smime_pair())] {
+            let plan = Plan { standard: std, sign: Some(a.clone()), encrypt: Some(vec![recip("bob@example.org", &b, false), recip("(you)", &a, false)]) };
+            let out = made(&alice.g, &plan, &Draft { standard: std, ..d.clone() });
+            assert!(matches!(classify(&out.bytes), Structure::Encrypted { .. }), "{std:?}");
+            for (name, h) in [("bob", &bob), ("alice", &alice)] {
+                let o = run(&h.g, &out.bytes, true);
+                assert_eq!(o.security.encryption, Encryption::Decrypted(std), "{std:?} {name}: {:?}", o.security);
+                assert_eq!(only_line(&o).sig.state, SigState::Good, "{std:?} {name}: {:?}", o.security);
+                assert_eq!(only_line(&o).from_ok, Some(true));
+                assert_eq!(mail::parse(o.display.as_ref().unwrap()).text, "the secret plan, signed");
+            }
+        }
+    }
+
+    // spec: MAIL-194
+    #[test]
+    fn attachments_and_non_ascii_text_survive_signing_and_encrypting() {
+        if !have_gnupg() {
+            return;
+        }
+        let (alice, a, bob, b) = pgp_pair();
+        let mut d = draft("bob@example.org", "", "", "Schöne Grüße — 日本語");
+        d.attachments.push(crate::compose::Att { name: "data.bin".into(), mime: "application/octet-stream".into(), data: std::sync::Arc::new((0..=255u8).cycle().take(5000).collect()), file: String::new() });
+        for (sign, encrypt) in [(true, false), (false, true), (true, true)] {
+            let plan = Plan { standard: CryptoStandard::OpenPgp, sign: sign.then(|| a.clone()), encrypt: encrypt.then(|| vec![recip("bob@example.org", &b, false), recip("(you)", &a, false)]) };
+            let out = made(&alice.g, &plan, &d);
+            let o = run(&bob.g, &out.bytes, true);
+            let shown = mail::parse(o.display.as_ref().expect("the content is shown"));
+            assert_eq!(shown.text, "Schöne Grüße — 日本語", "sign={sign} encrypt={encrypt}");
+            assert_eq!(shown.attachments.len(), 1, "{:?}", o.security);
+            assert_eq!(shown.attachments[0].data, (0..=255u8).cycle().take(5000).collect::<Vec<u8>>());
+            if sign {
+                assert_eq!(only_line(&o).sig.state, SigState::Good);
+            }
+        }
+    }
+
+    // spec: MAIL-193
+    #[test]
+    fn encrypting_needs_a_usable_key_for_every_recipient_and_always_adds_the_senders_own() {
+        if !have_gnupg() {
+            return;
+        }
+        let (alice, a, _bob, b) = pgp_pair();
+        let old = TestHome::new();
+        let o_fpr = old.gen_pgp("Old Key", "old@example.org", "30d", Some("20200101T000000"));
+        old.share_pgp_with(&alice, &o_fpr);
+        let mut d = draft("bob@example.org", "old@example.org", "dave@example.org", "x");
+        d.standard = CryptoStandard::OpenPgp;
+        // dave has no key, old@ has an expired one: both are named, nothing is encrypted
+        let e = resolve_recipients(&alice.g, &d, &a, &no_cancel()).unwrap_err();
+        assert!(e.contains("dave@example.org") && e.contains("old@example.org") && e.contains("not encrypted and not sent") && e.contains("gpg --locate-keys"), "{e}");
+        assert!(!e.contains("bob@example.org"), "{e}");
+        // Cc and Bcc are checked like To; with keys for all, the own key is added and Bcc is hidden
+        d.cc = String::new();
+        d.bcc = "bob@example.org".into();
+        d.to = "bob@example.org, BOB@example.org".into();
+        let r = resolve_recipients(&alice.g, &d, &a, &no_cancel()).unwrap();
+        assert_eq!(r, vec![recip("bob@example.org", &b, false), recip("(you)", &a, false)], "once each, Bcc only when not also To, own key added");
+        d.to = String::new();
+        let r = resolve_recipients(&alice.g, &d, &a, &no_cancel()).unwrap();
+        assert!(r[0].hidden && !r[1].hidden, "{r:?}");
+        // the sender's own key must be able to encrypt: a fingerprint that is not in the keyring is refused
+        let e = resolve_recipients(&alice.g, &d, "0123456789ABCDEF0123456789ABCDEF01234567", &no_cancel()).unwrap_err();
+        assert!(e.contains("cannot be used to encrypt"), "{e}");
+        // no recipient at all
+        assert!(resolve_recipients(&alice.g, &draft("", "", "", "x"), &a, &no_cancel()).is_err());
+        // the key lookup itself: found / not found, local keyring only
+        let l = lookup_keys(&alice.g, CryptoStandard::OpenPgp, &["bob@example.org".into(), "dave@example.org".into()], &no_cancel());
+        assert!(l[0].key.as_ref().is_some_and(|k| k.fingerprint == b) && l[1].key.is_none() && l.iter().all(|x| x.error.is_none()), "{l:?}");
     }
 
     // spec: MAIL-172

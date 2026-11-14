@@ -95,13 +95,52 @@ pub fn sender_of(a: &MailAccount) -> (String, String) {
 /// A new, empty draft for an account, with its sender and signature.
 pub fn new_draft(a: &MailAccount) -> Draft {
     let (name, addr) = sender_of(a);
-    crate::compose::new_draft(&a.id, &name, &addr, &a.signature)
+    with_crypto_defaults(crate::compose::new_draft(&a.id, &name, &addr, &a.signature), a)
+}
+
+/// The standard a draft of this account starts with and whether it is signed (MAIL-190): the preferred standard if it has a
+/// key, else the other one; Sign on if the account says so and has a key. Encrypt is never on by itself.
+pub fn with_crypto_defaults(mut d: Draft, a: &MailAccount) -> Draft {
+    use crate::config::CryptoStandard::{OpenPgp, Smime};
+    let std = [a.preferred_standard, if a.preferred_standard == OpenPgp { Smime } else { OpenPgp }].into_iter().find(|s| !a.key_for(*s).is_empty());
+    if let Some(s) = std {
+        d.standard = s;
+        d.sign = a.sign_by_default;
+    }
+    d
 }
 
 /// Send pressed (MAIL-132): the mail goes into the outbox, to be sent when `undo_secs` have passed. Nothing goes
 /// to the network here.
 pub fn queue_draft(ob: &Outbox, a: &MailAccount, draft: &Draft, undo_secs: u32, now: i64, date: &str) -> Result<Item, String> {
-    let built = crate::compose::finalize_plain(draft, &BuildOptions { now, user_agent: a.user_agent_header, ..BuildOptions::default() }).map_err(|e| e.0)?;
+    queue_with(ob, &crate::gpg::Gnupg::default(), a, draft, undo_secs, now, date, &std::sync::atomic::AtomicBool::new(false))
+}
+
+/// What a draft with Sign and/or Encrypt needs (MAIL-192, MAIL-193): the account's key for the standard and, to encrypt, a
+/// key for every recipient. None for a plain draft. The words say what is missing.
+pub fn crypto_plan(g: &crate::gpg::Gnupg, a: &MailAccount, d: &Draft, cancel: &std::sync::atomic::AtomicBool) -> Result<Option<crate::mail_crypto::Plan>, String> {
+    if !d.sign && !d.encrypt {
+        return Ok(None);
+    }
+    let key = a.key_for(d.standard);
+    if key.is_empty() {
+        return Err(format!("No {} key is chosen for this account yet (account settings: Encryption).", d.standard.label()));
+    }
+    let encrypt = if d.encrypt { Some(crate::mail_crypto::resolve_recipients(g, d, key, cancel)?) } else { None };
+    Ok(Some(crate::mail_crypto::Plan { standard: d.standard, sign: d.sign.then(|| key.to_string()), encrypt }))
+}
+
+/// [`queue_draft`] with GnuPG: a draft with Sign or Encrypt goes through the hook of the sending pipeline (MAIL-129, MAIL-194,
+/// MAIL-195). This may wait for a passphrase dialog, so the window runs it as a job. If anything fails nothing is put into the
+/// outbox: the draft stays as it was.
+pub fn queue_with(ob: &Outbox, g: &crate::gpg::Gnupg, a: &MailAccount, draft: &Draft, undo_secs: u32, now: i64, date: &str, cancel: &std::sync::atomic::AtomicBool) -> Result<Item, String> {
+    let plan = crypto_plan(g, a, draft, cancel)?;
+    let opts = BuildOptions { now, user_agent: a.user_agent_header, safe_transfer: plan.is_some(), ..BuildOptions::default() };
+    let built = crate::compose::finalize(draft, &opts, &|b| match &plan {
+        Some(p) => crate::mail_crypto::apply(g, p, b, cancel),
+        None => crate::compose::identity(b),
+    })
+    .map_err(|e| e.0)?;
     ob.queue(draft, &built, now, now + i64::from(undo_secs), date)
 }
 
@@ -374,6 +413,115 @@ pub mod tests {
         } else {
             std::fs::read(p).map(|b| b == bytes).unwrap_or(false)
         }
+    }
+
+    fn crypto_account(std: crate::config::CryptoStandard, fpr: &str) -> MailAccount {
+        let mut a = account();
+        a.from_address = "alice@example.org".into();
+        match std {
+            crate::config::CryptoStandard::OpenPgp => a.pgp_key = fpr.into(),
+            crate::config::CryptoStandard::Smime => a.smime_key = fpr.into(),
+        }
+        a
+    }
+
+    // spec: MAIL-195, MAIL-196, MAIL-197
+    #[test]
+    fn a_signed_and_encrypted_mail_goes_through_the_outbox_and_smtp_and_verifies_and_decrypts_for_everyone_and_the_sent_copy_is_readable() {
+        use crate::config::CryptoStandard;
+        use crate::gpg::testkit::{have_gnupg, no_cancel, TestHome};
+        use crate::mail_crypto::{process, Encryption, Structure};
+        if !have_gnupg() {
+            return;
+        }
+        let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
+        let c = connector(&smtp);
+        let (e, ob) = with_sent("crypt1");
+        let (alice, bob, carol) = (TestHome::new(), TestHome::new(), TestHome::new());
+        let a = alice.gen_pgp("Alice Test", "alice@example.org", "never", None);
+        let b = bob.gen_pgp("Bob", "bob@example.org", "never", None);
+        let k = carol.gen_pgp("Carol", "carol@example.org", "never", None);
+        for (h, f) in [(&bob, &b), (&carol, &k)] {
+            h.share_pgp_with(&alice, f);
+        }
+        alice.share_pgp_with(&bob, &a);
+        alice.share_pgp_with(&carol, &a);
+        let acct = crypto_account(CryptoStandard::OpenPgp, &a);
+        let mut d = draft("acct1", "Plans für Köln", "the secret plan");
+        (d.to, d.cc, d.bcc, d.sign, d.encrypt, d.standard, d.from_addr) = ("bob@example.org".into(), String::new(), "carol@example.org".into(), true, true, CryptoStandard::OpenPgp, "alice@example.org".into());
+        let item = queue_with(&ob, &alice.g, &acct, &d, 0, NOW, DATE, &no_cancel()).unwrap();
+        let eml = ob.read_eml("acct1", &item.id).unwrap();
+        assert!(!String::from_utf8_lossy(&eml).contains("the secret plan"), "the outbox holds the encrypted bytes");
+        let r = send_due(&ob, &e.store, &acct, &c, NOW);
+        assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
+        let got = smtp.state().received[0].clone();
+        assert_eq!(got.data, eml, "what arrived is what the outbox held");
+        let mut rcpts = got.rcpts.clone();
+        rcpts.sort();
+        assert_eq!(rcpts, vec!["bob@example.org", "carol@example.org"], "the envelope has the Bcc recipient, the message does not");
+        assert!(!String::from_utf8_lossy(&got.data).to_ascii_lowercase().contains("bcc:"));
+        assert!(matches!(crate::mail_crypto::classify(&got.data), Structure::Encrypted { .. }));
+        // each recipient and the sender can read it, and the signature is Alice's
+        for (name, h) in [("bob", &bob), ("carol", &carol), ("alice", &alice)] {
+            let o = process(&h.g, &got.data, true, &no_cancel(), NOW);
+            assert_eq!(o.security.encryption, Encryption::Decrypted(CryptoStandard::OpenPgp), "{name}: {:?}", o.security);
+            assert_eq!(o.security.lines.len(), 1, "{name}");
+            assert_eq!(o.security.lines[0].sig.state, crate::gpg::SigState::Good, "{name}");
+            assert_eq!(crate::mail::parse(o.display.as_ref().unwrap()).text, "the secret plan", "{name}");
+        }
+        // the Sent copy is the same bytes and is readable for the sender
+        let sent = sent_list(&e);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(e.store.read_raw(&sent[0]).unwrap(), eml);
+        let o = process(&alice.g, &e.store.read_raw(&sent[0]).unwrap(), true, &no_cancel(), NOW);
+        assert_eq!(crate::mail::parse(o.display.as_ref().expect("the copy in Sent decrypts")).text, "the secret plan");
+        // a recipient without a key: refused in words, nothing is put in the outbox, the draft is untouched
+        let before = ob.list(None).len();
+        let mut d2 = d.clone();
+        d2.cc = "dave@example.org".into();
+        let err = queue_with(&ob, &alice.g, &acct, &d2, 0, NOW, DATE, &no_cancel()).unwrap_err();
+        assert!(err.contains("dave@example.org"), "{err}");
+        assert_eq!(ob.list(None).len(), before);
+        // a cancelled run: nothing in the outbox either
+        let cancelled = std::sync::atomic::AtomicBool::new(true);
+        assert!(queue_with(&ob, &alice.g, &acct, &d, 0, NOW, DATE, &cancelled).is_err());
+        assert_eq!(ob.list(None).len(), before);
+        // an account without a key for the standard
+        let err = queue_with(&ob, &alice.g, &account(), &d, 0, NOW, DATE, &no_cancel()).unwrap_err();
+        assert!(err.contains("No OpenPGP key is chosen"), "{err}");
+        // a plain draft never touches GnuPG
+        let plain = draft("acct1", "Plain", "nothing secret");
+        let nope = crate::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
+        assert!(queue_with(&ob, &nope, &account(), &plain, 0, NOW, DATE, &no_cancel()).is_ok());
+    }
+
+    // spec: MAIL-195, MAIL-196
+    #[test]
+    fn a_signed_smime_mail_goes_through_smtp_and_verifies_for_the_recipient() {
+        use crate::config::CryptoStandard;
+        use crate::gpg::testkit::{have_gnupg, no_cancel, TestHome};
+        if !have_gnupg() {
+            return;
+        }
+        let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
+        let c = connector(&smtp);
+        let (e, ob) = with_sent("crypt2");
+        let (alice, bob) = (TestHome::new(), TestHome::new());
+        let a = alice.gen_smime("Alice S/MIME", "alice@example.org");
+        alice.share_smime_with(&bob, &a);
+        let acct = crypto_account(CryptoStandard::Smime, &a);
+        let mut d = draft("acct1", "Signed plans", "hello Bob");
+        (d.to, d.sign, d.standard, d.from_addr) = ("bob@example.org".into(), true, CryptoStandard::Smime, "alice@example.org".into());
+        let item = queue_with(&ob, &alice.g, &acct, &d, 0, NOW, DATE, &no_cancel()).unwrap();
+        let eml = ob.read_eml("acct1", &item.id).unwrap();
+        let r = send_due(&ob, &e.store, &acct, &c, NOW);
+        assert_eq!(r.sent.len(), 1, "{r:?}");
+        let got = smtp.state().received[0].data.clone();
+        assert_eq!(got, eml);
+        let o = crate::mail_crypto::process(&bob.g, &got, false, &no_cancel(), NOW);
+        assert_eq!(o.security.lines.len(), 1, "{:?}", o.security);
+        assert_eq!((o.security.lines[0].sig.state, o.security.lines[0].from_ok), (crate::gpg::SigState::Good, Some(true)));
+        assert_eq!(crate::mail::parse(o.display.as_ref().unwrap()).text, "hello Bob");
     }
 
     // spec: MAIL-142

@@ -295,6 +295,20 @@ impl KeyInfo {
     pub fn usable(&self) -> bool {
         !matches!(self.validity, 'e' | 'r' | 'd' | 'i')
     }
+    /// Words for the trust level of a key found for a recipient.
+    pub fn trust_words(&self) -> &'static str {
+        match self.validity {
+            'u' => "yours",
+            'f' => "trusted",
+            'm' => "marginally trusted",
+            'e' => "expired",
+            'r' => "revoked",
+            'd' => "disabled",
+            'i' => "invalid",
+            'n' => "not trusted",
+            _ => "not certified",
+        }
+    }
     /// The first user id, for lists.
     pub fn label(&self) -> String {
         self.uids.first().cloned().unwrap_or_else(|| self.fingerprint.clone())
@@ -374,7 +388,9 @@ pub fn parse_keys(out: &[u8], secret: bool) -> Vec<KeyInfo> {
                                 k.emails.push(addr);
                             }
                         }
-                        k.uids.push(u);
+                        if !k.uids.contains(&u) {
+                            k.uids.push(u);
+                        }
                     }
                 }
             }
@@ -566,6 +582,8 @@ pub enum DecryptFailure {
     /// The passphrase or PIN dialog was cancelled.
     Cancelled,
     BadPassphrase,
+    /// `gpgsm` only says that it failed: no certificate of yours fits it, or the data is damaged.
+    NoKeyOrDamaged,
     /// The data is not an encrypted message, or is damaged.
     Corrupt,
     Other(String),
@@ -576,6 +594,9 @@ impl std::fmt::Display for DecryptFailure {
         match self {
             DecryptFailure::NoSecretKey(_) => write!(f, "This mail is encrypted for a key that is not in your keyring (no secret key fits). If it is your key, import it with “gpg --import” or “gpgsm --import”."),
             DecryptFailure::Cancelled => write!(f, "The passphrase dialog was cancelled, so the mail was not decrypted. Open it again to retry."),
+            DecryptFailure::NoKeyOrDamaged => {
+                write!(f, "This mail could not be decrypted: none of your certificates fits it (it may be encrypted for another address), or the data is damaged. If it is yours, import the certificate with “gpgsm --import”.")
+            }
             DecryptFailure::BadPassphrase => write!(f, "The passphrase was not accepted, so the mail was not decrypted. Open it again to retry."),
             DecryptFailure::Corrupt => write!(f, "The encrypted part is damaged or is not an encrypted message, so it could not be decrypted."),
             DecryptFailure::Other(e) => write!(f, "The mail could not be decrypted: {e}"),
@@ -611,12 +632,113 @@ impl Gnupg {
             DecryptFailure::BadPassphrase
         } else if !missing.is_empty() || code == Some(17) {
             DecryptFailure::NoSecretKey(missing)
-        } else if run.has("NODATA") || code == Some(58) || run.has("DECRYPTION_FAILED") {
+        } else if run.has("NODATA") || code == Some(58) {
+            DecryptFailure::Corrupt
+        } else if s == CryptoStandard::Smime && run.has("DECRYPTION_FAILED") && code.is_none() {
+            DecryptFailure::NoKeyOrDamaged
+        } else if run.has("DECRYPTION_FAILED") {
             DecryptFailure::Corrupt
         } else {
             DecryptFailure::Other(run.status.iter().find(|s| s.keyword == "ERROR" || s.keyword == "FAILURE").map(|s| format!("{} {}", s.keyword, s.args)).unwrap_or_else(|| format!("exit code {}", run.code)))
         };
         Ok(Err(fail))
+    }
+}
+
+// ---------------------------------------------------------------- signing and encrypting
+
+/// Why `INV_RECP` refused a recipient (the reason numbers of GnuPG).
+fn inv_recp_words(reason: &str) -> &'static str {
+    match reason {
+        "1" => "no such key in your keyring",
+        "2" => "the name matches several keys",
+        "3" => "the key may not be used for encryption",
+        "4" => "the key has been revoked",
+        "5" => "the key has expired",
+        "6" | "7" => "no current revocation list is available for its certificate",
+        "8" => "it does not meet the policy",
+        "10" => "the key is not trusted",
+        "11" | "12" => "the certificate chain is incomplete (a certificate is missing)",
+        _ => "GnuPG refused the key",
+    }
+}
+
+/// What went wrong in a signing or encrypting call, in words, from its status lines.
+fn op_failure(run: &Run, doing: &str) -> String {
+    let code = error_code(&run.status);
+    if code == Some(99) {
+        return format!("The passphrase dialog was cancelled, so the mail was not {doing}.");
+    }
+    if run.has("BAD_PASSPHRASE") || code == Some(11) {
+        return format!("The passphrase was not accepted, so the mail was not {doing}.");
+    }
+    let refused: Vec<String> = run
+        .status
+        .iter()
+        .filter(|s| s.keyword == "INV_RECP")
+        .map(|s| {
+            let (reason, who) = s.args.split_once(' ').unwrap_or((&s.args, ""));
+            format!("{}: {}", unescape(who), inv_recp_words(reason))
+        })
+        .collect();
+    if !refused.is_empty() {
+        return format!("The mail was not {doing}: {}.", refused.join("; "));
+    }
+    if run.has("INV_SGNR") || run.has("NO_SECKEY") || code == Some(17) {
+        return format!("The mail was not {doing}: the key chosen for this account has no secret key here (or has expired). Choose another in the account settings (Encryption).");
+    }
+    let detail = run.status.iter().find(|s| s.keyword == "ERROR" || s.keyword == "FAILURE").map(|s| format!(" ({} {})", s.keyword, s.args)).unwrap_or_default();
+    format!("GnuPG could not do it, so the mail was not {doing}{detail}.")
+}
+
+impl Gnupg {
+    /// A detached signature of `data` made by the key `fingerprint` (armored text for OpenPGP, DER for S/MIME). SHA-256 is
+    /// asked for, so the `micalg` of the mail can say so. The passphrase dialog, if one is needed, is GnuPG's.
+    pub fn sign_detached(&self, s: CryptoStandard, fingerprint: &str, data: &[u8], cancel: &AtomicBool) -> Result<Vec<u8>, String> {
+        if !is_key_id(fingerprint) {
+            return Err(format!("{fingerprint:?} is not a key fingerprint"));
+        }
+        let args: Vec<&str> = match s {
+            CryptoStandard::OpenPgp => vec!["--armor", "--detach-sign", "--digest-algo", "SHA256", "-u", fingerprint],
+            CryptoStandard::Smime => vec!["--detach-sign", "--digest-algo", "sha256", "-u", fingerprint],
+        };
+        let run = self.run(s, &args, data, DIALOG, cancel).map_err(|e| e.to_string())?;
+        if run.has("SIG_CREATED") && run.code == 0 && !run.stdout.is_empty() {
+            Ok(run.stdout)
+        } else {
+            Err(op_failure(&run, "signed"))
+        }
+    }
+
+    /// `data` encrypted to the keys `to` (fingerprint and whether it is a hidden recipient: OpenPGP puts no key id for it
+    /// in the message), and signed in the same operation by `sign_with` when given (OpenPGP only; for S/MIME sign first).
+    /// Armored text for OpenPGP, DER for S/MIME. Only keys of the person's own keyring are used: they chose them.
+    pub fn encrypt(&self, s: CryptoStandard, to: &[(String, bool)], sign_with: Option<&str>, data: &[u8], cancel: &AtomicBool) -> Result<Vec<u8>, String> {
+        if to.is_empty() {
+            return Err("There is nobody to encrypt for.".into());
+        }
+        if let Some(bad) = to.iter().map(|t| t.0.as_str()).chain(sign_with).find(|f| !is_key_id(f)) {
+            return Err(format!("{bad:?} is not a key fingerprint"));
+        }
+        let mut args: Vec<&str> = match s {
+            CryptoStandard::OpenPgp => vec!["--armor", "--trust-model", "always", "--encrypt"],
+            CryptoStandard::Smime => vec!["--encrypt"],
+        };
+        for (fpr, hidden) in to {
+            args.push(if *hidden && s == CryptoStandard::OpenPgp { "-R" } else { "-r" });
+            args.push(fpr);
+        }
+        if let (Some(k), CryptoStandard::OpenPgp) = (sign_with, s) {
+            args.extend(["--sign", "--digest-algo", "SHA256", "-u", k]);
+        }
+        let run = self.run(s, &args, data, DIALOG, cancel).map_err(|e| e.to_string())?;
+        // gpgsm says nothing at the end of an encryption (gpg says END_ENCRYPTION): its success is the exit code, output and no refusal
+        let finished = s == CryptoStandard::Smime || run.has("END_ENCRYPTION");
+        if finished && !run.has("INV_RECP") && !run.has("ERROR") && !run.has("FAILURE") && run.code == 0 && !run.stdout.is_empty() {
+            Ok(run.stdout)
+        } else {
+            Err(op_failure(&run, "encrypted"))
+        }
     }
 }
 
@@ -798,6 +920,13 @@ pub(crate) mod testkit {
             self.pipe("gpg", &["--armor", "--clearsign", "-u", fpr], text.as_bytes())
         }
 
+        /// `gpg --list-packets` of some data: which keys a message is encrypted to.
+        pub fn list_packets(&self, data: &[u8]) -> String {
+            let mut c = self.cmd("gpg").args(["--batch", "--list-packets"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().expect("gpg runs");
+            c.stdin.take().unwrap().write_all(data).unwrap();
+            String::from_utf8_lossy(&c.wait_with_output().unwrap().stdout).into_owned()
+        }
+
         /// Revoke an OpenPGP key of this home with the certificate gpg stored when it was made.
         pub fn revoke_pgp(&self, fpr: &str) {
             let cert = std::fs::read_to_string(self.dir.join("openpgp-revocs.d").join(format!("{fpr}.rev"))).expect("revocation certificate");
@@ -907,6 +1036,82 @@ mod tests {
         }
         assert!(args.iter().all(|a| !a.contains("keyserver") && !a.contains("auto-key-locate=")), "{args:?}");
         assert!(seen.contains("stdin:cipher; rm -rf / $(evil)"), "data goes on stdin, never into a shell: {seen}");
+    }
+
+    // spec: MAIL-194, MAIL-197
+    #[test]
+    fn signing_and_encrypting_round_trip_for_openpgp_and_a_hidden_recipient_has_no_key_id_in_the_message() {
+        if !have_gnupg() {
+            return;
+        }
+        let (alice, bob, carol) = (TestHome::new(), TestHome::new(), TestHome::new());
+        let a = alice.gen_pgp("Alice", "alice@example.org", "never", None);
+        let b = bob.gen_pgp("Bob", "bob@example.org", "never", None);
+        let c = carol.gen_pgp("Carol", "carol@example.org", "never", None);
+        for (h, f) in [(&bob, &b), (&carol, &c)] {
+            h.share_pgp_with(&alice, f);
+        }
+        alice.share_pgp_with(&bob, &a);
+        alice.share_pgp_with(&carol, &a);
+        let data = b"Content-Type: text/plain\r\n\r\nhello \xc3\xa4\r\n";
+        // a detached signature: the programs' own check agrees
+        let sig = alice.g.sign_detached(CryptoStandard::OpenPgp, &a, data, &no_cancel()).unwrap();
+        assert!(sig.starts_with(b"-----BEGIN PGP SIGNATURE-----"));
+        let v = bob.g.verify_detached(CryptoStandard::OpenPgp, &sig, data, &no_cancel()).unwrap();
+        assert_eq!((v.len(), v[0].state), (1, SigState::Good));
+        let mut tampered = data.to_vec();
+        tampered[30] ^= 1;
+        assert_eq!(bob.g.verify_detached(CryptoStandard::OpenPgp, &sig, &tampered, &no_cancel()).unwrap()[0].state, SigState::Bad);
+        // signed and encrypted in one message, to Bob, Carol (hidden) and Alice herself
+        let cipher = alice.g.encrypt(CryptoStandard::OpenPgp, &[(b.clone(), false), (c.clone(), true), (a.clone(), false)], Some(&a), data, &no_cancel()).unwrap();
+        for h in [&alice, &bob, &carol] {
+            let d = h.g.decrypt(CryptoStandard::OpenPgp, &cipher, &no_cancel()).unwrap().unwrap();
+            assert_eq!(d.plain, data);
+            assert_eq!(d.signatures.len(), 1, "signed in the same operation");
+            assert_eq!(d.signatures[0].state, SigState::Good);
+        }
+        let packets = alice.list_packets(&cipher);
+        let c_id = &c[c.len() - 16..];
+        assert!(!packets.to_ascii_uppercase().contains(c_id), "the hidden recipient's key id is not in the message:\n{packets}");
+        assert!(packets.to_ascii_uppercase().contains(&b[b.len() - 16..]) || packets.contains("pubkey enc packet"), "{packets}");
+        assert!(packets.contains("0000000000000000"), "a hidden recipient shows as the wildcard key id");
+        // a stranger cannot read it
+        let eve = TestHome::new();
+        eve.gen_pgp("Eve", "eve@example.org", "never", None);
+        assert!(matches!(eve.g.decrypt(CryptoStandard::OpenPgp, &cipher, &no_cancel()).unwrap(), Err(DecryptFailure::NoSecretKey(_))));
+        // a key that is not there, and bad arguments, are refused in words
+        let e = alice.g.encrypt(CryptoStandard::OpenPgp, &[("0123456789ABCDEF0123456789ABCDEF01234567".into(), false)], None, data, &no_cancel()).unwrap_err();
+        assert!(e.contains("not encrypted"), "{e}");
+        assert!(alice.g.encrypt(CryptoStandard::OpenPgp, &[("--help".into(), false)], None, data, &no_cancel()).is_err());
+        assert!(alice.g.encrypt(CryptoStandard::OpenPgp, &[], None, data, &no_cancel()).is_err());
+        assert!(alice.g.sign_detached(CryptoStandard::OpenPgp, "not a key", data, &no_cancel()).is_err());
+        // a key that was not made here has no secret key: signing says so
+        let e = alice.g.sign_detached(CryptoStandard::OpenPgp, &b, data, &no_cancel()).unwrap_err();
+        assert!(e.contains("not signed") && e.contains("secret key"), "{e}");
+    }
+
+    // spec: MAIL-194, MAIL-197
+    #[test]
+    fn signing_and_encrypting_round_trip_for_smime() {
+        if !have_gnupg() {
+            return;
+        }
+        let (alice, bob) = (TestHome::new(), TestHome::new());
+        let a = alice.gen_smime("Alice S/MIME", "alice@example.org");
+        let b = bob.gen_smime("Bob S/MIME", "bob@example.org");
+        bob.share_smime_with(&alice, &b);
+        alice.share_smime_with(&bob, &a);
+        let data = b"Content-Type: text/plain\r\n\r\nhello\r\n";
+        let sig = alice.g.sign_detached(CryptoStandard::Smime, &a, data, &no_cancel()).unwrap();
+        let v = bob.g.verify_detached(CryptoStandard::Smime, &sig, data, &no_cancel()).unwrap();
+        assert_eq!((v.len(), v[0].state), (1, SigState::Good), "{v:?}");
+        let cipher = alice.g.encrypt(CryptoStandard::Smime, &[(b.clone(), false), (a.clone(), false)], None, data, &no_cancel()).unwrap();
+        for h in [&alice, &bob] {
+            assert_eq!(h.g.decrypt(CryptoStandard::Smime, &cipher, &no_cancel()).unwrap().unwrap().plain, data);
+        }
+        let eve = TestHome::new();
+        eve.gen_smime("Eve S/MIME", "eve@example.org");
+        assert!(matches!(eve.g.decrypt(CryptoStandard::Smime, &cipher, &no_cancel()).unwrap(), Err(DecryptFailure::NoSecretKey(_) | DecryptFailure::NoKeyOrDamaged)), "{:?}", eve.g.decrypt(CryptoStandard::Smime, &cipher, &no_cancel()));
     }
 
     // spec: MAIL-171

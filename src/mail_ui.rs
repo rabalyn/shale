@@ -275,6 +275,16 @@ enum Event {
     },
     /// What GnuPG is and has on this computer.
     Gnupg(Result<GnupgInfo, String>),
+    /// The keys found for the recipients of the mail being written (MAIL-192).
+    Keys {
+        sig: String,
+        result: Result<Vec<mail_crypto::KeyLookup>, String>,
+    },
+    /// A mail that is signed or encrypted has been put into the outbox, or could not be (MAIL-195).
+    Queued {
+        draft_id: String,
+        result: Result<Box<Item>, String>,
+    },
     /// The mail to answer or forward has been read.
     ReplyMail {
         kind: Kind,
@@ -543,6 +553,7 @@ impl MailView {
             self.handle(ev, cfg);
         }
         self.poll_syncs();
+        self.tick_compose_keys();
         self.tick_ops(cfg);
         self.tick_local(cfg);
         // the automatic sync (MAIL-058)
@@ -654,6 +665,37 @@ impl MailView {
                     }
                     // the decrypted copy changed what the index knows: the list and the counts are read again
                     self.dirty = true;
+                }
+            }
+            Event::Keys { sig, result } => {
+                if let Some(c) = self.compose.as_mut() {
+                    c.keys_running = false;
+                    match result {
+                        Ok(v) => {
+                            c.keys = v;
+                            c.keys_for = Some(sig);
+                        }
+                        Err(e) => {
+                            c.keys = vec![];
+                            c.keys_for = Some(sig);
+                            c.error = Some(format!("The keys could not be looked up: {e}"));
+                        }
+                    }
+                }
+            }
+            Event::Queued { draft_id, result } => {
+                if self.compose.as_ref().is_some_and(|c| c.draft.id == draft_id) {
+                    if let Some(c) = self.compose.as_mut() {
+                        c.crypting = None;
+                    }
+                    match result {
+                        Ok(item) => self.finish_queued(*item),
+                        Err(e) => {
+                            if let Some(c) = self.compose.as_mut() {
+                                c.error = Some(e);
+                            }
+                        }
+                    }
                 }
             }
             Event::Gnupg(r) => {
@@ -1777,7 +1819,7 @@ impl MailView {
     fn open_answer(&mut self, cfg: &Config, kind: Kind, msg: &MessageSummary, mail: &Mail) {
         let Some(a) = cfg.mail_accounts.iter().find(|a| a.id == msg.account) else { return };
         let (name, addr) = mail_send::sender_of(a);
-        let d = compose::answer(kind, mail, &a.id, &name, &addr, &a.signature);
+        let d = mail_send::with_crypto_defaults(compose::answer(kind, mail, &a.id, &name, &addr, &a.signature), a);
         self.open_compose(Compose::new(d), if kind == Kind::Forward { Field::To } else { Field::Body });
     }
 
@@ -1823,6 +1865,11 @@ impl MailView {
     /// Esc or Close: with changes the person is asked (MAIL-131).
     pub fn compose_close(&mut self) {
         let Some(c) = self.compose.as_mut() else { return };
+        if let Some(cancel) = &c.crypting {
+            // Esc while GnuPG works: stop it; the window stays
+            cancel.store(true, Ordering::SeqCst);
+            return;
+        }
         if c.ask.is_some() {
             return;
         }
@@ -1882,6 +1929,14 @@ impl MailView {
             c.error = Some("This account has no SMTP server yet: set it in the account settings (Sending).".into());
             return;
         }
+        if (c.draft.sign || c.draft.encrypt) && a.key_for(c.draft.standard).is_empty() {
+            c.error = Some(format!("No {} key is chosen for this account yet: choose one in the account settings (Encryption), or switch Sign and Encrypt off.", c.draft.standard.label()));
+            return;
+        }
+        if c.draft.encrypt && !self.consent {
+            c.error = Some("Encrypting needs encryption to be switched on in the settings first: the copy in Sent is stored decrypted on this computer so that you can read it later.".into());
+            return;
+        }
         // build it once to find out what is wrong with it
         if let Err(e) = compose::finalize_plain(&c.draft, &compose::BuildOptions { now: crate::cal_time::now(), user_agent: a.user_agent_header, ..Default::default() }) {
             c.error = Some(e.0);
@@ -1900,16 +1955,61 @@ impl MailView {
         let Some(a) = cfg.mail_accounts.iter().find(|a| a.id == c.draft.account) else { return };
         c.ask = None;
         let now = crate::cal_time::now();
+        if c.draft.sign || c.draft.encrypt {
+            // signing and encrypting are GnuPG's, and may wait for a passphrase dialog: a job, the window stays as it is
+            let cancel = Arc::new(AtomicBool::new(false));
+            c.crypting = Some(cancel.clone());
+            c.error = None;
+            let (g, a, draft, undo, id) = (self.gnupg.clone(), a.clone(), c.draft.clone(), cfg.mail_undo_secs, c.draft.id.clone());
+            let draft_id = id.clone();
+            self.spawn(move || mail_send::queue_with(&ob, &g, &a, &draft, undo, now, &crate::mail_store::today_string(), &cancel).map(Box::new), move |r| Event::Queued { draft_id, result: flatten(r) });
+            return;
+        }
         match mail_send::queue_draft(&ob, a, &c.draft, cfg.mail_undo_secs, now, &crate::mail_store::today_string()) {
-            Ok(item) => {
-                if let Some(old) = c.saved_account.clone().filter(|o| o != &item.account) {
-                    let _ = ob.discard_draft(&old, &item.id, &crate::mail_store::today_string());
-                }
-                self.compose = None;
-                self.refresh_local();
-            }
+            Ok(item) => self.finish_queued(item),
             Err(e) => c.error = Some(format!("The mail could not be put in the outbox: {e}")),
         }
+    }
+
+    /// The mail is in the outbox: the compose window is done.
+    fn finish_queued(&mut self, item: Item) {
+        if let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_ref()) {
+            if let Some(old) = c.saved_account.clone().filter(|o| o != &item.account) {
+                let _ = ob.discard_draft(&old, &item.id, &crate::mail_store::today_string());
+            }
+        }
+        self.compose = None;
+        self.refresh_local();
+    }
+
+    /// Looking up the keys of the recipients of a mail that is to be encrypted, in the local keyrings: a short pause after the
+    /// last change, then a job (MAIL-192).
+    fn tick_compose_keys(&mut self) {
+        let Some(c) = self.compose.as_mut() else { return };
+        if !c.draft.encrypt {
+            c.keys_wanted = None;
+            return;
+        }
+        let sig = c.keys_signature();
+        if c.keys_for.as_ref() == Some(&sig) || c.keys_running {
+            return;
+        }
+        match &c.keys_wanted {
+            Some((s, since)) if *s == sig => {
+                if since.elapsed() < Duration::from_millis(400) {
+                    return;
+                }
+            }
+            _ => {
+                c.keys_wanted = Some((sig, Instant::now()));
+                return;
+            }
+        }
+        c.keys_wanted = None;
+        c.keys_running = true;
+        let (g, std) = (self.gnupg.clone(), c.draft.standard);
+        let addresses: Vec<String> = mail_crypto::recipients_of(&c.draft).into_iter().map(|a| a.0).collect();
+        self.spawn(move || Ok::<_, String>(mail_crypto::lookup_keys(&g, std, &addresses, &AtomicBool::new(false))), move |r| Event::Keys { sig, result: flatten(r) });
     }
 
     /// What the compose view asked for in this frame.
@@ -1919,10 +2019,20 @@ impl MailView {
                 c.ask = None;
             }
         }
+        if out.cancel_crypt {
+            if let Some(cancel) = self.compose.as_ref().and_then(|c| c.crypting.clone()) {
+                cancel.store(true, Ordering::SeqCst);
+            }
+        }
         if let Some(id) = out.account {
             if let (Some(c), Some(a)) = (self.compose.as_mut(), cfg.mail_accounts.iter().find(|a| a.id == id)) {
                 let (name, addr) = mail_send::sender_of(a);
                 (c.draft.account, c.draft.from_name, c.draft.from_addr) = (id, name, addr);
+                if a.key_for(c.draft.standard).is_empty() {
+                    // the other account has no key for this standard: back to what it has
+                    let d = mail_send::with_crypto_defaults(c.draft.clone(), a);
+                    (c.draft.standard, c.draft.sign, c.draft.encrypt) = (d.standard, d.sign, false);
+                }
                 c.touch();
             }
         }

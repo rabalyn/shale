@@ -56,6 +56,10 @@ pub struct Draft {
     /// The Message-ID of the mail this answers, and its chain (`References`).
     pub in_reply_to: String,
     pub references: Vec<String>,
+    /// Sign and/or encrypt with this standard when sending (ADR-0011, MAIL-192).
+    pub sign: bool,
+    pub encrypt: bool,
+    pub standard: crate::config::CryptoStandard,
 }
 
 impl Draft {
@@ -154,7 +158,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn random_hex(n: usize) -> String {
+pub(crate) fn random_hex(n: usize) -> String {
     match crate::oauth::random_bytes(n) {
         Ok(b) => hex(&b),
         // the system has no random numbers: time and a counter keep ids apart (they are not secret)
@@ -197,6 +201,9 @@ pub struct BuildOptions {
     pub user_agent: bool,
     /// Drafts may be saved incomplete: no recipient needed, no sender check.
     pub lenient: bool,
+    /// The mail is going to be signed or encrypted (ADR-0011): its text uses a transfer encoding that no server or relay can
+    /// change without changing the bytes (quoted-printable when there are trailing blanks or long lines).
+    pub safe_transfer: bool,
 }
 
 /// A built message: the bytes to send and what the envelope and the outbox need to know.
@@ -290,7 +297,16 @@ pub fn build(draft: &Draft, opts: &BuildOptions) -> Result<Built, ComposeError> 
     if opts.user_agent {
         b = b.user_agent(format!("Shale {}", env!("CARGO_PKG_VERSION")));
     }
-    let text = SinglePart::plain(crlf(&draft.body));
+    let text = {
+        let body = crlf(&draft.body);
+        // a signature covers the exact bytes: trailing blanks and long lines are the first things a relay "fixes"
+        let fragile = body.split("\r\n").any(|l| l.ends_with([' ', '\t']) || l.len() > 76);
+        if opts.safe_transfer && fragile {
+            SinglePart::builder().header(ContentType::TEXT_PLAIN).header(lettre::message::header::ContentTransferEncoding::QuotedPrintable).body(body)
+        } else {
+            SinglePart::plain(body)
+        }
+    };
     let msg = if draft.attachments.is_empty() {
         b.singlepart(text)
     } else {
@@ -315,6 +331,8 @@ pub enum Confirm {
     NoSubject,
     NoBody,
     ForgottenAttachment,
+    /// S/MIME encryption with a Bcc: every recipient's certificate is listed in the message (ADR-0011 §4).
+    BccVisibleInSmime,
 }
 
 impl Confirm {
@@ -323,6 +341,7 @@ impl Confirm {
             Confirm::NoSubject => "This mail has no subject. Send it anyway?",
             Confirm::NoBody => "This mail has no text. Send it anyway?",
             Confirm::ForgottenAttachment => "The text mentions an attachment, but nothing is attached. Send it anyway?",
+            Confirm::BccVisibleInSmime => "S/MIME lists the certificate of every recipient in the encrypted message, so the people who get it can tell who was on Bcc (OpenPGP hides them). Send it anyway?",
         }
     }
 }
@@ -351,6 +370,9 @@ pub fn confirmations(d: &Draft) -> Vec<Confirm> {
     }
     if d.attachments.is_empty() && mentions_attachment(&before_sig.join("\n")) {
         v.push(Confirm::ForgottenAttachment);
+    }
+    if d.encrypt && d.standard == crate::config::CryptoStandard::Smime && !d.bcc.trim().is_empty() {
+        v.push(Confirm::BccVisibleInSmime);
     }
     v
 }

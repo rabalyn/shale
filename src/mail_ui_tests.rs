@@ -2106,3 +2106,130 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     w.until("the search ends", |a| a.mail.results.is_some() && !a.mail.searching);
     assert_eq!(w.app.mail.results.as_ref().unwrap().len(), 1, "and still searched");
 }
+
+// spec: MAIL-190, MAIL-191
+#[test]
+fn the_account_settings_pick_a_key_and_a_certificate_sign_by_default_and_the_standard_and_new_mail_starts_that_way() {
+    if !have_gnupg() {
+        return;
+    }
+    let alice = TestHome::new();
+    let a_pgp = alice.gen_pgp("Alice Test", "alice@example.org", "never", None);
+    let a_sm = alice.gen_smime("Alice S/MIME", "alice@example.org");
+    let (mut w, _smtp) = compose_world("keys-ui", 1);
+    w.app.mail.gnupg = alice.g.clone();
+    w.app.open_mail_settings();
+    w.settle();
+    w.until("GnuPG was looked at", |a| a.mail.gnupg_info.is_some());
+    // the Sending section is open (this account sends): fold it, so that the next one is in view
+    w.click("md:smtp-header");
+    w.settle();
+    w.click("md:keys-header");
+    w.settle();
+    // pick the OpenPGP key and the S/MIME certificate from the lists of GnuPG's secret keys
+    w.click("md:pgp-key");
+    w.frame(vec![]);
+    w.click(&format!("md:pgp-key:{a_pgp}"));
+    w.settle();
+    assert!(!w.has(&format!("md:pgp-key:{a_pgp}")), "the list closes after a choice");
+    w.click("md:smime-key");
+    w.settle();
+    assert!(w.has(&format!("md:smime-key:{a_sm}")), "the list of certificates opens");
+    w.click(&format!("md:smime-key:{a_sm}"));
+    w.click("md:sign-default");
+    w.click("md:std:Smime");
+    let acct = |w: &W| match &w.app.modal {
+        Some(Modal::MailAccounts(d)) => d.accounts[0].clone(),
+        _ => panic!("no dialog"),
+    };
+    let a = acct(&w);
+    assert_eq!((a.pgp_key.as_str(), a.smime_key.as_str(), a.sign_by_default, a.preferred_standard), (a_pgp.as_str(), a_sm.as_str(), true, crate::config::CryptoStandard::Smime));
+    assert!(w.shows("Alice Test") && w.shows("CN=Alice S/MIME"), "the keys are shown by name");
+    w.click("md:done");
+    assert!(w.app.modal.is_none());
+    let saved = &w.app.cfg.mail_accounts[0];
+    assert_eq!((saved.pgp_key.as_str(), saved.smime_key.as_str(), saved.sign_by_default), (a_pgp.as_str(), a_sm.as_str(), true));
+    // a new mail starts signed, with the preferred standard
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    assert!(w.compose_open());
+    let d = w.app.mail.compose.as_ref().unwrap().draft.clone();
+    assert_eq!((d.sign, d.encrypt, d.standard), (true, false, crate::config::CryptoStandard::Smime), "Encrypt is never on by itself");
+    w.frame(vec![]);
+    assert!(w.has("mail:compose:std:OpenPgp") && w.has("mail:compose:std:Smime"), "with both keys, both standards are offered");
+    // an account without any key gets no toggles, only the way to get them
+    w.esc();
+    w.app.cfg.mail_accounts[0].pgp_key.clear();
+    w.app.cfg.mail_accounts[0].smime_key.clear();
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.frame(vec![]);
+    assert!(!w.has("mail:compose:sign") && w.shows("choose a key in the account settings"));
+    assert!(!w.app.mail.compose.as_ref().unwrap().draft.sign);
+}
+
+// spec: MAIL-192, MAIL-193, MAIL-195
+#[test]
+fn compose_toggles_show_the_key_of_every_recipient_refuse_a_missing_one_and_send_signed_and_encrypted_in_a_job() {
+    if !have_gnupg() {
+        return;
+    }
+    let (alice, bob) = (TestHome::new(), TestHome::new());
+    let a = alice.gen_pgp("Alice Test", "alice@example.org", "never", None);
+    let b = bob.gen_pgp("Bob", "bob@example.org", "never", None);
+    bob.share_pgp_with(&alice, &b);
+    alice.share_pgp_with(&bob, &a);
+    let (mut w, smtp) = compose_world("crypt-ui", 1);
+    w.app.mail.gnupg = alice.g.clone();
+    w.app.cfg.mail_accounts[0].pgp_key = a.clone();
+    w.app.cfg.mail_accounts[0].from_address = "alice@example.org".into();
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.frame(vec![]);
+    assert!(w.has("mail:compose:sign") && w.has("mail:compose:encrypt"));
+    // Encrypt needs the consent: without it the box does nothing
+    w.click("mail:compose:encrypt");
+    assert!(!w.app.mail.compose.as_ref().unwrap().draft.encrypt, "Encrypt is off until encryption is switched on in the settings");
+    w.app.cfg.mail_encryption_consent = Some("2026-11-14 12:00".into());
+    w.typ("mail:compose:to", "bob@example.org, dave@example.org");
+    w.typ("mail:compose:subject", "Secret plans");
+    w.write_body("the secret plan");
+    w.click("mail:compose:sign");
+    w.click("mail:compose:encrypt");
+    let d = w.app.mail.compose.as_ref().unwrap().draft.clone();
+    assert!((d.sign, d.encrypt) == (true, true));
+    // the keys are looked up in the local keyring, in a job, after a short pause
+    w.until("the keys were looked up", |a| a.mail.compose.as_ref().is_some_and(|c| c.keys_for.is_some() && c.keys_for == Some(c.keys_signature())));
+    w.frame(vec![]);
+    assert!(w.shows("bob@example.org: key found") && w.shows("dave@example.org: no key"), "{:?}", w.texts.iter().filter(|t| t.0.contains("@example.org")).map(|t| t.0.clone()).collect::<Vec<_>>());
+    assert!(w.shows("Also encrypted for you"), "the note about the sender's own copy and the visible subject");
+    // the toggles are part of the draft and survive saving
+    w.click("mail:compose:save");
+    let (acct, id) = {
+        let c = w.app.mail.compose.as_ref().unwrap();
+        (c.draft.account.clone(), c.draft.id.clone())
+    };
+    let (saved, _) = crate::outbox::Outbox::new(&w.app.mail.root).load_draft(&acct, &id).unwrap();
+    assert_eq!((saved.sign, saved.encrypt), (true, true));
+    // Send with a recipient that has no key: refused in words, the window and the typed text stay, nothing is in the outbox
+    w.ctrl_enter();
+    w.until("the answer", |a| a.mail.compose.as_ref().is_some_and(|c| c.crypting.is_none() && c.error.is_some()));
+    let e = w.app.mail.compose.as_ref().unwrap().error.clone().unwrap();
+    assert!(e.contains("dave@example.org") && e.contains("not sent"), "{e}");
+    assert!(w.items().is_empty() && w.compose_field("body").contains("the secret plan"));
+    // the person takes dave out; Send now runs GnuPG in a job and puts the encrypted mail into the outbox
+    w.typ("mail:compose:to", "bob@example.org");
+    w.until("the keys were looked up again", |a| a.mail.compose.as_ref().is_some_and(|c| c.keys_for.is_some() && c.keys_for == Some(c.keys_signature())));
+    w.ctrl_enter();
+    let root = w.app.mail.root.clone();
+    w.until("the mail is in the outbox", move |_| !crate::outbox::Outbox::new(&root).list(None).is_empty());
+    let item = w.items().remove(0);
+    let eml = crate::outbox::Outbox::new(&w.app.mail.root).read_eml(&item.account, &item.id).unwrap();
+    assert!(!String::from_utf8_lossy(&eml).contains("the secret plan"), "the outbox holds the encrypted bytes");
+    assert!(!w.compose_open(), "the window closed when the mail was queued");
+    w.until("the mail was sent", |_| !smtp.state().received.is_empty());
+    let got = smtp.state().received[0].data.clone();
+    assert_eq!(got, eml);
+    for (name, h) in [("bob", &bob), ("alice", &alice)] {
+        let o = crate::mail_crypto::process(&h.g, &got, true, &std::sync::atomic::AtomicBool::new(false), NOW);
+        assert_eq!(o.security.lines.len(), 1, "{name}: {:?}", o.security);
+        assert!(crate::mail::parse(o.display.as_ref().unwrap()).text.starts_with("the secret plan"), "{name}");
+    }
+}

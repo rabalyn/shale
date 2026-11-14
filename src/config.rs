@@ -102,6 +102,16 @@ impl CryptoStandard {
     }
 }
 
+impl MailAccount {
+    /// The fingerprint of this account's key for a standard (empty: none).
+    pub fn key_for(&self, s: CryptoStandard) -> &str {
+        match s {
+            CryptoStandard::OpenPgp => &self.pgp_key,
+            CryptoStandard::Smime => &self.smime_key,
+        }
+    }
+}
+
 /// What a person has to type, exactly, to switch encryption on (ADR-0011 §3, OPEN-017).
 pub const CONSENT_PHRASE: &str = "I agree to decrypted local storage";
 
@@ -430,6 +440,26 @@ mod tests {
     }
 
     // spec: MAIL-020
+    // spec: MAIL-190, MAIL-180
+    #[test]
+    fn older_settings_load_without_keys_or_consent_and_the_new_ones_round_trip() {
+        let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada"}]}"#).unwrap();
+        let a = &c.mail_accounts[0];
+        assert_eq!((a.pgp_key.as_str(), a.smime_key.as_str(), a.sign_by_default, a.preferred_standard), ("", "", false, CryptoStandard::OpenPgp));
+        assert_eq!(c.mail_encryption_consent, None, "encryption is off until the consent is typed");
+        assert_eq!((a.key_for(CryptoStandard::OpenPgp), a.key_for(CryptoStandard::Smime)), ("", ""));
+        let mut c = c;
+        c.mail_accounts[0].pgp_key = "0123456789ABCDEF0123456789ABCDEF01234567".into();
+        c.mail_accounts[0].preferred_standard = CryptoStandard::Smime;
+        c.mail_accounts[0].sign_by_default = true;
+        c.mail_encryption_consent = Some("2026-11-14 12:00".into());
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.mail_accounts, c.mail_accounts);
+        assert_eq!(back.mail_encryption_consent.as_deref(), Some("2026-11-14 12:00"));
+        assert_eq!(CONSENT_PHRASE, "I agree to decrypted local storage");
+        assert_eq!((CryptoStandard::OpenPgp.program(), CryptoStandard::Smime.program()), ("gpg", "gpgsm"));
+    }
+
     #[test]
     fn mail_accounts_load_and_have_no_plain_text_mode() {
         let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada"}]}"#).unwrap();

@@ -93,6 +93,14 @@ pub struct Compose {
     pub picker: Option<Picker>,
     /// When the draft was last saved (for "Saved").
     pub saved_at: Option<i64>,
+    /// Signing or encrypting is going on in a job (ADR-0011); setting this flag cancels it. Nothing is editable meanwhile.
+    pub crypting: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// The keys found for the recipients in the local keyrings, and what they were looked up for (MAIL-192).
+    pub keys: Vec<crate::mail_crypto::KeyLookup>,
+    pub keys_for: Option<String>,
+    /// What a lookup is waiting to start for (debounce) and since when; and whether one is running.
+    pub keys_wanted: Option<(String, Instant)>,
+    pub keys_running: bool,
 }
 
 impl Compose {
@@ -114,7 +122,18 @@ impl Compose {
             path: String::new(),
             picker: None,
             saved_at: None,
+            crypting: None,
+            keys: vec![],
+            keys_for: None,
+            keys_wanted: None,
+            keys_running: false,
         }
+    }
+
+    /// What the key lookup is about: the standard and the addresses.
+    pub fn keys_signature(&self) -> String {
+        let addrs: Vec<String> = crate::mail_crypto::recipients_of(&self.draft).into_iter().map(|a| a.0).collect();
+        format!("{:?}|{}", self.draft.standard, addrs.join(","))
     }
 
     /// A draft that was saved before: its files are on disk and match what is shown.
@@ -234,6 +253,85 @@ pub struct ComposeOut {
     pub attach_vault: Option<String>,
     pub remove_att: Option<usize>,
     pub account: Option<String>,
+    /// Stop the signing or encrypting that is going on.
+    pub cancel_crypt: bool,
+}
+
+/// The Sign / Encrypt toggles, the standard and the key found for every recipient (MAIL-192, MAIL-193). Only the local keyrings
+/// are asked; a missing key is said, never fetched.
+fn security_row(ui: &mut Ui, c: &mut Compose, acct: Option<&crate::config::MailAccount>, consent: bool, label_w: f32, rects: &mut Vec<(String, Rect)>, touched: &mut bool) {
+    use crate::config::CryptoStandard::{OpenPgp, Smime};
+    let has = |s| acct.is_some_and(|a| !a.key_for(s).is_empty());
+    let standards: Vec<_> = [OpenPgp, Smime].into_iter().filter(|s| has(*s)).collect();
+    ui.horizontal_wrapped(|ui| {
+        ui.add_sized([label_w, 20.0], egui::Label::new(muted("Security")));
+        if standards.is_empty() {
+            ui.label(muted("To sign or encrypt, choose a key in the account settings (Encryption).").size(12.5));
+            return;
+        }
+        if !standards.contains(&c.draft.standard) {
+            c.draft.standard = standards[0];
+            c.draft.sign = false;
+            c.draft.encrypt = false;
+        }
+        if standards.len() > 1 {
+            for s in &standards {
+                let r = ui.radio(c.draft.standard == *s, s.label());
+                rec(rects, format!("mail:compose:std:{s:?}"), &r);
+                if r.clicked() && c.draft.standard != *s {
+                    c.draft.standard = *s;
+                    *touched = true;
+                }
+            }
+        } else {
+            ui.label(muted(standards[0].label()).size(12.5));
+        }
+        let r = ui.checkbox(&mut c.draft.sign, "Sign");
+        rec(rects, "mail:compose:sign", &r);
+        if r.on_hover_text("Sign the mail with your key: the recipient can check it is from you and was not changed").changed() {
+            *touched = true;
+        }
+        let r = ui.add_enabled(consent, egui::Checkbox::new(&mut c.draft.encrypt, "Encrypt"));
+        rec(rects, "mail:compose:encrypt", &r);
+        let r = if consent {
+            r.on_hover_text("Encrypt for every recipient (Cc and Bcc too) and for you, so the copy in Sent stays readable")
+        } else {
+            r.on_disabled_hover_text("Switch encryption on in the settings first (the Sent copy is kept decrypted on this computer)")
+        };
+        if r.changed() {
+            *touched = true;
+        }
+    });
+    if c.draft.encrypt && !standards.is_empty() {
+        let now_sig = c.keys_signature();
+        let fresh = c.keys_for.as_ref() == Some(&now_sig);
+        for (i, (addr, _bcc)) in crate::mail_crypto::recipients_of(&c.draft).into_iter().enumerate() {
+            let found = c.keys.iter().find(|k| k.address == addr);
+            let (text, color) = match (fresh, found) {
+                (_, Some(k)) if k.error.is_some() => (format!("{addr}: {}", k.error.clone().unwrap_or_default()), theme::LINK_MISSING),
+                (true, Some(k)) => match &k.key {
+                    Some(key) => (format!("{addr}: key found ({}; {}; {})", key.label(), key.trust_words(), crate::mail_ui::short_fingerprint(&key.fingerprint)), theme::TAG),
+                    None => (format!("{addr}: no key: this mail cannot be encrypted for them (import their key)"), theme::LINK_MISSING),
+                },
+                _ => (format!("{addr}: looking for a key…"), theme::MUTED),
+            };
+            ui.horizontal(|ui| {
+                ui.add_space(label_w + 4.0);
+                let r = ui.label(RichText::new(text).size(12.5).color(color));
+                rec(rects, format!("mail:compose:key:{i}"), &r);
+            });
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(label_w + 4.0);
+            let mut notes = vec!["Also encrypted for you, so the copy in Sent can be read. The subject and the addresses of an encrypted mail are not encrypted.".to_string()];
+            if c.draft.standard == Smime && !c.draft.bcc.trim().is_empty() {
+                notes.push("S/MIME shows every recipient's certificate in the message: people can tell who was on Bcc.".into());
+            } else if !c.draft.bcc.trim().is_empty() {
+                notes.push("Bcc recipients are hidden recipients: the others cannot see their keys.".into());
+            }
+            ui.label(muted(notes.join(" ")).size(12.0));
+        });
+    }
 }
 
 impl MailView {
@@ -243,7 +341,8 @@ impl MailView {
         let ctx = ui.ctx().clone();
         // keys first, so a text field does not see Ctrl+Enter or Esc (MAIL-150)
         let (send_key, esc) = ui.input_mut(|i| (i.consume_key(Modifiers::COMMAND, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
-        let asking = self.compose.as_ref().is_some_and(|c| c.ask.is_some());
+        let crypting = self.compose.as_ref().is_some_and(|c| c.crypting.is_some());
+        let asking = self.compose.as_ref().is_some_and(|c| c.ask.is_some()) || crypting;
         if send_key && !asking {
             out.send = true;
         }
@@ -262,6 +361,8 @@ impl MailView {
                 out.close = true;
             }
         }
+        let consent = self.consent;
+        let acct = self.compose.as_ref().and_then(|c| cfg.mail_accounts.iter().find(|a| a.id == c.draft.account)).cloned();
         let accounts: Vec<(String, String)> = cfg.mail_accounts.iter().map(|a| (a.id.clone(), if a.name.is_empty() { a.host.clone() } else { a.name.clone() })).collect();
         let have_vault = self.vault.is_some();
         let Some(c) = self.compose.as_mut() else { return out };
@@ -286,6 +387,14 @@ impl MailView {
                     out.close = true;
                 }
                 ui.add_space(8.0);
+                if crypting {
+                    ui.label(RichText::new("Signing / encrypting… (a passphrase or PIN dialog may open)").color(theme::TEXT));
+                    let r = ui.button("Cancel");
+                    rec(rects, "mail:compose:crypt-cancel", &r);
+                    if r.on_hover_text("Stop: the mail stays here, nothing is sent (Esc)").clicked() {
+                        out.cancel_crypt = true;
+                    }
+                }
                 let status = if c.unsaved() {
                     "Not saved yet".to_string()
                 } else if let Some(t) = c.saved_at {
@@ -302,51 +411,70 @@ impl MailView {
                 ui.label(RichText::new(n.as_str()).size(12.5).color(theme::LINK_MISSING));
             }
             ui.add_space(4.0);
-            egui::ScrollArea::vertical().id_salt("mail-compose-scroll").auto_shrink([false, false]).show(ui, |ui| {
-                let label_w = 64.0;
-                // From
-                ui.horizontal(|ui| {
-                    ui.add_sized([label_w, 20.0], egui::Label::new(muted("From")));
-                    let from = format!(
-                        "{}{}",
-                        if c.draft.from_name.is_empty() { String::new() } else { format!("{} ", c.draft.from_name) },
-                        if c.draft.from_addr.is_empty() { "(no address: see the account settings)".to_string() } else { format!("<{}>", c.draft.from_addr) }
-                    );
-                    if accounts.len() > 1 {
-                        let cur = accounts.iter().find(|a| a.0 == c.draft.account).map(|a| a.1.clone()).unwrap_or_default();
-                        let r = egui::ComboBox::from_id_salt("mail-compose-account").selected_text(format!("{cur}  ·  {from}")).show_ui(ui, |ui| {
-                            for (id, name) in &accounts {
-                                let r = ui.selectable_label(&c.draft.account == id, name.clone());
-                                rec(rects, format!("mail:compose:account:{id}"), &r);
-                                if r.clicked() {
-                                    out.account = Some(id.clone());
+            // nothing is editable while GnuPG works: what is signed is what was typed
+            ui.add_enabled_ui(!crypting, |ui| {
+                egui::ScrollArea::vertical().id_salt("mail-compose-scroll").auto_shrink([false, false]).show(ui, |ui| {
+                    let label_w = 64.0;
+                    // From
+                    ui.horizontal(|ui| {
+                        ui.add_sized([label_w, 20.0], egui::Label::new(muted("From")));
+                        let from = format!(
+                            "{}{}",
+                            if c.draft.from_name.is_empty() { String::new() } else { format!("{} ", c.draft.from_name) },
+                            if c.draft.from_addr.is_empty() { "(no address: see the account settings)".to_string() } else { format!("<{}>", c.draft.from_addr) }
+                        );
+                        if accounts.len() > 1 {
+                            let cur = accounts.iter().find(|a| a.0 == c.draft.account).map(|a| a.1.clone()).unwrap_or_default();
+                            let r = egui::ComboBox::from_id_salt("mail-compose-account").selected_text(format!("{cur}  ·  {from}")).show_ui(ui, |ui| {
+                                for (id, name) in &accounts {
+                                    let r = ui.selectable_label(&c.draft.account == id, name.clone());
+                                    rec(rects, format!("mail:compose:account:{id}"), &r);
+                                    if r.clicked() {
+                                        out.account = Some(id.clone());
+                                    }
                                 }
+                            });
+                            rec(rects, "mail:compose:from", &r.response);
+                        } else {
+                            ui.label(RichText::new(from).color(theme::TEXT));
+                        }
+                    });
+                    for f in [Field::To, Field::Cc, Field::Bcc] {
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                [label_w, 20.0],
+                                egui::Label::new(muted(match f {
+                                    Field::To => "To",
+                                    Field::Cc => "Cc",
+                                    _ => "Bcc",
+                                })),
+                            );
+                            let id = field_id(f);
+                            let text = match f {
+                                Field::To => &mut c.draft.to,
+                                Field::Cc => &mut c.draft.cc,
+                                _ => &mut c.draft.bcc,
+                            };
+                            let r =
+                                ui.add(egui::TextEdit::singleline(text).id(id).desired_width(f32::INFINITY).hint_text(if f == Field::Bcc { "hidden recipients (never shown in the mail)" } else { "names or addresses, separated by commas" }));
+                            rec(rects, format!("mail:compose:{}", f.key()), &r);
+                            if c.focus == Some(f) {
+                                r.request_focus();
+                                c.focus = None;
+                            }
+                            if r.changed() {
+                                touched = true;
+                            }
+                            if r.has_focus() {
+                                c.active = Some(f);
                             }
                         });
-                        rec(rects, "mail:compose:from", &r.response);
-                    } else {
-                        ui.label(RichText::new(from).color(theme::TEXT));
                     }
-                });
-                for f in [Field::To, Field::Cc, Field::Bcc] {
                     ui.horizontal(|ui| {
-                        ui.add_sized(
-                            [label_w, 20.0],
-                            egui::Label::new(muted(match f {
-                                Field::To => "To",
-                                Field::Cc => "Cc",
-                                _ => "Bcc",
-                            })),
-                        );
-                        let id = field_id(f);
-                        let text = match f {
-                            Field::To => &mut c.draft.to,
-                            Field::Cc => &mut c.draft.cc,
-                            _ => &mut c.draft.bcc,
-                        };
-                        let r = ui.add(egui::TextEdit::singleline(text).id(id).desired_width(f32::INFINITY).hint_text(if f == Field::Bcc { "hidden recipients (never shown in the mail)" } else { "names or addresses, separated by commas" }));
-                        rec(rects, format!("mail:compose:{}", f.key()), &r);
-                        if c.focus == Some(f) {
+                        ui.add_sized([label_w, 20.0], egui::Label::new(muted("Subject")));
+                        let r = ui.add(egui::TextEdit::singleline(&mut c.draft.subject).id(field_id(Field::Subject)).desired_width(f32::INFINITY));
+                        rec(rects, "mail:compose:subject", &r);
+                        if c.focus == Some(Field::Subject) {
                             r.request_focus();
                             c.focus = None;
                         }
@@ -354,16 +482,59 @@ impl MailView {
                             touched = true;
                         }
                         if r.has_focus() {
-                            c.active = Some(f);
+                            c.active = None;
                         }
                     });
-                }
-                ui.horizontal(|ui| {
-                    ui.add_sized([label_w, 20.0], egui::Label::new(muted("Subject")));
-                    let r = ui.add(egui::TextEdit::singleline(&mut c.draft.subject).id(field_id(Field::Subject)).desired_width(f32::INFINITY));
-                    rec(rects, "mail:compose:subject", &r);
-                    if c.focus == Some(Field::Subject) {
+                    security_row(ui, c, acct.as_ref(), consent, label_w, rects, &mut touched);
+                    // attachments
+                    if !c.draft.attachments.is_empty() {
+                        for (i, a) in c.draft.attachments.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.add_space(label_w + 4.0);
+                                ui.label(RichText::new(format!("📎 {}", a.name)).color(theme::TEXT));
+                                ui.label(muted(crate::mail_ui::size_text(a.data.len() as u64)).size(12.0));
+                                let r = ui.small_button("Remove");
+                                rec(rects, format!("mail:compose:att-remove:{i}"), &r);
+                                if r.clicked() {
+                                    out.remove_att = Some(i);
+                                }
+                            });
+                        }
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add_space(label_w + 4.0);
+                        ui.label(muted("Attach a file:").size(12.0));
+                        let r = ui.add(egui::TextEdit::singleline(&mut c.path).desired_width(260.0).hint_text("path of a file on this computer"));
+                        rec(rects, "mail:compose:att-path", &r);
+                        let go = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                        let b = ui.small_button("Attach");
+                        rec(rects, "mail:compose:att-add", &b);
+                        if (b.clicked() || go) && !c.path.trim().is_empty() {
+                            out.attach_path = true;
+                        }
+                        let b = ui.add_enabled(have_vault, egui::Button::new("From vault…").small());
+                        rec(rects, "mail:compose:att-vault", &b);
+                        if b.on_hover_text("A file of the open vault, also from the media folder").clicked() {
+                            c.picker = Some(Picker { notes_only: false, query: String::new() });
+                        }
+                        let b = ui.add_enabled(have_vault, egui::Button::new("Attach note…").small());
+                        rec(rects, "mail:compose:att-note", &b);
+                        if b.on_hover_text("The markdown text of a note, as a .md file").clicked() {
+                            c.picker = Some(Picker { notes_only: true, query: String::new() });
+                        }
+                    });
+                    ui.add_space(4.0);
+                    let h = ui.available_height().max(240.0);
+                    let r = ui.add_sized([ui.available_width(), h], egui::TextEdit::multiline(&mut c.draft.body).id(field_id(Field::Body)).desired_width(f32::INFINITY).lock_focus(true));
+                    rec(rects, "mail:compose:body", &r);
+                    if c.focus == Some(Field::Body) {
                         r.request_focus();
+                        // the cursor goes to the top: a new mail starts above its signature, an answer is typed above or below the quote
+                        if let Some(mut st) = egui::text_edit::TextEditState::load(ui.ctx(), field_id(Field::Body)) {
+                            let end = if c.draft.kind == crate::compose::Kind::New { 0 } else { c.draft.body.find("\n-- \n").map(|i| c.draft.body[..i].chars().count()).unwrap_or_else(|| c.draft.body.chars().count()) };
+                            st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(end))));
+                            st.store(ui.ctx(), field_id(Field::Body));
+                        }
                         c.focus = None;
                     }
                     if r.changed() {
@@ -372,64 +543,7 @@ impl MailView {
                     if r.has_focus() {
                         c.active = None;
                     }
-                });
-                // attachments
-                if !c.draft.attachments.is_empty() {
-                    for (i, a) in c.draft.attachments.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.add_space(label_w + 4.0);
-                            ui.label(RichText::new(format!("📎 {}", a.name)).color(theme::TEXT));
-                            ui.label(muted(crate::mail_ui::size_text(a.data.len() as u64)).size(12.0));
-                            let r = ui.small_button("Remove");
-                            rec(rects, format!("mail:compose:att-remove:{i}"), &r);
-                            if r.clicked() {
-                                out.remove_att = Some(i);
-                            }
-                        });
-                    }
-                }
-                ui.horizontal_wrapped(|ui| {
-                    ui.add_space(label_w + 4.0);
-                    ui.label(muted("Attach a file:").size(12.0));
-                    let r = ui.add(egui::TextEdit::singleline(&mut c.path).desired_width(260.0).hint_text("path of a file on this computer"));
-                    rec(rects, "mail:compose:att-path", &r);
-                    let go = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                    let b = ui.small_button("Attach");
-                    rec(rects, "mail:compose:att-add", &b);
-                    if (b.clicked() || go) && !c.path.trim().is_empty() {
-                        out.attach_path = true;
-                    }
-                    let b = ui.add_enabled(have_vault, egui::Button::new("From vault…").small());
-                    rec(rects, "mail:compose:att-vault", &b);
-                    if b.on_hover_text("A file of the open vault, also from the media folder").clicked() {
-                        c.picker = Some(Picker { notes_only: false, query: String::new() });
-                    }
-                    let b = ui.add_enabled(have_vault, egui::Button::new("Attach note…").small());
-                    rec(rects, "mail:compose:att-note", &b);
-                    if b.on_hover_text("The markdown text of a note, as a .md file").clicked() {
-                        c.picker = Some(Picker { notes_only: true, query: String::new() });
-                    }
-                });
-                ui.add_space(4.0);
-                let h = ui.available_height().max(240.0);
-                let r = ui.add_sized([ui.available_width(), h], egui::TextEdit::multiline(&mut c.draft.body).id(field_id(Field::Body)).desired_width(f32::INFINITY).lock_focus(true));
-                rec(rects, "mail:compose:body", &r);
-                if c.focus == Some(Field::Body) {
-                    r.request_focus();
-                    // the cursor goes to the top: a new mail starts above its signature, an answer is typed above or below the quote
-                    if let Some(mut st) = egui::text_edit::TextEditState::load(ui.ctx(), field_id(Field::Body)) {
-                        let end = if c.draft.kind == crate::compose::Kind::New { 0 } else { c.draft.body.find("\n-- \n").map(|i| c.draft.body[..i].chars().count()).unwrap_or_else(|| c.draft.body.chars().count()) };
-                        st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(end))));
-                        st.store(ui.ctx(), field_id(Field::Body));
-                    }
-                    c.focus = None;
-                }
-                if r.changed() {
-                    touched = true;
-                }
-                if r.has_focus() {
-                    c.active = None;
-                }
+                })
             });
             if touched {
                 c.touch();
