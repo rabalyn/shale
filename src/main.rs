@@ -42,6 +42,7 @@ mod theme;
 #[cfg(test)]
 mod utf8_tests;
 mod vault;
+mod vault_path;
 mod vim;
 #[cfg(target_os = "linux")]
 mod wl_drop;

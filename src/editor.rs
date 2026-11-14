@@ -1005,11 +1005,16 @@ impl NoteEditor {
                     let hint = if ctrl_to_follow { "Ctrl+click to follow" } else { "Ctrl+click to edit the link text" };
                     let colour = if *exists { theme::LINK } else { theme::LINK_MISSING };
                     let image = vault.resolve(&l.target, Some(rel)).filter(|p| crate::media::is_image(p)).map(|p| vault.abs(&p));
+                    // several files share the name, or a red path has several candidates (LINK-008, LINK-012)
+                    let note = vault.link_hint(&l.target, Some(rel));
                     resp.clone().on_hover_ui_at_pointer(|ui| {
                         if let Some(img) = image.as_ref().and_then(|p| crate::media::image_widget(ui.ctx(), p, 320.0, 240.0)) {
                             ui.add(img);
                         }
                         ui.label(egui::RichText::new(tip).color(colour));
+                        if let Some(n) = &note {
+                            ui.label(egui::RichText::new(n).small().color(theme::TEXT));
+                        }
                         ui.label(egui::RichText::new(hint).small().color(theme::MUTED));
                     });
                 }
