@@ -22,6 +22,9 @@ pub struct MailDialog {
     /// Ids of accounts that were removed (their keyring entries are cleared with Done).
     pub removed: Vec<String>,
     pub minutes: String,
+    /// "Mark as read when opened" and its delay in seconds as typed (MAIL-109).
+    pub mark_read: bool,
+    pub mark_read_secs: String,
     pub error: Option<String>,
     /// Is there a system keyring to keep passwords in?
     pub keyring: bool,
@@ -49,7 +52,19 @@ impl MailDialog {
     pub fn new(accounts: Vec<MailAccount>, minutes: u32, keyring: bool) -> MailDialog {
         let ports = accounts.iter().map(|a| a.port.to_string()).collect();
         let sel = if accounts.is_empty() { None } else { Some(0) };
-        MailDialog { accounts, ports, sel, passwords: HashMap::new(), client_secrets: HashMap::new(), removed: vec![], minutes: minutes.to_string(), error: None, keyring, rects: vec![] }
+        MailDialog { accounts, ports, sel, passwords: HashMap::new(), client_secrets: HashMap::new(), removed: vec![], minutes: minutes.to_string(), mark_read: true, mark_read_secs: "2".into(), error: None, keyring, rects: vec![] }
+    }
+
+    /// The "mark as read when opened" settings the dialog starts with.
+    pub fn with_read_settings(mut self, on: bool, secs: u32) -> MailDialog {
+        self.mark_read = on;
+        self.mark_read_secs = secs.to_string();
+        self
+    }
+
+    /// The delay as a number of seconds, if it is one.
+    pub fn read_delay(&self) -> Result<u32, String> {
+        self.mark_read_secs.trim().parse::<u32>().ok().filter(|s| *s <= 3600).ok_or_else(|| "“Mark as read after” must be a whole number of seconds (0 = at once, at most 3600).".to_string())
     }
 
     /// An id for a new account: letters and digits, not used by an account that exists or was
@@ -111,6 +126,7 @@ impl MailDialog {
             a.user = a.user.trim().to_string();
             a.name = a.name.trim().to_string();
         }
+        self.read_delay()?;
         self.minutes.trim().parse::<u32>().map_err(|_| "“Sync every” must be a whole number of minutes (0 = never).".to_string())
     }
 }
@@ -121,7 +137,12 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
     let mut out = None;
     ui.set_width(720.0);
     ui.label(RichText::new("Mail accounts").size(18.0).color(theme::TEXT_STRONG));
-    ui.label(muted("Shale reads your mail over IMAP and keeps a local copy. It never changes anything on the server. The local copy is not encrypted: use full-disk encryption.").size(12.5));
+    ui.label(
+        muted(
+            "Shale reads your mail over IMAP and keeps a local copy. Syncing never changes anything on the server; only what you do yourself does (mark read, flag, move, delete). The local copy is not encrypted: use full-disk encryption.",
+        )
+        .size(12.5),
+    );
     ui.add_space(8.0);
     // the form scrolls when the window is small; the buttons below it never do
     let max_h = (ui.ctx().content_rect().height() - 230.0).clamp(200.0, 620.0);
@@ -175,6 +196,13 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
             let r = ui.add(egui::TextEdit::singleline(&mut d.minutes).desired_width(36.0));
             rects.push(("md:minutes".into(), r.rect));
             ui.label("minutes while Shale runs (0 = only with the Sync button)");
+        });
+        ui.horizontal(|ui| {
+            let r = ui.checkbox(&mut d.mark_read, "Mark as read when opened, after");
+            rects.push(("md:mark-read".into(), r.rect));
+            let r = ui.add_enabled(d.mark_read, egui::TextEdit::singleline(&mut d.mark_read_secs).desired_width(36.0));
+            rects.push(("md:mark-read-secs".into(), r.rect));
+            ui.label("seconds (the server is told; 0 = at once)");
         });
     });
     if let Some(e) = &d.error {

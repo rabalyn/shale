@@ -500,11 +500,6 @@ pub fn pending_ops(c: &Connection, account: Option<&str>) -> Result<Vec<PendingR
     Ok(rows)
 }
 
-/// How many actions wait for the server.
-pub fn pending_count(c: &Connection) -> Result<i64> {
-    Ok(c.query_row("SELECT COUNT(*) FROM pending_ops", [], |r| r.get(0))?)
-}
-
 /// UIDs of a folder (in one UIDVALIDITY) that have an action waiting: the sync leaves their
 /// flags and state alone (MAIL-108).
 pub fn pending_uids(c: &Connection, folder: i64, uidvalidity: u32) -> Result<HashSet<u32>> {
@@ -829,7 +824,7 @@ mod tests {
         assert_eq!(current_version(&c).unwrap(), 2);
         assert_eq!(count_messages(&c).unwrap(), 1, "the mail of version 1 is untouched");
         assert_eq!(list(&c, f.id, 10, 0).unwrap()[0].pending, None);
-        assert_eq!(pending_count(&c).unwrap(), 0);
+        assert!(pending_ops(&c, None).unwrap().is_empty());
     }
 
     // spec: MAIL-004

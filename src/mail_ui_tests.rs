@@ -24,10 +24,15 @@ struct TestConnector {
     settings: ConnectSettings,
     user: String,
     password: String,
+    /// While set, the server cannot be reached (the network is down).
+    offline: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Connector for TestConnector {
     fn connect(&self) -> Result<Client, ImapError> {
+        if self.offline.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(ImapError::Connection("the network is down".into()));
+        }
         let mut a = PlainAuth::new(&self.user, &self.password);
         Client::connect_test(&self.settings, server_cert(), &mut a)
     }
@@ -46,8 +51,8 @@ impl Connector for OAuthTestConnector {
 
 /// A connector factory like the real one (the password is the session's or the keyring's), but
 /// for the pretend server's certificate.
-fn factory() -> ConnectorFactory {
-    Arc::new(|acct: &MailAccount, session: Option<String>| {
+fn factory(offline: Arc<std::sync::atomic::AtomicBool>) -> ConnectorFactory {
+    Arc::new(move |acct: &MailAccount, session: Option<String>| {
         if acct.auth == crate::config::MailAuth::OAuth2 {
             // like `connector_for_account`, but trusting the pretend server's certificate
             let cfg = crate::oauth::OAuthConfig::for_account(acct, session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::ClientSecret))).map_err(|e| e.to_string())?;
@@ -58,7 +63,7 @@ fn factory() -> ConnectorFactory {
         }
         let password = session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::Password)).ok_or_else(|| NO_PASSWORD.to_string())?;
         let settings = ConnectSettings { host: acct.host.clone(), port: acct.port, security: acct.security, limits: Limits { io_timeout: Duration::from_secs(15), max_message: 20_000, ..Limits::default() } };
-        Ok(Arc::new(TestConnector { settings, user: acct.user.clone(), password }) as Arc<dyn Connector>)
+        Ok(Arc::new(TestConnector { settings, user: acct.user.clone(), password, offline: offline.clone() }) as Arc<dyn Connector>)
     })
 }
 
@@ -94,6 +99,8 @@ struct W {
     server: FakeServer,
     dir: PathBuf,
     account: MailAccount,
+    /// Set it and the pretend server cannot be reached.
+    offline: Arc<std::sync::atomic::AtomicBool>,
     /// What the last frame painted: text and its colour.
     texts: Vec<(String, Color32)>,
 }
@@ -110,7 +117,10 @@ impl W {
         seed(&server);
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
         app.cfg.mail_sync_minutes = 0;
-        app.mail.factory = factory();
+        // marking read when a message is opened is tested on its own; elsewhere the timer must not write
+        app.cfg.mail_mark_read = false;
+        let offline = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        app.mail.factory = factory(offline.clone());
         app.mail.opts = SyncOptions { now: Some(NOW), batch_size: 2, ..SyncOptions::default() };
         let account = MailAccount { id: format!("t-{tag}"), name: "Test mail".into(), host: "localhost".into(), port: server.port, user: "ada".into(), ..MailAccount::default() };
         if with_account {
@@ -120,7 +130,7 @@ impl W {
         app.show_view(View::Mail, false);
         let ctx = egui::Context::default();
         crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, server, dir, account, texts: vec![] };
+        let mut w = W { app, ctx, t: 0.0, server, dir, account, offline, texts: vec![] };
         w.until("the mail store opens", |a| a.mail.ready_store().is_some());
         w
     }
@@ -229,6 +239,11 @@ impl W {
             Key::I => Some("i"),
             Key::Slash => Some("/"),
             Key::Space => Some(" "),
+            Key::U => Some("u"),
+            Key::S => Some("s"),
+            Key::F => Some("f"),
+            Key::D => Some("d"),
+            Key::M => Some("m"),
             _ => None,
         };
         let mut ev = vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }];
@@ -248,6 +263,26 @@ impl W {
         self.until("the sync button", |a| a.mail.rects.iter().any(|r| r.0 == "mail:sync"));
         self.click("mail:sync");
         self.until("the sync ends", move |a| a.mail.syncs.get(&id).is_some_and(|r| r.finished.is_some()));
+    }
+
+    /// Wait until every action of the person has been sent (or given up).
+    fn settle_ops(&mut self) {
+        self.until("the actions were sent", |a| a.mail.pending_total == 0 && !a.mail.busy_with_ops());
+    }
+
+    fn pending_is_empty(&self) -> bool {
+        self.app.mail.pending_total == 0
+    }
+
+    /// The flags of a mail on the server, sorted.
+    fn server_flags(&self, folder: &str, uid: u32) -> Vec<String> {
+        let mut v = self.server.state().messages(folder).into_iter().find(|m| m.0 == uid).map(|m| m.1).unwrap_or_default();
+        v.sort();
+        v
+    }
+
+    fn server_uids(&self, folder: &str) -> Vec<u32> {
+        self.server.state().messages(folder).iter().map(|m| m.0).collect()
     }
 
     fn folder_id(&self, name: &str) -> i64 {
@@ -561,7 +596,7 @@ fn a_message_over_the_size_limit_has_a_load_button() {
     w.app.mail.factory = Arc::new(|acct: &MailAccount, session: Option<String>| {
         let password = session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::Password)).ok_or_else(|| NO_PASSWORD.to_string())?;
         let settings = ConnectSettings { host: acct.host.clone(), port: acct.port, security: acct.security, limits: Limits { io_timeout: Duration::from_secs(15), max_message: 10_000_000, ..Limits::default() } };
-        Ok(Arc::new(TestConnector { settings, user: acct.user.clone(), password }) as Arc<dyn Connector>)
+        Ok(Arc::new(TestConnector { settings, user: acct.user.clone(), password, offline: Arc::new(std::sync::atomic::AtomicBool::new(false)) }) as Arc<dyn Connector>)
     });
     w.click("mail:load");
     w.until("the message arrives", |a| matches!(a.mail.open.as_ref().map(|o| &o.body), Some(Body::Ready(_))));
@@ -855,7 +890,7 @@ fn fifty_thousand_messages_draw_quickly_and_a_steady_frame_runs_no_query() {
     app.mail.root = root.clone();
     app.show_view(View::Mail, false);
     let server = FakeServer::start(MailSecurity::ImplicitTls);
-    let mut w = W { app, ctx: egui::Context::default(), t: 0.0, server, dir: dir.clone(), account: MailAccount { id: "perf".into(), ..MailAccount::default() }, texts: vec![] };
+    let mut w = W { app, ctx: egui::Context::default(), t: 0.0, server, dir: dir.clone(), account: MailAccount { id: "perf".into(), ..MailAccount::default() }, offline: Arc::new(std::sync::atomic::AtomicBool::new(false)), texts: vec![] };
     crate::theme::apply(&w.ctx);
     w.until("the store and the first page", |a| a.mail.total == 50_000);
     for _ in 0..3 {
@@ -1120,4 +1155,308 @@ fn zz_debug() {
         frame(ev, &mut d);
         eprintln!("accounts {}", d.accounts.len());
     }
+}
+
+// ------------------------------------------------------------ phase 2: flags, move, delete
+
+/// A synced window with the Inbox open, the first row under the cursor.
+fn inbox_with_cursor(tag: &str) -> W {
+    let mut w = W::new(tag, true);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    w.frame(vec![]);
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, Some(0));
+    w
+}
+
+// spec: MAIL-102, MAIL-110, MAIL-111
+#[test]
+fn keys_mark_read_flag_delete_and_move_work_on_the_cursor_and_on_the_marked_mails_without_the_mouse() {
+    let mut w = inbox_with_cursor("keys2");
+    // u: read (the list is bold and dotted for unread, plain for read); the server is told
+    assert!(w.has("mail:unread:0"));
+    w.press(Key::U, Modifiers::NONE);
+    w.frame(vec![]);
+    assert!(!w.has("mail:unread:0"), "read mail is not marked as unread");
+    assert!(w.has("mail:pending-mark:0"), "while the server has not answered, the row says so");
+    w.settle_ops();
+    w.frame(vec![]);
+    assert_eq!(w.server_flags("INBOX", 3), vec!["\\Seen"]);
+    assert!(w.shows("INBOX  (2)"), "the unread count follows");
+    assert!(!w.has("mail:pending-mark:0"));
+    w.press(Key::U, Modifiers::NONE);
+    w.settle_ops();
+    w.frame(vec![]);
+    assert!(w.server_flags("INBOX", 3).is_empty(), "u again: unread");
+    assert!(w.has("mail:unread:0"));
+    // s and f: the flag
+    w.press(Key::S, Modifiers::NONE);
+    w.settle_ops();
+    w.frame(vec![]);
+    assert_eq!(w.server_flags("INBOX", 3), vec!["\\Flagged"]);
+    assert!(w.has("mail:flag-mark:0"), "a flagged mail has a flag in the list");
+    w.press(Key::F, Modifiers::NONE);
+    w.settle_ops();
+    w.frame(vec![]);
+    assert!(w.server_flags("INBOX", 3).is_empty());
+    assert!(!w.has("mail:flag-mark:0"));
+    // a key with Ctrl, or while a text field has the keyboard, does nothing
+    w.press(Key::D, Modifiers::COMMAND);
+    w.click("mail:search");
+    w.type_text("d");
+    w.frame(vec![Event::Key { key: Key::D, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+    w.frame(vec![Event::Key { key: Key::Delete, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+    w.settle_ops();
+    assert_eq!(w.server_uids("INBOX"), vec![1, 2, 3], "nothing was deleted");
+    w.press(Key::Escape, Modifiers::NONE);
+    w.app.mail.query.clear();
+    // Space marks two mails, d moves both to Trash (never STORE \Deleted + EXPUNGE)
+    w.frame(vec![Event::PointerMoved(Pos2::new(5.0, 5.0))]);
+    w.app.mail.cursor = Some(0);
+    w.press(Key::Space, Modifiers::NONE);
+    w.press(Key::J, Modifiers::NONE);
+    w.press(Key::Space, Modifiers::NONE);
+    assert_eq!(w.app.mail.marked.len(), 2);
+    w.press(Key::D, Modifiers::NONE);
+    assert!(w.app.mail.marked.is_empty(), "the marks are used up");
+    w.settle_ops();
+    w.frame(vec![]);
+    assert_eq!(w.server_uids("INBOX"), vec![1]);
+    assert_eq!(w.server_uids("Trash").len(), 4, "the two that were there and the two moved");
+    assert_eq!(w.subjects(), vec!["Invoice 2026"]);
+    let verbs = w.server.state().verbs();
+    assert!(verbs.iter().all(|v| !v.contains("Deleted") && !v.starts_with("EXPUNGE") && !v.starts_with("UID EXPUNGE")), "{verbs:?}");
+    // m: the folder picker, typing filters, Enter moves
+    w.app.mail.cursor = Some(0);
+    w.press(Key::M, Modifiers::NONE);
+    assert!(w.app.mail.mover.is_some(), "m opens the picker");
+    w.frame(vec![]);
+    assert!(w.has("mail:mover-field"));
+    assert_eq!(w.app.mail.mover.as_ref().unwrap().query, "", "the m that opened it is not typed into it");
+    w.type_text("sen");
+    w.frame(vec![]);
+    let names: Vec<String> = w.app.mail.mover_candidates().iter().map(|f| f.name.clone()).collect();
+    assert_eq!(names, vec!["Sent"], "typing filters the folders");
+    w.press(Key::Enter, Modifiers::NONE);
+    assert!(w.app.mail.mover.is_none());
+    w.settle_ops();
+    assert_eq!(w.server_uids("Sent").len(), 2);
+    assert!(w.server_uids("INBOX").is_empty());
+    // Esc leaves the picker without moving anything
+    w.frame(vec![]);
+    w.app.mail.cursor = None;
+    w.open_folder("Sent");
+    w.press(Key::J, Modifiers::NONE);
+    w.press(Key::M, Modifiers::NONE);
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(w.app.mail.mover.is_none());
+    assert_eq!(w.server_uids("Sent").len(), 2);
+}
+
+// spec: MAIL-111
+#[test]
+fn the_reading_pane_buttons_the_marked_bar_and_the_row_menu_do_the_same_things() {
+    let mut w = inbox_with_cursor("buttons2");
+    w.open_mail("Lunch plans"); // uid 2
+    w.frame(vec![]);
+    w.click("mail:read-toggle");
+    w.settle_ops();
+    w.frame(vec![]);
+    assert_eq!(w.server_flags("INBOX", 2), vec!["\\Seen"]);
+    assert!(w.shows("Mark unread"), "the button says what it does next");
+    w.click("mail:flag-toggle");
+    w.settle_ops();
+    w.frame(vec![]);
+    assert_eq!(w.server_flags("INBOX", 2), vec!["\\Flagged", "\\Seen"]);
+    assert!(w.shows("Unflag") && w.shows("Flagged"));
+    // Move…: the list of folders, a click on one
+    w.click("mail:move");
+    w.frame(vec![]);
+    assert!(w.has("mail:mover-item:0"));
+    let first = w.app.mail.mover_candidates()[0].name.clone();
+    w.click("mail:mover-item:0");
+    w.settle_ops();
+    assert_eq!(w.server_uids("INBOX"), vec![1, 3], "mail 2 left the Inbox");
+    assert_eq!(w.server_uids(&first).len(), if first == "Trash" { 3 } else { w.server.state().messages(&first).len() });
+    assert!(!w.server.state().messages(&first).is_empty());
+    // the reading pane no longer shows mail that left
+    w.frame(vec![]);
+    assert!(w.app.mail.open.is_none());
+    // Delete in the reading pane
+    w.open_mail("Invoice 2026");
+    w.click("mail:delete");
+    w.settle_ops();
+    assert_eq!(w.server_uids("INBOX"), vec![3]);
+    // the marked bar
+    w.frame(vec![]);
+    w.app.mail.cursor = Some(0);
+    w.press(Key::Space, Modifiers::NONE);
+    w.frame(vec![]);
+    w.click("mail:marked-flag");
+    w.settle_ops();
+    assert_eq!(w.server_flags("INBOX", 3), vec!["\\Flagged"]);
+    w.click("mail:marked-delete");
+    w.settle_ops();
+    assert!(w.server_uids("INBOX").is_empty());
+    // the menu of a row (a right click)
+    w.open_folder("Sent");
+    w.frame(vec![]);
+    let row = w.rect("mail:row:0");
+    let p = row.center();
+    let b = |pressed| Event::PointerButton { pos: p, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE };
+    w.frame(vec![Event::PointerMoved(p)]);
+    w.frame(vec![b(true)]);
+    w.frame(vec![b(false)]);
+    w.frame(vec![]);
+    assert!(w.has("mail:ctx-read") && w.has("mail:ctx-flag") && w.has("mail:ctx-move") && w.has("mail:ctx-delete"), "right click opens the menu");
+    w.click("mail:ctx-flag");
+    w.settle_ops();
+    assert_eq!(w.server_flags("Sent", 1), vec!["\\Flagged"]);
+}
+
+// spec: MAIL-105
+#[test]
+fn delete_in_trash_asks_first_and_names_the_count_and_only_the_confirmation_deletes() {
+    let mut w = W::new("forever2", true);
+    w.sync_and_wait();
+    w.open_folder("Trash");
+    let trash = w.folder_id("Trash");
+    w.until("the listing arrives", move |a| matches!(a.mail.listings.get(&trash), Some(ListingState::Done(_))) && a.mail.total == 2);
+    w.frame(vec![]);
+    // another program flagged mail 2 as deleted: it must survive "delete forever" of mail 1
+    w.server.state().set_flags("Trash", 2, &["\\Deleted"]);
+    let i = w.row_of("Old newsletter");
+    w.open_row(i);
+    w.frame(vec![]);
+    assert!(w.shows("Delete forever…"), "in Trash the button says what it does");
+    w.press(Key::D, Modifiers::NONE);
+    w.frame(vec![]);
+    assert!(w.app.mail.forever.is_some());
+    assert!(w.shows("Delete 1 message forever?"), "the dialog names the count");
+    assert_eq!(w.server_uids("Trash"), vec![1, 2], "nothing happened yet");
+    // Esc and Enter do not delete; Cancel does not either
+    w.press(Key::Enter, Modifiers::NONE);
+    assert!(w.app.mail.forever.is_some() && w.server_uids("Trash") == vec![1, 2]);
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(w.app.mail.forever.is_none());
+    w.press(Key::D, Modifiers::NONE);
+    w.frame(vec![]);
+    w.click("mail:forever-cancel");
+    assert!(w.app.mail.forever.is_none());
+    assert_eq!(w.server_uids("Trash"), vec![1, 2]);
+    assert!(w.pending_is_empty());
+    // the button asks the same question, and only "Delete 1 forever" deletes
+    w.click("mail:delete");
+    w.frame(vec![]);
+    w.click("mail:forever-confirm");
+    w.settle_ops();
+    assert_eq!(w.server_uids("Trash"), vec![2], "only the chosen mail is gone; the other program's \\Deleted mail stays");
+    let cmds = w.server.state().verbs();
+    assert!(cmds.iter().any(|c| c == "UID EXPUNGE 1") && cmds.iter().all(|c| c != "EXPUNGE"), "{cmds:?}");
+}
+
+// spec: MAIL-107, MAIL-111
+#[test]
+fn changes_made_offline_show_as_waiting_survive_and_go_out_when_the_network_returns() {
+    let mut w = inbox_with_cursor("offline2");
+    w.app.mail.ops_retry = Duration::from_millis(100);
+    w.offline.store(true, std::sync::atomic::Ordering::SeqCst);
+    w.press(Key::U, Modifiers::NONE);
+    w.press(Key::S, Modifiers::NONE);
+    w.frame(vec![]);
+    w.until("the attempt fails", |a| a.mail.offline.values().next().is_some());
+    w.frame(vec![]);
+    assert!(w.shows("2 changes are waiting for the server"), "{:?}", w.texts.iter().map(|t| &t.0).collect::<Vec<_>>());
+    assert!(w.has("mail:pending-mark:0") && w.has("mail:flag-mark:0"), "shown as done, marked as waiting");
+    assert!(w.server_flags("INBOX", 3).is_empty(), "the server was not touched");
+    // the network is back: the next retry sends it
+    w.offline.store(false, std::sync::atomic::Ordering::SeqCst);
+    w.settle_ops();
+    w.frame(vec![]);
+    assert_eq!(w.server_flags("INBOX", 3), vec!["\\Flagged", "\\Seen"]);
+    assert!(!w.has("mail:pending-mark:0") && !w.shows("waiting for the server"));
+}
+
+// spec: MAIL-107, MAIL-111
+#[test]
+fn a_refused_action_is_undone_in_the_list_and_the_person_is_told_why() {
+    let mut w = inbox_with_cursor("refused2");
+    w.server.state().fail_next_write = Some("[NOPERM] this folder is read-only for you".into());
+    w.press(Key::U, Modifiers::NONE);
+    w.frame(vec![]);
+    assert!(!w.has("mail:unread:0"), "shown as read at first");
+    w.until("the refusal arrives", |a| !a.mail.problems.is_empty());
+    w.settle_ops();
+    w.frame(vec![]);
+    assert!(w.has("mail:unread:0"), "and unread again when the server said no");
+    assert!(w.shows("Not done:") && w.shows("read-only for you") || w.app.mail.problems.iter().any(|p| p.contains("read-only for you")));
+    assert!(w.server_flags("INBOX", 3).is_empty());
+    assert!(w.pending_is_empty());
+    w.click("mail:problem-dismiss");
+    w.frame(vec![]);
+    assert!(w.app.mail.problems.is_empty() && !w.has("mail:problem-dismiss"));
+}
+
+// spec: MAIL-109
+#[test]
+fn opening_a_message_marks_it_read_after_the_delay_only_if_the_setting_is_on_and_fetching_stays_peek() {
+    // off: nothing is written however long it stays open
+    let mut w = W::new("markread-off", true);
+    w.app.cfg.mail_mark_read = false;
+    w.app.cfg.mail_mark_read_secs = 0;
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    w.open_mail("Invoice 2026");
+    for _ in 0..30 {
+        w.frame(vec![]);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(w.server_flags("INBOX", 1).is_empty());
+    drop(w);
+    // on, with a delay: not at once, then yes
+    let mut w = W::new("markread-on", true);
+    w.app.cfg.mail_mark_read = true;
+    w.app.cfg.mail_mark_read_secs = 1;
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    w.open_mail("Invoice 2026");
+    let opened = Instant::now();
+    for _ in 0..8 {
+        w.frame(vec![]);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(opened.elapsed() < Duration::from_millis(900) && w.server_flags("INBOX", 1).is_empty(), "not before the delay");
+    w.until("it is marked read", |a| a.mail.pending_total == 0 && a.mail.open.as_ref().is_some_and(|o| o.msg.is_seen()));
+    w.settle_ops();
+    assert_eq!(w.server_flags("INBOX", 1), vec!["\\Seen"]);
+    assert!(w.server.state().verbs().iter().all(|v| !v.contains("BODY[") || v.contains("BODY.PEEK[")), "bodies are always fetched with PEEK");
+    // closing the message before the delay: it stays unread
+    w.open_mail("Lunch plans");
+    w.press(Key::Escape, Modifiers::NONE);
+    std::thread::sleep(Duration::from_millis(1100));
+    for _ in 0..5 {
+        w.frame(vec![]);
+    }
+    assert!(w.server_flags("INBOX", 2).is_empty(), "a message closed before the delay was not read");
+}
+
+// spec: MAIL-109
+#[test]
+fn the_account_settings_have_the_mark_as_read_setting_and_its_delay() {
+    let mut w = W::new("readsetting", true);
+    w.app.cfg.mail_mark_read = true;
+    w.app.cfg.mail_mark_read_secs = 2;
+    w.app.open_mail_settings();
+    w.settle();
+    assert!(w.has("md:mark-read") && w.has("md:mark-read-secs"));
+    w.typ("md:mark-read-secs", "x");
+    w.click("md:done");
+    assert!(matches!(w.app.modal, Some(Modal::MailAccounts(_))), "a bad number keeps the dialog open");
+    w.typ("md:mark-read-secs", "5");
+    w.click("md:mark-read");
+    w.click("md:done");
+    assert!(w.app.modal.is_none());
+    assert!(!w.app.cfg.mail_mark_read);
+    assert_eq!(w.app.cfg.mail_mark_read_secs, 5);
 }

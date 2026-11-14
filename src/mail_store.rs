@@ -387,9 +387,6 @@ impl Reader {
     pub fn pending_ops(&self, account: Option<&str>) -> Result<Vec<mail_db::PendingRow>> {
         mail_db::pending_ops(&self.conn, account)
     }
-    pub fn pending_count(&self) -> Result<i64> {
-        mail_db::pending_count(&self.conn)
-    }
     pub fn pending_uids(&self, folder: i64, uidvalidity: u32) -> Result<HashSet<u32>> {
         mail_db::pending_uids(&self.conn, folder, uidvalidity)
     }

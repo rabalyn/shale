@@ -150,6 +150,10 @@ pub struct Config {
     /// The mail view fetches new mail by itself every this many minutes while the app runs
     /// (0 = only with the Sync button).
     pub mail_sync_minutes: u32,
+    /// Opening a message in the mail view marks it read on the server (MAIL-109).
+    pub mail_mark_read: bool,
+    /// ... after this many seconds (0 = at once).
+    pub mail_mark_read_secs: u32,
     // Per-vault fields of older versions, read only to move them into the vault that is opened
     // first (CFG-008); dropped from the file after that.
     #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
@@ -190,6 +194,8 @@ impl Default for Config {
             vim_mode: false,
             mail_accounts: vec![],
             mail_sync_minutes: 10,
+            mail_mark_read: true,
+            mail_mark_read_secs: 2,
             legacy_open_files: None,
             legacy_last_import_folder: None,
             legacy_recent_tags: None,

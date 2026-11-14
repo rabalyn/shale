@@ -7,13 +7,18 @@
 //! channel, so a frame never waits for it. The drawing is in `mail_view.rs`, the account
 //! settings in `mail_dialog.rs`.
 //!
-//! Nothing here changes a server: the only server commands are the read-only ones of `imap_sync`.
+//! Syncing never changes a server: it uses only the read-only commands of `imap_sync`. What the
+//! person does (mark read, flag, move, delete) is recorded and sent by `mail_ops` (ADR-0009): the
+//! view enqueues, starts a job per account, shows the optimistic state and the waiting marker, and
+//! tells the person when the server refused something.
 
 use crate::config::{Config, MailAccount};
 use crate::imap_client::decode_mutf7;
+use crate::imap_client::MailFlag;
 use crate::imap_sync::{self, ConnectorFactory, FolderKind, LazyConnector, Progress, SyncOptions, SyncSummary, NO_PASSWORD};
 use crate::mail::Mail;
 use crate::mail_db::{FolderRow, MessageSummary, STATE_HEADER, STATE_TOO_LARGE};
+use crate::mail_ops::{self, Action, Confirmed, OpsReport};
 use crate::mail_store::{MailStore, Reader};
 use eframe::egui;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -130,7 +135,25 @@ pub struct PasswordPrompt {
 pub enum Retry {
     Sync,
     Listing(i64),
-    Message { folder: i64, uid: u32 },
+    Message {
+        folder: i64,
+        uid: u32,
+    },
+    /// Send the actions that wait for the server.
+    Ops,
+}
+
+/// "Move to…": the messages and what has been typed to find the folder (MAIL-110).
+pub struct MovePicker {
+    pub msgs: Vec<MessageSummary>,
+    pub query: String,
+    pub cursor: usize,
+    pub focus: bool,
+}
+
+/// "Delete forever?": waits for the person's confirmation (MAIL-105).
+pub struct ForeverAsk {
+    pub msgs: Vec<MessageSummary>,
 }
 
 /// What the window must do for the app, returned by `show`.
@@ -185,6 +208,11 @@ enum Event {
     Probed {
         account: String,
         signed_in: bool,
+    },
+    /// A run of `mail_ops::run_pending` ended.
+    Ops {
+        account: String,
+        result: Result<OpsReport, String>,
     },
 }
 
@@ -244,6 +272,22 @@ pub struct MailView {
     pub rects: Vec<(String, egui::Rect)>,
     /// Things to tell the person (the app shows them as messages).
     pub notices: Vec<String>,
+    // phase 2: flags, move, delete (ADR-0009)
+    ops_running: HashSet<String>,
+    /// Actions waiting for the server, and the accounts they belong to (read with the counts).
+    pub pending_total: i64,
+    pending_accounts: HashSet<String>,
+    last_ops: Option<Instant>,
+    /// How long to wait before sending waiting actions again (tests shorten it).
+    pub ops_retry: Duration,
+    /// Why the server could not be reached, per account (shown while actions wait).
+    pub offline: HashMap<String, String>,
+    /// The open message is marked read when this has run (message id, when it was opened).
+    read_timer: Option<(i64, Instant)>,
+    pub mover: Option<MovePicker>,
+    pub forever: Option<ForeverAsk>,
+    /// Actions the server refused or that could not be done, until the person dismisses them.
+    pub problems: Vec<String>,
 }
 
 /// Opening the store and the jobs report errors as text; a panic in a job is one too.
@@ -297,6 +341,16 @@ impl MailView {
             signed_in: HashMap::new(),
             rects: vec![],
             notices: vec![],
+            ops_running: HashSet::new(),
+            pending_total: 0,
+            pending_accounts: HashSet::new(),
+            last_ops: None,
+            ops_retry: Duration::from_secs(30),
+            offline: HashMap::new(),
+            read_timer: None,
+            mover: None,
+            forever: None,
+            problems: vec![],
         }
     }
 
@@ -352,6 +406,7 @@ impl MailView {
             self.handle(ev, cfg);
         }
         self.poll_syncs();
+        self.tick_ops(cfg);
         // the automatic sync (MAIL-058)
         if let (Some(_), true, minutes) = (self.ready_store(), !cfg.mail_accounts.is_empty(), cfg.mail_sync_minutes) {
             if minutes > 0 && self.last_auto.is_none_or(|t| t.elapsed() >= Duration::from_secs(u64::from(minutes) * 60)) {
@@ -386,6 +441,9 @@ impl MailView {
             || self.tests.values().any(|t| matches!(t, TestState::Running))
             || self.signins.values().any(|t| matches!(t, SignInState::Waiting { .. }))
             || matches!(self.open.as_ref().map(|o| &o.body), Some(Body::Loading))
+            || self.read_timer.is_some()
+            || !self.ops_running.is_empty()
+            || self.pending_total > 0
     }
 
     fn handle(&mut self, ev: Event, cfg: &Config) {
@@ -425,6 +483,10 @@ impl MailView {
                         Ok(l) => Body::Ready(l),
                         Err(e) => Body::Failed(e),
                     };
+                    // the message is on screen: it counts as read after the delay (MAIL-109)
+                    if matches!(o.body, Body::Ready(_)) && !o.msg.is_seen() && !o.msg.gone_on_server {
+                        self.read_timer = Some((id, Instant::now()));
+                    }
                 }
             }
             Event::Fetched { key, retry, result } => {
@@ -493,6 +555,40 @@ impl MailView {
             }
             Event::Probed { account, signed_in } => {
                 self.signed_in.insert(account, signed_in);
+            }
+            Event::Ops { account, result } => {
+                self.ops_running.remove(&account);
+                match result {
+                    Ok(r) => {
+                        for f in &r.failed {
+                            self.problems.push(f.clone());
+                            self.notices.push(f.clone());
+                        }
+                        self.notices.extend(r.notes.iter().cloned());
+                        match &r.offline {
+                            Some(o) if o.contains(NO_PASSWORD) => {
+                                self.offline.insert(account.clone(), o.clone());
+                                self.ask_password(&account, Retry::Ops);
+                            }
+                            Some(o) => {
+                                if crate::oauth::needs_sign_in(o) {
+                                    self.signed_in.insert(account.clone(), false);
+                                    self.notices.push("A mail account needs you to sign in again: open the account settings.".into());
+                                }
+                                self.offline.insert(account.clone(), o.clone());
+                            }
+                            None => {
+                                self.offline.remove(&account);
+                                // more came in while this ran: send it too
+                                if r.remaining > 0 && r.done + r.gone + r.failed.len() > 0 {
+                                    self.last_ops = None;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => self.problems.push(format!("Mail changes could not be sent: {e}")),
+                }
+                self.dirty = true;
             }
             Event::Tested { account, result } => {
                 self.tests.insert(
@@ -603,6 +699,29 @@ impl MailView {
         if let Ok(c) = r.folder_counts() {
             self.counts = c;
         }
+        let waiting = r.pending_ops(None).unwrap_or_default();
+        self.pending_total = waiting.len() as i64;
+        self.pending_accounts = waiting.iter().map(|p| p.account.clone()).collect();
+        // the marked mails and the open one as the index has them now (flags change, mail moves away)
+        let ids: Vec<i64> = self.marked.keys().copied().collect();
+        for id in ids {
+            match r.message_by_id(id) {
+                Ok(Some(m)) => {
+                    self.marked.insert(id, m);
+                }
+                Ok(None) => {
+                    self.marked.remove(&id);
+                }
+                Err(_) => {}
+            }
+        }
+        if let Some(o) = self.open.as_mut() {
+            match r.message_by_id(o.msg.id) {
+                Ok(Some(m)) => o.msg = m,
+                Ok(None) => self.open = None,
+                Err(_) => {}
+            }
+        }
         if let Some(folder) = self.folder {
             // keep the cursor on the same message when mail arrives above it
             let anchor = self.cursor.and_then(|c| self.row(c)).map(|m| (m.date, m.uid));
@@ -612,6 +731,10 @@ impl MailView {
                 if let Ok(p) = r.position_in_list(folder, date, uid) {
                     self.cursor = Some(p.max(0) as usize);
                 }
+            }
+            if self.results.is_none() {
+                // mail that left the folder (moved, deleted) can shorten the list under the cursor
+                self.cursor = self.cursor.and_then(|c| if self.total == 0 { None } else { Some(c.min(self.total - 1)) });
             }
         }
         if self.results.is_some() && !self.query.trim().is_empty() {
@@ -1045,7 +1168,212 @@ impl MailView {
                     self.load_message(cfg, &msg);
                 }
             }
+            Retry::Ops => self.start_ops(cfg, &p.account),
         }
+    }
+
+    // ------------------------------------------------------------ flags, move, delete (ADR-0009)
+
+    /// The messages an action works on: the marked ones, else the open one, else the one under
+    /// the cursor (the same rule as "Import to vault").
+    pub fn targets(&mut self) -> Vec<MessageSummary> {
+        if !self.marked.is_empty() {
+            return self.marked.values().cloned().collect();
+        }
+        if let Some(o) = &self.open {
+            return vec![o.msg.clone()];
+        }
+        self.cursor_message().into_iter().collect()
+    }
+
+    /// Record an action for these messages and send it (MAIL-107). The change shows at once.
+    /// Returns how many were recorded.
+    pub fn apply(&mut self, cfg: &Config, msgs: Vec<MessageSummary>, action: Action) -> usize {
+        let Some(store) = self.ready_store() else { return 0 };
+        match mail_ops::enqueue(&store, &msgs, &action, crate::cal_time::now()) {
+            Ok(q) => {
+                self.notices.extend(q.notes);
+                self.dirty = true;
+                self.refresh();
+                let mut accounts: Vec<String> = msgs.iter().map(|m| m.account.clone()).collect();
+                accounts.sort();
+                accounts.dedup();
+                if q.queued > 0 {
+                    for a in accounts {
+                        self.start_ops(cfg, &a);
+                    }
+                }
+                q.queued
+            }
+            Err(e) => {
+                self.problems.push(e.clone());
+                self.notices.push(e);
+                0
+            }
+        }
+    }
+
+    /// `u`: mark the messages read, or, when they all are, unread.
+    pub fn toggle_read(&mut self, cfg: &Config) {
+        let t = self.targets();
+        self.toggle_read_on(cfg, t);
+    }
+
+    pub fn toggle_read_on(&mut self, cfg: &Config, t: Vec<MessageSummary>) {
+        if t.is_empty() {
+            return;
+        }
+        let all_read = t.iter().all(|m| m.is_seen());
+        let a = if all_read { Action::SetFlags { add: vec![], remove: vec![MailFlag::Seen] } } else { Action::SetFlags { add: vec![MailFlag::Seen], remove: vec![] } };
+        self.read_timer = None; // a person who decides has no need for the timer
+        self.apply(cfg, t, a);
+    }
+
+    /// `s` / `f`: flag the messages, or, when they all are, unflag.
+    pub fn toggle_flag(&mut self, cfg: &Config) {
+        let t = self.targets();
+        self.toggle_flag_on(cfg, t);
+    }
+
+    pub fn toggle_flag_on(&mut self, cfg: &Config, t: Vec<MessageSummary>) {
+        if t.is_empty() {
+            return;
+        }
+        let all = t.iter().all(|m| m.is_flagged());
+        let a = if all { Action::SetFlags { add: vec![], remove: vec![MailFlag::Flagged] } } else { Action::SetFlags { add: vec![MailFlag::Flagged], remove: vec![] } };
+        self.apply(cfg, t, a);
+    }
+
+    pub fn in_trash(&self, m: &MessageSummary) -> bool {
+        self.folder_row(m.folder_id).is_some_and(|f| imap_sync::kind_of(f) == FolderKind::Trash)
+    }
+
+    /// `d` / Delete: move to Trash; in Trash, ask whether to delete forever.
+    pub fn delete_selected(&mut self, cfg: &Config) {
+        let t = self.targets();
+        self.delete_on(cfg, t);
+    }
+
+    pub fn delete_on(&mut self, cfg: &Config, t: Vec<MessageSummary>) {
+        if t.is_empty() {
+            return;
+        }
+        let (bin, rest): (Vec<_>, Vec<_>) = t.into_iter().partition(|m| self.in_trash(m));
+        if rest.is_empty() {
+            self.forever = Some(ForeverAsk { msgs: bin });
+            return;
+        }
+        if self.apply(cfg, rest, Action::Delete) > 0 {
+            self.after_leaving();
+        }
+    }
+
+    /// The confirmed "Delete forever" (the dialog's button).
+    pub fn confirm_forever(&mut self, cfg: &Config) {
+        let Some(ask) = self.forever.take() else { return };
+        let n = ask.msgs.len();
+        if self.apply(cfg, ask.msgs, Action::DeleteForever(Confirmed::after_dialog(n))) > 0 {
+            self.after_leaving();
+        }
+    }
+
+    /// After mail was sent away (moved, deleted): nothing is marked any more, the reading pane
+    /// does not show mail that is leaving, and the cursor goes on to the next one.
+    fn after_leaving(&mut self) {
+        self.marked.clear();
+        if self.open.as_ref().is_some_and(|o| o.msg.pending.is_some()) {
+            self.open = None;
+        }
+        if self.cursor.is_some() && self.results.is_none() {
+            self.move_cursor(1);
+        }
+    }
+
+    /// `m`: the folder picker for the messages.
+    pub fn open_mover(&mut self) {
+        let t = self.targets();
+        self.open_mover_on(t);
+    }
+
+    pub fn open_mover_on(&mut self, t: Vec<MessageSummary>) {
+        if t.is_empty() {
+            return;
+        }
+        let account = t[0].account.clone();
+        if t.iter().any(|m| m.account != account) {
+            self.problems.push("Choose mail of one account to move it: folders belong to an account.".into());
+            return;
+        }
+        self.mover = Some(MovePicker { msgs: t, query: String::new(), cursor: 0, focus: true });
+    }
+
+    /// The folders the picker offers for what has been typed: the account's folders in the order of
+    /// the folder list, without the folder all the messages are in already.
+    pub fn mover_candidates(&self) -> Vec<FolderRow> {
+        let Some(p) = &self.mover else { return vec![] };
+        let account = p.msgs[0].account.clone();
+        let same = p.msgs.iter().all(|m| m.folder_id == p.msgs[0].folder_id);
+        let q = p.query.trim().to_lowercase();
+        self.account_folders(&account).into_iter().filter(|f| !(same && f.id == p.msgs[0].folder_id)).filter(|f| q.is_empty() || decode_mutf7(&f.name).to_lowercase().contains(&q)).collect()
+    }
+
+    /// Move the picker's messages to this folder.
+    pub fn move_to(&mut self, cfg: &Config, folder: &FolderRow) {
+        let Some(p) = self.mover.take() else { return };
+        if self.apply(cfg, p.msgs, Action::MoveTo { folder: folder.name.clone() }) > 0 {
+            self.after_leaving();
+        }
+    }
+
+    /// Send what waits for the server, as a job (one at a time per account).
+    pub fn start_ops(&mut self, cfg: &Config, account: &str) {
+        if self.ops_running.contains(account) {
+            return;
+        }
+        let (Some(store), Some(acct)) = (self.ready_store(), cfg.mail_accounts.iter().find(|a| a.id == account).cloned()) else { return };
+        self.ops_running.insert(account.to_string());
+        let connector = self.lazy_connector(&acct, None);
+        let id = account.to_string();
+        let id2 = id.clone();
+        self.spawn(move || mail_ops::run_pending(&store, &connector, &id), move |r| Event::Ops { account: id2, result: r });
+    }
+
+    /// Every frame: the open message becomes read after the delay, and what waits for the server
+    /// is sent again from time to time (the network may be back).
+    fn tick_ops(&mut self, cfg: &Config) {
+        if let Some((id, t0)) = self.read_timer {
+            let msg = self.open.as_ref().filter(|o| o.msg.id == id && !o.msg.is_seen() && !o.msg.gone_on_server && o.msg.pending.is_none()).map(|o| o.msg.clone());
+            match msg {
+                Some(m) if cfg.mail_mark_read => {
+                    if t0.elapsed() >= Duration::from_secs(u64::from(cfg.mail_mark_read_secs)) {
+                        self.read_timer = None;
+                        self.apply(cfg, vec![m], Action::SetFlags { add: vec![MailFlag::Seen], remove: vec![] });
+                    }
+                }
+                _ => self.read_timer = None,
+            }
+        }
+        if self.pending_total > 0 && self.ready_store().is_some() && self.last_ops.is_none_or(|t| t.elapsed() >= self.ops_retry) {
+            self.last_ops = Some(Instant::now());
+            for a in self.pending_accounts.clone() {
+                self.start_ops(cfg, &a);
+            }
+        }
+    }
+
+    /// Is a job sending actions to the server?
+    #[cfg(test)]
+    pub fn busy_with_ops(&self) -> bool {
+        !self.ops_running.is_empty()
+    }
+
+    /// "3 changes are waiting for the server" (and why), for the bars.
+    pub fn pending_text(&self) -> Option<String> {
+        if self.pending_total == 0 {
+            return None;
+        }
+        let n = self.pending_total;
+        Some(format!("{n} change{} waiting for the server", if n == 1 { " is" } else { "s are" }))
     }
 }
 

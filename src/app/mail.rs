@@ -25,7 +25,7 @@ impl ShaleApp {
         for a in self.cfg.mail_accounts.clone() {
             self.mail.probe_sign_in(&a);
         }
-        self.modal = Some(Modal::MailAccounts(Box::new(MailDialog::new(self.cfg.mail_accounts.clone(), self.cfg.mail_sync_minutes, secrets::keyring_available()))));
+        self.modal = Some(Modal::MailAccounts(Box::new(MailDialog::new(self.cfg.mail_accounts.clone(), self.cfg.mail_sync_minutes, secrets::keyring_available()).with_read_settings(self.cfg.mail_mark_read, self.cfg.mail_mark_read_secs))));
     }
 
     /// Apply an action of the account settings. Returns true when the dialog should close.
@@ -75,6 +75,8 @@ impl ShaleApp {
                 };
                 self.cfg.mail_accounts = d.accounts.clone();
                 self.cfg.mail_sync_minutes = minutes;
+                self.cfg.mail_mark_read = d.mark_read;
+                self.cfg.mail_mark_read_secs = d.read_delay().unwrap_or(2);
                 for id in std::mem::take(&mut d.removed) {
                     self.mail.forget_account(&id);
                     self.toast(format!("The account was removed. Its mail already copied stays in {}.", self.mail.root.display()));
