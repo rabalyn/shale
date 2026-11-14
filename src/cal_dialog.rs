@@ -50,10 +50,7 @@ impl CalendarDialog {
         let acct = Account { url: self.dav_url.trim().to_string(), username: self.dav_user.clone(), password: self.dav_pass.clone() };
         let slot: Discovery = Arc::new(Mutex::new(None));
         let s2 = slot.clone();
-        std::thread::spawn(move || {
-            let r = cal_dav::discover(&acct);
-            *s2.lock().unwrap() = Some(r);
-        });
+        crate::jobs::run(move || cal_dav::discover(&acct), move |r| *s2.lock().unwrap() = Some(r.and_then(|r| r)));
         self.discovering = Some(slot);
         self.message = Some("Looking for calendars…".into());
     }

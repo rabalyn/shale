@@ -191,11 +191,11 @@ pub struct ShaleApp {
     drop_busy: bool,
     /// words typical for each tag (learned from the vault, see tagwords)
     pub tag_words: Option<crate::tagwords::TagWords>,
-    tag_job: Option<std::sync::mpsc::Receiver<crate::tagwords::TagWords>>,
+    tag_job: Option<std::sync::mpsc::Receiver<Result<crate::tagwords::TagWords, String>>>,
     tag_root: Option<PathBuf>,
     tag_gen: u64,
     tag_at: Option<Instant>,
-    pending_drops: Vec<(std::sync::mpsc::Receiver<(Vec<crate::import::Item>, Vec<String>)>, Option<(PathBuf, Option<PathBuf>)>)>,
+    pending_drops: Vec<(std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>)>,
     pub scenes: SceneCache,
     pub modal: Option<Modal>,
     pub actions: Vec<Action>,

@@ -61,9 +61,8 @@ pub fn job_result(j: &Job) -> Option<Result<String, String>> {
 fn run_job(f: impl FnOnce() -> Result<String, String> + Send + 'static, ctx: Option<eframe::egui::Context>) -> Job {
     let job: Job = Arc::new(Mutex::new(None));
     let j2 = job.clone();
-    std::thread::spawn(move || {
-        let r = f();
-        *j2.lock().unwrap() = Some(r);
+    crate::jobs::run(f, move |r| {
+        *j2.lock().unwrap() = Some(r.and_then(|r| r));
         if let Some(c) = ctx {
             c.request_repaint();
         }
@@ -273,16 +272,18 @@ impl CalendarStore {
         // the loaded range moves with the days: a calendar loaded on another day is loaded fully
         let known = self.known.get(&s.id).filter(|(_, day)| *day == today).map(|(tag, _)| tag.clone());
         let (id, url, acct, pending) = (s.id.clone(), url.clone(), Account { url: url.clone(), username: username.clone(), password: password.clone() }, self.pending.clone());
-        std::thread::spawn(move || {
-            // a failing state request (old servers) just means: load everything
-            let st = cal_dav::calendar_state(&url, &acct).unwrap_or_default();
-            let r = if st.tag.is_some() && st.tag == known {
-                Ok(Loaded { events: None, tag: st.tag, read_only: st.read_only })
-            } else {
-                cal_dav::fetch_events(&url, &acct, from, to).map(|ev| Loaded { events: Some(ev), tag: st.tag, read_only: st.read_only })
-            };
-            pending.lock().unwrap().push((id, r));
-        });
+        crate::jobs::run(
+            move || {
+                // a failing state request (old servers) just means: load everything
+                let st = cal_dav::calendar_state(&url, &acct).unwrap_or_default();
+                if st.tag.is_some() && st.tag == known {
+                    Ok(Loaded { events: None, tag: st.tag, read_only: st.read_only })
+                } else {
+                    cal_dav::fetch_events(&url, &acct, from, to).map(|ev| Loaded { events: Some(ev), tag: st.tag, read_only: st.read_only })
+                }
+            },
+            move |r| pending.lock().unwrap().push((id, r.and_then(|r| r))),
+        );
     }
 
     /// Load a calendar again now, completely (also when the server says nothing changed).
@@ -625,6 +626,14 @@ pub(crate) mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("job did not finish")
+    }
+
+    // spec: JOB-002
+    #[test]
+    fn a_panicking_save_job_ends_with_an_error() {
+        let job = run_job(|| panic!("server sent rubbish"), None);
+        let e = wait(&job).unwrap_err();
+        assert!(e.contains("server sent rubbish"), "{e}");
     }
 
     fn dav_source(id: &str, url: String) -> CalendarSource {

@@ -123,7 +123,11 @@ impl ShaleApp {
     pub fn learn_tags_tick(&mut self) {
         if let Some(rx) = &self.tag_job {
             match rx.try_recv() {
-                Ok(tw) => {
+                Ok(Err(e)) => {
+                    self.tag_job = None;
+                    self.toast(format!("Learning tag words failed: {e}"));
+                }
+                Ok(Ok(tw)) => {
                     if let Some(v) = &self.vault {
                         let _ = crate::tagwords::save(&v.root, &tw);
                     }
@@ -147,11 +151,7 @@ impl ShaleApp {
             self.tag_gen = v.generation;
             self.tag_at = Some(std::time::Instant::now());
             let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
-            let (tx, rx) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
-                let _ = tx.send(crate::tagwords::learn_from_vault(&notes));
-            });
-            self.tag_job = Some(rx);
+            self.tag_job = Some(crate::jobs::spawn(move || crate::tagwords::learn_from_vault(&notes), || {}));
         }
     }
 
@@ -299,18 +299,19 @@ impl ShaleApp {
                         self.last_offered = offered;
                         let zone = self.zone_at(Pos2::new(x / zoom, y / zoom)).map(|z| (z.folder, z.note));
                         // looking a message up in Thunderbird's folders can take a moment
-                        let (tx, rx) = std::sync::mpsc::channel();
                         let c = ctx.clone();
-                        std::thread::spawn(move || {
-                            let (items, mut notes) = import::items_from_parts(&parts);
-                            if items.is_empty() && !report.is_empty() {
-                                // the exact story of each kind instead of just "(empty)"
-                                notes.retain(|n| !n.starts_with("  "));
-                                notes.extend(report);
-                            }
-                            let _ = tx.send((items, notes));
-                            c.request_repaint();
-                        });
+                        let rx = crate::jobs::spawn(
+                            move || {
+                                let (items, mut notes) = import::items_from_parts(&parts);
+                                if items.is_empty() && !report.is_empty() {
+                                    // the exact story of each kind instead of just "(empty)"
+                                    notes.retain(|n| !n.starts_with("  "));
+                                    notes.extend(report);
+                                }
+                                (items, notes)
+                            },
+                            move || c.request_repaint(),
+                        );
                         self.pending_drops.push((rx, zone));
                     }
                 }
@@ -324,7 +325,8 @@ impl ShaleApp {
         let mut done = Vec::new();
         self.pending_drops.retain(|(rx, zone)| match rx.try_recv() {
             Ok(r) => {
-                done.push((r, zone.clone()));
+                // a crash while reading the drop ends as a message in the import dialog
+                done.push((r.unwrap_or_else(|e| (vec![], vec![format!("Reading the drop failed: {e}")])), zone.clone()));
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => true,

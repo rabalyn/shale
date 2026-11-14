@@ -23,6 +23,7 @@ mod fsutil;
 mod graph;
 mod import;
 mod import_dialog;
+mod jobs;
 mod layout;
 mod lists;
 mod mail;
