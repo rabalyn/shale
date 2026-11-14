@@ -40,7 +40,6 @@ pub fn open_recovery_folder(path: &Path, recovery_root: &Path) -> Result<(), Str
 
 /// Save `data` (a mail attachment, say) as `name` in Shale's private temp folder and open that
 /// copy. Each call uses a fresh folder, so same-named attachments never clash.
-#[allow(dead_code)] // for mail attachments (the mail view is the next step)
 pub fn open_temp_copy(name: &str, data: &[u8]) -> Result<(), String> {
     let path = save_temp_copy(name, data)?;
     launch(check_temp_file(&path)?.as_ref())

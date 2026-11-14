@@ -17,8 +17,6 @@
 //!
 //! Signing in goes through the [`Authenticator`] hook: [`PlainAuth`] for passwords now, XOAUTH2
 //! in phase 1c.
-// The mail window (phase 1b) is the user of most of this.
-#![allow(dead_code)]
 
 use crate::config::MailSecurity;
 use rustls::pki_types::ServerName;
@@ -498,6 +496,7 @@ impl FolderEntry {
         self.attributes.iter().any(|x| x.eq_ignore_ascii_case(a))
     }
     /// The name as people read it.
+    #[cfg(test)]
     pub fn display_name(&self) -> String {
         decode_mutf7(&self.name)
     }
@@ -913,11 +912,6 @@ impl Client {
         self.secure = true;
         self.caps.clear(); // what the server offered before the encryption does not count
         Ok(())
-    }
-
-    /// What the server can do (upper case: `CONDSTORE`, `AUTH=PLAIN`, `SPECIAL-USE` …).
-    pub fn capabilities(&self) -> &HashSet<String> {
-        &self.caps
     }
 
     pub fn has_capability(&self, name: &str) -> bool {

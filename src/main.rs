@@ -33,7 +33,12 @@ mod layout;
 mod lists;
 mod mail;
 mod mail_db;
+mod mail_dialog;
 mod mail_store;
+mod mail_ui;
+#[cfg(test)]
+mod mail_ui_tests;
+mod mail_view;
 mod markdown;
 mod media;
 #[cfg(test)]

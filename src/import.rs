@@ -148,6 +148,14 @@ pub fn email_item(mail: Mail, original: (String, Vec<u8>)) -> Item {
     Item { source: Source::Email { mail, original }, include: true, title, att_on, already: None, people: vec![] }
 }
 
+/// An item for a stored message, like a dropped `.eml` file: the original is kept under
+/// `file_name` (default: the subject).
+pub fn eml_item(raw: Vec<u8>, file_name: Option<&str>) -> Item {
+    let m = mail::parse(&raw);
+    let name = file_name.map(String::from).unwrap_or_else(|| format!("{}.eml", if m.subject.trim().is_empty() { "message".to_string() } else { safe_title(&m.subject) }));
+    email_item(m, (name, raw))
+}
+
 pub fn event_item(event: Event, calendar: String, original: Option<(String, Vec<u8>)>) -> Item {
     let title = safe_title(&format!("{} {}", ymd_text(event_ymd(&event)), if event.summary.trim().is_empty() { "Event" } else { event.summary.trim() }));
     Item { source: Source::Event { event, calendar, original }, include: true, title, att_on: vec![], already: None, people: vec![] }

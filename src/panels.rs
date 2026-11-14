@@ -839,7 +839,7 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) => {}
+            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) => {}
             Modal::Settings { vault_path } => {
                 let resp = egui::Modal::new(egui::Id::unique("settings")).show(&ctx, |ui| {
                     ui.set_width(520.0);
@@ -950,6 +950,21 @@ impl ShaleApp {
             });
             if let Some(a) = out {
                 if self.calendar_dialog_action(d, a) {
+                    keep = false;
+                }
+            }
+            if resp.should_close() {
+                keep = false;
+            }
+        }
+        if let Modal::MailAccounts(d) = &mut modal {
+            let mut out = None;
+            let mail = &self.mail;
+            let resp = egui::Modal::new(egui::Id::unique("mail-accounts")).show(&ctx, |ui| {
+                out = crate::mail_dialog::show(ui, d, mail);
+            });
+            if let Some(a) = out {
+                if self.mail_dialog_action(d, a) {
                     keep = false;
                 }
             }

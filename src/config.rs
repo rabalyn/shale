@@ -52,7 +52,6 @@ pub enum MailSecurity {
 
 impl MailSecurity {
     /// The usual port for this mode.
-    #[allow(dead_code)] // used by the account settings (phase 1b)
     pub fn default_port(self) -> u16 {
         match self {
             MailSecurity::ImplicitTls => 993,
@@ -117,6 +116,9 @@ pub struct Config {
     pub vim_mode: bool,
     /// IMAP accounts of the mail view.
     pub mail_accounts: Vec<MailAccount>,
+    /// The mail view fetches new mail by itself every this many minutes while the app runs
+    /// (0 = only with the Sync button).
+    pub mail_sync_minutes: u32,
     // Per-vault fields of older versions, read only to move them into the vault that is opened
     // first (CFG-008); dropped from the file after that.
     #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
@@ -156,6 +158,7 @@ impl Default for Config {
             input_log: false,
             vim_mode: false,
             mail_accounts: vec![],
+            mail_sync_minutes: 10,
             legacy_open_files: None,
             legacy_last_import_folder: None,
             legacy_recent_tags: None,

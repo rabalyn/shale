@@ -4,8 +4,6 @@
 //!
 //! Search text from the user never reaches the FTS5 query language raw: [`fts_query`] turns it
 //! into quoted phrases, so `"`, `*`, `NEAR`, `-` or `:` in what someone types is only text.
-// The mail window (phase 1b) is the user of most of this.
-#![allow(dead_code)]
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::collections::{HashMap, HashSet};
@@ -425,7 +423,35 @@ pub fn message(c: &Connection, folder: i64, uid: u32) -> Result<Option<MessageSu
     Ok(c.query_row(&format!("SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity WHERE m.folder = ?1 AND m.uid = ?2"), params![folder, uid], summary_from).optional()?)
 }
 
+/// Per folder: (messages shown in its list, how many of them are unread). One pass over the
+/// index; the mail view asks only when something changed.
+pub fn folder_counts(c: &Connection) -> Result<HashMap<i64, (i64, i64)>> {
+    let mut st = c.prepare(
+        "SELECT m.folder, COUNT(*), SUM(CASE WHEN instr(lower(' ' || m.flags || ' '), ' \\seen ') = 0 THEN 1 ELSE 0 END)
+         FROM messages m JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity GROUP BY m.folder",
+    )?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, (r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0)))))?.collect::<rusqlite::Result<HashMap<_, _>>>()?;
+    Ok(rows)
+}
+
+/// How many messages a folder's list has.
+pub fn count_folder(c: &Connection, folder: i64) -> Result<i64> {
+    Ok(c.query_row("SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity WHERE m.folder = ?1", [folder], |r| r.get(0))?)
+}
+
+/// How many messages of the folder's list come before this one (its row number in the list).
+pub fn position_in_list(c: &Connection, folder: i64, date: Option<i64>, uid: u32) -> Result<i64> {
+    let d = date.unwrap_or(i64::MIN);
+    Ok(c.query_row(
+        "SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND f.uidvalidity = m.uidvalidity
+         WHERE m.folder = ?1 AND (COALESCE(m.date, -9223372036854775807) > ?2 OR (COALESCE(m.date, -9223372036854775807) = ?2 AND m.uid > ?3))",
+        params![folder, d.max(-9223372036854775807), uid],
+        |r| r.get(0),
+    )?)
+}
+
 /// Number of messages in the index (all folders, all UIDVALIDITYs).
+#[cfg(test)]
 pub fn count_messages(c: &Connection) -> Result<i64> {
     Ok(c.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?)
 }

@@ -13,8 +13,6 @@
 //!
 //! `UIDNEXT` of a folder is stored only when its sync completed without errors, so an
 //! interrupted or partly failed sync starts again from what is already in the index.
-// The mail window (phase 1b) is the user of most of this.
-#![allow(dead_code)]
 
 use crate::cal_time;
 use crate::config::{MailAccount, MailAuth};
@@ -172,7 +170,7 @@ pub fn classify(attributes: &[String], name: &str) -> FolderKind {
     }
 }
 
-fn kind_of(f: &FolderRow) -> FolderKind {
+pub fn kind_of(f: &FolderRow) -> FolderKind {
     let attrs: Vec<String> = f.special_use.iter().flat_map(|s| s.split(' ').map(String::from)).collect();
     classify(&attrs, &f.name)
 }
@@ -246,8 +244,9 @@ pub fn sync_account(store: &MailStore, account_id: &str, display: &str, connecto
     done
 }
 
-/// Record the folder list and return the folders to sync now.
-fn folders_to_sync(store: &MailStore, account_id: &str, display: &str, client: &mut Client) -> Result<Vec<FolderRow>, String> {
+/// Record the folder list of the account in the index (a new folder starts with the default
+/// choice, an old one keeps the person's) and return every selectable folder with its kind.
+fn record_folders(store: &MailStore, account_id: &str, display: &str, client: &mut Client) -> Result<Vec<(FolderRow, FolderKind)>, String> {
     let mut out = Vec::new();
     for e in client.list_folders().map_err(err_text)? {
         if e.has_attr("\\Noselect") || e.has_attr("\\NonExistent") {
@@ -255,12 +254,80 @@ fn folders_to_sync(store: &MailStore, account_id: &str, display: &str, client: &
         }
         let kind = classify(&e.attributes, &e.name);
         let row = store.ensure_folder(account_id, display, &e.name, e.delimiter.as_deref(), special_use_of(&e).as_deref(), default_sync(kind)).map_err(err_text)?;
-        // Trash and Junk never sync by themselves, whatever the checkbox says
-        if row.sync_enabled && matches!(kind, FolderKind::Normal | FolderKind::All) {
-            out.push(row);
-        }
+        out.push((row, kind));
     }
     Ok(out)
+}
+
+/// Record the folder list and return the folders to sync now. Trash and Junk never sync by
+/// themselves, whatever the checkbox says.
+fn folders_to_sync(store: &MailStore, account_id: &str, display: &str, client: &mut Client) -> Result<Vec<FolderRow>, String> {
+    Ok(record_folders(store, account_id, display, client)?.into_iter().filter(|(row, kind)| row.sync_enabled && matches!(kind, FolderKind::Normal | FolderKind::All)).map(|(row, _)| row).collect())
+}
+
+/// Connect, list the account's folders and record them, without fetching any mail (the account
+/// settings' "Test connection", MAIL-042). Returns all folders of the account.
+pub fn discover_folders(store: &MailStore, connector: &dyn Connector, account_id: &str, display: &str) -> Result<Vec<FolderRow>, String> {
+    let mut client = connector.connect().map_err(err_text)?;
+    let rows = record_folders(store, account_id, display, &mut client);
+    client.logout();
+    Ok(rows?.into_iter().map(|(r, _)| r).collect())
+}
+
+/// What the window shows when an account has no password to sign in with. The window looks for
+/// this text to ask for the password (MAIL-059).
+pub const NO_PASSWORD: &str = "no password for this account";
+
+/// Decides how to connect only when the first connection is made, so that slow things (the
+/// keyring) never run on the window's thread: the account's connector is built by `make` inside
+/// the background job, once.
+pub struct LazyConnector {
+    make: Mutex<Option<Box<dyn FnOnce() -> Result<Arc<dyn Connector>, String> + Send>>>,
+    made: Mutex<Option<Result<Arc<dyn Connector>, String>>>,
+}
+
+impl LazyConnector {
+    pub fn new(make: impl FnOnce() -> Result<Arc<dyn Connector>, String> + Send + 'static) -> LazyConnector {
+        LazyConnector { make: Mutex::new(Some(Box::new(make))), made: Mutex::new(None) }
+    }
+}
+
+impl Connector for LazyConnector {
+    fn connect(&self) -> Result<Client, ImapError> {
+        let inner = {
+            let mut made = self.made.lock().unwrap_or_else(|e| e.into_inner());
+            if made.is_none() {
+                let make = self.make.lock().unwrap_or_else(|e| e.into_inner()).take();
+                *made = Some(match make {
+                    Some(f) => f(),
+                    None => Err("no way to connect".into()),
+                });
+            }
+            made.clone().unwrap_or_else(|| Err("no way to connect".into()))
+        };
+        inner.map_err(ImapError::Auth)?.connect()
+    }
+}
+
+/// Builds the connector of an account; the second argument is a password typed for this session
+/// (used when the keyring has none). Tests plug in a connector for the pretend server.
+pub type ConnectorFactory = Arc<dyn Fn(&MailAccount, Option<String>) -> Result<Arc<dyn Connector>, String> + Send + Sync>;
+
+/// The real factory: the keyring's password (or the session's) and the operating system's
+/// certificate check.
+pub fn real_factory() -> ConnectorFactory {
+    Arc::new(|account, session_password| {
+        if let (Some(pw), crate::config::MailAuth::Password) = (session_password.clone(), account.auth) {
+            // a password typed for this session wins over the keyring's: it is the newest
+            let settings = ConnectSettings { host: account.host.clone(), port: account.port, security: account.security, limits: Limits::default() };
+            return Ok(Arc::new(ImapConnector { settings, auth: Arc::new(PasswordAuth { user: account.user.clone(), password: pw }) }) as Arc<dyn Connector>);
+        }
+        match connector_for_account(account, Limits::default()) {
+            Ok(c) => Ok(Arc::new(c) as Arc<dyn Connector>),
+            Err(e) if e.contains("no password") => Err(NO_PASSWORD.into()),
+            Err(e) => Err(e),
+        }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -17,8 +17,6 @@
 //! rebuild loses nothing but flags (the next sync brings them back from the server).
 //!
 //! This phase never deletes a message file.
-// The mail window (phase 1b) is the user of most of this.
-#![allow(dead_code)]
 
 use crate::fsutil;
 use crate::mail;
@@ -197,10 +195,6 @@ impl MailStore {
         Ok(MailStore { root: root.to_path_buf(), tx, writer: Mutex::new(Some(handle)), opened: report })
     }
 
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
     pub fn index_path(&self) -> PathBuf {
         self.root.join("index.sqlite")
     }
@@ -326,9 +320,6 @@ impl Reader {
     pub fn folders(&self, account: Option<&str>) -> Result<Vec<FolderRow>> {
         mail_db::folders(&self.conn, account)
     }
-    pub fn folder(&self, id: i64) -> Result<Option<FolderRow>> {
-        mail_db::folder_by_id(&self.conn, id)
-    }
     /// A page of a folder, newest first (MAIL-013).
     pub fn list(&self, folder: i64, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
         mail_db::list(&self.conn, folder, limit, offset)
@@ -340,8 +331,20 @@ impl Reader {
     pub fn message(&self, folder: i64, uid: u32) -> Result<Option<MessageSummary>> {
         mail_db::message(&self.conn, folder, uid)
     }
+    #[cfg(test)]
     pub fn count_messages(&self) -> Result<i64> {
         mail_db::count_messages(&self.conn)
+    }
+    /// (messages, unread) per folder id (MAIL-051).
+    pub fn folder_counts(&self) -> Result<std::collections::HashMap<i64, (i64, i64)>> {
+        mail_db::folder_counts(&self.conn)
+    }
+    pub fn count_folder(&self, folder: i64) -> Result<i64> {
+        mail_db::count_folder(&self.conn, folder)
+    }
+    /// The row number of a message in its folder's list.
+    pub fn position_in_list(&self, folder: i64, date: Option<i64>, uid: u32) -> Result<i64> {
+        mail_db::position_in_list(&self.conn, folder, date, uid)
     }
     pub fn present_uids(&self, folder: i64, uidvalidity: u32) -> Result<HashSet<u32>> {
         mail_db::present_uids(&self.conn, folder, uidvalidity)

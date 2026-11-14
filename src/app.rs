@@ -17,6 +17,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Gives each app built without persistence (tests, screenshots) its own mail folder.
+static NEXT_MAIL_ROOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub struct Options {
     pub screenshot: Option<PathBuf>,
     pub vault: Option<PathBuf>,
@@ -34,6 +37,7 @@ pub enum View {
     Tasks,
     Graph,
     Calendar,
+    Mail,
 }
 
 impl View {
@@ -101,6 +105,7 @@ pub enum RightPanel {
 }
 
 mod drops;
+mod mail;
 mod sync;
 
 /// A file "dropped" by a `--keys` script.
@@ -126,6 +131,7 @@ pub enum Modal {
     Calendars(Box<crate::cal_dialog::CalendarDialog>),
     Event(Box<crate::cal_dialog::EventDialog>),
     Import(Box<crate::import_dialog::ImportDialog>),
+    MailAccounts(Box<crate::mail_dialog::MailDialog>),
 }
 
 pub enum Action {
@@ -225,6 +231,8 @@ pub struct ShaleApp {
     pub graph: GraphView,
     pub local_graph: GraphView,
     pub calendar: crate::cal_store::CalendarStore,
+    /// The mail view (ADR-0007 phase 1b).
+    pub mail: crate::mail_ui::MailView,
     pub cal_side: crate::cal_ui::CalendarView,
     pub cal_main: crate::cal_ui::CalendarView,
     /// deletes started from the event popup: (job, calendar)
@@ -338,6 +346,7 @@ impl ShaleApp {
             graph: GraphView::new(false),
             local_graph: GraphView::new(true),
             calendar: crate::cal_store::CalendarStore::new(cfg.calendars.clone(), if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{}", std::process::id())) }),
+            mail: crate::mail_ui::MailView::new(if persist { crate::mail_store::default_root() } else { std::env::temp_dir().join(format!("shale-mail-{}-{}", std::process::id(), NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst))) }),
             cal_side: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Small),
             cal_main: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Medium),
             cal_jobs: vec![],
@@ -393,6 +402,7 @@ impl ShaleApp {
             }
             match opts.view.as_deref() {
                 Some("calendar") => app.show_view(View::Calendar, false),
+                Some("mail") => app.show_view(View::Mail, false),
                 Some("calendar-side") => app.right = RightPanel::Calendar,
                 Some("tasks") => app.show_view(View::Tasks, false),
                 Some("graph") => app.show_view(View::Graph, false),
@@ -1330,6 +1340,7 @@ impl ShaleApp {
         // Ctrl+H / Ctrl+L (like vim's h / l): keyboard into the sidebar / back into the editor;
         // Ctrl+Shift+B: the file list
         let (to_sidebar, to_editor, files) = ui.input_mut(|i| (i.consume_key(Modifiers::COMMAND, Key::H), i.consume_key(Modifiers::COMMAND, Key::L), i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::B)));
+        let mail_view = ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::M));
         let (quick, new_note, toggle, back, fwd, close, search, save, settings) = ui.input_mut(|i| {
             (
                 i.consume_key(Modifiers::COMMAND, Key::O),
@@ -1345,6 +1356,9 @@ impl ShaleApp {
         });
         if self.vault.is_none() {
             return;
+        }
+        if mail_view {
+            self.show_view(View::Mail, false);
         }
         if quick {
             self.modal = Some(Modal::QuickSwitch { query: String::new(), sel: 0 });
@@ -1546,15 +1560,21 @@ impl ShaleApp {
         }
     }
 
+    /// Passwords are typed in the calendar and mail account settings: no key of theirs is recorded
+    /// (MAIL-041).
+    pub(crate) fn input_is_secret(&self) -> bool {
+        matches!(self.modal, Some(Modal::Calendars(_)) | Some(Modal::MailAccounts(_)))
+    }
+
     /// Append the keyboard-related events of this frame, plus the editor's picker state.
     fn log_input(&mut self, raw: &egui::RawInput) {
         use std::io::Write;
         // the calendar settings hold the CalDAV password field: record nothing typed there
         // (not even key names, they would spell the password)
-        if matches!(self.modal, Some(Modal::Calendars(_))) {
+        if self.input_is_secret() {
             if raw.events.iter().any(|e| matches!(e, egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Ime(_))) {
                 if let Ok(mut f) = crate::fsutil::open_private_log(&crate::config::input_log_path(), true) {
-                    let _ = writeln!(f, "frame {} | (input in the calendar settings is not recorded)", self.frames);
+                    let _ = writeln!(f, "frame {} | (input in the account settings is not recorded)", self.frames);
                 }
             }
             return;
@@ -1603,6 +1623,21 @@ impl eframe::App for ShaleApp {
     }
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        self.run_frame(ui);
+    }
+
+    fn on_exit(&mut self) {
+        // flush_all waits for a running sync's merge step first
+        self.flush_all();
+        self.rescue_unsaved();
+        self.remember_open_files();
+        self.save_config();
+    }
+}
+
+impl ShaleApp {
+    /// One frame of the window (the body of `eframe::App::ui`; tests call it directly).
+    pub(crate) fn run_frame(&mut self, ui: &mut Ui) {
         self.drop_zones.clear();
         self.calendar_areas.clear();
         self.tree_targets.clear();
@@ -1611,6 +1646,7 @@ impl eframe::App for ShaleApp {
         self.autosave();
         let ctx = ui.ctx().clone();
         self.sync_tick(&ctx);
+        self.mail_tick(&ctx);
         if self.calendar.poll() {
             ui.ctx().request_repaint();
         }
@@ -1657,14 +1693,6 @@ impl eframe::App for ShaleApp {
         self.paint_toasts(ui);
         self.paint_recovery_notice(ui);
         self.process_actions();
-    }
-
-    fn on_exit(&mut self) {
-        // flush_all waits for a running sync's merge step first
-        self.flush_all();
-        self.rescue_unsaved();
-        self.remember_open_files();
-        self.save_config();
     }
 }
 

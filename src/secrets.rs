@@ -28,13 +28,11 @@ fn account_of(s: &CalendarSource) -> Option<(String, String)> {
     Some((format!("{}://{}:{}", o.scheme, o.host, o.port), username.clone()))
 }
 
-#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
 /// Keyring application name of CalDAV passwords.
 const CALDAV: &str = "shale-caldav";
 /// Keyring application name of mail account secrets.
 const MAIL: &str = "shale-mail";
 
-#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
 /// What a mail account secret is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MailSecret {
@@ -43,7 +41,6 @@ pub enum MailSecret {
     RefreshToken,
 }
 
-#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
 impl MailSecret {
     fn name(self) -> &'static str {
         match self {
@@ -53,20 +50,17 @@ impl MailSecret {
     }
 }
 
-#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
 /// The secret of a mail account, if the keyring has it.
 pub fn mail_secret(account_id: &str, kind: MailSecret) -> Option<String> {
     backend::lookup(MAIL, account_id, kind.name())
 }
 
-#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
 /// Put a mail account secret into the keyring. False if that did not work (no keyring, or the
 /// unlock was refused): the secret is then not saved anywhere.
 pub fn set_mail_secret(account_id: &str, kind: MailSecret, secret: &str) -> bool {
     backend::store(MAIL, account_id, kind.name(), secret)
 }
 
-#[allow(dead_code)] // wired up by the mail sync and account settings (phase 1b)
 /// Remove a mail account secret (the account was deleted).
 pub fn clear_mail_secret(account_id: &str, kind: MailSecret) {
     backend::clear(MAIL, account_id, kind.name());
@@ -137,6 +131,11 @@ pub fn for_file(sources: &[CalendarSource]) -> Vec<CalendarSource> {
         map.remove(&a);
     }
     out
+}
+
+/// Is there a keyring to keep mail passwords in? (Without one they are asked for per session.)
+pub fn keyring_available() -> bool {
+    backend::available()
 }
 
 /// Where passwords end up, for the settings dialog.
@@ -219,9 +218,14 @@ mod backend {
     }
 }
 
+/// A mail account with this id has no keyring in tests: saving its password fails.
+#[cfg(test)]
+pub const NO_KEYRING_ACCOUNT: &str = "no-keyring";
+
 /// Tests: a pretend keyring in memory (never the real one).
 #[cfg(test)]
 mod backend {
+    use super::NO_KEYRING_ACCOUNT;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -238,6 +242,9 @@ mod backend {
         FAKE.lock().unwrap().as_ref()?.get(&key(app, server, user)).cloned()
     }
     pub fn store(app: &str, server: &str, user: &str, password: &str) -> bool {
+        if server == NO_KEYRING_ACCOUNT {
+            return false;
+        }
         FAKE.lock().unwrap().get_or_insert_with(HashMap::new).insert(key(app, server, user), password.into());
         true
     }

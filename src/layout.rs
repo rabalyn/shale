@@ -32,6 +32,7 @@ pub enum Icon {
     Sort,
     Calendar,
     Import,
+    Mail,
 }
 
 pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
@@ -152,6 +153,12 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             let y = cx.y + w * 0.06;
             let b = cx.y + w * 0.3;
             p.add(Shape::line(vec![Pos2::new(cx.x - w * 0.34, y), Pos2::new(cx.x - w * 0.34, b), Pos2::new(cx.x + w * 0.34, b), Pos2::new(cx.x + w * 0.34, y)], s));
+        }
+        Icon::Mail => {
+            // an envelope
+            let b = Rect::from_center_size(cx, Vec2::new(w * 0.72, w * 0.52));
+            p.rect_stroke(b, CornerRadius::same(2), s, StrokeKind::Middle);
+            p.add(Shape::line(vec![b.left_top(), cx + Vec2::new(0.0, w * 0.06), b.right_top()], s));
         }
         Icon::Sort => {
             for (k, len) in [0.62f32, 0.44, 0.26].iter().enumerate() {
@@ -305,6 +312,9 @@ impl ShaleApp {
             if icon_button(ui, Icon::Calendar, 30.0, cur == Some(View::Calendar), "Calendar").clicked() {
                 self.actions.push(Action::ShowView(View::Calendar));
             }
+            if icon_button(ui, Icon::Mail, 30.0, cur == Some(View::Mail), "Mail (Ctrl+Shift+M)").clicked() {
+                self.actions.push(Action::ShowView(View::Mail));
+            }
             if icon_button(ui, Icon::Tasks, 30.0, cur == Some(View::Tasks), "To-do list across all notes").clicked() {
                 self.actions.push(Action::ShowView(View::Tasks));
             }
@@ -337,6 +347,7 @@ impl ShaleApp {
             View::Tasks => "Tasks".into(),
             View::Graph => "Graph".into(),
             View::Calendar => "Calendar".into(),
+            View::Mail => "Mail".into(),
             View::Note(p) | View::Drawing(p) => self.vault.as_ref().and_then(|v| v.file(p).map(|f| f.display_name())).unwrap_or_else(|| rel_to_string(p)),
         }
     }
@@ -515,6 +526,13 @@ impl ShaleApp {
                     self.calendar_action(a);
                 }
             }
+            View::Mail => {
+                let modal_open = self.modal.is_some();
+                let acts = self.mail.show(ui, &self.cfg, modal_open);
+                for a in acts {
+                    self.mail_action(a);
+                }
+            }
             View::Graph => {
                 let cur = self.tabs.iter().rev().find_map(|t| match &t.view {
                     View::Note(p) => Some(p.clone()),
@@ -668,6 +686,9 @@ impl ShaleApp {
             if let Some(v) = &self.vault {
                 let open = v.all_tasks().iter().filter(|(_, t)| !t.done).count();
                 ui.label(small(format!("{open} open tasks")));
+            }
+            if let Some(t) = self.mail.status(&self.cfg) {
+                ui.label(small(t));
             }
             if self.cfg.input_log {
                 ui.label(egui::RichText::new("● recording keys").size(11.5).color(theme::LINK_MISSING)).on_hover_text(crate::config::input_log_path().to_string_lossy());
