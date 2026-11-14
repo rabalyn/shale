@@ -1,5 +1,6 @@
 //! App settings, saved as JSON in the user's config folder (~/.config/shale/config.json).
 
+use crate::vault_state::{LegacyVaultFields, Versioned};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -32,6 +33,8 @@ impl FileSort {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
+    /// Format version (CFG-004); see `Versioned for Config`.
+    pub version: u64,
     /// The vault opened last.
     pub vault: Option<PathBuf>,
     pub recent: Vec<PathBuf>,
@@ -48,8 +51,6 @@ pub struct Config {
     pub readable_width: bool,
     pub show_left: bool,
     pub show_right: bool,
-    /// Notes open when the app was closed (vault-relative, '/' separated).
-    pub open_files: Vec<String>,
     /// Order of the file tree.
     pub file_sort: FileSort,
     /// Show embedded images as pictures inside the editor (the link shows when the cursor is on it).
@@ -60,19 +61,30 @@ pub struct Config {
     pub week_starts_monday: bool,
     /// Troubleshooting: record every key, typed text and input-method event to a file.
     pub input_log: bool,
-    /// The folder used for the last import (vault-relative).
-    pub last_import_folder: String,
-    /// Tags used for imports, most recent first.
-    pub recent_tags: Vec<String>,
-    /// Folder of the contact notes (for `[[p …` links and people found when importing).
-    pub people_dir: String,
     /// Vim-style editing in notes: normal / insert / visual mode (off by default).
     pub vim_mode: bool,
+    // Per-vault fields of older versions, read only to move them into the vault that is opened
+    // first (CFG-008); dropped from the file after that.
+    #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
+    pub legacy_open_files: Option<Vec<String>>,
+    #[serde(rename = "last_import_folder", skip_serializing_if = "Option::is_none")]
+    pub legacy_last_import_folder: Option<String>,
+    #[serde(rename = "recent_tags", skip_serializing_if = "Option::is_none")]
+    pub legacy_recent_tags: Option<Vec<String>>,
+    #[serde(rename = "people_dir", skip_serializing_if = "Option::is_none")]
+    pub legacy_people_dir: Option<String>,
+    /// Fields of a newer Shale, written back unchanged.
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, serde_json::Value>,
+    /// The file came from a newer Shale or could not be read: never overwrite it (CFG-007).
+    #[serde(skip)]
+    pub read_only: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
+            version: <Config as Versioned>::CURRENT,
             vault: None,
             recent: vec![],
             ctrl_to_follow: false,
@@ -83,16 +95,31 @@ impl Default for Config {
             readable_width: true,
             show_left: true,
             show_right: true,
-            open_files: vec![],
             file_sort: FileSort::NameAsc,
             inline_images: true,
             calendars: vec![],
             week_starts_monday: true,
             input_log: false,
-            last_import_folder: String::new(),
-            recent_tags: vec![],
-            people_dir: crate::people::DEFAULT_DIR.into(),
             vim_mode: false,
+            legacy_open_files: None,
+            legacy_last_import_folder: None,
+            legacy_recent_tags: None,
+            legacy_people_dir: None,
+            other: serde_json::Map::new(),
+            read_only: false,
+        }
+    }
+}
+
+impl Versioned for Config {
+    const CURRENT: u64 = 1;
+    const WHAT: &'static str = "settings";
+    fn step(_json: &mut serde_json::Map<String, serde_json::Value>, from: u64) {
+        match from {
+            // 0 → 1: the first versioned format. The per-vault fields stay in the JSON; they
+            // are moved into the first vault that is opened (`take_legacy`, CFG-008).
+            0 => {}
+            _ => unreachable!("no migration from version {from}"),
         }
     }
 }
@@ -177,16 +204,44 @@ pub fn config_path() -> Option<PathBuf> {
 }
 
 impl Config {
-    pub fn load() -> Config {
-        let mut c: Config = config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+    /// Load the settings; a problem the user should hear about comes back too. A file that
+    /// fails to parse is kept as `config.json.broken-<date>` (CFG-004).
+    pub fn load() -> (Config, Option<String>) {
+        let Some(p) = config_path() else { return (Config::default(), None) };
+        let (mut c, problem) = Self::load_from(&p);
         crate::secrets::load_passwords(&mut c.calendars);
-        c
+        (c, problem)
+    }
+
+    pub fn load_from(path: &Path) -> (Config, Option<String>) {
+        let l = crate::vault_state::load::<Config>(path);
+        let mut c = l.value;
+        c.read_only = !l.writable;
+        (c, l.problem)
+    }
+
+    /// The per-vault fields of an old config file, removed from this config (CFG-008).
+    pub fn take_legacy(&mut self) -> LegacyVaultFields {
+        LegacyVaultFields {
+            people_dir: self.legacy_people_dir.take(),
+            open_files: self.legacy_open_files.take(),
+            last_import_folder: self.legacy_last_import_folder.take(),
+            recent_tags: self.legacy_recent_tags.take(),
+        }
+    }
+
+    /// Put back what `take_legacy` took (the vault could not take it over).
+    pub fn restore_legacy(&mut self, l: LegacyVaultFields) {
+        self.legacy_people_dir = l.people_dir;
+        self.legacy_open_files = l.open_files;
+        self.legacy_last_import_folder = l.last_import_folder;
+        self.legacy_recent_tags = l.recent_tags;
     }
 
     pub fn save(&self) {
+        if self.read_only {
+            return;
+        }
         let Some(p) = config_path() else { return };
         // CalDAV passwords go to the system keyring when there is one
         let mut out = self.clone();
@@ -213,7 +268,9 @@ mod tests {
     // spec: CFG-001
     #[test]
     fn old_config_files_still_load() {
-        let c: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
+        let (c, newer) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
+        assert!(!newer);
+        assert_eq!(c.version, 1);
         assert_eq!(c.vault, Some(PathBuf::from("/tmp/v")));
         assert!(c.update_links_on_rename);
         assert!(!c.ctrl_to_follow);
@@ -237,6 +294,50 @@ mod tests {
             assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
             assert_eq!(std::fs::metadata(p.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: CFG-004, CFG-008
+    #[test]
+    fn config_migration_0_to_1_keeps_the_old_vault_fields_until_taken() {
+        let old = br#"{"vault": "/v", "font_size": 17.0, "people_dir": "Adressbuch", "open_files": ["a.md"], "recent_tags": ["x"], "last_import_folder": "In"}"#;
+        let (mut c, _) = crate::vault_state::parse::<Config>(old).unwrap();
+        assert_eq!(c.font_size, 17.0);
+        let out = serde_json::to_string(&c).unwrap();
+        assert!(out.contains("\"people_dir\":\"Adressbuch\""), "{out}");
+        let legacy = c.take_legacy();
+        assert_eq!(legacy.people_dir.as_deref(), Some("Adressbuch"));
+        assert_eq!(legacy.open_files, Some(vec!["a.md".to_string()]));
+        assert_eq!(legacy.last_import_folder.as_deref(), Some("In"));
+        assert_eq!(legacy.recent_tags, Some(vec!["x".to_string()]));
+        let out = serde_json::to_string(&c).unwrap();
+        for k in ["people_dir", "open_files", "recent_tags", "last_import_folder"] {
+            assert!(!out.contains(k), "{k} still in {out}");
+        }
+        assert!(out.contains("\"version\":1"));
+        assert!(c.take_legacy().is_empty());
+        c.restore_legacy(legacy.clone());
+        assert_eq!(c.take_legacy(), legacy);
+    }
+
+    // spec: CFG-004
+    #[test]
+    fn a_broken_config_is_kept_and_a_newer_one_is_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!("shale-config-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let p = dir.join("config.json");
+        write_private(&p, b"{\"calendars\": [oops").unwrap();
+        let (c, problem) = Config::load_from(&p);
+        assert!(!c.read_only);
+        assert!(problem.unwrap().contains("config.json.broken-"));
+        let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].starts_with("config.json.broken-"), "{kept:?}");
+        write_private(&p, br#"{"version": 7, "font_size": 20.0, "new_thing": true}"#).unwrap();
+        let (c, problem) = Config::load_from(&p);
+        assert!(c.read_only && problem.is_some());
+        assert_eq!(c.font_size, 20.0);
+        assert_eq!(c.other.get("new_thing"), Some(&serde_json::Value::Bool(true)));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

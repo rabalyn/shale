@@ -155,11 +155,7 @@ pub fn load(vault_root: &std::path::Path) -> Option<TagWords> {
 }
 
 pub fn save(vault_root: &std::path::Path, tw: &TagWords) -> std::io::Result<()> {
-    let p = file_in(vault_root);
-    if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d)?;
-    }
-    std::fs::write(p, serde_json::to_string_pretty(tw).unwrap_or_default())
+    crate::fsutil::write_atomic(&file_in(vault_root), serde_json::to_string_pretty(tw).unwrap_or_default().as_bytes())
 }
 
 #[cfg(test)]

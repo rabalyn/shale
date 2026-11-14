@@ -14,7 +14,7 @@ here.
 | 4 | VAULT-018 | One checked vault path type at every user input | Rename can move a note out of the vault | [0004](../decisions/0004-link-resolution-and-paths.md) |
 | 5 | VAULT-016, VAULT-013 | One link rewrite routine by resolution (folder rename included) | Rename corrupts path links and rewrites wrong links | 0004 |
 | 6 | LINK-010, LINK-008 | Explicit resolution rules, no silent name fallback, show ambiguity | Blue links that open the wrong note | 0004 |
-| 7 | CFG-004…CFG-008, SYNC-* | Config version, keep broken file, per-vault state into `.shale/`, integrated git sync | One parse error wipes calendars; vaults behave the same on every machine | [0005](../decisions/0005-where-state-lives.md), [0008](../decisions/0008-git-sync.md) |
+| ~~7~~ | CFG-004…CFG-008, SYNC-* | ~~Config version, keep broken file, per-vault state into `.shale/`, integrated git sync~~ Done 2026-11-14 | One parse error wipes calendars; vaults behave the same on every machine | [0005](../decisions/0005-where-state-lives.md), [0008](../decisions/0008-git-sync.md) |
 | 8 | JOB-002 | Panic-safe background jobs | Endless spinners | [0006](../decisions/0006-engineering-baseline.md) |
 | 9 | SEC-006 | Allowlist for `xdg-open` | Server- and mail-supplied URLs/files opened unchecked | 0006 |
 | 10 | BUILD-004, BUILD-006 | CI on PRs, clippy/fmt gates, drop vendor/ | Zero-warnings rule enforced, security updates possible | 0006 |

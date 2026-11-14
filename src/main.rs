@@ -19,6 +19,8 @@ mod excalidraw_md;
 mod drawing_layout;
 mod editor;
 mod export_dialog;
+mod fsutil;
+mod gitsync;
 mod graph;
 mod import;
 mod import_dialog;
@@ -42,6 +44,7 @@ mod secrets;
 mod tagwords;
 mod tb_store;
 mod vault;
+mod vault_state;
 mod vim;
 #[cfg(target_os = "linux")]
 mod wl_drop;

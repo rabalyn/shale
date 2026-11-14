@@ -162,6 +162,36 @@ built-in demo vault (`shale --screenshot out.png`).
   It is learned again in the background now and then and kept in `.shale/tag-words.json` in the
   vault.
 
+## Settings that travel with the vault
+
+- Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
+  session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
+  behaves the same on every computer. Settings of the program itself (appearance, calendars,
+  recent vaults) stay in `~/.config/shale/config.json`.
+- The files carry a format version and are upgraded on load. A settings file that can't be read
+  is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
+  changed.
+- On the first start after the upgrade, the people folder, open notes, import folder and recent
+  tags move from the old global settings into the vault you open.
+
+## Git sync
+
+- Needs `git` installed. In Settings → Git sync, enter the URL of a git repository
+  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect, or run
+  `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
+  every few minutes (default 5, changeable) and on "Sync now".
+- A sync commits every change (the `.shale/` files too, so settings and open notes follow you),
+  fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an
+  optional prefix and suffix from the settings. Without a remote, Shale only keeps a local
+  history.
+- Nothing is ever lost: when a note was changed on two computers, the remote version stays and
+  yours is kept next to it as `Note (conflict 2026-11-14 1530).md`; a note deleted on one side
+  and changed on the other is kept. Shale never force-pushes, never writes conflict markers into
+  notes, and pauses if git is in the middle of something you started (a merge, a rebase).
+- Edits you type while a sync runs are never overwritten: if the sync brought a new version of
+  that note, your text is saved as a conflict copy next to it.
+- Passwords are git's business (credential helper or SSH key); Shale never asks for one.
+
 ## Keyboard
 
 | Keys | Action |

@@ -843,6 +843,9 @@ impl ShaleApp {
                     ui.add_space(8.0);
                     if ui.button("Close this vault (back to the start screen)").clicked() {
                         self.flush_all();
+                        self.remember_open_files();
+                        self.save_config();
+                        self.vdata = crate::vault_state::VaultData::default();
                         self.vault = None;
                         self.tabs.clear();
                         self.cfg.vault = None;
@@ -858,9 +861,11 @@ impl ShaleApp {
                     ui.label(egui::RichText::new("People").color(theme::MUTED));
                     ui.horizontal(|ui| {
                         ui.label("People folder");
-                        changed |= ui.add(egui::TextEdit::singleline(&mut self.cfg.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0)).on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.").changed();
+                        changed |= ui.add(egui::TextEdit::singleline(&mut self.vdata.settings.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0)).on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.").changed();
                     });
                     ui.label(muted("Type [[p followed by a name to pick a person from this folder (or make a new contact note).").size(12.0));
+                    ui.add_space(8.0);
+                    changed |= self.sync_settings_ui(ui);
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Appearance").color(theme::MUTED));
                     changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();

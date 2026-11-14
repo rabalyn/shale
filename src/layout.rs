@@ -573,7 +573,7 @@ impl ShaleApp {
                 } else {
                     tab.editor.inline_images = self.cfg.inline_images;
                     tab.editor.vim_enabled = self.cfg.vim_mode;
-                    tab.editor.people_dir = self.cfg.people_dir.clone();
+                    tab.editor.people_dir = self.vdata.settings.people_dir.clone();
                     tab.editor.dark_canvas = self.cfg.dark_canvas;
                     let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
                     if changed {
