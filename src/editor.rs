@@ -329,7 +329,11 @@ enum Art {
 
 /// What the editor asks the app to do.
 pub enum EditorAction {
-    OpenLink { target: String, heading: Option<String>, new_tab: bool },
+    OpenLink {
+        target: String,
+        heading: Option<String>,
+        new_tab: bool,
+    },
     /// A web link: open it in the default browser.
     OpenUrl(String),
     /// A file was copied into the vault; the file list should be refreshed.
@@ -404,7 +408,31 @@ struct MediaPicker {
 
 impl NoteEditor {
     pub fn new(id: egui::Id) -> Self {
-        NoteEditor { id, cache: Cache::default(), ac_active: false, ac_start: None, ac_dismissed: None, ac_sel: 0, ac_items: vec![], ac_labels: vec![], ac_people: false, people_dir: crate::people::DEFAULT_DIR.into(), pending_cursor: None, request_focus: false, last_layout: None, media: MediaPicker::default(), inline_images: false, dark_canvas: true, last_cursor: None, vim_enabled: false, vim: crate::vim::Vim::default(), vim_was_focused: false, vim_lost_at: None, vim_expected: None, vim_scroll: None }
+        NoteEditor {
+            id,
+            cache: Cache::default(),
+            ac_active: false,
+            ac_start: None,
+            ac_dismissed: None,
+            ac_sel: 0,
+            ac_items: vec![],
+            ac_labels: vec![],
+            ac_people: false,
+            people_dir: crate::people::DEFAULT_DIR.into(),
+            pending_cursor: None,
+            request_focus: false,
+            last_layout: None,
+            media: MediaPicker::default(),
+            inline_images: false,
+            dark_canvas: true,
+            last_cursor: None,
+            vim_enabled: false,
+            vim: crate::vim::Vim::default(),
+            vim_was_focused: false,
+            vim_lost_at: None,
+            vim_expected: None,
+            vim_scroll: None,
+        }
     }
 
     /// Is the `[!` file picker popup on screen?
@@ -416,7 +444,13 @@ impl NoteEditor {
     pub fn debug_state(&self) -> String {
         format!(
             "picker active={} shown={} sel={} items={} dismissed={:?} start={:?} | suggestions active={} (input method is switched off while either is open)",
-            self.media.active, self.media.shown, self.media.sel, self.media.items.len(), self.media.dismissed, self.media.start, self.ac_active
+            self.media.active,
+            self.media.shown,
+            self.media.sel,
+            self.media.items.len(),
+            self.media.dismissed,
+            self.media.start,
+            self.ac_active
         )
     }
 
@@ -468,7 +502,14 @@ impl NoteEditor {
                 let begin = if start > 0 && text[..start].ends_with('[') { start - 1 } else { start };
                 // swallow closing brackets right after the path (`]` or `]]`)
                 let rest = &text[cursor..];
-                let end = cursor + if rest.starts_with("]]") { 2 } else if rest.starts_with(']') { 1 } else { 0 };
+                let end = cursor
+                    + if rest.starts_with("]]") {
+                        2
+                    } else if rest.starts_with(']') {
+                        1
+                    } else {
+                        0
+                    };
                 text.replace_range(begin..end, &link);
                 self.set_cursor_byte(ui, text, begin + link.len());
                 self.media.active = false;
@@ -634,10 +675,13 @@ impl NoteEditor {
         let key = h.finish();
         if key != self.cache.key {
             self.cache.key = key;
-            self.cache.links = markdown::find_links(text).into_iter().map(|l| {
-                let ok = vault.exists(&l.target, Some(rel));
-                (l, ok)
-            }).collect();
+            self.cache.links = markdown::find_links(text)
+                .into_iter()
+                .map(|l| {
+                    let ok = vault.exists(&l.target, Some(rel));
+                    (l, ok)
+                })
+                .collect();
         }
     }
 
@@ -681,11 +725,7 @@ impl NoteEditor {
             media_handled = true;
         }
         if self.media.active {
-            let cur = egui::text_edit::TextEditState::load(ui.ctx(), self.id)
-                .and_then(|st| st.cursor.char_range())
-                .filter(|r| r.is_empty())
-                .map(|r| markdown::char_to_byte(text, r.primary.index.0))
-                .or(self.media.cursor);
+            let cur = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).filter(|r| r.is_empty()).map(|r| markdown::char_to_byte(text, r.primary.index.0)).or(self.media.cursor);
             if let Some((cb, (start, typed))) = cur.and_then(|cb| crate::media::media_query(text, cb).map(|q| (cb, q))) {
                 let n = self.media.items.len();
                 let (down, up, tab, enter, esc) = ui.input_mut(|i| {
@@ -843,11 +883,7 @@ impl NoteEditor {
         let links = self.cache.links.clone();
         let links_text = text.clone();
         // picker state going into the text box, for the safety net after it
-        let picker_before = if self.media.active && !media_handled {
-            self.media.cursor.and_then(|cb| crate::media::media_query(text, cb).map(|(st, typed)| (cb, st, typed)))
-        } else {
-            None
-        };
+        let picker_before = if self.media.active && !media_handled { self.media.cursor.and_then(|cb| crate::media::media_query(text, cb).map(|(st, typed)| (cb, st, typed))) } else { None };
         let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| -> Arc<Galley> {
             let s = buf.as_str();
             // The cached links belong to the text from the start of the frame; if the text box
@@ -856,10 +892,13 @@ impl NoteEditor {
             let use_links: &[(LinkSpan, bool)] = if s == links_text {
                 &links
             } else {
-                fresh = markdown::find_links(s).into_iter().map(|l| {
-                    let ok = vault.exists(&l.target, Some(rel));
-                    (l, ok)
-                }).collect::<Vec<_>>();
+                fresh = markdown::find_links(s)
+                    .into_iter()
+                    .map(|l| {
+                        let ok = vault.exists(&l.target, Some(rel));
+                        (l, ok)
+                    })
+                    .collect::<Vec<_>>();
                 &fresh
             };
             let ranges: Vec<(Range<usize>, f32)> = remap_images(s, &image_keys).into_iter().map(|(r, h, _)| (r, h)).collect();
@@ -1048,12 +1087,8 @@ impl NoteEditor {
                         labels.push(format!("＋ New contact “{}” in {}", markdown::link_safe_name(qt), self.people_dir.trim().trim_matches('/')));
                     }
                 } else {
-                    let mut items: Vec<(i32, String)> = vault
-                        .files
-                        .iter()
-                        .filter(|f| f.kind != crate::vault::FileKind::Other || q.contains('.'))
-                        .filter_map(|f| markdown::fuzzy_score(&q, &f.link_name).map(|s| (s, f.link_name.clone())))
-                        .collect();
+                    let mut items: Vec<(i32, String)> =
+                        vault.files.iter().filter(|f| f.kind != crate::vault::FileKind::Other || q.contains('.')).filter_map(|f| markdown::fuzzy_score(&q, &f.link_name).map(|s| (s, f.link_name.clone()))).collect();
                     items.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
                     items.dedup_by(|a, b| a.1 == b.1);
                     list = items.into_iter().take(8).map(|(_, n)| (n, true)).collect();
@@ -1201,7 +1236,11 @@ impl NoteEditor {
                 self.media.shown = true;
                 self.media.start = Some(start);
                 self.media.cursor = Some(cb);
-                let shown_dir = if typed.starts_with("~") { format!("~/{}", dir.strip_prefix(&home).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()) } else { format!("vault/{}", dir.strip_prefix(&vault.root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()) };
+                let shown_dir = if typed.starts_with("~") {
+                    format!("~/{}", dir.strip_prefix(&home).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
+                } else {
+                    format!("vault/{}", dir.strip_prefix(&vault.root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
+                };
                 let r = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(text, cb)));
                 let pos = output.galley_pos + r.left_bottom().to_vec2() + Vec2::new(0.0, 4.0);
                 let mut clicked: Option<crate::media::Entry> = None;
@@ -1226,7 +1265,13 @@ impl NoteEditor {
                         let total = self.media.items.len();
                         let first = self.media.sel.saturating_sub(9).min(total.saturating_sub(12));
                         for (i, e) in self.media.items.iter().enumerate().skip(first).take(12) {
-                            let label = if e.is_dir { egui::RichText::new(format!("▸ {}/", e.name)).color(theme::TEXT) } else if crate::media::is_image(std::path::Path::new(&e.name)) { egui::RichText::new(format!("▣ {}", e.name)).color(theme::LINK) } else { egui::RichText::new(format!("  {}", e.name)).color(theme::TEXT) };
+                            let label = if e.is_dir {
+                                egui::RichText::new(format!("▸ {}/", e.name)).color(theme::TEXT)
+                            } else if crate::media::is_image(std::path::Path::new(&e.name)) {
+                                egui::RichText::new(format!("▣ {}", e.name)).color(theme::LINK)
+                            } else {
+                                egui::RichText::new(format!("  {}", e.name)).color(theme::TEXT)
+                            };
                             if ui.selectable_label(i == self.media.sel, label).clicked() {
                                 clicked = Some(e.clone());
                             }
@@ -1991,10 +2036,13 @@ mod tests {
     #[test]
     fn highlight_colours_links() {
         let text = "See [[Yes]] and [[No]]";
-        let links: Vec<(LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| {
-            let ok = l.target == "Yes";
-            (l, ok)
-        }).collect();
+        let links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
+            .into_iter()
+            .map(|l| {
+                let ok = l.target == "Yes";
+                (l, ok)
+            })
+            .collect();
         let job = highlight(text, &links, 15.0);
         let color_at = |byte: usize| job.sections.iter().find(|s| s.byte_range.start.0 <= byte && byte < s.byte_range.end.0).unwrap().format.color;
         assert_eq!(color_at(text.find("Yes").unwrap()), theme::LINK);

@@ -128,11 +128,7 @@ pub fn read(text: &str) -> Result<Scene, String> {
     let text = &text.replace("\r\n", "\n");
     let block = find_block(text).ok_or("this .excalidraw.md file has no drawing data (no `## Drawing` block)")?;
     let data = &text[block.start..block.end];
-    let json = if block.compressed {
-        lz_string::decompress_from_base64(data).ok_or("the compressed drawing data could not be unpacked")?
-    } else {
-        data.to_string()
-    };
+    let json = if block.compressed { lz_string::decompress_from_base64(data).ok_or("the compressed drawing data could not be unpacked")? } else { data.to_string() };
     let mut value: Value = serde_json::from_str(&json).map_err(|e| format!("the drawing data is not valid: {e}"))?;
     // the texts in `## Text Elements` win (they may have been edited as markdown)
     if let Some((s, e)) = text_elements_section(text, block.start) {
@@ -271,7 +267,8 @@ pub fn write(original: &str, scene: &Scene) -> Result<String, String> {
 
 /// A new plugin drawing file (as version 2 of the plugin makes them), compressed.
 pub fn new_file(scene: &Scene) -> String {
-    let template = "---\n\nexcalidraw-plugin: parsed\ntags: [excalidraw]\n\n---\n==⚠  Switch to EXCALIDRAW VIEW in the MORE OPTIONS menu of this document. ⚠==\n\n\n# Excalidraw Data\n\n## Text Elements\n%%\n## Drawing\n```compressed-json\n```\n%%";
+    let template =
+        "---\n\nexcalidraw-plugin: parsed\ntags: [excalidraw]\n\n---\n==⚠  Switch to EXCALIDRAW VIEW in the MORE OPTIONS menu of this document. ⚠==\n\n\n# Excalidraw Data\n\n## Text Elements\n%%\n## Drawing\n```compressed-json\n```\n%%";
     write(template, scene).expect("the template has a drawing block")
 }
 

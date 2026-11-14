@@ -13,7 +13,10 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 pub enum ReaderAction {
-    OpenLink { target: String, new_tab: bool },
+    OpenLink {
+        target: String,
+        new_tab: bool,
+    },
     ToggleTask(usize),
     OpenFile(PathBuf),
     /// A web link: open in the default browser.
@@ -72,7 +75,13 @@ pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base
     let fmt = |st: &Inline, color: Color32| {
         let mut f = TextFormat {
             font_id: if st.code { FontId::new(size * 0.92, FontFamily::Monospace) } else { FontId::new(size, FontFamily::Proportional) },
-            color: if st.code { theme::CODE } else if st.bold { theme::TEXT_STRONG } else { color },
+            color: if st.code {
+                theme::CODE
+            } else if st.bold {
+                theme::TEXT_STRONG
+            } else {
+                color
+            },
             italics: st.italic,
             line_height: Some(size * 1.5),
             ..Default::default()
@@ -93,12 +102,8 @@ pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base
         f
     };
     // web links ride along as link spans whose target is the URL
-    let web: Vec<(LinkSpan, bool)> = crate::lists::find_web_links(line)
-        .into_iter()
-        .map(|w| {
-            (LinkSpan { range: w.range, target_range: w.label_range, target: w.url, heading: None, alias: Some(w.label), embed: false, markdown_style: true }, true)
-        })
-        .collect();
+    let web: Vec<(LinkSpan, bool)> =
+        crate::lists::find_web_links(line).into_iter().map(|w| (LinkSpan { range: w.range, target_range: w.label_range, target: w.url, heading: None, alias: Some(w.label), embed: false, markdown_style: true }, true)).collect();
     let b = line.as_bytes();
     let mut i = 0;
     while i < line.len() {
@@ -205,10 +210,13 @@ fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, b
 /// One line of markdown with clickable links (used by the task list).
 /// Returns a link action, and whether the text outside links was clicked.
 pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f32, done: bool) -> (Option<ReaderAction>, bool) {
-    let links: Vec<(LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| {
-        let ok = vault.exists(&l.target, Some(from));
-        (l, ok)
-    }).collect();
+    let links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
+        .into_iter()
+        .map(|l| {
+            let ok = vault.exists(&l.target, Some(from));
+            (l, ok)
+        })
+        .collect();
     let (job, spans) = inline_job(text, &links, base, theme::TEXT, done);
     let mut out = None;
     let resp = inline_block(ui, job, &spans, &mut out);
@@ -218,10 +226,13 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
 
 pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, scenes: &mut SceneCache, base: f32, dark_canvas: bool) -> Option<ReaderAction> {
     let mut out = None;
-    let all_links: Vec<(LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| {
-        let ok = vault.exists(&l.target, Some(rel));
-        (l, ok)
-    }).collect();
+    let all_links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
+        .into_iter()
+        .map(|l| {
+            let ok = vault.exists(&l.target, Some(rel));
+            (l, ok)
+        })
+        .collect();
     let fenced = markdown::fenced_code_lines(text);
     let lines = markdown::lines_with_offsets(text);
     let mut i = 0;

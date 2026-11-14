@@ -97,7 +97,13 @@ fn notes_every_file_is_listed_and_every_note_is_readable() {
         let mut problems = Vec::new();
         for f in &v.files {
             let lower = rel_to_string(&f.rel).to_lowercase();
-            let want = if crate::excalidraw_md::is_drawing_path(&f.rel) { FileKind::Drawing } else if lower.ends_with(".md") { FileKind::Note } else { FileKind::Other };
+            let want = if crate::excalidraw_md::is_drawing_path(&f.rel) {
+                FileKind::Drawing
+            } else if lower.ends_with(".md") {
+                FileKind::Note
+            } else {
+                FileKind::Other
+            };
             if f.kind != want {
                 problems.push(format!("{lower}: {:?}, expected {want:?}", f.kind));
             }
@@ -129,7 +135,13 @@ fn notes_every_note_parses_renders_and_exports() {
             for (i, _) in text.match_indices('\n') {
                 let _ = lists::continue_list(&text, i);
             }
-            let links: Vec<_> = markdown::find_links(&text).into_iter().map(|l| { let ok = v.exists(&l.target, Some(&rel)); (l, ok) }).collect();
+            let links: Vec<_> = markdown::find_links(&text)
+                .into_iter()
+                .map(|l| {
+                    let ok = v.exists(&l.target, Some(&rel));
+                    (l, ok)
+                })
+                .collect();
             let _ = editor::highlight(&text, &links, 15.0);
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(700.0, 900.0))), ..Default::default() };
             let mut out = ctx.run_ui(raw, |ui| {
@@ -297,10 +309,13 @@ fn notes_renaming_a_linked_note_keeps_its_links_working() {
         let mut known = Vec::new();
         for (_, rel) in targets.into_iter().take(20) {
             // every link (in every note) that points here now
-            let before: Vec<(PathBuf, String)> = notes(v).into_iter().flat_map(|src| {
-                let n = &v.notes[&src];
-                n.links.iter().zip(&n.resolved).filter(|(_, t)| t.as_deref() == Some(rel.as_path())).map(|(l, _)| (src.clone(), l.target.clone())).collect::<Vec<_>>()
-            }).collect();
+            let before: Vec<(PathBuf, String)> = notes(v)
+                .into_iter()
+                .flat_map(|src| {
+                    let n = &v.notes[&src];
+                    n.links.iter().zip(&n.resolved).filter(|(_, t)| t.as_deref() == Some(rel.as_path())).map(|(l, _)| (src.clone(), l.target.clone())).collect::<Vec<_>>()
+                })
+                .collect();
             let stem = markdown::strip_md_ext(&rel.file_name().unwrap().to_string_lossy()).to_string();
             let to = rel.with_file_name(format!("{stem} renamed.md"));
             if let Err(e) = v.rename(&rel, &to, true) {
@@ -313,7 +328,11 @@ fn notes_renaming_a_linked_note_keeps_its_links_working() {
                 if !still {
                     let line = format!("{} → [[{target}]] no longer points to {}", rel_to_string(&src), rel_to_string(&to));
                     // path links lose their folder on rename: VAULT-013 ⚠, reported only
-                    if target.contains('/') { known.push(line) } else { problems.push(line) }
+                    if target.contains('/') {
+                        known.push(line)
+                    } else {
+                        problems.push(line)
+                    }
                 }
             }
             // put it back for the next round

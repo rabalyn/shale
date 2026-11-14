@@ -45,14 +45,30 @@ pub const SAMPLE_SCENE: &str = r##"{
   "files": {}
 }"##;
 
-fn d_type() -> String { "excalidraw".into() }
-fn d_two() -> u32 { 2 }
-fn d_black() -> String { "#1e1e1e".into() }
-fn d_transparent() -> String { "transparent".into() }
-fn d_hachure() -> String { "hachure".into() }
-fn d_solid() -> String { "solid".into() }
-fn d_one() -> f64 { 1.0 }
-fn d_hundred() -> f64 { 100.0 }
+fn d_type() -> String {
+    "excalidraw".into()
+}
+fn d_two() -> u32 {
+    2
+}
+fn d_black() -> String {
+    "#1e1e1e".into()
+}
+fn d_transparent() -> String {
+    "transparent".into()
+}
+fn d_hachure() -> String {
+    "hachure".into()
+}
+fn d_solid() -> String {
+    "solid".into()
+}
+fn d_one() -> f64 {
+    1.0
+}
+fn d_hundred() -> f64 {
+    100.0
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Scene {
@@ -699,12 +715,29 @@ impl Default for Style {
 
 enum Drag {
     None,
-    Create { id: String, start: Pos2, bind_start: Option<(String, [f32; 2])>, bind_end: Option<(String, [f32; 2])> },
+    Create {
+        id: String,
+        start: Pos2,
+        bind_start: Option<(String, [f32; 2])>,
+        bind_end: Option<(String, [f32; 2])>,
+    },
     /// dragging one end of the selected line/arrow
-    Endpoint { id: String, start: bool, target: Option<(String, [f32; 2])> },
-    Move { last: Pos2 },
-    Resize { id: String, anchor: Pos2, orig: Box<Element> },
-    Marquee { start: Pos2 },
+    Endpoint {
+        id: String,
+        start: bool,
+        target: Option<(String, [f32; 2])>,
+    },
+    Move {
+        last: Pos2,
+    },
+    Resize {
+        id: String,
+        anchor: Pos2,
+        orig: Box<Element>,
+    },
+    Marquee {
+        start: Pos2,
+    },
     Pan,
     Erase,
 }
@@ -1772,7 +1805,15 @@ impl DrawingDoc {
                     } else if tresp.hovered() {
                         ui.painter().rect_filled(tr, CornerRadius::same(6), fg.gamma_multiply(0.08));
                     }
-                    let ic = if active { if dark { Color32::WHITE } else { ACCENT } } else { fg };
+                    let ic = if active {
+                        if dark {
+                            Color32::WHITE
+                        } else {
+                            ACCENT
+                        }
+                    } else {
+                        fg
+                    };
                     paint_tool_icon(ui.painter(), tr.shrink2(Vec2::new(11.0, 10.0)), t, ic);
                     let k = t.key();
                     if !k.is_empty() {

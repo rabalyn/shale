@@ -1,6 +1,6 @@
 //! Window layout: ribbon, sidebars, tab bar, the note/drawing/tasks/graph views and status bar.
 
-use crate::app::{handle_editor_action, handle_reader_action, graph_click, muted, Action, LeftPanel, Modal, ShaleApp, View};
+use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, ShaleApp, View};
 use crate::markdown;
 use crate::reader;
 use crate::theme;
@@ -71,7 +71,10 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             let a = cx + Vec2::new(-w * 0.3, w * 0.3);
             let b = cx + Vec2::new(w * 0.25, -w * 0.25);
             let n = Vec2::new(w * 0.09, w * 0.09);
-            p.add(Shape::closed_line(vec![a, a + Vec2::new(n.x * 1.2, -n.y * 0.2) + Vec2::new(0.0, -n.y * 1.4), b - Vec2::new(n.x, 0.0) + Vec2::new(0.0, -n.y * 0.0), b, b + Vec2::new(n.x * 0.2, n.y * 1.2), a + Vec2::new(n.x * 1.6, 0.0)], s));
+            p.add(Shape::closed_line(
+                vec![a, a + Vec2::new(n.x * 1.2, -n.y * 0.2) + Vec2::new(0.0, -n.y * 1.4), b - Vec2::new(n.x, 0.0) + Vec2::new(0.0, -n.y * 0.0), b, b + Vec2::new(n.x * 0.2, n.y * 1.2), a + Vec2::new(n.x * 1.6, 0.0)],
+                s,
+            ));
             if matches!(icon, Icon::Drawing) {
                 p.line_segment([cx + Vec2::new(-w * 0.35, w * 0.42), cx + Vec2::new(w * 0.35, w * 0.42)], Stroke::new(1.0, c.gamma_multiply(0.6)));
             }
@@ -174,7 +177,13 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: &str) 
     } else if hovered {
         ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_HOVER);
     }
-    let c = if active { theme::ACCENT } else if hovered { theme::TEXT_STRONG } else { theme::MUTED };
+    let c = if active {
+        theme::ACCENT
+    } else if hovered {
+        theme::TEXT_STRONG
+    } else {
+        theme::MUTED
+    };
     paint_icon(ui.painter(), r.shrink(size * 0.22), icon, c);
     resp.on_hover_text(tip)
 }
@@ -237,14 +246,20 @@ impl ShaleApp {
             self.status_bar(ui);
         });
         if self.cfg.show_left {
-            egui::Panel::left("left-sidebar").default_size(260.0).size_range(170.0..=520.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(8, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(ui, |ui| {
-                self.left_sidebar(ui);
-            });
+            egui::Panel::left("left-sidebar").default_size(260.0).size_range(170.0..=520.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(8, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
+                ui,
+                |ui| {
+                    self.left_sidebar(ui);
+                },
+            );
         }
         if self.cfg.show_right {
-            egui::Panel::right("right-sidebar").default_size(290.0).size_range(200.0..=560.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(ui, |ui| {
-                self.right_sidebar(ui);
-            });
+            egui::Panel::right("right-sidebar").default_size(290.0).size_range(200.0..=560.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
+                ui,
+                |ui| {
+                    self.right_sidebar(ui);
+                },
+            );
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG_PRIMARY)).show(ui, |ui| {
             self.tab_bar(ui);
@@ -338,7 +353,13 @@ impl ShaleApp {
             let dirty = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.dirty).unwrap_or(false) || self.drawings.get(p).map(|d| d.dirty).unwrap_or(false)).unwrap_or(false);
             let (r, resp) = child.allocate_exact_size(Vec2::new(tab_w, h - 6.0), Sense::click());
             let active = i == self.active;
-            let fill = if active { theme::BG_PRIMARY } else if resp.hovered() { theme::BG_HOVER } else { theme::BG_SECONDARY };
+            let fill = if active {
+                theme::BG_PRIMARY
+            } else if resp.hovered() {
+                theme::BG_HOVER
+            } else {
+                theme::BG_SECONDARY
+            };
             child.painter().rect_filled(r, CornerRadius { nw: 7, ne: 7, sw: 0, se: 0 }, fill);
             let text_rect = r.shrink2(Vec2::new(10.0, 0.0));
             let galley = child.painter().layout_no_wrap(title.clone(), FontId::proportional(13.0), if active { theme::TEXT_STRONG } else { theme::MUTED });
@@ -542,51 +563,52 @@ impl ShaleApp {
             let pad = ((full - col) / 2.0).max(20.0);
             ui.add_space(16.0);
             ui.horizontal_top(|ui| {
-              ui.add_space(pad);
-              ui.vertical(|ui| {
-                ui.set_width(col.min(full - pad - 10.0).max(200.0));
-                // inline title (rename by editing)
-                let tab = &mut self.tabs[active];
-                if tab.title_for.as_deref() != Some(rel.as_path()) {
-                    tab.title_for = Some(rel.clone());
-                    tab.title_buf = display_name.clone();
-                }
-                let title = egui::TextEdit::singleline(&mut tab.title_buf).font(FontId::proportional(base * 1.9)).text_color(theme::TEXT_STRONG).frame(egui::Frame::NONE).desired_width(f32::INFINITY).id(egui::Id::unique(("title", tab.id)));
-                let tr = ui.add(title);
-                if tr.lost_focus() && tab.title_buf.trim() != display_name && !tab.title_buf.trim().is_empty() {
-                    rename_to = Some(tab.title_buf.trim().to_string());
-                } else if tr.lost_focus() {
-                    tab.title_buf = display_name.clone();
-                }
-                if tr.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    tab.editor.request_focus = true;
-                }
-                ui.add_space(8.0);
-                let reading = tab.reading;
-                let Some(vault) = self.vault.as_mut() else { return };
-                let Some(doc) = self.notes.get_mut(&rel) else { return };
-                if reading {
-                    let text = doc.text.clone();
-                    if let Some(a) = reader::show(ui, &text, vault, &rel, &mut self.scenes, base, dark) {
-                        handle_reader_action(&mut self.actions, a, &rel);
+                ui.add_space(pad);
+                ui.vertical(|ui| {
+                    ui.set_width(col.min(full - pad - 10.0).max(200.0));
+                    // inline title (rename by editing)
+                    let tab = &mut self.tabs[active];
+                    if tab.title_for.as_deref() != Some(rel.as_path()) {
+                        tab.title_for = Some(rel.clone());
+                        tab.title_buf = display_name.clone();
                     }
-                } else {
-                    tab.editor.inline_images = self.cfg.inline_images;
-                    tab.editor.vim_enabled = self.cfg.vim_mode;
-                    tab.editor.people_dir = self.cfg.people_dir.clone();
-                    tab.editor.dark_canvas = self.cfg.dark_canvas;
-                    let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
-                    if changed {
-                        doc.dirty = true;
-                        doc.last_edit = std::time::Instant::now();
-                        vault.set_note_text(&rel, &doc.text);
+                    let title =
+                        egui::TextEdit::singleline(&mut tab.title_buf).font(FontId::proportional(base * 1.9)).text_color(theme::TEXT_STRONG).frame(egui::Frame::NONE).desired_width(f32::INFINITY).id(egui::Id::unique(("title", tab.id)));
+                    let tr = ui.add(title);
+                    if tr.lost_focus() && tab.title_buf.trim() != display_name && !tab.title_buf.trim().is_empty() {
+                        rename_to = Some(tab.title_buf.trim().to_string());
+                    } else if tr.lost_focus() {
+                        tab.title_buf = display_name.clone();
                     }
-                    if let Some(a) = action {
-                        handle_editor_action(&mut self.actions, a, &rel);
+                    if tr.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        tab.editor.request_focus = true;
                     }
-                }
-                ui.add_space(120.0);
-              });
+                    ui.add_space(8.0);
+                    let reading = tab.reading;
+                    let Some(vault) = self.vault.as_mut() else { return };
+                    let Some(doc) = self.notes.get_mut(&rel) else { return };
+                    if reading {
+                        let text = doc.text.clone();
+                        if let Some(a) = reader::show(ui, &text, vault, &rel, &mut self.scenes, base, dark) {
+                            handle_reader_action(&mut self.actions, a, &rel);
+                        }
+                    } else {
+                        tab.editor.inline_images = self.cfg.inline_images;
+                        tab.editor.vim_enabled = self.cfg.vim_mode;
+                        tab.editor.people_dir = self.cfg.people_dir.clone();
+                        tab.editor.dark_canvas = self.cfg.dark_canvas;
+                        let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
+                        if changed {
+                            doc.dirty = true;
+                            doc.last_edit = std::time::Instant::now();
+                            vault.set_note_text(&rel, &doc.text);
+                        }
+                        if let Some(a) = action {
+                            handle_editor_action(&mut self.actions, a, &rel);
+                        }
+                    }
+                    ui.add_space(120.0);
+                });
             });
         });
         if let Some(name) = rename_to {

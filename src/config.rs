@@ -178,10 +178,7 @@ pub fn config_path() -> Option<PathBuf> {
 
 impl Config {
     pub fn load() -> Config {
-        let mut c: Config = config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+        let mut c: Config = config_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         crate::secrets::load_passwords(&mut c.calendars);
         c
     }

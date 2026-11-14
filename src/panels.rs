@@ -61,7 +61,13 @@ impl ShaleApp {
                 if let Some(p) = ui.ctx().input(|i| i.pointer.latest_pos()) {
                     let clip = ui.clip_rect();
                     if clip.x_range().contains(p.x) {
-                        let dy = if p.y < clip.top() + 28.0 { 8.0 } else if p.y > clip.bottom() - 28.0 { -8.0 } else { 0.0 };
+                        let dy = if p.y < clip.top() + 28.0 {
+                            8.0
+                        } else if p.y > clip.bottom() - 28.0 {
+                            -8.0
+                        } else {
+                            0.0
+                        };
                         if dy != 0.0 {
                             ui.scroll_with_delta(Vec2::new(0.0, dy));
                             ui.ctx().request_repaint();
@@ -325,9 +331,7 @@ impl ShaleApp {
         let Some(v) = &self.vault else { return };
         let results = v.search(&self.search);
         // the stops the keyboard moves between: (result, found line or None for a name-only hit)
-        let stops: Vec<(usize, Option<usize>)> = results.iter().enumerate().flat_map(|(fi, (_, lines))| {
-            if lines.is_empty() { vec![(fi, None)] } else { (0..lines.len()).map(|li| (fi, Some(li))).collect() }
-        }).collect();
+        let stops: Vec<(usize, Option<usize>)> = results.iter().enumerate().flat_map(|(fi, (_, lines))| if lines.is_empty() { vec![(fi, None)] } else { (0..lines.len()).map(|li| (fi, Some(li))).collect() }).collect();
         let entering = (down_from_box || enter_from_box) && !stops.is_empty();
         if entering {
             self.search_sel = Some(0);
@@ -379,7 +383,13 @@ impl ShaleApp {
             }
         }
         if !self.search.trim().is_empty() {
-            let hint = if self.search_sel.is_some() { "  ·  j/k, Ctrl+J/K next file, Enter opens, Esc back" } else if stops.is_empty() { "" } else { "  ·  ↓ to browse" };
+            let hint = if self.search_sel.is_some() {
+                "  ·  j/k, Ctrl+J/K next file, Enter opens, Esc back"
+            } else if stops.is_empty() {
+                ""
+            } else {
+                "  ·  ↓ to browse"
+            };
             ui.label(muted(format!("{} result{}{hint}", results.len(), if results.len() == 1 { "" } else { "s" })).size(12.0));
         }
         let selected = self.search_sel.map(|i| stops[i]);
@@ -690,7 +700,9 @@ impl ShaleApp {
                     items.truncate(12);
                     let create = !query.trim().is_empty() && !items.iter().any(|(_, _, n)| n.eq_ignore_ascii_case(query.trim()));
                     let n = items.len() + create as usize;
-                    let (down, up, enter, esc) = ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, Key::Enter), i.consume_key(egui::Modifiers::NONE, Key::Escape)));
+                    let (down, up, enter, esc) = ui.input_mut(|i| {
+                        (i.consume_key(egui::Modifiers::NONE, Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, Key::Enter), i.consume_key(egui::Modifiers::NONE, Key::Escape))
+                    });
                     if n > 0 {
                         if down {
                             *sel = (*sel + 1) % n;
@@ -858,7 +870,10 @@ impl ShaleApp {
                     ui.label(egui::RichText::new("People").color(theme::MUTED));
                     ui.horizontal(|ui| {
                         ui.label("People folder");
-                        changed |= ui.add(egui::TextEdit::singleline(&mut self.cfg.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0)).on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.").changed();
+                        changed |= ui
+                            .add(egui::TextEdit::singleline(&mut self.cfg.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0))
+                            .on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.")
+                            .changed();
                     });
                     ui.label(muted("Type [[p followed by a name to pick a person from this folder (or make a new contact note).").size(12.0));
                     ui.add_space(8.0);
@@ -1029,13 +1044,7 @@ fn tree_row(ui: &mut Ui, depth: usize, name: &str, open: Option<bool>, active: b
 }
 
 /// Order two tree entries. Times are (created, modified); ties fall back to the name.
-fn sort_order(
-    sort: crate::config::FileSort,
-    name_a: &str,
-    name_b: &str,
-    ta: (Option<std::time::SystemTime>, Option<std::time::SystemTime>),
-    tb: (Option<std::time::SystemTime>, Option<std::time::SystemTime>),
-) -> std::cmp::Ordering {
+fn sort_order(sort: crate::config::FileSort, name_a: &str, name_b: &str, ta: (Option<std::time::SystemTime>, Option<std::time::SystemTime>), tb: (Option<std::time::SystemTime>, Option<std::time::SystemTime>)) -> std::cmp::Ordering {
     use crate::config::FileSort::*;
     let by_name = name_a.cmp(name_b);
     match sort {

@@ -259,13 +259,16 @@ mod tests {
     #[test]
     fn addresses_and_names() {
         let a = parse_addresses("\"Müller, Hans\" <H.Mueller@Arch.example>, info@lindner.example; Team Bau <bau@uni.example>, =?x?=, Ada Lovelace");
-        assert_eq!(a, vec![
-            ("Hans Müller".to_string(), "h.mueller@arch.example".to_string()),
-            ("Info".into(), "info@lindner.example".into()),
-            ("Team Bau".into(), "bau@uni.example".into()),
-            ("=?x?=".into(), String::new()),
-            ("Ada Lovelace".into(), String::new()),
-        ]);
+        assert_eq!(
+            a,
+            vec![
+                ("Hans Müller".to_string(), "h.mueller@arch.example".to_string()),
+                ("Info".into(), "info@lindner.example".into()),
+                ("Team Bau".into(), "bau@uni.example".into()),
+                ("=?x?=".into(), String::new()),
+                ("Ada Lovelace".into(), String::new()),
+            ]
+        );
         assert_eq!(parse_addresses("<anna.schmidt@x.de>")[0].0, "Anna Schmidt");
         assert_eq!(clean_name("  Schmidt,  Anna "), "Anna Schmidt");
         assert_eq!(clean_name("Bauamt, Abteilung Technik, Haus 2"), "Bauamt, Abteilung Technik, Haus 2", "not a person's name");

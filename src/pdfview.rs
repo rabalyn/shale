@@ -23,13 +23,7 @@ pub fn render_pages(data: Vec<u8>, max_pages: usize, scale: f32) -> Result<Rende
     let total = pages.len();
     let mut images = Vec::new();
     for page in pages.iter().take(max_pages) {
-        let pm = hayro::render(
-            page,
-            &cache,
-            &Default::default(),
-            &Default::default(),
-            &hayro::PixmapSettings { x_scale: scale, y_scale: scale, bg_color: hayro::vello_cpu::color::palette::css::WHITE },
-        );
+        let pm = hayro::render(page, &cache, &Default::default(), &Default::default(), &hayro::PixmapSettings { x_scale: scale, y_scale: scale, bg_color: hayro::vello_cpu::color::palette::css::WHITE });
         let size = [pm.width() as usize, pm.height() as usize];
         images.push(ColorImage::from_rgba_premultiplied(size, pm.data_as_u8_slice()));
     }

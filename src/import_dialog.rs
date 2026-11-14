@@ -95,7 +95,11 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                 });
                 ui.label(muted(&it.detail()));
                 if let Some(p) = &it.already {
-                    ui.label(egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))).size(12.0).color(theme::LINK_MISSING));
+                    ui.label(
+                        egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())))
+                            .size(12.0)
+                            .color(theme::LINK_MISSING),
+                    );
                 }
                 if !it.people.is_empty() {
                     ui.horizontal_wrapped(|ui| {

@@ -88,7 +88,11 @@ impl ExportOptions {
     }
     fn page_size(&self) -> [f32; 2] {
         let [w, h] = self.paper.size().unwrap_or([595.0, 842.0]);
-        if self.landscape { [h, w] } else { [w, h] }
+        if self.landscape {
+            [h, w]
+        } else {
+            [w, h]
+        }
     }
 }
 
@@ -259,7 +263,11 @@ impl<'a> Writer<'a> {
                     self.p().rect(x - pad * 0.5, base - p.size * 0.95, pw + pad, p.size * 1.25, Some(bg), None);
                 }
                 self.p().text(p.kind, p.size, x, base, &p.text, p.color, p.italic, p.bold);
-                let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) { pw } else { crate::pdfwrite::text_width(p.kind, p.size, p.text.trim_end()) };
+                let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) {
+                    pw
+                } else {
+                    crate::pdfwrite::text_width(p.kind, p.size, p.text.trim_end())
+                };
                 if p.underline {
                     self.p().line([x, base + p.size * 0.15], [x + tw, base + p.size * 0.15], p.color, p.size * 0.06);
                 }
@@ -277,10 +285,13 @@ impl<'a> Writer<'a> {
 
     /// Markdown inline text → styled pieces (using the reading view's parser).
     fn pieces(&self, vault: &Vault, rel: &Path, text: &str, size: f32, color: Color32, strike: bool) -> Vec<Piece> {
-        let links: Vec<(markdown::LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| {
-            let ok = vault.exists(&l.target, Some(rel));
-            (l, ok)
-        }).collect();
+        let links: Vec<(markdown::LinkSpan, bool)> = markdown::find_links(text)
+            .into_iter()
+            .map(|l| {
+                let ok = vault.exists(&l.target, Some(rel));
+                (l, ok)
+            })
+            .collect();
         let (job, spans) = crate::reader::inline_job(text, &links, size, color, strike);
         let mut out = Vec::new();
         for s in &job.sections {
