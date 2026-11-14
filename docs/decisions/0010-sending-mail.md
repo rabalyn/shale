@@ -162,6 +162,25 @@ window: `Ctrl+Enter` send, `Esc` close (with the draft rule).
 - OAUTHBEARER over SMTP is supported by us only; XOAUTH2 (Gmail, Outlook) works with every server that supports OAuth.
 - No server Drafts folder: a draft written in Shale is not visible in other programs.
 
+## Implementation notes
+
+- `lettre` is used with `default-features = false, features = ["builder"]`: six small crates in total (`email-encoding`,
+  `email_address`, `httpdate`, `mime`, `quoted_printable`, `lettre`). A message that Shale builds is always CRLF, ASCII headers and
+  7-bit or encoded bodies; `smtp_client` refuses a message with a bare CR or LF (SMTP smuggling) instead of repairing it.
+- The command gate of the SMTP client is `check_command`; a long `AUTH` line is allowed (OAuth2 tokens are several hundred
+  bytes, found by the container test), every other line is at most 600 bytes. If any recipient is refused nothing is sent to the
+  others (the transaction is reset): no mail goes to only some of the people.
+- The compose window uses a plain multi-line text field, not the note editor (which is bound to notes and a vault), and has no
+  vim-style editing. Attachments are added by path, from a list of the vault's files, or as a note; dropping files onto the
+  window is not done.
+- The local Sent copy has a UID of 4,000,000,000 and up (`SYNTHETIC_UID_BASE`) until the server's UID is known. A flag action on
+  it is refused while the append waits. If the server did not say `APPENDUID` the UID is found by Message-ID; if that fails
+  the local copy goes to `.trash/` and the next sync brings the server's own.
+- Drafts are autosaved on the window's thread (small JSON and the `.eml`; attachments are capped at 25 MB together).
+- The outbox lock is per process: two Shale programs on the same mail folder are not supported.
+- Not done in this phase: a server-side Drafts folder, HTML mail, `format=flowed`, dropping files into the compose window,
+  a separate window per draft (one compose view at a time; others wait in Drafts).
+
 ## Alternatives considered
 
 - **`lettre`'s `SmtpTransport`**: less code, but the phase of a failure is lost (see 1) and no OAUTHBEARER. Rejected for the safety reason.

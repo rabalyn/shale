@@ -17,8 +17,11 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
   and a graph of the whole vault.
 - **Mail**: read your IMAP mail next to your notes, search it, mark it read, flag, move or delete
-  it, and turn a mail into a note with one key. Shale keeps a local copy of the mail; syncing never
-  changes anything on the server, only your own actions do (delete always means the Trash folder). **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
+  it, write, reply, forward and send mail (plain text, attachments, drafts, an outbox with "undo
+  send"), and turn a mail into a note with one key. Shale keeps a local copy of the mail; syncing never
+  changes anything on the server, only your own actions do (delete always means the Trash folder;
+  a sent mail is never sent twice, and a mail that may or may not have gone out is shown to you
+  instead of being guessed). **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
   Sign in with a password or with OAuth2 (Google, Microsoft). Shale has no OAuth2 client IDs of
   its own yet, so you register one (about five minutes, free):
   - *Google:* Cloud console, new project, OAuth consent screen (External, Testing, add yourself as
@@ -29,7 +32,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
     test users, and while it is in Testing, Google ends the sign-in after 7 days.
   - *Microsoft:* Entra admin center, App registrations, new registration, platform "Mobile and
     desktop applications" with redirect address `http://localhost`, allow public client flows,
-    permission `IMAP.AccessAsUser.All`.
+    permissions `IMAP.AccessAsUser.All` and `SMTP.Send` (for sending).
   - Enter the Application (client) ID in Shale (Accounts…, OAuth2, Microsoft); no secret needed.
   Details in [docs/FEATURES.md](docs/FEATURES.md). A local test mail server with an OAuth2
   provider (podman) is in [tests/mail-env](tests/mail-env/README.md).
@@ -80,7 +83,7 @@ Other options:
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
-| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back |
+| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back; u read, s or f flag, d delete, m move; **c compose, r reply, Shift+R reply all, Shift+F forward**. In a new mail: Ctrl+Enter sends, Esc closes (it asks whether to keep the draft) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |

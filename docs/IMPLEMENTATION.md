@@ -37,7 +37,12 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 | `src/mail_ui.rs` | State and jobs behind the mail view: store opening, folder counts, the page cache of the list, the open message, search, syncs and the timer, password prompt. |
 | `src/mail_view.rs` | Drawing the mail view (folders, virtual message list, reading pane) and its keys. |
 | `src/mail_ops.rs` | Two-way mail (ADR-0009): recording the person's actions in the index (`pending_ops`), sending them through the IMAP client's write chokepoint (flags with CONDSTORE, MOVE or the verified COPY + UID EXPUNGE fallback, delete forever in Trash), rollback and retry, files to `.trash/`. Also holds the randomized "never lose a mail" test. |
-| `src/mail_dialog.rs` | The mail account settings (accounts, password or OAuth2 sign-in, Test connection, folder tick boxes). |
+| `src/mail_dialog.rs` | The mail account settings (accounts, password or OAuth2 sign-in, sending (SMTP), Test connection, folder tick boxes). |
+| `src/compose.rs` | Writing a mail (ADR-0010): the draft fields, checks on typed header values, replies and forwards with quoting and `References`, the send confirmations, building the message with `lettre`'s builder through one pipeline (build, hook, bytes) where phase 4 will sign and encrypt. |
+| `src/smtp_client.rs` | A small blocking SMTP client (TLS only, STARTTLS before AUTH, typed command gate, PLAIN/LOGIN/XOAUTH2/OAUTHBEARER): it knows in which phase a send failed, which is what lets Shale tell "not sent" from "may have been sent". |
+| `src/outbox.rs` | Drafts and the outbox on disk: atomic saves, the state machine queued/sending/sent/failed/unsure/undone, undo send, start-up recovery, put-away instead of delete; tested with a crash at every durable step. |
+| `src/mail_send.rs` | The sending job (state written before the first byte, no automatic retry, phase-exact outcomes) and the Sent copy (local row plus an `append` action in `pending_ops`). |
+| `src/mail_compose.rs` | The compose view, address completion, the keep/discard and confirmation questions, the Drafts and Outbox lists. |
 | `src/app/mail.rs` | The mail view in the app: settings actions, saving attachments to the vault, handing mails to the Import dialog. |
 | `src/mail_demo.rs` | The made-up mail store for `--screenshot --view mail`. |
 | `src/recovery.rs` | Text that could not be saved at exit, put aside and announced at the next start. |

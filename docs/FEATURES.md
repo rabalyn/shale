@@ -124,7 +124,7 @@ built-in demo vault (`shale --screenshot out.png`).
   the server (it does not even mark mail as read). Only your own actions are written back: mark
   read or unread, flag, move to another folder, delete (to Trash) and, inside Trash, delete
   forever. Passwords are checked over a TLS connection with the system's certificate store; there
-  is no unencrypted option. Shale cannot send mail yet.
+  is no unencrypted option.
 - **No HTML, no tracking.** The message text comes from the plain text part, or from the HTML
   turned into text. Nothing is rendered, no pictures are fetched, no scripts run. An attachment
   is opened from a private temporary copy through your default program (never a program or
@@ -192,6 +192,41 @@ built-in demo vault (`shale --screenshot out.png`).
   refused rather than risked.
 - **Mark as read when opened** (Accounts…): on by default, after 2 seconds (0 = at once). Mail
   you close before then stays unread. Off: opening never changes the "read" mark.
+
+### Writing and sending (phase 3)
+
+- **Compose** with `c` (or the Compose button), **Reply** `r`, **Reply all** `Shift+R`, **Forward**
+  `Shift+F` (also buttons under the message; `f` is still the flag key). Mail is plain text. To, Cc
+  and Bcc complete from the addresses in your people notes and in the mail you already have (↑ ↓,
+  Tab or a click); the subject, the text and the attachments are below. Attach a file by its path,
+  a file of the vault (also from the media folder) or a **note** (its markdown, as a `.md`
+  attachment). An answer quotes the mail with "On <date>, <name> wrote:" and `> `, sets
+  `In-Reply-To` and `References` (the whole chain), and a forward brings the attachments along.
+  Your signature goes below. **Ctrl+Enter** sends, **Esc** closes.
+- **Set up sending** in the account settings, "Sending (SMTP)": server, TLS (465) or STARTTLS (587),
+  your name and address, signature. The sign-in is the one of the account (the same password, or the
+  same OAuth2 sign-in; Google and Microsoft fill in the server, Microsoft's permission list gets
+  `SMTP.Send`). There is no unencrypted option, and with STARTTLS nothing, not even the password, goes
+  before the encryption. "Test connection" also signs in to the SMTP server (it never sends a mail).
+  The wait before sending ("Undo send", 10 seconds, 0 = at once) is set there too.
+- **Never lost, never twice.** What you write is saved as a draft after a pause in typing and when
+  you close the window (`~/.local/share/shale/mail/drafts/`, as a `.eml` any program can read, plus
+  the fields and attachments); after a crash the drafts are in **Drafts**. Closing with changes asks
+  "Keep draft?"; a discarded draft goes to `.trash/`, nothing is deleted. **Send** puts the mail into the
+  **Outbox** (a file you can read), and for a few seconds a bar offers **Undo send**, which brings it back
+  into the editor. Then it is sent, once. If the server refuses (a wrong address, no network) it stays in
+  the Outbox with the server's words and you press **Retry**, **Edit** or **Discard**: nothing is retried by
+  itself. If the connection ends *after* the whole mail was handed over and before the server answered,
+  nobody can know whether it went out: the mail shows as "may have been sent", Shale never sends it
+  again by itself, and you look in Sent and choose **Send again** or **Discard**. The same if Shale was
+  closed in the middle of sending.
+- **Questions before sending**: with no subject, with no text, and when the text says "attached" /
+  "attachment" / "angehängt" / "anbei" / "Anhang" but nothing is attached. Bcc recipients get the mail
+  but are never written into it; no read receipt is requested; the `User-Agent` header is off unless
+  you switch it on (privacy).
+- **The Sent copy**: after a send, the exact message appears in your Sent folder at once and is saved
+  to the server in the background (an account that keeps sent mail itself, like Gmail, is switched off
+  from that). If that save fails the mail is still sent, never sent again, and the copy is retried.
 
 ## Importing e-mails, events and files (for project tracking)
 

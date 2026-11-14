@@ -22,6 +22,23 @@ The release page of each version on GitHub shows its section from this file.
   dialog like a dragged `.eml`. j / k, Enter, Space, Ctrl+J / Ctrl+K, `/` and Esc work without
   the mouse. Syncing never changes anything on the server, shows no HTML and loads nothing from the
   web. **The local mail copy is not encrypted: use full-disk encryption.**
+- **Mail: write and send** (phase 3, SMTP). `c` compose, `r` reply, `Shift+R` reply all, `Shift+F`
+  forward (`f` is still the flag key), Ctrl+Enter send, Esc close. Plain text with attachments (a
+  file, a file of the vault, or a note as markdown), addresses completed from your people notes and
+  your mail, a signature, correct `In-Reply-To` / `References`, and the original quoted. Sending is
+  set up per account (TLS 465 or mandatory STARTTLS 587, the same password or OAuth2 sign-in as for
+  reading; Google and Microsoft are presets). Drafts are saved by themselves (atomically; after a
+  crash they are in Drafts), closing asks keep or discard (discard goes to `.trash/`), Send puts the
+  mail in an Outbox with an **Undo send** window (10 seconds, setting), and a mail is never sent twice:
+  a failure keeps it in the Outbox until you retry, and a mail that may or may not have gone out (the
+  connection ended after the whole mail was handed over, or Shale was closed while sending) is shown
+  as "may have been sent" for you to decide. Confirmations for an empty subject or text and a
+  forgotten attachment. Bcc never appears in the mail, no read receipt, `User-Agent` only on request.
+  After sending, the exact message appears in Sent at once and is saved to the server with `APPEND`
+  through the same write chokepoint as phase 2 (a failed save never causes a resend). New: ADR-0010,
+  `src/compose.rs`, `src/smtp_client.rs` (own small SMTP client; `lettre` only builds the message),
+  `src/outbox.rs`, `src/mail_send.rs`, a randomized safety test, and the container test environment
+  now has Dovecot's submission service with a Mailpit sink.
 - **Mail: read, flag, move and delete** (phase 2, two-way). `u` read / unread, `s` or `f` flag,
   `d` or Delete to Trash, `m` move (a folder picker you type into), on the open mail, the one
   under the cursor or all marked mails; also as buttons, in the right-click menu of a row and in

@@ -1896,3 +1896,55 @@ fn the_account_settings_have_the_sending_section_with_presets_and_test_connectio
     let a = &w.app.cfg.mail_accounts[0];
     assert_eq!((a.smtp_host.as_str(), a.smtp_port, a.from_name.as_str(), a.from_address.as_str()), ("localhost", smtp.port, "Ada Lovelace", "ada@example.com"));
 }
+
+// spec: MAIL-127, MAIL-128
+#[test]
+fn attachments_come_from_the_vault_and_notes_and_addresses_from_the_people_notes() {
+    let (mut w, smtp) = compose_world("attach2", 0);
+    std::fs::create_dir_all(w.dir.join("Adressbuch")).unwrap();
+    std::fs::write(w.dir.join("Adressbuch/Dora Dobler.md"), "# Dora Dobler\n- E-mail: dora.dobler@people.example\n").unwrap();
+    std::fs::write(w.dir.join("Plan.md"), "# The plan\n\n- Größe äöü\n").unwrap();
+    std::fs::create_dir_all(w.dir.join("z_media")).unwrap();
+    std::fs::write(w.dir.join("z_media/picture.png"), [0x89, b'P', b'N', b'G', 1, 2, 3]).unwrap();
+    w.app.actions.push(crate::app::Action::Rescan);
+    w.until("the vault is known to the mail view", |a| a.mail.vault.as_ref().is_some_and(|v| v.files.iter().any(|f| f.0 == "z_media/picture.png") && v.people.iter().any(|p| p.1 == "dora.dobler@people.example")));
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    // a name from a people note is completed
+    w.click("mail:compose:to");
+    w.type_text("dobl");
+    w.frame(vec![]);
+    assert!(w.has("mail:suggest:0") && w.shows("dora.dobler@people.example"), "completed from the people notes");
+    w.click("mail:suggest:0");
+    assert!(w.compose_field("to").contains("Dora Dobler <dora.dobler@people.example>"), "{}", w.compose_field("to"));
+    w.typ("mail:compose:subject", "Files");
+    w.write_body("Hello");
+    // a file of the vault, from its media folder
+    w.click("mail:compose:att-vault");
+    w.settle();
+    w.type_text("picture");
+    w.frame(vec![]);
+    w.click("mail:picker:0");
+    // a note, as markdown
+    w.click("mail:compose:att-note");
+    w.settle();
+    w.type_text("plan");
+    w.frame(vec![]);
+    w.click("mail:picker:0");
+    let atts = w.app.mail.compose.as_ref().unwrap().draft.attachments.clone();
+    assert_eq!(atts.iter().map(|a| (a.name.as_str(), a.mime.as_str())).collect::<Vec<_>>(), vec![("picture.png", "image/png"), ("Plan.md", "text/markdown")]);
+    assert_eq!(atts[0].data.as_slice(), &[0x89, b'P', b'N', b'G', 1, 2, 3]);
+    assert_eq!(atts[1].data.as_slice(), "# The plan\n\n- Größe äöü\n".as_bytes());
+    w.click("mail:compose:att-remove:0");
+    assert_eq!(w.app.mail.compose.as_ref().unwrap().draft.attachments.len(), 1);
+    w.click("mail:compose:send");
+    w.until("sent", |_| smtp.state().received.len() == 1);
+    let m = crate::mail::parse(&smtp.state().received[0].data);
+    assert_eq!((m.attachments.len(), m.attachments[0].name.as_str(), m.attachments[0].mime.as_str()), (1, "Plan.md", "text/markdown"));
+    assert!(m.to.contains("dora.dobler@people.example"));
+    // a file that is not there is told, not attached
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:att-path", "/nonexistent/file.pdf");
+    w.click("mail:compose:att-add");
+    assert!(w.app.mail.compose.as_ref().unwrap().error.as_deref().is_some_and(|e| e.contains("nonexistent")));
+    assert!(w.app.mail.compose.as_ref().unwrap().draft.attachments.is_empty());
+}

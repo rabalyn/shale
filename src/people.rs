@@ -295,6 +295,24 @@ mod tests {
         assert_eq!(emails_in("- **E-mail:** h.mueller@arch.example, (alt: <hm@x.de>) mailto:A@B.de."), vec!["h.mueller@arch.example", "hm@x.de", "a@b.de"]);
     }
 
+    // spec: MAIL-128
+    #[test]
+    fn the_addresses_of_the_people_notes_are_offered_for_completion_with_their_names() {
+        let d = std::env::temp_dir().join(format!("shale-people-addr-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("Adressbuch")).unwrap();
+        std::fs::create_dir_all(d.join("Other")).unwrap();
+        std::fs::write(d.join("Adressbuch/Hans Müller.md"), "# Hans Müller\n- E-mail: hans@arch.example\n").unwrap();
+        std::fs::write(d.join("Adressbuch/Bauamt Info.md"), "- **E-mail:** bau@uni.example, zweite@uni.example\n").unwrap();
+        std::fs::write(d.join("Other/Not a person.md"), "x@y.example\n").unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        v.rescan();
+        let a = addresses(&v, "Adressbuch/");
+        assert_eq!(a, vec![("Bauamt Info".to_string(), "bau@uni.example".to_string()), ("Bauamt Info".to_string(), "zweite@uni.example".to_string()), ("Hans Müller".to_string(), "hans@arch.example".to_string())]);
+        assert!(addresses(&v, "").is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: PPL-002, PPL-003
     #[test]
     fn people_of_a_mail_and_their_notes() {

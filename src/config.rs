@@ -355,6 +355,19 @@ mod tests {
         assert_eq!(c.file_sort, FileSort::NameAsc);
     }
 
+    // spec: MAIL-120
+    #[test]
+    fn mail_accounts_of_older_files_load_with_sensible_sending_defaults_and_never_a_plain_text_choice() {
+        let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada@example.com"}]}"#).unwrap();
+        let a = &c.mail_accounts[0];
+        assert_eq!((a.smtp_host.as_str(), a.smtp_port, a.smtp_security, a.server_stores_sent, a.user_agent_header), ("", 465, MailSecurity::ImplicitTls, false, false));
+        assert_eq!(c.mail_undo_secs, 10, "the undo-send time defaults to 10 seconds");
+        assert_eq!((MailSecurity::ImplicitTls.smtp_default_port(), MailSecurity::StartTls.smtp_default_port()), (465, 587));
+        assert!(serde_json::from_str::<Config>(r#"{"mail_accounts": [{"smtp_security": "Plain"}]}"#).is_err(), "there is no plain-text sending");
+        let back = serde_json::to_string(&c).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&back).unwrap().mail_accounts, c.mail_accounts);
+    }
+
     // spec: CFG-002
     #[test]
     fn private_files_are_owner_only_and_replaced_whole() {
