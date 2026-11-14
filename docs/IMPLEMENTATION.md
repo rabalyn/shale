@@ -36,6 +36,7 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 | `src/mail_db.rs`, `src/mail_store.rs` | The local mail copy: one `.eml` file per message plus an SQLite index with full-text search, one writer thread, crash-safe order, repair and backups. |
 | `src/mail_ui.rs` | State and jobs behind the mail view: store opening, folder counts, the page cache of the list, the open message, search, syncs and the timer, password prompt. |
 | `src/mail_view.rs` | Drawing the mail view (folders, virtual message list, reading pane) and its keys. |
+| `src/mail_ops.rs` | Two-way mail (ADR-0009): recording the person's actions in the index (`pending_ops`), sending them through the IMAP client's write chokepoint (flags with CONDSTORE, MOVE or the verified COPY + UID EXPUNGE fallback, delete forever in Trash), rollback and retry, files to `.trash/`. Also holds the randomized "never lose a mail" test. |
 | `src/mail_dialog.rs` | The mail account settings (accounts, password or OAuth2 sign-in, Test connection, folder tick boxes). |
 | `src/app/mail.rs` | The mail view in the app: settings actions, saving attachments to the vault, handing mails to the Import dialog. |
 | `src/mail_demo.rs` | The made-up mail store for `--screenshot --view mail`. |

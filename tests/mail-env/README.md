@@ -78,7 +78,11 @@ tests/mail-env/mail-env.sh up
 cargo test -- --ignored mail_env
 ```
 
-Two tests in `src/mail_env_tests.rs` (ignored by default, so `cargo test` never needs containers):
+Three tests in `src/mail_env_tests.rs` (ignored by default, so `cargo test` never needs containers).
+The third (phase 2, MAIL-113) makes two scratch mailboxes (`Scratch`, `Scratch2`) and puts test mail
+into them with `doveadm save`, then marks, flags, moves, deletes (to Trash) and deletes forever through
+Shale's own code, checks Dovecot after each step and that the seeded mailboxes are the same at the end;
+it removes everything it made, also what a failed earlier run left. The first two:
 the password account syncs end to end (folders, the 3-year window, Trash and Junk not synced, the
 large mail, HTML as text, ISO-8859-1, flags) and the server's files and flags (read through
 `doveadm` and a read-only mount of the volume) are the same before and after, so nothing was

@@ -11,7 +11,7 @@ The release page of each version on GitHub shows its section from this file.
 
 ### Added
 
-- **Mail view (read-only)**: read your IMAP mail in Shale. Ribbon button or Ctrl+Shift+M opens
+- **Mail view**: read your IMAP mail in Shale. Ribbon button or Ctrl+Shift+M opens
   accounts and folders (with unread counts), a fast message list (50,000 messages are fine) and
   a plain-text reading pane with the attachments. Accounts are set up in "Accounts…" (password
   in the system keyring, or asked per session without one) with a "Test
@@ -20,8 +20,20 @@ The release page of each version on GitHub shows its section from this file.
   message is downloaded with "Load this message". Search understands `from:`, `to:`, `subject:`
   and "phrases". "Import to vault" (or `i`) hands a mail, or all marked mails, to the Import
   dialog like a dragged `.eml`. j / k, Enter, Space, Ctrl+J / Ctrl+K, `/` and Esc work without
-  the mouse. Shale never changes anything on the server, shows no HTML and loads nothing from the
+  the mouse. Syncing never changes anything on the server, shows no HTML and loads nothing from the
   web. **The local mail copy is not encrypted: use full-disk encryption.**
+- **Mail: read, flag, move and delete** (phase 2, two-way). `u` read / unread, `s` or `f` flag,
+  `d` or Delete to Trash, `m` move (a folder picker you type into), on the open mail, the one
+  under the cursor or all marked mails; also as buttons, in the right-click menu of a row and in
+  the marked bar. Unread mail is bold, flagged mail has a flag, and changes the server has not
+  confirmed yet say so. Changes show at once, wait while you are offline (also across a restart)
+  and are undone with a message if the server refuses. "Delete" always moves to the Trash folder;
+  "Delete forever" exists only in Trash, asks first and removes only the mails you chose. Mail
+  that another program moved or deleted meanwhile is left alone. Opening a mail can mark it read
+  after 2 seconds (setting, on by default, in Accounts…). Syncing still never writes to the
+  server, and Shale never deletes its own local copy (old files go to `.trash/` in the mail
+  folder). New: ADR-0009, `src/mail_ops.rs`, a randomized safety test that checks no mail is ever
+  lost, and tests against the Dovecot container.
 - **OAuth2 sign-in for mail** (Google, Microsoft, or a custom provider): authorization code with
   PKCE in your browser, a refresh token in the system keyring, `XOAUTH2` or `OAUTHBEARER` at the
   server, and a clear "sign in again" when the sign-in expires or is revoked. Shale has no client

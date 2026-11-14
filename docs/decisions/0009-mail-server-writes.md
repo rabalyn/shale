@@ -74,6 +74,27 @@ every message that is flagged `\Deleted` in the folder, including ones that anot
 - Servers without `UIDPLUS` can still mark and flag, but not delete forever and not fall back from
   a missing `MOVE`.
 
+## Implementation notes
+
+- `WriteCmd` also has `Select`, `Copy` and `MarkDeleted` (set or clear `\Deleted`); the "copy, verify,
+  mark, expunge" fallback is a sequence in `mail_ops.rs` made of these, not one variant, because it must
+  look at the server between the steps. `Client::write` refuses a write before any `Select`,
+  `UID EXPUNGE` without `UIDPLUS` and `UID MOVE` without `MOVE` before anything is sent.
+- The queue is the table `pending_ops` (index schema version 2): one row per message and action, with
+  the flags before the optimistic change so a refusal can undo exactly that change (and not another
+  action's). A message with a waiting move, delete or delete-forever takes no further action; flag
+  actions can stack and are sent in order.
+- A write is preceded by `UID SEARCH UID <set>` in the folder just opened: UIDs that are no longer there
+  are treated as moved or deleted by someone else. After a `MOVE`, `COPY` or `STORE` the result is read
+  back (`UID SEARCH`, `UID FETCH FLAGS`) and the index follows what the server says, not what was asked.
+- Moves and deletes put the message's row into the target folder only when the server said the new UID
+  (`COPYUID`, or a Message-ID search in the fallback) and the old row's file could be read; otherwise
+  the next sync or listing of the target brings it. The old file always goes to `.trash/<date>/`.
+- After 12 failed attempts to reach the server an action is given up and rolled back, with a message.
+- Not tried: a server that offers `MOVE` but not `UIDPLUS` is covered by the pretend server only; the
+  container's Dovecot has both (`MOVE`, `UIDPLUS`, `CONDSTORE`), so the fallback path is tested with the
+  pretend server alone.
+
 ## Alternatives considered
 
 - **`STORE \Deleted` and `EXPUNGE` for delete**: rejected, it can remove other mail (see Context).

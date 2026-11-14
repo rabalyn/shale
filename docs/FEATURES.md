@@ -112,7 +112,7 @@ built-in demo vault (`shale --screenshot out.png`).
 
 ![Calendar in the sidebar](screenshots/calendar-sidebar.png)
 
-## Mail (read-only)
+## Mail
 
 ![The mail view](screenshots/mail-view.png)
 
@@ -120,9 +120,11 @@ built-in demo vault (`shale --screenshot out.png`).
   folders with their unread counts, the list of messages (newest first) and the message itself
   as plain text. Shale reads your mail over IMAP and keeps a local copy next to the other
   program data (`~/.local/share/shale/mail`), so it works offline and search is instant.
-- **It only reads.** Shale never changes anything on the server, not even the "read" mark: it
-  does not delete, move, flag or send. Passwords are checked over a TLS connection with the
-  system's certificate store; there is no unencrypted option.
+- **Syncing only reads; what you do yourself is sent.** Fetching mail never changes anything on
+  the server (it does not even mark mail as read). Only your own actions are written back: mark
+  read or unread, flag, move to another folder, delete (to Trash) and, inside Trash, delete
+  forever. Passwords are checked over a TLS connection with the system's certificate store; there
+  is no unencrypted option. Shale cannot send mail yet.
 - **No HTML, no tracking.** The message text comes from the plain text part, or from the HTML
   turned into text. Nothing is rendered, no pictures are fetched, no scripts run. An attachment
   is opened from a private temporary copy through your default program (never a program or
@@ -171,6 +173,25 @@ built-in demo vault (`shale --screenshot out.png`).
   message, Space marks it, Ctrl+J / Ctrl+K go to the next / previous folder, `/` goes to the
   search field (↓ or Enter there go into the results), `i` imports, Esc steps back (closes the
   message, then clears the search).
+- **Read, flag, move, delete** (also with the buttons above the message, a right click on a row,
+  and the buttons that appear when mails are marked). The keys work on the marked mails, else on
+  the open one, else on the one under the cursor, and need no Ctrl or Shift:
+  `u` marks read or unread, `s` or `f` sets or clears the flag, `d` or Delete moves to Trash (in
+  Trash it asks whether to delete forever; Enter does not confirm, only the red button does), `m`
+  opens the folder picker (type to find a folder, ↑ ↓, Enter; Esc leaves). Unread mail is bold,
+  flagged mail has a flag, and anything the server has not confirmed yet says "saving…",
+  "moving…" or "deleting…" and shows in the bar as "N changes are waiting for the server".
+- **Safe by design.** A change shows at once and is sent in the background. Without a network it
+  waits (also across a restart) and goes out when the server answers; if the server refuses, the
+  change is undone in the list and you are told why. "Delete" is always a move to the Trash
+  folder. "Delete forever" removes only the mails you chose (never the ones another program
+  marked as deleted). A mail that another program moved or deleted meanwhile is left alone and
+  dimmed. Shale never deletes its own local copy: files of mail that moved or were deleted go to
+  `.trash/<date>/` inside the mail folder. A server without `MOVE` is handled by a verified copy
+  first; a server without `UIDPLUS` cannot delete forever, and for it deleting without `MOVE` is
+  refused rather than risked.
+- **Mark as read when opened** (Accounts…): on by default, after 2 seconds (0 = at once). Mail
+  you close before then stays unread. Off: opening never changes the "read" mark.
 
 ## Importing e-mails, events and files (for project tracking)
 

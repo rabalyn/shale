@@ -16,9 +16,9 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   (`📅 2026-12-01` or `due:2026-12-01`).
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
   and a graph of the whole vault.
-- **Mail (read-only)**: read your IMAP mail next to your notes, search it, and turn a mail into a
-  note with one key. Shale keeps a local copy of the mail and never changes anything on the
-  server. **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
+- **Mail**: read your IMAP mail next to your notes, search it, mark it read, flag, move or delete
+  it, and turn a mail into a note with one key. Shale keeps a local copy of the mail; syncing never
+  changes anything on the server, only your own actions do (delete always means the Trash folder). **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
   Sign in with a password or with OAuth2 (Google, Microsoft). Shale has no OAuth2 client IDs of
   its own yet, so you register one (about five minutes, free):
   - *Google:* Cloud console, new project, OAuth consent screen (External, Testing, add yourself as

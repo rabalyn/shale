@@ -14,9 +14,11 @@
 //! restarting the provider (`mail-env.sh revoke`), which kills every token it handed out.
 
 use crate::config::{MailAccount, MailAuth, MailSecurity, OAuthProvider};
+use crate::imap_client::MailFlag;
 use crate::imap_client::{Client, ConnectSettings, ImapError, Limits};
 use crate::imap_sync::{connect_with_retry, discover_folders, fetch_folder_listing, sync_account, AuthFactory, Connector, PasswordAuth, SyncOptions};
-use crate::mail_db::{FolderRow, MessageSummary, STATE_FULL, STATE_HEADER};
+use crate::mail_db::{FolderRow, MessageSummary, Op, STATE_FULL, STATE_HEADER};
+use crate::mail_ops::{self, Action, Confirmed};
 use crate::mail_store::MailStore;
 use crate::oauth::{self, OAuthConfig, OAuthFactory};
 use crate::oauth_fake_tests::{http_get, http_post_form};
@@ -295,5 +297,183 @@ fn mail_env_oauth_account_signs_in_syncs_renews_its_token_and_a_dead_sign_in_is_
 
     secrets::clear_mail_secret(&acct.id, MailSecret::RefreshToken);
     oauth::forget_source(&acct.id);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// ------------------------------------------------------------ phase 2 (MAIL-113)
+
+fn container_id() -> String {
+    let id = run(&engine(), &["ps", "-q", "--filter", "label=com.docker.compose.service=dovecot", "--filter", "label=com.docker.compose.project=shale-mail-env"]);
+    let id = id.trim().to_string();
+    assert!(!id.is_empty(), "the dovecot container is not running: tests/mail-env/mail-env.sh up");
+    id
+}
+
+/// `doveadm` inside the Dovecot container, optionally with a message on its standard input.
+/// Errors are returned, not fatal (cleaning up must not fail a test that already failed).
+fn doveadm(args: &[&str], stdin: Option<&[u8]>) -> Result<String, String> {
+    use std::io::Write;
+    let id = container_id();
+    let mut cmd = Command::new(engine());
+    cmd.args(["exec", "-i", &id, "/dovecot/bin/doveadm"]).args(args).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    if let Some(mut si) = child.stdin.take() {
+        if let Some(data) = stdin {
+            si.write_all(data).map_err(|e| e.to_string())?;
+        }
+    }
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).into_owned())
+    }
+}
+
+const USER: &str = "alice@shale.test";
+
+/// The server's own view of a mailbox: "uid=1 hdr.subject=… flags=…", without `\Recent` (which only says
+/// that no session has looked at the message yet).
+fn server_view(mailbox: &str) -> Vec<String> {
+    let out = doveadm(&["-f", "flow", "fetch", "-u", USER, "uid hdr.subject flags", "mailbox", mailbox, "all"], None).unwrap_or_default();
+    out.lines().map(|l| l.replace("\\Recent", "").split_whitespace().collect::<Vec<_>>().join(" ")).collect()
+}
+
+fn line_of<'a>(view: &'a [String], subject: &str) -> Option<&'a String> {
+    view.iter().find(|l| l.contains(&format!("hdr.subject={subject}")))
+}
+
+fn put_message(mailbox: &str, subject: &str) {
+    let raw = format!(
+        "From: Sender <sender@shale.test>\r\nTo: {USER}\r\nSubject: {subject}\r\nMessage-ID: <{}@scratch.shale.test>\r\nDate: Thu, 12 Nov 2026 10:00:00 +0000\r\n\r\nA test message for {subject}.\r\n",
+        subject.replace(' ', "-").to_lowercase()
+    );
+    doveadm(&["save", "-u", USER, "-m", mailbox], Some(raw.as_bytes())).unwrap_or_else(|e| panic!("could not put {subject:?} into {mailbox}: {e}"));
+}
+
+/// Remove everything this test makes (also what an earlier, failed run left behind).
+fn clean_scratch() {
+    for mb in ["Scratch", "Scratch2"] {
+        let _ = doveadm(&["mailbox", "delete", "-u", USER, mb], None);
+    }
+    for subject in ["Scratch four", "Scratch five"] {
+        let _ = doveadm(&["expunge", "-u", USER, "mailbox", "Trash", "header", "Subject", subject], None);
+    }
+}
+
+fn run_ops(store: &MailStore, connector: &dyn Connector) -> mail_ops::OpsReport {
+    let r = mail_ops::run_pending(store, connector, "alice");
+    assert!(r.failed.is_empty() && r.offline.is_none(), "{r:?}");
+    assert_eq!(r.remaining, 0, "{r:?}");
+    r
+}
+
+fn only_scratch_is_synced(store: &MailStore, connector: &dyn Connector) {
+    let rows = discover_folders(store, connector, "alice", "Alice").expect("folders");
+    for f in &rows {
+        let on = f.name == "Scratch" || f.name == "Scratch2";
+        store.commit(vec![Op::SyncEnabled { folder: f.id, enabled: on }]).unwrap();
+    }
+}
+
+// spec: MAIL-113
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_and_nothing_else() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    clean_scratch();
+    let (dir, store) = temp_store("ops");
+    let connector = EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) };
+    // what must not change: every seeded mailbox
+    let watched = ["INBOX", "Work", "Work/Projects", "Sent", "Drafts", "Junk", "Trash"];
+    let before: Vec<Vec<String>> = watched.iter().map(|m| server_view(m)).collect();
+    assert!(!before[0].is_empty() && !before[6].is_empty(), "the seed is there: {before:?}");
+
+    for mb in ["Scratch", "Scratch2"] {
+        doveadm(&["mailbox", "create", "-u", USER, mb], None).unwrap();
+    }
+    for s in ["Scratch one", "Scratch two", "Scratch three", "Scratch four"] {
+        put_message("Scratch", s);
+    }
+    only_scratch_is_synced(&store, &connector);
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty() && sum.messages_added == 4, "{sum:?}");
+    let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
+    let by_subject = |name: &str, subject: &str| -> MessageSummary { messages(&store, &rows_now(&store), name).into_iter().find(|m| m.subject == subject).unwrap_or_else(|| panic!("{subject} not in {name}")) };
+    fn rows_now(store: &MailStore) -> Vec<FolderRow> {
+        store.reader().unwrap().folders(Some("alice")).unwrap()
+    }
+    let _ = rows;
+    let now = crate::cal_time::now();
+    let flags = |add: &[MailFlag], remove: &[MailFlag]| Action::SetFlags { add: add.to_vec(), remove: remove.to_vec() };
+
+    // read, flagged, and back
+    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[MailFlag::Seen], &[]), now).unwrap();
+    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[MailFlag::Flagged], &[]), now).unwrap();
+    assert_eq!(run_ops(&store, &connector).done, 2);
+    let v = server_view("Scratch");
+    assert!(line_of(&v, "Scratch one").unwrap().contains("\\Seen") && !line_of(&v, "Scratch one").unwrap().contains("\\Flagged"), "{v:?}");
+    assert!(line_of(&v, "Scratch two").unwrap().contains("\\Flagged") && !line_of(&v, "Scratch two").unwrap().contains("\\Seen"), "{v:?}");
+    assert!(!line_of(&v, "Scratch three").unwrap().contains("\\Seen"), "an untouched mail stays unseen: {v:?}");
+    // the local copy took the server's answer
+    assert!(by_subject("Scratch", "Scratch one").is_seen());
+    assert!(by_subject("Scratch", "Scratch two").is_flagged());
+    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[], &[MailFlag::Seen]), now).unwrap();
+    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[], &[MailFlag::Flagged]), now).unwrap();
+    run_ops(&store, &connector);
+    let v = server_view("Scratch");
+    assert!(!line_of(&v, "Scratch one").unwrap().contains("\\Seen") && !line_of(&v, "Scratch two").unwrap().contains("\\Flagged"), "{v:?}");
+
+    // move: the server has it in the other folder and not in this one; the row and file followed
+    let three = by_subject("Scratch", "Scratch three");
+    let old_file = store.abs_path(&three.path);
+    assert!(old_file.is_file());
+    mail_ops::enqueue(&store, &[three], &Action::MoveTo { folder: "Scratch2".into() }, now).unwrap();
+    assert_eq!(run_ops(&store, &connector).done, 1);
+    assert!(line_of(&server_view("Scratch"), "Scratch three").is_none());
+    assert!(line_of(&server_view("Scratch2"), "Scratch three").is_some());
+    let moved = by_subject("Scratch2", "Scratch three");
+    assert!(moved.state == STATE_FULL && store.abs_path(&moved.path).is_file(), "the row in the new folder has a file");
+    assert!(!old_file.exists() && !store.read_raw(&moved).unwrap().is_empty());
+
+    // delete: Dovecot has it in Trash (a move, no \Deleted)
+    let trash_before = server_view("Trash");
+    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch four")], &Action::Delete, now).unwrap();
+    assert_eq!(run_ops(&store, &connector).done, 1);
+    assert!(line_of(&server_view("Scratch"), "Scratch four").is_none());
+    let trash_now = server_view("Trash");
+    let four = line_of(&trash_now, "Scratch four").expect("in Trash");
+    assert!(!four.contains("\\Deleted"), "a delete is a move, not a flag: {four}");
+    assert_eq!(trash_now.len(), trash_before.len() + 1);
+
+    // delete forever: only the chosen mail; another program's \Deleted mail in Trash survives
+    put_message("Trash", "Scratch five");
+    doveadm(&["flags", "add", "-u", USER, "\\Deleted", "mailbox", "Trash", "header", "Subject", "Scratch five"], None).unwrap();
+    fetch_folder_listing(&store, &connector, "alice", "Trash", 100, &SyncOptions::default()).unwrap();
+    let rows = rows_now(&store);
+    let trash_row = messages(&store, &rows, "Trash").into_iter().find(|m| m.subject == "Scratch four").expect("listed");
+    mail_ops::enqueue(&store, &[trash_row], &Action::DeleteForever(Confirmed::after_dialog(1)), now).unwrap();
+    assert_eq!(run_ops(&store, &connector).done, 1);
+    let trash_after = server_view("Trash");
+    assert!(line_of(&trash_after, "Scratch four").is_none(), "{trash_after:?}");
+    let five = line_of(&trash_after, "Scratch five").expect("the other program's \\Deleted mail survived");
+    assert!(five.contains("\\Deleted"), "{five}");
+    assert_eq!(trash_after.len(), trash_before.len() + 1, "the seeded Trash mails and the survivor");
+    // nothing local was deleted: the file of every handled mail is still in the store (in .trash for those that left)
+    let kept: Vec<String> = std::fs::read_dir(dir.join(".trash")).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+    assert!(!kept.is_empty(), "the local trash has the old files");
+
+    // a sync afterwards agrees with the server
+    let sum = sync(&store, "alice", &connector);
+    assert!(sum.errors.is_empty(), "{sum:?}");
+    let rows = rows_now(&store);
+    assert_eq!(subjects(&store, &rows, "Scratch"), ["Scratch one", "Scratch two"]);
+    assert_eq!(subjects(&store, &rows, "Scratch2"), ["Scratch three"]);
+
+    // nothing else changed anywhere
+    clean_scratch();
+    for (i, m) in watched.iter().enumerate() {
+        assert_eq!(server_view(m), before[i], "{m} was changed");
+    }
     let _ = std::fs::remove_dir_all(dir);
 }
