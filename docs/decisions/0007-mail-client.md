@@ -176,6 +176,23 @@ Shale does not store private keys. On Linux, GnuPG is the shared key store for b
   `https://mail.google.com/` scope is "restricted": unverified apps work for up to 100 test users;
   public distribution needs Google's security assessment. Thunderbird's client IDs are not reused.
 
+**Implementation note (phase 1c).** `src/oauth.rs` is the whole flow. The loopback listener
+accepts one callback with the right path, `Host` and `state` and answers anything else with an
+error page; the token endpoint is called with the system `curl` like CalDAV (form on stdin, no
+redirects followed), so no HTTP library was added; SHA-256 and random bytes come from the TLS
+library already in the build. The refresh token and an optional client secret are in the keyring,
+the access token only in memory in one `TokenSource` per account (shared by the sync's four
+connections, so a sync refreshes once). Client IDs are per-account settings, **not** built-in
+defaults: until Shale's own registrations exist (the owner's task, above), a person registers an
+own app (README). The provider presets are Google and Microsoft plus "Custom" (typed endpoints;
+`http://localhost` only here, which is also how the local test environment is used). A refused
+token gets one retry with a fresh one; a refresh token that the provider calls `invalid_grant` is
+dropped and the person is told to sign in again. The test environment of the Consequences section
+is `tests/mail-env/` (Dovecot 2.4 plus `mock-oauth2-server`, run with `podman-compose`; gated tests
+with `cargo test -- --ignored mail_env`). Known limits: Google's refresh tokens of an unverified app
+in "Testing" status expire after 7 days; Microsoft may insist on `http://localhost` instead of
+`127.0.0.1` as the redirect address (not tried against the real service).
+
 ## Alternatives considered
 
 - **Read Thunderbird's local copy instead of the server** (extend `tb_store.rs`): no network, no

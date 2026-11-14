@@ -134,8 +134,25 @@ built-in demo vault (`shale --screenshot out.png`).
 - **Accounts…** adds an account: server, port (993 with TLS, 143 with STARTTLS), user name and
   password. The password goes into the system keyring. Without a keyring Shale says so and asks
   again each time it starts, keeping it in memory only; it is never written to the settings
-  file. OAuth2 sign-in (Google, Microsoft) comes in a later step. **Test connection** checks the
-  login and lists the folders.
+  file. **Test connection** checks the login and lists the folders.
+- **OAuth2 sign-in** (Google, Microsoft, or your own provider): choose "OAuth2 (in the browser)",
+  the provider and your own **client ID** (Shale ships none; see below), press **Sign in in the
+  browser**, and sign in on the provider's page. Shale shows who signed in, keeps only a refresh
+  token in the system keyring and renews the short-lived access token by itself. If the sign-in
+  expires or is revoked, the mail view and the settings say so and **Sign in again** fixes it.
+  Without a keyring the sign-in lasts until Shale quits.
+  - *Google:* in the Google Cloud console create a project, set up the OAuth consent screen
+    (External, status Testing) and add your Gmail address as a test user, create an **OAuth client
+    ID of type "Desktop app"**, and enter its client ID and client secret in Shale. The scope
+    `https://mail.google.com/` is "restricted": an unverified app is limited to 100 test users, and
+    in Testing status Google ends the sign-in after 7 days (sign in again).
+  - *Microsoft:* in the Entra admin center register an app ("Accounts in any organizational
+    directory and personal Microsoft accounts"), add the platform "Mobile and desktop
+    applications" with the redirect address `http://localhost`, switch on "Allow public client
+    flows", add the delegated permission `IMAP.AccessAsUser.All`, and enter the Application
+    (client) ID in Shale (no secret). A work account may need IMAP switched on by its admin.
+  - *Custom:* any OIDC provider with an authorization-code + PKCE flow; type its authorization and
+    token addresses and the scope. `http://` is accepted only for `localhost`.
 - The first sync fetches the mail of the last three years, newest first, several folders at once,
   and can be stopped and resumed. **Sync** and the status bar show the progress; new mail is also
   fetched every 10 minutes (changeable, 0 = off) while Shale runs. A mail deleted on the server

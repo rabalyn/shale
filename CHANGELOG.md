@@ -14,7 +14,7 @@ The release page of each version on GitHub shows its section from this file.
 - **Mail view (read-only)**: read your IMAP mail in Shale. Ribbon button or Ctrl+Shift+M opens
   accounts and folders (with unread counts), a fast message list (50,000 messages are fine) and
   a plain-text reading pane with the attachments. Accounts are set up in "Accounts…" (password
-  in the system keyring, or asked per session without one; OAuth2 comes later) with a "Test
+  in the system keyring, or asked per session without one) with a "Test
   connection" button and a tick box per folder. Mail is synced in the background (on a button and
   every 10 minutes), Trash, Junk and Gmail's All Mail are listed only when you open them, and a
   message is downloaded with "Load this message". Search understands `from:`, `to:`, `subject:`
@@ -22,6 +22,14 @@ The release page of each version on GitHub shows its section from this file.
   dialog like a dragged `.eml`. j / k, Enter, Space, Ctrl+J / Ctrl+K, `/` and Esc work without
   the mouse. Shale never changes anything on the server, shows no HTML and loads nothing from the
   web. **The local mail copy is not encrypted: use full-disk encryption.**
+- **OAuth2 sign-in for mail** (Google, Microsoft, or a custom provider): authorization code with
+  PKCE in your browser, a refresh token in the system keyring, `XOAUTH2` or `OAUTHBEARER` at the
+  server, and a clear "sign in again" when the sign-in expires or is revoked. Shale has no client
+  IDs of its own yet: you enter one you registered (README explains how, in five lines per
+  provider). Google's restricted mail scope limits an unverified app to 100 test users.
+- **A local mail test environment** (`tests/mail-env/`, podman-compose): Dovecot with TLS and
+  seeded mailboxes plus a pretend OAuth2 provider, and tests that sync both accounts against it
+  and check that nothing on the server changed (`cargo test -- --ignored mail_env`).
 - **Unsaved text is no longer lost at exit**: if a note still cannot be saved when Shale quits,
   its text is written to `~/.local/share/shale/recovery/<date>/…` (never over anything) and the
   next start tells you, with a link to the folder.

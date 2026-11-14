@@ -1,0 +1,53 @@
+# Shale's local mail test environment (MAIL-090): Dovecot with TLS and seeded mailboxes, and a
+# pretend OAuth2 provider. Everything listens on 127.0.0.1 only.
+#
+#   ./mail-env.sh up        start (makes the certificates and seeds the mailboxes the first time)
+#   ./mail-env.sh down      stop; ./mail-env.sh reset also deletes the mail
+#
+# Works with `podman-compose` and with `docker compose`.
+name: shale-mail-env
+
+services:
+  # one-shot: writes the test mailboxes into the volume
+  seed:
+    image: docker.io/library/alpine:3.24.2
+    command: ["sh", "/seed/seed.sh"]
+    volumes:
+      - maildata:/srv/vmail
+      - ./seed:/seed:ro,Z
+
+  # Dovecot shares the network of the "oauth" container, so that it reaches the provider at the
+  # very address the browser uses (http://localhost:18080): the provider writes that address into
+  # its tokens as the issuer, and Dovecot checks it. All ports are therefore published below,
+  # on the "oauth" service.
+  dovecot:
+    image: docker.io/dovecot/dovecot:2.4.1
+    network_mode: "service:oauth"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      oauth:
+        condition: service_started
+    volumes:
+      - maildata:/srv/vmail
+      - ./dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro,Z
+      - ./dovecot/users:/etc/dovecot/users:ro,Z
+      - ./certs:/certs:ro,Z
+
+  # pretend OAuth2/OIDC provider (navikt/mock-oauth2-server): a real browser sign-in page at
+  # http://localhost:18080/default/authorize
+  oauth:
+    image: ghcr.io/navikt/mock-oauth2-server:2.3.0
+    ports:
+      - "127.0.0.1:18080:18080" # the provider
+      - "127.0.0.1:10993:31993" # Dovecot: IMAP over TLS
+      - "127.0.0.1:10143:31143" # Dovecot: IMAP with STARTTLS
+    environment:
+      SERVER_PORT: "18080"
+      JSON_CONFIG_PATH: /config/oauth.json
+    volumes:
+      - ./oauth:/config:ro,Z
+
+volumes:
+  maildata:
+    name: shale-mail-env-maildata

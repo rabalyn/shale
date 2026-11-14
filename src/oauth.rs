@@ -66,7 +66,7 @@ impl fmt::Display for OAuthError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             OAuthError::NotSignedIn => write!(f, "This account is not signed in yet: use “{SIGN_IN_BUTTON}” in the account settings."),
-            OAuthError::Revoked => write!(f, "The sign-in expired or was revoked. {SIGN_IN_AGAIN} in the account settings."),
+            OAuthError::Revoked => write!(f, "The sign-in expired or was revoked. {SIGN_IN_AGAIN}"),
             OAuthError::Denied(t) | OAuthError::Rejected(t) | OAuthError::Network(t) | OAuthError::Config(t) | OAuthError::Local(t) => f.write_str(t),
             OAuthError::Cancelled => f.write_str("The sign-in was cancelled."),
             OAuthError::TimedOut => f.write_str("The sign-in took too long and was given up. Try again."),
@@ -77,11 +77,11 @@ impl fmt::Display for OAuthError {
 impl std::error::Error for OAuthError {}
 
 /// What an error text says when the old sign-in is dead.
-const SIGN_IN_AGAIN: &str = "Sign in again with the button";
+pub const SIGN_IN_AGAIN: &str = "Sign in again with the button in the account settings.";
 
 /// Does this error text say the account needs a (new) browser sign-in?
 pub fn needs_sign_in(text: &str) -> bool {
-    text.contains(SIGN_IN_BUTTON) || text.contains(SIGN_IN_AGAIN)
+    text.contains(SIGN_IN_BUTTON) || text.contains("Sign in again with the button")
 }
 
 // ---------------------------------------------------------------- settings
@@ -450,7 +450,9 @@ impl fmt::Debug for Tokens {
 fn user_of_id_token(jwt: &str) -> Option<String> {
     let payload = jwt.split('.').nth(1)?;
     let v: Value = serde_json::from_slice(&crate::mail::base64_decode(payload.as_bytes())).ok()?;
-    ["email", "preferred_username", "upn"].iter().find_map(|k| v.get(k).and_then(Value::as_str)).map(clean).filter(|s| !s.is_empty())
+    let text = |k: &str| v.get(k).and_then(Value::as_str).map(clean).filter(|s| !s.is_empty());
+    // `sub` is often a number: shown only when it is an address
+    text("email").or_else(|| text("preferred_username")).or_else(|| text("upn")).or_else(|| text("sub").filter(|s| s.contains('@')))
 }
 
 /// Read a token endpoint's answer. `refreshing`: an `invalid_grant` then means the refresh token

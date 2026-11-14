@@ -84,6 +84,21 @@ pub fn http_get(url: &str) -> (u16, String, String) {
     (status, head.to_string(), body.to_string())
 }
 
+/// A plain HTTP POST of a form, without following redirects: (status, headers, body).
+pub fn http_post_form(url: &str, form: &str) -> (u16, String, String) {
+    let rest = url.strip_prefix("http://").expect("an http address");
+    let (authority, path) = rest.split_once('/').map(|(a, p)| (a, format!("/{p}"))).unwrap_or((rest, "/".into()));
+    let mut s = TcpStream::connect(authority).expect("connect");
+    s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "POST {path} HTTP/1.1\r\nHost: {authority}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{form}", form.len()).unwrap();
+    let mut raw = Vec::new();
+    let _ = s.read_to_end(&mut raw);
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
+    let status = head.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+    (status, head.to_string(), body.to_string())
+}
+
 impl FakeOAuth {
     pub fn start() -> FakeOAuth {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();

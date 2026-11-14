@@ -108,7 +108,11 @@ pub fn connect_with_retry(auth: &dyn AuthFactory, mut connect: impl FnMut(&mut d
     match connect(a.as_mut()) {
         Err(ImapError::Auth(_)) if auth.token_rejected() => {
             let mut a = auth.authenticator().map_err(ImapError::Auth)?;
-            connect(a.as_mut())
+            // a fresh token was refused too: the sign-in itself is no good any more
+            connect(a.as_mut()).map_err(|e| match e {
+                ImapError::Auth(t) => ImapError::Auth(format!("{t} The server refused a fresh token as well. {}", crate::oauth::SIGN_IN_AGAIN)),
+                other => other,
+            })
         }
         r => r,
     }

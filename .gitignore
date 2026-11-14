@@ -5,3 +5,4 @@
 /.toolshim
 /.cargo
 notes/
+/tests/mail-env/certs/

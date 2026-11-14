@@ -19,6 +19,20 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **Mail (read-only)**: read your IMAP mail next to your notes, search it, and turn a mail into a
   note with one key. Shale keeps a local copy of the mail and never changes anything on the
   server. **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
+  Sign in with a password or with OAuth2 (Google, Microsoft). Shale has no OAuth2 client IDs of
+  its own yet, so you register one (about five minutes, free):
+  - *Google:* Cloud console, new project, OAuth consent screen (External, Testing, add yourself as
+    a test user), then Credentials, OAuth client ID, type **Desktop app**.
+  - Enter the client ID and the client secret in Shale (Accounts…, OAuth2, Google), then
+    "Sign in in the browser".
+  - Google's scope `https://mail.google.com/` is restricted: an unverified app works for up to 100
+    test users, and while it is in Testing, Google ends the sign-in after 7 days.
+  - *Microsoft:* Entra admin center, App registrations, new registration, platform "Mobile and
+    desktop applications" with redirect address `http://localhost`, allow public client flows,
+    permission `IMAP.AccessAsUser.All`.
+  - Enter the Application (client) ID in Shale (Accounts…, OAuth2, Microsoft); no secret needed.
+  Details in [docs/FEATURES.md](docs/FEATURES.md). A local test mail server with an OAuth2
+  provider (podman) is in [tests/mail-env](tests/mail-env/README.md).
 
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 

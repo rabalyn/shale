@@ -35,6 +35,8 @@ mod mail;
 mod mail_db;
 mod mail_demo;
 mod mail_dialog;
+#[cfg(test)]
+mod mail_env_tests;
 mod mail_store;
 mod mail_ui;
 #[cfg(test)]
