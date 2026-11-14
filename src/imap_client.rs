@@ -98,7 +98,7 @@ impl std::error::Error for ImapError {}
 
 pub type Result<T> = std::result::Result<T, ImapError>;
 
-fn io_error(e: io::Error) -> ImapError {
+pub(crate) fn io_error(e: io::Error) -> ImapError {
     if let Some(t) = e.get_ref().and_then(|x| x.downcast_ref::<rustls::Error>()) {
         return ImapError::Tls(t.to_string());
     }
@@ -442,7 +442,7 @@ struct RawResponse {
 }
 
 /// The connection: plain only until STARTTLS has been done.
-enum Io {
+pub(crate) enum Io {
     Plain(TcpStream),
     Tls(Box<StreamOwned<ClientConnection, TcpStream>>),
     /// While the connection is being upgraded.
@@ -477,8 +477,8 @@ impl Write for Io {
 }
 
 /// Buffered reading of lines and literals from the connection.
-struct Wire {
-    io: Io,
+pub(crate) struct Wire {
+    pub(crate) io: Io,
     buf: Vec<u8>,
     pos: usize,
     len: usize,
@@ -486,7 +486,7 @@ struct Wire {
 }
 
 impl Wire {
-    fn new(io: Io, max_line: usize) -> Wire {
+    pub(crate) fn new(io: Io, max_line: usize) -> Wire {
         Wire { io, buf: vec![0; 16 * 1024], pos: 0, len: 0, max_line }
     }
 
@@ -514,7 +514,7 @@ impl Wire {
     }
 
     /// One line without its CRLF. Longer than the limit is an error (and the connection is not used again).
-    fn read_line(&mut self) -> Result<Vec<u8>> {
+    pub(crate) fn read_line(&mut self) -> Result<Vec<u8>> {
         let mut scanned = 0;
         loop {
             let avail = &self.buf[self.pos..self.len];
@@ -530,6 +530,11 @@ impl Wire {
             scanned = avail.len();
             self.fill()?;
         }
+    }
+
+    /// Bytes that arrived but were not read yet (data that came before an encryption started is an attack).
+    pub(crate) fn has_buffered(&self) -> bool {
+        self.pos != self.len
     }
 
     fn take(&mut self, n: u64, keep: bool) -> Result<Vec<u8>> {
@@ -1043,7 +1048,7 @@ pub fn test_tls_config(extra_root: rustls::pki_types::CertificateDer<'static>) -
     Arc::new(cfg)
 }
 
-fn tcp_connect(s: &ConnectSettings) -> Result<TcpStream> {
+pub(crate) fn tcp_connect(s: &ConnectSettings) -> Result<TcpStream> {
     let addrs = (s.host.as_str(), s.port).to_socket_addrs().map_err(|e| ImapError::Connection(format!("cannot find {}: {e}", s.host)))?;
     let mut last = None;
     for a in addrs {
@@ -1060,7 +1065,7 @@ fn tcp_connect(s: &ConnectSettings) -> Result<TcpStream> {
     Err(last.map(io_error).unwrap_or_else(|| ImapError::Connection(format!("no address for {}", s.host))))
 }
 
-fn tls_stream(cfg: Arc<ClientConfig>, host: &str, tcp: TcpStream) -> Result<Io> {
+pub(crate) fn tls_stream(cfg: Arc<ClientConfig>, host: &str, tcp: TcpStream) -> Result<Io> {
     let name = ServerName::try_from(host.to_string()).map_err(|_| ImapError::Tls(format!("{host} is not a valid server name")))?;
     let conn = ClientConnection::new(cfg, name).map_err(|e| ImapError::Tls(e.to_string()))?;
     Ok(Io::Tls(Box::new(StreamOwned::new(conn, tcp))))

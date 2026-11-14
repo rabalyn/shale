@@ -98,7 +98,7 @@ pub fn server_cert() -> CertificateDer<'static> {
     certified().0.clone()
 }
 
-fn server_config() -> Arc<ServerConfig> {
+pub(crate) fn server_config() -> Arc<ServerConfig> {
     let (cert, key) = certified();
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let cfg = ServerConfig::builder_with_provider(provider).with_safe_default_protocol_versions().unwrap().with_no_client_auth().with_single_cert(vec![cert.clone()], PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.clone()))).unwrap();

@@ -61,6 +61,10 @@ mod people;
 mod reader;
 mod recovery;
 mod secrets;
+#[allow(dead_code)] // used by the sending job in a later commit of phase 3
+mod smtp_client;
+#[cfg(test)]
+mod smtp_fake_tests;
 mod tagwords;
 mod tb_store;
 mod theme;
