@@ -32,6 +32,7 @@ pub enum Icon {
     Sort,
     Calendar,
     Import,
+    Social,
 }
 
 pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
@@ -149,6 +150,16 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             let y = cx.y + w * 0.06;
             let b = cx.y + w * 0.3;
             p.add(Shape::line(vec![Pos2::new(cx.x - w * 0.34, y), Pos2::new(cx.x - w * 0.34, b), Pos2::new(cx.x + w * 0.34, b), Pos2::new(cx.x + w * 0.34, y)], s));
+        }
+        Icon::Social => {
+            // a speech bubble with two lines of text
+            let b = Rect::from_center_size(cx - Vec2::new(0.0, w * 0.07), Vec2::new(w * 0.8, w * 0.56));
+            let tail = b.min.x + w * 0.14;
+            p.add(Shape::closed_line(vec![b.left_top(), b.right_top(), b.right_bottom(), Pos2::new(tail + w * 0.26, b.max.y), Pos2::new(tail, b.max.y + w * 0.2), Pos2::new(tail, b.max.y), b.left_bottom()], s));
+            for (k, len) in [0.46f32, 0.3].iter().enumerate() {
+                let y = b.min.y + w * 0.17 + k as f32 * w * 0.16;
+                p.line_segment([Pos2::new(b.min.x + w * 0.14, y), Pos2::new(b.min.x + w * 0.14 + w * len, y)], Stroke::new(1.0, c));
+            }
         }
         Icon::Sort => {
             for (k, len) in [0.62f32, 0.44, 0.26].iter().enumerate() {
@@ -290,6 +301,9 @@ impl ShaleApp {
             if icon_button(ui, Icon::Tasks, 30.0, cur == Some(View::Tasks), "To-do list across all notes").clicked() {
                 self.actions.push(Action::ShowView(View::Tasks));
             }
+            if icon_button(ui, Icon::Social, 30.0, cur == Some(View::Social), "Feeds: read Mastodon and Bluesky and save posts to the vault").clicked() {
+                self.actions.push(Action::ShowView(View::Social));
+            }
             if icon_button(ui, Icon::Import, 30.0, matches!(self.modal, Some(Modal::Import(_))), "Import e-mails, events and files (or drop them on the window)").clicked() {
                 self.open_import(vec![], vec![], None);
             }
@@ -319,6 +333,7 @@ impl ShaleApp {
             View::Tasks => "Tasks".into(),
             View::Graph => "Graph".into(),
             View::Calendar => "Calendar".into(),
+            View::Social => "Feeds".into(),
             View::Note(p) | View::Drawing(p) => self.vault.as_ref().and_then(|v| v.file(p).map(|f| f.display_name())).unwrap_or_else(|| rel_to_string(p)),
         }
     }
@@ -470,13 +485,17 @@ impl ShaleApp {
             View::Note(rel) => self.note_view(ui, rel),
             View::Drawing(rel) => {
                 let dark = self.cfg.dark_canvas;
-                if let Some(d) = self.drawings.get_mut(&rel) {
-                    d.ui(ui, dark);
-                } else {
-                    self.actions.push(Action::Open { rel, new_tab: false });
+                match (self.drawings.get_mut(&rel), &self.vault) {
+                    (Some(d), Some(v)) => match d.ui(ui, dark, v) {
+                        Some(crate::drawing::DrawingAction::Editor(a)) => handle_editor_action(&mut self.actions, a, &rel),
+                        Some(crate::drawing::DrawingAction::ConvertCanvas) => self.actions.push(Action::ConvertCanvas { rel, new_tab: false }),
+                        None => {}
+                    },
+                    _ => self.actions.push(Action::Open { rel, new_tab: false }),
                 }
             }
             View::Tasks => self.tasks_view(ui),
+            View::Social => self.social_view(ui),
             View::Calendar => {
                 let monday = self.cfg.week_starts_monday;
                 let mut act = None;
@@ -572,7 +591,8 @@ impl ShaleApp {
                     }
                 } else {
                     tab.editor.inline_images = self.cfg.inline_images;
-                    tab.editor.people_dir = self.cfg.people_dir.clone();
+                    tab.editor.vim_enabled = self.cfg.vim_mode;
+                    tab.editor.assist.people_dir = self.cfg.people_dir.clone();
                     tab.editor.dark_canvas = self.cfg.dark_canvas;
                     let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
                     if changed {
@@ -602,6 +622,10 @@ impl ShaleApp {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 14.0;
             let small = |t: String| egui::RichText::new(t).size(11.5).color(theme::MUTED);
+            // vim-lite mode (or the command being typed) of the open note
+            if let Some(status) = self.tabs.get(self.active).and_then(|t| t.editor.vim_status()) {
+                ui.label(egui::RichText::new(status).size(11.5).monospace().color(theme::ACCENT));
+            }
             if let (Some(rel), Some(v)) = (self.current_path(), &self.vault) {
                 if let Some(doc) = self.notes.get(&rel) {
                     let words = doc.text.split_whitespace().count();

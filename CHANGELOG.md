@@ -9,6 +9,62 @@ The release page of each version on GitHub shows its section from this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Feeds: Mastodon and Bluesky**: a new Feeds tab (speech-bubble button in the ribbon) to
+  scroll your Home timeline, lists, Bluesky Following and saved feeds, with avatars, pictures,
+  quotes, link cards, content warnings and "boosted by". The next page loads when you reach the
+  end. **Save to vault** opens the Import dialog with the post, or the whole thread when it is a
+  thread by one author, its pictures (each can be unticked) and a **Source** link back; posts
+  saved before are marked. An option adds other people's replies as a nested "Replies" section. Accounts are added in the dialog **Accounts…**: Mastodon with a code
+  from the server's page (or an access token), Bluesky with an app password; secrets go to the
+  system keyring. `--view social` and `--view social-import` (with `--screenshot`) show it with
+  made-up posts. The `--keys` script got a `scroll:N` step.
+- **Drag and drop in the file list**: drag notes, drawings, files or whole folders onto a folder
+  to move them there (onto a note: next to it; onto empty space: to the top of the vault). A
+  closed folder opens when you hold the pointer on it, the list scrolls at its edges, and links
+  written as a path to anything that moved are updated (links by name keep working anyway).
+- **Browse search results with the keyboard**: ↓ or Enter in the search box goes into the
+  results; j / k move from hit to hit, Ctrl+J / Ctrl+K jump to the next / previous file, and
+  Enter opens the note with the cursor on the found text, ready to type. Esc goes back to the
+  box. All hits of a note are listed now (up to 20), not only the first 6.
+- **Obsidian Excalidraw drawings** (`.excalidraw.md`) open in the drawing editor instead of as a
+  note, also when their data is compressed. Saving keeps the plugin's file layout (front
+  matter, compression, embedded files) and updates its text list, so Obsidian keeps reading the
+  drawing. `[[Drawing.excalidraw]]` links and embeds find these files.
+- **Keyboard-only navigation**: Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back
+  into the note, and Ctrl+Shift+B opens the file list. There j / k go from file to file,
+  Ctrl+J / Ctrl+K from folder to folder, Space opens or closes a folder and Enter opens a file.
+- **Vim-style editing** (Settings, off by default): notes open in normal mode with h j k l,
+  w b W B, 0 $, gg G, `:line`, `/search` with n / N, i a I A o O to type, x, visual mode (v, V)
+  with d to cut and y to copy to the clipboard, and p to paste.
+- **Obsidian canvases** (`.canvas`) open in the drawing view, read-only: cards with their
+  colours, groups, file and web cards, and labelled arrows. Opening one asks whether to convert
+  it into an editable `Name.excalidraw.md` drawing next to it (the canvas is never changed); a
+  tick box, also in Settings → Drawings, makes that automatic. A copy made earlier is offered
+  instead of a second one.
+- **Links in drawings**: `[[` note suggestions, `[[p ` people and the `[!` file picker work in
+  drawing labels and texts. Shapes and texts with a link show a ↗ mark; click it (or Ctrl+click
+  the shape) to open the note or web page.
+- **Drawings in backlinks and the graph**: links in drawings and canvases count like links in
+  notes. Renaming or moving a note updates the links in drawings as well; canvases are never
+  changed, and the message names those still pointing to the old name.
+- **Pictures in drawings**: pictures in Obsidian Excalidraw drawings and excalidraw.com files are
+  shown instead of a dashed box, also in embeds and PDF export.
+
+### Fixed
+
+- Opening a drawing with arrows no longer rewrites its file; only an edit does.
+- A drawing file that can't be read now opens read-only with the reason, instead of as an empty
+  drawing that would replace the file on the first edit.
+
+### Changed
+
+- The `[[`, `[[p ` and `[!` helpers moved out of the note editor into their own module
+  (`src/link_assist.rs`) so drawings can use them; notes behave as before.
+- Dragging something Shale can't take (like a browser tab) across the window no longer leaves a
+  message behind; a hint at the pointer says so while it is over the window.
+
 ## [0.3.0] - 2026-11-13
 
 ### Security

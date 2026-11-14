@@ -165,7 +165,7 @@ pub fn resolve(base: &str, href: &str) -> String {
 // ---------------------------------------------------------------- HTTP through curl
 
 /// Largest answer accepted from a server.
-const MAX_BYTES: &str = "52428800";
+const MAX_BYTES: u64 = 52_428_800;
 const MARK: &str = "\n__SHALE__";
 // (%{size_header}: bytes of all response headers, which `-i` puts before the body; works with
 // any curl, unlike %header{…} which needs curl 7.84)
@@ -202,8 +202,29 @@ pub fn request(method: &str, url: &str, depth: &str, body: &str, acct: &Account)
     request_with(method, url, &[&format!("Depth: {depth}"), "Content-Type: application/xml; charset=utf-8"], body, acct)
 }
 
-/// One HTTP request with any headers.
+/// One HTTP request with any headers; the answer's body as text.
 pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account) -> Result<Response, String> {
+    let r = request_bytes(method, url, headers, body, acct, MAX_BYTES)?;
+    Ok(Response { status: r.status, body: String::from_utf8_lossy(&r.body).into_owned(), url: r.url, etag: r.etag })
+}
+
+/// The answer to `request_bytes`: the body is raw (pictures, video).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BytesResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+    /// where the answer came from in the end (after redirects)
+    pub url: String,
+    pub etag: Option<String>,
+    /// the Content-Type header of the answer (without parameters, lower case)
+    pub content_type: Option<String>,
+}
+
+/// One HTTP request with any headers and a binary answer of at most `max_bytes` (bigger answers
+/// are an error). All the security rules of this file apply; a header `Authorization: …` is only
+/// accepted when the answer finally comes from the same server (curl itself drops it on a
+/// redirect to another server).
+pub fn request_bytes(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, max_bytes: u64) -> Result<BytesResponse, String> {
     let origin = check_url(url)?;
     if !method.chars().all(|c| c.is_ascii_uppercase()) || method.is_empty() {
         return Err(format!("bad request method {method:?}"));
@@ -227,12 +248,14 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
     for h in headers {
         cfg.push_str(&format!("header = {}\n", curl_quote(h)));
     }
+    let with_auth = headers.iter().any(|h| h.trim_start().to_ascii_lowercase().starts_with("authorization:"));
     // a local http server may redirect to http; the final address is checked below
     let protos = if origin.scheme == "http" { "=http,https" } else { "=https" };
+    let max_time = if max_bytes > 10_000_000 { "300" } else { "30" };
     let mut child = Command::new("curl")
         // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
         .args(["-q", "-sS", "-i", "-L", "--max-redirs", "5", "--proto", protos, "--proto-redir", protos])
-        .args(["--connect-timeout", "10", "--max-time", "30", "--max-filesize", MAX_BYTES])
+        .args(["--connect-timeout", "10", "--max-time", max_time, "--max-filesize", &max_bytes.to_string()])
         .args(["-X", method, "-w", WRITE_OUT, "-K", "-", url])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -253,17 +276,25 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
     let (code, header_len, effective) = (fields.next().unwrap_or(""), fields.next().unwrap_or(""), fields.next().unwrap_or(""));
     let status: u16 = code.trim().parse().unwrap_or(0);
     let header_len = header_len.trim().parse::<usize>().unwrap_or(0).min(pos);
-    let etag = last_header(&String::from_utf8_lossy(&raw[..header_len]), "etag").unwrap_or_default();
-    let body = String::from_utf8_lossy(&raw[header_len..pos]).into_owned();
+    let head = String::from_utf8_lossy(&raw[..header_len]).into_owned();
+    let etag = last_header(&head, "etag").unwrap_or_default();
+    let content_type = last_header(&head, "content-type").map(|c| c.split(';').next().unwrap_or("").trim().to_ascii_lowercase()).filter(|c| !c.is_empty() && !has_control(c));
+    let body = raw[header_len..pos].to_vec();
     if status == 0 {
         let err = stderr();
         return Err(if err.is_empty() { "could not reach the server".into() } else { err });
     }
+    if body.len() as u64 > max_bytes {
+        return Err(format!("the answer is bigger than {} MB", max_bytes / 1_000_000));
+    }
     let effective = if effective.trim().is_empty() { url.to_string() } else { effective.trim().to_string() };
     if effective != url {
         check_url(&effective).map_err(|e| format!("the server redirected to an address that is not allowed: {e}"))?;
+        if with_auth && !same_server(&effective, url) {
+            return Err(format!("the server sent the request on to {}; Shale does not send your access token to another server", host_of(&effective)));
+        }
     }
-    Ok(Response { status, body, url: effective, etag: clean_etag(&etag) })
+    Ok(BytesResponse { status, body, url: effective, etag: clean_etag(&etag), content_type })
 }
 
 /// A header of the last response in curl's `-i` output (after redirects and "100 Continue").
@@ -623,6 +654,7 @@ pub(crate) mod tests {
         Command::new("curl").arg("--version").output().is_ok()
     }
 
+    // spec: SEC-001, SEC-004
     #[test]
     fn only_https_or_this_computer() {
         for ok in ["https://dav.example.com/cal/", "HTTPS://Dav.Example.com:8443/x", "http://localhost:5232/", "http://127.0.0.1:1/a", "http://[::1]:8080/", "http://radicale.localhost/"] {
@@ -641,6 +673,7 @@ pub(crate) mod tests {
         assert!(err.contains("https"), "{err}");
     }
 
+    // spec: SEC-001
     #[test]
     fn headers_with_line_breaks_are_refused() {
         let acct = Account { url: String::new(), username: "ada".into(), password: "pw".into() };
@@ -652,6 +685,7 @@ pub(crate) mod tests {
         assert!(request("PROPFIND", "http://127.0.0.1:1/", "0", "", &bad_user).is_err());
     }
 
+    // spec: SEC-007
     #[test]
     fn passwords_stay_out_of_debug_output() {
         let acct = Account { url: "https://x".into(), username: "ada".into(), password: "hunter2".into() };
@@ -659,6 +693,7 @@ pub(crate) mod tests {
         assert!(!s.contains("hunter2") && s.contains("***"), "{s}");
     }
 
+    // spec: SEC-001
     #[test]
     fn xml_and_addresses() {
         let x = r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/cal/work/</d:href><d:propstat><d:prop><d:displayname>Work &amp; more</d:displayname><d:resourcetype><d:collection/><cal:calendar xmlns:cal="urn:ietf:params:xml:ns:caldav"/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response><d:response><d:href>/cal/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response></d:multistatus>"#;
@@ -676,6 +711,7 @@ pub(crate) mod tests {
         assert!(calendars_in(&responses(&parse(other_ns).unwrap()), "https://h.example/").0.is_empty());
     }
 
+    // spec: CAL-002
     #[test]
     fn task_lists_and_read_only_calendars() {
         let x = r##"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/">
@@ -692,6 +728,7 @@ pub(crate) mod tests {
         assert_eq!((found[1].name.as_str(), found[1].read_only), ("work", false));
     }
 
+    // spec: SEC-008
     #[test]
     fn event_files_never_collide() {
         assert_eq!(event_file("abc-123@x"), event_file("abc-123@x"));
@@ -800,6 +837,7 @@ pub(crate) mod tests {
         (base, h)
     }
 
+    // spec: CAL-002, SEC-002
     #[test]
     fn discovers_and_fetches_from_a_server() {
         if !has_curl() {
@@ -821,6 +859,7 @@ pub(crate) mod tests {
         assert_eq!(seen.len(), 4);
     }
 
+    // spec: CAL-004, CAL-011
     #[test]
     fn writes_and_removes_events() {
         if !has_curl() {
@@ -869,6 +908,7 @@ pub(crate) mod tests {
         assert_eq!(h.join().unwrap().len(), 5);
     }
 
+    // spec: CAL-004
     #[test]
     fn headers_come_from_the_last_answer() {
         assert_eq!(last_header("HTTP/1.1 301 Moved\r\nETag: \"old\"\r\nLocation: /b\r\n\r\nHTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\netag: \"new\"\r\n\r\n", "etag").as_deref(), Some("\"new\""));
@@ -886,6 +926,7 @@ pub(crate) mod tests {
         assert_eq!(r.body, "<x>HTTP/1.1 200 OK\r\n\r\nnot a header</x>");
     }
 
+    // spec: CAL-004
     #[test]
     fn fetched_events_know_their_address() {
         if !has_curl() {
@@ -919,6 +960,7 @@ END:VCALENDAR
         assert_eq!((ev[1].href.as_deref(), ev[1].etag.as_deref()), (None, None), "an address on another server is not kept");
     }
 
+    // spec: CAL-002
     #[test]
     fn calendar_state_reads_tag_and_permission() {
         if !has_curl() {
@@ -932,6 +974,7 @@ END:VCALENDAR
         assert_eq!(st, CalState { tag: Some("ctag:42".into()), read_only: Some(true) });
     }
 
+    // spec: CAL-010
     #[test]
     fn unreachable_server_is_an_error() {
         if !has_curl() {

@@ -166,6 +166,7 @@ pub fn save(vault_root: &std::path::Path, tw: &TagWords) -> std::io::Result<()> 
 mod tests {
     use super::*;
 
+    // spec: TAG-002
     #[test]
     fn words_and_direct_tags() {
         let w = words("Hallo zusammen, der Beamer im Hörsaal B ist kaputt! 2026 https://x.de Grüße");
@@ -175,6 +176,7 @@ mod tests {
         assert!(direct(&tags, "lecture hall bb").is_empty(), "whole words only");
     }
 
+    // spec: TAG-002, TAG-003, VAULT-004
     #[test]
     fn learns_typical_words_and_suggests_tags() {
         let doc = |text: &str, tags: &[&str]| (words(text), tags.iter().map(|s| s.to_string()).collect::<Vec<_>>());

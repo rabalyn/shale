@@ -255,6 +255,7 @@ pub fn ensure_note(vault: &mut Vault, dir: &str, p: &Person) -> Result<PathBuf, 
 mod tests {
     use super::*;
 
+    // spec: PPL-002
     #[test]
     fn addresses_and_names() {
         let a = parse_addresses("\"Müller, Hans\" <H.Mueller@Arch.example>, info@lindner.example; Team Bau <bau@uni.example>, =?x?=, Ada Lovelace");
@@ -271,6 +272,7 @@ mod tests {
         assert_eq!(emails_in("- **E-mail:** h.mueller@arch.example, (alt: <hm@x.de>) mailto:A@B.de."), vec!["h.mueller@arch.example", "hm@x.de", "a@b.de"]);
     }
 
+    // spec: PPL-002, PPL-003
     #[test]
     fn people_of_a_mail_and_their_notes() {
         let d = std::env::temp_dir().join(format!("shale-people-{}", std::process::id()));

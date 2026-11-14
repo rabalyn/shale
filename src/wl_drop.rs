@@ -29,7 +29,8 @@ pub enum DropEvent {
     /// a drop is being read
     Busy,
     /// something was dragged over the window that Shale can't take
-    Refused { offered: Vec<String> },
+    /// (sent while it moves over the window, so the window can say so at the pointer)
+    Refused { x: f32, y: f32, offered: Vec<String> },
 }
 
 /// The kinds Shale takes, best first.
@@ -298,7 +299,7 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
                 state.pos = (x, y);
                 match &mime {
                     Some(_) => send(DropEvent::Hover { x: x as f32, y: y as f32 }),
-                    None => send(DropEvent::Refused { offered: offered.clone() }),
+                    None => send(DropEvent::Refused { x: x as f32, y: y as f32, offered: unique(&offered) }),
                 }
                 // read what can be read already now (the drop may come too late for some programs)
                 if mime.is_some() {
@@ -313,8 +314,10 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
             }
             E::Motion { x, y, .. } => {
                 state.pos = (x, y);
-                if matches!(state.current, Some((_, _, Some(_)))) {
-                    send(DropEvent::Hover { x: x as f32, y: y as f32 });
+                match &state.current {
+                    Some((_, _, Some(_))) => send(DropEvent::Hover { x: x as f32, y: y as f32 }),
+                    Some((_, offered, None)) => send(DropEvent::Refused { x: x as f32, y: y as f32, offered: unique(offered) }),
+                    None => {}
                 }
             }
             E::Leave => {
@@ -389,6 +392,7 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
 mod tests {
     use super::*;
 
+    // spec: IMP-009
     #[test]
     fn picks_the_most_useful_kind() {
         let o = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
@@ -403,6 +407,7 @@ mod tests {
         assert!(early("text/uri-list") && early("text/x-moz-url"), "everything is asked for while dragging");
     }
 
+    // spec: IMP-009
     #[test]
     fn reads_several_transfers_at_once_with_a_time_limit() {
         let pipe = || {

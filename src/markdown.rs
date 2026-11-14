@@ -481,6 +481,18 @@ pub fn link_safe_name(name: &str) -> String {
     s.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
+/// Byte offset of the first place in `line` where `query_lower` (already lowercase) starts,
+/// ignoring case: also for letters whose lowercase form has another length (`ẞ`, `İ`).
+pub fn find_ci(line: &str, query_lower: &str) -> Option<usize> {
+    if query_lower.is_empty() {
+        return Some(0);
+    }
+    line.char_indices().map(|(i, _)| i).find(|&i| {
+        let mut rest = line[i..].chars().flat_map(char::to_lowercase);
+        query_lower.chars().all(|q| rest.next() == Some(q))
+    })
+}
+
 pub fn sanitize_note_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
@@ -526,6 +538,7 @@ pub fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
 mod tests {
     use super::*;
 
+    // spec: LINK-001
     #[test]
     fn wiki_links_basic() {
         let t = "See [[Alpha]] and [[Beta|the beta]] and [[Gamma#Intro]].";
@@ -540,6 +553,7 @@ mod tests {
         assert_eq!(l[2].target, "Gamma");
     }
 
+    // spec: LINK-001
     #[test]
     fn embeds_and_md_links() {
         let t = "![[Sketch.excalidraw]]\n[text](My%20Note.md) [web](https://x.org)";
@@ -551,6 +565,7 @@ mod tests {
         assert_eq!(l[1].target, "My Note");
     }
 
+    // spec: LINK-001
     #[test]
     fn links_skip_code() {
         let t = "`[[Not]]` [[Yes]]\n```\n[[NoFence]]\n```\n[[After]]";
@@ -558,6 +573,7 @@ mod tests {
         assert_eq!(names, vec!["Yes", "After"]);
     }
 
+    // spec: LINK-001
     #[test]
     fn unicode_links() {
         let t = "Über [[Ärger]] ok";
@@ -566,6 +582,7 @@ mod tests {
         assert_eq!(&t[l[0].range.clone()], "[[Ärger]]");
     }
 
+    // spec: TASK-001, TASK-002
     #[test]
     fn tasks_parse_and_toggle() {
         let mut t = String::from("- [ ] one\n  * [x] two 📅 2026-12-01\n- [?] not\n1. [ ] three\n- [] no");
@@ -582,6 +599,7 @@ mod tests {
         assert!(find_tasks(&t).iter().all(|x| x.line != 1 || !x.done));
     }
 
+    // spec: TAG-001
     #[test]
     fn tags() {
         let t = "#one two #two/sub `#code` x#no #123\n# Heading";
@@ -589,6 +607,7 @@ mod tests {
         assert_eq!(tags, vec!["one", "two/sub"]);
     }
 
+    // spec: VAULT-013
     #[test]
     fn rename() {
         let t = "[[Old]] [[old|alias]] [[Old#H]] [x](Old.md) [[Older]]";
@@ -597,6 +616,7 @@ mod tests {
         assert_eq!(n, "[[New Name]] [[New Name|alias]] [[New Name#H]] [x](New%20Name.md) [[Older]]");
     }
 
+    // spec: TAG-001, LINK-006, VAULT-012
     #[test]
     fn file_names_with_a_hash_sign() {
         let l = find_links("- [[z_media/2026/11/261112_Your receipt from Shop, Limited #2583-3353-7982.eml]] and [[Note#Intro]] and [[Plan#Version 1.2]]");
@@ -609,10 +629,22 @@ mod tests {
         assert_eq!(tags, vec!["real"], "no tag from inside the link");
     }
 
+    // spec: LINK-007
     #[test]
     fn headings() {
         let h = find_headings("# A\ntext\n## B\n#notheading\n```\n# code\n```");
         assert_eq!(h, vec![(0, 1, "A".into()), (2, 2, "B".into())]);
+    }
+
+    // spec: EDIT-001
+    // spec: NAV-009
+    #[test]
+    fn find_ignores_case_also_for_other_letters() {
+        assert_eq!(find_ci("first Apple", "apple"), Some(6));
+        assert_eq!(find_ci("  Ünïcode ÄPFEL", "äpfel"), Some("  Ünïcode ".len()));
+        assert_eq!(find_ci("Die STRAẞE", "straße"), Some(4));
+        assert_eq!(find_ci("nothing", "apple"), None);
+        assert_eq!(find_ci("x", ""), Some(0));
     }
 
     #[test]
@@ -622,6 +654,7 @@ mod tests {
         assert!(fuzzy_score("apa", "Alpha").is_some());
     }
 
+    // spec: LINK-001
     #[test]
     fn offsets() {
         let t = "äb\ncd";

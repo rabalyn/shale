@@ -480,6 +480,7 @@ mod tests {
         continue_list(t, t.len()).expect("should continue")
     }
 
+    // spec: EDIT-005
     #[test]
     fn prefixes() {
         assert_eq!(list_prefix("- a").unwrap().marker, Marker::Bullet('-'));
@@ -494,6 +495,7 @@ mod tests {
         assert!(list_prefix("2026. year").is_some());
     }
 
+    // spec: EDIT-005
     #[test]
     fn enter_continues_lists() {
         assert_eq!(enter("- apples"), ("- apples\n- ".to_string(), 11));
@@ -507,6 +509,7 @@ mod tests {
         assert!(continue_list("plain", 5).is_none());
     }
 
+    // spec: EDIT-005
     #[test]
     fn enter_on_empty_item_ends_or_outdents() {
         let (t, c) = enter("- a\n- ");
@@ -518,6 +521,7 @@ mod tests {
         assert_eq!(t, "1. a\n2. [ ] ");
     }
 
+    // spec: EDIT-005
     #[test]
     fn enter_in_the_middle_renumbers() {
         let t = "1. a\n2. b\n3. c";
@@ -526,6 +530,7 @@ mod tests {
         assert_eq!(cur, 8);
     }
 
+    // spec: EDIT-005
     #[test]
     fn enter_splits_line_at_cursor() {
         let t = "- hello world";
@@ -533,6 +538,7 @@ mod tests {
         assert_eq!(out, "- hello\n- world");
     }
 
+    // spec: EDIT-005
     #[test]
     fn tab_indents_lists_and_headings() {
         let (t, s) = indent("- a\n- b", 6..6, false).unwrap();
@@ -556,6 +562,7 @@ mod tests {
         assert_eq!(t, "    - a\n    - b\n    - c");
     }
 
+    // spec: EDIT-005
     #[test]
     fn moving_lines() {
         // plain lines swap, cursor follows
@@ -583,6 +590,7 @@ mod tests {
         assert_eq!(t, "a\nb\nx\ny");
     }
 
+    // spec: EDIT-009
     #[test]
     fn web_links() {
         let t = "See [this is google](https://google.com) and https://example.org/x. Not [[Note]] or [n](Note.md) `https://code`";

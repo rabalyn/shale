@@ -449,6 +449,7 @@ mod tests {
 
     const SAMPLE: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:a1\r\nDTSTART:20261112T130000Z\r\nDTEND:20261112T143000Z\r\nSUMMARY:Planning\\, part 2\r\nLOCATION:Room 4\r\nDESCRIPTION:Line one\\nLine two that is quite long and is fol\r\n ded onto the next line\r\nORGANIZER;CN=Ada:mailto:ada@example.com\r\nATTENDEE;CN=\"Bob B\":mailto:bob@example.com\r\nBEGIN:VALARM\r\nTRIGGER:-PT15M\r\nDESCRIPTION:ignored\r\nEND:VALARM\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:a2\r\nDTSTART;VALUE=DATE:20261120\r\nDTEND;VALUE=DATE:20261123\r\nSUMMARY:Trip\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:a3\r\nDTSTART;TZID=Europe/Berlin:20260105T090000\r\nDURATION:PT15M\r\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE;COUNT=6\r\nEXDATE;TZID=Europe/Berlin:20260107T090000\r\nSUMMARY:Standup\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 
+    // spec: CAL-006
     #[test]
     fn parses_events() {
         let ev = parse_ics(SAMPLE);
@@ -477,6 +478,7 @@ mod tests {
         assert_eq!(ev[2].end - ev[2].start, 15 * 60, "DURATION");
     }
 
+    // spec: CAL-006
     #[test]
     fn weekly_repeats_with_exdate_and_count() {
         let ev = parse_ics(SAMPLE);
@@ -489,6 +491,7 @@ mod tests {
         assert_eq!(days[1], days_from_civil(2026, 1, 12), "Wed 7 Jan is excluded");
     }
 
+    // spec: CAL-006
     #[test]
     fn other_frequencies_and_ranges() {
         let base = Event { uid: "x".into(), summary: "Pay rent".into(), start: days_from_civil(2026, 1, 31) * 86_400, end: days_from_civil(2026, 2, 1) * 86_400, all_day: true, rrule: Some("FREQ=MONTHLY".into()), ..Default::default() };
@@ -506,6 +509,7 @@ mod tests {
         assert!(occurrences(&single, to, to + 86_400).is_empty());
     }
 
+    // spec: CAL-005, DATA-005
     #[test]
     fn writes_and_reads_back() {
         let ev = parse_ics(SAMPLE);
@@ -523,6 +527,7 @@ mod tests {
         assert_eq!(occurrences(&back[2], 0, i64::MAX / 2).len(), 5);
     }
 
+    // spec: CAL-006
     #[test]
     fn durations() {
         assert_eq!(parse_duration("PT45M"), Some(2700));

@@ -31,6 +31,7 @@ fn boundaries(s: &str) -> Vec<usize> {
     s.char_indices().map(|(i, _)| i).chain(std::iter::once(s.len())).collect()
 }
 
+// spec: VAULT-010, DATA-006
 #[test]
 fn text_functions_never_cut_a_character() {
     for s in samples() {
@@ -70,7 +71,7 @@ fn text_functions_never_cut_a_character() {
             let _ = lists::move_lines(&s, b..b, true);
             let _ = lists::move_lines(&s, b..s.len(), false);
             let _ = media::media_query(&s, b);
-            let _ = editor::link_query(&s, k);
+            let _ = crate::link_assist::link_query(&s, k);
             let _ = markdown::byte_to_char(&s, b);
             let _ = markdown::char_to_byte(&s, k);
         }
@@ -81,6 +82,7 @@ fn text_functions_never_cut_a_character() {
     }
 }
 
+// spec: DATA-006
 #[test]
 fn reading_view_and_pdf_export_take_any_text() {
     let d = std::env::temp_dir().join(format!("shale-utf8-{}", std::process::id()));

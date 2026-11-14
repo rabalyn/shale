@@ -883,6 +883,7 @@ mod tests {
         (d, ia, ib, il)
     }
 
+    // spec: DRAW-003
     #[test]
     fn snapping_finds_edge_middles() {
         let (d, a, _, _) = doc_with_two_boxes();
@@ -893,6 +894,7 @@ mod tests {
         assert!(d.find_snap(Pos2::new(200.0, 200.0), None).is_none());
     }
 
+    // spec: DRAW-003
     #[test]
     fn connections_follow_moved_shapes() {
         let (mut d, a, b, l) = doc_with_two_boxes();
@@ -921,6 +923,7 @@ mod tests {
         assert!(json.contains("\"endBinding\"") && json.contains("\"fixedPoint\""));
     }
 
+    // spec: DRAW-003
     #[test]
     fn labels_are_centred_and_follow() {
         let (mut d, a, _, _) = doc_with_two_boxes();
@@ -950,6 +953,7 @@ mod tests {
         assert!(d.scene.elements.iter().find(|e| e.id == id).unwrap().is_deleted);
     }
 
+    // spec: DRAW-004
     #[test]
     fn arrange_and_spread_move_shapes_and_keep_connections() {
         let (mut d, a, b, l) = doc_with_two_boxes();
@@ -972,6 +976,7 @@ mod tests {
         assert_eq!(ra2.min, Pos2::new(0.0, 0.0));
     }
 
+    // spec: DRAW-003
     #[test]
     fn line_endings_and_patterns_are_saved() {
         let (mut d, _, _, l) = doc_with_two_boxes();

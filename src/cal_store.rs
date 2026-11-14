@@ -579,6 +579,7 @@ pub(crate) mod tests {
         d
     }
 
+    // spec: CAL-001
     #[test]
     fn local_calendar_sample_add_delete() {
         let dir = tmp("local");
@@ -590,7 +591,10 @@ pub(crate) mod tests {
         assert!(file_of(&src).unwrap().exists(), "saved as an .ics file");
         let today = t::today();
         let occ = store.occurrences(today, today);
-        assert!(occ.len() >= 6, "today has several events, got {}", occ.len());
+        // 5 one-off events today, plus the standup on weekdays (Monday = 0 … Friday = 4)
+        assert!(occ.len() >= 5, "today has several events, got {}", occ.len());
+        let standup = occ.iter().any(|o| store.events[&src.id][o.event].summary == "Team standup");
+        assert_eq!(standup, t::weekday(today) < 5, "the standup repeats on weekdays only");
         let busy = store.occurrences(today + 2, today + 2);
         assert!(busy.len() >= 10, "the busy day is busy");
         // a reload from the file gives the same events
@@ -627,6 +631,7 @@ pub(crate) mod tests {
         CalendarSource { id: id.into(), name: id.into(), color: "#1971c2".into(), enabled: true, sync_minutes: DEFAULT_SYNC_MINUTES, kind: SourceKind::Caldav { url, username: "ada".into(), password: "x".into() } }
     }
 
+    // spec: CAL-002
     #[test]
     fn each_calendar_has_its_own_sync_timer() {
         let mut a = dav_source("a", "http://127.0.0.1:1/a/".into());
@@ -649,6 +654,7 @@ pub(crate) mod tests {
         assert_eq!(s.sync_minutes, 15);
     }
 
+    // spec: CAL-003
     #[test]
     fn moving_an_event_writes_first_and_removes_after() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -694,6 +700,7 @@ pub(crate) mod tests {
         assert_eq!(calls, vec!["PUT /ro/u1.ics".to_string(), "PUT /rw/u1.ics".into(), "DELETE /rw/u1.ics".into()]);
     }
 
+    // spec: CAL-002
     #[test]
     fn a_change_during_a_sync_loads_again() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -727,6 +734,7 @@ pub(crate) mod tests {
         assert!(!store.is_loading());
     }
 
+    // spec: JOB-001, CAL-002
     #[test]
     fn caldav_source_loads_in_the_background() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -750,6 +758,7 @@ pub(crate) mod tests {
         assert_eq!(store.event(&occ[0]).unwrap().summary, "Remote day");
     }
 
+    // spec: CAL-002
     #[test]
     fn unchanged_calendars_are_not_downloaded_again_and_read_only_ones_refuse_writes() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -790,6 +799,7 @@ pub(crate) mod tests {
         assert!(err.contains("read-only"), "{err}");
     }
 
+    // spec: CAL-004
     #[test]
     fn a_write_keeps_the_new_version_tag() {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
@@ -808,12 +818,14 @@ pub(crate) mod tests {
         assert_eq!(store.events["a"][0].etag.as_deref(), Some("\"v2\""));
     }
 
+    // spec: SEC-007
     #[test]
     fn passwords_stay_out_of_debug_output() {
         let s = format!("{:?}", dav_source("a", "https://x/".into()).kind);
         assert!(!s.contains("\"x\"") && s.contains("***"), "{s}");
     }
 
+    // spec: CAL-001, CFG-001
     #[test]
     fn config_round_trip() {
         let s = vec![

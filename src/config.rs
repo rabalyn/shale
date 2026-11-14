@@ -66,6 +66,18 @@ pub struct Config {
     pub recent_tags: Vec<String>,
     /// Folder of the contact notes (for `[[p …` links and people found when importing).
     pub people_dir: String,
+    /// Vim-style editing in notes: normal / insert / visual mode (off by default).
+    pub vim_mode: bool,
+    /// Opening an Obsidian canvas converts it to an editable drawing without asking.
+    pub auto_convert_canvas: bool,
+    /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
+    pub social_accounts: Vec<crate::social::SocialAccountEntry>,
+    /// The account and feed shown last in the feed view.
+    pub social_last: Option<(String, String)>,
+    /// The folder used for the last saved post (vault-relative); empty: "Social".
+    pub last_social_folder: String,
+    /// Include replies from other people when saving a post (the last choice in the Import dialog).
+    pub social_replies: bool,
 }
 
 impl Default for Config {
@@ -90,6 +102,12 @@ impl Default for Config {
             last_import_folder: String::new(),
             recent_tags: vec![],
             people_dir: crate::people::DEFAULT_DIR.into(),
+            vim_mode: false,
+            auto_convert_canvas: false,
+            social_accounts: vec![],
+            social_last: None,
+            last_social_folder: String::new(),
+            social_replies: false,
         }
     }
 }
@@ -207,6 +225,7 @@ impl Config {
 mod tests {
     use super::*;
 
+    // spec: CFG-001
     #[test]
     fn old_config_files_still_load() {
         let c: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
@@ -217,6 +236,25 @@ mod tests {
         assert_eq!(c.file_sort, FileSort::NameAsc);
     }
 
+    // spec: SOC-003
+    #[test]
+    fn social_accounts_are_saved_without_secrets_that_the_keyring_holds() {
+        use crate::social::{Account, Network, SocialAccountEntry};
+        let in_keyring = SocialAccountEntry { account: Account::new(Network::Mastodon, "https://m.test", "ada@m.test", "Ada"), secret: String::new() };
+        let kept = SocialAccountEntry { account: Account::new(Network::Bluesky, "https://bsky.social", "ada.bsky.social", ""), secret: "app-pw-123".into() };
+        let c = Config { social_accounts: vec![in_keyring.clone(), kept.clone()], social_last: Some(("a".into(), "home".into())), ..Config::default() };
+        let json = serde_json::to_string(&c).unwrap();
+        assert_eq!(json.matches("\"secret\"").count(), 1, "only the account without a keyring has a secret in the file: {json}");
+        let back: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.social_accounts, vec![in_keyring, kept]);
+        assert_eq!(back.social_last, Some(("a".into(), "home".into())));
+        assert!(!format!("{:?}", back.social_accounts).contains("app-pw-123"), "never in debug output");
+        // an old file has none
+        let old: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
+        assert!(old.social_accounts.is_empty() && old.social_last.is_none());
+    }
+
+    // spec: CFG-002
     #[test]
     fn private_files_are_owner_only_and_replaced_whole() {
         let dir = std::env::temp_dir().join(format!("shale-private-{}", std::process::id()));
@@ -235,6 +273,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // spec: VAULT-006
     #[test]
     fn recent_list_is_unique() {
         let mut c = Config::default();

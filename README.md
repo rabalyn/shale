@@ -14,6 +14,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **To-do list for the whole vault**: every `- [ ] task` from every note in one list.
   Tick tasks off there (the change is saved to the note), filter them, and sort by due date
   (`📅 2026-12-01` or `due:2026-12-01`).
+- **Feeds**: read your Mastodon and Bluesky timelines in Shale and save a post (or a whole
+  thread by one author) as a note, with its pictures and a link back to the post.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
   and a graph of the whole vault.
 
@@ -51,7 +53,9 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading` (with `--screenshot`) chooses which view to capture.
+- `--view tasks|graph|drawing|reading|social|social-import` (with `--screenshot`) chooses which view to capture;
+  `open:<file>` opens a file of the vault, `read-only:<file>.canvas` shows a canvas without the
+  question, and `convert:<file>.canvas` converts it first.
 
 ## Keyboard
 
@@ -61,6 +65,9 @@ Other options:
 | Ctrl+O | Quick switcher (find or create a note) |
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
+| Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
+| ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Alt+← / Alt+→ | Back / forward |
@@ -68,6 +75,12 @@ Other options:
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |
 | Middle-click on a link | Open it in a new tab |
+
+With **Vim-style editing** turned on in Settings, a note you go to is in normal mode:
+h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / N go to the next /
+previous hit; i a I A o O start typing and Esc stops; x deletes a character; v / V select (the
+motions extend the selection), then d cuts and y copies to the clipboard; p pastes it. The
+status bar shows the mode.
 
 In a drawing: V/1 select, H hand, R/2 rectangle, D/3 diamond, O/4 ellipse, A/5 arrow, L/6 line,
 P/7 pen, T/8 text, E/0 eraser. Ctrl+Z/Ctrl+Shift+Z undo/redo, Ctrl+D duplicate, Delete removes.
@@ -79,5 +92,11 @@ The mouse wheel pans and Ctrl+wheel zooms. Hold Space and drag to pan.
 cargo test
 ```
 
+The tests also run against a real vault if there is one: put notes, drawings and files into
+`notes/` next to `Cargo.toml` (it is not committed), or point `SHALE_TEST_VAULT` at a folder.
+Each test works on a copy, so the vault itself is never changed. Without such a folder those
+tests pass with a note.
+
 See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for what is done, what is tested and what is
-still missing.
+still missing. What Shale guarantees is in the specs ([docs/spec/](docs/spec/README.md)), and
+why it is built that way is in the decision records ([docs/decisions/](docs/decisions/README.md)).

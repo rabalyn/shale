@@ -8,6 +8,7 @@
 
 mod app;
 mod cal_dav;
+mod canvas;
 mod cal_dialog;
 mod cal_ics;
 mod cal_store;
@@ -15,13 +16,16 @@ mod cal_ui;
 mod cal_time;
 mod config;
 mod drawing;
+mod excalidraw_md;
 mod drawing_layout;
+mod drawing_pictures;
 mod editor;
 mod export_dialog;
 mod graph;
 mod import;
 mod import_dialog;
 mod layout;
+mod link_assist;
 mod lists;
 mod mail;
 mod markdown;
@@ -34,11 +38,15 @@ mod people;
 mod reader;
 mod theme;
 #[cfg(test)]
+mod notes_vault_tests;
+#[cfg(test)]
 mod utf8_tests;
 mod secrets;
+mod social;
 mod tagwords;
 mod tb_store;
 mod vault;
+mod vim;
 #[cfg(target_os = "linux")]
 mod wl_drop;
 

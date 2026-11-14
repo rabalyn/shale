@@ -196,6 +196,7 @@ impl ShaleApp {
                     }
                 };
                 let tags = import::parse_tags(&d.tags);
+                let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
                 let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.cfg.people_dir.clone() };
                 let Some(v) = &mut self.vault else { return true };
                 let (made, errors) = import::import(v, &d.items, &opts);
@@ -209,7 +210,18 @@ impl ShaleApp {
                     }
                 }
                 // remember the folder and tags for next time
-                self.cfg.last_import_folder = rel_to_string(&folder);
+                // remember whether replies of others were wanted (only asked when there were some)
+                if let Some(on) = d.items.iter().filter(|i| i.include).filter_map(|i| match &i.source {
+                    import::Source::Social { saved, replies, .. } if !saved.replies.is_empty() => Some(*replies),
+                    _ => None,
+                }).last() {
+                    self.cfg.social_replies = on;
+                }
+                if social_only {
+                    self.cfg.last_social_folder = rel_to_string(&folder);
+                } else {
+                    self.cfg.last_import_folder = rel_to_string(&folder);
+                }
                 for t in tags.iter().rev() {
                     self.cfg.recent_tags.retain(|o| !o.eq_ignore_ascii_case(t));
                     self.cfg.recent_tags.insert(0, t.clone());
@@ -279,14 +291,19 @@ impl ShaleApp {
             for e in events {
                 match e {
                     crate::wl_drop::DropEvent::Hover { x, y } => self.ext_hover = Some(Pos2::new(x / zoom, y / zoom)),
-                    crate::wl_drop::DropEvent::Leave => self.ext_hover = None,
+                    crate::wl_drop::DropEvent::Leave => {
+                        self.ext_hover = None;
+                        self.ext_refused = None;
+                    }
                     crate::wl_drop::DropEvent::Busy => {
                         self.ext_hover = None;
                         self.drop_busy = true;
                     }
-                    crate::wl_drop::DropEvent::Refused { offered } => {
+                    crate::wl_drop::DropEvent::Refused { x, y, offered } => {
+                        // only a hint at the pointer while it is over the window: passing over
+                        // the window with a browser tab is not worth a message
                         self.ext_hover = None;
-                        self.last_offered = offered;
+                        self.ext_refused = Some((Pos2::new(x / zoom, y / zoom), offered));
                     }
                     crate::wl_drop::DropEvent::Drop { x, y, parts, offered, report } => {
                         self.ext_hover = None;
@@ -310,12 +327,9 @@ impl ShaleApp {
                     }
                 }
             }
-            if !self.last_offered.is_empty() && self.ext_hover.is_none() && !matches!(self.modal, Some(Modal::Import(_))) {
-                // a drag the app couldn't take: say what was offered, once
-                let offered = std::mem::take(&mut self.last_offered);
-                if !offered.iter().any(|o| crate::wl_drop::pick_mime(std::slice::from_ref(o)).is_some()) {
-                    self.toast(format!("That can't be dropped here (it offered {}).", offered.join(", ")));
-                }
+            if let Some((p, offered)) = &self.ext_refused {
+                let shown: Vec<&str> = offered.iter().take(4).map(|s| s.as_str()).collect();
+                self.paint_hint_text(&ctx, *p, &format!("Shale can't take this\n(it offers {}{})", shown.join(", "), if offered.len() > 4 { ", …" } else { "" }));
             }
         }
         // finished drops
@@ -342,6 +356,57 @@ impl ShaleApp {
             let p = ctx.content_rect().center_bottom() - Vec2::new(90.0, 60.0);
             self.paint_hint_text(&ctx, p, "Reading the dropped message…");
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        // a file or folder dragged in the file list
+        if let (Some(drag), Some(p)) = (egui::DragAndDrop::payload::<crate::panels::TreeDrag>(&ctx), pointer_now(&ctx)) {
+            let target = self.tree_targets.iter().filter(|(r, _, _)| r.contains(p)).min_by(|a, b| a.0.area().total_cmp(&b.0.area())).cloned();
+            let from = drag.0.clone();
+            let name = from.file_name().map(|n| crate::markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
+            let here = from.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+            let verdict = target.as_ref().map(|(_, into, _)| {
+                if *into == here {
+                    Err("already here")
+                } else if into.starts_with(&from) {
+                    Err("a folder can't go into itself")
+                } else {
+                    Ok(())
+                }
+            });
+            // a closed folder opens when the pointer rests on it
+            match &target {
+                Some((_, f, true)) => match &self.tree_hover {
+                    Some((h, since)) if h == f => {
+                        if since.elapsed() > std::time::Duration::from_millis(700) {
+                            self.expanded.insert(f.clone());
+                            self.tree_hover = None;
+                        }
+                    }
+                    _ => self.tree_hover = Some((f.clone(), std::time::Instant::now())),
+                },
+                _ => self.tree_hover = None,
+            }
+            if ctx.input(|i| i.pointer.any_released()) {
+                egui::DragAndDrop::clear_payload(&ctx);
+                self.tree_hover = None;
+                if let (Some((_, into, _)), Some(Ok(()))) = (target, verdict) {
+                    self.actions.push(Action::Move { from, into });
+                }
+            } else {
+                let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("tree-drop")));
+                let text = match (&target, verdict) {
+                    (Some((r, into, _)), Some(Ok(()))) => {
+                        // the whole list stands for the top of the vault: no box around it
+                        if !into.as_os_str().is_empty() {
+                            painter.rect_stroke(*r, CornerRadius::same(5), Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+                        }
+                        format!("Move “{name}” into {}", if into.as_os_str().is_empty() { "the top of the vault".to_string() } else { format!("“{}”", rel_to_string(into)) })
+                    }
+                    (_, Some(Err(why))) => format!("“{name}”: {why}"),
+                    _ => format!("Move “{name}”: drop it on a folder"),
+                };
+                self.paint_hint_text(&ctx, p, &text);
+                ctx.request_repaint();
+            }
         }
         // an event dragged out of the calendar
         let cal = egui::DragAndDrop::payload::<crate::cal_ui::CalDrag>(&ctx);
@@ -397,4 +462,8 @@ impl ShaleApp {
         painter.rect_stroke(r, CornerRadius::same(6), Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
         painter.galley(r.min + Vec2::new(8.0, 5.0), galley, Color32::WHITE);
     }
+}
+
+fn pointer_now(ctx: &egui::Context) -> Option<Pos2> {
+    ctx.input(|i| i.pointer.latest_pos())
 }

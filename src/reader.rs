@@ -32,8 +32,7 @@ impl SceneCache {
         let mtime = std::fs::metadata(&abs).and_then(|m| m.modified()).ok();
         let stale = self.map.get(rel).map(|(m, _)| *m != mtime).unwrap_or(true);
         if stale {
-            let text = std::fs::read_to_string(&abs).ok()?;
-            let scene = Scene::parse(&text).ok()?;
+            let scene = Scene::read_file(&abs).ok()?;
             self.map.insert(rel.to_path_buf(), (mtime, scene));
         }
         self.map.get(rel).map(|(_, s)| s)
@@ -50,7 +49,7 @@ pub fn scene_cached(ctx: &egui::Context, abs: &Path) -> Option<std::sync::Arc<Sc
     if let Some(s) = ctx.data(|d| d.get_temp::<Option<std::sync::Arc<Scene>>>(id)) {
         return s;
     }
-    let scene = std::fs::read_to_string(abs).ok().and_then(|t| Scene::parse(&t).ok()).map(std::sync::Arc::new);
+    let scene = Scene::read_file(abs).ok().map(std::sync::Arc::new);
     ctx.data_mut(|d| d.insert_temp(id, scene.clone()));
     scene
 }
@@ -384,7 +383,8 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, scenes: &mut SceneCache, bas
                 let bg = if dark { Color32::from_rgb(18, 18, 18) } else { Color32::WHITE };
                 ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
                 if let Some(scene) = scenes.get(vault, target) {
-                    drawing::paint_thumbnail(ui.painter(), scene, rect.shrink(6.0), dark);
+                    let pics = crate::drawing_pictures::textures(ui.ctx(), scene, vault, target);
+                    drawing::paint_thumbnail(ui.painter(), scene, rect.shrink(6.0), dark, &pics);
                 }
                 if resp.on_hover_text("Open drawing").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     *out = Some(ReaderAction::OpenFile(target.to_path_buf()));

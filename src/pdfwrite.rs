@@ -463,6 +463,7 @@ pub fn inflate(data: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    // spec: PDF-001
     #[test]
     fn writes_a_pdf_that_renders() {
         let mut d = Doc::new("Test");
@@ -485,6 +486,7 @@ mod tests {
         assert!(px[i] > 150 && px[i + 1] < 100, "red rectangle rendered: {:?}", &px[i..i + 4]);
     }
 
+    // spec: PDF-001
     #[test]
     fn win_ansi_mapping() {
         assert_eq!(win_ansi('A'), Some(0x41));

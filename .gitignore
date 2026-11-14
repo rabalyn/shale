@@ -4,3 +4,4 @@
 # build helpers for the sandbox this was made in (a normal cargo build doesn't need them)
 /.toolshim
 /.cargo
+notes/

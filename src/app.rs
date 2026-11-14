@@ -32,6 +32,8 @@ pub enum View {
     Tasks,
     Graph,
     Calendar,
+    /// Mastodon / Bluesky feeds
+    Social,
 }
 
 impl View {
@@ -77,6 +79,7 @@ pub enum RightPanel {
 }
 
 mod drops;
+mod social;
 
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
@@ -101,6 +104,9 @@ pub enum Modal {
     Calendars(Box<crate::cal_dialog::CalendarDialog>),
     Event(Box<crate::cal_dialog::EventDialog>),
     Import(Box<crate::import_dialog::ImportDialog>),
+    Social(Box<crate::social::accounts_ui::SocialDialog>),
+    /// an Obsidian canvas is being opened: convert it or open it read-only?
+    ConvertCanvas { rel: PathBuf, new_tab: bool, always: bool, existing: Option<PathBuf> },
 }
 
 pub enum Action {
@@ -112,6 +118,8 @@ pub enum Action {
     NewDrawing { folder: PathBuf, embed_into: Option<PathBuf> },
     ToggleTask { rel: PathBuf, offset: usize },
     GotoLine { rel: PathBuf, line: usize },
+    /// open a note with the cursor at `col` (byte offset) of `line`, keyboard in the editor
+    GotoMatch { rel: PathBuf, line: usize, col: usize },
     ShowView(View),
     CloseTab(usize),
     Rename(PathBuf),
@@ -122,6 +130,10 @@ pub enum Action {
     Rescan,
     /// make a contact note in the people folder (from `[[p Name`)
     CreatePerson(String),
+    /// move a file or folder into a folder (drag and drop in the file list)
+    Move { from: PathBuf, into: PathBuf },
+    /// make an editable drawing from an Obsidian canvas and open it
+    ConvertCanvas { rel: PathBuf, new_tab: bool },
 }
 
 #[derive(Default)]
@@ -144,6 +156,14 @@ pub struct ShaleApp {
     pub right: RightPanel,
     pub expanded: HashSet<PathBuf>,
     pub search: String,
+    /// the selected stop in the search results while they are browsed with the keyboard
+    pub search_sel: Option<usize>,
+    /// scroll the selected search result into view on the next frame
+    pub(crate) search_scroll: bool,
+    /// the selected row of the file list while it has the keyboard (Ctrl+H, Ctrl+Shift+B)
+    pub tree_sel: Option<PathBuf>,
+    /// scroll the selected file list row into view on the next frame
+    pub(crate) tree_scroll: bool,
     /// focus the search box (and select its text) in the next frame
     pub focus_search: bool,
     pub tasks: TasksFilter,
@@ -152,6 +172,8 @@ pub struct ShaleApp {
     pub calendar: crate::cal_store::CalendarStore,
     pub cal_side: crate::cal_ui::CalendarView,
     pub cal_main: crate::cal_ui::CalendarView,
+    /// the feed view (Mastodon / Bluesky)
+    pub social: crate::social::state::SocialState,
     /// deletes started from the event popup: (job, calendar)
     pub cal_jobs: Vec<(crate::cal_store::Job, String)>,
     /// the calendar the last event was saved to (the default for the next new one)
@@ -160,11 +182,17 @@ pub struct ShaleApp {
     ctx: Option<egui::Context>,
     /// where things can be dropped this frame
     drop_zones: Vec<drops::DropZone>,
+    /// file list drop targets this frame: (row, folder to move into, a closed folder row)
+    pub(crate) tree_targets: Vec<(egui::Rect, PathBuf, bool)>,
+    /// a closed folder hovered while dragging, since when (it opens after a moment)
+    tree_hover: Option<(PathBuf, Instant)>,
     calendar_areas: Vec<egui::Rect>,
     /// something from another program is dragged over the window (Wayland)
     ext_hover: Option<egui::Pos2>,
     /// the kinds the last drag from another program offered
     last_offered: Vec<String>,
+    /// something Shale can't take is dragged over the window: where, and what it offers
+    ext_refused: Option<(egui::Pos2, Vec<String>)>,
     /// test drops from `--keys` (handled like drops from other programs)
     #[cfg(target_os = "linux")]
     fake_drops: Vec<crate::wl_drop::DropEvent>,
@@ -211,6 +239,10 @@ impl ShaleApp {
         let screenshot = opts.screenshot.clone();
         let mut cfg = if persist { Config::load() } else { Config::default() };
         let persist_config = persist;
+        // screenshots and scripted checks of vim-lite: SHALE_VIM=1 turns it on
+        if opts.screenshot.is_some() && std::env::var("SHALE_VIM").as_deref() == Ok("1") {
+            cfg.vim_mode = true;
+        }
         // Which vault to open: --vault, else (normal start) the last one, else a demo for screenshots.
         let vault_path = match (&opts.vault, &screenshot) {
             (Some(v), _) => Some(v.clone()),
@@ -236,6 +268,10 @@ impl ShaleApp {
             right: RightPanel::Backlinks,
             expanded: HashSet::new(),
             search: String::new(),
+            search_sel: None,
+            search_scroll: false,
+            tree_sel: None,
+            tree_scroll: false,
             focus_search: false,
             tasks: TasksFilter::default(),
             graph: GraphView::new(false),
@@ -243,13 +279,17 @@ impl ShaleApp {
             calendar: crate::cal_store::CalendarStore::new(cfg.calendars.clone(), if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{}", std::process::id())) }),
             cal_side: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Small),
             cal_main: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Medium),
+            social: crate::social::state::SocialState::new(if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{}", std::process::id())) }),
             cal_jobs: vec![],
             last_event_calendar: None,
             ctx: None,
             drop_zones: vec![],
+            tree_targets: vec![],
+            tree_hover: None,
             calendar_areas: vec![],
             ext_hover: None,
             last_offered: vec![],
+            ext_refused: None,
             #[cfg(target_os = "linux")]
             fake_drops: vec![],
             pending_drops: vec![],
@@ -289,7 +329,27 @@ impl ShaleApp {
                 Some("calendar-side") => app.right = RightPanel::Calendar,
                 Some("tasks") => app.show_view(View::Tasks, false),
                 Some("graph") => app.show_view(View::Graph, false),
+                // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
+                Some(v @ ("social" | "social-import")) => {
+                    let demo = crate::social::demo::account();
+                    app.cfg.social_accounts = vec![demo.clone()];
+                    app.social.load_demo(&demo);
+                    app.show_view(View::Social, false);
+                    if v == "social-import" {
+                        let posts = crate::social::demo::posts();
+                        let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon", false)).collect();
+                        app.open_import(items, vec![], Some((PathBuf::from("Social"), None)));
+                    }
+                }
                 Some("drawing") => app.open(Path::new("Sketch.excalidraw"), false),
+                // any file of the vault, e.g. `--view "open:Excalidraw/Plan.excalidraw.md"`
+                Some(v) if v.starts_with("open:") => app.open(Path::new(&v["open:".len()..]), false),
+                // a canvas shown read-only without the question, e.g. `--view "read-only:Map.canvas"`
+                Some(v) if v.starts_with("read-only:") => app.open_canvas_read_only(Path::new(&v["read-only:".len()..]), false),
+                // a canvas converted to a drawing (as the "Convert" button does), e.g. `--view "convert:Map.canvas"`
+                Some(v) if v.starts_with("convert:") => {
+                    app.convert_canvas(Path::new(&v["convert:".len()..]), false);
+                }
                 Some("reading") => {
                     if let Some(t) = app.tabs.get_mut(app.active) {
                         t.reading = true;
@@ -334,7 +394,13 @@ impl ShaleApp {
                 let reopen: Vec<String> = self.cfg.open_files.clone();
                 for (i, f) in reopen.iter().enumerate() {
                     let rel = PathBuf::from(f);
-                    if self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
+                    if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
+                        continue;
+                    }
+                    // a canvas tab comes back as it was left: read-only, without the question
+                    if crate::canvas::is_canvas_path(&rel) {
+                        self.open_canvas_read_only(&rel, i > 0);
+                    } else {
                         self.open(&rel, i > 0);
                     }
                 }
@@ -415,10 +481,26 @@ impl ShaleApp {
                 }
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
             }
+            FileKind::Drawing if crate::canvas::is_canvas_path(rel) && !self.drawings.contains_key(rel) => {
+                // a canvas: open the copy converted earlier, convert it, or ask
+                let existing = crate::canvas::find_converted(v, rel);
+                match existing {
+                    Some(copy) if self.cfg.auto_convert_canvas => self.open(&copy, new_tab),
+                    None if self.cfg.auto_convert_canvas => {
+                        self.convert_canvas(rel, new_tab);
+                    }
+                    _ => self.modal = Some(Modal::ConvertCanvas { rel: rel.to_path_buf(), new_tab, always: false, existing }),
+                }
+                return;
+            }
             FileKind::Drawing => {
                 if !self.drawings.contains_key(rel) {
-                    let json = std::fs::read_to_string(v.abs(rel)).unwrap_or_default();
-                    self.drawings.insert(rel.to_path_buf(), DrawingDoc::new(rel.to_path_buf(), &json));
+                    // a file that can't be read opens read-only (never an empty drawing that overwrites it)
+                    let doc = match std::fs::read_to_string(v.abs(rel)) {
+                        Ok(text) => DrawingDoc::new(rel.to_path_buf(), &text),
+                        Err(e) => DrawingDoc::unreadable(rel.to_path_buf(), &e.to_string()),
+                    };
+                    self.drawings.insert(rel.to_path_buf(), doc);
                 }
                 self.show_view(View::Drawing(rel.to_path_buf()), new_tab);
             }
@@ -428,6 +510,44 @@ impl ShaleApp {
             }
         }
         self.remember_open_files();
+    }
+
+    /// Show an Obsidian canvas read-only (no question asked).
+    pub fn open_canvas_read_only(&mut self, rel: &Path, new_tab: bool) {
+        let Some(v) = &self.vault else { return };
+        let doc = match std::fs::read_to_string(v.abs(rel)) {
+            Ok(text) => DrawingDoc::new(rel.to_path_buf(), &text),
+            Err(e) => DrawingDoc::unreadable(rel.to_path_buf(), &e.to_string()),
+        };
+        self.drawings.insert(rel.to_path_buf(), doc);
+        self.show_view(View::Drawing(rel.to_path_buf()), new_tab);
+        self.remember_open_files();
+    }
+
+    /// Make `Name.excalidraw.md` next to the canvas `rel` and open it. The canvas is not changed.
+    pub fn convert_canvas(&mut self, rel: &Path, new_tab: bool) -> Option<PathBuf> {
+        let v = self.vault.as_mut()?;
+        let made = std::fs::read_to_string(v.abs(rel)).map_err(|e| e.to_string()).and_then(|text| crate::canvas::converted_file(rel, &text)).and_then(|content| {
+            let to = v.new_note_path(rel.parent().unwrap_or(Path::new("")), &crate::canvas::drawing_name_for(rel));
+            v.create_file(&to, &content).map_err(|e| e.to_string())
+        });
+        match made {
+            Ok(to) => {
+                self.toast(format!("Converted to “{}” (the canvas is unchanged)", rel_to_string(&to)));
+                // the canvas's read-only tab (if open) shows the new drawing instead
+                if let Some(i) = self.tabs.iter().position(|t| t.view.path() == Some(rel)) {
+                    self.active = i;
+                    self.open(&to, false);
+                } else {
+                    self.open(&to, new_tab);
+                }
+                Some(to)
+            }
+            Err(e) => {
+                self.toast(format!("Could not convert the canvas: {e}"));
+                None
+            }
+        }
     }
 
     fn remember_open_files(&mut self) {
@@ -462,8 +582,13 @@ impl ShaleApp {
     pub fn create_note(&mut self, folder: &Path, name: &str, new_tab: bool) -> Option<PathBuf> {
         let v = self.vault.as_mut()?;
         let rel = v.new_note_path(folder, name);
-        let is_drawing = rel.extension().map(|e| e == "excalidraw").unwrap_or(false);
-        let content = if is_drawing { crate::drawing::Scene::default().to_json() } else { String::new() };
+        let content = if crate::excalidraw_md::is_plugin_file(&rel) {
+            crate::excalidraw_md::new_file(&crate::drawing::Scene::default())
+        } else if crate::excalidraw_md::is_drawing_path(&rel) {
+            crate::drawing::Scene::default().to_json()
+        } else {
+            String::new()
+        };
         match v.create_file(&rel, &content) {
             Ok(rel) => {
                 let shown = v.file(&rel).map(|f| f.display_name()).unwrap_or_default();
@@ -511,9 +636,20 @@ impl ShaleApp {
     }
 
     pub fn goto_line(&mut self, rel: &Path, line: usize) {
+        self.goto_match(rel, line, 0);
+    }
+
+    /// Open `rel` with the cursor at byte `col` of `line` (clamped to the line) and the keyboard
+    /// in the editor.
+    pub fn goto_match(&mut self, rel: &Path, line: usize, col: usize) {
         self.open(rel, false);
         if let (Some(doc), Some(tab)) = (self.notes.get(rel), self.tabs.get_mut(self.active)) {
-            let byte = markdown::line_start_byte(&doc.text, line);
+            let start = markdown::line_start_byte(&doc.text, line);
+            let line_len = doc.text[start..].find('\n').unwrap_or(doc.text.len() - start);
+            let mut byte = start + col.min(line_len);
+            while !doc.text.is_char_boundary(byte) {
+                byte -= 1;
+            }
             tab.editor.pending_cursor = Some(markdown::byte_to_char(&doc.text, byte));
             tab.reading = false;
         }
@@ -547,10 +683,14 @@ impl ShaleApp {
         }
         for (rel, d) in self.drawings.iter_mut() {
             if d.dirty {
-                let json = d.scene.to_json();
-                if v.write_raw(rel, &json).is_ok() {
-                    d.dirty = false;
-                    self.scenes.put(rel, d.scene.clone());
+                match d.file_text() {
+                    Ok(text) => {
+                        if v.write_raw(rel, &text).is_ok() {
+                            d.dirty = false;
+                            self.scenes.put(rel, d.scene.clone());
+                        }
+                    }
+                    Err(e) => eprintln!("save failed for {}: {e}", rel_to_string(rel)),
                 }
             }
         }
@@ -568,10 +708,11 @@ impl ShaleApp {
         }
         for (rel, d) in self.drawings.iter_mut() {
             if d.dirty && d.last_edit.elapsed() > wait {
-                let json = d.scene.to_json();
-                if v.write_raw(rel, &json).is_ok() {
-                    d.dirty = false;
-                    self.scenes.put(rel, d.scene.clone());
+                if let Ok(text) = d.file_text() {
+                    if v.write_raw(rel, &text).is_ok() {
+                        d.dirty = false;
+                        self.scenes.put(rel, d.scene.clone());
+                    }
                 }
             }
         }
@@ -613,10 +754,14 @@ impl ShaleApp {
         let file_name = match kind {
             Some(FileKind::Note) => format!("{}.md", markdown::strip_md_ext(&new_name)),
             Some(FileKind::Drawing) => {
-                if new_name.to_lowercase().ends_with(".excalidraw") {
-                    new_name.clone()
+                // keep the format: an Obsidian `.excalidraw.md` drawing or `.canvas` stays one
+                let stem = crate::excalidraw_md::drawing_stem(&new_name);
+                if crate::excalidraw_md::is_plugin_file(rel) {
+                    format!("{stem}.excalidraw.md")
+                } else if crate::canvas::is_canvas_path(rel) {
+                    format!("{stem}.canvas")
                 } else {
-                    format!("{new_name}.excalidraw")
+                    format!("{stem}.excalidraw")
                 }
             }
             _ => new_name.clone(),
@@ -626,6 +771,16 @@ impl ShaleApp {
             return Ok(());
         }
         let changed = v.rename(rel, &to, self.cfg.update_links_on_rename && !is_dir).map_err(|e| e.to_string())?;
+        self.after_move(rel, &to, is_dir, &changed.changed);
+        self.toast(format!("Renamed to “{}”{}", markdown::strip_md_ext(&file_name), links_message(&changed, "name")));
+        self.remember_open_files();
+        Ok(())
+    }
+
+    /// After a file or folder moved from `rel` to `to`: open notes, drawings and tabs follow it,
+    /// and open notes whose text changed on disk (updated links) are reloaded.
+    fn after_move(&mut self, rel: &Path, to: &Path, is_dir: bool, changed: &[PathBuf]) {
+        let to = to.to_path_buf();
         // move open buffers and tabs
         let remap = |p: &Path| -> Option<PathBuf> {
             if p == rel {
@@ -667,18 +822,46 @@ impl ShaleApp {
             t.title_for = None;
         }
         let v = self.vault.as_ref().unwrap();
-        for c in &changed {
+        for c in changed {
             if let (Some(doc), Some(n)) = (self.notes.get_mut(c), v.notes.get(c)) {
                 doc.text = n.text.clone();
             }
+            // an open drawing whose links were rewritten shows the file as it is now (it was saved
+            // before the rename, so nothing is lost)
+            if self.drawings.contains_key(c) {
+                if let Ok(text) = std::fs::read_to_string(v.abs(c)) {
+                    self.drawings.insert(c.clone(), DrawingDoc::new(c.clone(), &text));
+                }
+            }
         }
-        if !changed.is_empty() {
-            self.toast(format!("Renamed and updated links in {} note(s)", changed.len()));
-        } else {
-            self.toast(format!("Renamed to “{}”", markdown::strip_md_ext(&file_name)));
+        // open folders in the file list move along
+        let exp: Vec<PathBuf> = self.expanded.iter().cloned().collect();
+        for e in exp {
+            if let Ok(rest) = e.strip_prefix(rel) {
+                self.expanded.remove(&e);
+                self.expanded.insert(to.join(rest));
+            }
         }
+    }
+
+    /// Move a note, drawing, file or folder into another folder (drag and drop in the file list).
+    pub fn move_into(&mut self, rel: &Path, into: &Path) -> Result<PathBuf, String> {
+        if rel.parent().unwrap_or(Path::new("")) == into {
+            return Ok(rel.to_path_buf());
+        }
+        self.flush_all();
+        let v = self.vault.as_mut().ok_or("no vault")?;
+        let is_dir = v.abs(rel).is_dir();
+        let (to, changed) = v.move_into(rel, into).map_err(|e| e.to_string())?;
+        self.after_move(rel, &to, is_dir, &changed.changed);
+        if !into.as_os_str().is_empty() {
+            self.expanded.insert(into.to_path_buf());
+        }
+        let name = rel.file_name().map(|n| markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
+        let place = if into.as_os_str().is_empty() { "the vault".to_string() } else { format!("“{}”", rel_to_string(into)) };
+        self.toast(format!("Moved “{name}” to {place}{}", links_message(&changed, "place")));
         self.remember_open_files();
-        Ok(())
+        Ok(to)
     }
 
     pub fn trash(&mut self, rel: &Path) {
@@ -699,6 +882,42 @@ impl ShaleApp {
                 self.remember_open_files();
             }
             Err(e) => self.toast(format!("Could not move to trash: {e}")),
+        }
+    }
+
+    /// Open the note before (-1) or after (+1) the current one in the file list (same folder,
+    /// the list's sort order), in the same tab.
+    /// Put the keyboard into the left sidebar (Ctrl+H, Ctrl+Shift+B): browse the file list with
+    /// the open note selected, or type in the search box.
+    pub fn focus_sidebar(&mut self, ctx: &egui::Context) {
+        self.cfg.show_left = true;
+        if let Some(f) = ctx.memory(|m| m.focused()) {
+            ctx.memory_mut(|m| m.surrender_focus(f));
+        }
+        match self.left {
+            LeftPanel::Files => {
+                let cur = self.current_path();
+                // the open note's folders open, so it can be selected
+                let mut p = cur.as_deref().and_then(|c| c.parent());
+                while let Some(d) = p.filter(|d| !d.as_os_str().is_empty()) {
+                    self.expanded.insert(d.to_path_buf());
+                    p = d.parent();
+                }
+                let rows = self.visible_tree_rows();
+                self.tree_sel = cur.filter(|c| rows.iter().any(|(r, _)| r == c)).or_else(|| rows.first().map(|(r, _)| r.clone()));
+                self.tree_scroll = true;
+            }
+            LeftPanel::Search => self.focus_search = true,
+            LeftPanel::Tags => {}
+        }
+    }
+
+    /// Put the keyboard back into the editor of the open note (Ctrl+L).
+    pub fn focus_editor(&mut self) {
+        self.tree_sel = None;
+        self.search_sel = None;
+        if let Some(t) = self.tabs.get_mut(self.active) {
+            t.editor.request_focus = true;
         }
     }
 
@@ -788,7 +1007,7 @@ impl ShaleApp {
         let drawing = f.kind == FileKind::Drawing;
         let name = f.display_name();
         let opts = if drawing {
-            let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| std::fs::read_to_string(v.abs(rel)).ok().and_then(|s| crate::drawing::Scene::parse(&s).ok())).unwrap_or_default();
+            let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| crate::drawing::Scene::read_file(&v.abs(rel)).ok()).unwrap_or_default();
             crate::pdfexport::ExportOptions::for_drawing(&scene)
         } else {
             crate::pdfexport::ExportOptions::for_note()
@@ -804,9 +1023,9 @@ impl ShaleApp {
         let bytes = if d.drawing {
             let scene = match self.drawings.get(&d.rel) {
                 Some(doc) => doc.scene.clone(),
-                None => crate::drawing::Scene::parse(&std::fs::read_to_string(v.abs(&d.rel)).map_err(|e| e.to_string())?)?,
+                None => crate::drawing::Scene::read_file(&v.abs(&d.rel))?,
             };
-            crate::pdfexport::export_drawing(&scene, &d.name, &d.opts)?
+            crate::pdfexport::export_drawing(&scene, &d.name, &d.opts, &crate::drawing_pictures::images(&scene, v, &d.rel))?
         } else {
             let text = self.notes.get(&d.rel).map(|n| n.text.clone()).or_else(|| v.notes.get(&d.rel).map(|n| n.text.clone())).unwrap_or_default();
             crate::pdfexport::export_note(v, &d.rel, &text, &d.opts)?
@@ -866,6 +1085,7 @@ impl ShaleApp {
                 Action::NewDrawing { folder, embed_into } => self.new_drawing(&folder, embed_into),
                 Action::ToggleTask { rel, offset } => self.toggle_task(&rel, offset),
                 Action::GotoLine { rel, line } => self.goto_line(&rel, line),
+                Action::GotoMatch { rel, line, col } => self.goto_match(&rel, line, col),
                 Action::ShowView(v) => self.show_view(v, false),
                 Action::CloseTab(i) => self.close_tab(i),
                 Action::Rename(rel) => {
@@ -878,6 +1098,14 @@ impl ShaleApp {
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::Rescan => self.rescan(),
                 Action::CreatePerson(name) => self.create_person(&name),
+                Action::ConvertCanvas { rel, new_tab } => {
+                    self.convert_canvas(&rel, new_tab);
+                }
+                Action::Move { from, into } => {
+                    if let Err(e) = self.move_into(&from, &into) {
+                        self.toast(format!("Could not move: {e}"));
+                    }
+                }
             }
         }
     }
@@ -885,6 +1113,11 @@ impl ShaleApp {
     fn shortcuts(&mut self, ui: &Ui) {
         // mouse side buttons: back / forward through the notes opened in this tab
         let (mouse_back, mouse_fwd) = ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2)));
+        // Ctrl+H / Ctrl+L (like vim's h / l): keyboard into the sidebar / back into the editor;
+        // Ctrl+Shift+B: the file list
+        let (to_sidebar, to_editor, files) = ui.input_mut(|i| {
+            (i.consume_key(Modifiers::COMMAND, Key::H), i.consume_key(Modifiers::COMMAND, Key::L), i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::B))
+        });
         let (quick, new_note, toggle, back, fwd, close, search, save, settings) = ui.input_mut(|i| {
             (
                 i.consume_key(Modifiers::COMMAND, Key::O),
@@ -912,6 +1145,15 @@ impl ShaleApp {
             if let Some(t) = self.tabs.get_mut(self.active) {
                 t.reading = !t.reading;
             }
+        }
+        if files {
+            self.left = LeftPanel::Files;
+            self.focus_sidebar(ui.ctx());
+        } else if to_sidebar {
+            self.focus_sidebar(ui.ctx());
+        }
+        if to_editor {
+            self.focus_editor();
         }
         if back || mouse_back {
             self.go_back();
@@ -1022,6 +1264,11 @@ impl ShaleApp {
                 } else if step.starts_with("dblclick:") {
                     raw.events.extend([btn(true), btn(false), btn(true), btn(false)]);
                 }
+            }
+        } else if let Some(n) = step.strip_prefix("scroll:") {
+            // the mouse wheel at the pointer, in points (positive: down): scroll:400
+            if let Ok(dy) = n.trim().parse::<f32>() {
+                raw.events.push(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -dy), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel });
             }
         } else if let Some(p) = step.strip_prefix("drop:") {
             // a file dropped through the window system: drop:/path/to/file
@@ -1152,6 +1399,7 @@ impl eframe::App for ShaleApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         self.drop_zones.clear();
         self.calendar_areas.clear();
+        self.tree_targets.clear();
         self.screenshot_tick(ui);
         self.shortcuts(ui);
         self.autosave();
@@ -1195,6 +1443,7 @@ impl eframe::App for ShaleApp {
         } else {
             self.layout(ui);
         }
+        self.social_tick(ui.ctx());
         self.modals(ui);
         self.handle_drops(ui);
         self.learn_tags_tick();
@@ -1207,6 +1456,19 @@ impl eframe::App for ShaleApp {
         self.remember_open_files();
         self.save_config();
     }
+}
+
+/// The end of a rename / move message: which files got new links, which canvases did not.
+fn links_message(u: &crate::vault::LinkUpdate, old: &str) -> String {
+    let mut out = String::new();
+    if !u.changed.is_empty() {
+        out.push_str(&format!(" and updated links in {} file(s)", u.changed.len()));
+    }
+    if !u.canvases.is_empty() {
+        let names: Vec<String> = u.canvases.iter().map(|c| format!("“{}”", rel_to_string(c))).collect();
+        out.push_str(&format!(". Still linking to the old {old} (canvases are never changed): {}", names.join(", ")));
+    }
+    out
 }
 
 pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from: &Path) {
@@ -1240,10 +1502,10 @@ pub fn muted(t: impl Into<String>) -> egui::RichText {
 
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn test_app(tag: &str) -> (ShaleApp, PathBuf) {
+    pub(crate) fn test_app(tag: &str) -> (ShaleApp, PathBuf) {
         let d = std::env::temp_dir().join(format!("shale-app-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         vault::write_sample_vault(&d).unwrap();
@@ -1251,6 +1513,7 @@ mod tests {
         (app, d)
     }
 
+    // spec: LINK-005, NAV-001
     #[test]
     fn blue_link_opens_existing_note() {
         let (mut app, d) = test_app("open");
@@ -1262,6 +1525,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: LINK-005
     #[test]
     fn red_link_creates_note_and_turns_blue() {
         let (mut app, d) = test_app("create");
@@ -1279,6 +1543,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: TASK-003
     #[test]
     fn task_toggle_and_drawing_embed() {
         let (mut app, d) = test_app("tasks");
@@ -1296,6 +1561,129 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: SOC-007, SOC-012
+    #[test]
+    fn saving_a_post_opens_the_import_dialog_and_the_note_lands_in_the_vault() {
+        use crate::social::accounts_ui::DialogAction;
+        let (mut app, d) = test_app("social");
+        let entry = crate::social::demo::account();
+        assert!(!app.social_dialog_action(DialogAction::Added(entry.clone())));
+        assert_eq!(app.cfg.social_accounts.len(), 1);
+        app.social.load_demo(&entry);
+        let ctx = egui::Context::default();
+        let post = crate::social::demo::posts().remove(4);
+        let wait_for_dialog = |app: &mut ShaleApp| {
+            for _ in 0..300 {
+                app.social_tick(&ctx);
+                if matches!(app.modal, Some(Modal::Import(_))) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("the Import dialog did not open");
+        };
+        app.social.save(&ctx, &entry, &post);
+        wait_for_dialog(&mut app);
+        let Some(Modal::Import(mut dlg)) = app.modal.take() else { panic!() };
+        assert_eq!((dlg.items.len(), dlg.folder.as_str(), dlg.items[0].kind().as_ref()), (1, "Social", "Thread (3 posts)"));
+        assert!(dlg.items[0].include && dlg.items[0].already.is_none() && dlg.link_into.is_none());
+        assert!(app.import_action(&mut dlg, crate::import_dialog::ImportAction::Import));
+        assert_eq!(app.cfg.last_social_folder, "Social");
+        assert!(app.cfg.last_import_folder.is_empty(), "posts have their own last folder");
+        let rel = d.join("Social").read_dir().unwrap().flatten().find(|f| f.file_name().to_string_lossy().ends_with(".md")).unwrap().path();
+        let text = std::fs::read_to_string(&rel).unwrap();
+        assert!(text.contains("## Thread") && text.contains("**Source:**") && text.contains("![[z_media/"), "{text}");
+        assert!(app.actions.iter().any(|a| matches!(a, Action::Open { .. })), "the new note is opened");
+        // the same post again: offered, but marked as imported before
+        app.rescan();
+        app.social.save(&ctx, &entry, &post);
+        wait_for_dialog(&mut app);
+        let Some(Modal::Import(dlg)) = app.modal.take() else { panic!() };
+        assert!(dlg.items[0].already.is_some() && !dlg.items[0].include);
+        // removing the account forgets it
+        app.social_dialog_action(DialogAction::Remove(entry.account.id.clone()));
+        assert!(app.cfg.social_accounts.is_empty() && app.social.account.is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    pub(crate) const CANVAS: &str = r#"{"nodes":[{"id":"a","type":"text","text":"devices","x":0,"y":0,"width":250,"height":60},{"id":"b","type":"file","file":"Ideas.md","x":0,"y":200,"width":250,"height":60}],"edges":[{"id":"e","fromNode":"a","toNode":"b"}]}"#;
+
+    /// The sample vault with `Maps/Map.canvas`.
+    pub(crate) fn app_with_canvas(tag: &str) -> (ShaleApp, PathBuf) {
+        let (mut app, d) = test_app(tag);
+        std::fs::create_dir_all(d.join("Maps")).unwrap();
+        std::fs::write(d.join("Maps/Map.canvas"), CANVAS).unwrap();
+        app.rescan();
+        (app, d)
+    }
+
+    // spec: DRAW-011, DRAW-012, DRAW-013
+    #[test]
+    fn opening_a_canvas_asks_converts_and_never_changes_it() {
+        let (mut app, d) = app_with_canvas("canvas");
+        let canvas = Path::new("Maps/Map.canvas");
+        assert_eq!(app.vault.as_ref().unwrap().file(canvas).map(|f| f.kind), Some(FileKind::Drawing));
+        // the question comes first; nothing is opened yet
+        app.open(canvas, false);
+        assert!(matches!(&app.modal, Some(Modal::ConvertCanvas { existing: None, always: false, .. })));
+        assert_ne!(app.current_path().as_deref(), Some(canvas));
+        // read-only
+        app.modal = None;
+        app.open_canvas_read_only(canvas, false);
+        assert_eq!(app.current_path().as_deref(), Some(canvas));
+        assert!(app.drawings[canvas].read_only.is_some());
+        app.flush_all();
+        // convert: a plugin drawing next to it, shown in the canvas's tab; the canvas is unchanged
+        let to = app.convert_canvas(canvas, false).unwrap();
+        assert_eq!(to, Path::new("Maps/Map.excalidraw.md"));
+        assert_eq!(app.current_path(), Some(to.clone()));
+        assert_eq!(app.tabs.iter().filter(|t| t.view.path() == Some(canvas)).count(), 0, "the canvas tab now shows the drawing");
+        let made = std::fs::read_to_string(d.join(&to)).unwrap();
+        assert!(crate::canvas::is_converted_from(&made, canvas));
+        assert!(app.drawings[&to].read_only.is_none() && app.drawings[&to].error.is_none());
+        assert_eq!(std::fs::read_to_string(d.join(canvas)).unwrap(), CANVAS);
+        // opening the canvas again offers the copy made before
+        app.drawings.remove(canvas);
+        app.open(canvas, false);
+        assert!(matches!(&app.modal, Some(Modal::ConvertCanvas { existing: Some(e), .. }) if *e == to));
+        // with the setting on: no question, the copy opens, no second copy
+        app.modal = None;
+        app.cfg.auto_convert_canvas = true;
+        app.open(Path::new("Welcome.md"), false);
+        app.open(canvas, false);
+        assert!(app.modal.is_none());
+        assert_eq!(app.current_path(), Some(to.clone()));
+        assert!(!d.join("Maps/Map 1.excalidraw.md").exists());
+        // …and without a copy it converts right away
+        app.drawings.remove(&to);
+        std::fs::remove_file(d.join(&to)).unwrap();
+        app.rescan();
+        app.open(canvas, false);
+        assert!(app.modal.is_none() && d.join(&to).exists());
+        assert_eq!(std::fs::read_to_string(d.join(canvas)).unwrap(), CANVAS);
+        // renaming keeps it a canvas
+        app.rename(canvas, "Network").unwrap();
+        assert_eq!(std::fs::read_to_string(d.join("Maps/Network.canvas")).unwrap(), CANVAS);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: DRAW-017
+    #[test]
+    fn rename_updates_an_open_drawing_and_names_the_canvas_left_behind() {
+        let (mut app, d) = test_app("rename-drawing");
+        let scene = crate::drawing::SAMPLE_SCENE.replace("\"Idea\"", "\"see [[Ideas]]\"");
+        std::fs::write(d.join("Map.excalidraw"), scene).unwrap();
+        app.rescan();
+        app.open(Path::new("Map.excalidraw"), false);
+        app.rename(Path::new("Ideas.md"), "Thoughts").unwrap();
+        let shown: Vec<String> = app.drawings[Path::new("Map.excalidraw")].scene.live().filter_map(|e| e.text.clone()).collect();
+        assert!(shown.contains(&"see [[Thoughts]]".to_string()), "the open drawing shows the new link: {shown:?}");
+        let msg = &app.toasts.last().unwrap().0;
+        assert!(msg.contains("updated links in") && msg.contains("“Overview.canvas”") && msg.contains("canvases are never changed"), "{msg}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-013
     #[test]
     fn rename_keeps_open_buffers_in_step() {
         let (mut app, d) = test_app("rename");
@@ -1319,6 +1707,7 @@ mod export_tests {
         (ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false), d)
     }
 
+    // spec: PDF-003
     #[test]
     fn export_menu_entry_opens_the_dialog_and_writes_a_pdf() {
         for (rel, tag) in [("Welcome.md", "note"), ("Sketch.excalidraw", "drawing")] {
@@ -1338,6 +1727,7 @@ mod export_tests {
         }
     }
 
+    // spec: PDF-001
     #[test]
     fn export_reports_a_bad_path() {
         let (mut app, d) = test_app("badpath");
