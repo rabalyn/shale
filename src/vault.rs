@@ -216,6 +216,16 @@ impl Vault {
         self.root.join(rel)
     }
 
+    /// The path of `rel` on disk, for something that changes files: an error unless `rel` stays
+    /// inside the vault (no `..`, not absolute), as a last guard behind VAULT-018.
+    fn abs_checked(&self, rel: &Path) -> io::Result<PathBuf> {
+        let checked = VaultPath::new(rel).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("“{}”: {e}", rel.display())))?;
+        if checked.as_path().as_os_str().is_empty() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "that is the vault itself"));
+        }
+        Ok(self.root.join(rel))
+    }
+
     /// Walk the folder again. Files whose modification time did not change are not re-read.
     /// Returns the notes whose content changed on disk.
     pub fn rescan(&mut self) -> Vec<PathBuf> {
@@ -581,7 +591,7 @@ impl Vault {
     /// Create a file with content; makes parent folders. Never replaces an existing file
     /// (`AlreadyExists`). Returns its relative path.
     pub fn create_file(&mut self, rel: &Path, content: &str) -> io::Result<PathBuf> {
-        let abs = self.abs(rel);
+        let abs = self.abs_checked(rel)?;
         if let Some(p) = abs.parent() {
             fs::create_dir_all(p)?;
         }
@@ -607,7 +617,7 @@ impl Vault {
     /// The index follows for notes. (Another program can still write between the check and the
     /// rename; that window is microseconds, and the loser is then a conflict at the next save.)
     pub fn save_checked(&mut self, rel: &Path, text: &str, base: Stamp) -> io::Result<Saved> {
-        let abs = self.abs(rel);
+        let abs = self.abs_checked(rel)?;
         let disk = match fsutil::read(&abs) {
             Ok(b) => Some(b),
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
@@ -635,7 +645,7 @@ impl Vault {
     /// index) and returns the new text, or `None` for no change. A note that can't be read is
     /// an error and stays as it is. Returns whether the file changed.
     pub fn edit_note(&mut self, rel: &Path, f: impl FnOnce(&str) -> Option<String>) -> io::Result<bool> {
-        let abs = self.abs(rel);
+        let abs = self.abs_checked(rel)?;
         let old = fsutil::read_to_string(&abs)?;
         let Some(new) = f(&old) else { return Ok(false) };
         if new == old {
@@ -690,6 +700,8 @@ impl Vault {
     /// moved). After the change, each link that would now resolve somewhere else is rewritten to
     /// the shortest form that resolves to that file. Links that were red are left alone.
     fn relocate(&mut self, from: &Path, to: &Path, update_links: bool) -> io::Result<Vec<PathBuf>> {
+        self.abs_checked(from)?;
+        self.abs_checked(to)?;
         if self.abs(to).exists() {
             // never replace anything (a rename onto an empty folder would succeed otherwise)
             return Err(io::Error::new(io::ErrorKind::AlreadyExists, "a file with that name already exists"));
@@ -851,6 +863,7 @@ impl Vault {
 
     /// Move a file or folder to `<vault>/.trash/` instead of deleting it for good.
     pub fn trash(&mut self, rel: &Path) -> io::Result<()> {
+        self.abs_checked(rel)?;
         let trash = self.root.join(".trash");
         fs::create_dir_all(&trash)?;
         let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "item".into());

@@ -40,6 +40,13 @@ The release page of each version on GitHub shows its section from this file.
 
 ### Fixed
 
+- **Data safety (ADR-0003)**: a note changed by another program while you edit it is saved as
+  `Name (conflict date time).md` next to it and the other version stays, instead of being
+  overwritten; open drawings reload when changed outside; a note that cannot be read (not UTF-8,
+  no permission) opens read-only and is never written; failed saves stay visible (red dot on the
+  tab, "Not saved" in the status bar) and keep your text; a rename or move that cannot update
+  every link says which notes were and were not updated. A randomized test runs thousands of
+  such operations and checks that nothing is lost.
 - A settings file that can't be read is no longer replaced by defaults on the next save (which
   lost the calendars): it is kept as `config.json.broken-<date>` and you are told. Settings from
   a newer Shale are no longer overwritten.

@@ -356,3 +356,28 @@ fn a_rename_where_a_write_fails_halfway_says_which_notes_were_updated() {
     assert!(t.contains("sub/B.md") && t.contains("A.md") && t.contains("C.md"), "{t}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+// spec: DATA-009
+#[test]
+fn a_folder_with_unsaved_edits_that_cannot_be_saved_is_not_moved_to_the_trash() {
+    let (mut app, d) = app_in("trash-unsaved", &[("x/N.md", b"base\n"), ("x/M.md", b"m\n")]);
+    if locks_do_not_hold(&d) {
+        return;
+    }
+    app.open(Path::new("x/N.md"), false);
+    type_text(&mut app, "x/N.md", "precious\n");
+    locked(&d.join("x"), true);
+    app.trash(Path::new("x"));
+    locked(&d.join("x"), false);
+    assert!(d.join("x/N.md").exists(), "the folder stays");
+    assert!(!d.join(".trash").exists());
+    let doc = &app.notes[Path::new("x/N.md")];
+    assert!(doc.dirty && doc.text == "precious\n", "the unsaved text is still there");
+    assert!(toasted(&app, "not moved to the trash"), "{:?}", app.toasts);
+    // once it can be saved, the trash works and the edit is in the trashed file
+    app.trash(Path::new("x"));
+    assert!(!d.join("x").exists());
+    assert!(names(&d.join(".trash"), "x").len() == 1);
+    assert_eq!(read(&d, ".trash/x/N.md"), "precious\n");
+    let _ = std::fs::remove_dir_all(&d);
+}

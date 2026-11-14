@@ -453,6 +453,12 @@ impl ShaleApp {
 
     pub fn open_vault(&mut self, path: &Path) {
         self.flush_all();
+        // closing the buffers would lose edits that could not be saved (DATA-009)
+        if let Some(bad) = self.notes.iter().find(|(_, d)| d.dirty).map(|(k, _)| k).or_else(|| self.drawings.iter().find(|(_, d)| d.dirty).map(|(k, _)| k)) {
+            let bad = rel_to_string(bad);
+            self.toast(format!("“{bad}” has changes that could not be saved, so the vault is not switched"));
+            return;
+        }
         match Vault::open(path) {
             Ok(v) => {
                 let had_files = !v.files.is_empty();
@@ -538,6 +544,13 @@ impl ShaleApp {
         }
         match f.kind {
             FileKind::Note => {
+                // a buffer without edits that is behind the index (the file was replaced since it
+                // was loaded) takes the index text instead of showing a stale one
+                if let (Some(doc), Some(n)) = (self.notes.get_mut(rel), self.vault.as_ref().and_then(|v| v.notes.get(rel))) {
+                    if !doc.dirty && (doc.unreadable != n.unreadable || doc.base != crate::vault::Stamp::of(&n.text)) {
+                        doc.reload(n.text.clone(), n.unreadable.clone());
+                    }
+                }
                 if !self.notes.contains_key(rel) {
                     // red path links whose file name exists exactly once are fixed (LINK-012);
                     // there is no buffer for this note yet, so nothing unsaved is in the way
@@ -1036,6 +1049,11 @@ impl ShaleApp {
 
     pub fn trash(&mut self, rel: &Path) {
         self.flush_all();
+        // unsaved edits that could not be saved must not go away with the buffer (DATA-009)
+        if let Some(bad) = self.notes.iter().find(|(k, d)| k.starts_with(rel) && d.dirty).map(|(k, _)| rel_to_string(k)).or_else(|| self.drawings.iter().find(|(k, d)| k.starts_with(rel) && d.dirty).map(|(k, _)| rel_to_string(k))) {
+            self.toast(format!("“{bad}” has changes that could not be saved, so “{}” is not moved to the trash", rel_to_string(rel)));
+            return;
+        }
         let Some(v) = self.vault.as_mut() else { return };
         match v.trash(rel) {
             Ok(()) => {
@@ -1669,6 +1687,8 @@ pub fn muted(t: impl Into<String>) -> egui::RichText {
     egui::RichText::new(t).color(theme::MUTED)
 }
 
+#[cfg(test)]
+mod data_fuzz_tests;
 #[cfg(test)]
 mod data_tests;
 
