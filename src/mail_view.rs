@@ -242,7 +242,13 @@ impl MailView {
             ui.label(muted(t).size(12.0));
         } else if !errs.is_empty() {
             let first = errs.first().cloned().unwrap_or_default();
-            let short = if first.contains(NO_PASSWORD) { "No password for the account".to_string() } else { first.chars().take(90).collect() };
+            let short = if first.contains(NO_PASSWORD) {
+                "No password for the account".to_string()
+            } else if crate::oauth::needs_sign_in(&first) {
+                "sign-in expired: open the account settings and sign in again".to_string()
+            } else {
+                first.chars().take(90).collect()
+            };
             ui.label(RichText::new(format!("Sync problem: {short}")).size(12.0).color(theme::LINK_MISSING)).on_hover_text(errs.join("\n"));
         } else if self.syncs.values().any(|r| r.finished.is_some()) {
             ui.label(muted(format!("Synced · {added} new")).size(12.0));
@@ -586,6 +592,8 @@ impl MailView {
                     ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
                     if e.contains(NO_PASSWORD) {
                         ui.label(muted("Type the password above, or save one in the account settings."));
+                    } else if crate::oauth::needs_sign_in(e) {
+                        ui.label(muted("Open the account settings and sign in again."));
                     }
                 }
                 Some(Body::NeedsDownload) | Some(Body::TooLarge) => {

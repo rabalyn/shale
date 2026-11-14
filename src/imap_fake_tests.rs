@@ -53,6 +53,14 @@ pub struct FakeState {
     pub pad_message: Option<(u32, usize)>,
     /// Folders that answer EXAMINE with NO.
     pub refuse_examine: Vec<String>,
+    /// OAuth2 sign-in: the access tokens that are good. None: the server has no OAuth2.
+    pub valid_tokens: Option<Arc<Mutex<std::collections::HashSet<String>>>>,
+    /// The OAuth2 mechanisms offered (`XOAUTH2`, `OAUTHBEARER`).
+    pub oauth_mechs: Vec<&'static str>,
+    /// What the client answered to an OAuth2 error challenge (decoded), per refused sign-in.
+    pub oauth_error_answers: Vec<Vec<u8>>,
+    /// The mechanism of every `AUTHENTICATE` received.
+    pub auth_mechs: Vec<String>,
 }
 
 pub struct FakeServer {
@@ -170,6 +178,10 @@ impl FakeServer {
             max_open_connections: 0,
             pad_message: None,
             refuse_examine: vec![],
+            valid_tokens: None,
+            oauth_mechs: vec!["XOAUTH2", "OAUTHBEARER"],
+            oauth_error_answers: vec![],
+            auth_mechs: vec![],
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let (st, sp) = (state.clone(), stop.clone());
@@ -301,6 +313,8 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                 if g.sasl_ir {
                     caps.push("SASL-IR");
                 }
+                let oauth: Vec<String> = if g.valid_tokens.is_some() { g.oauth_mechs.iter().map(|m| format!("AUTH={m}")).collect() } else { vec![] };
+                caps.extend(oauth.iter().map(String::as_str));
                 if g.condstore {
                     caps.push("CONDSTORE");
                 }
@@ -331,6 +345,8 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                 }
             }
             "AUTHENTICATE" if tls => {
+                let mech = rest.split_whitespace().nth(1).unwrap_or("").to_ascii_uppercase();
+                st.lock().unwrap().auth_mechs.push(mech.clone());
                 let b64 = match rest.split_whitespace().nth(2) {
                     Some(x) => x.to_string(),
                     None => {
@@ -343,6 +359,29 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                 };
                 let out = r.get_mut();
                 let data = crate::mail::base64_decode(b64.as_bytes());
+                if mech == "XOAUTH2" || mech == "OAUTHBEARER" {
+                    // the token is the text after "auth=Bearer " up to the next ^A
+                    let text = String::from_utf8_lossy(&data).into_owned();
+                    let token = text.split("auth=Bearer ").nth(1).and_then(|t| t.split('\x01').next()).unwrap_or("").to_string();
+                    let user_ok = if mech == "XOAUTH2" { text.starts_with(&format!("user={}\x01", st.lock().unwrap().user)) } else { text.starts_with(&format!("n,a={},\x01", st.lock().unwrap().user)) };
+                    let good = {
+                        let g = st.lock().unwrap();
+                        user_ok && g.oauth_mechs.contains(&mech.as_str()) && g.valid_tokens.as_ref().is_some_and(|v| v.lock().unwrap().contains(&token))
+                    };
+                    if good {
+                        write!(out, "{tag} OK authenticated\r\n")?;
+                    } else {
+                        // the specifications: the reason as a challenge, the client answers, then NO
+                        write!(out, "+ {}\r\n", crate::imap_client::base64_encode(b"{\"status\":\"401\",\"schemes\":\"Bearer\",\"scope\":\"mail\"}"))?;
+                        out.flush()?;
+                        let mut l = String::new();
+                        r.read_line(&mut l)?;
+                        st.lock().unwrap().oauth_error_answers.push(crate::mail::base64_decode(l.trim().as_bytes()));
+                        let out = r.get_mut();
+                        write!(out, "{tag} NO [AUTHENTICATIONFAILED] invalid token\r\n")?;
+                    }
+                    continue;
+                }
                 let parts: Vec<&[u8]> = data.split(|&b| b == 0).collect();
                 let g = st.lock().unwrap();
                 if parts.len() == 3 && parts[1] == g.user.as_bytes() && parts[2] == g.password.as_bytes() {
@@ -730,5 +769,121 @@ mod tests {
         let err = Client::connect_test(&settings, server_cert(), &mut auth).err().expect("must fail");
         assert!(started.elapsed() < Duration::from_secs(2), "took {:?}", started.elapsed());
         assert!(matches!(err, ImapError::Connection(_) | ImapError::Tls(_)), "{err}");
+    }
+
+    fn oauth_server(mechs: &[&'static str]) -> (FakeServer, Arc<Mutex<std::collections::HashSet<String>>>) {
+        let server = seeded(MailSecurity::ImplicitTls);
+        let tokens = Arc::new(Mutex::new(std::collections::HashSet::new()));
+        {
+            let mut s = server.state();
+            s.valid_tokens = Some(tokens.clone());
+            s.oauth_mechs = mechs.to_vec();
+        }
+        (server, tokens)
+    }
+
+    fn oauth_connect(server: &FakeServer, token: &str) -> Result<Client> {
+        let mut auth = crate::oauth::OAuthAuth::new("ada", token, "localhost", server.port);
+        Client::connect_test(&server.settings(), server_cert(), &mut auth)
+    }
+
+    // spec: MAIL-084
+    #[test]
+    fn oauth_signs_in_with_xoauth2_or_oauthbearer_whichever_the_server_offers_and_prefers_oauthbearer() {
+        let (server, tokens) = oauth_server(&["XOAUTH2"]);
+        tokens.lock().unwrap().insert("good-token".into());
+        oauth_connect(&server, "good-token").unwrap().logout();
+        assert_eq!(server.state().auth_mechs, vec!["XOAUTH2"]);
+        server.state().oauth_mechs = vec!["XOAUTH2", "OAUTHBEARER"];
+        oauth_connect(&server, "good-token").unwrap().logout();
+        assert_eq!(server.state().auth_mechs, vec!["XOAUTH2", "OAUTHBEARER"], "OAUTHBEARER is preferred when offered");
+        server.state().oauth_mechs = vec!["OAUTHBEARER"];
+        oauth_connect(&server, "good-token").unwrap().logout();
+        // a server with only passwords is not asked for a token
+        let plain = seeded(MailSecurity::ImplicitTls);
+        let err = oauth_connect(&plain, "good-token").err().expect("must fail");
+        assert!(matches!(&err, ImapError::Auth(t) if t.contains("does not offer XOAUTH2")), "{err}");
+        assert!(plain.state().auth_mechs.is_empty());
+    }
+
+    // spec: MAIL-084
+    #[test]
+    fn a_refused_token_gets_the_specified_answer_to_the_error_challenge_and_the_servers_reason() {
+        let (server, tokens) = oauth_server(&["XOAUTH2"]);
+        tokens.lock().unwrap().insert("good-token".into());
+        let err = oauth_connect(&server, "expired-token").err().expect("must fail");
+        let ImapError::Auth(text) = &err else { panic!("{err}") };
+        assert!(text.contains("invalid token") && text.contains("the server said") && text.contains("401"), "{text}");
+        assert!(!text.contains("expired-token"), "the token is not repeated in errors");
+        assert_eq!(server.state().oauth_error_answers, vec![Vec::<u8>::new()], "XOAUTH2: an empty line");
+        server.state().oauth_mechs = vec!["OAUTHBEARER", "XOAUTH2"];
+        let _ = oauth_connect(&server, "expired-token");
+        assert_eq!(server.state().oauth_error_answers.last().unwrap(), &vec![1u8], "OAUTHBEARER: a single ^A");
+        // the connection was not left half open: the next sign-in works
+        oauth_connect(&server, "good-token").unwrap().logout();
+    }
+
+    // spec: MAIL-083
+    #[test]
+    fn a_server_that_refuses_the_token_gets_one_retry_with_a_new_one_and_a_revoked_login_says_so() {
+        use crate::imap_sync::{connect_with_retry, AuthFactory};
+        use crate::oauth::{OAuthConfig, OAuthFactory, TokenSource};
+        use crate::oauth_fake_tests::FakeOAuth;
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let provider = FakeOAuth::start();
+        let (server, _) = oauth_server(&["XOAUTH2"]);
+        server.state().valid_tokens = Some(provider.valid_access());
+        let acct = crate::config::MailAccount {
+            id: "t-retry".into(),
+            user: "ada".into(),
+            oauth_provider: crate::config::OAuthProvider::Custom,
+            oauth_client_id: "shale-test".into(),
+            oauth_auth_url: format!("http://127.0.0.1:{}/authorize", provider.port),
+            oauth_token_url: format!("http://127.0.0.1:{}/token", provider.port),
+            oauth_scope: "mail".into(),
+            ..Default::default()
+        };
+        struct Mem(Mutex<Option<String>>);
+        impl crate::oauth::RefreshStore for Mem {
+            fn load(&self) -> Option<String> {
+                self.0.lock().unwrap().clone()
+            }
+            fn save(&self, t: &str) -> bool {
+                *self.0.lock().unwrap() = Some(t.into());
+                true
+            }
+            fn clear(&self) {
+                *self.0.lock().unwrap() = None;
+            }
+        }
+        let rt = provider.new_refresh_token();
+        let source = Arc::new(TokenSource::new(OAuthConfig::for_account(&acct, None).unwrap(), Arc::new(Mem(Mutex::new(Some(rt))))));
+        let factory = OAuthFactory { user: "ada".into(), host: "localhost".into(), port: server.port, source: source.clone() };
+        let go = |f: &dyn AuthFactory| connect_with_retry(f, |a| Client::connect_test(&server.settings(), server_cert(), a));
+        go(&factory).unwrap().logout();
+        assert_eq!(source.refresh_count(), 1);
+        // the server forgets every token (it expired early): refused once, then a new one works
+        provider.expire_access_tokens();
+        let before = server.state().auth_mechs.len();
+        go(&factory).unwrap().logout();
+        assert_eq!(server.state().auth_mechs.len() - before, 2, "one refused, one accepted");
+        assert_eq!(source.refresh_count(), 2);
+        // a provider that keeps refusing is not asked more than once more
+        provider.state.lock().unwrap().revoked = true;
+        provider.expire_access_tokens();
+        let err = go(&factory).err().expect("must fail");
+        assert!(matches!(&err, ImapError::Auth(t) if crate::oauth::needs_sign_in(t)), "{err}");
+        // a password factory is never retried
+        struct Pw;
+        impl AuthFactory for Pw {
+            fn authenticator(&self) -> std::result::Result<Box<dyn Authenticator>, String> {
+                Ok(Box::new(PlainAuth::new("ada", "wrong")))
+            }
+        }
+        let n = server.state().connections;
+        assert!(matches!(go(&Pw), Err(ImapError::Auth(_))));
+        assert_eq!(server.state().connections - n, 1);
     }
 }

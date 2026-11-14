@@ -33,10 +33,29 @@ impl Connector for TestConnector {
     }
 }
 
+struct OAuthTestConnector {
+    settings: ConnectSettings,
+    auth: Arc<crate::oauth::OAuthFactory>,
+}
+
+impl Connector for OAuthTestConnector {
+    fn connect(&self) -> Result<Client, ImapError> {
+        crate::imap_sync::connect_with_retry(self.auth.as_ref(), |a| Client::connect_test(&self.settings, server_cert(), a))
+    }
+}
+
 /// A connector factory like the real one (the password is the session's or the keyring's), but
 /// for the pretend server's certificate.
 fn factory() -> ConnectorFactory {
     Arc::new(|acct: &MailAccount, session: Option<String>| {
+        if acct.auth == crate::config::MailAuth::OAuth2 {
+            // like `connector_for_account`, but trusting the pretend server's certificate
+            let cfg = crate::oauth::OAuthConfig::for_account(acct, session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::ClientSecret))).map_err(|e| e.to_string())?;
+            let source = crate::oauth::shared_source(&acct.id, cfg);
+            let auth = Arc::new(crate::oauth::OAuthFactory { user: acct.user.clone(), host: acct.host.clone(), port: acct.port, source });
+            let settings = ConnectSettings { host: acct.host.clone(), port: acct.port, security: acct.security, limits: Limits { io_timeout: Duration::from_secs(15), ..Limits::default() } };
+            return Ok(Arc::new(OAuthTestConnector { settings, auth }) as Arc<dyn Connector>);
+        }
         let password = session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::Password)).ok_or_else(|| NO_PASSWORD.to_string())?;
         let settings = ConnectSettings { host: acct.host.clone(), port: acct.port, security: acct.security, limits: Limits { io_timeout: Duration::from_secs(15), max_message: 20_000, ..Limits::default() } };
         Ok(Arc::new(TestConnector { settings, user: acct.user.clone(), password }) as Arc<dyn Connector>)
@@ -317,10 +336,10 @@ fn an_account_is_added_in_the_dialog_tested_and_saved_with_its_password_in_the_k
     assert!(!w.shows("Plain"), "there is no plain-text choice");
     w.typ("md:port", &w.server.port.to_string());
     if let Some(Modal::MailAccounts(d)) = &w.app.modal {
-        assert_eq!(d.accounts[0].auth, crate::config::MailAuth::Password, "OAuth2 is offered disabled, never chosen");
+        assert_eq!(d.accounts[0].auth, crate::config::MailAuth::Password, "a new account signs in with a password until OAuth2 is chosen");
     }
     w.frame(vec![]);
-    assert!(w.shows("coming in a later step"));
+    assert!(w.shows("OAuth2 (in the browser)") && w.has("md:auth-oauth2"), "OAuth2 is offered");
 
     // "Test connection" runs as a job, says what it found and records the folders
     w.click("md:test");
@@ -918,6 +937,158 @@ fn dates_in_the_list_are_short() {
     assert!(crate::mail_ui::list_date(Some(now), now).contains(':'), "today shows the time");
     assert!(crate::mail_ui::list_date(Some(now - 100 * 86_400), now).chars().any(|c| c.is_alphabetic()), "this year shows day and month");
     assert!(crate::mail_ui::list_date(Some(now - 800 * 86_400), now).starts_with("202"), "older shows the date");
+}
+
+// spec: MAIL-083, MAIL-084, MAIL-086
+#[test]
+fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks_to_sign_in_again_when_revoked() {
+    use crate::oauth_fake_tests::{http_get, FakeOAuth};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    if std::process::Command::new("curl").arg("--version").output().is_err() {
+        return;
+    }
+    let provider = FakeOAuth::start();
+    let mut w = W::new("oauth", false);
+    {
+        let mut s = w.server.state();
+        s.valid_tokens = Some(provider.valid_access());
+    }
+    // the pretend browser: waits to be let go, then asks the provider and follows its redirect
+    let go = Arc::new(AtomicBool::new(false));
+    let opened = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let (go2, opened2) = (go.clone(), opened.clone());
+    let _browser = crate::opener::install_test_browser(Box::new(move |url| {
+        opened2.lock().unwrap().push(url.to_string());
+        let (url, go) = (url.to_string(), go2.clone());
+        std::thread::spawn(move || {
+            while !go.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let (_, head, _) = http_get(&url);
+            if let Some(loc) = head.lines().find_map(|l| l.strip_prefix("Location: ")) {
+                let _ = http_get(loc.trim());
+            }
+        });
+    }));
+
+    w.until("the empty view", |a| a.mail.rects.iter().any(|r| r.0 == "mail:add-account"));
+    w.click("mail:add-account");
+    w.settle();
+    w.click("md:add");
+    w.typ("md:name", "OAuth mail");
+    w.typ("md:host", "localhost");
+    w.typ("md:port", &w.server.port.to_string());
+    w.typ("md:user", "ada");
+    w.click("md:auth-oauth2");
+    w.click("md:provider:Custom");
+    assert!(!w.has("md:password"), "an OAuth2 account has no password field");
+    // nothing typed yet: the sign-in is refused with a clear message
+    w.click("md:signin");
+    let id = match &w.app.modal {
+        Some(Modal::MailAccounts(d)) => d.accounts[0].id.clone(),
+        _ => unreachable!(),
+    };
+    let id1 = id.clone();
+    w.until("the first attempt fails", move |a| matches!(a.mail.signins.get(&id1), Some(crate::mail_ui::SignInState::Failed(_))));
+    w.frame(vec![]);
+    assert!(w.shows("client ID"), "the missing client ID is said in words");
+    w.typ("md:oauth-auth-url", &format!("http://127.0.0.1:{}/authorize", provider.port));
+    w.typ("md:oauth-token-url", &format!("http://127.0.0.1:{}/token", provider.port));
+    w.typ("md:oauth-scope", "mail");
+    w.typ("md:oauth-client-id", "shale-test");
+
+    // sign in: waiting state with Cancel, then cancel it
+    w.click("md:signin");
+    w.frame(vec![]);
+    assert!(w.shows("Waiting for the browser") && w.has("md:signin-cancel"));
+    let o = opened.clone();
+    w.until("the browser got the address", move |_| !o.lock().unwrap().is_empty());
+    w.until("the address is offered", |a| a.mail.signins.values().any(|s| matches!(s, crate::mail_ui::SignInState::Waiting { url: Some(_), .. })));
+    w.click("md:signin-cancel");
+    let id2 = id.clone();
+    w.until("the cancelled sign-in ends", move |a| matches!(a.mail.signins.get(&id2), Some(crate::mail_ui::SignInState::Failed(_))));
+    w.frame(vec![]);
+    assert!(w.shows("The sign-in was cancelled."));
+    assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_none(), "a cancelled sign-in keeps nothing");
+    go.store(true, Ordering::SeqCst); // the old pretend browser answers late: nobody listens any more
+
+    // sign in for real
+    w.click("md:signin");
+    let id3 = id.clone();
+    w.until("the sign-in ends", move |a| matches!(a.mail.signins.get(&id3), Some(crate::mail_ui::SignInState::Done { .. })));
+    w.frame(vec![]);
+    assert!(w.shows("Signed in as ada@example.com"), "who signed in is shown");
+    assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_some(), "the refresh token is in the keyring");
+    {
+        let urls = opened.lock().unwrap();
+        let last = urls.last().unwrap();
+        assert!(last.starts_with(&format!("http://127.0.0.1:{}/authorize?", provider.port)) && last.contains("code_challenge_method=S256") && last.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A"), "{last}");
+    }
+
+    // "Test connection" works with OAuth2 (OAUTHBEARER is preferred: the pretend server offers both)
+    w.click("md:test");
+    let id4 = id.clone();
+    w.until("the test ends", move |a| matches!(a.mail.tests.get(&id4), Some(TestState::Ok(_)) | Some(TestState::Failed(_))));
+    assert!(
+        matches!(w.app.mail.tests.get(&id), Some(TestState::Ok(m)) if m.contains("4 folders")),
+        "{}",
+        match w.app.mail.tests.get(&id) {
+            Some(TestState::Failed(e)) => e.clone(),
+            _ => "?".into(),
+        }
+    );
+    assert_eq!(w.server.state().auth_mechs.last().map(String::as_str), Some("OAUTHBEARER"));
+    w.click("md:done");
+    assert!(w.app.modal.is_none());
+    let a = &w.app.cfg.mail_accounts[0];
+    assert_eq!((a.auth, a.oauth_client_id.as_str()), (crate::config::MailAuth::OAuth2, "shale-test"));
+    let json = serde_json::to_string(&w.app.cfg).unwrap();
+    assert!(!json.contains("rt-") && !json.contains("at-"), "no token in the settings file");
+    let id5 = id.clone();
+    w.until("the first sync ends", move |a| a.mail.syncs.get(&id5).is_some_and(|r| r.finished.is_some()));
+    assert!(w.app.mail.syncs[&id].errors.is_empty(), "{:?}", w.app.mail.syncs[&id].errors);
+
+    // the server stops accepting the access token (it expired): the sync renews it by itself
+    let before = provider.state.lock().unwrap().token_requests.len();
+    provider.expire_access_tokens();
+    w.app.mail.syncs.remove(&id);
+    w.account = w.app.cfg.mail_accounts[0].clone();
+    w.sync_and_wait();
+    assert!(w.app.mail.syncs[&id].errors.is_empty(), "{:?}", w.app.mail.syncs[&id].errors);
+    assert!(provider.state.lock().unwrap().token_requests.len() > before, "a new access token was fetched");
+
+    // the provider revokes the sign-in: a clear message and a way to sign in again
+    {
+        let mut st = provider.state.lock().unwrap();
+        st.revoked = true;
+    }
+    provider.expire_access_tokens();
+    w.sync_and_wait();
+    let errs = w.app.mail.syncs[&id].errors.join(" ");
+    let fin = w.app.mail.syncs[&id].finished.as_ref().map(|s| s.errors.join(" ")).unwrap_or_default();
+    assert!(crate::oauth::needs_sign_in(&errs) || crate::oauth::needs_sign_in(&fin), "{errs} / {fin}");
+    assert!(crate::oauth::needs_sign_in(&format!("{errs}{fin}")) && format!("{errs}{fin}").contains("revoked"));
+    assert_eq!(w.app.mail.signed_in.get(&id), Some(&false));
+    assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_none(), "a dead refresh token is dropped");
+    w.frame(vec![]);
+    assert!(w.shows("sign-in expired"), "the mail view says so");
+    w.app.open_mail_settings();
+    w.settle();
+    w.frame(vec![]);
+    assert!(w.has("md:signin"));
+    // sign in again
+    provider.state.lock().unwrap().revoked = false;
+    go.store(true, Ordering::SeqCst);
+    w.click("md:signin");
+    let id6 = id.clone();
+    w.until("signed in again", move |a| matches!(a.mail.signins.get(&id6), Some(crate::mail_ui::SignInState::Done { .. })));
+    w.click("md:done");
+    w.app.mail.syncs.remove(&id);
+    w.sync_and_wait();
+    assert!(w.app.mail.syncs[&id].errors.is_empty(), "{:?}", w.app.mail.syncs[&id].errors);
+    secrets::clear_mail_secret(&id, MailSecret::RefreshToken);
+    secrets::clear_mail_secret(&id, MailSecret::ClientSecret);
+    crate::oauth::forget_source(&id);
 }
 
 #[test]

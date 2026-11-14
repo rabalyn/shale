@@ -2,9 +2,9 @@
 //! password, test the connection and choose which folders are synced.
 
 use crate::app::muted;
-use crate::config::{MailAccount, MailAuth, MailSecurity};
+use crate::config::{MailAccount, MailAuth, MailSecurity, OAuthProvider};
 use crate::imap_sync::{kind_of, FolderKind};
-use crate::mail_ui::{MailView, TestState};
+use crate::mail_ui::{MailView, SignInState, TestState};
 use crate::theme;
 use eframe::egui::{self, Rect, RichText, Ui};
 use std::collections::HashMap;
@@ -17,6 +17,8 @@ pub struct MailDialog {
     pub sel: Option<usize>,
     /// Passwords typed this time, by account id; saved when the dialog is closed with Done.
     pub passwords: HashMap<String, String>,
+    /// Client secrets typed this time, by account id; saved to the keyring with Done.
+    pub client_secrets: HashMap<String, String>,
     /// Ids of accounts that were removed (their keyring entries are cleared with Done).
     pub removed: Vec<String>,
     pub minutes: String,
@@ -32,6 +34,10 @@ pub enum MailDialogAction {
     Cancel,
     /// Test the connection of account `i` (with the password typed, if any).
     Test(usize),
+    /// "Sign in in the browser" for account `i`.
+    SignIn(usize),
+    /// Stop waiting for the browser of account `i`.
+    CancelSignIn(usize),
     /// Tick or untick a folder.
     ToggleFolder {
         folder: i64,
@@ -43,7 +49,7 @@ impl MailDialog {
     pub fn new(accounts: Vec<MailAccount>, minutes: u32, keyring: bool) -> MailDialog {
         let ports = accounts.iter().map(|a| a.port.to_string()).collect();
         let sel = if accounts.is_empty() { None } else { Some(0) };
-        MailDialog { accounts, ports, sel, passwords: HashMap::new(), removed: vec![], minutes: minutes.to_string(), error: None, keyring, rects: vec![] }
+        MailDialog { accounts, ports, sel, passwords: HashMap::new(), client_secrets: HashMap::new(), removed: vec![], minutes: minutes.to_string(), error: None, keyring, rects: vec![] }
     }
 
     /// An id for a new account: letters and digits, not used by an account that exists or was
@@ -57,6 +63,20 @@ impl MailDialog {
         self.accounts.push(MailAccount { id, ..MailAccount::default() });
         self.ports.push("993".into());
         self.sel = Some(self.accounts.len() - 1);
+    }
+
+    /// Choosing OAuth2 or a provider: the server and port of the preset, unless the account
+    /// already has a server of its own.
+    pub fn use_preset_server(&mut self, i: usize) {
+        let a = &mut self.accounts[i];
+        let presets = [OAuthProvider::Google, OAuthProvider::Microsoft].map(crate::oauth::preset_server);
+        let is_preset_host = a.host.trim().is_empty() || presets.iter().flatten().any(|(h, _)| *h == a.host.trim());
+        if let (true, Some((host, port))) = (is_preset_host, crate::oauth::preset_server(a.oauth_provider)) {
+            a.host = host.to_string();
+            a.port = port;
+            a.security = MailSecurity::ImplicitTls;
+            self.ports[i] = port.to_string();
+        }
     }
 
     pub fn remove(&mut self, i: usize) {
@@ -77,6 +97,14 @@ impl MailDialog {
             }
             if a.user.trim().is_empty() {
                 return Err(format!("“{label}” needs a user name."));
+            }
+            if a.auth == MailAuth::OAuth2 {
+                if a.oauth_client_id.trim().is_empty() {
+                    return Err(format!("“{label}” needs the client ID of your OAuth2 app."));
+                }
+                if a.oauth_provider == OAuthProvider::Custom {
+                    crate::oauth::OAuthConfig::for_account(a, None).map_err(|e| format!("“{label}”: {e}"))?;
+                }
             }
             a.port = p.trim().parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("“{label}”: the port must be a number between 1 and 65535."))?;
             a.host = a.host.trim().to_string();
@@ -211,21 +239,33 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
             if r.clicked() {
                 d.accounts[i].auth = MailAuth::Password;
             }
-            ui.add_enabled(false, egui::RadioButton::new(false, "OAuth2")).on_disabled_hover_text("coming in a later step");
-            ui.label(muted("coming in a later step").size(12.0));
+            let r = ui.radio(d.accounts[i].auth == MailAuth::OAuth2, "OAuth2 (in the browser)");
+            rects.push(("md:auth-oauth2".into(), r.rect));
+            if r.clicked() {
+                d.accounts[i].auth = MailAuth::OAuth2;
+                d.use_preset_server(i);
+            }
         });
         ui.end_row();
-        ui.label("Password");
-        let pw = d.passwords.entry(id.clone()).or_default();
-        let r = ui.add(egui::TextEdit::singleline(pw).password(true).hint_text("leave empty to keep the saved one").desired_width(300.0));
-        rects.push(("md:password".into(), r.rect));
-        ui.end_row();
+        if d.accounts[i].auth == MailAuth::Password {
+            ui.label("Password");
+            let pw = d.passwords.entry(id.clone()).or_default();
+            let r = ui.add(egui::TextEdit::singleline(pw).password(true).hint_text("leave empty to keep the saved one").desired_width(300.0));
+            rects.push(("md:password".into(), r.rect));
+            ui.end_row();
+        } else {
+            oauth_rows(ui, d, i, &id, rects);
+        }
     });
+    if d.accounts[i].auth == MailAuth::OAuth2 {
+        ui.label(muted("Shale needs an OAuth2 client ID that you register yourself with Google or Microsoft (see the README). Shale opens your browser for the sign-in and keeps only a refresh token, in the system keyring.").size(12.0));
+        sign_in_row(ui, i, &id, mail, rects, out);
+    }
     ui.label(
         muted(if d.keyring {
-            "The password is kept in the system keyring, never in the settings file."
+            "Passwords, client secrets and sign-in tokens are kept in the system keyring, never in the settings file."
         } else {
-            "No system keyring was found (install libsecret / secret-tool to use one). The password is not saved anywhere: Shale asks for it again each time it starts and keeps it in memory only."
+            "No system keyring was found (install libsecret / secret-tool to use one). A password is not saved anywhere: Shale asks for it again each time it starts and keeps it in memory only. An OAuth2 sign-in lasts until Shale quits."
         })
         .size(12.0),
     );
@@ -283,4 +323,95 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
             });
         }
     });
+}
+
+/// The OAuth2 rows of the form: provider, endpoints (Custom), client ID and secret.
+fn oauth_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, id: &str, rects: &mut Vec<(String, Rect)>) {
+    ui.label("Provider");
+    ui.horizontal(|ui| {
+        for p in [OAuthProvider::Google, OAuthProvider::Microsoft, OAuthProvider::Custom] {
+            let r = ui.radio(d.accounts[i].oauth_provider == p, p.label());
+            rects.push((format!("md:provider:{}", p.label()), r.rect));
+            if r.clicked() && d.accounts[i].oauth_provider != p {
+                d.accounts[i].oauth_provider = p;
+                d.use_preset_server(i);
+            }
+        }
+    });
+    ui.end_row();
+    if d.accounts[i].oauth_provider == OAuthProvider::Custom {
+        ui.label("Authorization address");
+        let r = ui.add(egui::TextEdit::singleline(&mut d.accounts[i].oauth_auth_url).hint_text("https://id.example.com/authorize").desired_width(300.0));
+        rects.push(("md:oauth-auth-url".into(), r.rect));
+        ui.end_row();
+        ui.label("Token address");
+        let r = ui.add(egui::TextEdit::singleline(&mut d.accounts[i].oauth_token_url).hint_text("https://id.example.com/token").desired_width(300.0));
+        rects.push(("md:oauth-token-url".into(), r.rect));
+        ui.end_row();
+        ui.label("Scope");
+        let r = ui.add(egui::TextEdit::singleline(&mut d.accounts[i].oauth_scope).hint_text("mail").desired_width(300.0));
+        rects.push(("md:oauth-scope".into(), r.rect));
+        ui.end_row();
+    }
+    ui.label("Client ID");
+    let r = ui.add(egui::TextEdit::singleline(&mut d.accounts[i].oauth_client_id).hint_text("from your Google or Microsoft app registration").desired_width(300.0));
+    rects.push(("md:oauth-client-id".into(), r.rect));
+    ui.end_row();
+    ui.label("Client secret");
+    let sec = d.client_secrets.entry(id.to_string()).or_default();
+    let r = ui.add(egui::TextEdit::singleline(sec).password(true).hint_text("only if the provider asks for one (Google does); empty keeps the saved one").desired_width(300.0));
+    rects.push(("md:oauth-client-secret".into(), r.rect));
+    ui.end_row();
+}
+
+/// The sign-in button with its waiting note, Cancel and the result.
+fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec<(String, Rect)>, out: &mut Option<MailDialogAction>) {
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        let state = mail.signins.get(id);
+        let waiting = matches!(state, Some(SignInState::Waiting { .. }));
+        let known_in = matches!(state, Some(SignInState::Done { .. })) || mail.signed_in.get(id) == Some(&true);
+        let r = ui.add_enabled(!waiting, egui::Button::new(if known_in { "Sign in again" } else { crate::oauth::SIGN_IN_BUTTON }));
+        rects.push(("md:signin".into(), r.rect));
+        if r.clicked() {
+            *out = Some(MailDialogAction::SignIn(i));
+        }
+        match state {
+            Some(SignInState::Waiting { url, .. }) => {
+                ui.label(muted("Waiting for the browser… (it is given up after 5 minutes)"));
+                let r = ui.button("Cancel");
+                rects.push(("md:signin-cancel".into(), r.rect));
+                if r.clicked() {
+                    *out = Some(MailDialogAction::CancelSignIn(i));
+                }
+                if let Some(u) = url {
+                    let r = ui.button("Copy the sign-in address").on_hover_text("If no browser opened, paste this into one");
+                    rects.push(("md:signin-copy".into(), r.rect));
+                    if r.clicked() {
+                        ui.ctx().copy_text(u.clone());
+                    }
+                }
+            }
+            Some(SignInState::Done { user, kept }) => {
+                let who = user.as_ref().map(|u| format!(" as {u}")).unwrap_or_default();
+                ui.label(RichText::new(format!("Signed in{who}.")).color(theme::TAG));
+                if !kept {
+                    ui.label(muted("(not saved: no keyring)"));
+                }
+            }
+            Some(SignInState::Failed(e)) => {
+                ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
+            }
+            None => match mail.signed_in.get(id) {
+                Some(true) => {
+                    ui.label(muted("Signed in. The refresh token is in the keyring."));
+                }
+                Some(false) => {
+                    ui.label(muted("Not signed in."));
+                }
+                None => {}
+            },
+        }
+    });
+    ui.add_space(4.0);
 }

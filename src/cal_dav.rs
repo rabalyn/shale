@@ -204,6 +204,12 @@ pub fn request(method: &str, url: &str, depth: &str, body: &str, acct: &Account)
 
 /// One HTTP request with any headers.
 pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account) -> Result<Response, String> {
+    request_opts(method, url, headers, body, acct, true)
+}
+
+/// Like [`request_with`]; `follow` = false never follows a redirect (the OAuth2 token endpoint:
+/// its form holds secrets and must go only where it was addressed).
+pub fn request_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, follow: bool) -> Result<Response, String> {
     let origin = check_url(url)?;
     if !method.chars().all(|c| c.is_ascii_uppercase()) || method.is_empty() {
         return Err(format!("bad request method {method:?}"));
@@ -231,7 +237,9 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
     let protos = if origin.scheme == "http" { "=http,https" } else { "=https" };
     let mut child = Command::new("curl")
         // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
-        .args(["-q", "-sS", "-i", "-L", "--max-redirs", "5", "--proto", protos, "--proto-redir", protos])
+        .args(["-q", "-sS", "-i"])
+        .args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] })
+        .args(["--proto", protos, "--proto-redir", protos])
         .args(["--connect-timeout", "10", "--max-time", "30", "--max-filesize", MAX_BYTES])
         .args(["-X", method, "-w", WRITE_OUT, "-K", "-", url])
         .stdin(Stdio::piped())

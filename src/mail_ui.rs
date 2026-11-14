@@ -84,6 +84,22 @@ pub enum TestState {
     Failed(String),
 }
 
+/// The browser sign-in of an OAuth2 account (MAIL-086).
+pub enum SignInState {
+    /// Waiting for the person in the browser; `url` is the sign-in address (to copy when no
+    /// browser opened) once it is known.
+    Waiting {
+        cancel: Arc<AtomicBool>,
+        url: Option<String>,
+    },
+    /// Signed in; `user` when the provider said who; `kept`: the keyring has the refresh token.
+    Done {
+        user: Option<String>,
+        kept: bool,
+    },
+    Failed(String),
+}
+
 /// One sync of one account, running or finished.
 pub struct SyncRun {
     rx: Receiver<Progress>,
@@ -132,12 +148,44 @@ pub enum MailAction {
 
 enum Event {
     Store(Result<Arc<MailStore>, String>),
-    Search { gen: u64, result: Result<Vec<MessageSummary>, String> },
-    Message { id: i64, result: Result<Arc<Loaded>, String> },
-    Fetched { key: (i64, u32), retry: Retry, result: Result<Box<MessageSummary>, String> },
-    Listing { folder: i64, result: Result<usize, String> },
-    Tested { account: String, result: Result<usize, String> },
-    Secret { account: String, stored: bool },
+    Search {
+        gen: u64,
+        result: Result<Vec<MessageSummary>, String>,
+    },
+    Message {
+        id: i64,
+        result: Result<Arc<Loaded>, String>,
+    },
+    Fetched {
+        key: (i64, u32),
+        retry: Retry,
+        result: Result<Box<MessageSummary>, String>,
+    },
+    Listing {
+        folder: i64,
+        result: Result<usize, String>,
+    },
+    Tested {
+        account: String,
+        result: Result<usize, String>,
+    },
+    Secret {
+        account: String,
+        stored: bool,
+    },
+    SignInUrl {
+        account: String,
+        url: String,
+    },
+    SignedIn {
+        account: String,
+        result: Result<crate::oauth::SignedIn, String>,
+    },
+    /// Does the account have a refresh token? (read from the keyring in a job)
+    Probed {
+        account: String,
+        signed_in: bool,
+    },
 }
 
 pub struct MailView {
@@ -188,6 +236,10 @@ pub struct MailView {
     pub session_pw: HashMap<String, String>,
     pub prompt: Option<PasswordPrompt>,
     pub tests: HashMap<String, TestState>,
+    /// The browser sign-ins of OAuth2 accounts.
+    pub signins: HashMap<String, SignInState>,
+    /// OAuth2 accounts known to have (true) or not have (false) a refresh token.
+    pub signed_in: HashMap<String, bool>,
     /// Controls drawn in the last frame, by name (for the UI tests).
     pub rects: Vec<(String, egui::Rect)>,
     /// Things to tell the person (the app shows them as messages).
@@ -241,6 +293,8 @@ impl MailView {
             session_pw: HashMap::new(),
             prompt: None,
             tests: HashMap::new(),
+            signins: HashMap::new(),
+            signed_in: HashMap::new(),
             rects: vec![],
             notices: vec![],
         }
@@ -330,6 +384,7 @@ impl MailView {
             || self.dirty
             || self.fetching.len() + self.listings.values().filter(|l| matches!(l, ListingState::Loading)).count() > 0
             || self.tests.values().any(|t| matches!(t, TestState::Running))
+            || self.signins.values().any(|t| matches!(t, SignInState::Waiting { .. }))
             || matches!(self.open.as_ref().map(|o| &o.body), Some(Body::Loading))
     }
 
@@ -414,6 +469,31 @@ impl MailView {
                     self.notices.push("No keyring could keep the password: Shale remembers it until you quit and asks again next time.".into());
                 }
             }
+            Event::SignInUrl { account, url } => {
+                if let Some(SignInState::Waiting { url: u, .. }) = self.signins.get_mut(&account) {
+                    *u = Some(url);
+                }
+            }
+            Event::SignedIn { account, result } => {
+                match result {
+                    Ok(r) => {
+                        self.signed_in.insert(account.clone(), true);
+                        if !r.kept {
+                            self.notices.push("No keyring could keep the sign-in: Shale remembers it until you quit and asks you to sign in again next time.".into());
+                        }
+                        self.signins.insert(account.clone(), SignInState::Done { user: r.user, kept: r.kept });
+                        // an old failure of this account's test is out of date now
+                        self.tests.remove(&account);
+                    }
+                    Err(e) => {
+                        self.signins.insert(account, SignInState::Failed(e));
+                    }
+                }
+                self.dirty = true;
+            }
+            Event::Probed { account, signed_in } => {
+                self.signed_in.insert(account, signed_in);
+            }
             Event::Tested { account, result } => {
                 self.tests.insert(
                     account,
@@ -481,6 +561,11 @@ impl MailView {
             let no_pw = self.syncs.get(&id).is_some_and(|r| r.errors.iter().any(|e| e.contains(NO_PASSWORD)) || r.finished.as_ref().is_some_and(|s| s.errors.iter().any(|e| e.contains(NO_PASSWORD))));
             if no_pw {
                 self.ask_password(&id, Retry::Sync);
+            }
+            let signin_needed = self.syncs.get(&id).is_some_and(|r| r.errors.iter().any(|e| crate::oauth::needs_sign_in(e)) || r.finished.as_ref().is_some_and(|s| s.errors.iter().any(|e| crate::oauth::needs_sign_in(e))));
+            if signin_needed {
+                self.signed_in.insert(id.clone(), false);
+                self.notices.push("A mail account needs you to sign in again: open the account settings.".into());
             }
             self.refresh();
         }
@@ -844,6 +929,55 @@ impl MailView {
         self.spawn(move || imap_sync::discover_folders(&store, &connector, &id, &display).map(|f| f.len()), move |r| Event::Tested { account: id2, result: flatten(r) });
     }
 
+    /// "Sign in in the browser": the whole OAuth2 flow as a job (MAIL-086). `secret` is the
+    /// client secret typed in the dialog, if any (else the keyring's is used).
+    pub fn start_sign_in(&mut self, account: &MailAccount, secret: Option<String>) {
+        if matches!(self.signins.get(&account.id), Some(SignInState::Waiting { .. })) {
+            return;
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.signins.insert(account.id.clone(), SignInState::Waiting { cancel: cancel.clone(), url: None });
+        let (acct, id, id2) = (account.clone(), account.id.clone(), account.id.clone());
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        self.spawn(
+            move || {
+                let secret = secret.filter(|s| !s.is_empty()).or_else(|| crate::secrets::mail_secret(&acct.id, crate::secrets::MailSecret::ClientSecret));
+                let shown = |url: &str| {
+                    let _ = tx.send(Event::SignInUrl { account: id.clone(), url: url.to_string() });
+                    if let Some(c) = &ctx {
+                        c.request_repaint();
+                    }
+                };
+                crate::oauth::sign_in(&acct, secret, &cancel, crate::oauth::SIGN_IN_TIMEOUT, &shown).map_err(|e| e.to_string())
+            },
+            move |r| Event::SignedIn { account: id2, result: flatten(r) },
+        );
+    }
+
+    /// Stop waiting for the browser.
+    pub fn cancel_sign_in(&mut self, account: &str) {
+        if let Some(SignInState::Waiting { cancel, .. }) = self.signins.get(account) {
+            cancel.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Find out (in a job: it reads the keyring) whether an OAuth2 account is signed in.
+    pub fn probe_sign_in(&mut self, account: &MailAccount) {
+        if account.auth != crate::config::MailAuth::OAuth2 || self.signed_in.contains_key(&account.id) {
+            return;
+        }
+        let acct = account.clone();
+        let id = account.id.clone();
+        self.spawn(move || crate::oauth::is_signed_in(&acct), move |r| Event::Probed { account: id, signed_in: r.unwrap_or(false) });
+    }
+
+    /// Keep a typed client secret in the keyring (never in the settings file).
+    pub fn save_client_secret(&mut self, account: &str, secret: String) {
+        let id = account.to_string();
+        let id2 = id.clone();
+        self.spawn(move || crate::secrets::set_mail_secret(&id, crate::secrets::MailSecret::ClientSecret, &secret), move |r| Event::Secret { account: id2, stored: r.unwrap_or(false) });
+    }
+
     /// A folder's checkbox: sync it or not (MAIL-042).
     pub fn set_folder_sync(&mut self, folder: i64, enabled: bool) -> Result<(), String> {
         let store = self.ready_store().ok_or("the local mail copy is not open yet")?;
@@ -865,6 +999,9 @@ impl MailView {
     /// An account was removed: its secrets go, its syncs stop; its mail files stay (MAIL-043).
     pub fn forget_account(&mut self, account: &str) {
         self.session_pw.remove(account);
+        self.signins.remove(account);
+        self.signed_in.remove(account);
+        crate::oauth::forget_source(account);
         if let Some(r) = self.syncs.remove(account) {
             r.cancel.store(true, Ordering::SeqCst);
         }
@@ -880,6 +1017,7 @@ impl MailView {
             move || {
                 crate::secrets::clear_mail_secret(&id, crate::secrets::MailSecret::Password);
                 crate::secrets::clear_mail_secret(&id, crate::secrets::MailSecret::RefreshToken);
+                crate::secrets::clear_mail_secret(&id, crate::secrets::MailSecret::ClientSecret);
             },
             |_| {},
         );

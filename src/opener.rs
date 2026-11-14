@@ -19,6 +19,53 @@ pub fn open_url(url: &str) -> Result<(), String> {
     launch(url.as_ref())
 }
 
+/// Open an OAuth2 sign-in page in the browser. Only `https://` addresses; `http://` only for an
+/// address on this computer and only when `allow_local_http` (the Custom provider, MAIL-082).
+/// In tests the address goes to the installed "browser" (`set_test_browser`) instead.
+pub fn open_signin_url(url: &str, allow_local_http: bool) -> Result<(), String> {
+    let url = url.trim();
+    let origin = crate::cal_dav::Origin::parse(url)?;
+    if origin.scheme != "https" && !(allow_local_http && origin.is_local()) {
+        return Err("The sign-in address must start with https://".into());
+    }
+    #[cfg(test)]
+    if let Some(b) = test_browser().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        b(url);
+        return Ok(());
+    }
+    open_url(url)
+}
+
+/// A pretend browser for tests: gets the sign-in address instead of a real browser.
+#[cfg(test)]
+pub type TestBrowser = Box<dyn Fn(&str) + Send + Sync>;
+
+#[cfg(test)]
+fn test_browser() -> &'static std::sync::Mutex<Option<TestBrowser>> {
+    static B: std::sync::Mutex<Option<TestBrowser>> = std::sync::Mutex::new(None);
+    &B
+}
+
+/// Holds the pretend browser; the next test that wants one waits for this one to be dropped.
+#[cfg(test)]
+pub struct BrowserGuard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+#[cfg(test)]
+impl Drop for BrowserGuard {
+    fn drop(&mut self) {
+        *test_browser().lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
+/// Tests only: install the pretend browser used by [`open_signin_url`] until the guard is dropped.
+#[cfg(test)]
+pub fn install_test_browser(b: TestBrowser) -> BrowserGuard {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    *test_browser().lock().unwrap_or_else(|e| e.into_inner()) = Some(b);
+    BrowserGuard(g)
+}
+
 /// Open a file of the vault with its default program.
 pub fn open_vault_file(path: &Path, vault_root: &Path) -> Result<(), String> {
     launch(check_vault_file(path, vault_root)?.as_ref())

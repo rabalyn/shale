@@ -94,6 +94,24 @@ pub trait Connector: Send + Sync {
 /// Gives a fresh authenticator for each connection (an OAuth2 one fetches a current access token).
 pub trait AuthFactory: Send + Sync {
     fn authenticator(&self) -> Result<Box<dyn Authenticator>, String>;
+    /// The server refused the sign-in. An OAuth2 factory forgets its access token and says yes:
+    /// the connection is then tried once more with a new one (MAIL-083). Passwords say no.
+    fn token_rejected(&self) -> bool {
+        false
+    }
+}
+
+/// Connect with an authenticator from `auth`; if the server refuses the sign-in and the factory
+/// can get a new token, once more. `connect` does the actual connecting.
+pub fn connect_with_retry(auth: &dyn AuthFactory, mut connect: impl FnMut(&mut dyn Authenticator) -> Result<Client, ImapError>) -> Result<Client, ImapError> {
+    let mut a = auth.authenticator().map_err(ImapError::Auth)?;
+    match connect(a.as_mut()) {
+        Err(ImapError::Auth(_)) if auth.token_rejected() => {
+            let mut a = auth.authenticator().map_err(ImapError::Auth)?;
+            connect(a.as_mut())
+        }
+        r => r,
+    }
 }
 
 /// User name and password.
@@ -116,20 +134,26 @@ pub struct ImapConnector {
 
 impl Connector for ImapConnector {
     fn connect(&self) -> Result<Client, ImapError> {
-        let mut a = self.auth.authenticator().map_err(ImapError::Auth)?;
-        Client::connect(&self.settings, a.as_mut())
+        connect_with_retry(self.auth.as_ref(), |a| Client::connect(&self.settings, a))
     }
 }
 
 /// A connector for a configured account; the password comes from the keyring.
-pub fn connector_for_account(account: &MailAccount, limits: Limits) -> Result<ImapConnector, String> {
+/// `typed_secret` is a client secret typed but not saved yet
+/// (OAuth2 accounts only).
+pub fn connector_for_account(account: &MailAccount, limits: Limits, typed_secret: Option<String>) -> Result<ImapConnector, String> {
     let settings = ConnectSettings { host: account.host.clone(), port: account.port, security: account.security, limits };
     let auth: Arc<dyn AuthFactory> = match account.auth {
         MailAuth::Password => {
             let password = crate::secrets::mail_secret(&account.id, crate::secrets::MailSecret::Password).ok_or("no password for this account in the keyring")?;
             Arc::new(PasswordAuth { user: account.user.clone(), password })
         }
-        MailAuth::OAuth2 => return Err("OAuth2 sign-in is not available yet".into()),
+        MailAuth::OAuth2 => {
+            let secret = typed_secret.filter(|s| !s.is_empty()).or_else(|| crate::secrets::mail_secret(&account.id, crate::secrets::MailSecret::ClientSecret));
+            let cfg = crate::oauth::OAuthConfig::for_account(account, secret).map_err(|e| e.to_string())?;
+            let source = crate::oauth::shared_source(&account.id, cfg);
+            Arc::new(crate::oauth::OAuthFactory { user: account.user.clone(), host: account.host.clone(), port: account.port, source })
+        }
     };
     Ok(ImapConnector { settings, auth })
 }
@@ -322,7 +346,7 @@ pub fn real_factory() -> ConnectorFactory {
             let settings = ConnectSettings { host: account.host.clone(), port: account.port, security: account.security, limits: Limits::default() };
             return Ok(Arc::new(ImapConnector { settings, auth: Arc::new(PasswordAuth { user: account.user.clone(), password: pw }) }) as Arc<dyn Connector>);
         }
-        match connector_for_account(account, Limits::default()) {
+        match connector_for_account(account, Limits::default(), session_password) {
             Ok(c) => Ok(Arc::new(c) as Arc<dyn Connector>),
             Err(e) if e.contains("no password") => Err(NO_PASSWORD.into()),
             Err(e) => Err(e),

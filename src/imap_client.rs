@@ -107,6 +107,10 @@ fn io_error(e: io::Error) -> ImapError {
 
 /// How to sign in. Passwords use [`PlainAuth`]; XOAUTH2 (phase 1c) is another implementation.
 pub trait Authenticator: Send {
+    /// Called with the server's capabilities before anything is sent: `offered("XOAUTH2")` says
+    /// whether the server has `AUTH=XOAUTH2`. An authenticator that knows several mechanisms
+    /// picks one here.
+    fn select_mechanism(&mut self, _offered: &dyn Fn(&str) -> bool) {}
     /// The SASL mechanism, such as `PLAIN` or `XOAUTH2`.
     fn mechanism(&self) -> &str;
     /// The first message of the exchange.
@@ -155,7 +159,7 @@ impl Authenticator for PlainAuth {
     }
 }
 
-fn base64_encode(data: &[u8]) -> String {
+pub(crate) fn base64_encode(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for c in data.chunks(3) {
@@ -983,6 +987,10 @@ impl Client {
         if !self.secure {
             return Err(ImapError::Tls("signing in on a connection without encryption is never done".into()));
         }
+        {
+            let caps = self.caps.clone();
+            auth.select_mechanism(&|m| caps.contains(&format!("AUTH={}", m.to_ascii_uppercase())));
+        }
         let mech = auth.mechanism().to_ascii_uppercase();
         if self.caps.contains(&format!("AUTH={mech}")) {
             self.authenticate_sasl(&mech, auth)?;
@@ -1007,17 +1015,30 @@ impl Client {
             self.send(&tag, &format!("AUTHENTICATE {mech}"))?;
         }
         let mut sent_initial = self.caps.contains("SASL-IR");
+        // what the server said when it refused the token (XOAUTH2 / OAUTHBEARER send the reason
+        // as a challenge after the first message, and the final NO has no details)
+        let mut reason: Option<String> = None;
         loop {
             let r = self.wire.read_response(self.limits.max_small_literal)?;
             if let Some(rest) = r.text.strip_prefix(b"+") {
                 let challenge = crate::mail::base64_decode(String::from_utf8_lossy(rest).trim().as_bytes());
+                if sent_initial && !challenge.is_empty() {
+                    reason = Some(String::from_utf8_lossy(&challenge).chars().filter(|c| !c.is_control()).take(300).collect());
+                }
                 let answer = if sent_initial { auth.respond(&challenge) } else { initial.clone() };
                 sent_initial = true;
                 let line = format!("{}\r\n", base64_encode(&answer));
                 self.wire.io.write_all(line.as_bytes()).and_then(|_| self.wire.io.flush()).map_err(io_error)?;
             } else if let Some(rest) = r.text.strip_prefix(tag.as_bytes()).and_then(|x| x.strip_prefix(b" ")) {
                 let text = String::from_utf8_lossy(rest).into_owned();
-                return if text.get(..2).map(|w| w.eq_ignore_ascii_case("OK")).unwrap_or(false) { Ok(()) } else { Err(ImapError::Auth(text)) };
+                return if text.get(..2).map(|w| w.eq_ignore_ascii_case("OK")).unwrap_or(false) {
+                    Ok(())
+                } else {
+                    Err(ImapError::Auth(match reason {
+                        Some(r) => format!("{text} (the server said: {r})"),
+                        None => text,
+                    }))
+                };
             }
             // untagged answers during sign-in carry nothing we need
         }

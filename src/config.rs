@@ -36,8 +36,18 @@ pub enum MailAuth {
     /// Password or app password, kept in the keyring.
     #[default]
     Password,
-    /// OAuth2 (XOAUTH2); the sign-in itself comes with phase 1c.
+    /// OAuth2 (XOAUTH2 / OAUTHBEARER); the sign-in is in `oauth.rs`.
     OAuth2,
+}
+
+/// Where an OAuth2 account signs in. Google and Microsoft have fixed endpoints; Custom has the
+/// ones typed in the account settings (an own provider, or the local test environment).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum OAuthProvider {
+    #[default]
+    Google,
+    Microsoft,
+    Custom,
 }
 
 /// How the connection to the mail server is secured. There is no plain-text choice.
@@ -73,11 +83,32 @@ pub struct MailAccount {
     pub user: String,
     pub auth: MailAuth,
     pub security: MailSecurity,
+    /// OAuth2 only: the provider, and the client ID registered with it. Shale has no built-in
+    /// client IDs. The client secret (some providers need one) is in the keyring.
+    pub oauth_provider: OAuthProvider,
+    pub oauth_client_id: String,
+    /// OAuth2 with the Custom provider only: the authorization and token endpoints and the scope.
+    pub oauth_auth_url: String,
+    pub oauth_token_url: String,
+    pub oauth_scope: String,
 }
 
 impl Default for MailAccount {
     fn default() -> Self {
-        MailAccount { id: String::new(), name: String::new(), host: String::new(), port: 993, user: String::new(), auth: MailAuth::Password, security: MailSecurity::ImplicitTls }
+        MailAccount {
+            id: String::new(),
+            name: String::new(),
+            host: String::new(),
+            port: 993,
+            user: String::new(),
+            auth: MailAuth::Password,
+            security: MailSecurity::ImplicitTls,
+            oauth_provider: OAuthProvider::Google,
+            oauth_client_id: String::new(),
+            oauth_auth_url: String::new(),
+            oauth_token_url: String::new(),
+            oauth_scope: String::new(),
+        }
     }
 }
 

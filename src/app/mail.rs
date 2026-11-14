@@ -22,6 +22,9 @@ impl ShaleApp {
     }
 
     pub fn open_mail_settings(&mut self) {
+        for a in self.cfg.mail_accounts.clone() {
+            self.mail.probe_sign_in(&a);
+        }
         self.modal = Some(Modal::MailAccounts(Box::new(MailDialog::new(self.cfg.mail_accounts.clone(), self.cfg.mail_sync_minutes, secrets::keyring_available()))));
     }
 
@@ -31,13 +34,28 @@ impl ShaleApp {
             MailDialogAction::Cancel => true,
             MailDialogAction::Test(i) => {
                 if let Some(acct) = d.accounts.get(i).cloned() {
-                    let typed = d.passwords.get(&acct.id).filter(|p| !p.is_empty()).cloned();
+                    // for an OAuth2 account the typed value is the client secret
+                    let typed = if acct.auth == crate::config::MailAuth::OAuth2 { d.client_secrets.get(&acct.id) } else { d.passwords.get(&acct.id) }.filter(|p| !p.is_empty()).cloned();
                     // use what is in the fields now, even if it is not valid yet to be saved
                     let mut acct = acct;
                     if let Ok(p) = d.ports.get(i).map(|p| p.trim()).unwrap_or("").parse::<u16>() {
                         acct.port = p;
                     }
                     self.mail.test_connection(&acct, typed);
+                }
+                false
+            }
+            MailDialogAction::SignIn(i) => {
+                if let Some(mut acct) = d.accounts.get(i).cloned() {
+                    acct.oauth_client_id = acct.oauth_client_id.trim().to_string();
+                    let typed = d.client_secrets.get(&acct.id).filter(|s| !s.is_empty()).cloned();
+                    self.mail.start_sign_in(&acct, typed);
+                }
+                false
+            }
+            MailDialogAction::CancelSignIn(i) => {
+                if let Some(a) = d.accounts.get(i) {
+                    self.mail.cancel_sign_in(&a.id);
                 }
                 false
             }
@@ -64,6 +82,11 @@ impl ShaleApp {
                 for (id, pw) in std::mem::take(&mut d.passwords) {
                     if !pw.is_empty() && self.cfg.mail_accounts.iter().any(|a| a.id == id) {
                         self.mail.save_password(&id, pw);
+                    }
+                }
+                for (id, secret) in std::mem::take(&mut d.client_secrets) {
+                    if !secret.is_empty() && self.cfg.mail_accounts.iter().any(|a| a.id == id && a.auth == crate::config::MailAuth::OAuth2) {
+                        self.mail.save_client_secret(&id, secret);
                     }
                 }
                 self.save_config();

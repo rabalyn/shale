@@ -37,8 +37,10 @@ const MAIL: &str = "shale-mail";
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MailSecret {
     Password,
-    /// For the OAuth2 sign-in (phase 1c).
+    /// The OAuth2 refresh token (`oauth.rs`).
     RefreshToken,
+    /// The OAuth2 client secret, for providers that want one from desktop apps.
+    ClientSecret,
 }
 
 impl MailSecret {
@@ -46,6 +48,7 @@ impl MailSecret {
         match self {
             MailSecret::Password => "password",
             MailSecret::RefreshToken => "refresh-token",
+            MailSecret::ClientSecret => "client-secret",
         }
     }
 }

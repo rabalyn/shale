@@ -44,6 +44,9 @@ mod markdown;
 mod media;
 #[cfg(test)]
 mod notes_vault_tests;
+mod oauth;
+#[cfg(test)]
+mod oauth_fake_tests;
 mod opener;
 mod panels;
 mod pdfexport;
