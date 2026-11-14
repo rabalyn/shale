@@ -41,6 +41,8 @@ mod mail_dialog;
 mod mail_env_tests;
 mod mail_ops;
 mod mail_send;
+#[cfg(test)]
+mod mail_send_fuzz_tests;
 mod mail_store;
 mod mail_ui;
 #[cfg(test)]
