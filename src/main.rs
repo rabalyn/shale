@@ -6,6 +6,8 @@
 //!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
 //!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
 
+#![allow(dead_code)] // TEMPORARY: the mail view uses the new mail_ops in the next commit; this line goes then
+
 mod app;
 mod cal_dav;
 mod cal_dialog;
@@ -37,6 +39,7 @@ mod mail_demo;
 mod mail_dialog;
 #[cfg(test)]
 mod mail_env_tests;
+mod mail_ops;
 mod mail_store;
 mod mail_ui;
 #[cfg(test)]

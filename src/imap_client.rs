@@ -79,9 +79,6 @@ pub enum ImapError {
     Server(String),
     /// The client itself refused to send a command because it could change the server.
     Refused(String),
-    /// The folder is not the one the local copy knows (its `UIDVALIDITY` changed): the UIDs we
-    /// hold mean other messages now, so nothing is written.
-    Stale(String),
 }
 
 impl fmt::Display for ImapError {
@@ -93,7 +90,6 @@ impl fmt::Display for ImapError {
             ImapError::Protocol(s) => write!(f, "unexpected answer from the server: {s}"),
             ImapError::Server(s) => write!(f, "the server said: {s}"),
             ImapError::Refused(s) => write!(f, "refused to send a command that could change the mailbox: {s}"),
-            ImapError::Stale(s) => write!(f, "{s}"),
         }
     }
 }
@@ -236,16 +232,34 @@ impl MailFlag {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WriteCmd {
     /// Open a folder for writing (`SELECT`); reading uses `EXAMINE`.
-    Select { folder: String },
-    StoreFlags { uids: Vec<u32>, add: bool, flags: Vec<MailFlag>, unchanged_since: Option<u64> },
+    Select {
+        folder: String,
+    },
+    StoreFlags {
+        uids: Vec<u32>,
+        add: bool,
+        flags: Vec<MailFlag>,
+        unchanged_since: Option<u64>,
+    },
     /// `UID MOVE` (needs the `MOVE` capability).
-    Move { uids: Vec<u32>, to: String },
+    Move {
+        uids: Vec<u32>,
+        to: String,
+    },
     /// `UID COPY`: the first step of the fallback for a server without `MOVE`.
-    Copy { uids: Vec<u32>, to: String },
+    Copy {
+        uids: Vec<u32>,
+        to: String,
+    },
     /// Set (`set: true`) or clear `\Deleted`: only the fallback of a move and "delete forever".
-    MarkDeleted { uids: Vec<u32>, set: bool },
+    MarkDeleted {
+        uids: Vec<u32>,
+        set: bool,
+    },
     /// `UID EXPUNGE`: removes exactly these UIDs, and only if they carry `\Deleted` (needs `UIDPLUS`).
-    ExpungeUids { uids: Vec<u32> },
+    ExpungeUids {
+        uids: Vec<u32>,
+    },
 }
 
 fn checked_set(uids: &[u32]) -> Result<String> {

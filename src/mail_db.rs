@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Newest schema version this program knows.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// What went wrong, in words for the person (the store never panics on bad data).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +62,8 @@ pub const STATE_TOO_LARGE: i64 = 2;
 // ---------------------------------------------------------------- schema
 
 /// Migration `n` (index `n - 1`) brings the schema from version `n - 1` to `n`.
-const MIGRATIONS: [&str; 1] = [r#"
+const MIGRATIONS: [&str; 2] = [
+    r#"
 CREATE TABLE accounts (
     id TEXT PRIMARY KEY,
     display TEXT NOT NULL
@@ -107,7 +108,27 @@ CREATE VIRTUAL TABLE mail_fts USING fts5 (
     subject, from_addr, to_addr, cc_addr, body, attachments,
     tokenize = 'unicode61 remove_diacritics 2'
 );
-"#];
+"#,
+    // version 2 (phase 2, ADR-0009): what the person asked for and the server has not confirmed yet
+    r#"
+CREATE TABLE pending_ops (
+    id INTEGER PRIMARY KEY,
+    account TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    folder INTEGER NOT NULL,
+    uidvalidity INTEGER NOT NULL,
+    uid INTEGER NOT NULL,
+    target TEXT,
+    flags_add TEXT NOT NULL DEFAULT '',
+    flags_remove TEXT NOT NULL DEFAULT '',
+    prev_flags TEXT NOT NULL DEFAULT '',
+    created INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+);
+CREATE INDEX pending_by_message ON pending_ops (folder, uidvalidity, uid);
+"#,
+];
 
 /// The version the file is at (0 = a new, empty file).
 pub fn current_version(c: &Connection) -> Result<i64> {
@@ -210,9 +231,16 @@ pub struct MessageSummary {
     pub parsed: bool,
     pub gone_on_server: bool,
     pub missing_file: bool,
+    /// The kind of the newest action on this message that the server has not confirmed yet
+    /// (`flags`, `move`, `delete`, `expunge`).
+    pub pending: Option<String>,
 }
 
 impl MessageSummary {
+    pub fn is_flagged(&self) -> bool {
+        has_flag(&self.flags, "\\Flagged")
+    }
+
     pub fn is_seen(&self) -> bool {
         self.flags.split(' ').any(|f| f.eq_ignore_ascii_case("\\Seen"))
     }
@@ -252,11 +280,108 @@ pub struct NewMessage {
 #[derive(Clone, Debug)]
 pub enum Op {
     Message(Box<NewMessage>),
-    Flags { folder: i64, uidvalidity: u32, uid: u32, flags: String },
-    Gone { folder: i64, uidvalidity: u32, uid: u32, gone: bool },
-    MissingFile { id: i64, missing: bool },
-    FolderState { folder: i64, uidvalidity: Option<u32>, uidnext: Option<u32>, highestmodseq: Option<u64>, last_sync: i64 },
-    SyncEnabled { folder: i64, enabled: bool },
+    Flags {
+        folder: i64,
+        uidvalidity: u32,
+        uid: u32,
+        flags: String,
+    },
+    Gone {
+        folder: i64,
+        uidvalidity: u32,
+        uid: u32,
+        gone: bool,
+    },
+    MissingFile {
+        id: i64,
+        missing: bool,
+    },
+    FolderState {
+        folder: i64,
+        uidvalidity: Option<u32>,
+        uidnext: Option<u32>,
+        highestmodseq: Option<u64>,
+        last_sync: i64,
+    },
+    SyncEnabled {
+        folder: i64,
+        enabled: bool,
+    },
+    /// Record an action of the person; a `flags` action also changes the local flags in the same
+    /// transaction (the previous flags are kept in the row, for a rollback).
+    PendingAdd(Box<PendingRow>),
+    /// The server confirmed (or the action ended some other way that the caller has handled): forget it.
+    PendingDone {
+        id: i64,
+    },
+    /// The server refused: undo the local effect of a `flags` action, then forget it.
+    PendingRollback {
+        id: i64,
+    },
+    /// An attempt failed in a way that is worth trying again: count it, remember why.
+    PendingTried {
+        id: i64,
+        error: String,
+    },
+    /// The message is not in this folder any more (it moved or was deleted): its row and its
+    /// search entry go. The caller has taken care of the file (it is never deleted).
+    Remove {
+        folder: i64,
+        uidvalidity: u32,
+        uid: u32,
+    },
+}
+
+/// One action of the person that waits for the server (MAIL-107).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingRow {
+    pub id: i64,
+    pub account: String,
+    /// `flags`, `move`, `delete` (a move to Trash) or `expunge` (delete forever).
+    pub kind: String,
+    pub folder: i64,
+    pub uidvalidity: u32,
+    pub uid: u32,
+    /// The folder a `move` or `delete` goes to, as the server spells it.
+    pub target: Option<String>,
+    /// Flags to set and to clear (`flags` only), separated by spaces.
+    pub flags_add: String,
+    pub flags_remove: String,
+    /// The local flags before the optimistic change.
+    pub prev_flags: String,
+    pub created: i64,
+    pub attempts: i64,
+    pub last_error: Option<String>,
+}
+
+/// Whether a flag list (separated by spaces) has this flag, ignoring case.
+pub fn has_flag(flags: &str, flag: &str) -> bool {
+    flags.split(' ').any(|f| f.eq_ignore_ascii_case(flag))
+}
+
+/// The flags in the form the index keeps them: sorted ignoring case, separated by spaces.
+pub fn canonical_flags(list: impl IntoIterator<Item = String>) -> String {
+    let mut v: Vec<String> = list.into_iter().filter(|f| !f.is_empty()).collect();
+    v.sort_by_key(|f| f.to_ascii_lowercase());
+    v.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    v.join(" ")
+}
+
+/// `flags` with the `add` flags set and the `remove` flags cleared.
+pub fn change_flags(flags: &str, add: &str, remove: &str) -> String {
+    let mut v: Vec<String> = flags.split(' ').filter(|f| !f.is_empty() && !remove.split(' ').any(|r| r.eq_ignore_ascii_case(f))).map(String::from).collect();
+    v.extend(add.split(' ').filter(|f| !f.is_empty()).map(String::from));
+    canonical_flags(v)
+}
+
+/// Undo a flags action on `current`: a flag that the action set goes again unless it was set
+/// before, a flag it cleared comes back if it was set before. Other flags (and the changes of
+/// other actions) stay as they are.
+pub fn undo_flags(current: &str, prev: &str, add: &str, remove: &str) -> String {
+    let was = |f: &str| has_flag(prev, f);
+    let drop: Vec<&str> = add.split(' ').filter(|f| !f.is_empty() && !was(f)).collect();
+    let back: Vec<&str> = remove.split(' ').filter(|f| !f.is_empty() && was(f)).collect();
+    change_flags(current, &back.join(" "), &drop.join(" "))
 }
 
 impl Op {
@@ -298,8 +423,104 @@ fn apply_op(tx: &rusqlite::Transaction<'_>, op: &Op) -> Result<()> {
         Op::SyncEnabled { folder, enabled } => {
             tx.execute("UPDATE folders SET sync_enabled = ?2 WHERE id = ?1", params![folder, *enabled as i64])?;
         }
+        Op::PendingAdd(p) => {
+            let mut prev = p.prev_flags.clone();
+            if p.kind == "flags" {
+                let cur: Option<String> = tx.query_row("SELECT flags FROM messages WHERE folder = ?1 AND uidvalidity = ?2 AND uid = ?3", params![p.folder, p.uidvalidity, p.uid], |r| r.get(0)).optional()?;
+                let Some(cur) = cur else { return Err(MailError("the message is not in the index".into())) };
+                let new = change_flags(&cur, &p.flags_add, &p.flags_remove);
+                tx.execute("UPDATE messages SET flags = ?4 WHERE folder = ?1 AND uidvalidity = ?2 AND uid = ?3", params![p.folder, p.uidvalidity, p.uid, new])?;
+                prev = cur;
+            }
+            tx.execute(
+                "INSERT INTO pending_ops (account, kind, folder, uidvalidity, uid, target, flags_add, flags_remove, prev_flags, created) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![p.account, p.kind, p.folder, p.uidvalidity, p.uid, p.target, p.flags_add, p.flags_remove, prev, p.created],
+            )?;
+        }
+        Op::PendingDone { id } => {
+            tx.execute("DELETE FROM pending_ops WHERE id = ?1", [id])?;
+        }
+        Op::PendingRollback { id } => {
+            let row = pending_row(tx, *id)?;
+            if let Some(p) = row {
+                if p.kind == "flags" {
+                    let cur: Option<String> = tx.query_row("SELECT flags FROM messages WHERE folder = ?1 AND uidvalidity = ?2 AND uid = ?3", params![p.folder, p.uidvalidity, p.uid], |r| r.get(0)).optional()?;
+                    if let Some(cur) = cur {
+                        let back = undo_flags(&cur, &p.prev_flags, &p.flags_add, &p.flags_remove);
+                        tx.execute("UPDATE messages SET flags = ?4 WHERE folder = ?1 AND uidvalidity = ?2 AND uid = ?3", params![p.folder, p.uidvalidity, p.uid, back])?;
+                    }
+                }
+                // the sync skipped this message while the action waited: have the next sync compare every flag
+                tx.execute("UPDATE folders SET highestmodseq = NULL WHERE id = ?1", [p.folder])?;
+                tx.execute("DELETE FROM pending_ops WHERE id = ?1", [id])?;
+            }
+        }
+        Op::PendingTried { id, error } => {
+            tx.execute("UPDATE pending_ops SET attempts = attempts + 1, last_error = ?2 WHERE id = ?1", params![id, error])?;
+        }
+        Op::Remove { folder, uidvalidity, uid } => {
+            let id: Option<i64> = tx.query_row("SELECT id FROM messages WHERE folder = ?1 AND uidvalidity = ?2 AND uid = ?3", params![folder, uidvalidity, uid], |r| r.get(0)).optional()?;
+            if let Some(id) = id {
+                tx.execute("DELETE FROM mail_fts WHERE rowid = ?1", [id])?;
+                tx.execute("DELETE FROM messages WHERE id = ?1", [id])?;
+            }
+        }
     }
     Ok(())
+}
+
+const PENDING_COLS: &str = "id, account, kind, folder, uidvalidity, uid, target, flags_add, flags_remove, prev_flags, created, attempts, last_error";
+
+fn pending_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<PendingRow> {
+    Ok(PendingRow {
+        id: r.get(0)?,
+        account: r.get(1)?,
+        kind: r.get(2)?,
+        folder: r.get(3)?,
+        uidvalidity: r.get(4)?,
+        uid: r.get(5)?,
+        target: r.get(6)?,
+        flags_add: r.get(7)?,
+        flags_remove: r.get(8)?,
+        prev_flags: r.get(9)?,
+        created: r.get(10)?,
+        attempts: r.get(11)?,
+        last_error: r.get(12)?,
+    })
+}
+
+fn pending_row(c: &Connection, id: i64) -> Result<Option<PendingRow>> {
+    Ok(c.query_row(&format!("SELECT {PENDING_COLS} FROM pending_ops WHERE id = ?1"), [id], pending_from).optional()?)
+}
+
+/// The actions that wait for the server, oldest first (one account, or all).
+pub fn pending_ops(c: &Connection, account: Option<&str>) -> Result<Vec<PendingRow>> {
+    let mut st = c.prepare(&format!("SELECT {PENDING_COLS} FROM pending_ops WHERE (?1 IS NULL OR account = ?1) ORDER BY id"))?;
+    let rows = st.query_map([account], pending_from)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// How many actions wait for the server.
+pub fn pending_count(c: &Connection) -> Result<i64> {
+    Ok(c.query_row("SELECT COUNT(*) FROM pending_ops", [], |r| r.get(0))?)
+}
+
+/// UIDs of a folder (in one UIDVALIDITY) that have an action waiting: the sync leaves their
+/// flags and state alone (MAIL-108).
+pub fn pending_uids(c: &Connection, folder: i64, uidvalidity: u32) -> Result<HashSet<u32>> {
+    let mut st = c.prepare("SELECT DISTINCT uid FROM pending_ops WHERE folder = ?1 AND uidvalidity = ?2")?;
+    let rows = st.query_map(params![folder, uidvalidity], |r| r.get(0))?.collect::<rusqlite::Result<HashSet<u32>>>()?;
+    Ok(rows)
+}
+
+/// One message by its row id (any folder, any UIDVALIDITY).
+pub fn message_by_id(c: &Connection, id: i64) -> Result<Option<MessageSummary>> {
+    Ok(c.query_row(&format!("SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder WHERE m.id = ?1"), [id], summary_from).optional()?)
+}
+
+/// One message by folder, UIDVALIDITY and UID.
+pub fn message_at(c: &Connection, folder: i64, uidvalidity: u32, uid: u32) -> Result<Option<MessageSummary>> {
+    Ok(c.query_row(&format!("SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder WHERE m.folder = ?1 AND m.uidvalidity = ?2 AND m.uid = ?3"), params![folder, uidvalidity, uid], summary_from).optional()?)
 }
 
 fn insert_message(tx: &rusqlite::Transaction<'_>, m: &NewMessage) -> Result<()> {
@@ -369,7 +590,8 @@ pub fn folders(c: &Connection, account: Option<&str>) -> Result<Vec<FolderRow>> 
 }
 
 const MSG_COLS: &str =
-    "m.id, f.account, m.folder, f.name, m.uid, m.uidvalidity, m.path, m.state, m.flags, m.date, m.from_addr, m.to_addr, m.cc_addr, m.subject, m.message_id, m.size, m.has_attachments, m.parsed, m.gone_on_server, m.missing_file";
+    "m.id, f.account, m.folder, f.name, m.uid, m.uidvalidity, m.path, m.state, m.flags, m.date, m.from_addr, m.to_addr, m.cc_addr, m.subject, m.message_id, m.size, m.has_attachments, m.parsed, m.gone_on_server, m.missing_file,
+     (SELECT p.kind FROM pending_ops p WHERE p.folder = m.folder AND p.uidvalidity = m.uidvalidity AND p.uid = m.uid ORDER BY p.id DESC LIMIT 1)";
 
 fn summary_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<MessageSummary> {
     Ok(MessageSummary {
@@ -393,6 +615,7 @@ fn summary_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<MessageSummary> {
         parsed: r.get::<_, i64>(17)? != 0,
         gone_on_server: r.get::<_, i64>(18)? != 0,
         missing_file: r.get::<_, i64>(19)? != 0,
+        pending: r.get(20)?,
     })
 }
 
@@ -584,12 +807,29 @@ mod tests {
         let c = Connection::open_in_memory().unwrap();
         assert_eq!(current_version(&c).unwrap(), 0);
         migrate(&c).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 1);
+        assert_eq!(current_version(&c).unwrap(), SCHEMA_VERSION);
         migrate(&c).unwrap(); // nothing to do the second time
-        for t in ["accounts", "folders", "messages", "mail_fts", "schema_version"] {
+        for t in ["accounts", "folders", "messages", "mail_fts", "schema_version", "pending_ops"] {
             let n: i64 = c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name = ?1", [t], |r| r.get(0)).unwrap();
             assert_eq!(n, 1, "table {t}");
         }
+    }
+
+    // spec: MAIL-004, MAIL-107
+    #[test]
+    fn migration_2_adds_the_pending_table_to_a_version_1_index_and_keeps_its_mail() {
+        let c = Connection::open_in_memory().unwrap();
+        current_version(&c).unwrap();
+        c.execute_batch(MIGRATIONS[0]).unwrap();
+        c.execute("INSERT INTO schema_version (version) VALUES (1)", []).unwrap();
+        let mut c = c;
+        let f = inbox(&c);
+        add(&mut c, f.id, 1, fields("old mail", "a@x.de", "text", 5));
+        migrate(&c).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 2);
+        assert_eq!(count_messages(&c).unwrap(), 1, "the mail of version 1 is untouched");
+        assert_eq!(list(&c, f.id, 10, 0).unwrap()[0].pending, None);
+        assert_eq!(pending_count(&c).unwrap(), 0);
     }
 
     // spec: MAIL-004

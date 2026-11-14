@@ -16,7 +16,8 @@
 //! [`reconcile`] indexes every file that has no row and marks rows whose file is gone, so a
 //! rebuild loses nothing but flags (the next sync brings them back from the server).
 //!
-//! This phase never deletes a message file.
+//! Nothing here deletes a message file. A message that moved or was deleted by the person goes
+//! to `.trash/<date>/` ([`MailStore::archive_file`]).
 
 use crate::fsutil;
 use crate::mail;
@@ -284,6 +285,33 @@ impl MailStore {
         Ok(())
     }
 
+    /// Put a message file out of the way without deleting it (MAIL-106): it moves, by
+    /// `fsutil::rename_noreplace`, to `<root>/.trash/<date>/<rel>` (a number is added to the name
+    /// if that exists). Returns the new place, or None if there was no such file.
+    pub fn archive_file(&self, rel: &str, date: &str) -> Result<Option<PathBuf>> {
+        let rel_path = Path::new(rel);
+        if rel.is_empty() || rel_path.is_absolute() || rel_path.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+            return Err(MailError(format!("not a path inside the mail store: {rel:?}")));
+        }
+        let src = self.root.join(rel_path);
+        if !src.is_file() {
+            return Ok(None);
+        }
+        let mut dest = self.root.join(".trash").join(date).join(rel_path);
+        fsutil::ensure_private_dir(dest.parent().ok_or("bad path")?)?;
+        for n in 2..1000 {
+            match fsutil::rename_noreplace(&src, &dest) {
+                Ok(()) => return Ok(Some(dest)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let stem = rel_path.file_stem().and_then(|s| s.to_str()).unwrap_or("message");
+                    dest = dest.with_file_name(format!("{stem}-{n}.eml"));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(MailError("too many files with that name in the local trash".into()))
+    }
+
     /// Read a message file.
     pub fn read_raw(&self, m: &MessageSummary) -> Result<Vec<u8>> {
         if m.path.is_empty() {
@@ -354,6 +382,25 @@ impl Reader {
     }
     pub fn missing_uids(&self, folder: i64, uidvalidity: u32) -> Result<Vec<u32>> {
         mail_db::missing_uids(&self.conn, folder, uidvalidity)
+    }
+    /// The actions waiting for the server, oldest first (MAIL-107).
+    pub fn pending_ops(&self, account: Option<&str>) -> Result<Vec<mail_db::PendingRow>> {
+        mail_db::pending_ops(&self.conn, account)
+    }
+    pub fn pending_count(&self) -> Result<i64> {
+        mail_db::pending_count(&self.conn)
+    }
+    pub fn pending_uids(&self, folder: i64, uidvalidity: u32) -> Result<HashSet<u32>> {
+        mail_db::pending_uids(&self.conn, folder, uidvalidity)
+    }
+    pub fn message_by_id(&self, id: i64) -> Result<Option<MessageSummary>> {
+        mail_db::message_by_id(&self.conn, id)
+    }
+    pub fn message_at(&self, folder: i64, uidvalidity: u32, uid: u32) -> Result<Option<MessageSummary>> {
+        mail_db::message_at(&self.conn, folder, uidvalidity, uid)
+    }
+    pub fn folder_by_id(&self, id: i64) -> Result<Option<FolderRow>> {
+        mail_db::folder_by_id(&self.conn, id)
     }
 }
 
@@ -848,7 +895,7 @@ mod tests {
     // spec: MAIL-009
     #[test]
     fn nothing_here_deletes_a_message_file() {
-        let sources = [include_str!("mail_store.rs"), include_str!("imap_sync.rs")];
+        let sources = [include_str!("mail_store.rs"), include_str!("imap_sync.rs"), include_str!("mail_ops.rs")];
         for src in sources {
             let code = src.split("#[cfg(test)]").next().unwrap();
             let removals: Vec<&str> = code.lines().filter(|l| !l.trim_start().starts_with("//") && (l.contains("remove_file") || l.contains("remove_dir"))).collect();

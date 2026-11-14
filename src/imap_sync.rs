@@ -511,8 +511,14 @@ fn compare_with_server(store: &MailStore, client: &mut Client, row: &FolderRow, 
     let reader = store.reader().map_err(err_text)?;
     let known = reader.flags_of(row.id, uv).map_err(err_text)?;
     let on_server: HashSet<u32> = client.uid_search(SearchKey::All).map_err(err_text)?.into_iter().collect();
+    // a message with an action of the person that the server has not confirmed yet is left alone:
+    // the server wins, unless the person's own change is still on its way (MAIL-108)
+    let waiting = reader.pending_uids(row.id, uv).map_err(err_text)?;
     let mut ops = Vec::new();
     for (uid, (_, gone)) in &known {
+        if waiting.contains(uid) {
+            continue;
+        }
         let there = on_server.contains(uid);
         if *gone == there {
             ops.push(Op::Gone { folder: row.id, uidvalidity: uv, uid: *uid, gone: !there });
@@ -523,7 +529,7 @@ fn compare_with_server(store: &MailStore, client: &mut Client, row: &FolderRow, 
     client
         .uid_fetch_flags(since, |f| {
             if let (Some(flags), Some((old, _))) = (&f.flags, known.get(&f.uid)) {
-                if flags != old {
+                if flags != old && !waiting.contains(&f.uid) {
                     ops.push(Op::Flags { folder: row.id, uidvalidity: uv, uid: f.uid, flags: flags.clone() });
                 }
             }
