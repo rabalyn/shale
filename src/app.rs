@@ -274,6 +274,10 @@ pub struct ShaleApp {
     cfg_error: Option<String>,
     /// scripted input steps for tests of the real window
     script: std::collections::VecDeque<String>,
+    /// where text that could not be saved at exit is put (DATA-011)
+    pub recovery_root: PathBuf,
+    /// recovery folders from earlier runs the person has not dismissed yet
+    pub recovery_notice: Vec<PathBuf>,
 }
 
 impl ShaleApp {
@@ -367,7 +371,10 @@ impl ShaleApp {
             shot_done: Arc::new(AtomicBool::new(false)),
             cfg_error: None,
             script: opts.keys.as_deref().map(|k| k.split('|').map(|x| x.to_string()).collect()).unwrap_or_default(),
+            recovery_root: if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{}", std::process::id())) },
+            recovery_notice: vec![],
         };
+        app.recovery_notice = crate::recovery::unseen(&app.recovery_root);
         if let Some(p) = cfg_problem {
             app.toast(p);
         }
@@ -829,11 +836,28 @@ impl ShaleApp {
         for rel in dirty_drawings {
             self.save_drawing(&rel);
         }
-        for (rel, d) in &self.notes {
-            if let (true, Some(e)) = (d.dirty, &d.save_error) {
-                eprintln!("{e} ({})", rel_to_string(rel));
+    }
+
+    /// At exit: what still could not be saved goes to the recovery folder instead of being lost
+    /// (DATA-011). Returns where each text went. Failures are the last resort: stderr.
+    pub fn rescue_unsaved(&mut self) -> Vec<PathBuf> {
+        let date = crate::mail_store::today_string();
+        let mut texts: Vec<(PathBuf, Vec<u8>)> = self.notes.iter().filter(|(_, d)| d.dirty && d.unreadable.is_none()).map(|(r, d)| (r.clone(), d.text.clone().into_bytes())).collect();
+        for (rel, d) in &self.drawings {
+            if d.dirty {
+                if let Ok(t) = d.file_text() {
+                    texts.push((rel.clone(), t.into_bytes()));
+                }
             }
         }
+        let mut out = Vec::new();
+        for (rel, bytes) in texts {
+            match crate::recovery::rescue(&self.recovery_root, &date, &rel, &bytes) {
+                Ok(p) => out.push(p),
+                Err(e) => eprintln!("could not save “{}” and could not rescue it either: {e}", rel_to_string(&rel)),
+            }
+        }
+        out
     }
 
     fn autosave(&mut self) {
@@ -1631,12 +1655,14 @@ impl eframe::App for ShaleApp {
         self.handle_drops(ui);
         self.learn_tags_tick();
         self.paint_toasts(ui);
+        self.paint_recovery_notice(ui);
         self.process_actions();
     }
 
     fn on_exit(&mut self) {
         // flush_all waits for a running sync's merge step first
         self.flush_all();
+        self.rescue_unsaved();
         self.remember_open_files();
         self.save_config();
     }

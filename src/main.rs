@@ -45,6 +45,7 @@ mod pdfview;
 mod pdfwrite;
 mod people;
 mod reader;
+mod recovery;
 mod secrets;
 mod tagwords;
 mod tb_store;

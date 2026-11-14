@@ -381,3 +381,40 @@ fn a_folder_with_unsaved_edits_that_cannot_be_saved_is_not_moved_to_the_trash() 
     assert_eq!(read(&d, ".trash/x/N.md"), "precious\n");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+// spec: DATA-011
+#[test]
+fn text_that_cannot_be_saved_at_exit_is_put_in_the_recovery_folder_and_announced_next_start() {
+    let (mut app, d) = app_in("exitrescue", &[("Sub/N.md", b"base\n")]);
+    if locks_do_not_hold(&d.join("Sub")) {
+        return;
+    }
+    let rec = d.join("recovery-root");
+    app.recovery_root = rec.clone();
+    app.open(Path::new("Sub/N.md"), false);
+    type_text(&mut app, "Sub/N.md", "precious unsaved words\n");
+    std::fs::set_permissions(d.join("Sub"), std::fs::Permissions::from_mode(0o555)).unwrap();
+    eframe::App::on_exit(&mut app);
+    std::fs::set_permissions(d.join("Sub"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(read(&d, "Sub/N.md"), "base\n", "the note on disk is untouched");
+    let day = crate::mail_store::today_string();
+    let saved = rec.join(&day).join("Sub/N.md");
+    assert_eq!(std::fs::read_to_string(&saved).unwrap(), "precious unsaved words\n");
+
+    // the next start announces it, once dismissed it stays quiet
+    let mut next = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
+    next.recovery_root = rec.clone();
+    next.recovery_notice = crate::recovery::unseen(&rec);
+    assert_eq!(next.recovery_notice, vec![rec.join(&day)]);
+    crate::recovery::dismiss(&next.recovery_notice);
+    assert!(crate::recovery::unseen(&rec).is_empty());
+
+    // a clean exit rescues nothing
+    let (mut ok, d2) = app_in("exitclean", &[("N.md", b"x\n")]);
+    ok.recovery_root = d2.join("rec");
+    ok.open(Path::new("N.md"), false);
+    eframe::App::on_exit(&mut ok);
+    assert!(!d2.join("rec").exists());
+    let _ = std::fs::remove_dir_all(&d);
+    let _ = std::fs::remove_dir_all(&d2);
+}

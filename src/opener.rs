@@ -29,6 +29,15 @@ pub fn open_exported_pdf(path: &Path) -> Result<(), String> {
     launch(check_exported_pdf(path)?.as_ref())
 }
 
+/// Open a folder of rescued notes (see `recovery`) in the file manager. Only folders inside the
+/// recovery folder are opened.
+pub fn open_recovery_folder(path: &Path, recovery_root: &Path) -> Result<(), String> {
+    if !crate::recovery::is_inside(recovery_root, path) {
+        return Err("Not opened: not a folder of rescued notes".into());
+    }
+    launch(path.as_os_str())
+}
+
 /// Save `data` (a mail attachment, say) as `name` in Shale's private temp folder and open that
 /// copy. Each call uses a fresh folder, so same-named attachments never clash.
 #[allow(dead_code)] // for mail attachments (the mail view is the next step)

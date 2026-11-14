@@ -676,6 +676,34 @@ impl ShaleApp {
         });
     }
 
+    /// Text from an earlier run that could not be saved and was put aside (DATA-011): stays until
+    /// it is dismissed.
+    pub fn paint_recovery_notice(&mut self, ui: &mut Ui) {
+        let Some(first) = self.recovery_notice.last().cloned() else { return };
+        let screen = ui.ctx().content_rect();
+        let mut dismissed = false;
+        egui::Area::new(egui::Id::unique("recovery-notice")).order(egui::Order::Tooltip).fixed_pos(Pos2::new(screen.min.x + 60.0, screen.max.y - 120.0)).show(ui.ctx(), |ui| {
+            egui::Frame::new().fill(Color32::from_rgb(64, 44, 44)).stroke(Stroke::new(1.0, theme::LINK_MISSING.gamma_multiply(0.7))).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                ui.set_max_width(420.0);
+                ui.label(egui::RichText::new("Some changes could not be saved when Shale was closed last time. They were put aside so nothing is lost.").color(theme::TEXT));
+                ui.horizontal(|ui| {
+                    if ui.link("Open the folder").clicked() {
+                        if let Err(e) = crate::opener::open_recovery_folder(&first, &self.recovery_root) {
+                            self.toasts.push((e, std::time::Instant::now()));
+                        }
+                    }
+                    if ui.link("Dismiss").clicked() {
+                        dismissed = true;
+                    }
+                });
+            });
+        });
+        if dismissed {
+            crate::recovery::dismiss(&self.recovery_notice);
+            self.recovery_notice.clear();
+        }
+    }
+
     pub fn paint_toasts(&mut self, ui: &mut Ui) {
         self.toasts.retain(|(_, t)| t.elapsed().as_secs_f32() < 3.5);
         if self.toasts.is_empty() {
