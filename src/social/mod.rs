@@ -14,10 +14,15 @@
 //! (`social_lookup` / `social_store` / `social_clear`). The login of a Bluesky account lives in
 //! memory only. Media addresses on other servers (picture CDNs) are fetched without any login.
 
+pub mod accounts_ui;
 pub mod bluesky;
-pub mod mastodon;
+pub mod demo;
+pub mod feed_ui;
+pub mod images;
 pub mod markup;
+pub mod mastodon;
 pub mod note;
+pub mod state;
 
 use crate::cal_dav::{self, check_url, same_server, Origin};
 use crate::cal_time as t;
@@ -62,6 +67,37 @@ pub struct Account {
     /// Mastodon: "ada@mastodon.social"; Bluesky: "ada.bsky.social" (what you sign in with)
     pub handle: String,
     pub display_name: String,
+}
+
+/// An account as the settings file holds it: the account and, only when no system keyring took
+/// the secret, the secret itself (the settings file can only be read by its owner).
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct SocialAccountEntry {
+    #[serde(flatten)]
+    pub account: Account,
+    /// the access token / app password; empty while the keyring holds it
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub secret: String,
+}
+
+impl std::fmt::Debug for SocialAccountEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SocialAccountEntry").field("account", &self.account).field("secret", &cal_dav::redacted(&self.secret)).finish()
+    }
+}
+
+impl SocialAccountEntry {
+    /// Keep the secret of a new account in the keyring (blocking: the keyring may ask for its
+    /// password), or in the entry when there is no keyring.
+    pub fn new(account: Account, secret: &str) -> SocialAccountEntry {
+        let secret = crate::secrets::social_store_or_keep(&account.server, &account.handle, secret);
+        SocialAccountEntry { account, secret }
+    }
+
+    /// The secret, from the keyring or the entry (blocking, like `new`).
+    pub fn secret(&self) -> String {
+        crate::secrets::social_secret(&self.account.server, &self.account.handle, &self.secret)
+    }
 }
 
 /// The default Bluesky server.
@@ -344,6 +380,7 @@ pub(crate) fn count(v: &Value) -> u32 {
 /// - then `root`;
 /// - then the descendants by the same author that reply to a post already in the chain, in the
 ///   order they were written.
+///
 /// `ancestors` run from the top of the conversation down to the parent of `root`; `descendants`
 /// are all replies below `root`, in any order. The result is in reading order and includes `root`.
 pub fn self_thread(root: Post, ancestors: Vec<Post>, descendants: Vec<Post>) -> Vec<Post> {
@@ -450,7 +487,8 @@ impl Client {
         note::fetch_saved(self, post)
     }
 
-    /// Whether this address is on the account's own server (only those get a login).
+    /// Whether this address is on the account's own server (only those would get a login).
+    #[allow(dead_code)] // media downloads never send a login, so nothing asks yet; kept with its test-able rule
     pub fn is_own_server(&self, url: &str) -> bool {
         same_server(url, &self.account.server)
     }

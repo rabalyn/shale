@@ -196,6 +196,7 @@ impl ShaleApp {
                     }
                 };
                 let tags = import::parse_tags(&d.tags);
+                let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
                 let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.cfg.people_dir.clone() };
                 let Some(v) = &mut self.vault else { return true };
                 let (made, errors) = import::import(v, &d.items, &opts);
@@ -209,7 +210,11 @@ impl ShaleApp {
                     }
                 }
                 // remember the folder and tags for next time
-                self.cfg.last_import_folder = rel_to_string(&folder);
+                if social_only {
+                    self.cfg.last_social_folder = rel_to_string(&folder);
+                } else {
+                    self.cfg.last_import_folder = rel_to_string(&folder);
+                }
                 for t in tags.iter().rev() {
                     self.cfg.recent_tags.retain(|o| !o.eq_ignore_ascii_case(t));
                     self.cfg.recent_tags.insert(0, t.clone());

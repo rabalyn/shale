@@ -32,6 +32,8 @@ pub enum View {
     Tasks,
     Graph,
     Calendar,
+    /// Mastodon / Bluesky feeds
+    Social,
 }
 
 impl View {
@@ -77,6 +79,7 @@ pub enum RightPanel {
 }
 
 mod drops;
+mod social;
 
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
@@ -101,6 +104,7 @@ pub enum Modal {
     Calendars(Box<crate::cal_dialog::CalendarDialog>),
     Event(Box<crate::cal_dialog::EventDialog>),
     Import(Box<crate::import_dialog::ImportDialog>),
+    Social(Box<crate::social::accounts_ui::SocialDialog>),
     /// an Obsidian canvas is being opened: convert it or open it read-only?
     ConvertCanvas { rel: PathBuf, new_tab: bool, always: bool, existing: Option<PathBuf> },
 }
@@ -168,6 +172,8 @@ pub struct ShaleApp {
     pub calendar: crate::cal_store::CalendarStore,
     pub cal_side: crate::cal_ui::CalendarView,
     pub cal_main: crate::cal_ui::CalendarView,
+    /// the feed view (Mastodon / Bluesky)
+    pub social: crate::social::state::SocialState,
     /// deletes started from the event popup: (job, calendar)
     pub cal_jobs: Vec<(crate::cal_store::Job, String)>,
     /// the calendar the last event was saved to (the default for the next new one)
@@ -273,6 +279,7 @@ impl ShaleApp {
             calendar: crate::cal_store::CalendarStore::new(cfg.calendars.clone(), if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{}", std::process::id())) }),
             cal_side: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Small),
             cal_main: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Medium),
+            social: crate::social::state::SocialState::new(if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{}", std::process::id())) }),
             cal_jobs: vec![],
             last_event_calendar: None,
             ctx: None,
@@ -322,6 +329,18 @@ impl ShaleApp {
                 Some("calendar-side") => app.right = RightPanel::Calendar,
                 Some("tasks") => app.show_view(View::Tasks, false),
                 Some("graph") => app.show_view(View::Graph, false),
+                // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
+                Some(v @ ("social" | "social-import")) => {
+                    let demo = crate::social::demo::account();
+                    app.cfg.social_accounts = vec![demo.clone()];
+                    app.social.load_demo(&demo);
+                    app.show_view(View::Social, false);
+                    if v == "social-import" {
+                        let posts = crate::social::demo::posts();
+                        let items = [3, 4].iter().map(|i| crate::import::social_item(crate::social::demo::saved(&posts[*i]), "Mastodon")).collect();
+                        app.open_import(items, vec![], Some((PathBuf::from("Social"), None)));
+                    }
+                }
                 Some("drawing") => app.open(Path::new("Sketch.excalidraw"), false),
                 // any file of the vault, e.g. `--view "open:Excalidraw/Plan.excalidraw.md"`
                 Some(v) if v.starts_with("open:") => app.open(Path::new(&v["open:".len()..]), false),
@@ -1246,6 +1265,11 @@ impl ShaleApp {
                     raw.events.extend([btn(true), btn(false), btn(true), btn(false)]);
                 }
             }
+        } else if let Some(n) = step.strip_prefix("scroll:") {
+            // the mouse wheel at the pointer, in points (positive: down): scroll:400
+            if let Ok(dy) = n.trim().parse::<f32>() {
+                raw.events.push(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -dy), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel });
+            }
         } else if let Some(p) = step.strip_prefix("drop:") {
             // a file dropped through the window system: drop:/path/to/file
             raw.dropped_files.push(std::sync::Arc::new(ScriptDrop(PathBuf::from(p))));
@@ -1419,6 +1443,7 @@ impl eframe::App for ShaleApp {
         } else {
             self.layout(ui);
         }
+        self.social_tick(ui.ctx());
         self.modals(ui);
         self.handle_drops(ui);
         self.learn_tags_tick();
@@ -1533,6 +1558,51 @@ pub(crate) mod tests {
         app.flush_all();
         let ideas = std::fs::read_to_string(d.join("Ideas.md")).unwrap();
         assert!(ideas.contains("![[Drawing.excalidraw]]"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: SOC-007, SOC-012
+    #[test]
+    fn saving_a_post_opens_the_import_dialog_and_the_note_lands_in_the_vault() {
+        use crate::social::accounts_ui::DialogAction;
+        let (mut app, d) = test_app("social");
+        let entry = crate::social::demo::account();
+        assert!(!app.social_dialog_action(DialogAction::Added(entry.clone())));
+        assert_eq!(app.cfg.social_accounts.len(), 1);
+        app.social.load_demo(&entry);
+        let ctx = egui::Context::default();
+        let post = crate::social::demo::posts().remove(4);
+        let wait_for_dialog = |app: &mut ShaleApp| {
+            for _ in 0..300 {
+                app.social_tick(&ctx);
+                if matches!(app.modal, Some(Modal::Import(_))) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("the Import dialog did not open");
+        };
+        app.social.save(&ctx, &entry, &post);
+        wait_for_dialog(&mut app);
+        let Some(Modal::Import(mut dlg)) = app.modal.take() else { panic!() };
+        assert_eq!((dlg.items.len(), dlg.folder.as_str(), dlg.items[0].kind().as_ref()), (1, "Social", "Thread (3 posts)"));
+        assert!(dlg.items[0].include && dlg.items[0].already.is_none() && dlg.link_into.is_none());
+        assert!(app.import_action(&mut dlg, crate::import_dialog::ImportAction::Import));
+        assert_eq!(app.cfg.last_social_folder, "Social");
+        assert!(app.cfg.last_import_folder.is_empty(), "posts have their own last folder");
+        let rel = d.join("Social").read_dir().unwrap().flatten().find(|f| f.file_name().to_string_lossy().ends_with(".md")).unwrap().path();
+        let text = std::fs::read_to_string(&rel).unwrap();
+        assert!(text.contains("## Thread") && text.contains("**Source:**") && text.contains("![[z_media/"), "{text}");
+        assert!(app.actions.iter().any(|a| matches!(a, Action::Open { .. })), "the new note is opened");
+        // the same post again: offered, but marked as imported before
+        app.rescan();
+        app.social.save(&ctx, &entry, &post);
+        wait_for_dialog(&mut app);
+        let Some(Modal::Import(dlg)) = app.modal.take() else { panic!() };
+        assert!(dlg.items[0].already.is_some() && !dlg.items[0].include);
+        // removing the account forgets it
+        app.social_dialog_action(DialogAction::Remove(entry.account.id.clone()));
+        assert!(app.cfg.social_accounts.is_empty() && app.social.account.is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
 

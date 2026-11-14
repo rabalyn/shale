@@ -161,6 +161,29 @@ built-in demo vault (`shale --screenshot out.png`).
   in its properties, links to the attachments and the original message, and the text of the
   message. The tag list counts these tags too.
 
+## Feeds: read Mastodon and Bluesky, save posts to the vault
+
+![The feed view](screenshots/social-feed.png)
+
+- The ribbon's speech-bubble button opens **Feeds**. **Accounts…** adds a Mastodon account (type
+  the server, open the sign-in page in the browser, paste the code it shows; or paste an access
+  token) or a Bluesky account (handle and an **app password** from Settings → Privacy and
+  security → App passwords, never your main password). Secrets go to the system keyring.
+- Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and your
+  saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
+  previews have a play mark), quoted posts and link cards. A content warning stays closed until
+  you click Show. The next page loads when you reach the end of the list; Refresh starts over.
+- **Save to vault** copies the post, and the whole thread when it is a thread by one author,
+  into the Import dialog: choose the folder (default `Social`), tags and which pictures to
+  bring along. **Open in browser** and **Copy link** are next to it.
+
+![Saving two posts](screenshots/social-import.png)
+
+- The note has the author, the date, a **Source** link back to the post, the text (a thread:
+  every post in order, numbered), the pictures saved in `z_media/` and their descriptions. A post
+  that was saved before, also as part of a thread, is marked "Imported before".
+- Try it without an account: `shale --screenshot out.png --view social` shows made-up posts.
+
 ## People (contact notes)
 
 ![People list](screenshots/people-picker.png)

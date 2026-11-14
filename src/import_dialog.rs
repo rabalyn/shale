@@ -97,6 +97,9 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                 if let Some(p) = &it.already {
                     ui.label(egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))).size(12.0).color(theme::LINK_MISSING));
                 }
+                if let Some(w) = it.warning() {
+                    ui.add(egui::Label::new(egui::RichText::new(w).size(12.0).color(theme::LINK_MISSING)).wrap());
+                }
                 if !it.people.is_empty() {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
@@ -113,6 +116,12 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                     for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
                         let label = format!("{}  ({}, {}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" });
                         rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5)));
+                    }
+                }
+                if let Source::Social { saved, .. } = &it.source {
+                    for (k, (m, on)) in saved.media.iter().zip(it.att_on.iter_mut()).enumerate() {
+                        let label = format!("{}  ({})", m.file_name, size_text(m.data.len()));
+                        rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5))).on_hover_text("Untick to leave this file out; the note then links to its web address");
                     }
                 }
             });
@@ -188,7 +197,9 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             ui.end_row();
         }
     });
-    rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
+    if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. })) {
+        rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
+    }
     if let Some(n) = &d.link_into {
         let name = crate::markdown::strip_md_ext(&n.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).to_string();
         rec("link".into(), ui.checkbox(&mut d.link_on, format!("Add links to the new notes in “{name}”")));

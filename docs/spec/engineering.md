@@ -20,8 +20,8 @@ Tests are named `file.rs::test_fn`. Format: [ADR-0001](../decisions/0001-spec-dr
 
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
-| JOB-001 | Slow work (PDF rendering, CalDAV, reading drops, tag learning) runs on background threads and never blocks the window. | IS NOW | `thread::spawn` + mpsc in `pdfview`, `cal_store`, `app/drops`, `tagwords` | `pdfview.rs::background_rendering_becomes_ready`, `cal_store.rs::caldav_source_loads_in_the_background` |
-| JOB-002 | Every background job ends with a result or an error shown to the user, even if it panics. ⚠ Today a panic leaves the job "running" forever (`pdfview.rs:77-80`, `cal_store.rs:64-67`). | SHOULD BE | — | ADR-0006 |
+| JOB-001 | Slow work (PDF rendering, CalDAV, reading drops, tag learning) runs on background threads and never blocks the window. | IS NOW | `thread::spawn` + mpsc in `pdfview`, `cal_store`, `app/drops`, `tagwords`, `social/state` | `pdfview.rs::background_rendering_becomes_ready`, `cal_store.rs::caldav_source_loads_in_the_background` |
+| JOB-002 | Every background job ends with a result or an error shown to the user, even if it panics. ⚠ Today a panic leaves the job "running" forever (`pdfview.rs:77-80`, `cal_store.rs:64-67`). The social feed jobs already catch panics (SOC-010). | SHOULD BE | — | ADR-0006 |
 
 ## Performance (PERF)
 

@@ -814,7 +814,7 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) => {}
+            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::Social(_) => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = egui::Modal::new(egui::Id::unique("convert-canvas")).show(&ctx, |ui| {
                     ui.set_width(460.0);
@@ -970,6 +970,20 @@ impl ShaleApp {
                 }
             }
             if resp.should_close() {
+                keep = false;
+            }
+        }
+        if let Modal::Social(d) = &mut modal {
+            let accounts = self.cfg.social_accounts.clone();
+            let resp = egui::Modal::new(egui::Id::unique("social-accounts")).show(&ctx, |ui| crate::social::accounts_ui::show(ui, d, &accounts));
+            let close_asked = resp.should_close();
+            if let Some(a) = resp.inner {
+                if self.social_dialog_action(a) {
+                    keep = false;
+                }
+            }
+            // Esc / clicking outside closes it, but not while a sign-in is running
+            if close_asked && !d.busy() {
                 keep = false;
             }
         }

@@ -99,33 +99,28 @@ pub fn for_file(sources: &[CalendarSource]) -> Vec<CalendarSource> {
 
 /// The access token (Mastodon) or app password (Bluesky) of a social account, from the keyring.
 /// `server` is the account's server address as stored in `social::Account::server`.
-#[allow(dead_code)] // used by the social feed screens
 pub fn social_lookup(server: &str, handle: &str) -> Option<String> {
     backend::lookup(SOCIAL, server, handle)
 }
 
 /// Put the secret of a social account into the keyring. False when no keyring works (the caller
 /// then keeps it in the owner-only settings file, see `social_store_or_keep`).
-#[allow(dead_code)] // used by the social feed screens
 pub fn social_store(server: &str, handle: &str, secret: &str) -> bool {
     backend::store(SOCIAL, server, handle, secret)
 }
 
 /// Remove the secret of a social account from the keyring (when the account is removed).
-#[allow(dead_code)] // used by the social feed screens
 pub fn social_clear(server: &str, handle: &str) {
     backend::clear(SOCIAL, server, handle)
 }
 
 /// What goes into the settings file for the secret: empty when the keyring has it now, the
 /// secret itself (the file is readable only by its owner) when no keyring works.
-#[allow(dead_code)] // used by the social feed screens
 pub fn social_store_or_keep(server: &str, handle: &str, secret: &str) -> String {
     if social_store(server, handle, secret) { String::new() } else { secret.to_string() }
 }
 
 /// The secret of a social account: from the keyring, else the one kept in the settings file.
-#[allow(dead_code)] // used by the social feed screens
 pub fn social_secret(server: &str, handle: &str, from_file: &str) -> String {
     social_lookup(server, handle).unwrap_or_else(|| from_file.to_string())
 }

@@ -14,6 +14,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0004](0004-link-resolution-and-paths.md) | Link resolution, link rewriting and vault paths | Proposed |
 | [0005](0005-where-state-lives.md) | Where state lives: global settings vs. per-vault data | Proposed |
 | [0006](0006-engineering-baseline.md) | Engineering baseline: CI gates, background jobs, external programs, structure | Proposed |
+| [0007](0007-social-feeds.md) | Social feeds: Mastodon and Bluesky, saved as notes | Proposed |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.

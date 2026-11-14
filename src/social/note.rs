@@ -77,7 +77,7 @@ fn media_file_name(p: &Post, m: &Media, n: usize, content_type: Option<&str>) ->
     let stem: String = p.author.handle.chars().map(|c| if c.is_alphanumeric() || matches!(c, '-' | '.') { c } else { '_' }).collect();
     let ext = Path::new(&m.file_name_hint).extension().and_then(|e| e.to_str()).filter(|e| !e.is_empty() && e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric())).map(|e| e.to_ascii_lowercase()).or_else(|| {
         content_type.and_then(|c| {
-            Some(match c {
+            match c {
                 "image/jpeg" => "jpg",
                 "image/png" => "png",
                 "image/webp" => "webp",
@@ -87,8 +87,9 @@ fn media_file_name(p: &Post, m: &Media, n: usize, content_type: Option<&str>) ->
                 "audio/mpeg" => "mp3",
                 "audio/ogg" => "ogg",
                 _ => return None,
-            })
-            .map(String::from)
+            }
+            .to_string()
+            .into()
         })
     });
     format!("{}-{n}.{}", stem.trim_matches('.'), ext.unwrap_or_else(|| "bin".into()))
