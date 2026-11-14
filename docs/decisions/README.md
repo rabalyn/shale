@@ -11,7 +11,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0001](0001-spec-driven-development.md) | Spec-driven development with IS NOW / SHOULD BE specs | Proposed |
 | [0002](0002-documentation-structure.md) | One job per document | Proposed |
 | [0003](0003-data-safety.md) | Data safety: never lose or corrupt a user's file | Proposed |
-| [0004](0004-link-resolution-and-paths.md) | Link resolution, link rewriting and vault paths | Proposed |
+| [0004](0004-link-resolution-and-paths.md) | Link resolution, link rewriting and vault paths | Accepted |
 | [0005](0005-where-state-lives.md) | Where state lives: global settings vs. per-vault data | Proposed |
 | [0006](0006-engineering-baseline.md) | Engineering baseline: CI gates, background jobs, external programs, structure | Proposed |
 | [0007](0007-mail-client.md) | A built-in mail view (IMAP), and later sending and signing | Proposed |

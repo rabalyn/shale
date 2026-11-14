@@ -264,6 +264,7 @@ fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
     parts.push(cur);
     let main = parts.first().map(|s| s.trim().to_ascii_lowercase()).unwrap_or_default();
     // name → (pieces by number, was encoded)
+    #[allow(clippy::type_complexity)]
     let mut acc: Vec<(String, Vec<(u32, String, bool)>)> = Vec::new();
     for p in parts.iter().skip(1) {
         let Some((k, val)) = p.split_once('=') else { continue };

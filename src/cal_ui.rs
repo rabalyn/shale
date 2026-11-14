@@ -303,6 +303,7 @@ impl CalendarView {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn chip(&mut self, ui: &mut Ui, rect: Rect, o: &Occ, store: &CalendarStore, key: String, clicked: &mut Option<(Occ, Pos2)>, show_time: bool) {
         let Some(e) = store.event(o) else { return };
         let col = parse_hex(&store.sources[o.source].color);

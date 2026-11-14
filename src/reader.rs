@@ -170,7 +170,8 @@ pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base
 }
 
 /// Paint an inline job as a wrapped block and handle link clicks.
-fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], out: &mut Option<ReaderAction>) -> egui::Response {
+/// `hint` gives an extra tooltip line for a link target (LINK-008, LINK-012).
+fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) -> egui::Response {
     let mut job = job;
     job.wrap.max_width = ui.available_width();
     let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
@@ -192,8 +193,12 @@ fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, b
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 let tip = if *ok { format!("Open “{}”", l.target) } else { format!("Create note “{}”", l.target) };
                 let colour = if *ok { theme::LINK } else { theme::LINK_MISSING };
+                let note = hint(&l.target);
                 resp.clone().on_hover_ui_at_pointer(|ui| {
                     ui.label(egui::RichText::new(tip).color(colour));
+                    if let Some(n) = &note {
+                        ui.label(egui::RichText::new(n).small().color(theme::TEXT));
+                    }
                 });
                 if resp.clicked() || resp.middle_clicked() {
                     let new_tab = resp.middle_clicked() || ui.input(|i| i.modifiers.command);
@@ -217,13 +222,14 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
         .collect();
     let (job, spans) = inline_job(text, &links, base, theme::TEXT, done);
     let mut out = None;
-    let resp = inline_block(ui, job, &spans, &mut out);
+    let resp = inline_block(ui, job, &spans, &|t| vault.link_hint(t, Some(from)), &mut out);
     let plain_click = resp.clicked() && out.is_none();
     (out, plain_click)
 }
 
 pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, scenes: &mut SceneCache, base: f32, dark_canvas: bool) -> Option<ReaderAction> {
     let mut out = None;
+    let hint = |t: &str| vault.link_hint(t, Some(rel));
     let all_links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
         .into_iter()
         .map(|l| {
@@ -302,7 +308,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, scenes: &mut Sce
             ui.add_space(base * 0.5);
             let size = base * heading_scale(level as u8);
             let (job, spans) = inline_job(line[level..].trim_start(), &shift(&line_links, level + (line[level..].len() - line[level..].trim_start().len())), size, theme::HEADING, false);
-            inline_block(ui, job, &spans, &mut out);
+            inline_block(ui, job, &spans, &hint, &mut out);
             ui.add_space(base * 0.2);
         } else if let Some((check, done, rest, _)) = markdown::parse_task_line(line) {
             let rest_off = line.len() - rest.len();
@@ -318,14 +324,14 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, scenes: &mut Sce
                     out = Some(ReaderAction::ToggleTask(off + check));
                 }
                 let (job, spans) = inline_job(rest, &shift(&line_links, rest_off), base, theme::TEXT, done);
-                inline_block(ui, job, &spans, &mut out);
+                inline_block(ui, job, &spans, &hint, &mut out);
             });
         } else if let Some((marker, rest_off)) = list_marker(line) {
             ui.horizontal_top(|ui| {
                 ui.add_space(indent + 4.0);
                 ui.label(egui::RichText::new(marker).size(base).color(theme::ACCENT));
                 let (job, spans) = inline_job(&line[rest_off..], &shift(&line_links, rest_off), base, theme::TEXT, false);
-                inline_block(ui, job, &spans, &mut out);
+                inline_block(ui, job, &spans, &hint, &mut out);
             });
         } else if trimmed.starts_with('>') {
             let content_off = line.find('>').unwrap() + 1;
@@ -333,13 +339,13 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, scenes: &mut Sce
             let lead = content.len() - content.trim_start().len();
             egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 4, top: 2, bottom: 2 }).show(ui, |ui| {
                 let (job, spans) = inline_job(content.trim_start(), &shift(&line_links, content_off + lead), base, theme::QUOTE, false);
-                inline_block(ui, job, &spans, &mut out);
+                inline_block(ui, job, &spans, &hint, &mut out);
                 let r = ui.min_rect();
                 ui.painter().line_segment([r.left_top() - Vec2::new(10.0, 0.0), r.left_bottom() - Vec2::new(10.0, 0.0)], Stroke::new(3.0, theme::ACCENT.gamma_multiply(0.7)));
             });
         } else {
             let (job, spans) = inline_job(line, &line_links, base, theme::TEXT, false);
-            inline_block(ui, job, &spans, &mut out);
+            inline_block(ui, job, &spans, &hint, &mut out);
         }
         i += 1;
     }

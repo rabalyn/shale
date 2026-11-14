@@ -1,8 +1,8 @@
 # ADR-0004: Link resolution, link rewriting and vault paths
 
-- **Status**: Proposed
+- **Status**: Accepted (2026-11-14)
 - **Date**: 2026-11-14
-- **Specs**: LINK-002, LINK-003, LINK-008, LINK-010, VAULT-013, VAULT-016, VAULT-018
+- **Specs**: LINK-002, LINK-003, LINK-008, LINK-010, LINK-012, VAULT-013, VAULT-016, VAULT-018
 
 ## Context
 
@@ -62,10 +62,22 @@ note outside the vault. Typing `../../x` or `/tmp/x` as the new name moves it th
 
 ## Open
 
-- Should Shale offer "fix this link" for red path links whose name exists elsewhere? (OPEN-003)
+- ~~Should Shale offer "fix this link" for red path links whose name exists elsewhere? (OPEN-003)~~
+  Decided, see below.
 
 ## Decisions
 
 - implement proposed Decisions. I agree to these changes, they are sensible.
 - I would say it would be best to fix links as soon as possible. best case the update is automatic possible and does not need user interaction at all, right?
   - fix this link should rise where no auto-fix is possible
+
+Notes on the implementation:
+
+- §2 is implemented as "every link keeps pointing at the file it pointed at": after a rename or
+  move, any link whose resolution would change is rewritten. Besides links to what moved, this
+  also covers relative links inside a moved note and `[[Name]]` links to another file that a new
+  name would otherwise take over.
+- §3: `VaultPath` checks every path at the user-input boundaries. `Vault::abs` still takes a
+  plain `&Path` (the inward step from the Consequences is left for later).
+- Automatic fixing (LINK-012) runs when a note is opened, not on every scan: a scan can see a
+  half-synced vault, and writing to notes the user is not looking at would surprise them.

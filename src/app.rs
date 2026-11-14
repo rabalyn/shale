@@ -8,6 +8,7 @@ use crate::markdown;
 use crate::reader::{ReaderAction, SceneCache};
 use crate::theme;
 use crate::vault::{self, rel_to_string, FileKind, Vault};
+use crate::vault_path::VaultPath;
 use eframe::egui::{self, Key, Modifiers, Ui};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -115,6 +116,12 @@ pub enum Action {
         heading: Option<String>,
         from: Option<PathBuf>,
         new_tab: bool,
+    },
+    /// "Fix link": point the red links `target` in `note` at `to` (LINK-012)
+    FixLink {
+        note: PathBuf,
+        target: String,
+        to: PathBuf,
     },
     NewNote {
         folder: PathBuf,
@@ -458,8 +465,16 @@ impl ShaleApp {
         match f.kind {
             FileKind::Note => {
                 if !self.notes.contains_key(rel) {
-                    let text = v.notes.get(rel).map(|n| n.text.clone()).unwrap_or_default();
+                    // red path links whose file name exists exactly once are fixed (LINK-012);
+                    // there is no buffer for this note yet, so nothing unsaved is in the way
+                    let fixed = self.vault.as_mut().map(|v| v.auto_fix_links(rel));
+                    let text = self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| n.text.clone()).unwrap_or_default();
                     self.notes.insert(rel.to_path_buf(), NoteDoc { text, dirty: false, last_edit: Instant::now() });
+                    match fixed {
+                        Some(Ok(n)) if n > 0 => self.toast(format!("Fixed {n} link(s) whose note had moved")),
+                        Some(Err(e)) => self.toast(format!("Could not fix links: {e}")),
+                        _ => {}
+                    }
                 }
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
             }
@@ -505,6 +520,22 @@ impl ShaleApp {
             self.open(&rel, new_tab);
             if let Some(line) = line {
                 self.goto_line(&rel, line);
+            }
+            return;
+        }
+        let t = target.trim();
+        if t.starts_with("./") || t.starts_with("../") {
+            // a red `./` / `../` link creates the note where it points (LINK-010)
+            let base = from.as_ref().and_then(|f| f.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
+            match vault::normalize_path(&base, t) {
+                Some(p) if !p.is_empty() => {
+                    let (folder, name) = match p.rsplit_once('/') {
+                        Some((dir, name)) => (PathBuf::from(dir), name.to_string()),
+                        None => (PathBuf::new(), p),
+                    };
+                    self.create_note(&folder, &name, new_tab);
+                }
+                _ => self.toast("This link points outside the vault"),
             }
             return;
         }
@@ -676,10 +707,8 @@ impl ShaleApp {
     pub fn rename(&mut self, rel: &Path, new_name: &str) -> Result<(), String> {
         self.flush_all();
         let v = self.vault.as_mut().ok_or("no vault")?;
-        let new_name = markdown::sanitize_note_name(new_name);
-        if new_name.is_empty() {
-            return Err("The name can't be empty".into());
-        }
+        // one name, inside the note's folder (VAULT-018)
+        let new_name = VaultPath::name(new_name).map_err(|e| e.to_string())?;
         let is_dir = v.abs(rel).is_dir();
         let kind = v.file(rel).map(|f| f.kind);
         let file_name = match kind {
@@ -695,11 +724,12 @@ impl ShaleApp {
             }
             _ => new_name.clone(),
         };
-        let to = rel.parent().map(|p| p.join(&file_name)).unwrap_or_else(|| PathBuf::from(&file_name));
+        let parent = VaultPath::new(rel.parent().unwrap_or(Path::new(""))).map_err(|e| e.to_string())?;
+        let to = parent.join_name(&file_name).map_err(|e| e.to_string())?.into_path_buf();
         if to == rel {
             return Ok(());
         }
-        let changed = v.rename(rel, &to, self.cfg.update_links_on_rename && !is_dir).map_err(|e| e.to_string())?;
+        let changed = v.rename(rel, &to, self.cfg.update_links_on_rename).map_err(|e| e.to_string())?;
         self.after_move(rel, &to, is_dir, &changed);
         if !changed.is_empty() {
             self.toast(format!("Renamed and updated links in {} note(s)", changed.len()));
@@ -708,6 +738,34 @@ impl ShaleApp {
         }
         self.remember_open_files();
         Ok(())
+    }
+
+    /// Create the folder `name` (may be nested: `a/b`) inside `parent`. The result always stays
+    /// inside the vault (VAULT-018).
+    pub fn create_folder(&mut self, parent: &Path, name: &str) -> Result<PathBuf, String> {
+        let rel = VaultPath::new(parent).and_then(|p| p.join(name)).map_err(|e| e.to_string())?;
+        if rel.as_path().as_os_str().is_empty() {
+            return Err("The name can't be empty".into());
+        }
+        let v = self.vault.as_mut().ok_or("no vault")?;
+        v.create_folder(&rel).map_err(|e| e.to_string())?;
+        Ok(rel.into_path_buf())
+    }
+
+    /// Point the red links `target` in `note` at the file `to` ("Fix link", LINK-012).
+    pub fn fix_link(&mut self, note: &Path, target: &str, to: &Path) {
+        self.flush_all();
+        let Some(v) = self.vault.as_mut() else { return };
+        match v.fix_link(note, target, to) {
+            Ok(n) => {
+                if let (Some(doc), Some(idx)) = (self.notes.get_mut(note), v.notes.get(note)) {
+                    doc.text = idx.text.clone();
+                }
+                let shown = markdown::strip_md_ext(&rel_to_string(to)).to_string();
+                self.toast(if n > 0 { format!("The link now points to “{shown}”") } else { "Nothing to fix".to_string() });
+            }
+            Err(e) => self.toast(format!("Could not fix the link: {e}")),
+        }
     }
 
     /// After a file or folder moved from `rel` to `to`: open notes, drawings and tabs follow it,
@@ -1006,6 +1064,7 @@ impl ShaleApp {
             match a {
                 Action::Open { rel, new_tab } => self.open(&rel, new_tab),
                 Action::OpenLink { target, heading, from, new_tab } => self.open_link(&target, heading, from, new_tab),
+                Action::FixLink { note, target, to } => self.fix_link(&note, &target, &to),
                 Action::NewNote { folder } => self.new_untitled(&folder),
                 Action::NewDrawing { folder, embed_into } => self.new_drawing(&folder, embed_into),
                 Action::ToggleTask { rel, offset } => self.toggle_task(&rel, offset),
@@ -1426,6 +1485,93 @@ mod tests {
         // back goes to the previous note
         app.go_back();
         assert_eq!(app.current_path(), Some(PathBuf::from("Welcome.md")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-018
+    #[test]
+    fn rename_refuses_names_that_leave_the_folder() {
+        let (mut app, d) = test_app("escape");
+        for bad in ["../../x", "/tmp/x", "..", "a/b", "   "] {
+            assert!(app.rename(Path::new("Ideas.md"), bad).is_err(), "{bad} must be refused");
+        }
+        assert!(d.join("Ideas.md").exists());
+        assert!(!d.parent().unwrap().join("x.md").exists());
+        app.rename(Path::new("Projects/Garden plan.md"), " Garden: v2 ").unwrap();
+        assert!(d.join("Projects/Garden- v2.md").exists(), "renamed inside its folder");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-018
+    #[test]
+    fn new_folder_stays_inside_the_vault() {
+        let (mut app, d) = test_app("newfolder");
+        for bad in ["../x", "/../../x", "a/../../x", "~/x"] {
+            assert!(app.create_folder(Path::new("Projects"), bad).is_err(), "{bad} must be refused");
+        }
+        assert!(!d.join("x").exists() && !d.parent().unwrap().join("x").exists());
+        assert_eq!(app.create_folder(Path::new("Projects"), "/a/ b ").unwrap(), PathBuf::from("Projects/a/b"));
+        assert!(d.join("Projects/a/b").is_dir());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-013, VAULT-016
+    #[test]
+    fn folder_rename_updates_links() {
+        let (mut app, d) = test_app("folderrename");
+        app.open(Path::new("Ideas.md"), false);
+        app.rename(Path::new("Projects"), "Work").unwrap();
+        // Ideas links `[[Projects/Garden plan|garden]]`; the open buffer follows
+        assert!(app.notes[Path::new("Ideas.md")].text.contains("[[Work/Garden plan|garden]]"));
+        assert!(std::fs::read_to_string(d.join("Ideas.md")).unwrap().contains("[[Work/Garden plan|garden]]"));
+        // `[[Garden plan]]` by name keeps working as it is
+        assert!(std::fs::read_to_string(d.join("Daily log.md")).unwrap().contains("[[Garden plan]]"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-012
+    #[test]
+    fn opening_a_note_fixes_its_broken_path_links() {
+        let (mut app, d) = test_app("autofix");
+        std::fs::write(d.join("Moved.md"), "See [[Archive/Garden plan]] and [[Archive/Nothing]]").unwrap();
+        app.rescan();
+        app.open(Path::new("Moved.md"), false);
+        assert_eq!(app.notes[Path::new("Moved.md")].text, "See [[Projects/Garden plan]] and [[Archive/Nothing]]");
+        assert_eq!(std::fs::read_to_string(d.join("Moved.md")).unwrap(), "See [[Projects/Garden plan]] and [[Archive/Nothing]]");
+        assert!(app.toasts.iter().any(|(t, _)| t.contains("Fixed 1 link")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-012
+    #[test]
+    fn fix_link_action_points_the_link_at_the_chosen_file() {
+        let (mut app, d) = test_app("fixaction");
+        std::fs::create_dir_all(d.join("Archive")).unwrap();
+        std::fs::write(d.join("Archive/Ideas.md"), "").unwrap();
+        std::fs::write(d.join("Moved.md"), "[[Old/Ideas]]").unwrap();
+        app.rescan();
+        app.open(Path::new("Moved.md"), false);
+        assert_eq!(app.notes[Path::new("Moved.md")].text, "[[Old/Ideas]]", "two candidates: not fixed by itself");
+        app.actions.push(Action::FixLink { note: PathBuf::from("Moved.md"), target: "Old/Ideas".into(), to: PathBuf::from("Archive/Ideas.md") });
+        app.process_actions();
+        assert_eq!(app.notes[Path::new("Moved.md")].text, "[[Archive/Ideas]]");
+        assert!(app.vault.as_ref().unwrap().exists("Archive/Ideas", None));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-010
+    #[test]
+    fn red_relative_link_creates_the_note_where_it_points() {
+        let (mut app, d) = test_app("relcreate");
+        app.open_link("../Notes/Fresh", None, Some(PathBuf::from("Projects/Garden plan.md")), false);
+        assert!(d.join("Notes/Fresh.md").exists());
+        assert!(app.vault.as_ref().unwrap().exists("../Notes/Fresh", Some(Path::new("Projects/Garden plan.md"))));
+        app.open_link("./Sub", None, Some(PathBuf::from("Projects/Garden plan.md")), false);
+        assert!(d.join("Projects/Sub.md").exists());
+        let files = app.vault.as_ref().unwrap().files.len();
+        app.open_link("../../Outside", None, Some(PathBuf::from("Projects/Garden plan.md")), false);
+        assert_eq!(app.vault.as_ref().unwrap().files.len(), files, "nothing is created outside");
+        assert!(!d.parent().unwrap().join("Outside.md").exists());
         let _ = std::fs::remove_dir_all(&d);
     }
 

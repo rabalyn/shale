@@ -35,9 +35,20 @@ The release page of each version on GitHub shows its section from this file.
 - Opening a drawing with arrows no longer rewrites its file; only an edit does.
 - A drawing file that can't be read now opens read-only with the reason, instead of as an empty
   drawing that would replace the file on the first edit.
+- Renaming a note rewrites only the links that really pointed to it, keeps their folder part
+  (`[[Projects/Old]]` → `[[Projects/New]]`), their `#heading` in markdown links, `<…>` and
+  `.md`, and compares names with Unicode case. Renaming a **folder** now updates links to the
+  notes inside it, and moving a note keeps its own `../` links working.
+- A rename can no longer move a note out of the vault (`../../x`, `/tmp/x`), and a new folder
+  name can't point outside it either.
 
 ### Changed
 
+- **Path links are stricter**: `[[Archive/Plan]]` is now red when `Archive/Plan.md` does not
+  exist, instead of quietly opening some other note called “Plan”. `./` and `../` links work
+  relative to the note. If exactly one note has that name, the link is fixed automatically
+  when you open the note; if several do, the Outgoing links panel offers “Fix link”.
+- The tooltip of a link says when several notes share its name and which one it opens.
 - Dragging something Shale can't take (like a browser tab) across the window no longer leaves a
   message behind; a hint at the pointer says so while it is over the window.
 
