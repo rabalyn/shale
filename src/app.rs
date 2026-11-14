@@ -122,6 +122,8 @@ pub enum Action {
     OpenVault(PathBuf),
     /// Look at the vault folder again (e.g. after a file was copied in).
     Rescan,
+    /// open a web or mail address (checked, see `opener`)
+    OpenUrl(String),
     /// make a contact note in the people folder (from `[[p Name`)
     CreatePerson(String),
     /// move a file or folder into a folder (drag and drop in the file list)
@@ -459,7 +461,10 @@ impl ShaleApp {
             }
             FileKind::Other => {
                 let abs = v.abs(rel);
-                let _ = std::process::Command::new("xdg-open").arg(abs).spawn();
+                let opened = crate::opener::open_vault_file(&abs, &v.root);
+                if let Err(e) = opened {
+                    self.toast(e);
+                }
             }
         }
         self.remember_open_files();
@@ -836,6 +841,11 @@ impl ShaleApp {
         use crate::cal_ui::CalAction;
         match a {
             CalAction::Settings => self.open_calendar_settings(),
+            CalAction::OpenUrl(url) => {
+                if let Err(e) = crate::opener::open_url(&url) {
+                    self.toast(e);
+                }
+            }
             CalAction::OpenLarge => self.show_view(View::Calendar, false),
             CalAction::NewEventAt(start) => {
                 let srcs = &self.calendar.sources;
@@ -1007,6 +1017,11 @@ impl ShaleApp {
                 Action::OpenVault(p) => self.open_vault(&p),
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::Rescan => self.rescan(),
+                Action::OpenUrl(url) => {
+                    if let Err(e) = crate::opener::open_url(&url) {
+                        self.toast(e);
+                    }
+                }
                 Action::CreatePerson(name) => self.create_person(&name),
                 Action::Move { from, into } => {
                     if let Err(e) = self.move_into(&from, &into) {
@@ -1364,7 +1379,7 @@ impl eframe::App for ShaleApp {
 pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from: &Path) {
     match a {
         EditorAction::OpenLink { target, heading, new_tab } => app_actions.push(Action::OpenLink { target, heading, from: Some(from.to_path_buf()), new_tab }),
-        EditorAction::OpenUrl(url) => crate::lists::open_in_browser(&url),
+        EditorAction::OpenUrl(url) => app_actions.push(Action::OpenUrl(url)),
         EditorAction::FilesChanged => app_actions.push(Action::Rescan),
         EditorAction::CreatePerson(name) => app_actions.push(Action::CreatePerson(name)),
     }
@@ -1375,7 +1390,7 @@ pub fn handle_reader_action(app_actions: &mut Vec<Action>, a: ReaderAction, from
         ReaderAction::OpenLink { target, new_tab } => app_actions.push(Action::OpenLink { target, heading: None, from: Some(from.to_path_buf()), new_tab }),
         ReaderAction::ToggleTask(offset) => app_actions.push(Action::ToggleTask { rel: from.to_path_buf(), offset }),
         ReaderAction::OpenFile(rel) => app_actions.push(Action::Open { rel, new_tab: false }),
-        ReaderAction::OpenUrl(url) => crate::lists::open_in_browser(&url),
+        ReaderAction::OpenUrl(url) => app_actions.push(Action::OpenUrl(url)),
     }
 }
 

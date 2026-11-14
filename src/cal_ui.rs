@@ -34,6 +34,8 @@ pub enum CalAction {
     Edit(Occ),
     /// remove this event from its calendar
     Delete(Occ),
+    /// open the event's link (checked before it is opened)
+    OpenUrl(String),
 }
 
 /// Round a time up to the next full or half hour (local clock); a time already on one stays.
@@ -668,7 +670,7 @@ impl CalendarView {
                         let l = ui.link(&e.url);
                         rects.push(("popup-url".into(), l.rect));
                         if l.clicked() {
-                            crate::lists::open_in_browser(&e.url);
+                            action = Some(CalAction::OpenUrl(e.url.clone()));
                         }
                     });
                 }
@@ -744,6 +746,7 @@ mod tests {
             if let Some(a) = act {
                 self.actions.push(match a {
                     CalAction::Settings => "settings".into(),
+                    CalAction::OpenUrl(u) => format!("url:{u}"),
                     CalAction::OpenLarge => "large".into(),
                     CalAction::NewEventAt(s) => format!("new:{s}"),
                     CalAction::Edit(o) => format!("edit:{}", store.event(&o).map(|e| e.summary.clone()).unwrap_or_default()),

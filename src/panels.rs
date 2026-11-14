@@ -962,7 +962,9 @@ impl ShaleApp {
                     Ok(out) => {
                         self.toast(format!("Exported to {}", out.display()));
                         if d.open_after {
-                            let _ = std::process::Command::new("xdg-open").arg(&out).spawn();
+                            if let Err(e) = crate::opener::open_exported_pdf(&out) {
+                                self.toast(e);
+                            }
                         }
                         keep = false;
                     }

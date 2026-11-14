@@ -29,6 +29,7 @@ mod lists;
 mod mail;
 mod markdown;
 mod media;
+mod opener;
 mod panels;
 mod pdfexport;
 mod pdfview;

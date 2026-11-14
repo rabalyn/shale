@@ -338,22 +338,6 @@ pub fn find_web_links(text: &str) -> Vec<WebLink> {
     out
 }
 
-/// Open a web address in the default browser.
-pub fn open_in_browser(url: &str) {
-    let url = if url.to_ascii_lowercase().starts_with("www.") { format!("https://{url}") } else { url.to_string() };
-    #[cfg(target_os = "linux")]
-    let r = std::process::Command::new("xdg-open").arg(&url).spawn();
-    #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(&url).spawn();
-    #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn();
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    let r: std::io::Result<std::process::Child> = Err(std::io::Error::other("unsupported"));
-    if let Err(e) = r {
-        eprintln!("could not open {url}: {e}");
-    }
-}
-
 /// Alt+Up / Alt+Down: move the lines touched by `sel` one line up or down.
 /// Afterwards list items in the surrounding list are kept valid: an item is never indented
 /// more than one level deeper than the item above it (or at all when nothing is above),
