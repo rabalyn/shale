@@ -405,7 +405,7 @@ jobs:
       # starts both stacks, runs both ignored suites and always takes the stacks down again
       - name: CalDAV and mail tests against the real servers
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
-        run: sh .forgejo/scripts/env-tests.sh run
+        run: sh .forgejo/scripts/env-tests.sh run "${{ steps.engine.outputs.engine }}"
 
   # A `main` that is green on Linux goes to GitHub's `main`, whose workflow builds and tests it on
   # macOS and Windows (BUILD-016, FORGE-003). Only `main`, never a branch or a pull request. The

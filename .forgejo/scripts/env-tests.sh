@@ -6,7 +6,8 @@
 #       environments (a push to main and the weekly run always do)
 #   env-tests.sh detect
 #       prints "podman", "docker" or "none": which container engine the job container can use
-#   env-tests.sh run
+#   env-tests.sh run [podman|docker]
+#       uses the given engine (the one the detect step found; detected again when left out),
 #       starts both stacks, runs `cargo test -- --ignored caldav_env` and `… mail_env`, and always
 #       takes the stacks down again; exits 1 if a stack or a test fails or no test ran
 set -eu
@@ -30,11 +31,15 @@ case "${1:-}" in
       echo docker
     else
       echo none
+      # say why, for the log (stderr, so the answer on stdout stays one word)
+      if command -v podman >/dev/null 2>&1; then podman info 2>&1 | tail -n 5 >&2 || true; fi
     fi
     ;;
 
   run)
-    engine=$(sh "$0" detect)
+    # a second `podman info` right after the first can fail where the first worked: trust the
+    # engine the detect step found, and let the stacks themselves show a real problem
+    engine=${2:-$(sh "$0" detect)}
     case $engine in
       podman) ;;
       docker)
@@ -78,7 +83,7 @@ case "${1:-}" in
     ;;
 
   *)
-    echo "usage: $0 wanted <event> <base> <head> | detect | run" >&2
+    echo "usage: $0 wanted <event> <base> <head> | detect | run [podman|docker]" >&2
     exit 2
     ;;
 esac
