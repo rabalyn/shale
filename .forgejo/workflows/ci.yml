@@ -59,17 +59,47 @@ jobs:
           fi
           git log -1 --oneline 2>/dev/null || true
 
-      - name: Check the version and the release notes (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # The checkout above is shallow and has no tags; the release check and the commit check
+      # need the history and the tags (the token is only needed when the repository is private).
+      - name: Fetch the history and the tags (tags, main and pull requests)
+        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
         shell: bash
+        env:
+          TOKEN: ${{ github.token }}
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          CARGO=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          if [ "$TAG" != "$CARGO" ]; then
-            echo "::error::tag v$TAG does not match the version $CARGO in Cargo.toml"
-            exit 1
+          auth=()
+          if [ -n "$TOKEN" ]; then
+            auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
           fi
-          sh .github/release-notes.sh "$TAG"
+          git "${auth[@]}" fetch -q --tags --force origin
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+            git "${auth[@]}" fetch -q --unshallow origin
+          fi
+          # the commits a pull request or push is compared with may be outside the fetched history
+          for sha in "${{ github.event.pull_request.base.sha }}" "${{ github.event.before }}"; do
+            if [ -n "$sha" ]; then git "${auth[@]}" fetch -q origin "$sha" || true; fi
+          done
+
+      # BUILD-013: valid semver, greater than the previous tag, Cargo.toml and Cargo.lock agree,
+      # and the CHANGELOG.md section is not empty and names every issue closed since the previous tag
+      - name: Check the release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: sh .github/check-release.sh "${GITHUB_REF_NAME#v}"
+
+      # FORGE-008: every new commit names an issue or starts with "no-issue:"
+      - name: Check that commits name an issue (main and pull requests)
+        if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            sh .forgejo/scripts/check-commit-issues.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+          else
+            sh .forgejo/scripts/check-commit-issues.sh "${{ github.event.before }}" "${{ github.sha }}"
+          fi
+
+      - name: Test the release and commit checks
+        run: |
+          sh .github/test-check-release.sh
+          sh .forgejo/scripts/test-check-commit-issues.sh
 
       - name: Libraries for the window (Wayland, X11, OpenGL)
         run: |
