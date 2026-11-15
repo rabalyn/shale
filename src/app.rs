@@ -2475,7 +2475,7 @@ pub(crate) mod tests {
             }
             panic!("the Import dialog did not open");
         };
-        app.social.save(&ctx, &entry, &post);
+        app.social.save(&ctx, &entry, "home", &post);
         wait_for_dialog(&mut app);
         let Some(Modal::Import(mut dlg)) = app.modal.take() else { panic!() };
         assert_eq!((dlg.items.len(), dlg.folder.as_str(), dlg.items[0].kind().as_ref()), (1, "Social", "Thread (3 posts)"));
@@ -2489,7 +2489,7 @@ pub(crate) mod tests {
         assert!(app.actions.iter().any(|a| matches!(a, Action::Open { .. })), "the new note is opened");
         // the same post again: offered, but marked as imported before
         app.rescan();
-        app.social.save(&ctx, &entry, &post);
+        app.social.save(&ctx, &entry, "home", &post);
         wait_for_dialog(&mut app);
         let Some(Modal::Import(dlg)) = app.modal.take() else { panic!() };
         assert!(dlg.items[0].already.is_some() && !dlg.items[0].include);

@@ -41,7 +41,50 @@ impl ShaleApp {
         }
         self.open_feed(FeedRef { account: hit.account.clone(), feed: hit.feed.clone() }, true);
         let tab = self.tabs[self.active].id;
-        self.social.show_hit(tab, hit);
+        // a post that neither the index nor the list holds any more is fetched first (SOC-039)
+        let (key, feed) = (crate::social::state::post_key(&hit.post), (hit.account.clone(), hit.feed.clone()));
+        let in_list = self.social.timelines.get(&feed).is_some_and(|t| t.posts.iter().chain(&t.waiting).any(|p| crate::social::state::post_key(p) == key));
+        if in_list || self.social.index.contains(&hit.account, &key) {
+            self.social.show_hit(tab, hit);
+        } else {
+            self.social.fetch_wanted.push((tab, hit.account.clone(), hit.feed.clone(), hit.post.id.clone()));
+        }
+    }
+
+    /// The "Post search index" section of Settings → General (SOC-040): how many posts are
+    /// indexed, Rebuild, and Clear with a question first.
+    pub fn post_index_settings(&mut self, ui: &mut Ui) {
+        ui.label(eframe::egui::RichText::new("Post search index").color(crate::theme::MUTED));
+        let n = self.social.index.count(None);
+        ui.label(super::muted(format!("{n} posts from your feeds can be found by the search. It is a cache and fills again as feeds load.")).size(12.0));
+        if self.social.confirm_clear {
+            ui.label("Clear the post search index?");
+            ui.horizontal(|ui| {
+                let clear = ui.button("Clear");
+                self.social.rects.push(("index-clear-yes".to_string(), clear.rect));
+                let cancel = ui.button("Cancel");
+                self.social.rects.push(("index-clear-no".to_string(), cancel.rect));
+                if clear.clicked() {
+                    self.social.clear_index();
+                    self.toast("The post search index is empty");
+                } else if cancel.clicked() {
+                    self.social.confirm_clear = false;
+                }
+            });
+            return;
+        }
+        ui.horizontal(|ui| {
+            let rebuild = ui.button("Rebuild").on_hover_text("Clear it and index again the posts your open feeds hold now");
+            self.social.rects.push(("index-rebuild".to_string(), rebuild.rect));
+            let clear = ui.button("Clear…");
+            self.social.rects.push(("index-clear".to_string(), clear.rect));
+            if rebuild.clicked() {
+                let n = self.social.rebuild_index();
+                self.toast(format!("Post search index rebuilt: {n} posts"));
+            } else if clear.clicked() {
+                self.social.confirm_clear = true;
+            }
+        });
     }
 
     /// The tab named no feed (or one that is gone): this is the one it shows. No history step.
@@ -103,6 +146,7 @@ impl ShaleApp {
         self.social.check_every = Duration::from_secs(u64::from(self.cfg.social_check_minutes) * 60);
         let (accounts, open) = (self.cfg.social_accounts.clone(), self.open_feed_refs());
         self.social.tick(ctx, &accounts, &open, Instant::now());
+        self.social.start_fetches(ctx, &accounts);
         let free = matches!(self.modal, None | Some(Modal::Import(_)));
         if self.social.saved.is_empty() || !free {
             return;

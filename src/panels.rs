@@ -973,6 +973,8 @@ impl ShaleApp {
                         changed |= ui.add(egui::Slider::new(&mut self.cfg.font_size, 12.0..=24.0)).changed();
                     });
                     ui.add_space(8.0);
+                    self.post_index_settings(ui);
+                    ui.add_space(8.0);
                     ui.label(egui::RichText::new("Troubleshooting").color(theme::MUTED));
                     if ui.checkbox(&mut self.cfg.input_log, "Record keyboard input to a file (to find keyboard problems)").changed() {
                         if self.cfg.input_log {
