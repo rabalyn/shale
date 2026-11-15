@@ -25,6 +25,8 @@ pub fn open_url(url: &str) -> Result<(), String> {
 pub fn open_signin_url(url: &str, allow_local_http: bool) -> Result<(), String> {
     let url = url.trim();
     let origin = crate::cal_dav::Origin::parse(url)?;
+    #[cfg(test)]
+    let allow_local_http = allow_local_http || (origin.is_local() && *trusted_local_port().lock().unwrap_or_else(|e| e.into_inner()) == Some(origin.port));
     if origin.scheme != "https" && !(allow_local_http && origin.is_local()) {
         return Err("The sign-in address must start with https://".into());
     }
@@ -46,6 +48,14 @@ fn test_browser() -> &'static std::sync::Mutex<Option<TestBrowser>> {
     &B
 }
 
+/// The one local port whose `http://` sign-in addresses the pretend browser accepts (a pretend
+/// Mastodon server on this computer): set by [`install_test_browser_for_local_server`].
+#[cfg(test)]
+fn trusted_local_port() -> &'static std::sync::Mutex<Option<u16>> {
+    static P: std::sync::Mutex<Option<u16>> = std::sync::Mutex::new(None);
+    &P
+}
+
 /// Holds the pretend browser; the next test that wants one waits for this one to be dropped.
 #[cfg(test)]
 pub struct BrowserGuard {
@@ -56,6 +66,7 @@ pub struct BrowserGuard {
 impl Drop for BrowserGuard {
     fn drop(&mut self) {
         *test_browser().lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *trusted_local_port().lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 
@@ -66,6 +77,16 @@ pub fn install_test_browser(b: TestBrowser) -> BrowserGuard {
     let g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     *test_browser().lock().unwrap_or_else(|e| e.into_inner()) = Some(b);
     BrowserGuard { _serial: g }
+}
+
+/// Tests only: like [`install_test_browser`], and sign-in addresses on `http://127.0.0.1:<port>`
+/// of one pretend server on this computer (a Mastodon server of a test) are accepted although the
+/// Feeds sign-in is `https` only. Other ports and other hosts are still refused.
+#[cfg(test)]
+pub fn install_test_browser_for_local_server(port: u16, b: TestBrowser) -> BrowserGuard {
+    let g = install_test_browser(b);
+    *trusted_local_port().lock().unwrap_or_else(|e| e.into_inner()) = Some(port);
+    g
 }
 
 /// Open a file of the vault with its default program.
@@ -91,7 +112,17 @@ pub fn open_recovery_folder(path: &Path, recovery_root: &Path) -> Result<(), Str
 /// copy. Each call uses a fresh folder, so same-named attachments never clash.
 pub fn open_temp_copy(name: &str, data: &[u8]) -> Result<(), String> {
     let path = save_temp_copy(name, data)?;
-    launch(check_temp_file(&path)?.as_ref())
+    let checked = match check_temp_file(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            // a refused copy (a program, a .desktop file) is not left lying around
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+            return Err(e);
+        }
+    };
+    launch(checked.as_ref())
 }
 
 /// The address to open, or why it is refused. Control characters (which could smuggle in a
@@ -272,22 +303,39 @@ fn save_temp_copy(name: &str, data: &[u8]) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Start the system's opener for an address or a file that has been checked.
-fn launch(target: &std::ffi::OsStr) -> Result<(), String> {
-    // tests: the pretend program gets what would be opened (nothing starts)
+/// The program that opens things on this system, as a command ready for its one argument.
+fn system_opener() -> Result<std::process::Command, String> {
+    // tests: a recording fake on this thread only (`FakeXdgOpen`), so parallel tests never see it
     #[cfg(test)]
-    if let Some(b) = test_browser().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        b(&target.to_string_lossy());
-        return Ok(());
+    if let Some(c) = fake_opener_command() {
+        return Ok(c);
     }
     #[cfg(target_os = "linux")]
-    let r = std::process::Command::new("xdg-open").arg(target).spawn();
+    return Ok(std::process::Command::new("xdg-open"));
     #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(target).spawn();
+    return Ok(std::process::Command::new("open"));
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(target).spawn();
+    return Ok({
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
+    });
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    let r: std::io::Result<std::process::Child> = Err(std::io::Error::other("unsupported"));
+    Err("unsupported".into())
+}
+
+/// Start the system's opener for an address or a file that has been checked.
+fn launch(target: &std::ffi::OsStr) -> Result<(), String> {
+    // tests: the pretend program gets what would be opened (nothing starts). A recording fake
+    // `xdg-open` of this thread (`FakeXdgOpen`) comes first: it tests the real start-up.
+    #[cfg(test)]
+    if !fake_opener_installed() {
+        if let Some(b) = test_browser().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            b(&target.to_string_lossy());
+            return Ok(());
+        }
+    }
+    let r = system_opener().and_then(|mut c| c.arg(target).spawn().map_err(|e| e.to_string()));
     match r {
         Ok(mut child) => {
             // reap it in the background so it never stays a zombie
@@ -297,6 +345,89 @@ fn launch(target: &std::ffi::OsStr) -> Result<(), String> {
             Ok(())
         }
         Err(e) => Err(format!("Could not open it: {e}")),
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The script of the fake opener of this test thread.
+    static FAKE_OPENER: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn fake_opener_installed() -> bool {
+    FAKE_OPENER.with(|f| f.borrow().is_some())
+}
+
+#[cfg(test)]
+fn fake_opener_command() -> Option<std::process::Command> {
+    // run through `sh`, never by executing the written file (a parallel test's fork could hold
+    // it open for writing, which makes starting it fail with "text file busy")
+    FAKE_OPENER.with(|f| {
+        f.borrow().as_ref().map(|script| {
+            let mut c = std::process::Command::new("sh");
+            c.arg(script).arg("--");
+            c
+        })
+    })
+}
+
+/// Tests only: a recording fake `xdg-open` for the calling thread. Everything the opener starts
+/// on this thread goes to a small shell script that writes the arguments it got to a file; the
+/// real chokepoint (checks, temp copies, the argument list, starting a child) is exercised.
+/// Needs a Unix shell.
+#[cfg(all(test, unix))]
+pub struct FakeXdgOpen {
+    dir: PathBuf,
+}
+
+#[cfg(all(test, unix))]
+impl FakeXdgOpen {
+    pub fn install() -> FakeXdgOpen {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!("shale-fake-xdg-open-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("calls")).unwrap();
+        // one file per call (written whole, then renamed), one argument per line
+        let script = dir.join("xdg-open");
+        let text = format!("#!/bin/sh\nshift\nf=\"{d}/calls/$$.tmp\"\nprintf '%s\\n' \"$@\" > \"$f\" && mv \"$f\" \"{d}/calls/$$.call\"\n", d = dir.display());
+        std::fs::write(&script, text).unwrap();
+        FAKE_OPENER.with(|f| *f.borrow_mut() = Some(script));
+        FakeXdgOpen { dir }
+    }
+
+    /// Wait until `n` calls have come in (at most 10 s) and return the argument lists, oldest
+    /// first. Fails the test when there are fewer, or more.
+    pub fn calls(&self, n: usize) -> Vec<Vec<String>> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let got = self.recorded();
+            if got.len() >= n || std::time::Instant::now() > deadline {
+                assert_eq!(got.len(), n, "the fake xdg-open got these calls: {got:?}");
+                return got;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    /// The calls so far (nothing is waited for): one argument list each, oldest first.
+    pub fn recorded(&self) -> Vec<Vec<String>> {
+        let mut v: Vec<_> = std::fs::read_dir(self.dir.join("calls"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "call"))
+            .map(|e| (e.metadata().and_then(|m| m.modified()).unwrap(), std::fs::read_to_string(e.path()).unwrap().lines().map(String::from).collect::<Vec<_>>()))
+            .collect();
+        v.sort_by_key(|(t, _)| *t);
+        v.into_iter().map(|(_, a)| a).collect()
+    }
+}
+
+#[cfg(all(test, unix))]
+impl Drop for FakeXdgOpen {
+    fn drop(&mut self) {
+        FAKE_OPENER.with(|f| *f.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -510,5 +641,184 @@ mod tests {
             }
         }
         assert!(bad.is_empty(), "open things through opener instead:\n{}", bad.join("\n"));
+    }
+}
+
+/// SEC-006 end to end: the real opener starts a (fake, recording) `xdg-open`, so the checks, the
+/// argument list and the start of the child are all exercised, not only `check_url` and friends.
+#[cfg(all(test, unix))]
+mod real_opener_tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// A fresh folder of this test (counter, not only the process id).
+    fn folder(tag: &str) -> PathBuf {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let d = std::env::temp_dir().join(format!("shale-opener-real-{tag}-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    // spec: SEC-006
+    #[test]
+    fn the_fake_xdg_open_gets_exactly_the_allowed_web_and_mail_addresses_as_one_argument() {
+        let fake = FakeXdgOpen::install();
+        let mut want = vec![];
+        for (given, passed) in [
+            ("https://example.com/a?b=c&d=e#f", "https://example.com/a?b=c&d=e#f"),
+            ("http://example.com", "http://example.com"),
+            ("HTTPS://Example.com/X", "HTTPS://Example.com/X"),
+            ("mailto:ada@example.com?subject=Hi%20there", "mailto:ada@example.com?subject=Hi%20there"),
+            ("  https://example.com/trimmed  ", "https://example.com/trimmed"),
+            ("www.example.com", "https://www.example.com"),
+            ("https://example.com/a b;rm -rf $HOME `x`", "https://example.com/a b;rm -rf $HOME `x`"),
+        ] {
+            open_url(given).unwrap_or_else(|e| panic!("{given}: {e}"));
+            want.push(vec![passed.to_string()]);
+            assert_eq!(fake.calls(want.len()), want, "{given}");
+        }
+    }
+
+    // spec: SEC-006
+    #[test]
+    fn the_fake_xdg_open_never_gets_other_schemes_or_addresses_with_control_characters() {
+        let fake = FakeXdgOpen::install();
+        for bad in [
+            "file:///etc/passwd",
+            "FILE:///etc/passwd",
+            "javascript:alert(1)",
+            // a scheme a calendar server may put into an event link
+            "ftp://files.example.com/a.sh",
+            "data:text/html,hi",
+            "smb://host/share",
+            "-n",
+            "--help",
+            "/etc/passwd",
+            "https://example.com\nfile:///etc/passwd",
+            "https://exa\0mple.com",
+            "",
+        ] {
+            assert!(open_url(bad).is_err(), "{bad:?} must be refused");
+        }
+        assert!(fake.recorded().is_empty(), "nothing was started: {:?}", fake.recorded());
+        // the sign-in address has its own rule and the same chokepoint
+        assert!(open_signin_url("http://example.com/auth", true).is_err());
+        assert!(open_signin_url("file:///etc/passwd", true).is_err());
+        assert!(fake.recorded().is_empty());
+        // the opener still works afterwards, and what it got is only this one
+        open_url("https://example.com/sentinel").unwrap();
+        assert_eq!(fake.calls(1), vec![vec!["https://example.com/sentinel".to_string()]]);
+    }
+
+    // spec: SEC-006
+    #[test]
+    fn the_fake_xdg_open_gets_a_vault_file_by_its_real_path_and_never_a_file_outside_a_program_or_a_desktop_file() {
+        let fake = FakeXdgOpen::install();
+        let root = folder("vault");
+        let outside = folder("outside");
+        fs::write(root.join("my doc.pdf"), "x").unwrap();
+        fs::write(outside.join("secret.txt"), "x").unwrap();
+        fs::write(root.join("run.sh"), "#!/bin/sh").unwrap();
+        fs::write(root.join("evil.desktop"), "[Desktop Entry]\nExec=sh").unwrap();
+        fs::write(root.join("tool"), "x").unwrap();
+        fs::set_permissions(root.join("tool"), fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(root.join("scan.pdf"), "x").unwrap();
+        fs::set_permissions(root.join("scan.pdf"), fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("link.txt")).unwrap();
+        // the vault is reached through a link: the argument is the real path
+        let via = folder("via-link").join("v");
+        std::os::unix::fs::symlink(&root, &via).unwrap();
+
+        open_vault_file(&via.join("my doc.pdf"), &via).unwrap();
+        let real = fs::canonicalize(root.join("my doc.pdf")).unwrap();
+        assert_eq!(fake.calls(1), vec![vec![real.to_string_lossy().into_owned()]], "one argument, with the space in it");
+        // a document that a mounted disk marks executable is still a document
+        open_vault_file(&root.join("scan.pdf"), &root).unwrap();
+        assert_eq!(fake.calls(2).len(), 2);
+
+        for (what, path) in [
+            ("a file outside the vault", outside.join("secret.txt")),
+            ("a path that climbs out of the vault", root.join("..").join(outside.file_name().unwrap()).join("secret.txt")),
+            ("a link out of the vault", root.join("link.txt")),
+            ("a script", root.join("run.sh")),
+            ("a .desktop file", root.join("evil.desktop")),
+            ("an executable file", root.join("tool")),
+            ("a folder", root.clone()),
+            ("a missing file", root.join("missing.pdf")),
+        ] {
+            assert!(open_vault_file(&path, &root).is_err(), "{what} must be refused");
+        }
+        assert_eq!(fake.recorded().len(), 2, "the refused files never reached xdg-open: {:?}", fake.recorded());
+        for d in [&root, &outside, via.parent().unwrap()] {
+            let _ = fs::remove_dir_all(d);
+        }
+    }
+
+    // spec: SEC-006, MAIL-054
+    #[test]
+    fn a_mail_attachment_is_opened_as_a_private_temp_copy_and_programs_are_refused() {
+        let fake = FakeXdgOpen::install();
+        open_temp_copy("../../report 1.pdf", b"%PDF-1.4 hello").unwrap();
+        let calls = fake.calls(1);
+        let path = PathBuf::from(&calls[0][0]);
+        assert_eq!(calls[0].len(), 1);
+        assert_eq!(fs::read(&path).unwrap(), b"%PDF-1.4 hello", "the copy has the attachment's bytes");
+        assert_eq!(path.file_name().unwrap(), "_.._report 1.pdf", "folders in the name are made harmless");
+        assert!(path.starts_with(fs::canonicalize(temp_root().unwrap()).unwrap()), "{path:?} is in Shale's temp folder");
+        assert_eq!(fs::metadata(path.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+        // the same name again: a copy of its own
+        open_temp_copy("report 1.pdf", b"other").unwrap();
+        let calls = fake.calls(2);
+        assert_ne!(calls[0][0], calls[1][0]);
+        assert_eq!(fs::read(&calls[0][0]).unwrap(), b"%PDF-1.4 hello", "the first copy is untouched");
+        // programs and .desktop files are refused, whatever the mail says they are
+        for name in ["setup.EXE", "run.sh", "evil.desktop", "x.AppImage", "s.py", "l.lnk"] {
+            assert!(open_temp_copy(name, b"x").is_err(), "{name} must be refused");
+        }
+        assert_eq!(fake.recorded().len(), 2, "{:?}", fake.recorded());
+        // ... and their copies are not left in the temp folder
+        assert!(open_temp_copy("only-in-this-test.desktop", b"x").is_err());
+        let left = fs::read_dir(temp_root().unwrap()).unwrap().flatten().filter(|e| e.path().join("only-in-this-test.desktop").exists()).count();
+        assert_eq!(left, 0, "a refused copy was removed");
+        for c in &calls {
+            let _ = fs::remove_dir_all(PathBuf::from(&c[0]).parent().unwrap());
+        }
+    }
+
+    // spec: SEC-006
+    #[test]
+    fn the_exported_pdf_and_a_recovery_folder_go_to_the_fake_xdg_open_only_when_they_qualify() {
+        let fake = FakeXdgOpen::install();
+        let d = folder("export");
+        let recovery = folder("recovery");
+        let rescued = recovery.join("2024-05-01 rescue");
+        fs::create_dir_all(&rescued).unwrap();
+        fs::write(d.join("a.pdf"), "x").unwrap();
+        fs::write(d.join("a.txt"), "x").unwrap();
+        open_exported_pdf(&d.join("a.pdf")).unwrap();
+        assert_eq!(fake.calls(1), vec![vec![fs::canonicalize(d.join("a.pdf")).unwrap().to_string_lossy().into_owned()]]);
+        assert!(open_exported_pdf(&d.join("a.txt")).is_err());
+        open_recovery_folder(&rescued, &recovery).unwrap();
+        assert!(open_recovery_folder(&d, &recovery).is_err(), "a folder outside the recovery folder");
+        assert!(open_recovery_folder(&recovery.join("missing"), &recovery).is_err());
+        let calls = fake.calls(2);
+        assert_eq!(calls[1], vec![rescued.to_string_lossy().into_owned()]);
+        let _ = fs::remove_dir_all(&d);
+        let _ = fs::remove_dir_all(&recovery);
+    }
+
+    // spec: SEC-006
+    #[test]
+    fn a_fake_xdg_open_belongs_to_its_test_thread() {
+        let fake = FakeXdgOpen::install();
+        // another thread has none: its opener is the installed pretend browser or the real one, never this fake
+        let other = std::thread::spawn(fake_opener_installed).join().unwrap();
+        assert!(!other);
+        open_url("https://example.com/mine").unwrap();
+        assert_eq!(fake.calls(1).len(), 1);
+        drop(fake);
+        assert!(!fake_opener_installed(), "dropping it removes it");
     }
 }
