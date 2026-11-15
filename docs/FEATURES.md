@@ -110,6 +110,13 @@ built-in demo vault (`shale --screenshot out.png`).
   graph of the open note.
 - The vault graph shows every note. Red dots are missing notes and green ones are drawings.
 
+## The ribbon and the sidebars
+
+- The icons of the ribbon (the narrow bar on the left) can be dragged into any order. A line
+  between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
+  order is kept in the settings. The sidebar toggles at the top and bottom and the settings
+  button stay where they are.
+
 ## Calendar
 
 ![Month view](screenshots/calendar-month.png)

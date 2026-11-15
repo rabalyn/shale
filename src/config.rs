@@ -190,6 +190,22 @@ impl Default for MailAccount {
     }
 }
 
+/// Where the icons of the window are (LAY-001, LAY-002). The ids are the strings of `sidebar::Item`;
+/// what they mean and how a stored list is repaired is in `sidebar.rs`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct SidebarCfg {
+    /// The ribbon (left menubar), top to bottom. Empty: the default order.
+    pub ribbon: Vec<String>,
+}
+
+/// A value of the wrong shape (an old or hand-edited file) loads as the default instead of
+/// making the whole settings file unreadable.
+fn lenient<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned + Default>(d: D) -> Result<T, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).unwrap_or_default())
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
@@ -211,6 +227,9 @@ pub struct Config {
     pub readable_width: bool,
     pub show_left: bool,
     pub show_right: bool,
+    /// The order of the ribbon icons (and the views of the right sidebar).
+    #[serde(deserialize_with = "lenient")]
+    pub sidebars: SidebarCfg,
     /// Order of the file tree.
     pub file_sort: FileSort,
     /// Show embedded images as pictures inside the editor (the link shows when the cursor is on it).
@@ -279,6 +298,7 @@ impl Default for Config {
             readable_width: true,
             show_left: true,
             show_right: true,
+            sidebars: SidebarCfg::default(),
             file_sort: FileSort::NameAsc,
             inline_images: true,
             calendars: vec![],
@@ -433,6 +453,21 @@ mod tests {
         assert!(!c.ctrl_to_follow);
         assert!(c.inline_images);
         assert_eq!(c.file_sort, FileSort::NameAsc);
+    }
+
+    // spec: LAY-002
+    #[test]
+    fn lay_002_a_layout_of_the_wrong_shape_loads_as_the_default() {
+        let c: Config = serde_json::from_str(r#"{"sidebars": "oops", "font_size": 18.0}"#).unwrap();
+        assert_eq!((c.sidebars, c.font_size), (SidebarCfg::default(), 18.0), "the rest of the file still loads");
+        let c: Config = serde_json::from_str(r#"{"sidebars": {"ribbon": [1, 2]}}"#).unwrap();
+        assert_eq!(c.sidebars, SidebarCfg::default());
+        let c: Config = serde_json::from_str(r#"{"sidebars": {"ribbon": ["mail", "files"]}}"#).unwrap();
+        assert_eq!(c.sidebars.ribbon, ["mail", "files"]);
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.sidebars, c.sidebars);
+        let old: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
+        assert_eq!(old.sidebars, SidebarCfg::default(), "files from before the layout have the default");
     }
 
     // spec: MAIL-120

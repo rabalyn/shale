@@ -7,7 +7,7 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 |---|---|---|
 | [vault-and-files.md](vault-and-files.md) | Vault, create/rename/move/trash, writing data, settings, git sync | VAULT, DATA, CFG, SYNC |
 | [links-and-editor.md](links-and-editor.md) | Link syntax and resolution, editing, navigation and keys | LINK, EDIT, NAV |
-| [features.md](features.md) | Tasks, drawings, calendar, network security, import, people, tags, PDF | TASK, DRAW, CAL, SEC, IMP, PPL, TAG, PDF |
+| [features.md](features.md) | Tasks, drawings, calendar, network security, import, people, tags, PDF, window layout (ribbon, right sidebar) | TASK, DRAW, CAL, SEC, IMP, PPL, TAG, PDF, LAY |
 | [social.md](social.md) | Mastodon and Bluesky feeds, saving posts as notes | SOC |
 | [engineering.md](engineering.md) | Forge and work tracking, development rules, build and release, background jobs, performance | FORGE, DEV, BUILD, JOB, PERF |
 | [mail.md](mail.md) | Local mail store, IMAP account and sync, flags and moves, sending, signing and encrypting | MAIL |

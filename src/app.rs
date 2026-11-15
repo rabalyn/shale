@@ -248,6 +248,8 @@ pub struct ShaleApp {
     pub drawings: HashMap<PathBuf, DrawingDoc>,
     pub left: LeftPanel,
     pub right: RightPanel,
+    /// The icons of the ribbon and the right sidebar, and a drag of one of them (LAY-001).
+    pub side: crate::sidebar_ui::SideState,
     pub expanded: HashSet<PathBuf>,
     pub search: String,
     /// the selected stop in the search results while they are browsed with the keyboard
@@ -374,6 +376,7 @@ impl ShaleApp {
             drawings: HashMap::new(),
             left: LeftPanel::Files,
             right: RightPanel::Backlinks,
+            side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
             expanded: HashSet::new(),
             search: String::new(),
             search_sel: None,

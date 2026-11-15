@@ -1,4 +1,4 @@
-# Spec: Tasks, drawings, calendar, import, people, tags, PDF (TASK, DRAW, CAL, SEC, IMP, PPL, TAG, PDF)
+# Spec: Tasks, drawings, calendar, import, people, tags, PDF, window layout (TASK, DRAW, CAL, SEC, IMP, PPL, TAG, PDF, LAY)
 
 **IS NOW** = true of the code today (⚠ = known defect, described as it behaves) ·
 **SHOULD BE** = agreed target. Format: [ADR-0001](../decisions/0001-spec-driven-development.md).
@@ -111,3 +111,10 @@ are deliberately not specced beyond their guarantees; their tests check the deta
 | PDF-001 | Notes and drawings export to PDF with no external tools; note text stays selectable (embedded fonts), web links stay clickable, drawings are vector; a bad save path gives an error. | IS NOW | `pdfexport.rs`, `pdfwrite.rs` | `pdfexport.rs::note_export_has_title_text_links_and_pages`, `pdfexport.rs::note_export_options_change_the_pages`, `pdfexport.rs::drawing_export_fit_and_paper`, `pdfwrite.rs::writes_a_pdf_that_renders`, `pdfwrite.rs::win_ansi_mapping`, `export_dialog.rs::note_dialog_controls`, `export_dialog.rs::drawing_dialog_controls`, `app.rs::export_reports_a_bad_path` |
 | PDF-002 | Embedded PDFs render in the editor and reading view (up to 50 pages) on a background thread, with the bundled pure-Rust renderer. | IS NOW | `pdfview.rs` | `pdfview.rs::renders_pages`, `pdfview.rs::background_rendering_becomes_ready` |
 | PDF-003 | Default export path is `<vault>/exports/<name>.pdf`, so the export shows up in the vault. | IS NOW | `ShaleApp` export (`app.rs:859`) | `app.rs::export_menu_entry_opens_the_dialog_and_writes_a_pdf` |
+
+## Window layout: ribbon and right sidebar (LAY)
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| LAY-001 | The icons of the ribbon (the left menubar) can be dragged into another order with the mouse; a marker between two icons shows where the dragged icon lands. The two sidebar toggles at the top and bottom and the Settings button stay where they are. | IS NOW | `sidebar.rs`, `sidebar_ui.rs` | `sidebar_tests.rs::lay_001_a_ribbon_icon_is_dragged_to_a_new_place_and_the_order_survives_a_restart`, `sidebar_tests.rs::lay_001_dropping_a_ribbon_icon_outside_the_ribbon_or_pressing_esc_changes_nothing` |
+| LAY-002 | The ribbon order is kept in the global settings (`sidebars.ribbon`, a list of icon ids) and restored at the next start. Ids this version does not know and doubles are dropped, icons missing from the list (a newer Shale added them) appear at the end in their default order, and a stored layout of the wrong shape gives the default order. | IS NOW | `sidebar::Layout::from_config`, `config::SidebarCfg` | `sidebar.rs::lay_002_a_stored_order_with_unknown_missing_and_double_ids_is_repaired`, `config.rs::lay_002_a_layout_of_the_wrong_shape_loads_as_the_default`, `sidebar_tests.rs::lay_001_a_ribbon_icon_is_dragged_to_a_new_place_and_the_order_survives_a_restart` |
