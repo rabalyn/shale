@@ -70,6 +70,12 @@ pub struct Picker {
     pub query: String,
 }
 
+/// A missing-attachment alert and whether the person hid it (it still stops sending).
+pub struct AttAlertState {
+    pub alert: crate::outbox::AttAlert,
+    pub dismissed: bool,
+}
+
 pub struct Compose {
     pub draft: Draft,
     /// Counts every change the person made; 0 = untouched since it was opened.
@@ -83,6 +89,8 @@ pub struct Compose {
     pub ask: Option<Ask>,
     /// Attachments that could not be read back from a saved draft, and the like.
     pub notes: Vec<String>,
+    /// Attachments a cut-off replacement left missing; sending waits until each is restored or removed (MAIL-216).
+    pub att_alerts: Vec<AttAlertState>,
     /// Completion candidates: name and address.
     pub contacts: Vec<(String, String)>,
     pub active: Option<Field>,
@@ -114,6 +122,7 @@ impl Compose {
             error: None,
             ask: None,
             notes: vec![],
+            att_alerts: vec![],
             contacts: vec![],
             active: None,
             suggest_cursor: 0,
@@ -252,6 +261,10 @@ pub struct ComposeOut {
     pub attach_path: bool,
     pub attach_vault: Option<String>,
     pub remove_att: Option<usize>,
+    /// The alert of a missing attachment (by file name): restore the old file, remove the attachment, hide the alert.
+    pub att_restore: Option<String>,
+    pub att_remove_missing: Option<String>,
+    pub att_dismiss: Option<String>,
     pub account: Option<String>,
     /// Stop the signing or encrypting that is going on.
     pub cancel_crypt: bool,
@@ -409,6 +422,32 @@ impl MailView {
             }
             for n in &c.notes {
                 ui.label(RichText::new(n.as_str()).size(12.5).color(theme::LINK_MISSING));
+            }
+            // an attachment that a cut-off replacement left missing (MAIL-216, MAIL-217)
+            for (i, al) in c.att_alerts.iter().enumerate() {
+                if al.dismissed {
+                    continue;
+                }
+                ui.label(RichText::new(al.alert.message()).size(12.5).color(theme::LINK_MISSING));
+                ui.horizontal(|ui| {
+                    if al.alert.trash_present {
+                        let r = ui.small_button("Restore the old file");
+                        rec(rects, format!("mail:compose:att-restore:{i}"), &r);
+                        if r.clicked() {
+                            out.att_restore = Some(al.alert.file.clone());
+                        }
+                    }
+                    let r = ui.small_button("Remove the attachment");
+                    rec(rects, format!("mail:compose:att-alert-remove:{i}"), &r);
+                    if r.clicked() {
+                        out.att_remove_missing = Some(al.alert.file.clone());
+                    }
+                    let r = ui.small_button("Dismiss");
+                    rec(rects, format!("mail:compose:att-dismiss:{i}"), &r);
+                    if r.clicked() {
+                        out.att_dismiss = Some(al.alert.file.clone());
+                    }
+                });
             }
             ui.add_space(4.0);
             // nothing is editable while GnuPG works: what is signed is what was typed
