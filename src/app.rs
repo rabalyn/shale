@@ -380,7 +380,13 @@ impl ShaleApp {
             tasks: TasksFilter::default(),
             graph: GraphView::new(false),
             local_graph: GraphView::new(true),
-            calendar: crate::cal_store::CalendarStore::new(cfg.calendars.clone(), if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{}", std::process::id())) }),
+            calendar: {
+                let mut c = crate::cal_store::CalendarStore::new(cfg.calendars.clone(), if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{}", std::process::id())) });
+                if persist {
+                    c.trash_dir = crate::cal_store::default_trash_dir();
+                }
+                c
+            },
             mail: crate::mail_ui::MailView::new(if persist { crate::mail_store::default_root() } else { std::env::temp_dir().join(format!("shale-mail-{}-{}", std::process::id(), NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst))) }),
             cal_side: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Small),
             cal_main: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Medium),

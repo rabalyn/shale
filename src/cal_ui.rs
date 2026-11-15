@@ -23,6 +23,17 @@ pub struct Popup {
     pub occ: Occ,
     pub pos: Pos2,
     opened_frame: u64,
+    /// a delete button was clicked and the popup asks "Delete?" (CAL-011): None, or what goes
+    confirm: Option<Confirm>,
+}
+
+/// What a delete confirmation is about.
+#[derive(Clone, Copy, PartialEq)]
+enum Confirm {
+    /// the event (all its repeats)
+    All,
+    /// one date of a repeating event
+    One,
 }
 
 pub enum CalAction {
@@ -299,7 +310,7 @@ impl CalendarView {
             }
         }
         if let Some((occ, pos)) = clicked {
-            self.popup = Some(Popup { occ, pos, opened_frame: self.frame });
+            self.popup = Some(Popup { occ, pos, opened_frame: self.frame, confirm: None });
         }
         if let Some(a) = self.popup_ui(ui, store) {
             action = Some(a);
@@ -665,6 +676,8 @@ impl CalendarView {
         let opened = popup.opened_frame;
         let mut close = false;
         let mut action = None;
+        let confirm = popup.confirm;
+        let mut new_confirm = confirm;
         let mut rects: Vec<(String, Rect)> = Vec::new();
         let area = egui::Area::new(egui::Id::unique("cal-event-popup")).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
@@ -733,6 +746,30 @@ impl CalendarView {
                     });
                 }
                 ui.add_space(6.0);
+                if let Some(c) = confirm {
+                    let name = if e.summary.is_empty() { "(no title)" } else { e.summary.as_str() };
+                    let q = match c {
+                        Confirm::All if series => format!("Delete “{name}” with all its repeats?"),
+                        Confirm::All => format!("Delete “{name}”?"),
+                        Confirm::One => format!("Delete only {} of “{name}”?", when_text(&occ)),
+                    };
+                    ui.add(egui::Label::new(egui::RichText::new(q).size(13.0).color(theme::TEXT_STRONG)).wrap());
+                    ui.label(egui::RichText::new("A copy is kept, so it can be brought back by hand.").size(11.5).color(theme::MUTED));
+                    ui.horizontal(|ui| {
+                        let b = ui.button(egui::RichText::new("Delete").color(theme::LINK_MISSING));
+                        rects.push(("popup-confirm".into(), b.rect));
+                        if b.clicked() {
+                            action = Some(if c == Confirm::One { CalAction::DeleteOne(occ.clone()) } else { CalAction::Delete(occ.clone()) });
+                            close = true;
+                        }
+                        let b = ui.button("Keep");
+                        rects.push(("popup-keep".into(), b.rect));
+                        if b.clicked() {
+                            new_confirm = None;
+                        }
+                    });
+                    return;
+                }
                 ui.horizontal(|ui| {
                     let b = ui.button("Close");
                     rects.push(("popup-close".into(), b.rect));
@@ -749,8 +786,7 @@ impl CalendarView {
                         let b = ui.button(egui::RichText::new("Delete event").color(theme::LINK_MISSING)).on_hover_text(format!("Remove it from “{}”", src.name));
                         rects.push(("popup-delete".into(), b.rect));
                         if b.clicked() {
-                            action = Some(CalAction::Delete(occ.clone()));
-                            close = true;
+                            new_confirm = Some(Confirm::All);
                         }
                     }
                 });
@@ -774,14 +810,12 @@ impl CalendarView {
                         let b = ui.button(egui::RichText::new("Delete this date").color(theme::LINK_MISSING)).on_hover_text("Remove only this date; the other repeats stay");
                         rects.push(("popup-delete-one".into(), b.rect));
                         if b.clicked() {
-                            action = Some(CalAction::DeleteOne(occ.clone()));
-                            close = true;
+                            new_confirm = Some(Confirm::One);
                         }
                         let b = ui.button(egui::RichText::new("Delete all repeats").color(theme::LINK_MISSING)).on_hover_text(format!("Remove it, with all its repeats, from “{}”", src.name));
                         rects.push(("popup-delete".into(), b.rect));
                         if b.clicked() {
-                            action = Some(CalAction::Delete(occ.clone()));
-                            close = true;
+                            new_confirm = Some(Confirm::All);
                         }
                     });
                 }
@@ -797,6 +831,8 @@ impl CalendarView {
         }
         if close {
             self.popup = None;
+        } else if let Some(p) = &mut self.popup {
+            p.confirm = new_confirm;
         }
         action
     }
@@ -990,6 +1026,13 @@ mod tests {
         h.click(&mut v, &store, true, &format!("event:Gym:{today}"));
         assert!(v.popup.is_some());
         h.click(&mut v, &store, true, "popup-delete");
+        assert!(h.actions.is_empty(), "the first click only asks: {:?}", h.actions);
+        assert!(v.popup.is_some());
+        // "Keep" goes back to the buttons without deleting
+        h.click(&mut v, &store, true, "popup-keep");
+        assert!(h.actions.is_empty() && v.popup.is_some());
+        h.click(&mut v, &store, true, "popup-delete");
+        h.click(&mut v, &store, true, "popup-confirm");
         assert!(h.actions.iter().any(|a| a.starts_with("delete:sample-gym")), "{:?}", h.actions);
         assert!(v.popup.is_none());
         h.click(&mut v, &store, true, &format!("event:Gym:{today}"));
@@ -1014,6 +1057,12 @@ mod tests {
             h.click(&mut v, &store, true, "event:Book club");
             assert!(v.popup.is_some());
             h.click(&mut v, &store, true, key);
+            if key.starts_with("popup-delete") {
+                let n = h.actions.len();
+                assert!(v.popup.is_some(), "{key}: the first click only asks");
+                h.click(&mut v, &store, true, "popup-confirm");
+                assert_eq!(h.actions.len(), n + 1, "{key}: only the confirmation sends the action");
+            }
             assert!(h.actions.last().unwrap().starts_with(action), "{key}: {:?}", h.actions);
             assert!(v.popup.is_none());
         }

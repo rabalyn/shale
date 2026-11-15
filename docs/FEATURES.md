@@ -120,7 +120,9 @@ built-in demo vault (`shale --screenshot out.png`).
 ![Week view and event details](screenshots/calendar-week.png)
 
 - Click an event to see its details: when, how it repeats, where, organizer, attendees,
-  categories, reminders and notes. **Edit** and **Delete** work for local and CalDAV calendars.
+  categories, reminders and notes. **Edit** and **Delete** work for local and CalDAV calendars. Delete asks first ("Delete
+  “Title”?"), and a copy of the event is kept in `calendar-trash` in the data folder. A CalDAV
+  save or delete that cannot be sure the server still has what Shale read is refused.
 - A repeating event asks what you mean: **Edit this date** or **Edit all repeats**, **Delete this
   date** or **Delete all repeats**. A date you change becomes its own entry next to the series; a
   date you delete is left out of the series.

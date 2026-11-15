@@ -577,7 +577,7 @@ fn write_error(status: u16, creating: bool) -> String {
         403 => "you don't have permission to write to this calendar".into(),
         405 | 501 => "this calendar is read-only".into(),
         412 if creating => "an event with the same ID already exists in this calendar".into(),
-        412 => "the event was changed on the server meanwhile; refresh the calendar and try again".into(),
+        412 => CHANGED_MEANWHILE.into(),
         415 => "this calendar doesn't accept events".into(),
         507 => "the server has no space left".into(),
         s => format!("the server answered with status {s}"),
@@ -595,11 +595,41 @@ fn current_etag(href: &str, acct: &Account) -> Result<Option<String>, String> {
     Ok(etag)
 }
 
+/// The lines of each event, sorted, so two copies of an event compare without regard to order.
+fn src_key(events: &[Event]) -> Vec<Vec<String>> {
+    let mut k: Vec<Vec<String>> = events
+        .iter()
+        .map(|e| {
+            let mut l = e.src.clone();
+            l.sort();
+            l
+        })
+        .collect();
+    k.sort();
+    k
+}
+
+/// When no version tag is known: fetch the event and check that the server still has what Shale
+/// read (`before`). Ok(true): same. Ok(false): changed, or gone (404).
+fn unchanged_on_server(href: &str, acct: &Account, before: &[Event]) -> Result<bool, String> {
+    let r = request_with("GET", href, &[], "", acct)?;
+    match r.status {
+        200..=299 => Ok(src_key(&cal_ics::parse_ics(&r.body)) == src_key(before)),
+        404 | 410 => Ok(false),
+        401 => Err(check(&r, href).unwrap_err()),
+        s => Err(format!("could not check the event on the server first: it answered with status {s}")),
+    }
+}
+
+const CHANGED_MEANWHILE: &str = "the event was changed on the server meanwhile; refresh the calendar and try again";
+
 /// Save an event to a calendar: `parts` is the event and, for a repeating one, its changed
 /// single dates (all stored together in one file on the server). `existing`: the current
 /// address and version tag when it is changed in place; None creates it.
+/// `before`: the event's parts as Shale read them; without a version tag they are compared with
+/// what the server has now, and a difference stops the save (CAL-016).
 /// Returns the address and the new version tag (if the server sent one).
-pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Option<(&str, Option<&str>)>) -> Result<(String, Option<String>), String> {
+pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Option<(&str, Option<&str>)>, before: &[Event]) -> Result<(String, Option<String>), String> {
     let e = parts.first().ok_or("nothing to save")?;
     let clean: Vec<Event> = parts.iter().map(|p| Event { href: None, etag: None, ..p.clone() }).collect();
     let body = cal_ics::to_ics("", &clean);
@@ -609,10 +639,17 @@ pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Optio
             if !same_server(href, cal_url) {
                 return Err(OTHER_SERVER.into());
             }
-            // without a known version, ask for it: never overwrite a newer version blindly
+            // without a known version, ask for it and check the server still has what was read:
+            // never overwrite a newer version blindly
             let tag = match tag.and_then(clean_etag) {
                 Some(t) => Some(t),
-                None => current_etag(href, acct).ok().flatten(),
+                None => {
+                    let now = current_etag(href, acct).ok().flatten();
+                    if !unchanged_on_server(href, acct, before)? {
+                        return Err(CHANGED_MEANWHILE.into());
+                    }
+                    now
+                }
             };
             (href.to_string(), tag)
         }
@@ -637,11 +674,24 @@ pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Optio
 
 /// Remove an event from the server. An event that is already gone counts as removed.
 /// `acct.url` is the calendar's address; the event must be on the same server.
-pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>) -> Result<(), String> {
+/// Without a version tag the event is first compared with `before` (as Shale read it), like in
+/// `put_event`; one that was changed on the server is not deleted.
+pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>, before: &[Event]) -> Result<(), String> {
     if !same_server(href, &acct.url) {
         return Err(OTHER_SERVER.into());
     }
-    let cond = etag.and_then(clean_etag).map(|t| format!("If-Match: {t}"));
+    let tag = etag.and_then(clean_etag);
+    if tag.is_none() {
+        let r = request_with("GET", href, &[], "", acct)?;
+        match r.status {
+            404 | 410 => return Ok(()),
+            200..=299 if src_key(&cal_ics::parse_ics(&r.body)) != src_key(before) => return Err(CHANGED_MEANWHILE.into()),
+            200..=299 => {}
+            401 => return Err(check(&r, href).unwrap_err()),
+            s => return Err(format!("could not check the event on the server first: it answered with status {s}")),
+        }
+    }
+    let cond = tag.map(|t| format!("If-Match: {t}"));
     let headers: Vec<&str> = cond.iter().map(|s| s.as_str()).collect();
     let r = request_with("DELETE", href, &headers, "", acct)?;
     match r.status {
@@ -885,13 +935,15 @@ pub(crate) mod tests {
         }
         let file = event_file("ev/1");
         let f2 = file.clone();
-        let (base, h) = mock_http_with(5, move |method, path, headers, body| {
+        let (base, h) = mock_http_with(6, move |method, path, headers, body| {
             let lower = headers.to_ascii_lowercase();
             let ours = path == format!("/cal/rw/{f2}");
             match method {
                 "PUT" if ours && lower.contains("if-none-match: *") && body.contains("SUMMARY:Lunch") => (201, "ETag: \"v2\"\r\n".into(), String::new()),
                 "PUT" if ours && lower.contains("if-match: \"v1\"") => (412, String::new(), String::new()),
                 "PUT" if path.starts_with("/cal/ro/") => (403, String::new(), String::new()),
+                "GET" if ours => (200, String::new(), SERVER_ICS.into()),
+                "GET" if path == "/cal/rw/gone.ics" => (404, String::new(), String::new()),
                 "DELETE" if ours && !lower.contains("content-type") => (204, String::new(), String::new()),
                 "DELETE" if path == "/cal/rw/gone.ics" => (404, String::new(), String::new()),
                 _ => (500, String::new(), String::new()),
@@ -900,22 +952,24 @@ pub(crate) mod tests {
         let cal = format!("{base}/cal/rw");
         let acct = Account { url: cal.clone(), username: "ada".into(), password: "x".into() };
         let e = Event { uid: "ev/1".into(), summary: "Lunch".into(), start: 1_800_000_000, end: 1_800_001_800, ..Default::default() };
-        let (href, etag) = put_event(&cal, &acct, std::slice::from_ref(&e), None).unwrap();
+        let (href, etag) = put_event(&cal, &acct, std::slice::from_ref(&e), None, &[]).unwrap();
         assert_eq!(href, format!("{base}/cal/rw/{file}"));
         assert_eq!(etag.as_deref(), Some("\"v2\""), "the new version tag is kept");
-        let err = put_event(&format!("{base}/cal/ro/"), &acct, std::slice::from_ref(&e), None).unwrap_err();
+        let err = put_event(&format!("{base}/cal/ro/"), &acct, std::slice::from_ref(&e), None, &[]).unwrap_err();
         assert!(err.contains("permission"), "{err}");
-        let err = put_event(&cal, &acct, std::slice::from_ref(&e), Some((&href, Some("\"v1\"")))).unwrap_err();
+        let err = put_event(&cal, &acct, std::slice::from_ref(&e), Some((&href, Some("\"v1\""))), &[]).unwrap_err();
         assert!(err.contains("changed on the server"), "{err}");
-        delete_event(&href, &acct, None).unwrap();
-        delete_event(&format!("{base}/cal/rw/gone.ics"), &acct, None).unwrap();
+        let before = cal_ics::parse_ics(SERVER_ICS);
+        delete_event(&href, &acct, None, &before).unwrap();
+        delete_event(&format!("{base}/cal/rw/gone.ics"), &acct, None, &before).unwrap();
         // an event address on another server is never contacted
-        let err = put_event(&cal, &acct, std::slice::from_ref(&e), Some(("https://evil.example/x.ics", Some("\"v1\"")))).unwrap_err();
+        let err = put_event(&cal, &acct, std::slice::from_ref(&e), Some(("https://evil.example/x.ics", Some("\"v1\""))), &[]).unwrap_err();
         assert!(err.contains("different server"), "{err}");
-        let err = delete_event("https://evil.example/x.ics", &acct, None).unwrap_err();
+        let err = delete_event("https://evil.example/x.ics", &acct, None, &[]).unwrap_err();
         assert!(err.contains("different server"), "{err}");
         // a missing version tag is looked up before changing in place
-        let (b2, h2) = mock_http(2, |method, _, headers, _| match method {
+        let (b2, h2) = mock_http(3, |method, _, headers, _| match method {
+            "GET" => (200, SERVER_ICS.into()),
             "PROPFIND" => {
                 (207, r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/c/a.ics</d:href><d:propstat><d:prop><d:getetag>"now"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#.into())
             }
@@ -923,9 +977,59 @@ pub(crate) mod tests {
             _ => (500, String::new()),
         });
         let acct2 = Account { url: format!("{b2}/c/"), ..acct.clone() };
-        put_event(&acct2.url, &acct2, std::slice::from_ref(&e), Some((&format!("{b2}/c/a.ics"), None))).unwrap();
-        assert_eq!(h2.join().unwrap(), vec!["PROPFIND /c/a.ics".to_string(), "PUT /c/a.ics".into()]);
-        assert_eq!(h.join().unwrap().len(), 5);
+        let before = cal_ics::parse_ics(SERVER_ICS);
+        put_event(&acct2.url, &acct2, std::slice::from_ref(&e), Some((&format!("{b2}/c/a.ics"), None)), &before).unwrap();
+        assert_eq!(h2.join().unwrap(), vec!["PROPFIND /c/a.ics".to_string(), "GET /c/a.ics".into(), "PUT /c/a.ics".into()]);
+        assert_eq!(h.join().unwrap().len(), 6);
+    }
+
+    const SERVER_ICS: &str = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:ev/1\r\nDTSTART:20261113T090000Z\r\nSUMMARY:Lunch\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    // spec: CAL-016
+    #[test]
+    fn no_version_tag_means_compare_with_the_server_first() {
+        if !has_curl() {
+            return;
+        }
+        let before = cal_ics::parse_ics(SERVER_ICS);
+        let e = Event { summary: "Lunch at noon".into(), ..before[0].clone() };
+        // the server still has what was read: saved
+        let (b, h) = mock_http(3, |m, _, _, _| match m {
+            "GET" => (200, SERVER_ICS.into()),
+            "PUT" => (204, String::new()),
+            _ => (404, String::new()),
+        });
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        put_event(&acct.url, &acct, std::slice::from_ref(&e), Some((&format!("{b}/c/a.ics"), None)), &before).unwrap();
+        assert_eq!(h.join().unwrap(), vec!["PROPFIND /c/a.ics".to_string(), "GET /c/a.ics".into(), "PUT /c/a.ics".into()]);
+        // the server has something else now: nothing is sent
+        let changed = SERVER_ICS.replace("Lunch", "Brunch");
+        let (b, h) = mock_http(2, move |m, _, _, _| match m {
+            "GET" => (200, changed.clone()),
+            _ => (500, String::new()),
+        });
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        let err = put_event(&acct.url, &acct, std::slice::from_ref(&e), Some((&format!("{b}/c/a.ics"), None)), &before).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        assert!(h.join().unwrap().iter().all(|s| !s.starts_with("PUT")));
+        // gone from the server: also a change for a save
+        let (b, h) = mock_http(2, |_, _, _, _| (404, String::new()));
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        let err = put_event(&acct.url, &acct, std::slice::from_ref(&e), Some((&format!("{b}/c/a.ics"), None)), &before).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        assert!(h.join().unwrap().iter().all(|s| !s.starts_with("PUT")));
+        // a delete of a changed event sends no DELETE
+        let changed = SERVER_ICS.replace("Lunch", "Brunch");
+        let (b, h) = mock_http(1, move |_, _, _, _| (200, changed.clone()));
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        let err = delete_event(&format!("{b}/c/a.ics"), &acct, None, &before).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        assert_eq!(h.join().unwrap(), vec!["GET /c/a.ics".to_string()]);
+        // with a version tag there is no extra GET
+        let (b, h) = mock_http(1, |_, _, _, _| (204, String::new()));
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        delete_event(&format!("{b}/c/a.ics"), &acct, Some("\"v1\""), &before).unwrap();
+        assert_eq!(h.join().unwrap(), vec!["DELETE /c/a.ics".to_string()]);
     }
 
     // spec: CAL-004
