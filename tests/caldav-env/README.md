@@ -98,6 +98,9 @@ that container. It installs `podman` and `podman-compose` with apt and then asks
   label whose runner has Podman, `openssl`, `curl` and a Rust toolchain). Then change `runs-on` of
   `env-tests` to that label and drop the `container:`.
 
+Inside the job container Podman stores images with the `vfs` driver (`STORAGE_DRIVER: vfs` in the
+job): its default `overlay` driver does not work on top of the job container's own overlayfs.
+
 The job has not yet been confirmed on the homelab runner (it is only known to work where Podman
 works, e.g. a developer machine: run `sh .forgejo/scripts/env-tests.sh run`).
 

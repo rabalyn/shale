@@ -330,6 +330,9 @@ jobs:
         - /srv/data/deployments/forgejo-runner/cache/shale/target-env:/cache/target-env
     env:
       CARGO_TARGET_DIR: /cache/target-env
+      # podman inside the job container: its default `overlay` storage does not work on top of the
+      # container's own overlayfs ("'overlay' is not supported over overlayfs"); vfs is slower but works
+      STORAGE_DRIVER: vfs
     steps:
       - name: Trust the runner's extra CA, if any
         run: |
