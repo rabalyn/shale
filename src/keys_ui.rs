@@ -1,5 +1,5 @@
-//! The keybindings dialog (KEY-006): every definable action by scope with its binding(s), a way
-//! to record a new binding, reset one, reset all.
+//! The Keybindings tab of the Settings dialog (KEY-006): every definable action by scope with
+//! its binding(s), a way to record a new binding, add one, clear, reset one, reset all.
 
 use crate::keys::{Action, Binding, Chord, Keymap, Scope, DEFS};
 use crate::theme;
@@ -9,15 +9,19 @@ use eframe::egui::{self, Event, Key, Modifiers, Rect, RichText, Ui};
 pub struct KeyDialog {
     /// The action whose binding is being recorded, and the chords pressed so far.
     pub recording: Option<(Action, Vec<Chord>)>,
+    /// The recording adds a binding (keeping the others) instead of replacing them.
+    adding: bool,
     /// Why the last binding was refused.
     pub error: Option<String>,
-    /// Where the controls were drawn (`key:<id>`, `reset:<id>`, `reset-all`), for tests.
+    /// Where the controls were drawn (`key:<id>`, `add:<id>`, `clear:<id>`, `reset:<id>`,
+    /// `reset-all`), for tests.
     pub rects: Vec<(String, Rect)>,
 }
 
 impl KeyDialog {
-    fn start(&mut self, a: Action) {
+    fn start(&mut self, a: Action, adding: bool) {
         self.recording = Some((a, vec![]));
+        self.adding = adding;
         self.error = None;
     }
 
@@ -32,7 +36,8 @@ impl KeyDialog {
             if bare && *key == Key::Escape {
                 self.recording = None;
             } else if bare && *key == Key::Enter && !chords.is_empty() {
-                match keys.set(*action, Binding(std::mem::take(chords))) {
+                let binding = Binding(std::mem::take(chords));
+                match if self.adding { keys.add(*action, binding) } else { keys.set(*action, binding) } {
                     Ok(()) => {
                         self.recording = None;
                         self.error = None;
@@ -51,7 +56,7 @@ impl KeyDialog {
     }
 }
 
-/// Draw the dialog's content. Returns true when a binding changed (the caller saves).
+/// Draw the tab's content. Returns true when a binding changed (the caller saves).
 pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
     let mut changed = false;
     d.rects.clear();
@@ -66,18 +71,30 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
             }
         });
     }
-    ui.label(muted("Press Change, then the keys: one key or chord, or several in a row (a sequence). Enter saves, Esc cancels."));
+    ui.label(muted("Press Change (replaces the keys) or Add (one more), then the keys: one key or chord, or several in a row (a sequence). Enter saves, Esc cancels."));
     if let Some(e) = &d.error {
         ui.add_space(4.0);
         ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
     }
     ui.add_space(6.0);
+    let r = ui.button("Reset all");
+    d.rects.push(("reset-all".into(), r.rect));
+    if r.clicked() {
+        keys.reset_all();
+        d.recording = None;
+        d.error = None;
+        changed = true;
+    }
     let mut start = None;
+    let mut clear = None;
     let mut reset = None;
-    for scope in Scope::ALL {
-        ui.add_space(6.0);
-        ui.label(RichText::new(scope.label()).strong());
-        egui::Grid::new(("keys", scope.label())).num_columns(3).spacing([12.0, 4.0]).show(ui, |ui| {
+    // one grid for all groups, so that the columns line up from group to group
+    egui::Grid::new("keys-grid").num_columns(3).spacing([14.0, 4.0]).show(ui, |ui| {
+        for scope in Scope::ALL {
+            ui.allocate_space(egui::vec2(0.0, 8.0));
+            ui.end_row();
+            ui.label(RichText::new(scope.label()).strong());
+            ui.end_row();
             for def in DEFS.iter().filter(|d| d.scope == scope) {
                 ui.label(def.label);
                 match &d.recording {
@@ -94,7 +111,17 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
                     let change = ui.button("Change");
                     d.rects.push((format!("key:{}", def.id), change.rect));
                     if change.clicked() {
-                        start = Some(def.action);
+                        start = Some((def.action, false));
+                    }
+                    let add = ui.button("Add").on_hover_text("One more key for this action, the others stay");
+                    d.rects.push((format!("add:{}", def.id), add.rect));
+                    if add.clicked() {
+                        start = Some((def.action, true));
+                    }
+                    let c = ui.add_enabled(!keys.bindings(def.action).is_empty(), egui::Button::new("Clear")).on_hover_text("No key for this action");
+                    d.rects.push((format!("clear:{}", def.id), c.rect));
+                    if c.clicked() {
+                        clear = Some(def.action);
                     }
                     let r = ui.add_enabled(!keys.is_default(def.action), egui::Button::new("Reset"));
                     d.rects.push((format!("reset:{}", def.id), r.rect));
@@ -104,22 +131,18 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
                 });
                 ui.end_row();
             }
-        });
+        }
+    });
+    if let Some((a, adding)) = start {
+        d.start(a, adding);
     }
-    if let Some(a) = start {
-        d.start(a);
-    }
-    if let Some(a) = reset {
-        keys.reset(a);
+    if let Some(a) = clear {
+        keys.clear(a);
         d.error = None;
         changed = true;
     }
-    ui.add_space(8.0);
-    let r = ui.button("Reset all");
-    d.rects.push(("reset-all".into(), r.rect));
-    if r.clicked() {
-        keys.reset_all();
-        d.recording = None;
+    if let Some(a) = reset {
+        keys.reset(a);
         d.error = None;
         changed = true;
     }
@@ -134,7 +157,7 @@ fn muted(t: impl Into<String>) -> RichText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{Modal, Options, ShaleApp, View};
+    use crate::app::{Modal, Options, SettingsTab, ShaleApp, View};
     use eframe::egui::{Pos2, RawInput, Vec2};
     use std::path::Path;
 
@@ -143,6 +166,8 @@ mod tests {
         ctx: egui::Context,
         t: f64,
         dir: std::path::PathBuf,
+        /// What the last frame painted.
+        texts: Vec<String>,
     }
 
     impl W {
@@ -153,11 +178,12 @@ mod tests {
             for n in ["A", "B", "C"] {
                 std::fs::write(dir.join(format!("{n}.md")), format!("# {n}\n")).unwrap();
             }
+            std::fs::write(dir.join("Map.excalidraw"), r#"{"type":"excalidraw","version":2,"elements":[],"appState":{},"files":{}}"#).unwrap();
             std::fs::create_dir_all(dir.join("projects")).unwrap();
             std::fs::write(dir.join("projects/Roadmap.md"), "# Roadmap\nbanana\n").unwrap();
             let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
             app.open(Path::new("A.md"), false);
-            let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir };
+            let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir, texts: vec![] };
             w.frame(vec![]);
             w
         }
@@ -168,6 +194,17 @@ mod tests {
             let app = &mut self.app;
             let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
             out.textures_delta.clear();
+            fn walk(s: &egui::Shape, out: &mut Vec<String>) {
+                match s {
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                    egui::Shape::Text(t) => out.push(t.galley.job.text.clone()),
+                    _ => {}
+                }
+            }
+            self.texts.clear();
+            for c in &out.shapes {
+                walk(&c.shape, &mut self.texts);
+            }
         }
 
         fn press(&mut self, key: Key, modifiers: Modifiers) {
@@ -176,7 +213,7 @@ mod tests {
         }
 
         fn open_dialog(&mut self) {
-            self.app.modal = Some(Modal::Keybindings(Box::default()));
+            self.app.open_settings(SettingsTab::Keybindings);
             for _ in 0..4 {
                 self.frame(vec![]);
             }
@@ -184,8 +221,8 @@ mod tests {
 
         fn dialog(&self) -> &KeyDialog {
             match &self.app.modal {
-                Some(Modal::Keybindings(d)) => d,
-                _ => panic!("the keybindings dialog is not open"),
+                Some(Modal::Settings { keys, tab: SettingsTab::Keybindings, .. }) => keys,
+                _ => panic!("the Keybindings tab of the settings is not open"),
             }
         }
 
@@ -487,6 +524,133 @@ mod tests {
         assert!(!w.app.normal_keys_active(&w.ctx));
     }
 
+    // spec: KEY-006, KEY-007
+    #[test]
+    fn add_keeps_the_other_bindings_and_clear_unbinds() {
+        let mut w = W::new("add-clear");
+        w.open_dialog();
+        // the Keybindings tab sits in the settings next to the General one, which keeps the vault folder
+        assert!(w.texts.iter().any(|t| t == "General") && w.texts.iter().any(|t| t == "Keybindings"), "{:?}", w.texts);
+        assert!(w.texts.iter().any(|t| t.contains("Press Change")));
+        assert!(!w.texts.iter().any(|t| t == "Vault folder"));
+        // Add: j and Down stay, the new key joins them
+        w.click("add:files.next_file");
+        w.press(Key::J, CTRL_ALT);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert_eq!(w.dialog().error, None);
+        assert_eq!(w.app.cfg.keybindings.get("files.next_file"), Some(&vec!["J".to_string(), "Down".to_string(), "Ctrl+Alt+J".to_string()]));
+        // an added binding that clashes is refused with the name of the other action and changes nothing
+        w.click("add:files.next_file");
+        w.press(Key::K, Modifiers::NONE);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert_eq!(w.dialog().error.as_deref(), Some("k is already used by “Previous file”"));
+        assert_eq!(w.app.keymap.bindings(Action::TreeNextFile).len(), 3);
+        // Change replaces all of them
+        w.click("key:files.next_file");
+        w.press(Key::N, CTRL_ALT);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert_eq!(w.app.cfg.keybindings.get("files.next_file"), Some(&vec!["Ctrl+Alt+N".to_string()]));
+        // Clear: stored as an empty list, shown as not set, and the key does nothing any more
+        w.click("clear:global.toggle_reading");
+        assert_eq!(w.app.cfg.keybindings.get("global.toggle_reading"), Some(&vec![]));
+        assert!(w.texts.iter().any(|t| t.contains("not set")), "{:?}", w.texts);
+        w.app.modal = None;
+        w.press(Key::E, CTRL);
+        assert!(!w.reading(), "Ctrl+E does nothing after Clear");
+        // Reset gives the default back
+        w.open_dialog();
+        w.click("reset:global.toggle_reading");
+        assert!(w.app.keymap.is_default(Action::ToggleReading));
+        w.app.modal = None;
+        w.press(Key::E, CTRL);
+        assert!(w.reading());
+    }
+
+    // spec: KEY-006
+    #[test]
+    fn the_columns_of_the_keybindings_line_up_across_the_groups() {
+        let mut w = W::new("columns");
+        w.open_dialog();
+        let x = |id: &str| w.dialog().rects.iter().find(|r| r.0 == id).unwrap().1.min.x;
+        let first = x("key:global.save");
+        for d in DEFS {
+            assert_eq!(x(&format!("key:{}", d.id)), first, "{}", d.id);
+        }
+    }
+
+    // spec: KEY-009
+    #[test]
+    fn a_waiting_sequence_shows_in_the_status_bar() {
+        let mut w = vim_note("pending");
+        assert!(!w.texts.iter().any(|t| t.starts_with("Space")));
+        typed(&mut w, Key::Space, " ");
+        w.frame(vec![]);
+        assert!(w.texts.iter().any(|t| t == "Space"), "{:?}", w.texts);
+        typed(&mut w, Key::F, "f");
+        w.frame(vec![]);
+        assert!(w.texts.iter().any(|t| t == "Space f"), "{:?}", w.texts);
+        // after the time-out it is gone, and the late key starts nothing
+        for _ in 0..40 {
+            w.frame(vec![]);
+        }
+        assert!(!w.texts.iter().any(|t| t.starts_with("Space")), "{:?}", w.texts);
+        typed(&mut w, Key::F, "f");
+        assert!(w.app.modal.is_none());
+        // a finished sequence shows nothing
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        w.frame(vec![]);
+        assert!(!w.texts.iter().any(|t| t.starts_with("Space")), "{:?}", w.texts);
+    }
+
+    fn kind(w: &W) -> &'static str {
+        match w.app.tabs[w.app.active].view {
+            View::Note(_) => "note",
+            View::Mail => "mail",
+            View::Drawing(_) => "drawing",
+            _ => "other",
+        }
+    }
+
+    // spec: NAV-019, KEY-011
+    #[test]
+    fn ctrl_6_swaps_note_and_mail_and_note_and_drawing_by_keys_only() {
+        let mut w = W::new("ctrl6");
+        // nothing before the note: nothing happens
+        w.press(Key::Num6, CTRL);
+        assert_eq!(kind(&w), "note");
+        // note -> mail (Ctrl+Shift+M) -> note -> mail -> note, from the mail view too
+        w.press(Key::M, Modifiers::COMMAND | Modifiers::SHIFT);
+        settle(&mut w);
+        assert_eq!(kind(&w), "mail");
+        for expect in ["note", "mail", "note"] {
+            w.press(Key::Num6, CTRL);
+            settle(&mut w);
+            assert_eq!(kind(&w), expect);
+        }
+        // note -> drawing -> note -> drawing -> note -> drawing: Space and the tool keys stay the drawing's own
+        w.app.open(Path::new("Map.excalidraw"), false);
+        settle(&mut w);
+        assert_eq!(kind(&w), "drawing");
+        for expect in ["note", "drawing", "note", "drawing"] {
+            w.press(Key::Num6, CTRL);
+            settle(&mut w);
+            assert_eq!(kind(&w), expect);
+        }
+        assert_eq!(note_text(&w), "# A\n", "nothing was typed");
+        // the key is a definable action: the old one does nothing, the new one swaps
+        w.app.keymap.set(Action::AlternateView, Binding::parse("Ctrl+Alt+6").unwrap()).unwrap();
+        w.press(Key::Num6, CTRL);
+        assert_eq!(kind(&w), "drawing");
+        w.press(Key::Num6, CTRL_ALT);
+        assert_eq!(kind(&w), "note");
+        // not while a dialog is open
+        w.app.open_settings(SettingsTab::General);
+        settle(&mut w);
+        w.press(Key::Num6, CTRL_ALT);
+        assert_eq!(kind(&w), "note");
+    }
+
     fn picker(w: &W) -> &crate::picker::Picker {
         match &w.app.modal {
             Some(Modal::Picker(p)) => p,
@@ -527,11 +691,11 @@ mod tests {
         settle(&mut w);
         // j and k are typed (the field has the keyboard); the arrows and Ctrl+J / Ctrl+K select
         type_in_picker(&mut w, "o");
-        let names = |w: &W| crate::picker::Source::FileNames.hits(w.app.vault.as_ref().unwrap(), &picker(w).query).into_iter().map(|h| h.title).collect::<Vec<_>>();
+        let names = |w: &W| picker(w).listed().iter().map(|h| h.title.clone()).collect::<Vec<_>>();
         assert_eq!(names(&w), ["Roadmap"], "only the Roadmap has an o in its name");
         w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
         settle(&mut w);
-        assert_eq!(names(&w), ["A", "B", "C", "Roadmap"]);
+        assert_eq!(names(&w), ["A", "B", "C", "Map", "Roadmap"]);
         w.press(Key::ArrowDown, Modifiers::NONE);
         assert_eq!(picker(&w).sel, 1);
         w.press(Key::J, CTRL);
@@ -540,7 +704,7 @@ mod tests {
         w.press(Key::ArrowUp, Modifiers::NONE);
         assert_eq!(picker(&w).sel, 0);
         w.press(Key::ArrowUp, Modifiers::NONE);
-        assert_eq!(picker(&w).sel, 3, "wraps around");
+        assert_eq!(picker(&w).sel, 4, "wraps around");
         // Esc closes and changes nothing
         w.press(Key::Escape, Modifiers::NONE);
         assert!(w.app.modal.is_none());
@@ -559,6 +723,164 @@ mod tests {
         assert_eq!((views(&w), w.app.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in the current tab");
         assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor, in normal mode");
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
+    }
+
+    /// A mail index with two mails ("Banana invoice" and "Lunch") that the app has open.
+    fn with_mail(w: &mut W) {
+        let root = w.dir.join("mail-store");
+        {
+            let store = crate::mail_store::MailStore::open(&root).unwrap();
+            let folder = store.ensure_folder("acct", "Acct", "INBOX", Some("/"), None, true).unwrap();
+            store.commit(vec![crate::mail_db::Op::FolderState { folder: folder.id, uidvalidity: Some(7), uidnext: Some(10), highestmodseq: None, last_sync: 1 }]).unwrap();
+            let folder = crate::mail_db::FolderRow { uidvalidity: Some(7), ..folder };
+            let mails = [(1u32, "Banana invoice"), (2, "Lunch")];
+            let ops = mails.iter().map(|(uid, subject)| {
+                let headers = format!("From: Ann <ann@x.de>\r\nSubject: {subject}\r\n\r\n");
+                crate::mail_db::Op::message(store.header_only(&folder, 7, *uid, headers.as_bytes(), "", Some(1_700_000_000 + i64::from(*uid)), 100))
+            });
+            store.commit(ops.collect()).unwrap();
+        }
+        w.app.cfg.mail_sync_minutes = 0;
+        w.app.cfg.mail_accounts = vec![crate::config::MailAccount { id: "acct".into(), name: "Acct".into(), host: "localhost".into(), user: "u".into(), ..Default::default() }];
+        w.app.mail.root = root;
+        w.app.show_view(View::Mail, false);
+        for _ in 0..200 {
+            w.frame(vec![]);
+            if w.app.mail.index().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(w.app.mail.index().is_some(), "the mail store opened");
+        w.app.open(Path::new("A.md"), false);
+        w.app.focus_editor();
+        settle(w);
+    }
+
+    /// One post about bananas in the post index, of the demo account.
+    fn with_post(w: &mut W) {
+        let entry = crate::social::demo::account();
+        w.app.cfg.social_accounts = vec![entry.clone()];
+        w.app.social.load_demo(&entry);
+        let mut p = crate::social::tests::post("b1", "bob", crate::cal_time::now() - 600, None);
+        p.text_markdown = "banana republic".into();
+        w.app.social.index.add(&entry.account.id, "home", &[p]);
+    }
+
+    /// Type into the picker of `Space f g` and let the debounce pass (NAV-024).
+    fn search_for(w: &mut W, text: &str) {
+        w.frame(vec![Event::Text(text.to_string())]);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        settle(w);
+    }
+
+    fn space_f_g(w: &mut W) {
+        for (key, text) in [(Key::Space, " "), (Key::F, "f"), (Key::G, "g")] {
+            typed(w, key, text);
+        }
+        settle(w);
+    }
+
+    fn picker_rows(w: &W) -> Vec<(&'static str, String)> {
+        picker(w).listed().iter().map(|h| (h.group, h.title.clone())).collect()
+    }
+
+    // spec: NAV-022, NAV-024, EDIT-015
+    #[test]
+    fn space_f_g_lists_notes_mail_and_posts_in_groups_with_counts() {
+        let mut w = vim_note("search-all");
+        with_mail(&mut w);
+        with_post(&mut w);
+        space_f_g(&mut w);
+        assert_eq!(picker(&w).source, crate::picker::Source::Everything);
+        assert_eq!(picker(&w).query, "");
+        assert!(picker(&w).listed().is_empty(), "nothing typed, nothing listed");
+        assert_eq!(note_text(&w), "# A\n", "the sequence typed nothing into the note");
+        search_for(&mut w, "banana");
+        assert_eq!(note_text(&w), "# A\n", "typing goes into the field");
+        assert_eq!(picker_rows(&w), [("Notes", "banana".to_string()), ("Mail", "Banana invoice".to_string()), ("Posts", "banana republic".to_string())], "grouped in this order");
+        // the wildcards reach all three
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything)));
+        settle(&mut w);
+        search_for(&mut w, "ban*");
+        assert_eq!(picker_rows(&w).iter().map(|r| r.0).collect::<Vec<_>>(), ["Notes", "Mail", "Posts"]);
+        // ↓ ↑ Ctrl+J Ctrl+K select across the groups, wrapping
+        assert_eq!(picker(&w).sel, 0);
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        w.press(Key::J, CTRL);
+        assert_eq!(picker(&w).sel, 2);
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 0, "wraps");
+        w.press(Key::K, CTRL);
+        assert_eq!(picker(&w).sel, 2);
+        w.press(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 1);
+        // Esc closes and changes nothing
+        w.press(Key::Escape, Modifiers::NONE);
+        assert!(w.app.modal.is_none());
+        assert_eq!((views(&w), note_text(&w)), (vec!["A.md".to_string()], "# A\n".to_string()));
+    }
+
+    // spec: NAV-025, NAV-009
+    #[test]
+    fn space_f_g_opens_a_note_line_a_mail_and_a_post() {
+        let mut w = vim_note("search-open");
+        with_mail(&mut w);
+        with_post(&mut w);
+        // a note: the found line, the keyboard in the editor
+        space_f_g(&mut w);
+        search_for(&mut w, "ban?na");
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        assert_eq!((views(&w), w.app.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in this tab");
+        assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor");
+        let cursor = egui::text_edit::TextEditState::load(&w.ctx, w.app.tabs[0].editor.id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0);
+        let text = &w.app.notes[Path::new("projects/Roadmap.md")].text;
+        let at = text.find("banana").unwrap();
+        assert_eq!(cursor, Some(text[..at].chars().count()), "the cursor is at the match on line 2");
+        // a mail: the mail view with the message open
+        w.app.open(Path::new("A.md"), false);
+        w.app.focus_editor();
+        settle(&mut w);
+        space_f_g(&mut w);
+        search_for(&mut w, "invoice");
+        assert_eq!(picker_rows(&w), [("Mail", "Banana invoice".to_string())]);
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        assert_eq!(views(&w), ["mail"]);
+        assert_eq!(w.app.mail.open.as_ref().map(|o| o.msg.subject.as_str()), Some("Banana invoice"), "the message is open");
+        assert_eq!(w.app.mail.cursor, Some(1), "the list has the cursor on it (newest first: it is the second row)");
+        // a post: its feed in a new Feeds tab
+        w.app.open(Path::new("A.md"), false);
+        w.app.focus_editor();
+        settle(&mut w);
+        let tabs = w.app.tabs.len();
+        space_f_g(&mut w);
+        search_for(&mut w, "republic");
+        assert_eq!(picker_rows(&w), [("Posts", "banana republic".to_string())]);
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        assert_eq!(w.app.tabs.len(), tabs + 1, "a new tab");
+        let feed = crate::social::FeedRef { account: crate::social::demo::account().account.id, feed: "home".into() };
+        assert_eq!(w.app.tabs[w.app.active].view, View::Social(Some(feed)));
+        assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
+    }
+
+    // spec: KEY-008, NAV-022
+    #[test]
+    fn the_search_all_keys_can_be_changed() {
+        let mut w = vim_note("search-keys");
+        w.app.keymap.set(Action::NormalSearchAll, Binding::parse("Space s").unwrap()).unwrap();
+        for (key, text) in [(Key::Space, " "), (Key::F, "f"), (Key::G, "g")] {
+            typed(&mut w, key, text);
+        }
+        assert!(w.app.modal.is_none(), "the old keys do nothing");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::S, "s");
+        assert!(matches!(&w.app.modal, Some(Modal::Picker(p)) if p.source == crate::picker::Source::Everything));
     }
 
     // spec: KEY-008, NAV-020

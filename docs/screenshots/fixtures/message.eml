@@ -1,0 +1,26 @@
+From: Architekturbüro Lindner <info@lindner.example>
+To: Medientechnik <mt@uni.example>
+Subject: =?UTF-8?B?SMO2cnNhYWwgQiDigJMgQXVzZsO8aHJ1bmdzcGzDpG5lIFN0YW5kIDQ=?=
+Date: Thu, 12 Nov 2026 16:05:00 +0100
+Message-ID: <plan-42@arch.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+SGFsbG8genVzYW1tZW4sDQoNCmFuYmVpIGRpZSBBdXNmw7xocnVuZ3NwbMOkbmUgU3RhbmQgNCBmw7xyIGRlbiBIw7Zyc2FhbCBCLg0KQml0dGUgZGllIFBvc2l0aW9uZW4gZGVyIEJvZGVudGFua3MgdW5kIGRlcyBCZWFtZXJzIHByw7xmZW4uDQoNClZpZWxlIEdyw7zDn2UNCkFyY2hpdGVrdHVyYsO8cm8gTGluZG5lcg0K
+--b1
+Content-Type: application/pdf; name="Grundriss EG Stand 4.pdf"
+Content-Disposition: attachment; filename="Grundriss EG Stand 4.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSBzYW1wbGUgZHJhd2luZyBmb3IgdGhlIHNjcmVlbnNob3RzCg==
+--b1
+Content-Type: application/pdf; name="Deckenspiegel.pdf"
+Content-Disposition: attachment; filename="Deckenspiegel.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSBzYW1wbGUgZHJhd2luZyBmb3IgdGhlIHNjcmVlbnNob3RzCg==
+--b1--
