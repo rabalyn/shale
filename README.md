@@ -64,6 +64,10 @@ unpack it and run `./shale/shale`. The newest build of `main` (between releases)
 [latest build](https://github.com/rabalyn/shale/releases/tag/latest). Both are made by GitHub
 Actions (`.github/workflows/build.yml`).
 
+Each download has a `.sha256` file next to it; to check the download, put both files in one folder and run
+`sha256sum -c shale-linux-x86_64.tar.gz.sha256` (for a release, use the file name of the version).
+This catches a damaged download, not a compromised release page.
+
 ### Making a release
 
 1. Raise `version` in `Cargo.toml` ([semver](https://semver.org/): before 1.0, new features raise
