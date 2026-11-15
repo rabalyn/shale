@@ -9,15 +9,20 @@ use eframe::egui::{Pos2, Rect};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-struct W {
-    app: ShaleApp,
-    hl: Headless,
+pub(super) struct W {
+    pub(super) app: ShaleApp,
+    pub(super) hl: Headless,
     /// files to drop, outside the vault
-    out: PathBuf,
+    pub(super) out: PathBuf,
 }
 
 impl W {
-    fn new(tag: &str) -> W {
+    pub(super) fn new(tag: &str) -> W {
+        Self::with_files(tag, &[])
+    }
+
+    /// The same vault plus these files (`Folder/Name.md`, text).
+    pub(super) fn with_files(tag: &str, extra: &[(&str, &str)]) -> W {
         let base = std::env::temp_dir().join(format!("shale-drops-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let (dir, out) = (base.join("vault"), base.join("outside"));
@@ -27,24 +32,29 @@ impl W {
         std::fs::write(dir.join("Sub/Inner.md"), "# Inner\n").unwrap();
         std::fs::write(out.join("first drop.md"), "# First\n\nfrom outside\n").unwrap();
         std::fs::write(out.join("second.md"), "# Second\n").unwrap();
+        for (name, text) in extra {
+            let f = dir.join(name);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, text).unwrap();
+        }
         let app = ShaleApp::build(Options { screenshot: None, vault: Some(dir), view: None, keys: None }, false);
         let mut w = W { app, hl: Headless::new(), out };
         w.frames(6);
         w
     }
 
-    fn frames(&mut self, n: usize) {
+    pub(super) fn frames(&mut self, n: usize) {
         for _ in 0..n {
             self.hl.frame(&mut self.app, vec![]);
         }
     }
 
-    fn file(&self, name: &str) -> PathBuf {
+    pub(super) fn file(&self, name: &str) -> PathBuf {
         self.out.join(name)
     }
 
     /// Run frames until `f` holds (the drop is read in the background).
-    fn until(&mut self, what: &str, f: impl Fn(&ShaleApp) -> bool) {
+    pub(super) fn until(&mut self, what: &str, f: impl Fn(&ShaleApp) -> bool) {
         let start = Instant::now();
         loop {
             self.hl.frame(&mut self.app, vec![]);
@@ -58,41 +68,41 @@ impl W {
 
     /// A place something can be dropped on, as the last frame drew it (the smallest for a
     /// row of the file list, the largest for the editor of the note).
-    fn zone(&self, folder: &str, note: Option<&str>, smallest: bool) -> Rect {
+    pub(super) fn zone(&self, folder: &str, note: Option<&str>, smallest: bool) -> Rect {
         let mut zs: Vec<Rect> = self.app.drop_zones.iter().filter(|z| z.folder == Path::new(folder) && z.note.as_deref() == note.map(Path::new)).map(|z| z.rect).collect();
         zs.sort_by(|a, b| a.area().total_cmp(&b.area()));
         let z = if smallest { zs.first() } else { zs.last() };
         *z.unwrap_or_else(|| panic!("no drop zone for {folder:?} {note:?}"))
     }
 
-    fn dialog(&self) -> &crate::import_dialog::ImportDialog {
+    pub(super) fn dialog(&self) -> &crate::import_dialog::ImportDialog {
         match &self.app.modal {
             Some(Modal::Import(d)) => d,
             _ => panic!("the Import dialog is not open"),
         }
     }
 
-    fn dialog_open(&self) -> bool {
+    pub(super) fn dialog_open(&self) -> bool {
         matches!(self.app.modal, Some(Modal::Import(_)))
     }
 
     /// Another program drops `paths` at `at` (what `wl_drop` sends for a file list).
-    fn drop_files(&mut self, at: Pos2, paths: &[PathBuf]) {
+    pub(super) fn drop_files(&mut self, at: Pos2, paths: &[PathBuf]) {
         let list: String = paths.iter().map(|p| format!("{}\r\n", crate::import::file_uri(p))).collect();
         self.app.fake_drops.push(DropEvent::Drop { x: at.x, y: at.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
     }
 
-    fn drop_data(&mut self, at: Pos2, mime: &str, data: &[u8]) {
+    pub(super) fn drop_data(&mut self, at: Pos2, mime: &str, data: &[u8]) {
         self.app.fake_drops.push(DropEvent::Drop { x: at.x, y: at.y, parts: vec![(mime.into(), data.to_vec())], offered: vec![mime.into()], report: vec![] });
         self.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
     }
 
-    fn close_dialog(&mut self) {
+    pub(super) fn close_dialog(&mut self) {
         self.app.modal = None;
         self.frames(2);
     }
 
-    fn painted(&self, text: &str) -> bool {
+    pub(super) fn painted(&self, text: &str) -> bool {
         self.hl.text.iter().any(|(t, _)| t.contains(text))
     }
 }
@@ -267,24 +277,24 @@ fn dragged_event(summary: &str) -> crate::cal_ics::Event {
 
 impl W {
     /// Start dragging a calendar event at `from` and move the pointer to `to`, button down.
-    fn drag_event(&mut self, ev: crate::cal_ics::Event, from: Pos2, to: Pos2) {
+    pub(super) fn drag_event(&mut self, ev: crate::cal_ics::Event, from: Pos2, to: Pos2) {
         eframe::egui::DragAndDrop::set_payload(self.hl.ctx(), crate::cal_ui::CalDrag { event: ev, calendar: "Work".into() });
         self.hl.frame(&mut self.app, vec![eframe::egui::Event::PointerMoved(from)]);
         self.hl.frame(&mut self.app, vec![eframe::egui::Event::PointerMoved(to)]);
         self.frames(2);
     }
 
-    fn dragging(&self) -> bool {
+    pub(super) fn dragging(&self) -> bool {
         eframe::egui::DragAndDrop::payload::<crate::cal_ui::CalDrag>(self.hl.ctx()).is_some()
     }
 
     /// A point outside every drop zone.
-    fn nowhere(&self) -> Pos2 {
+    pub(super) fn nowhere(&self) -> Pos2 {
         (0..90).flat_map(|y| (0..150).map(move |x| Pos2::new(x as f32 * 10.0 + 3.0, y as f32 * 10.0 + 3.0))).find(|p| !self.app.drop_zones.iter().any(|z| z.rect.contains(*p))).expect("a place outside every zone")
     }
 
     /// The imported event of the only item of the open Import dialog and its calendar file.
-    fn dialog_event(&self) -> (crate::cal_ics::Event, String, Option<(String, Vec<u8>)>) {
+    pub(super) fn dialog_event(&self) -> (crate::cal_ics::Event, String, Option<(String, Vec<u8>)>) {
         let d = self.dialog();
         assert_eq!(d.items.len(), 1);
         match &d.items[0].source {

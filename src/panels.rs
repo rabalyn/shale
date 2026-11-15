@@ -1671,5 +1671,8 @@ mod canvas_dialog_tests {
 }
 
 #[cfg(test)]
+#[path = "dialogs_ui_tests.rs"]
+mod dialogs_ui_tests;
+#[cfg(test)]
 #[path = "panels_ui_tests.rs"]
 mod ui_tests;
