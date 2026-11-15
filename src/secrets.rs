@@ -280,11 +280,20 @@ pub fn secret_field_shown() -> bool {
 /// Where passwords end up, for the settings dialog. Says so when secrets could not be locked
 /// into memory (they are then only wiped when dropped, SEC-018).
 pub fn where_stored() -> String {
-    let base = if backend::available() { "Passwords are kept in the system keyring." } else { "No system keyring found (install secret-tool / libsecret to use one): passwords are stored in the settings file, readable only by you." };
+    let base = if backend::available() { "Passwords are kept in the system keyring." } else { no_keyring_text() };
     if crate::secret::lock_failures() > 0 {
-        format!("{base} The system would not lock typed passwords into memory (RLIMIT_MEMLOCK), so they could end up in swap; use encrypted swap.")
+        format!("{base} The system would not lock typed passwords into memory ({}), so they could end up in swap; use encrypted swap.", crate::secret::LOCK_LIMIT)
     } else {
         base.to_string()
+    }
+}
+
+/// What the settings dialog says when there is no keyring (SEC-003, SEC-021).
+fn no_keyring_text() -> &'static str {
+    if cfg!(target_os = "linux") {
+        "No system keyring found (install secret-tool / libsecret to use one): passwords are stored in the settings file, readable only by you."
+    } else {
+        "This system has no keyring support in Shale yet: passwords are stored in the settings file, readable only by you."
     }
 }
 
@@ -646,7 +655,17 @@ mod tests {
         let _unlocked = Secret::new("x");
         crate::secret::fail_locks_on_this_thread(false);
         let text = where_stored();
-        assert!(text.contains("RLIMIT_MEMLOCK") && text.contains("encrypted swap"), "{text}");
+        assert!(text.contains(crate::secret::LOCK_LIMIT) && text.contains("encrypted swap"), "{text}");
         assert!(text.contains("keyring"), "{text}");
+    }
+
+    // spec: SEC-021
+    #[test]
+    fn without_a_keyring_the_dialog_names_the_settings_file_and_only_linux_points_to_secret_tool() {
+        pretend_no_keyring(true);
+        let text = where_stored();
+        pretend_no_keyring(false);
+        assert!(text.contains("settings file") && text.contains("readable only by you"), "{text}");
+        assert_eq!(text.contains("secret-tool"), cfg!(target_os = "linux"), "{text}");
     }
 }

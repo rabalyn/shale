@@ -325,6 +325,7 @@ pub struct ShaleApp {
     /// the kinds the last drag from another program offered
     last_offered: Vec<String>,
     /// something Shale can't take is dragged over the window: where, and what it offers
+    #[cfg(target_os = "linux")]
     ext_refused: Option<(egui::Pos2, Vec<String>)>,
     /// test drops from `--keys` (handled like drops from other programs)
     #[cfg(target_os = "linux")]
@@ -456,6 +457,7 @@ impl ShaleApp {
             calendar_areas: vec![],
             ext_hover: None,
             last_offered: vec![],
+            #[cfg(target_os = "linux")]
             ext_refused: None,
             #[cfg(target_os = "linux")]
             fake_drops: vec![],

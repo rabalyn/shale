@@ -3555,6 +3555,7 @@ dependencies = [
  "ttf-parser",
  "wayland-backend",
  "wayland-client",
+ "windows-sys 0.61.2",
  "winit",
  "zeroize",
 ]

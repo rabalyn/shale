@@ -573,6 +573,14 @@ pub fn host_name() -> String {
             }
         }
     }
+    // Windows keeps the computer's name in the environment of every program
+    #[cfg(windows)]
+    if let Ok(h) = std::env::var("COMPUTERNAME") {
+        let h = h.trim().to_string();
+        if !h.is_empty() {
+            return h;
+        }
+    }
     "this computer".into()
 }
 

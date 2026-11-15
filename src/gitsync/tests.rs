@@ -17,13 +17,16 @@ impl Env {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let env = [
-            ("GIT_CONFIG_GLOBAL", "/dev/null"),
+            ("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" }),
             ("GIT_CONFIG_NOSYSTEM", "1"),
-            ("GIT_CONFIG_COUNT", "2"),
+            ("GIT_CONFIG_COUNT", "3"),
             ("GIT_CONFIG_KEY_0", "init.defaultBranch"),
             ("GIT_CONFIG_VALUE_0", "main"),
             ("GIT_CONFIG_KEY_1", "protocol.file.allow"),
             ("GIT_CONFIG_VALUE_1", "always"),
+            // Git for Windows converts line endings by default; the tests compare exact bytes
+            ("GIT_CONFIG_KEY_2", "core.autocrlf"),
+            ("GIT_CONFIG_VALUE_2", "false"),
         ];
         let git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() };
         Env { root, git }
@@ -489,4 +492,11 @@ fn conflict_copy_names() {
     assert_eq!(conflict_name(Path::new(".gitignore"), STAMP, none), PathBuf::from(".gitignore (conflict 2026-11-14 1200)"));
     let first = PathBuf::from("Note (conflict 2026-11-14 1200).md");
     assert_eq!(conflict_name(Path::new("Note.md"), STAMP, |p| p == first), PathBuf::from("Note (conflict 2026-11-14 1200 2).md"));
+}
+
+// spec: BUILD-018
+#[test]
+fn the_computer_has_a_name_for_commit_messages() {
+    let h = host_name();
+    assert!(!h.is_empty() && !h.contains('\n') && h == h.trim(), "{h:?}");
 }

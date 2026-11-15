@@ -94,6 +94,8 @@ mod social;
 #[cfg(test)]
 mod tab_order_tests;
 mod tagwords;
+// Thunderbird's own mail folders, looked up for dropped messages (Wayland, IMP-008)
+#[cfg(target_os = "linux")]
 mod tb_store;
 mod theme;
 #[cfg(test)]

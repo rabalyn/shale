@@ -53,10 +53,21 @@ pub enum GpgError {
     BadArgument(String),
 }
 
+/// Where to get GnuPG on this system (BUILD-018): macOS and Windows do not come with it.
+fn install_hint() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Install GnuPG first, for example with Homebrew: brew install gnupg"
+    } else if cfg!(windows) {
+        "Install GnuPG first, for example Gpg4win from https://www.gpg4win.org, and restart Shale."
+    } else {
+        "Install the gnupg package of your system first."
+    }
+}
+
 impl std::fmt::Display for GpgError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GpgError::Missing(s) => write!(f, "{} is not installed (the program “{}” was not found), so {} cannot be used.", s.program(), s.program(), s.label()),
+            GpgError::Missing(s) => write!(f, "{} is not installed (the program “{}” was not found), so {} cannot be used. {}", s.program(), s.program(), s.label(), install_hint()),
             GpgError::Timeout => write!(f, "GnuPG did not answer in time (a passphrase dialog may have been left open)."),
             GpgError::Cancelled => write!(f, "Cancelled."),
             GpgError::TooBig => write!(f, "GnuPG produced more output than Shale accepts."),
@@ -803,15 +814,21 @@ pub(crate) mod testkit {
         }
     }
 
-    /// Are `gpg`, `gpgsm` and `gpgconf` here? Tests that need them say so and pass when they are not (the CI image has them).
+    /// Are `gpg`, `gpgsm` and `gpgconf` here? Tests that need them skip themselves with a note when they are not (the
+    /// Linux CI image has them; macOS and Windows usually do not, BUILD-018).
     pub fn have_gnupg() -> bool {
-        ["gpg", "gpgsm", "gpgconf"].iter().all(|p| Command::new(p).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok())
+        let have = ["gpg", "gpgsm", "gpgconf"].iter().all(|p| Command::new(p).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok());
+        if !have {
+            eprintln!("skipping: gpg, gpgsm and gpgconf are not installed here");
+        }
+        have
     }
 
     impl TestHome {
         pub fn new() -> TestHome {
             // short, so that the agent's socket path fits when it has to live in the home
-            let dir = std::path::PathBuf::from("/tmp").join(format!("shg{}-{}", std::process::id(), COUNT.fetch_add(1, Ordering::SeqCst)));
+            let base = if cfg!(unix) { std::path::PathBuf::from("/tmp") } else { std::env::temp_dir() };
+            let dir = base.join(format!("shg{}-{}", std::process::id(), COUNT.fetch_add(1, Ordering::SeqCst)));
             let _ = std::fs::remove_dir_all(&dir);
             crate::fsutil::ensure_private_dir(&dir).expect("temp home");
             std::fs::write(dir.join("gpg-agent.conf"), "allow-loopback-pinentry\n").expect("agent conf");
@@ -1038,10 +1055,12 @@ mod tests {
         let e = g.list_keys(CryptoStandard::OpenPgp, false, None, &no_cancel()).unwrap_err();
         assert_eq!(e, GpgError::Missing(CryptoStandard::OpenPgp));
         assert!(e.to_string().contains("not installed"), "{e}");
+        assert!(e.to_string().contains("Install "), "it says where to get it: {e}");
         assert!(matches!(g.version(CryptoStandard::Smime), Err(GpgError::Missing(CryptoStandard::Smime))));
     }
 
     // spec: MAIL-170
+    #[cfg(unix)]
     #[test]
     fn a_call_never_asks_for_a_network_lookup_and_passes_its_arguments_as_a_list() {
         let dir = TempDir::new().unwrap();
@@ -1138,6 +1157,7 @@ mod tests {
     }
 
     // spec: MAIL-171
+    #[cfg(unix)]
     #[test]
     fn a_call_that_hangs_is_killed_at_its_time_limit_and_by_cancel_without_blocking_forever() {
         let dir = TempDir::new().unwrap();

@@ -83,7 +83,9 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
 }
 
 /// Open a file for reading (for files too big or too odd to read whole, such as mailboxes).
-/// The error says which file could not be opened.
+/// The error says which file could not be opened. (Only the Thunderbird lookup of dropped
+/// messages uses it, and that is Linux only.)
+#[cfg(target_os = "linux")]
 pub fn open_read(path: impl AsRef<Path>) -> io::Result<File> {
     let path = path.as_ref();
     File::open(path).map_err(|e| named(path, e))
@@ -110,12 +112,16 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
 /// Make one new folder that only the owner can enter. A path that already exists (a folder or a
 /// link someone else made) is an error: it is never adopted.
 pub fn create_private_dir_new(path: &Path) -> io::Result<()> {
-    let mut b = fs::DirBuilder::new();
     #[cfg(unix)]
-    {
+    let b = {
         use std::os::unix::fs::DirBuilderExt;
+        let mut b = fs::DirBuilder::new();
         b.mode(0o700);
-    }
+        b
+    };
+    // Windows: the new folder inherits the access list of its place (DATA-014)
+    #[cfg(not(unix))]
+    let b = fs::DirBuilder::new();
     b.create(path).map_err(|e| named(path, e))
 }
 
@@ -125,14 +131,21 @@ pub fn create_private_dir_new(path: &Path) -> io::Result<()> {
 pub fn private_temp_root(prefix: &str) -> io::Result<PathBuf> {
     #[cfg(unix)]
     let who = unsafe { libc::geteuid() }.to_string();
+    // Windows: the system temp folder is the user's own (`%TEMP%` inside the profile, DATA-014)
     #[cfg(not(unix))]
     let who = String::from("user");
     let base = dirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
     let dir = base.join(format!("{prefix}-{who}"));
-    #[cfg(unix)]
     if let Ok(m) = fs::symlink_metadata(&dir) {
-        use std::os::unix::fs::MetadataExt;
-        if !m.is_dir() || m.uid() != unsafe { libc::geteuid() } {
+        #[cfg(unix)]
+        let ours = {
+            use std::os::unix::fs::MetadataExt;
+            m.is_dir() && m.uid() == unsafe { libc::geteuid() }
+        };
+        // no owner id to compare here: a plain folder (not a link) in the user's own temp folder
+        #[cfg(not(unix))]
+        let ours = m.is_dir() && !m.file_type().is_symlink();
+        if !ours {
             return Err(io::Error::new(io::ErrorKind::PermissionDenied, "the temp folder is not ours"));
         }
     }
@@ -144,7 +157,7 @@ pub fn private_temp_root(prefix: &str) -> io::Result<PathBuf> {
 /// waiting. `Ok(Some(file))`: the lock is held as long as the file value lives; the operating
 /// system releases it when the process ends, also after a crash. `Ok(None)`: another process
 /// (or another open of the file) holds it. Any other problem is an error.
-/// On systems that are not unix there is no locking: this always succeeds.
+/// (`flock` on Linux and macOS, `LockFileEx` on Windows, through the standard library.)
 pub fn try_lock_file(path: &Path) -> io::Result<Option<File>> {
     if let Some(dir) = path.parent() {
         ensure_private_dir(dir)?;
@@ -153,22 +166,15 @@ pub fn try_lock_file(path: &Path) -> io::Result<Option<File>> {
     o.create(true).read(true).write(true);
     #[cfg(unix)]
     {
-        use std::os::fd::AsRawFd;
         use std::os::unix::fs::OpenOptionsExt;
         o.mode(PRIVATE_MODE);
-        let f = o.open(path).map_err(|e| named(path, e))?;
-        // SAFETY: the descriptor is open for as long as `f` lives.
-        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            return Ok(Some(f));
-        }
-        let e = io::Error::last_os_error();
-        if e.kind() == io::ErrorKind::WouldBlock {
-            return Ok(None);
-        }
-        Err(named(path, e))
     }
-    #[cfg(not(unix))]
-    o.open(path).map(Some).map_err(|e| named(path, e))
+    let f = o.open(path).map_err(|e| named(path, e))?;
+    match f.try_lock() {
+        Ok(()) => Ok(Some(f)),
+        Err(fs::TryLockError::WouldBlock) => Ok(None),
+        Err(fs::TryLockError::Error(e)) => Err(named(path, e)),
+    }
 }
 
 /// Open an owner-only file for a debug log (not user data): started empty, or with `append`
@@ -221,8 +227,8 @@ pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
-/// `renameat2(RENAME_NOREPLACE)` on Linux. `None` when it is not available here (other systems,
-/// old kernels, file systems without support).
+/// `renameat2(RENAME_NOREPLACE)` on Linux. `None` when it is not available here (old kernels,
+/// file systems without support).
 #[cfg(target_os = "linux")]
 fn renameat2_noreplace(from: &Path, to: &Path) -> Option<io::Result<()>> {
     use std::ffi::CString;
@@ -241,7 +247,47 @@ fn renameat2_noreplace(from: &Path, to: &Path) -> Option<io::Result<()>> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+/// `renamex_np(RENAME_EXCL)` on macOS. `None` when the file system does not support it.
+#[cfg(target_os = "macos")]
+fn renameat2_noreplace(from: &Path, to: &Path) -> Option<io::Result<()>> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let a = CString::new(from.as_os_str().as_bytes()).ok()?;
+    let b = CString::new(to.as_os_str().as_bytes()).ok()?;
+    // SAFETY: both pointers are valid NUL-terminated strings that outlive the call.
+    let r = unsafe { libc::renamex_np(a.as_ptr(), b.as_ptr(), libc::RENAME_EXCL) };
+    if r == 0 {
+        return Some(Ok(()));
+    }
+    let e = io::Error::last_os_error();
+    match e.raw_os_error() {
+        Some(libc::ENOTSUP) | Some(libc::EINVAL) => None,
+        _ => Some(Err(e)),
+    }
+}
+
+/// `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` on Windows: it fails if the target exists
+/// (`std::fs::rename` would replace it).
+#[cfg(windows)]
+fn renameat2_noreplace(from: &Path, to: &Path) -> Option<io::Result<()>> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(std::iter::once(0)).collect() };
+    let (a, b) = (wide(from), wide(to));
+    // SAFETY: both buffers are NUL-terminated UTF-16 strings that outlive the call.
+    let ok = unsafe { windows_sys::Win32::Storage::FileSystem::MoveFileExW(a.as_ptr(), b.as_ptr(), 0) };
+    if ok != 0 {
+        return Some(Ok(()));
+    }
+    let e = io::Error::last_os_error();
+    // ERROR_ALREADY_EXISTS (183) and ERROR_FILE_EXISTS (80) say AlreadyExists; a folder at the
+    // target may also come back as access denied, so look
+    if matches!(e.raw_os_error(), Some(80) | Some(183)) || (e.kind() == io::ErrorKind::PermissionDenied && fs::symlink_metadata(to).is_ok()) {
+        return Some(Err(io::Error::new(io::ErrorKind::AlreadyExists, "the target exists")));
+    }
+    Some(Err(e))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn renameat2_noreplace(_: &Path, _: &Path) -> Option<io::Result<()>> {
     None
 }
@@ -387,8 +433,8 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-            assert!(try_lock_file(&path).unwrap().is_none(), "a second lock must be refused");
         }
+        assert!(try_lock_file(&path).unwrap().is_none(), "a second lock must be refused");
         drop(first);
         assert!(try_lock_file(&path).unwrap().is_some(), "the lock is free after the first is dropped");
         let _ = fs::remove_dir_all(&dir);
@@ -648,7 +694,7 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
-    // spec: DATA-004
+    // spec: DATA-004, DATA-013
     #[test]
     fn rename_noreplace_moves_files_and_folders_but_never_replaces() {
         let d = tmp("rename");
@@ -662,10 +708,62 @@ mod tests {
         assert!(!d.join("a").exists());
         fs::create_dir(d.join("dir1")).unwrap();
         fs::create_dir(d.join("dir2")).unwrap();
-        assert!(rename_noreplace(&d.join("dir1"), &d.join("dir2")).is_err());
+        assert_eq!(rename_noreplace(&d.join("dir1"), &d.join("dir2")).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        // a file onto a folder and a folder onto a file are refused too, and nothing is lost
+        fs::write(d.join("f"), "F").unwrap();
+        assert!(rename_noreplace(&d.join("f"), &d.join("dir2")).is_err());
+        assert!(rename_noreplace(&d.join("dir2"), &d.join("f")).is_err());
+        assert_eq!(fs::read(d.join("f")).unwrap(), b"F");
+        assert!(d.join("dir2").is_dir());
         rename_noreplace(&d.join("dir1"), &d.join("dir3")).unwrap();
         assert!(d.join("dir3").is_dir() && !d.join("dir1").exists());
         assert!(rename_noreplace(&d.join("missing"), &d.join("x")).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DATA-013
+    #[test]
+    fn the_atomic_save_replaces_but_the_no_replace_rename_does_not() {
+        // std::fs::rename replaces the target on Windows and Unix alike: that is what a save
+        // needs, and what rename_noreplace must never do
+        let d = tmp("replace-vs-noreplace");
+        fs::write(d.join("old"), "old").unwrap();
+        fs::write(d.join("new"), "new").unwrap();
+        fs::rename(d.join("new"), d.join("old")).unwrap();
+        assert_eq!(fs::read(d.join("old")).unwrap(), b"new");
+        fs::write(d.join("again"), "again").unwrap();
+        assert_eq!(rename_noreplace(&d.join("again"), &d.join("old")).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(d.join("old")).unwrap(), b"new");
+        assert_eq!(fs::read(d.join("again")).unwrap(), b"again");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DATA-014
+    #[cfg(windows)]
+    #[test]
+    fn private_files_on_windows_carry_no_access_entry_for_other_users() {
+        let d = tmp("acl");
+        let p = d.join("sub").join("config.json");
+        ensure_private_dir(p.parent().unwrap()).unwrap();
+        write_atomic_private(&p, b"secret").unwrap();
+        let root = private_temp_root("shale-acl-test").unwrap();
+        // Shale's own folders are in the user's profile, where only the user, SYSTEM and the
+        // administrators have access by default
+        // (compared after canonicalize: the temp folder may be spelled with 8.3 short names)
+        let real = |p: PathBuf| fs::canonicalize(&p).unwrap_or(p);
+        let home = real(dirs::home_dir().unwrap());
+        assert!(real(dirs::config_dir().unwrap()).starts_with(&home), "the config folder is in the profile");
+        assert!(real(dirs::data_dir().unwrap()).starts_with(&home), "the data folder is in the profile");
+        assert!(real(std::env::temp_dir()).starts_with(&home), "the temp folder is in the profile");
+        for path in [&p, p.parent().unwrap(), &root] {
+            let out = std::process::Command::new("icacls").arg(path).output().expect("icacls");
+            let text = String::from_utf8_lossy(&out.stdout).to_string();
+            assert!(out.status.success(), "{text}");
+            for other in ["Everyone", "BUILTIN\\Users", "Authenticated Users"] {
+                assert!(!text.contains(other), "{} gives access to {other}:\n{text}", path.display());
+            }
+        }
+        let _ = fs::remove_dir(&root);
         let _ = fs::remove_dir_all(&d);
     }
 
