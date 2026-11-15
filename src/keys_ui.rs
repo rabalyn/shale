@@ -1,0 +1,304 @@
+//! The keybindings dialog (KEY-006): every definable action by scope with its binding(s), a way
+//! to record a new binding, reset one, reset all.
+
+use crate::keys::{Action, Binding, Chord, Keymap, Scope, DEFS};
+use crate::theme;
+use eframe::egui::{self, Event, Key, Modifiers, Rect, RichText, Ui};
+
+#[derive(Default)]
+pub struct KeyDialog {
+    /// The action whose binding is being recorded, and the chords pressed so far.
+    pub recording: Option<(Action, Vec<Chord>)>,
+    /// Why the last binding was refused.
+    pub error: Option<String>,
+    /// Where the controls were drawn (`key:<id>`, `reset:<id>`, `reset-all`), for tests.
+    pub rects: Vec<(String, Rect)>,
+}
+
+impl KeyDialog {
+    fn start(&mut self, a: Action) {
+        self.recording = Some((a, vec![]));
+        self.error = None;
+    }
+
+    /// Take the keys of one frame while recording: chords add up, Enter saves, Esc cancels.
+    /// Returns true when a binding was saved.
+    fn record(&mut self, keys: &mut Keymap, events: &[Event]) -> bool {
+        let mut saved = false;
+        for e in events {
+            let Event::Key { key, pressed: true, repeat: false, modifiers, .. } = e else { continue };
+            let Some((action, chords)) = &mut self.recording else { break };
+            let bare = !modifiers.any();
+            if bare && *key == Key::Escape {
+                self.recording = None;
+            } else if bare && *key == Key::Enter && !chords.is_empty() {
+                match keys.set(*action, Binding(std::mem::take(chords))) {
+                    Ok(()) => {
+                        self.recording = None;
+                        self.error = None;
+                        saved = true;
+                    }
+                    Err(msg) => {
+                        self.error = Some(msg);
+                        self.recording = None;
+                    }
+                }
+            } else {
+                chords.push(Chord::new(*modifiers, *key));
+            }
+        }
+        saved
+    }
+}
+
+/// Draw the dialog's content. Returns true when a binding changed (the caller saves).
+pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
+    let mut changed = false;
+    d.rects.clear();
+    if d.recording.is_some() {
+        // the recording takes every key: Esc must not close the dialog, nothing may press a button
+        let events = ui.input(|i| i.events.clone());
+        changed |= d.record(keys, &events);
+        ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
+        ui.ctx().memory_mut(|m| {
+            if let Some(id) = m.focused() {
+                m.surrender_focus(id);
+            }
+        });
+    }
+    ui.label(muted("Press Change, then the keys: one key or chord, or several in a row (a sequence). Enter saves, Esc cancels."));
+    if let Some(e) = &d.error {
+        ui.add_space(4.0);
+        ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
+    }
+    ui.add_space(6.0);
+    let mut start = None;
+    let mut reset = None;
+    for scope in Scope::ALL {
+        ui.add_space(6.0);
+        ui.label(RichText::new(scope.label()).strong());
+        egui::Grid::new(("keys", scope.label())).num_columns(3).spacing([12.0, 4.0]).show(ui, |ui| {
+            for def in DEFS.iter().filter(|d| d.scope == scope) {
+                ui.label(def.label);
+                match &d.recording {
+                    Some((a, chords)) if *a == def.action => {
+                        let typed = Binding(chords.clone()).display();
+                        ui.label(RichText::new(if chords.is_empty() { "press the keys…".to_string() } else { typed }).color(theme::ACCENT));
+                    }
+                    _ => {
+                        let text = keys.display(def.action);
+                        ui.label(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::ACCENT) });
+                    }
+                }
+                ui.horizontal(|ui| {
+                    let change = ui.button("Change");
+                    d.rects.push((format!("key:{}", def.id), change.rect));
+                    if change.clicked() {
+                        start = Some(def.action);
+                    }
+                    let r = ui.add_enabled(!keys.is_default(def.action), egui::Button::new("Reset"));
+                    d.rects.push((format!("reset:{}", def.id), r.rect));
+                    if r.clicked() {
+                        reset = Some(def.action);
+                    }
+                });
+                ui.end_row();
+            }
+        });
+    }
+    if let Some(a) = start {
+        d.start(a);
+    }
+    if let Some(a) = reset {
+        keys.reset(a);
+        d.error = None;
+        changed = true;
+    }
+    ui.add_space(8.0);
+    let r = ui.button("Reset all");
+    d.rects.push(("reset-all".into(), r.rect));
+    if r.clicked() {
+        keys.reset_all();
+        d.recording = None;
+        d.error = None;
+        changed = true;
+    }
+    keys.recording = d.recording.is_some();
+    changed
+}
+
+fn muted(t: impl Into<String>) -> RichText {
+    RichText::new(t).color(theme::MUTED)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{Modal, Options, ShaleApp};
+    use eframe::egui::{Pos2, RawInput, Vec2};
+    use std::path::Path;
+
+    struct W {
+        app: ShaleApp,
+        ctx: egui::Context,
+        t: f64,
+        dir: std::path::PathBuf,
+    }
+
+    impl W {
+        fn new(tag: &str) -> W {
+            let dir = std::env::temp_dir().join(format!("shale-keysui-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("A.md"), "# A\n").unwrap();
+            let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
+            app.open(Path::new("A.md"), false);
+            let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir };
+            w.frame(vec![]);
+            w
+        }
+
+        fn frame(&mut self, events: Vec<Event>) {
+            self.t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 1600.0))), time: Some(self.t), events, ..Default::default() };
+            let app = &mut self.app;
+            let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
+            out.textures_delta.clear();
+        }
+
+        fn press(&mut self, key: Key, modifiers: Modifiers) {
+            self.frame(vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }]);
+            self.frame(vec![Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers }]);
+        }
+
+        fn open_dialog(&mut self) {
+            self.app.modal = Some(Modal::Keybindings(Box::default()));
+            for _ in 0..4 {
+                self.frame(vec![]);
+            }
+        }
+
+        fn dialog(&self) -> &KeyDialog {
+            match &self.app.modal {
+                Some(Modal::Keybindings(d)) => d,
+                _ => panic!("the keybindings dialog is not open"),
+            }
+        }
+
+        fn click(&mut self, key: &str) {
+            let r = self.dialog().rects.iter().find(|r| r.0 == key).unwrap_or_else(|| panic!("no control {key}")).1;
+            let p = r.center();
+            let b = |pressed| Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+            self.frame(vec![Event::PointerMoved(p)]);
+            self.frame(vec![b(true)]);
+            self.frame(vec![b(false)]);
+            self.frame(vec![]);
+        }
+
+        fn reading(&self) -> bool {
+            self.app.tabs[self.app.active].reading
+        }
+    }
+
+    impl Drop for W {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    const CTRL: Modifiers = Modifiers::COMMAND;
+    const CTRL_ALT: Modifiers = Modifiers { alt: true, ctrl: true, shift: false, mac_cmd: false, command: true };
+
+    // spec: KEY-006, KEY-008, KEY-007
+    #[test]
+    fn changing_a_binding_moves_the_shortcut() {
+        let mut w = W::new("change");
+        // before: Ctrl+E switches to the reading view
+        w.press(Key::E, CTRL);
+        assert!(w.reading());
+        w.press(Key::E, CTRL);
+        assert!(!w.reading());
+
+        w.press(Key::Comma, CTRL);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert!(matches!(w.app.modal, Some(Modal::Settings { .. })), "Ctrl+, opens the settings");
+        w.app.modal = None;
+        w.open_dialog();
+        w.click("key:global.toggle_reading");
+        assert!(w.dialog().recording.is_some());
+        // while recording, keys trigger nothing and Esc does not close the dialog: Ctrl+E is recorded, not run
+        w.press(Key::E, CTRL_ALT);
+        assert!(!w.reading(), "a key typed to record does nothing else");
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.dialog().recording.is_none());
+        assert_eq!(w.dialog().error, None);
+        assert_eq!(w.app.cfg.keybindings.get("global.toggle_reading"), Some(&vec!["Ctrl+Alt+E".to_string()]), "the change is in the config to be saved");
+        w.app.modal = None;
+        w.frame(vec![]);
+        // after: the new key works, the old one does not
+        w.press(Key::E, CTRL);
+        assert!(!w.reading(), "the old key does nothing now");
+        w.press(Key::E, CTRL_ALT);
+        assert!(w.reading(), "the new key works");
+
+        // Esc cancels a recording and leaves the dialog open
+        w.open_dialog();
+        w.click("key:global.save");
+        w.press(Key::S, CTRL_ALT);
+        w.press(Key::Escape, Modifiers::NONE);
+        assert!(w.dialog().recording.is_none());
+        assert!(w.app.keymap.is_default(Action::Save));
+        assert!(!w.app.keymap.recording, "triggers work again after the recording");
+    }
+
+    // spec: KEY-004
+    #[test]
+    fn a_double_binding_is_refused_with_the_name_of_the_other_action() {
+        let mut w = W::new("double");
+        w.open_dialog();
+        w.click("key:global.focus_editor");
+        w.press(Key::H, CTRL);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert_eq!(w.dialog().error.as_deref(), Some("Ctrl+H is already used by “Keyboard into the left sidebar”"));
+        assert!(w.app.keymap.is_default(Action::FocusEditor), "nothing changed");
+        assert!(w.app.cfg.keybindings.is_empty());
+        // a binding that is taken in the other direction too: a Global key against a list key
+        w.click("key:global.back");
+        w.press(Key::J, CTRL);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert_eq!(w.dialog().error.as_deref(), Some("Ctrl+J is already used by “Next folder”"));
+        // a plain key is no global shortcut
+        w.click("key:global.back");
+        w.press(Key::G, Modifiers::NONE);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.dialog().error.as_deref().unwrap().contains("needs Ctrl or Alt"));
+        // a sequence can be recorded in a list scope
+        w.click("key:files.toggle_folder");
+        w.press(Key::Space, Modifiers::NONE);
+        w.press(Key::F, Modifiers::NONE);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert_eq!(w.dialog().error, None);
+        assert_eq!(w.app.cfg.keybindings.get("files.toggle_folder"), Some(&vec!["Space F".to_string()]));
+    }
+
+    // spec: KEY-006
+    #[test]
+    fn reset_and_reset_all_restore_the_defaults() {
+        let mut w = W::new("reset");
+        w.app.keymap.set(Action::ToggleReading, Binding::parse("Ctrl+Alt+E").unwrap()).unwrap();
+        w.app.keymap.set(Action::NewNote, Binding::parse("Ctrl+Alt+N").unwrap()).unwrap();
+        w.app.keymap.set(Action::TreeNextFile, Binding::parse("Ctrl+Alt+J").unwrap()).unwrap();
+        w.open_dialog();
+        w.click("reset:global.toggle_reading");
+        assert!(w.app.keymap.is_default(Action::ToggleReading));
+        assert!(!w.app.keymap.is_default(Action::NewNote));
+        assert_eq!(w.app.cfg.keybindings.keys().collect::<Vec<_>>(), ["files.next_file", "global.new_note"]);
+        w.app.modal = None;
+        w.press(Key::E, CTRL);
+        assert!(w.reading(), "Ctrl+E is back");
+        w.open_dialog();
+        w.click("reset-all");
+        assert!(w.app.keymap.overrides().is_empty() && w.app.cfg.keybindings.is_empty());
+    }
+}
