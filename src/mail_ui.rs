@@ -558,6 +558,23 @@ impl MailView {
         self.reader.as_ref()
     }
 
+    /// The index for the picker's search over everything (NAV-022); None until the store is open.
+    pub fn index(&self) -> Option<&rusqlite::Connection> {
+        self.reader.as_ref().map(Reader::conn)
+    }
+
+    /// Show a message the picker found (NAV-025): its folder is listed with the cursor on it and
+    /// the message is open in the reading pane.
+    pub fn show_hit(&mut self, cfg: &Config, msg: MessageSummary) {
+        self.select_folder(cfg, msg.folder_id);
+        if let Some(p) = self.reader.as_ref().and_then(|r| r.position_in_list(msg.folder_id, msg.date, msg.uid).ok()) {
+            self.cursor = Some(p.max(0) as usize);
+            self.scroll_to_cursor = true;
+        }
+        self.pane = Pane::List;
+        self.open_message(msg);
+    }
+
     pub fn set_context(&mut self, ctx: &egui::Context) {
         if self.ctx.is_none() {
             self.ctx = Some(ctx.clone());

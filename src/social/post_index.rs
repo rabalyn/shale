@@ -10,7 +10,7 @@
 //! connection of its own ([`clear_file`], [`prune_file`]).
 
 use super::{feed_ui::segments, Post};
-use crate::mail_db::fts_query_in;
+use crate::mail_db::{fts_query_in, fts_query_wild};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
@@ -333,6 +333,16 @@ impl PostIndex {
     /// for, or a broken index: an empty list.
     pub fn search(&self, query: &str, limit: usize) -> Vec<PostHit> {
         let Some(q) = fts_query_in(query, &FIELDS) else { return vec![] };
+        self.search_fts(&q, limit)
+    }
+
+    /// [`PostIndex::search`] with the wildcards of `fts_query_wild` (NAV-023).
+    pub fn search_wild(&self, query: &str, limit: usize) -> Vec<PostHit> {
+        let Some(q) = fts_query_wild(query, &FIELDS) else { return vec![] };
+        self.search_fts(&q, limit)
+    }
+
+    fn search_fts(&self, q: &str, limit: usize) -> Vec<PostHit> {
         let run = || -> rusqlite::Result<Vec<PostHit>> {
             let mut st = self.conn.prepare(
                 "SELECT p.account, p.feed, p.key, p.author_name, p.author_handle, p.created_at, p.snippet, p.url, p.reply_to, p.json

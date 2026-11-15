@@ -192,3 +192,17 @@ fn the_data_usage_dialog_counts_empties_and_prunes_the_index_file_next_to_the_op
     drop(ix);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// spec: NAV-023
+#[test]
+fn wildcards_find_posts_by_prefix() {
+    let mut ix = PostIndex::in_memory();
+    ix.add("a", "home", &[with_text("1", "ada", ago(2), "Plain text outlives apps"), with_text("2", "bob", ago(1), "Textual things")]);
+    let find = |q: &str| ids(&ix.search_wild(q, 10)).into_iter().map(String::from).collect::<Vec<_>>();
+    assert_eq!(find("text*"), ["2", "1"], "a prefix, newest first");
+    assert_eq!(find("tex?"), ["2", "1"], "? cuts the word like *");
+    assert_eq!(find("text"), ["1"], "without a wildcard a whole word");
+    assert_eq!(find("from:ada* out*"), ["1"], "field prefixes and several words");
+    assert!(find("*text").is_empty() && find("").is_empty());
+    assert_eq!(ix.search_wild("text*", 1).len(), 1);
+}
