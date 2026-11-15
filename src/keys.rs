@@ -236,6 +236,8 @@ actions! {
     MailReplyAll => "mail.reply_all", "Reply all", MailView, ["Shift+R"];
     MailForward => "mail.forward", "Forward", MailView, ["Shift+F"];
     MailAttSave => "mail.attachment_save", "Save the selected attachment to the vault", MailView, ["Shift+O"];
+    MailRetry => "mail.retry", "Retry a mail of the outbox that was not sent (or send it again)", MailView, ["Shift+S"];
+    MailUnsent => "mail.unsent", "Show or hide the sent mails that are only on this computer", MailView, ["Shift+U"];
     MailLoad => "mail.load", "Load the message (or the list of the folder) from the server", MailView, ["Shift+L"];
     MailNext => "mail.next", "Next folder, message or line of the pane with the keyboard", MailView, ["J", "Down"];
     MailPrev => "mail.prev", "Previous folder, message or line of the pane with the keyboard", MailView, ["K", "Up"];
@@ -256,6 +258,8 @@ actions! {
     MailUndoSend => "mail.undo_send", "Take back the mail waiting to be sent", MailView, ["Z"];
     MailAttNext => "mail.attachment_next", "Select the next attachment", MailView, ["CloseBracket"];
     MailAttOpen => "mail.attachment_open", "Open the selected attachment", MailView, ["O"];
+    MailEdit => "mail.edit", "Edit the draft, or take a mail of the outbox back into the editor", MailView, ["E"];
+    MailMenu => "mail.menu", "Open the menu of the message or draft under the cursor", MailView, ["Menu", "Shift+F10"];
 }
 
 impl Action {
@@ -504,7 +508,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 23 + 23 + 5);
+        assert_eq!(DEFS.len(), 23 + 27 + 5);
     }
 
     // spec: KEY-003
@@ -690,7 +694,8 @@ mod tests {
     fn a_bare_key_does_not_fire_with_shift_or_alt() {
         let mut k = Keymap::default();
         let sc = Scope::MailView;
-        for (key, bare, shift) in [(Key::S, Some(Action::MailFlag), None), (Key::R, Some(Action::MailReply), Some(Action::MailReplyAll)), (Key::F, Some(Action::MailFlag), Some(Action::MailForward)), (Key::D, Some(Action::MailDelete), None)]
+        for (key, bare, shift) in
+            [(Key::S, Some(Action::MailFlag), Some(Action::MailRetry)), (Key::R, Some(Action::MailReply), Some(Action::MailReplyAll)), (Key::F, Some(Action::MailFlag), Some(Action::MailForward)), (Key::D, Some(Action::MailDelete), None)]
         {
             assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::NONE)]), bare, "{key:?}");
             assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::SHIFT)]), shift, "Shift+{key:?}");

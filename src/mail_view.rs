@@ -12,13 +12,14 @@ use crate::keys::{Action as KeyAction, Keymap, Scope};
 use crate::mail::display_name;
 use crate::mail_compose::{LocalOut, LocalView};
 use crate::mail_db::{MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
+use crate::mail_keys::MenuTarget;
 use crate::mail_ui::*;
 use crate::theme;
 use eframe::egui::{self, Align, Color32, CornerRadius, FontId, Key, Layout, Modifiers, Pos2, Rect, RichText, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 /// What a button or a menu entry of the phase 2 actions asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Act {
+pub(crate) enum Act {
     Read,
     Flag,
     Move,
@@ -48,6 +49,9 @@ impl MailView {
         let mut rects: Vec<(String, Rect)> = Vec::new();
         self.set_context(ui.ctx());
         self.dialog = modal_open;
+        if self.compose.is_some() {
+            self.kbd.menu = None;
+        }
         self.handle_keys(ui, cfg, keys, modal_open, &mut actions);
         let full = ui.available_rect_before_wrap();
         ui.allocate_rect(full, Sense::hover());
@@ -131,6 +135,7 @@ impl MailView {
                 self.mover_window(ui, cfg, &mut rects);
                 self.forever_window(ui, cfg, &mut rects);
                 self.unsent_window(ui, cfg, &mut rects);
+                self.row_menu_window(ui, cfg, &mut rects);
             }
         }
         self.att_open = false;
@@ -173,14 +178,24 @@ impl MailView {
             // the letter that came with the key must not be typed into the field or window that opens
             ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(_))));
         }
+        // an open menu of a row and the window of the unsent copies have the keyboard (MAIL-068, MAIL-069)
+        if self.kbd.menu.is_some() {
+            self.menu_keys(cfg, action, enter, esc);
+            return;
+        }
+        if self.unsent_keys(cfg, action, enter, esc) {
+            return;
+        }
         // what works on messages does nothing while the folder pane has the keyboard (MAIL-064)
-        let on_messages = self.pane != Pane::Folders;
+        let local = self.local_view.is_some();
+        let on_messages = self.pane != Pane::Folders && !local;
+        let beside_folders = self.pane != Pane::Folders;
         match action {
             Some(KeyAction::MailNext) => self.step_in_pane(cfg, 1),
             Some(KeyAction::MailPrev) => self.step_in_pane(cfg, -1),
             Some(KeyAction::MailNextFolder) => self.step_folder(cfg, 1),
             Some(KeyAction::MailPrevFolder) => self.step_folder(cfg, -1),
-            Some(KeyAction::MailMark) if self.pane == Pane::List => {
+            Some(KeyAction::MailMark) if self.pane == Pane::List && !local => {
                 if let Some(m) = self.cursor_message() {
                     self.toggle_mark(&m);
                 }
@@ -204,6 +219,11 @@ impl MailView {
             Some(KeyAction::MailRead) if on_messages => self.toggle_read(cfg),
             Some(KeyAction::MailFlag) if on_messages => self.toggle_flag(cfg),
             Some(KeyAction::MailDelete) if on_messages => self.delete_selected(cfg),
+            Some(KeyAction::MailDelete) if beside_folders && local => self.local_discard(),
+            Some(KeyAction::MailEdit) if beside_folders && local => self.local_edit(),
+            Some(KeyAction::MailRetry) if beside_folders && local => self.local_retry(),
+            Some(KeyAction::MailMenu) if beside_folders => self.open_menu_by_key(),
+            Some(KeyAction::MailUnsent) => self.unsent_show(),
             Some(KeyAction::MailMove) if on_messages => self.open_mover(),
             Some(KeyAction::MailCompose) => self.compose_new(cfg),
             Some(KeyAction::MailReply) if on_messages => self.start_reply(Kind::Reply),
@@ -217,8 +237,8 @@ impl MailView {
                 }
             }
             Some(KeyAction::MailAccounts) => actions.push(MailAction::OpenAccounts),
-            Some(KeyAction::MailUndoSend) => self.undo_newest(),
-            Some(KeyAction::MailLoad) => self.load_from_server(cfg),
+            Some(KeyAction::MailUndoSend) => self.undo_key(),
+            Some(KeyAction::MailLoad) if !local => self.load_from_server(cfg),
             Some(KeyAction::MailAttNext) if on_messages => {
                 if let Some(Body::Ready(l)) = self.open.as_ref().map(|o| &o.body) {
                     let n = l.mail.attachments.len();
@@ -234,6 +254,7 @@ impl MailView {
         if enter {
             match self.pane {
                 Pane::Folders => self.pane = Pane::List,
+                Pane::List if local => self.local_enter(),
                 Pane::List => {
                     if let Some(m) = self.cursor_message() {
                         self.open_message(m);
@@ -262,6 +283,7 @@ impl MailView {
     fn step_in_pane(&mut self, cfg: &Config, delta: isize) {
         match self.pane {
             Pane::Folders => self.step_entry(cfg, delta),
+            Pane::List if self.local_view.is_some() => self.local_step(delta),
             Pane::List => self.move_cursor(delta),
             Pane::Message => self.read_scroll += delta as f32 * 60.0,
         }
@@ -660,7 +682,7 @@ impl MailView {
             }
         }
         let mut clicked: Option<(usize, bool)> = None;
-        let mut ctx_act: Option<(usize, Act)> = None;
+        let mut menu_at: Option<(usize, Pos2)> = None;
         let now = crate::cal_time::now();
         ui.spacing_mut().item_spacing.y = 0.0;
         let out = area.show_rows(ui, ROW_H, n, |ui, range| {
@@ -675,31 +697,16 @@ impl MailView {
                 if r.clicked() {
                     clicked = Some((i, ui.input(|i| i.modifiers.command)));
                 }
-                r.context_menu(|ui| {
-                    let read = if m.is_seen() { "Mark unread" } else { "Mark read" };
-                    let flag = if m.is_flagged() { "Unflag" } else { "Flag" };
-                    let del = if self.in_trash(&m) { "Delete forever…" } else { "Delete" };
-                    for (key, label, a) in [("mail:ctx-read", read, Act::Read), ("mail:ctx-flag", flag, Act::Flag), ("mail:ctx-move", "Move…", Act::Move), ("mail:ctx-delete", del, Act::Delete)] {
-                        let b = ui.button(label);
-                        rec(rects, key, &b);
-                        if b.clicked() {
-                            ctx_act = Some((i, a));
-                            ui.close();
-                        }
-                    }
-                });
+                if r.secondary_clicked() {
+                    menu_at = Some((i, ui.input(|i| i.pointer.interact_pos()).unwrap_or(r.rect.center())));
+                }
             }
             range
         });
         self.visible = out.inner;
         self.list_h = out.inner_rect.height();
-        if let Some((i, a)) = ctx_act {
-            // a menu on a marked row works on all marked mails, on another row only on that row
-            if let Some(m) = self.row(i).cloned() {
-                self.cursor = Some(i);
-                let t = if self.marked.contains_key(&m.id) { self.marked.values().cloned().collect() } else { vec![m] };
-                self.run_act(cfg, a, t);
-            }
+        if let Some((i, at)) = menu_at {
+            self.open_menu_at(MenuTarget::Message(i), at);
         }
         if let Some((i, toggle)) = clicked {
             self.cursor = Some(i);
@@ -714,7 +721,7 @@ impl MailView {
     }
 
     /// What a button, key or menu entry asks for, on these messages.
-    fn run_act(&mut self, cfg: &Config, a: Act, t: Vec<MessageSummary>) {
+    pub(crate) fn run_act(&mut self, cfg: &Config, a: Act, t: Vec<MessageSummary>) {
         match a {
             Act::Read => self.toggle_read_on(cfg, t),
             Act::Flag => self.toggle_flag_on(cfg, t),

@@ -52,6 +52,7 @@ mod mail_demo;
 mod mail_dialog;
 #[cfg(test)]
 mod mail_env_tests;
+mod mail_keys;
 mod mail_ops;
 mod mail_send;
 #[cfg(test)]

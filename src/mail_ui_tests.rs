@@ -103,6 +103,8 @@ struct W {
     offline: Arc<std::sync::atomic::AtomicBool>,
     /// What the last frame painted: text and its colour.
     texts: Vec<(String, Color32)>,
+    /// What the last frame filled: rectangles and their colour.
+    fills: Vec<(Rect, Color32)>,
 }
 
 impl W {
@@ -132,7 +134,7 @@ impl W {
         app.show_view(View::Mail, false);
         let ctx = egui::Context::default();
         crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, server, dir, account, offline, texts: vec![] };
+        let mut w = W { app, ctx, t: 0.0, server, dir, account, offline, texts: vec![], fills: vec![] };
         w.until("the mail store opens", |a| a.mail.ready_store().is_some());
         w
     }
@@ -144,17 +146,20 @@ impl W {
         let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
         out.textures_delta.clear();
         let mut texts = vec![];
-        fn walk(s: &Shape, out: &mut Vec<(String, Color32)>) {
+        let mut fills = vec![];
+        fn walk(s: &Shape, out: &mut Vec<(String, Color32)>, fills: &mut Vec<(Rect, Color32)>) {
             match s {
-                Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                Shape::Vec(v) => v.iter().for_each(|s| walk(s, out, fills)),
                 Shape::Text(t) => out.push((t.galley.job.text.clone(), t.galley.job.sections.first().map(|s| s.format.color).unwrap_or(Color32::WHITE))),
+                Shape::Rect(r) => fills.push((r.rect, r.fill)),
                 _ => {}
             }
         }
         for c in &out.shapes {
-            walk(&c.shape, &mut texts);
+            walk(&c.shape, &mut texts, &mut fills);
         }
         self.texts = texts;
+        self.fills = fills;
     }
 
     fn until(&mut self, what: &str, f: impl Fn(&ShaleApp) -> bool) {
@@ -894,7 +899,17 @@ fn fifty_thousand_messages_draw_quickly_and_a_steady_frame_runs_no_query() {
     app.mail.root = root.clone();
     app.show_view(View::Mail, false);
     let server = FakeServer::start(MailSecurity::ImplicitTls);
-    let mut w = W { app, ctx: egui::Context::default(), t: 0.0, server, dir: dir.clone(), account: MailAccount { id: "perf".into(), ..MailAccount::default() }, offline: Arc::new(std::sync::atomic::AtomicBool::new(false)), texts: vec![] };
+    let mut w = W {
+        app,
+        ctx: egui::Context::default(),
+        t: 0.0,
+        server,
+        dir: dir.clone(),
+        account: MailAccount { id: "perf".into(), ..MailAccount::default() },
+        offline: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        texts: vec![],
+        fills: vec![],
+    };
     crate::theme::apply(&w.ctx);
     w.until("the store and the first page", |a| a.mail.total == 50_000);
     for _ in 0..3 {
@@ -2658,4 +2673,308 @@ fn sync_load_attachments_search_scope_and_the_password_field_work_from_the_keybo
     w.press(Key::A, Modifiers::NONE);
     w.frame(vec![]);
     assert!(matches!(w.app.modal, Some(Modal::MailAccounts(_))));
+}
+
+// ------------------------------------------------------------ the keyboard of drafts, outbox, the menu and the unsent window
+
+use crate::outbox::{Outbox, Outcome};
+
+impl W {
+    /// Is the cursor colour painted over this control?
+    fn cursor_painted_on(&self, key: &str) -> bool {
+        let r = self.rect(key);
+        let c = crate::theme::ACCENT.gamma_multiply(0.25);
+        self.fills.iter().any(|(f, col)| *col == c && f.intersects(r))
+    }
+
+    /// Put mails into the outbox files: `kind` 0 waits (for an hour), 1 failed, 2 may have been sent.
+    fn put_in_outbox(&mut self, subject: &str, kind: u8) {
+        let ob = Outbox::new(&self.app.mail.root);
+        let real = crate::cal_time::now();
+        let d = crate::outbox::tests::draft(&self.account.id, subject, "the text");
+        let b = crate::compose::build(&d, &crate::compose::BuildOptions { now: real, ..Default::default() }).unwrap();
+        ob.queue(&d, &b, real, real + 3600, "2026-11-14").unwrap();
+        if kind > 0 {
+            ob.begin_send(&d.account, &d.id, real + 4000).unwrap();
+            let out = if kind == 1 { Outcome::Failed("550 no such user".into()) } else { Outcome::Unsure("the connection ended".into()) };
+            ob.finish(&d.account, &d.id, out, real).unwrap();
+        }
+        self.app.mail.refresh_local();
+        self.frame(vec![]);
+    }
+
+    /// Move the cursor of the outbox list to the mail with this subject, with the keys.
+    fn outbox_go(&mut self, subject: &str) {
+        let acct = self.account.id.clone();
+        let at = self.app.mail.local_items.iter().filter(|i| i.account == acct).position(|i| i.subject == subject).unwrap_or_else(|| panic!("no {subject:?} in the outbox"));
+        for _ in 0..8 {
+            self.press(Key::K, Modifiers::NONE);
+        }
+        for _ in 0..at {
+            self.press(Key::J, Modifiers::NONE);
+        }
+        assert_eq!(self.app.mail.outbox_sel.as_ref().map(|k| k.1.clone()), self.app.mail.local_items.iter().find(|i| i.subject == subject).map(|i| i.id.clone()), "the mail under the cursor is the selected one");
+    }
+}
+
+// spec: MAIL-067
+#[test]
+fn drafts_and_outbox_lists_work_from_the_keyboard() {
+    let (mut w, smtp) = compose_world("kbd-local", 30);
+    let acct = w.account.id.clone();
+    let ob = Outbox::new(&w.app.mail.root);
+    for (i, subject) in ["First draft", "Second draft"].iter().enumerate() {
+        ob.save_draft(&crate::outbox::tests::draft(&acct, subject, "words"), NOW + i as i64).unwrap();
+    }
+    for (subject, kind) in [("Waiting", 0), ("Failed A", 1), ("Unsure", 2), ("Failed B", 1), ("Failed C", 1)] {
+        w.put_in_outbox(subject, kind);
+    }
+    // Drafts: j / k move a visible cursor; a message key does not touch the Inbox
+    w.click(&format!("mail:drafts:{acct}"));
+    w.frame(vec![]);
+    assert_eq!(w.app.mail.pane, Pane::List);
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, Some(0));
+    assert!(w.cursor_painted_on("mail:draft:0"), "the row under the cursor is painted");
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, Some(1));
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, Some(1), "the last row stops the cursor");
+    w.press(Key::K, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, Some(0));
+    w.press(Key::U, Modifiers::NONE);
+    w.press(Key::S, Modifiers::NONE);
+    w.settle_ops();
+    assert!(w.server_flags("INBOX", 3).is_empty(), "u and s did not act on a message of the Inbox");
+    // e (and Enter) open the draft under the cursor
+    let first = w.app.mail.local_drafts[0].subject.clone();
+    w.press_text(Key::E, Modifiers::NONE, "e");
+    w.until("the draft opens", |a| a.mail.compose.is_some());
+    assert_eq!(w.compose_field("subject"), first);
+    w.app.mail.compose_close();
+    w.until("the editor is closed", |a| a.mail.compose.is_none());
+    w.frame(vec![Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+    w.until("Enter opens it too", |a| a.mail.compose.is_some());
+    w.app.mail.compose_close();
+    w.until("the editor is closed again", |a| a.mail.compose.is_none());
+    // d discards the draft; the cursor stays in the list
+    w.press(Key::D, Modifiers::NONE);
+    assert_eq!(w.drafts_on_disk().len(), 1);
+    assert_eq!(w.app.mail.cursor, Some(0));
+    w.press(Key::Delete, Modifiers::NONE);
+    assert!(w.drafts_on_disk().is_empty());
+    assert_eq!(w.app.mail.cursor, None, "no row is left to stand on");
+
+    // Outbox: the cursor selects the mail, the detail shows it
+    w.click(&format!("mail:outbox:{acct}"));
+    w.frame(vec![]);
+    w.outbox_go("Failed A");
+    assert!(w.cursor_painted_on(&format!("mail:outbox:{}", w.app.mail.cursor.unwrap())));
+    w.frame(vec![]);
+    assert!(w.shows("was not sent") && w.shows("550"), "the detail shows what happened");
+    // Shift+S retries a failed mail
+    w.press_text(Key::S, Modifiers::SHIFT, "S");
+    w.until("the failed mail went out", |_| smtp.state().received.len() == 1);
+    // and sends one that may have been sent again
+    w.outbox_go("Unsure");
+    w.press_text(Key::S, Modifiers::SHIFT, "S");
+    w.until("the unsure mail went out again", |_| smtp.state().received.len() == 2);
+    // e takes a failed mail back into the editor
+    w.outbox_go("Failed B");
+    w.press_text(Key::E, Modifiers::NONE, "e");
+    w.until("the editor opens", |a| a.mail.compose.is_some());
+    assert_eq!(w.compose_field("subject"), "Failed B");
+    w.app.mail.compose_close();
+    w.until("the editor is closed", |a| a.mail.compose.is_none());
+    // e does nothing for a mail that waits; z takes it back into the editor
+    w.outbox_go("Waiting");
+    w.press_text(Key::E, Modifiers::NONE, "e");
+    assert!(w.app.mail.compose.is_none(), "a waiting mail is taken back with z");
+    w.press_text(Key::Z, Modifiers::NONE, "z");
+    w.until("the waiting mail is back in the editor", |a| a.mail.compose.is_some());
+    assert_eq!(w.compose_field("subject"), "Waiting");
+    w.app.mail.compose_close();
+    w.until("the editor is closed once more", |a| a.mail.compose.is_none());
+    // d discards the record of a failed mail
+    w.click(&format!("mail:outbox:{acct}"));
+    w.frame(vec![]);
+    w.outbox_go("Failed C");
+    let before = w.items().len();
+    w.press(Key::D, Modifiers::NONE);
+    assert_eq!(w.items().len(), before - 1);
+    assert!(w.items().iter().all(|i| i.subject != "Failed C"));
+}
+
+// spec: MAIL-068
+#[test]
+fn the_menu_of_a_row_opens_by_key_and_is_driven_by_the_arrows_enter_and_esc() {
+    let (mut w, _smtp) = compose_world("menukey", 30);
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, Some(0));
+    w.press(Key::Space, Modifiers::NONE);
+    assert_eq!(w.app.mail.marked.len(), 1);
+    // Shift+F10 opens the menu at the row, the first entry is marked
+    w.press(Key::F10, Modifiers::SHIFT);
+    assert!(w.has("mail:ctx-read") && w.has("mail:ctx-flag") && w.has("mail:ctx-move") && w.has("mail:ctx-delete"));
+    assert_eq!(w.rect("mail:menu-sel"), w.rect("mail:ctx-read"));
+    // no other key acts meanwhile: d would delete
+    w.press(Key::D, Modifiers::NONE);
+    w.settle_ops();
+    assert_eq!(w.server_uids("INBOX").len(), 3, "d did not delete");
+    assert!(w.has("mail:ctx-read"), "the menu is still open");
+    // ↓ marks the next entry
+    w.press(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(w.rect("mail:menu-sel"), w.rect("mail:ctx-flag"));
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.rect("mail:menu-sel"), w.rect("mail:ctx-move"));
+    w.press(Key::K, Modifiers::NONE);
+    w.press(Key::ArrowUp, Modifiers::NONE);
+    w.press(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(w.rect("mail:menu-sel"), w.rect("mail:ctx-read"), "the mark stops at the first entry");
+    // Esc closes only the menu: the mark of the message stays
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(!w.has("mail:ctx-read"));
+    assert_eq!(w.app.mail.marked.len(), 1, "Esc closed the menu and nothing else");
+    // the Menu key opens it again; ↓ Enter flags the marked mail
+    w.press(Key::Menu, Modifiers::NONE);
+    assert!(w.has("mail:ctx-flag"));
+    w.press(Key::ArrowDown, Modifiers::NONE);
+    w.press(Key::Enter, Modifiers::NONE);
+    assert!(!w.has("mail:ctx-flag"), "Enter ran the entry and closed the menu");
+    w.settle_ops();
+    assert_eq!(w.server_flags("INBOX", 3), vec!["\\Flagged"]);
+    // a click outside closes it
+    w.press(Key::Menu, Modifiers::NONE);
+    assert!(w.has("mail:ctx-read"));
+    w.click_at(Pos2::new(1400.0, 800.0), Modifiers::NONE);
+    assert!(!w.has("mail:ctx-read"));
+    // a draft has a menu too
+    let acct = w.account.id.clone();
+    Outbox::new(&w.app.mail.root).save_draft(&crate::outbox::tests::draft(&acct, "Menu draft", "words"), NOW).unwrap();
+    w.app.mail.refresh_local();
+    w.click(&format!("mail:drafts:{acct}"));
+    w.frame(vec![]);
+    w.press(Key::Menu, Modifiers::NONE);
+    assert!(!w.has("mail:draft-discard:0"), "no cursor, no menu");
+    w.press(Key::J, Modifiers::NONE);
+    w.press(Key::Menu, Modifiers::NONE);
+    assert!(w.has("mail:draft-discard:0"));
+    w.press(Key::Enter, Modifiers::NONE);
+    assert!(w.drafts_on_disk().is_empty(), "the menu entry discarded the draft");
+    assert!(!w.has("mail:draft-discard:0"));
+    // the Outbox has no row menu
+    w.click(&format!("mail:outbox:{acct}"));
+    w.press(Key::J, Modifiers::NONE);
+    w.press(Key::Menu, Modifiers::NONE);
+    assert!(w.app.mail.kbd.menu.is_none());
+}
+
+// spec: MAIL-069
+#[test]
+fn the_unsent_window_is_driven_from_the_keyboard() {
+    let mut w = world_with_unsent("unsent-kbd", 3);
+    assert!(!w.app.mail.unsent_open);
+    w.press_text(Key::U, Modifiers::SHIFT, "U");
+    w.settle();
+    assert!(w.app.mail.unsent_open, "Shift+U opens the window");
+    let first = w.rect("mail:unsent-sel");
+    // the window has the keyboard: c does not start a mail, j moves the mark
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    assert!(w.app.mail.compose.is_none());
+    w.press(Key::J, Modifiers::NONE);
+    w.frame(vec![]);
+    assert!(w.rect("mail:unsent-sel").min.y > first.min.y, "the mark moved down");
+    let marked = w.app.mail.unsent[1].subject.clone();
+    // Enter uploads the marked mail again, once
+    w.frame(vec![Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+    w.until("the copy was queued and is not listed any more", |a| a.mail.unsent.len() == 2);
+    assert!(w.app.mail.unsent.iter().all(|c| c.subject != marked));
+    w.settle_ops();
+    let server = w.server.state.clone();
+    w.until("it reached the server", |_| server.lock().unwrap().messages("Sent").len() == 2);
+    // d dismisses the marked one
+    let next = w.app.mail.unsent[1.min(w.app.mail.unsent.len() - 1)].subject.clone();
+    w.press(Key::J, Modifiers::NONE);
+    w.press(Key::D, Modifiers::NONE);
+    assert_eq!(w.app.mail.unsent.len(), 1);
+    assert!(w.app.mail.unsent.iter().all(|c| c.subject != next));
+    // Esc closes the window, Shift+U opens and closes it
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(!w.app.mail.unsent_open);
+    w.press_text(Key::U, Modifiers::SHIFT, "U");
+    assert!(w.app.mail.unsent_open);
+    w.press_text(Key::U, Modifiers::SHIFT, "U");
+    assert!(!w.app.mail.unsent_open);
+    // the last one dismissed: the window goes, and Shift+U has nothing to show
+    w.press_text(Key::U, Modifiers::SHIFT, "U");
+    assert!(w.app.mail.unsent_open);
+    w.press(Key::Delete, Modifiers::NONE);
+    w.frame(vec![]);
+    assert!(w.app.mail.unsent.is_empty() && !w.app.mail.unsent_open);
+    w.press_text(Key::U, Modifiers::SHIFT, "U");
+    assert!(!w.app.mail.unsent_open);
+}
+
+fn two_attachments(day: u32) -> Vec<u8> {
+    format!("From: Carol <carol@x.de>\r\nTo: ada@example.com\r\nSubject: Two files\r\nDate: {day:02} Nov 2026 09:30:00 +0100\r\nMessage-ID: <two@fake>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b2\"\r\n\r\n--b2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBoth files are attached.\r\n--b2\r\nContent-Type: text/plain; name=\"a.txt\"\r\nContent-Disposition: attachment; filename=\"a.txt\"\r\nContent-Transfer-Encoding: base64\r\n\r\nSGVsbG8gQQ==\r\n--b2\r\nContent-Type: text/plain; name=\"b.txt\"\r\nContent-Disposition: attachment; filename=\"b.txt\"\r\nContent-Transfer-Encoding: base64\r\n\r\nSGVsbG8gQg==\r\n--b2--\r\n").into_bytes()
+}
+
+// spec: MAIL-065
+#[test]
+fn o_opens_the_selected_attachment_through_the_opener_and_the_bracket_key_cycles_through_several() {
+    let mut w = W::new("att-two", true);
+    w.server.state().add_message("INBOX", two_attachments(15), NOW - 86_400);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 4);
+    // a pretend program: nothing starts, the opener tells what it was given
+    let opened: Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>> = Arc::default();
+    let seen = opened.clone();
+    let _program = crate::opener::install_test_browser(Box::new(move |target| {
+        let bytes = std::fs::read(target).unwrap_or_default();
+        seen.lock().unwrap().push((target.to_string(), bytes));
+    }));
+    w.open_mail("Two files");
+    w.frame(vec![]);
+    assert_eq!(w.app.mail.att_sel, 0);
+    w.press(Key::CloseBracket, Modifiers::NONE);
+    assert_eq!(w.app.mail.att_sel, 1);
+    assert!(w.shows("▸ b.txt") && !w.shows("▸ a.txt"), "the second attachment is marked");
+    w.press_text(Key::O, Modifiers::NONE, "o");
+    w.press(Key::CloseBracket, Modifiers::NONE);
+    assert_eq!(w.app.mail.att_sel, 0, "after the last one it goes round to the first");
+    assert!(w.shows("▸ a.txt"));
+    w.press_text(Key::O, Modifiers::NONE, "o");
+    w.press(Key::CloseBracket, Modifiers::NONE);
+    assert_eq!(w.app.mail.att_sel, 1);
+    let got = opened.lock().unwrap().clone();
+    assert_eq!(got.len(), 2, "o opened exactly twice: {got:?}");
+    assert!(got[0].0.ends_with("b.txt") && got[0].1 == b"Hello B", "{got:?}");
+    assert!(got[1].0.ends_with("a.txt") && got[1].1 == b"Hello A", "{got:?}");
+    // in the folder pane o opens nothing (MAIL-064)
+    w.app.mail.pane = Pane::Folders;
+    w.press_text(Key::O, Modifiers::NONE, "o");
+    assert_eq!(opened.lock().unwrap().len(), 2);
+}
+
+// spec: MAIL-065, MAIL-134
+#[test]
+fn z_takes_back_the_waiting_mail() {
+    let (mut w, smtp) = compose_world("zkey", 30);
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Back with z");
+    w.write_body("precious words");
+    w.click("mail:compose:send");
+    assert!(!w.compose_open());
+    w.until("the strip with Undo shows", |a| a.mail.rects.iter().any(|r| r.0 == "mail:undo-send"));
+    assert_eq!(w.items()[0].state, OutState::Queued);
+    w.press_text(Key::Z, Modifiers::NONE, "z");
+    w.until("the editor is back", |a| a.mail.compose.is_some());
+    assert_eq!(w.compose_field("subject"), "Back with z");
+    assert!(w.items().is_empty());
+    for _ in 0..20 {
+        w.frame(vec![]);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(smtp.state().received.is_empty() && smtp.state().commands.is_empty(), "nothing was sent");
 }
