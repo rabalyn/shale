@@ -166,16 +166,19 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    the mark is undone), verification by Message-ID with one mail not found, and "delete forever"
    without UIDPLUS. A Dovecot variant was not needed: the fake reaches the same client branches.
 4. **`imap_client.rs` response parsing (`skip_value`, `skip_value_open`, `parse_fetch`,
-   `parse_untagged`, 727 to 973) and `append` (1538 to 1564)**: odd server replies (nested
-   literals, NIL, unterminated lists) and the APPEND error paths. Test: feed the parser byte strings
-   of real-world oddities (also cut off after every byte, as the UTF-8 test does for text) and APPEND
-   refusals ([OVERQUOTA], missing continuation). Kind: test (the fake server exists).
-5. **`imap_sync.rs` `real_factory`, `auth_factory`, `connector_for_account`, `connect_with_retry`
-   (113 to 364) and `mail_send.rs` `connector_for_account`, `connect_with_retry`, `smtp_settings`
-   (40 to 80)**: the production connection set-up (password or OAuth2 login, retry, settings for a
-   provider) is probably reached only by the ignored `mail_env` suite. Test: unit tests of the
-   settings and the retry back-off with a fake connector that fails twice; and measure the env
-   suites (the `env-tests` job, once the runner runs containers). Kind: test.
+   `parse_untagged`) and `append`**: closed (#57, MAIL-220, MAIL-221). Unit tests feed the parser
+   odd but legal answers (literals, nested lists, NIL, escaped strings) and broken ones (also cut
+   off after every byte, in a thread that must finish); a loopback `Wire` tests literals, NUL bytes,
+   long lines and early ends; the pretend server has the switches `append_noise`,
+   `append_cut_before_plus` and `append_answer` for the APPEND failures. One real gap found: a
+   line longer than the limit passed when it arrived in one chunk; fixed.
+5. **`imap_sync.rs` `real_factory`, `connector_for_account`, `connect_with_retry` and `mail_send.rs`
+   `connector_for_account`, `connect_with_retry`, `smtp_settings`**: closed (#57, MAIL-222,
+   MAIL-223), except the keyring paths. Counting auth factories test the retry; loopback ports
+   (`closed_port`) and the pretend servers test refused connections and untrusted certificates;
+   the settings mapping is checked. Not tested: `auth_factory` for a password account without a
+   session password (it asks the real keyring; a fake keyring seam in `secrets.rs` would be
+   needed) and the OAuth2 token fetch itself (covered in `oauth.rs`).
 6. **`cal_dav.rs` `discover` (469 to 513), `request_bytes_opts` (245 to 315), `write_error`,
    `delete_event` (585 to 709)**: well-known and principal discovery with redirects and the words
    for 401, 403, 412 and 5xx are reached mainly by the ignored `caldav_env` suite. Test: a scripted

@@ -480,8 +480,9 @@ pub fn html_to_text(html: &str) -> String {
                     out.push_str("———\n");
                 }
                 ("a", false) => {
-                    let href = raw_tag.split_once("href=").map(|(_, r)| {
-                        let r = r.trim_start();
+                    let href = tag.find("href=").map(|p| {
+                        // `tag` is the lower-case copy: same byte positions as `raw_tag`
+                        let r = raw_tag[p + 5..].trim_start();
                         let q = r.chars().next().unwrap_or(' ');
                         if q == '"' || q == '\'' {
                             r[1..].split(q).next().unwrap_or("").to_string()
@@ -740,6 +741,166 @@ pub(crate) mod tests {
     fn html_mails_become_readable_text() {
         let t = html_to_text("<html><head><style>p{color:red}</style></head><body><p>Hallo&nbsp;Team,</p><p>die <b>Pläne</b> sind\n  da:<br>Bau&nbsp;B</p><ul><li>Beamer</li><li>Audio</li></ul><a href=\"https://example.org/x\">Link</a><!-- x --></body></html>");
         assert_eq!(t, "Hallo Team,\n\ndie Pläne sind da:\nBau B\n\n- Beamer\n- Audio\n\n[Link](https://example.org/x)");
+    }
+
+    // spec: IMP-010
+    #[test]
+    fn html_entities_are_decoded_once_and_what_is_not_an_entity_stays() {
+        assert_eq!(decode_entities("Tom &amp; Jerry &lt;b&gt; &quot;x&quot; &apos;y&apos;"), "Tom & Jerry <b> \"x\" 'y'");
+        assert_eq!(
+            decode_entities("&auml;&ouml;&uuml;&Auml;&Ouml;&Uuml;&szlig; &euro; &eacute;&egrave;&agrave; &ndash;&mdash;&hellip; &laquo;&raquo;&bdquo;&ldquo;&rdquo;&lsquo;&rsquo; &copy;&reg;&middot;&bull;&deg;"),
+            "äöüÄÖÜß € éèà –—… «»„“”‘’ ©®·•°"
+        );
+        assert_eq!(decode_entities("&#65;&#x42;&#X43; &#x1F600; &#228;"), "ABC 😀 ä");
+        // decoded once: the result is not looked at again
+        assert_eq!(decode_entities("&amp;lt; &amp;amp;"), "&lt; &amp;");
+        // not entities: unknown names, a missing semicolon, a far too long name, no digits, a surrogate, past the last character
+        for t in ["&foo;", "&AMP;", "AT&T", "a & b", "&amp", "&;", "&#;", "&#x;", "&#xD800;", "&#x110000;", "&#-1;", "&#12ab;", "&averyverylongname;", "&", "&&", "trailing &"] {
+            assert_eq!(decode_entities(t), t, "{t}");
+        }
+        assert_eq!(decode_entities("a &foo; &amp; b"), "a &foo; & b", "one unknown entity does not stop the next");
+        assert_eq!(decode_entities("&&amp;"), "&&");
+        assert_eq!(decode_entities(""), "");
+        assert_eq!(entity("nbsp").as_deref(), Some(" "));
+        assert_eq!(entity("#0").as_deref(), Some("\0"));
+        assert_eq!(entity("nope"), None);
+    }
+
+    // spec: IMP-010
+    #[test]
+    fn dates_in_the_many_shapes_mail_programs_write_them() {
+        let at = |y: i32, m: u32, d: u32, h: i64, mi: i64, s: i64| t::days_from_civil(y, m, d) * 86_400 + h * 3600 + mi * 60 + s;
+        let cases = [
+            ("Thu, 13 Nov 2026 10:22:33 +0100 (CET)", Some(at(2026, 11, 13, 9, 22, 33))),
+            ("13 Nov 2026 10:22 -0500", Some(at(2026, 11, 13, 15, 22, 0))),
+            ("13 Nov 2026 10:22:33 -0930", Some(at(2026, 11, 13, 19, 52, 33))),
+            ("13 Nov 2026 10:22:33 +0530", Some(at(2026, 11, 13, 4, 52, 33))),
+            ("Thu, 13 Nov 2026 10:22:33", Some(at(2026, 11, 13, 10, 22, 33))),
+            ("13 Nov 2026 10 +0000", Some(at(2026, 11, 13, 10, 0, 0))),
+            ("13 November 2026 10:00 +0000", Some(at(2026, 11, 13, 10, 0, 0))),
+            ("13 NOV 2026 10:00 +0000", Some(at(2026, 11, 13, 10, 0, 0))),
+            ("Fri, 14 Nov 2025 08:00:00 EST", Some(at(2025, 11, 14, 13, 0, 0))),
+            ("14 Nov 2025 08:00 EDT", Some(at(2025, 11, 14, 12, 0, 0))),
+            ("14 Nov 2025 08:00 CST", Some(at(2025, 11, 14, 14, 0, 0))),
+            ("14 Nov 2025 08:00 CDT", Some(at(2025, 11, 14, 13, 0, 0))),
+            ("14 Nov 2025 08:00 MST", Some(at(2025, 11, 14, 15, 0, 0))),
+            ("14 Nov 2025 08:00 MDT", Some(at(2025, 11, 14, 14, 0, 0))),
+            ("14 Nov 2025 08:00 PST", Some(at(2025, 11, 14, 16, 0, 0))),
+            ("14 Nov 2025 08:00 PDT", Some(at(2025, 11, 14, 15, 0, 0))),
+            ("14 Nov 2025 08:00 cet", Some(at(2025, 11, 14, 7, 0, 0))),
+            ("14 Aug 2025 08:00 CEST", Some(at(2025, 8, 14, 6, 0, 0))),
+            ("14 Nov 2025 08:00 XYZ", Some(at(2025, 11, 14, 8, 0, 0))),
+            ("14 Nov 2025 08:00 +05", Some(at(2025, 11, 14, 8, 0, 0))),
+            ("1 Jan 99 00:00 GMT", Some(at(1999, 1, 1, 0, 0, 0))),
+            ("1 Jan 49 00:00 GMT", Some(at(2049, 1, 1, 0, 0, 0))),
+            ("1 Jan 50 00:00 GMT", Some(at(1950, 1, 1, 0, 0, 0))),
+            ("  Sun,   2 Nov   2026   23:59:59   +0000  ", Some(at(2026, 11, 2, 23, 59, 59))),
+            ("29 Feb 2028 12:00 +0000", Some(at(2028, 2, 29, 12, 0, 0))),
+            ("", None),
+            ("nonsense", None),
+            ("13 Nov", None),
+            ("13 Nov 2026", None),
+            ("13 Foo 2026 10:00", None),
+            ("x Nov 2026 10:00", None),
+            ("13 Nov year 10:00", None),
+            ("0 Nov 2026 10:00", None),
+            ("32 Nov 2026 10:00", None),
+            ("13 Nov 2026 24:00", None),
+            ("13 Nov 2026 10:60", None),
+            ("(comment only)", None),
+        ];
+        for (s, want) in cases {
+            assert_eq!(parse_date(s), want, "{s:?}");
+        }
+    }
+
+    // spec: IMP-010
+    #[test]
+    fn charsets_are_read_by_name_in_any_spelling_and_a_lying_label_is_forgiven() {
+        for name in ["iso-8859-1", "ISO-8859-1", "latin1", "Latin-1", "iso8859-1", "l1", " \"iso-8859-1\" "] {
+            assert_eq!(decode_charset(&[0x48, 0xE4, 0xFC, 0xDF, 0xA4], name), "Häüß¤", "{name}");
+        }
+        assert_eq!(decode_charset(&[0xA4, 0xA6, 0xA8, 0xB4, 0xB8, 0xBC, 0xBD, 0xBE, 0xE4], "iso-8859-15"), "€ŠšŽžŒœŸä");
+        assert_eq!(decode_charset(&[0xA4], "latin9"), "€");
+        assert_eq!(decode_charset(&[0xA4], "iso8859-15"), "€");
+        let all: Vec<u8> = (0x80..0xA0).collect();
+        let s = decode_charset(&all, "cp1252");
+        assert_eq!(s.chars().count(), 32);
+        assert!(s.starts_with('€') && s.ends_with('Ÿ'));
+        assert_eq!(decode_charset(&[0x81, 0x8d, 0x8f, 0x90, 0x9d], "x-cp1252"), "\u{81}\u{8d}\u{8f}\u{90}\u{9d}", "the holes of Windows-1252 stay control characters");
+        assert_eq!(decode_charset(&[0xe4, 0x80], "Windows-1252"), "ä€");
+        // UTF-8, US-ASCII and no label: read as UTF-8, else (the label lied) as Windows-1252
+        for cs in ["utf-8", "UTF-8", "us-ascii", "", "\"utf-8\""] {
+            assert_eq!(decode_charset("Grüße €".as_bytes(), cs), "Grüße €", "{cs:?}");
+            assert_eq!(decode_charset(&[b'a', 0xfc, 0x80], cs), "aü€", "{cs:?} that is not UTF-8");
+        }
+        // a charset we do not know: UTF-8 if it is, else the bytes with replacement characters
+        assert_eq!(decode_charset("Grüße".as_bytes(), "koi8-r"), "Grüße");
+        assert_eq!(decode_charset(&[b'a', 0xff, b'b'], "koi8-r"), "a\u{fffd}b");
+        assert_eq!(decode_charset(&[], "iso-8859-2"), "");
+        assert_eq!(decode_charset(&[], "iso-8859-1"), "");
+    }
+
+    // spec: IMP-010
+    #[test]
+    fn html_to_text_handles_links_comments_scripts_odd_markup_and_cut_off_input() {
+        let h = html_to_text;
+        // links: markdown unless the text is the address, there is no usable address or no text
+        assert_eq!(h("<a href=\"https://x.org/a?b=1&amp;c=2\">the page</a>"), "[the page](https://x.org/a?b=1&c=2)");
+        assert_eq!(h("<A HREF='https://x.org'>single</A>"), "[single](https://x.org)");
+        assert_eq!(h("<a href=https://x.org>bare</a>"), "[bare](https://x.org)");
+        assert_eq!(h("<a href=\"https://x.org\">https://x.org</a>"), "https://x.org");
+        assert_eq!(h("<a href=\"mailto:ada@x.org\">ada@x.org</a> and <a href=\"mailto:ada@x.org\">write to Ada</a>"), "ada@x.org and [write to Ada](mailto:ada@x.org)");
+        assert_eq!(h("<a href=\"javascript:alert(1)\">click</a>"), "click", "no script links");
+        assert_eq!(h("<a href=\"\">empty</a><a>none</a><a href=\"https://x.org\"></a>"), "emptynone");
+        assert_eq!(h("<a href=\"https://x.org\">never closed"), "never closed");
+        // what is not text: scripts, styles, the head, title, comments (also one that never ends)
+        assert_eq!(h("<title>T</title><script>if (a<b) x()</script><STYLE>a{}</STYLE>text"), "text");
+        assert_eq!(h("<head><meta charset=utf-8></head><body>x</body>"), "x");
+        assert_eq!(h("a<!-- hidden <b>x</b> -->b"), "ab");
+        assert_eq!(h("a<!-- never ends"), "a");
+        assert_eq!(h("a<style>never ends"), "a");
+        // structure
+        assert_eq!(h("one<br/>two<BR>three"), "one\ntwo\nthree");
+        assert_eq!(h("<div>a</div><div>b</div>"), "a\nb");
+        assert_eq!(h("<h1>T</h1><p>x</p><hr>y"), "T\n\nx\n\n———\ny");
+        assert_eq!(h("<table><tr><td>a</td><td>b</td></tr><tr><th>c</th><td>d</td></tr></table>"), "a  b\nc  d");
+        assert_eq!(h("<ol><li>x<li>y</ol>"), "- x\n- y");
+        assert_eq!(h("<blockquote>q</blockquote>after"), "q\n\nafter");
+        // white space: runs collapse, no-break spaces are spaces, blank lines are at most one, ends are trimmed
+        assert_eq!(h("  a \n\t b&nbsp;&nbsp;c  "), "a b c");
+        assert_eq!(h("<p>a</p><p></p><p></p><p>b</p>"), "a\n\nb");
+        assert_eq!(h("<p>   </p>"), "");
+        // odd and cut-off markup never panics: what follows an unfinished tag is dropped
+        for t in [
+            "",
+            "<",
+            "<>",
+            "</>",
+            "x <",
+            "a < b",
+            "<a",
+            "<a href=",
+            "<a href=\"",
+            "<a href=\"x\"",
+            "<p",
+            "</p",
+            "<!--",
+            "<!-",
+            "<!",
+            "<![CDATA[x]]>y",
+            "&",
+            "&#",
+            "<?xml version=\"1.0\"?>x",
+            "<a href=\"é\">é</a>é",
+            "\u{a0}",
+            "<b><i>x</b></i>",
+        ] {
+            let _ = h(t);
+        }
+        assert_eq!(h("x <"), "x");
+        assert_eq!(h("é<b>ü</b>"), "éü");
+        assert_eq!(h("<![CDATA[x]]>y"), "y");
     }
 
     pub(crate) fn sample_eml() -> Vec<u8> {
