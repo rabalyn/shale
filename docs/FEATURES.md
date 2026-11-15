@@ -148,7 +148,14 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   below the views) and back. Icons that are no panels (Files, Mail, …) cannot go to the right
   sidebar: the pointer shows "not allowed" and nothing changes. Taking the last icon out of a
   view removes the view. Esc cancels a drag.
-- The layout is kept in the settings.
+- Drag the border between two views up or down to change their heights (they start equal; a
+  view never gets lower than a small minimum).
+- Right-click an icon (in the ribbon or in a view's menubar) for a menu: **Remove from the
+  ribbon** / **Remove from this view**, **Restore …** for every icon removed earlier, and
+  **Reset layout** (the default icons, order and heights). The last icon of the ribbon cannot
+  be removed. Panel shortcuts in the ribbon have their own glyphs, not those of the Graph and
+  Calendar buttons.
+- The layout (icons, heights, removed icons) is kept in the settings.
 
 ![The right sidebar split into two views: Backlinks above, Calendar below](screenshots/sidebar-split.png)
 
