@@ -428,6 +428,10 @@ fn apply_op(tx: &rusqlite::Transaction<'_>, op: &Op) -> Result<()> {
             tx.execute("UPDATE messages SET missing_file = ?2 WHERE id = ?1", params![id, *missing as i64])?;
         }
         Op::FolderState { folder, uidvalidity, uidnext, highestmodseq, last_sync } => {
+            // rows of any other number are local copies now: no action may go to the server for them (MAIL-204)
+            if let Some(new) = uidvalidity {
+                tx.execute("UPDATE messages SET gone_on_server = 1 WHERE folder = ?1 AND uidvalidity NOT IN (0, ?2) AND gone_on_server = 0", params![folder, new])?;
+            }
             tx.execute("UPDATE folders SET uidvalidity = ?2, uidnext = ?3, highestmodseq = ?4, last_sync = ?5 WHERE id = ?1", params![folder, uidvalidity, uidnext, highestmodseq.map(|m| m as i64), last_sync])?;
         }
         Op::SyncEnabled { folder, enabled } => {
@@ -520,6 +524,23 @@ pub fn pending_ops(c: &Connection, account: Option<&str>) -> Result<Vec<PendingR
     let mut st = c.prepare(&format!("SELECT {PENDING_COLS} FROM pending_ops WHERE (?1 IS NULL OR account = ?1) ORDER BY id"))?;
     let rows = st.query_map([account], pending_from)?.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+/// After an index was restored from a backup: its queue is old news (the actions were done, undone or given
+/// up since), so every row is undone locally like a refusal and forgotten, in one transaction. A local sent
+/// copy that waited for its `append` keeps its row and file. Returns how many rows went (MAIL-205).
+pub fn drop_restored_queue(c: &mut Connection) -> Result<usize> {
+    let tx = c.transaction()?;
+    let ids: Vec<i64> = {
+        let mut st = tx.prepare("SELECT id FROM pending_ops ORDER BY id DESC")?;
+        let rows = st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+    for id in &ids {
+        apply_op(&tx, &Op::PendingRollback { id: *id })?;
+    }
+    tx.commit()?;
+    Ok(ids.len())
 }
 
 /// UIDs of a folder (in one UIDVALIDITY) that have an action waiting: the sync leaves their
@@ -663,11 +684,16 @@ fn summary_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<MessageSummary> {
     })
 }
 
-/// A page of a folder's messages, newest first. Only the folder's current UIDVALIDITY shows:
-/// messages of an older one are copies the sync has fetched again (their files stay on disk).
+/// Which rows a list shows (MAIL-204): the folder's current UIDVALIDITY, local copies (0), and rows of an
+/// older number unless the same message (same non-empty Message-ID) is there under the current one.
+const VISIBLE: &str = "(f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0 OR m.message_id = ''
+    OR NOT EXISTS (SELECT 1 FROM messages c INDEXED BY messages_by_message_id WHERE c.message_id = m.message_id AND c.folder = m.folder AND c.uidvalidity = f.uidvalidity))";
+
+/// A page of a folder's messages, newest first. Messages of an older UIDVALIDITY stay (as local copies
+/// that are gone on the server) unless the current number has the same message.
 pub fn list(c: &Connection, folder: i64, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
     let mut st = c.prepare(&format!(
-        "SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0)
+        "SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder AND {VISIBLE}
          WHERE m.folder = ?1 ORDER BY m.date DESC, m.uid DESC LIMIT ?2 OFFSET ?3"
     ))?;
     let rows = st.query_map(params![folder, limit as i64, offset as i64], summary_from)?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -678,7 +704,7 @@ pub fn list(c: &Connection, folder: i64, limit: usize, offset: usize) -> Result<
 pub fn search(c: &Connection, query: &str, folder: Option<i64>, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
     let Some(q) = fts_query(query) else { return Ok(vec![]) };
     let mut st = c.prepare(&format!(
-        "SELECT {MSG_COLS} FROM mail_fts JOIN messages m ON m.id = mail_fts.rowid JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0)
+        "SELECT {MSG_COLS} FROM mail_fts JOIN messages m ON m.id = mail_fts.rowid JOIN folders f ON f.id = m.folder AND {VISIBLE}
          WHERE mail_fts MATCH ?1 AND (?2 IS NULL OR m.folder = ?2) ORDER BY m.date DESC, m.uid DESC LIMIT ?3 OFFSET ?4"
     ))?;
     let rows = st.query_map(params![q, folder, limit as i64, offset as i64], summary_from)?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -698,25 +724,27 @@ pub fn message(c: &Connection, folder: i64, uid: u32) -> Result<Option<MessageSu
 /// Per folder: (messages shown in its list, how many of them are unread). One pass over the
 /// index; the mail view asks only when something changed.
 pub fn folder_counts(c: &Connection) -> Result<HashMap<i64, (i64, i64)>> {
-    let mut st = c.prepare(
+    let mut st = c.prepare(&format!(
         "SELECT m.folder, COUNT(*), SUM(CASE WHEN instr(lower(' ' || m.flags || ' '), ' \\seen ') = 0 THEN 1 ELSE 0 END)
-         FROM messages m JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0) GROUP BY m.folder",
-    )?;
+         FROM messages m JOIN folders f ON f.id = m.folder AND {VISIBLE} GROUP BY m.folder"
+    ))?;
     let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, (r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0)))))?.collect::<rusqlite::Result<HashMap<_, _>>>()?;
     Ok(rows)
 }
 
 /// How many messages a folder's list has.
 pub fn count_folder(c: &Connection, folder: i64) -> Result<i64> {
-    Ok(c.query_row("SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0) WHERE m.folder = ?1", [folder], |r| r.get(0))?)
+    Ok(c.query_row(&format!("SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND {VISIBLE} WHERE m.folder = ?1"), [folder], |r| r.get(0))?)
 }
 
 /// How many messages of the folder's list come before this one (its row number in the list).
 pub fn position_in_list(c: &Connection, folder: i64, date: Option<i64>, uid: u32) -> Result<i64> {
     let d = date.unwrap_or(i64::MIN);
     Ok(c.query_row(
-        "SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND (f.uidvalidity = m.uidvalidity OR m.uidvalidity = 0)
-         WHERE m.folder = ?1 AND (COALESCE(m.date, -9223372036854775807) > ?2 OR (COALESCE(m.date, -9223372036854775807) = ?2 AND m.uid > ?3))",
+        &format!(
+            "SELECT COUNT(*) FROM messages m JOIN folders f ON f.id = m.folder AND {VISIBLE}
+         WHERE m.folder = ?1 AND (COALESCE(m.date, -9223372036854775807) > ?2 OR (COALESCE(m.date, -9223372036854775807) = ?2 AND m.uid > ?3))"
+        ),
         params![folder, d.max(-9223372036854775807), uid],
         |r| r.get(0),
     )?)
@@ -1035,14 +1063,18 @@ mod tests {
 
     // spec: MAIL-013
     #[test]
-    fn the_list_is_newest_first_in_pages_and_shows_the_current_uidvalidity_only() {
+    fn the_list_is_newest_first_in_pages_and_hides_an_old_uidvalidity_copy_the_current_one_has() {
         let mut c = db();
         let f = inbox(&c);
         for uid in 1..=5u32 {
-            add(&mut c, f.id, uid, fields("s", "a@x.de", "b", uid as i64 * 10));
+            let mut fl = fields("s", "a@x.de", "b", uid as i64 * 10);
+            fl.message_id = format!("<m{uid}@x>");
+            add(&mut c, f.id, uid, fl);
         }
-        // a copy from before a UIDVALIDITY change
-        let old = NewMessage { folder: f.id, uidvalidity: 7, uid: 9, path: "old.eml".into(), state: 0, flags: String::new(), size: 1, parsed: true, fields: fields("old", "a@x.de", "b", 999) };
+        // a copy from before a UIDVALIDITY change that the current number has as well
+        let mut ofl = fields("old", "a@x.de", "b", 999);
+        ofl.message_id = "<m3@x>".into();
+        let old = NewMessage { folder: f.id, uidvalidity: 7, uid: 9, path: "old.eml".into(), state: 0, flags: String::new(), size: 1, parsed: true, fields: ofl };
         apply_batch(&mut c, &[Op::message(old)], None).unwrap();
         {
             let page = |off| list(&c, f.id, 2, off).unwrap().iter().map(|m| m.uid).collect::<Vec<_>>();
@@ -1057,6 +1089,75 @@ mod tests {
         apply_batch(&mut c, &[Op::message(local)], None).unwrap();
         let first = list(&c, f.id, 2, 0).unwrap().iter().map(|m| m.uid).collect::<Vec<_>>();
         assert_eq!(first, vec![4_000_000_000, 5]);
+    }
+
+    fn old_copy(folder: i64, uid: u32, mid: &str, date: i64) -> Op {
+        let mut fl = fields(&format!("old {uid}"), "a@x.de", "kept body", date);
+        fl.message_id = mid.into();
+        Op::message(NewMessage { folder, uidvalidity: 7, uid, path: format!("a/f/7/{uid}.eml"), state: 0, flags: String::new(), size: 1, parsed: true, fields: fl })
+    }
+
+    // spec: MAIL-204
+    #[test]
+    fn a_new_uidvalidity_keeps_older_mail_visible_as_gone_unless_the_current_number_has_it() {
+        let mut c = db();
+        let f = inbox(&c); // number 1
+        apply_batch(&mut c, &[old_copy(f.id, 1, "<a@x>", 10), old_copy(f.id, 2, "<b@x>", 20), old_copy(f.id, 3, "", 30)], None).unwrap();
+        // the old ones are under number 7, the folder is at 1: nothing renumbered yet, so they show but are not gone
+        c.execute("UPDATE messages SET uidvalidity = 1 WHERE uidvalidity = 7", []).unwrap();
+        apply_batch(&mut c, &[Op::FolderState { folder: f.id, uidvalidity: Some(2), uidnext: None, highestmodseq: None, last_sync: 0 }], None).unwrap();
+        let mut fl = fields("again", "a@x.de", "b", 21);
+        fl.message_id = "<b@x>".into();
+        let m = NewMessage { folder: f.id, uidvalidity: 2, uid: 1, path: "a/f/2/1.eml".into(), state: 0, flags: String::new(), size: 1, parsed: true, fields: fl };
+        apply_batch(&mut c, &[Op::message(m)], None).unwrap();
+        let shown = list(&c, f.id, 10, 0).unwrap();
+        let subjects: Vec<&str> = shown.iter().map(|m| m.subject.as_str()).collect();
+        assert_eq!(subjects, vec!["old 3", "again", "old 1"], "the old copy of <b@x> is hidden, the one without a Message-ID stays");
+        assert!(shown.iter().filter(|m| m.uidvalidity == 1).all(|m| m.gone_on_server));
+        assert!(!shown[1].gone_on_server);
+        assert_eq!(search(&c, "kept", None, 10, 0).unwrap().len(), 2);
+        assert_eq!(count_folder(&c, f.id).unwrap(), 3);
+        assert_eq!(folder_counts(&c).unwrap()[&f.id].0, 3);
+        for (i, m) in shown.iter().enumerate() {
+            assert_eq!(position_in_list(&c, f.id, m.date, m.uid).unwrap(), i as i64);
+        }
+        // a folder that had no number yet: rows of other numbers are old for it, too (a rebuilt index)
+        let g = upsert_folder(&c, "a", "A", "Other", Some("/"), None, true).unwrap();
+        apply_batch(&mut c, &[old_copy(g.id, 1, "<z@x>", 5)], None).unwrap();
+        apply_batch(&mut c, &[Op::FolderState { folder: g.id, uidvalidity: Some(3), uidnext: None, highestmodseq: None, last_sync: 0 }], None).unwrap();
+        assert!(list(&c, g.id, 10, 0).unwrap().iter().all(|m| m.gone_on_server), "rows of number 7 are old for number 3, too");
+    }
+
+    // spec: MAIL-204
+    #[test]
+    fn the_list_of_a_folder_with_old_and_new_rows_stays_fast() {
+        let mut c = db();
+        let f = inbox(&c);
+        let mut ops = Vec::new();
+        for uid in 1..=4000u32 {
+            let mut fl = fields("s", "a@x.de", "b", uid as i64);
+            fl.message_id = format!("<m{uid}@x>");
+            ops.push(Op::message(NewMessage { folder: f.id, uidvalidity: 7, uid, path: format!("o/{uid}.eml"), state: 0, flags: String::new(), size: 1, parsed: true, fields: fl.clone() }));
+            if uid % 2 == 0 {
+                ops.push(Op::message(NewMessage { folder: f.id, uidvalidity: 1, uid, path: format!("n/{uid}.eml"), state: 0, flags: String::new(), size: 1, parsed: true, fields: fl }));
+            }
+        }
+        apply_batch(&mut c, &ops, None).unwrap();
+        let t = std::time::Instant::now();
+        let page = list(&c, f.id, 50, 0).unwrap();
+        let deep = list(&c, f.id, 50, 3950).unwrap();
+        let n = count_folder(&c, f.id).unwrap();
+        let took = t.elapsed();
+        assert_eq!(page.len(), 50);
+        assert_eq!(deep.len(), 50);
+        assert_eq!(n, 4000, "2000 old ones the server has again are hidden, 2000 new and 2000 only-old show");
+        assert!(took < std::time::Duration::from_secs(2), "took {took:?}");
+        eprintln!("list+deep page+count over 6000 rows: {took:?}");
+        let plan: Vec<String> = {
+            let mut st = c.prepare(&format!("EXPLAIN QUERY PLAN SELECT {MSG_COLS} FROM messages m JOIN folders f ON f.id = m.folder AND {VISIBLE} WHERE m.folder = 1 ORDER BY m.date DESC, m.uid DESC LIMIT 50")).unwrap();
+            st.query_map([], |r| r.get::<_, String>(3)).unwrap().map(|r| r.unwrap()).collect()
+        };
+        assert!(plan.iter().any(|p| p.contains("messages_by_message_id")), "the duplicate check uses the Message-ID index: {plan:?}");
     }
 
     #[test]

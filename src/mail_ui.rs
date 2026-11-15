@@ -613,7 +613,8 @@ impl MailView {
                 let o = &s.opened;
                 if let Some(q) = &o.quarantined {
                     let how = if o.restored_from.is_some() { "restored from a backup" } else { "rebuilt from the message files" };
-                    self.notices.push(format!("The mail index was damaged: it was {how}. The damaged file is kept as {}.", q.display()));
+                    let queued = if o.dropped_queued > 0 { format!(" {} queued change(s) from the backup were not sent again; check them.", o.dropped_queued) } else { String::new() };
+                    self.notices.push(format!("The mail index was damaged: it was {how}. The damaged file is kept as {}.{queued}", q.display()));
                 }
                 self.reader = s.reader().ok();
                 self.store = StoreState::Ready(s);

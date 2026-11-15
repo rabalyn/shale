@@ -184,6 +184,8 @@ pub struct OpenReport {
     pub quarantined: Option<PathBuf>,
     /// The backup the index was restored from.
     pub restored_from: Option<PathBuf>,
+    /// Queued actions that came back with the backup and were undone, not sent (MAIL-205).
+    pub dropped_queued: usize,
     /// Files without a row that were indexed.
     pub indexed_files: usize,
     /// Rows whose file is gone (they are fetched again by the next sync).
@@ -271,6 +273,29 @@ impl MailStore {
         fsutil::write_atomic(&path, raw)?;
         let (fields, parsed) = index_fields(raw, internal_date);
         Ok(NewMessage { folder: folder.id, uidvalidity, uid, path: rel, state: STATE_FULL, flags: flags.into(), size: raw.len() as u64, parsed, fields })
+    }
+
+    /// Write a local copy (UIDVALIDITY 0) under the first UID from `first` on that has no file yet: a file
+    /// that is there already (its row went, or the index was rebuilt) is never written over (MAIL-206).
+    pub fn save_new_local_copy(&self, folder: &FolderRow, first: u32, raw: &[u8], flags: &str, internal_date: Option<i64>) -> Result<NewMessage> {
+        let mut uid = first;
+        loop {
+            let rel = eml_rel_path(&folder.account, &folder.name, mail_db::LOCAL_UIDVALIDITY, uid);
+            let path = self.root.join(&rel);
+            fsutil::ensure_private_dir(path.parent().ok_or("bad message path")?)?;
+            self.remember_folder_name(folder)?;
+            if !path.exists() {
+                match fsutil::create_new(&path, raw) {
+                    Ok(()) => {
+                        let (fields, parsed) = index_fields(raw, internal_date);
+                        return Ok(NewMessage { folder: folder.id, uidvalidity: mail_db::LOCAL_UIDVALIDITY, uid, path: rel, state: STATE_FULL, flags: flags.into(), size: raw.len() as u64, parsed, fields });
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            uid = uid.checked_add(1).ok_or("no free number for the local copy")?;
+        }
     }
 
     /// An index row for a message of which only the headers are known (a listing of Trash).
@@ -549,7 +574,12 @@ fn prepare_index(root: &Path, date: &str, report: &mut OpenReport) -> Result<Con
         }
     }
     // a newer index (or any other failure to open) is reported, not "repaired"
-    mail_db::open_writer(&idx)
+    let mut conn = mail_db::open_writer(&idx)?;
+    if report.restored_from.is_some() {
+        // the backup's queue is old: nothing may run before it is cleared
+        report.dropped_queued = mail_db::drop_restored_queue(&mut conn)?;
+    }
+    Ok(conn)
 }
 
 /// Rename the damaged index (and its WAL files) so nothing is lost; returns the new name.
@@ -628,6 +658,8 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
                 }
             }
             if let Some(f) = folder {
+                // the rows of this folder must be in before its number decides which of them are old
+                mail_db::apply_batch(conn, &std::mem::take(&mut batch), None)?;
                 adopt_uidvalidity(conn, &f, &fpath)?;
             }
         }
@@ -640,7 +672,9 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
 /// that finds the same number carries on instead of fetching everything again.
 fn adopt_uidvalidity(conn: &mut Connection, f: &FolderRow, fpath: &Path) -> Result<()> {
     let current = mail_db::folder_by_id(conn, f.id)?.ok_or("folder vanished")?;
-    if current.uidvalidity.is_some() {
+    if let Some(uv) = current.uidvalidity {
+        // files of another number that turned up now are local copies, too (MAIL-204)
+        conn.execute("UPDATE messages SET gone_on_server = 1 WHERE folder = ?1 AND uidvalidity NOT IN (0, ?2) AND gone_on_server = 0", rusqlite::params![f.id, uv]).map_err(mail_db::MailError::from)?;
         return Ok(());
     }
     let newest = sorted_dir(fpath).iter().filter_map(|(n, _)| n.parse::<u32>().ok()).filter(|n| *n != mail_db::LOCAL_UIDVALIDITY).max();
@@ -866,6 +900,49 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // spec: MAIL-205
+    #[test]
+    fn a_restored_index_does_not_replay_the_queue_of_the_backup() {
+        let root = temp_root("restore-queue");
+        let store = MailStore::open(&root).unwrap();
+        let f = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
+        put(&store, &f, 1, &sample("one", "a@x.de", "first"));
+        put(&store, &f, 2, &sample("two", "a@x.de", "second"));
+        let pending = |kind: &str, uid: u32, remove: &str| mail_db::PendingRow {
+            id: 0,
+            account: "acct1".into(),
+            kind: kind.into(),
+            folder: f.id,
+            uidvalidity: 7,
+            uid,
+            target: if kind == "delete" { Some("Trash".into()) } else { None },
+            flags_add: String::new(),
+            flags_remove: remove.into(),
+            prev_flags: String::new(),
+            created: 1,
+            attempts: 0,
+            last_error: None,
+        };
+        store.commit(vec![Op::PendingAdd(Box::new(pending("flags", 1, "\\Seen"))), Op::PendingAdd(Box::new(pending("delete", 2, "")))]).unwrap();
+        assert_eq!(store.reader().unwrap().message(f.id, 1).unwrap().unwrap().flags, "");
+        store.backup("2026-11-01").unwrap().unwrap();
+        drop(store);
+        std::fs::write(root.join("index.sqlite"), b"garbage garbage garbage").unwrap();
+        let store = MailStore::open(&root).unwrap();
+        assert!(store.opened.restored_from.is_some());
+        assert_eq!(store.opened.dropped_queued, 2);
+        let r = store.reader().unwrap();
+        assert!(r.pending_ops(None).unwrap().is_empty(), "nothing is sent again");
+        assert_eq!(r.message(f.id, 1).unwrap().unwrap().flags, "\\Seen", "the flag is as before the queued change");
+        assert_eq!(r.message(f.id, 2).unwrap().unwrap().pending, None);
+        drop(r);
+        drop(store);
+        // a normal open does not touch the queue
+        let store = MailStore::open(&root).unwrap();
+        assert_eq!(store.opened.dropped_queued, 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     // spec: MAIL-008
     #[test]
     fn backups_are_made_once_a_day_and_the_newest_three_are_kept() {
@@ -971,7 +1048,7 @@ mod tests {
     }
 
     #[test]
-    fn rebuilding_adopts_the_newest_uidvalidity_and_keeps_old_ones_unlisted() {
+    fn rebuilding_adopts_the_newest_uidvalidity_and_keeps_old_ones_as_local_copies() {
         let root = temp_root("uv");
         let store = MailStore::open(&root).unwrap();
         let f = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
@@ -985,8 +1062,10 @@ mod tests {
         let r = store.reader().unwrap();
         let folder = &r.folders(None).unwrap()[0];
         assert_eq!(folder.uidvalidity, Some(9));
-        assert_eq!(r.list(folder.id, 10, 0).unwrap().len(), 2, "the old UIDVALIDITY is not listed");
-        assert_eq!(r.count_messages().unwrap(), 3, "but its file is still indexed");
+        let shown = r.list(folder.id, 10, 0).unwrap();
+        assert_eq!(shown.len(), 3, "the old UIDVALIDITY still shows (MAIL-204) ...");
+        assert_eq!(shown.iter().filter(|m| m.gone_on_server).count(), 1, "... as a copy that is not on the server");
+        assert_eq!(r.count_messages().unwrap(), 3, "its file is indexed");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -809,6 +809,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // spec: MAIL-204
+    #[test]
+    fn after_a_renumbering_mail_the_server_no_longer_has_stays_as_a_local_copy_without_actions() {
+        let (dir, server) = (root("uv-keep"), server());
+        let store = MailStore::open(&dir).unwrap();
+        run(&store, &server, &opts());
+        let r = store.reader().unwrap();
+        let f = r.folders(Some("acct1")).unwrap().into_iter().find(|f| f.name == "INBOX").unwrap();
+        let gone_subject = r.list(f.id, 100, 0).unwrap().into_iter().find(|m| m.uid == 2).unwrap().subject;
+        {
+            let mut s = server.state();
+            s.renumber("INBOX", 2000);
+            s.delete_message("INBOX", 2); // the server forgot this one in the renumbering
+        }
+        let (sum, _) = run(&store, &server, &opts());
+        assert_eq!(sum.errors, Vec::<String>::new());
+        let r = store.reader().unwrap();
+        let list = r.list(f.id, 100, 0).unwrap();
+        assert_eq!(list.len(), 5, "4 from the server once each, plus the one only kept locally");
+        let kept: Vec<_> = list.iter().filter(|m| m.uidvalidity == 1000).collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].subject, gone_subject);
+        assert!(kept[0].gone_on_server, "shown as not on the server");
+        assert!(list.iter().filter(|m| m.uidvalidity == 2000).all(|m| !m.gone_on_server));
+        assert_eq!(r.search(&gone_subject, None, 5, 0).unwrap().len(), 1, "found by search");
+        assert_eq!(r.count_folder(f.id).unwrap(), 5);
+        assert_eq!(r.folder_counts().unwrap()[&f.id].0, 5);
+        assert_eq!(r.position_in_list(f.id, kept[0].date, kept[0].uid).unwrap() as usize, list.iter().position(|m| m.id == kept[0].id).unwrap());
+        // a second sync does not bring it back to life or hide it
+        run(&store, &server, &opts());
+        assert_eq!(store.reader().unwrap().count_folder(f.id).unwrap(), 5);
+        let before = server.state().commands.len();
+        for action in [crate::mail_ops::Action::Delete, crate::mail_ops::Action::MoveTo { folder: "Sent".into() }, crate::mail_ops::Action::SetFlags { add: vec![crate::imap_client::MailFlag::Seen], remove: vec![] }] {
+            let out = crate::mail_ops::enqueue(&store, std::slice::from_ref(kept[0]), &action, NOW).unwrap();
+            assert!(!out.notes.is_empty(), "refused with a note");
+        }
+        assert!(store.reader().unwrap().pending_ops(None).unwrap().is_empty());
+        assert_eq!(server.state().commands.len(), before, "nothing went to the server");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // spec: MAIL-032, MAIL-037
     #[test]
     fn a_cancelled_sync_resumes_with_what_is_missing() {
