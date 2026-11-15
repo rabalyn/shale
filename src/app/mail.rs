@@ -96,6 +96,7 @@ impl ShaleApp {
                         return false;
                     }
                 };
+                let moved = d.split_changed_mailboxes(&self.mail.root);
                 self.cfg.mail_accounts = d.accounts.clone();
                 self.cfg.mail_sync_minutes = minutes;
                 self.cfg.mail_mark_read = d.mark_read;
@@ -104,7 +105,14 @@ impl ShaleApp {
                 self.cfg.mail_encryption_consent = d.consent.clone();
                 for id in std::mem::take(&mut d.removed) {
                     self.mail.forget_account(&id);
-                    self.toast(format!("The account was removed. Its mail already copied stays in {}.", self.mail.root.display()));
+                    if let Some((_, new)) = moved.iter().find(|(old, _)| *old == id) {
+                        let a = self.cfg.mail_accounts.iter().find(|a| &a.id == new);
+                        let label = a.map(|a| if a.name.is_empty() { a.host.clone() } else { a.name.clone() }).unwrap_or_default();
+                        let again = if a.is_some_and(|a| a.auth == crate::config::MailAuth::OAuth2) { " Sign in again for the new mailbox." } else { " Enter the password again if it is not the same." };
+                        self.toast(format!("“{label}” now points to another mailbox, so it starts with an empty local copy; the mail already copied from the old one stays in {}.{again}", self.mail.root.join(&id).display()));
+                    } else {
+                        self.toast(format!("The account was removed. Its mail already copied stays in {}.", self.mail.root.display()));
+                    }
                 }
                 for (id, pw) in std::mem::take(&mut d.passwords) {
                     if !pw.is_empty() && self.cfg.mail_accounts.iter().any(|a| a.id == id) {

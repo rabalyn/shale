@@ -1016,6 +1016,19 @@ impl ShaleApp {
         out
     }
 
+    /// An open mail draft is saved when the window closes; if that fails its text goes to the recovery folder (MAIL-201).
+    fn save_mail_draft_at_exit(&mut self) {
+        if let Err(e) = self.mail.flush_draft() {
+            match self.mail.draft_rescue_text() {
+                Some((rel, text)) => match crate::recovery::rescue(&self.recovery_root, &crate::mail_store::today_string(), &rel, text.as_bytes()) {
+                    Ok(_) => eprintln!("the mail draft could not be saved ({e}); its text is in the recovery folder"),
+                    Err(e2) => eprintln!("the mail draft could not be saved ({e}) and could not be rescued either: {e2}"),
+                },
+                None => eprintln!("the mail draft could not be saved: {e}"),
+            }
+        }
+    }
+
     fn autosave(&mut self) {
         // never save into the middle of a git merge (SYNC-013); the buffers stay dirty meanwhile
         if self.sync.tree_busy.load(std::sync::atomic::Ordering::SeqCst) {
@@ -1821,6 +1834,7 @@ impl eframe::App for ShaleApp {
         // flush_all waits for a running sync's merge step first
         self.flush_all();
         self.rescue_unsaved();
+        self.save_mail_draft_at_exit();
         self.remember_open_files();
         self.save_config();
     }

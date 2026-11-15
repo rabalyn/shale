@@ -194,6 +194,23 @@ impl Outbox {
         Err("too many files with that name in the local trash".into())
     }
 
+    /// An attachment file that is about to be replaced by other bytes goes to the trash, not into nothing (MAIL-200).
+    fn put_away_att(&self, kind: &str, account: &str, id: &str, file: &str) -> Result<()> {
+        let src = self.path(kind, account, id, ".att")?.join(file);
+        self.step()?;
+        let dest_dir = self.root.join(".trash").join(crate::mail_store::today_string()).join(kind).join(account).join(format!("{id}.att"));
+        fsutil::ensure_private_dir(&dest_dir).map_err(err)?;
+        let mut dest = dest_dir.join(file);
+        for n in 2..1000 {
+            match fsutil::rename_noreplace(&src, &dest) {
+                Ok(()) => return Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => dest = dest_dir.join(format!("{n}-{file}")),
+                Err(e) => return Err(err(e)),
+            }
+        }
+        Err("too many files with that name in the local trash".into())
+    }
+
     fn put_away_all(&self, kind: &str, account: &str, id: &str, date: &str) -> Result<()> {
         // the JSON goes first: without it the rest is not a draft or a mail any more, and a crash
         // in between leaves only files that nothing lists
@@ -211,8 +228,12 @@ impl Outbox {
         for (i, a) in atts.iter_mut().enumerate() {
             let file = format!("{i}-{}-{}", a.data.len(), crate::compose::safe_file_name(&a.name));
             let p = dir.join(&file);
-            let same = std::fs::metadata(&p).map(|m| m.len() == a.data.len() as u64).unwrap_or(false);
+            // the length is in the name, so only the bytes can tell a replaced file of the same size apart
+            let same = std::fs::metadata(&p).map(|m| m.len() == a.data.len() as u64).unwrap_or(false) && fsutil::read(&p).is_ok_and(|b| b == *a.data);
             if !same {
+                if std::fs::symlink_metadata(&p).is_ok() {
+                    self.put_away_att(kind, account, id, &file)?;
+                }
                 self.write(&p, &a.data)?;
             }
             a.file = file;
@@ -936,6 +957,28 @@ pub mod tests {
         let (back, problems) = ob.load_draft("acct1", &d.id).unwrap();
         assert_eq!(back.body, "text");
         assert!(problems[0].contains("a.txt"), "{problems:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: MAIL-200
+    #[test]
+    fn an_attachment_replaced_by_other_bytes_of_the_same_size_is_saved_and_the_old_file_goes_to_the_trash() {
+        let root = temp("same-size");
+        let ob = Outbox::new(&root);
+        let mut d = draft("acct1", "S", "text");
+        d.attachments.push(Att { name: "a.txt".into(), mime: "text/plain".into(), data: Arc::new(b"old-bytes".to_vec()), file: String::new() });
+        ob.save_draft(&d, NOW).unwrap();
+        d.attachments[0].data = Arc::new(b"new-bytes".to_vec());
+        ob.save_draft(&d, NOW + 1).unwrap();
+        let (back, problems) = ob.load_draft("acct1", &d.id).unwrap();
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(back.attachments[0].data.as_slice(), b"new-bytes");
+        let trashed: Vec<String> = files(&root).into_iter().filter(|p| p.starts_with(".trash/") && p.contains(".att/")).collect();
+        assert_eq!(trashed.len(), 1, "{trashed:?}");
+        assert_eq!(std::fs::read(root.join(&trashed[0])).unwrap(), b"old-bytes");
+        // saving the same bytes again moves nothing
+        ob.save_draft(&d, NOW + 2).unwrap();
+        assert_eq!(files(&root).iter().filter(|p| p.starts_with(".trash/") && p.contains(".att/")).count(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

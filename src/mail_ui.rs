@@ -1869,6 +1869,29 @@ impl MailView {
         }
     }
 
+    /// Save the open draft now if it has unsaved content, whatever dialog is open (the window is closing, MAIL-201).
+    pub fn flush_draft(&mut self) -> Result<(), String> {
+        match self.compose.as_ref() {
+            Some(c) if c.unsaved() && c.has_content() => {}
+            _ => return Ok(()),
+        }
+        if self.outbox.is_none() {
+            return Err("the draft folder is not open".into());
+        }
+        if self.compose_save() {
+            Ok(())
+        } else {
+            Err(self.compose.as_ref().and_then(|c| c.error.clone()).unwrap_or_else(|| "The draft could not be saved.".into()))
+        }
+    }
+
+    /// The text of the open draft, for the recovery folder when it could not be saved: its file name and content.
+    pub fn draft_rescue_text(&self) -> Option<(PathBuf, String)> {
+        let c = self.compose.as_ref().filter(|c| c.has_content())?;
+        let d = &c.draft;
+        Some((PathBuf::from("mail-drafts").join(format!("{}.txt", d.id)), format!("To: {}\nCc: {}\nSubject: {}\n\n{}\n", d.to, d.cc, d.subject, d.body)))
+    }
+
     /// Esc or Close: with changes the person is asked (MAIL-131).
     pub fn compose_close(&mut self) {
         let Some(c) = self.compose.as_mut() else { return };
