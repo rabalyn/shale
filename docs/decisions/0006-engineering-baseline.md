@@ -44,7 +44,8 @@ The review found these gaps:
 
 ## Decision (proposed)
 
-1. **CI gates**: run on `push` **and** `pull_request`:
+1. **CI gates**: run on `push` **and** `pull_request` (since 2026-11-15 on the homelab Forgejo,
+   `.forgejo/workflows/ci.yml`; GitHub builds only the `v*` release tags, BUILD-012):
    - `cargo fmt --check`
    - `cargo clippy --all-targets -- -D warnings`
    - `cargo test`

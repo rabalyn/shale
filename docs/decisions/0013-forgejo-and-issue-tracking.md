@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (owner decision, 2026-11-15)
 - **Date**: 2026-11-15
-- **Specs**: FORGE-001…FORGE-009, DEV-001…DEV-008, BUILD-012
+- **Specs**: FORGE-001…FORGE-009, DEV-001…DEV-008, BUILD-013
 - **Issue**: Forgejo raba/shale#1
 
 ## Context
@@ -43,7 +43,7 @@
    be fixed; no dead code; a sensible test for every code path; real servers in podman for
    external behaviour; tooling as a proposed side track before a shallow test; docs and
    screenshots checked on every change; correct version bumps and release notes) become the
-   DEV rules and BUILD-012, each SHOULD BE row linked to its issue.
+   DEV rules and BUILD-013, each SHOULD BE row linked to its issue.
 
 ## Consequences
 
@@ -54,8 +54,10 @@
 - Issue numbers in commit messages refer to Forgejo. If the source is mirrored to GitHub, a bare
   `#N` there points at GitHub's numbering; release notes and docs therefore write Forgejo issues
   as `raba/shale#N` or as a full link.
-- Until raba/shale#2 is done, CI still runs on GitHub (FORGE-002/003 are SHOULD BE) and
-  `make-release.sh` still pushes the tag to `origin`.
+- Since the CI migration (BUILD-002, BUILD-012), day-to-day CI runs on Forgejo; GitHub still
+  rebuilds release tags itself, so FORGE-003 stays SHOULD BE until raba/shale#2 publishes the
+  Forgejo build instead.
+
 - Forgejo availability now matters for development; GitHub remains the public download place.
 
 ## Alternatives

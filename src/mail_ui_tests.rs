@@ -2348,3 +2348,24 @@ fn a_gnupg_call_that_waits_for_a_dialog_never_blocks_the_window_and_cancel_stops
     assert!(w.shows("Cancelled."), "the strip says what happened");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// spec: MAIL-207, MAIL-208
+#[test]
+fn queued_actions_of_an_account_that_is_not_configured_are_not_counted_as_waiting_but_noted_and_kept() {
+    let mut w = inbox_with_cursor("orphan-ops");
+    w.offline.store(true, std::sync::atomic::Ordering::SeqCst);
+    w.press(Key::U, Modifiers::NONE);
+    w.press(Key::S, Modifiers::NONE);
+    w.frame(vec![]);
+    w.until("the attempt fails", |a| a.mail.offline.values().next().is_some());
+    w.frame(vec![]);
+    assert!(w.shows("2 changes are waiting for the server") && !w.shows("removed accounts"));
+    // the account gets a new id (its server or user was changed): its old id is not configured any more
+    w.app.cfg.mail_accounts[0].id = "someone-else".into();
+    w.app.mail.refresh();
+    w.frame(vec![]);
+    assert!(!w.shows("waiting for the server"), "not counted: they will never be sent");
+    assert!(w.shows("2 queued changes belong to removed accounts (not sent)"), "{:?}", w.texts.iter().map(|t| &t.0).collect::<Vec<_>>());
+    assert_eq!(w.app.mail.pending_split(&w.app.cfg), (0, 2));
+    assert_eq!(w.app.mail.pending_total, 2, "they stay queued");
+}

@@ -46,6 +46,9 @@ FORGE-004, [ADR-0013](../decisions/0013-forgejo-and-issue-tracking.md)). The tab
 | ~~OPEN-015~~ | ~~Mail: support OAuth2 in the first phase or later?~~ | Decided 2026-11-14: phase 1 ([ADR-0007](../decisions/0007-mail-client.md) §7). |
 | ~~OPEN-016~~ | ~~Mail: big attachments with the message or on demand?~~ | Decided 2026-11-14: with the message. |
 | ~~OPEN-017~~ | ~~Mail: index decrypted mails?~~ | Decided 2026-11-14: yes, after typed consent (ADR-0007 §6). |
+| OPEN-018 | Release signing: sign the release tarball (and its `.sha256`) so a download can be checked against a key, not only against damage. Which tool (minisign, `gpg --detach-sign`, Sigstore/cosign), where the key lives, and whether the GitHub build or a local step signs? | To do (owner, 2026-11-15). Today BUILD-011 checksums only; a compromised release page could replace both files. |
+| OPEN-019 | Wipe secrets from memory: passwords, OAuth2 refresh/access tokens and client secrets are plain `String`s that stay in freed memory and can end up in swap or core dumps. Use `zeroize`/`secrecy` (or own wrappers) for secrets from the dialog to the keyring call, and see which copies egui text fields keep. | To do (owner, 2026-11-15). Related: SEC-007, SEC-009, SEC-012, MAIL-021. |
+| OPEN-020 | A system keyring on macOS (Keychain) and Windows (Credential Manager): `secrets.rs` talks only to `secret-tool` (libsecret), so on other systems secrets fall back to the owner-only settings file. | To do (owner, 2026-11-15). Depends on OPEN-007 (platform policy); related: SEC-003, SEC-011, MAIL-021. |
 
 ## Backlog carried over from IMPLEMENTATION.md (still open after checking)
 

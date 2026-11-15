@@ -375,6 +375,8 @@ pub struct MailView {
     /// Actions waiting for the server, and the accounts they belong to (read with the counts).
     pub pending_total: i64,
     pending_accounts: HashSet<String>,
+    /// Waiting actions per account id, configured or not (MAIL-207).
+    pending_by_account: HashMap<String, i64>,
     last_ops: Option<Instant>,
     /// How long to wait before sending waiting actions again (tests shorten it).
     pub ops_retry: Duration,
@@ -472,6 +474,7 @@ impl MailView {
             ops_running: HashSet::new(),
             pending_total: 0,
             pending_accounts: HashSet::new(),
+            pending_by_account: HashMap::new(),
             last_ops: None,
             ops_retry: Duration::from_secs(30),
             offline: HashMap::new(),
@@ -973,6 +976,10 @@ impl MailView {
         let waiting = r.pending_ops(None).unwrap_or_default();
         self.pending_total = waiting.len() as i64;
         self.pending_accounts = waiting.iter().map(|p| p.account.clone()).collect();
+        self.pending_by_account.clear();
+        for p in &waiting {
+            *self.pending_by_account.entry(p.account.clone()).or_default() += 1;
+        }
         // the marked mails and the open one as the index has them now (flags change, mail moves away)
         let ids: Vec<i64> = self.marked.keys().copied().collect();
         for id in ids {
@@ -1674,13 +1681,37 @@ impl MailView {
         !self.ops_running.is_empty()
     }
 
-    /// "3 changes are waiting for the server" (and why), for the bars.
-    pub fn pending_text(&self) -> Option<String> {
-        if self.pending_total == 0 {
+    /// Waiting actions of configured accounts, and of account ids that are not configured (any more); the second
+    /// kind is never sent (MAIL-207).
+    pub fn pending_split(&self, cfg: &Config) -> (i64, i64) {
+        let (mut live, mut orphaned) = (0, 0);
+        for (a, n) in &self.pending_by_account {
+            if cfg.mail_accounts.iter().any(|x| &x.id == a) {
+                live += n;
+            } else {
+                orphaned += n;
+            }
+        }
+        (live, orphaned)
+    }
+
+    /// "3 changes are waiting for the server" (and why), for the bars; only actions that will be sent.
+    pub fn pending_text(&self, cfg: &Config) -> Option<String> {
+        let n = self.pending_split(cfg).0;
+        if n == 0 {
             return None;
         }
-        let n = self.pending_total;
         Some(format!("{n} change{} waiting for the server", if n == 1 { " is" } else { "s are" }))
+    }
+
+    /// "2 queued changes belong to removed accounts (not sent)" and the hover text that says why (MAIL-208).
+    pub fn orphaned_text(&self, cfg: &Config) -> Option<(String, &'static str)> {
+        let n = self.pending_split(cfg).1;
+        if n == 0 {
+            return None;
+        }
+        let t = format!("{n} queued change{} to removed accounts (not sent)", if n == 1 { " belongs" } else { "s belong" });
+        Some((t, "These changes were queued for an account that is no longer set up (removed, or its server or user was changed, which makes it a new account). They are kept, never sent, and not lost."))
     }
 
     // ------------------------------------------------------------ phase 3: writing and sending (ADR-0010)
