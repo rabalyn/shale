@@ -476,6 +476,10 @@ impl Reader {
     pub fn pending_ops(&self, account: Option<&str>) -> Result<Vec<mail_db::PendingRow>> {
         mail_db::pending_ops(&self.conn, account)
     }
+    /// Local sent copies that nothing uploads (MAIL-210).
+    pub fn unsent_copies(&self, with_dismissed: bool) -> Result<Vec<mail_db::UnsentCopy>> {
+        mail_db::unsent_copies(&self.conn, with_dismissed)
+    }
     pub fn pending_uids(&self, folder: i64, uidvalidity: u32) -> Result<HashSet<u32>> {
         mail_db::pending_uids(&self.conn, folder, uidvalidity)
     }
@@ -940,6 +944,94 @@ mod tests {
         // a normal open does not touch the queue
         let store = MailStore::open(&root).unwrap();
         assert_eq!(store.opened.dropped_queued, 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A Sent folder with two local sent copies whose appends are queued; returns the folder and the two UIDs.
+    fn sent_with_two_copies(store: &MailStore) -> (FolderRow, u32, u32) {
+        let f = store.ensure_folder("acct1", "A", "Sent", Some("/"), Some("\\Sent"), true).unwrap();
+        crate::mail_ops::record_sent_copy(store, "acct1", &sample("one", "me@example.com", "first"), 100).unwrap().unwrap();
+        crate::mail_ops::record_sent_copy(store, "acct1", &sample("two", "me@example.com", "second"), 200).unwrap().unwrap();
+        let uids: Vec<u32> = store.reader().unwrap().pending_ops(None).unwrap().iter().map(|p| p.uid).collect();
+        (f, uids[0], uids[1])
+    }
+
+    // spec: MAIL-210
+    #[test]
+    fn a_local_sent_copy_without_a_queued_append_is_not_uploaded_and_one_with_it_is_not() {
+        let root = temp_root("unsent-detect");
+        let store = MailStore::open(&root).unwrap();
+        let (f, u1, _u2) = sent_with_two_copies(&store);
+        assert!(store.reader().unwrap().unsent_copies(false).unwrap().is_empty(), "both appends are queued");
+        // the queue row of the first one goes without an upload (what a restore from a backup does)
+        let id = store.reader().unwrap().pending_ops(None).unwrap().iter().find(|p| p.uid == u1).unwrap().id;
+        store.commit(vec![Op::PendingDone { id }]).unwrap();
+        let got = store.reader().unwrap().unsent_copies(false).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].account.as_str(), got[0].folder, got[0].uid, got[0].subject.as_str()), ("acct1", f.id, u1, "one"));
+        // an ordinary message of the server is never in the set, and neither is a copy that the server has
+        let m = store.save_message(&f, 7, 5, &sample("one", "me@example.com", "first"), "\\Seen", None).unwrap();
+        store.commit(vec![Op::message(m)]).unwrap();
+        assert!(store.reader().unwrap().unsent_copies(false).unwrap().is_empty(), "the server has this Message-ID");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: MAIL-211
+    #[test]
+    fn uploading_again_queues_one_append_however_often_it_is_asked_and_deletes_nothing() {
+        let root = temp_root("unsent-queue");
+        let store = MailStore::open(&root).unwrap();
+        let (f, u1, _) = sent_with_two_copies(&store);
+        let id = store.reader().unwrap().pending_ops(None).unwrap().iter().find(|p| p.uid == u1).unwrap().id;
+        store.commit(vec![Op::PendingDone { id }]).unwrap();
+        let path = store.reader().unwrap().message_at(f.id, 0, u1).unwrap().unwrap().path;
+        assert!(store.root.join(&path).exists());
+        let ask = || vec![Op::QueueAppend { folder: f.id, uid: u1, created: 300 }];
+        store.commit(ask()).unwrap();
+        store.commit(ask()).unwrap();
+        store.commit(vec![Op::QueueAppend { folder: f.id, uid: u1, created: 301 }, Op::QueueAppend { folder: f.id, uid: u1, created: 302 }]).unwrap();
+        let r = store.reader().unwrap();
+        let q: Vec<_> = r.pending_ops(None).unwrap().into_iter().filter(|p| p.uid == u1).collect();
+        assert_eq!(q.len(), 1, "one append, not four");
+        assert_eq!((q[0].kind.as_str(), q[0].account.as_str(), q[0].target.as_deref(), q[0].flags_add.as_str()), ("append", "acct1", Some("Sent"), "\\Seen"));
+        assert!(r.unsent_copies(true).unwrap().is_empty(), "queued: not in the set any more");
+        // a copy that is not there (a made-up UID) is not invented
+        store.commit(vec![Op::QueueAppend { folder: f.id, uid: 4_000_000_999, created: 300 }]).unwrap();
+        assert_eq!(store.reader().unwrap().pending_ops(None).unwrap().len(), 2);
+        assert!(store.root.join(&path).exists(), "no file was touched");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: MAIL-212
+    #[test]
+    fn a_dismissed_copy_stays_in_the_sent_folder_and_the_dismissal_survives_a_restart_and_a_restore() {
+        let root = temp_root("unsent-dismiss");
+        let store = MailStore::open(&root).unwrap();
+        let (f, u1, _) = sent_with_two_copies(&store);
+        let id = store.reader().unwrap().pending_ops(None).unwrap().iter().find(|p| p.uid == u1).unwrap().id;
+        store.commit(vec![Op::PendingDone { id }]).unwrap();
+        // a backup from before the dismissal
+        store.backup("2026-11-01").unwrap().unwrap();
+        store.commit(vec![Op::DismissUnsent { folder: f.id, uid: u1 }]).unwrap();
+        let r = store.reader().unwrap();
+        assert!(r.unsent_copies(false).unwrap().is_empty());
+        assert!(r.unsent_copies(true).unwrap()[0].dismissed);
+        let m = r.message_at(f.id, 0, u1).unwrap().unwrap();
+        assert!(store.root.join(&m.path).exists(), "the mail and its file are still there");
+        assert!(r.list(f.id, 10, 0).unwrap().iter().any(|x| x.uid == u1), "and in the local Sent folder");
+        drop(r);
+        drop(store);
+        // a restart
+        let store = MailStore::open(&root).unwrap();
+        assert!(store.reader().unwrap().unsent_copies(false).unwrap().is_empty());
+        drop(store);
+        // a restore from the older backup shows it again (acceptable), the mail is not lost
+        std::fs::write(root.join("index.sqlite"), b"garbage garbage garbage").unwrap();
+        let store = MailStore::open(&root).unwrap();
+        assert!(store.opened.restored_from.is_some());
+        let r = store.reader().unwrap();
+        assert_eq!(r.unsent_copies(false).unwrap().len(), 2, "both copies lost their queue row in the restore; the dismissal is not in that backup");
+        assert!(r.message_at(f.id, 0, u1).unwrap().is_some());
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -93,6 +93,7 @@ impl MailView {
                 self.undo_newest();
             }
         }
+        self.unsent_strip(ui, &mut body, &mut rects);
         match &self.store {
             StoreState::Failed(e) => {
                 let e = e.clone();
@@ -127,6 +128,7 @@ impl MailView {
                 self.panes(ui, cfg, body, &mut actions, &mut rects);
                 self.mover_window(ui, cfg, &mut rects);
                 self.forever_window(ui, cfg, &mut rects);
+                self.unsent_window(ui, cfg, &mut rects);
             }
         }
         self.rects = rects;
