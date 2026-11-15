@@ -293,6 +293,8 @@ pub struct EventDialog {
     pub categories: String,
     /// the named zone the times are stored in (`Europe/Berlin`); empty: UTC
     pub zone: String,
+    /// the last complete start the fields held (all day, day, seconds of the day), for CAL-031
+    start_seen: Option<(bool, i64, i64)>,
 }
 
 /// How an event repeats, as the dialog shows it.
@@ -431,6 +433,14 @@ fn parse_time(s: &str) -> Option<i64> {
     ((0..24).contains(&h) && (0..60).contains(&m)).then_some(h * 3600 + m * 60)
 }
 
+/// The end after the start moved from `old` to `new`, all as (day, seconds of the day) on the wall clock:
+/// the end keeps its distance to the start, so a summer-time change in between does not change the length shown (CAL-031).
+fn moved_end(old: (i64, i64), new: (i64, i64), end: (i64, i64)) -> (i64, i64) {
+    let wall = |(d, s): (i64, i64)| d * 86_400 + s;
+    let e = wall(end) + wall(new) - wall(old);
+    (e.div_euclid(86_400), e.rem_euclid(86_400))
+}
+
 /// The day a time of an event is shown on (this computer's clock; an all-day date as it is).
 fn shown_day(e: &Event, v: i64) -> i64 {
     if e.all_day {
@@ -480,6 +490,7 @@ impl EventDialog {
             free: false,
             categories: String::new(),
             zone: String::new(),
+            start_seen: None,
         }
     }
 
@@ -498,6 +509,30 @@ impl EventDialog {
             self.start_time = t::hhmm(ss);
             self.end_date = date_text(ed);
             self.end_time = t::hhmm(es);
+        }
+        self.start_seen = self.start_now();
+    }
+
+    /// The start the fields hold now, if it is complete (an all-day event has no time).
+    fn start_now(&self) -> Option<(bool, i64, i64)> {
+        let sd = parse_date(&self.start_date)?;
+        Some((self.all_day, sd, if self.all_day { 0 } else { parse_time(&self.start_time)? }))
+    }
+
+    /// CAL-031: when the start field holds a complete value other than the last one, the end keeps its distance to it.
+    fn follow_start(&mut self) {
+        let Some(now) = self.start_now() else { return };
+        let Some(was) = self.start_seen.replace(now) else { return };
+        if was == now || was.0 != now.0 {
+            return;
+        }
+        let end = parse_date(&self.end_date).zip(if self.all_day { Some(0) } else { parse_time(&self.end_time) });
+        if let Some(end) = end {
+            let (ed, es) = moved_end((was.1, was.2), (now.1, now.2), end);
+            self.end_date = date_text(ed);
+            if !self.all_day {
+                self.end_time = t::hhmm(es);
+            }
         }
     }
 
@@ -843,8 +878,6 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
-    let before = d.start_end().ok();
-    let mut start_changed = false;
     ui.add_enabled_ui(!saving, |ui| {
         egui::Grid::new("event-dialog").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
             ui.label(muted("Title"));
@@ -880,14 +913,11 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             ui.end_row();
             ui.label(muted("Starts"));
             ui.horizontal(|ui| {
-                let a = rec("start-date", ui.add(egui::TextEdit::singleline(&mut d.start_date).desired_width(96.0)));
-                let mut b_changed = false;
+                rec("start-date", ui.add(egui::TextEdit::singleline(&mut d.start_date).desired_width(96.0)));
                 if !d.all_day {
-                    let b = rec("start-time", ui.add(egui::TextEdit::singleline(&mut d.start_time).desired_width(52.0)));
-                    b_changed = b.changed();
+                    rec("start-time", ui.add(egui::TextEdit::singleline(&mut d.start_time).desired_width(52.0)));
                 }
-                let picked = date_picker(ui, "start-date", &mut d.start_date, monday_first, &mut picks);
-                start_changed = a.changed() || b_changed || picked;
+                date_picker(ui, "start-date", &mut d.start_date, monday_first, &mut picks);
                 // one date of a series keeps the kind of time its series has
                 rec("all-day", ui.add_enabled(!one_date, egui::Checkbox::new(&mut d.all_day, "All day")));
             });
@@ -1077,15 +1107,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             }
         });
     });
-    // moving the start keeps the length of the event
-    if start_changed && !d.all_day {
-        if let (Some((s0, e0)), Some(sd), Some(st)) = (before, parse_date(&d.start_date), parse_time(&d.start_time)) {
-            let s = t::local_to_utc(sd, st);
-            let (ed, es) = t::utc_to_local(s + (e0 - s0));
-            d.end_date = date_text(ed);
-            d.end_time = t::hhmm(es);
-        }
-    }
+    d.follow_start();
     if let Some((_, e)) = &d.original {
         if e.rrule.is_some() {
             ui.label(muted("This event repeats: changes apply to every repeat. To change one date only, close this and choose “Edit this date”."));
@@ -1505,6 +1527,23 @@ mod tests {
         assert!(parts.iter().any(|x| x.rrule.is_some() && x.summary == "Standup") && parts.iter().any(|x| x.recurrence_id == Some(occ.start) && x.summary == "Standup (short)"));
         let shown: Vec<String> = store.occurrences(day, day + 6).iter().filter_map(|o| store.event(o)).map(|x| x.summary.clone()).collect();
         assert_eq!(shown, vec!["Standup (short)"], "Monday is the changed date, Wednesday is skipped");
+    }
+
+    // spec: CAL-031
+    #[test]
+    fn the_end_keeps_its_distance_to_the_start_on_the_wall_clock() {
+        let day = |y, m, d| t::days_from_civil(y, m, d);
+        // same day, an hour later
+        assert_eq!(moved_end((day(2026, 11, 13), 9 * 3600), (day(2026, 11, 13), 10 * 3600), (day(2026, 11, 13), 9 * 3600 + 1800)), (day(2026, 11, 13), 10 * 3600 + 1800));
+        // across midnight, both ways
+        assert_eq!(moved_end((day(2026, 11, 13), 23 * 3600), (day(2026, 11, 14), 23 * 3600), (day(2026, 11, 14), 3600)), (day(2026, 11, 15), 3600));
+        assert_eq!(moved_end((day(2026, 11, 13), 9 * 3600), (day(2026, 11, 12), 23 * 3600 + 1800), (day(2026, 11, 13), 10 * 3600)), (day(2026, 11, 13), 1800));
+        // days, all day (no time)
+        assert_eq!(moved_end((day(2026, 11, 13), 0), (day(2026, 12, 30), 0), (day(2026, 11, 15), 0)), (day(2027, 1, 1), 0));
+        // over the clock change of 29 March 2026 (Europe): 24 hours on the wall clock stay 24 hours on it
+        assert_eq!(moved_end((day(2026, 3, 28), 9 * 3600), (day(2026, 3, 30), 9 * 3600), (day(2026, 3, 29), 9 * 3600)), (day(2026, 3, 31), 9 * 3600), "wall clock: 24 h on the clock, whatever summer time did");
+        // the end before the start stays before it
+        assert_eq!(moved_end((day(2026, 11, 13), 9 * 3600), (day(2026, 11, 14), 9 * 3600), (day(2026, 11, 13), 8 * 3600)), (day(2026, 11, 14), 8 * 3600));
     }
 
     // spec: CAL-015

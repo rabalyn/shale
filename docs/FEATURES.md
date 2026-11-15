@@ -178,6 +178,8 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - A repeating event asks what you mean: **Edit this date** or **Edit all repeats**, **Delete this
   date** or **Delete all repeats**. A date you change becomes its own entry next to the series; a
   date you delete is left out of the series.
+- Moving an event's start in the event dialog (typed or picked) moves its end along, so the
+  event keeps its length; changing the end never moves the start.
 - The event dialog sets how an event **repeats** (daily, weekly on the days you pick, monthly,
   yearly; every N; ending never, on a date or after N times), the dates it **skips**,
   **reminders** (minutes, hours or days before), its status, whether it shows as busy or free,
