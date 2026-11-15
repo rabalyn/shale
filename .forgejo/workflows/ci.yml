@@ -183,7 +183,7 @@ jobs:
   # A `main` that is green on Linux goes to GitHub's `main`, whose workflow builds and tests it on
   # macOS and Windows (BUILD-016, FORGE-003). Only `main`, never a branch or a pull request. The
   # write credential is the owner's: an SSH deploy key of rabalyn/shale with write access, kept as
-  # the Forgejo Actions secret GITHUB_DEPLOY_KEY. Without it the job says so and fails.
+  # the Forgejo Actions secret MIRROR_DEPLOY_KEY (Forgejo refuses names that start with GITHUB_). Without it the job says so and fails.
   mirror:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -202,12 +202,12 @@ jobs:
         shell: bash
         env:
           TOKEN: ${{ github.token }}
-          DEPLOY_KEY: ${{ secrets.GITHUB_DEPLOY_KEY }}
+          DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [ -z "$DEPLOY_KEY" ]; then
-            echo "::error::the secret GITHUB_DEPLOY_KEY is not set (see raba/shale#52)"
+            echo "::error::the secret MIRROR_DEPLOY_KEY is not set (see raba/shale#52)"
             exit 1
           fi
           command -v ssh >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-client >/dev/null; }
