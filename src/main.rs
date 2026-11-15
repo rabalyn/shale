@@ -92,8 +92,12 @@ mod smtp_client;
 mod smtp_fake_tests;
 mod social;
 #[cfg(test)]
+mod start_dialog_tests;
+#[cfg(test)]
 mod tab_order_tests;
 mod tagwords;
+#[cfg(test)]
+mod tb_fixture_tests;
 mod tb_store;
 mod theme;
 #[cfg(test)]
@@ -117,52 +121,77 @@ fn parse_size(s: &str) -> Option<[f32; 2]> {
     (w >= 720.0 && h >= 480.0).then_some([w, h])
 }
 
-fn main() -> eframe::Result {
-    let mut screenshot: Option<PathBuf> = None;
-    let mut vault: Option<PathBuf> = None;
-    let mut view: Option<String> = None;
-    let mut keys: Option<String> = None;
-    let mut size = [1360.0, 840.0];
-    let mut args = std::env::args().skip(1);
+/// What the command line asked for.
+#[derive(Debug, PartialEq)]
+struct Cli {
+    screenshot: Option<PathBuf>,
+    vault: Option<PathBuf>,
+    view: Option<String>,
+    keys: Option<String>,
+    size: [f32; 2],
+}
+
+/// The result of reading the command line.
+#[derive(Debug, PartialEq)]
+enum Parsed {
+    Run(Cli),
+    /// `-h`: print the usage and end with success
+    Help,
+    /// a value that cannot be used: the message for stderr; the exit code is 2
+    Bad(String),
+}
+
+/// Read the arguments after the program name. Unknown options are ignored; a bare word is the vault
+/// (when `--vault` did not give one).
+fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
+    let mut cli = Cli { screenshot: None, vault: None, view: None, keys: None, size: [1360.0, 840.0] };
+    let mut args = args;
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--screenshot" => screenshot = args.next().map(PathBuf::from),
-            "--vault" => vault = args.next().map(PathBuf::from),
+            "--screenshot" => cli.screenshot = args.next().map(PathBuf::from),
+            "--vault" => cli.vault = args.next().map(PathBuf::from),
             // testing aid for screenshots: tasks | graph | drawing | reading
-            "--view" => view = args.next(),
+            "--view" => cli.view = args.next(),
             // testing aid with --screenshot: scripted typing, e.g. "text:[!/|key:Down|key:Tab"
-            "--keys" => keys = args.next(),
+            "--keys" => cli.keys = args.next(),
             // testing aid with --screenshot: the window size in points, e.g. 1000x700
             "--size" => match args.next().as_deref().and_then(parse_size) {
-                Some(s) => size = s,
-                None => {
-                    eprintln!("--size needs WIDTHxHEIGHT, e.g. 1360x840");
-                    std::process::exit(2);
-                }
+                Some(s) => cli.size = s,
+                None => return Parsed::Bad("--size needs WIDTHxHEIGHT, e.g. 1360x840".into()),
             },
-            "-h" | "--help" => {
-                println!("shale [--vault <folder>] [--screenshot <file.png>]");
-                return Ok(());
-            }
-            other if !other.starts_with('-') && vault.is_none() => vault = Some(PathBuf::from(other)),
+            "-h" | "--help" => return Parsed::Help,
+            other if !other.starts_with('-') && cli.vault.is_none() => cli.vault = Some(PathBuf::from(other)),
             _ => {}
         }
     }
-
-    if let Err(e) = script::parse(keys.as_deref().unwrap_or("")) {
-        eprintln!("--keys: {e}");
-        std::process::exit(2);
+    if let Err(e) = script::parse(cli.keys.as_deref().unwrap_or("")) {
+        return Parsed::Bad(format!("--keys: {e}"));
     }
+    Parsed::Run(cli)
+}
+
+fn main() -> eframe::Result {
+    let Cli { screenshot, vault, view, keys, size } = match parse_args(std::env::args().skip(1)) {
+        Parsed::Run(cli) => cli,
+        Parsed::Help => {
+            println!("shale [--vault <folder>] [--screenshot <file.png>]");
+            return Ok(());
+        }
+        Parsed::Bad(message) => {
+            eprintln!("{message}");
+            std::process::exit(2);
+        }
+    };
 
     // Not for screenshots: they use their own temporary folders and may run beside the real app.
     let _instance_lock = if screenshot.is_none() {
-        match instance::acquire(&instance::default_dir()) {
-            Ok(Some(lock)) => Some(lock),
-            Ok(None) => {
+        match instance::claim(&instance::default_dir()) {
+            instance::Claim::Owner(lock) => Some(lock),
+            instance::Claim::AlreadyRunning => {
                 instance::show_already_running();
                 std::process::exit(1);
             }
-            Err(e) => {
+            instance::Claim::Unchecked(e) => {
                 // a broken data folder must not lock the person out of their notes
                 eprintln!("Shale could not check whether it is already running ({e}); starting anyway.");
                 None
@@ -208,7 +237,19 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_size;
+    use super::{parse_args, parse_size, Cli, Parsed};
+    use std::path::PathBuf;
+
+    fn parse(args: &[&str]) -> Parsed {
+        parse_args(args.iter().map(|s| s.to_string()))
+    }
+
+    fn cli(p: Parsed) -> Cli {
+        match p {
+            Parsed::Run(c) => c,
+            other => panic!("{other:?}"),
+        }
+    }
 
     // spec: DEV-007
     #[test]
@@ -217,5 +258,67 @@ mod tests {
         assert_eq!(parse_size("100x100"), None);
         assert_eq!(parse_size("1360"), None);
         assert_eq!(parse_size("axb"), None);
+    }
+
+    // spec: DEV-012
+    #[test]
+    fn no_arguments_start_with_the_defaults() {
+        assert_eq!(cli(parse(&[])), Cli { screenshot: None, vault: None, view: None, keys: None, size: [1360.0, 840.0] });
+    }
+
+    // spec: DEV-012
+    #[test]
+    fn every_option_is_read() {
+        let c = cli(parse(&["--vault", "/v", "--screenshot", "out.png", "--view", "tasks", "--keys", "key:Down|key:Tab", "--size", "1000x700"]));
+        assert_eq!(c, Cli { screenshot: Some("out.png".into()), vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1000.0, 700.0] });
+    }
+
+    // spec: DEV-012
+    #[test]
+    fn a_bare_word_is_the_vault_unless_one_was_given() {
+        assert_eq!(cli(parse(&["/notes"])).vault, Some(PathBuf::from("/notes")));
+        assert_eq!(cli(parse(&["--vault", "/a", "/b"])).vault, Some(PathBuf::from("/a")), "--vault wins over a bare word before it");
+        assert_eq!(cli(parse(&["/b", "--vault", "/a"])).vault, Some(PathBuf::from("/a")), "and after it");
+        assert_eq!(cli(parse(&["/a", "/b"])).vault, Some(PathBuf::from("/a")), "the first bare word counts");
+    }
+
+    // spec: DEV-012
+    #[test]
+    fn unknown_options_and_missing_values_are_ignored() {
+        let c = cli(parse(&["--nonsense", "--vault"]));
+        assert_eq!((c.vault, c.screenshot), (None, None));
+        assert_eq!(cli(parse(&["--screenshot"])).screenshot, None);
+        assert_eq!(cli(parse(&["-x", "--view"])).view, None);
+    }
+
+    // spec: DEV-012
+    #[test]
+    fn help_ends_with_success_before_anything_else_is_judged() {
+        assert_eq!(parse(&["-h"]), Parsed::Help);
+        assert_eq!(parse(&["--vault", "/v", "--help"]), Parsed::Help);
+        assert_eq!(parse(&["--help", "--size", "bad"]), Parsed::Help);
+    }
+
+    // spec: DEV-012
+    #[test]
+    fn a_bad_size_is_an_error_for_exit_code_2() {
+        for bad in [&["--size", "100x100"][..], &["--size", "1360"], &["--size", "axb"], &["--size"]] {
+            match parse(bad) {
+                Parsed::Bad(m) => assert!(m.contains("--size needs WIDTHxHEIGHT"), "{m}"),
+                other => panic!("{bad:?}: {other:?}"),
+            }
+        }
+        assert_eq!(cli(parse(&["--size", "720x480"])).size, [720.0, 480.0], "the smallest window is allowed");
+    }
+
+    // spec: DEV-012
+    #[test]
+    fn bad_keys_are_an_error_for_exit_code_2() {
+        match parse(&["--screenshot", "o.png", "--keys", "nonsense:thing"]) {
+            Parsed::Bad(m) => assert!(m.starts_with("--keys: "), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(parse(&["--keys", "key:Down|click:@Sync"]), Parsed::Run(_)));
+        assert!(matches!(parse(&["--keys", ""]), Parsed::Run(_)));
     }
 }
