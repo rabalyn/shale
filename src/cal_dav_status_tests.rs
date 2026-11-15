@@ -148,9 +148,10 @@ fn redirects_that_are_not_allowed_are_refused() {
     }
     // to a scheme that is neither http nor https: nothing is requested there
     let (base, h) = mock_http_with(1, |_, _, _, _| redirect(301, "ftp://127.0.0.1/x"));
-    assert!(cal_dav::request_with("GET", &format!("{base}/x"), &[], "", &acct(&base)).is_err());
+    let err = cal_dav::request_with("GET", &format!("{base}/x"), &[], "", &acct(&base)).unwrap_err();
+    assert!(err.contains("kind of address that is not allowed"), "{err}");
     h.join().unwrap();
-    // a redirect that never ends stops after 5 follow-ups and is an error in words (CAL-022)
+    // a redirect that never ends stops after 5 follow-ups and is an error in words (CAL-030)
     let (base, h) = mock_http_with(6, |_, path, _, _| redirect(302, &format!("{path}x")));
     let err = cal_dav::request_with("GET", &format!("{base}/a"), &[], "", &acct(&base)).unwrap_err();
     assert!(err.contains("redirect loop"), "{err}");
@@ -351,7 +352,7 @@ fn an_answer_bigger_than_allowed_is_an_error_and_a_small_one_keeps_its_headers()
     h.join().unwrap();
 }
 
-// spec: CAL-022
+// spec: CAL-030
 #[test]
 fn a_redirect_loop_is_named_and_not_shown_as_its_last_status() {
     if !has_curl() {
@@ -369,7 +370,7 @@ fn a_redirect_loop_is_named_and_not_shown_as_its_last_status() {
     h.join().unwrap();
 }
 
-// spec: CAL-022
+// spec: CAL-030
 #[test]
 fn an_empty_reply_a_refused_connection_and_a_cut_short_answer_are_named() {
     if !has_curl() {
