@@ -7,6 +7,8 @@
 #
 # Before running: raise `version` in Cargo.toml (semver), run `cargo build` once (updates
 # Cargo.lock), add a "## [x.y.z] - date" section to CHANGELOG.md, commit everything.
+# The release check (.github/check-release.sh: version greater than the previous tag, Cargo.lock,
+# and a CHANGELOG.md section that names every issue closed since) runs before the tag is made.
 #   sh make-release.sh
 set -e
 cd "$(dirname "$0")"
@@ -17,9 +19,8 @@ for r in "$FORGEJO_REMOTE" "$GITHUB_REMOTE"; do
 done
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 TAG="v$VERSION"
-sh .github/release-notes.sh "$VERSION" >/dev/null
 git diff --quiet && git diff --cached --quiet || { echo "There are uncommitted changes; commit them first."; exit 1; }
-grep -q "^name = \"shale\"" Cargo.lock && grep -A1 '^name = "shale"' Cargo.lock | grep -q "version = \"$VERSION\"" || { echo "Cargo.lock still has the old version; run cargo build and commit."; exit 1; }
+sh .github/check-release.sh "$VERSION" || { echo "The release check failed (see above); fix it, commit and run this again."; exit 1; }
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   echo "Tag $TAG exists already (pointing at $(git rev-parse --short "$TAG^{commit}"))."
 else

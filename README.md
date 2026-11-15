@@ -75,9 +75,11 @@ This catches a damaged download, not a compromised release page.
 2. Move the notes from `## [Unreleased]` in `CHANGELOG.md` to a new `## [x.y.z] - date` section.
 3. Commit, then run `sh make-release.sh`: it tags the commit `vx.y.z` and pushes the commit and
    the tag to the development server (remote `origin`) and to GitHub (remote `github`). GitHub
-   builds it and creates the release page with that section as its notes and the `.sha256` file
-   (the build stops if the tag and `Cargo.toml` disagree or the changelog has no notes for the
-   version).
+   builds it and creates the release page with that section as its notes and the `.sha256` file.
+   Before tagging, and again in both CI systems, `.github/check-release.sh` checks that the
+   version is valid semver and greater than the previous `v*` tag, that `Cargo.toml` and
+   `Cargo.lock` agree, and that the changelog section is not empty and mentions every issue
+   closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
 formats, lints, builds, tests, packages and audits every push; GitHub gets the released
