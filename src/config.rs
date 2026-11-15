@@ -276,6 +276,9 @@ pub struct Config {
     pub social_replies: bool,
     /// Minutes between looks for new posts in the feeds open in tabs (0 = never, SOC-025).
     pub social_check_minutes: u32,
+    /// Keybindings the user changed: action id -> bindings as text (KEY-007). Missing = defaults.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub keybindings: std::collections::BTreeMap<String, Vec<String>>,
     // Per-vault fields of older versions, read only to move them into the vault that is opened
     // first (CFG-008); dropped from the file after that.
     #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
@@ -326,6 +329,7 @@ impl Default for Config {
             social_last: None,
             social_replies: false,
             social_check_minutes: 5,
+            keybindings: Default::default(),
             legacy_open_files: None,
             legacy_last_import_folder: None,
             legacy_recent_tags: None,

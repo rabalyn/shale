@@ -1,6 +1,6 @@
 //! Window layout: ribbon, sidebars, tab bar, the note/drawing/tasks/graph views and status bar.
 
-use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, ShaleApp, View};
+use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, ShaleApp, TabMarks, View};
 use crate::markdown;
 use crate::reader;
 use crate::sidebar::Item;
@@ -27,6 +27,7 @@ pub enum Icon {
     Book,
     Pencil,
     Close,
+    Pin,
     Plus,
     SidebarLeft,
     SidebarRight,
@@ -131,6 +132,12 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
         Icon::Close => {
             p.line_segment([cx - Vec2::splat(w * 0.22), cx + Vec2::splat(w * 0.22)], s);
             p.line_segment([cx + Vec2::new(-w * 0.22, w * 0.22), cx + Vec2::new(w * 0.22, -w * 0.22)], s);
+        }
+        Icon::Pin => {
+            // a drawing pin: the head, the body and the needle
+            let head = Rect::from_center_size(cx + Vec2::new(0.0, -w * 0.18), Vec2::new(w * 0.5, w * 0.34));
+            p.rect_stroke(head, CornerRadius::same(2), s, egui::StrokeKind::Middle);
+            p.line_segment([cx + Vec2::new(0.0, w * 0.0), cx + Vec2::new(0.0, w * 0.36)], s);
         }
         Icon::Plus => {
             p.line_segment([cx - Vec2::new(w * 0.28, 0.0), cx + Vec2::new(w * 0.28, 0.0)], s);
@@ -394,10 +401,14 @@ impl ShaleApp {
         let tab_w = ((bar.width() - 50.0) / n as f32).clamp(60.0, 220.0);
         let mut close = None;
         self.tab_rects.clear();
+        self.tab_marks = TabMarks::default();
+        let mut dragging = None;
+        let mut dropped = None;
+        let mut pin_toggle = None;
         for i in 0..self.tabs.len() {
             let title = self.tab_title(&self.tabs[i].view);
             let dirty = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.dirty).unwrap_or(false) || self.drawings.get(p).map(|d| d.dirty).unwrap_or(false)).unwrap_or(false);
-            let (r, resp) = child.allocate_exact_size(Vec2::new(tab_w, h - 6.0), Sense::click());
+            let (r, resp) = child.allocate_exact_size(Vec2::new(tab_w, h - 6.0), Sense::click_and_drag());
             let active = i == self.active;
             let fill = if active {
                 theme::BG_PRIMARY
@@ -407,7 +418,13 @@ impl ShaleApp {
                 theme::BG_SECONDARY
             };
             child.painter().rect_filled(r, CornerRadius { nw: 7, ne: 7, sw: 0, se: 0 }, fill);
-            let text_rect = r.shrink2(Vec2::new(10.0, 0.0));
+            let mut text_rect = r.shrink2(Vec2::new(10.0, 0.0));
+            if self.tabs[i].pinned {
+                let pin = Rect::from_center_size(Pos2::new(text_rect.min.x + 5.0, r.center().y), Vec2::splat(12.0));
+                paint_icon(child.painter(), pin, Icon::Pin, if active { theme::TEXT_STRONG } else { theme::MUTED });
+                text_rect.min.x += 14.0;
+                self.tab_marks.pinned.push(i);
+            }
             let galley = child.painter().layout_no_wrap(title.clone(), FontId::proportional(13.0), if active { theme::TEXT_STRONG } else { theme::MUTED });
             child.painter().with_clip_rect(Rect::from_min_max(text_rect.min, Pos2::new(text_rect.max.x - 18.0, text_rect.max.y))).galley(Pos2::new(text_rect.min.x, r.center().y - galley.size().y / 2.0), galley, theme::TEXT);
             let cr = Rect::from_center_size(Pos2::new(r.max.x - 14.0, r.center().y), Vec2::splat(16.0));
@@ -427,10 +444,43 @@ impl ShaleApp {
             }
             if close_resp.clicked() || resp.middle_clicked() {
                 close = Some(i);
-            } else if resp.clicked() {
+            } else if resp.clicked() || resp.drag_started() {
                 self.active = i;
             }
+            if resp.dragged() {
+                dragging = Some(i);
+            }
+            if resp.drag_stopped() {
+                dropped = Some(i);
+            }
+            let pinned = self.tabs[i].pinned;
+            resp.context_menu(|ui| {
+                let entry = ui.button(if pinned { "Unpin tab" } else { "Pin tab" });
+                self.tab_marks.menu_pin = Some(entry.rect);
+                if entry.clicked() {
+                    pin_toggle = Some((i, !pinned));
+                    ui.close();
+                }
+            });
             resp.on_hover_text(title);
+        }
+        // the marker of the drag: where the tab lands (NAV-014, NAV-017)
+        if let Some(from) = dragging.or(dropped) {
+            let mids: Vec<f32> = self.tab_rects.iter().map(|t| t.0.center().x).collect();
+            if let Some(x) = child.ctx().pointer_interact_pos().map(|p| p.x) {
+                let slot = self.tab_slot(from, x, &mids);
+                if dropped.is_some() {
+                    self.move_tab(from, slot);
+                } else {
+                    let at = if slot < mids.len() { self.tab_rects[slot].0.min.x - 1.0 } else { self.tab_rects.last().map_or(bar.min.x, |t| t.0.max.x + 1.0) };
+                    let marker = Rect::from_min_max(Pos2::new(at - 1.0, bar.min.y + 6.0), Pos2::new(at + 1.0, bar.max.y - 2.0));
+                    child.painter().rect_filled(marker, CornerRadius::same(1), theme::ACCENT);
+                    self.tab_marks.drop_marker = Some(marker);
+                }
+            }
+        }
+        if let Some((i, pinned)) = pin_toggle {
+            self.set_tab_pinned(i, pinned);
         }
         if icon_button(&mut child, Icon::Plus, 26.0, false, "New tab").clicked() {
             self.new_tab(View::Empty);
