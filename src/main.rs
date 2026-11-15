@@ -5,6 +5,8 @@
 //!   shale --vault <folder>      open a specific folder as vault
 //!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
 //!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
+//!   shale --screenshot out.png --keys 'click:@Sync|waitfor:@Compose'   (scripted input, see script.rs)
+//!   shale --screenshot out.png --size 1000x700   (window size; docs/screenshots/regen.sh makes all pictures)
 
 mod app;
 mod cal_dav;
@@ -77,6 +79,7 @@ mod people;
 mod picker;
 mod reader;
 mod recovery;
+mod script;
 mod search_all;
 mod secrets;
 mod sidebar;
@@ -104,11 +107,19 @@ mod wl_drop;
 use eframe::egui;
 use std::path::PathBuf;
 
+/// `1360x840` as window points.
+fn parse_size(s: &str) -> Option<[f32; 2]> {
+    let (w, h) = s.split_once('x')?;
+    let (w, h): (f32, f32) = (w.parse().ok()?, h.parse().ok()?);
+    (w >= 720.0 && h >= 480.0).then_some([w, h])
+}
+
 fn main() -> eframe::Result {
     let mut screenshot: Option<PathBuf> = None;
     let mut vault: Option<PathBuf> = None;
     let mut view: Option<String> = None;
     let mut keys: Option<String> = None;
+    let mut size = [1360.0, 840.0];
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -118,6 +129,14 @@ fn main() -> eframe::Result {
             "--view" => view = args.next(),
             // testing aid with --screenshot: scripted typing, e.g. "text:[!/|key:Down|key:Tab"
             "--keys" => keys = args.next(),
+            // testing aid with --screenshot: the window size in points, e.g. 1000x700
+            "--size" => match args.next().as_deref().and_then(parse_size) {
+                Some(s) => size = s,
+                None => {
+                    eprintln!("--size needs WIDTHxHEIGHT, e.g. 1360x840");
+                    std::process::exit(2);
+                }
+            },
             "-h" | "--help" => {
                 println!("shale [--vault <folder>] [--screenshot <file.png>]");
                 return Ok(());
@@ -125,6 +144,11 @@ fn main() -> eframe::Result {
             other if !other.starts_with('-') && vault.is_none() => vault = Some(PathBuf::from(other)),
             _ => {}
         }
+    }
+
+    if let Err(e) = script::parse(keys.as_deref().unwrap_or("")) {
+        eprintln!("--keys: {e}");
+        std::process::exit(2);
     }
 
     // Not for screenshots: they use their own temporary folders and may run beside the real app.
@@ -145,7 +169,7 @@ fn main() -> eframe::Result {
         None
     };
 
-    let mut viewport = egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size([1360.0, 840.0]).with_min_inner_size([720.0, 480.0]);
+    let mut viewport = egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size(size).with_min_inner_size([720.0, 480.0]);
     if screenshot.is_some() {
         // Don't steal focus from whatever the person is doing.
         viewport = viewport.with_active(false);
@@ -175,4 +199,18 @@ fn main() -> eframe::Result {
     }
     #[cfg(not(target_os = "linux"))]
     eframe::run_native("Shale", options, Box::new(move |cc| Ok(Box::new(app::ShaleApp::new(cc, opts)))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_size;
+
+    // spec: DEV-007
+    #[test]
+    fn a_window_size_is_width_x_height_and_not_tiny() {
+        assert_eq!(parse_size("1360x840"), Some([1360.0, 840.0]));
+        assert_eq!(parse_size("100x100"), None);
+        assert_eq!(parse_size("1360"), None);
+        assert_eq!(parse_size("axb"), None);
+    }
 }
