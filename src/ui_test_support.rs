@@ -29,6 +29,11 @@ impl Headless {
         Headless { ctx, t: 0.0, text: vec![], cursor: egui::CursorIcon::Default }
     }
 
+    /// The egui context the frames run in (to set a drag-and-drop payload the way a view does).
+    pub fn ctx(&self) -> &egui::Context {
+        &self.ctx
+    }
+
     /// Run one frame of a 1500 x 900 window with these events.
     pub fn frame(&mut self, app: &mut ShaleApp, events: Vec<Event>) -> egui::FullOutput {
         self.frame_with(app, events, |_, _| {})
