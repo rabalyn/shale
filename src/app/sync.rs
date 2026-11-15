@@ -47,7 +47,7 @@ impl ShaleApp {
     pub(crate) fn sync_vault_opened(&mut self) {
         self.sync.last_start = None;
         self.sync.last = None;
-        self.sync.remote = self.vault.as_ref().and_then(|v| gitsync::remote_url(&self.sync.git, &v.root));
+        self.sync.remote = self.vault.as_ref().and_then(|v| gitsync::remote_url(&self.sync.git, &v.root)).map(|u| gitsync::hide_passwords(&u));
         self.sync.url = self.sync.remote.clone().unwrap_or_default();
     }
 
@@ -152,7 +152,7 @@ impl ShaleApp {
         if self.vault.as_ref().map(|v| v.root.as_path()) != Some(root) {
             return; // another vault was opened meanwhile
         }
-        self.sync.remote = self.vault.as_ref().and_then(|v| gitsync::remote_url(&self.sync.git, &v.root));
+        self.sync.remote = self.vault.as_ref().and_then(|v| gitsync::remote_url(&self.sync.git, &v.root)).map(|u| gitsync::hide_passwords(&u));
         let mut copies: Vec<PathBuf> = vec![];
         let mut failures: Vec<String> = vec![];
         for rel in &report.changed {

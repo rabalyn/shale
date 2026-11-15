@@ -172,7 +172,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         rec("dav-user".into(), ui.add(egui::TextEdit::singleline(&mut d.dav_user).desired_width(220.0)));
         ui.end_row();
         ui.label(muted("Password"));
-        rec("dav-pass".into(), ui.add(egui::TextEdit::singleline(&mut d.dav_pass).password(true).desired_width(220.0)));
+        rec("dav-pass".into(), crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut d.dav_pass).desired_width(220.0)));
         ui.end_row();
     });
     ui.horizontal(|ui| {

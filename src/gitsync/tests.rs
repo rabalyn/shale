@@ -396,12 +396,48 @@ fn connect_creates_the_repository_and_updates_the_url() {
 // spec: SYNC-004
 #[test]
 fn only_plain_remote_urls_are_accepted() {
-    for ok in ["https://github.com/me/notes.git", "http://host/x", "ssh://git@host:22/x.git", "git://host/x", "file:///srv/x.git", "git@github.com:me/notes.git", "host:notes", "/srv/git/notes.git"] {
+    for ok in [
+        "https://github.com/me/notes.git",
+        "https://me@host/x",
+        "http://localhost/x",
+        "http://127.0.0.1:8080/x",
+        "git://[::1]/x",
+        "ssh://git@host:22/x.git",
+        "file:///srv/x.git",
+        "git@github.com:me/notes.git",
+        "host:notes",
+        "/srv/git/notes.git",
+    ] {
         assert!(check_url(ok).is_ok(), "{ok}");
     }
     for bad in ["", "-uhelp", "--upload-pack=touch /tmp/x", "ext::sh -c id", "fd::17", "notes", "relative/path", "https://host/a b", "https://host/\nx", "ftp:x/../::y"] {
         assert!(check_url(bad).is_err(), "{bad:?}");
     }
+}
+
+// spec: SEC-010
+#[test]
+fn an_address_with_a_password_or_without_encryption_is_refused() {
+    for bad in ["https://user:token@host/x.git", "ssh://git:secret@host/x", "https://:token@host/x", "user:secret@host:notes.git"] {
+        let e = check_url(bad).unwrap_err();
+        assert!(e.contains("password") && e.contains("credential helper"), "{bad}: {e}");
+    }
+    for bad in ["http://host/x", "git://example.com/x", "HTTP://host/x", "http://localhost.evil.com/x", "http://localhost@evil.com/x"] {
+        let e = check_url(bad).unwrap_err();
+        assert!(e.contains("unencrypted"), "{bad}: {e}");
+    }
+    // a user name alone is fine
+    assert!(check_url("ssh://git@host/x.git").is_ok());
+    assert!(check_url("https://user@host/x.git").is_ok());
+}
+
+// spec: SEC-010
+#[test]
+fn a_password_in_an_existing_remote_is_hidden_when_shown() {
+    assert_eq!(hide_passwords("https://user:tok3n@host/x.git"), "https://user:***@host/x.git");
+    assert_eq!(hide_passwords("fatal: unable to access 'https://u:p@h:8443/a/b.git/': Could not resolve host"), "fatal: unable to access 'https://u:***@h:8443/a/b.git/': Could not resolve host");
+    assert_eq!(hide_passwords("https://user@host/x.git and /srv/x.git"), "https://user@host/x.git and /srv/x.git");
+    assert!(!hide_passwords("a https://x:y@h/ b ssh://q:r@s/").contains(":y@"));
 }
 
 // spec: SYNC-003

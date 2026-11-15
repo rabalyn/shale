@@ -246,21 +246,7 @@ fn check_temp_file(path: &Path) -> Result<PathBuf, String> {
 /// user's runtime folder when there is one (already private), else in the system temp folder,
 /// where an existing folder of that name that is not ours is refused.
 fn temp_root() -> Result<PathBuf, String> {
-    #[cfg(unix)]
-    let who = unsafe { libc::geteuid() }.to_string();
-    #[cfg(not(unix))]
-    let who = String::from("user");
-    let base = dirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
-    let dir = base.join(format!("shale-open-{who}"));
-    #[cfg(unix)]
-    if let Ok(m) = std::fs::symlink_metadata(&dir) {
-        use std::os::unix::fs::MetadataExt;
-        if !m.is_dir() || m.uid() != unsafe { libc::geteuid() } {
-            return Err("Not opened: the temp folder is not ours".into());
-        }
-    }
-    crate::fsutil::ensure_private_dir(&dir).map_err(|e| format!("Could not make the temp folder: {e}"))?;
-    Ok(dir)
+    crate::fsutil::private_temp_root("shale-open").map_err(|e| if e.kind() == std::io::ErrorKind::PermissionDenied { "Not opened: the temp folder is not ours".to_string() } else { format!("Could not make the temp folder: {e}") })
 }
 
 /// A file name that is safe to create: no folders in it, nothing hidden, not empty.

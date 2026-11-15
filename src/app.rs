@@ -493,6 +493,9 @@ impl ShaleApp {
         }
         if app.cfg.input_log {
             app.start_input_log();
+            // an old setting must not keep recording unnoticed; the start of the window is slow, so the
+            // toast gets a later start time to stay visible long enough (SEC-009)
+            app.toasts.push((format!("Keyboard recording is on: everything typed outside password fields is written to {}. Switch it off in Settings.", crate::config::input_log_path().display()), Instant::now() + Duration::from_secs(8)));
         }
         cfg = app.cfg.clone();
         let _ = cfg;
@@ -1810,14 +1813,14 @@ impl ShaleApp {
         }
     }
 
-    /// Passwords are typed in the calendar and mail account settings: no key of theirs is recorded
-    /// (MAIL-041).
+    /// Passwords are typed in the calendar and mail account settings and in every other password
+    /// field (`secrets::password_edit`): no key of theirs is recorded (MAIL-041, SEC-009).
     pub(crate) fn input_is_secret(&self) -> bool {
-        matches!(self.modal, Some(Modal::Calendars(_)) | Some(Modal::MailAccounts(_)))
+        matches!(self.modal, Some(Modal::Calendars(_)) | Some(Modal::MailAccounts(_))) | crate::secrets::secret_field_shown()
     }
 
     /// Append the keyboard-related events of this frame, plus the editor's picker state.
-    fn log_input(&mut self, raw: &egui::RawInput) {
+    pub(crate) fn log_input(&mut self, raw: &egui::RawInput) {
         use std::io::Write;
         // the calendar settings hold the CalDAV password field: record nothing typed there
         // (not even key names, they would spell the password)
@@ -1895,6 +1898,10 @@ impl ShaleApp {
         self.screenshot_tick(ui);
         self.shortcuts(ui);
         self.autosave();
+        // secrets the keyring refused to keep (SEC-011)
+        for m in crate::secrets::take_notices() {
+            self.toast(m);
+        }
         let ctx = ui.ctx().clone();
         self.sync_tick(&ctx);
         self.mail_tick(&ctx);
@@ -2137,6 +2144,48 @@ pub(crate) mod tests {
         // a red link to a drawing creates a drawing file
         app.open_link("Plan.excalidraw", None, None, false);
         assert!(d.join("Plan.excalidraw").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: SEC-009
+    #[test]
+    fn nothing_typed_or_pasted_into_a_password_field_is_recorded() {
+        use eframe::egui::{Event as Ev, Modifiers};
+        let (mut app, d) = test_app("keyrec");
+        let log = d.join("input-debug.log");
+        crate::config::INPUT_LOG_TEST_PATH.with(|c| *c.borrow_mut() = Some(log.clone()));
+        app.cfg.input_log = true;
+        let typed = |s: &str| egui::RawInput {
+            events: vec![Ev::Key { key: egui::Key::H, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }, Ev::Text(s.into()), Ev::Paste(s.into()), Ev::Ime(egui::ImeEvent::Commit(s.into()))],
+            ..Default::default()
+        };
+        let read = || std::fs::read_to_string(&log).unwrap_or_default();
+        // a normal field is recorded (so the checks below are not vacuous)
+        app.log_input(&typed("visible-text"));
+        assert!(read().contains("visible-text"));
+        // while a password field is on screen, nothing of it is
+        let ctx = egui::Context::default();
+        let mut pw = String::new();
+        let mut show = || {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut pw));
+                });
+            });
+        };
+        show();
+        app.log_input(&typed("hunter2-secret"));
+        show();
+        app.log_input(&typed("pasted-secret"));
+        assert!(!read().contains("secret"), "{}", read());
+        assert!(!read().contains("Key H"), "not even key names: {}", read());
+        // a few frames after the field is gone, recording goes on
+        for _ in 0..4 {
+            app.log_input(&egui::RawInput::default());
+        }
+        app.log_input(&typed("visible-again"));
+        assert!(read().contains("visible-again"));
+        crate::config::INPUT_LOG_TEST_PATH.with(|c| *c.borrow_mut() = None);
         let _ = std::fs::remove_dir_all(&d);
     }
 

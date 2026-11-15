@@ -556,6 +556,10 @@ impl MailView {
             self.handle(ev, cfg);
         }
         self.poll_syncs();
+        for id in crate::oauth::take_unsaved_notices() {
+            let name = cfg.mail_accounts.iter().find(|a| a.id == id).map_or(id.as_str(), |a| a.name.as_str());
+            self.notices.push(format!("The sign-in of “{name}” was renewed but could not be saved in the keyring; you may have to sign in again after a restart."));
+        }
         self.tick_compose_keys();
         self.tick_ops(cfg);
         self.tick_local(cfg);

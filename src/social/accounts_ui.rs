@@ -231,7 +231,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
                 ui.end_row();
                 if d.use_token {
                     ui.label(muted("Access token"));
-                    rec("token".into(), ui.add(egui::TextEdit::singleline(&mut d.secret).password(true).hint_text("created in Preferences → Development").desired_width(380.0)));
+                    rec("token".into(), crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut d.secret).hint_text("created in Preferences → Development").desired_width(380.0)));
                     ui.end_row();
                 } else {
                     ui.label(muted("Step 1"));
@@ -263,7 +263,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
                 rec("handle".into(), ui.add(egui::TextEdit::singleline(&mut d.handle).hint_text("you.bsky.social").desired_width(380.0)));
                 ui.end_row();
                 ui.label(muted("App password"));
-                rec("app-password".into(), ui.add(egui::TextEdit::singleline(&mut d.secret).password(true).hint_text("xxxx-xxxx-xxxx-xxxx").desired_width(380.0)));
+                rec("app-password".into(), crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut d.secret).hint_text("xxxx-xxxx-xxxx-xxxx").desired_width(380.0)));
                 ui.end_row();
                 ui.label(muted("Server"));
                 rec("server".into(), ui.add(egui::TextEdit::singleline(&mut d.server).hint_text(BLUESKY_SERVER).desired_width(380.0)));

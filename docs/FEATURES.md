@@ -186,7 +186,7 @@ built-in demo vault (`shale --screenshot out.png`).
   browser**, and sign in on the provider's page. Shale shows who signed in, keeps only a refresh
   token in the system keyring and renews the short-lived access token by itself. If the sign-in
   expires or is revoked, the mail view and the settings say so and **Sign in again** fixes it.
-  Without a keyring the sign-in lasts until Shale quits.
+  Without a keyring the sign-in lasts until Shale quits. If a renewed sign-in can't be saved in the keyring, Shale says so once.
   - *Google:* in the Google Cloud console create a project, set up the OAuth consent screen
     (External, status Testing) and add your Gmail address as a test user, create an **OAuth client
     ID of type "Desktop app"**, and enter its client ID and client secret in Shale. The scope
@@ -418,7 +418,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 ## Git sync
 
 - Needs `git` installed. In Settings → Git sync, enter the URL of a git repository
-  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect, or run
+  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use a credential helper or an SSH key), or run
   `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
   every few minutes (default 5, changeable) and on "Sync now".
 - A sync commits every change (the `.shale/` files too, so settings and open notes follow you),
