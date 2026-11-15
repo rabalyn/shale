@@ -1448,8 +1448,10 @@ fn queued_actions_of_an_account_that_is_not_configured_any_more_are_never_sent_a
     w.until("the attempt fails", |a| a.mail.offline.values().next().is_some());
     let queued = |w: &W| w.app.mail.ready_store().unwrap().reader().unwrap().pending_ops(None).unwrap().len();
     assert_eq!(queued(&w), 1);
-    // the account is gone from the settings, the network is back
+    // the account is gone from the settings; a retry started before that (every 50 ms) ends offline first
     w.app.cfg.mail_accounts.clear();
+    w.until("no attempt of the old settings is running", |a| !a.mail.busy_with_ops());
+    // the network is back
     w.offline.store(false, std::sync::atomic::Ordering::SeqCst);
     let flags = w.server_flags("INBOX", 3);
     let id = w.account.id.clone();
