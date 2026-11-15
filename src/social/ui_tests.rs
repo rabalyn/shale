@@ -70,6 +70,8 @@ impl W {
         let script = Arc::new(Script::default());
         app.social.source = Some(script.clone());
         let mut w = W { script, app, ctx, t: 0.0, dir };
+        // the window starts with the Feeds tab only (the Feeds button would add one to the note tab)
+        w.app.tabs.clear();
         w.app.show_view(View::Social(None), false);
         w.frames(4);
         w
@@ -186,18 +188,21 @@ fn two_feeds_open_in_two_tabs_each_with_its_own_scroll_and_title() {
 
 // spec: SOC-022
 #[test]
-fn the_feeds_button_shows_an_existing_feeds_tab_and_a_new_empty_tab_becomes_a_second_one() {
+fn the_feeds_button_always_opens_a_new_feeds_tab_and_an_empty_tab_is_filled() {
     let mut w = W::new("ribbon");
     w.app.new_tab(View::Note(PathBuf::from("Welcome.md")));
-    w.app.show_view(View::Social(None), false);
-    assert_eq!(w.app.active, 0, "the existing Feeds tab is shown");
-    assert_eq!(w.app.tabs.len(), 2);
-    // the (+) button: an empty tab, then Feeds in it
+    // the ribbon button, clicked twice: two more Feeds tabs, none focused or replaced
+    for n in [3, 4] {
+        w.app.show_view(View::Social(None), false);
+        assert_eq!((w.app.tabs.len(), w.app.active), (n, n - 1));
+        w.frames(3);
+        assert_eq!(w.view(n - 1), View::Social(Some(home())), "the new tab shows the feed set-up");
+    }
+    assert!(matches!(w.view(1), View::Note(_)), "the note tab stays");
+    // the (+) button: an empty tab, then Feeds in it, makes no extra tab
     w.app.new_tab(View::Empty);
     w.app.show_view(View::Social(None), false);
-    assert_eq!((w.app.tabs.len(), w.app.active), (3, 2));
-    w.frames(3);
-    assert_eq!(w.view(2), View::Social(Some(home())), "the last feed is shown");
+    assert_eq!((w.app.tabs.len(), w.app.active), (5, 4));
 }
 
 // spec: SOC-021

@@ -344,7 +344,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ![The feed view](screenshots/social-feed.png)
 
-- The ribbon's speech-bubble button opens **Feeds**. **Accounts…** adds a Mastodon account (type
+- The ribbon's speech-bubble button opens **Feeds** in a **new tab** every time (pick the account
+  and feed there, so a new feed can join the tabs you have). **Accounts…** adds a Mastodon account (type
   the server, open the sign-in page in the browser, paste the code it shows; or paste an access
   token) or a Bluesky account (handle and an **app password** from Settings → Privacy and
   security → App passwords, never your main password). Secrets go to the system keyring.

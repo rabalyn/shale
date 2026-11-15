@@ -622,21 +622,12 @@ impl ShaleApp {
             self.new_tab(view);
             return;
         }
-        // the Feeds button shows a Feeds tab that exists (the current one first); the same feed
-        // may be open in several tabs, so a feed is never "found" by equality
-        if view == View::Social(None) {
-            // (a new tab, still empty, becomes a second Feeds tab instead)
-            let i = if self.tabs[self.active].view == View::Empty {
-                None
-            } else if matches!(self.tabs[self.active].view, View::Social(_)) {
-                Some(self.active)
-            } else {
-                self.tabs.iter().position(|t| matches!(t.view, View::Social(_)))
-            };
-            if let Some(i) = i {
-                self.active = i;
-                return;
-            }
+        // the Feeds button always opens a new Feeds tab (to add a feed to the workflow); the same
+        // feed may be open in several tabs, so a feed is never "found" by equality. A new tab that
+        // is still empty becomes the Feeds tab instead of leaving an empty one behind.
+        if view == View::Social(None) && self.tabs[self.active].view != View::Empty {
+            self.new_tab(view);
+            return;
         }
         // reuse a tab already showing it
         if let Some(i) = self.tabs.iter().position(|t| t.view == view && !matches!(t.view, View::Social(_))) {
