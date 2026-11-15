@@ -47,6 +47,7 @@ fn dialog_rect(p: &P, key: &str) -> Rect {
         Some(Modal::Event(d)) => &d.rects,
         Some(Modal::Import(d)) => &d.rects,
         Some(Modal::Export(d)) => &d.rects,
+        Some(Modal::MailAccounts(d)) => &d.rects,
         _ => panic!("no dialog with controls is open"),
     };
     rects.iter().find(|(k, _)| k == key).unwrap_or_else(|| panic!("no control {key:?}: {:?}", rects.iter().map(|r| &r.0).collect::<Vec<_>>())).1
@@ -69,7 +70,7 @@ fn click_control(p: &mut P, key: &str) {
 
 // spec: VAULT-024
 #[test]
-fn dialogs_the_sort_menu_orders_the_rows_and_remembers_the_choice() {
+fn dialogs_the_sort_menu_orders_the_rows_and_names_the_choice() {
     let mut p = P::with_files("sort", &[("Bravo.md", "b\n"), ("Alpha.md", "a\n"), ("Charlie.md", "c\n"), ("Mango/x.md", "x\n"), ("Apple/y.md", "y\n")]);
     // modified times the test sets itself (folders last: writing into them changes theirs)
     for (f, s) in [("Alpha.md", 3000), ("Bravo.md", 1000), ("Charlie.md", 2000), ("Mango/x.md", 100), ("Apple/y.md", 100), ("Mango", 900), ("Apple", 500)] {
@@ -99,7 +100,7 @@ fn dialogs_the_sort_menu_orders_the_rows_and_remembers_the_choice() {
     // the creation times are whatever the file system made: check against them
     let created = |p: &P, n: &str| p.app.vault.as_ref().unwrap().files.iter().find(|f| f.rel == Path::new(&format!("{n}.md"))).and_then(|f| f.created);
     for (to, asc) in [("Created (old to new)", true), ("Created (new to old)", false)] {
-        let from = format!("{}", p.app.cfg.file_sort.label());
+        let from = p.app.cfg.file_sort.label().to_string();
         choose(&mut p, &from, to);
         let files: Vec<String> = names(&p).into_iter().filter(|n| n.len() > 4 && n != "Apple" && n != "Mango").collect();
         let mut want = files.clone();
@@ -413,4 +414,54 @@ fn dialogs_convert_again_makes_a_second_drawing_and_open_uses_the_first() {
     assert_ne!(second, first);
     assert!(p.dir.join(&first).is_file() && p.dir.join(&second).is_file(), "both drawings exist");
     assert_eq!(std::fs::read_to_string(p.dir.join(canvas)).unwrap(), crate::app::tests::CANVAS, "the canvas is never changed");
+}
+
+// spec: MAIL-040
+#[test]
+fn dialogs_mail_accounts_wrong_entries_are_explained_and_a_good_one_is_saved() {
+    let mut p = P::new("mail-accounts", &[]);
+    p.app.open_mail_settings();
+    p.look(Show::Modals);
+    click_control(&mut p, "md:add");
+    // nothing typed: the first thing missing is named, and nothing is saved
+    click_control(&mut p, "md:done");
+    assert!(p.shows(Show::Modals, "Every account needs a server (host name)."));
+    assert!(p.app.cfg.mail_accounts.is_empty() && p.app.modal.is_some());
+    fill(&mut p, "md:host", "127.0.0.1");
+    click_control(&mut p, "md:done");
+    assert!(p.shows(Show::Modals, "needs a user name."));
+    fill(&mut p, "md:user", "ada");
+    fill(&mut p, "md:port", "99999");
+    click_control(&mut p, "md:done");
+    assert!(p.shows(Show::Modals, "the port must be a number between 1 and 65535."));
+    fill(&mut p, "md:port", "1993");
+    fill(&mut p, "md:minutes", "often");
+    click_control(&mut p, "md:done");
+    assert!(p.shows(Show::Modals, "“Sync every” must be a whole number of minutes"));
+    assert!(p.app.cfg.mail_accounts.is_empty());
+    // the rest is right: saved
+    fill(&mut p, "md:minutes", "7");
+    if matches!(&p.app.modal, Some(Modal::MailAccounts(d)) if !d.mark_read) {
+        click_control(&mut p, "md:mark-read");
+    }
+    fill(&mut p, "md:mark-read-secs", "5");
+    fill(&mut p, "md:undo-secs", "0");
+    click_control(&mut p, "md:done");
+    assert!(p.app.modal.is_none(), "closed");
+    assert_eq!(p.app.cfg.mail_accounts.len(), 1);
+    let a = &p.app.cfg.mail_accounts[0];
+    assert_eq!((a.host.as_str(), a.user.as_str(), a.port), ("127.0.0.1", "ada", 1993));
+    assert_eq!((p.app.cfg.mail_sync_minutes, p.app.cfg.mail_mark_read, p.app.cfg.mail_mark_read_secs, p.app.cfg.mail_undo_secs), (7, true, 5, 0));
+    // Cancel keeps the account, removing it and saying Done takes it away (the mail on disk stays)
+    p.app.open_mail_settings();
+    p.look(Show::Modals);
+    click_control(&mut p, "md:remove");
+    click_control(&mut p, "md:cancel");
+    assert!(p.app.modal.is_none() && p.app.cfg.mail_accounts.len() == 1);
+    p.app.open_mail_settings();
+    p.look(Show::Modals);
+    click_control(&mut p, "md:remove");
+    click_control(&mut p, "md:done");
+    assert!(p.app.modal.is_none() && p.app.cfg.mail_accounts.is_empty());
+    assert!(p.app.toasts.iter().any(|(t, _)| t.starts_with("The account was removed.")), "{:?}", p.app.toasts);
 }
