@@ -109,6 +109,11 @@ impl MailView {
                     ui.label(muted("Opening the local mail copy…"));
                 });
             }
+            StoreState::Rebuilding(_) => {
+                ui.scope_builder(UiBuilder::new().max_rect(body.shrink(20.0)), |ui| {
+                    ui.label(muted("Rebuilding the mail index from the message files…"));
+                });
+            }
             StoreState::Ready(_) if cfg.mail_accounts.is_empty() => {
                 ui.scope_builder(UiBuilder::new().max_rect(body.shrink(30.0)), |ui| {
                     ui.add_space(40.0);

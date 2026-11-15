@@ -25,15 +25,16 @@ use crate::mail_db::{self, FolderRow, IndexFields, MailError, MessageSummary, Ne
 use rusqlite::Connection;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 /// Text of the body that goes into the search index (bytes; the rest of a huge mail is not searched).
 const MAX_BODY_INDEX: usize = 1 << 20;
 /// How many index rows one transaction takes when rebuilding.
 const RECONCILE_BATCH: usize = 200;
-/// Backups kept.
+/// Backups kept unless the setting says otherwise (USE-020).
 const BACKUPS_KEPT: usize = 3;
 /// Longest folder directory name; longer folder names use a hash (the real name is in `name.txt`).
 const MAX_DIR_NAME: usize = 150;
@@ -165,6 +166,7 @@ enum Cmd {
     Batch { ops: Vec<Op>, crash_after: Option<usize>, reply: Sender<Result<()>> },
     Folder { account: String, display: String, name: String, delimiter: Option<String>, special_use: Option<String>, sync_enabled: bool, reply: Sender<Result<FolderRow>> },
     Backup { date: String, reply: Sender<Result<Option<PathBuf>>> },
+    Rebuild { reply: Sender<Result<usize>> },
     Stop,
 }
 
@@ -173,6 +175,8 @@ pub struct MailStore {
     root: PathBuf,
     tx: Sender<Cmd>,
     writer: Mutex<Option<JoinHandle<()>>>,
+    /// How many daily backups are kept (`usize::MAX`: all).
+    keep_backups: Arc<AtomicUsize>,
     /// What opening found and repaired.
     pub opened: OpenReport,
 }
@@ -205,12 +209,28 @@ impl MailStore {
         report.missing_files = missing;
         let (tx, rx) = channel::<Cmd>();
         let writer_root = root.to_path_buf();
-        let handle = std::thread::Builder::new().name("mail-index-writer".into()).spawn(move || writer_loop(conn, writer_root, rx)).map_err(|e| MailError(e.to_string()))?;
-        Ok(MailStore { root: root.to_path_buf(), tx, writer: Mutex::new(Some(handle)), opened: report })
+        let keep_backups = Arc::new(AtomicUsize::new(BACKUPS_KEPT));
+        let keep = keep_backups.clone();
+        let handle = std::thread::Builder::new().name("mail-index-writer".into()).spawn(move || writer_loop(conn, writer_root, rx, keep)).map_err(|e| MailError(e.to_string()))?;
+        Ok(MailStore { root: root.to_path_buf(), tx, writer: Mutex::new(Some(handle)), keep_backups, opened: report })
     }
 
     pub fn index_path(&self) -> PathBuf {
         self.root.join("index.sqlite")
+    }
+
+    /// How many daily backups the next backup keeps (None: all of them) (USE-020).
+    pub fn set_backups_kept(&self, keep: Option<u32>) {
+        self.keep_backups.store(keep.map(|n| n as usize).unwrap_or(usize::MAX), Ordering::Relaxed);
+    }
+
+    /// Build the index again from the message files, in place (USE-012): the rows of the
+    /// messages go and come back from the files as in MAIL-006; the folders keep their rows,
+    /// so their ids and the server's folder roles stay, and the next sync brings the flags back.
+    /// Refused while the index holds actions not yet sent to the server (MAIL-107). Returns how
+    /// many messages the index has afterwards.
+    pub fn rebuild_index(&self) -> Result<usize> {
+        self.ask(|reply| Cmd::Rebuild { reply })
     }
 
     /// The full path of a message file given its relative path from the index.
@@ -496,7 +516,7 @@ impl Reader {
 
 // ---------------------------------------------------------------- the writer thread
 
-fn writer_loop(mut conn: Connection, root: PathBuf, rx: std::sync::mpsc::Receiver<Cmd>) {
+fn writer_loop(mut conn: Connection, root: PathBuf, rx: std::sync::mpsc::Receiver<Cmd>, keep_backups: Arc<AtomicUsize>) {
     while let Ok(cmd) = rx.recv() {
         match cmd {
             Cmd::Stop => break,
@@ -509,7 +529,12 @@ fn writer_loop(mut conn: Connection, root: PathBuf, rx: std::sync::mpsc::Receive
                 let _ = reply.send(r);
             }
             Cmd::Backup { date, reply } => {
-                let r = crate::jobs::catch(|| make_backup(&conn, &root, &date)).unwrap_or_else(|e| Err(MailError(e)));
+                let keep = keep_backups.load(Ordering::Relaxed);
+                let r = crate::jobs::catch(|| make_backup(&conn, &root, &date, keep)).unwrap_or_else(|e| Err(MailError(e)));
+                let _ = reply.send(r);
+            }
+            Cmd::Rebuild { reply } => {
+                let r = crate::jobs::catch(|| rebuild_in_place(&mut conn, &root)).unwrap_or_else(|e| Err(MailError(e)));
                 let _ = reply.send(r);
             }
         }
@@ -522,6 +547,63 @@ fn backup_name(date: &str) -> String {
     format!("index.backup-{date}.sqlite")
 }
 
+/// The daily backups as cache files, oldest first (USE-013).
+pub fn backup_files(root: &Path) -> Vec<crate::data_usage::files::FileEntry> {
+    let mut v = crate::data_usage::files::entries(root, |n| n.starts_with("index.backup-") && n.ends_with(".sqlite"));
+    for f in &mut v {
+        let name = f.path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        f.at = date_in_name(name.trim_start_matches("index.backup-")).unwrap_or(f.at);
+    }
+    v.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.path.cmp(&b.path)));
+    v
+}
+
+/// The damaged copies of the index (with their WAL files), oldest first (USE-014). Their time
+/// is the date in the name.
+pub fn broken_files(root: &Path) -> Vec<crate::data_usage::files::FileEntry> {
+    let mut v = crate::data_usage::files::entries(root, |n| n.starts_with("index.sqlite") && n.contains(".broken-"));
+    for f in &mut v {
+        let name = f.path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        let date = name.split_once(".broken-").map(|(_, d)| d).unwrap_or_default();
+        f.at = date_in_name(date).unwrap_or(f.at);
+    }
+    v.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.path.cmp(&b.path)));
+    v
+}
+
+/// The start of a day given as `YYYY-MM-DD…` at the start of `s` (UTC).
+fn date_in_name(s: &str) -> Option<i64> {
+    let d = s.get(..10)?;
+    let mut it = d.split('-');
+    let (y, m, dd) = (it.next()?.parse().ok()?, it.next()?.parse().ok()?, it.next()?.parse().ok()?);
+    Some(crate::cal_time::days_from_civil(y, m, dd) * 86_400)
+}
+
+/// See [`MailStore::rebuild_index`].
+fn rebuild_in_place(conn: &mut Connection, root: &Path) -> Result<usize> {
+    let waiting: i64 = conn.query_row("SELECT COUNT(*) FROM pending_ops", [], |r| r.get(0))?;
+    if waiting > 0 {
+        return Err(MailError(format!("{waiting} change(s) still wait for the server; the index holds them, so it is not rebuilt until they are sent")));
+    }
+    let roles: Vec<(i64, Option<String>, Option<String>)> = {
+        let mut st = conn.prepare("SELECT id, delimiter, special_use FROM folders")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        v
+    };
+    let tx = conn.transaction()?;
+    tx.execute_batch("DELETE FROM mail_fts; DELETE FROM messages; UPDATE folders SET uidvalidity = NULL, uidnext = NULL, highestmodseq = NULL, last_sync = NULL;")?;
+    tx.commit()?;
+    reconcile(conn, root)?;
+    // a folder found again from its files lost the role the server gave it (Trash, Sent …)
+    let tx = conn.transaction()?;
+    for (id, delimiter, special_use) in roles {
+        tx.execute("UPDATE folders SET delimiter = ?2, special_use = ?3 WHERE id = ?1", rusqlite::params![id, delimiter, special_use])?;
+    }
+    tx.commit()?;
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
+    Ok(n as usize)
+}
+
 /// The backups in `root`, newest first (the date is in the name).
 fn backups(root: &Path) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> =
@@ -532,10 +614,10 @@ fn backups(root: &Path) -> Vec<PathBuf> {
 }
 
 /// `VACUUM INTO` a temporary name, check the copy, then give it its final name. The copy only
-/// replaces nothing: an existing backup of that day stays. Backups older than the newest 3 are
+/// replaces nothing: an existing backup of that day stays. Backups older than the newest `keep` are
 /// deleted: they are copies of a cache that can be rebuilt from the message files, and keeping
 /// them in a trash folder would add a whole index every day, forever.
-fn make_backup(conn: &Connection, root: &Path, date: &str) -> Result<Option<PathBuf>> {
+fn make_backup(conn: &Connection, root: &Path, date: &str, keep: usize) -> Result<Option<PathBuf>> {
     let dest = root.join(backup_name(date));
     if dest.exists() {
         return Ok(None);
@@ -549,7 +631,7 @@ fn make_backup(conn: &Connection, root: &Path, date: &str) -> Result<Option<Path
         return Err(e);
     }
     fsutil::rename_noreplace(&tmp, &dest)?;
-    for old in backups(root).into_iter().skip(BACKUPS_KEPT) {
+    for old in backups(root).into_iter().skip(keep.max(1)) {
         let _ = std::fs::remove_file(old);
     }
     Ok(Some(dest))
@@ -1242,6 +1324,90 @@ mod tests {
         reader.join().unwrap();
         assert_eq!(count(&store), 30);
         drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: USE-012
+    #[test]
+    fn a_rebuild_makes_the_index_again_from_the_files_and_keeps_the_folders() {
+        let root = temp_root("rebuild");
+        let store = MailStore::open(&root).unwrap();
+        let inbox = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
+        let trash = store.ensure_folder("acct1", "A", "Trash", Some("/"), Some("\\Trash"), false).unwrap();
+        put(&store, &inbox, 1, &sample("one", "a@x.de", "zebrafish"));
+        put(&store, &inbox, 2, &sample("two", "a@x.de", "second"));
+        put(&store, &trash, 1, &sample("three", "a@x.de", "third"));
+        let files_before: Vec<_> = crate::data_usage::scan::vault(&root).1;
+        assert_eq!(store.rebuild_index().unwrap(), 3, "every message file is indexed again");
+        let r = store.reader().unwrap();
+        let folders = r.folders(Some("acct1")).unwrap();
+        let t = folders.iter().find(|f| f.name == "Trash").unwrap();
+        assert_eq!((t.id, t.special_use.as_deref(), t.sync_enabled), (trash.id, Some("\\Trash"), false), "the folder keeps its row, role and switch");
+        assert_eq!(folders.iter().find(|f| f.name == "INBOX").unwrap().uidvalidity, Some(7), "the number comes from the files");
+        assert_eq!(r.search("zebrafish", None, 5, 0).unwrap().len(), 1, "the search works again");
+        assert_eq!(r.message(inbox.id, 1).unwrap().unwrap().flags, "", "the flags come back with the next sync");
+        let mut files_after: Vec<_> = crate::data_usage::scan::vault(&root).1;
+        files_after.retain(|(p, _)| p.extension().is_some_and(|e| e == "eml"));
+        assert_eq!(files_after, files_before.into_iter().filter(|(p, _)| p.extension().is_some_and(|e| e == "eml")).collect::<Vec<_>>(), "no message file changed");
+        // an action that waits for the server lives only in the index: no rebuild then
+        let pending = mail_db::PendingRow {
+            id: 0,
+            account: "acct1".into(),
+            kind: "flags".into(),
+            folder: inbox.id,
+            uidvalidity: 7,
+            uid: 1,
+            target: None,
+            flags_add: "\\Flagged".into(),
+            flags_remove: String::new(),
+            prev_flags: String::new(),
+            created: 1,
+            attempts: 0,
+            last_error: None,
+        };
+        store.commit(vec![Op::PendingAdd(Box::new(pending))]).unwrap();
+        let e = store.rebuild_index().unwrap_err();
+        assert!(e.0.contains("wait for the server"), "{e}");
+        assert_eq!(count(&store), 3, "a refused rebuild changes nothing");
+        drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: USE-013, USE-020
+    #[test]
+    fn the_number_of_backups_kept_is_a_setting_and_the_backups_are_listed_by_their_date() {
+        let root = temp_root("keep-backups");
+        let store = MailStore::open(&root).unwrap();
+        let f = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
+        put(&store, &f, 1, &sample("one", "a@x.de", "first"));
+        store.set_backups_kept(Some(1));
+        store.backup("2026-11-01").unwrap().unwrap();
+        store.backup("2026-11-02").unwrap().unwrap();
+        assert_eq!(backups(&root).len(), 1);
+        store.set_backups_kept(None);
+        for d in ["2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"] {
+            store.backup(d).unwrap().unwrap();
+        }
+        let listed = backup_files(&root);
+        assert_eq!(listed.len(), 5, "no limit keeps them all");
+        assert_eq!(listed[0].at, crate::cal_time::days_from_civil(2026, 11, 2) * 86_400, "oldest first, by the date in the name");
+        drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: USE-014
+    #[test]
+    fn damaged_copies_are_listed_with_the_date_of_their_name() {
+        let root = temp_root("broken-list");
+        std::fs::create_dir_all(&root).unwrap();
+        for n in ["index.sqlite.broken-2026-10-01", "index.sqlite-wal.broken-2026-10-01", "index.sqlite.broken-2026-11-02-2", "index.sqlite", "index.backup-2026-11-01.sqlite"] {
+            std::fs::write(root.join(n), b"x").unwrap();
+        }
+        let v = broken_files(&root);
+        let names: Vec<String> = v.iter().map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["index.sqlite-wal.broken-2026-10-01", "index.sqlite.broken-2026-10-01", "index.sqlite.broken-2026-11-02-2"]);
+        assert_eq!(v[2].at, crate::cal_time::days_from_civil(2026, 11, 2) * 86_400);
+        assert_eq!(date_in_name("garbage"), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
