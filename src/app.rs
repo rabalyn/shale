@@ -127,6 +127,8 @@ impl egui::DroppedFile for ScriptDrop {
 }
 
 pub enum Modal {
+    /// The picker window (`Space f f`, NAV-020)
+    Picker(crate::picker::Picker),
     QuickSwitch {
         query: String,
         sel: usize,
@@ -163,6 +165,8 @@ pub enum Modal {
 }
 
 pub enum Action {
+    /// put the keyboard into the editor of the open note (after opening it)
+    FocusEditor,
     /// open the "Export to PDF" dialog for a note or drawing
     Export(PathBuf),
     Open {
@@ -1594,6 +1598,7 @@ impl ShaleApp {
         let actions = std::mem::take(&mut self.actions);
         for a in actions {
             match a {
+                Action::FocusEditor => self.focus_editor(),
                 Action::Open { rel, new_tab } => self.open(&rel, new_tab),
                 Action::OpenLink { target, heading, from, new_tab } => self.open_link(&target, heading, from, new_tab),
                 Action::FixLink { note, target, to } => self.fix_link(&note, &target, &to),
@@ -1653,8 +1658,10 @@ impl ShaleApp {
         // Space sequences of vim-style normal mode (EDIT-015); a half typed one is forgotten
         // when the keys are not read any more
         if self.normal_keys_active(ui.ctx()) {
-            if let Some(KeyAction::NormalAlternate) = ui.input_mut(|i| self.keymap.poll(i, Scope::EditorNormal)) {
-                self.swap_alternate();
+            match ui.input_mut(|i| self.keymap.poll(i, Scope::EditorNormal)) {
+                Some(KeyAction::NormalAlternate) => self.swap_alternate(),
+                Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
+                _ => {}
             }
         } else {
             self.keymap.cancel(Scope::EditorNormal);

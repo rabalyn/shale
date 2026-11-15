@@ -153,6 +153,8 @@ mod tests {
             for n in ["A", "B", "C"] {
                 std::fs::write(dir.join(format!("{n}.md")), format!("# {n}\n")).unwrap();
             }
+            std::fs::create_dir_all(dir.join("projects")).unwrap();
+            std::fs::write(dir.join("projects/Roadmap.md"), "# Roadmap\nbanana\n").unwrap();
             let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
             app.open(Path::new("A.md"), false);
             let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir };
@@ -472,5 +474,100 @@ mod tests {
         w.app.show_view(View::Mail, false);
         settle(&mut w);
         assert!(!w.app.normal_keys_active(&w.ctx));
+    }
+
+    fn picker(w: &W) -> &crate::picker::Picker {
+        match &w.app.modal {
+            Some(Modal::Picker(p)) => p,
+            _ => panic!("the picker is not open"),
+        }
+    }
+
+    fn type_in_picker(w: &mut W, text: &str) {
+        w.frame(vec![Event::Text(text.to_string())]);
+        settle(w);
+    }
+
+    // spec: NAV-020, EDIT-015
+    #[test]
+    fn space_f_f_finds_a_file_by_name_and_opens_it_in_the_editor() {
+        let mut w = vim_note("picker");
+        for (key, text) in [(Key::Space, " "), (Key::F, "f")] {
+            typed(&mut w, key, text);
+            assert!(w.app.modal.is_none(), "half a sequence opens nothing");
+        }
+        assert_eq!(note_text(&w), "# A\n", "the sequence typed nothing into the note");
+        typed(&mut w, Key::F, "f");
+        settle(&mut w);
+        assert_eq!(picker(&w).query, "", "the window is open with an empty field");
+        assert_eq!(note_text(&w), "# A\n");
+        // typing filters by file name only: the text of a note and the folder do not count
+        type_in_picker(&mut w, "banana");
+        assert_eq!(picker(&w).query, "banana");
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.app.modal.is_some() && views(&w) == ["A.md"], "no name matches: Enter does nothing, and no note is created");
+        assert!(!w.dir.join("banana.md").exists());
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+        settle(&mut w);
+        type_in_picker(&mut w, "projects");
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.app.modal.is_some(), "the folder name is not a match");
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+        settle(&mut w);
+        // j and k are typed (the field has the keyboard); the arrows and Ctrl+J / Ctrl+K select
+        type_in_picker(&mut w, "o");
+        let names = |w: &W| crate::picker::Source::FileNames.hits(w.app.vault.as_ref().unwrap(), &picker(w).query).into_iter().map(|h| h.title).collect::<Vec<_>>();
+        assert_eq!(names(&w), ["Roadmap"], "only the Roadmap has an o in its name");
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+        settle(&mut w);
+        assert_eq!(names(&w), ["A", "B", "C", "Roadmap"]);
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 1);
+        w.press(Key::J, CTRL);
+        assert_eq!(picker(&w).sel, 2);
+        w.press(Key::K, CTRL);
+        w.press(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 0);
+        w.press(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 3, "wraps around");
+        // Esc closes and changes nothing
+        w.press(Key::Escape, Modifiers::NONE);
+        assert!(w.app.modal.is_none());
+        assert_eq!(views(&w), ["A.md"]);
+        // Enter on the selection: opens in the current tab, the keyboard is in the editor
+        w.app.focus_editor();
+        settle(&mut w);
+        for (key, text) in [(Key::Space, " "), (Key::F, "f"), (Key::F, "f")] {
+            typed(&mut w, key, text);
+        }
+        settle(&mut w);
+        type_in_picker(&mut w, "rdmp");
+        w.press(Key::Enter, Modifiers::NONE);
+        for n in 0..4 {
+            let ed = &w.app.tabs[0].editor;
+            eprintln!("DBG0 {n} {} {} {:?}", ed.request_focus, w.ctx.memory(|m| m.has_focus(ed.id)), w.app.modal.is_some());
+            w.frame(vec![]);
+        }
+        assert!(w.app.modal.is_none());
+        assert_eq!((views(&w), w.app.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in the current tab");
+        let ed = &w.app.tabs[0].editor;
+        eprintln!("DBG {} {:?} {} {}", ed.vim_enabled, ed.vim.mode, ed.vim.typing_command(), w.ctx.memory(|m| m.has_focus(ed.id)));
+        assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor, in normal mode");
+        assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
+    }
+
+    // spec: KEY-008, NAV-020
+    #[test]
+    fn the_find_file_keys_can_be_changed() {
+        let mut w = vim_note("picker-keys");
+        w.app.keymap.set(Action::NormalFindFile, Binding::parse("Space p").unwrap()).unwrap();
+        for (key, text) in [(Key::Space, " "), (Key::F, "f"), (Key::F, "f")] {
+            typed(&mut w, key, text);
+        }
+        assert!(w.app.modal.is_none(), "the old keys do nothing");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::P, "p");
+        assert!(matches!(w.app.modal, Some(Modal::Picker(_))), "the new ones open the picker");
+        assert_eq!(note_text(&w), "# A\n");
     }
 }

@@ -60,7 +60,8 @@ built-in demo vault (`shale --screenshot out.png`).
   and y copies to the clipboard, p pastes. The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
 - In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
   this tab showed just before, and again to come back, like vim's alternate file. Space is the
-  leader key of its own list in Keybindings…; the vim keys themselves cannot be rebound.
+  leader key of its own list in Keybindings…; **Space f f** opens a window to find a file by its
+  name (it never creates a note, unlike Ctrl+O); the vim keys themselves cannot be rebound.
 
 ## Drawings
 
@@ -466,5 +467,6 @@ keys and the keys inside the mail view are fixed.
 | Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back |
 | Alt+← / Alt+→ | Back / forward |
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |

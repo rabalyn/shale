@@ -72,6 +72,7 @@ mod pdfexport;
 mod pdfview;
 mod pdfwrite;
 mod people;
+mod picker;
 mod reader;
 mod recovery;
 mod secrets;
