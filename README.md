@@ -117,8 +117,8 @@ Other options:
 ## Keyboard
 
 The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
-(everywhere, file list, search results, mail view; double bindings are refused). Text editing
-keys and vim keys are fixed.
+(everywhere, file list, search results, mail view, vim normal mode; double bindings are refused).
+Text editing keys and vim keys are fixed.
 
 | Keys | Action |
 |---|---|
@@ -127,6 +127,7 @@ keys and vim keys are fixed.
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
@@ -135,6 +136,8 @@ keys and vim keys are fixed.
 | Drag a tab | Reorder tabs; a marker shows where it lands |
 | Right-click a tab | Pin tab / Unpin tab (pinned tabs sit at the left with a pin and keep their place between starts) |
 | Alt+← / Alt+→ | Back / forward |
+| Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Ctrl+, | Settings |
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |
@@ -175,7 +178,8 @@ With **Vim-style editing** turned on in Settings, a note you go to is in normal 
 h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / N go to the next /
 previous hit; i a I A o O start typing and Esc stops; x deletes a character; v / V select (the
 motions extend the selection), then d cuts and y copies to the clipboard; p pastes it. The
-status bar shows the mode.
+status bar shows the mode. **Space Tab** goes back to the view this tab showed just before
+(a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name.
 
 In a drawing: V/1 select, H hand, R/2 rectangle, D/3 diamond, O/4 ellipse, A/5 arrow, L/6 line,
 P/7 pen, T/8 text, E/0 eraser. Ctrl+Z/Ctrl+Shift+Z undo/redo, Ctrl+D duplicate, Delete removes.

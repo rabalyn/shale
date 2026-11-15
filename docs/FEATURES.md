@@ -61,11 +61,17 @@ built-in demo vault (`shale --screenshot out.png`).
   folder to folder, Space opens or closes a folder, Enter opens a file.
 - Every shortcut of this section can be changed in Settings → Keybindings…; a key that another
   action already uses is refused, and a binding can be a sequence of keys.
+- Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
+  mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
   start typing, Esc stops; x deletes a character; v and V select with the same motions, d cuts
   and y copies to the clipboard, p pastes. The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
+- In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
+  this tab showed just before, and again to come back, like vim's alternate file. Space is the
+  leader key of its own list in Keybindings…; **Space f f** opens a window to find a file by its
+  name (it never creates a note, unlike Ctrl+O); the vim keys themselves cannot be rebound.
 
 ## Drawings
 
@@ -463,8 +469,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 ## Keyboard
 
 The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
-(everywhere, file list, search results, mail view; double bindings are refused). Text editing
-keys and vim keys are fixed.
+(everywhere, file list, search results, mail view, vim normal mode; double bindings are refused).
+Text editing keys and vim keys are fixed.
 
 | Keys | Action |
 |---|---|
@@ -476,10 +482,13 @@ keys and vim keys are fixed.
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward |
+| Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
 

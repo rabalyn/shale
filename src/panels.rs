@@ -718,6 +718,17 @@ impl ShaleApp {
         let mut open_keybindings = false;
         let ctx = ui.ctx().clone();
         match &mut modal {
+            Modal::Picker(p) => {
+                if let Some(v) = &self.vault {
+                    let out = crate::picker::show(&ctx, p, v);
+                    keep = out.pick.is_none() && !out.close;
+                    if let Some(hit) = out.pick {
+                        // the file opens in this tab and the keyboard goes into it
+                        self.actions.push(hit.action);
+                        self.actions.push(Action::FocusEditor);
+                    }
+                }
+            }
             Modal::QuickSwitch { query, sel } => {
                 let resp = crate::dialog::Dialog::new("quick-switch", "Open a note").width(520.0).show(&ctx, |ui| {
                     let r = ui.add(egui::TextEdit::singleline(query).hint_text("Find or create a note…").desired_width(f32::INFINITY).font(FontId::proportional(16.0)));
@@ -728,20 +739,10 @@ impl ShaleApp {
                     items.truncate(12);
                     let create = !query.trim().is_empty() && !items.iter().any(|(_, _, n)| n.eq_ignore_ascii_case(query.trim()));
                     let n = items.len() + create as usize;
-                    let (down, up, enter, esc) = ui.input_mut(|i| {
-                        (i.consume_key(egui::Modifiers::NONE, Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, Key::Enter), i.consume_key(egui::Modifiers::NONE, Key::Escape))
-                    });
-                    if n > 0 {
-                        if down {
-                            *sel = (*sel + 1) % n;
-                        }
-                        if up {
-                            *sel = (*sel + n - 1) % n;
-                        }
-                        *sel = (*sel).min(n - 1);
-                    }
+                    let keys = crate::picker::ListKeys::take(ui);
+                    keys.select(sel, n);
                     ui.add_space(6.0);
-                    let mut pick: Option<usize> = if enter && n > 0 { Some(*sel) } else { None };
+                    let mut pick: Option<usize> = if keys.enter && n > 0 { Some(*sel) } else { None };
                     for (i, (_, rel, name)) in items.iter().enumerate() {
                         let folder = rel.parent().map(rel_to_string).unwrap_or_default();
                         let label = if folder.is_empty() { name.clone() } else { format!("{name}    {folder}") };
@@ -761,7 +762,7 @@ impl ShaleApp {
                         }
                         keep = false;
                     }
-                    if esc {
+                    if keys.esc {
                         keep = false;
                     }
                 });
