@@ -86,8 +86,8 @@ versions.
 ## Development and issues
 
 Shale is developed on Forgejo: <https://git.home.rabalyn.de/raba/shale>. Branches, pull requests
-and the **issues, which are the one list of open work**, live there; GitHub only hosts the
-released downloads ([ADR-0013](docs/decisions/0013-forgejo-and-issue-tracking.md), FORGE rules in
+and the **issues, which are the one list of open work**, live there; GitHub only builds and hosts the
+releases ([ADR-0013](docs/decisions/0013-forgejo-and-issue-tracking.md), FORGE rules in
 [engineering.md](docs/spec/engineering.md)). Checks run on the Forgejo runner
 (`.forgejo/workflows/ci.yml`); GitHub builds only release tags (BUILD-012).
 

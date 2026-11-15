@@ -1,4 +1,4 @@
-# ADR-0013: Forgejo is the home of development; its issues track all work; GitHub only distributes releases
+# ADR-0013: Forgejo is the home of development; its issues track all work; GitHub builds and distributes releases
 
 - **Status**: Accepted (owner decision, 2026-11-15)
 - **Date**: 2026-11-15
@@ -9,7 +9,8 @@
 
 - Shale has two remotes: `origin` (GitHub, `rabalyn/shale`) and `forgejo`
   (`ssh://git@git.home.rabalyn.de:2222/raba/shale.git`). The Forgejo repository exists and the
-  Forgejo CLI `fj` is signed in with a token (`fj --host git.home.rabalyn.de …`).
+  Forgejo CLI `fj` is signed in with a token (`fj --host git.home.rabalyn.de …`). On
+  2026-11-15 the remotes were renamed: `origin` is Forgejo, `github` is GitHub.
 - Today all CI runs on GitHub Actions (`.github/workflows/build.yml`): checks, the `latest`
   pre-release and tagged releases (BUILD-002, BUILD-003).
 - Open work was spread over `docs/spec/open-points.md`, the backlog in IMPLEMENTATION.md, the
@@ -21,13 +22,15 @@
 1. **Forgejo is the primary forge.** Branches, pull requests, reviews and issues live on
    `git.home.rabalyn.de/raba/shale`. Agents and people use `fj --host git.home.rabalyn.de`
    (or the Forgejo API with the same token) for issues and PRs.
-2. **Forgejo builds.** Pushes and PRs run the checks (fmt, clippy `-D warnings`, build, tests,
-   audit) on the Forgejo runner. A `v*` tag pushed to Forgejo starts the runner that checks the
-   version and notes and builds the release artifacts.
-3. **GitHub only distributes releases**, through a separate release workflow that publishes a
-   tagged, Forgejo-built release (tarball, checksum, notes) to GitHub Releases. GitHub runs no
-   build or test CI of its own. How the source reaches GitHub (push mirror or tags only) is
-   settled in the migration issue (raba/shale#2).
+2. **Forgejo runs the day-to-day CI.** Every push, PR and `v*` tag runs the checks (fmt, clippy
+   `-D warnings`, build, tests, packaging, audit) on the Forgejo runner; nothing is published
+   from there.
+3. **GitHub builds and distributes releases, and only releases.** Releases are cut in larger,
+   timed gaps than the day-to-day work. For a `v*` tag, a separate GitHub workflow builds and
+   tests the tagged commit again, writes the checksums and publishes the release (tarball,
+   `.sha256`, notes from `CHANGELOG.md`), so the checksums come from the build that publishes.
+   GitHub runs nothing for ordinary pushes or PRs and gets only the release commits and tags
+   (`make-release.sh` pushes them to both servers).
 4. **Forgejo issues are the one to-do list.** Every open to-do (a SHOULD BE spec row with
    planned work, a bug, an owner note, a follow-up found while working) is an open issue.
    `open-points.md` keeps undecided *questions*; `TO-TELL.md` and similar notes are input that
@@ -54,11 +57,10 @@
 - Issue numbers in commit messages refer to Forgejo. If the source is mirrored to GitHub, a bare
   `#N` there points at GitHub's numbering; release notes and docs therefore write Forgejo issues
   as `raba/shale#N` or as a full link.
-- Since the CI migration (BUILD-002, BUILD-012), day-to-day CI runs on Forgejo; GitHub still
-  rebuilds release tags itself, so FORGE-003 stays SHOULD BE until raba/shale#2 publishes the
-  Forgejo build instead.
+- A release is built twice (Forgejo checks the tag, GitHub builds what it publishes). That is
+  intended: an extra check, and the published checksum belongs to the published build.
 
-- Forgejo availability now matters for development; GitHub remains the public download place.
+- Forgejo availability now matters for development; GitHub remains the public download place and the release build.
 
 ## Alternatives
 
