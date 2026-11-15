@@ -651,6 +651,8 @@ impl NoteEditor {
             state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(c))));
             state.store(ui.ctx(), self.id);
             ui.ctx().memory_mut(|m| m.request_focus(self.id));
+            // a note opened just now may not have the keyboard in the first frame: ask again
+            self.focus_retry = 3;
         } else if self.request_focus {
             ui.ctx().memory_mut(|m| m.request_focus(self.id));
             self.focus_retry = 3;

@@ -1,6 +1,6 @@
 //! Window layout: ribbon, sidebars, tab bar, the note/drawing/tasks/graph views and status bar.
 
-use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, ShaleApp, TabMarks, View};
+use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, SettingsTab, ShaleApp, TabMarks, View};
 use crate::markdown;
 use crate::reader;
 use crate::sidebar::Item;
@@ -333,8 +333,7 @@ impl ShaleApp {
             self.ribbon_items(ui);
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 if icon_button(ui, Icon::Settings, 30.0, false, "Settings and vault (Ctrl+,)").clicked() {
-                    let vp = self.cfg.vault.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.modal = Some(Modal::Settings { vault_path: vp });
+                    self.open_settings(SettingsTab::General);
                 }
                 if icon_button(ui, Icon::SidebarRight, 30.0, false, "Toggle right sidebar").clicked() {
                     self.cfg.show_right = !self.cfg.show_right;
@@ -743,6 +742,11 @@ impl ShaleApp {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 14.0;
             let small = |t: String| egui::RichText::new(t).size(11.5).color(theme::MUTED);
+            // the keys of a sequence that waits for its next key (KEY-009)
+            if let Some((keys, left)) = self.keymap.pending_text(ui.input(|i| i.time)) {
+                ui.label(egui::RichText::new(keys).size(11.5).monospace().color(theme::ACCENT));
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+            }
             // vim-lite mode (or the command being typed) of the open note
             if let Some(status) = self.tabs.get(self.active).and_then(|t| t.editor.vim_status()) {
                 ui.label(egui::RichText::new(status).size(11.5).monospace().color(theme::ACCENT));

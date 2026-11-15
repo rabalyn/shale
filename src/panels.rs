@@ -1,7 +1,7 @@
 //! Sidebars (files, search, tags, linked notes, outline, local graph), the vault-wide
 //! to-do list and the dialogs.
 
-use crate::app::{graph_click, muted, Action, LeftPanel, Modal, RightPanel, ShaleApp, View};
+use crate::app::{graph_click, muted, Action, LeftPanel, Modal, RightPanel, SettingsTab, ShaleApp, View};
 use crate::keys::{Action as KeyAction, Scope};
 use crate::layout::{icon_button, paint_icon, Icon};
 use crate::markdown;
@@ -708,17 +708,20 @@ impl ShaleApp {
         let Some(mut modal) = self.modal.take() else { return };
         let mut keep = true;
         let mut open_calendars = false;
-        let mut open_keybindings = false;
         let ctx = ui.ctx().clone();
         match &mut modal {
             Modal::Picker(p) => {
                 if let Some(v) = &self.vault {
-                    let out = crate::picker::show(&ctx, p, v);
+                    let data = crate::search_all::Ctx { vault: v, mail: self.mail.index(), posts: &self.social.index };
+                    let out = crate::picker::show(&ctx, p, &data);
                     keep = out.pick.is_none() && !out.close;
                     if let Some(hit) = out.pick {
-                        // the file opens in this tab and the keyboard goes into it
+                        // a note opens in this tab and the keyboard goes into it; a mail or a post has its own view
+                        let note = matches!(hit.action, Action::Open { .. } | Action::GotoMatch { .. });
                         self.actions.push(hit.action);
-                        self.actions.push(Action::FocusEditor);
+                        if note {
+                            self.actions.push(Action::FocusEditor);
+                        }
                     }
                 }
             }
@@ -839,7 +842,7 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::Keybindings(_) => {}
+            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -884,8 +887,25 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Settings { vault_path } => {
-                let resp = crate::dialog::Dialog::new("settings", "Settings").width(520.0).show(&ctx, |ui| {
+            Modal::Settings { vault_path, tab, keys } => {
+                let resp = crate::dialog::Dialog::new("settings", "Settings").width(640.0).show(&ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(tab, SettingsTab::General, "General");
+                        ui.selectable_value(tab, SettingsTab::Keybindings, "Keybindings");
+                    });
+                    ui.separator();
+                    if *tab == SettingsTab::Keybindings {
+                        if crate::keys_ui::show(ui, keys, &mut self.keymap) {
+                            self.cfg.keybindings = self.keymap.overrides();
+                            self.save_config();
+                        }
+                        ui.add_space(10.0);
+                        if ui.button("Done").clicked() {
+                            keep = false;
+                        }
+                        return;
+                    }
+                    self.keymap.recording = false;
                     ui.label(egui::RichText::new("Vault folder").color(theme::MUTED));
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(vault_path).desired_width(360.0));
@@ -918,15 +938,6 @@ impl ShaleApp {
                         self.cfg.vault = None;
                         keep = false;
                     }
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Keyboard").color(theme::MUTED));
-                    ui.horizontal(|ui| {
-                        if ui.button("Keybindings…").on_hover_text("Change the shortcuts").clicked() {
-                            open_keybindings = true;
-                        }
-                        let changed = self.keymap.overrides().len();
-                        ui.label(muted(if changed == 0 { "all default".to_string() } else { format!("{changed} changed") }).size(12.0));
-                    });
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Links").color(theme::MUTED));
                     let mut changed = false;
@@ -988,6 +999,7 @@ impl ShaleApp {
                     }
                 });
                 if resp.should_close() {
+                    self.keymap.recording = false;
                     keep = false;
                 }
             }
@@ -995,24 +1007,6 @@ impl ShaleApp {
         if open_calendars {
             self.open_calendar_settings();
             keep = false;
-        }
-        if open_keybindings {
-            self.modal = Some(Modal::Keybindings(Box::default()));
-            keep = false;
-        }
-        if let Modal::Keybindings(d) = &mut modal {
-            let mut changed = false;
-            let resp = crate::dialog::Dialog::new("keybindings", "Keybindings").width(560.0).show(&ctx, |ui| {
-                changed = crate::keys_ui::show(ui, d, &mut self.keymap);
-            });
-            if changed {
-                self.cfg.keybindings = self.keymap.overrides();
-                self.save_config();
-            }
-            if resp.should_close() {
-                self.keymap.recording = false;
-                keep = false;
-            }
         }
         if let Modal::Calendars(d) = &mut modal {
             let mut out = None;

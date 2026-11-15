@@ -765,6 +765,16 @@ pub fn list(c: &Connection, folder: i64, limit: usize, offset: usize) -> Result<
 /// Search (see [`fts_query`] for what is understood), newest first. `folder` limits it to one folder.
 pub fn search(c: &Connection, query: &str, folder: Option<i64>, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
     let Some(q) = fts_query(query) else { return Ok(vec![]) };
+    search_fts(c, &q, folder, limit, offset)
+}
+
+/// [`search`] with wildcards (NAV-023): see [`fts_query_wild`]. Over all folders.
+pub fn search_wild(c: &Connection, query: &str, limit: usize) -> Result<Vec<MessageSummary>> {
+    let Some(q) = fts_query_wild(query, &FIELDS) else { return Ok(vec![]) };
+    search_fts(c, &q, None, limit, 0)
+}
+
+fn search_fts(c: &Connection, q: &str, folder: Option<i64>, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
     let mut st = c.prepare(&format!(
         "SELECT {MSG_COLS} FROM mail_fts JOIN messages m ON m.id = mail_fts.rowid JOIN folders f ON f.id = m.folder AND {VISIBLE}
          WHERE mail_fts MATCH ?1 AND (?2 IS NULL OR m.folder = ?2) ORDER BY m.date DESC, m.uid DESC LIMIT ?3 OFFSET ?4"
@@ -860,6 +870,19 @@ pub fn fts_query(input: &str) -> Option<String> {
 /// [`fts_query`] for another table: `fields` pairs each prefix a person may type with the FTS5
 /// column it limits a term to (the social post index uses it, SOC-032).
 pub fn fts_query_in(input: &str, fields: &[(&str, &str)]) -> Option<String> {
+    build_fts_query(input, fields, false)
+}
+
+/// [`fts_query_in`] where `*` and `?` in a plain word (not in a "phrase") are wildcards as far as
+/// FTS5 can do them (NAV-023): the word is cut before the first wildcard and what is left of it
+/// is a prefix (`mee*`, `mee?ing` and `meeting*` all become prefix queries). FTS5 cannot match
+/// the end of a word or one letter, so `?` and an inner `*` give more than the pattern says,
+/// and a word that starts with a wildcard is left out.
+pub fn fts_query_wild(input: &str, fields: &[(&str, &str)]) -> Option<String> {
+    build_fts_query(input, fields, true)
+}
+
+fn build_fts_query(input: &str, fields: &[(&str, &str)], wild: bool) -> Option<String> {
     let chars: Vec<char> = input.chars().take(MAX_QUERY_CHARS).collect();
     let mut terms: Vec<String> = Vec::new();
     let mut i = 0;
@@ -870,6 +893,7 @@ pub fn fts_query_in(input: &str, fields: &[(&str, &str)]) -> Option<String> {
         }
         let mut column: Option<&str> = None;
         let mut text = String::new();
+        let mut prefix = false;
         if chars[i] != '"' {
             let start = i;
             while i < chars.len() && !chars[i].is_whitespace() && chars[i] != '"' {
@@ -886,6 +910,12 @@ pub fn fts_query_in(input: &str, fields: &[(&str, &str)]) -> Option<String> {
                 }
                 None => text = word,
             }
+            if wild {
+                if let Some(at) = text.find(['*', '?']) {
+                    text.truncate(at);
+                    prefix = true;
+                }
+            }
         }
         if i < chars.len() && chars[i] == '"' && text.is_empty() {
             i += 1;
@@ -899,7 +929,7 @@ pub fn fts_query_in(input: &str, fields: &[(&str, &str)]) -> Option<String> {
         if !text.chars().any(|c| c.is_alphanumeric()) {
             continue; // nothing the tokenizer would keep
         }
-        let quoted = format!("\"{}\"", text.replace('"', "\"\""));
+        let quoted = format!("\"{}\"{}", text.replace('"', "\"\""), if prefix { "*" } else { "" });
         terms.push(match column {
             Some(col) => format!("{col} : {quoted}"),
             None => quoted,
@@ -1228,6 +1258,30 @@ mod tests {
             st.query_map([], |r| r.get::<_, String>(3)).unwrap().map(|r| r.unwrap()).collect()
         };
         assert!(plan.iter().any(|p| p.contains("messages_by_message_id")), "the duplicate check uses the Message-ID index: {plan:?}");
+    }
+
+    // spec: NAV-023
+    #[test]
+    fn wildcards_make_a_word_a_prefix_in_the_mail_query() {
+        let q = |s: &str| fts_query_wild(s, &FIELDS);
+        assert_eq!(q("mee*").as_deref(), Some("\"mee\"*"));
+        assert_eq!(q("mee?ing").as_deref(), Some("\"mee\"*"), "cut before the first wildcard");
+        assert_eq!(q("a*b*c Plan").as_deref(), Some("\"a\"* \"Plan\""));
+        assert_eq!(q("subject:inv*").as_deref(), Some("subject : \"inv\"*"), "a field prefix still works");
+        assert_eq!(q("*ing"), None, "a word that starts with a wildcard is left out");
+        assert_eq!(q("\"mee*\"").as_deref(), Some("\"mee*\""), "a phrase has no wildcards");
+        assert_eq!(fts_query("mee*").as_deref(), Some("\"mee*\""), "the plain mail search is as it was");
+        let mut c = db();
+        let f = inbox(&c);
+        add(&mut c, f.id, 1, fields("Team meetings", "a@x.de", "agenda", 1));
+        add(&mut c, f.id, 2, fields("Lunch", "a@x.de", "meet me", 2));
+        add(&mut c, f.id, 3, fields("Other", "a@x.de", "nothing", 3));
+        let subjects = |s: &str| search_wild(&c, s, 10).unwrap().into_iter().map(|m| m.subject).collect::<Vec<_>>();
+        assert_eq!(subjects("mee*"), ["Lunch", "Team meetings"], "newest first");
+        assert_eq!(subjects("meeti?g"), ["Team meetings"]);
+        assert_eq!(subjects("meet"), ["Lunch"], "without a wildcard whole words only");
+        assert!(subjects("*").is_empty());
+        assert_eq!(search_wild(&c, "mee*", 1).unwrap().len(), 1, "the limit holds");
     }
 
     #[test]
