@@ -163,7 +163,7 @@ mod tests {
         std::fs::write(dir.join("Road trip.md"), "x\n").unwrap();
         let v = Vault::open(&dir).unwrap();
         let titles = |q: &str| Source::FileNames.hits(&v, q).into_iter().map(|h| h.title).collect::<Vec<_>>();
-        assert_eq!(titles("road"), ["Road trip", "Roadmap"], "a name that starts with it first");
+        assert_eq!(titles("road"), ["Roadmap", "Road trip"], "names starting with it, the shorter first");
         assert_eq!(titles("rdmp"), ["Roadmap"], "fuzzy: letters in order");
         assert_eq!(titles("GROC"), ["Groceries"], "case does not matter");
         assert!(titles("banana").is_empty(), "the text of a note is not searched");

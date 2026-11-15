@@ -352,6 +352,17 @@ mod tests {
         assert_eq!(views(&w)[0], "calendar");
         w.press(Key::L, CTRL_ALT);
         assert_eq!(views(&w)[w.app.active], "B.md");
+        // a pinned tab sits first, and so it comes first in the order
+        let a = w.app.tabs.iter().position(|t| t.view == View::Note("A.md".into())).unwrap();
+        w.app.set_tab_pinned(a, true);
+        assert_eq!(views(&w), ["A.md", "calendar", "B.md"]);
+        w.app.active = 0;
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "B.md", "Previous from the pinned first tab wraps to the last");
+        w.press(Key::L, CTRL_ALT);
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "calendar");
+        w.app.active = views(&w).iter().position(|v| v == "B.md").unwrap();
         // another binding: the old key does nothing
         w.app.keymap.set(Action::NextTab, Binding::parse("Ctrl+Alt+N").unwrap()).unwrap();
         w.press(Key::L, CTRL_ALT);
@@ -543,15 +554,9 @@ mod tests {
         settle(&mut w);
         type_in_picker(&mut w, "rdmp");
         w.press(Key::Enter, Modifiers::NONE);
-        for n in 0..4 {
-            let ed = &w.app.tabs[0].editor;
-            eprintln!("DBG0 {n} {} {} {:?}", ed.request_focus, w.ctx.memory(|m| m.has_focus(ed.id)), w.app.modal.is_some());
-            w.frame(vec![]);
-        }
+        settle(&mut w);
         assert!(w.app.modal.is_none());
         assert_eq!((views(&w), w.app.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in the current tab");
-        let ed = &w.app.tabs[0].editor;
-        eprintln!("DBG {} {:?} {} {}", ed.vim_enabled, ed.vim.mode, ed.vim.typing_command(), w.ctx.memory(|m| m.has_focus(ed.id)));
         assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor, in normal mode");
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
     }

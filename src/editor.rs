@@ -359,6 +359,9 @@ pub struct NoteEditor {
     /// Put the cursor here (char index) on the next frame and scroll to it.
     pub pending_cursor: Option<usize>,
     pub request_focus: bool,
+    /// Frames left to ask again when the request was not granted (a dialog that has just closed
+    /// still blocks the keyboard for the window behind it for a frame).
+    focus_retry: u8,
     /// Where the text was drawn last frame (used by tests and for scrolling).
     pub last_layout: Option<(Arc<Galley>, Pos2)>,
     /// Draw embedded images, drawings and PDFs inside the editor (set from the app's settings).
@@ -386,6 +389,7 @@ impl NoteEditor {
             assist: crate::link_assist::LinkAssist::new(id),
             pending_cursor: None,
             request_focus: false,
+            focus_retry: 0,
             last_layout: None,
             inline_images: false,
             dark_canvas: true,
@@ -649,6 +653,14 @@ impl NoteEditor {
             ui.ctx().memory_mut(|m| m.request_focus(self.id));
         } else if self.request_focus {
             ui.ctx().memory_mut(|m| m.request_focus(self.id));
+            self.focus_retry = 3;
+        } else if self.focus_retry > 0 {
+            if ui.ctx().memory(|m| m.has_focus(self.id)) {
+                self.focus_retry = 0;
+            } else {
+                ui.ctx().memory_mut(|m| m.request_focus(self.id));
+                self.focus_retry -= 1;
+            }
         }
         self.request_focus = false;
 
