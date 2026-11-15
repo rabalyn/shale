@@ -431,11 +431,24 @@ impl ShaleApp {
         let default_welcome = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_default().join("Notes");
         // where the data lives: the user's folders, or temporary ones for tests and screenshots
         let n = NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst);
-        let pid = std::process::id();
-        let mail_root = if persist { crate::mail_store::default_root() } else { std::env::temp_dir().join(format!("shale-mail-{pid}-{n}")) };
-        let social_dir = if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{pid}")) };
-        let calendar_dir = if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{pid}")) };
-        let recovery_root = if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{pid}")) };
+        // tests: one folder per process (and app); screenshots: a fixed name, emptied first, because
+        // the data usage dialog shows these paths and two runs must give the same picture
+        let tag = if screenshot.is_some() { "screenshot".to_string() } else { std::process::id().to_string() };
+        let mail_root = if persist {
+            crate::mail_store::default_root()
+        } else if screenshot.is_some() {
+            std::env::temp_dir().join("shale-mail-screenshot")
+        } else {
+            std::env::temp_dir().join(format!("shale-mail-{tag}-{n}"))
+        };
+        let social_dir = if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{tag}")) };
+        let calendar_dir = if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{tag}")) };
+        let recovery_root = if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{tag}")) };
+        if screenshot.is_some() {
+            for d in [&mail_root, &social_dir, &calendar_dir, &recovery_root] {
+                let _ = std::fs::remove_dir_all(d);
+            }
+        }
         let places = if persist {
             crate::data_usage::Places {
                 pictures: social_dir.clone(),
@@ -456,7 +469,7 @@ impl ShaleApp {
                 calendars: calendar_dir.clone(),
                 calendar_trash: calendar_dir.join(".calendar-trash"),
                 recovery: recovery_root.clone(),
-                ..crate::data_usage::Places::in_folder(&std::env::temp_dir().join(format!("shale-usage-{pid}-{n}")))
+                ..crate::data_usage::Places::in_folder(&std::env::temp_dir().join(format!("shale-usage-{tag}-{n}")))
             }
         };
         let mut app = ShaleApp {
