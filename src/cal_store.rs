@@ -114,7 +114,8 @@ fn local_write(file: &std::path::Path, name: &str, events: &[Event]) -> Result<(
 /// series (changed single dates), which are always kept together. `in_place`: the event is
 /// already in this calendar and is replaced; otherwise it is created.
 /// For CalDAV: returns the event's address and new version tag.
-fn write_to(target: &Target, parts: &[Event], in_place: bool) -> Result<Option<(String, Option<String>)>, String> {
+/// `before`: the event's parts as they were loaded (for the check against the server).
+fn write_to(target: &Target, parts: &[Event], in_place: bool, before: &[Event]) -> Result<Option<(String, Option<String>)>, String> {
     let Some(e) = parts.first() else { return Ok(None) };
     match target {
         Target::Local { file, name } => {
@@ -129,12 +130,45 @@ fn write_to(target: &Target, parts: &[Event], in_place: bool) -> Result<Option<(
                 (true, None) => return Err("the event's address on the server is unknown; refresh the calendar and try again".into()),
                 (false, _) => None,
             };
-            cal_dav::put_event(url, acct, parts, existing).map(Some)
+            cal_dav::put_event(url, acct, parts, existing, before).map(Some)
         }
     }
 }
 
-fn remove_from(target: &Target, e: &Event) -> Result<(), String> {
+/// Where the copy of a deleted event goes by default (`~/.local/share/shale/calendar-trash`).
+pub fn default_trash_dir() -> PathBuf {
+    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("calendar-trash")
+}
+
+/// Keep the full text of an event (every part of its series) in `<trash>/<date>/<uid>.ics` before
+/// it is removed or changed. Never overwrites a copy: a taken name gets `-2`, `-3` …
+/// Returns the file. The folder is never emptied by Shale (CAL-017).
+fn keep_copy(trash: &std::path::Path, parts: &[Event]) -> Result<PathBuf, String> {
+    let uid = parts.first().map(|e| e.uid.as_str()).unwrap_or("");
+    let safe: String = uid.chars().take(80).map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    let safe = if safe.trim_matches('_').is_empty() { "event".to_string() } else { safe };
+    let dir = trash.join(crate::mail_store::today_string());
+    let fail = |e: std::io::Error| format!("a copy of the event could not be kept in {} ({e}), so nothing was deleted", dir.display());
+    crate::fsutil::ensure_private_dir(trash).map_err(fail)?;
+    crate::fsutil::ensure_private_dir(&dir).map_err(fail)?;
+    let text = cal_ics::to_ics("", parts);
+    for n in 1.. {
+        let file = dir.join(if n == 1 { format!("{safe}.ics") } else { format!("{safe}-{n}.ics") });
+        match crate::fsutil::create_new(&file, text.as_bytes()) {
+            Ok(()) => return Ok(file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(fail(e)),
+        }
+    }
+    unreachable!()
+}
+
+/// Remove an event from a calendar after a copy of `series` was kept. Returns where the copy is.
+/// `series`: every loaded part of the event; it is also what a server must still have when
+/// there is no version tag.
+fn remove_from(target: &Target, e: &Event, trash: &std::path::Path, series: &[Event]) -> Result<PathBuf, String> {
+    let series: Vec<Event> = if series.is_empty() { vec![e.clone()] } else { series.to_vec() };
+    let copy = keep_copy(trash, &series)?;
     match target {
         Target::Local { file, name } => {
             let mut evs = local_read(file)?;
@@ -142,10 +176,11 @@ fn remove_from(target: &Target, e: &Event) -> Result<(), String> {
             local_write(file, name, &evs)
         }
         Target::Dav { acct, .. } => match &e.href {
-            Some(h) => cal_dav::delete_event(h, acct, e.etag.as_deref()),
+            Some(h) => cal_dav::delete_event(h, acct, e.etag.as_deref(), &series),
             None => Err("the event's address on the server is unknown; refresh the calendar and try again".into()),
         },
     }
+    .map(|_| copy)
 }
 
 impl CalendarSource {
@@ -207,6 +242,8 @@ pub struct CalendarStore {
     pub generation: u64,
     /// where new local calendars are created
     pub local_dir: PathBuf,
+    /// where a copy of every deleted event is kept (CAL-017); inside `local_dir` unless set (the app sets the data dir)
+    pub trash_dir: PathBuf,
 }
 
 impl CalendarStore {
@@ -223,6 +260,7 @@ impl CalendarStore {
             read_only: HashSet::new(),
             fixes: Default::default(),
             generation: 0,
+            trash_dir: local_dir.join(".calendar-trash"),
             local_dir,
         };
         s.reload_local();
@@ -440,6 +478,11 @@ impl CalendarStore {
         Ok(())
     }
 
+    /// Every loaded part (master and changed dates) of the event with this uid.
+    fn series(&self, source_id: &str, uid: &str) -> Vec<Event> {
+        self.events.get(source_id).into_iter().flatten().filter(|x| x.uid == uid).cloned().collect()
+    }
+
     fn target(&self, id: &str) -> Result<(Target, String), String> {
         let s = self.sources.iter().find(|s| s.id == id).ok_or("that calendar is no longer configured")?;
         let t = match &s.kind {
@@ -490,16 +533,19 @@ impl CalendarStore {
             }
         }
         let (fixes, fix_source, uid) = (self.fixes.clone(), target_id.to_string(), event.uid.clone());
+        let before = self.series(target_id, &event.uid);
+        let old_series = original.as_ref().map(|(sid, old)| self.series(sid, &old.uid)).unwrap_or_default();
+        let trash = self.trash_dir.clone();
         Ok(run_job(
             move || {
-                let written = write_to(&target, &parts, in_place).map_err(|e| format!("Could not save to “{target_name}”: {e}"))?;
+                let written = write_to(&target, &parts, in_place, &before).map_err(|e| format!("Could not save to “{target_name}”: {e}"))?;
                 if let Some((href, etag)) = written {
                     fixes.lock().unwrap().push((fix_source, uid, href, etag));
                 }
                 if let Some(((old_target, old_name), old)) = moved_from {
                     // the event is safe in the new calendar either way
-                    return Ok(match remove_from(&old_target, &old) {
-                        Ok(()) => format!("Moved to “{target_name}”"),
+                    return Ok(match remove_from(&old_target, &old, &trash, &old_series) {
+                        Ok(_) => format!("Moved to “{target_name}”"),
                         Err(e) => format!("⚠ Saved to “{target_name}”, but could not remove it from “{old_name}”: {e}. The event is now in both calendars."),
                     });
                 }
@@ -515,7 +561,9 @@ impl CalendarStore {
         if self.read_only.contains(source_id) {
             return Err(format!("“{name}” is read-only"));
         }
-        Ok(run_job(move || remove_from(&target, &event).map(|_| "Event deleted".to_string()).map_err(|e| format!("Could not delete the event from “{name}”: {e}")), ctx))
+        let series = self.series(source_id, &event.uid);
+        let trash = self.trash_dir.clone();
+        Ok(run_job(move || remove_from(&target, &event, &trash, &series).map(|copy| format!("Event deleted. A copy is kept in {}", copy.display())).map_err(|e| format!("Could not delete the event from “{name}”: {e}")), ctx))
     }
 
     /// Remove one date of a repeating event in the background (CAL-007): the series gets an
@@ -528,7 +576,7 @@ impl CalendarStore {
             return Err(format!("“{name}” is read-only"));
         }
         let date = event.recurrence_id.unwrap_or(start);
-        let series: Vec<Event> = self.events.get(source_id).into_iter().flatten().filter(|x| x.uid == event.uid).cloned().collect();
+        let series = self.series(source_id, &event.uid);
         let mut parts: Vec<Event> = Vec::new();
         if let Some(master) = series.iter().find(|x| x.recurrence_id.is_none()) {
             let mut m = master.clone();
@@ -539,10 +587,16 @@ impl CalendarStore {
         }
         parts.extend(series.iter().filter(|x| x.recurrence_id.is_some() && x.recurrence_id != Some(date)).cloned());
         let event = event.clone();
+        let trash = self.trash_dir.clone();
         Ok(run_job(
             move || {
-                let r = if parts.is_empty() { remove_from(&target, &event) } else { write_to(&target, &parts, true).map(|_| ()) };
-                r.map(|_| "This date was removed".to_string()).map_err(|e| format!("Could not remove the date from “{name}”: {e}"))
+                let r = if parts.is_empty() {
+                    remove_from(&target, &event, &trash, &series)
+                } else {
+                    // the whole series as it was is kept before one date of it goes
+                    keep_copy(&trash, &series).and_then(|copy| write_to(&target, &parts, true, &series).map(|_| copy))
+                };
+                r.map(|copy| format!("This date was removed. A copy of the event is kept in {}", copy.display())).map_err(|e| format!("Could not remove the date from “{name}”: {e}"))
             },
             ctx,
         ))
@@ -1049,5 +1103,71 @@ pub(crate) mod tests {
         wait(&store.save_event("work", later, Some(("work".into(), evs[0].clone())), None).unwrap()).unwrap();
         let last = bodies.lock().unwrap().last().unwrap().1.clone();
         assert!(last.contains("DTSTART;TZID=Europe/Berlin:20260105T100000\r\n") && last.contains("RECURRENCE-ID;TZID=Europe/Berlin:20260112T100000\r\n"), "{last}");
+    }
+
+    fn trash_files(dir: &std::path::Path) -> Vec<PathBuf> {
+        let mut v = vec![];
+        for day in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            for f in std::fs::read_dir(day.path()).into_iter().flatten().flatten() {
+                v.push(f.path());
+            }
+        }
+        v.sort();
+        v
+    }
+
+    // spec: CAL-011, CAL-017
+    #[test]
+    fn a_deleted_event_is_kept_in_the_calendar_trash() {
+        let mut store = CalendarStore::new(vec![], tmp("trash"));
+        let src = store.new_local_source("Home", &[]);
+        store.set_sources(vec![src.clone()]);
+        let e = Event { uid: "a/b".into(), summary: "Dentist".into(), start: 1_800_000_000, end: 1_800_003_600, ..Default::default() };
+        wait(&store.save_event(&src.id, e.clone(), None, None).unwrap()).unwrap();
+        store.reload_local();
+        let msg = wait(&store.delete_event(&src.id, e.clone(), None).unwrap()).unwrap();
+        let files = trash_files(&store.trash_dir);
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert!(msg.contains(&files[0].display().to_string()), "the message says where the copy is: {msg}");
+        assert!(files[0].file_name().unwrap().to_string_lossy().starts_with("a_b"), "a safe name from the uid");
+        assert!(std::fs::read_to_string(&files[0]).unwrap().contains("SUMMARY:Dentist"));
+        // the same event deleted again never overwrites the first copy
+        wait(&store.save_event(&src.id, e.clone(), None, None).unwrap()).unwrap();
+        store.reload_local();
+        wait(&store.delete_event(&src.id, e.clone(), None).unwrap()).unwrap();
+        let files = trash_files(&store.trash_dir);
+        assert_eq!(files.len(), 2, "{files:?}");
+        assert!(files.iter().any(|f| f.to_string_lossy().ends_with("a_b-2.ics")));
+        // a copy that cannot be written stops the delete
+        wait(&store.save_event(&src.id, e.clone(), None, None).unwrap()).unwrap();
+        store.reload_local();
+        let blocked = tmp("trash-blocked");
+        std::fs::create_dir_all(blocked.parent().unwrap()).unwrap();
+        std::fs::write(&blocked, b"a file, not a folder").unwrap();
+        store.trash_dir = blocked;
+        let err = wait(&store.delete_event(&src.id, e, None).unwrap()).unwrap_err();
+        assert!(err.contains("nothing was deleted"), "{err}");
+        store.reload_local();
+        assert!(store.events[&src.id].iter().any(|x| x.uid == "a/b"), "the event is still there");
+    }
+
+    // spec: CAL-011, CAL-017
+    #[test]
+    fn deleting_one_date_keeps_the_whole_series_as_it_was() {
+        if !t::zone_known("Europe/Berlin") {
+            return;
+        }
+        let mut store = CalendarStore::new(vec![], tmp("trash-one"));
+        let src = store.new_local_source("Home", &[]);
+        let file = file_of(&src).unwrap().to_path_buf();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        crate::fsutil::write_atomic(&file, cal_ics::tests::RICH.as_bytes()).unwrap();
+        store.set_sources(vec![src.clone()]);
+        let series = store.events[&src.id].iter().find(|e| e.rrule.is_some()).unwrap().clone();
+        wait(&store.delete_occurrence(&src.id, &series, series.at_wall(days_from_civil(2026, 1, 19), 9 * 3600), None).unwrap()).unwrap();
+        let files = trash_files(&store.trash_dir);
+        assert_eq!(files.len(), 1);
+        let kept = std::fs::read_to_string(&files[0]).unwrap();
+        assert!(kept.contains("SUMMARY:Standup (late)") && !kept.contains("20260119T090000"), "the series with its changed date, before the change: {kept}");
     }
 }
