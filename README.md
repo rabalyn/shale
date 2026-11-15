@@ -2,6 +2,16 @@
 
 [![build](https://github.com/rabalyn/shale/actions/workflows/build.yml/badge.svg)](https://github.com/rabalyn/shale/actions/workflows/build.yml)
 
+> [!WARNING]
+> **Shale is built entirely by AI coding agents.**
+>
+> All of Shale (its code, tests and documentation) is written by AI agents through agentic
+> coding, not by hand. The owner decides what Shale should do, sets and approves the specs and
+> design decisions in `docs/`, reviews the changes and tests the app, but does not write the code.
+>
+> Some people do not want to use, support or contribute to software made this way. If that is
+> you, Shale is not for you, and that is a fair choice. Every release page carries the same notice.
+
 A native Rust notes app for the desktop: Linux, macOS and Windows (MIT licensed). Your vault is a plain folder of
 markdown files. Notes link to each other with `[[wiki links]]`.
 
@@ -110,7 +120,8 @@ built; it does not show that a person checked the build.
 2. Move the notes from `## [Unreleased]` in `CHANGELOG.md` to a new `## [x.y.z] - date` section.
 3. Commit, then run `sh make-release.sh`: it tags the commit `vx.y.z` and pushes the commit and
    the tag to the development server (remote `origin`) and to GitHub (remote `github`). GitHub
-   builds it and creates the release page with that section as its notes and the `.sha256` file.
+   builds it and creates the release page with the AI notice (`.github/ai-notice.md`) and that
+   section as its notes and the `.sha256` file.
    Before tagging, and again in both CI systems, `.github/check-release.sh` checks that the
    version is valid semver and greater than the previous `v*` tag, that `Cargo.toml` and
    `Cargo.lock` agree, and that the changelog section is not empty and mentions every issue

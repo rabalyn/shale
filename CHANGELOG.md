@@ -5,7 +5,8 @@ All notable changes to Shale are listed here. The format follows
 [Semantic Versioning](https://semver.org/) (before 1.0, new features raise the middle number and
 fixes the last one).
 
-The release page of each version on GitHub shows its section from this file.
+The release page of each version on GitHub shows the AI notice (`.github/ai-notice.md`) and then
+its section from this file.
 
 ## [Unreleased]
 
