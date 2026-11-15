@@ -8,6 +8,7 @@
 //! messages share it, all of them are offered (the newest ticked).
 
 use crate::mail;
+use std::cell::Cell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -331,9 +332,19 @@ fn scan_maildir(dir: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
     out
 }
 
-/// Messages in a folder whose headers pass `pick`; copies marked deleted are skipped.
-fn scan(place: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
-    let live = |h: &str| !is_deleted(h) && pick(h);
+/// Messages in a folder whose headers pass `pick`; copies marked deleted are skipped, but a
+/// skipped copy that `pick` would have taken sets `saw_deleted` (IMP-030).
+fn scan(place: &Path, pick: &dyn Fn(&str) -> bool, saw_deleted: &Cell<bool>) -> Vec<Vec<u8>> {
+    let live = |h: &str| {
+        if !pick(h) {
+            return false;
+        }
+        if is_deleted(h) {
+            saw_deleted.set(true);
+            return false;
+        }
+        true
+    };
     if place.is_dir() {
         scan_maildir(place, &live)
     } else {
@@ -519,7 +530,7 @@ fn index_of(place: &Path) -> PathBuf {
 }
 
 /// The text of a message the index knows about.
-fn by_index(place: &Path, row: &std::collections::HashMap<String, String>) -> Option<Vec<u8>> {
+fn by_index(place: &Path, row: &std::collections::HashMap<String, String>, saw_deleted: &Cell<bool>) -> Option<Vec<u8>> {
     let id = row.get("message-id").cloned();
     let ok = |raw: &[u8]| -> bool {
         let text = String::from_utf8_lossy(&raw[..raw.len().min(64 * 1024)]).replace("\r\n", "\n");
@@ -546,7 +557,7 @@ fn by_index(place: &Path, row: &std::collections::HashMap<String, String>) -> Op
     }
     // the position is out of date (folder compacted): look for its Message-ID
     let id = id?;
-    scan(place, &|h| has_id(h, &id)).into_iter().next()
+    scan(place, &|h| has_id(h, &id), saw_deleted).into_iter().next()
 }
 
 /// Find the dragged message(s): `links` as handed over, `file_name` the suggested
@@ -563,6 +574,7 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
     let mut why: Vec<String> = Vec::new();
     let mut seen: Vec<PathBuf> = Vec::new();
     let mut not_offline = false;
+    let saw_deleted = Cell::new(false);
     for r in &refs {
         let mut places: Vec<PathBuf> = r.file.iter().cloned().collect();
         for d in server_dirs(roots, r) {
@@ -589,7 +601,7 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
                 match crate::fsutil::read(&idx) {
                     Ok(bytes) => match mork_rows(&bytes).get(&k) {
                         Some(row) => {
-                            if let Some(raw) = by_index(&p, row) {
+                            if let Some(raw) = by_index(&p, row, &saw_deleted) {
                                 return Ok(vec![raw]);
                             }
                             index_subject = row.get("subject").cloned();
@@ -603,7 +615,7 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
             }
             // last resort: the subject
             for s in subject.iter().chain(index_subject.iter()) {
-                let found = scan(&p, &|h| has_subject(h, s));
+                let found = scan(&p, &|h| has_subject(h, s), &saw_deleted);
                 if !found.is_empty() {
                     return Ok(found);
                 }
@@ -612,6 +624,9 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
                 why.push(format!("{} does not exist", p.display()));
             }
         }
+    }
+    if saw_deleted.get() {
+        return Err("the message was deleted in Thunderbird (it is still in the folder file until Thunderbird compacts it)".into());
     }
     if seen.is_empty() && why.is_empty() {
         why.push(format!("no Thunderbird folder for “{}” on this computer", refs[0].folder.join("/")));
