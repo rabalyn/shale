@@ -28,7 +28,25 @@ pub enum Item {
 
 impl Item {
     /// All items in their default order: the ribbon's, then the panels'.
-    pub const ALL: [Item; 17] = [Item::Files, Item::Search, Item::Tags, Item::Switcher, Item::Graph, Item::Calendar, Item::Mail, Item::Tasks, Item::Social, Item::Import, Item::Drawing, Item::NewNote, Item::Panel(RightPanel::Backlinks), Item::Panel(RightPanel::Outgoing), Item::Panel(RightPanel::Outline), Item::Panel(RightPanel::LocalGraph), Item::Panel(RightPanel::Calendar)];
+    pub const ALL: [Item; 17] = [
+        Item::Files,
+        Item::Search,
+        Item::Tags,
+        Item::Switcher,
+        Item::Graph,
+        Item::Calendar,
+        Item::Mail,
+        Item::Tasks,
+        Item::Social,
+        Item::Import,
+        Item::Drawing,
+        Item::NewNote,
+        Item::Panel(RightPanel::Backlinks),
+        Item::Panel(RightPanel::Outgoing),
+        Item::Panel(RightPanel::Outline),
+        Item::Panel(RightPanel::LocalGraph),
+        Item::Panel(RightPanel::Calendar),
+    ];
 
     /// The panels, in the default order of the right sidebar's menubar.
     pub fn is_panel(self) -> bool {

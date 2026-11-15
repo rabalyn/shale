@@ -3,9 +3,9 @@
 //! in `ShaleApp::side`.
 
 use crate::app::{Options, RightPanel, ShaleApp};
-use crate::sidebar_ui::Cue;
 use crate::config::Config;
 use crate::sidebar::{Item, Layout};
+use crate::sidebar_ui::Cue;
 use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
 use std::path::PathBuf;
 
@@ -158,7 +158,7 @@ impl Drop for W {
 #[test]
 fn lay_001_a_ribbon_icon_is_dragged_to_a_new_place_and_the_order_survives_a_restart() {
     let mut w = W::new("ribbon-order");
-    assert_eq!(w.ribbon(), Item::ALL.to_vec(), "the default order is drawn");
+    assert_eq!(w.ribbon(), Layout::default().ribbon, "the default order is drawn");
     // Mail is dragged up between Files and Search; the marker shows the place while the button is down
     let mail = w.ribbon_icon(Item::Mail).center();
     let between = (w.ribbon_icon(Item::Files).max.y + w.ribbon_icon(Item::Search).min.y) / 2.0;
@@ -168,9 +168,9 @@ fn lay_001_a_ribbon_icon_is_dragged_to_a_new_place_and_the_order_survives_a_rest
         crate::sidebar_ui::Cue::Ribbon { at, line } => assert_eq!((at, (line[0].y - between).abs() < 3.0), (1, true), "the marker is between Files and Search"),
         c => panic!("no marker: {c:?}"),
     }
-    assert_eq!(w.app.side.layout.ribbon, Item::ALL.to_vec(), "nothing moves before the button is let go");
+    assert_eq!(w.app.side.layout.ribbon, Layout::default().ribbon, "nothing moves before the button is let go");
     w.release(Pos2::new(mail.x, between));
-    let mut want = Item::ALL.to_vec();
+    let mut want = Layout::default().ribbon;
     want.remove(6);
     want.insert(1, Item::Mail);
     assert_eq!(w.ribbon(), want, "the drawn ribbon has the new order");
@@ -197,13 +197,13 @@ fn lay_001_dropping_a_ribbon_icon_outside_the_ribbon_or_pressing_esc_changes_not
     let mut w = W::new("ribbon-cancel");
     let mail = w.ribbon_icon(Item::Mail).center();
     w.drag_and_drop(mail, Pos2::new(700.0, 400.0));
-    assert_eq!(w.ribbon(), Item::ALL.to_vec(), "dropped on the note: nothing happens");
+    assert_eq!(w.ribbon(), Layout::default().ribbon, "dropped on the note: nothing happens");
     let between = (w.ribbon_icon(Item::Files).max.y + w.ribbon_icon(Item::Search).min.y) / 2.0;
     w.drag_to(mail, Pos2::new(mail.x, between));
     w.press_esc();
     assert_eq!(w.app.side.drag, None, "Esc ends the drag");
     w.release(Pos2::new(mail.x, between));
-    assert_eq!(w.ribbon(), Item::ALL.to_vec(), "and the button let go afterwards drops nothing");
+    assert_eq!(w.ribbon(), Layout::default().ribbon, "and the button let go afterwards drops nothing");
 }
 
 fn panel(p: RightPanel) -> Item {

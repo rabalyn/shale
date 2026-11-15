@@ -5,7 +5,7 @@ use crate::app::{muted, LeftPanel, Modal, RightPanel, ShaleApp, View};
 use crate::layout::{icon_button_sense, paint_icon};
 use crate::sidebar::{Dest, Item, Layout};
 use crate::theme;
-use eframe::egui::{self, Align, Align2, CornerRadius, FontId, Id, LayerId, Layout as UiLayout, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
+use eframe::egui::{self, Align, CornerRadius, FontId, Id, LayerId, Layout as UiLayout, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
 
 /// The height of a menubar of the right sidebar, and its icons.
 const BAR_H: f32 = 30.0;
@@ -245,7 +245,8 @@ impl ShaleApp {
             Cue::Zone { rect, .. } => {
                 painter.rect_filled(rect, CornerRadius::same(6), theme::ACCENT.gamma_multiply(0.22));
                 painter.rect_stroke(rect.shrink(2.0), CornerRadius::same(6), Stroke::new(2.0, theme::ACCENT), StrokeKind::Inside);
-                painter.text(rect.center(), Align2::CENTER_CENTER, "Drop to open this icon in a new view", FontId::proportional(13.0), theme::TEXT_STRONG);
+                let galley = painter.layout("Drop to open this icon in a new view".into(), FontId::proportional(13.0), theme::TEXT_STRONG, rect.width() - 24.0);
+                painter.galley(rect.center() - galley.size() / 2.0, galley, theme::TEXT_STRONG);
             }
             Cue::Refused | Cue::None => {}
         }
