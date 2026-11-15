@@ -362,9 +362,9 @@ fn imap(fx: &TbFixture) -> PathBuf {
     fx.account("server2", Kind::Imap, "imap.uni.example", "ada", "ImapMail/imap.uni.example")
 }
 
-// spec: IMP-018
+// spec: IMP-030
 #[test]
-fn imp_018_a_search_by_subject_skips_deleted_copies_in_mbox_and_maildir_folders() {
+fn imp_030_a_search_by_subject_skips_deleted_copies_in_mbox_and_maildir_folders() {
     let fx = TbFixture::new("del-subject");
     let acc = imap(&fx);
     // only a deleted copy: not found
@@ -388,9 +388,9 @@ fn imp_018_a_search_by_subject_skips_deleted_copies_in_mbox_and_maildir_folders(
     assert!(find(&fx, &imap_link("MdAlt"), Some("MdAlt.eml")).is_err());
 }
 
-// spec: IMP-018
+// spec: IMP-030
 #[test]
-fn imp_018_a_search_by_message_id_after_a_stale_position_skips_deleted_copies() {
+fn imp_030_a_search_by_message_id_after_a_stale_position_skips_deleted_copies() {
     let fx = TbFixture::new("del-id");
     let acc = imap(&fx);
     let dead = Msg::new("Gleich", "tot").status(0x0009).id("same@x");
@@ -413,9 +413,9 @@ fn imp_018_a_search_by_message_id_after_a_stale_position_skips_deleted_copies() 
     assert!(text(&got[0]).contains("lebt"));
 }
 
-// spec: IMP-018
+// spec: IMP-030
 #[test]
-fn imp_018_reading_by_a_known_position_still_returns_a_deleted_copy() {
+fn imp_030_reading_by_a_known_position_still_returns_a_deleted_copy() {
     let fx = TbFixture::new("del-known");
     let acc = local(&fx);
     let (file, at) = fx.mbox(&acc, &["Inbox"], &[Msg::new("Alt", "weg").status(0x0008)]);
@@ -424,9 +424,9 @@ fn imp_018_reading_by_a_known_position_still_returns_a_deleted_copy() {
     assert!(!is_deleted("Subject: x") && !is_deleted("X-Mozilla-Status: zz\n"));
 }
 
-// spec: IMP-018
+// spec: IMP-030
 #[test]
-fn imp_018_a_position_must_start_with_a_real_header_line_or_the_from_line() {
+fn imp_030_a_position_must_start_with_a_real_header_line_or_the_from_line() {
     let fx = TbFixture::new("header-check");
     let acc = local(&fx);
     let ok = Msg::new("Echt", "inhalt");
