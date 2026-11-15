@@ -166,7 +166,9 @@ mod tests {
     }
 
     fn fixture() -> (Vault, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("shale-searchall-{}", std::process::id()));
+        // one folder per call: two tests run this at the same time, and each removes its folder first
+        static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!("shale-searchall-{}-{}", std::process::id(), COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("Fruit.md"), "# Fruit\nI like banana bread\nand a Banana split\nbanana 3\nbanana 4\n").unwrap();
