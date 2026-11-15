@@ -79,6 +79,8 @@ mod smtp_client;
 #[cfg(test)]
 mod smtp_fake_tests;
 mod social;
+#[cfg(test)]
+mod tab_order_tests;
 mod tagwords;
 mod tb_store;
 mod theme;

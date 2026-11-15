@@ -128,6 +128,8 @@ Other options:
 | ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
+| Drag a tab | Reorder tabs; a marker shows where it lands |
+| Right-click a tab | Pin tab / Unpin tab (pinned tabs sit at the left with a pin and keep their place between starts) |
 | Alt+← / Alt+→ | Back / forward |
 | Ctrl+, | Settings |
 | Click on a link | Open it (or create it if it's red) |

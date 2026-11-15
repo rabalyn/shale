@@ -58,9 +58,22 @@ pub struct Tab {
     pub back: Vec<View>,
     pub fwd: Vec<View>,
     pub reading: bool,
+    /// Pinned tabs sit left of all others (NAV-016).
+    pub pinned: bool,
     pub editor: NoteEditor,
     pub title_buf: String,
     pub title_for: Option<PathBuf>,
+}
+
+/// What the tab bar drew last frame besides the tabs themselves.
+#[derive(Default)]
+pub(crate) struct TabMarks {
+    /// the drop marker while a tab is dragged (NAV-014)
+    pub drop_marker: Option<egui::Rect>,
+    /// the tabs (by index) that show a pin (NAV-016)
+    pub pinned: Vec<usize>,
+    /// the "Pin tab" / "Unpin tab" entry of an open tab menu
+    pub menu_pin: Option<egui::Rect>,
 }
 
 pub struct NoteDoc {
@@ -282,6 +295,8 @@ pub struct ShaleApp {
     pub(crate) tree_targets: Vec<(egui::Rect, PathBuf, bool)>,
     /// where the tabs of the tab bar are, and their close marks (for tests)
     pub(crate) tab_rects: Vec<(egui::Rect, egui::Rect)>,
+    /// what the tab bar showed last frame besides the tabs (for tests)
+    pub(crate) tab_marks: TabMarks,
     /// a closed folder hovered while dragging, since when (it opens after a moment)
     tree_hover: Option<(PathBuf, Instant)>,
     calendar_areas: Vec<egui::Rect>,
@@ -401,6 +416,7 @@ impl ShaleApp {
             drop_zones: vec![],
             tree_targets: vec![],
             tab_rects: vec![],
+            tab_marks: TabMarks::default(),
             tree_hover: None,
             calendar_areas: vec![],
             ext_hover: None,
@@ -573,6 +589,7 @@ impl ShaleApp {
                 self.active = 0;
                 self.cfg.remember_vault(path.to_path_buf());
                 let reopen: Vec<String> = self.vdata.state.open_files.clone();
+                let pinned: Vec<String> = self.vdata.state.pinned_files.clone();
                 // (opening a note rewrites the saved lists, so read both first)
                 let reopen_feeds: Vec<crate::social::FeedRef> = self.vdata.state.open_feeds.clone();
                 for (i, f) in reopen.iter().enumerate() {
@@ -586,6 +603,10 @@ impl ShaleApp {
                     } else {
                         self.open(&rel, i > 0);
                     }
+                }
+                // (open_files is in tab order, pinned tabs first: they stay first)
+                for t in &mut self.tabs {
+                    t.pinned = t.view.path().is_some_and(|p| pinned.contains(&rel_to_string(p)));
                 }
                 // Feeds tabs come back after the note tabs (the accounts must still exist)
                 let known: Vec<crate::social::FeedRef> = reopen_feeds.into_iter().filter(|f| self.cfg.social_accounts.iter().any(|e| e.account.id == f.account)).collect();
@@ -613,7 +634,7 @@ impl ShaleApp {
     pub fn new_tab(&mut self, view: View) {
         let id = self.next_tab_id;
         self.next_tab_id += 1;
-        self.tabs.push(Tab { id, view, back: vec![], fwd: vec![], reading: false, editor: NoteEditor::new(egui::Id::unique(("note-editor", id))), title_buf: String::new(), title_for: None });
+        self.tabs.push(Tab { id, view, back: vec![], fwd: vec![], reading: false, pinned: false, editor: NoteEditor::new(egui::Id::unique(("note-editor", id))), title_buf: String::new(), title_for: None });
         self.active = self.tabs.len() - 1;
     }
 
@@ -769,6 +790,7 @@ impl ShaleApp {
             return;
         }
         self.vdata.state.open_files = self.tabs.iter().filter_map(|t| t.view.path().map(rel_to_string)).collect();
+        self.vdata.state.pinned_files = self.tabs.iter().filter(|t| t.pinned).filter_map(|t| t.view.path().map(rel_to_string)).collect();
         self.vdata.state.open_feeds = self.open_feed_refs();
     }
 
@@ -1524,6 +1546,45 @@ impl ShaleApp {
             }
             self.remember_open_files();
         }
+    }
+
+    /// Where a tab dragged to the pointer at `x` would land: the gap index in `0..=tabs.len()`,
+    /// kept inside the tab's own group, pinned tabs first (NAV-017). `mids` are the tabs' centres.
+    pub(crate) fn tab_slot(&self, from: usize, x: f32, mids: &[f32]) -> usize {
+        let pinned = self.tabs.iter().take_while(|t| t.pinned).count();
+        let (lo, hi) = if self.tabs[from].pinned { (0, pinned) } else { (pinned, self.tabs.len()) };
+        mids.iter().filter(|m| **m < x).count().clamp(lo, hi)
+    }
+
+    /// Move the tab `from` into the gap `slot` (as `tab_slot` counts it); the open tab stays open.
+    pub(crate) fn move_tab(&mut self, from: usize, slot: usize) {
+        self.move_tab_to(from, if slot > from { slot - 1 } else { slot });
+    }
+
+    fn move_tab_to(&mut self, from: usize, to: usize) {
+        if from >= self.tabs.len() || to == from {
+            return;
+        }
+        let active_id = self.tabs.get(self.active).map(|t| t.id);
+        let t = self.tabs.remove(from);
+        self.tabs.insert(to, t);
+        if let Some(id) = active_id {
+            self.active = self.tabs.iter().position(|t| t.id == id).unwrap_or(0);
+        }
+        self.remember_open_files();
+    }
+
+    /// Pin or unpin a tab: it moves to the end of the pinned tabs (NAV-016).
+    pub(crate) fn set_tab_pinned(&mut self, i: usize, pinned: bool) {
+        let Some(t) = self.tabs.get_mut(i) else { return };
+        if t.pinned == pinned {
+            return;
+        }
+        t.pinned = pinned;
+        let count = self.tabs.iter().filter(|t| t.pinned).count();
+        // the end of the pinned group (the unpinned tab is not counted: it is the first outside)
+        self.move_tab_to(i, if pinned { count - 1 } else { count });
+        self.remember_open_files();
     }
 
     pub fn go_back(&mut self) {
