@@ -46,6 +46,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   - Enter the Application (client) ID in Shale (Accounts…, OAuth2, Microsoft); no secret needed.
   Details in [docs/FEATURES.md](docs/FEATURES.md). A local test mail server with an OAuth2
   provider (podman) is in [tests/mail-env](tests/mail-env/README.md).
+  A local CalDAV server (Radicale, podman) with seeded calendars is in [tests/caldav-env](tests/caldav-env/README.md).
   - *Your keys from Thunderbird:* Thunderbird keeps OpenPGP keys in its own store, not in GnuPG's. In
     Thunderbird: Account settings, End-to-End Encryption, your key, "Backup secret key to file" (the
     public keys of others: the key manager, Export). Then `gpg --import file.asc`. S/MIME certificates:

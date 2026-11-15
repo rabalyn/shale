@@ -34,6 +34,7 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 | `src/imap_sync.rs` | The read-only sync (several connections, newest first, resumable), on-demand listing of Trash/Junk, single-message download, folder discovery for "Test connection". |
 | `src/oauth.rs` | OAuth2 for IMAP: PKCE flow with a loopback listener on 127.0.0.1, token exchange and refresh over `curl`, the access token in memory (one `TokenSource` per account) and the refresh token in the keyring, `XOAUTH2` / `OAUTHBEARER`, the Google / Microsoft / Custom presets. |
 | `tests/mail-env/` | The local container test environment: Dovecot (TLS, seeded mailboxes), a pretend OAuth2 provider, helper scripts and README; used by the ignored `mail_env_tests.rs`. |
+| `tests/caldav-env/` | The local CalDAV test environment: Radicale behind TLS with a seeded user and calendars (`seed/`), helper scripts and README; used by the ignored `caldav_env_tests.rs`. Test code trusts its CA through `cal_dav::TEST_CA` (tests only). |
 | `src/mail_db.rs`, `src/mail_store.rs` | The local mail copy: one `.eml` file per message plus an SQLite index with full-text search, one writer thread, crash-safe order, repair and backups. |
 | `src/mail_ui.rs` | State and jobs behind the mail view: store opening, folder counts, the page cache of the list, the open message, search, syncs and the timer, password prompt. |
 | `src/mail_view.rs` | Drawing the mail view (folders, virtual message list, reading pane) and its keys. |

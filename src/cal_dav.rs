@@ -197,6 +197,11 @@ pub fn clean_etag(s: &str) -> Option<String> {
     (!s.is_empty() && !has_control(s) && !s.contains("%header")).then(|| s.to_string())
 }
 
+/// Tests only: a certificate authority that curl trusts instead of the system's (the test
+/// environment's). There is no such switch outside tests.
+#[cfg(test)]
+pub(crate) static TEST_CA: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
 /// Run one HTTP request with curl.
 pub fn request(method: &str, url: &str, depth: &str, body: &str, acct: &Account) -> Result<Response, String> {
     request_with(method, url, &[&format!("Depth: {depth}"), "Content-Type: application/xml; charset=utf-8"], body, acct)
@@ -262,18 +267,22 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     // a local http server may redirect to http; the final address is checked below
     let protos = if origin.scheme == "http" { "=http,https" } else { "=https" };
     let max_time = if max_bytes > 10_000_000 { "300" } else { "30" };
-    let mut child = Command::new("curl")
-        // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
-        .args(["-q", "-sS", "-i"])
-        .args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] })
-        .args(["--proto", protos, "--proto-redir", protos])
-        .args(["--connect-timeout", "10", "--max-time", max_time, "--max-filesize", &max_bytes.to_string()])
-        .args(["-X", method, "-w", WRITE_OUT, "-K", "-", url])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
+    let mut curl = Command::new("curl");
+    // -q must come first: don't read ~/.curlrc (it could turn off certificate checks or trace the password to a file)
+    curl.args(["-q", "-sS", "-i"]).args(if follow { &["-L", "--max-redirs", "5"][..] } else { &[][..] }).args(["--proto", protos, "--proto-redir", protos]).args([
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        max_time,
+        "--max-filesize",
+        &max_bytes.to_string(),
+    ]);
+    // tests only: trust the test environment's certificate authority (tests/caldav-env/, CALENV-002)
+    #[cfg(test)]
+    if let Some(ca) = TEST_CA.lock().unwrap().as_ref() {
+        curl.arg("--cacert").arg(ca);
+    }
+    let mut child = curl.args(["-X", method, "-w", WRITE_OUT, "-K", "-", url]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
     child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| e.to_string())?;
     drop(cfg);
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
