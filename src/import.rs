@@ -981,9 +981,9 @@ mod tests {
         let _ = std::fs::remove_file(&p);
     }
 
-    // spec: IMP-013
+    // spec: IMP-014
     #[test]
-    fn imp_013_a_uri_list_is_read_line_by_line() {
+    fn imp_014_a_uri_list_is_read_line_by_line() {
         let text = "# a comment\r\nfile:///tmp/a%20b.md\r\n\r\n  file://localhost/tmp/c.md  \nfile:///tmp/%C3%A4%C3%B6.md\nfile://otherhost/tmp/d.md\nhttps://example.org/x\nhttps://example.org/x\nimap-message://ada@mail/INBOX#1\nfile:///tmp/bad%zz.md\nfile:///tmp/end%41";
         let (paths, notes) = uri_list(text);
         let want: Vec<PathBuf> = ["/tmp/a b.md", "/tmp/c.md", "/tmp/äö.md", "/tmp/bad%zz.md", "/tmp/endA"].iter().map(PathBuf::from).collect();
@@ -998,10 +998,10 @@ mod tests {
         assert!(items.is_empty() && notes.len() == 1);
     }
 
-    // spec: IMP-013
+    // spec: IMP-014
     #[cfg(target_os = "linux")]
     #[test]
-    fn imp_013_a_path_survives_the_trip_through_a_uri() {
+    fn imp_014_a_path_survives_the_trip_through_a_uri() {
         for p in ["/tmp/plain.md", "/tmp/a b/ü ö#1%.md", "/tmp/colon:semi;amp&.md", "/tmp/日本語.md"] {
             let uri = file_uri(Path::new(p));
             assert!(uri.is_ascii() && !uri.contains(' ') && uri.starts_with("file:///"), "{uri}");

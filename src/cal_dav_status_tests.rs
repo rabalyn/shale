@@ -49,7 +49,7 @@ fn raw_server(bytes: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
     (base, h)
 }
 
-// spec: CAL-018
+// spec: CAL-019
 #[test]
 fn discovery_says_in_words_what_the_server_answered() {
     if !has_curl() {
@@ -77,7 +77,7 @@ fn discovery_says_in_words_what_the_server_answered() {
     }
 }
 
-// spec: CAL-018
+// spec: CAL-019
 #[test]
 fn discovery_asks_the_well_known_address_when_the_first_is_not_found() {
     if !has_curl() {
@@ -92,7 +92,7 @@ fn discovery_asks_the_well_known_address_when_the_first_is_not_found() {
     }
 }
 
-// spec: CAL-018
+// spec: CAL-019
 #[test]
 fn discovery_follows_each_kind_of_redirect_on_the_same_server() {
     if !has_curl() {
@@ -116,7 +116,7 @@ fn discovery_follows_each_kind_of_redirect_on_the_same_server() {
     }
 }
 
-// spec: CAL-018, SEC-001
+// spec: CAL-019, SEC-001
 #[test]
 fn a_redirect_to_another_server_never_gets_the_password() {
     if !has_curl() {
@@ -140,7 +140,7 @@ fn a_redirect_to_another_server_never_gets_the_password() {
     }
 }
 
-// spec: CAL-018, SEC-001
+// spec: CAL-019, SEC-001
 #[test]
 fn redirects_that_are_not_allowed_are_refused() {
     if !has_curl() {
@@ -161,7 +161,7 @@ fn redirects_that_are_not_allowed_are_refused() {
     h.join().unwrap();
 }
 
-// spec: CAL-018, SEC-001
+// spec: CAL-019, SEC-001
 #[test]
 fn a_redirect_is_not_followed_when_the_caller_says_so_and_an_access_token_stays_home() {
     if !has_curl() {
@@ -181,7 +181,7 @@ fn a_redirect_is_not_followed_when_the_caller_says_so_and_an_access_token_stays_
     ho.join().unwrap();
 }
 
-// spec: CAL-019
+// spec: CAL-020
 #[test]
 fn saving_names_what_the_server_refused() {
     if !has_curl() {
@@ -212,7 +212,7 @@ fn saving_names_what_the_server_refused() {
     }
 }
 
-// spec: CAL-019
+// spec: CAL-020
 #[test]
 fn a_save_that_is_sent_on_keeps_its_body() {
     if !has_curl() {
@@ -230,7 +230,7 @@ fn a_save_that_is_sent_on_keeps_its_body() {
     }
 }
 
-// spec: CAL-019
+// spec: CAL-020
 #[test]
 fn deleting_names_what_the_server_refused() {
     if !has_curl() {
@@ -253,7 +253,7 @@ fn deleting_names_what_the_server_refused() {
     }
 }
 
-// spec: CAL-019, CAL-016
+// spec: CAL-020, CAL-016
 #[test]
 fn deleting_without_a_version_tag_reads_first_and_names_what_went_wrong() {
     if !has_curl() {
@@ -288,7 +288,7 @@ fn deleting_without_a_version_tag_reads_first_and_names_what_went_wrong() {
     assert_eq!(h.join().unwrap().len(), 1);
 }
 
-// spec: CAL-019, SEC-001
+// spec: CAL-020, SEC-001
 #[test]
 fn a_delete_sent_to_another_server_by_a_redirect_asks_for_the_right_address() {
     if !has_curl() {
@@ -307,7 +307,7 @@ fn a_delete_sent_to_another_server_by_a_redirect_asks_for_the_right_address() {
     assert_eq!(h.join().unwrap(), vec!["DELETE /cal/ev1.ics".to_string(), "DELETE /moved/ev1.ics".into()]);
 }
 
-// spec: CAL-018
+// spec: CAL-019
 #[test]
 fn an_answer_that_is_not_http_is_an_error() {
     if !has_curl() {

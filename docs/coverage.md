@@ -180,14 +180,14 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    session password (it asks the real keyring; a fake keyring seam in `secrets.rs` would be
    needed) and the OAuth2 token fetch itself (covered in `oauth.rs`).
 6. **`cal_dav.rs` `discover` (469 to 513), `request_bytes_opts` (245 to 315), `write_error`,
-   `delete_event` (585 to 709)**: closed (#59, CAL-018, CAL-019).
+   `delete_event` (585 to 709)**: closed (#59, CAL-019, CAL-020).
    `cal_dav_status_tests.rs` runs the client against the scripted loopback server
    `cal_dav::tests::mock_http_with` (and a raw socket that is not HTTP). Originally: well-known and principal discovery with redirects and the words
    for 401, 403, 412 and 5xx are reached mainly by the ignored `caldav_env` suite. Test: a scripted
    HTTP server for the status and redirect cases (the "redirect and certificate rules" test of
    CALENV-002 shows the shape). Kind: test.
 7. **`cal_store.rs` `delete_occurrence`, `save_event`, `poll`, `default_trash_dir` (139 to 638)**:
-   closed (#59, CAL-020, CAL-021): `cal_store_failure_tests.rs`, with write failures made by a folder
+   closed (#59, CAL-021, CAL-022): `cal_store_failure_tests.rs`, with write failures made by a folder
    where the file should be (also holds for root, so no seam was needed). Originally: removing one date of a repeating event in a local calendar, saving to a read-only or missing
    directory, and the polling refresh. Test: a local calendar in a temp dir, delete one occurrence,
    save with the folder made read-only, poll after an outside change. Kind: test.
@@ -258,7 +258,7 @@ More, in the order of the table:
   directory. Kind: test.
 - **`tb_store.rs`: closed** (#63 part 2). `tb_fixture_tests.rs` generates Thunderbird profiles
   (`profiles.ini`, `prefs.js`, mbox and maildir folders, `.sbd` nesting, non-ASCII names, `.msf`
-  indexes, flags, large and broken files); `tb_store_tests.rs` has 21 tests on them (IMP-017).
+  indexes, flags, large and broken files); `tb_store_tests.rs` has 21 tests on them (IMP-018).
 - **`mail.rs` `entity` (372 to 409), `parse_date` (349 to 363), `decode_charset` (108 to 126),
   `html_to_text`**: HTML entities, odd date formats and charsets in incoming mail. Test: table tests
   with real-world strings. Kind: test.

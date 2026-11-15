@@ -51,7 +51,7 @@ fn trash_count(dir: &Path) -> usize {
     std::fs::read_dir(dir).into_iter().flatten().flatten().map(|d| std::fs::read_dir(d.path()).map(|r| r.count()).unwrap_or(0)).sum()
 }
 
-// spec: CAL-020
+// spec: CAL-021
 #[test]
 fn a_local_save_that_cannot_write_says_so_and_changes_nothing() {
     // the calendar's file is a folder
@@ -76,7 +76,7 @@ fn a_local_save_that_cannot_write_says_so_and_changes_nothing() {
     assert!(err.contains("no longer configured"), "{err}");
 }
 
-// spec: CAL-020
+// spec: CAL-021
 #[test]
 fn a_local_save_after_the_file_vanished_creates_it_again() {
     let (store, src, file) = local_with("save-vanished", DAILY);
@@ -100,7 +100,7 @@ fn a_local_save_after_the_file_vanished_creates_it_again() {
     assert!(store.find(&src.id, "e1").is_some(), "the new calendar has it");
 }
 
-// spec: CAL-020
+// spec: CAL-021
 #[test]
 fn a_local_delete_that_cannot_write_says_so() {
     let (mut store, src, file) = local_with("delete-dir", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:e1\r\nDTSTART:20270115T080000Z\r\nSUMMARY:Dentist\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
@@ -115,7 +115,7 @@ fn a_local_delete_that_cannot_write_says_so() {
     assert!(store.delete_event("gone", event(), None).err().unwrap().contains("no longer configured"));
 }
 
-// spec: CAL-007, CAL-020
+// spec: CAL-007, CAL-021
 #[test]
 fn deleting_one_date_of_a_repeating_event_leaves_the_others() {
     let (mut store, src, file) = local_with("one-of-five", DAILY);
@@ -142,7 +142,7 @@ fn deleting_one_date_of_a_repeating_event_leaves_the_others() {
     assert_eq!(days, vec![1, 3]);
 }
 
-// spec: CAL-007, CAL-020
+// spec: CAL-007, CAL-021
 #[test]
 fn deleting_one_date_that_is_only_a_changed_copy_removes_the_copy() {
     // a file with the changed date but without its series (another program removed the series)
@@ -157,7 +157,7 @@ fn deleting_one_date_that_is_only_a_changed_copy_removes_the_copy() {
     assert_eq!(trash_count(&store.trash_dir), 1);
 }
 
-// spec: CAL-020
+// spec: CAL-021
 #[test]
 fn deleting_one_date_when_the_file_cannot_be_written_or_has_vanished() {
     // the file became a folder: an error, and the copy of the series is still kept
@@ -223,7 +223,7 @@ END:VCALENDAR</c:calendar-data></d:prop></d:propstat></d:response></d:multistatu
     )
 }
 
-// spec: CAL-021
+// spec: CAL-022
 #[test]
 fn a_refresh_that_fails_shows_the_reason_and_keeps_what_was_loaded() {
     if !has_curl() {
@@ -267,7 +267,7 @@ fn a_refresh_that_fails_shows_the_reason_and_keeps_what_was_loaded() {
     assert!(store.status["w"].contains("synced"));
 }
 
-// spec: CAL-021
+// spec: CAL-022
 #[test]
 fn a_server_that_cannot_be_reached_is_shown_and_tried_again_on_the_next_timer() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -284,7 +284,7 @@ fn a_server_that_cannot_be_reached_is_shown_and_tried_again_on_the_next_timer() 
     assert_eq!(store.due_sources(std::time::Instant::now() + Duration::from_secs(16 * 60)), vec!["w".to_string()]);
 }
 
-// spec: CAL-021, CAL-002
+// spec: CAL-022, CAL-002
 #[test]
 fn a_changed_version_tag_downloads_again_and_a_changed_permission_is_taken_over() {
     if !has_curl() {
@@ -326,7 +326,7 @@ fn a_changed_version_tag_downloads_again_and_a_changed_permission_is_taken_over(
     assert!(!store.read_only.contains("w") && !store.status["w"].contains("read-only"), "{:?}", store.status);
 }
 
-// spec: CAL-021
+// spec: CAL-022
 #[test]
 fn without_a_version_tag_every_refresh_downloads() {
     if !has_curl() {
