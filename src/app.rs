@@ -2314,10 +2314,15 @@ pub(crate) mod tests {
     #[test]
     fn new_folder_stays_inside_the_vault() {
         let (mut app, d) = test_app("newfolder");
+        // the vault sits in the shared temp folder, where another program may have made an `x`:
+        // check that it is not created or changed, not that it is absent
+        let outside = d.parent().unwrap().join("x");
+        let before = std::fs::metadata(&outside).ok().map(|m| (m.is_dir(), m.modified().ok()));
         for bad in ["../x", "/../../x", "a/../../x", "~/x"] {
             assert!(app.create_folder(Path::new("Projects"), bad).is_err(), "{bad} must be refused");
         }
-        assert!(!d.join("x").exists() && !d.parent().unwrap().join("x").exists());
+        assert!(!d.join("x").exists());
+        assert_eq!(std::fs::metadata(&outside).ok().map(|m| (m.is_dir(), m.modified().ok())), before, "nothing outside the vault is touched");
         assert_eq!(app.create_folder(Path::new("Projects"), "/a/ b ").unwrap(), PathBuf::from("Projects/a/b"));
         assert!(d.join("Projects/a/b").is_dir());
         let _ = std::fs::remove_dir_all(&d);
