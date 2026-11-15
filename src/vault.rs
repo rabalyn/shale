@@ -270,7 +270,7 @@ fn apply_edits(text: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> 
     out
 }
 
-fn kind_of(path: &Path) -> FileKind {
+pub fn kind_of(path: &Path) -> FileKind {
     let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
     if crate::excalidraw_md::is_drawing_path(path) {
         FileKind::Drawing

@@ -104,20 +104,20 @@ fn a_post_loaded_again_is_one_entry_with_the_newest_data_and_a_boost_is_its_own(
 #[test]
 fn the_index_keeps_the_newest_posts_of_each_account_and_nothing_older_than_the_days() {
     let mut ix = PostIndex::in_memory();
-    ix.keep_posts = 3;
+    ix.keep_posts = Some(3);
     ix.add("a", "home", &(1..=5).map(|i| with_text(&format!("a{i}"), "x", ago(10 - i), "word")).collect::<Vec<_>>());
     ix.add("b", "home", &[with_text("b1", "x", ago(50), "word")]);
     assert_eq!((ix.count(Some("a")), ix.count(Some("b"))), (3, 1), "a cap per account");
     assert_eq!(ids(&ix.search("word", 10)), ["a5", "a4", "a3", "b1"]);
     assert!(ix.search("link:a1", 10).is_empty(), "the oldest went, with their search entries");
-    ix.keep_posts = KEEP_POSTS;
-    ix.keep_days = 30;
+    ix.keep_posts = Some(KEEP_POSTS);
+    ix.keep_days = Some(30);
     ix.add("a", "home", &[with_text("old", "x", ago(31), "ancient"), with_text("new", "x", ago(29), "recent")]);
     assert!(ix.search("ancient", 5).is_empty(), "a post older than the days is not taken");
     assert_eq!(ids(&ix.search("recent", 5)), ["new"]);
     assert_eq!(ids(&ix.search("word", 10)), ["a5", "a4", "a3"], "the post of 50 days ago went with the next addition, in the other account too");
     // shrinking the days drops what is now too old at the next addition
-    ix.keep_days = 20;
+    ix.keep_days = Some(20);
     ix.add("a", "home", &[with_text("x", "x", ago(1), "fresh")]);
     assert!(ix.search("recent", 5).is_empty());
     assert_eq!(ix.count(None), 4);
@@ -163,4 +163,32 @@ fn the_index_file_keeps_posts_between_runs_and_a_broken_file_is_made_again() {
     assert!(PostIndex::open(&dir).is_none());
     let _ = std::fs::remove_dir_all(&dir);
     assert!(default_path().ends_with("shale/social-posts.db"));
+}
+
+// spec: USE-011, USE-022
+#[test]
+fn the_data_usage_dialog_counts_empties_and_prunes_the_index_file_next_to_the_open_one() {
+    let dir = std::env::temp_dir().join(format!("shale-postindex-usage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("posts.db");
+    assert_eq!(stats_file(&path), Ok(Default::default()), "no file: nothing, and no file is made");
+    assert!(!path.exists());
+    let mut ix = PostIndex::open(&path).unwrap();
+    ix.keep_days = None;
+    ix.add("a", "home", &[with_text("1", "x", ago(400), "very old"), with_text("2", "x", ago(10), "old"), with_text("3", "x", ago(1), "new")]);
+    ix.add("b", "home", &[with_text("4", "x", ago(2), "other")]);
+    let s = stats_file(&path).unwrap();
+    assert_eq!((s.entries, s.oldest.map(|o| o <= ago(399))), (4, Some(true)));
+    assert!(s.bytes > 0);
+    let pruned = prune_file(&path, Some(365), Some(1), crate::cal_time::now()).unwrap();
+    assert_eq!(pruned.entries, 2, "the post of 400 days, then the oldest over one per account");
+    assert_eq!(ids(&ix.search("new", 5)), ["3"], "the window's own connection sees the change");
+    assert_eq!(ix.count(None), 2);
+    assert_eq!(prune_file(&path, None, None, crate::cal_time::now()).unwrap().entries, 0, "no limits remove nothing");
+    assert_eq!(clear_file(&path).unwrap().entries, 2);
+    assert!(ix.search("other", 5).is_empty() && ix.count(None) == 0, "empty for every account");
+    ix.add("a", "home", &[with_text("5", "x", ago(1), "after the clear")]);
+    assert_eq!(ix.search("clear", 5).len(), 1, "the feeds go on filling it");
+    drop(ix);
+    let _ = std::fs::remove_dir_all(&dir);
 }

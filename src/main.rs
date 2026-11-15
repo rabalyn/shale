@@ -18,6 +18,7 @@ mod caldav_env_tests;
 mod canvas;
 mod compose;
 mod config;
+mod data_usage;
 mod dialog;
 mod drawing;
 mod drawing_layout;
