@@ -272,6 +272,12 @@ fn save_temp_copy(name: &str, data: &[u8]) -> Result<PathBuf, String> {
 
 /// Start the system's opener for an address or a file that has been checked.
 fn launch(target: &std::ffi::OsStr) -> Result<(), String> {
+    // tests: the pretend program gets what would be opened (nothing starts)
+    #[cfg(test)]
+    if let Some(b) = test_browser().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        b(&target.to_string_lossy());
+        return Ok(());
+    }
     #[cfg(target_os = "linux")]
     let r = std::process::Command::new("xdg-open").arg(target).spawn();
     #[cfg(target_os = "macos")]

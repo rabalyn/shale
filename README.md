@@ -175,7 +175,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | Keys | Action |
 |---|---|
 | j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
-| Enter | Folder pane: go to the list; list: open the message |
+| Enter | Folder pane: go to the list; list: open the message (Drafts: open the draft; Outbox: show the mail) |
 | Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
 | Space | Mark the message for a selection (list) |
 | / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
@@ -183,7 +183,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | i | Import to vault |
 | u | Mark read or unread |
 | s or f | Set or clear the flag |
-| d or Delete | Delete (Trash: asks first) |
+| d or Delete | Delete (Trash: asks first); in Drafts and Outbox discard the draft or the record |
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |
@@ -193,6 +193,10 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | ] | Select the next attachment (marked with ▸) |
 | o, Shift+O | Open the selected attachment, save it to the vault |
 | z | Take back a mail waiting in the outbox |
+| e | Edit: open the draft, or take a mail of the outbox that was not sent back into the editor |
+| Shift+S | Retry a mail of the outbox that was not sent (or send it again when it may have been sent) |
+| Menu, Shift+F10 | Open the menu of the message or draft under the cursor (↓ / ↑ or j / k, Enter, Esc) |
+| Shift+U | Show or hide the sent mails that are only on this computer (j / k, Enter = Upload again, d = Dismiss, Esc) |
 | Esc | Step back: close the message, clear the search, clear the marks, dismiss a message |
 
 With **Vim-style editing** turned on in Settings, a note you go to is in normal mode:

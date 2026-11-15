@@ -423,6 +423,8 @@ pub struct MailView {
     /// Local sent copies that the server does not have and nothing uploads (MAIL-210).
     pub unsent: Vec<crate::mail_db::UnsentCopy>,
     pub unsent_open: bool,
+    /// The keyboard of the drafts and outbox lists, the menu of a row and the unsent window (MAIL-067…069).
+    pub(crate) kbd: crate::mail_keys::Kbd,
     // the keyboard (MAIL-062…065)
     /// The pane that has the keyboard.
     pub pane: Pane,
@@ -540,6 +542,7 @@ impl MailView {
             announced_local: false,
             unsent: vec![],
             unsent_open: false,
+            kbd: Default::default(),
             pane: Pane::List,
             away: false,
             dialog: false,
