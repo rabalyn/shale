@@ -398,6 +398,7 @@ impl ShaleApp {
             self.search_sel = None;
         }
         let scroll = std::mem::take(&mut self.search_scroll);
+        let posts = if self.search.trim().is_empty() { vec![] } else { self.social.index.search(&self.search, 20) };
         let mark = |ui: &Ui, rect: egui::Rect| {
             ui.painter().rect_stroke(rect.expand(1.0), CornerRadius::same(4), egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Outside);
         };
@@ -431,6 +432,25 @@ impl ShaleApp {
                     }
                 }
                 ui.add_space(6.0);
+            }
+            // posts of the feeds (SOC-036): a click opens the post in its feed
+            if !posts.is_empty() {
+                ui.label(muted(format!("Posts  {}", posts.len())).size(12.0));
+            }
+            let now = crate::cal_time::now();
+            self.social.hit_rects.clear();
+            for (i, h) in posts.iter().enumerate() {
+                let resp = egui::Frame::new().fill(theme::BG_PRIMARY).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let who = format!("{} · @{} · {}", h.author_name, h.author_handle, crate::social::feed_ui::age_text(h.created_at, now));
+                    ui.add(egui::Label::new(egui::RichText::new(who).size(12.5).color(theme::TEXT_STRONG)).truncate());
+                    ui.add(egui::Label::new(egui::RichText::new(&h.snippet).size(12.5).color(theme::MUTED)).wrap());
+                });
+                self.social.hit_rects.push((i, resp.response.rect));
+                if resp.response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    self.actions.push(Action::OpenPost(Box::new(h.clone())));
+                }
+                ui.add_space(4.0);
             }
         });
     }

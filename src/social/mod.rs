@@ -22,6 +22,9 @@ pub mod images;
 pub mod markup;
 pub mod mastodon;
 pub mod note;
+pub mod post_index;
+#[cfg(test)]
+mod post_index_tests;
 pub mod state;
 #[cfg(test)]
 mod ui_tests;

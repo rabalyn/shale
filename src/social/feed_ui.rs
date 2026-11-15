@@ -632,6 +632,8 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             }
         });
     }
+    // a search hit for this tab: its post is put into the list and the view is moved to it (SOC-035)
+    let focused = st.take_focus(tab.id, &key);
     let posts = st.timelines.get_mut(&key).map(|t| std::mem::take(&mut t.posts)).unwrap_or_default();
     let (loading, loaded, error, has_more, filling) = st.timelines.get(&key).map(|t| (t.loading, t.loaded, t.error.clone(), t.cursor.is_some(), t.filling)).unwrap_or((false, false, None, false, false));
     let gaps: HashSet<String> = st.timelines.get(&key).map(|t| t.gaps.iter().map(|g| g.above.clone()).collect()).unwrap_or_default();
@@ -644,6 +646,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     if anchor.reloads != reloads {
         // the list was replaced: it starts at the top
         anchor = Anchor { scope: key.clone(), reloads, apply: Some(0.0), ..Default::default() };
+    }
+    if let Some(k) = focused {
+        anchor = Anchor { scope: key.clone(), reloads, key: k, dy: 0.0, apply: None };
     }
     let applied = anchor.apply.take();
     let mut post_rects: Vec<(String, Rect)> = vec![];
