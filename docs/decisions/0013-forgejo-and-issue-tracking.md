@@ -31,6 +31,10 @@
    `.sha256`, notes from `CHANGELOG.md`), so the checksums come from the build that publishes.
    GitHub runs nothing for ordinary pushes or PRs and gets only the release commits and tags
    (`make-release.sh` pushes them to both servers).
+   *Amended 2026-11-15 (raba/shale#26):* Shale supports macOS and Windows too, which the homelab
+   runner (a Mac mini M2 with Asahi Linux) cannot test. So every commit of `main` that passed
+   Forgejo's CI is also pushed to GitHub, where only macOS and Windows jobs run (FORGE-003,
+   BUILD-005, BUILD-016). Feature branches and pull requests still never go to GitHub.
 4. **Forgejo issues are the one to-do list.** Every open to-do (a SHOULD BE spec row with
    planned work, a bug, an owner note, a follow-up found while working) is an open issue.
    `open-points.md` keeps undecided *questions*; `TO-TELL.md` and similar notes are input that

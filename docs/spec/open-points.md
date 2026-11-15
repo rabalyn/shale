@@ -35,7 +35,7 @@ FORGE-004, [ADR-0013](../decisions/0013-forgejo-and-issue-tracking.md)). The tab
 | OPEN-004 | Should the media folder (`z_media/<YYYY>/<MM>/`) become a vault setting? | Today it is fixed; Obsidian users may expect their attachment folder. |
 | OPEN-005 | Symbolic links in vaults: follow or show? | VAULT-007/008. Following needs loop and escape guards. |
 | OPEN-006 | inotify file watching instead of 3 s polling? | Narrows the conflict window and saves work on big vaults; not a replacement for DATA-003. |
-| OPEN-007 | Platform policy: Linux only, or keep the macOS/Windows code paths alive (and test them)? | `Cargo.toml` has macOS deps; `lists.rs` has Windows code; CI is Linux only. |
+| ~~OPEN-007~~ | ~~Platform policy: Linux only, or keep the macOS/Windows code paths alive (and test them)?~~ | Decided 2026-11-15 by the owner: Linux, macOS and Windows are supported; macOS and Windows are tested on GitHub for every commit of `main` (BUILD-005, BUILD-016, FORGE-003; raba/shale#52, raba/shale#53). |
 | OPEN-008 | Trash: restore from within Shale, and empty it after N days? | VAULT-019 records the origin first. |
 | ~~OPEN-009~~ | ~~`.excalidraw.md` (Obsidian Excalidraw plugin) files: support or document as unsupported?~~ | Decided 2026-11-14: supported (DRAW-007, DRAW-008). Links and pictures inside them: OPEN-014. |
 | ~~OPEN-014~~ | ~~Count `[[links]]` in drawings' texts as links, and show pictures embedded in plugin drawings?~~ | Decided 2026-11-14: yes, canvases included; canvases are still never written, so a rename names the canvases left behind (DRAW-016, DRAW-017, DRAW-018). |
@@ -48,7 +48,7 @@ FORGE-004, [ADR-0013](../decisions/0013-forgejo-and-issue-tracking.md)). The tab
 | ~~OPEN-017~~ | ~~Mail: index decrypted mails?~~ | Decided 2026-11-14: yes, after typed consent (ADR-0007 §6). |
 | ~~OPEN-018~~ | ~~Release signing: which tool, where the key lives, who signs?~~ | Decided 2026-11-15 by the owner (raba/shale#24): keyless GitHub artifact attestations through Sigstore, made by the release workflow; no key (BUILD-014). |
 | OPEN-019 | Wipe secrets from memory: passwords, OAuth2 refresh/access tokens and client secrets are plain `String`s that stay in freed memory and can end up in swap or core dumps. Use `zeroize`/`secrecy` (or own wrappers) for secrets from the dialog to the keyring call, and see which copies egui text fields keep. | To do: raba/shale#25 (owner, 2026-11-15). Related: SEC-007, SEC-009, SEC-012, MAIL-021. |
-| OPEN-020 | A system keyring on macOS (Keychain) and Windows (Credential Manager): `secrets.rs` talks only to `secret-tool` (libsecret), so on other systems secrets fall back to the owner-only settings file. | To do: raba/shale#26 (owner, 2026-11-15). Depends on OPEN-007 (platform policy); related: SEC-003, SEC-011, MAIL-021. |
+| OPEN-020 | A system keyring on macOS (Keychain) and Windows (Credential Manager): `secrets.rs` talks only to `secret-tool` (libsecret), so on other systems secrets fall back to the owner-only settings file. | To do: raba/shale#26 (owner, 2026-11-15). Needs raba/shale#53 (Shale on macOS and Windows) first; related: SEC-003, SEC-011, MAIL-021. |
 
 ## Backlog carried over from IMPLEMENTATION.md (still open after checking)
 

@@ -11,8 +11,11 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
 - Development happens on Forgejo: <https://git.home.rabalyn.de/raba/shale> (remote `origin`). Use the Forgejo CLI
   with the host given explicitly: `fj --host git.home.rabalyn.de …` (signed in with a token;
   issues are addressed as `raba/shale#N`, e.g. `fj --host git.home.rabalyn.de issue view raba/shale#5`).
-  GitHub (`rabalyn/shale`, remote `github`) only builds and publishes releases (`v*` tags, cut
-  now and then via `make-release.sh`); never push day-to-day work or open issues or PRs there.
+  GitHub (`rabalyn/shale`, remote `github`) builds and publishes releases (`v*` tags, cut
+  now and then via `make-release.sh`) and tests macOS and Windows on `main`, which Forgejo's
+  `mirror` job pushes there after its CI passed (FORGE-003, BUILD-016). Never push branches or
+  day-to-day work there yourself (a test branch for a run by hand only when the owner asks, and
+  deleted afterwards), and never open issues or PRs there.
 - **Before you start**: read the open issues of your area
   (`fj --host git.home.rabalyn.de issue search -r raba/shale`). If the work has no issue, create
   one first.
