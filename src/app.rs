@@ -127,6 +127,8 @@ mod drops_tests;
 mod mail;
 mod social;
 mod sync;
+#[cfg(all(test, target_os = "linux"))]
+mod tree_ui_tests;
 mod usage;
 
 /// A file "dropped" by a `--keys` script.
