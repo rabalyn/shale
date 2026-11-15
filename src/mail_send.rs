@@ -804,4 +804,17 @@ pub mod tests {
         let e = connector_for_account(&MailAccount { oauth_client_id: "".into(), ..oauth }, Some("typed-secret".into())).err().unwrap();
         assert!(e.contains("client ID"), "{e}");
     }
+
+    // spec: MAIL-059
+    #[test]
+    fn an_smtp_connector_for_a_password_account_without_a_stored_password_says_no_password() {
+        // an account id of its own: the pretend keyring is shared by all tests and nothing stores a password for this one
+        let a = MailAccount { id: "t-smtp-no-password".into(), smtp_host: "localhost".into(), ..account() };
+        assert!(crate::secrets::mail_secret(&a.id, crate::secrets::MailSecret::Password).is_none());
+        assert_eq!(connector_for_account(&a, None).err().unwrap(), crate::imap_sync::NO_PASSWORD);
+        // with a password in the keyring it works
+        let stored = MailAccount { id: "t-smtp-stored-password".into(), ..a };
+        assert!(crate::secrets::set_mail_secret(&stored.id, crate::secrets::MailSecret::Password, "pw"));
+        assert!(connector_for_account(&stored, None).is_ok());
+    }
 }
