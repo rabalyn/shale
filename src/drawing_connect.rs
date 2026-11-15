@@ -64,7 +64,6 @@ pub fn binding_of(e: &Element, key: &str) -> Option<(String, Option<[f32; 2]>)> 
 
 /// Paint a line ending. Excalidraw names: arrow, triangle, triangle_outline, bar, dot, circle,
 /// circle_outline, diamond, diamond_outline.
-#[allow(clippy::too_many_arguments)]
 pub fn paint_head(kind: &str, tip: Pos2, from: Pos2, stroke_width: f32, stroke: Stroke, view: &View, out: &mut Vec<Shape>) {
     let d = tip - from;
     let len = d.length();
@@ -330,7 +329,6 @@ impl DrawingDoc {
     /// After shapes moved: a connection that now runs through one of its own shapes switches to
     /// the pair of anchors that face each other. Connections that still look fine keep the
     /// anchors the person picked.
-    #[allow(clippy::type_complexity)]
     pub(super) fn tidy_connections(&mut self, moved: &[String]) {
         let shapes: HashMap<String, (String, Rect)> = self.scene.live().filter(|e| is_bindable(e)).map(|e| (e.id.clone(), (e.kind.clone(), e.bounds()))).collect();
         let mut fixes: Vec<(String, String, [f32; 2], String, [f32; 2])> = Vec::new();
@@ -372,7 +370,6 @@ impl DrawingDoc {
     // ------------------------------------------------------------------ arrange / spread
 
     /// Shapes to arrange (the selected ones, or all) and the connections between them.
-    #[allow(clippy::type_complexity)]
     fn layout_input(&self) -> (Vec<String>, Vec<(String, Rect)>, Vec<(usize, usize, String)>) {
         let sel_shapes: Vec<&Element> = self.scene.live().filter(|e| is_bindable(e) && self.selection.contains(&e.id)).collect();
         let pool: Vec<&Element> = if sel_shapes.len() >= 2 { sel_shapes } else { self.scene.live().filter(|e| is_bindable(e)).collect() };

@@ -209,7 +209,6 @@ impl Page {
 
     /// Text on a baseline at (x, y). Returns the width. Embedded fonts give selectable text;
     /// the hand-drawn font and characters outside WinAnsi are drawn as glyph outlines.
-    #[allow(clippy::too_many_arguments)]
     pub fn text(&mut self, kind: FontKind, size: f32, x: f32, y: f32, s: &str, color: Rgba, italic: bool, bold: bool) -> f32 {
         let mut cx = x;
         let mut run = String::new();
@@ -248,7 +247,6 @@ impl Page {
         cx - x
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn glyph_outline(&mut self, kind: FontKind, size: f32, x: f32, y: f32, c: char, color: Rgba, skew: f32) {
         let (k, g) = face_for(kind, c);
         let f = &font(k).face;

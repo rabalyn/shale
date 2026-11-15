@@ -177,3 +177,42 @@ jobs:
       # reads only Cargo.lock, so it needs no build and no system libraries
       - name: Audit the dependencies
         run: cargo audit
+
+  # DEV-002: a dependency that no code uses fails the build (vendor/ is skipped via .ignore)
+  unused-deps:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/rust:1.100.0-bookworm
+    steps:
+      - name: Trust the runner's extra CA, if any
+        run: |
+          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
+            update-ca-certificates >/dev/null 2>&1
+            echo "Added the runner's extra CA."
+          fi
+
+      - name: Check out
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "Workspace already populated (local act_runner exec)."
+          else
+            git init -q .
+            git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+            auth=()
+            if [ -n "$TOKEN" ]; then
+              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+            fi
+            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.sha }}"
+            git checkout -q FETCH_HEAD
+          fi
+
+      - name: Install cargo-machete
+        run: cargo install cargo-machete --version 0.9.2 --locked
+
+      # reads only the sources and Cargo.toml, so it needs no build and no system libraries
+      - name: Check for unused dependencies
+        run: cargo machete

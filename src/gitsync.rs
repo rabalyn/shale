@@ -423,7 +423,6 @@ fn align_branch(git: &Git, vault: &Path, branch: &str) -> Result<String, String>
 }
 
 /// Bring the remote commit `theirs` into HEAD: fast-forward or merge, conflicts as copies.
-#[allow(clippy::too_many_arguments)]
 fn integrate(git: &Git, vault: &Path, opts: &Options, ident: &[String], local: Option<&str>, theirs: &str, tree: &TreeLock, report: &mut Report) -> Result<(), String> {
     if let Some(l) = local {
         if git.run(vault, args!["merge-base", "--is-ancestor", theirs, l])?.ok {
