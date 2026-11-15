@@ -1101,7 +1101,10 @@ impl Vault {
             nodes.push(GraphNode { key: rel_to_string(&f.rel), label: f.display_name(), rel: Some(f.rel.clone()), kind: f.kind });
         }
         let mut edges = HashSet::new();
-        for (src, n) in self.linkers() {
+        // in the order of the paths: the missing notes get the same places in the graph every start
+        let mut linkers: Vec<_> = self.linkers().collect();
+        linkers.sort_by(|a, b| a.0.cmp(b.0));
+        for (src, n) in linkers {
             let Some(&a) = idx.get(&rel_to_string(src)) else { continue };
             for (l, r) in n.links.iter().zip(n.resolved.iter()) {
                 let b = match r {
@@ -1389,6 +1392,23 @@ mod tests {
         let (nodes, edges) = v.graph(true);
         assert!(nodes.iter().any(|n| n.rel.is_none() && n.label == "Reading list"));
         assert!(edges.len() >= 5);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DEV-007
+    #[test]
+    fn dev_007_the_missing_notes_of_the_graph_come_in_the_order_of_the_notes_that_link_them() {
+        let d = temp_vault("graph-order");
+        fs::create_dir_all(&d).unwrap();
+        for (name, target) in [("A.md", "Zeta"), ("B.md", "Mu"), ("C.md", "Alpha"), ("D.md", "Kappa"), ("E.md", "Beta")] {
+            fs::write(d.join(name), format!("see [[{target}]]")).unwrap();
+        }
+        let v = Vault::open(&d).unwrap();
+        for _ in 0..5 {
+            let (nodes, _) = v.graph(true);
+            let missing: Vec<&str> = nodes.iter().filter(|n| n.rel.is_none()).map(|n| n.label.as_str()).collect();
+            assert_eq!(missing, ["Zeta", "Mu", "Alpha", "Kappa", "Beta"]);
+        }
         let _ = fs::remove_dir_all(&d);
     }
 

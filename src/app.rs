@@ -371,6 +371,13 @@ pub struct ShaleApp {
 impl ShaleApp {
     pub fn new(cc: &eframe::CreationContext<'_>, opts: Options) -> Self {
         theme::apply(&cc.egui_ctx);
+        if opts.screenshot.is_some() {
+            // no fades and no scroll easing: a picture shows the end state, whatever the speed of the machine
+            cc.egui_ctx.all_styles_mut(|s| {
+                s.animation_time = 0.0;
+                s.scroll_animation = egui::style::ScrollAnimation::none();
+            });
+        }
         #[cfg(target_os = "linux")]
         {
             // drops from other programs on Wayland (a second listener; see wl_drop)
@@ -384,6 +391,15 @@ impl ShaleApp {
     /// Set up the app without a window. `persist` = read/write the user's config file.
     pub fn build(opts: Options, persist: bool) -> Self {
         let screenshot = opts.screenshot.clone();
+        // screenshots only: SHALE_FAKE_NOW=2026-11-15T10:00:00 freezes the clock and the build stamp
+        if screenshot.is_some() {
+            if let Ok(v) = std::env::var("SHALE_FAKE_NOW") {
+                match crate::cal_time::parse_fake_now(&v) {
+                    Some(secs) => crate::cal_time::freeze(secs),
+                    None => eprintln!("SHALE_FAKE_NOW={v}: not a date-time like 2026-11-15T10:00:00, the real clock is used"),
+                }
+            }
+        }
         let (mut cfg, cfg_problem) = if persist { Config::load() } else { (Config::default(), None) };
         let persist_config = persist;
         // screenshots and scripted checks of vim-lite: SHALE_VIM=1 turns it on
@@ -478,7 +494,7 @@ impl ShaleApp {
             shot_requested: false,
             shot_done: Arc::new(AtomicBool::new(false)),
             cfg_error: None,
-            script: opts.keys.as_deref().map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default(),
+            script: opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default(),
             script_texts: vec![],
             script_last_frame: 0,
             recovery_root: if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{}", std::process::id())) },
@@ -2032,6 +2048,7 @@ impl ShaleApp {
                 }
             }
         });
+        out.extend(crate::script::take_hints());
         self.script_texts = out;
     }
 

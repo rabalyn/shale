@@ -1197,7 +1197,7 @@ pub fn strip_due(text: &str) -> String {
 
 /// Today's date as YYYY-MM-DD (UTC), without a date library.
 pub fn today() -> Option<String> {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+    let secs = crate::cal_time::now();
     let days = secs.div_euclid(86_400);
     // civil-from-days (Howard Hinnant)
     let z = days + 719_468;
