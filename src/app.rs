@@ -1541,6 +1541,35 @@ impl ShaleApp {
         }
     }
 
+    /// Do the keys of the "Editor normal mode" scope apply now (EDIT-015)? Vim-style editing is
+    /// on and either the editor of the open note has the keyboard in normal mode, or the tab
+    /// shows a view without a text box (calendar, Feeds, tasks, graph, a note in reading view)
+    /// and no field has the keyboard. Not in the mail view (Space and f are mail keys, MAIL-061,
+    /// MAIL-110), not in a drawing (Space pans), not with a dialog open.
+    pub(crate) fn normal_keys_active(&self, ctx: &egui::Context) -> bool {
+        if !self.cfg.vim_mode || self.modal.is_some() {
+            return false;
+        }
+        let Some(tab) = self.tabs.get(self.active) else { return false };
+        match tab.view {
+            View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx),
+            View::Mail | View::Drawing(_) => false,
+            _ => ctx.memory(|m| m.focused().is_none()),
+        }
+    }
+
+    /// Swap the view of this tab with the one before it in its history, so that doing it again
+    /// swaps back (NAV-019). A note gets the keyboard.
+    pub fn swap_alternate(&mut self) {
+        let Some(t) = self.tabs.get_mut(self.active) else { return };
+        let Some(prev) = t.back.last_mut() else { return };
+        std::mem::swap(&mut t.view, prev);
+        if matches!(t.view, View::Note(_)) {
+            self.focus_editor();
+        }
+        self.remember_open_files();
+    }
+
     pub fn go_back(&mut self) {
         if let Some(t) = self.tabs.get_mut(self.active) {
             if let Some(prev) = t.back.pop() {
@@ -1620,6 +1649,15 @@ impl ShaleApp {
             self.step_tab(-1);
         } else if is(KeyAction::NextTab) {
             self.step_tab(1);
+        }
+        // Space sequences of vim-style normal mode (EDIT-015); a half typed one is forgotten
+        // when the keys are not read any more
+        if self.normal_keys_active(ui.ctx()) {
+            if let Some(KeyAction::NormalAlternate) = ui.input_mut(|i| self.keymap.poll(i, Scope::EditorNormal)) {
+                self.swap_alternate();
+            }
+        } else {
+            self.keymap.cancel(Scope::EditorNormal);
         }
         if mail_view {
             self.show_view(View::Mail, false);

@@ -15,17 +15,20 @@ pub enum Scope {
     Global,
     FileList,
     SearchResults,
+    /// Vim-lite normal mode (EDIT-015): sequences that start with Space.
+    EditorNormal,
 }
 
 impl Scope {
     /// The scopes in the order the keybindings list shows them.
-    pub const ALL: [Scope; 3] = [Scope::Global, Scope::FileList, Scope::SearchResults];
+    pub const ALL: [Scope; 4] = [Scope::Global, Scope::FileList, Scope::SearchResults, Scope::EditorNormal];
 
     pub fn label(self) -> &'static str {
         match self {
             Scope::Global => "Everywhere",
             Scope::FileList => "File list (Ctrl+Shift+B)",
             Scope::SearchResults => "Search results",
+            Scope::EditorNormal => "Vim-style editing, normal mode",
         }
     }
 
@@ -35,6 +38,36 @@ impl Scope {
             Scope::Global => &[],
             Scope::FileList => &[Key::Enter, Key::Escape],
             Scope::SearchResults => &[Key::Enter, Key::Escape, Key::Slash],
+            // every key vim-lite uses in normal mode (EDIT-011…014), with or without Shift
+            Scope::EditorNormal => &[
+                Key::H,
+                Key::J,
+                Key::K,
+                Key::L,
+                Key::W,
+                Key::B,
+                Key::G,
+                Key::N,
+                Key::O,
+                Key::I,
+                Key::A,
+                Key::X,
+                Key::V,
+                Key::P,
+                Key::D,
+                Key::Y,
+                Key::Num0,
+                Key::Num4,
+                Key::Colon,
+                Key::Slash,
+                Key::Escape,
+                Key::Enter,
+                Key::Backspace,
+                Key::ArrowLeft,
+                Key::ArrowRight,
+                Key::ArrowUp,
+                Key::ArrowDown,
+            ],
         }
     }
 
@@ -183,6 +216,7 @@ actions! {
     Settings => "global.settings", "Settings", Global, ["Ctrl+Comma"];
     PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+Alt+H"];
     NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+Alt+L"];
+    NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
     TreeNextFolder => "files.next_folder", "Next folder", FileList, ["Ctrl+J"];
@@ -283,13 +317,12 @@ impl Keymap {
         if scope == Scope::Global && !first.ctrl && !first.alt {
             return Err(format!("{} needs Ctrl or Alt: a shortcut that works everywhere must not get in the way of typing", b.display()));
         }
-        if b.0.len() == 1 {
-            if scope == Scope::Global && RESERVED_TEXT.iter().any(|(shift, key)| first.ctrl && !first.alt && first.shift == *shift && first.key == *key) {
-                return Err(format!("{} is reserved for text editing", b.display()));
-            }
-            if !first.ctrl && !first.alt && !first.shift && scope.reserved().contains(&first.key) {
-                return Err(format!("{} has a fixed meaning in this list", b.display()));
-            }
+        if b.0.len() == 1 && scope == Scope::Global && RESERVED_TEXT.iter().any(|(shift, key)| first.ctrl && !first.alt && first.shift == *shift && first.key == *key) {
+            return Err(format!("{} is reserved for text editing", b.display()));
+        }
+        // a fixed key cannot start a binding (also not a sequence, which it would never complete)
+        if !first.ctrl && !first.alt && scope.reserved().contains(&first.key) {
+            return Err(format!("{} has a fixed meaning here", b.display()));
         }
         for d in DEFS.iter().filter(|d| d.action != a && d.scope.overlaps(scope)) {
             if self.bindings(d.action).iter().any(|o| o.clashes(b)) {
@@ -308,6 +341,11 @@ impl Keymap {
             self.custom.insert(a, vec![b]);
         }
         Ok(())
+    }
+
+    /// Forget the chords of an unfinished sequence of this scope (its keys are not being read).
+    pub fn cancel(&mut self, scope: Scope) {
+        self.pending.remove(&scope);
     }
 
     pub fn reset(&mut self, a: Action) {
@@ -393,7 +431,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 24);
+        assert_eq!(DEFS.len(), 25);
     }
 
     // spec: KEY-003
@@ -450,6 +488,41 @@ mod tests {
         assert!(k.check(Action::TreeNextFile, &b("Enter")).unwrap_err().contains("fixed"));
         assert!(k.check(Action::HitNext, &b("Slash")).unwrap_err().contains("fixed"));
         assert_eq!(k.check(Action::TreeNextFile, &b("Slash")), Ok(()));
+    }
+
+    // spec: EDIT-015, KEY-005
+    #[test]
+    fn the_keys_of_vim_normal_mode_cannot_be_bound() {
+        let k = Keymap::default();
+        let a = Action::NormalAlternate;
+        for text in ["H", "Shift+W", "G", "0", "4", "Slash", "Colon", "Escape", "Enter", "Backspace", "ArrowDown", "G X", "Shift+O Tab"] {
+            assert!(k.check(a, &b(text)).unwrap_err().contains("fixed meaning"), "{text}");
+        }
+        // after the leader any key is free, and Ctrl chords are no vim keys
+        assert_eq!(k.check(a, &b("Space G")), Ok(()));
+        assert_eq!(k.check(a, &b("Space Tab")), Ok(()));
+        assert_eq!(k.check(a, &b("Ctrl+J")), Ok(()));
+        // the other scopes keep their own fixed keys
+        assert_eq!(k.check(Action::TreeNextFile, &b("H")), Ok(()));
+    }
+
+    // spec: EDIT-015
+    #[test]
+    fn a_sequence_key_does_not_leave_its_typed_character() {
+        let ctx = egui::Context::default();
+        let mut k = Keymap::default();
+        for (key, text) in [(Key::Space, " "), (Key::Tab, "")] {
+            let mut events = vec![key_event(key, Modifiers::NONE)];
+            events.push(Event::Text(text.to_string()));
+            let (mut act, mut left) = (None, usize::MAX);
+            let mut full = ctx.run_ui(RawInput { events, ..Default::default() }, |ui| {
+                act = ui.input_mut(|i| k.poll(i, Scope::EditorNormal));
+                left = ui.input(|i| i.events.iter().filter(|e| matches!(e, Event::Text(t) if !t.is_empty())).count());
+            });
+            full.textures_delta.clear();
+            assert_eq!(left, 0, "{key:?} left its character for the text box");
+            assert_eq!(act, (key == Key::Tab).then_some(Action::NormalAlternate));
+        }
     }
 
     // spec: KEY-007

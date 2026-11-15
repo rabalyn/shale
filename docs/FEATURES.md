@@ -58,6 +58,9 @@ built-in demo vault (`shale --screenshot out.png`).
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
   start typing, Esc stops; x deletes a character; v and V select with the same motions, d cuts
   and y copies to the clipboard, p pastes. The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
+- In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
+  this tab showed just before, and again to come back, like vim's alternate file. Space is the
+  leader key of its own list in Keybindings…; the vim keys themselves cannot be rebound.
 
 ## Drawings
 
@@ -444,7 +447,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 ## Keyboard
 
 The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
-(everywhere, file list, search results; double bindings are refused). Text editing keys, vim
+(everywhere, file list, search results, vim normal mode; double bindings are refused). Text editing keys, vim
 keys and the keys inside the mail view are fixed.
 
 | Keys | Action |
@@ -462,5 +465,6 @@ keys and the keys inside the mail view are fixed.
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back |
 | Alt+← / Alt+→ | Back / forward |
+| Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |

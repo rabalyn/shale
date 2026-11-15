@@ -357,4 +357,120 @@ mod tests {
         w.press(Key::N, CTRL_ALT);
         assert_eq!(views(&w)[w.app.active], "A.md", "the new one works");
     }
+
+    /// A key that types a character: the key event and the text event, as the window sends them.
+    fn typed(w: &mut W, key: Key, text: &str) {
+        let ev = |pressed| Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+        let mut down = vec![ev(true)];
+        if !text.is_empty() {
+            down.push(Event::Text(text.to_string()));
+        }
+        w.frame(down);
+        w.frame(vec![ev(false)]);
+    }
+
+    fn note_text(w: &W) -> String {
+        w.app.notes[Path::new("A.md")].text.clone()
+    }
+
+    fn settle(w: &mut W) {
+        for _ in 0..3 {
+            w.frame(vec![]);
+        }
+    }
+
+    /// Vim-style editing on, the open note's editor has the keyboard (normal mode).
+    fn vim_note(tag: &str) -> W {
+        let mut w = W::new(tag);
+        w.app.cfg.vim_mode = true;
+        w.app.focus_editor();
+        settle(&mut w);
+        assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the editor has the keyboard in normal mode");
+        w
+    }
+
+    // spec: NAV-019
+    #[test]
+    fn space_tab_toggles_between_the_note_and_the_view_before_it() {
+        let mut w = vim_note("alt");
+        // nothing before the note yet: nothing happens
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        assert_eq!(views(&w), ["A.md"]);
+        w.app.show_view(View::Calendar, false);
+        settle(&mut w);
+        assert_eq!(views(&w), ["calendar"]);
+        // calendar -> note, note -> calendar, and again
+        for expect in ["A.md", "calendar", "A.md", "calendar"] {
+            typed(&mut w, Key::Space, " ");
+            typed(&mut w, Key::Tab, "");
+            settle(&mut w);
+            assert_eq!(views(&w), [expect]);
+        }
+        assert_eq!(note_text(&w), "# A\n", "nothing was typed into the note");
+        // another note in the same tab: back and forth between the two
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        settle(&mut w);
+        w.app.open(Path::new("B.md"), false);
+        w.app.focus_editor();
+        settle(&mut w);
+        assert_eq!(views(&w), ["B.md"]);
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        settle(&mut w);
+        assert_eq!(views(&w), ["A.md"]);
+        // Back still works, with the swapped history
+        w.press(Key::ArrowLeft, Modifiers::ALT);
+        assert_eq!(views(&w), ["B.md"]);
+        // the key can be changed like any other
+        w.app.keymap.set(Action::NormalAlternate, Binding::parse("Space Backspace").unwrap()).unwrap();
+        settle(&mut w);
+        let before = views(&w);
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        settle(&mut w);
+        assert_eq!(views(&w), before, "the old keys do nothing");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Backspace, "");
+        settle(&mut w);
+        assert_ne!(views(&w), before, "the new ones work");
+    }
+
+    // spec: EDIT-015
+    #[test]
+    fn space_tab_in_normal_mode_does_not_type_and_insert_mode_still_types() {
+        let mut w = vim_note("leak");
+        // a waiting Space types nothing and moves nothing; a key that does not continue it works as usual
+        typed(&mut w, Key::Space, " ");
+        assert_eq!(note_text(&w), "# A\n");
+        typed(&mut w, Key::Z, "z");
+        assert_eq!(note_text(&w), "# A\n", "z is no vim key either");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::I, "i");
+        assert!(w.app.tabs[0].editor.vim.mode == crate::vim::Mode::Insert, "i after a cancelled Space starts insert mode");
+        // insert mode: Space is typing again
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::X, "x");
+        assert!(note_text(&w).contains(" x"), "{:?}", note_text(&w));
+        // a vim command line takes every key
+        w.press(Key::Escape, Modifiers::NONE);
+        typed(&mut w, Key::Colon, ":");
+        typed(&mut w, Key::Space, " ");
+        assert!(w.app.tabs[0].editor.vim.typing_command());
+        assert!(!w.app.tabs[0].editor.vim_normal_keys(&w.ctx));
+        // with Vim-style editing off the scope is not read at all
+        w.press(Key::Escape, Modifiers::NONE);
+        w.app.cfg.vim_mode = false;
+        w.app.show_view(View::Calendar, false);
+        settle(&mut w);
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        assert_eq!(views(&w), ["calendar"]);
+        // and the mail view keeps Space and f for itself
+        w.app.cfg.vim_mode = true;
+        w.app.show_view(View::Mail, false);
+        settle(&mut w);
+        assert!(!w.app.normal_keys_active(&w.ctx));
+    }
 }

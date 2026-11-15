@@ -414,6 +414,12 @@ impl NoteEditor {
         !self.vim_enabled || self.vim.mode == crate::vim::Mode::Insert
     }
 
+    /// This editor has the keyboard in vim normal mode, not typing a `:` or `/` command: the
+    /// keys of the "Editor normal mode" scope (EDIT-015) are looked up before vim sees them.
+    pub fn vim_normal_keys(&self, ctx: &egui::Context) -> bool {
+        self.vim_enabled && self.vim.mode == crate::vim::Mode::Normal && !self.vim.typing_command() && ctx.memory(|m| m.has_focus(self.id))
+    }
+
     /// The vim mode (or command) for the status bar, while this editor has the keyboard.
     pub fn vim_status(&self) -> Option<String> {
         (self.vim_enabled && self.vim_was_focused).then(|| self.vim.status())
