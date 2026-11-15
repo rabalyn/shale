@@ -20,9 +20,9 @@ pub struct MailDialog {
     pub undo_secs: String,
     pub sel: Option<usize>,
     /// Passwords typed this time, by account id; saved when the dialog is closed with Done.
-    pub passwords: HashMap<String, String>,
+    pub passwords: HashMap<String, crate::secret::Secret>,
     /// Client secrets typed this time, by account id; saved to the keyring with Done.
-    pub client_secrets: HashMap<String, String>,
+    pub client_secrets: HashMap<String, crate::secret::Secret>,
     /// Ids of accounts that were removed (their keyring entries are cleared with Done).
     pub removed: Vec<String>,
     /// Id, server and user of each account as the dialog opened (MAIL-199).
@@ -412,7 +412,7 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
         if d.accounts[i].auth == MailAuth::Password {
             ui.label("Password");
             let pw = d.passwords.entry(id.clone()).or_default();
-            let r = crate::secrets::password_edit(ui, egui::TextEdit::singleline(pw).hint_text("leave empty to keep the saved one").desired_width(300.0));
+            let r = crate::secrets::password_edit(ui, pw, "leave empty to keep the saved one", 300.0);
             rects.push(("md:password".into(), r.rect));
             ui.end_row();
         } else {
@@ -580,7 +580,7 @@ fn oauth_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, id: &str, rects: &mut V
     ui.end_row();
     ui.label("Client secret");
     let sec = d.client_secrets.entry(id.to_string()).or_default();
-    let r = crate::secrets::password_edit(ui, egui::TextEdit::singleline(sec).hint_text("only if the provider asks for one (Google does); empty keeps the saved one").desired_width(300.0));
+    let r = crate::secrets::password_edit(ui, sec, "only if the provider asks for one (Google does); empty keeps the saved one", 300.0);
     rects.push(("md:oauth-client-secret".into(), r.rect));
     ui.end_row();
 }
@@ -827,7 +827,7 @@ mod tests {
             assert_eq!(changed, vec![("mail1".to_string(), "mail2".to_string())], "{host} {user}");
             assert_eq!(d.accounts[0].id, "mail2");
             assert_eq!(d.removed, vec!["mail1".to_string()]);
-            assert_eq!(d.passwords.get("mail2").map(String::as_str), Some("typed"), "the typed password moves along");
+            assert_eq!(d.passwords.get("mail2").map(|s| s.expose()), Some("typed"), "the typed password moves along");
             assert!(!d.passwords.contains_key("mail1"));
             // done again with nothing new changes nothing
             assert!(done(&mut d).is_empty());

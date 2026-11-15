@@ -109,6 +109,11 @@ impl MailView {
                     ui.label(muted("Opening the local mail copy…"));
                 });
             }
+            StoreState::Rebuilding(_) => {
+                ui.scope_builder(UiBuilder::new().max_rect(body.shrink(20.0)), |ui| {
+                    ui.label(muted("Rebuilding the mail index from the message files…"));
+                });
+            }
             StoreState::Ready(_) if cfg.mail_accounts.is_empty() => {
                 ui.scope_builder(UiBuilder::new().max_rect(body.shrink(30.0)), |ui| {
                     ui.add_space(40.0);
@@ -405,7 +410,7 @@ impl MailView {
         ui.label(format!("Password for {name} (kept in memory until you quit):"));
         let mut go = false;
         if let Some(p) = self.prompt.as_mut() {
-            let r = crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut p.text).desired_width(200.0));
+            let r = crate::secrets::password_edit(ui, &mut p.text, "", 200.0);
             rec(rects, "mail:password", &r);
             if std::mem::take(&mut p.focus) {
                 r.request_focus();

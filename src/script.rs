@@ -245,7 +245,7 @@ mod tests {
                 assert!(crate::parse_size(size).is_some(), "[{}] size {size}", r.name);
             }
             if let Some(view) = k("view") {
-                let known = ["tasks", "graph", "drawing", "reading", "calendar", "calendar-side", "mail", "keybindings", "social", "social-import"];
+                let known = ["tasks", "graph", "drawing", "reading", "calendar", "calendar-side", "mail", "keybindings", "data-usage", "social", "social-import"];
                 assert!(known.contains(&view) || ["open:", "read-only:", "convert:"].iter().any(|p| view.starts_with(p)), "[{}] view {view}", r.name);
             }
             if let Some(v) = k("vault") {

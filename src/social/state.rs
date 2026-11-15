@@ -302,7 +302,7 @@ impl SocialState {
 
     fn client_source(&self, e: &SocialAccountEntry) -> impl FnOnce() -> Client + Send + 'static {
         let (cached, entry) = (self.clients.get(&e.account.id).cloned(), e.clone());
-        move || cached.unwrap_or_else(|| Client::new(entry.account.clone(), &entry.secret()))
+        move || cached.unwrap_or_else(|| Client::new(entry.account.clone(), entry.secret().expose()))
     }
 
     /// Ask for the feed list of the account (once; `reload_feeds` asks again).

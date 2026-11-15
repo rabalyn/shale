@@ -17,14 +17,14 @@ pub enum SourceKind {
     Local { file: PathBuf },
     /// a calendar on a CalDAV server
     /// (the password is kept in the system keyring when there is one; see `secrets`)
-    Caldav { url: String, username: String, password: String },
+    Caldav { url: String, username: String, password: crate::secret::Secret },
 }
 
 impl std::fmt::Debug for SourceKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SourceKind::Local { file } => f.debug_struct("Local").field("file", file).finish(),
-            SourceKind::Caldav { url, username, password } => f.debug_struct("Caldav").field("url", url).field("username", username).field("password", &cal_dav::redacted(password)).finish(),
+            SourceKind::Caldav { url, username, password } => f.debug_struct("Caldav").field("url", url).field("username", username).field("password", &cal_dav::redacted(password.expose())).finish(),
         }
     }
 }

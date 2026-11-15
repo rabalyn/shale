@@ -67,6 +67,16 @@ fn fetch(dir: &Path, url: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Whether a file name is one of the cache's own (`<16 hex digits>.<picture type>`).
+fn is_cache_file(name: &str) -> bool {
+    name.split_once('.').is_some_and(|(stem, ext)| stem.len() == 16 && stem.bytes().all(|b| b.is_ascii_hexdigit()) && EXTS.contains(&ext))
+}
+
+/// The picture files in the cache folder, oldest fetch first (USE-010).
+pub fn cache_files(dir: &Path) -> Vec<crate::data_usage::files::FileEntry> {
+    crate::data_usage::files::entries(dir, is_cache_file)
+}
+
 impl ImageCache {
     /// `ctx` is asked to repaint whenever a picture arrives.
     pub fn new(ctx: &egui::Context, dir: PathBuf) -> ImageCache {
@@ -115,6 +125,12 @@ impl ImageCache {
         self.slots.lock().unwrap_or_else(|e| e.into_inner()).get(url) == Some(&Slot::Failed)
     }
 
+    /// Forget the pictures found so far (after the files were cleared or pruned): each one is
+    /// fetched again when it is shown next (USE-010).
+    pub fn forget_all(&self) {
+        self.slots.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, s| *s == Slot::Pending);
+    }
+
     /// How many pictures are still on their way.
     pub fn pending(&self) -> usize {
         self.slots.lock().unwrap_or_else(|e| e.into_inner()).values().filter(|s| **s == Slot::Pending).count()
@@ -146,5 +162,27 @@ mod tests {
         }
         assert!(c.failed("http://example.invalid/x.png"));
         assert_eq!(c.pending(), 0);
+    }
+
+    // spec: USE-010
+    #[test]
+    fn only_picture_files_of_the_cache_are_its_own_and_forgetting_fetches_again() {
+        assert!(is_cache_file("0123456789abcdef.png"));
+        assert!(!is_cache_file("0123456789abcdef.txt"));
+        assert!(!is_cache_file("short.png"));
+        assert!(!is_cache_file("notes.md"));
+        let d = std::env::temp_dir().join(format!("shale-img-forget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("0123456789abcdef.png"), b"\x89PNG").unwrap();
+        std::fs::write(d.join("other.txt"), b"x").unwrap();
+        assert_eq!(cache_files(&d).len(), 1);
+        let ctx = egui::Context::default();
+        let c = ImageCache::new(&ctx, d.clone());
+        c.slots.lock().unwrap().insert("https://a.test/x.png".into(), Slot::Ready(d.join("0123456789abcdef.png")));
+        c.slots.lock().unwrap().insert("https://a.test/y.png".into(), Slot::Failed);
+        c.forget_all();
+        assert!(c.slots.lock().unwrap().is_empty(), "known and failed pictures are asked for again");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
