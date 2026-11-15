@@ -76,9 +76,6 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     };
     let mut action = None;
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
-    ui.set_width(620.0);
-    ui.label(egui::RichText::new("Import into the vault").size(18.0).color(theme::TEXT_STRONG));
-    ui.add_space(4.0);
     // ---- what
     if d.items.is_empty() {
         ui.label(muted("Nothing to import yet. Drop e-mails, calendar events or files on the window, or add a file below."));

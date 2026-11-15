@@ -183,9 +183,6 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(150));
     }
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
-    ui.set_width(560.0);
-    ui.label(egui::RichText::new("Feed accounts").size(18.0).color(theme::TEXT_STRONG));
-    ui.add_space(4.0);
     // ---- the list
     if accounts.is_empty() {
         ui.label(muted("No account yet. Add a Mastodon or Bluesky account below to read its feeds here."));

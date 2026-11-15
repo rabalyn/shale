@@ -37,6 +37,7 @@ built-in demo vault (`shale --screenshot out.png`).
 
 - Export notes and drawings to PDF (paper size, margins, fonts and more in a dialog), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash.
+- Every dialog is a window you can move by its title bar and resize from any edge or corner.
 
 ## Keyboard only: sidebar, file list and vim-style editing
 

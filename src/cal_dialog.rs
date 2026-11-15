@@ -90,9 +90,6 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
     }
     let mut action = None;
-    ui.set_width(560.0);
-    ui.label(egui::RichText::new("Calendars").size(18.0).color(theme::TEXT_STRONG));
-    ui.add_space(4.0);
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     // ---- the list
     if d.sources.is_empty() {
@@ -478,10 +475,6 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
     if saving {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
-    ui.set_width(460.0);
-    let heading = if d.original.is_some() { "Edit event" } else { "New event" };
-    ui.label(egui::RichText::new(heading).size(17.0).color(theme::TEXT_STRONG));
-    ui.add_space(2.0);
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     let before = d.start_end().ok();
     let mut start_changed = false;
