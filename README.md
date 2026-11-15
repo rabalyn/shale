@@ -68,6 +68,18 @@ Each download has a `.sha256` file next to it; to check the download, put both f
 `sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256`.
 This catches a damaged download, not a compromised release page.
 
+To check that a download was built by Shale's release workflow from its version tag, use the
+[GitHub CLI](https://cli.github.com/) (each release is attested through Sigstore, without a key):
+
+```sh
+gh attestation verify shale-<version>-linux-x86_64.tar.gz --repo rabalyn/shale \
+  --signer-workflow rabalyn/shale/.github/workflows/build.yml --source-ref refs/tags/v<version>
+```
+
+Add `--bundle shale-<version>-linux-x86_64.tar.gz.sigstore.json` to use the attestation file from
+the release page instead of asking GitHub for it. This shows where and from what the file was
+built; it does not show that a person checked the build.
+
 ### Making a release
 
 1. Raise `version` in `Cargo.toml` ([semver](https://semver.org/): before 1.0, new features raise
