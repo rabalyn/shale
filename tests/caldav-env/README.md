@@ -82,7 +82,8 @@ suites (`--test-threads=1`, and fails if a suite ran no test) and always takes t
 
 The job runs in the `rust` container like the other jobs, so it needs a container engine **inside**
 that container. It installs `podman` and `podman-compose` with apt and then asks `podman info`
-(then `docker info`). If neither works, the job prints `SKIPPED: this runner cannot run containers
+(then `docker info`) and starts a small `alpine` container with it (an unprivileged job
+container answers `info` but cannot unpack images). If neither works, the job prints `SKIPPED: this runner cannot run containers
 …` and ends green: the real-server tests did not run. What the runner must offer for them to run:
 
 - the job container must be allowed to run containers: for the runner's `container.options` in the
@@ -97,6 +98,9 @@ that container. It installs `podman` and `podman-compose` with apt and then asks
 - a runner without the container layer: a job with a label that runs on the host itself (a `host`
   label whose runner has Podman, `openssl`, `curl` and a Rust toolchain). Then change `runs-on` of
   `env-tests` to that label and drop the `container:`.
+
+Inside the job container Podman stores images with the `vfs` driver (the job writes
+`/etc/containers/storage.conf` before Podman first runs): its default `overlay` driver does not work on top of the job container's own overlayfs.
 
 The job has not yet been confirmed on the homelab runner (it is only known to work where Podman
 works, e.g. a developer machine: run `sh .forgejo/scripts/env-tests.sh run`).

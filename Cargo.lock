@@ -3550,6 +3550,8 @@ dependencies = [
  "rusqlite",
  "rustls",
  "rustls-platform-verifier",
+ "security-framework",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "ttf-parser",

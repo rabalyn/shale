@@ -25,14 +25,18 @@ case "${1:-}" in
     ;;
 
   detect)
-    if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+    # `podman info` alone is not enough: an unprivileged job container answers it but cannot unpack
+    # images with files owned by other ids (tests/caldav-env/README.md "In CI"). Alpine's
+    # /etc/shadow belongs to group 42, the owner the stack images failed on, so start it.
+    probe=docker.io/library/alpine:3.20
+    if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1 && podman run --rm "$probe" true >/dev/null 2>&1; then
       echo podman
-    elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker run --rm "$probe" true >/dev/null 2>&1; then
       echo docker
     else
       echo none
       # say why, for the log (stderr, so the answer on stdout stays one word)
-      if command -v podman >/dev/null 2>&1; then podman info 2>&1 | tail -n 5 >&2 || true; fi
+      if command -v podman >/dev/null 2>&1; then podman run --rm "$probe" true 2>&1 | tail -n 3 >&2 || true; fi
     fi
     ;;
 

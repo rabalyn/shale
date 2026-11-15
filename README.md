@@ -67,8 +67,9 @@ See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
 Release downloads for macOS and Windows do not exist yet. What differs from Linux:
 
-- **Passwords**: until Keychain and Credential Manager support arrives, macOS and Windows keep
-  passwords and tokens in the settings file, which only you can read (in your user profile).
+- **Passwords** and tokens go to the macOS Keychain and the Windows Credential Manager (on Linux to
+  the Secret Service through `secret-tool`). If the store cannot be used, or you cancel its unlock
+  prompt, Shale says so: they are then kept in the settings file, which only you can read, or for this run only.
 - **Signed and encrypted mail** needs GnuPG on your computer (`brew install gnupg` on macOS,
   [Gpg4win](https://www.gpg4win.org) on Windows); without it Shale says so and everything else works.
 - **CalDAV** and **git sync** need `curl` and `git` on the path (both come with macOS and Windows 10 and later; Git
