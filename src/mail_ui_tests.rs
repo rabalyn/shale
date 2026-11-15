@@ -1717,6 +1717,13 @@ fn compose_with_c_complete_an_address_send_with_ctrl_enter_and_the_mail_appears_
     assert!(got.to.contains("bob@x.de") && got.text.contains("Hello Bob, the plans are ready."), "{got:?}");
     assert_eq!(smtp.state().received[0].rcpts, vec!["bob@x.de"]);
     w.settle_ops();
+    // the queued append may not be counted yet when the wait above ends: wait for the copy on the server itself
+    let t0 = Instant::now();
+    while w.server.state().messages("Sent").len() < 2 {
+        assert!(t0.elapsed() < Duration::from_secs(20), "the copy never reached the Sent folder on the server");
+        w.frame(vec![]);
+        std::thread::sleep(Duration::from_millis(10));
+    }
     // the Sent folder on the server has it, flagged read, once; and the list shows it
     let on = w.server.state().messages("Sent");
     assert_eq!(on.len(), 2, "the seeded one and ours");
@@ -1966,8 +1973,8 @@ fn a_mail_that_may_have_been_sent_waits_for_the_person_and_a_failed_one_can_be_r
     w.typ("mail:compose:subject", "Refused");
     w.write_body("hello");
     w.ctrl_enter();
-    w.until("the mail failed", |a| a.mail.local_items.iter().any(|i| i.subject == "Refused" && i.state == OutState::Failed));
-    assert!(w.app.mail.problems.iter().any(|p| p.contains("550")));
+    // the entry is Failed on disk before the job's answer (with the server's words) arrives: wait for both
+    w.until("the mail failed and the server's words are shown", |a| a.mail.local_items.iter().any(|i| i.subject == "Refused" && i.state == OutState::Failed) && a.mail.problems.iter().any(|p| p.contains("550")));
     w.frame(vec![]);
     w.until("both entries listed", |a| a.mail.local_items.iter().filter(|i| i.state != OutState::Sent).count() >= 1);
     let i = w.app.mail.local_items.iter().filter(|i| i.account == acct).position(|i| i.subject == "Refused").unwrap();
@@ -2439,7 +2446,7 @@ fn a_gnupg_call_that_waits_for_a_dialog_never_blocks_the_window_and_cancel_stops
 // spec: MAIL-207, MAIL-208
 #[test]
 fn queued_actions_of_an_account_that_is_not_configured_are_not_counted_as_waiting_but_noted_and_kept() {
-    let mut w = inbox_with_cursor("orphan-ops");
+    let mut w = inbox_with_cursor("orphan-count");
     w.offline.store(true, std::sync::atomic::Ordering::SeqCst);
     w.press(Key::U, Modifiers::NONE);
     w.press(Key::S, Modifiers::NONE);
