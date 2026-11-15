@@ -77,6 +77,7 @@ mod people;
 mod picker;
 mod reader;
 mod recovery;
+mod secret;
 mod secrets;
 mod sidebar;
 #[cfg(test)]
@@ -104,6 +105,10 @@ use eframe::egui;
 use std::path::PathBuf;
 
 fn main() -> eframe::Result {
+    // release builds: no core dumps, no memory reads by other processes (SEC-019)
+    if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {
+        eprintln!("shale: could not make the process undumpable: {e}");
+    }
     let mut screenshot: Option<PathBuf> = None;
     let mut vault: Option<PathBuf> = None;
     let mut view: Option<String> = None;

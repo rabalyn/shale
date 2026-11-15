@@ -3556,6 +3556,7 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "winit",
+ "zeroize",
 ]
 
 [[package]]

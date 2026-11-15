@@ -23,7 +23,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   send"), and turn a mail into a note with one key. Shale keeps a local copy of the mail; syncing never
   changes anything on the server, only your own actions do (delete always means the Trash folder;
   a sent mail is never sent twice, and a mail that may or may not have gone out is shown to you
-  instead of being guessed). **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
+  instead of being guessed). **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption, and encrypted swap too: Shale locks typed passwords and tokens into memory and wipes them when done, but where the system refuses the lock they could reach a swap file.**
   **Signed and encrypted mail** (OpenPGP and S/MIME) works through the GnuPG on your computer
   (`gpg`, `gpgsm`, your keys, your passphrase dialog): signatures are checked and shown in a strip above
   the mail, you can sign and encrypt what you send, and nothing is fetched from key servers by itself.
