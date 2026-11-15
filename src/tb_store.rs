@@ -626,7 +626,7 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
         }
     }
     if saw_deleted.get() {
-        return Err("the message was deleted in Thunderbird (it is still in the folder file until Thunderbird compacts it)".into());
+        return Err("the message was deleted in Thunderbird (Thunderbird has not compacted the folder yet)".into());
     }
     if seen.is_empty() && why.is_empty() {
         why.push(format!("no Thunderbird folder for “{}” on this computer", refs[0].folder.join("/")));

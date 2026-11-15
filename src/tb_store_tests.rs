@@ -362,7 +362,7 @@ fn imap(fx: &TbFixture) -> PathBuf {
     fx.account("server2", Kind::Imap, "imap.uni.example", "ada", "ImapMail/imap.uni.example")
 }
 
-const DELETED: &str = "the message was deleted in Thunderbird (it is still in the folder file until Thunderbird compacts it)";
+const DELETED: &str = "the message was deleted in Thunderbird (Thunderbird has not compacted the folder yet)";
 
 // spec: IMP-030
 #[test]
