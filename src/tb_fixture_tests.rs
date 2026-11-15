@@ -174,6 +174,21 @@ impl TbFixture {
         (path, at)
     }
 
+    /// An mbox folder made of raw blocks of text (messages from `Msg::mbox_text`, or garbage such as
+    /// a body line or a cut-off line, to test positions that are not a message start). Returns its
+    /// file and the byte position of each block.
+    pub fn mbox_raw(&self, account: &Path, folder: &[&str], blocks: &[String]) -> (PathBuf, Vec<u64>) {
+        let path = self.folder_path(account, folder);
+        let mut text = String::new();
+        let mut at = Vec::new();
+        for b in blocks {
+            at.push(text.len() as u64);
+            text.push_str(b);
+        }
+        std::fs::write(&path, text).unwrap();
+        (path, at)
+    }
+
     /// A maildir folder (`cur/`, `new/`, `tmp/`) with these messages in `cur/`, named
     /// `1700000000.<n>.fixture`. Returns its folder and the file names.
     pub fn maildir(&self, account: &Path, folder: &[&str], msgs: &[Msg]) -> (PathBuf, Vec<String>) {

@@ -353,3 +353,98 @@ fn the_fixture_writes_what_thunderbird_writes() {
     let one = Msg::new("Mail", "body").maildir_text();
     assert!(!one.starts_with("From ") && one.starts_with("X-Mozilla-Status"));
 }
+
+fn imap_link(folder: &str) -> String {
+    format!("imap-message://ada@imap.uni.example/INBOX/{folder}#77")
+}
+
+fn imap(fx: &TbFixture) -> PathBuf {
+    fx.account("server2", Kind::Imap, "imap.uni.example", "ada", "ImapMail/imap.uni.example")
+}
+
+// spec: IMP-018
+#[test]
+fn imp_018_a_search_by_subject_skips_deleted_copies_in_mbox_and_maildir_folders() {
+    let fx = TbFixture::new("del-subject");
+    let acc = imap(&fx);
+    // only a deleted copy: not found
+    fx.mbox(&acc, &["INBOX", "Alt"], &[Msg::new("Nur weg", "tot").status(0x0009)]);
+    let err = find(&fx, &imap_link("Alt"), Some("Nur weg.eml")).unwrap_err();
+    assert!(err.contains("the message was not found"), "{err}");
+    // a live and a deleted copy of the same message: the live one is found, the deleted one is not offered
+    fx.mbox(&acc, &["INBOX", "Paar"], &[Msg::new("Paar", "tot").status(0x0009), Msg::new("Paar", "lebt"), Msg::new("Paar", "tot2").status(0x0108)]);
+    let got = find(&fx, &imap_link("Paar"), Some("Paar.eml")).unwrap();
+    assert_eq!(got.len(), 1);
+    assert!(text(&got[0]).contains("lebt"));
+    // the flag is only the 0x0008 bit: read, replied and flagged are live
+    fx.mbox(&acc, &["INBOX", "Flags"], &[Msg::new("Flags", "a").status(0x0003), Msg::new("Flags", "b").status(0x0010)]);
+    assert_eq!(find(&fx, &imap_link("Flags"), Some("Flags.eml")).unwrap().len(), 2);
+    // maildir folders the same
+    fx.maildir(&acc, &["INBOX", "Md"], &[Msg::new("Md", "tot").status(0x0009), Msg::new("Md", "lebt")]);
+    let got = find(&fx, &imap_link("Md"), Some("Md.eml")).unwrap();
+    assert_eq!(got.len(), 1);
+    assert!(text(&got[0]).contains("lebt"));
+    fx.maildir(&acc, &["INBOX", "MdAlt"], &[Msg::new("MdAlt", "tot").status(0x0008)]);
+    assert!(find(&fx, &imap_link("MdAlt"), Some("MdAlt.eml")).is_err());
+}
+
+// spec: IMP-018
+#[test]
+fn imp_018_a_search_by_message_id_after_a_stale_position_skips_deleted_copies() {
+    let fx = TbFixture::new("del-id");
+    let acc = imap(&fx);
+    let dead = Msg::new("Gleich", "tot").status(0x0009).id("same@x");
+    let live = Msg::new("Gleich", "lebt").id("same@x");
+    let (file, _) = fx.mbox(&acc, &["INBOX", "Id"], &[dead.clone(), live]);
+    // the index points at a stale position (3): the Message-ID decides, and only the live copy counts
+    fx.index(&file, &[(77, "Gleich", "same@x", "3")]);
+    let got = find(&fx, &imap_link("Id"), None).unwrap();
+    assert_eq!(got.len(), 1);
+    assert!(text(&got[0]).contains("lebt"));
+    // only the deleted copy: not found, and the error says so
+    let (file, _) = fx.mbox(&acc, &["INBOX", "Id2"], &[dead]);
+    fx.index(&file, &[(77, "Gleich", "same@x", "3")]);
+    assert!(find(&fx, &imap_link("Id2"), None).unwrap_err().contains("not stored on this computer"));
+    // the same through a maildir folder
+    let (dir, _) = fx.maildir(&acc, &["INBOX", "Id3"], &[Msg::new("Gleich", "tot").status(0x0009).id("same@x"), Msg::new("Gleich", "lebt").id("same@x")]);
+    fx.index(&dir, &[(77, "Gleich", "same@x", "nope")]);
+    let got = find(&fx, &imap_link("Id3"), None).unwrap();
+    assert_eq!(got.len(), 1);
+    assert!(text(&got[0]).contains("lebt"));
+}
+
+// spec: IMP-018
+#[test]
+fn imp_018_reading_by_a_known_position_still_returns_a_deleted_copy() {
+    let fx = TbFixture::new("del-known");
+    let acc = local(&fx);
+    let (file, at) = fx.mbox(&acc, &["Inbox"], &[Msg::new("Alt", "weg").status(0x0008)]);
+    assert!(text(&read_at(&file, at[0]).unwrap()).contains("weg"));
+    assert!(is_deleted("X-Mozilla-Status: 0008\nSubject: x") && is_deleted("X-Mozilla-Status: 000F\n") && !is_deleted("X-Mozilla-Status: 0001\n"));
+    assert!(!is_deleted("Subject: x") && !is_deleted("X-Mozilla-Status: zz\n"));
+}
+
+// spec: IMP-018
+#[test]
+fn imp_018_a_position_must_start_with_a_real_header_line_or_the_from_line() {
+    let fx = TbFixture::new("header-check");
+    let acc = local(&fx);
+    let ok = Msg::new("Echt", "inhalt");
+    // a message whose first header is not X-Mozilla-Status
+    let other = "From - Thu Nov 12 10:00:00 2026\nSubject: Ohne Status\n\nbody\n\n".to_string();
+    let bare = "Return-Path: <a@b>\nSubject: Ohne From-Zeile\n\nbody\n\n".to_string();
+    let garbage = ["not a header: just text with a colon\n", "see http://example.org/x\n", ": no name\n", "\u{e4}: non-ascii name\n", "\tfolded: line\n", "\n"];
+    let mut blocks = vec![ok.mbox_text(), other, bare];
+    blocks.extend(garbage.iter().map(|g| format!("{g}rest\n")));
+    let (file, at) = fx.mbox_raw(&acc, &["Inbox"], &blocks);
+    assert!(text(&read_at(&file, at[0]).unwrap()).starts_with("X-Mozilla-Status: 0001"), "a normal message is still read");
+    assert!(text(&read_at(&file, at[1]).unwrap()).contains("Ohne Status"));
+    assert!(text(&read_at(&file, at[2]).unwrap()).contains("Ohne From-Zeile"));
+    for (i, g) in garbage.iter().enumerate() {
+        assert!(read_at(&file, at[3 + i]).is_none(), "{g:?} is not the start of a message");
+    }
+    assert!(is_header_line(b"X-Mozilla-Status: 0001\n") && is_header_line(b"a:b") && !is_header_line(b"a b: c") && !is_header_line(b"no colon"));
+    // a link to a garbage position falls back to the subject
+    let (_, at) = fx.mbox_raw(&acc, &["Inbox2"], &["Subject: x\n\n".to_string(), "ein Satz: im Text\n".to_string()]);
+    assert!(find(&fx, &format!("mailbox-message://nobody@Local%20Folders/Inbox2#{}", at[1]), None).is_err());
+}
