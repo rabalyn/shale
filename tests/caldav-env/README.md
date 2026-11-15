@@ -81,7 +81,8 @@ suite and the mail suite (`tests/mail-env/`) with `.forgejo/scripts/env-tests.sh
 suites (`--test-threads=1`, and fails if a suite ran no test) and always takes the stacks down.
 
 The job runs in the `rust` container like the other jobs, so it needs a container engine **inside**
-that container. It installs `podman` and `podman-compose` with apt and then asks `podman info`
+that container. It installs `podman` with apt and `podman-compose` 1.2.0 with pip (bookworm's 1.0.3 lacks
+`network_mode: "service:…"`) and then asks `podman info`
 (then `docker info`) and starts a small `alpine` container with it (an unprivileged job
 container answers `info` but cannot unpack images). If neither works, the job prints `SKIPPED: this runner cannot run containers
 …` and ends green: the real-server tests did not run. What the runner must offer for them to run:

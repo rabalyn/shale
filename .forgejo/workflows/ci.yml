@@ -380,8 +380,11 @@ jobs:
       - name: Container engine (Podman)
         if: steps.wanted.outputs.wanted == 'yes'
         run: |
-          (apt-get update -qq && apt-get install -y -qq --no-install-recommends podman podman-compose openssl curl netcat-openbsd >/dev/null) \
+          (apt-get update -qq && apt-get install -y -qq --no-install-recommends podman python3-pip openssl curl netcat-openbsd >/dev/null) \
             || echo "Could not install Podman here."
+          # bookworm's podman-compose (1.0.3) does not know `network_mode: "service:…"`, which the mail
+          # stack uses: a pinned newer one from PyPI
+          python3 -m pip install -q --break-system-packages podman-compose==1.2.0 || echo "Could not install podman-compose here."
           # podman's default `overlay` storage does not work on top of the job container's own overlayfs
           # ("'overlay' is not supported over overlayfs"): vfs is slower but works; set before podman's first run
           mkdir -p /etc/containers
