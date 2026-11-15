@@ -28,6 +28,19 @@ fn page_size() -> usize {
                 return n as usize;
             }
         }
+        #[cfg(windows)]
+        {
+            // SAFETY: GetSystemInfo fills the struct it is given; an all-zero one is a valid start.
+            let info = unsafe {
+                let mut info: windows_sys::Win32::System::SystemInformation::SYSTEM_INFO = std::mem::zeroed();
+                windows_sys::Win32::System::SystemInformation::GetSystemInfo(&mut info);
+                info
+            };
+            let n = info.dwPageSize as usize;
+            if n > 0 && n.is_power_of_two() {
+                return n;
+            }
+        }
         4096
     })
 }
@@ -83,6 +96,9 @@ unsafe impl Send for Pages {}
 // SAFETY: shared access only reads; writing needs `&mut`.
 unsafe impl Sync for Pages {}
 
+/// What limits locked memory, for the message of SEC-018.
+pub const LOCK_LIMIT: &str = if cfg!(windows) { "the working set limit" } else { "RLIMIT_MEMLOCK" };
+
 /// How many times `mlock` failed in this process (RLIMIT_MEMLOCK too low, or no such call).
 static LOCK_FAILURES: AtomicUsize = AtomicUsize::new(0);
 /// The debug notice about a failed lock is printed once.
@@ -119,7 +135,12 @@ fn lock(buf: &[u8]) -> bool {
         // SAFETY: the pointer and length describe a live allocation owned by the caller.
         unsafe { libc::mlock(buf.as_ptr().cast(), buf.len()) == 0 }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        // SAFETY: the pointer and length describe a live allocation owned by the caller.
+        unsafe { windows_sys::Win32::System::Memory::VirtualLock(buf.as_ptr().cast(), buf.len()) != 0 }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = buf;
         false
@@ -133,7 +154,13 @@ fn unlock(buf: &[u8]) {
         // A failure here changes nothing we could do, the memory is freed right after.
         let _ = unsafe { libc::munlock(buf.as_ptr().cast(), buf.len()) };
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        // SAFETY: the pointer and length describe a live allocation that was locked by `lock`.
+        // A failure here changes nothing we could do, the memory is freed right after.
+        let _ = unsafe { windows_sys::Win32::System::Memory::VirtualUnlock(buf.as_ptr().cast(), buf.len()) };
+    }
+    #[cfg(not(any(unix, windows)))]
     let _ = buf;
 }
 
@@ -359,8 +386,9 @@ pub fn concat(parts: &[&str]) -> Zeroizing<String> {
 }
 
 /// Make the process refuse core dumps and reads of its memory by other processes of the same
-/// user (`PR_SET_DUMPABLE` 0), but only for a release build: debug builds stay debuggable
-/// (SEC-019). Where that is not possible (not Linux) nothing happens.
+/// user, but only for a release build: debug builds stay debuggable (SEC-019, SEC-023).
+/// Linux: `PR_SET_DUMPABLE` 0. macOS: no core file (`RLIMIT_CORE` 0) and no debugger may attach
+/// (`PT_DENY_ATTACH`). Windows has no counterpart for the same user: nothing happens there.
 pub fn harden_process(release: bool) -> std::io::Result<()> {
     if !release {
         return Ok(());
@@ -369,6 +397,18 @@ pub fn harden_process(release: bool) -> std::io::Result<()> {
     {
         // SAFETY: PR_SET_DUMPABLE takes plain integers and touches no memory of ours.
         if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let none = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        // SAFETY: setrlimit reads the struct it is given, which lives through the call.
+        if unsafe { libc::setrlimit(libc::RLIMIT_CORE, &none) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: PT_DENY_ATTACH takes no address and no data; it only changes this process's flags.
+        if unsafe { libc::ptrace(libc::PT_DENY_ATTACH, 0, std::ptr::null_mut(), 0) } != 0 {
             return Err(std::io::Error::last_os_error());
         }
     }
@@ -581,6 +621,33 @@ mod tests {
         #[cfg(target_os = "linux")]
         // SAFETY: PR_GET_DUMPABLE reads one integer.
         assert_eq!(unsafe { libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0) }, 1, "still dumpable");
+    }
+
+    // spec: SEC-019, SEC-023
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn harden_process_gives_a_release_process_no_core_file() {
+        // the limit is a property of the whole process, so look at it in a child
+        if std::env::var("SHALE_HARDEN_CHILD").is_ok() {
+            harden_process(true).unwrap();
+            let mut lim = libc::rlimit { rlim_cur: 1, rlim_max: 1 };
+            // SAFETY: getrlimit fills the struct it is given.
+            assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_CORE, &mut lim) }, 0);
+            println!("core={}", lim.rlim_cur);
+            return;
+        }
+        let exe = std::env::current_exe().unwrap();
+        let out = std::process::Command::new(exe).args(["--exact", "secret::tests::harden_process_gives_a_release_process_no_core_file", "--nocapture"]).env("SHALE_HARDEN_CHILD", "1").output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("core=0"), "{text}{}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    // spec: SEC-019, SEC-023
+    #[cfg(windows)]
+    #[test]
+    fn harden_process_does_nothing_on_windows() {
+        // the honest answer of SEC-023: no counterpart there, and no error either
+        harden_process(true).unwrap();
     }
 
     // spec: SEC-019

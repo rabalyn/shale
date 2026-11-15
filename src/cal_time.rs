@@ -58,8 +58,33 @@ pub fn local_offset(utc: i64) -> i64 {
             return tm.tm_gmtoff as i64;
         }
     }
+    #[cfg(windows)]
+    if let Some(off) = windows_offset(utc) {
+        return off;
+    }
     let _ = utc;
     0
+}
+
+/// The same on Windows, from the system's time zone settings (summer time included).
+#[cfg(windows)]
+fn windows_offset(utc: i64) -> Option<i64> {
+    use windows_sys::Win32::Foundation::SYSTEMTIME;
+    use windows_sys::Win32::System::Time::SystemTimeToTzSpecificLocalTime;
+    let (days, sod) = (utc.div_euclid(86_400), utc.rem_euclid(86_400));
+    let (y, m, d) = civil_from_days(days);
+    // the range the Windows calls take
+    if !(1601..=30_827).contains(&y) {
+        return None;
+    }
+    let st = SYSTEMTIME { wYear: y as u16, wMonth: m as u16, wDayOfWeek: 0, wDay: d as u16, wHour: (sod / 3600) as u16, wMinute: (sod % 3600 / 60) as u16, wSecond: (sod % 60) as u16, wMilliseconds: 0 };
+    // SAFETY: both structs are valid for the call; a null zone means the computer's own.
+    let mut local: SYSTEMTIME = unsafe { std::mem::zeroed() };
+    if unsafe { SystemTimeToTzSpecificLocalTime(std::ptr::null(), &st, &mut local) } == 0 {
+        return None;
+    }
+    let wall = days_from_civil(local.wYear as i32, local.wMonth as u32, local.wDay as u32) * 86_400 + local.wHour as i64 * 3600 + local.wMinute as i64 * 60 + local.wSecond as i64;
+    Some(wall - utc)
 }
 
 /// Local wall clock → UTC (handles summer time changes).
@@ -315,5 +340,21 @@ mod tests {
         let d = days_from_civil(2026, 3, 10);
         let utc = local_to_utc(d, 9 * 3600 + 30 * 60);
         assert_eq!(utc_to_local(utc), (d, 9 * 3600 + 30 * 60));
+    }
+
+    // spec: CAL-018
+    #[test]
+    fn the_local_offset_is_a_real_zone_offset_and_local_time_round_trips() {
+        for utc in [0, 1_000_000_000, days_from_civil(2026, 1, 15) * 86_400 + 43_200, days_from_civil(2026, 7, 15) * 86_400 + 43_200, days_from_civil(2026, 11, 15) * 86_400] {
+            let off = local_offset(utc);
+            assert!(off.abs() <= 14 * 3600 && off % 900 == 0, "{off} at {utc}");
+            let (day, sod) = utc_to_local(utc);
+            assert_eq!(local_to_utc(day, sod), utc, "{utc}");
+        }
+        // the same moment is one local calendar day at most away from its UTC day
+        let utc = days_from_civil(2026, 11, 15) * 86_400 + 12 * 3600;
+        assert!((utc_to_local(utc).0 - utc.div_euclid(86_400)).abs() <= 1);
+        // the range the Windows call cannot take falls back to no offset instead of failing
+        assert!(local_offset(-20_000_000_000).abs() <= 14 * 3600);
     }
 }

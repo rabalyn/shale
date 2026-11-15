@@ -348,7 +348,7 @@ mod tests {
             .tabs
             .iter()
             .map(|t| match &t.view {
-                View::Note(p) => p.to_string_lossy().into_owned(),
+                View::Note(p) => p.to_string_lossy().replace('\\', "/"),
                 View::Calendar => "calendar".into(),
                 View::Mail => "mail".into(),
                 _ => "other".into(),

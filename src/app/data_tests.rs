@@ -2,7 +2,6 @@
 //! saves. The rules are DATA-002, DATA-003, DATA-008, DATA-009 and VAULT-016.
 
 use super::*;
-use std::os::unix::fs::PermissionsExt;
 
 fn app_in(tag: &str, files: &[(&str, &[u8])]) -> (ShaleApp, PathBuf) {
     let d = std::env::temp_dir().join(format!("shale-data-{tag}-{}", std::process::id()));
@@ -238,8 +237,17 @@ fn a_drawing_with_edits_over_an_outside_change_becomes_a_conflict_copy() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// Make a folder read-only (`on`) or writable again. Only on Unix does that close the folder: a
+/// read-only folder on Windows still takes new files, so there this does nothing and the tests
+/// that need a closed folder skip themselves with a note (`locks_do_not_hold`).
 fn locked(dir: &Path, on: bool) {
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(if on { 0o555 } else { 0o755 })).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(if on { 0o555 } else { 0o755 })).unwrap();
+    }
+    #[cfg(not(unix))]
+    let _ = (dir, on);
 }
 
 /// Can this process write into a read-only folder (running as root, for example)?
@@ -248,6 +256,9 @@ fn locks_do_not_hold(d: &Path) -> bool {
     let works = crate::fsutil::create_new(&d.join("probe.tmp"), b"x").is_ok();
     locked(d, false);
     let _ = std::fs::remove_file(d.join("probe.tmp"));
+    if works {
+        eprintln!("skipping: a read-only folder still takes files here (running as root, or not Unix)");
+    }
     works
 }
 
@@ -394,9 +405,9 @@ fn text_that_cannot_be_saved_at_exit_is_put_in_the_recovery_folder_and_announced
     app.recovery_root = rec.clone();
     app.open(Path::new("Sub/N.md"), false);
     type_text(&mut app, "Sub/N.md", "precious unsaved words\n");
-    std::fs::set_permissions(d.join("Sub"), std::fs::Permissions::from_mode(0o555)).unwrap();
+    locked(&d.join("Sub"), true);
     eframe::App::on_exit(&mut app);
-    std::fs::set_permissions(d.join("Sub"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    locked(&d.join("Sub"), false);
     assert_eq!(read(&d, "Sub/N.md"), "base\n", "the note on disk is untouched");
     let day = crate::mail_store::today_string();
     let saved = rec.join(&day).join("Sub/N.md");
