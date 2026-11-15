@@ -718,7 +718,8 @@ pub fn record_sent_copy(store: &MailStore, account: &str, raw: &[u8], now: i64) 
     }
     let uv = mail_db::LOCAL_UIDVALIDITY;
     let uid = mail_db::max_uid_from(reader.conn(), sent.id, uv, SYNTHETIC_UID_BASE).map_err(err)?.map_or(SYNTHETIC_UID_BASE, |m| m + 1);
-    let nm = store.save_message(sent, uv, uid, raw, "\\Seen", Some(now)).map_err(err)?;
+    let nm = store.save_new_local_copy(sent, uid, raw, "\\Seen", Some(now)).map_err(err)?;
+    let uid = nm.uid;
     let row = PendingRow {
         id: 0,
         account: account.into(),
@@ -1562,6 +1563,26 @@ pub(crate) mod tests {
         assert!(e.pending().is_empty(), "seed {seed}: actions are still waiting after the server came back: {:?}", e.pending());
         sync(&e);
         check(&e, &mut m, seed, steps, "settled");
+    }
+
+    // spec: MAIL-206
+    #[test]
+    fn a_local_copy_of_sent_mail_never_overwrites_a_file_that_is_there() {
+        let e = env("sent-file");
+        e.store.ensure_folder("acct1", "Test", "Sent", Some("/"), Some("\\Sent"), true).unwrap();
+        let sent = e.folder("Sent");
+        // a file without a row at the next number (its row went, the move to the trash failed)
+        let old = e.dir.join(format!("acct1/Sent/0/{}.eml", SYNTHETIC_UID_BASE));
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, b"older mail, must stay").unwrap();
+        let raw = message("fresh sent", "ada@example.com", "new text");
+        assert_eq!(record_sent_copy(&e.store, "acct1", &raw, NOW).unwrap().as_deref(), Some("Sent"));
+        assert_eq!(std::fs::read(&old).unwrap(), b"older mail, must stay");
+        let list = e.store.reader().unwrap().list(sent.id, 10, 0).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].uid, SYNTHETIC_UID_BASE + 1, "another number");
+        assert_eq!(std::fs::read(e.store.abs_path(&list[0].path)).unwrap(), raw);
+        assert_eq!(e.pending().iter().filter(|p| p.kind == "append" && p.uid == SYNTHETIC_UID_BASE + 1).count(), 1);
     }
 
     // spec: MAIL-112
