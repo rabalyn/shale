@@ -362,6 +362,8 @@ fn imap(fx: &TbFixture) -> PathBuf {
     fx.account("server2", Kind::Imap, "imap.uni.example", "ada", "ImapMail/imap.uni.example")
 }
 
+const DELETED: &str = "the message was deleted in Thunderbird (it is still in the folder file until Thunderbird compacts it)";
+
 // spec: IMP-030
 #[test]
 fn imp_030_a_search_by_subject_skips_deleted_copies_in_mbox_and_maildir_folders() {
@@ -370,7 +372,7 @@ fn imp_030_a_search_by_subject_skips_deleted_copies_in_mbox_and_maildir_folders(
     // only a deleted copy: not found
     fx.mbox(&acc, &["INBOX", "Alt"], &[Msg::new("Nur weg", "tot").status(0x0009)]);
     let err = find(&fx, &imap_link("Alt"), Some("Nur weg.eml")).unwrap_err();
-    assert!(err.contains("the message was not found"), "{err}");
+    assert!(err.contains(DELETED), "{err}");
     // a live and a deleted copy of the same message: the live one is found, the deleted one is not offered
     fx.mbox(&acc, &["INBOX", "Paar"], &[Msg::new("Paar", "tot").status(0x0009), Msg::new("Paar", "lebt"), Msg::new("Paar", "tot2").status(0x0108)]);
     let got = find(&fx, &imap_link("Paar"), Some("Paar.eml")).unwrap();
@@ -385,7 +387,7 @@ fn imp_030_a_search_by_subject_skips_deleted_copies_in_mbox_and_maildir_folders(
     assert_eq!(got.len(), 1);
     assert!(text(&got[0]).contains("lebt"));
     fx.maildir(&acc, &["INBOX", "MdAlt"], &[Msg::new("MdAlt", "tot").status(0x0008)]);
-    assert!(find(&fx, &imap_link("MdAlt"), Some("MdAlt.eml")).is_err());
+    assert!(find(&fx, &imap_link("MdAlt"), Some("MdAlt.eml")).unwrap_err().contains(DELETED));
 }
 
 // spec: IMP-030
@@ -404,13 +406,41 @@ fn imp_030_a_search_by_message_id_after_a_stale_position_skips_deleted_copies() 
     // only the deleted copy: not found, and the error says so
     let (file, _) = fx.mbox(&acc, &["INBOX", "Id2"], &[dead]);
     fx.index(&file, &[(77, "Gleich", "same@x", "3")]);
-    assert!(find(&fx, &imap_link("Id2"), None).unwrap_err().contains("not stored on this computer"));
+    let err = find(&fx, &imap_link("Id2"), None).unwrap_err();
+    assert!(err.contains(DELETED) && !err.contains("not stored on this computer"), "{err}");
     // the same through a maildir folder
     let (dir, _) = fx.maildir(&acc, &["INBOX", "Id3"], &[Msg::new("Gleich", "tot").status(0x0009).id("same@x"), Msg::new("Gleich", "lebt").id("same@x")]);
     fx.index(&dir, &[(77, "Gleich", "same@x", "nope")]);
     let got = find(&fx, &imap_link("Id3"), None).unwrap();
     assert_eq!(got.len(), 1);
     assert!(text(&got[0]).contains("lebt"));
+    // only a deleted copy in a maildir folder, found by its Message-ID
+    let (dir, _) = fx.maildir(&acc, &["INBOX", "Id4"], &[Msg::new("Gleich", "tot").status(0x0008).id("same@x")]);
+    fx.index(&dir, &[(77, "Gleich", "same@x", "nope")]);
+    assert!(find(&fx, &imap_link("Id4"), None).unwrap_err().contains(DELETED));
+}
+
+// spec: IMP-030
+#[test]
+fn imp_030_the_generic_error_stays_when_no_deleted_copy_matched() {
+    let fx = TbFixture::new("del-generic");
+    let acc = imap(&fx);
+    // nothing matches at all
+    fx.mbox(&acc, &["INBOX", "Leer"], &[Msg::new("Anderes", "x")]);
+    let err = find(&fx, &imap_link("Leer"), Some("Gesucht.eml")).unwrap_err();
+    assert!(err.contains("the message was not found") && !err.contains(DELETED), "{err}");
+    // a deleted copy of a DIFFERENT message next to no match: still generic (mbox and maildir)
+    fx.mbox(&acc, &["INBOX", "Fremd"], &[Msg::new("Anderes", "weg").status(0x0009)]);
+    let err = find(&fx, &imap_link("Fremd"), Some("Gesucht.eml")).unwrap_err();
+    assert!(err.contains("the message was not found") && !err.contains(DELETED), "{err}");
+    fx.maildir(&acc, &["INBOX", "FremdMd"], &[Msg::new("Anderes", "weg").status(0x0009)]);
+    let err = find(&fx, &imap_link("FremdMd"), Some("Gesucht.eml")).unwrap_err();
+    assert!(err.contains("the message was not found") && !err.contains(DELETED), "{err}");
+    // the Message-ID path: a deleted copy with another Message-ID does not count
+    let (file, _) = fx.mbox(&acc, &["INBOX", "FremdId"], &[Msg::new("Anderes", "weg").status(0x0009).id("other@x")]);
+    fx.index(&file, &[(77, "Gesucht", "wanted@x", "3")]);
+    let err = find(&fx, &imap_link("FremdId"), None).unwrap_err();
+    assert!(!err.contains(DELETED), "{err}");
 }
 
 // spec: IMP-030
