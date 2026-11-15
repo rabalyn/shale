@@ -273,8 +273,11 @@ fn dialogs_event_cancel_and_a_wrong_date_store_nothing() {
     assert!(stored(&src).is_empty());
     // fixed: it saves
     fill(&mut p, "start-date", "2027-02-20");
+    // the end moved with the start (CAL-031); an end typed before the start is refused
+    let Some(Modal::Event(d)) = &p.app.modal else { panic!("the dialog closed") };
+    assert_eq!(d.end_date, "2027-02-20");
+    fill(&mut p, "end-date", "2027-02-19");
     p.click(Show::Modals, "Save");
-    // it now starts after it ends
     assert!(p.shows(Show::Modals, "The event must end after it starts"));
     assert!(stored(&src).is_empty());
     fill(&mut p, "end-date", "2027-02-20");
@@ -287,6 +290,70 @@ fn dialogs_event_cancel_and_a_wrong_date_store_nothing() {
     p.app.calendar.set_sources(vec![]);
     p.app.calendar_action(crate::cal_ui::CalAction::NewEventAt(START));
     assert!(matches!(&p.app.modal, Some(Modal::Calendars(d)) if d.sources.is_empty()));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The event dialog for a new event at `START`, with the title typed.
+fn new_event_dialog(p: &mut P) {
+    p.app.calendar_action(crate::cal_ui::CalAction::NewEventAt(START));
+    p.look(Show::Modals);
+    p.type_text(Show::Modals, "Moves");
+}
+
+fn event_fields(p: &P) -> (String, String, String, String) {
+    let Some(Modal::Event(d)) = &p.app.modal else { panic!("the dialog closed") };
+    (d.start_date.clone(), d.start_time.clone(), d.end_date.clone(), d.end_time.clone())
+}
+
+// spec: CAL-031
+#[test]
+fn dialogs_event_the_end_follows_a_typed_start_date_and_time_and_is_saved_so() {
+    let (mut p, src, dir) = with_calendar("evt-follow");
+    new_event_dialog(&mut p);
+    let (sd, st, ed, et) = event_fields(&p);
+    assert_eq!(sd, ed);
+    // a later start date moves the end date, not the time
+    fill(&mut p, "start-date", "2030-05-09");
+    assert_eq!(event_fields(&p), ("2030-05-09".into(), st.clone(), "2030-05-09".into(), et.clone()));
+    // a changed start time moves the end time (30 minutes stay), across midnight too
+    fill(&mut p, "start-time", "23:45");
+    assert_eq!(event_fields(&p), ("2030-05-09".into(), "23:45".into(), "2030-05-10".into(), "00:15".into()));
+    // an end typed by hand is the new length, and the next start change keeps it
+    fill(&mut p, "end-time", "01:45");
+    fill(&mut p, "start-date", "2030-06-01");
+    assert_eq!(event_fields(&p), ("2030-06-01".into(), "23:45".into(), "2030-06-02".into(), "01:45".into()));
+    // an end that does not read as a time is left alone
+    fill(&mut p, "end-time", "9:");
+    fill(&mut p, "start-time", "10:00");
+    assert_eq!(event_fields(&p).3, "9:");
+    fill(&mut p, "end-time", "11:00");
+    p.click(Show::Modals, "Save");
+    until(&mut p, Show::Modals, "the event is saved", |p| p.app.modal.is_none());
+    let evs = stored(&src);
+    assert_eq!(evs.len(), 1);
+    let day = |y, m, d| crate::cal_time::days_from_civil(y, m, d);
+    assert_eq!((evs[0].start, evs[0].end), (crate::cal_time::local_to_utc(day(2030, 6, 1), 36_000), crate::cal_time::local_to_utc(day(2030, 6, 2), 39_600)));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: CAL-031
+#[test]
+fn dialogs_event_an_all_day_event_keeps_its_days_when_the_start_moves() {
+    let (mut p, src, dir) = with_calendar("evt-follow-day");
+    new_event_dialog(&mut p);
+    click_control(&mut p, "all-day");
+    fill(&mut p, "start-date", "2030-05-09");
+    fill(&mut p, "end-date", "2030-05-11");
+    fill(&mut p, "start-date", "2030-05-20");
+    let (_, _, ed, _) = event_fields(&p);
+    assert_eq!(ed, "2030-05-22", "three days stay three days");
+    p.click(Show::Modals, "Save");
+    until(&mut p, Show::Modals, "the event is saved", |p| p.app.modal.is_none());
+    let evs = stored(&src);
+    assert_eq!(evs.len(), 1);
+    let day = crate::cal_time::days_from_civil(2030, 5, 20);
+    assert!(evs[0].all_day);
+    assert_eq!((evs[0].start, evs[0].end), (day * 86_400, (day + 3) * 86_400));
     let _ = std::fs::remove_dir_all(dir);
 }
 
