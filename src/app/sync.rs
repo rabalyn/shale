@@ -3,14 +3,12 @@
 
 use super::{muted, ShaleApp};
 use crate::drawing::DrawingDoc;
-use crate::gitsync::{self, Git, Report};
+use crate::gitsync::{self, Git, Report, TreeGuard, TreeLock};
 use crate::theme;
 use crate::vault::rel_to_string;
 use eframe::egui::{self, Ui};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// The sync's state in the app.
@@ -19,8 +17,11 @@ pub struct SyncState {
     pub git: Git,
     /// A running sync: its vault and where its result arrives.
     job: Option<(PathBuf, Receiver<Result<Result<Report, String>, String>>)>,
-    /// Set by the job while it changes files in the vault (autosave waits).
-    pub tree_busy: Arc<AtomicBool>,
+    /// Held by the job while it changes files in the vault, and by the window while it writes
+    /// notes (SYNC-013).
+    pub tree: TreeLock,
+    /// The "could not wait for the sync" message was shown and nothing was saved since.
+    tree_told: bool,
     /// When the last sync started (None = sync as soon as possible).
     last_start: Option<Instant>,
     /// The last result: (local time, summary or error).
@@ -57,13 +58,18 @@ impl ShaleApp {
         self.sync.git_version.clone().flatten()
     }
 
-    /// Wait (briefly: a local merge) until the sync no longer changes files, so a save never
-    /// lands in the middle of it.
-    pub(crate) fn wait_for_sync_tree(&self) {
-        let t = Instant::now();
-        while self.sync.tree_busy.load(Ordering::SeqCst) && t.elapsed() < Duration::from_secs(30) {
-            std::thread::sleep(Duration::from_millis(10));
+    /// Take the lock on the vault's files before the window writes to them, waiting (a local
+    /// merge is quick) up to 30 seconds for a running sync. None: the sync is still changing
+    /// files; the caller writes nothing and the buffers stay dirty (SYNC-013).
+    pub(crate) fn hold_sync_tree(&mut self) -> Option<TreeGuard> {
+        let g = self.sync.tree.hold_for(Duration::from_secs(30));
+        if g.is_some() {
+            self.sync.tree_told = false;
+        } else if !self.sync.tree_told {
+            self.sync.tree_told = true;
+            self.toast("The sync is still changing files in the vault, so nothing was saved yet. Your edits are kept and are saved when it is done".to_string());
         }
+        g
     }
 
     /// Every frame: collect a finished sync, start one when it is due (SYNC-002).
@@ -111,14 +117,12 @@ impl ShaleApp {
         let s = &self.vdata.settings.sync;
         let opts = gitsync::Options { commit_prefix: s.commit_prefix.clone(), commit_suffix: s.commit_suffix.clone(), host: gitsync::host_name(), stamp: gitsync::stamp_now() };
         let git = self.sync.git.clone();
-        let busy = self.sync.tree_busy.clone();
+        let tree = self.sync.tree.clone();
         let ctx = self.ctx.clone();
         let job_root = root.clone();
-        let busy_done = busy.clone();
         let rx = crate::jobs::spawn(
-            move || gitsync::sync(&git, &job_root, &opts, &busy),
+            move || gitsync::sync(&git, &job_root, &opts, &tree),
             move || {
-                busy_done.store(false, Ordering::SeqCst);
                 if let Some(c) = ctx {
                     c.request_repaint();
                 }
@@ -350,7 +354,7 @@ mod tests {
         }
         crate::fsutil::write_atomic(&a.join("Clean.md"), b"base\n").unwrap();
         crate::fsutil::write_atomic(&a.join("Busy.md"), b"base\n").unwrap();
-        let busy = AtomicBool::new(false);
+        let busy = TreeLock::default();
         let opts = gitsync::Options { host: "a".into(), stamp: "2026-11-14 1200".into(), ..Default::default() };
         gitsync::sync(&git, &a, &opts, &busy).unwrap();
 
@@ -407,7 +411,7 @@ mod tests {
             gitsync::connect(&git, v, remote.to_str().unwrap()).unwrap();
         }
         crate::fsutil::write_atomic(&a.join("N.md"), b"base\n").unwrap();
-        let busy = AtomicBool::new(false);
+        let busy = TreeLock::default();
         let opts = gitsync::Options { host: "a".into(), stamp: "2026-11-14 1200".into(), ..Default::default() };
         gitsync::sync(&git, &a, &opts, &busy).unwrap();
         let mut app = app_on(&b);
@@ -522,14 +526,65 @@ mod tests {
         doc.text = "edited\n".into();
         doc.dirty = true;
         doc.last_edit = Instant::now() - Duration::from_secs(5);
-        app.sync.tree_busy.store(true, Ordering::SeqCst);
+        let guard = app.sync.tree.try_hold().unwrap();
         app.autosave();
         assert_eq!(crate::fsutil::read_to_string(root.join("N.md")).unwrap(), "disk\n");
         assert!(app.notes[Path::new("N.md")].dirty);
-        app.sync.tree_busy.store(false, Ordering::SeqCst);
+        drop(guard);
         app.autosave();
         assert_eq!(crate::fsutil::read_to_string(root.join("N.md")).unwrap(), "edited\n");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: SYNC-013
+    #[test]
+    fn autosave_skips_while_another_thread_holds_the_tree_and_saves_after_it_lets_go() {
+        let root = std::env::temp_dir().join(format!("shale-app-sync-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        crate::fsutil::write_atomic(&root.join("N.md"), b"disk\n").unwrap();
+        let mut app = app_on(&root);
+        app.open(Path::new("N.md"), false);
+        let doc = app.notes.get_mut(Path::new("N.md")).unwrap();
+        doc.text = "edited\n".into();
+        doc.dirty = true;
+        doc.last_edit = Instant::now() - Duration::from_secs(5);
+        let lock = app.sync.tree.clone();
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let job = std::thread::spawn(move || {
+            let _g = lock.hold();
+            held_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+        });
+        held_rx.recv().unwrap();
+        app.autosave();
+        assert_eq!(crate::fsutil::read_to_string(root.join("N.md")).unwrap(), "disk\n");
+        assert!(app.notes[Path::new("N.md")].dirty);
+        release_tx.send(()).unwrap();
+        job.join().unwrap();
+        app.autosave();
+        assert_eq!(crate::fsutil::read_to_string(root.join("N.md")).unwrap(), "edited\n");
+        assert!(!app.notes[Path::new("N.md")].dirty);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: SYNC-013
+    #[test]
+    fn a_panic_inside_the_sync_does_not_keep_the_tree_locked() {
+        let lock = TreeLock::default();
+        let l2 = lock.clone();
+        let _ = std::thread::spawn(move || {
+            let _g = l2.hold();
+            panic!("the job failed");
+        })
+        .join();
+        assert!(lock.try_hold().is_some());
+        let g = lock.try_hold().unwrap();
+        assert!(lock.try_hold().is_none());
+        assert!(lock.hold_for(Duration::from_millis(20)).is_none());
+        drop(g);
+        assert!(lock.hold_for(Duration::from_millis(20)).is_some());
     }
 
     // spec: CFG-006, SYNC-015

@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 /// The remote Shale syncs with.
 pub const REMOTE: &str = "origin";
@@ -212,25 +213,66 @@ impl Report {
     }
 }
 
-/// Sets a flag while the working tree is being changed; clears it however the step ends.
-struct Busy<'a>(&'a AtomicBool);
+/// The lock on the vault's working tree. The sync holds it while git changes files; the window
+/// holds it while it writes notes, so a save never lands inside a merge (SYNC-013). The guard
+/// owns its handle, so a window function can keep it across `&mut self` calls.
+#[derive(Clone, Default)]
+pub struct TreeLock(Arc<(Mutex<bool>, Condvar)>);
 
-impl<'a> Busy<'a> {
-    fn new(flag: &'a AtomicBool) -> Self {
-        flag.store(true, Ordering::SeqCst);
-        Busy(flag)
+/// Releases the lock when dropped, also when the holder panics.
+pub struct TreeGuard(TreeLock);
+
+impl TreeLock {
+    fn state(&self) -> MutexGuard<'_, bool> {
+        // the flag is only ever flipped, so a poisoned mutex still holds a true answer
+        self.0 .0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The lock if it is free right now (the window never blocks on it).
+    pub fn try_hold(&self) -> Option<TreeGuard> {
+        let mut held = self.state();
+        if *held {
+            return None;
+        }
+        *held = true;
+        Some(TreeGuard(self.clone()))
+    }
+
+    /// Wait for the lock for at most `limit`.
+    pub fn hold_for(&self, limit: Duration) -> Option<TreeGuard> {
+        let end = Instant::now() + limit;
+        let mut held = self.state();
+        while *held {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            held = self.0 .1.wait_timeout(held, left).unwrap_or_else(PoisonError::into_inner).0;
+        }
+        *held = true;
+        Some(TreeGuard(self.clone()))
+    }
+
+    /// Wait as long as it takes (the sync job, which has no window to keep alive).
+    pub fn hold(&self) -> TreeGuard {
+        loop {
+            if let Some(g) = self.hold_for(Duration::from_secs(3600)) {
+                return g;
+            }
+        }
     }
 }
 
-impl Drop for Busy<'_> {
+impl Drop for TreeGuard {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        *self.0.state() = false;
+        self.0 .0 .1.notify_all();
     }
 }
 
-/// Run one sync cycle (ADR-0008 §4). `tree_busy` is set while files in the vault are changed,
-/// so the app holds its autosave.
-pub fn sync(git: &Git, vault: &Path, opts: &Options, tree_busy: &AtomicBool) -> Result<Report, String> {
+/// Run one sync cycle (ADR-0008 §4). `tree` is held while files in the vault are changed,
+/// so the app cannot save a note meanwhile.
+pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<Report, String> {
     if !is_repo(vault) {
         return Err("The vault is not a git repository".into());
     }
@@ -272,7 +314,7 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree_busy: &AtomicBool) -> 
         let remote_ref = format!("refs/remotes/{REMOTE}/{branch}");
         if let Some(theirs) = rev(git, vault, &remote_ref)? {
             if local.as_deref() != Some(theirs.as_str()) {
-                integrate(git, vault, opts, &ident, local.as_deref(), &theirs, tree_busy, &mut report)?;
+                integrate(git, vault, opts, &ident, local.as_deref(), &theirs, tree, &mut report)?;
             }
         }
         if rev(git, vault, "HEAD")?.is_none() {
@@ -342,13 +384,13 @@ fn align_branch(git: &Git, vault: &Path, branch: &str) -> Result<String, String>
 
 /// Bring the remote commit `theirs` into HEAD: fast-forward or merge, conflicts as copies.
 #[allow(clippy::too_many_arguments)]
-fn integrate(git: &Git, vault: &Path, opts: &Options, ident: &[String], local: Option<&str>, theirs: &str, tree_busy: &AtomicBool, report: &mut Report) -> Result<(), String> {
+fn integrate(git: &Git, vault: &Path, opts: &Options, ident: &[String], local: Option<&str>, theirs: &str, tree: &TreeLock, report: &mut Report) -> Result<(), String> {
     if let Some(l) = local {
         if git.run(vault, args!["merge-base", "--is-ancestor", theirs, l])?.ok {
             return Ok(()); // the remote is behind: just push
         }
     }
-    let _busy = Busy::new(tree_busy);
+    let _tree = tree.hold();
     let fast = match local {
         None => true,
         Some(l) => git.run(vault, args!["merge-base", "--is-ancestor", l, theirs])?.ok,

@@ -92,6 +92,11 @@ impl ShaleApp {
                     self.actions.push(Action::NewDrawing { folder: PathBuf::new(), embed_into: None });
                     ui.close();
                 }
+                ui.separator();
+                if ui.add_enabled(self.can_restore_trashed(), egui::Button::new("Restore last deleted")).clicked() {
+                    self.actions.push(Action::RestoreTrashed);
+                    ui.close();
+                }
             });
         });
         ui.separator();

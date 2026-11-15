@@ -36,7 +36,10 @@ built-in demo vault (`shale --screenshot out.png`).
 ![The note menu](screenshots/more-menu.png)
 
 - Export notes and drawings to PDF (paper size, margins, fonts and more in a dialog), insert a
-  new drawing, rename the note (links in other notes are updated), or move it to the trash.
+  new drawing, rename the note (links in other notes are updated), or move it to the trash. The
+  trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
+  emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
+  the last item you trashed back.
 - Every dialog is a window you can move by its title bar and resize from any edge or corner.
 
 ## Keyboard only: sidebar, file list and vim-style editing

@@ -377,8 +377,9 @@ fn a_folder_with_unsaved_edits_that_cannot_be_saved_is_not_moved_to_the_trash() 
     // once it can be saved, the trash works and the edit is in the trashed file
     app.trash(Path::new("x"));
     assert!(!d.join("x").exists());
-    assert!(names(&d.join(".trash"), "x").len() == 1);
-    assert_eq!(read(&d, ".trash/x/N.md"), "precious\n");
+    let day = crate::mail_store::today_string();
+    assert!(names(&d.join(".trash").join(&day), "x").len() == 1);
+    assert_eq!(read(&d, &format!(".trash/{day}/x/N.md")), "precious\n");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -417,4 +418,26 @@ fn text_that_cannot_be_saved_at_exit_is_put_in_the_recovery_folder_and_announced
     assert!(!d2.join("rec").exists());
     let _ = std::fs::remove_dir_all(&d);
     let _ = std::fs::remove_dir_all(&d2);
+}
+
+// spec: VAULT-020
+#[test]
+fn restore_last_deleted_puts_the_item_back_and_refuses_when_the_place_is_taken() {
+    let (mut app, d) = app_in("restore-cmd", &[("x/N.md", b"base\n"), ("y/N.md", b"other\n")]);
+    assert!(!app.can_restore_trashed());
+    app.trash(Path::new("x/N.md"));
+    app.trash(Path::new("y/N.md"));
+    assert!(app.can_restore_trashed());
+    // newest first
+    app.actions.push(Action::RestoreTrashed);
+    app.process_actions();
+    assert_eq!(read(&d, "y/N.md"), "other\n");
+    assert!(toasted(&app, "Restored"), "{:?}", app.toasts);
+    // something else took the place of the next one: it stays in the trash
+    crate::fsutil::write_atomic(&d.join("x/N.md"), b"new\n").unwrap();
+    app.restore_trashed();
+    assert!(toasted(&app, "Could not restore"), "{:?}", app.toasts);
+    assert_eq!(read(&d, "x/N.md"), "new\n");
+    assert!(app.can_restore_trashed());
+    let _ = std::fs::remove_dir_all(&d);
 }

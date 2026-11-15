@@ -204,6 +204,8 @@ pub enum Action {
     CloseTab(usize),
     Rename(PathBuf),
     Trash(PathBuf),
+    /// put the item moved to the trash last (in this session) back where it was (VAULT-020)
+    RestoreTrashed,
     NewFolder(PathBuf),
     OpenVault(PathBuf),
     /// Look at the vault folder again (e.g. after a file was copied in).
@@ -306,6 +308,8 @@ pub struct ShaleApp {
     pub modal: Option<Modal>,
     pub actions: Vec<Action>,
     pub toasts: Vec<(String, Instant)>,
+    /// What this session moved to the trash, newest last: where it is in `.trash/` (VAULT-020).
+    pub trashed: Vec<PathBuf>,
     last_scan: Instant,
     pub welcome_path: String,
     // screenshot mode
@@ -409,6 +413,7 @@ impl ShaleApp {
             modal: None,
             actions: vec![],
             toasts: vec![],
+            trashed: vec![],
             last_scan: Instant::now(),
             welcome_path: default_welcome.to_string_lossy().into_owned(),
             screenshot,
@@ -875,7 +880,7 @@ impl ShaleApp {
 
     /// Toggle a checkbox in any note (open buffer or file on disk).
     pub fn toggle_task(&mut self, rel: &Path, offset: usize) {
-        self.wait_for_sync_tree();
+        let Some(_tree) = self.hold_sync_tree() else { return };
         if let Some(doc) = self.notes.get_mut(rel) {
             if doc.unreadable.is_some() {
                 self.toast(format!("“{}” could not be read, so it is not changed", rel_to_string(rel)));
@@ -983,7 +988,13 @@ impl ShaleApp {
     }
 
     pub fn flush_all(&mut self) {
-        self.wait_for_sync_tree();
+        // after the wait limit nothing is saved into the merge: the buffers stay dirty
+        let Some(_tree) = self.hold_sync_tree() else { return };
+        self.flush_dirty();
+    }
+
+    /// Save every dirty buffer; the caller holds the tree lock.
+    fn flush_dirty(&mut self) {
         let dirty_notes: Vec<PathBuf> = self.notes.iter().filter(|(_, d)| d.dirty).map(|(r, _)| r.clone()).collect();
         for rel in dirty_notes {
             self.save_note(&rel);
@@ -1030,10 +1041,10 @@ impl ShaleApp {
     }
 
     fn autosave(&mut self) {
-        // never save into the middle of a git merge (SYNC-013); the buffers stay dirty meanwhile
-        if self.sync.tree_busy.load(std::sync::atomic::Ordering::SeqCst) {
-            return;
-        }
+        // never save into the middle of a git merge (SYNC-013): the lock is held for the saves,
+        // and while the sync has it the buffers stay dirty and this frame saves nothing
+        let tree = self.sync.tree.clone();
+        let Some(_tree) = tree.try_hold() else { return };
         let wait = Duration::from_millis(800);
         let notes: Vec<PathBuf> = self.notes.iter().filter(|(_, d)| d.dirty && d.last_edit.elapsed() > wait).map(|(r, _)| r.clone()).collect();
         for rel in notes {
@@ -1090,7 +1101,8 @@ impl ShaleApp {
     }
 
     pub fn rename(&mut self, rel: &Path, new_name: &str) -> Result<(), String> {
-        self.flush_all();
+        let _tree = self.hold_sync_tree().ok_or("The sync is still changing files in the vault; try again in a moment")?;
+        self.flush_dirty();
         let v = self.vault.as_mut().ok_or("no vault")?;
         // one name, inside the note's folder (VAULT-018)
         let new_name = VaultPath::name(new_name).map_err(|e| e.to_string())?;
@@ -1142,7 +1154,8 @@ impl ShaleApp {
 
     /// Point the red links `target` in `note` at the file `to` ("Fix link", LINK-012).
     pub fn fix_link(&mut self, note: &Path, target: &str, to: &Path) {
-        self.flush_all();
+        let Some(_tree) = self.hold_sync_tree() else { return };
+        self.flush_dirty();
         let Some(v) = self.vault.as_mut() else { return };
         match v.fix_link(note, target, to) {
             Ok(n) => {
@@ -1228,7 +1241,8 @@ impl ShaleApp {
         if rel.parent().unwrap_or(Path::new("")) == into {
             return Ok(rel.to_path_buf());
         }
-        self.flush_all();
+        let _tree = self.hold_sync_tree().ok_or("The sync is still changing files in the vault; try again in a moment")?;
+        self.flush_dirty();
         let v = self.vault.as_mut().ok_or("no vault")?;
         let is_dir = v.abs(rel).is_dir();
         let (to, changed) = v.move_into(rel, into).map_err(|e| e.to_string())?;
@@ -1248,7 +1262,8 @@ impl ShaleApp {
     }
 
     pub fn trash(&mut self, rel: &Path) {
-        self.flush_all();
+        let Some(_tree) = self.hold_sync_tree() else { return };
+        self.flush_dirty();
         // unsaved edits that could not be saved must not go away with the buffer (DATA-009)
         if let Some(bad) = self.notes.iter().find(|(k, d)| k.starts_with(rel) && d.dirty).map(|(k, _)| rel_to_string(k)).or_else(|| self.drawings.iter().find(|(k, d)| k.starts_with(rel) && d.dirty).map(|(k, _)| rel_to_string(k))) {
             self.toast(format!("“{bad}” has changes that could not be saved, so “{}” is not moved to the trash", rel_to_string(rel)));
@@ -1256,7 +1271,8 @@ impl ShaleApp {
         }
         let Some(v) = self.vault.as_mut() else { return };
         match v.trash(rel) {
-            Ok(()) => {
+            Ok(in_trash) => {
+                self.trashed.push(in_trash);
                 self.notes.retain(|k, _| !k.starts_with(rel));
                 self.drawings.retain(|k, _| !k.starts_with(rel));
                 for t in &mut self.tabs {
@@ -1266,11 +1282,40 @@ impl ShaleApp {
                     t.back.retain(|b| !b.path().map(|p| p.starts_with(rel)).unwrap_or(false));
                     t.fwd.retain(|b| !b.path().map(|p| p.starts_with(rel)).unwrap_or(false));
                 }
-                self.toast(format!("Moved “{}” to the vault's .trash folder", rel_to_string(rel)));
+                self.toast(format!("Moved “{}” to the vault's .trash folder. Right-click the empty space in the file list and choose “Restore last deleted” to put it back", rel_to_string(rel)));
                 self.remember_open_files();
             }
             Err(e) => self.toast(format!("Could not move to trash: {e}")),
         }
+    }
+
+    /// Whether "Restore last deleted" has something to restore: an item this session moved to
+    /// the trash that is still there.
+    pub fn can_restore_trashed(&self) -> bool {
+        let Some(v) = &self.vault else { return false };
+        self.trashed.iter().any(|t| std::fs::symlink_metadata(v.abs(t)).is_ok())
+    }
+
+    /// Put the item moved to the trash last back at its original path (VAULT-020). Refuses, and
+    /// keeps it in the trash, when something is there already.
+    pub fn restore_trashed(&mut self) {
+        let Some(_tree) = self.hold_sync_tree() else { return };
+        let Some(v) = self.vault.as_mut() else { return };
+        while let Some(t) = self.trashed.last().cloned() {
+            if std::fs::symlink_metadata(v.abs(&t)).is_err() {
+                self.trashed.pop(); // taken out of the trash by hand
+                continue;
+            }
+            match v.restore(&t) {
+                Ok(back) => {
+                    self.trashed.pop();
+                    self.toast(format!("Restored “{}”", rel_to_string(&back)));
+                }
+                Err(e) => self.toast(format!("Could not restore: {e}")),
+            }
+            return;
+        }
+        self.toast("There is nothing to restore from this session");
     }
 
     /// Open the note before (-1) or after (+1) the current one in the file list (same folder,
@@ -1511,6 +1556,7 @@ impl ShaleApp {
                     self.modal = Some(Modal::Rename { rel, name, error: None });
                 }
                 Action::Trash(rel) => self.modal = Some(Modal::ConfirmTrash { rel }),
+                Action::RestoreTrashed => self.restore_trashed(),
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
                 Action::OpenVault(p) => self.open_vault(&p),
                 Action::Export(rel) => self.open_export_dialog(&rel),
