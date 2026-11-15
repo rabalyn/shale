@@ -13,6 +13,8 @@ mod cal_ics;
 mod cal_store;
 mod cal_time;
 mod cal_ui;
+#[cfg(test)]
+mod caldav_env_tests;
 mod canvas;
 mod compose;
 mod config;
