@@ -1,6 +1,6 @@
 # Shale features
 
-Shale is a notes app for the Linux desktop. Your vault is a plain folder of markdown files,
+Shale is a notes app for the Linux, macOS and Windows desktop (what differs per system: the README, "Supported systems"). Your vault is a plain folder of markdown files,
 and notes link to each other with `[[wiki links]]`. The screenshots below come from the app's
 built-in demo vault (`shale --screenshot out.png`); `docs/screenshots/regen.sh` makes them all
 again from the recipes in `docs/screenshots/recipes.conf`.

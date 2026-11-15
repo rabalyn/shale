@@ -284,8 +284,7 @@ impl ShaleApp {
     /// calendar) and paint the drop highlight. Call after the layout of the frame.
     pub fn handle_drops(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        let zoom = ctx.zoom_factor();
-        // files dropped through the window system (X11)
+        // files dropped through the window system (X11, macOS, Windows)
         let (dropped, hovering_files) = ctx.input(|i| (i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect::<Vec<_>>(), !i.raw.hovered_files.is_empty()));
         if !dropped.is_empty() {
             let (items, notes) = import::items_from_paths(&dropped);
@@ -294,6 +293,7 @@ impl ShaleApp {
         // drops from other programs on Wayland (and scripted test drops)
         #[cfg(target_os = "linux")]
         {
+            let zoom = ctx.zoom_factor();
             let mut events = crate::wl_drop::take_events();
             events.append(&mut self.fake_drops);
             for e in events {

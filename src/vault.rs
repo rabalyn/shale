@@ -51,6 +51,9 @@ pub struct FileStamp {
     ino: u64,
     #[cfg(unix)]
     ctime: (i64, i64),
+    /// Windows: the volume and file index (no inode there)
+    #[cfg(windows)]
+    id: Option<(u32, u64)>,
 }
 
 impl FileStamp {
@@ -66,6 +69,8 @@ impl FileStamp {
             ino: m.ino(),
             #[cfg(unix)]
             ctime: (m.ctime(), m.ctime_nsec()),
+            #[cfg(windows)]
+            id: crate::fsutil::file_identity(path),
         })
     }
 }

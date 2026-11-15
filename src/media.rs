@@ -139,18 +139,9 @@ pub fn tab_complete(typed: &str, vault_root: &Path, home: &Path) -> Option<Strin
     }
 }
 
-/// Today's local date (year, month, day).
+/// Today's local date (year, month, day), in the computer's time zone (`cal_time::local_offset`).
 pub fn local_date() -> (i32, u32, u32) {
-    #[cfg(unix)]
-    {
-        let now = unsafe { libc::time(std::ptr::null_mut()) };
-        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        if !unsafe { libc::localtime_r(&now, &mut tm) }.is_null() {
-            return (tm.tm_year + 1900, (tm.tm_mon + 1) as u32, tm.tm_mday as u32);
-        }
-    }
-    let s = crate::panels::today().unwrap_or_else(|| "1970-01-01".into());
-    (s[0..4].parse().unwrap_or(1970), s[5..7].parse().unwrap_or(1), s[8..10].parse().unwrap_or(1))
+    crate::cal_time::civil_from_days(crate::cal_time::today())
 }
 
 /// `z_media/2026/11/261112_photo.png` for a file called `photo.png` on 2026-11-12.

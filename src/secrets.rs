@@ -93,7 +93,14 @@ static NOTICES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Secrets of social accounts the keyring refused: kept for this run only.
 static SOCIAL_SESSION: Mutex<Option<HashMap<(String, String), Secret>>> = Mutex::new(None);
 
+/// Tests: every notice ever given, which app frames never take (headless app tests running at
+/// the same time empty `NOTICES` with `take_notices`, raba/shale#80).
+#[cfg(test)]
+static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 fn notice(msg: String) {
+    #[cfg(test)]
+    SEEN.lock().unwrap_or_else(|e| e.into_inner()).push(msg.clone());
     NOTICES.lock().unwrap_or_else(|e| e.into_inner()).push(msg);
 }
 
@@ -280,11 +287,20 @@ pub fn secret_field_shown() -> bool {
 /// Where passwords end up, for the settings dialog. Says so when secrets could not be locked
 /// into memory (they are then only wiped when dropped, SEC-018).
 pub fn where_stored() -> String {
-    let base = if backend::available() { "Passwords are kept in the system keyring." } else { "No system keyring found (install secret-tool / libsecret to use one): passwords are stored in the settings file, readable only by you." };
+    let base = if backend::available() { "Passwords are kept in the system keyring." } else { no_keyring_text() };
     if crate::secret::lock_failures() > 0 {
-        format!("{base} The system would not lock typed passwords into memory (RLIMIT_MEMLOCK), so they could end up in swap; use encrypted swap.")
+        format!("{base} The system would not lock typed passwords into memory ({}), so they could end up in swap; use encrypted swap.", crate::secret::LOCK_LIMIT)
     } else {
         base.to_string()
+    }
+}
+
+/// What the settings dialog says when there is no keyring (SEC-003, SEC-021).
+fn no_keyring_text() -> &'static str {
+    if cfg!(target_os = "linux") {
+        "No system keyring found (install secret-tool / libsecret to use one): passwords are stored in the settings file, readable only by you."
+    } else {
+        "This system has no keyring support in Shale yet: passwords are stored in the settings file, readable only by you."
     }
 }
 
@@ -453,11 +469,19 @@ mod backend {
 
 #[cfg(test)]
 mod tests {
+    /// The calendar passwords the settings file knows (`for_file` drops the keyring entries of
+    /// accounts that are not in the list it gets) and the pretend keyring are shared by the whole
+    /// process, so the tests of this module take turns.
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
     use super::*;
 
     // spec: SEC-003
     #[test]
     fn social_secrets_have_their_own_keyring_entries() {
+        let _serial = serial();
         assert!(social_store("https://social.test", "ada@social.test", "tok-1"));
         assert_eq!(social_lookup("https://social.test", "ada@social.test").as_ref().map(|s| s.expose()), Some("tok-1"));
         assert_eq!(backend::lookup(CALDAV, "https://social.test", "ada@social.test"), None, "not mixed up with calendars");
@@ -474,6 +498,7 @@ mod tests {
     // spec: SEC-003
     #[test]
     fn passwords_go_to_the_keyring_and_come_back() {
+        let _serial = serial();
         let sources = vec![dav("a", "https://dav.example.com/cal/a/", "ada", "s3cret"), dav("b", "https://DAV.example.com:443/cal/b/", "ada", "s3cret"), dav("anon", "https://pub.example.com/c/", "", "")];
         let file = for_file(&sources);
         let json = serde_json::to_string(&file).unwrap();
@@ -491,6 +516,7 @@ mod tests {
     // spec: MAIL-021
     #[test]
     fn mail_secrets_have_their_own_entries() {
+        let _serial = serial();
         assert!(set_mail_secret("acct-1", MailSecret::Password, "pw-1"));
         assert!(set_mail_secret("acct-1", MailSecret::RefreshToken, "tok-1"));
         assert_eq!(mail_secret("acct-1", MailSecret::Password).as_ref().map(|s| s.expose()), Some("pw-1"));
@@ -504,14 +530,15 @@ mod tests {
         clear_mail_secret("acct-1", MailSecret::RefreshToken);
     }
 
-    /// The notices so far, without taking them (other tests run at the same time).
+    /// Every notice so far, also those an app frame of another test already took.
     fn notices_now() -> Vec<String> {
-        NOTICES.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        SEEN.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     // spec: SEC-011
     #[test]
     fn a_refused_keyring_never_puts_a_new_password_into_the_settings_file() {
+        let _serial = serial();
         // the pretend keyring refuses every address that contains NO_KEYRING_ACCOUNT
         let sources = vec![dav("r", "https://no-keyring/cal/", "ada-refused", "typed-this-run")];
         let file = for_file(&sources);
@@ -529,6 +556,7 @@ mod tests {
     // spec: SEC-011
     #[test]
     fn a_password_from_the_file_stays_there_while_the_keyring_refuses_and_moves_when_it_takes() {
+        let _serial = serial();
         let mut loaded = vec![dav("f", "https://no-keyring/cal/", "ada-old", "old-file-pw")];
         load_passwords(&mut loaded);
         let file = for_file(&loaded);
@@ -545,6 +573,7 @@ mod tests {
     // spec: SEC-011
     #[test]
     fn without_any_keyring_the_password_stays_in_the_owner_only_file_as_documented() {
+        let _serial = serial();
         pretend_no_keyring(true);
         let sources = vec![dav("n", "https://nokr.example.com/cal/n/", "ada-nokr", "plain-pw")];
         let file = for_file(&sources);
@@ -559,6 +588,7 @@ mod tests {
     // spec: SEC-011
     #[test]
     fn a_social_secret_the_keyring_refuses_is_kept_for_this_run_and_never_goes_to_the_file() {
+        let _serial = serial();
         let kept = social_store_or_keep("https://no-keyring.test", "ada@refuse.test", &Secret::new("app-pw"));
         assert_eq!(kept, "", "not for the settings file");
         assert_eq!(social_secret("https://no-keyring.test", "ada@refuse.test", &Secret::default()), "app-pw", "works for this run");
@@ -576,6 +606,7 @@ mod tests {
     // spec: SEC-009
     #[test]
     fn every_password_field_goes_through_password_edit() {
+        let _serial = serial();
         let mut bad = Vec::new();
         let mut stack = vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")];
         while let Some(dir) = stack.pop() {
@@ -628,6 +659,7 @@ mod tests {
     // spec: SEC-015
     #[test]
     fn a_password_field_keeps_no_undo_history_and_edits_the_locked_buffer() {
+        let _serial = serial();
         let mut secret = Secret::default();
         let kept = types_into(|ui| password_edit(ui, &mut secret, "hint", 100.0));
         assert_eq!(secret.expose(), "hunter2", "typed into the locked buffer");
@@ -642,11 +674,23 @@ mod tests {
     // spec: SEC-018
     #[test]
     fn the_settings_dialog_says_when_secrets_could_not_be_locked() {
+        let _serial = serial();
         crate::secret::fail_locks_on_this_thread(true);
         let _unlocked = Secret::new("x");
         crate::secret::fail_locks_on_this_thread(false);
         let text = where_stored();
-        assert!(text.contains("RLIMIT_MEMLOCK") && text.contains("encrypted swap"), "{text}");
+        assert!(text.contains(crate::secret::LOCK_LIMIT) && text.contains("encrypted swap"), "{text}");
         assert!(text.contains("keyring"), "{text}");
+    }
+
+    // spec: SEC-021
+    #[test]
+    fn without_a_keyring_the_dialog_names_the_settings_file_and_only_linux_points_to_secret_tool() {
+        let _serial = serial();
+        pretend_no_keyring(true);
+        let text = where_stored();
+        pretend_no_keyring(false);
+        assert!(text.contains("settings file") && text.contains("readable only by you"), "{text}");
+        assert_eq!(text.contains("secret-tool"), cfg!(target_os = "linux"), "{text}");
     }
 }

@@ -2,7 +2,7 @@
 
 [![build](https://github.com/rabalyn/shale/actions/workflows/build.yml/badge.svg)](https://github.com/rabalyn/shale/actions/workflows/build.yml)
 
-A native Rust notes app for the Linux desktop (MIT licensed). Your vault is a plain folder of
+A native Rust notes app for the desktop: Linux, macOS and Windows (MIT licensed). Your vault is a plain folder of
 markdown files. Notes link to each other with `[[wiki links]]`.
 
 - **Links you can see**: `[[Note]]` is **blue** when the note exists and **red** when it doesn't.
@@ -57,6 +57,27 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
+## Supported systems
+
+| System | Tested | Notes |
+|---|---|---|
+| Linux (Wayland and X11), x86_64 | on every push (Forgejo) and for every release | the release download is for this system |
+| macOS (Apple silicon, arm64) | built, linted and tested on GitHub (`macos-latest`) for every push to `main` | build it from source for now |
+| Windows 10 and 11 (x86_64) | built, linted and tested on GitHub (`windows-latest`) for every push to `main` | build it from source for now |
+
+Release downloads for macOS and Windows do not exist yet. What differs from Linux:
+
+- **Passwords**: until Keychain and Credential Manager support arrives, macOS and Windows keep
+  passwords and tokens in the settings file, which only you can read (in your user profile).
+- **Signed and encrypted mail** needs GnuPG on your computer (`brew install gnupg` on macOS,
+  [Gpg4win](https://www.gpg4win.org) on Windows); without it Shale says so and everything else works.
+- **CalDAV** and **git sync** need `curl` and `git` on the path (both come with macOS and Windows 10 and later; Git
+  for Windows is a separate install).
+- **Drag and drop**: files dropped on the window are imported everywhere; mail messages, links and
+  text dragged out of Thunderbird need Wayland.
+- **Time zones**: calendar events in a named zone (`Europe/Berlin`) need the system's zoneinfo
+  files, which Windows does not have; there such events are shown in the computer's own zone.
+
 ## Download
 
 Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
@@ -95,8 +116,9 @@ built; it does not show that a person checked the build.
    closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
-formats, lints, builds, tests, packages and audits every pull request and `main`; GitHub gets the released
-versions.
+formats, lints, builds, tests, packages and audits every pull request and `main`; GitHub gets the
+released versions, and builds and tests macOS and Windows for every push to `main` (the Linux
+job of GitHub only runs for release tags).
 
 ## Development and issues
 
@@ -104,7 +126,8 @@ Shale is developed on Forgejo: <https://git.home.rabalyn.de/raba/shale>. Branche
 and the **issues, which are the one list of open work**, live there; GitHub only builds and hosts the
 releases ([ADR-0013](docs/decisions/0013-forgejo-and-issue-tracking.md), FORGE rules in
 [engineering.md](docs/spec/engineering.md)). Checks run on the Forgejo runner
-(`.forgejo/workflows/ci.yml`); GitHub builds only release tags (BUILD-012).
+(`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012) and tests macOS and
+Windows (BUILD-017).
 
 ## Build and run
 
@@ -114,8 +137,11 @@ cargo build --release
 ./target/release/shale --vault ~/Notes    # opens a folder as vault
 ```
 
-You need a Rust toolchain (1.85 or newer) and the usual desktop libraries (Wayland or X11, plus
-OpenGL/Vulkan drivers).
+You need a Rust toolchain (1.89 or newer; CI uses the version in `rust-toolchain.toml`). On Linux also
+the usual desktop libraries (Wayland or X11, plus OpenGL/Vulkan drivers, and a C compiler for the
+bundled SQLite). On macOS the Xcode command line tools (`xcode-select --install`) are enough. On Windows
+install Rust with the MSVC toolchain (the Visual Studio Build Tools with "Desktop development with C++");
+the same three commands work in PowerShell, with `.\target\release\shale.exe` as the program.
 
 Other options:
 

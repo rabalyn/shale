@@ -237,7 +237,9 @@ pub(crate) fn split_message(raw: &[u8]) -> (Vec<(String, String)>, &[u8]) {
     (headers, &raw[body_start.min(raw.len())..])
 }
 
-/// One header's (unfolded, still encoded) value from a block of header lines.
+/// One header's (unfolded, still encoded) value from a block of header lines (for the Thunderbird
+/// lookup of dropped messages, which only Wayland delivers).
+#[cfg(target_os = "linux")]
 pub fn header_value(headers: &str, name: &str) -> Option<String> {
     let block = format!("{}\n\n", headers.trim_end());
     let (h, _) = split_message(block.as_bytes());

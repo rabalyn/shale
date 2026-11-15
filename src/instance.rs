@@ -38,7 +38,6 @@ mod tests {
 
     // spec: DATA-012
     #[test]
-    #[cfg(unix)]
     fn a_second_instance_is_refused_until_the_first_has_ended() {
         let dir = std::env::temp_dir().join(format!("shale-instance-test-{}", std::process::id()));
         let first = acquire(&dir).unwrap();
