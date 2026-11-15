@@ -372,10 +372,12 @@ impl ShaleApp {
     pub fn new(cc: &eframe::CreationContext<'_>, opts: Options) -> Self {
         theme::apply(&cc.egui_ctx);
         if opts.screenshot.is_some() {
-            // no fades and no scroll easing: a picture shows the end state, whatever the speed of the machine
+            // no fades, no scroll easing and a steady text cursor: a picture shows the end state,
+            // whatever the speed of the machine (DEV-007: two runs give the same bytes)
             cc.egui_ctx.all_styles_mut(|s| {
                 s.animation_time = 0.0;
                 s.scroll_animation = egui::style::ScrollAnimation::none();
+                s.visuals.text_cursor.blink = false;
             });
         }
         #[cfg(target_os = "linux")]
