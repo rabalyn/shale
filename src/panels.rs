@@ -712,12 +712,16 @@ impl ShaleApp {
         match &mut modal {
             Modal::Picker(p) => {
                 if let Some(v) = &self.vault {
-                    let out = crate::picker::show(&ctx, p, v);
+                    let data = crate::search_all::Ctx { vault: v, mail: self.mail.index(), posts: &self.social.index };
+                    let out = crate::picker::show(&ctx, p, &data);
                     keep = out.pick.is_none() && !out.close;
                     if let Some(hit) = out.pick {
-                        // the file opens in this tab and the keyboard goes into it
+                        // a note opens in this tab and the keyboard goes into it; a mail or a post has its own view
+                        let note = matches!(hit.action, Action::Open { .. } | Action::GotoMatch { .. });
                         self.actions.push(hit.action);
-                        self.actions.push(Action::FocusEditor);
+                        if note {
+                            self.actions.push(Action::FocusEditor);
+                        }
                     }
                 }
             }

@@ -231,6 +231,8 @@ pub enum Action {
     ShowView(View),
     /// open a post found by the search in its feed, in a new tab (SOC-035)
     OpenPost(Box<crate::social::post_index::PostHit>),
+    /// open a mail found by the search in the mail view (NAV-025)
+    OpenMail(Box<crate::mail_db::MessageSummary>),
     CloseTab(usize),
     Rename(PathBuf),
     Trash(PathBuf),
@@ -1682,6 +1684,7 @@ impl ShaleApp {
                 Action::GotoMatch { rel, line, col } => self.goto_match(&rel, line, col),
                 Action::ShowView(v) => self.show_view(v, false),
                 Action::OpenPost(hit) => self.open_post_hit(&hit),
+                Action::OpenMail(msg) => self.open_mail_hit(*msg),
                 Action::CloseTab(i) => self.close_tab(i),
                 Action::Rename(rel) => {
                     let name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_else(|| rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
@@ -1739,6 +1742,7 @@ impl ShaleApp {
             match ui.input_mut(|i| self.keymap.poll(i, Scope::EditorNormal)) {
                 Some(KeyAction::NormalAlternate) => self.swap_alternate(),
                 Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
+                Some(KeyAction::NormalSearchAll) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything))),
                 _ => {}
             }
         } else {

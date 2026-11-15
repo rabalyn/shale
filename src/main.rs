@@ -77,6 +77,7 @@ mod people;
 mod picker;
 mod reader;
 mod recovery;
+mod search_all;
 mod secrets;
 mod sidebar;
 #[cfg(test)]
