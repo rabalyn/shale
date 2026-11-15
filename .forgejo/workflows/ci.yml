@@ -209,8 +209,9 @@ jobs:
   # macOS and Windows (BUILD-016, FORGE-003). Only `main`, never a branch or a pull request. The
   # write credential is the owner's: a fine-grained GitHub token for rabalyn/shale only, with
   # Contents and Workflows read and write (a deploy key may not push changes to
-  # .github/workflows/, raba/shale#52), kept as the Forgejo Actions secret MIRROR_TOKEN (Forgejo
-  # refuses names that start with GITHUB_). Without it the job says so and fails.
+  # .github/workflows/, raba/shale#52), kept as the Forgejo Actions secret MIRROR_DEPLOY_KEY (the
+  # name is from the deploy key it replaced; Forgejo refuses names that start with GITHUB_).
+  # Without it the job says so and fails.
   mirror:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -229,12 +230,12 @@ jobs:
         shell: bash
         env:
           TOKEN: ${{ github.token }}
-          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
+          MIRROR_TOKEN: ${{ secrets.MIRROR_DEPLOY_KEY }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [ -z "$MIRROR_TOKEN" ]; then
-            echo "::error::the secret MIRROR_TOKEN is not set (see raba/shale#52)"
+            echo "::error::the secret MIRROR_DEPLOY_KEY (a GitHub token) is not set (see raba/shale#52)"
             exit 1
           fi
           # the whole history of main (a shallow push is refused by GitHub)
