@@ -17,13 +17,16 @@ impl Env {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let env = [
-            ("GIT_CONFIG_GLOBAL", "/dev/null"),
+            ("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" }),
             ("GIT_CONFIG_NOSYSTEM", "1"),
-            ("GIT_CONFIG_COUNT", "2"),
+            ("GIT_CONFIG_COUNT", "3"),
             ("GIT_CONFIG_KEY_0", "init.defaultBranch"),
             ("GIT_CONFIG_VALUE_0", "main"),
             ("GIT_CONFIG_KEY_1", "protocol.file.allow"),
             ("GIT_CONFIG_VALUE_1", "always"),
+            // Git for Windows converts line endings by default; the tests compare exact bytes
+            ("GIT_CONFIG_KEY_2", "core.autocrlf"),
+            ("GIT_CONFIG_VALUE_2", "false"),
         ];
         let git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() };
         Env { root, git }
@@ -384,9 +387,11 @@ fn connect_creates_the_repository_and_updates_the_url() {
     let env = Env::new("connect");
     let v = env.folder("v");
     assert!(!is_repo(&v));
-    connect(&env.git, &v, "/srv/notes.git").unwrap();
+    // an absolute folder path (on Windows that needs a drive)
+    let abs = if cfg!(windows) { r"C:\srv\notes.git" } else { "/srv/notes.git" };
+    connect(&env.git, &v, abs).unwrap();
     assert!(is_repo(&v));
-    assert_eq!(remote_url(&env.git, &v).as_deref(), Some("/srv/notes.git"));
+    assert_eq!(remote_url(&env.git, &v).as_deref(), Some(abs));
     connect(&env.git, &v, " https://example.org/me/notes.git ").unwrap();
     assert_eq!(remote_url(&env.git, &v).as_deref(), Some("https://example.org/me/notes.git"));
     assert!(connect(&env.git, &v, "ext::sh -c touch% /tmp/pwned").is_err());
@@ -406,7 +411,7 @@ fn only_plain_remote_urls_are_accepted() {
         "file:///srv/x.git",
         "git@github.com:me/notes.git",
         "host:notes",
-        "/srv/git/notes.git",
+        if cfg!(windows) { r"C:\srv\git\notes.git" } else { "/srv/git/notes.git" },
     ] {
         assert!(check_url(ok).is_ok(), "{ok}");
     }
@@ -489,4 +494,11 @@ fn conflict_copy_names() {
     assert_eq!(conflict_name(Path::new(".gitignore"), STAMP, none), PathBuf::from(".gitignore (conflict 2026-11-14 1200)"));
     let first = PathBuf::from("Note (conflict 2026-11-14 1200).md");
     assert_eq!(conflict_name(Path::new("Note.md"), STAMP, |p| p == first), PathBuf::from("Note (conflict 2026-11-14 1200 2).md"));
+}
+
+// spec: BUILD-018
+#[test]
+fn the_computer_has_a_name_for_commit_messages() {
+    let h = host_name();
+    assert!(!h.is_empty() && !h.contains('\n') && h == h.trim(), "{h:?}");
 }

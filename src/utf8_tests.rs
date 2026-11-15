@@ -57,8 +57,11 @@ fn text_functions_never_cut_a_character() {
         let links: Vec<_> = markdown::find_links(&s).into_iter().map(|l| (l, true)).collect();
         let _ = editor::highlight(&s, &links, 15.0);
         let _ = import::parse_tags(&s);
-        let _ = import::text_of(s.as_bytes());
-        let _ = import::items_from_drop("text/plain", s.as_bytes());
+        #[cfg(target_os = "linux")]
+        {
+            let _ = import::text_of(s.as_bytes());
+            let _ = import::items_from_drop("text/plain", s.as_bytes());
+        }
         let _ = mail::decode_words(&s);
         let _ = mail::html_to_text(&s);
         let _ = mail::parse(s.as_bytes());

@@ -269,10 +269,12 @@ mod tests {
     // spec: IMP-001
     #[test]
     fn every_control_of_the_import_dialog() {
-        let (items, _) = import::items_from_drop("message/rfc822", &crate::mail::tests::sample_eml());
-        let (more, _) = import::items_from_drop("text/plain", b"Notiz");
-        let mut all = items;
-        all.extend(more);
+        // a second item: dropped text where a program can drop it (Wayland), else a second message
+        let mut all = vec![import::eml_item(crate::mail::tests::sample_eml(), None)];
+        #[cfg(target_os = "linux")]
+        all.extend(import::items_from_drop("text/plain", b"Notiz").0);
+        #[cfg(not(target_os = "linux"))]
+        all.push(import::eml_item(crate::mail::tests::sample_eml(), None));
         let mut d = ImportDialog::new(all, vec!["“x” is a folder; drop the files inside it instead.".into()], String::new(), String::new(), Some(PathBuf::from("Projekte/Übersicht.md")), false);
         let folders = vec!["Projekte".to_string(), "Projekte/Neubau B".to_string()];
         let tags = vec!["neubau-b".to_string(), "status".to_string()];

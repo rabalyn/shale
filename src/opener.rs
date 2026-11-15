@@ -1,6 +1,7 @@
 //! Opening things with another program (browser, mail program, document viewer).
 //!
-//! This is the only place that starts `xdg-open` / `open` / `start`. What it is given can come
+//! This is the only place that starts `xdg-open` (Linux), `open` (macOS) or `ShellExecuteW`
+//! (Windows, with no shell: never `cmd /C start`, SEC-022). What it is given can come
 //! from a remote server (calendar event links) or from a mail (attachments), so it checks first:
 //!
 //! - web addresses: only `http`, `https` and `mailto`; `www.…` becomes `https://www.…`;
@@ -171,9 +172,23 @@ const PROGRAM_EXTENSIONS: &[&str] = &[
     "service",
     "flatpakref",
     "snap",
+    // more Windows program and script types (the list is the same on every system, SEC-022)
+    "pif",
+    "msp",
+    "msc",
+    "scf",
+    "inf",
+    "chm",
+    "gadget",
+    "application",
+    "appref-ms",
+    "vb",
+    "ws",
 ];
 
-/// Document types that are safe to open even if the file system marks them executable.
+/// Document types that are safe to open even if the file system marks them executable (where
+/// there is an executable bit at all).
+#[cfg(unix)]
 const DOCUMENT_EXTENSIONS: &[&str] = &[
     "pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "txt", "md", "csv", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "mp3", "mp4", "m4a", "wav", "ogg", "flac", "mkv", "webm", "mov", "avi", "eml",
     "ics", "vcf", "zip", "epub",
@@ -272,6 +287,59 @@ fn save_temp_copy(name: &str, data: &[u8]) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// A Windows path without the verbatim prefix that `canonicalize` adds (`\\?\C:\x` becomes
+/// `C:\x`, `\\?\UNC\host\share` becomes `\\host\share`): the shell does not understand it.
+/// Anything else is returned unchanged. Works on UTF-16 text, so no path is ever altered by a
+/// conversion.
+#[cfg(any(windows, test))]
+fn strip_verbatim(path: &[u16]) -> Vec<u16> {
+    let wide = |t: &str| t.encode_utf16().collect::<Vec<u16>>();
+    let unc = wide(r"\\?\UNC\");
+    if path.starts_with(&unc) {
+        return [wide(r"\\"), path[unc.len()..].to_vec()].concat();
+    }
+    let verbatim = wide(r"\\?\");
+    // only the drive form: other verbatim names (devices, volume GUIDs) are left alone
+    let drive = path.len() >= verbatim.len() + 2 && path[verbatim.len() + 1] == u16::from(b':') && char::from_u32(u32::from(path[verbatim.len()])).is_some_and(|c| c.is_ascii_alphabetic());
+    if path.starts_with(&verbatim) && drive {
+        return path[verbatim.len()..].to_vec();
+    }
+    path.to_vec()
+}
+
+/// Windows: hand the address or file to the shell's "open" verb. No command line is built, so
+/// nothing in `target` can be taken for a switch or a second command (SEC-005).
+#[cfg(windows)]
+fn launch_windows(target: &std::ffi::OsStr) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let raw: Vec<u16> = target.encode_wide().collect();
+    let file: Vec<u16> = strip_verbatim(&raw).into_iter().chain(std::iter::once(0)).collect();
+    let verb: Vec<u16> = "open".encode_utf16().chain(std::iter::once(0)).collect();
+    // a thread of its own: the shell wants COM set up on the calling thread, and it may take a moment
+    let code = std::thread::spawn(move || {
+        // SAFETY: the strings are NUL-terminated and outlive the call; the other arguments are null.
+        unsafe {
+            let hr = CoInitializeEx(std::ptr::null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as _);
+            let r = ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) as usize;
+            if hr >= 0 {
+                CoUninitialize();
+            }
+            r
+        }
+    })
+    .join()
+    .map_err(|_| "Could not open it: the shell call failed".to_string())?;
+    // ShellExecuteW answers with a value above 32 when it worked, an error code up to 32 if not
+    if code > 32 {
+        Ok(())
+    } else {
+        Err(format!("Could not open it: the system answered {code}"))
+    }
+}
+
 /// Start the system's opener for an address or a file that has been checked.
 fn launch(target: &std::ffi::OsStr) -> Result<(), String> {
     // tests: the pretend program gets what would be opened (nothing starts)
@@ -280,13 +348,24 @@ fn launch(target: &std::ffi::OsStr) -> Result<(), String> {
         b(&target.to_string_lossy());
         return Ok(());
     }
+    #[cfg(windows)]
+    {
+        launch_windows(target)
+    }
+    #[cfg(not(windows))]
+    {
+        launch_program(target)
+    }
+}
+
+/// Linux and macOS: the opener program, started with the target as its only argument.
+#[cfg(not(windows))]
+fn launch_program(target: &std::ffi::OsStr) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     let r = std::process::Command::new("xdg-open").arg(target).spawn();
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("open").arg(target).spawn();
-    #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(target).spawn();
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let r: std::io::Result<std::process::Child> = Err(std::io::Error::other("unsupported"));
     match r {
         Ok(mut child) => {
@@ -473,6 +552,29 @@ mod tests {
         }
     }
 
+    // spec: SEC-022
+    #[test]
+    fn the_verbatim_prefix_is_removed_before_a_path_goes_to_the_windows_shell() {
+        let w = |t: &str| t.encode_utf16().collect::<Vec<u16>>();
+        assert_eq!(strip_verbatim(&w(r"\\?\C:\Users\me\a.pdf")), w(r"C:\Users\me\a.pdf"));
+        assert_eq!(strip_verbatim(&w(r"\\?\UNC\host\share\a.pdf")), w(r"\\host\share\a.pdf"));
+        // everything else stays as it is
+        for same in [r"C:\Users\me\a.pdf", r"\\host\share\a.pdf", r"\\?\Volume{1234}\a.pdf", r"\\?\", r"\\?\C", "https://example.com/?a=1", ""] {
+            assert_eq!(strip_verbatim(&w(same)), w(same), "{same}");
+        }
+    }
+
+    // spec: SEC-022
+    #[test]
+    fn program_types_of_every_system_are_refused_on_every_system() {
+        let root = tmp("types");
+        for name in ["a.exe", "a.BAT", "a.cmd", "a.ps1", "a.msi", "a.lnk", "a.hta", "a.app", "a.command", "a.desktop", "a.sh", "a.jar", "a.vbs", "a.scr", "a.pif", "a.chm"] {
+            fs::write(root.join(name), "x").unwrap();
+            assert!(check_vault_file(&root.join(name), &root).is_err(), "{name}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn temp_names_are_made_safe() {
         assert_eq!(safe_name("a/b\\c.txt"), "a_b_c.txt");
@@ -503,7 +605,7 @@ mod tests {
                 let code = text.split("#[cfg(test)]").next().unwrap_or("");
                 for (i, line) in code.lines().enumerate() {
                     let l = line.trim_start();
-                    if !l.starts_with("//") && (l.contains("\"xdg-open\"") || l.contains("Command::new(\"open\")") || l.contains("\"/C\"")) {
+                    if !l.starts_with("//") && (l.contains("\"xdg-open\"") || l.contains("Command::new(\"open\")") || l.contains("\"/C\"") || l.contains("ShellExecute")) {
                         bad.push(format!("{name}:{}: {l}", i + 1));
                     }
                 }

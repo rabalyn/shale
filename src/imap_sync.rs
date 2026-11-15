@@ -739,7 +739,8 @@ mod tests {
         let (dir, server) = (root("window"), server());
         server.state().add_message("INBOX", message("ancient", "old@x.de", "from long ago"), NOW - 4 * 365 * DAY);
         let store = MailStore::open(&dir).unwrap();
-        run(&store, &server, &opts());
+        // one connection: with several, the order in which their commands reach the server is up to the scheduler
+        run(&store, &server, &SyncOptions { parallel: 1, ..opts() });
         let r = store.reader().unwrap();
         assert!(r.search("ancient", None, 5, 0).unwrap().is_empty(), "outside the window");
         let fetches: Vec<String> = server.state().verbs().into_iter().filter(|v| v.starts_with("UID FETCH") && v.contains("BODY.PEEK[]")).collect();

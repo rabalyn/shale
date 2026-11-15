@@ -238,7 +238,7 @@ impl Outbox {
         }
         let mut recs = self.read_records(kind, account, id);
         recs.retain(|r| r.file != file);
-        recs.push(ReplaceRecord { file: file.to_string(), name: name.to_string(), trash: rel.to_string_lossy().into_owned() });
+        recs.push(ReplaceRecord { file: file.to_string(), name: name.to_string(), trash: crate::vault::rel_to_string(&rel) });
         self.write_records(kind, account, id, &recs)?;
         self.step()?;
         fsutil::rename_noreplace(&src, &self.root.join(&rel)).map_err(err)
@@ -739,7 +739,8 @@ pub mod tests {
                 if q.is_dir() {
                     walk(&q, base, out);
                 } else {
-                    out.push(q.strip_prefix(base).unwrap().to_string_lossy().into_owned());
+                    // always with "/", so the expectations read the same on every system
+                    out.push(q.strip_prefix(base).unwrap().components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
                 }
             }
         }
