@@ -12,12 +12,17 @@ on:
   # pull requests get the same checks (the publishing steps below only run for main and tags)
   pull_request:
   workflow_dispatch:
+  # weekly, so advisories published for unchanged code are noticed (only the audit job runs then)
+  schedule:
+    - cron: '17 5 * * 1'
 
 permissions:
   contents: write
 
 jobs:
   linux:
+    # the scheduled run is only for the audit below; it must not rebuild or republish "latest"
+    if: github.event_name != 'schedule'
     env:
       # always strict: any warning (also in vendored crates) fails the build
       RUSTFLAGS: -D warnings
@@ -71,11 +76,14 @@ jobs:
           cp target/release/shale LICENSE README.md CHANGELOG.md dist/shale/
           cp -r docs dist/shale/
           tar -C dist -czf shale-linux-x86_64.tar.gz shale
+          sha256sum shale-linux-x86_64.tar.gz > shale-linux-x86_64.tar.gz.sha256
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: shale-linux-x86_64
-          path: shale-linux-x86_64.tar.gz
+          path: |
+            shale-linux-x86_64.tar.gz
+            shale-linux-x86_64.tar.gz.sha256
 
       - name: Publish the version's release page (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -85,11 +93,14 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           ASSET="shale-${VERSION}-linux-x86_64.tar.gz"
           cp shale-linux-x86_64.tar.gz "$ASSET"
+          # the checksum names the file as it is downloaded, so `sha256sum -c` works on it
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          printf '\nTo check the download: `sha256sum -c %s.sha256` (both files in one folder).\n' "$ASSET" >> release-notes.md
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" --title "Shale $VERSION" --notes-file release-notes.md
-            gh release upload "$GITHUB_REF_NAME" "$ASSET" --clobber
+            gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "$ASSET" --title "Shale $VERSION" --notes-file release-notes.md --verify-tag
+            gh release create "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --title "Shale $VERSION" --notes-file release-notes.md --verify-tag
           fi
 
       - name: Publish as the "latest" build (main only)
@@ -97,13 +108,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          NOTES="Newest build of ${GITHUB_SHA::7} from main ($(date -u '+%Y-%m-%d %H:%M UTC')), not a release. Download shale-linux-x86_64.tar.gz, unpack it and run ./shale/shale. Released versions and their notes are on the Releases page."
+          NOTES="Newest build of ${GITHUB_SHA::7} from main ($(date -u '+%Y-%m-%d %H:%M UTC')), not a release. Download shale-linux-x86_64.tar.gz, unpack it and run ./shale/shale. Released versions and their notes are on the Releases page. To check the download: sha256sum -c shale-linux-x86_64.tar.gz.sha256 (both files in one folder)."
           if gh release view latest >/dev/null 2>&1; then
-            gh release upload latest shale-linux-x86_64.tar.gz --clobber
+            gh release upload latest shale-linux-x86_64.tar.gz shale-linux-x86_64.tar.gz.sha256 --clobber
             gh release edit latest --notes "$NOTES" --target "$GITHUB_SHA" --prerelease
           else
-            gh release create latest shale-linux-x86_64.tar.gz --prerelease --title "Latest build (main)" --notes "$NOTES" --target "$GITHUB_SHA"
+            gh release create latest shale-linux-x86_64.tar.gz shale-linux-x86_64.tar.gz.sha256 --prerelease --title "Latest build (main)" --notes "$NOTES" --target "$GITHUB_SHA"
           fi
           # move the tag to this build
           git tag -f latest "$GITHUB_SHA"
           git push -f origin latest
+
+  # separate from the build, so an advisory published overnight shows up as a red job of its own
+  # but never blocks a release build
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # reads only Cargo.lock, so it needs no build and no system libraries
+      - name: Audit the dependencies
+        run: cargo audit
