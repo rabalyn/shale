@@ -216,3 +216,146 @@ jobs:
       # reads only the sources and Cargo.toml, so it needs no build and no system libraries
       - name: Check for unused dependencies
         run: cargo machete
+
+  # DEV-003: line coverage of the unit tests (`cargo llvm-cov`), the summary per file in the log and
+  # a ratchet against .forgejo/coverage-baseline. Separate from the build, so it never blocks it.
+  # No artifact is uploaded (upload-artifact is a JavaScript action); the table in the log is the
+  # report, and `cargo llvm-cov --html` makes the browsable one locally (docs/coverage.md).
+  coverage:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/rust:1.100.0-bookworm
+    steps:
+      - name: Trust the runner's extra CA, if any
+        run: |
+          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
+            update-ca-certificates >/dev/null 2>&1
+            echo "Added the runner's extra CA."
+          fi
+
+      - name: Check out
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "Workspace already populated (local act_runner exec)."
+          else
+            git init -q .
+            git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+            auth=()
+            if [ -n "$TOKEN" ]; then
+              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+            fi
+            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.sha }}"
+            git checkout -q FETCH_HEAD
+          fi
+
+      - name: Libraries for the window (Wayland, X11, OpenGL)
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev >/dev/null
+
+      - name: Install cargo-llvm-cov
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --version 0.9.1 --locked
+
+      - name: Test the coverage check
+        run: sh .forgejo/scripts/test-check-coverage.sh
+
+      - name: Measure the coverage
+        run: |
+          cargo llvm-cov --locked --lcov --output-path lcov.info
+          cargo llvm-cov report
+
+      - name: Check the coverage against the baseline
+        run: sh .forgejo/scripts/check-coverage.sh lcov.info .forgejo/coverage-baseline
+
+  # DEV-011, CALENV-004, MAIL-093: the real-server suites (Radicale, Dovecot, the OAuth2 provider and
+  # Mailpit in containers) of tests/caldav-env and tests/mail-env. Needs a container engine inside the
+  # job container; where the runner offers none, the job says so and ends green without running the
+  # suites (see tests/caldav-env/README.md, "In CI"). Separate from the build, so it never blocks it.
+  env-tests:
+    if: github.event_name != 'workflow_dispatch' && (github.event_name != 'push' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/rust:1.100.0-bookworm
+    steps:
+      - name: Trust the runner's extra CA, if any
+        run: |
+          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
+            update-ca-certificates >/dev/null 2>&1
+            echo "Added the runner's extra CA."
+          fi
+
+      - name: Check out
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "Workspace already populated (local act_runner exec)."
+          else
+            git init -q .
+            git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+            auth=()
+            if [ -n "$TOKEN" ]; then
+              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+            fi
+            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.sha }}"
+            git checkout -q FETCH_HEAD
+          fi
+
+      # a pull request runs the suites only when it touches the code or the environments
+      - name: Decide whether this run is wanted
+        id: wanted
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          answer=yes
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            auth=()
+            if [ -n "$TOKEN" ]; then
+              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+            fi
+            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+            answer=$(sh .forgejo/scripts/env-tests.sh wanted pull_request "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          fi
+          echo "wanted=$answer" >> "$GITHUB_OUTPUT"
+          if [ "$answer" = no ]; then echo "This pull request touches neither the CalDAV/mail code nor the test environments: skipped."; fi
+
+      # best effort: where the container may not install packages or has no privileges, the next
+      # step finds no engine and skips
+      - name: Container engine (Podman)
+        if: steps.wanted.outputs.wanted == 'yes'
+        run: |
+          (apt-get update -qq && apt-get install -y -qq --no-install-recommends podman podman-compose openssl curl netcat-openbsd >/dev/null) \
+            || echo "Could not install Podman here."
+
+      - name: Detect whether containers can run here
+        id: engine
+        if: steps.wanted.outputs.wanted == 'yes'
+        run: |
+          engine=$(sh .forgejo/scripts/env-tests.sh detect)
+          echo "engine=$engine" >> "$GITHUB_OUTPUT"
+          if [ "$engine" = none ]; then
+            echo "SKIPPED: this runner cannot run containers inside the job container (neither 'podman info' nor 'docker info' works)."
+            echo "The CalDAV and mail real-server tests did NOT run. What the runner needs: tests/caldav-env/README.md, section 'In CI'."
+          else
+            echo "Container engine: $engine"
+          fi
+
+      - name: Libraries for the window (Wayland, X11, OpenGL)
+        if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
+        run: |
+          apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev >/dev/null
+
+      # starts both stacks, runs both ignored suites and always takes the stacks down again
+      - name: CalDAV and mail tests against the real servers
+        if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
+        run: sh .forgejo/scripts/env-tests.sh run
