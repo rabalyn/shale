@@ -6,6 +6,7 @@
 
 use crate::app::muted;
 use crate::config::Config;
+use crate::keys::Action as KeyAction;
 use crate::mail_db::{Op, UnsentCopy};
 use crate::mail_ui::*;
 use crate::theme;
@@ -64,6 +65,7 @@ impl MailView {
         let strip = Rect::from_min_size(body.min, Vec2::new(body.width(), 30.0));
         let text = unsent_text(self.unsent.len());
         let mut open = false;
+        let show_tip = self.tip("Show these mails", KeyAction::MailUnsent);
         ui.scope_builder(UiBuilder::new().max_rect(strip).layout(Layout::left_to_right(Align::Center)), |ui| {
             ui.set_clip_rect(strip.intersect(ui.clip_rect()));
             ui.add_space(10.0);
@@ -71,7 +73,7 @@ impl MailView {
             rec(rects, "mail:unsent-notice", &l);
             let r = ui.small_button("Show…");
             rec(rects, "mail:unsent-open", &r);
-            open = r.clicked();
+            open = r.on_hover_text(show_tip.as_str()).clicked();
         });
         body.min.y = strip.max.y;
         if open {
@@ -87,6 +89,8 @@ impl MailView {
         let list = self.unsent.clone();
         let (mut upload, mut dismiss): (Option<Vec<UnsentCopy>>, Option<Vec<UnsentCopy>>) = (None, None);
         let mut close = false;
+        let dismiss_tip = self.tip("Keep the mail in the local Sent folder and stop showing it here", KeyAction::MailDelete);
+        let close_tip = self.tip("Close this window", KeyAction::MailUnsent);
         let resp = crate::dialog::Dialog::new("mail-unsent", "Sent mails only on this computer").width(620.0).non_modal().show(ui.ctx(), |ui| {
             ui.label(muted("The server's Sent folder does not have these. “Upload again” sends a copy there; “Dismiss” keeps the mail in the local Sent folder and stops showing it here. Nothing is deleted.").size(12.5));
             ui.add_space(6.0);
@@ -118,7 +122,7 @@ impl MailView {
                         }
                         let r = ui.small_button("Dismiss");
                         rec(rects, format!("mail:unsent-dismiss:{k}"), &r);
-                        if r.clicked() {
+                        if r.on_hover_text(dismiss_tip.as_str()).clicked() {
                             dismiss = Some(vec![c.clone()]);
                         }
                     });
@@ -140,7 +144,7 @@ impl MailView {
                 }
                 let r = ui.button("Close");
                 rec(rects, "mail:unsent-close", &r);
-                close = r.clicked();
+                close = r.on_hover_text(close_tip.as_str()).clicked();
             });
         });
         if let Some(w) = upload {

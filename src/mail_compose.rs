@@ -8,6 +8,7 @@
 use crate::app::muted;
 use crate::compose::{Confirm, Draft};
 use crate::config::Config;
+use crate::keys::Action as KeyAction;
 use crate::mail_ui::MailView;
 use crate::outbox::{DraftInfo, Item, State};
 use crate::theme;
@@ -773,6 +774,14 @@ pub struct LocalOut {
     pub discard_draft: Option<(String, String)>,
 }
 
+/// The row that Tab moved to is framed like the pane that has the keyboard (MAIL-073).
+fn tab_focus(ui: &Ui, r: &egui::Response, key: &str, i: usize, rects: &mut Vec<(String, Rect)>) {
+    if r.has_focus() {
+        ui.painter().rect_stroke(r.rect.shrink(1.0), 0, egui::Stroke::new(2.0, theme::ACCENT), egui::StrokeKind::Inside);
+        rects.push((format!("{key}:{i}"), r.rect));
+    }
+}
+
 /// "in 7 s" for a mail that waits.
 pub fn wait_text(send_after: i64, now: i64) -> String {
     let left = send_after - now;
@@ -815,6 +824,7 @@ impl MailView {
                         .min_size(Vec2::new(ui.available_width(), 44.0)),
                     );
                     rec(rects, format!("mail:draft:{i}"), &r);
+                    tab_focus(ui, &r, "mail:draft-focus", i, rects);
                     if self.cursor == Some(i) {
                         ui.painter().rect_filled(r.rect, 0, theme::ACCENT.gamma_multiply(0.25));
                     }
@@ -855,6 +865,7 @@ impl MailView {
                             .min_size(Vec2::new(ui.available_width(), 44.0)),
                     );
                     rec(rects, format!("mail:outbox:{i}"), &r);
+                    tab_focus(ui, &r, "mail:outbox-focus", i, rects);
                     if self.cursor == Some(i) {
                         ui.painter().rect_filled(r.rect, 0, theme::ACCENT.gamma_multiply(0.25));
                     }
@@ -887,7 +898,7 @@ impl MailView {
                 ui.label(RichText::new(format!("Waiting: {}.", wait_text(it.send_after, now))).color(theme::TEXT));
                 let r = ui.button("Undo send");
                 rec(rects, "mail:outbox:undo", &r);
-                if r.clicked() {
+                if r.on_hover_text(self.tip("Take the mail back into the editor", KeyAction::MailUndoSend)).clicked() {
                     out.undo = Some(key.clone());
                 }
             }
@@ -898,7 +909,7 @@ impl MailView {
                 ui.label(RichText::new("Sent.").color(theme::TEXT));
                 let r = ui.button("Dismiss");
                 rec(rects, "mail:outbox:discard", &r);
-                if r.on_hover_text("Move this record to the mail trash folder; the mail itself is in Sent").clicked() {
+                if r.on_hover_text(self.tip("Move this record to the mail trash folder; the mail itself is in Sent", KeyAction::MailDelete)).clicked() {
                     out.discard = Some(key.clone());
                 }
             }
@@ -906,10 +917,14 @@ impl MailView {
                 ui.label(RichText::new("This mail was not sent.").size(15.0).color(theme::LINK_MISSING));
                 ui.label(muted(it.error.clone().unwrap_or_default()));
                 ui.horizontal(|ui| {
-                    for (k, label, slot) in [("mail:outbox:retry", "Retry", 0), ("mail:outbox:edit", "Edit", 1), ("mail:outbox:discard", "Discard", 2)] {
+                    for (k, label, slot, tip) in [
+                        ("mail:outbox:retry", "Retry", 0, self.tip("Send the mail again", KeyAction::MailRetry)),
+                        ("mail:outbox:edit", "Edit", 1, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
+                        ("mail:outbox:discard", "Discard", 2, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
+                    ] {
                         let r = ui.button(label);
                         rec(rects, k, &r);
-                        if r.clicked() {
+                        if r.on_hover_text(tip).clicked() {
                             match slot {
                                 0 => out.retry = Some(key.clone()),
                                 1 => out.edit = Some(key.clone()),
@@ -926,10 +941,14 @@ impl MailView {
                     ui.label(muted(e.clone()).size(12.0));
                 }
                 ui.horizontal(|ui| {
-                    for (k, label, slot) in [("mail:outbox:send-again", "Send again", 0), ("mail:outbox:edit", "Edit", 1), ("mail:outbox:discard", "Discard", 2)] {
+                    for (k, label, slot, tip) in [
+                        ("mail:outbox:send-again", "Send again", 0, self.tip("Send the mail again, after you looked in Sent", KeyAction::MailRetry)),
+                        ("mail:outbox:edit", "Edit", 1, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
+                        ("mail:outbox:discard", "Discard", 2, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
+                    ] {
                         let r = ui.button(label);
                         rec(rects, k, &r);
-                        if r.clicked() {
+                        if r.on_hover_text(tip).clicked() {
                             match slot {
                                 0 => out.send_again = Some(key.clone()),
                                 1 => out.edit = Some(key.clone()),

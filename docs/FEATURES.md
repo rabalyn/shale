@@ -270,7 +270,9 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   only: folder, message or scroll. `/` goes to the search field (↓ or Enter there go into the
   results), Esc steps back. Everything has a key (see the Keyboard section), also syncing, the
   attachments, loading a message that is not here and switching the search scope, and all of them
-  can be changed in Settings → Keybindings (Mail view). Keys do not act while you type.
+  can be changed in Settings → Keybindings (Mail view). Keys do not act while you type. The row
+  menu shows the key of each entry, and the tooltip of a button names its key; both follow what you
+  set in Keybindings.
 - **Read, flag, move, delete** (also with the buttons above the message, a right click on a row,
   and the buttons that appear when mails are marked). The keys work on the marked mails, else on
   the open one, else on the one under the cursor, and need no Ctrl or Shift:

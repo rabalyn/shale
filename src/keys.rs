@@ -353,6 +353,12 @@ impl Keymap {
         b.iter().map(Binding::display).collect::<Vec<_>>().join(" / ")
     }
 
+    /// The key of `a` as a hint on a button or menu entry (MAIL-072): the bindings as `display` shows
+    /// them, `None` for an action that is not bound.
+    pub fn hint(&self, a: Action) -> Option<String> {
+        (!self.bindings(a).is_empty()).then(|| self.display(a))
+    }
+
     /// Can `a` take `b`? The error is the message for the user (KEY-004, KEY-005).
     pub fn check(&self, a: Action, b: &Binding) -> Result<(), String> {
         let scope = a.def().scope;
@@ -649,6 +655,18 @@ mod tests {
         // an empty list is a cleared action (KEY-007), not a bad entry
         assert_eq!(k.overrides().keys().collect::<Vec<_>>(), ["global.forward", "global.new_note"]);
         assert!(k.is_default(Action::Back) && k.is_default(Action::CloseTab));
+    }
+
+    // spec: MAIL-072
+    #[test]
+    fn a_hint_is_the_bindings_as_shown_and_nothing_for_an_unbound_action() {
+        let mut k = Keymap::default();
+        assert_eq!(k.hint(Action::MailFlag).as_deref(), Some("s / f"));
+        assert_eq!(k.hint(Action::MailRetry).as_deref(), Some("Shift+S"));
+        k.set(Action::MailRetry, Binding::parse("G").unwrap()).unwrap();
+        assert_eq!(k.hint(Action::MailRetry).as_deref(), Some("g"));
+        k.clear(Action::MailFlag);
+        assert_eq!(k.hint(Action::MailFlag), None);
     }
 
     // spec: KEY-007, KEY-006
