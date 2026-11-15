@@ -5,6 +5,7 @@
 
 use super::images::ImageCache;
 use super::note::SavedPost;
+use super::post_index::PostIndex;
 use super::{Client, Feed, FeedRef, Fresh, Page, Post, Since, SocialAccountEntry};
 use eframe::egui::{Context, Rect};
 use std::collections::{HashMap, HashSet};
@@ -100,6 +101,23 @@ impl Timeline {
         }
     }
 
+    /// Put a post that the feed does not hold (any more) into the list where its date puts it,
+    /// newest first. Below the last post loaded it goes at the end, and the pages between are
+    /// left as a gap that "Load more in between" fills. A post the list holds stays where it is.
+    fn insert_found(&mut self, post: Post) {
+        let k = post_key(&post);
+        if self.posts.iter().any(|p| post_key(p) == k) {
+            return;
+        }
+        let at = self.posts.iter().position(|p| p.created_at < post.created_at).unwrap_or(self.posts.len());
+        if at == self.posts.len() && !self.posts.is_empty() {
+            if let Some(cursor) = self.cursor.take() {
+                self.gaps.push(Gap { above: post_key(self.posts.last().expect("not empty")), cursor });
+            }
+        }
+        self.posts.insert(at, post);
+    }
+
     /// A page for the gap below `above`: the posts up to the first one already known go in
     /// there. The gap is closed when the page met a known post (or the feed ended), else it moves
     /// below the last post that came in.
@@ -126,6 +144,13 @@ impl Timeline {
         }
         self.posts.splice(at + 1..at + 1, new);
     }
+}
+
+/// A search hit waiting for the feed of its tab to show.
+pub struct Focus {
+    pub tab: u64,
+    pub account: String,
+    pub post: Post,
 }
 
 enum Msg {
@@ -157,6 +182,8 @@ pub struct SocialState {
     pub rects: Vec<(String, Rect)>,
     /// where the posts of the list shown are, by `post_key` (for tests)
     pub post_rects: Vec<(String, Rect)>,
+    /// where the post rows of the sidebar search are (for tests)
+    pub hit_rects: Vec<(usize, Rect)>,
     /// the screen rectangle of the list's viewport (for tests)
     pub list_rect: Rect,
     /// how often the feeds open in tabs are checked for new posts (zero: never)
@@ -165,6 +192,10 @@ pub struct SocialState {
     pub source: Option<Arc<dyn Source>>,
     /// where each tab's view is held still while posts come in above it (see `feed_ui`)
     pub anchors: HashMap<u64, super::feed_ui::Anchor>,
+    /// every post loaded is searchable (SOC-030)
+    pub index: PostIndex,
+    /// a search hit that a tab is to show (SOC-035)
+    pub focus: Option<Focus>,
     clients: HashMap<String, Client>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -200,10 +231,13 @@ impl SocialState {
             messages: vec![],
             rects: vec![],
             post_rects: vec![],
+            hit_rects: vec![],
             list_rect: Rect::NOTHING,
             check_every: Duration::from_secs(300),
             source: None,
             anchors: HashMap::new(),
+            index: PostIndex::in_memory(),
+            focus: None,
             clients: HashMap::new(),
             tx,
             rx,
@@ -223,6 +257,39 @@ impl SocialState {
         let by_id = |id: &str| list.iter().find(|f| f.id == id);
         let remembered = self.feed_of.get(account).map(String::as_str).or(last.filter(|l| l.0 == account).map(|l| l.1.as_str()));
         by_id(want).or_else(|| remembered.and_then(by_id)).or(list.first()).cloned()
+    }
+
+    /// Keep the posts in a file (the real app) instead of in memory; without one the feeds work
+    /// as before and the search finds only what this run loaded.
+    pub fn open_index(&mut self, path: &std::path::Path) {
+        if let Some(i) = PostIndex::open(path) {
+            self.index = i;
+        }
+    }
+
+    /// Show a search hit: the next time the tab shows the feed it is scrolled to the post, which
+    /// is put into the list from the index when the feed no longer has it (SOC-035).
+    pub fn show_hit(&mut self, tab: u64, hit: &super::post_index::PostHit) {
+        self.focus = Some(Focus { tab, account: hit.account.clone(), post: hit.post.clone() });
+    }
+
+    /// The post a tab is to be scrolled to, once its feed has loaded: it is in the list by now.
+    /// None while the list loads (or when there is nothing to show).
+    pub fn take_focus(&mut self, tab: u64, key: &(String, String)) -> Option<String> {
+        let k = self.focus.as_ref().filter(|f| f.tab == tab && f.account == key.0).map(|f| post_key(&f.post))?;
+        let t = self.timelines.get_mut(key)?;
+        if !t.loaded {
+            if t.error.is_some() {
+                self.focus = None;
+            }
+            return None;
+        }
+        if t.waiting.iter().any(|w| post_key(w) == k) {
+            self.show_waiting(key);
+        }
+        let f = self.focus.take()?;
+        self.timelines.get_mut(key)?.insert_found(f.post);
+        Some(k)
     }
 
     /// Forget everything about an account (removed).
@@ -456,6 +523,9 @@ impl SocialState {
                     if let Some(c) = client {
                         self.clients.insert(key.0.clone(), c);
                     }
+                    if let Ok(page) = &result {
+                        self.index.add(&key.0, &key.1, &page.posts);
+                    }
                     let t = self.timelines.entry(key).or_default();
                     t.loading = false;
                     match result {
@@ -488,6 +558,9 @@ impl SocialState {
                     if let Some(c) = client {
                         self.clients.insert(key.0.clone(), c);
                     }
+                    if let Ok(fresh) = &result {
+                        self.index.add(&key.0, &key.1, &fresh.posts);
+                    }
                     let every = self.check_every;
                     let t = self.timelines.entry(key).or_default();
                     t.checking = false;
@@ -509,6 +582,9 @@ impl SocialState {
                 Msg::Gap { key, above, client, result } => {
                     if let Some(c) = client {
                         self.clients.insert(key.0.clone(), c);
+                    }
+                    if let Ok(page) = &result {
+                        self.index.add(&key.0, &key.1, &page.posts);
                     }
                     let t = self.timelines.entry(key).or_default();
                     t.filling = false;

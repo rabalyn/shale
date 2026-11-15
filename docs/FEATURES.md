@@ -366,6 +366,13 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   exactly where it is, so you can scroll up slowly. **Check now** looks right away;
   **⋯ → Reload from the top** replaces the list. If more than 200 posts came in on Bluesky,
   **Load more in between** fills the gap.
+- **Search the posts you loaded**: every post a feed brings in is kept in a search index
+  (`~/.local/share/shale/social-posts.db`, the same for every vault: text, author, date, links
+  and the thread around it). The sidebar search (Ctrl+Shift+F) lists the posts that match under
+  the notes; click one to open a new Feeds tab scrolled to it, also when the feed no longer has
+  it. `from:ada`, `text:`, `in:` (quote, link card, the post answered, who boosted), `link:` and
+  `date:2026-11` limit a word to one part. At most 10 000 posts per account and one year are
+  kept; removing an account removes its posts. (Mouse only for now.)
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.

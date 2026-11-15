@@ -201,6 +201,8 @@ pub enum Action {
         col: usize,
     },
     ShowView(View),
+    /// open a post found by the search in its feed, in a new tab (SOC-035)
+    OpenPost(Box<crate::social::post_index::PostHit>),
     CloseTab(usize),
     Rename(PathBuf),
     Trash(PathBuf),
@@ -394,7 +396,14 @@ impl ShaleApp {
             mail: crate::mail_ui::MailView::new(if persist { crate::mail_store::default_root() } else { std::env::temp_dir().join(format!("shale-mail-{}-{}", std::process::id(), NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst))) }),
             cal_side: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Small),
             cal_main: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Medium),
-            social: crate::social::state::SocialState::new(if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{}", std::process::id())) }),
+            social: {
+                let mut s =
+                    crate::social::state::SocialState::new(if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{}", std::process::id())) });
+                if persist {
+                    s.open_index(&crate::social::post_index::default_path());
+                }
+                s
+            },
             cal_jobs: vec![],
             last_event_calendar: None,
             ctx: None,
@@ -1550,6 +1559,7 @@ impl ShaleApp {
                 Action::GotoLine { rel, line } => self.goto_line(&rel, line),
                 Action::GotoMatch { rel, line, col } => self.goto_match(&rel, line, col),
                 Action::ShowView(v) => self.show_view(v, false),
+                Action::OpenPost(hit) => self.open_post_hit(&hit),
                 Action::CloseTab(i) => self.close_tab(i),
                 Action::Rename(rel) => {
                     let name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_else(|| rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());

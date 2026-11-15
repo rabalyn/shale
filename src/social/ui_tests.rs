@@ -235,6 +235,166 @@ fn choosing_another_feed_is_a_step_in_the_tab_history() {
     assert_eq!(w.app.tabs.len(), 3);
 }
 
+/// Wait (up to 2 s) until a background job of the feeds has delivered, as `until` sees it.
+fn wait_for(w: &mut W, until: impl Fn(&W) -> bool) {
+    for _ in 0..200 {
+        w.frame(vec![]);
+        if until(w) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the background job did not finish");
+}
+
+fn recent(prefix: &str, n: usize) -> Vec<Post> {
+    let now = crate::cal_time::now();
+    (0..n).map(|i| post(&format!("{prefix}{i}"), "bob", now - 3600 * (i as i64 + 1), None)).collect()
+}
+
+// spec: SOC-030
+#[test]
+fn posts_that_pages_and_checks_bring_in_are_searchable() {
+    let mut w = W::new("indexing");
+    let entry = demo::account();
+    let feed = Feed { id: "home".into(), title: "Home".into() };
+    assert_eq!(w.app.social.index.count(None), 0, "the posts a test puts into a timeline directly were not loaded");
+    // the first page of the feed
+    *w.script.first_page.lock().unwrap() = Some(Page { posts: recent("first", 3), ..Default::default() });
+    w.app.social.reload(&w.ctx, &entry, &feed);
+    wait_for(&mut w, |w| w.app.social.index.count(None) == 3);
+    assert_eq!(w.app.social.index.search("first1", 5)[0].feed, "home");
+    // a check: the posts that wait are searchable before they are shown
+    let newer = recent("newer", 2);
+    w.script.newer.lock().unwrap().push(("home".into(), Fresh { posts: newer.clone(), ..Default::default() }));
+    assert!(w.app.social.check(&w.ctx, &entry, &feed));
+    wait_for(&mut w, |w| w.app.social.index.count(None) == 5);
+    assert_eq!(w.app.social.waiting_count(&entry.account.id, "home"), 2);
+    assert_eq!(w.app.social.index.search("newer0", 5).len(), 1);
+    // a post that waits and is found again is not a second entry; the page of a gap is indexed too
+    w.app.social.index.add(&entry.account.id, "home", &newer);
+    assert_eq!(w.app.social.index.count(None), 5);
+}
+
+// spec: SOC-033
+#[test]
+fn removing_the_account_in_the_dialog_drops_its_posts_from_the_search_but_adding_it_again_keeps_them() {
+    let mut w = W::new("remove-index");
+    let entry = demo::account();
+    w.app.social.index.add(&entry.account.id, "home", &recent("gone", 2));
+    assert_eq!(w.app.social.index.search("gone1", 5).len(), 1);
+    // the same account signed in again (a new secret): its posts stay
+    assert!(!w.app.social_dialog_action(crate::social::accounts_ui::DialogAction::Added(entry.clone())));
+    assert_eq!(w.app.social.index.count(None), 2);
+    w.app.social_dialog_action(crate::social::accounts_ui::DialogAction::Remove(entry.account.id.clone()));
+    assert!(w.app.social.index.search("gone1", 5).is_empty());
+    assert_eq!(w.app.social.index.count(None), 0);
+}
+
+// spec: SOC-035, SOC-036
+#[test]
+fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
+    let mut w = W::new("hit");
+    let (acct, list_key) = (home().account, (home().account, "list:1".to_string()));
+    let now = crate::cal_time::now();
+    for (f, p) in [("home", "h"), ("list:1", "l")] {
+        w.app.social.timelines.get_mut(&(acct.clone(), f.to_string())).unwrap().posts = recent(p, 40);
+    }
+    w.app.left = crate::app::LeftPanel::Search;
+    let search = |w: &mut W, q: &str| {
+        w.app.search = q.into();
+        w.frames(3);
+    };
+    // 1: a post the feed holds (in the middle of its list)
+    let held = w.app.social.timelines[&list_key].posts[30].clone();
+    w.app.social.index.add(&acct, "list:1", std::slice::from_ref(&held));
+    search(&mut w, "l30");
+    assert_eq!(w.app.social.hit_rects.len(), 1, "one post row in the sidebar");
+    let p = w.app.social.hit_rects[0].1.center();
+    w.click_at(p);
+    assert_eq!((w.app.tabs.len(), w.app.active), (2, 1), "a new Feeds tab");
+    assert_eq!(w.view(1), View::Social(Some(list())));
+    assert_eq!(w.view(0), View::Social(Some(home())), "the first tab is left as it was");
+    w.frames(4);
+    let at = |w: &W, k: &str| w.app.social.post_rects.iter().find(|r| r.0 == k).unwrap_or_else(|| panic!("post {k} not shown")).1.min.y - w.app.social.list_rect.min.y;
+    assert!(at(&w, &post_key(&held)).abs() < 2.0, "the post is at the top of the list, not at {}", at(&w, &post_key(&held)));
+    assert_eq!(w.app.social.timelines[&list_key].posts.len(), 40, "nothing was added: the feed had it");
+    assert!(w.app.social.focus.is_none());
+    // 2: a post the feed no longer holds goes into the list where its date puts it
+    let mut gone = post("zebra", "bob", now - 3600 * 11 - 1800, None);
+    gone.text_markdown = "an unusual zebra".into();
+    w.app.social.index.add(&acct, "list:1", &[gone.clone()]);
+    search(&mut w, "zebra");
+    let p = w.app.social.hit_rects[0].1.center();
+    w.click_at(p);
+    w.frames(4);
+    let posts = &w.app.social.timelines[&list_key].posts;
+    assert_eq!((posts.len(), posts[11].id.as_str(), posts[10].id.as_str()), (41, "zebra", "l10"));
+    assert_eq!(w.app.tabs.len(), 3);
+    assert!(at(&w, &post_key(&gone)).abs() < 2.0, "shown at the top of the list");
+    // 3: older than the whole list, which has more pages: it goes to the end, with the pages between as a gap
+    w.app.social.timelines.get_mut(&list_key).unwrap().cursor = Some("c".into());
+    let old = post("ancient", "bob", now - 3600 * 100, None);
+    w.app.social.index.add(&acct, "list:1", &[Post { text_markdown: "something ancient".into(), ..old.clone() }]);
+    search(&mut w, "something ancient");
+    let p = w.app.social.hit_rects[0].1.center();
+    w.click_at(p);
+    w.frames(4);
+    let t = &w.app.social.timelines[&list_key];
+    assert_eq!(t.posts.last().map(|p| p.id.as_str()), Some("ancient"));
+    assert_eq!(t.cursor, None);
+    assert_eq!(t.gaps.last().map(|g| (g.above.as_str(), g.cursor.as_str())), Some((post_key(&t.posts[t.posts.len() - 2]).as_str(), "c")));
+    // 4: a post that waits behind the button is shown with the others when its hit is opened
+    let waiting = post("waits", "bob", now - 10, None);
+    w.app.social.timelines.get_mut(&list_key).unwrap().waiting = vec![waiting.clone()];
+    w.app.social.index.add(&acct, "list:1", &[Post { text_markdown: "waits for you".into(), ..waiting }]);
+    search(&mut w, "waits for you");
+    let p = w.app.social.hit_rects[0].1.center();
+    w.click_at(p);
+    w.frames(4);
+    let t = &w.app.social.timelines[&list_key];
+    assert!(t.waiting.is_empty() && t.posts[0].id == "waits");
+    // 5: a feed that is gone: the account's other feed is shown, with the post in it
+    let mut elsewhere = post("elsewhere", "bob", now - 3600 * 5 - 1800, None);
+    elsewhere.text_markdown = "from a vanished feed".into();
+    w.app.social.index.add(&acct, "list:vanished", &[elsewhere]);
+    search(&mut w, "vanished feed");
+    let p = w.app.social.hit_rects[0].1.center();
+    w.click_at(p);
+    w.frames(4);
+    let n = w.app.tabs.len();
+    assert!(matches!(w.view(n - 1), View::Social(Some(f)) if f.account == acct), "{:?}", w.view(n - 1));
+    let shown = w.app.tabs[n - 1].view.clone();
+    let View::Social(Some(shown)) = shown else { panic!() };
+    assert!(w.app.social.timelines[&(acct.clone(), shown.feed)].posts.iter().any(|p| p.id == "elsewhere"));
+    // 6: the account is gone: nothing opens, the user is told
+    let hit = w.app.social.index.search("zebra", 1).remove(0);
+    let tabs = w.app.tabs.len();
+    w.app.open_post_hit(&crate::social::post_index::PostHit { account: "mastodon:nobody".into(), ..hit });
+    assert_eq!(w.app.tabs.len(), tabs);
+}
+
+// spec: SOC-035
+#[test]
+fn a_hit_waits_for_the_feed_to_load_and_is_dropped_when_that_fails() {
+    let mut w = W::new("hit-wait");
+    let acct = home().account;
+    let key = (acct.clone(), "home".to_string());
+    let hit_post = post("late", "bob", crate::cal_time::now() - 60, None);
+    w.app.social.timelines.get_mut(&key).unwrap().loaded = false;
+    w.app.social.focus = Some(crate::social::state::Focus { tab: 7, account: acct.clone(), post: hit_post.clone() });
+    assert_eq!(w.app.social.take_focus(8, &key), None, "another tab is not asked");
+    assert_eq!(w.app.social.take_focus(7, &key), None, "the list is still loading");
+    assert!(w.app.social.focus.is_some());
+    w.app.social.timelines.get_mut(&key).unwrap().error = Some("offline".into());
+    assert_eq!(w.app.social.take_focus(7, &key), None);
+    assert!(w.app.social.focus.is_none(), "a feed that cannot be loaded drops the hit");
+    w.app.social.timelines.get_mut(&key).unwrap().loaded = true;
+    w.app.social.focus = Some(crate::social::state::Focus { tab: 7, account: acct, post: hit_post.clone() });
+    assert_eq!(w.app.social.take_focus(7, &key), Some(post_key(&hit_post)));
+    assert_eq!(w.app.social.timelines[&key].posts[0].id, "late");
+}
+
 // spec: SOC-024
 #[test]
 fn open_feed_tabs_come_back_and_an_old_state_file_still_loads() {
