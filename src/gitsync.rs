@@ -63,7 +63,7 @@ impl Git {
 
     fn run(&self, dir: &Path, args: &[&OsStr]) -> Result<Out, String> {
         let o: Output = self.command(dir, args).output().map_err(|e| format!("git could not be started ({}): {e}", self.program.display()))?;
-        Ok(Out { ok: o.status.success(), stdout: o.stdout, stderr: String::from_utf8_lossy(&o.stderr).trim().to_string() })
+        Ok(Out { ok: o.status.success(), stdout: o.stdout, stderr: hide_passwords(String::from_utf8_lossy(&o.stderr).trim()) })
     }
 
     /// Run and require success; the error is git's own message.
@@ -103,6 +103,29 @@ pub fn remote_url(git: &Git, vault: &Path) -> Option<String> {
     o.ok.then(|| o.text()).filter(|u| !u.is_empty())
 }
 
+/// Replace the password of every `scheme://user:password@host` in a text with `***`, so an address
+/// set outside Shale never shows its password in the settings or in an error message (SEC-010).
+pub fn hide_passwords(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find("://") {
+        let (head, tail) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = tail.find(|c: char| matches!(c, '/' | '?' | '#' | '\\' | '\'' | '"') || c.is_whitespace()).unwrap_or(tail.len());
+        let (authority, after) = tail.split_at(end);
+        match authority.rsplit_once('@') {
+            Some((userinfo, host)) if userinfo.contains(':') => {
+                let user = userinfo.split(':').next().unwrap_or("");
+                out.push_str(&format!("{user}:***@{host}"));
+            }
+            _ => out.push_str(authority),
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Check a remote URL typed by the user (SYNC-004).
 pub fn check_url(url: &str) -> Result<(), String> {
     let url = url.trim();
@@ -116,7 +139,21 @@ pub fn check_url(url: &str) -> Result<(), String> {
         return Err("A URL can't contain spaces or control characters".into());
     }
     let lower = url.to_ascii_lowercase();
-    if ["https://", "http://", "ssh://", "git://", "file://"].iter().any(|p| lower.starts_with(p)) {
+    if let Some((scheme, rest)) = lower.split_once("://") {
+        if !["https", "http", "ssh", "git", "file"].contains(&scheme) {
+            return Err("Use an https://, ssh:// or git@host:path URL, or an absolute folder path".into());
+        }
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        let (userinfo, host_port) = authority.rsplit_once('@').unwrap_or(("", authority));
+        if userinfo.contains(':') {
+            return Err("The address has a password in it. Remove it and use a git credential helper or an SSH key instead; a password in the address is stored in plain text.".into());
+        }
+        if scheme == "http" || scheme == "git" {
+            let host = if host_port.starts_with('[') { host_port.split_inclusive(']').next().unwrap_or("") } else { host_port.split(':').next().unwrap_or("") };
+            if !["localhost", "127.0.0.1", "[::1]"].contains(&host) {
+                return Err(format!("{scheme}:// sends your notes unencrypted. Use https:// or ssh:// instead (only this computer may use {scheme}://)."));
+            }
+        }
         return Ok(());
     }
     // remote helpers (`ext::sh -c …`, `fd::…`) can run programs
@@ -128,6 +165,9 @@ pub fn check_url(url: &str) -> Result<(), String> {
     }
     // scp-like: [user@]host:path
     if let Some((host, path)) = url.split_once(':') {
+        if !host.contains('@') && path.split('/').next().is_some_and(|first| first.contains('@')) {
+            return Err("The address has a password in it. Remove it and use a git credential helper or an SSH key instead.".into());
+        }
         let host_ok = !host.is_empty() && !host.contains('/') && host.chars().all(|c| c.is_ascii_alphanumeric() || "@.-_[]".contains(c));
         if host_ok && !path.is_empty() {
             return Ok(());

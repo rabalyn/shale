@@ -107,6 +107,39 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Make one new folder that only the owner can enter. A path that already exists (a folder or a
+/// link someone else made) is an error: it is never adopted.
+pub fn create_private_dir_new(path: &Path) -> io::Result<()> {
+    let mut b = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    b.create(path).map_err(|e| named(path, e))
+}
+
+/// A folder `<prefix>-<user id>` for temporary files that must stay private: in the user's runtime
+/// folder when there is one (already private), else in the system temp folder, where an existing
+/// path of that name that is not a folder of the current user is refused.
+pub fn private_temp_root(prefix: &str) -> io::Result<PathBuf> {
+    #[cfg(unix)]
+    let who = unsafe { libc::geteuid() }.to_string();
+    #[cfg(not(unix))]
+    let who = String::from("user");
+    let base = dirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
+    let dir = base.join(format!("{prefix}-{who}"));
+    #[cfg(unix)]
+    if let Ok(m) = fs::symlink_metadata(&dir) {
+        use std::os::unix::fs::MetadataExt;
+        if !m.is_dir() || m.uid() != unsafe { libc::geteuid() } {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "the temp folder is not ours"));
+        }
+    }
+    ensure_private_dir(&dir)?;
+    Ok(dir)
+}
+
 /// Open (creating it owner-only) a lock file and take an exclusive advisory lock on it without
 /// waiting. `Ok(Some(file))`: the lock is held as long as the file value lives; the operating
 /// system releases it when the process ends, also after a crash. `Ok(None)`: another process

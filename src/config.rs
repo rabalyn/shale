@@ -319,8 +319,18 @@ impl Versioned for Config {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: where the key recording of this thread goes (never the real cache folder).
+    pub static INPUT_LOG_TEST_PATH: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 /// Where the troubleshooting key recording goes (~/.cache/shale/input-debug.log).
 pub fn input_log_path() -> PathBuf {
+    #[cfg(test)]
+    if let Some(p) = INPUT_LOG_TEST_PATH.with(|c| c.borrow().clone()) {
+        return p;
+    }
     dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("input-debug.log")
 }
 
@@ -361,6 +371,9 @@ impl Config {
         let Some(p) = config_path() else { return (Config::default(), None) };
         let (mut c, problem) = Self::load_from(&p);
         crate::secrets::load_passwords(&mut c.calendars);
+        for e in c.social_accounts.iter_mut() {
+            crate::secrets::social_move_to_keyring(&e.account.server, &e.account.handle, &mut e.secret);
+        }
         (c, problem)
     }
 

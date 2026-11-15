@@ -754,8 +754,9 @@ impl TempDir {
         static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = N.fetch_add(1, Ordering::SeqCst);
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
-        let path = std::env::temp_dir().join(format!("shale-gpg-{}-{n}-{nanos}", std::process::id()));
-        crate::fsutil::ensure_private_dir(&path).map_err(|e| GpgError::Io(e.to_string()))?;
+        let root = crate::fsutil::private_temp_root("shale-gpg").map_err(|e| GpgError::Io(e.to_string()))?;
+        let path = root.join(format!("{}-{n}-{nanos}", std::process::id()));
+        crate::fsutil::create_private_dir_new(&path).map_err(|e| GpgError::Io(e.to_string()))?;
         Ok(TempDir { path })
     }
 
@@ -978,6 +979,28 @@ pub(crate) mod testkit {
 mod tests {
     use super::testkit::*;
     use super::*;
+
+    // spec: SEC-013
+    #[test]
+    fn the_temp_folder_is_private_and_a_made_up_path_is_never_adopted() {
+        let a = TempDir::new().unwrap();
+        let b = TempDir::new().unwrap();
+        assert_ne!(a.path, b.path);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&a.path).unwrap().permissions().mode() & 0o777, 0o700);
+            assert_ne!(a.path.parent(), Some(std::env::temp_dir().as_path()), "not directly in the shared temp folder");
+        }
+        // a path that exists already (a folder or a link someone made) is an error
+        assert!(crate::fsutil::create_private_dir_new(&a.path).is_err());
+        #[cfg(unix)]
+        {
+            let link = a.path.join("link");
+            std::os::unix::fs::symlink(&b.path, &link).unwrap();
+            assert!(crate::fsutil::create_private_dir_new(&link).is_err());
+        }
+    }
 
     // spec: MAIL-170
     #[test]

@@ -561,6 +561,10 @@ struct Inner {
     access: Option<(String, Instant)>,
     refresh: Option<String>,
     loaded: bool,
+    /// The refresh token in memory is newer than the one in the keyring (it could not be saved).
+    unsaved: bool,
+    /// The person has been told about `unsaved`.
+    told: bool,
 }
 
 /// The access token of one account: kept in memory, renewed when it is about to expire or when
@@ -580,7 +584,7 @@ impl fmt::Debug for TokenSource {
 
 impl TokenSource {
     pub fn new(cfg: OAuthConfig, store: Arc<dyn RefreshStore>) -> TokenSource {
-        TokenSource { cfg, store, inner: Mutex::new(Inner { access: None, refresh: None, loaded: false }), refreshes: std::sync::atomic::AtomicUsize::new(0) }
+        TokenSource { cfg, store, inner: Mutex::new(Inner { access: None, refresh: None, loaded: false, unsaved: false, told: false }), refreshes: std::sync::atomic::AtomicUsize::new(0) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
@@ -610,13 +614,25 @@ impl TokenSource {
             g.loaded = true;
         }
         let Some(rt) = g.refresh.clone() else { return Err(OAuthError::NotSignedIn) };
+        // a renewed token the keyring did not take earlier: try again now
+        if g.unsaved && self.store.save(&rt) {
+            g.unsaved = false;
+            g.told = false;
+        }
         self.refreshes.fetch_add(1, Ordering::SeqCst);
         match refresh(&self.cfg, &rt) {
             Ok(t) => {
                 g.access = Some((t.access_token.clone(), Instant::now() + Duration::from_secs(t.expires_in)));
                 if let Some(new) = t.refresh_token.filter(|n| *n != rt) {
                     // the provider rotates refresh tokens: the old one is dead
-                    self.store.save(&new);
+                    if self.store.save(&new) {
+                        g.unsaved = false;
+                        g.told = false;
+                    } else {
+                        // the keyring still holds the dead one: keep the new one in memory, try
+                        // again at the next refresh and tell the person once (SEC-012)
+                        g.unsaved = true;
+                    }
                     g.refresh = Some(new);
                 }
                 Ok(t.access_token)
@@ -645,10 +661,23 @@ impl TokenSource {
         match &t.refresh_token {
             Some(r) => {
                 g.refresh = Some(r.clone());
-                self.store.save(r)
+                let kept = self.store.save(r);
+                g.unsaved = !kept;
+                g.told = !kept; // the sign-in dialog says so itself
+                kept
             }
             None => false,
         }
+    }
+
+    /// True once after a renewed refresh token could not be saved in the keyring.
+    fn take_unsaved_notice(&self) -> bool {
+        let mut g = self.lock();
+        let tell = g.unsaved && !g.told;
+        if tell {
+            g.told = true;
+        }
+        tell
     }
 
     /// Is there a refresh token (in memory or the keyring)?
@@ -679,6 +708,12 @@ pub fn shared_source(account_id: &str, cfg: OAuthConfig) -> Arc<TokenSource> {
     let s = Arc::new(TokenSource::new(cfg, Arc::new(KeyringStore { account_id: account_id.to_string() })));
     r.insert(account_id.to_string(), s.clone());
     s
+}
+
+/// The accounts whose renewed sign-in could not be saved in the keyring, each reported once (SEC-012).
+pub fn take_unsaved_notices() -> Vec<String> {
+    let r = registry().lock().unwrap_or_else(|e| e.into_inner());
+    r.iter().filter(|(_, s)| s.take_unsaved_notice()).map(|(id, _)| id.clone()).collect()
 }
 
 /// Forget the in-memory tokens of an account (it was removed).
@@ -849,8 +884,56 @@ mod tests {
         }
     }
 
+    /// A store that refuses to save while `refuse` is set.
+    struct FlakyStore {
+        token: Mutex<Option<String>>,
+        refuse: std::sync::atomic::AtomicBool,
+    }
+    impl RefreshStore for FlakyStore {
+        fn load(&self) -> Option<String> {
+            self.token.lock().unwrap().clone()
+        }
+        fn save(&self, t: &str) -> bool {
+            if self.refuse.load(Ordering::SeqCst) {
+                return false;
+            }
+            *self.token.lock().unwrap() = Some(t.into());
+            true
+        }
+        fn clear(&self) {
+            *self.token.lock().unwrap() = None;
+        }
+    }
+
     fn cfg_for(f: &FakeOAuth) -> OAuthConfig {
         OAuthConfig::for_account(&custom(f), None).unwrap()
+    }
+
+    // spec: SEC-012
+    #[test]
+    fn a_renewed_token_the_keyring_cannot_keep_is_kept_in_memory_saved_later_and_reported_once() {
+        if !has_curl() {
+            return;
+        }
+        let f = FakeOAuth::start();
+        let cfg = cfg_for(&f);
+        let rt = f.new_refresh_token();
+        let store = Arc::new(FlakyStore { token: Mutex::new(Some(rt.clone())), refuse: std::sync::atomic::AtomicBool::new(true) });
+        let src = TokenSource::new(cfg, store.clone());
+        f.state.lock().unwrap().rotate = true;
+        src.access_token().unwrap();
+        assert_eq!(store.load().unwrap(), rt, "the keyring still has the old token");
+        assert!(src.take_unsaved_notice(), "the person is told");
+        assert!(!src.take_unsaved_notice(), "only once");
+        // the next refresh uses the new token from memory (the old one is dead) and tries to save again
+        src.reject();
+        src.access_token().unwrap();
+        assert!(!src.take_unsaved_notice(), "still only once");
+        store.refuse.store(false, Ordering::SeqCst);
+        src.reject();
+        src.access_token().unwrap();
+        assert_ne!(store.load().unwrap(), rt, "saved as soon as the keyring takes it");
+        assert!(!src.take_unsaved_notice());
     }
 
     // spec: MAIL-080

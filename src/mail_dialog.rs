@@ -381,7 +381,7 @@ fn account_form(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rect
         if d.accounts[i].auth == MailAuth::Password {
             ui.label("Password");
             let pw = d.passwords.entry(id.clone()).or_default();
-            let r = ui.add(egui::TextEdit::singleline(pw).password(true).hint_text("leave empty to keep the saved one").desired_width(300.0));
+            let r = crate::secrets::password_edit(ui, egui::TextEdit::singleline(pw).hint_text("leave empty to keep the saved one").desired_width(300.0));
             rects.push(("md:password".into(), r.rect));
             ui.end_row();
         } else {
@@ -549,7 +549,7 @@ fn oauth_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, id: &str, rects: &mut V
     ui.end_row();
     ui.label("Client secret");
     let sec = d.client_secrets.entry(id.to_string()).or_default();
-    let r = ui.add(egui::TextEdit::singleline(sec).password(true).hint_text("only if the provider asks for one (Google does); empty keeps the saved one").desired_width(300.0));
+    let r = crate::secrets::password_edit(ui, egui::TextEdit::singleline(sec).hint_text("only if the provider asks for one (Google does); empty keeps the saved one").desired_width(300.0));
     rects.push(("md:oauth-client-secret".into(), r.rect));
     ui.end_row();
 }
