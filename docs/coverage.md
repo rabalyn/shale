@@ -209,11 +209,14 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
 
 More, in the order of the table:
 
-- **`main.rs` `main` (117 to 202, 20 %), `instance.rs` `show_already_running` (21 to 33, 43 %)**:
-  start-up, the single-instance check and its dialog. Test: start the binary with `--screenshot`
-  and a second instance against a temp config dir and check the exit status and the message. Kind:
-  tooling for the dialog (a headless display, which the screenshot runner already needs); test for
-  the rest.
+- **`main.rs` `main`, `instance.rs` `show_already_running`: closed for everything that can be run
+  without a window** (#63 part 2). The command line is read by `parse_args` (DEV-013, 7 tests), the
+  lock check by `instance::claim` (DATA-012: owner, second start refused, stale file after a crash,
+  broken data folder) and the start dialog is driven through the headless harness
+  (`start_dialog_tests.rs`, VAULT-021, VAULT-022). What stays uncovered is `main` itself (the real
+  window and event loop) and the little window of `show_already_running`: both need a real display.
+  There is no hand-over of a second start's arguments to the running Shale (the second one only
+  says it is running); that is a missing feature, not a missing test.
 - **`reader.rs` `embed` (380 to 462, 63 %), `layout.rs` `welcome`, `view_header`,
   `paint_recovery_notice` (242 to 817), `graph.rs` `ui` (164 to 322, 68 %), `app.rs`
   `calendar_action`, `calendar_dialog_action`, `shortcuts`, `process_actions` (1420 to 1807),
@@ -234,9 +237,9 @@ More, in the order of the table:
   `adopt_legacy` (272 to 316)**: reading and writing the settings file and the first-start
   migration. Test: point `XDG_CONFIG_HOME` at a temp dir; save, load, a corrupt file, a read-only
   directory. Kind: test.
-- **`tb_store.rs` `scan_maildir`, `find_in`, `by_index`, `mork_rows` (301 to 608, 86 %)**: the
-  Thunderbird profile reader. Kind: tooling (a generator for Thunderbird profile fixtures, with Mork
-  files and a local-folder maildir; the formats are hard to write by hand).
+- **`tb_store.rs`: closed** (#63 part 2). `tb_fixture_tests.rs` generates Thunderbird profiles
+  (`profiles.ini`, `prefs.js`, mbox and maildir folders, `.sbd` nesting, non-ASCII names, `.msf`
+  indexes, flags, large and broken files); `tb_store_tests.rs` has 21 tests on them (IMP-017).
 - **`mail.rs` `entity` (372 to 409), `parse_date` (349 to 363), `decode_charset` (108 to 126),
   `html_to_text`**: HTML entities, odd date formats and charsets in incoming mail. Test: table tests
   with real-world strings. Kind: test.
