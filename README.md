@@ -46,6 +46,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   - Enter the Application (client) ID in Shale (Accounts…, OAuth2, Microsoft); no secret needed.
   Details in [docs/FEATURES.md](docs/FEATURES.md). A local test mail server with an OAuth2
   provider (podman) is in [tests/mail-env](tests/mail-env/README.md).
+  A local CalDAV server (Radicale, podman) with seeded calendars is in [tests/caldav-env](tests/caldav-env/README.md).
   - *Your keys from Thunderbird:* Thunderbird keeps OpenPGP keys in its own store, not in GnuPG's. In
     Thunderbird: Account settings, End-to-End Encryption, your key, "Backup secret key to file" (the
     public keys of others: the key manager, Export). Then `gpg --import file.asc`. S/MIME certificates:
@@ -87,9 +88,11 @@ built; it does not show that a person checked the build.
 2. Move the notes from `## [Unreleased]` in `CHANGELOG.md` to a new `## [x.y.z] - date` section.
 3. Commit, then run `sh make-release.sh`: it tags the commit `vx.y.z` and pushes the commit and
    the tag to the development server (remote `origin`) and to GitHub (remote `github`). GitHub
-   builds it and creates the release page with that section as its notes and the `.sha256` file
-   (the build stops if the tag and `Cargo.toml` disagree or the changelog has no notes for the
-   version).
+   builds it and creates the release page with that section as its notes and the `.sha256` file.
+   Before tagging, and again in both CI systems, `.github/check-release.sh` checks that the
+   version is valid semver and greater than the previous `v*` tag, that `Cargo.toml` and
+   `Cargo.lock` agree, and that the changelog section is not empty and mentions every issue
+   closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
 formats, lints, builds, tests, packages and audits every push; GitHub gets the released
@@ -118,12 +121,16 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import` (with `--screenshot`) chooses which
+- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|keybindings` (with `--screenshot`) chooses which
   view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
   `social-import` made-up posts; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
   shows a canvas without the question, and `convert:<file>.canvas` converts it first.
 
 ## Keyboard
+
+The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
+(everywhere, file list, search results, mail view, vim normal mode; double bindings are refused).
+Text editing keys and vim keys are fixed.
 
 | Keys | Action |
 |---|---|
@@ -132,22 +139,59 @@ Other options:
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
-| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back; u read, s or f flag, d delete, m move; **c compose, r reply, Shift+R reply all, Shift+F forward**. In a new mail: Ctrl+Enter sends, Esc closes (it asks whether to keep the draft) |
-| Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
-| ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
+| Ctrl+Shift+M | Mail view (its keys are listed below) |
+| Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
+| ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
+| Drag a tab | Reorder tabs; a marker shows where it lands |
+| Right-click a tab | Pin tab / Unpin tab (pinned tabs sit at the left with a pin and keep their place between starts) |
 | Alt+← / Alt+→ | Back / forward |
+| Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Ctrl+, | Settings |
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |
 | Middle-click on a link | Open it in a new tab |
 
+### Mail view keys
+
+In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
+keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
+the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). Letters work
+only while no text field has the keyboard. Every key can be changed in Settings → Keybindings…
+(scope Mail view); Enter and Esc are fixed.
+
+| Keys | Action |
+|---|---|
+| j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
+| Enter | Folder pane: go to the list; list: open the message |
+| Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
+| Space | Mark the message for a selection (list) |
+| / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
+| t | Search all folders or only this one |
+| i | Import to vault |
+| u | Mark read or unread |
+| s or f | Set or clear the flag |
+| d or Delete | Delete (Trash: asks first) |
+| m | Move to a folder |
+| c | Write a new mail |
+| r, Shift+R, Shift+F | Reply, reply all, forward |
+| Ctrl+R | Sync, or cancel the sync |
+| a | Account settings |
+| Shift+L | Load the open message (or the list of a folder that is not synced) from the server |
+| ] | Select the next attachment (marked with ▸) |
+| o, Shift+O | Open the selected attachment, save it to the vault |
+| z | Take back a mail waiting in the outbox |
+| Esc | Step back: close the message, clear the search, clear the marks, dismiss a message |
+
 With **Vim-style editing** turned on in Settings, a note you go to is in normal mode:
 h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / N go to the next /
 previous hit; i a I A o O start typing and Esc stops; x deletes a character; v / V select (the
 motions extend the selection), then d cuts and y copies to the clipboard; p pastes it. The
-status bar shows the mode.
+status bar shows the mode. **Space Tab** goes back to the view this tab showed just before
+(a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name.
 
 In a drawing: V/1 select, H hand, R/2 rectangle, D/3 diamond, O/4 ellipse, A/5 arrow, L/6 line,
 P/7 pen, T/8 text, E/0 eraser. Ctrl+Z/Ctrl+Shift+Z undo/redo, Ctrl+D duplicate, Delete removes.

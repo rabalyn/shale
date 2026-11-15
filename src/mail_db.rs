@@ -854,6 +854,12 @@ const MAX_QUERY_CHARS: usize = 512;
 /// `*`, `-`, `NEAR`, `AND`, `OR`, `NOT`, `:` and brackets, is plain text for the tokenizer.
 /// None if there is nothing to search for.
 pub fn fts_query(input: &str) -> Option<String> {
+    fts_query_in(input, &FIELDS)
+}
+
+/// [`fts_query`] for another table: `fields` pairs each prefix a person may type with the FTS5
+/// column it limits a term to (the social post index uses it, SOC-032).
+pub fn fts_query_in(input: &str, fields: &[(&str, &str)]) -> Option<String> {
     let chars: Vec<char> = input.chars().take(MAX_QUERY_CHARS).collect();
     let mut terms: Vec<String> = Vec::new();
     let mut i = 0;
@@ -870,7 +876,7 @@ pub fn fts_query(input: &str) -> Option<String> {
                 i += 1;
             }
             let word: String = chars[start..i].iter().collect();
-            match word.split_once(':').and_then(|(f, rest)| FIELDS.iter().find(|(n, _)| f.eq_ignore_ascii_case(n)).map(|(_, col)| (*col, rest))) {
+            match word.split_once(':').and_then(|(f, rest)| fields.iter().find(|(n, _)| f.eq_ignore_ascii_case(n)).map(|(_, col)| (*col, rest))) {
                 Some((col, rest)) if i < chars.len() && chars[i] == '"' && rest.is_empty() => {
                     column = Some(col);
                 }

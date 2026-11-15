@@ -1,0 +1,34 @@
+# Shale's local CalDAV test environment (CALENV-001): Radicale behind TLS with a seeded user and
+# calendars. Listens on 127.0.0.1 only.
+#
+#   ./caldav-env.sh up        start (makes the certificates and seeds the calendars the first time)
+#   ./caldav-env.sh down      stop; ./caldav-env.sh reset also deletes the calendars
+#
+# Works with `podman-compose` and with `docker compose`.
+name: shale-caldav-env
+
+services:
+  # one-shot: writes the seeded calendars into the volume (only when it is empty)
+  seed:
+    image: docker.io/library/alpine:3.24.2
+    command: ["sh", "/seed/seed.sh"]
+    volumes:
+      - caldata:/data
+      - ./seed:/seed:ro,Z
+
+  radicale:
+    image: docker.io/tomsquest/docker-radicale:3.5.4.0
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:15232:5232"
+    volumes:
+      - caldata:/data
+      - ./radicale/config:/config/config:ro,Z
+      - ./radicale/users:/config/users:ro,Z
+      - ./certs:/certs:ro,Z
+
+volumes:
+  caldata:
+    name: shale-caldav-env-data

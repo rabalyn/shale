@@ -42,16 +42,36 @@ built-in demo vault (`shale --screenshot out.png`).
   the last item you trashed back.
 - Every dialog is a window you can move by its title bar and resize from any edge or corner.
 
+## Tabs
+
+- Drag a tab left or right to reorder it; a marker shows where it will land. A click without
+  moving still just selects the tab, and the ✕ or a middle click closes it.
+- Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far left,
+  show a small pin and keep their order. Drag reorders pinned tabs among themselves and the
+  others among themselves, never across the border. A pinned tab can still be closed.
+- The order of the open notes and which of them are pinned come back at the next start (a pinned
+  Feeds tab is not remembered as pinned).
+
 ## Keyboard only: sidebar, file list and vim-style editing
+
+![The keybindings dialog](screenshots/keybindings.png)
 
 - Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back into the note. Ctrl+Shift+B opens
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
   folder to folder, Space opens or closes a folder, Enter opens a file.
+- Every shortcut of this section can be changed in Settings → Keybindings…; a key that another
+  action already uses is refused, and a binding can be a sequence of keys.
+- Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
+  mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
   start typing, Esc stops; x deletes a character; v and V select with the same motions, d cuts
   and y copies to the clipboard, p pastes. The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
+- In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
+  this tab showed just before, and again to come back, like vim's alternate file. Space is the
+  leader key of its own list in Keybindings…; **Space f f** opens a window to find a file by its
+  name (it never creates a note, unlike Ctrl+O); the vim keys themselves cannot be rebound.
 
 ## Drawings
 
@@ -109,6 +129,23 @@ built-in demo vault (`shale --screenshot out.png`).
 - The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline and a local
   graph of the open note.
 - The vault graph shows every note. Red dots are missing notes and green ones are drawings.
+
+## The ribbon and the sidebars
+
+- The icons of the ribbon (the narrow bar on the left) can be dragged into any order. A line
+  between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
+  sidebar toggles at the top and bottom and the settings button stay where they are.
+- The right sidebar is a stack of **views**. Each view has its own menubar of panel icons
+  (Backlinks, Outgoing links, Outline, Graph, Calendar) and shows the panel of the selected
+  icon, so several panels can be open at once.
+- Drag a panel icon over the content of the right sidebar: the area lights up ("Drop to open
+  this icon in a new view") and dropping makes a new view below it. Drag icons from one
+  menubar to another, from a view to the ribbon (it then is a shortcut that shows the panel
+  below the views) and back. Icons that are no panels (Files, Mail, …) cannot go to the right
+  sidebar: the pointer shows "not allowed" and nothing changes. Taking the last icon out of a
+  view removes the view. Esc cancels a drag.
+- The layout is kept in the settings. (No screenshot: the `--screenshot … --keys` workflow
+  has no mouse drags, so it cannot show a split sidebar yet.)
 
 ## Calendar
 
@@ -215,10 +252,13 @@ built-in demo vault (`shale --screenshot out.png`).
   `.eml` file: attachments, people and tags work the same, a mail that was imported before is
   recognised, and nothing is written until you press Import. Mark several mails (Space or
   Ctrl+click) to import them together.
-- Keys while no text field has the keyboard: j / k or ↑ / ↓ move in the list, Enter opens the
-  message, Space marks it, Ctrl+J / Ctrl+K go to the next / previous folder, `/` goes to the
-  search field (↓ or Enter there go into the results), `i` imports, Esc steps back (closes the
-  message, then clears the search).
+- **Keyboard first.** One of the three panes has the keyboard and is framed in the accent
+  colour; Ctrl+H / Ctrl+L (the keys that go between the file list and the editor) move it between
+  folders, list and message, and from the folders on into the left sidebar. j / k act in that pane
+  only: folder, message or scroll. `/` goes to the search field (↓ or Enter there go into the
+  results), Esc steps back. Everything has a key (see the Keyboard section), also syncing, the
+  attachments, loading a message that is not here and switching the search scope, and all of them
+  can be changed in Settings → Keybindings… (Mail view). Keys do not act while you type.
 - **Read, flag, move, delete** (also with the buttons above the message, a right click on a row,
   and the buttons that appear when mails are marked). The keys work on the marked mails, else on
   the open one, else on the one under the cursor, and need no Ctrl or Shift:
@@ -344,7 +384,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ![The feed view](screenshots/social-feed.png)
 
-- The ribbon's speech-bubble button opens **Feeds**. **Accounts…** adds a Mastodon account (type
+- The ribbon's speech-bubble button opens **Feeds** in a **new tab** every time (pick the account
+  and feed there, so a new feed can join the tabs you have). **Accounts…** adds a Mastodon account (type
   the server, open the sign-in page in the browser, paste the code it shows; or paste an access
   token) or a Bluesky account (handle and an **app password** from Settings → Privacy and
   security → App passwords, never your main password). Secrets go to the system keyring.
@@ -365,6 +406,13 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   exactly where it is, so you can scroll up slowly. **Check now** looks right away;
   **⋯ → Reload from the top** replaces the list. If more than 200 posts came in on Bluesky,
   **Load more in between** fills the gap.
+- **Search the posts you loaded**: every post a feed brings in is kept in a search index
+  (`~/.local/share/shale/social-posts.db`, the same for every vault: text, author, date, links
+  and the thread around it). The sidebar search (Ctrl+Shift+F) lists the posts that match under
+  the notes; click one to open a new Feeds tab scrolled to it, also when the feed no longer has
+  it. `from:ada`, `text:`, `in:` (quote, link card, the post answered, who boosted), `link:` and
+  `date:2026-11` limit a word to one part. At most 10 000 posts per account and one year are
+  kept; removing an account removes its posts. (Mouse only for now.)
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.
@@ -437,17 +485,57 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Keyboard
 
+The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
+(everywhere, file list, search results, mail view, vim normal mode; double bindings are refused).
+Text editing keys and vim keys are fixed.
+
 | Keys | Action |
 |---|---|
 | Ctrl+N | New note |
 | Ctrl+O | Quick switcher (find or create a note) |
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
+| Ctrl+S | Save now (notes also save automatically) |
+| Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
-| Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
-| ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
-| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back |
+| Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
+| Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
+| ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward |
+| Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
+
+### Mail view keys
+
+In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
+keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
+the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). Letters work
+only while no text field has the keyboard. Every key can be changed in Settings → Keybindings…
+(scope Mail view); Enter and Esc are fixed.
+
+| Keys | Action |
+|---|---|
+| j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
+| Enter | Folder pane: go to the list; list: open the message |
+| Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
+| Space | Mark the message for a selection (list) |
+| / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
+| t | Search all folders or only this one |
+| i | Import to vault |
+| u | Mark read or unread |
+| s or f | Set or clear the flag |
+| d or Delete | Delete (Trash: asks first) |
+| m | Move to a folder |
+| c | Write a new mail |
+| r, Shift+R, Shift+F | Reply, reply all, forward |
+| Ctrl+R | Sync, or cancel the sync |
+| a | Account settings |
+| Shift+L | Load the open message (or the list of a folder that is not synced) from the server |
+| ] | Select the next attachment (marked with ▸) |
+| o, Shift+O | Open the selected attachment, save it to the vault |
+| z | Take back a mail waiting in the outbox |
+| Esc | Step back: close the message, clear the search, clear the marks, dismiss a message |

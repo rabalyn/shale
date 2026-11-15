@@ -210,6 +210,11 @@ impl Vim {
         }
     }
 
+    /// A `:` or `/` command is being typed: every key belongs to it.
+    pub fn typing_command(&self) -> bool {
+        self.cmdline.is_some()
+    }
+
     pub fn visual(&self) -> bool {
         matches!(self.mode, Mode::Visual | Mode::VisualLine)
     }

@@ -190,6 +190,32 @@ impl Default for MailAccount {
     }
 }
 
+/// Where the icons of the window are (LAY-001, LAY-002). The ids are the strings of `sidebar::Item`;
+/// what they mean and how a stored list is repaired is in `sidebar.rs`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct SidebarCfg {
+    /// The ribbon (left menubar), top to bottom. Empty: the default order.
+    pub ribbon: Vec<String>,
+    /// The views of the right sidebar, top to bottom. Empty: the default (one view with all panels).
+    pub right: Vec<RightViewCfg>,
+}
+
+/// One view of the right sidebar: its menubar (icon ids, left to right) and the icon it shows.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct RightViewCfg {
+    pub icons: Vec<String>,
+    pub active: String,
+}
+
+/// A value of the wrong shape (an old or hand-edited file) loads as the default instead of
+/// making the whole settings file unreadable.
+fn lenient<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned + Default>(d: D) -> Result<T, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).unwrap_or_default())
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
@@ -211,6 +237,9 @@ pub struct Config {
     pub readable_width: bool,
     pub show_left: bool,
     pub show_right: bool,
+    /// The order of the ribbon icons (and the views of the right sidebar).
+    #[serde(deserialize_with = "lenient")]
+    pub sidebars: SidebarCfg,
     /// Order of the file tree.
     pub file_sort: FileSort,
     /// Show embedded images as pictures inside the editor (the link shows when the cursor is on it).
@@ -247,6 +276,9 @@ pub struct Config {
     pub social_replies: bool,
     /// Minutes between looks for new posts in the feeds open in tabs (0 = never, SOC-025).
     pub social_check_minutes: u32,
+    /// Keybindings the user changed: action id -> bindings as text (KEY-007). Missing = defaults.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub keybindings: std::collections::BTreeMap<String, Vec<String>>,
     // Per-vault fields of older versions, read only to move them into the vault that is opened
     // first (CFG-008); dropped from the file after that.
     #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
@@ -279,6 +311,7 @@ impl Default for Config {
             readable_width: true,
             show_left: true,
             show_right: true,
+            sidebars: SidebarCfg::default(),
             file_sort: FileSort::NameAsc,
             inline_images: true,
             calendars: vec![],
@@ -296,6 +329,7 @@ impl Default for Config {
             social_last: None,
             social_replies: false,
             social_check_minutes: 5,
+            keybindings: Default::default(),
             legacy_open_files: None,
             legacy_last_import_folder: None,
             legacy_recent_tags: None,
@@ -433,6 +467,21 @@ mod tests {
         assert!(!c.ctrl_to_follow);
         assert!(c.inline_images);
         assert_eq!(c.file_sort, FileSort::NameAsc);
+    }
+
+    // spec: LAY-002
+    #[test]
+    fn lay_002_a_layout_of_the_wrong_shape_loads_as_the_default() {
+        let c: Config = serde_json::from_str(r#"{"sidebars": "oops", "font_size": 18.0}"#).unwrap();
+        assert_eq!((c.sidebars, c.font_size), (SidebarCfg::default(), 18.0), "the rest of the file still loads");
+        let c: Config = serde_json::from_str(r#"{"sidebars": {"ribbon": [1, 2]}}"#).unwrap();
+        assert_eq!(c.sidebars, SidebarCfg::default());
+        let c: Config = serde_json::from_str(r#"{"sidebars": {"ribbon": ["mail", "files"]}}"#).unwrap();
+        assert_eq!(c.sidebars.ribbon, ["mail", "files"]);
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.sidebars, c.sidebars);
+        let old: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
+        assert_eq!(old.sidebars, SidebarCfg::default(), "files from before the layout have the default");
     }
 
     // spec: MAIL-120
