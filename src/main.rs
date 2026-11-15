@@ -24,6 +24,7 @@ mod caldav_env_tests;
 mod canvas;
 mod compose;
 mod config;
+mod data_usage;
 mod dialog;
 mod drawing;
 mod drawing_layout;
@@ -86,6 +87,7 @@ mod reader;
 mod recovery;
 mod script;
 mod search_all;
+mod secret;
 mod secrets;
 mod sidebar;
 #[cfg(test)]
@@ -175,6 +177,10 @@ fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
 }
 
 fn main() -> eframe::Result {
+    // release builds: no core dumps, no memory reads by other processes (SEC-019)
+    if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {
+        eprintln!("shale: could not make the process undumpable: {e}");
+    }
     let Cli { screenshot, vault, view, keys, size } = match parse_args(std::env::args().skip(1)) {
         Parsed::Run(cli) => cli,
         Parsed::Help => {

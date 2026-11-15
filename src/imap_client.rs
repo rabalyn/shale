@@ -34,6 +34,7 @@ use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
+use zeroize::Zeroizing;
 
 /// Limits that keep a broken or hostile server from using up memory or time.
 #[derive(Clone, Debug)]
@@ -120,13 +121,13 @@ pub trait Authenticator: Send {
     /// The SASL mechanism, such as `PLAIN` or `XOAUTH2`.
     fn mechanism(&self) -> &str;
     /// The first message of the exchange.
-    fn initial_response(&mut self) -> Vec<u8>;
+    fn initial_response(&mut self) -> Zeroizing<Vec<u8>>;
     /// The answer to a server challenge (empty for most: that is also how XOAUTH2 acknowledges an error).
     fn respond(&mut self, _challenge: &[u8]) -> Vec<u8> {
         Vec::new()
     }
     /// User name and password for the old `LOGIN` command, for servers without `AUTH=PLAIN`.
-    fn login_credentials(&self) -> Option<(String, String)> {
+    fn login_credentials(&self) -> Option<(&str, &str)> {
         None
     }
 }
@@ -134,12 +135,12 @@ pub trait Authenticator: Send {
 /// User name and password (`AUTHENTICATE PLAIN`, RFC 4616). Never shown in debug output.
 pub struct PlainAuth {
     user: String,
-    password: String,
+    password: crate::secret::Secret,
 }
 
 impl PlainAuth {
     pub fn new(user: &str, password: &str) -> PlainAuth {
-        PlainAuth { user: user.into(), password: password.into() }
+        PlainAuth { user: user.into(), password: crate::secret::Secret::new(password) }
     }
 }
 
@@ -153,15 +154,16 @@ impl Authenticator for PlainAuth {
     fn mechanism(&self) -> &str {
         "PLAIN"
     }
-    fn initial_response(&mut self) -> Vec<u8> {
-        let mut v = vec![0];
+    fn initial_response(&mut self) -> Zeroizing<Vec<u8>> {
+        let mut v = Zeroizing::new(Vec::with_capacity(self.user.len() + self.password.len() + 2));
+        v.push(0);
         v.extend_from_slice(self.user.as_bytes());
         v.push(0);
-        v.extend_from_slice(self.password.as_bytes());
+        v.extend_from_slice(self.password.expose().as_bytes());
         v
     }
-    fn login_credentials(&self) -> Option<(String, String)> {
-        Some((self.user.clone(), self.password.clone()))
+    fn login_credentials(&self) -> Option<(&str, &str)> {
+        Some((&self.user, self.password.expose()))
     }
 }
 
@@ -1144,6 +1146,23 @@ struct Completion {
 }
 
 /// Quote a string for a command (a folder name): `"` and `\` escaped, line breaks refused.
+/// Like [`quote`] for a password: the answer is wiped when dropped, and no half-built copies are left.
+fn quote_secret(s: &str) -> Result<Zeroizing<String>> {
+    if s.contains(['\r', '\n', '\0']) {
+        return Err(ImapError::Refused("a line break in a name".into()));
+    }
+    let mut out = Zeroizing::new(String::with_capacity(s.len() * 2 + 2));
+    out.push('"');
+    for c in s.chars() {
+        if c == '\\' || c == '"' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    Ok(out)
+}
+
 fn quote(s: &str) -> Result<String> {
     if s.contains(['\r', '\n', '\0']) {
         return Err(ImapError::Refused("a line break in a name".into()));
@@ -1242,7 +1261,8 @@ impl Client {
             Gate::ReadOnly => check_read_only(cmd)?,
             Gate::Write => check_write(cmd)?,
         }
-        let line = format!("{tag} {cmd}\r\n");
+        // the command can hold a password or token: this copy is wiped (the TLS writer's is out of reach)
+        let line = crate::secret::concat(&[tag, " ", cmd, "\r\n"]);
         self.wire.io.write_all(line.as_bytes()).and_then(|_| self.wire.io.flush()).map_err(io_error)
     }
 
@@ -1300,7 +1320,7 @@ impl Client {
         if self.caps.contains(&format!("AUTH={mech}")) {
             self.authenticate_sasl(&mech, auth)?;
         } else if let (true, Some((user, pass))) = (mech == "PLAIN" && !self.caps.contains("LOGINDISABLED"), auth.login_credentials()) {
-            let cmd = format!("LOGIN {} {}", quote(&user)?, quote(&pass)?);
+            let cmd = crate::secret::concat(&["LOGIN ", &quote(user)?, " ", &quote_secret(pass)?]);
             let c = self.run(&cmd, self.limits.max_small_literal, |_| Ok(()))?;
             if !c.ok {
                 return Err(ImapError::Auth(c.text));
@@ -1315,7 +1335,8 @@ impl Client {
         let tag = self.next_tag();
         let initial = auth.initial_response();
         if self.caps.contains("SASL-IR") {
-            self.send(&tag, &format!("AUTHENTICATE {mech} {}", base64_encode(&initial)), Gate::ReadOnly)?;
+            let b64 = Zeroizing::new(base64_encode(&initial));
+            self.send(&tag, &crate::secret::concat(&["AUTHENTICATE ", mech, " ", &b64]), Gate::ReadOnly)?;
         } else {
             self.send(&tag, &format!("AUTHENTICATE {mech}"), Gate::ReadOnly)?;
         }
@@ -1330,9 +1351,10 @@ impl Client {
                 if sent_initial && !challenge.is_empty() {
                     reason = Some(String::from_utf8_lossy(&challenge).chars().filter(|c| !c.is_control()).take(300).collect());
                 }
-                let answer = if sent_initial { auth.respond(&challenge) } else { initial.clone() };
+                let answer = if sent_initial { Zeroizing::new(auth.respond(&challenge)) } else { initial.clone() };
                 sent_initial = true;
-                let line = format!("{}\r\n", base64_encode(&answer));
+                let b64 = Zeroizing::new(base64_encode(&answer));
+                let line = crate::secret::concat(&[&b64, "\r\n"]);
                 self.wire.io.write_all(line.as_bytes()).and_then(|_| self.wire.io.flush()).map_err(io_error)?;
             } else if let Some(rest) = r.text.strip_prefix(tag.as_bytes()).and_then(|x| x.strip_prefix(b" ")) {
                 let text = String::from_utf8_lossy(rest).into_owned();
@@ -1589,6 +1611,24 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: SEC-017
+    #[test]
+    fn a_password_is_quoted_like_any_name_and_a_line_break_is_refused() {
+        for s in ["plain", "with \"quote\" and \\ slash", "", "ünï"] {
+            assert_eq!(*quote_secret(s).unwrap(), quote(s).unwrap(), "{s}");
+        }
+        assert!(matches!(quote_secret("a\nb"), Err(ImapError::Refused(_))));
+        assert!(matches!(quote_secret("a\0b"), Err(ImapError::Refused(_))));
+    }
+
+    // spec: SEC-017
+    #[test]
+    fn plain_auth_builds_its_first_message_in_a_wiped_buffer_and_offers_login() {
+        let mut a = PlainAuth::new("ada", "pw");
+        assert_eq!(*a.initial_response(), b"\0ada\0pw".to_vec());
+        assert_eq!(a.login_credentials(), Some(("ada", "pw")));
+    }
 
     #[test]
     fn uid_sets_are_compact_and_sorted() {

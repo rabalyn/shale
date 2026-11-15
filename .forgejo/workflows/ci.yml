@@ -2,6 +2,8 @@
 # request is formatted, linted, built, tested and packaged here, and the dependencies are audited.
 # Nothing is published from here. Releases are built and published by GitHub from `v*` tags
 # (.github/workflows/build.yml; Forgejo ignores .github/workflows because this folder exists).
+# A push to `main` that passes the build is also pushed to GitHub's `main` (the `mirror` job),
+# where macOS and Windows are built and tested: the homelab cannot run those (BUILD-016).
 #
 # The runner starts the job in a container (Docker or Podman). Steps are plain shell: JavaScript
 # actions (checkout, cache, upload-artifact) need Node, which the Rust image does not have, and
@@ -9,7 +11,11 @@
 name: ci
 
 on:
+  # a branch is checked through its pull request; a push runs only for main (and its mirror job)
+  # and for release tags, so a PR commit is not built twice
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
   # weekly, so advisories published for unchanged code are noticed (only the audit job runs then)
@@ -27,9 +33,16 @@ jobs:
     # same compiler as rust-toolchain.toml (rustup in the image reads it and agrees)
     container:
       image: docker.io/library/rust:1.100.0-bookworm
+      # kept between runs on the runner's host (allowed in its config.yaml `valid_volumes`):
+      # the crates, git dependencies and build folder, so a run compiles only what changed
+      volumes:
+        - /srv/data/deployments/forgejo-runner/cache/shale/registry:/usr/local/cargo/registry
+        - /srv/data/deployments/forgejo-runner/cache/shale/git:/usr/local/cargo/git
+        - /srv/data/deployments/forgejo-runner/cache/shale/target:/cache/target
     env:
       # always strict: any warning (also in vendored crates) fails the build
       RUSTFLAGS: -D warnings
+      CARGO_TARGET_DIR: /cache/target
     steps:
       # A self-hosted runner may mount an extra CA certificate (the private CA in front of
       # Forgejo) at this path; add it so git trusts it without losing the public CAs.
@@ -113,6 +126,16 @@ jobs:
           rustup component add rustfmt clippy
           cargo --version
 
+      # the kept build folder grows with every dependency update; start it afresh past 20 GB
+      - name: Keep the build cache in bounds
+        run: |
+          used=$(du -sm "$CARGO_TARGET_DIR" | cut -f1)
+          echo "build cache: ${used} MB"
+          if [ "$used" -gt 20480 ]; then
+            find "$CARGO_TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+            echo "emptied it"
+          fi
+
       - name: Format
         run: cargo fmt --check
 
@@ -131,7 +154,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist/shale
-          cp target/release/shale LICENSE README.md CHANGELOG.md dist/shale/
+          cp "$CARGO_TARGET_DIR/release/shale" LICENSE README.md CHANGELOG.md dist/shale/
           cp -r docs dist/shale/
           tar -C dist -czf shale-linux-x86_64.tar.gz shale
           sha256sum shale-linux-x86_64.tar.gz > shale-linux-x86_64.tar.gz.sha256
@@ -145,6 +168,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: docker.io/library/rust:1.100.0-bookworm
+      volumes:
+        - /srv/data/deployments/forgejo-runner/cache/shale/registry:/usr/local/cargo/registry
+        - /srv/data/deployments/forgejo-runner/cache/shale/tools:/cache/tools
     steps:
       - name: Trust the runner's extra CA, if any
         run: |
@@ -172,11 +198,12 @@ jobs:
           fi
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        # kept between runs: installed again only when a newer cargo-audit is out
+        run: cargo install cargo-audit --locked --root /cache/tools
 
       # reads only Cargo.lock, so it needs no build and no system libraries
       - name: Audit the dependencies
-        run: cargo audit
+        run: /cache/tools/bin/cargo-audit audit
 
   # DEV-002: a dependency that no code uses fails the build (vendor/ is skipped via .ignore)
   unused-deps:
@@ -184,6 +211,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: docker.io/library/rust:1.100.0-bookworm
+      volumes:
+        - /srv/data/deployments/forgejo-runner/cache/shale/registry:/usr/local/cargo/registry
+        - /srv/data/deployments/forgejo-runner/cache/shale/tools:/cache/tools
     steps:
       - name: Trust the runner's extra CA, if any
         run: |
@@ -211,7 +241,10 @@ jobs:
           fi
 
       - name: Install cargo-machete
-        run: cargo install cargo-machete --version 0.9.2 --locked
+        # kept between runs in /cache/tools: installed again only when the version changes
+        run: |
+          cargo install cargo-machete --version 0.9.2 --locked --root /cache/tools
+          echo /cache/tools/bin >> "$GITHUB_PATH"
 
       # reads only the sources and Cargo.toml, so it needs no build and no system libraries
       - name: Check for unused dependencies
@@ -226,6 +259,13 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: docker.io/library/rust:1.100.0-bookworm
+      volumes:
+        - /srv/data/deployments/forgejo-runner/cache/shale/registry:/usr/local/cargo/registry
+        - /srv/data/deployments/forgejo-runner/cache/shale/git:/usr/local/cargo/git
+        - /srv/data/deployments/forgejo-runner/cache/shale/tools:/cache/tools
+        - /srv/data/deployments/forgejo-runner/cache/shale/target-cov:/cache/target-cov
+    env:
+      CARGO_TARGET_DIR: /cache/target-cov
     steps:
       - name: Trust the runner's extra CA, if any
         run: |
@@ -261,7 +301,8 @@ jobs:
       - name: Install cargo-llvm-cov
         run: |
           rustup component add llvm-tools-preview
-          cargo install cargo-llvm-cov --version 0.9.1 --locked
+          cargo install cargo-llvm-cov --version 0.9.1 --locked --root /cache/tools
+          echo /cache/tools/bin >> "$GITHUB_PATH"
 
       - name: Test the coverage check
         run: sh .forgejo/scripts/test-check-coverage.sh
@@ -283,6 +324,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: docker.io/library/rust:1.100.0-bookworm
+      volumes:
+        - /srv/data/deployments/forgejo-runner/cache/shale/registry:/usr/local/cargo/registry
+        - /srv/data/deployments/forgejo-runner/cache/shale/git:/usr/local/cargo/git
+        - /srv/data/deployments/forgejo-runner/cache/shale/target-env:/cache/target-env
+    env:
+      CARGO_TARGET_DIR: /cache/target-env
     steps:
       - name: Trust the runner's extra CA, if any
         run: |
@@ -359,3 +406,56 @@ jobs:
       - name: CalDAV and mail tests against the real servers
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
         run: sh .forgejo/scripts/env-tests.sh run
+
+  # A `main` that is green on Linux goes to GitHub's `main`, whose workflow builds and tests it on
+  # macOS and Windows (BUILD-016, FORGE-003). Only `main`, never a branch or a pull request. The
+  # write credential is the owner's: an SSH deploy key of rabalyn/shale with write access, kept as
+  # the Forgejo Actions secret MIRROR_DEPLOY_KEY (Forgejo refuses names that start with GITHUB_). Without it the job says so and fails.
+  mirror:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/rust:1.100.0-bookworm
+    steps:
+      - name: Trust the runner's extra CA, if any
+        run: |
+          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
+            update-ca-certificates >/dev/null 2>&1
+            echo "Added the runner's extra CA."
+          fi
+
+      - name: Push this commit to GitHub's main
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+          DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::the secret MIRROR_DEPLOY_KEY is not set (see raba/shale#52)"
+            exit 1
+          fi
+          command -v ssh >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-client >/dev/null; }
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/github_deploy
+          # GitHub's published host key (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/github_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          # the whole history of main (a shallow push is refused by GitHub)
+          git init -q .
+          git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+          auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+          git "${auth[@]}" fetch -q origin "+refs/heads/main:refs/remotes/origin/main"
+          git cat-file -e "$SHA^{commit}"
+          git remote add github git@github.com:rabalyn/shale.git
+          git fetch -q github "+refs/heads/main:refs/remotes/github/main" || true
+          # a later push of main got there first: nothing to do (an older commit is never forced over it)
+          if git rev-parse -q --verify refs/remotes/github/main >/dev/null && git merge-base --is-ancestor "$SHA" refs/remotes/github/main; then
+            echo "GitHub's main already contains $SHA."
+            exit 0
+          fi
+          git push github "$SHA:refs/heads/main"
+          echo "Pushed $SHA to GitHub's main."

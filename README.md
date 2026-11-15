@@ -23,7 +23,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   send"), and turn a mail into a note with one key. Shale keeps a local copy of the mail; syncing never
   changes anything on the server, only your own actions do (delete always means the Trash folder;
   a sent mail is never sent twice, and a mail that may or may not have gone out is shown to you
-  instead of being guessed). **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
+  instead of being guessed). **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption, and encrypted swap too: Shale locks typed passwords and tokens into memory and wipes them when done, but where the system refuses the lock they could reach a swap file.**
   **Signed and encrypted mail** (OpenPGP and S/MIME) works through the GnuPG on your computer
   (`gpg`, `gpgsm`, your keys, your passphrase dialog): signatures are checked and shown in a strip above
   the mail, you can sign and encrypt what you send, and nothing is fetched from key servers by itself.
@@ -95,7 +95,7 @@ built; it does not show that a person checked the build.
    closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
-formats, lints, builds, tests, packages and audits every push; GitHub gets the released
+formats, lints, builds, tests, packages and audits every pull request and `main`; GitHub gets the released
 versions.
 
 ## Development and issues
@@ -121,7 +121,7 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|keybindings` (with `--screenshot`) chooses which
+- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|keybindings|data-usage` (with `--screenshot`) chooses which
   view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
   `social-import` made-up posts; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
   shows a canvas without the question, and `convert:<file>.canvas` converts it first.
@@ -160,6 +160,7 @@ Text editing keys and vim keys are fixed.
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | Ctrl+, | Settings |
+| Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |
 | Middle-click on a link | Open it in a new tab |

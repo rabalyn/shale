@@ -17,12 +17,12 @@ const PAGE_SIZE: &str = "20";
 #[derive(Clone, PartialEq)]
 pub struct AppCredentials {
     pub client_id: String,
-    pub client_secret: String,
+    pub client_secret: Secret,
 }
 
 impl std::fmt::Debug for AppCredentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AppCredentials").field("client_id", &self.client_id).field("client_secret", &cal_dav::redacted(&self.client_secret)).finish()
+        f.debug_struct("AppCredentials").field("client_id", &self.client_id).field("client_secret", &cal_dav::redacted(self.client_secret.expose())).finish()
     }
 }
 
@@ -42,8 +42,9 @@ fn base(server: &str) -> Result<String, String> {
 pub fn register_app(server: &str) -> Result<AppCredentials, String> {
     let server = base(server)?;
     let body = json!({"client_name": "Shale", "redirect_uris": REDIRECT, "scopes": SCOPE});
-    let v = api("POST", &format!("{server}/api/v1/apps"), None, Some(&body))?;
-    let (id, secret) = (text(&v["client_id"]), text(&v["client_secret"]));
+    let mut v = api("POST", &format!("{server}/api/v1/apps"), None, Some(&body))?;
+    let (id, secret) = (text(&v["client_id"]), secret_of(&v["client_secret"]));
+    wipe_value(&mut v);
     if id.is_empty() || secret.is_empty() {
         return Err("the server did not accept the app registration (is this a Mastodon server?)".into());
     }
@@ -57,11 +58,14 @@ pub fn authorize_url(server: &str, app: &AppCredentials) -> Result<String, Strin
 }
 
 /// Step 3: the code from the browser → the access token.
-pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<String, String> {
+pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<Secret, String> {
     let server = base(server)?;
-    let body = json!({"client_id": app.client_id, "client_secret": app.client_secret, "redirect_uri": REDIRECT, "grant_type": "authorization_code", "code": code.trim(), "scope": SCOPE});
-    let v = api("POST", &format!("{server}/oauth/token"), None, Some(&body))?;
-    let tok = text(&v["access_token"]);
+    let mut body = json!({"client_id": app.client_id, "client_secret": app.client_secret.expose(), "redirect_uri": REDIRECT, "grant_type": "authorization_code", "code": code.trim(), "scope": SCOPE});
+    let answer = api("POST", &format!("{server}/oauth/token"), None, Some(&body));
+    wipe_value(&mut body);
+    let mut v = answer?;
+    let tok = secret_of(&v["access_token"]);
+    wipe_value(&mut v);
     if tok.is_empty() {
         Err("the server did not give an access token".into())
     } else {
@@ -364,9 +368,9 @@ mod tests {
         let app = register_app(&base).unwrap();
         assert!(authorize_url(&base, &app).unwrap().contains("/oauth/authorize?client_id=cid&scope=read&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob&response_type=code"));
         let tok = exchange_code(&base, &app, " abc ").unwrap();
-        let who = verify(&base, &tok).unwrap();
+        let who = verify(&base, tok.expose()).unwrap();
         assert_eq!((who.handle.as_str(), who.display_name.as_str()), ("ada@127.0.0.1", "Ada"));
-        let mut c = Client::new(Account::new(Network::Mastodon, &base, &who.handle, &who.display_name), &tok);
+        let mut c = Client::new(Account::new(Network::Mastodon, &base, &who.handle, &who.display_name), tok.expose());
         let feeds = c.feeds().unwrap();
         assert_eq!(feeds, vec![Feed { id: "home".into(), title: "Home".into() }, Feed { id: "list:7".into(), title: "Friends".into() }]);
         let page = c.timeline(&feeds[0], None).unwrap();

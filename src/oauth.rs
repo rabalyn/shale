@@ -23,6 +23,7 @@
 use crate::cal_dav::{self, Origin};
 use crate::config::{MailAccount, OAuthProvider};
 use crate::imap_client::{base64_encode, Authenticator};
+use crate::secret::Secret;
 use crate::secrets::{self, MailSecret};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -32,6 +33,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use zeroize::Zeroizing;
 
 /// How long the browser sign-in may take.
 pub const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
@@ -135,7 +137,7 @@ pub struct OAuthConfig {
     pub token_url: String,
     pub scope: String,
     pub client_id: String,
-    pub client_secret: Option<String>,
+    pub client_secret: Option<Secret>,
     /// The user name, offered to the sign-in page as a hint.
     pub login_hint: String,
 }
@@ -171,7 +173,7 @@ pub fn check_endpoint(url: &str, custom: bool) -> Result<(), String> {
 
 impl OAuthConfig {
     /// The settings of an OAuth2 account; `client_secret` comes from the keyring or was typed.
-    pub fn for_account(a: &MailAccount, client_secret: Option<String>) -> Result<OAuthConfig, OAuthError> {
+    pub fn for_account(a: &MailAccount, client_secret: Option<Secret>) -> Result<OAuthConfig, OAuthError> {
         let bad = |t: String| OAuthError::Config(t);
         let client_id = a.oauth_client_id.trim().to_string();
         if client_id.is_empty() {
@@ -201,16 +203,18 @@ impl OAuthConfig {
 
 // ---------------------------------------------------------------- small encoders
 
-fn pct_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
+/// Append `s` percent-encoded. No intermediate strings: `out` can be a wiped one.
+fn pct_push(out: &mut String, s: &str) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            out.push('%');
+            out.push(HEX[(b >> 4) as usize] as char);
+            out.push(HEX[(b & 15) as usize] as char);
         }
     }
-    out
 }
 
 fn pct_decode(s: &str) -> String {
@@ -234,9 +238,19 @@ fn pct_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// `a=b&c=d`, every part percent-encoded.
-pub fn form_body(params: &[(&str, &str)]) -> String {
-    params.iter().map(|(k, v)| format!("{}={}", pct_encode(k), pct_encode(v))).collect::<Vec<_>>().join("&")
+/// `a=b&c=d`, every part percent-encoded. The form can hold a client secret or a token, so it is
+/// built in one buffer of the largest possible size (it never reallocates) that is wiped on drop.
+pub fn form_body(params: &[(&str, &str)]) -> Zeroizing<String> {
+    let mut out = Zeroizing::new(String::with_capacity(params.iter().map(|(k, v)| 3 * (k.len() + v.len()) + 2).sum()));
+    for (i, (k, v)) in params.iter().enumerate() {
+        if i > 0 {
+            out.push('&');
+        }
+        pct_push(&mut out, k);
+        out.push('=');
+        pct_push(&mut out, v);
+    }
+    out
 }
 
 fn parse_query(q: &str) -> Vec<(String, String)> {
@@ -282,7 +296,7 @@ pub fn authorization_url(cfg: &OAuthConfig, redirect_uri: &str, state: &str, cha
         params.push(("prompt", "consent"));
     }
     let sep = if cfg.auth_url.contains('?') { '&' } else { '?' };
-    format!("{}{sep}{}", cfg.auth_url, form_body(&params))
+    format!("{}{sep}{}", cfg.auth_url, form_body(&params).as_str())
 }
 
 // ---------------------------------------------------------------- the callback
@@ -446,8 +460,8 @@ impl Pending {
 /// What the token endpoint handed out.
 #[derive(Clone, PartialEq)]
 pub struct Tokens {
-    pub access_token: String,
-    pub refresh_token: Option<String>,
+    pub access_token: Secret,
+    pub refresh_token: Option<Secret>,
     pub expires_in: u64,
     /// Who signed in, when the answer says (the `email` of the ID token). Only for display.
     pub user: Option<String>,
@@ -471,9 +485,20 @@ fn user_of_id_token(jwt: &str) -> Option<String> {
 /// Read a token endpoint's answer. `refreshing`: an `invalid_grant` then means the refresh token
 /// is dead (revoked or expired), not that a code was wrong.
 pub fn parse_token_response(status: u16, body: &str, refreshing: bool) -> Result<Tokens, OAuthError> {
-    let v: Value = serde_json::from_str(body).map_err(|_| OAuthError::Network(format!("the token endpoint's answer could not be read (status {status})")))?;
-    if let Some(e) = v.get("error").and_then(Value::as_str) {
-        let desc = v.get("error_description").and_then(Value::as_str).map(clean).unwrap_or_default();
+    /// The tokens are read straight into `Secret`s: no `Value` tree that keeps them in unwiped strings.
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        access_token: Option<Secret>,
+        refresh_token: Option<Secret>,
+        token_type: Option<String>,
+        expires_in: Option<Value>,
+        id_token: Option<Secret>,
+        error: Option<String>,
+        error_description: Option<String>,
+    }
+    let v: Raw = serde_json::from_str(body).map_err(|_| OAuthError::Network(format!("the token endpoint's answer could not be read (status {status})")))?;
+    if let Some(e) = v.error.as_deref() {
+        let desc = v.error_description.as_deref().map(clean).unwrap_or_default();
         return Err(match e {
             "invalid_grant" if refreshing => OAuthError::Revoked,
             "invalid_grant" => OAuthError::Rejected(format!("The provider did not accept the sign-in code (invalid_grant). {desc}").trim().to_string()),
@@ -484,39 +509,36 @@ pub fn parse_token_response(status: u16, body: &str, refreshing: bool) -> Result
     if !(200..300).contains(&status) {
         return Err(OAuthError::Rejected(format!("the token endpoint answered with status {status}")));
     }
-    let access = v.get("access_token").and_then(Value::as_str).filter(|t| !t.is_empty()).ok_or_else(|| OAuthError::Rejected("the token endpoint sent no access token".into()))?;
-    if let Some(t) = v.get("token_type").and_then(Value::as_str) {
+    let access = v.access_token.filter(|t| !t.is_empty()).ok_or_else(|| OAuthError::Rejected("the token endpoint sent no access token".into()))?;
+    if let Some(t) = v.token_type.as_deref() {
         if !t.eq_ignore_ascii_case("bearer") {
             return Err(OAuthError::Rejected(format!("the token endpoint sent a “{}” token, but only bearer tokens are used", clean(t))));
         }
     }
-    let expires_in = match v.get("expires_in") {
+    let expires_in = match &v.expires_in {
         Some(Value::Number(n)) => n.as_u64().or_else(|| n.as_f64().map(|f| f.max(0.0) as u64)),
         Some(Value::String(s)) => s.trim().parse().ok(),
         _ => None,
     }
     .unwrap_or(3600);
-    Ok(Tokens {
-        access_token: access.to_string(),
-        refresh_token: v.get("refresh_token").and_then(Value::as_str).filter(|t| !t.is_empty()).map(String::from),
-        expires_in,
-        user: v.get("id_token").and_then(Value::as_str).and_then(user_of_id_token),
-    })
+    Ok(Tokens { access_token: access, refresh_token: v.refresh_token.filter(|t| !t.is_empty()), expires_in, user: v.id_token.as_ref().and_then(|t| user_of_id_token(t.expose())) })
 }
 
 fn post_form(cfg: &OAuthConfig, params: &[(&str, &str)], refreshing: bool) -> Result<Tokens, OAuthError> {
     check_endpoint(&cfg.token_url, cfg.allow_local_http()).map_err(OAuthError::Config)?;
     let body = form_body(params);
-    let nobody = cal_dav::Account { url: String::new(), username: String::new(), password: String::new() };
+    let nobody = cal_dav::Account { url: String::new(), username: String::new(), password: Secret::default() };
     let r = cal_dav::request_opts("POST", &cfg.token_url, &["Content-Type: application/x-www-form-urlencoded", "Accept: application/json"], &body, &nobody, false).map_err(OAuthError::Network)?;
-    parse_token_response(r.status, &r.body, refreshing)
+    // the answer holds the tokens: its text is wiped once read
+    let answer = Zeroizing::new(r.body);
+    parse_token_response(r.status, &answer, refreshing)
 }
 
 /// Trade the authorization code for tokens.
 pub fn exchange_code(cfg: &OAuthConfig, code: &str, redirect_uri: &str, verifier: &str) -> Result<Tokens, OAuthError> {
     let mut p = vec![("grant_type", "authorization_code"), ("code", code), ("redirect_uri", redirect_uri), ("client_id", cfg.client_id.as_str()), ("code_verifier", verifier)];
     if let Some(s) = &cfg.client_secret {
-        p.push(("client_secret", s));
+        p.push(("client_secret", s.expose()));
     }
     post_form(cfg, &p, false)
 }
@@ -525,7 +547,7 @@ pub fn exchange_code(cfg: &OAuthConfig, code: &str, redirect_uri: &str, verifier
 pub fn refresh(cfg: &OAuthConfig, refresh_token: &str) -> Result<Tokens, OAuthError> {
     let mut p = vec![("grant_type", "refresh_token"), ("refresh_token", refresh_token), ("client_id", cfg.client_id.as_str())];
     if let Some(s) = &cfg.client_secret {
-        p.push(("client_secret", s));
+        p.push(("client_secret", s.expose()));
     }
     post_form(cfg, &p, true)
 }
@@ -534,7 +556,7 @@ pub fn refresh(cfg: &OAuthConfig, refresh_token: &str) -> Result<Tokens, OAuthEr
 
 /// Where the refresh token lives between runs.
 pub trait RefreshStore: Send + Sync {
-    fn load(&self) -> Option<String>;
+    fn load(&self) -> Option<Secret>;
     /// False if it could not be kept (no keyring).
     fn save(&self, token: &str) -> bool;
     fn clear(&self);
@@ -546,7 +568,7 @@ pub struct KeyringStore {
 }
 
 impl RefreshStore for KeyringStore {
-    fn load(&self) -> Option<String> {
+    fn load(&self) -> Option<Secret> {
         secrets::mail_secret(&self.account_id, MailSecret::RefreshToken)
     }
     fn save(&self, token: &str) -> bool {
@@ -558,8 +580,8 @@ impl RefreshStore for KeyringStore {
 }
 
 struct Inner {
-    access: Option<(String, Instant)>,
-    refresh: Option<String>,
+    access: Option<(Secret, Instant)>,
+    refresh: Option<Secret>,
     loaded: bool,
     /// The refresh token in memory is newer than the one in the keyring (it could not be saved).
     unsaved: bool,
@@ -598,7 +620,7 @@ impl TokenSource {
     }
 
     /// A usable access token: the one in memory while it has time left, else a new one.
-    pub fn access_token(&self) -> Result<String, OAuthError> {
+    pub fn access_token(&self) -> Result<Secret, OAuthError> {
         let mut g = self.lock();
         if let Some((t, exp)) = &g.access {
             if Instant::now() + EXPIRY_MARGIN < *exp {
@@ -608,24 +630,24 @@ impl TokenSource {
         self.refresh_locked(&mut g)
     }
 
-    fn refresh_locked(&self, g: &mut Inner) -> Result<String, OAuthError> {
+    fn refresh_locked(&self, g: &mut Inner) -> Result<Secret, OAuthError> {
         if !g.loaded {
             g.refresh = self.store.load();
             g.loaded = true;
         }
         let Some(rt) = g.refresh.clone() else { return Err(OAuthError::NotSignedIn) };
         // a renewed token the keyring did not take earlier: try again now
-        if g.unsaved && self.store.save(&rt) {
+        if g.unsaved && self.store.save(rt.expose()) {
             g.unsaved = false;
             g.told = false;
         }
         self.refreshes.fetch_add(1, Ordering::SeqCst);
-        match refresh(&self.cfg, &rt) {
+        match refresh(&self.cfg, rt.expose()) {
             Ok(t) => {
                 g.access = Some((t.access_token.clone(), Instant::now() + Duration::from_secs(t.expires_in)));
                 if let Some(new) = t.refresh_token.filter(|n| *n != rt) {
                     // the provider rotates refresh tokens: the old one is dead
-                    if self.store.save(&new) {
+                    if self.store.save(new.expose()) {
                         g.unsaved = false;
                         g.told = false;
                     } else {
@@ -661,7 +683,7 @@ impl TokenSource {
         match &t.refresh_token {
             Some(r) => {
                 g.refresh = Some(r.clone());
-                let kept = self.store.save(r);
+                let kept = self.store.save(r.expose());
                 g.unsaved = !kept;
                 g.told = !kept; // the sign-in dialog says so itself
                 kept
@@ -740,7 +762,7 @@ pub struct SignedIn {
 
 /// The whole browser sign-in of an account. Blocks (up to `timeout`): run it as a job.
 /// `shown` gets the sign-in address (so it can be offered when no browser opens).
-pub fn sign_in(account: &MailAccount, client_secret: Option<String>, cancel: &AtomicBool, timeout: Duration, shown: &dyn Fn(&str)) -> Result<SignedIn, OAuthError> {
+pub fn sign_in(account: &MailAccount, client_secret: Option<Secret>, cancel: &AtomicBool, timeout: Duration, shown: &dyn Fn(&str)) -> Result<SignedIn, OAuthError> {
     let cfg = OAuthConfig::for_account(account, client_secret)?;
     let pending = begin(&cfg)?;
     shown(&pending.url);
@@ -771,7 +793,7 @@ enum Mech {
 /// Signs in to IMAP with an access token: `OAUTHBEARER` if the server offers it, else `XOAUTH2`.
 pub struct OAuthAuth {
     user: String,
-    token: String,
+    token: Secret,
     host: String,
     port: u16,
     mech: Mech,
@@ -779,7 +801,7 @@ pub struct OAuthAuth {
 
 impl OAuthAuth {
     pub fn new(user: &str, token: &str, host: &str, port: u16) -> OAuthAuth {
-        OAuthAuth { user: user.into(), token: token.into(), host: host.into(), port, mech: Mech::XOAuth2 }
+        OAuthAuth { user: user.into(), token: Secret::new(token), host: host.into(), port, mech: Mech::XOAuth2 }
     }
 }
 
@@ -790,13 +812,22 @@ impl fmt::Debug for OAuthAuth {
 }
 
 /// `user=<user>\x01auth=Bearer <token>\x01\x01` (the XOAUTH2 initial response).
-pub fn xoauth2_response(user: &str, token: &str) -> Vec<u8> {
-    format!("user={user}\x01auth=Bearer {token}\x01\x01").into_bytes()
+pub fn xoauth2_response(user: &str, token: &str) -> Zeroizing<Vec<u8>> {
+    bytes_of(&["user=", user, "\x01auth=Bearer ", token, "\x01\x01"])
+}
+
+/// The parts joined into one byte buffer of exactly the needed size, wiped when dropped.
+fn bytes_of(parts: &[&str]) -> Zeroizing<Vec<u8>> {
+    let mut v = Zeroizing::new(Vec::with_capacity(parts.iter().map(|p| p.len()).sum()));
+    for p in parts {
+        v.extend_from_slice(p.as_bytes());
+    }
+    v
 }
 
 /// The OAUTHBEARER initial response (RFC 7628 §3.1). `=` and `,` in the user name are escaped.
-pub fn oauthbearer_response(user: &str, host: &str, port: u16, token: &str) -> Vec<u8> {
-    format!("n,a={},\x01host={host}\x01port={port}\x01auth=Bearer {token}\x01\x01", user.replace('=', "=3D").replace(',', "=2C")).into_bytes()
+pub fn oauthbearer_response(user: &str, host: &str, port: u16, token: &str) -> Zeroizing<Vec<u8>> {
+    bytes_of(&["n,a=", &user.replace('=', "=3D").replace(',', "=2C"), ",\x01host=", host, "\x01port=", &port.to_string(), "\x01auth=Bearer ", token, "\x01\x01"])
 }
 
 impl Authenticator for OAuthAuth {
@@ -809,10 +840,10 @@ impl Authenticator for OAuthAuth {
             Mech::OAuthBearer => "OAUTHBEARER",
         }
     }
-    fn initial_response(&mut self) -> Vec<u8> {
+    fn initial_response(&mut self) -> Zeroizing<Vec<u8>> {
         match self.mech {
-            Mech::XOAuth2 => xoauth2_response(&self.user, &self.token),
-            Mech::OAuthBearer => oauthbearer_response(&self.user, &self.host, self.port, &self.token),
+            Mech::XOAuth2 => xoauth2_response(&self.user, self.token.expose()),
+            Mech::OAuthBearer => oauthbearer_response(&self.user, &self.host, self.port, self.token.expose()),
         }
     }
     /// The server's reason for refusing the token arrives as a challenge; the specifications
@@ -837,7 +868,7 @@ pub struct OAuthFactory {
 impl crate::imap_sync::AuthFactory for OAuthFactory {
     fn authenticator(&self) -> Result<Box<dyn Authenticator>, String> {
         let token = self.source.access_token().map_err(|e| e.to_string())?;
-        Ok(Box::new(OAuthAuth::new(&self.user, &token, &self.host, self.port)))
+        Ok(Box::new(OAuthAuth::new(&self.user, token.expose(), &self.host, self.port)))
     }
     /// The server refused the token: forget it, so that the connection is tried once more with
     /// a new one.
@@ -870,13 +901,13 @@ mod tests {
         }
     }
 
-    struct MemStore(Mutex<Option<String>>);
+    struct MemStore(Mutex<Option<Secret>>);
     impl RefreshStore for MemStore {
-        fn load(&self) -> Option<String> {
+        fn load(&self) -> Option<Secret> {
             self.0.lock().unwrap().clone()
         }
         fn save(&self, t: &str) -> bool {
-            *self.0.lock().unwrap() = Some(t.into());
+            *self.0.lock().unwrap() = Some(Secret::new(t));
             true
         }
         fn clear(&self) {
@@ -886,18 +917,18 @@ mod tests {
 
     /// A store that refuses to save while `refuse` is set.
     struct FlakyStore {
-        token: Mutex<Option<String>>,
+        token: Mutex<Option<Secret>>,
         refuse: std::sync::atomic::AtomicBool,
     }
     impl RefreshStore for FlakyStore {
-        fn load(&self) -> Option<String> {
+        fn load(&self) -> Option<Secret> {
             self.token.lock().unwrap().clone()
         }
         fn save(&self, t: &str) -> bool {
             if self.refuse.load(Ordering::SeqCst) {
                 return false;
             }
-            *self.token.lock().unwrap() = Some(t.into());
+            *self.token.lock().unwrap() = Some(Secret::new(t));
             true
         }
         fn clear(&self) {
@@ -918,7 +949,7 @@ mod tests {
         let f = FakeOAuth::start();
         let cfg = cfg_for(&f);
         let rt = f.new_refresh_token();
-        let store = Arc::new(FlakyStore { token: Mutex::new(Some(rt.clone())), refuse: std::sync::atomic::AtomicBool::new(true) });
+        let store = Arc::new(FlakyStore { token: Mutex::new(Some(Secret::new(&rt))), refuse: std::sync::atomic::AtomicBool::new(true) });
         let src = TokenSource::new(cfg, store.clone());
         f.state.lock().unwrap().rotate = true;
         src.access_token().unwrap();
@@ -1074,7 +1105,7 @@ mod tests {
     // spec: MAIL-084
     #[test]
     fn sasl_responses_follow_the_specifications() {
-        assert_eq!(xoauth2_response("someuser@example.com", "ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg"), b"user=someuser@example.com\x01auth=Bearer ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg\x01\x01".to_vec());
+        assert_eq!(*xoauth2_response("someuser@example.com", "ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg"), b"user=someuser@example.com\x01auth=Bearer ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg\x01\x01".to_vec());
         // Google's documented example, base64
         assert_eq!(
             base64_encode(&xoauth2_response("someuser@example.com", "ya29.vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg")),
@@ -1082,10 +1113,10 @@ mod tests {
         );
         // RFC 7628 §4.1
         assert_eq!(
-            oauthbearer_response("user@example.com", "server.example.com", 143, "vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg=="),
+            *oauthbearer_response("user@example.com", "server.example.com", 143, "vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg=="),
             b"n,a=user@example.com,\x01host=server.example.com\x01port=143\x01auth=Bearer vF9dft4qmTc2Nvb3RlckBhbHRhdmlzdGEuY29tCg==\x01\x01".to_vec()
         );
-        assert_eq!(oauthbearer_response("a=b,c", "h", 1, "t"), b"n,a=a=3Db=2Cc,\x01host=h\x01port=1\x01auth=Bearer t\x01\x01".to_vec());
+        assert_eq!(*oauthbearer_response("a=b,c", "h", 1, "t"), b"n,a=a=3Db=2Cc,\x01host=h\x01port=1\x01auth=Bearer t\x01\x01".to_vec());
         // OAUTHBEARER is preferred when offered; otherwise XOAUTH2
         let mut a = OAuthAuth::new("u", "TOKVALUE", "h", 993);
         a.select_mechanism(&|m| m == "XOAUTH2");
@@ -1107,7 +1138,7 @@ mod tests {
     #[test]
     fn token_answers_are_read_and_errors_are_told_apart() {
         let t = parse_token_response(200, r#"{"access_token":"at","token_type":"Bearer","expires_in":3599,"refresh_token":"rt","scope":"mail"}"#, false).unwrap();
-        assert_eq!((t.access_token.as_str(), t.refresh_token.as_deref(), t.expires_in, t.user), ("at", Some("rt"), 3599, None));
+        assert_eq!((t.access_token.expose(), t.refresh_token.as_ref().map(|s| s.expose()), t.expires_in, t.user), ("at", Some("rt"), 3599, None));
         // string expiry, no refresh token, lower-case type
         let t = parse_token_response(200, r#"{"access_token":"at","token_type":"bearer","expires_in":"120"}"#, true).unwrap();
         assert_eq!((t.refresh_token, t.expires_in), (None, 120));
@@ -1126,7 +1157,7 @@ mod tests {
             assert!(parse_token_response(200, junk, false).is_err(), "{junk}");
         }
         // a form body is percent-encoded
-        assert_eq!(form_body(&[("a b", "c&d=e"), ("x", "ü")]), "a%20b=c%26d%3De&x=%C3%BC");
+        assert_eq!(form_body(&[("a b", "c&d=e"), ("x", "ü")]).as_str(), "a%20b=c%26d%3De&x=%C3%BC");
     }
 
     // spec: MAIL-080, MAIL-082
@@ -1208,7 +1239,7 @@ mod tests {
         let f = FakeOAuth::start();
         let cfg = cfg_for(&f);
         let rt = f.new_refresh_token();
-        let store = Arc::new(MemStore(Mutex::new(Some(rt.clone()))));
+        let store = Arc::new(MemStore(Mutex::new(Some(Secret::new(&rt)))));
         let src = TokenSource::new(cfg.clone(), store.clone());
         // first use: refresh; second: the one in memory
         let a1 = src.access_token().unwrap();

@@ -20,13 +20,19 @@ pub struct Session {
     pub pds: String,
     pub did: String,
     pub handle: String,
-    pub access_jwt: String,
-    pub refresh_jwt: String,
+    pub access_jwt: Secret,
+    pub refresh_jwt: Secret,
 }
 
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Session").field("pds", &self.pds).field("did", &self.did).field("handle", &self.handle).field("access_jwt", &cal_dav::redacted(&self.access_jwt)).field("refresh_jwt", &cal_dav::redacted(&self.refresh_jwt)).finish()
+        f.debug_struct("Session")
+            .field("pds", &self.pds)
+            .field("did", &self.did)
+            .field("handle", &self.handle)
+            .field("access_jwt", &cal_dav::redacted(self.access_jwt.expose()))
+            .field("refresh_jwt", &cal_dav::redacted(self.refresh_jwt.expose()))
+            .finish()
     }
 }
 
@@ -35,13 +41,13 @@ impl std::fmt::Debug for Session {
 pub struct Api {
     server: String,
     handle: String,
-    password: String,
+    password: Secret,
     pub session: Option<Session>,
 }
 
 impl std::fmt::Debug for Api {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Api").field("server", &self.server).field("handle", &self.handle).field("password", &cal_dav::redacted(&self.password)).field("session", &self.session).finish()
+        f.debug_struct("Api").field("server", &self.server).field("handle", &self.handle).field("password", &cal_dav::redacted(self.password.expose())).field("session", &self.session).finish()
     }
 }
 
@@ -50,7 +56,7 @@ fn is_expired(e: &ApiError) -> bool {
 }
 
 fn session_from(v: &Value, server: &str) -> Result<Session, String> {
-    let (access, refresh, did) = (text(&v["accessJwt"]), text(&v["refreshJwt"]), text(&v["did"]));
+    let (access, refresh, did) = (secret_of(&v["accessJwt"]), secret_of(&v["refreshJwt"]), text(&v["did"]));
     if access.is_empty() || refresh.is_empty() || did.is_empty() {
         return Err("the server did not answer like a Bluesky server".into());
     }
@@ -71,33 +77,39 @@ fn pds_of_did_doc(doc: &Value) -> Option<String> {
 /// Sign in with the handle (or e-mail) and an app password (Settings → App passwords on bsky.app).
 pub fn create_session(server: &str, handle: &str, app_password: &str) -> Result<Session, String> {
     let server = clean_server(server)?;
-    let body = json!({"identifier": handle.trim().trim_start_matches('@'), "password": app_password});
-    let v = api("POST", &format!("{server}/xrpc/com.atproto.server.createSession"), None, Some(&body)).map_err(|e| if e.status == 401 || e.status == 400 { "Bluesky refused the handle or app password".to_string() } else { e.message })?;
-    session_from(&v, &server)
+    let mut body = json!({"identifier": handle.trim().trim_start_matches('@'), "password": app_password});
+    let answer = api("POST", &format!("{server}/xrpc/com.atproto.server.createSession"), None, Some(&body));
+    wipe_value(&mut body);
+    let mut v = answer.map_err(|e| if e.status == 401 || e.status == 400 { "Bluesky refused the handle or app password".to_string() } else { e.message })?;
+    let session = session_from(&v, &server);
+    wipe_value(&mut v);
+    session
 }
 
 /// Get new tokens with the refresh token.
 pub fn refresh_session(s: &Session) -> Result<Session, String> {
-    let v = api("POST", &format!("{}/xrpc/com.atproto.server.refreshSession", s.pds), Some(&s.refresh_jwt), None)?;
-    let mut n = session_from(&v, &s.pds)?;
+    let mut v = api("POST", &format!("{}/xrpc/com.atproto.server.refreshSession", s.pds), Some(s.refresh_jwt.expose()), None)?;
+    let n = session_from(&v, &s.pds);
+    wipe_value(&mut v);
+    let mut n = n?;
     n.pds = s.pds.clone();
     Ok(n)
 }
 
 impl Api {
     pub fn new(server: &str, handle: &str, password: &str) -> Api {
-        Api { server: server.trim().trim_end_matches('/').to_string(), handle: handle.trim().to_string(), password: password.to_string(), session: None }
+        Api { server: server.trim().trim_end_matches('/').to_string(), handle: handle.trim().to_string(), password: Secret::new(password), session: None }
     }
 
     /// Sign in now (done by itself with the first call).
     pub fn login(&mut self) -> Result<&Session, String> {
-        let s = create_session(&self.server, &self.handle, &self.password)?;
+        let s = create_session(&self.server, &self.handle, self.password.expose())?;
         Ok(self.session.insert(s))
     }
 
     fn once(&mut self, method: &str, nsid: &str, params: &[(&str, &str)], body: Option<&Value>) -> Result<Value, ApiError> {
         let s = self.session.as_ref().ok_or_else(|| ApiError::plain("not signed in"))?;
-        api(method, &format!("{}/xrpc/{nsid}{}", s.pds, query(params)), Some(&s.access_jwt), body)
+        api(method, &format!("{}/xrpc/{nsid}{}", s.pds, query(params)), Some(s.access_jwt.expose()), body)
     }
 
     /// One XRPC call. When the login has expired: renew it (refresh token, else app password) and try once more.

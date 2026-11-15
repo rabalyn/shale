@@ -18,7 +18,7 @@ pub struct CalendarDialog {
     pub new_local_name: String,
     pub dav_url: String,
     pub dav_user: String,
-    pub dav_pass: String,
+    pub dav_pass: crate::secret::Secret,
     pub found: Vec<(FoundCalendar, bool)>,
     discovering: Option<Discovery>,
     pub message: Option<String>,
@@ -39,7 +39,7 @@ pub enum CalDialogAction {
 
 impl CalendarDialog {
     pub fn new(sources: Vec<CalendarSource>, week_monday: bool) -> Self {
-        CalendarDialog { sources, week_monday, new_local_name: String::new(), dav_url: String::new(), dav_user: String::new(), dav_pass: String::new(), found: vec![], discovering: None, message: None, rects: vec![] }
+        CalendarDialog { sources, week_monday, new_local_name: String::new(), dav_url: String::new(), dav_user: String::new(), dav_pass: Default::default(), found: vec![], discovering: None, message: None, rects: vec![] }
     }
 
     fn start_discovery(&mut self) {
@@ -172,7 +172,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         rec("dav-user".into(), ui.add(egui::TextEdit::singleline(&mut d.dav_user).desired_width(220.0)));
         ui.end_row();
         ui.label(muted("Password"));
-        rec("dav-pass".into(), crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut d.dav_pass).desired_width(220.0)));
+        rec("dav-pass".into(), crate::secrets::password_edit(ui, &mut d.dav_pass, "", 220.0));
         ui.end_row();
     });
     ui.horizontal(|ui| {

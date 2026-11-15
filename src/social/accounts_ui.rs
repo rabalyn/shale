@@ -25,7 +25,7 @@ pub struct SocialDialog {
     /// Bluesky handle
     pub handle: String,
     /// Bluesky app password / Mastodon access token
-    pub secret: String,
+    pub secret: crate::secret::Secret,
     /// Mastodon: the code from the sign-in page
     pub code: String,
     /// Mastodon: sign in with an access token instead of the browser
@@ -59,7 +59,7 @@ fn spawn(ctx: &egui::Context, f: impl FnOnce() -> JobResult + Send + 'static) ->
 
 impl SocialDialog {
     pub fn new() -> SocialDialog {
-        SocialDialog { network: Network::Mastodon, server: String::new(), handle: String::new(), secret: String::new(), code: String::new(), use_token: false, app: None, job: None, error: None, rects: vec![] }
+        SocialDialog { network: Network::Mastodon, server: String::new(), handle: String::new(), secret: Default::default(), code: String::new(), use_token: false, app: None, job: None, error: None, rects: vec![] }
     }
 
     pub fn busy(&self) -> bool {
@@ -93,7 +93,7 @@ impl SocialDialog {
 
     fn sign_in(&mut self, ctx: &egui::Context) {
         self.error = None;
-        let secret = self.secret.trim().to_string();
+        let secret = crate::secret::Secret::new(self.secret.expose().trim());
         match self.network {
             Network::Mastodon => {
                 let server = match self.server_ok() {
@@ -117,7 +117,7 @@ impl SocialDialog {
                         (Some(app), false) => mastodon::exchange_code(&server, app, &code)?,
                         _ => secret,
                     };
-                    let who = mastodon::verify(&server, &token)?;
+                    let who = mastodon::verify(&server, token.expose())?;
                     Ok(Done::Added(SocialAccountEntry::new(Account::new(Network::Mastodon, &server, &who.handle, &who.display_name), &token)))
                 }));
             }
@@ -130,7 +130,7 @@ impl SocialDialog {
                 }
                 self.job = Some(spawn(ctx, move || {
                     let server = clean_server(&server).map_err(|e| format!("This server address can't be used: {e}"))?;
-                    let session = bluesky::create_session(&server, &handle, &secret)?;
+                    let session = bluesky::create_session(&server, &handle, secret.expose())?;
                     Ok(Done::Added(SocialAccountEntry::new(Account::new(Network::Bluesky, &server, &session.handle, &session.handle), &secret)))
                 }));
             }
@@ -231,7 +231,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
                 ui.end_row();
                 if d.use_token {
                     ui.label(muted("Access token"));
-                    rec("token".into(), crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut d.secret).hint_text("created in Preferences → Development").desired_width(380.0)));
+                    rec("token".into(), crate::secrets::password_edit(ui, &mut d.secret, "created in Preferences → Development", 380.0));
                     ui.end_row();
                 } else {
                     ui.label(muted("Step 1"));
@@ -263,7 +263,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
                 rec("handle".into(), ui.add(egui::TextEdit::singleline(&mut d.handle).hint_text("you.bsky.social").desired_width(380.0)));
                 ui.end_row();
                 ui.label(muted("App password"));
-                rec("app-password".into(), crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut d.secret).hint_text("xxxx-xxxx-xxxx-xxxx").desired_width(380.0)));
+                rec("app-password".into(), crate::secrets::password_edit(ui, &mut d.secret, "xxxx-xxxx-xxxx-xxxx", 380.0));
                 ui.end_row();
                 ui.label(muted("Server"));
                 rec("server".into(), ui.add(egui::TextEdit::singleline(&mut d.server).hint_text(BLUESKY_SERVER).desired_width(380.0)));
@@ -331,7 +331,7 @@ mod tests {
     fn the_account_dialog_checks_its_input_before_it_asks_the_network() {
         let ctx = egui::Context::default();
         let mut t = 0.0;
-        let acct = SocialAccountEntry { account: Account::new(Network::Bluesky, BLUESKY_SERVER, "ada.bsky.social", "ada.bsky.social"), secret: String::new() };
+        let acct = SocialAccountEntry { account: Account::new(Network::Bluesky, BLUESKY_SERVER, "ada.bsky.social", "ada.bsky.social"), secret: Default::default() };
         let accounts = vec![acct.clone()];
         let mut d = SocialDialog::new();
         frame(&ctx, &mut t, vec![], &mut d, &accounts);
@@ -402,7 +402,7 @@ mod tests {
         let added = click_and_wait(&ctx, &mut t, "sign-in", &mut d);
         let Some(DialogAction::Added(e)) = added else { panic!("no account was added: {:?}", d.error) };
         assert_eq!((e.account.network, e.account.handle.as_str(), e.account.display_name.as_str(), e.account.server.as_str()), (Network::Mastodon, "ada@127.0.0.1", "Ada L.", server.address().as_str()));
-        assert!(e.secret.is_empty() && server.state.lock().unwrap().tokens.contains(&e.secret()), "the access token the server made is in the keyring, not in the entry");
+        assert!(e.secret.is_empty() && server.state.lock().unwrap().tokens.iter().any(|t| t == e.secret().expose()), "the access token the server made is in the keyring, not in the entry");
         crate::secrets::social_clear(&e.account.server, &e.account.handle);
         assert_eq!(server.state.lock().unwrap().requests, ["POST /api/v1/apps", "GET /oauth/authorize", "POST /oauth/token", "GET /api/v1/accounts/verify_credentials"]);
         assert!(d.code.is_empty() && d.server.is_empty() && d.app.is_none(), "the dialog is ready for the next account");
@@ -468,7 +468,7 @@ mod tests {
         assert_eq!(d.error.as_deref(), Some("Bluesky refused the handle or app password"));
         d.secret = "abcd-efgh-ijkl-mnop".into();
         let Some(DialogAction::Added(e)) = click_and_wait(&ctx, &mut t, "sign-in", &mut d) else { panic!("no account was added: {:?}", d.error) };
-        assert_eq!((e.account.network, e.account.handle.as_str(), e.secret.as_str(), e.secret().as_str()), (Network::Bluesky, "ada.test", "", "abcd-efgh-ijkl-mnop"), "the app password is in the keyring");
+        assert_eq!((e.account.network, e.account.handle.as_str(), e.secret.expose(), e.secret().expose()), (Network::Bluesky, "ada.test", "", "abcd-efgh-ijkl-mnop"), "the app password is in the keyring");
         crate::secrets::social_clear(&e.account.server, &e.account.handle);
         assert!(d.secret.is_empty() && d.handle.is_empty(), "the app password does not stay in the dialog");
     }

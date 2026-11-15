@@ -33,9 +33,11 @@ mod ui_tests;
 
 use crate::cal_dav::{self, check_url, Origin};
 use crate::cal_time as t;
+use crate::secret::Secret;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
+use zeroize::{Zeroize, Zeroizing};
 
 // ---------------------------------------------------------------- data model
 
@@ -84,26 +86,26 @@ pub struct SocialAccountEntry {
     #[serde(flatten)]
     pub account: Account,
     /// the access token / app password; empty while the keyring holds it
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub secret: String,
+    #[serde(default, skip_serializing_if = "Secret::is_empty")]
+    pub secret: Secret,
 }
 
 impl std::fmt::Debug for SocialAccountEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SocialAccountEntry").field("account", &self.account).field("secret", &cal_dav::redacted(&self.secret)).finish()
+        f.debug_struct("SocialAccountEntry").field("account", &self.account).field("secret", &cal_dav::redacted(self.secret.expose())).finish()
     }
 }
 
 impl SocialAccountEntry {
     /// Keep the secret of a new account in the keyring (blocking: the keyring may ask for its
     /// password), or in the entry when there is no keyring.
-    pub fn new(account: Account, secret: &str) -> SocialAccountEntry {
+    pub fn new(account: Account, secret: &Secret) -> SocialAccountEntry {
         let secret = crate::secrets::social_store_or_keep(&account.server, &account.handle, secret);
         SocialAccountEntry { account, secret }
     }
 
     /// The secret, from the keyring or the entry (blocking, like `new`).
-    pub fn secret(&self) -> String {
+    pub fn secret(&self) -> Secret {
         crate::secrets::social_secret(&self.account.server, &self.account.handle, &self.secret)
     }
 }
@@ -285,39 +287,79 @@ const MAX_JSON: u64 = 20_000_000;
 pub const MAX_MEDIA_BYTES: u64 = 64_000_000;
 
 fn no_login() -> cal_dav::Account {
-    cal_dav::Account { url: String::new(), username: String::new(), password: String::new() }
+    cal_dav::Account { url: String::new(), username: String::new(), password: Secret::default() }
+}
+
+/// Overwrite every string in a JSON answer or request that held a secret (the tree would
+/// otherwise leave the text in freed memory).
+pub(crate) fn wipe_value(v: &mut Value) {
+    match v {
+        Value::String(s) => s.zeroize(),
+        Value::Array(a) => a.iter_mut().for_each(wipe_value),
+        Value::Object(o) => o.iter_mut().for_each(|(_, x)| wipe_value(x)),
+        _ => {}
+    }
+}
+
+/// A secret text out of a JSON value (empty when it is not a string).
+pub(crate) fn secret_of(v: &Value) -> Secret {
+    Secret::new(v.as_str().unwrap_or(""))
+}
+
+/// The JSON as text in a buffer of exactly the right size (found by a first, counting pass), so
+/// nothing is left behind by growing; wiped when dropped.
+fn json_text(v: &Value) -> Zeroizing<String> {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0 += b.len();
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut n = Count(0);
+    let _ = serde_json::to_writer(&mut n, v);
+    let mut out = Zeroizing::new(Vec::with_capacity(n.0));
+    let _ = serde_json::to_writer(&mut *out, v);
+    // what serde_json wrote is UTF-8; the empty string is the (unreachable) failure
+    Zeroizing::new(String::from_utf8(std::mem::take(&mut *out)).unwrap_or_default())
 }
 
 /// One JSON request to an API. `token`: sent as `Authorization: Bearer …` (inside curl's input,
 /// never on its command line); only ever to this one address.
 pub(crate) fn api(method: &str, url: &str, token: Option<&str>, body: Option<&Value>) -> Result<Value, ApiError> {
-    let mut headers = vec!["Accept: application/json".to_string()];
-    let text = body.map(|b| b.to_string()).unwrap_or_default();
+    let mut hs = vec!["Accept: application/json"];
+    // the body can hold a password or client secret, the header holds the token: both are wiped
+    let text = body.map(json_text).unwrap_or_default();
     if body.is_some() {
-        headers.push("Content-Type: application/json".into());
+        hs.push("Content-Type: application/json");
     }
+    let auth;
     if let Some(tok) = token {
         if tok.chars().any(char::is_control) {
             return Err(ApiError::plain("the access token contains line breaks or control characters"));
         }
-        headers.push(format!("Authorization: Bearer {tok}"));
+        auth = crate::secret::concat(&["Authorization: Bearer ", tok]);
+        hs.push(&auth);
     }
-    let hs: Vec<&str> = headers.iter().map(|s| s.as_str()).collect();
     let r = cal_dav::request_bytes(method, url, &hs, &text, &no_login(), MAX_JSON).map_err(ApiError::plain)?;
-    let json: Value = serde_json::from_slice(&r.body).unwrap_or(Value::Null);
-    if (200..300).contains(&r.status) {
-        return if json.is_null() && !r.body.iter().all(|b| b.is_ascii_whitespace()) { Err(ApiError::plain("the server's answer could not be read")) } else { Ok(json) };
+    let (status, answer) = (r.status, Zeroizing::new(r.body));
+    let json: Value = serde_json::from_slice(&answer).unwrap_or(Value::Null);
+    if (200..300).contains(&status) {
+        return if json.is_null() && !answer.iter().all(|b| b.is_ascii_whitespace()) { Err(ApiError::plain("the server's answer could not be read")) } else { Ok(json) };
     }
     // Bluesky: {"error": "ExpiredToken", "message": "…"}; Mastodon: {"error": "…"}
     let code = json["error"].as_str().unwrap_or("").to_string();
     let detail = json["message"].as_str().or_else(|| json["error_description"].as_str()).or_else(|| json["error"].as_str()).unwrap_or("");
-    let message = match r.status {
+    let message = match status {
         401 | 403 => format!("the server refused the login{}", if detail.is_empty() { String::new() } else { format!(" ({detail})") }),
         404 => format!("not found (404){}", if detail.is_empty() { String::new() } else { format!(": {detail}") }),
         429 => "the server says: too many requests, try again in a few minutes".to_string(),
         s => format!("the server answered with status {s}{}", if detail.is_empty() { String::new() } else { format!(": {detail}") }),
     };
-    Err(ApiError { status: r.status, code, message })
+    Err(ApiError { status, code, message })
 }
 
 /// Download a media file (no login is sent). At most `MAX_MEDIA_BYTES`. Returns the bytes and
@@ -524,7 +566,7 @@ pub struct Client {
 
 #[derive(Clone)]
 enum Backend {
-    Mastodon { token: String },
+    Mastodon { token: Secret },
     Bluesky(bluesky::Api),
 }
 
@@ -538,7 +580,7 @@ impl Client {
     /// `secret`: the Mastodon access token or the Bluesky app password. Nothing is sent yet.
     pub fn new(account: Account, secret: &str) -> Client {
         let backend = match account.network {
-            Network::Mastodon => Backend::Mastodon { token: secret.trim().to_string() },
+            Network::Mastodon => Backend::Mastodon { token: Secret::new(secret.trim()) },
             Network::Bluesky => Backend::Bluesky(bluesky::Api::new(&account.server, &account.handle, secret)),
         };
         Client { account, backend }
@@ -547,7 +589,7 @@ impl Client {
     /// The timelines to choose from.
     pub fn feeds(&mut self) -> Result<Vec<Feed>, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::feeds(&self.account.server, token),
+            Backend::Mastodon { token } => mastodon::feeds(&self.account.server, token.expose()),
             Backend::Bluesky(api) => bluesky::feeds(api),
         }
     }
@@ -556,7 +598,7 @@ impl Client {
     /// `Page::cursor` of the page before.
     pub fn timeline(&mut self, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::timeline(&self.account.server, token, feed, cursor),
+            Backend::Mastodon { token } => mastodon::timeline(&self.account.server, token.expose(), feed, cursor),
             Backend::Bluesky(api) => bluesky::timeline(api, feed, cursor),
         }
     }
@@ -564,7 +606,7 @@ impl Client {
     /// The posts newer than the known ones, newest first, at most `MAX_NEW` (see `Fresh`).
     pub fn newer(&mut self, feed: &Feed, since: &Since) -> Result<Fresh, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::newer(&self.account.server, token, feed, since.top.as_deref(), MAX_NEW),
+            Backend::Mastodon { token } => mastodon::newer(&self.account.server, token.expose(), feed, since.top.as_deref(), MAX_NEW),
             Backend::Bluesky(api) => bluesky::newer(api, feed, &since.known, MAX_NEW),
         }
     }
@@ -572,7 +614,7 @@ impl Client {
     /// One post by its id (to open a search hit the index and the feed no longer hold, SOC-039).
     pub fn fetch_post(&mut self, id: &str) -> Result<Post, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::fetch_post(&self.account.server, token, id),
+            Backend::Mastodon { token } => mastodon::fetch_post(&self.account.server, token.expose(), id),
             Backend::Bluesky(api) => bluesky::fetch_post(api, id),
         }
     }
@@ -581,7 +623,7 @@ impl Client {
     /// replies of other people below it (see `conversation`).
     pub fn thread_with_replies(&mut self, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::thread_full(&self.account.server, token, post),
+            Backend::Mastodon { token } => mastodon::thread_full(&self.account.server, token.expose(), post),
             Backend::Bluesky(api) => bluesky::thread_full(api, post),
         }
     }
@@ -603,6 +645,19 @@ impl Client {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    // spec: SEC-017
+    #[test]
+    fn json_with_secrets_is_written_exactly_and_wiped_after_use() {
+        let mut v = serde_json::json!({"identifier": "ada", "password": "hunter2", "list": ["x", {"deep": "y"}], "n": 5, "ü": "ö"});
+        assert_eq!(*json_text(&v), v.to_string());
+        wipe_value(&mut v);
+        assert_eq!(v["password"], "", "strings are emptied");
+        assert_eq!(v["list"][1]["deep"], "");
+        assert_eq!(v["n"], 5, "numbers stay");
+        assert_eq!(secret_of(&serde_json::json!("tok")).expose(), "tok");
+        assert!(secret_of(&serde_json::json!(5)).is_empty());
+    }
 
     pub fn post(id: &str, author: &str, at: i64, reply_to: Option<&str>) -> Post {
         Post {

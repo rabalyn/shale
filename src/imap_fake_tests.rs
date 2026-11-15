@@ -1119,13 +1119,13 @@ mod tests {
             oauth_scope: "mail".into(),
             ..Default::default()
         };
-        struct Mem(Mutex<Option<String>>);
+        struct Mem(Mutex<Option<crate::secret::Secret>>);
         impl crate::oauth::RefreshStore for Mem {
-            fn load(&self) -> Option<String> {
+            fn load(&self) -> Option<crate::secret::Secret> {
                 self.0.lock().unwrap().clone()
             }
             fn save(&self, t: &str) -> bool {
-                *self.0.lock().unwrap() = Some(t.into());
+                *self.0.lock().unwrap() = Some(crate::secret::Secret::new(t));
                 true
             }
             fn clear(&self) {
@@ -1133,7 +1133,7 @@ mod tests {
             }
         }
         let rt = provider.new_refresh_token();
-        let source = Arc::new(TokenSource::new(OAuthConfig::for_account(&acct, None).unwrap(), Arc::new(Mem(Mutex::new(Some(rt))))));
+        let source = Arc::new(TokenSource::new(OAuthConfig::for_account(&acct, None).unwrap(), Arc::new(Mem(Mutex::new(Some(crate::secret::Secret::new(&rt)))))));
         let factory = OAuthFactory { user: "ada".into(), host: "localhost".into(), port: server.port, source: source.clone() };
         let go = |f: &dyn AuthFactory| connect_with_retry(f, |a| Client::connect_test(&server.settings(), server_cert(), a));
         go(&factory).unwrap().logout();
