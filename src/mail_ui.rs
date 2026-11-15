@@ -52,6 +52,8 @@ pub enum StoreState {
     Closed,
     Opening,
     Ready(Arc<MailStore>),
+    /// The index is being built again (USE-012): nothing syncs, sends or changes it meanwhile.
+    Rebuilding(Arc<MailStore>),
     Failed(String),
 }
 
@@ -586,6 +588,45 @@ impl MailView {
         }
     }
 
+    /// Why the mail index cannot be rebuilt now (USE-012): a sync, an action or a send runs,
+    /// or the store is not open.
+    pub fn rebuild_blocked(&self) -> Option<String> {
+        if !matches!(self.store, StoreState::Ready(_)) {
+            return Some("the mail store is not open".into());
+        }
+        if self.any_sync_running() {
+            return Some("mail is syncing; try again when it is done".into());
+        }
+        if !self.ops_running.is_empty() || !self.send_running.is_empty() {
+            return Some("changes or mail are being sent to the server; try again when that is done".into());
+        }
+        None
+    }
+
+    /// Hand the store over for a rebuild: until [`MailView::end_rebuild`] nothing starts that
+    /// writes the index (every such job starts from `ready_store`).
+    pub fn begin_rebuild(&mut self) -> Result<Arc<MailStore>, String> {
+        if let Some(why) = self.rebuild_blocked() {
+            return Err(why);
+        }
+        let StoreState::Ready(s) = std::mem::replace(&mut self.store, StoreState::Closed) else { unreachable!("checked above") };
+        self.close_message();
+        self.store = StoreState::Rebuilding(s.clone());
+        Ok(s)
+    }
+
+    /// The rebuild ended (well or not): the index is read again from the start.
+    pub fn end_rebuild(&mut self, cfg: &Config) {
+        let StoreState::Rebuilding(s) = std::mem::replace(&mut self.store, StoreState::Closed) else { return };
+        self.reader = s.reader().ok();
+        self.store = StoreState::Ready(s);
+        // the folders keep their rows (and ids), so the folder shown stays
+        self.refresh();
+        if self.folder.is_none() {
+            self.select_first_folder(cfg);
+        }
+    }
+
     /// Run `f` as a job; its outcome comes back as an event and wakes the window.
     fn spawn<T: Send + 'static>(&self, f: impl FnOnce() -> T + Send + 'static, wrap: impl FnOnce(Result<T, String>) -> Event + Send + 'static) {
         let tx = self.tx.clone();
@@ -653,7 +694,7 @@ impl MailView {
 
     /// Is a job, a sync or a debounce going on?
     pub fn busy(&self) -> bool {
-        matches!(self.store, StoreState::Opening)
+        matches!(self.store, StoreState::Opening | StoreState::Rebuilding(_))
             || self.any_sync_running()
             || self.searching
             || self.search_edited.is_some()

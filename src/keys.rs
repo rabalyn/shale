@@ -217,6 +217,7 @@ actions! {
     CloseTab => "global.close_tab", "Close tab", Global, ["Ctrl+W"];
     Save => "global.save", "Save now", Global, ["Ctrl+S"];
     Settings => "global.settings", "Settings", Global, ["Ctrl+Comma"];
+    DataUsage => "global.data_usage", "Data usage (what Shale keeps on disk, its caches)", Global, ["Ctrl+Shift+D"];
     PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+Alt+H"];
     NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+Alt+L"];
     AlternateView => "global.alternate_view", "Alternate view: swap with the previous view of this tab (again: back)", Global, ["Ctrl+6"];
@@ -504,7 +505,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 23 + 23 + 5);
+        assert_eq!(DEFS.len(), 24 + 23 + 5);
     }
 
     // spec: KEY-003

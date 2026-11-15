@@ -125,6 +125,7 @@ mod drops;
 mod mail;
 mod social;
 mod sync;
+mod usage;
 
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
@@ -171,6 +172,8 @@ pub enum Modal {
         /// State of the Keybindings tab (KEY-006).
         keys: Box<crate::keys_ui::KeyDialog>,
     },
+    /// the Data usage dialog (USE-001)
+    DataUsage,
     Export(Box<crate::export_dialog::ExportDialog>),
     Calendars(Box<crate::cal_dialog::CalendarDialog>),
     Event(Box<crate::cal_dialog::EventDialog>),
@@ -341,6 +344,8 @@ pub struct ShaleApp {
     tag_at: Option<Instant>,
     pending_drops: Vec<(std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>)>,
     pub scenes: SceneCache,
+    /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
+    pub usage: crate::data_usage::DataUsage,
     pub modal: Option<Modal>,
     /// The key registry with the user's changes (KEY-001…009).
     pub keymap: crate::keys::Keymap,
@@ -387,6 +392,7 @@ impl ShaleApp {
         let screenshot = opts.screenshot.clone();
         let (mut cfg, cfg_problem) = if persist { Config::load() } else { (Config::default(), None) };
         let persist_config = persist;
+        crate::data_usage::dialog::sanitize(&mut cfg.caches);
         // screenshots and scripted checks of vim-lite: SHALE_VIM=1 turns it on
         if opts.screenshot.is_some() && std::env::var("SHALE_VIM").as_deref() == Ok("1") {
             cfg.vim_mode = true;
@@ -404,6 +410,36 @@ impl ShaleApp {
             (None, None) => cfg.vault.clone().filter(|p| p.is_dir()),
         };
         let default_welcome = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_default().join("Notes");
+        // where the data lives: the user's folders, or temporary ones for tests and screenshots
+        let n = NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        let mail_root = if persist { crate::mail_store::default_root() } else { std::env::temp_dir().join(format!("shale-mail-{pid}-{n}")) };
+        let social_dir = if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{pid}")) };
+        let calendar_dir = if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{pid}")) };
+        let recovery_root = if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{pid}")) };
+        let places = if persist {
+            crate::data_usage::Places {
+                pictures: social_dir.clone(),
+                post_index: Some(crate::social::post_index::default_path()),
+                mail_root: mail_root.clone(),
+                debug_log: crate::config::input_log_path(),
+                calendars: calendar_dir.clone(),
+                calendar_trash: crate::cal_store::default_trash_dir(),
+                recovery: recovery_root.clone(),
+                cleanup_file: crate::data_usage::cleanup::default_path(),
+                vault: None,
+            }
+        } else {
+            crate::data_usage::Places {
+                pictures: social_dir.clone(),
+                post_index: None,
+                mail_root: mail_root.clone(),
+                calendars: calendar_dir.clone(),
+                calendar_trash: calendar_dir.join(".calendar-trash"),
+                recovery: recovery_root.clone(),
+                ..crate::data_usage::Places::in_folder(&std::env::temp_dir().join(format!("shale-usage-{pid}-{n}")))
+            }
+        };
         let mut app = ShaleApp {
             keymap: crate::keys::Keymap::from_overrides(&cfg.keybindings),
             cfg: cfg.clone(),
@@ -429,18 +465,17 @@ impl ShaleApp {
             graph: GraphView::new(false),
             local_graph: GraphView::new(true),
             calendar: {
-                let mut c = crate::cal_store::CalendarStore::new(cfg.calendars.clone(), if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{}", std::process::id())) });
+                let mut c = crate::cal_store::CalendarStore::new(cfg.calendars.clone(), calendar_dir);
                 if persist {
                     c.trash_dir = crate::cal_store::default_trash_dir();
                 }
                 c
             },
-            mail: crate::mail_ui::MailView::new(if persist { crate::mail_store::default_root() } else { std::env::temp_dir().join(format!("shale-mail-{}-{}", std::process::id(), NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst))) }),
+            mail: crate::mail_ui::MailView::new(mail_root),
             cal_side: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Small),
             cal_main: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Medium),
             social: {
-                let mut s =
-                    crate::social::state::SocialState::new(if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{}", std::process::id())) });
+                let mut s = crate::social::state::SocialState::new(social_dir);
                 if persist {
                     s.open_index(&crate::social::post_index::default_path());
                 }
@@ -483,7 +518,8 @@ impl ShaleApp {
             script: opts.keys.as_deref().map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default(),
             script_texts: vec![],
             script_last_frame: 0,
-            recovery_root: if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{}", std::process::id())) },
+            recovery_root,
+            usage: crate::data_usage::DataUsage::new(places),
             recovery_notice: vec![],
         };
         app.recovery_notice = crate::recovery::unseen(&app.recovery_root);
@@ -521,6 +557,13 @@ impl ShaleApp {
                 }
                 Some("tasks") => app.show_view(View::Tasks, false),
                 Some("keybindings") => app.open_settings(SettingsTab::Keybindings),
+                // the Data usage dialog with made-up cache files in the temporary folders
+                Some("data-usage") => {
+                    if let Err(e) = crate::data_usage::seed_demo(&app.usage.places) {
+                        eprintln!("could not make the demo caches: {e}");
+                    }
+                    app.open_data_usage();
+                }
                 Some("graph") => app.show_view(View::Graph, false),
                 // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
                 Some(v @ ("social" | "social-import")) => {
@@ -1811,6 +1854,9 @@ impl ShaleApp {
         if settings {
             self.open_settings(SettingsTab::General);
         }
+        if is(KeyAction::DataUsage) {
+            self.open_data_usage();
+        }
     }
 
     /// Open the Settings dialog on this tab.
@@ -2193,6 +2239,7 @@ impl ShaleApp {
         self.modals(ui);
         self.handle_drops(ui);
         self.learn_tags_tick();
+        self.usage_tick();
         self.paint_toasts(ui);
         self.paint_recovery_notice(ui);
         if !self.script.is_empty() {
@@ -2277,6 +2324,53 @@ pub(crate) mod tests {
         (app, d)
     }
 
+    // spec: USE-001, USE-006, USE-012, USE-015
+    #[test]
+    fn the_data_usage_dialog_opens_counts_and_clears_and_the_mail_index_waits_for_the_store() {
+        use crate::data_usage::{dialog::Ask, CacheId};
+        let (mut app, d) = test_app("usage");
+        let ctx = egui::Context::default();
+        app.ctx = Some(ctx.clone());
+        assert!(!app.usage.places.pictures.starts_with(dirs::cache_dir().unwrap_or_default()) || app.usage.places.pictures.starts_with(std::env::temp_dir()), "a test never sees the real caches");
+        assert_eq!(app.usage.places.post_index, None);
+        std::fs::create_dir_all(d.join(".shale")).unwrap();
+        crate::fsutil::write_atomic(&crate::tagwords::file_in(&d), b"{}").unwrap();
+        app.open_data_usage();
+        assert!(matches!(app.modal, Some(Modal::DataUsage)));
+        let mut n = 0;
+        while (app.usage.saved.is_none() || app.usage.stats.len() < CacheId::ALL.len()) && n < 300 {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| app.run_frame(ui));
+            out.textures_delta.clear();
+            std::thread::sleep(Duration::from_millis(10));
+            n += 1;
+        }
+        let saved = app.usage.saved.clone().unwrap().unwrap();
+        assert!(saved.vault.iter().any(|l| l.label == "Notes" && l.files > 0), "{:?}", saved.vault);
+        assert_eq!(app.usage.stats[&CacheId::TagWords].as_ref().unwrap().entries, 1);
+        // the mail store is not open: the rebuild is refused with the reason and nothing runs
+        app.usage_ask(Ask::Clear(CacheId::MailIndex));
+        assert!(!app.usage.running(CacheId::MailIndex));
+        assert!(app.toasts.iter().any(|(t, _)| t.contains("not now")), "{:?}", app.toasts);
+        assert!(app.usage.record.caches[&CacheId::MailIndex].error.is_some());
+        // tag words: cleared, and learned again at once
+        app.tag_gen = 0;
+        app.usage_ask(Ask::Clear(CacheId::TagWords));
+        let mut n = 0;
+        while app.usage.running(CacheId::TagWords) && n < 300 {
+            app.usage_tick();
+            std::thread::sleep(Duration::from_millis(10));
+            n += 1;
+        }
+        assert!(!crate::tagwords::file_in(&d).exists() || app.tag_job.is_some());
+        assert_eq!(app.tag_gen, u64::MAX, "learning starts again");
+        assert!(app.toasts.iter().any(|(t, _)| t.starts_with("Tag words cleared")), "{:?}", app.toasts);
+        assert!(app.usage_ask(Ask::Open(PathBuf::from("Ideas.md"))), "opening a file closes the dialog");
+        assert_eq!(app.current_path(), Some(PathBuf::from("Ideas.md")));
+        app.usage_ask(Ask::ShowFolder(PathBuf::from("Projects")));
+        assert!(app.expanded.contains(Path::new("Projects")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: LINK-005, NAV-001
     #[test]
     fn blue_link_opens_existing_note() {
@@ -2307,10 +2401,15 @@ pub(crate) mod tests {
     #[test]
     fn new_folder_stays_inside_the_vault() {
         let (mut app, d) = test_app("newfolder");
+        // the vault sits in the shared temp folder, where another program may have made an `x`:
+        // check that it is not created or changed, not that it is absent
+        let outside = d.parent().unwrap().join("x");
+        let before = std::fs::metadata(&outside).ok().map(|m| (m.is_dir(), m.modified().ok()));
         for bad in ["../x", "/../../x", "a/../../x", "~/x"] {
             assert!(app.create_folder(Path::new("Projects"), bad).is_err(), "{bad} must be refused");
         }
-        assert!(!d.join("x").exists() && !d.parent().unwrap().join("x").exists());
+        assert!(!d.join("x").exists());
+        assert_eq!(std::fs::metadata(&outside).ok().map(|m| (m.is_dir(), m.modified().ok())), before, "nothing outside the vault is touched");
         assert_eq!(app.create_folder(Path::new("Projects"), "/a/ b ").unwrap(), PathBuf::from("Projects/a/b"));
         assert!(d.join("Projects/a/b").is_dir());
         let _ = std::fs::remove_dir_all(&d);

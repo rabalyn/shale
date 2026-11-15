@@ -216,6 +216,33 @@ fn lenient<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned + De
     Ok(serde_json::from_value(v).unwrap_or_default())
 }
 
+/// The retention settings of the caches (USE-020). `None` means "forever" for an age and "no
+/// limit" for a size or count.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct CacheRetention {
+    /// Social pictures: days since a picture was fetched.
+    pub picture_days: Option<u32>,
+    /// Social pictures: the size of the folder in MB.
+    pub picture_mb: Option<u32>,
+    /// Social post index: days by the date of the post (SOC-032).
+    pub post_days: Option<u32>,
+    /// Social post index: posts per account (SOC-032).
+    pub posts_per_account: Option<u32>,
+    /// Mail index backups: how many of the newest are kept (MAIL-008).
+    pub mail_backups: Option<u32>,
+    /// Damaged mail index copies: days by the date in their name.
+    pub broken_days: Option<u32>,
+    /// Input debug log: its size in MB.
+    pub debug_log_mb: Option<u32>,
+}
+
+impl Default for CacheRetention {
+    fn default() -> Self {
+        CacheRetention { picture_days: Some(30), picture_mb: Some(500), post_days: Some(365), posts_per_account: Some(10_000), mail_backups: Some(3), broken_days: None, debug_log_mb: Some(10) }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
@@ -276,6 +303,9 @@ pub struct Config {
     pub social_replies: bool,
     /// Minutes between looks for new posts in the feeds open in tabs (0 = never, SOC-025).
     pub social_check_minutes: u32,
+    /// How long each cache is kept (USE-020).
+    #[serde(deserialize_with = "lenient")]
+    pub caches: CacheRetention,
     /// Keybindings the user changed: action id -> bindings as text (KEY-007). Missing = defaults.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub keybindings: std::collections::BTreeMap<String, Vec<String>>,
@@ -329,6 +359,7 @@ impl Default for Config {
             social_last: None,
             social_replies: false,
             social_check_minutes: 5,
+            caches: CacheRetention::default(),
             keybindings: Default::default(),
             legacy_open_files: None,
             legacy_last_import_folder: None,

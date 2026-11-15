@@ -5,16 +5,18 @@
 //!
 //! The index is global, not per vault: accounts are global settings (ADR-0005), so their posts
 //! belong to the machine and the user, and every vault can search them. It is bounded (see
-//! [`KEEP_POSTS`] and [`KEEP_DAYS`]) and only a cache: a file that cannot be read is replaced.
+//! [`KEEP_POSTS`] and [`KEEP_DAYS`], settings since USE-020) and only a cache: a file that cannot
+//! be read is replaced, and the Data usage dialog can empty and prune it (USE-011) through a
+//! connection of its own ([`clear_file`], [`prune_file`]).
 
 use super::{feed_ui::segments, Post};
 use crate::mail_db::{fts_query_in, fts_query_wild};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
-/// The most posts kept per account; the oldest go first.
+/// The most posts kept per account by default; the oldest go first.
 pub const KEEP_POSTS: usize = 10_000;
-/// Posts older than this many days are not kept (the date of the post counts).
+/// By default posts older than this many days are not kept (the date of the post counts).
 pub const KEEP_DAYS: i64 = 365;
 
 const VERSION: i64 = 1;
@@ -50,8 +52,10 @@ pub struct PostHit {
 
 pub struct PostIndex {
     conn: Connection,
-    pub keep_posts: usize,
-    pub keep_days: i64,
+    /// posts per account (None: no limit)
+    pub keep_posts: Option<usize>,
+    /// days by the date of the post (None: forever)
+    pub keep_days: Option<i64>,
 }
 
 fn setup(c: &Connection) -> rusqlite::Result<()> {
@@ -113,12 +117,87 @@ fn one_line(s: &str, n: usize) -> String {
     }
 }
 
+/// The limits: the days (for every account), then the newest `keep` of the account (or of
+/// every account). Returns how many posts went.
+fn apply_limits(tx: &rusqlite::Transaction, cutoff: i64, account: Option<&str>, keep: Option<usize>) -> rusqlite::Result<u64> {
+    tx.execute("DELETE FROM posts_fts WHERE rowid IN (SELECT id FROM posts WHERE stamp < ?1)", [cutoff])?;
+    let mut gone = tx.execute("DELETE FROM posts WHERE stamp < ?1", [cutoff])? as u64;
+    let Some(keep) = keep else { return Ok(gone) };
+    let accounts: Vec<String> = match account {
+        Some(a) => vec![a.to_string()],
+        None => tx.prepare("SELECT DISTINCT account FROM posts")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?,
+    };
+    let over = "SELECT id FROM posts WHERE account = ?1 AND id NOT IN (SELECT id FROM posts WHERE account = ?1 ORDER BY stamp DESC, id DESC LIMIT ?2)";
+    for a in accounts {
+        tx.execute(&format!("DELETE FROM posts_fts WHERE rowid IN ({over})"), params![a, keep as i64])?;
+        gone += tx.execute(&format!("DELETE FROM posts WHERE id IN ({over})"), params![a, keep as i64])? as u64;
+    }
+    Ok(gone)
+}
+
+/// The size of the index file with its journal files.
+fn file_bytes(path: &Path) -> u64 {
+    ["", "-wal", "-shm"].iter().filter_map(|ext| std::fs::metadata(format!("{}{ext}", path.display())).ok()).map(|m| m.len()).sum()
+}
+
+/// A second connection to the index file for the Data usage dialog (the window keeps its own).
+/// A missing file is not created.
+fn open_side(path: &Path) -> Result<Option<Connection>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let c = Connection::open(path).map_err(|e| e.to_string())?;
+    c.busy_timeout(std::time::Duration::from_secs(10)).map_err(|e| e.to_string())?;
+    setup(&c).map_err(|e| e.to_string())?;
+    Ok(Some(c))
+}
+
+/// Size, number of posts and the date of the oldest (USE-006).
+pub fn stats_file(path: &Path) -> Result<crate::data_usage::CacheStats, String> {
+    let Some(c) = open_side(path)? else { return Ok(Default::default()) };
+    let (n, oldest): (i64, Option<i64>) = c.query_row("SELECT COUNT(*), MIN(stamp) FROM posts", [], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|e| e.to_string())?;
+    Ok(crate::data_usage::CacheStats { bytes: file_bytes(path), entries: n as u64, oldest })
+}
+
+/// Empty the index of every account and compact the file (USE-011).
+pub fn clear_file(path: &Path) -> Result<crate::data_usage::Freed, String> {
+    let Some(mut c) = open_side(path)? else { return Ok(Default::default()) };
+    let before = file_bytes(path);
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM posts_fts", []).map_err(|e| e.to_string())?;
+    let n = tx.execute("DELETE FROM posts", []).map_err(|e| e.to_string())? as u64;
+    tx.commit().map_err(|e| e.to_string())?;
+    compact(&c);
+    Ok(crate::data_usage::Freed { bytes: before.saturating_sub(file_bytes(path)), entries: n })
+}
+
+/// Drop what the retention settings no longer allow (USE-022): posts older than `days` by
+/// their date, then the oldest of each account over `per_account`.
+pub fn prune_file(path: &Path, days: Option<u32>, per_account: Option<u32>, now: i64) -> Result<crate::data_usage::Freed, String> {
+    let Some(mut c) = open_side(path)? else { return Ok(Default::default()) };
+    let before = file_bytes(path);
+    let cutoff = days.map(|d| now - i64::from(d) * 86_400).unwrap_or(i64::MIN);
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    let n = apply_limits(&tx, cutoff, None, per_account.map(|n| n as usize)).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    if n > 0 {
+        compact(&c);
+    }
+    Ok(crate::data_usage::Freed { bytes: before.saturating_sub(file_bytes(path)), entries: n })
+}
+
+/// Give the free pages back to the file system; a busy file stays as it is (the next prune
+/// tries again).
+fn compact(c: &Connection) {
+    let _ = c.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
+}
+
 impl PostIndex {
     /// An index that lives in memory only (tests, screenshots).
     pub fn in_memory() -> PostIndex {
         let conn = Connection::open_in_memory().expect("an in-memory database opens");
         setup(&conn).expect("the layout is valid");
-        PostIndex { conn, keep_posts: KEEP_POSTS, keep_days: KEEP_DAYS }
+        PostIndex { conn, keep_posts: Some(KEEP_POSTS), keep_days: Some(KEEP_DAYS) }
     }
 
     /// The index in a file. A file that cannot be used is removed and made again; None when even
@@ -147,7 +226,7 @@ impl PostIndex {
             try_open()
         });
         match conn {
-            Ok(conn) => Some(PostIndex { conn, keep_posts: KEEP_POSTS, keep_days: KEEP_DAYS }),
+            Ok(conn) => Some(PostIndex { conn, keep_posts: Some(KEEP_POSTS), keep_days: Some(KEEP_DAYS) }),
             Err(e) => {
                 eprintln!("could not open the post index {}: {e}", path.display());
                 None
@@ -166,7 +245,7 @@ impl PostIndex {
 
     fn try_add(&mut self, account: &str, feed: &str, posts: &[Post]) -> rusqlite::Result<()> {
         let now = crate::cal_time::now();
-        let cutoff = now - self.keep_days * 86_400;
+        let cutoff = self.keep_days.map(|d| now - d * 86_400).unwrap_or(i64::MIN);
         let tx = self.conn.transaction()?;
         // oldest first: the post a reply answers is in the index before the reply, so its text is context
         for p in posts.iter().rev() {
@@ -225,12 +304,7 @@ impl PostIndex {
                 params![id, text, format!("{} {}", p.author.name(), p.author.handle), context, links.join("\n"), date_text(p.created_at)],
             )?;
         }
-        // the limits: the days (for every account), then the newest `keep_posts` of each account
-        tx.execute("DELETE FROM posts_fts WHERE rowid IN (SELECT id FROM posts WHERE stamp < ?1)", [cutoff])?;
-        tx.execute("DELETE FROM posts WHERE stamp < ?1", [cutoff])?;
-        let over = "SELECT id FROM posts WHERE account = ?1 AND id NOT IN (SELECT id FROM posts WHERE account = ?1 ORDER BY stamp DESC, id DESC LIMIT ?2)";
-        tx.execute(&format!("DELETE FROM posts_fts WHERE rowid IN ({over})"), params![account, self.keep_posts as i64])?;
-        tx.execute(&format!("DELETE FROM posts WHERE id IN ({over})"), params![account, self.keep_posts as i64])?;
+        apply_limits(&tx, cutoff, Some(account), self.keep_posts)?;
         tx.commit()
     }
 
