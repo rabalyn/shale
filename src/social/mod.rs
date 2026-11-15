@@ -612,7 +612,7 @@ impl Client {
     /// One post by its id (to open a search hit the index and the feed no longer hold, SOC-039).
     pub fn fetch_post(&mut self, id: &str) -> Result<Post, String> {
         match &mut self.backend {
-            Backend::Mastodon { token } => mastodon::fetch_post(&self.account.server, token, id),
+            Backend::Mastodon { token } => mastodon::fetch_post(&self.account.server, token.expose(), id),
             Backend::Bluesky(api) => bluesky::fetch_post(api, id),
         }
     }
