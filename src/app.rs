@@ -122,6 +122,8 @@ pub enum RightPanel {
 }
 
 mod drops;
+#[cfg(all(test, target_os = "linux"))]
+mod drops_tests;
 mod mail;
 mod social;
 mod sync;
@@ -1969,7 +1971,18 @@ impl ShaleApp {
                 }
             }
             Step::WaitFor(..) => {}
-            Step::Drop(p) => raw.dropped_files.push(std::sync::Arc::new(ScriptDrop(p.clone()))),
+            Step::Drop(at, paths) => match at {
+                // files dropped at a place by another program: a file list at the pointer, the
+                // way `wl_drop` delivers it (IMP-002, BUILD-007)
+                #[cfg(target_os = "linux")]
+                Some(t) => {
+                    let pos = self.script_point(t);
+                    raw.events.push(egui::Event::PointerMoved(pos));
+                    let list: String = paths.iter().map(|p| format!("{}\r\n", crate::import::file_uri(p))).collect();
+                    self.fake_drops.push(crate::wl_drop::DropEvent::Drop { x: pos.x, y: pos.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
+                }
+                _ => paths.iter().for_each(|p| raw.dropped_files.push(std::sync::Arc::new(ScriptDrop(p.clone())))),
+            },
             Step::DropData(rest) => {
                 // data dropped by another program at the pointer: dropdata:text/plain:hello
                 // (several kinds: dropdata:text/uri-list:|text/x-moz-url:link — an empty part is allowed)

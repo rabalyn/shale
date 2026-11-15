@@ -278,6 +278,38 @@ pub fn text_of(data: &[u8]) -> String {
     }
 }
 
+/// The files of a `text/uri-list` and what could not be taken: one URI per line (CRLF or LF),
+/// empty lines and `#` comments skipped.
+pub fn uri_list(text: &str) -> (Vec<PathBuf>, Vec<String>) {
+    let mut paths = Vec::new();
+    let mut notes = Vec::new();
+    for l in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        match file_uri_path(l) {
+            Some(p) => paths.push(p),
+            None if is_mail_link(l) => notes.push(MAIL_LINK_HELP.to_string()),
+            None => notes.push(format!("“{l}” is not a file on this computer.")),
+        }
+    }
+    notes.dedup();
+    (paths, notes)
+}
+
+/// `file://` URI of a path, as a file manager writes it (everything but letters, digits and
+/// `-_.~/` percent-encoded).
+#[cfg(target_os = "linux")]
+pub fn file_uri(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut out = String::from("file://");
+    for &b in path.as_os_str().as_bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~/".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 fn file_uri_path(uri: &str) -> Option<PathBuf> {
     let rest = uri.trim().strip_prefix("file://")?;
     let rest = rest.strip_prefix("localhost").unwrap_or(rest);
@@ -408,17 +440,7 @@ pub fn items_from_parts_in(parts: &[(String, Vec<u8>)], tb_roots: &[PathBuf]) ->
 pub fn items_from_drop(mime: &str, data: &[u8]) -> (Vec<Item>, Vec<String>) {
     let text = text_of(data);
     let uris = |text: &str| -> (Vec<Item>, Vec<String>) {
-        let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
-        let mut paths = Vec::new();
-        let mut notes = Vec::new();
-        for l in lines {
-            match file_uri_path(l) {
-                Some(p) => paths.push(p),
-                None if is_mail_link(l) => notes.push(MAIL_LINK_HELP.to_string()),
-                None => notes.push(format!("“{l}” is not a file on this computer.")),
-            }
-        }
-        notes.dedup();
+        let (paths, mut notes) = uri_list(text);
         let (items, more) = items_from_paths(&paths);
         notes.extend(more);
         (items, notes)
@@ -957,5 +979,34 @@ mod tests {
         let (items, notes) = items_from_drop("text/uri-list", b"mailbox:///home/ada/Mail/Inbox?number=12");
         assert!(items.is_empty() && notes[0].contains(".eml"));
         let _ = std::fs::remove_file(&p);
+    }
+
+    // spec: IMP-013
+    #[test]
+    fn imp_013_a_uri_list_is_read_line_by_line() {
+        let text = "# a comment\r\nfile:///tmp/a%20b.md\r\n\r\n  file://localhost/tmp/c.md  \nfile:///tmp/%C3%A4%C3%B6.md\nfile://otherhost/tmp/d.md\nhttps://example.org/x\nhttps://example.org/x\nimap-message://ada@mail/INBOX#1\nfile:///tmp/bad%zz.md\nfile:///tmp/end%41";
+        let (paths, notes) = uri_list(text);
+        let want: Vec<PathBuf> = ["/tmp/a b.md", "/tmp/c.md", "/tmp/äö.md", "/tmp/bad%zz.md", "/tmp/endA"].iter().map(PathBuf::from).collect();
+        assert_eq!(paths, want);
+        assert_eq!(notes.len(), 3, "the same reason twice in a row comes once: {notes:?}");
+        assert!(notes[0].contains("file://otherhost/tmp/d.md") && notes[1].contains("https://example.org/x"));
+        assert!(notes[2].contains("Save As"), "{notes:?}");
+        assert_eq!(uri_list("").0.len() + uri_list("# only\r\n").0.len(), 0);
+        assert!(uri_list("file:relative").1[0].contains("not a file"));
+        // a list with nothing usable gives no items, only the reasons
+        let (items, notes) = items_from_drop("text/uri-list", b"https://example.org/x\r\n");
+        assert!(items.is_empty() && notes.len() == 1);
+    }
+
+    // spec: IMP-013
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn imp_013_a_path_survives_the_trip_through_a_uri() {
+        for p in ["/tmp/plain.md", "/tmp/a b/ü ö#1%.md", "/tmp/colon:semi;amp&.md", "/tmp/日本語.md"] {
+            let uri = file_uri(Path::new(p));
+            assert!(uri.is_ascii() && !uri.contains(' ') && uri.starts_with("file:///"), "{uri}");
+            assert_eq!(file_uri_path(&uri), Some(PathBuf::from(p)), "{uri}");
+        }
+        assert_eq!(file_uri(Path::new("/a b")), "file:///a%20b");
     }
 }

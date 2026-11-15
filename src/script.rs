@@ -18,6 +18,7 @@
 //! | `wait:N` | does nothing for N steps |
 //! | `waitfor:@label` | waits until the label is drawn (the next step only then runs) |
 //! | `drop:/path` | a file dropped through the window system |
+//! | `drop:T:/a;;/b` | files dropped at the target by another program (Linux), so the folder, note or editor under it decides where they go |
 //! | `dropdata:mime:data` | data dropped by another program at the pointer (Linux) |
 //! | `dump` | prints every label drawn, with its place, to stderr (to find the `@label` of a widget) |
 //! | `focus-end` | puts the editor's cursor at the end of the note |
@@ -53,7 +54,9 @@ pub enum Step {
     Scroll(f32),
     Wait(u32),
     WaitFor(String, usize),
-    Drop(PathBuf),
+    /// files dropped: through the window system (no place), or at a place the way another
+    /// program drops them
+    Drop(Option<Target>, Vec<PathBuf>),
     DropData(String),
     Dump,
     FocusEnd,
@@ -118,7 +121,18 @@ fn step(raw: &str) -> Result<Step, String> {
             Target::Label(l, n) => Step::WaitFor(l, n),
             Target::At(..) => return Err(format!("`{raw}`: waitfor needs `@label`")),
         },
-        "drop" => Step::Drop(PathBuf::from(arg)),
+        "drop" => {
+            // `drop:/a` or `drop:T:/a;;/b` (a place, then files separated by `;;`)
+            let (at, files) = match arg.split_once(':').and_then(|(t, f)| target(t).ok().map(|t| (t, f))) {
+                Some((t, f)) => (Some(t), f),
+                None => (None, arg),
+            };
+            let paths: Vec<PathBuf> = files.split(";;").filter(|f| !f.is_empty()).map(PathBuf::from).collect();
+            if paths.is_empty() {
+                return Err(format!("`{raw}`: drop needs a file"));
+            }
+            Step::Drop(at, paths)
+        }
         "dropdata" => Step::DropData(arg.to_string()),
         _ => return Err(format!("`{name}` is not a step")),
     })
@@ -294,8 +308,10 @@ mod tests {
             let steps = k("steps").unwrap_or("").replace("{fixtures}", root().join("docs/screenshots/fixtures").to_str().unwrap());
             let parsed = parse(&steps).unwrap_or_else(|e| panic!("[{}] steps: {e}", r.name));
             for s in parsed {
-                if let Step::Drop(p) = s {
-                    assert!(p.is_file(), "[{}] drops {}", r.name, p.display());
+                if let Step::Drop(_, paths) = s {
+                    for p in paths {
+                        assert!(p.is_file(), "[{}] drops {}", r.name, p.display());
+                    }
                 }
             }
         }
@@ -327,5 +343,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    // spec: BUILD-007
+    #[test]
+    fn build_007_a_drop_step_takes_files_and_a_place() {
+        let one = |p: &str| vec![PathBuf::from(p)];
+        assert_eq!(parse("drop:/tmp/a.png").unwrap(), vec![Step::Drop(None, one("/tmp/a.png"))]);
+        assert_eq!(parse("drop:C:\\x\\a.png").unwrap(), vec![Step::Drop(None, one("C:\\x\\a.png"))]);
+        assert_eq!(parse("drop:10,20.5:/tmp/a b.md").unwrap(), vec![Step::Drop(Some(Target::At(10.0, 20.5)), one("/tmp/a b.md"))]);
+        assert_eq!(parse("drop:@Welcome#2:/a;;/b c").unwrap(), vec![Step::Drop(Some(Target::Label("Welcome".into(), 2)), vec![PathBuf::from("/a"), PathBuf::from("/b c")])]);
+        assert!(parse("drop:").is_err() && parse("drop:1,2:").is_err());
     }
 }
