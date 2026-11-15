@@ -150,15 +150,11 @@ fn redirects_that_are_not_allowed_are_refused() {
     let (base, h) = mock_http_with(1, |_, _, _, _| redirect(301, "ftp://127.0.0.1/x"));
     assert!(cal_dav::request_with("GET", &format!("{base}/x"), &[], "", &acct(&base)).is_err());
     h.join().unwrap();
-    // a redirect that never ends stops after 5 follow-ups
+    // a redirect that never ends stops after 5 follow-ups and is an error in words (CAL-022)
     let (base, h) = mock_http_with(6, |_, path, _, _| redirect(302, &format!("{path}x")));
-    let r = cal_dav::request_with("GET", &format!("{base}/a"), &[], "", &acct(&base)).unwrap();
-    assert_eq!(r.status, 302, "the last redirect is the answer; the callers turn it into \"status 302\"");
+    let err = cal_dav::request_with("GET", &format!("{base}/a"), &[], "", &acct(&base)).unwrap_err();
+    assert!(err.contains("redirect loop"), "{err}");
     assert_eq!(h.join().unwrap().len(), 6);
-    let (base, h) = mock_http_with(6, |_, path, _, _| redirect(302, &format!("{path}x")));
-    let err = cal_dav::discover(&acct(&format!("{base}/a"))).unwrap_err();
-    assert!(err.contains("status 302"), "{err}");
-    h.join().unwrap();
 }
 
 // spec: CAL-018, SEC-001
@@ -352,5 +348,49 @@ fn an_answer_bigger_than_allowed_is_an_error_and_a_small_one_keeps_its_headers()
     assert!(err.unwrap_err().contains("bigger than 1000 bytes"));
     let ok = cal_dav::request_bytes("GET", &format!("{base}/big"), &[], "", &acct(&base), 10_000).unwrap();
     assert_eq!((ok.status, ok.body.len(), ok.etag.as_deref(), ok.content_type.as_deref()), (200, 5000, Some("\"abc\""), Some("application/xml")));
+    h.join().unwrap();
+}
+
+// spec: CAL-022
+#[test]
+fn a_redirect_loop_is_named_and_not_shown_as_its_last_status() {
+    if !has_curl() {
+        return;
+    }
+    // curl follows five redirects and stops at the sixth answer
+    let (base, h) = mock_http_with(6, |_, _, _, _| redirect(302, "/again"));
+    let url = format!("{base}/loop");
+    let err = cal_dav::request_bytes("GET", &url, &[], "", &acct(&base), 10_000).unwrap_err();
+    assert!(err.contains("redirect loop"), "{err}");
+    h.join().unwrap();
+    let (base, h) = mock_http_with(6, |_, _, _, _| redirect(302, "/again"));
+    let err = cal_dav::discover(&acct(&format!("{base}/"))).unwrap_err();
+    assert!(err.contains("redirect loop") && !err.contains("302"), "{err}");
+    h.join().unwrap();
+}
+
+// spec: CAL-022
+#[test]
+fn an_empty_reply_a_refused_connection_and_a_cut_short_answer_are_named() {
+    if !has_curl() {
+        return;
+    }
+    let (base, h) = raw_server(Vec::new());
+    let err = cal_dav::request_bytes("GET", &format!("{base}/"), &[], "", &acct(&base), 10_000).unwrap_err();
+    assert!(err.contains("closed the connection without an answer"), "{err}");
+    h.join().unwrap();
+
+    // nobody listens at this port
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    drop(l);
+    let base = format!("http://127.0.0.1:{port}");
+    let err = cal_dav::request_bytes("GET", &format!("{base}/"), &[], "", &acct(&base), 10_000).unwrap_err();
+    assert!(err.contains("could not connect"), "{err}");
+
+    // a 200 with a body that stops before its announced length is not a success
+    let (base, h) = raw_server(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc".to_vec());
+    let err = cal_dav::request_bytes("GET", &format!("{base}/"), &[], "", &acct(&base), 10_000).unwrap_err();
+    assert!(err.contains("cut short"), "{err}");
     h.join().unwrap();
 }
