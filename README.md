@@ -116,7 +116,7 @@ Other options:
 
 ## Keyboard
 
-The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
+The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, vim normal mode; double bindings are refused).
 Text editing keys and vim keys are fixed.
 
@@ -136,7 +136,9 @@ Text editing keys and vim keys are fixed.
 | Drag a tab | Reorder tabs; a marker shows where it lands |
 | Right-click a tab | Pin tab / Unpin tab (pinned tabs sit at the left with a pin and keep their place between starts) |
 | Alt+← / Alt+→ | Back / forward |
+| Ctrl+6 | Alternate view, in every view (also mail and drawings, where Space is taken): swap with the view this tab showed just before; again: back |
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Ctrl+, | Settings |
 | Click on a link | Open it (or create it if it's red) |
@@ -148,7 +150,7 @@ Text editing keys and vim keys are fixed.
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
 keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
 the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). Letters work
-only while no text field has the keyboard. Every key can be changed in Settings → Keybindings…
+only while no text field has the keyboard. Every key can be changed in Settings → Keybindings
 (scope Mail view); Enter and Esc are fixed.
 
 | Keys | Action |

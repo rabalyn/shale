@@ -54,12 +54,12 @@ built-in demo vault (`shale --screenshot out.png`).
 
 ## Keyboard only: sidebar, file list and vim-style editing
 
-![The keybindings dialog](screenshots/keybindings.png)
+![The Keybindings tab of the settings](screenshots/keybindings.png)
 
 - Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back into the note. Ctrl+Shift+B opens
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
   folder to folder, Space opens or closes a folder, Enter opens a file.
-- Every shortcut of this section can be changed in Settings → Keybindings…; a key that another
+- Every shortcut of this section can be changed in Settings → Keybindings; a key that another
   action already uses is refused, and a binding can be a sequence of keys.
 - Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
@@ -70,7 +70,7 @@ built-in demo vault (`shale --screenshot out.png`).
   and y copies to the clipboard, p pastes. The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
 - In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
   this tab showed just before, and again to come back, like vim's alternate file. Space is the
-  leader key of its own list in Keybindings…; **Space f f** opens a window to find a file by its
+  leader key of its own list in the Keybindings tab; **Space f f** opens a window to find a file by its
   name (it never creates a note, unlike Ctrl+O); the vim keys themselves cannot be rebound.
 
 ## Drawings
@@ -258,7 +258,7 @@ built-in demo vault (`shale --screenshot out.png`).
   only: folder, message or scroll. `/` goes to the search field (↓ or Enter there go into the
   results), Esc steps back. Everything has a key (see the Keyboard section), also syncing, the
   attachments, loading a message that is not here and switching the search scope, and all of them
-  can be changed in Settings → Keybindings… (Mail view). Keys do not act while you type.
+  can be changed in Settings → Keybindings (Mail view). Keys do not act while you type.
 - **Read, flag, move, delete** (also with the buttons above the message, a right click on a row,
   and the buttons that appear when mails are marked). The keys work on the marked mails, else on
   the open one, else on the one under the cursor, and need no Ctrl or Shift:
@@ -485,7 +485,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Keyboard
 
-The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
+The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, vim normal mode; double bindings are refused).
 Text editing keys and vim keys are fixed.
 
@@ -504,7 +504,9 @@ Text editing keys and vim keys are fixed.
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward |
+| Ctrl+6 | Alternate view, in every view (also mail and drawings, where Space is taken): swap with the view this tab showed just before; again: back |
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
+| Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
@@ -514,7 +516,7 @@ Text editing keys and vim keys are fixed.
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
 keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
 the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). Letters work
-only while no text field has the keyboard. Every key can be changed in Settings → Keybindings…
+only while no text field has the keyboard. Every key can be changed in Settings → Keybindings
 (scope Mail view); Enter and Esc are fixed.
 
 | Keys | Action |
