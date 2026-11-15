@@ -229,6 +229,121 @@ fn pointer_corner_handles_resize_text_and_scribbles() {
     assert!(f.width > 0.0 && f.points.iter().all(|p| p[0] >= -0.01 && p[1] >= -0.01), "{:?}", f.points);
 }
 
+/// A drawing of one scribble "f" at (100, 100) with the given points, selected.
+fn lone_scribble(points: &str) -> (H, DrawingDoc) {
+    let scene = format!(
+        r##"{{"type":"excalidraw","version":2,"source":"shale","elements":[
+      {{"id":"f","type":"freedraw","x":100,"y":100,"width":100,"height":50,"points":{points},"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":2,"strokeStyle":"solid","roughness":0,"opacity":100,"seed":1,"version":1,"versionNonce":1,"isDeleted":false,"angle":0}}
+    ],"appState":{{"viewBackgroundColor":"#ffffff"}},"files":{{}}}}"##
+    );
+    let mut h = H::new();
+    let mut d = DrawingDoc::new(PathBuf::from("ui.excalidraw"), &scene);
+    d.selection = vec!["f".into()];
+    h.settle(&mut d);
+    (h, d)
+}
+
+/// The scribble's points in world coordinates.
+fn world_points(d: &DrawingDoc) -> Vec<(f64, f64)> {
+    let f = el(d, "f");
+    f.points.iter().map(|p| (f.x + p[0], f.y + p[1])).collect()
+}
+
+fn assert_points(d: &DrawingDoc, want: &[(f64, f64)], what: &str) {
+    let got = world_points(d);
+    assert_eq!(got.len(), want.len(), "{what}");
+    for (g, w) in got.iter().zip(want) {
+        assert!(near(g.0, w.0) && near(g.1, w.1), "{what}: {got:?} != {want:?}");
+    }
+}
+
+// spec: DRAW-019
+#[test]
+fn pointer_each_corner_scales_a_scribble_around_the_opposite_corner() {
+    // the scribble spans (100,100)-(200,150); its handles sit 4 outside each corner
+    let (lt, rt, lb, rb) = ((96.0, 96.0), (204.0, 96.0), (96.0, 154.0), (204.0, 154.0));
+    // (handle, drop point, the points afterwards): the opposite corner stays where it is
+    let cases = [
+        (rb, (300.0, 200.0), [(100.0, 100.0), (200.0, 200.0), (300.0, 100.0)], "bottom right, grown to 200 x 100"),
+        (lt, (50.0, 75.0), [(50.0, 75.0), (125.0, 150.0), (200.0, 75.0)], "top left, grown to 150 x 75"),
+        (rt, (150.0, 125.0), [(100.0, 125.0), (125.0, 150.0), (150.0, 125.0)], "top right, shrunk to 50 x 25"),
+        (lb, (140.0, 200.0), [(140.0, 100.0), (170.0, 200.0), (200.0, 100.0)], "bottom left, 60 x 100"),
+    ];
+    for (handle, to, want, what) in cases {
+        let (mut h, mut d) = lone_scribble("[[0,0],[50,50],[100,0]]");
+        h.drag_w(&mut d, handle, to);
+        assert_points(&d, &want, what);
+        d.undo();
+        assert_points(&d, &[(100.0, 100.0), (150.0, 150.0), (200.0, 100.0)], "one undo takes the resize back");
+    }
+}
+
+// spec: DRAW-019
+#[test]
+fn pointer_dragging_a_scribble_corner_past_the_opposite_corner_mirrors_it() {
+    // bottom right corner dragged to the left of and above the top left anchor (100, 100)
+    let (mut h, mut d) = lone_scribble("[[0,0],[50,50],[100,0]]");
+    h.drag_w(&mut d, (204.0, 154.0), (60.0, 70.0));
+    // 40 x 30 box at (60, 70), turned over both ways around the anchor
+    assert_points(&d, &[(100.0, 100.0), (80.0, 70.0), (60.0, 100.0)], "mirrored both ways");
+    let f = el(&d, "f");
+    assert!(near(f.x, 60.0) && near(f.y, 70.0) && near(f.width, 40.0) && near(f.height, 30.0), "{} {} {} {}", f.x, f.y, f.width, f.height);
+    // and the top left corner dragged past the bottom right anchor of the new box
+    let b = el(&d, "f").bounds();
+    h.drag_w(&mut d, (b.min.x - 4.0, b.min.y - 4.0), (130.0, 130.0));
+    let f = el(&d, "f");
+    assert!(f.width > 0.0 && f.height > 0.0, "{} {}", f.width, f.height);
+    assert!(f.points.iter().all(|p| p[0] >= -0.01 && p[1] >= -0.01 && p[0] <= f.width + 0.01 && p[1] <= f.height + 0.01), "{:?}", f.points);
+}
+
+// spec: DRAW-019
+#[test]
+fn pointer_a_flat_scribble_resizes_without_nan() {
+    // a vertical stroke (no width), a horizontal one (no height), a dot (neither), and a
+    // vertical stroke dragged across its anchor
+    for (points, handle, to) in
+        [("[[0,0],[0,50],[0,100]]", (104.0, 204.0), (164.0, 204.0)), ("[[0,0],[50,0],[100,0]]", (204.0, 104.0), (204.0, 164.0)), ("[[0,0]]", (104.0, 104.0), (154.0, 154.0)), ("[[0,0],[0,50],[0,100]]", (104.0, 204.0), (40.0, 100.0))]
+    {
+        let (mut h, mut d) = lone_scribble(points);
+        h.drag_w(&mut d, handle, to);
+        let f = el(&d, "f");
+        let all = [f.x, f.y, f.width, f.height].into_iter().chain(f.points.iter().flatten().copied());
+        assert!(all.into_iter().all(f64::is_finite), "{points}: {} {} {} {} {:?}", f.x, f.y, f.width, f.height, f.points);
+        assert!(f.width >= 0.0 && f.height >= 0.0, "{points}");
+    }
+    // the flat dimension stays flat while the other one scales
+    let (mut h, mut d) = lone_scribble("[[0,0],[0,50],[0,100]]");
+    h.drag_w(&mut d, (104.0, 204.0), (160.0, 300.0));
+    assert_points(&d, &[(100.0, 100.0), (100.0, 200.0), (100.0, 300.0)], "a vertical stroke scaled to twice its height");
+}
+
+// spec: DRAW-019
+#[test]
+fn pointer_lines_and_arrows_get_end_handles_and_no_resize_box() {
+    // lines and arrows are changed by their ends only: dragging a corner of their bounds is
+    // not a resize, and with several shapes selected there are no handles at all
+    let (mut h, mut d) = plain();
+    // make the arrow diagonal, so that the corners of its bounds are far from its ends
+    let a = d.scene.elements.iter_mut().find(|e| e.id == "s3").unwrap();
+    a.points = vec![[0.0, 0.0], [160.0, 100.0]];
+    a.extra.remove("startBinding");
+    a.extra.remove("endBinding");
+    d.selection = vec!["s3".into()];
+    h.settle(&mut d);
+    let before = el(&d, "s3").points.clone();
+    let b = el(&d, "s3").bounds();
+    h.drag_w(&mut d, (b.max.x + 4.0, b.min.y - 4.0), (b.max.x + 80.0, b.min.y - 80.0));
+    assert_eq!(el(&d, "s3").points, before, "the points are not scaled");
+    // two shapes: a drag from a corner of their union never resizes anything
+    d.selection = vec!["s1".into(), "s3".into()];
+    h.settle(&mut d);
+    let (w, hh) = (el(&d, "s1").width, el(&d, "s1").height);
+    let u = d.selection_bounds().unwrap();
+    h.drag_w(&mut d, (u.max.x + 4.0, u.max.y + 4.0), (u.max.x + 60.0, u.max.y + 60.0));
+    assert!(near(el(&d, "s1").width, w) && near(el(&d, "s1").height, hh), "no group resize");
+    assert_eq!(el(&d, "s3").points, before);
+}
+
 // spec: DRAW-019
 #[test]
 fn pointer_ends_of_an_arrow_move_and_attach() {
