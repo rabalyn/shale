@@ -4,48 +4,84 @@
 //!   shale                       open the last vault (or the start screen)
 //!   shale --vault <folder>      open a specific folder as vault
 //!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
-//!   shale --screenshot out.png --view tasks|graph|drawing|reading   (same, other view)
+//!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
 
 mod app;
 mod cal_dav;
-mod canvas;
 mod cal_dialog;
 mod cal_ics;
 mod cal_store;
-mod cal_ui;
 mod cal_time;
+mod cal_ui;
+mod canvas;
+mod compose;
 mod config;
 mod drawing;
-mod excalidraw_md;
 mod drawing_layout;
 mod drawing_pictures;
 mod editor;
+mod excalidraw_md;
 mod export_dialog;
+mod fsutil;
+mod gitsync;
+mod gpg;
 mod graph;
+mod imap_client;
+#[cfg(test)]
+mod imap_fake_tests;
+mod imap_sync;
 mod import;
 mod import_dialog;
+mod jobs;
 mod layout;
 mod link_assist;
 mod lists;
 mod mail;
+mod mail_compose;
+mod mail_crypto;
+mod mail_db;
+mod mail_demo;
+mod mail_dialog;
+#[cfg(test)]
+mod mail_env_tests;
+mod mail_ops;
+mod mail_send;
+#[cfg(test)]
+mod mail_send_fuzz_tests;
+mod mail_store;
+mod mail_ui;
+#[cfg(test)]
+mod mail_ui_tests;
+mod mail_view;
 mod markdown;
 mod media;
+#[cfg(test)]
+mod notes_vault_tests;
+mod oauth;
+#[cfg(test)]
+mod oauth_fake_tests;
+mod opener;
+mod outbox;
 mod panels;
 mod pdfexport;
 mod pdfview;
 mod pdfwrite;
 mod people;
 mod reader;
-mod theme;
-#[cfg(test)]
-mod notes_vault_tests;
-#[cfg(test)]
-mod utf8_tests;
+mod recovery;
 mod secrets;
+mod smtp_client;
+#[cfg(test)]
+mod smtp_fake_tests;
 mod social;
 mod tagwords;
 mod tb_store;
+mod theme;
+#[cfg(test)]
+mod utf8_tests;
 mod vault;
+mod vault_path;
+mod vault_state;
 mod vim;
 #[cfg(target_os = "linux")]
 mod wl_drop;
@@ -76,11 +112,7 @@ fn main() -> eframe::Result {
         }
     }
 
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Shale")
-        .with_app_id("shale")
-        .with_inner_size([1360.0, 840.0])
-        .with_min_inner_size([720.0, 480.0]);
+    let mut viewport = egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size([1360.0, 840.0]).with_min_inner_size([720.0, 480.0]);
     if screenshot.is_some() {
         // Don't steal focus from whatever the person is doing.
         viewport = viewport.with_active(false);

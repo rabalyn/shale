@@ -61,9 +61,8 @@ pub fn job_result(j: &Job) -> Option<Result<String, String>> {
 fn run_job(f: impl FnOnce() -> Result<String, String> + Send + 'static, ctx: Option<eframe::egui::Context>) -> Job {
     let job: Job = Arc::new(Mutex::new(None));
     let j2 = job.clone();
-    std::thread::spawn(move || {
-        let r = f();
-        *j2.lock().unwrap() = Some(r);
+    crate::jobs::run(f, move |r| {
+        *j2.lock().unwrap() = Some(r.and_then(|r| r));
         if let Some(c) = ctx {
             c.request_repaint();
         }
@@ -91,7 +90,7 @@ enum Target {
 }
 
 fn local_read(file: &std::path::Path) -> Result<Vec<Event>, String> {
-    match std::fs::read_to_string(file) {
+    match crate::fsutil::read_to_string(file) {
         Ok(t) => Ok(cal_ics::parse_ics(&t)),
         Err(_) if !file.exists() => Ok(vec![]),
         Err(e) => Err(format!("could not read {}: {e}", file.display())),
@@ -102,7 +101,7 @@ fn local_write(file: &std::path::Path, name: &str, events: &[Event]) -> Result<(
     if let Some(d) = file.parent() {
         std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
     }
-    std::fs::write(file, cal_ics::to_ics(name, events)).map_err(|e| format!("could not save {}: {e}", file.display()))
+    crate::fsutil::write_atomic(file, cal_ics::to_ics(name, events).as_bytes()).map_err(|e| format!("could not save {}: {e}", file.display()))
 }
 
 /// Write an event into a calendar. `parts`: the event first, then the other parts of the same
@@ -163,10 +162,18 @@ pub struct Occ {
 
 impl Occ {
     pub fn start_day(&self) -> i64 {
-        if self.all_day { self.start.div_euclid(86_400) } else { t::utc_to_local(self.start).0 }
+        if self.all_day {
+            self.start.div_euclid(86_400)
+        } else {
+            t::utc_to_local(self.start).0
+        }
     }
     pub fn end_day(&self) -> i64 {
-        if self.all_day { ((self.end - 1).div_euclid(86_400)).max(self.start_day()) } else { t::utc_to_local((self.end - 1).max(self.start)).0 }
+        if self.all_day {
+            ((self.end - 1).div_euclid(86_400)).max(self.start_day())
+        } else {
+            t::utc_to_local((self.end - 1).max(self.start)).0
+        }
     }
 }
 
@@ -198,7 +205,20 @@ pub struct CalendarStore {
 
 impl CalendarStore {
     pub fn new(sources: Vec<CalendarSource>, local_dir: PathBuf) -> Self {
-        let mut s = CalendarStore { sources, events: HashMap::new(), status: HashMap::new(), pending: Default::default(), inflight: HashSet::new(), again: HashSet::new(), last_sync: HashMap::new(), known: HashMap::new(), read_only: HashSet::new(), fixes: Default::default(), generation: 0, local_dir };
+        let mut s = CalendarStore {
+            sources,
+            events: HashMap::new(),
+            status: HashMap::new(),
+            pending: Default::default(),
+            inflight: HashSet::new(),
+            again: HashSet::new(),
+            last_sync: HashMap::new(),
+            known: HashMap::new(),
+            read_only: HashSet::new(),
+            fixes: Default::default(),
+            generation: 0,
+            local_dir,
+        };
         s.reload_local();
         s
     }
@@ -206,12 +226,8 @@ impl CalendarStore {
     /// Use a changed list of calendars. CalDAV calendars that are new, newly shown or point
     /// somewhere else are loaded; the others keep their events and sync timers.
     pub fn set_sources(&mut self, sources: Vec<CalendarSource>) {
-        let fresh: Vec<String> = sources
-            .iter()
-            .filter(|n| n.enabled && !n.is_local())
-            .filter(|n| !self.sources.iter().any(|o| o.id == n.id && o.enabled && o.kind == n.kind) || !self.events.contains_key(&n.id))
-            .map(|n| n.id.clone())
-            .collect();
+        let fresh: Vec<String> =
+            sources.iter().filter(|n| n.enabled && !n.is_local()).filter(|n| !self.sources.iter().any(|o| o.id == n.id && o.enabled && o.kind == n.kind) || !self.events.contains_key(&n.id)).map(|n| n.id.clone()).collect();
         self.sources = sources;
         self.events.retain(|id, _| self.sources.iter().any(|s| s.id == *id));
         self.last_sync.retain(|id, _| self.sources.iter().any(|s| s.id == *id));
@@ -229,7 +245,7 @@ impl CalendarStore {
     pub fn reload_local(&mut self) {
         for s in &self.sources {
             if let SourceKind::Local { file } = &s.kind {
-                match std::fs::read_to_string(file) {
+                match crate::fsutil::read_to_string(file) {
                     Ok(text) => {
                         self.events.insert(s.id.clone(), cal_ics::parse_ics(&text));
                         self.status.remove(&s.id);
@@ -273,16 +289,18 @@ impl CalendarStore {
         // the loaded range moves with the days: a calendar loaded on another day is loaded fully
         let known = self.known.get(&s.id).filter(|(_, day)| *day == today).map(|(tag, _)| tag.clone());
         let (id, url, acct, pending) = (s.id.clone(), url.clone(), Account { url: url.clone(), username: username.clone(), password: password.clone() }, self.pending.clone());
-        std::thread::spawn(move || {
-            // a failing state request (old servers) just means: load everything
-            let st = cal_dav::calendar_state(&url, &acct).unwrap_or_default();
-            let r = if st.tag.is_some() && st.tag == known {
-                Ok(Loaded { events: None, tag: st.tag, read_only: st.read_only })
-            } else {
-                cal_dav::fetch_events(&url, &acct, from, to).map(|ev| Loaded { events: Some(ev), tag: st.tag, read_only: st.read_only })
-            };
-            pending.lock().unwrap().push((id, r));
-        });
+        crate::jobs::run(
+            move || {
+                // a failing state request (old servers) just means: load everything
+                let st = cal_dav::calendar_state(&url, &acct).unwrap_or_default();
+                if st.tag.is_some() && st.tag == known {
+                    Ok(Loaded { events: None, tag: st.tag, read_only: st.read_only })
+                } else {
+                    cal_dav::fetch_events(&url, &acct, from, to).map(|ev| Loaded { events: Some(ev), tag: st.tag, read_only: st.read_only })
+                }
+            },
+            move |r| pending.lock().unwrap().push((id, r.and_then(|r| r))),
+        );
     }
 
     /// Load a calendar again now, completely (also when the server says nothing changed).
@@ -413,7 +431,7 @@ impl CalendarStore {
         if let Some(d) = file.parent() {
             std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
         }
-        std::fs::write(file, cal_ics::to_ics(&s.name, &events)).map_err(|e| e.to_string())?;
+        crate::fsutil::write_atomic(file, cal_ics::to_ics(&s.name, &events).as_bytes()).map_err(|e| e.to_string())?;
         self.events.insert(id.to_string(), events);
         self.generation += 1;
         Ok(())
@@ -540,16 +558,38 @@ pub fn sample_events(today: i64) -> Vec<Event> {
     let monday = today - t::weekday(today) as i64;
     let mut v = vec![
         Event { rrule: Some("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=60".into()), description: "Quick round: yesterday, today, blockers.".into(), location: "Video call".into(), ..timed(&id("standup"), monday, 9, 0, 15, "Team standup") },
-        Event { location: "Room 2.14".into(), description: "Walk through the new layout.\nBring the printed mock-ups.".into(), organizer: "Ada Lovelace <ada@example.com>".into(), attendees: vec!["Grace Hopper <grace@example.com>".into(), "Alan Turing <alan@example.com>".into()], ..timed(&id("review"), today, 10, 0, 90, "Design review") },
+        Event {
+            location: "Room 2.14".into(),
+            description: "Walk through the new layout.\nBring the printed mock-ups.".into(),
+            organizer: "Ada Lovelace <ada@example.com>".into(),
+            attendees: vec!["Grace Hopper <grace@example.com>".into(), "Alan Turing <alan@example.com>".into()],
+            ..timed(&id("review"), today, 10, 0, 90, "Design review")
+        },
         Event { location: "Café Lindgren".into(), ..timed(&id("lunch"), today, 12, 30, 60, "Lunch with Sam") },
         Event { description: "No meetings — deep work.".into(), ..timed(&id("focus"), today, 14, 0, 120, "Focus time") },
         timed(&id("supplier"), today, 15, 0, 30, "Call with supplier"),
         timed(&id("gym"), today, 18, 0, 60, "Gym"),
-        Event { url: "https://example.com/webinar".into(), organizer: "Events team <events@example.com>".into(), description: "Join with the link below.".into(), ..timed(&id("webinar"), today + 3, 16, 0, 60, "Webinar: Writing better notes") },
+        Event {
+            url: "https://example.com/webinar".into(),
+            organizer: "Events team <events@example.com>".into(),
+            description: "Join with the link below.".into(),
+            ..timed(&id("webinar"), today + 3, 16, 0, 60, "Webinar: Writing better notes")
+        },
         Event { location: "Messe Berlin".into(), ..all_day(&id("conf"), today + 7, 3, "Conference") },
         all_day(&id("holiday"), today + 14, 1, "Public holiday"),
         Event { rrule: Some("FREQ=WEEKLY".into()), location: "Library".into(), ..timed(&id("book"), monday + 3, 19, 0, 90, "Book club") },
-        Event { rrule: Some("FREQ=MONTHLY".into()), ..all_day(&id("rent"), { let (y, m, _) = t::civil_from_days(today); days_from_civil(y, m, 1) }, 1, "Pay rent") },
+        Event {
+            rrule: Some("FREQ=MONTHLY".into()),
+            ..all_day(
+                &id("rent"),
+                {
+                    let (y, m, _) = t::civil_from_days(today);
+                    days_from_civil(y, m, 1)
+                },
+                1,
+                "Pay rent",
+            )
+        },
         all_day(&id("deadline"), today + 1, 1, "Report deadline"),
     ];
     // a busy day with many short meetings
@@ -604,10 +644,10 @@ pub(crate) mod tests {
         // add and delete
         let e = Event { uid: "mine".into(), summary: "Dentist".into(), start: t::local_to_utc(today + 5, 8 * 3600), end: t::local_to_utc(today + 5, 9 * 3600), ..Default::default() };
         wait(&store.save_event(&src.id, e.clone(), None, None).unwrap()).unwrap();
-        store.after_write(&[src.id.clone()]);
+        store.after_write(std::slice::from_ref(&src.id));
         assert!(store.occurrences(today + 5, today + 5).iter().any(|o| store.event(o).unwrap().summary == "Dentist"));
         wait(&store.delete_event(&src.id, e, None).unwrap()).unwrap();
-        store.after_write(&[src.id.clone()]);
+        store.after_write(std::slice::from_ref(&src.id));
         assert!(!store.occurrences(today + 5, today + 5).iter().any(|o| store.event(o).unwrap().summary == "Dentist"));
         // disabled calendars are hidden
         let mut off = src.clone();
@@ -625,6 +665,14 @@ pub(crate) mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("job did not finish")
+    }
+
+    // spec: JOB-002
+    #[test]
+    fn a_panicking_save_job_ends_with_an_error() {
+        let job = run_job(|| panic!("server sent rubbish"), None);
+        let e = wait(&job).unwrap_err();
+        assert!(e.contains("server sent rubbish"), "{e}");
     }
 
     fn dav_source(id: &str, url: String) -> CalendarSource {
@@ -679,7 +727,7 @@ pub(crate) mod tests {
         // a local event
         let e = Event { uid: "u1".into(), summary: "Plan".into(), start: 1_800_000_000, end: 1_800_001_800, ..Default::default() };
         wait(&store.save_event(&local.id, e.clone(), None, None).unwrap()).unwrap();
-        store.after_write(&[local.id.clone()]);
+        store.after_write(std::slice::from_ref(&local.id));
         // move it to the read-only calendar: refused, and it is still in the local calendar
         let err = wait(&store.save_event("ro", e.clone(), Some((local.id.clone(), e.clone())), None).unwrap()).unwrap_err();
         assert!(err.contains("permission"), "{err}");
@@ -744,7 +792,14 @@ pub(crate) mod tests {
         let (y, m, d) = t::civil_from_days(today);
         let ics = format!("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:r1\r\nDTSTART;VALUE=DATE:{y:04}{m:02}{d:02}\r\nSUMMARY:Remote day\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
         let (base, _h) = crate::cal_dav::tests::mock_server(ics);
-        let src = CalendarSource { id: "dav1".into(), name: "Work".into(), color: "#1971c2".into(), enabled: true, sync_minutes: DEFAULT_SYNC_MINUTES, kind: SourceKind::Caldav { url: format!("{base}/calendars/ada/work/"), username: "ada".into(), password: "x".into() } };
+        let src = CalendarSource {
+            id: "dav1".into(),
+            name: "Work".into(),
+            color: "#1971c2".into(),
+            enabled: true,
+            sync_minutes: DEFAULT_SYNC_MINUTES,
+            kind: SourceKind::Caldav { url: format!("{base}/calendars/ada/work/"), username: "ada".into(), password: "x".into() },
+        };
         let mut store = CalendarStore::new(vec![src], tmp("dav"));
         store.refresh_remote();
         for _ in 0..200 {
@@ -766,12 +821,14 @@ pub(crate) mod tests {
         }
         let reports = Arc::new(Mutex::new(0usize));
         let r2 = reports.clone();
-        let (base, _h) = crate::cal_dav::tests::mock_http(10, move |m, _, _, _| match m {
+        let (base, _h) = crate::cal_dav::tests::mock_http(10, move |m, _, _, _| {
+            match m {
             "PROPFIND" => (207, r#"<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:response><d:href>/ro/</d:href><d:propstat><d:prop><cs:getctag>7</cs:getctag><d:current-user-privilege-set><d:privilege><d:read/></d:privilege></d:current-user-privilege-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#.into()),
             _ => {
                 *r2.lock().unwrap() += 1;
                 (207, r#"<d:multistatus xmlns:d="DAV:"/>"#.into())
             }
+        }
         });
         let mut store = CalendarStore::new(vec![], tmp("ctag"));
         store.set_sources(vec![dav_source("ro", format!("{base}/ro/"))]);

@@ -169,9 +169,14 @@ pub fn import_file(vault_root: &Path, src: &Path, date: (i32, u32, u32)) -> io::
         return Ok(rel.to_path_buf());
     }
     let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).ok_or_else(|| io::Error::other("not a file"))?;
-    let rel = free_media_path(vault_root, &name, date)?;
-    fs::copy(src, vault_root.join(&rel))?;
-    Ok(rel)
+    // a name taken in the meantime (AlreadyExists) is never overwritten: pick the next one
+    loop {
+        let rel = free_media_path(vault_root, &name, date)?;
+        match crate::fsutil::copy_new(src, &vault_root.join(&rel)) {
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            r => return r.map(|_| rel),
+        }
+    }
 }
 
 /// A media path for `name` that isn't taken yet (a number is added if needed); makes the folder.
@@ -197,9 +202,13 @@ fn free_media_path(vault_root: &Path, name: &str, date: (i32, u32, u32)) -> io::
 pub fn save_bytes(vault_root: &Path, name: &str, data: &[u8], date: (i32, u32, u32)) -> io::Result<PathBuf> {
     let clean: String = name.chars().map(|c| if matches!(c, '/' | '\\' | '\0') { '_' } else { c }).collect();
     let clean = clean.trim().trim_start_matches('.');
-    let rel = free_media_path(vault_root, if clean.is_empty() { "file" } else { clean }, date)?;
-    fs::write(vault_root.join(&rel), data)?;
-    Ok(rel)
+    loop {
+        let rel = free_media_path(vault_root, if clean.is_empty() { "file" } else { clean }, date)?;
+        match crate::fsutil::create_new(&vault_root.join(&rel), data) {
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            r => return r.map(|_| rel),
+        }
+    }
 }
 
 /// The markdown to insert: images are embedded `![[…]]`, other files linked `[[…]]`.

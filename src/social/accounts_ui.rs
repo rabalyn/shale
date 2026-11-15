@@ -43,14 +43,15 @@ pub enum DialogAction {
     Added(SocialAccountEntry),
     /// remove the account with this id
     Remove(String),
+    /// the number of minutes between looks for new posts was changed (0 = never)
+    CheckMinutes(u32),
 }
 
 fn spawn(ctx: &egui::Context, f: impl FnOnce() -> JobResult + Send + 'static) -> Receiver<JobResult> {
     let (tx, rx) = channel();
     let ctx = ctx.clone();
-    std::thread::spawn(move || {
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| Err("the sign-in crashed (a bug in Shale)".into()));
-        let _ = tx.send(r);
+    crate::jobs::run(f, move |r| {
+        let _ = tx.send(r.and_then(|x| x));
         ctx.request_repaint();
     });
     rx
@@ -85,7 +86,7 @@ impl SocialDialog {
         self.job = Some(spawn(ctx, move || {
             let app = mastodon::register_app(&server)?;
             let url = mastodon::authorize_url(&server, &app)?;
-            crate::lists::open_in_browser(&url);
+            crate::opener::open_signin_url(&url, false)?;
             Ok(Done::Opened(server, app))
         }));
     }
@@ -167,7 +168,8 @@ impl Default for SocialDialog {
     }
 }
 
-pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry]) -> Option<DialogAction> {
+/// `check_minutes`: how often the feeds open in tabs look for new posts (a setting of the app).
+pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], check_minutes: u32) -> Option<DialogAction> {
     let mut rects: Vec<(String, Rect)> = Vec::new();
     let mut rec = |k: String, r: egui::Response| -> egui::Response {
         rects.push((k, r.rect));
@@ -202,6 +204,14 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry]) 
         });
     }
     ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(muted("Look for new posts every"));
+        let mut m = check_minutes;
+        if rec("check-minutes".into(), ui.add(egui::DragValue::new(&mut m).range(0..=240).suffix(" min"))).on_hover_text("0 = never. Only feeds open in a tab are checked, and only while Shale runs.").changed() && action.is_none() {
+            action = Some(DialogAction::CheckMinutes(m));
+        }
+    });
+    ui.separator();
     // ---- add
     ui.label(egui::RichText::new("Add an account").size(14.0).color(theme::TEXT));
     ui.horizontal(|ui| {
@@ -229,7 +239,10 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry]) 
                 } else {
                     ui.label(muted("Step 1"));
                     ui.horizontal(|ui| {
-                        if rec("open-browser".into(), ui.add_enabled(!busy, egui::Button::new("Open sign-in page in browser"))).on_hover_text("Shale asks the server for a read-only sign-in; you log in and allow it on the server's own page").clicked() {
+                        if rec("open-browser".into(), ui.add_enabled(!busy, egui::Button::new("Open sign-in page in browser")))
+                            .on_hover_text("Shale asks the server for a read-only sign-in; you log in and allow it on the server's own page")
+                            .clicked()
+                        {
                             d.open_sign_in(ui.ctx());
                         }
                         if d.app.is_some() {
@@ -259,7 +272,14 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry]) 
                 rec("server".into(), ui.add(egui::TextEdit::singleline(&mut d.server).hint_text(BLUESKY_SERVER).desired_width(380.0)));
                 ui.end_row();
             });
-            ui.add(egui::Label::new(egui::RichText::new("Use an app password, never your main password: Bluesky → Settings → Privacy and security → App passwords. It can be revoked there at any time. It goes to your system keyring.").size(12.0).color(theme::LINK_MISSING.gamma_multiply(0.85))).wrap());
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new("Use an app password, never your main password: Bluesky → Settings → Privacy and security → App passwords. It can be revoked there at any time. It goes to your system keyring.")
+                        .size(12.0)
+                        .color(theme::LINK_MISSING.gamma_multiply(0.85)),
+                )
+                .wrap(),
+            );
         }
     }
     if let Some(e) = &d.error {
@@ -293,7 +313,7 @@ mod tests {
         let mut res = None;
         let mut out = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                res = show(ui, d, accounts);
+                res = show(ui, d, accounts, 5);
             });
         });
         out.textures_delta.clear();

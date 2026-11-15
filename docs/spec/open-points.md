@@ -8,16 +8,16 @@ here.
 
 | # | Spec IDs | What | Why first | ADR |
 |---|---|---|---|---|
-| 1 | DATA-004 | Atomic writes everywhere | A crash mid-write is the only failure that destroys a whole note | [0003](../decisions/0003-data-safety.md) |
-| 2 | DATA-003, DATA-002 | Conflict copy instead of silently overwriting outside changes; reload drawings too | Silent lost updates with Syncthing / git / a second editor | 0003 |
-| 3 | DATA-008, DATA-009 | Unreadable notes read-only; never swallow write errors | First keystroke can destroy a non-UTF-8 file | 0003 |
-| 4 | VAULT-018 | One checked vault path type at every user input | Rename can move a note out of the vault | [0004](../decisions/0004-link-resolution-and-paths.md) |
-| 5 | VAULT-016, VAULT-013 | One link rewrite routine by resolution (folder rename included) | Rename corrupts path links and rewrites wrong links | 0004 |
-| 6 | LINK-010, LINK-008 | Explicit resolution rules, no silent name fallback, show ambiguity | Blue links that open the wrong note | 0004 |
-| 7 | CFG-004, CFG-005 | Config version, keep broken file, per-vault state into `.shale/` | One parse error wipes calendars | [0005](../decisions/0005-where-state-lives.md) |
-| 8 | JOB-002 | Panic-safe background jobs | Endless spinners | [0006](../decisions/0006-engineering-baseline.md) |
-| 9 | SEC-006 | Allowlist for `xdg-open` | Server- and mail-supplied URLs/files opened unchecked | 0006 |
-| 10 | BUILD-004, BUILD-006 | CI on PRs, clippy/fmt gates, drop vendor/ | Zero-warnings rule enforced, security updates possible | 0006 |
+| 1 | ~~DATA-004~~ | ~~Atomic writes everywhere~~ (done, DATA-004 and DATA-010) | A crash mid-write is the only failure that destroys a whole note | [0003](../decisions/0003-data-safety.md) |
+| 2 | ~~DATA-003, DATA-002~~ | ~~Conflict copy instead of silently overwriting outside changes; reload drawings too~~ (done) | Silent lost updates with Syncthing / git / a second editor | 0003 |
+| 3 | ~~DATA-008, DATA-009~~ | ~~Unreadable notes read-only; never swallow write errors~~ (done) | First keystroke can destroy a non-UTF-8 file | 0003 |
+| 4 | ~~VAULT-018~~ | One checked vault path type at every user input | Rename can move a note out of the vault | [0004](../decisions/0004-link-resolution-and-paths.md) |
+| 5 | ~~VAULT-016, VAULT-013~~ | One link rewrite routine by resolution (folder rename included) | Rename corrupts path links and rewrites wrong links | 0004 |
+| 6 | ~~LINK-010, LINK-008~~ | Explicit resolution rules, no silent name fallback, show ambiguity | Blue links that open the wrong note | 0004 |
+| ~~7~~ | CFG-004…CFG-008, SYNC-* | ~~Config version, keep broken file, per-vault state into `.shale/`, integrated git sync~~ Done 2026-11-14 | One parse error wipes calendars; vaults behave the same on every machine | [0005](../decisions/0005-where-state-lives.md), [0008](../decisions/0008-git-sync.md) |
+| 8 | ~~JOB-002~~ | ~~Panic-safe background jobs~~ (done) | Endless spinners | [0006](../decisions/0006-engineering-baseline.md) |
+| 9 | ~~SEC-006~~ | ~~Allowlist for `xdg-open`~~ (done) | Server- and mail-supplied URLs/files opened unchecked | 0006 |
+| 10 | ~~BUILD-004~~, BUILD-006 | ~~CI on PRs, clippy/fmt gates~~ (done), drop vendor/ | Zero-warnings rule enforced, security updates possible | 0006 |
 | 11 | PERF-001, PERF-002 | Cache derived data, fix O(n²) rescan | Big vaults | 0006 |
 | 12 | — | Docs restructure | Stop drift | [0002](../decisions/0002-documentation-structure.md) |
 
@@ -26,8 +26,8 @@ here.
 | ID | Question | Notes |
 |---|---|---|
 | OPEN-001 | Accept ADRs 0002–0006 as a whole, or one by one? | All are *Proposed*. |
-| OPEN-002 | Conflict handling: conflict copy (proposed) or a merge view later? | A copy is simple and loses nothing; a merge view could build on it. |
-| OPEN-003 | Offer "fix this link" for red path links whose name exists elsewhere (after LINK-010 turns them red)? | Softens the visible change of ADR-0004. |
+| ~~OPEN-002~~ | ~~Conflict handling: conflict copy (proposed) or a merge view later?~~ | Decided 2026-11-14 by the owner's acceptance of [ADR-0003](../decisions/0003-data-safety.md): a conflict copy (DATA-003). A merge view could still build on it later. |
+| ~~OPEN-003~~ | ~~Offer "fix this link" for red path links whose name exists elsewhere (after LINK-010 turns them red)?~~ | Decided 2026-11-14: links are fixed automatically, without asking, whenever the target is unambiguous; "Fix link" is offered only where it is not (LINK-012). |
 | OPEN-004 | Should the media folder (`z_media/<YYYY>/<MM>/`) become a vault setting? | Today it is fixed; Obsidian users may expect their attachment folder. |
 | OPEN-005 | Symbolic links in vaults: follow or show? | VAULT-007/008. Following needs loop and escape guards. |
 | OPEN-006 | inotify file watching instead of 3 s polling? | Narrows the conflict window and saves work on big vaults; not a replacement for DATA-003. |
@@ -39,6 +39,9 @@ here.
 | OPEN-011 | Module restructuring (feature folders, splitting `ShaleApp`): do it along the way (proposed) or as one dedicated change? | ADR-0006 §6. |
 | OPEN-012 | Add a test that checks spec IDs against test names (every ID used or marked `untested`)? | Prevents spec drift ([ADR-0001](../decisions/0001-spec-driven-development.md) §5). |
 | OPEN-013 | Rename/move rewrites links in notes on disk while an open, dirty buffer of the same note exists — which wins? | Related to DATA-003; needs a test either way. |
+| ~~OPEN-015~~ | ~~Mail: support OAuth2 in the first phase or later?~~ | Decided 2026-11-14: phase 1 ([ADR-0007](../decisions/0007-mail-client.md) §7). |
+| ~~OPEN-016~~ | ~~Mail: big attachments with the message or on demand?~~ | Decided 2026-11-14: with the message. |
+| ~~OPEN-017~~ | ~~Mail: index decrypted mails?~~ | Decided 2026-11-14: yes, after typed consent (ADR-0007 §6). |
 
 ## Backlog carried over from IMPLEMENTATION.md (still open after checking)
 

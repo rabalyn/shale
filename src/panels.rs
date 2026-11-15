@@ -61,7 +61,13 @@ impl ShaleApp {
                 if let Some(p) = ui.ctx().input(|i| i.pointer.latest_pos()) {
                     let clip = ui.clip_rect();
                     if clip.x_range().contains(p.x) {
-                        let dy = if p.y < clip.top() + 28.0 { 8.0 } else if p.y > clip.bottom() - 28.0 { -8.0 } else { 0.0 };
+                        let dy = if p.y < clip.top() + 28.0 {
+                            8.0
+                        } else if p.y > clip.bottom() - 28.0 {
+                            -8.0
+                        } else {
+                            0.0
+                        };
                         if dy != 0.0 {
                             ui.scroll_with_delta(Vec2::new(0.0, dy));
                             ui.ctx().request_repaint();
@@ -70,7 +76,7 @@ impl ShaleApp {
                 }
             }
             let root = PathBuf::new();
-            let r = self.tree(ui, &root, 0);
+            self.tree(ui, &root, 0);
             // right-click on empty space
             let rest = ui.allocate_response(Vec2::new(ui.available_width(), (ui.available_height()).max(40.0)), Sense::click());
             rest.context_menu(|ui| {
@@ -87,7 +93,6 @@ impl ShaleApp {
                     ui.close();
                 }
             });
-            let _ = r;
         });
         ui.separator();
         ui.horizontal(|ui| {
@@ -326,9 +331,7 @@ impl ShaleApp {
         let Some(v) = &self.vault else { return };
         let results = v.search(&self.search);
         // the stops the keyboard moves between: (result, found line or None for a name-only hit)
-        let stops: Vec<(usize, Option<usize>)> = results.iter().enumerate().flat_map(|(fi, (_, lines))| {
-            if lines.is_empty() { vec![(fi, None)] } else { (0..lines.len()).map(|li| (fi, Some(li))).collect() }
-        }).collect();
+        let stops: Vec<(usize, Option<usize>)> = results.iter().enumerate().flat_map(|(fi, (_, lines))| if lines.is_empty() { vec![(fi, None)] } else { (0..lines.len()).map(|li| (fi, Some(li))).collect() }).collect();
         let entering = (down_from_box || enter_from_box) && !stops.is_empty();
         if entering {
             self.search_sel = Some(0);
@@ -380,7 +383,13 @@ impl ShaleApp {
             }
         }
         if !self.search.trim().is_empty() {
-            let hint = if self.search_sel.is_some() { "  ·  j/k, Ctrl+J/K next file, Enter opens, Esc back" } else if stops.is_empty() { "" } else { "  ·  ↓ to browse" };
+            let hint = if self.search_sel.is_some() {
+                "  ·  j/k, Ctrl+J/K next file, Enter opens, Esc back"
+            } else if stops.is_empty() {
+                ""
+            } else {
+                "  ·  ↓ to browse"
+            };
             ui.label(muted(format!("{} result{}{hint}", results.len(), if results.len() == 1 { "" } else { "s" })).size(12.0));
         }
         let selected = self.search_sel.map(|i| stops[i]);
@@ -521,10 +530,27 @@ impl ShaleApp {
                     ui.add_space(10.0);
                     section_header(ui, &format!("Not created yet  {}", missing.len()));
                     for (display, target, _) in missing {
-                        let resp = ui.add(egui::Label::new(egui::RichText::new(display).color(theme::LINK_MISSING)).sense(Sense::click())).on_hover_text("Click to create this note").on_hover_cursor(egui::CursorIcon::PointingHand);
-                        if resp.clicked() {
-                            self.actions.push(Action::OpenLink { target, heading: None, from: Some(rel.clone()), new_tab: false });
-                        }
+                        // a path link whose name exists in other places: offer them (LINK-012)
+                        let candidates = v.fix_candidates(&target, Some(&rel));
+                        ui.horizontal_wrapped(|ui| {
+                            let resp = ui.add(egui::Label::new(egui::RichText::new(display).color(theme::LINK_MISSING)).sense(Sense::click())).on_hover_text("Click to create this note").on_hover_cursor(egui::CursorIcon::PointingHand);
+                            if resp.clicked() {
+                                self.actions.push(Action::OpenLink { target: target.clone(), heading: None, from: Some(rel.clone()), new_tab: false });
+                            }
+                            if !candidates.is_empty() {
+                                ui.menu_button(egui::RichText::new("Fix link").small(), |ui| {
+                                    ui.label(muted("Point the link at:").size(12.0));
+                                    for c in &candidates {
+                                        if ui.button(markdown::strip_md_ext(&rel_to_string(c))).clicked() {
+                                            self.actions.push(Action::FixLink { note: rel.clone(), target: target.clone(), to: c.clone() });
+                                            ui.close();
+                                        }
+                                    }
+                                })
+                                .response
+                                .on_hover_text(format!("No file at this path; {} file(s) have this name", candidates.len()));
+                            }
+                        });
                     }
                 });
             }
@@ -592,7 +618,7 @@ impl ShaleApp {
         let done = all.len() - open;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let full = ui.available_width();
-            let col = (full - 32.0).min(860.0).max(200.0);
+            let col = (full - 32.0).clamp(200.0, 860.0);
             let pad = ((full - col) / 2.0).max(16.0);
             ui.horizontal(|ui| {
                 ui.add_space(pad);
@@ -691,7 +717,9 @@ impl ShaleApp {
                     items.truncate(12);
                     let create = !query.trim().is_empty() && !items.iter().any(|(_, _, n)| n.eq_ignore_ascii_case(query.trim()));
                     let n = items.len() + create as usize;
-                    let (down, up, enter, esc) = ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, Key::Enter), i.consume_key(egui::Modifiers::NONE, Key::Escape)));
+                    let (down, up, enter, esc) = ui.input_mut(|i| {
+                        (i.consume_key(egui::Modifiers::NONE, Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, Key::Enter), i.consume_key(egui::Modifiers::NONE, Key::Escape))
+                    });
                     if n > 0 {
                         if down {
                             *sel = (*sel + 1) % n;
@@ -770,17 +798,15 @@ impl ShaleApp {
                     let enter = ui.input(|i| i.key_pressed(Key::Enter));
                     ui.horizontal(|ui| {
                         if (ui.button("Create").clicked() || enter) && !name.trim().is_empty() {
-                            let rel = parent.join(markdown::sanitize_note_name(name));
-                            if let Some(v) = self.vault.as_mut() {
-                                match v.create_folder(&rel) {
-                                    Ok(()) => {
-                                        self.expanded.insert(rel.clone());
-                                        if let Some(p) = rel.parent() {
-                                            self.expanded.insert(p.to_path_buf());
-                                        }
+                            match self.create_folder(parent, name) {
+                                Ok(rel) => {
+                                    let mut p = Some(rel.as_path());
+                                    while let Some(dir) = p.filter(|d| !d.as_os_str().is_empty()) {
+                                        self.expanded.insert(dir.to_path_buf());
+                                        p = dir.parent();
                                     }
-                                    Err(e) => self.toasts.push((format!("Could not create folder: {e}"), std::time::Instant::now())),
                                 }
+                                Err(e) => self.toasts.push((format!("Could not create folder: {e}"), std::time::Instant::now())),
                             }
                             keep = false;
                         }
@@ -814,7 +840,7 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::Social(_) => {}
+            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = egui::Modal::new(egui::Id::unique("convert-canvas")).show(&ctx, |ui| {
                     ui.set_width(460.0);
@@ -890,6 +916,9 @@ impl ShaleApp {
                     ui.add_space(8.0);
                     if ui.button("Close this vault (back to the start screen)").clicked() {
                         self.flush_all();
+                        self.remember_open_files();
+                        self.save_config();
+                        self.vdata = crate::vault_state::VaultData::default();
                         self.vault = None;
                         self.tabs.clear();
                         self.cfg.vault = None;
@@ -905,12 +934,20 @@ impl ShaleApp {
                     ui.label(egui::RichText::new("People").color(theme::MUTED));
                     ui.horizontal(|ui| {
                         ui.label("People folder");
-                        changed |= ui.add(egui::TextEdit::singleline(&mut self.cfg.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0)).on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.").changed();
+                        changed |= ui
+                            .add(egui::TextEdit::singleline(&mut self.vdata.settings.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0))
+                            .on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.")
+                            .changed();
                     });
                     ui.label(muted("Type [[p followed by a name to pick a person from this folder (or make a new contact note).").size(12.0));
                     ui.add_space(8.0);
+                    changed |= self.sync_settings_ui(ui);
+                    ui.add_space(8.0);
                     ui.label(egui::RichText::new("Drawings").color(theme::MUTED));
-                    changed |= ui.checkbox(&mut self.cfg.auto_convert_canvas, "Convert Obsidian canvases to editable drawings when opening them (instead of asking)").on_hover_text("Off: Shale asks, and can show the canvas read-only. The canvas file is never changed.").changed();
+                    changed |= ui
+                        .checkbox(&mut self.cfg.auto_convert_canvas, "Convert Obsidian canvases to editable drawings when opening them (instead of asking)")
+                        .on_hover_text("Off: Shale asks, and can show the canvas read-only. The canvas file is never changed.")
+                        .changed();
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Appearance").color(theme::MUTED));
                     changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
@@ -973,9 +1010,25 @@ impl ShaleApp {
                 keep = false;
             }
         }
+        if let Modal::MailAccounts(d) = &mut modal {
+            let mut out = None;
+            let mail = &self.mail;
+            let resp = egui::Modal::new(egui::Id::unique("mail-accounts")).show(&ctx, |ui| {
+                out = crate::mail_dialog::show(ui, d, mail);
+            });
+            if let Some(a) = out {
+                if self.mail_dialog_action(d, a) {
+                    keep = false;
+                }
+            }
+            if resp.should_close() {
+                keep = false;
+            }
+        }
         if let Modal::Social(d) = &mut modal {
             let accounts = self.cfg.social_accounts.clone();
-            let resp = egui::Modal::new(egui::Id::unique("social-accounts")).show(&ctx, |ui| crate::social::accounts_ui::show(ui, d, &accounts));
+            let check_minutes = self.cfg.social_check_minutes;
+            let resp = egui::Modal::new(egui::Id::unique("social-accounts")).show(&ctx, |ui| crate::social::accounts_ui::show(ui, d, &accounts, check_minutes));
             let close_asked = resp.should_close();
             if let Some(a) = resp.inner {
                 if self.social_dialog_action(a) {
@@ -1026,7 +1079,9 @@ impl ShaleApp {
                     Ok(out) => {
                         self.toast(format!("Exported to {}", out.display()));
                         if d.open_after {
-                            let _ = std::process::Command::new("xdg-open").arg(&out).spawn();
+                            if let Err(e) = crate::opener::open_exported_pdf(&out) {
+                                self.toast(e);
+                            }
                         }
                         keep = false;
                     }
@@ -1093,13 +1148,7 @@ fn tree_row(ui: &mut Ui, depth: usize, name: &str, open: Option<bool>, active: b
 }
 
 /// Order two tree entries. Times are (created, modified); ties fall back to the name.
-fn sort_order(
-    sort: crate::config::FileSort,
-    name_a: &str,
-    name_b: &str,
-    ta: (Option<std::time::SystemTime>, Option<std::time::SystemTime>),
-    tb: (Option<std::time::SystemTime>, Option<std::time::SystemTime>),
-) -> std::cmp::Ordering {
+fn sort_order(sort: crate::config::FileSort, name_a: &str, name_b: &str, ta: (Option<std::time::SystemTime>, Option<std::time::SystemTime>), tb: (Option<std::time::SystemTime>, Option<std::time::SystemTime>)) -> std::cmp::Ordering {
     use crate::config::FileSort::*;
     let by_name = name_a.cmp(name_b);
     match sort {

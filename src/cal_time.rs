@@ -111,9 +111,7 @@ fn parse_tzif(data: &[u8]) -> Option<Zone> {
         return None;
     }
     let be32 = |o: usize| -> Option<u32> { data.get(o..o + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]])) };
-    let counts = |base: usize| -> Option<[usize; 6]> {
-        Some([be32(base + 20)? as usize, be32(base + 24)? as usize, be32(base + 28)? as usize, be32(base + 32)? as usize, be32(base + 36)? as usize, be32(base + 40)? as usize])
-    };
+    let counts = |base: usize| -> Option<[usize; 6]> { Some([be32(base + 20)? as usize, be32(base + 24)? as usize, be32(base + 28)? as usize, be32(base + 32)? as usize, be32(base + 36)? as usize, be32(base + 40)? as usize]) };
     let [isutc, isstd, leap, timecnt, typecnt, charcnt] = counts(0)?;
     let v1_len = 44 + timecnt * 4 + timecnt + typecnt * 6 + charcnt + leap * 8 + isstd + isutc;
     // prefer the 64-bit section of version 2+ files
@@ -147,11 +145,7 @@ fn zone(tzid: &str) -> Option<std::sync::Arc<Zone>> {
     let z = if clean.contains("..") {
         None
     } else {
-        ["/usr/share/zoneinfo", "/usr/lib/zoneinfo", "/usr/share/lib/zoneinfo"]
-            .iter()
-            .find_map(|dir| std::fs::read(std::path::Path::new(dir).join(clean)).ok())
-            .and_then(|d| parse_tzif(&d))
-            .map(std::sync::Arc::new)
+        ["/usr/share/zoneinfo", "/usr/lib/zoneinfo", "/usr/share/lib/zoneinfo"].iter().find_map(|dir| crate::fsutil::read(std::path::Path::new(dir).join(clean)).ok()).and_then(|d| parse_tzif(&d)).map(std::sync::Arc::new)
     };
     cache.lock().unwrap().insert(tzid.to_string(), z.clone());
     z

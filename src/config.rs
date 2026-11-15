@@ -1,5 +1,6 @@
 //! App settings, saved as JSON in the user's config folder (~/.config/shale/config.json).
 
+use crate::vault_state::{LegacyVaultFields, Versioned};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -29,9 +30,171 @@ impl FileSort {
     }
 }
 
+/// How a mail account signs in.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MailAuth {
+    /// Password or app password, kept in the keyring.
+    #[default]
+    Password,
+    /// OAuth2 (XOAUTH2 / OAUTHBEARER); the sign-in is in `oauth.rs`.
+    OAuth2,
+}
+
+/// Where an OAuth2 account signs in. Google and Microsoft have fixed endpoints; Custom has the
+/// ones typed in the account settings (an own provider, or the local test environment).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum OAuthProvider {
+    #[default]
+    Google,
+    Microsoft,
+    Custom,
+}
+
+/// How the connection to the mail server is secured. There is no plain-text choice.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MailSecurity {
+    /// TLS from the first byte (port 993).
+    #[default]
+    ImplicitTls,
+    /// Plain start, then the upgrade to TLS is mandatory (port 143); nothing is sent before it.
+    StartTls,
+}
+
+impl MailSecurity {
+    /// The usual port for this mode.
+    pub fn default_port(self) -> u16 {
+        match self {
+            MailSecurity::ImplicitTls => 993,
+            MailSecurity::StartTls => 143,
+        }
+    }
+
+    /// The usual port of the mail submission service (SMTP) for this mode (MAIL-120).
+    pub fn smtp_default_port(self) -> u16 {
+        match self {
+            MailSecurity::ImplicitTls => 465,
+            MailSecurity::StartTls => 587,
+        }
+    }
+}
+
+/// The two standards for signing and encrypting mail (ADR-0011): OpenPGP (`gpg`) and S/MIME (`gpgsm`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum CryptoStandard {
+    #[default]
+    OpenPgp,
+    Smime,
+}
+
+impl CryptoStandard {
+    pub fn label(self) -> &'static str {
+        match self {
+            CryptoStandard::OpenPgp => "OpenPGP",
+            CryptoStandard::Smime => "S/MIME",
+        }
+    }
+    /// The GnuPG program that does it.
+    pub fn program(self) -> &'static str {
+        match self {
+            CryptoStandard::OpenPgp => "gpg",
+            CryptoStandard::Smime => "gpgsm",
+        }
+    }
+}
+
+impl MailAccount {
+    /// The fingerprint of this account's key for a standard (empty: none).
+    pub fn key_for(&self, s: CryptoStandard) -> &str {
+        match s {
+            CryptoStandard::OpenPgp => &self.pgp_key,
+            CryptoStandard::Smime => &self.smime_key,
+        }
+    }
+}
+
+/// What a person has to type, exactly, to switch encryption on (ADR-0011 §3, OPEN-017).
+pub const CONSENT_PHRASE: &str = "I agree to decrypted local storage";
+
+/// One IMAP account. The password is not here: it is in the keyring (`secrets::mail_secret`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct MailAccount {
+    /// Stable name of the account; used for its folder in the mail store (letters, digits, `-`, `_`).
+    pub id: String,
+    /// What the account is called in the window.
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub auth: MailAuth,
+    pub security: MailSecurity,
+    /// OAuth2 only: the provider, and the client ID registered with it. Shale has no built-in
+    /// client IDs. The client secret (some providers need one) is in the keyring.
+    pub oauth_provider: OAuthProvider,
+    pub oauth_client_id: String,
+    /// OAuth2 with the Custom provider only: the authorization and token endpoints and the scope.
+    pub oauth_auth_url: String,
+    pub oauth_token_url: String,
+    pub oauth_scope: String,
+    /// Sending (phase 3, MAIL-120): the SMTP server. The sign-in is the one above (same
+    /// password, or the same OAuth2 sign-in). Never plain text: 465 implicit TLS or 587 STARTTLS.
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_security: MailSecurity,
+    /// The sender: name and address (empty address = the user name, if it is an address).
+    pub from_name: String,
+    pub from_address: String,
+    /// Added below a new mail (and above the quote of a reply).
+    pub signature: String,
+    /// The server saves a copy of what is sent in Sent by itself (Gmail): Shale then does not append one.
+    pub server_stores_sent: bool,
+    /// Add a `User-Agent` header to sent mail (off: privacy).
+    pub user_agent_header: bool,
+    /// Signing and encrypting (phase 4, MAIL-190): the fingerprint of the OpenPGP key and of the S/MIME
+    /// certificate in GnuPG that belong to this account (empty: none), sign new mail by default, and which
+    /// standard a new mail uses.
+    pub pgp_key: String,
+    pub smime_key: String,
+    pub sign_by_default: bool,
+    pub preferred_standard: CryptoStandard,
+}
+
+impl Default for MailAccount {
+    fn default() -> Self {
+        MailAccount {
+            id: String::new(),
+            name: String::new(),
+            host: String::new(),
+            port: 993,
+            user: String::new(),
+            auth: MailAuth::Password,
+            security: MailSecurity::ImplicitTls,
+            oauth_provider: OAuthProvider::Google,
+            oauth_client_id: String::new(),
+            oauth_auth_url: String::new(),
+            oauth_token_url: String::new(),
+            oauth_scope: String::new(),
+            smtp_host: String::new(),
+            smtp_port: 465,
+            smtp_security: MailSecurity::ImplicitTls,
+            from_name: String::new(),
+            from_address: String::new(),
+            signature: String::new(),
+            server_stores_sent: false,
+            user_agent_header: false,
+            pgp_key: String::new(),
+            smime_key: String::new(),
+            sign_by_default: false,
+            preferred_standard: CryptoStandard::OpenPgp,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
+    /// Format version (CFG-004); see `Versioned for Config`.
+    pub version: u64,
     /// The vault opened last.
     pub vault: Option<PathBuf>,
     pub recent: Vec<PathBuf>,
@@ -48,8 +211,6 @@ pub struct Config {
     pub readable_width: bool,
     pub show_left: bool,
     pub show_right: bool,
-    /// Notes open when the app was closed (vault-relative, '/' separated).
-    pub open_files: Vec<String>,
     /// Order of the file tree.
     pub file_sort: FileSort,
     /// Show embedded images as pictures inside the editor (the link shows when the cursor is on it).
@@ -60,29 +221,54 @@ pub struct Config {
     pub week_starts_monday: bool,
     /// Troubleshooting: record every key, typed text and input-method event to a file.
     pub input_log: bool,
-    /// The folder used for the last import (vault-relative).
-    pub last_import_folder: String,
-    /// Tags used for imports, most recent first.
-    pub recent_tags: Vec<String>,
-    /// Folder of the contact notes (for `[[p …` links and people found when importing).
-    pub people_dir: String,
     /// Vim-style editing in notes: normal / insert / visual mode (off by default).
     pub vim_mode: bool,
+    /// IMAP accounts of the mail view.
+    pub mail_accounts: Vec<MailAccount>,
+    /// The mail view fetches new mail by itself every this many minutes while the app runs
+    /// (0 = only with the Sync button).
+    pub mail_sync_minutes: u32,
+    /// Opening a message in the mail view marks it read on the server (MAIL-109).
+    pub mail_mark_read: bool,
+    /// ... after this many seconds (0 = at once).
+    pub mail_mark_read_secs: u32,
+    /// Seconds a sent mail waits in the outbox, where it can still be pulled back (0 = send at once) (MAIL-134).
+    pub mail_undo_secs: u32,
+    /// The date and time the person typed the consent to decrypted local storage (ADR-0011, MAIL-180);
+    /// None = encryption is off: nothing is decrypted.
+    pub mail_encryption_consent: Option<String>,
     /// Opening an Obsidian canvas converts it to an editable drawing without asking.
     pub auto_convert_canvas: bool,
     /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
     pub social_accounts: Vec<crate::social::SocialAccountEntry>,
     /// The account and feed shown last in the feed view.
     pub social_last: Option<(String, String)>,
-    /// The folder used for the last saved post (vault-relative); empty: "Social".
-    pub last_social_folder: String,
     /// Include replies from other people when saving a post (the last choice in the Import dialog).
     pub social_replies: bool,
+    /// Minutes between looks for new posts in the feeds open in tabs (0 = never, SOC-025).
+    pub social_check_minutes: u32,
+    // Per-vault fields of older versions, read only to move them into the vault that is opened
+    // first (CFG-008); dropped from the file after that.
+    #[serde(rename = "open_files", skip_serializing_if = "Option::is_none")]
+    pub legacy_open_files: Option<Vec<String>>,
+    #[serde(rename = "last_import_folder", skip_serializing_if = "Option::is_none")]
+    pub legacy_last_import_folder: Option<String>,
+    #[serde(rename = "recent_tags", skip_serializing_if = "Option::is_none")]
+    pub legacy_recent_tags: Option<Vec<String>>,
+    #[serde(rename = "people_dir", skip_serializing_if = "Option::is_none")]
+    pub legacy_people_dir: Option<String>,
+    /// Fields of a newer Shale, written back unchanged.
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, serde_json::Value>,
+    /// The file came from a newer Shale or could not be read: never overwrite it (CFG-007).
+    #[serde(skip)]
+    pub read_only: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
+            version: <Config as Versioned>::CURRENT,
             vault: None,
             recent: vec![],
             ctrl_to_follow: false,
@@ -93,21 +279,42 @@ impl Default for Config {
             readable_width: true,
             show_left: true,
             show_right: true,
-            open_files: vec![],
             file_sort: FileSort::NameAsc,
             inline_images: true,
             calendars: vec![],
             week_starts_monday: true,
             input_log: false,
-            last_import_folder: String::new(),
-            recent_tags: vec![],
-            people_dir: crate::people::DEFAULT_DIR.into(),
             vim_mode: false,
+            mail_accounts: vec![],
+            mail_sync_minutes: 10,
+            mail_mark_read: true,
+            mail_mark_read_secs: 2,
+            mail_undo_secs: 10,
+            mail_encryption_consent: None,
             auto_convert_canvas: false,
             social_accounts: vec![],
             social_last: None,
-            last_social_folder: String::new(),
             social_replies: false,
+            social_check_minutes: 5,
+            legacy_open_files: None,
+            legacy_last_import_folder: None,
+            legacy_recent_tags: None,
+            legacy_people_dir: None,
+            other: serde_json::Map::new(),
+            read_only: false,
+        }
+    }
+}
+
+impl Versioned for Config {
+    const CURRENT: u64 = 1;
+    const WHAT: &'static str = "settings";
+    fn step(_json: &mut serde_json::Map<String, serde_json::Value>, from: u64) {
+        match from {
+            // 0 → 1: the first versioned format. The per-vault fields stay in the JSON; they
+            // are moved into the first vault that is opened (`take_legacy`, CFG-008).
+            0 => {}
+            _ => unreachable!("no migration from version {from}"),
         }
     }
 }
@@ -134,57 +341,13 @@ pub fn build_stamp() -> String {
     format!("{y:04}-{m:02}-{d:02} {:02}:{:02} UTC", rem / 3600, rem % 3600 / 60)
 }
 
-/// Make the folder of a private file, readable only by the owner.
-fn private_dir(path: &Path) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
-        }
-    }
-    Ok(())
-}
-
-/// Open a file only the owner can read and write (created that way, never readable by others
-/// for a moment). `append`: add to it, otherwise start it empty.
-pub fn open_private(path: &Path, append: bool) -> std::io::Result<std::fs::File> {
-    private_dir(path)?;
-    let mut o = std::fs::OpenOptions::new();
-    o.create(true);
-    if append {
-        o.append(true);
-    } else {
-        o.write(true).truncate(true);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        o.mode(0o600);
-    }
-    let f = o.open(path)?;
-    #[cfg(unix)]
-    {
-        // an older file may have been created with wider permissions
-        use std::os::unix::fs::PermissionsExt;
-        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(f)
-}
-
-/// Replace a private file in one step: written to a temporary file next to it (owner-only),
-/// then renamed over it, so a crash never leaves a half-written file.
+/// Replace a private file in one step (owner-only, in an owner-only folder), so a crash never
+/// leaves a half-written file. See `fsutil::write_atomic_private`.
 pub fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
-    let mut f = open_private(&tmp, false)?;
-    f.write_all(data)?;
-    f.sync_all()?;
-    drop(f);
-    std::fs::rename(&tmp, path)
+    if let Some(dir) = path.parent() {
+        crate::fsutil::ensure_private_dir(dir)?;
+    }
+    crate::fsutil::write_atomic_private(path, data)
 }
 
 pub fn config_path() -> Option<PathBuf> {
@@ -192,25 +355,46 @@ pub fn config_path() -> Option<PathBuf> {
 }
 
 impl Config {
-    pub fn load() -> Config {
-        let mut c: Config = config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+    /// Load the settings; a problem the user should hear about comes back too. A file that
+    /// fails to parse is kept as `config.json.broken-<date>` (CFG-004).
+    pub fn load() -> (Config, Option<String>) {
+        let Some(p) = config_path() else { return (Config::default(), None) };
+        let (mut c, problem) = Self::load_from(&p);
         crate::secrets::load_passwords(&mut c.calendars);
-        c
+        (c, problem)
     }
 
-    pub fn save(&self) {
-        let Some(p) = config_path() else { return };
+    pub fn load_from(path: &Path) -> (Config, Option<String>) {
+        let l = crate::vault_state::load::<Config>(path);
+        let mut c = l.value;
+        c.read_only = !l.writable;
+        (c, l.problem)
+    }
+
+    /// The per-vault fields of an old config file, removed from this config (CFG-008).
+    pub fn take_legacy(&mut self) -> LegacyVaultFields {
+        LegacyVaultFields { people_dir: self.legacy_people_dir.take(), open_files: self.legacy_open_files.take(), last_import_folder: self.legacy_last_import_folder.take(), recent_tags: self.legacy_recent_tags.take() }
+    }
+
+    /// Put back what `take_legacy` took (the vault could not take it over).
+    pub fn restore_legacy(&mut self, l: LegacyVaultFields) {
+        self.legacy_people_dir = l.people_dir;
+        self.legacy_open_files = l.open_files;
+        self.legacy_last_import_folder = l.last_import_folder;
+        self.legacy_recent_tags = l.recent_tags;
+    }
+
+    /// Write the settings. A failure is returned for the caller to show (DATA-009).
+    pub fn save(&self) -> Result<(), String> {
+        if self.read_only {
+            return Ok(());
+        }
+        let Some(p) = config_path() else { return Ok(()) };
         // CalDAV passwords go to the system keyring when there is one
         let mut out = self.clone();
         out.calendars = crate::secrets::for_file(&self.calendars);
-        if let Ok(s) = serde_json::to_string_pretty(&out) {
-            if let Err(e) = write_private(&p, s.as_bytes()) {
-                eprintln!("could not save the settings: {e}");
-            }
-        }
+        let s = serde_json::to_string_pretty(&out).map_err(|e| format!("could not save the settings: {e}"))?;
+        write_private(&p, s.as_bytes()).map_err(|e| format!("could not save the settings: {e}"))
     }
 
     pub fn remember_vault(&mut self, path: PathBuf) {
@@ -228,12 +412,27 @@ mod tests {
     // spec: CFG-001
     #[test]
     fn old_config_files_still_load() {
-        let c: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
+        let (c, newer) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
+        assert!(!newer);
+        assert_eq!(c.version, 1);
         assert_eq!(c.vault, Some(PathBuf::from("/tmp/v")));
         assert!(c.update_links_on_rename);
         assert!(!c.ctrl_to_follow);
         assert!(c.inline_images);
         assert_eq!(c.file_sort, FileSort::NameAsc);
+    }
+
+    // spec: MAIL-120
+    #[test]
+    fn mail_accounts_of_older_files_load_with_sensible_sending_defaults_and_never_a_plain_text_choice() {
+        let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada@example.com"}]}"#).unwrap();
+        let a = &c.mail_accounts[0];
+        assert_eq!((a.smtp_host.as_str(), a.smtp_port, a.smtp_security, a.server_stores_sent, a.user_agent_header), ("", 465, MailSecurity::ImplicitTls, false, false));
+        assert_eq!(c.mail_undo_secs, 10, "the undo-send time defaults to 10 seconds");
+        assert_eq!((MailSecurity::ImplicitTls.smtp_default_port(), MailSecurity::StartTls.smtp_default_port()), (465, 587));
+        assert!(serde_json::from_str::<Config>(r#"{"mail_accounts": [{"smtp_security": "Plain"}]}"#).is_err(), "there is no plain-text sending");
+        let back = serde_json::to_string(&c).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&back).unwrap().mail_accounts, c.mail_accounts);
     }
 
     // spec: SOC-003
@@ -252,6 +451,7 @@ mod tests {
         // an old file has none
         let old: Config = serde_json::from_str(r#"{"vault": "/tmp/v"}"#).unwrap();
         assert!(old.social_accounts.is_empty() && old.social_last.is_none());
+        assert_eq!(old.social_check_minutes, 5, "files from before the checks use the default");
     }
 
     // spec: CFG-002
@@ -263,13 +463,91 @@ mod tests {
         write_private(&p, b"one").unwrap();
         write_private(&p, b"two").unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "two");
-        assert!(!dir.join("sub").join("config.json.tmp").exists());
+        assert_eq!(std::fs::read_dir(dir.join("sub")).unwrap().count(), 1, "no temporary file left");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
             assert_eq!(std::fs::metadata(p.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: MAIL-020
+    // spec: MAIL-190, MAIL-180
+    #[test]
+    fn older_settings_load_without_keys_or_consent_and_the_new_ones_round_trip() {
+        let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada"}]}"#).unwrap();
+        let a = &c.mail_accounts[0];
+        assert_eq!((a.pgp_key.as_str(), a.smime_key.as_str(), a.sign_by_default, a.preferred_standard), ("", "", false, CryptoStandard::OpenPgp));
+        assert_eq!(c.mail_encryption_consent, None, "encryption is off until the consent is typed");
+        assert_eq!((a.key_for(CryptoStandard::OpenPgp), a.key_for(CryptoStandard::Smime)), ("", ""));
+        let mut c = c;
+        c.mail_accounts[0].pgp_key = "0123456789ABCDEF0123456789ABCDEF01234567".into();
+        c.mail_accounts[0].preferred_standard = CryptoStandard::Smime;
+        c.mail_accounts[0].sign_by_default = true;
+        c.mail_encryption_consent = Some("2026-11-14 12:00".into());
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.mail_accounts, c.mail_accounts);
+        assert_eq!(back.mail_encryption_consent.as_deref(), Some("2026-11-14 12:00"));
+        assert_eq!(CONSENT_PHRASE, "I agree to decrypted local storage");
+        assert_eq!((CryptoStandard::OpenPgp.program(), CryptoStandard::Smime.program()), ("gpg", "gpgsm"));
+    }
+
+    #[test]
+    fn mail_accounts_load_and_have_no_plain_text_mode() {
+        let c: Config = serde_json::from_str(r#"{"mail_accounts": [{"id": "a1", "host": "imap.example.com", "user": "ada"}]}"#).unwrap();
+        let a = &c.mail_accounts[0];
+        assert_eq!((a.port, a.auth, a.security), (993, MailAuth::Password, MailSecurity::ImplicitTls));
+        assert_eq!(MailSecurity::StartTls.default_port(), 143);
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.mail_accounts, c.mail_accounts);
+        // there is no way to ask for an unencrypted connection, and no password field to leak
+        assert!(serde_json::from_str::<Config>(r#"{"mail_accounts": [{"security": "Plain"}]}"#).is_err());
+        assert!(!serde_json::to_string(&c).unwrap().contains("password"));
+    }
+
+    // spec: CFG-004, CFG-008
+    #[test]
+    fn config_migration_0_to_1_keeps_the_old_vault_fields_until_taken() {
+        let old = br#"{"vault": "/v", "font_size": 17.0, "people_dir": "Adressbuch", "open_files": ["a.md"], "recent_tags": ["x"], "last_import_folder": "In"}"#;
+        let (mut c, _) = crate::vault_state::parse::<Config>(old).unwrap();
+        assert_eq!(c.font_size, 17.0);
+        let out = serde_json::to_string(&c).unwrap();
+        assert!(out.contains("\"people_dir\":\"Adressbuch\""), "{out}");
+        let legacy = c.take_legacy();
+        assert_eq!(legacy.people_dir.as_deref(), Some("Adressbuch"));
+        assert_eq!(legacy.open_files, Some(vec!["a.md".to_string()]));
+        assert_eq!(legacy.last_import_folder.as_deref(), Some("In"));
+        assert_eq!(legacy.recent_tags, Some(vec!["x".to_string()]));
+        let out = serde_json::to_string(&c).unwrap();
+        for k in ["people_dir", "open_files", "recent_tags", "last_import_folder"] {
+            assert!(!out.contains(k), "{k} still in {out}");
+        }
+        assert!(out.contains("\"version\":1"));
+        assert!(c.take_legacy().is_empty());
+        c.restore_legacy(legacy.clone());
+        assert_eq!(c.take_legacy(), legacy);
+    }
+
+    // spec: CFG-004
+    #[test]
+    fn a_broken_config_is_kept_and_a_newer_one_is_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!("shale-config-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let p = dir.join("config.json");
+        write_private(&p, b"{\"calendars\": [oops").unwrap();
+        let (c, problem) = Config::load_from(&p);
+        assert!(!c.read_only);
+        assert!(problem.unwrap().contains("config.json.broken-"));
+        let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].starts_with("config.json.broken-"), "{kept:?}");
+        write_private(&p, br#"{"version": 7, "font_size": 20.0, "new_thing": true}"#).unwrap();
+        let (c, problem) = Config::load_from(&p);
+        assert!(c.read_only && problem.is_some());
+        assert_eq!(c.font_size, 20.0);
+        assert_eq!(c.other.get("new_thing"), Some(&serde_json::Value::Bool(true)));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

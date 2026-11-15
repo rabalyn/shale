@@ -50,10 +50,7 @@ impl CalendarDialog {
         let acct = Account { url: self.dav_url.trim().to_string(), username: self.dav_user.clone(), password: self.dav_pass.clone() };
         let slot: Discovery = Arc::new(Mutex::new(None));
         let s2 = slot.clone();
-        std::thread::spawn(move || {
-            let r = cal_dav::discover(&acct);
-            *s2.lock().unwrap() = Some(r);
-        });
+        crate::jobs::run(move || cal_dav::discover(&acct), move |r| *s2.lock().unwrap() = Some(r.and_then(|r| r)));
         self.discovering = Some(slot);
         self.message = Some("Looking for calendars…".into());
     }
@@ -126,8 +123,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
                 }
                 if !s.is_local() {
                     ui.label(muted("sync every"));
-                    rec(format!("sync:{i}"), ui.add(egui::DragValue::new(&mut s.sync_minutes).range(0..=1440).suffix(" min")))
-                        .on_hover_text("Load this calendar again every this many minutes (0 = only when Shale starts, or with Sync now)");
+                    rec(format!("sync:{i}"), ui.add(egui::DragValue::new(&mut s.sync_minutes).range(0..=1440).suffix(" min"))).on_hover_text("Load this calendar again every this many minutes (0 = only when Shale starts, or with Sync now)");
                     if rec(format!("sync-now:{i}"), ui.small_button("Sync now")).clicked() {
                         sync_now = Some(s.id.clone());
                     }
@@ -210,7 +206,8 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
                 rec(format!("found:{i}"), ui.checkbox(on, &c.name)).on_hover_text(&c.url);
                 // the password goes wherever the calendar is: say so when that's another server
                 if !cal_dav::same_server(&c.url, &entered) {
-                    ui.label(egui::RichText::new(format!("on {}", cal_dav::host_of(&c.url))).size(12.0).color(theme::LINK_MISSING)).on_hover_text("This calendar is on another server than the address you entered; your user name and password will be sent there.");
+                    ui.label(egui::RichText::new(format!("on {}", cal_dav::host_of(&c.url))).size(12.0).color(theme::LINK_MISSING))
+                        .on_hover_text("This calendar is on another server than the address you entered; your user name and password will be sent there.");
                 }
                 if c.read_only {
                     ui.label(muted("read-only"));
@@ -318,7 +315,23 @@ fn new_uid() -> String {
 
 impl EventDialog {
     fn blank(calendar: String) -> Self {
-        EventDialog { calendar, original: None, title: String::new(), start_date: String::new(), start_time: String::new(), end_date: String::new(), end_time: String::new(), all_day: false, location: String::new(), description: String::new(), error: None, job: None, rects: vec![], focused: false, new_uid: new_uid() }
+        EventDialog {
+            calendar,
+            original: None,
+            title: String::new(),
+            start_date: String::new(),
+            start_time: String::new(),
+            end_date: String::new(),
+            end_time: String::new(),
+            all_day: false,
+            location: String::new(),
+            description: String::new(),
+            error: None,
+            job: None,
+            rects: vec![],
+            focused: false,
+            new_uid: new_uid(),
+        }
     }
 
     fn set_times(&mut self, start: i64, end: i64, all_day: bool) {
@@ -487,7 +500,13 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             let combo = egui::ComboBox::from_id_salt("event-cal").width(320.0).selected_text(current_name).show_ui(ui, |ui| {
                 for s in &store.sources {
                     let read_only = store.read_only.contains(&s.id);
-                    let kind = if s.is_local() { "local" } else if read_only { "CalDAV, read-only" } else { "CalDAV" };
+                    let kind = if s.is_local() {
+                        "local"
+                    } else if read_only {
+                        "CalDAV, read-only"
+                    } else {
+                        "CalDAV"
+                    };
                     let label = egui::RichText::new(format!("● {}   ({kind})", s.name)).color(crate::drawing::parse_color(&s.color).unwrap_or(theme::TEXT));
                     if rec(&format!("cal:{}", s.name), ui.add_enabled(!read_only || d.calendar == s.id, egui::Button::selectable(d.calendar == s.id, label))).clicked() {
                         d.calendar = s.id.clone();
@@ -784,7 +803,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut store = CalendarStore::new(vec![], dir);
         let local = store.new_local_source("Home", &[]);
-        let dav = |id: &str, name: &str| CalendarSource { id: id.into(), name: name.into(), color: "#1971c2".into(), enabled: true, sync_minutes: 0, kind: SourceKind::Caldav { url: format!("{base}/{id}/"), username: "ada".into(), password: "x".into() } };
+        let dav = |id: &str, name: &str| CalendarSource {
+            id: id.into(),
+            name: name.into(),
+            color: "#1971c2".into(),
+            enabled: true,
+            sync_minutes: 0,
+            kind: SourceKind::Caldav { url: format!("{base}/{id}/"), username: "ada".into(), password: "x".into() },
+        };
         store.set_sources(vec![local.clone(), dav("shared", "Shared"), dav("work", "Work")]);
         let mut d = EventDialog::new_at("shared".into(), 1_800_000_000);
         d.title = "Kickoff".into();

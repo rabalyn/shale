@@ -8,7 +8,6 @@
 //! messages share it, all of them are offered (the newest ticked).
 
 use crate::mail;
-use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -92,7 +91,11 @@ pub fn parse_link(link: &str) -> Option<MsgRef> {
 /// Where Thunderbird keeps its profiles.
 pub fn default_roots() -> Vec<PathBuf> {
     let Some(home) = dirs::home_dir() else { return vec![] };
-    [".thunderbird", ".var/app/org.mozilla.Thunderbird/.thunderbird", ".var/app/net.thunderbird.Thunderbird/.thunderbird", "snap/thunderbird/common/.thunderbird", ".mozilla-thunderbird"].iter().map(|p| home.join(p)).filter(|p| p.is_dir()).collect()
+    [".thunderbird", ".var/app/org.mozilla.Thunderbird/.thunderbird", ".var/app/net.thunderbird.Thunderbird/.thunderbird", "snap/thunderbird/common/.thunderbird", ".mozilla-thunderbird"]
+        .iter()
+        .map(|p| home.join(p))
+        .filter(|p| p.is_dir())
+        .collect()
 }
 
 /// A mail account's folder on disk, from the profile's prefs.js.
@@ -105,7 +108,7 @@ struct Server {
 }
 
 fn servers(profile: &Path) -> Vec<Server> {
-    let Ok(prefs) = std::fs::read_to_string(profile.join("prefs.js")) else { return vec![] };
+    let Ok(prefs) = crate::fsutil::read_to_string(profile.join("prefs.js")) else { return vec![] };
     let mut map: std::collections::BTreeMap<String, Server> = Default::default();
     for line in prefs.lines() {
         let Some(rest) = line.trim().strip_prefix("user_pref(\"mail.server.") else { continue };
@@ -117,11 +120,8 @@ fn servers(profile: &Path) -> Vec<Server> {
             "hostname" => s.host = val,
             "userName" => s.user = val,
             "type" => s.kind = val,
-            "directory-rel" => {
-                if s.dir.as_os_str().is_empty() || !s.dir.is_dir() {
-                    s.dir = profile.join(val.trim_start_matches("[ProfD]"));
-                }
-            }
+            "directory-rel" if s.dir.as_os_str().is_empty() || !s.dir.is_dir() => s.dir = profile.join(val.trim_start_matches("[ProfD]")),
+            "directory-rel" => {}
             "directory" => s.dir = PathBuf::from(val),
             _ => {}
         }
@@ -212,7 +212,7 @@ fn clean_message(mut raw: Vec<u8>) -> Vec<u8> {
 
 /// The message starting at `offset` in an mbox file.
 fn read_at(file: &Path, offset: u64) -> Option<Vec<u8>> {
-    let mut f = File::open(file).ok()?;
+    let mut f = crate::fsutil::open_read(file).ok()?;
     f.seek(SeekFrom::Start(offset)).ok()?;
     let mut r = BufReader::new(f.take(200 << 20));
     let mut out = Vec::new();
@@ -249,7 +249,7 @@ fn subject_matches(subject: &str, wanted: &str) -> bool {
 
 /// Messages in an mbox file whose headers pass `pick`.
 fn scan_mbox(file: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
-    let Ok(f) = File::open(file) else { return vec![] };
+    let Ok(f) = crate::fsutil::open_read(file) else { return vec![] };
     let mut r = BufReader::with_capacity(1 << 20, f);
     let mut found = Vec::new();
     let mut cur: Vec<u8> = Vec::new();
@@ -303,14 +303,14 @@ fn scan_maildir(dir: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
     for sub in ["cur", "new"] {
         let Ok(rd) = std::fs::read_dir(dir.join(sub)) else { continue };
         for e in rd.flatten() {
-            let Ok(mut f) = File::open(e.path()) else { continue };
+            let Ok(mut f) = crate::fsutil::open_read(e.path()) else { continue };
             let mut head = vec![0u8; 64 * 1024];
             let n = f.read(&mut head).unwrap_or(0);
             head.truncate(n);
             let text = String::from_utf8_lossy(&head).replace("\r\n", "\n");
             let headers = text.split("\n\n").next().unwrap_or("").to_string();
             if pick(&headers) {
-                if let Ok(all) = std::fs::read(e.path()) {
+                if let Ok(all) = crate::fsutil::read(e.path()) {
                     out.push(clean_message(all));
                 }
             }
@@ -320,7 +320,11 @@ fn scan_maildir(dir: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
 }
 
 fn scan(place: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
-    if place.is_dir() { scan_maildir(place, pick) } else { scan_mbox(place, pick) }
+    if place.is_dir() {
+        scan_maildir(place, pick)
+    } else {
+        scan_mbox(place, pick)
+    }
 }
 
 fn bare_id(s: &str) -> String {
@@ -428,7 +432,11 @@ pub fn mork_rows(b: &[u8]) -> Rows {
                             let (id, j) = mork_token(b, i + 1, b"=)");
                             if j < b.len() && b[j] == b'=' {
                                 let (v, k) = mork_literal(b, j + 1);
-                                if is_cols { cols.insert(id, v) } else { vals.insert(id, v) };
+                                if is_cols {
+                                    cols.insert(id, v)
+                                } else {
+                                    vals.insert(id, v)
+                                };
                                 i = k;
                             } else {
                                 i = j + 1;
@@ -513,7 +521,7 @@ fn by_index(place: &Path, row: &std::collections::HashMap<String, String>) -> Op
             }
         } else {
             for sub in ["cur", "new"] {
-                if let Ok(raw) = std::fs::read(place.join(sub).join(token.trim())) {
+                if let Ok(raw) = crate::fsutil::read(place.join(sub).join(token.trim())) {
                     let raw = clean_message(raw);
                     if ok(&raw) {
                         return Some(raw);
@@ -564,7 +572,7 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
             let mut index_subject = None;
             if let Some(k) = r.key {
                 let idx = index_of(&p);
-                match std::fs::read(&idx) {
+                match crate::fsutil::read(&idx) {
                     Ok(bytes) => match mork_rows(&bytes).get(&k) {
                         Some(row) => {
                             if let Some(raw) = by_index(&p, row) {
@@ -594,7 +602,11 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
     if seen.is_empty() && why.is_empty() {
         why.push(format!("no Thunderbird folder for “{}” on this computer", refs[0].folder.join("/")));
     }
-    let hint = if not_offline || refs.iter().any(|r| r.imap) { " For IMAP accounts, Thunderbird keeps the text only with “Keep messages for this account on this computer” (Account settings → Synchronization & Storage; also per folder under Folder properties → Synchronization)." } else { "" };
+    let hint = if not_offline || refs.iter().any(|r| r.imap) {
+        " For IMAP accounts, Thunderbird keeps the text only with “Keep messages for this account on this computer” (Account settings → Synchronization & Storage; also per folder under Folder properties → Synchronization)."
+    } else {
+        ""
+    };
     Err(format!("the message was not found: {}.{hint} (Link: {}; file name: {})", why.join("; "), links.join(" "), file_name.unwrap_or("none")))
 }
 
@@ -644,7 +656,7 @@ mod tests {
         let first = msg("Erste", "eins");
         let second = msg("Hörsaal B – Pläne", ">From the architects\n>From here on");
         std::fs::write(prof.join("Mail/Local Folders/Inbox.sbd/Projekte"), format!("{first}{second}")).unwrap();
-        let found = find_in(&[root.clone()], &[format!("mailbox-message://nobody@Local%20Folders/Inbox/Projekte#{}", first.len())], None).unwrap();
+        let found = find_in(std::slice::from_ref(&root), &[format!("mailbox-message://nobody@Local%20Folders/Inbox/Projekte#{}", first.len())], None).unwrap();
         assert_eq!(found.len(), 1);
         let text = String::from_utf8_lossy(&found[0]);
         assert!(text.starts_with("X-Mozilla-Status") && text.contains("Subject: Hörsaal B – Pläne") && text.contains("\nFrom the architects\nFrom here on") && !text.contains("eins"), "{text}");
@@ -653,26 +665,26 @@ mod tests {
         let b = msg("Something else", "no");
         let c = msg("Bau Hörsaal B: Stand 4", "older");
         std::fs::write(prof.join("ImapMail/imap.uni.example/INBOX.sbd/Bau"), format!("{c}{b}{a}")).unwrap();
-        let found = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Bau Hörsaal B_ Stand 4.eml")).unwrap();
+        let found = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Bau Hörsaal B_ Stand 4.eml")).unwrap();
         assert_eq!(found.len(), 2, "both messages with that subject");
         assert!(String::from_utf8_lossy(&found[1]).contains("newest"));
         // not there: says where it looked and what to turn on
-        let err = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Missing.eml")).unwrap_err();
+        let err = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Missing.eml")).unwrap_err();
         assert!(err.contains("Keep messages") && err.contains("Bau") && err.contains("no index file") && err.contains("Missing.eml"), "{err}");
         // with Thunderbird's index: found by its UID, whatever the file name says
         let off = (c.len() + b.len()) as u64;
         let msf = format!("// <!-- <mdb:mork:z v=\"1.4\"/> -->\n< <(a=c)> // (f=iso-8859-1)\n  (B8=subject)(B9=message-id)(BA=storeToken)>\n<(A0=whatever)(A1={}@x)>\n{{1:^80 {{(k^BE:c)(s=9)}}\n  [4D(^B8^A0)(^B9^A1)(^BA=12)]\n  [4E(^B8=Other)(^BA=0)]}}\n@$${{2{{@\n[-4D(^B8^A0)(^B9^A1)(^BA={off})]\n@$$}}2}}@\n", fold("=?UTF-8?Q?Bau_H=C3=B6rsaal_B=3A_Stand_4?=").len());
         std::fs::write(prof.join("ImapMail/imap.uni.example/INBOX.sbd/Bau.msf"), msf).unwrap();
-        let found = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Something.eml")).unwrap();
+        let found = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], Some("Something.eml")).unwrap();
         assert_eq!(found.len(), 1);
         assert!(String::from_utf8_lossy(&found[0]).contains("newest"), "the later row (position {off}) counts");
         // the position is out of date: found by its Message-ID
         let msf2 = std::fs::read_to_string(prof.join("ImapMail/imap.uni.example/INBOX.sbd/Bau.msf")).unwrap().replace(&format!("(^BA={off})"), "(^BA=3)");
         std::fs::write(prof.join("ImapMail/imap.uni.example/INBOX.sbd/Bau.msf"), msf2).unwrap();
-        let found = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], None).unwrap();
+        let found = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#77".to_string()], None).unwrap();
         assert!(String::from_utf8_lossy(&found[0]).contains("newest"));
         // a message the index doesn't know
-        let err = find_in(&[root.clone()], &["imap-message://ada@imap.uni.example/INBOX/Bau#79".to_string()], None).unwrap_err();
+        let err = find_in(std::slice::from_ref(&root), &["imap-message://ada@imap.uni.example/INBOX/Bau#79".to_string()], None).unwrap_err();
         assert!(err.contains("not in Thunderbird's index"), "{err}");
         let _ = std::fs::remove_dir_all(&root);
     }

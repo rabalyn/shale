@@ -34,6 +34,8 @@ pub enum CalAction {
     Edit(Occ),
     /// remove this event from its calendar
     Delete(Occ),
+    /// open the event's link (checked before it is opened)
+    OpenUrl(String),
 }
 
 /// Round a time up to the next full or half hour (local clock); a time already on one stays.
@@ -103,16 +105,19 @@ pub fn rrule_text(rule: &str) -> String {
         _ => "repeating".into(),
     };
     if let Some(days) = get("BYDAY") {
-        let names: Vec<&str> = days.split(',').filter_map(|d| match d.trim_start_matches(|c: char| c == '-' || c == '+' || c.is_ascii_digit()) {
-            "MO" => Some("Mon"),
-            "TU" => Some("Tue"),
-            "WE" => Some("Wed"),
-            "TH" => Some("Thu"),
-            "FR" => Some("Fri"),
-            "SA" => Some("Sat"),
-            "SU" => Some("Sun"),
-            _ => None,
-        }).collect();
+        let names: Vec<&str> = days
+            .split(',')
+            .filter_map(|d| match d.trim_start_matches(|c: char| c == '-' || c == '+' || c.is_ascii_digit()) {
+                "MO" => Some("Mon"),
+                "TU" => Some("Tue"),
+                "WE" => Some("Wed"),
+                "TH" => Some("Thu"),
+                "FR" => Some("Fri"),
+                "SA" => Some("Sat"),
+                "SU" => Some("Sun"),
+                _ => None,
+            })
+            .collect();
         s.push_str(&format!(" on {}", names.join(", ")));
     }
     if let Some(c) = get("COUNT") {
@@ -298,6 +303,7 @@ impl CalendarView {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn chip(&mut self, ui: &mut Ui, rect: Rect, o: &Occ, store: &CalendarStore, key: String, clicked: &mut Option<(Occ, Pos2)>, show_time: bool) {
         let Some(e) = store.event(o) else { return };
         let col = parse_hex(&store.sources[o.source].color);
@@ -339,9 +345,21 @@ impl CalendarView {
         let cw = w / 7.0;
         let avail_h = ui.available_height();
         let ch = match self.size {
-            Size::Small => if large { 44.0 } else { 30.0 },
+            Size::Small => {
+                if large {
+                    44.0
+                } else {
+                    30.0
+                }
+            }
             Size::Medium => 74.0,
-            Size::Large => if large { ((avail_h - 24.0) / rows as f32).max(130.0) } else { 120.0 },
+            Size::Large => {
+                if large {
+                    ((avail_h - 24.0) / rows as f32).max(130.0)
+                } else {
+                    120.0
+                }
+            }
         };
         // weekday header
         let (hr, _) = ui.allocate_exact_size(Vec2::new(w, 18.0), Sense::hover());
@@ -359,7 +377,13 @@ impl CalendarView {
             let resp = ui.interact(r, ui.scope_id().with(("cal-day", d)), Sense::click());
             self.rec(format!("day:{d}"), r);
             let p = ui.painter();
-            let bg = if self.size == Size::Small { Color32::TRANSPARENT } else if in_month { theme::BG_SECONDARY } else { theme::BG_PRIMARY };
+            let bg = if self.size == Size::Small {
+                Color32::TRANSPARENT
+            } else if in_month {
+                theme::BG_SECONDARY
+            } else {
+                theme::BG_PRIMARY
+            };
             p.rect_filled(r, CornerRadius::same(4), if resp.hovered() { theme::BG_HOVER } else { bg });
             if self.size == Size::Small && d == self.selected {
                 p.rect_stroke(r, CornerRadius::same(4), Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Inside);
@@ -369,7 +393,13 @@ impl CalendarView {
                 p.circle_filled(num_pos, 9.0, theme::ACCENT);
             }
             let (_, _, dd) = civil_from_days(d);
-            let numc = if d == today { Color32::WHITE } else if in_month { theme::TEXT } else { theme::FAINT };
+            let numc = if d == today {
+                Color32::WHITE
+            } else if in_month {
+                theme::TEXT
+            } else {
+                theme::FAINT
+            };
             p.text(num_pos, Align2::CENTER_CENTER, dd.to_string(), FontId::proportional(11.5), numc);
             let list = &by_day[i as usize];
             match self.size {
@@ -668,7 +698,7 @@ impl CalendarView {
                         let l = ui.link(&e.url);
                         rects.push(("popup-url".into(), l.rect));
                         if l.clicked() {
-                            crate::lists::open_in_browser(&e.url);
+                            action = Some(CalAction::OpenUrl(e.url.clone()));
                         }
                     });
                 }
@@ -744,6 +774,7 @@ mod tests {
             if let Some(a) = act {
                 self.actions.push(match a {
                     CalAction::Settings => "settings".into(),
+                    CalAction::OpenUrl(u) => format!("url:{u}"),
                     CalAction::OpenLarge => "large".into(),
                     CalAction::NewEventAt(s) => format!("new:{s}"),
                     CalAction::Edit(o) => format!("edit:{}", store.event(&o).map(|e| e.summary.clone()).unwrap_or_default()),

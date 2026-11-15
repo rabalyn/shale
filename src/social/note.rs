@@ -100,7 +100,11 @@ fn media_file_name(p: &Post, m: &Media, n: usize, content_type: Option<&str>) ->
 
 /// The date of a post in the local time zone (today when the post has no date).
 fn local_day(at: i64) -> (i32, u32, u32) {
-    if at == 0 { media::local_date() } else { t::civil_from_days(t::utc_to_local(at).0) }
+    if at == 0 {
+        media::local_date()
+    } else {
+        t::civil_from_days(t::utc_to_local(at).0)
+    }
 }
 
 /// The folder-date for saving media: the date of the first post.
@@ -123,7 +127,15 @@ pub fn post_title(p: &Post) -> String {
         words.push_str(w);
     }
     let words = if words.is_empty() { plain.chars().take(40).collect() } else { words };
-    let words = if words.trim().is_empty() { if p.media.is_empty() { "(post)".to_string() } else { "(media)".to_string() } } else { words };
+    let words = if words.trim().is_empty() {
+        if p.media.is_empty() {
+            "(post)".to_string()
+        } else {
+            "(media)".to_string()
+        }
+    } else {
+        words
+    };
     let raw = format!("{y:04}-{m:02}-{d:02} @{} – {}", p.author.handle, words);
     let cleaned: String = raw.chars().map(|c| if matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { ' ' } else { c }).filter(|c| !c.is_control()).collect();
     safe_title(&cleaned).trim_end_matches(['.', ' ']).to_string()
@@ -214,7 +226,7 @@ fn replies_section(saved: &SavedPost) -> String {
     if saved.replies.is_empty() {
         return String::new();
     }
-    let mut s = format!("\n## Replies\n");
+    let mut s = "\n## Replies\n".to_string();
     for r in &saved.replies {
         let p = &r.post;
         let mut head = vec![format!("**{}**", md_link(&format!("{} (@{})", p.author.name(), p.author.handle), &p.author.profile_url))];
@@ -368,7 +380,9 @@ mod tests {
         let (y, m, d) = local_day(1_715_941_800);
         let stamp = local_stamp(1_715_941_800, false);
         assert!(n.starts_with("---\ntype: social-post\nnetwork: mastodon\nauthor: \"@ada@m.test\"\nauthor-name: \"Ada \\\"Countess\\\" L.\"\n"), "{n}");
-        for line in [format!("date: {stamp}"), "url: \"https://m.test/@ada/42\"".into(), "post-id: \"42\"".into(), "tags: [social, recipes]".into(), format!("# {y:04}-{m:02}-{d:02} @ada@m.test – Lunch #yum second paragraph").replace("#yum", "yum")] {
+        for line in
+            [format!("date: {stamp}"), "url: \"https://m.test/@ada/42\"".into(), "post-id: \"42\"".into(), "tags: [social, recipes]".into(), format!("# {y:04}-{m:02}-{d:02} @ada@m.test – Lunch #yum second paragraph").replace("#yum", "yum")]
+        {
             let l = line.trim_start_matches("# ");
             assert!(n.contains(l) || n.contains(&line), "{l}\n{n}");
         }

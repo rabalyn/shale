@@ -63,8 +63,7 @@ fn fetch(dir: &Path, url: &str) -> Result<PathBuf, String> {
     let ext = sniff(&data).ok_or("not a picture")?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{:016x}.{ext}", fnv(url)));
-    let tmp = path.with_extension("part");
-    std::fs::write(&tmp, &data).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())?;
+    crate::fsutil::write_atomic(&path, &data).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
@@ -76,14 +75,17 @@ impl ImageCache {
         let rx = Arc::new(Mutex::new(rx));
         for _ in 0..WORKERS {
             let (rx, slots, ctx, dir) = (rx.clone(), slots.clone(), ctx.clone(), dir.clone());
-            std::thread::spawn(move || loop {
-                // one worker waits for the next address; the lock is let go before the download
-                let next = rx.lock().unwrap_or_else(|e| e.into_inner()).recv();
-                let Ok(url) = next else { return };
-                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fetch(&dir, &url))).unwrap_or_else(|_| Err("crashed".into()));
-                slots.lock().unwrap_or_else(|e| e.into_inner()).insert(url, r.map(Slot::Ready).unwrap_or(Slot::Failed));
-                ctx.request_repaint();
-            });
+            crate::jobs::run(
+                move || loop {
+                    // one worker waits for the next address; the lock is let go before the download
+                    let next = rx.lock().unwrap_or_else(|e| e.into_inner()).recv();
+                    let Ok(url) = next else { return };
+                    let r = crate::jobs::catch(|| fetch(&dir, &url)).and_then(|r| r);
+                    slots.lock().unwrap_or_else(|e| e.into_inner()).insert(url, r.map(Slot::Ready).unwrap_or(Slot::Failed));
+                    ctx.request_repaint();
+                },
+                |_| {},
+            );
         }
         ImageCache { slots, queue: tx }
     }

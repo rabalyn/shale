@@ -137,6 +137,164 @@ built-in demo vault (`shale --screenshot out.png`).
 
 ![Calendar in the sidebar](screenshots/calendar-sidebar.png)
 
+## Mail
+
+![The mail view](screenshots/mail-view.png)
+
+- The **Mail** button in the ribbon (or Ctrl+Shift+M) opens a three-pane view: accounts and
+  folders with their unread counts, the list of messages (newest first) and the message itself
+  as plain text. Shale reads your mail over IMAP and keeps a local copy next to the other
+  program data (`~/.local/share/shale/mail`), so it works offline and search is instant.
+- **Syncing only reads; what you do yourself is sent.** Fetching mail never changes anything on
+  the server (it does not even mark mail as read). Only your own actions are written back: mark
+  read or unread, flag, move to another folder, delete (to Trash) and, inside Trash, delete
+  forever. Passwords are checked over a TLS connection with the system's certificate store; there
+  is no unencrypted option.
+- **No HTML, no tracking.** The message text comes from the plain text part, or from the HTML
+  turned into text. Nothing is rendered, no pictures are fetched, no scripts run. An attachment
+  is opened from a private temporary copy through your default program (never a program or
+  script), or saved into the vault's media folder.
+- **The local copy is not encrypted** (like Thunderbird's). Use full-disk encryption.
+
+![Mail accounts](screenshots/mail-accounts.png)
+
+- **Accounts…** adds an account: server, port (993 with TLS, 143 with STARTTLS), user name and
+  password. The password goes into the system keyring. Without a keyring Shale says so and asks
+  again each time it starts, keeping it in memory only; it is never written to the settings
+  file. **Test connection** checks the login and lists the folders.
+- **OAuth2 sign-in** (Google, Microsoft, or your own provider): choose "OAuth2 (in the browser)",
+  the provider and your own **client ID** (Shale ships none; see below), press **Sign in in the
+  browser**, and sign in on the provider's page. Shale shows who signed in, keeps only a refresh
+  token in the system keyring and renews the short-lived access token by itself. If the sign-in
+  expires or is revoked, the mail view and the settings say so and **Sign in again** fixes it.
+  Without a keyring the sign-in lasts until Shale quits.
+  - *Google:* in the Google Cloud console create a project, set up the OAuth consent screen
+    (External, status Testing) and add your Gmail address as a test user, create an **OAuth client
+    ID of type "Desktop app"**, and enter its client ID and client secret in Shale. The scope
+    `https://mail.google.com/` is "restricted": an unverified app is limited to 100 test users, and
+    in Testing status Google ends the sign-in after 7 days (sign in again).
+  - *Microsoft:* in the Entra admin center register an app ("Accounts in any organizational
+    directory and personal Microsoft accounts"), add the platform "Mobile and desktop
+    applications" with the redirect address `http://localhost`, switch on "Allow public client
+    flows", add the delegated permission `IMAP.AccessAsUser.All`, and enter the Application
+    (client) ID in Shale (no secret). A work account may need IMAP switched on by its admin.
+  - *Custom:* any OIDC provider with an authorization-code + PKCE flow; type its authorization and
+    token addresses and the scope. `http://` is accepted only for `localhost`.
+- The first sync fetches the mail of the last three years, newest first, several folders at once,
+  and can be stopped and resumed. **Sync** and the status bar show the progress; new mail is also
+  fetched every 10 minutes (changeable, 0 = off) while Shale runs. A mail deleted on the server
+  stays here, dimmed, with a note.
+- Choose which folders are synced with the tick boxes. **Trash, Junk and Gmail's "All Mail" are
+  not synced automatically**: when you open one, its list is loaded from the server, and a
+  message is downloaded when you press **Load this message**. The same button appears for a
+  message over the size limit (200 MB).
+- **Search** (the field above the list, or `/`): words, `"phrases"`, `from:`, `to:`, `subject:`
+  and `body:`; ignores case and accents. Choose all folders or only the open one.
+- **Import to vault** (button, or `i`) hands the mail to the same Import dialog as a dragged
+  `.eml` file: attachments, people and tags work the same, a mail that was imported before is
+  recognised, and nothing is written until you press Import. Mark several mails (Space or
+  Ctrl+click) to import them together.
+- Keys while no text field has the keyboard: j / k or ↑ / ↓ move in the list, Enter opens the
+  message, Space marks it, Ctrl+J / Ctrl+K go to the next / previous folder, `/` goes to the
+  search field (↓ or Enter there go into the results), `i` imports, Esc steps back (closes the
+  message, then clears the search).
+- **Read, flag, move, delete** (also with the buttons above the message, a right click on a row,
+  and the buttons that appear when mails are marked). The keys work on the marked mails, else on
+  the open one, else on the one under the cursor, and need no Ctrl or Shift:
+  `u` marks read or unread, `s` or `f` sets or clears the flag, `d` or Delete moves to Trash (in
+  Trash it asks whether to delete forever; Enter does not confirm, only the red button does), `m`
+  opens the folder picker (type to find a folder, ↑ ↓, Enter; Esc leaves). Unread mail is bold,
+  flagged mail has a flag, and anything the server has not confirmed yet says "saving…",
+  "moving…" or "deleting…" and shows in the bar as "N changes are waiting for the server".
+- **Safe by design.** A change shows at once and is sent in the background. Without a network it
+  waits (also across a restart) and goes out when the server answers; if the server refuses, the
+  change is undone in the list and you are told why. "Delete" is always a move to the Trash
+  folder. "Delete forever" removes only the mails you chose (never the ones another program
+  marked as deleted). A mail that another program moved or deleted meanwhile is left alone and
+  dimmed. Shale never deletes its own local copy: files of mail that moved or were deleted go to
+  `.trash/<date>/` inside the mail folder. A server without `MOVE` is handled by a verified copy
+  first; a server without `UIDPLUS` cannot delete forever, and for it deleting without `MOVE` is
+  refused rather than risked.
+- **Mark as read when opened** (Accounts…): on by default, after 2 seconds (0 = at once). Mail
+  you close before then stays unread. Off: opening never changes the "read" mark.
+
+### Writing and sending (phase 3)
+
+- **Compose** with `c` (or the Compose button), **Reply** `r`, **Reply all** `Shift+R`, **Forward**
+  `Shift+F` (also buttons under the message; `f` is still the flag key). Mail is plain text. To, Cc
+  and Bcc complete from the addresses in your people notes and in the mail you already have (↑ ↓,
+  Tab or a click); the subject, the text and the attachments are below. Attach a file by its path,
+  a file of the vault (also from the media folder) or a **note** (its markdown, as a `.md`
+  attachment). An answer quotes the mail with "On <date>, <name> wrote:" and `> `, sets
+  `In-Reply-To` and `References` (the whole chain), and a forward brings the attachments along.
+  Your signature goes below. **Ctrl+Enter** sends, **Esc** closes.
+- **Set up sending** in the account settings, "Sending (SMTP)": server, TLS (465) or STARTTLS (587),
+  your name and address, signature. The sign-in is the one of the account (the same password, or the
+  same OAuth2 sign-in; Google and Microsoft fill in the server, Microsoft's permission list gets
+  `SMTP.Send`). There is no unencrypted option, and with STARTTLS nothing, not even the password, goes
+  before the encryption. "Test connection" also signs in to the SMTP server (it never sends a mail).
+  The wait before sending ("Undo send", 10 seconds, 0 = at once) is set there too.
+- **Never lost, never twice.** What you write is saved as a draft after a pause in typing and when
+  you close the window (`~/.local/share/shale/mail/drafts/`, as a `.eml` any program can read, plus
+  the fields and attachments); after a crash the drafts are in **Drafts**. Closing with changes asks
+  "Keep draft?"; a discarded draft goes to `.trash/`, nothing is deleted. **Send** puts the mail into the
+  **Outbox** (a file you can read), and for a few seconds a bar offers **Undo send**, which brings it back
+  into the editor. Then it is sent, once. If the server refuses (a wrong address, no network) it stays in
+  the Outbox with the server's words and you press **Retry**, **Edit** or **Discard**: nothing is retried by
+  itself. If the connection ends *after* the whole mail was handed over and before the server answered,
+  nobody can know whether it went out: the mail shows as "may have been sent", Shale never sends it
+  again by itself, and you look in Sent and choose **Send again** or **Discard**. The same if Shale was
+  closed in the middle of sending.
+- **Questions before sending**: with no subject, with no text, and when the text says "attached" /
+  "attachment" / "angehängt" / "anbei" / "Anhang" but nothing is attached. Bcc recipients get the mail
+  but are never written into it; no read receipt is requested; the `User-Agent` header is off unless
+  you switch it on (privacy).
+- **The Sent copy**: after a send, the exact message appears in your Sent folder at once and is saved
+  to the server in the background (an account that keeps sent mail itself, like Gmail, is switched off
+  from that). If that save fails the mail is still sent, never sent again, and the copy is retried.
+
+### Signed and encrypted mail (phase 4)
+
+Shale uses the **GnuPG on your computer**: `gpg` for OpenPGP (PGP/MIME) and `gpgsm` for S/MIME, with
+your own keys, smartcards and the usual passphrase dialog (`gpg-agent` / pinentry). Shale never sees a
+key or a passphrase, never looks a key up on the network by itself, and tells you in words if `gpg` or
+`gpgsm` is missing.
+
+- **Reading.** A strip above the mail says what GnuPG found, in its own colours, never from anything in
+  the mail: a valid signature (who, which key, how far you trust it), a **bad** one (the mail was changed
+  or forged), a signer whose key you do not have, an expired or revoked key, a mail that is signed only in
+  part, a signature by somebody other than the sender, and inline OpenPGP (signed text in the body), which
+  is marked as weaker. Checking a signature needs no setting and stores nothing. A body text that says
+  "Good signature from…" is just text and shows no strip.
+- **Encrypted mail** needs one decision first. In **Accounts…, Encryption** a red banner says
+  **"ENCRYPTED MAILS WILL ALWAYS BE STORED DECRYPTED LOCALLY"**: a decrypted mail is kept next to the encrypted
+  original (`<number>.decrypted.eml`) and its text goes into the search index, unencrypted, in the mail folder
+  (protected by the folder's permissions and your full-disk encryption). It is switched on only when you type
+  `I agree to decrypted local storage` exactly. Until then an encrypted mail shows "Encrypted — enable
+  encryption in the settings", and nothing is decrypted or stored. Withdrawing the consent stops decrypting; it
+  deletes nothing (the copies you have stay, are shown and searched). Mails are decrypted when you open them,
+  in the background; a passphrase or PIN dialog may open, and Cancel stops it.
+- **Safe by construction** (EFAIL): only a mail that is encrypted as a whole is decrypted; a mail that mixes an
+  encrypted part with other parts or text is not decrypted and says so; decrypted text is shown as its own
+  message and never joined with anything else of the mail; there is no HTML and no link is followed or
+  made clickable. Signed-and-encrypted mail works in both orders and when OpenPGP does both at once.
+- **Writing.** Set the key of an account in Accounts…, the account, *Signing and encrypting* (the lists come
+  from `gpg --list-secret-keys` and `gpgsm --list-secret-keys`), plus "sign new mail by default" and the
+  preferred standard. In a new mail: **Sign**, **Encrypt** and (with both kinds of key) the standard. For
+  every address in To, Cc and Bcc the window shows whether a key was found in your local keyring (with its
+  trust) or not. Encrypting needs a key for **every** recipient, Cc and Bcc included, and always also
+  encrypts for you, so the copy in Sent stays readable. OpenPGP Bcc recipients are hidden recipients; S/MIME
+  lists every certificate, so with a Bcc it asks first. Signing and encrypting run in the background (the
+  passphrase dialog is GnuPG's), the window stays as it is and Cancel stops it; if anything fails nothing
+  goes to the Outbox and nothing you typed is lost. What is signed is exactly what is sent (quoted-printable or
+  base64 for anything a mail server might rewrite). The **subject and the addresses of an encrypted mail
+  are not encrypted** (protected headers are not supported).
+- **Your keys and Thunderbird.** Thunderbird keeps OpenPGP keys in its own store. Export your secret key in
+  Thunderbird (Account settings, End-to-End Encryption, "Backup secret key to file") and run
+  `gpg --import backup.asc`; the keys of others the same way, or by hand with `gpg --locate-keys name@example.org`
+  (also WKD). S/MIME: Thunderbird's certificate manager, Backup, then `gpgsm --import backup.p12` and the
+  issuer's fingerprint in `~/.gnupg/trustlist.txt`. The Encryption settings say all this too.
+
 ## Importing e-mails, events and files (for project tracking)
 
 ![Import dialog](screenshots/import-dialog.png)
@@ -172,7 +330,20 @@ built-in demo vault (`shale --screenshot out.png`).
 - Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and your
   saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
   previews have a play mark), quoted posts and link cards. A content warning stays closed until
-  you click Show. The next page loads when you reach the end of the list; Refresh starts over.
+  you click Show. The next page loads when you reach the end of the list.
+- **Several feeds at once**: every Feeds tab has its own feed, scroll position and back/forward
+  history. Next to each feed in the picker, **New tab** (or Shift+click / middle-click on the
+  entry) opens it in another tab; the same feed may be open twice. The tab is called
+  "Mastodon · Home" and gets "(12)" when 12 new posts wait. Open Feeds tabs come back at the next
+  start.
+- **New posts wait, they do not jump in**: every 5 minutes (change it in **Accounts…**, 0 =
+  never) each feed that is open in a tab, also in the background, looks for newer posts. They
+  appear as a button "12 new posts — show" in a row above the list (or press `.`); the row is
+  always there ("Up to date · checked 2 min ago" when nothing waits), so the list never moves
+  and nothing is covered, and it does not change until you click. Then the new posts go above and the post you were reading stays
+  exactly where it is, so you can scroll up slowly. **Check now** looks right away;
+  **⋯ → Reload from the top** replaces the list. If more than 200 posts came in on Bluesky,
+  **Load more in between** fills the gap.
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.
@@ -213,6 +384,36 @@ built-in demo vault (`shale --screenshot out.png`).
   It is learned again in the background now and then and kept in `.shale/tag-words.json` in the
   vault.
 
+## Settings that travel with the vault
+
+- Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
+  session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
+  behaves the same on every computer. Settings of the program itself (appearance, calendars,
+  recent vaults) stay in `~/.config/shale/config.json`.
+- The files carry a format version and are upgraded on load. A settings file that can't be read
+  is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
+  changed.
+- On the first start after the upgrade, the people folder, open notes, import folder and recent
+  tags move from the old global settings into the vault you open.
+
+## Git sync
+
+- Needs `git` installed. In Settings → Git sync, enter the URL of a git repository
+  (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect, or run
+  `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
+  every few minutes (default 5, changeable) and on "Sync now".
+- A sync commits every change (the `.shale/` files too, so settings and open notes follow you),
+  fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an
+  optional prefix and suffix from the settings. Without a remote, Shale only keeps a local
+  history.
+- Nothing is ever lost: when a note was changed on two computers, the remote version stays and
+  yours is kept next to it as `Note (conflict 2026-11-14 1530).md`; a note deleted on one side
+  and changed on the other is kept. Shale never force-pushes, never writes conflict markers into
+  notes, and pauses if git is in the middle of something you started (a merge, a rebase).
+- Edits you type while a sync runs are never overwritten: if the sync brought a new version of
+  that note, your text is saved as a conflict copy next to it.
+- Passwords are git's business (credential helper or SSH key); Shale never asks for one.
+
 ## Keyboard
 
 | Keys | Action |
@@ -225,6 +426,7 @@ built-in demo vault (`shale --screenshot out.png`).
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back |
 | Alt+← / Alt+→ | Back / forward |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |

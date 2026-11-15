@@ -105,7 +105,13 @@ impl LinkAssist {
     pub fn debug_state(&self) -> String {
         format!(
             "picker active={} shown={} sel={} items={} dismissed={:?} start={:?} | suggestions active={} (input method is switched off while either is open)",
-            self.media.active, self.media.shown, self.media.sel, self.media.items.len(), self.media.dismissed, self.media.start, self.ac_active
+            self.media.active,
+            self.media.shown,
+            self.media.sel,
+            self.media.items.len(),
+            self.media.dismissed,
+            self.media.start,
+            self.ac_active
         )
     }
 
@@ -150,11 +156,7 @@ impl LinkAssist {
             out.handled = true;
         }
         if self.media.active {
-            let cur = egui::text_edit::TextEditState::load(ui.ctx(), self.id)
-                .and_then(|st| st.cursor.char_range())
-                .filter(|r| r.is_empty())
-                .map(|r| markdown::char_to_byte(text, r.primary.index.0))
-                .or(self.media.cursor);
+            let cur = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).filter(|r| r.is_empty()).map(|r| markdown::char_to_byte(text, r.primary.index.0)).or(self.media.cursor);
             if let Some((cb, (start, typed))) = cur.and_then(|cb| crate::media::media_query(text, cb).map(|q| (cb, q))) {
                 let n = self.media.items.len();
                 let (down, up, tab, enter, esc) = ui.input_mut(|i| {
@@ -343,7 +345,11 @@ impl LinkAssist {
                 self.media.shown = true;
                 self.media.start = Some(start);
                 self.media.cursor = Some(cb);
-                let shown_dir = if typed.starts_with("~") { format!("~/{}", dir.strip_prefix(&home).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()) } else { format!("vault/{}", dir.strip_prefix(&vault.root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()) };
+                let shown_dir = if typed.starts_with("~") {
+                    format!("~/{}", dir.strip_prefix(&home).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
+                } else {
+                    format!("vault/{}", dir.strip_prefix(&vault.root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
+                };
                 let r = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(text, cb)));
                 let pos = output.galley_pos + r.left_bottom().to_vec2() + Vec2::new(0.0, 4.0);
                 let (clicked, close) = self.picker_popup(ui, pos, &shown_dir, typed.is_empty());
@@ -416,12 +422,7 @@ impl LinkAssist {
                 labels.push(format!("＋ New contact “{}” in {}", markdown::link_safe_name(qt), self.people_dir.trim().trim_matches('/')));
             }
         } else {
-            let mut items: Vec<(i32, String)> = vault
-                .files
-                .iter()
-                .filter(|f| f.kind != crate::vault::FileKind::Other || q.contains('.'))
-                .filter_map(|f| markdown::fuzzy_score(q, &f.link_name).map(|s| (s, f.link_name.clone())))
-                .collect();
+            let mut items: Vec<(i32, String)> = vault.files.iter().filter(|f| f.kind != crate::vault::FileKind::Other || q.contains('.')).filter_map(|f| markdown::fuzzy_score(q, &f.link_name).map(|s| (s, f.link_name.clone()))).collect();
             items.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
             items.dedup_by(|a, b| a.1 == b.1);
             list = items.into_iter().take(8).map(|(_, n)| (n, true)).collect();
@@ -546,7 +547,14 @@ impl LinkAssist {
                 let begin = if start > 0 && text[..start].ends_with('[') { start - 1 } else { start };
                 // swallow closing brackets right after the path (`]` or `]]`)
                 let rest = &text[cursor..];
-                let end = cursor + if rest.starts_with("]]") { 2 } else if rest.starts_with(']') { 1 } else { 0 };
+                let end = cursor
+                    + if rest.starts_with("]]") {
+                        2
+                    } else if rest.starts_with(']') {
+                        1
+                    } else {
+                        0
+                    };
                 text.replace_range(begin..end, &link);
                 self.set_cursor_byte(ui, text, begin + link.len());
                 self.media.active = false;

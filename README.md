@@ -18,6 +18,41 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   thread by one author) as a note, with its pictures and a link back to the post.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
   and a graph of the whole vault.
+- **Mail**: read your IMAP mail next to your notes, search it, mark it read, flag, move or delete
+  it, write, reply, forward and send mail (plain text, attachments, drafts, an outbox with "undo
+  send"), and turn a mail into a note with one key. Shale keeps a local copy of the mail; syncing never
+  changes anything on the server, only your own actions do (delete always means the Trash folder;
+  a sent mail is never sent twice, and a mail that may or may not have gone out is shown to you
+  instead of being guessed). **The local mail copy is unencrypted (like Thunderbird's): use full-disk encryption.**
+  **Signed and encrypted mail** (OpenPGP and S/MIME) works through the GnuPG on your computer
+  (`gpg`, `gpgsm`, your keys, your passphrase dialog): signatures are checked and shown in a strip above
+  the mail, you can sign and encrypt what you send, and nothing is fetched from key servers by itself.
+  **Read this first: with encryption switched on (Accounts…, Encryption; you must type a sentence to
+  confirm), encrypted mails WILL ALWAYS BE STORED DECRYPTED LOCALLY** (the decrypted copy and its search
+  text lie unencrypted in the mail folder, next to the encrypted original). Without that switch nothing
+  is decrypted. To use your Thunderbird keys, export them there and import them into GnuPG
+  (`gpg --import backup.asc`; S/MIME: `gpgsm --import backup.p12`), see below.
+  Sign in with a password or with OAuth2 (Google, Microsoft). Shale has no OAuth2 client IDs of
+  its own yet, so you register one (about five minutes, free):
+  - *Google:* Cloud console, new project, OAuth consent screen (External, Testing, add yourself as
+    a test user), then Credentials, OAuth client ID, type **Desktop app**.
+  - Enter the client ID and the client secret in Shale (Accounts…, OAuth2, Google), then
+    "Sign in in the browser".
+  - Google's scope `https://mail.google.com/` is restricted: an unverified app works for up to 100
+    test users, and while it is in Testing, Google ends the sign-in after 7 days.
+  - *Microsoft:* Entra admin center, App registrations, new registration, platform "Mobile and
+    desktop applications" with redirect address `http://localhost`, allow public client flows,
+    permissions `IMAP.AccessAsUser.All` and `SMTP.Send` (for sending).
+  - Enter the Application (client) ID in Shale (Accounts…, OAuth2, Microsoft); no secret needed.
+  Details in [docs/FEATURES.md](docs/FEATURES.md). A local test mail server with an OAuth2
+  provider (podman) is in [tests/mail-env](tests/mail-env/README.md).
+  - *Your keys from Thunderbird:* Thunderbird keeps OpenPGP keys in its own store, not in GnuPG's. In
+    Thunderbird: Account settings, End-to-End Encryption, your key, "Backup secret key to file" (the
+    public keys of others: the key manager, Export). Then `gpg --import file.asc`. S/MIME certificates:
+    Settings, Privacy & Security, Manage S/MIME Certificates, Backup; then `gpgsm --import file.p12`
+    and put the fingerprint of the issuer (for a self-signed one: of the certificate) into
+    `~/.gnupg/trustlist.txt`. In Shale: Accounts…, the account, "Signing and encrypting": pick the key.
+    Keys of your correspondents: `gpg --locate-keys name@example.org` (Shale never looks them up itself).
 
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
@@ -53,9 +88,10 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading|social|social-import` (with `--screenshot`) chooses which view to capture;
-  `open:<file>` opens a file of the vault, `read-only:<file>.canvas` shows a canvas without the
-  question, and `convert:<file>.canvas` converts it first.
+- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import` (with `--screenshot`) chooses which
+  view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
+  `social-import` made-up posts; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
+  shows a canvas without the question, and `convert:<file>.canvas` converts it first.
 
 ## Keyboard
 
@@ -66,6 +102,7 @@ Other options:
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back; u read, s or f flag, d delete, m move; **c compose, r reply, Shift+R reply all, Shift+F forward**. In a new mail: Ctrl+Enter sends, Esc closes (it asks whether to keep the draft) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |

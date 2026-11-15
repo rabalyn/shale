@@ -2,6 +2,7 @@
 //! - Enter continues a list (`- `, `* `, `+ `, `1. `, `1) `, with or without `[ ]`),
 //!   and Enter on an empty item ends the list (or outdents it first).
 //! - Tab / Shift+Tab indent / outdent list items and raise / lower heading levels.
+//!
 //! Also finds web links (`[name](https://…)` and bare `https://…`).
 
 use std::ops::Range;
@@ -207,7 +208,11 @@ pub fn indent(text: &str, sel: Range<usize>, outdent: bool) -> Option<(String, R
         let new_line: String;
         if let Some(level) = crate::markdown::heading_level(l) {
             new_line = if outdent {
-                if level > 1 { l[1..].to_string() } else { l.to_string() }
+                if level > 1 {
+                    l[1..].to_string()
+                } else {
+                    l.to_string()
+                }
             } else if level < 6 {
                 format!("#{l}")
             } else {
@@ -216,7 +221,11 @@ pub fn indent(text: &str, sel: Range<usize>, outdent: bool) -> Option<(String, R
         } else if list_prefix(l).is_some() {
             new_line = if outdent {
                 let (t, removed) = outdent_line(l);
-                if removed == 0 { t } else { renumber_marker(&t, &out, line_start_out) }
+                if removed == 0 {
+                    t
+                } else {
+                    renumber_marker(&t, &out, line_start_out)
+                }
             } else {
                 renumber_marker(&format!("{INDENT}{l}"), &out, line_start_out)
             };
@@ -325,7 +334,7 @@ pub fn find_web_links(text: &str) -> Vec<WebLink> {
                     e -= 1;
                 }
                 i = s + len.max(1);
-                if in_code(s) || taken.iter().any(|r| r.contains(&s)) || line[..s].ends_with("](") || line[..s].ends_with('<') && false {
+                if in_code(s) || taken.iter().any(|r| r.contains(&s)) || line[..s].ends_with("](") {
                     continue;
                 }
                 let url = &line[s..e];
@@ -336,22 +345,6 @@ pub fn find_web_links(text: &str) -> Vec<WebLink> {
     }
     out.sort_by_key(|w| w.range.start);
     out
-}
-
-/// Open a web address in the default browser.
-pub fn open_in_browser(url: &str) {
-    let url = if url.to_ascii_lowercase().starts_with("www.") { format!("https://{url}") } else { url.to_string() };
-    #[cfg(target_os = "linux")]
-    let r = std::process::Command::new("xdg-open").arg(&url).spawn();
-    #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(&url).spawn();
-    #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn();
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    let r: std::io::Result<std::process::Child> = Err(std::io::Error::other("unsupported"));
-    if let Err(e) = r {
-        eprintln!("could not open {url}: {e}");
-    }
 }
 
 /// Alt+Up / Alt+Down: move the lines touched by `sel` one line up or down.
@@ -403,9 +396,10 @@ pub fn move_lines(text: &str, sel: Range<usize>, up: bool) -> Option<(String, Ra
 }
 
 /// Fix indentation and numbering of the list that contains lines `a..=b`.
+#[allow(clippy::needless_range_loop)] // the loop also looks at neighbouring lines and writes back by index
 fn normalize_list_around(lines: &mut [String], a: usize, b: usize) {
     let is_item = |l: &str| list_prefix(l).is_some();
-    if !(a..=b).any(|i| is_item(&lines[i])) && !(a > 0 && is_item(&lines[a - 1])) && !(b + 1 < lines.len() && is_item(&lines[b + 1])) {
+    if !((a..=b).any(|i| is_item(&lines[i])) || (a > 0 && is_item(&lines[a - 1])) || (b + 1 < lines.len() && is_item(&lines[b + 1]))) {
         return;
     }
     let mut start = a;
@@ -418,6 +412,7 @@ fn normalize_list_around(lines: &mut [String], a: usize, b: usize) {
     }
     // indentation: at most one level deeper than the item above
     let mut prev_indent: Option<usize> = None;
+    #[allow(clippy::needless_range_loop)] // lines[i] is replaced inside the loop
     for i in start..=end {
         let Some(p) = list_prefix(&lines[i]) else {
             prev_indent = None;

@@ -72,9 +72,33 @@ pub fn win_ansi(c: char) -> Option<u8> {
         return Some(u as u8);
     }
     const HIGH: [(char, u8); 27] = [
-        ('€', 0x80), ('‚', 0x82), ('ƒ', 0x83), ('„', 0x84), ('…', 0x85), ('†', 0x86), ('‡', 0x87), ('ˆ', 0x88), ('‰', 0x89),
-        ('Š', 0x8a), ('‹', 0x8b), ('Œ', 0x8c), ('Ž', 0x8e), ('‘', 0x91), ('’', 0x92), ('“', 0x93), ('”', 0x94), ('•', 0x95),
-        ('–', 0x96), ('—', 0x97), ('˜', 0x98), ('™', 0x99), ('š', 0x9a), ('›', 0x9b), ('œ', 0x9c), ('ž', 0x9e), ('Ÿ', 0x9f),
+        ('€', 0x80),
+        ('‚', 0x82),
+        ('ƒ', 0x83),
+        ('„', 0x84),
+        ('…', 0x85),
+        ('†', 0x86),
+        ('‡', 0x87),
+        ('ˆ', 0x88),
+        ('‰', 0x89),
+        ('Š', 0x8a),
+        ('‹', 0x8b),
+        ('Œ', 0x8c),
+        ('Ž', 0x8e),
+        ('‘', 0x91),
+        ('’', 0x92),
+        ('“', 0x93),
+        ('”', 0x94),
+        ('•', 0x95),
+        ('–', 0x96),
+        ('—', 0x97),
+        ('˜', 0x98),
+        ('™', 0x99),
+        ('š', 0x9a),
+        ('›', 0x9b),
+        ('œ', 0x9c),
+        ('ž', 0x9e),
+        ('Ÿ', 0x9f),
     ];
     HIGH.iter().find(|(ch, _)| *ch == c).map(|(_, b)| *b)
 }
@@ -162,7 +186,7 @@ impl Page {
             (true, false) => "f",
             _ => "S",
         };
-        let _ = write!(self.ops, "{op} Q\n");
+        let _ = writeln!(self.ops, "{op} Q");
     }
 
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, fill: Option<Rgba>, stroke: Option<(Rgba, f32)>) {
@@ -170,10 +194,12 @@ impl Page {
     }
 
     pub fn circle(&mut self, cx: f32, cy: f32, r: f32, fill: Option<Rgba>, stroke: Option<(Rgba, f32)>) {
-        let pts: Vec<[f32; 2]> = (0..24).map(|i| {
-            let a = i as f32 / 24.0 * std::f32::consts::TAU;
-            [cx + r * a.cos(), cy + r * a.sin()]
-        }).collect();
+        let pts: Vec<[f32; 2]> = (0..24)
+            .map(|i| {
+                let a = i as f32 / 24.0 * std::f32::consts::TAU;
+                [cx + r * a.cos(), cy + r * a.sin()]
+            })
+            .collect();
         self.path(&pts, true, fill, stroke);
     }
 
@@ -199,7 +225,7 @@ impl Page {
                 page.stroke_color(color, size * 0.03);
             }
             let hex: String = run.chars().filter_map(win_ansi).map(|b| format!("{b:02x}")).collect();
-            let _ = write!(page.ops, "q BT /{} {:.2} Tf {} Tr 1 0 {skew} 1 {:.2} {:.2} Tm <{hex}> Tj ET Q\n", font_res(kind), size, if bold { 2 } else { 0 }, run_x, page.y(y));
+            let _ = writeln!(page.ops, "q BT /{} {:.2} Tf {} Tr 1 0 {skew} 1 {:.2} {:.2} Tm <{hex}> Tj ET Q", font_res(kind), size, if bold { 2 } else { 0 }, run_x, page.y(y));
             run.clear();
         };
         for c in s.chars() {
@@ -239,7 +265,7 @@ impl Page {
     /// Place an image (from `Doc::add_image`) into the rect.
     pub fn image(&mut self, index: usize, x: f32, y: f32, w: f32, h: f32) {
         self.images.insert(index);
-        let _ = write!(self.ops, "q {:.2} 0 0 {:.2} {:.2} {:.2} cm /Im{index} Do Q\n", w, h, x, self.y(y + h));
+        let _ = writeln!(self.ops, "q {:.2} 0 0 {:.2} {:.2} {:.2} cm /Im{index} Do Q", w, h, x, self.y(y + h));
     }
 
     /// A clickable link to a web address over the rect.
@@ -376,7 +402,13 @@ impl Doc {
             let s = |v: i16| (v as f32 * 1000.0 / upem).round() as i32;
             objs[desc_id - 1] = format!(
                 "<< /Type /FontDescriptor /FontName /{name} /Flags 32 /FontBBox [{} {} {} {}] /ItalicAngle 0 /Ascent {} /Descent {} /CapHeight {} /StemV 80 /FontFile2 {file_id} 0 R >>",
-                s(bb.x_min), s(bb.y_min), s(bb.x_max), s(bb.y_max), s(f.ascender()), s(f.descender()), s(f.capital_height().unwrap_or(f.ascender()))
+                s(bb.x_min),
+                s(bb.y_min),
+                s(bb.x_max),
+                s(bb.y_max),
+                s(f.ascender()),
+                s(f.descender()),
+                s(f.capital_height().unwrap_or(f.ascender()))
             )
             .into_bytes();
             let widths: Vec<String> = (32u8..=255).map(|b| char_of_win_ansi(b).and_then(|c| f.glyph_index(c)).and_then(|g| f.glyph_hor_advance(g)).map(|a| (a as f32 * 1000.0 / upem).round() as i32).unwrap_or(0).to_string()).collect();
@@ -425,11 +457,9 @@ impl Doc {
             }
             let annots = if annots.is_empty() { String::new() } else { format!(" /Annots [{}]", annots.join(" ")) };
             let page_id = reserve(&mut objs);
-            objs[page_id - 1] = format!(
-                "<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents {content_id} 0 R /Resources << /Font << {fonts}>> /XObject << {xobj}>> /ExtGState << {gs}>> >>{annots} >>",
-                p.width, p.height
-            )
-            .into_bytes();
+            objs[page_id - 1] =
+                format!("<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents {content_id} 0 R /Resources << /Font << {fonts}>> /XObject << {xobj}>> /ExtGState << {gs}>> >>{annots} >>", p.width, p.height)
+                    .into_bytes();
             kids.push(format!("{page_id} 0 R"));
         }
         objs[catalog - 1] = format!("<< /Type /Catalog /Pages {pages_id} 0 R >>").into_bytes();

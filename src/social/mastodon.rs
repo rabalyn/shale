@@ -84,7 +84,11 @@ pub fn verify(server: &str, token: &str) -> Result<Identity, String> {
 
 /// "ada" on https://mastodon.social → "ada@mastodon.social"; "ada@other.org" stays.
 fn full_acct(acct: &str, server: &str) -> String {
-    if acct.contains('@') { acct.to_string() } else { format!("{acct}@{}", cal_dav::host_of(server)) }
+    if acct.contains('@') {
+        acct.to_string()
+    } else {
+        format!("{acct}@{}", cal_dav::host_of(server))
+    }
 }
 
 /// Home and the user's lists.
@@ -101,14 +105,24 @@ pub fn feeds(server: &str, token: &str) -> Result<Vec<Feed>, String> {
     Ok(out)
 }
 
+/// The API path of a feed.
+fn timeline_path(feed: &Feed) -> Result<String, String> {
+    match feed.id.strip_prefix("list:") {
+        Some(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) => Ok(format!("timelines/list/{id}")),
+        Some(_) => Err("bad list".into()),
+        None => Ok("timelines/home".to_string()),
+    }
+}
+
+/// The id of the newest of the timeline entries (ids are numbers, longer is newer).
+fn newest_id(items: &[Value]) -> Option<String> {
+    items.iter().map(|s| text(&s["id"])).filter(|c| !c.is_empty()).max_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)))
+}
+
 /// One page of a timeline (20 posts). `cursor`: the last id of the page before.
 pub fn timeline(server: &str, token: &str, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
     let server = base(server)?;
-    let path = match feed.id.strip_prefix("list:") {
-        Some(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()) => format!("timelines/list/{id}"),
-        Some(_) => return Err("bad list".into()),
-        None => "timelines/home".to_string(),
-    };
+    let path = timeline_path(feed)?;
     let mut params = vec![("limit", PAGE_SIZE)];
     if let Some(c) = cursor.filter(|c| !c.is_empty()) {
         params.push(("max_id", c));
@@ -118,7 +132,48 @@ pub fn timeline(server: &str, token: &str, feed: &Feed, cursor: Option<&str>) ->
     // the next page starts after the last status as the timeline lists it (a boost has its own id)
     let next = items.last().map(|s| text(&s["id"])).filter(|c| !c.is_empty());
     let posts: Vec<Post> = items.iter().filter_map(|s| parse_status(s, &server)).collect();
-    Ok(Page { posts, cursor: next })
+    Ok(Page { posts, cursor: next, top: newest_id(items) })
+}
+
+/// The most pages one check asks for.
+const MAX_CHECK_PAGES: usize = 12;
+
+/// The posts newer than the timeline entry `top`: `min_id` gives the page directly above it, and
+/// the newest entry of that page is the `min_id` of the next, until a page is empty or `cap`
+/// posts are there. What is found is always the block directly above `top`, so nothing is
+/// missing in between; if the cap stops the check, the next check goes on from the new top.
+pub fn newer(server: &str, token: &str, feed: &Feed, top: Option<&str>, cap: usize) -> Result<Fresh, String> {
+    let server = base(server)?;
+    let path = timeline_path(feed)?;
+    newer_with(&server, top, cap, |min| {
+        let mut params = vec![("limit", "40")];
+        if let Some(m) = min {
+            params.push(("min_id", m));
+        }
+        Ok(api("GET", &format!("{server}/api/v1/{path}{}", query(&params)), Some(token), None)?)
+    })
+}
+
+/// `newer` with the requests left to the caller (`fetch(min_id)` returns the JSON answer).
+pub(crate) fn newer_with(server: &str, top: Option<&str>, cap: usize, mut fetch: impl FnMut(Option<&str>) -> Result<Value, String>) -> Result<Fresh, String> {
+    let mut posts: Vec<Post> = vec![];
+    let mut min = top.map(String::from);
+    let mut newest = None;
+    for _ in 0..MAX_CHECK_PAGES {
+        let v = fetch(min.as_deref())?;
+        let items = v.as_array().ok_or("the server's answer is not a timeline")?;
+        let Some(page_top) = newest_id(items) else { break };
+        // this page is newer than what was found before it
+        let mut page: Vec<Post> = items.iter().filter_map(|s| parse_status(s, server)).collect();
+        page.append(&mut posts);
+        posts = page;
+        min = Some(page_top.clone());
+        newest = Some(page_top);
+        if posts.len() >= cap {
+            break;
+        }
+    }
+    Ok(Fresh { posts, top: newest, gap: None })
 }
 
 /// The self-thread and the replies of other people.
@@ -330,5 +385,69 @@ mod tests {
         h.join().unwrap();
         assert!(verify("http://mastodon.example", "x").unwrap_err().contains("https"));
         assert!(verify(&base, "to\nken").is_err());
+    }
+
+    fn entries(ids: &[u32]) -> Value {
+        Value::Array(ids.iter().map(|i| status(&i.to_string(), "1", "ada", "2024-05-17T10:00:00Z", None, &format!("<p>post {i}</p>"))).collect())
+    }
+
+    // spec: SOC-026
+    #[test]
+    fn newer_posts_are_the_blocks_directly_above_the_newest_entry_until_a_page_is_empty() {
+        // the server answers with the page above the id it is asked for (newest first inside a page)
+        let mut asked: Vec<Option<String>> = vec![];
+        let mut answers = vec![entries(&[105, 104, 103]), entries(&[108, 107, 106]), json!([])].into_iter();
+        let f = newer_with("https://m.test", Some("102"), 200, |min| {
+            asked.push(min.map(String::from));
+            Ok(answers.next().unwrap())
+        })
+        .unwrap();
+        assert_eq!(asked, [Some("102".to_string()), Some("105".into()), Some("108".into())], "each page continues from the newest entry of the one before");
+        assert_eq!(f.posts.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["108", "107", "106", "105", "104", "103"], "newest first");
+        assert_eq!((f.top.as_deref(), f.gap), (Some("108"), None));
+        // nothing new: the top stays unknown to the caller (it keeps its own)
+        let none = newer_with("https://m.test", Some("108"), 200, |_| Ok(json!([]))).unwrap();
+        assert_eq!((none.posts.len(), none.top), (0, None));
+        // the cap stops the paging; what was found is still the block right above the old top
+        let mut n = 0;
+        let capped = newer_with("https://m.test", Some("100"), 5, |_| {
+            n += 1;
+            Ok(entries(&[100 + 3 * n, 99 + 3 * n, 98 + 3 * n]))
+        })
+        .unwrap();
+        assert_eq!((n, capped.posts.len(), capped.top.as_deref()), (2, 6, Some("106")));
+        assert_eq!(capped.posts.last().unwrap().id, "101", "starts right above the old top");
+        // an error is passed on and nothing is half-taken
+        assert!(newer_with("https://m.test", Some("1"), 200, |_| Err("offline".into())).is_err());
+    }
+
+    // spec: SOC-026
+    #[test]
+    fn a_boost_has_its_own_entry_id_and_that_is_the_top() {
+        let boost = json!({"id": "300", "reblog": status("10", "1", "ada", "2024-05-17T10:30:00Z", None, "<p>orig</p>"), "account": {"id": "5", "acct": "cy", "display_name": "Cy", "url": "https://m.test/@cy", "avatar": ""}});
+        let f = newer_with("https://m.test", Some("200"), 200, |min| Ok(if min == Some("200") { json!([boost.clone(), status("250", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>x</p>")]) } else { json!([]) })).unwrap();
+        assert_eq!(f.top.as_deref(), Some("300"), "the boost's entry, not the id 10 of the post");
+        assert_eq!(f.posts[0].id, "10");
+        assert!(f.posts[0].reposted_by.is_some());
+    }
+
+    // spec: SOC-026
+    #[test]
+    fn the_request_for_newer_posts_carries_min_id_against_a_mock_server() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let page = entries(&[12, 11]);
+        let (base, handle) = mock_http(2, move |_, path, headers, _| {
+            assert!(headers.to_ascii_lowercase().contains("authorization: bearer tok-1"));
+            match path {
+                "/api/v1/timelines/home?limit=40&min_id=10" => (200, page.to_string()),
+                "/api/v1/timelines/home?limit=40&min_id=12" => (200, "[]".into()),
+                _ => (404, json!({"error": "nope"}).to_string()),
+            }
+        });
+        let f = newer(&base, "tok-1", &Feed { id: "home".into(), title: "Home".into() }, Some("10"), 200).unwrap();
+        assert_eq!((f.posts.len(), f.top.as_deref()), (2, Some("12")));
+        assert_eq!(handle.join().unwrap().len(), 2);
     }
 }

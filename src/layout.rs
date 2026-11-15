@@ -1,6 +1,6 @@
 //! Window layout: ribbon, sidebars, tab bar, the note/drawing/tasks/graph views and status bar.
 
-use crate::app::{handle_editor_action, handle_reader_action, graph_click, muted, Action, LeftPanel, Modal, ShaleApp, View};
+use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, ShaleApp, View};
 use crate::markdown;
 use crate::reader;
 use crate::theme;
@@ -32,6 +32,7 @@ pub enum Icon {
     Sort,
     Calendar,
     Import,
+    Mail,
     Social,
 }
 
@@ -72,7 +73,10 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             let a = cx + Vec2::new(-w * 0.3, w * 0.3);
             let b = cx + Vec2::new(w * 0.25, -w * 0.25);
             let n = Vec2::new(w * 0.09, w * 0.09);
-            p.add(Shape::closed_line(vec![a, a + Vec2::new(n.x * 1.2, -n.y * 0.2) + Vec2::new(0.0, -n.y * 1.4), b - Vec2::new(n.x, 0.0) + Vec2::new(0.0, -n.y * 0.0), b, b + Vec2::new(n.x * 0.2, n.y * 1.2), a + Vec2::new(n.x * 1.6, 0.0)], s));
+            p.add(Shape::closed_line(
+                vec![a, a + Vec2::new(n.x * 1.2, -n.y * 0.2) + Vec2::new(0.0, -n.y * 1.4), b - Vec2::new(n.x, 0.0) + Vec2::new(0.0, -n.y * 0.0), b, b + Vec2::new(n.x * 0.2, n.y * 1.2), a + Vec2::new(n.x * 1.6, 0.0)],
+                s,
+            ));
             if matches!(icon, Icon::Drawing) {
                 p.line_segment([cx + Vec2::new(-w * 0.35, w * 0.42), cx + Vec2::new(w * 0.35, w * 0.42)], Stroke::new(1.0, c.gamma_multiply(0.6)));
             }
@@ -151,6 +155,12 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             let b = cx.y + w * 0.3;
             p.add(Shape::line(vec![Pos2::new(cx.x - w * 0.34, y), Pos2::new(cx.x - w * 0.34, b), Pos2::new(cx.x + w * 0.34, b), Pos2::new(cx.x + w * 0.34, y)], s));
         }
+        Icon::Mail => {
+            // an envelope
+            let b = Rect::from_center_size(cx, Vec2::new(w * 0.72, w * 0.52));
+            p.rect_stroke(b, CornerRadius::same(2), s, StrokeKind::Middle);
+            p.add(Shape::line(vec![b.left_top(), cx + Vec2::new(0.0, w * 0.06), b.right_top()], s));
+        }
         Icon::Social => {
             // a speech bubble with two lines of text
             let b = Rect::from_center_size(cx - Vec2::new(0.0, w * 0.07), Vec2::new(w * 0.8, w * 0.56));
@@ -185,7 +195,13 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: &str) 
     } else if hovered {
         ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_HOVER);
     }
-    let c = if active { theme::ACCENT } else if hovered { theme::TEXT_STRONG } else { theme::MUTED };
+    let c = if active {
+        theme::ACCENT
+    } else if hovered {
+        theme::TEXT_STRONG
+    } else {
+        theme::MUTED
+    };
     paint_icon(ui.painter(), r.shrink(size * 0.22), icon, c);
     resp.on_hover_text(tip)
 }
@@ -215,13 +231,16 @@ impl ShaleApp {
                             }
                         }
                         if ui.button("Create vault with sample notes").clicked() {
-                            let _ = std::fs::create_dir_all(&path);
-                            let _ = crate::vault::write_sample_vault(&path);
-                            self.actions.push(Action::OpenVault(path.clone()));
+                            match std::fs::create_dir_all(&path).and_then(|()| crate::vault::write_sample_vault(&path)) {
+                                Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
+                                Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                            }
                         }
                         if ui.button("Create empty vault").clicked() {
-                            let _ = std::fs::create_dir_all(&path);
-                            self.actions.push(Action::OpenVault(path.clone()));
+                            match std::fs::create_dir_all(&path) {
+                                Ok(()) => self.actions.push(Action::OpenVault(path.clone())),
+                                Err(e) => self.toast(format!("Could not create the vault: {e}")),
+                            }
                         }
                     });
                     if !self.cfg.recent.is_empty() {
@@ -248,14 +267,20 @@ impl ShaleApp {
             self.status_bar(ui);
         });
         if self.cfg.show_left {
-            egui::Panel::left("left-sidebar").default_size(260.0).size_range(170.0..=520.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(8, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(ui, |ui| {
-                self.left_sidebar(ui);
-            });
+            egui::Panel::left("left-sidebar").default_size(260.0).size_range(170.0..=520.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(8, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
+                ui,
+                |ui| {
+                    self.left_sidebar(ui);
+                },
+            );
         }
         if self.cfg.show_right {
-            egui::Panel::right("right-sidebar").default_size(290.0).size_range(200.0..=560.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(ui, |ui| {
-                self.right_sidebar(ui);
-            });
+            egui::Panel::right("right-sidebar").default_size(290.0).size_range(200.0..=560.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
+                ui,
+                |ui| {
+                    self.right_sidebar(ui);
+                },
+            );
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG_PRIMARY)).show(ui, |ui| {
             self.tab_bar(ui);
@@ -298,11 +323,14 @@ impl ShaleApp {
             if icon_button(ui, Icon::Calendar, 30.0, cur == Some(View::Calendar), "Calendar").clicked() {
                 self.actions.push(Action::ShowView(View::Calendar));
             }
+            if icon_button(ui, Icon::Mail, 30.0, cur == Some(View::Mail), "Mail (Ctrl+Shift+M)").clicked() {
+                self.actions.push(Action::ShowView(View::Mail));
+            }
             if icon_button(ui, Icon::Tasks, 30.0, cur == Some(View::Tasks), "To-do list across all notes").clicked() {
                 self.actions.push(Action::ShowView(View::Tasks));
             }
-            if icon_button(ui, Icon::Social, 30.0, cur == Some(View::Social), "Feeds: read Mastodon and Bluesky and save posts to the vault").clicked() {
-                self.actions.push(Action::ShowView(View::Social));
+            if icon_button(ui, Icon::Social, 30.0, matches!(cur, Some(View::Social(_))), "Feeds: read Mastodon and Bluesky and save posts to the vault").clicked() {
+                self.actions.push(Action::ShowView(View::Social(None)));
             }
             if icon_button(ui, Icon::Import, 30.0, matches!(self.modal, Some(Modal::Import(_))), "Import e-mails, events and files (or drop them on the window)").clicked() {
                 self.open_import(vec![], vec![], None);
@@ -333,7 +361,8 @@ impl ShaleApp {
             View::Tasks => "Tasks".into(),
             View::Graph => "Graph".into(),
             View::Calendar => "Calendar".into(),
-            View::Social => "Feeds".into(),
+            View::Mail => "Mail".into(),
+            View::Social(f) => self.social_title(f.as_ref()),
             View::Note(p) | View::Drawing(p) => self.vault.as_ref().and_then(|v| v.file(p).map(|f| f.display_name())).unwrap_or_else(|| rel_to_string(p)),
         }
     }
@@ -348,19 +377,31 @@ impl ShaleApp {
         let n = self.tabs.len().max(1);
         let tab_w = ((bar.width() - 50.0) / n as f32).clamp(60.0, 220.0);
         let mut close = None;
+        self.tab_rects.clear();
         for i in 0..self.tabs.len() {
             let title = self.tab_title(&self.tabs[i].view);
             let dirty = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.dirty).unwrap_or(false) || self.drawings.get(p).map(|d| d.dirty).unwrap_or(false)).unwrap_or(false);
             let (r, resp) = child.allocate_exact_size(Vec2::new(tab_w, h - 6.0), Sense::click());
             let active = i == self.active;
-            let fill = if active { theme::BG_PRIMARY } else if resp.hovered() { theme::BG_HOVER } else { theme::BG_SECONDARY };
+            let fill = if active {
+                theme::BG_PRIMARY
+            } else if resp.hovered() {
+                theme::BG_HOVER
+            } else {
+                theme::BG_SECONDARY
+            };
             child.painter().rect_filled(r, CornerRadius { nw: 7, ne: 7, sw: 0, se: 0 }, fill);
             let text_rect = r.shrink2(Vec2::new(10.0, 0.0));
             let galley = child.painter().layout_no_wrap(title.clone(), FontId::proportional(13.0), if active { theme::TEXT_STRONG } else { theme::MUTED });
             child.painter().with_clip_rect(Rect::from_min_max(text_rect.min, Pos2::new(text_rect.max.x - 18.0, text_rect.max.y))).galley(Pos2::new(text_rect.min.x, r.center().y - galley.size().y / 2.0), galley, theme::TEXT);
             let cr = Rect::from_center_size(Pos2::new(r.max.x - 14.0, r.center().y), Vec2::splat(16.0));
             let close_resp = child.interact(cr, child.scope_id().with(("tab-close", self.tabs[i].id)), Sense::click());
-            if dirty && !close_resp.hovered() {
+            self.tab_rects.push((r, cr));
+            let failed = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.save_error.is_some()).unwrap_or(false) || self.drawings.get(p).map(|d| d.save_error.is_some()).unwrap_or(false)).unwrap_or(false);
+            if failed && dirty && !close_resp.hovered() {
+                // not saved, and the save failed: a red mark instead of the grey dot (DATA-009)
+                child.painter().circle_filled(cr.center(), 4.5, theme::LINK_MISSING);
+            } else if dirty && !close_resp.hovered() {
                 child.painter().circle_filled(cr.center(), 3.5, theme::MUTED);
             } else if resp.hovered() || active || close_resp.hovered() {
                 if close_resp.hovered() {
@@ -495,7 +536,7 @@ impl ShaleApp {
                 }
             }
             View::Tasks => self.tasks_view(ui),
-            View::Social => self.social_view(ui),
+            View::Social(f) => self.social_view(ui, f.clone()),
             View::Calendar => {
                 let monday = self.cfg.week_starts_monday;
                 let mut act = None;
@@ -504,6 +545,13 @@ impl ShaleApp {
                 });
                 if let Some(a) = act {
                     self.calendar_action(a);
+                }
+            }
+            View::Mail => {
+                let modal_open = self.modal.is_some();
+                let acts = self.mail.show(ui, &self.cfg, modal_open);
+                for a in acts {
+                    self.mail_action(a);
                 }
             }
             View::Graph => {
@@ -561,51 +609,57 @@ impl ShaleApp {
             let pad = ((full - col) / 2.0).max(20.0);
             ui.add_space(16.0);
             ui.horizontal_top(|ui| {
-              ui.add_space(pad);
-              ui.vertical(|ui| {
-                ui.set_width(col.min(full - pad - 10.0).max(200.0));
-                // inline title (rename by editing)
-                let tab = &mut self.tabs[active];
-                if tab.title_for.as_deref() != Some(rel.as_path()) {
-                    tab.title_for = Some(rel.clone());
-                    tab.title_buf = display_name.clone();
-                }
-                let title = egui::TextEdit::singleline(&mut tab.title_buf).font(FontId::proportional(base * 1.9)).text_color(theme::TEXT_STRONG).frame(egui::Frame::NONE).desired_width(f32::INFINITY).id(egui::Id::unique(("title", tab.id)));
-                let tr = ui.add(title);
-                if tr.lost_focus() && tab.title_buf.trim() != display_name && !tab.title_buf.trim().is_empty() {
-                    rename_to = Some(tab.title_buf.trim().to_string());
-                } else if tr.lost_focus() {
-                    tab.title_buf = display_name.clone();
-                }
-                if tr.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    tab.editor.request_focus = true;
-                }
-                ui.add_space(8.0);
-                let reading = tab.reading;
-                let Some(vault) = self.vault.as_mut() else { return };
-                let Some(doc) = self.notes.get_mut(&rel) else { return };
-                if reading {
-                    let text = doc.text.clone();
-                    if let Some(a) = reader::show(ui, &text, vault, &rel, &mut self.scenes, base, dark) {
-                        handle_reader_action(&mut self.actions, a, &rel);
+                ui.add_space(pad);
+                ui.vertical(|ui| {
+                    ui.set_width(col.min(full - pad - 10.0).max(200.0));
+                    // inline title (rename by editing)
+                    let tab = &mut self.tabs[active];
+                    if tab.title_for.as_deref() != Some(rel.as_path()) {
+                        tab.title_for = Some(rel.clone());
+                        tab.title_buf = display_name.clone();
                     }
-                } else {
-                    tab.editor.inline_images = self.cfg.inline_images;
-                    tab.editor.vim_enabled = self.cfg.vim_mode;
-                    tab.editor.assist.people_dir = self.cfg.people_dir.clone();
-                    tab.editor.dark_canvas = self.cfg.dark_canvas;
-                    let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
-                    if changed {
-                        doc.dirty = true;
-                        doc.last_edit = std::time::Instant::now();
-                        vault.set_note_text(&rel, &doc.text);
+                    let title =
+                        egui::TextEdit::singleline(&mut tab.title_buf).font(FontId::proportional(base * 1.9)).text_color(theme::TEXT_STRONG).frame(egui::Frame::NONE).desired_width(f32::INFINITY).id(egui::Id::unique(("title", tab.id)));
+                    let tr = ui.add(title);
+                    if tr.lost_focus() && tab.title_buf.trim() != display_name && !tab.title_buf.trim().is_empty() {
+                        rename_to = Some(tab.title_buf.trim().to_string());
+                    } else if tr.lost_focus() {
+                        tab.title_buf = display_name.clone();
                     }
-                    if let Some(a) = action {
-                        handle_editor_action(&mut self.actions, a, &rel);
+                    if tr.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        tab.editor.request_focus = true;
                     }
-                }
-                ui.add_space(120.0);
-              });
+                    ui.add_space(8.0);
+                    let reading = tab.reading;
+                    let Some(vault) = self.vault.as_mut() else { return };
+                    let Some(doc) = self.notes.get_mut(&rel) else { return };
+                    if let Some(why) = &doc.unreadable {
+                        // never shown as an empty note that the next keystroke would save over the file (DATA-008)
+                        ui.label(egui::RichText::new(format!("This note could not be read ({why}). It is shown read-only, and Shale will not change the file.")).color(theme::LINK_MISSING));
+                        return;
+                    }
+                    if reading {
+                        let text = doc.text.clone();
+                        if let Some(a) = reader::show(ui, &text, vault, &rel, &mut self.scenes, base, dark) {
+                            handle_reader_action(&mut self.actions, a, &rel);
+                        }
+                    } else {
+                        tab.editor.inline_images = self.cfg.inline_images;
+                        tab.editor.vim_enabled = self.cfg.vim_mode;
+                        tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
+                        tab.editor.dark_canvas = self.cfg.dark_canvas;
+                        let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
+                        if changed {
+                            doc.dirty = true;
+                            doc.last_edit = std::time::Instant::now();
+                            vault.set_note_text(&rel, &doc.text);
+                        }
+                        if let Some(a) = action {
+                            handle_editor_action(&mut self.actions, a, &rel);
+                        }
+                    }
+                    ui.add_space(120.0);
+                });
             });
         });
         if let Some(name) = rename_to {
@@ -634,21 +688,62 @@ impl ShaleApp {
                     ui.label(small(format!("{words} words")));
                     let bl = v.backlinks(&rel).len();
                     ui.label(small(format!("{bl} backlink{}", if bl == 1 { "" } else { "s" })));
-                    ui.label(small(if doc.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
+                    if doc.unreadable.is_some() {
+                        ui.label(egui::RichText::new("Read-only: could not be read").size(11.5).color(theme::LINK_MISSING));
+                    } else if let (true, Some(e)) = (doc.dirty, &doc.save_error) {
+                        ui.label(egui::RichText::new("Not saved").size(11.5).color(theme::LINK_MISSING)).on_hover_text(e);
+                    } else {
+                        ui.label(small(if doc.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
+                    }
                 } else if let Some(d) = self.drawings.get(&rel) {
                     ui.label(small(format!("{} elements", d.scene.live().count())));
-                    ui.label(small(if d.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
+                    if let (true, Some(e)) = (d.dirty, &d.save_error) {
+                        ui.label(egui::RichText::new("Not saved").size(11.5).color(theme::LINK_MISSING)).on_hover_text(e);
+                    } else {
+                        ui.label(small(if d.dirty { "Saving…".to_string() } else { "Saved".to_string() }));
+                    }
                 }
             }
             if let Some(v) = &self.vault {
                 let open = v.all_tasks().iter().filter(|(_, t)| !t.done).count();
                 ui.label(small(format!("{open} open tasks")));
             }
+            if let Some(t) = self.mail.status(&self.cfg) {
+                ui.label(small(t));
+            }
             if self.cfg.input_log {
                 ui.label(egui::RichText::new("● recording keys").size(11.5).color(theme::LINK_MISSING)).on_hover_text(crate::config::input_log_path().to_string_lossy());
             }
             ui.label(small(format!("Shale {} · build {}", env!("CARGO_PKG_VERSION"), crate::config::build_stamp())));
         });
+    }
+
+    /// Text from an earlier run that could not be saved and was put aside (DATA-011): stays until
+    /// it is dismissed.
+    pub fn paint_recovery_notice(&mut self, ui: &mut Ui) {
+        let Some(first) = self.recovery_notice.last().cloned() else { return };
+        let screen = ui.ctx().content_rect();
+        let mut dismissed = false;
+        egui::Area::new(egui::Id::unique("recovery-notice")).order(egui::Order::Tooltip).fixed_pos(Pos2::new(screen.min.x + 60.0, screen.max.y - 120.0)).show(ui.ctx(), |ui| {
+            egui::Frame::new().fill(Color32::from_rgb(64, 44, 44)).stroke(Stroke::new(1.0, theme::LINK_MISSING.gamma_multiply(0.7))).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
+                ui.set_max_width(420.0);
+                ui.label(egui::RichText::new("Some changes could not be saved when Shale was closed last time. They were put aside so nothing is lost.").color(theme::TEXT));
+                ui.horizontal(|ui| {
+                    if ui.link("Open the folder").clicked() {
+                        if let Err(e) = crate::opener::open_recovery_folder(&first, &self.recovery_root) {
+                            self.toasts.push((e, std::time::Instant::now()));
+                        }
+                    }
+                    if ui.link("Dismiss").clicked() {
+                        dismissed = true;
+                    }
+                });
+            });
+        });
+        if dismissed {
+            crate::recovery::dismiss(&self.recovery_notice);
+            self.recovery_notice.clear();
+        }
     }
 
     pub fn paint_toasts(&mut self, ui: &mut Ui) {

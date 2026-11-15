@@ -1,10 +1,14 @@
-//! CalDAV passwords in the system keyring instead of the settings file.
+//! CalDAV and mail account secrets in the system keyring instead of the settings file.
 //!
 //! On Linux the Secret Service (GNOME Keyring, KWallet, KeePassXC …) is used through the
 //! `secret-tool` program; the password goes to it on standard input, never on the command line.
 //! One entry per account (server + user name), shared by all calendars of that account.
 //! Where no keyring is available the password stays in the settings file, which only its
 //! owner can read.
+//!
+//! Mail accounts (`mail_secret`, `set_mail_secret`, `clear_mail_secret`) keep one entry per
+//! account id and kind (password, later an OAuth2 refresh token). They never go to the settings
+//! file: without a keyring the caller has to ask again.
 //!
 //! In memory, `SourceKind::Caldav::password` always holds the real password: `load_passwords`
 //! fills it in after reading the settings, `for_file` takes it out again before writing them.
@@ -14,10 +18,6 @@ use crate::cal_store::{CalendarSource, SourceKind};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// Keyring "application" attributes: calendars and social accounts never see each other's entries.
-const CALDAV: &str = "shale-caldav";
-const SOCIAL: &str = "shale-social";
-
 /// The account a calendar belongs to: (server, user name). None without a user name.
 fn account_of(s: &CalendarSource) -> Option<(String, String)> {
     let SourceKind::Caldav { url, username, .. } = &s.kind else { return None };
@@ -26,6 +26,49 @@ fn account_of(s: &CalendarSource) -> Option<(String, String)> {
     }
     let o = cal_dav::Origin::parse(url).ok()?;
     Some((format!("{}://{}:{}", o.scheme, o.host, o.port), username.clone()))
+}
+
+/// Keyring application name of CalDAV passwords.
+const CALDAV: &str = "shale-caldav";
+/// Keyring application name of mail account secrets.
+const MAIL: &str = "shale-mail";
+/// Keyring application name of social account secrets: calendars, mail and social accounts never see each other's entries.
+const SOCIAL: &str = "shale-social";
+
+/// What a mail account secret is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MailSecret {
+    Password,
+    /// The OAuth2 refresh token (`oauth.rs`).
+    RefreshToken,
+    /// The OAuth2 client secret, for providers that want one from desktop apps.
+    ClientSecret,
+}
+
+impl MailSecret {
+    fn name(self) -> &'static str {
+        match self {
+            MailSecret::Password => "password",
+            MailSecret::RefreshToken => "refresh-token",
+            MailSecret::ClientSecret => "client-secret",
+        }
+    }
+}
+
+/// The secret of a mail account, if the keyring has it.
+pub fn mail_secret(account_id: &str, kind: MailSecret) -> Option<String> {
+    backend::lookup(MAIL, account_id, kind.name())
+}
+
+/// Put a mail account secret into the keyring. False if that did not work (no keyring, or the
+/// unlock was refused): the secret is then not saved anywhere.
+pub fn set_mail_secret(account_id: &str, kind: MailSecret, secret: &str) -> bool {
+    backend::store(MAIL, account_id, kind.name(), secret)
+}
+
+/// Remove a mail account secret (the account was deleted).
+pub fn clear_mail_secret(account_id: &str, kind: MailSecret) {
+    backend::clear(MAIL, account_id, kind.name());
 }
 
 /// Passwords this run knows to be in the keyring (read from or written to it).
@@ -95,6 +138,11 @@ pub fn for_file(sources: &[CalendarSource]) -> Vec<CalendarSource> {
     out
 }
 
+/// Is there a keyring to keep mail passwords in? (Without one they are asked for per session.)
+pub fn keyring_available() -> bool {
+    backend::available()
+}
+
 // ---------------------------------------------------------------- social accounts (Mastodon / Bluesky)
 
 /// The access token (Mastodon) or app password (Bluesky) of a social account, from the keyring.
@@ -117,7 +165,11 @@ pub fn social_clear(server: &str, handle: &str) {
 /// What goes into the settings file for the secret: empty when the keyring has it now, the
 /// secret itself (the file is readable only by its owner) when no keyring works.
 pub fn social_store_or_keep(server: &str, handle: &str, secret: &str) -> String {
-    if social_store(server, handle, secret) { String::new() } else { secret.to_string() }
+    if social_store(server, handle, secret) {
+        String::new()
+    } else {
+        secret.to_string()
+    }
 }
 
 /// The secret of a social account: from the keyring, else the one kept in the settings file.
@@ -191,7 +243,16 @@ mod backend {
         if !available() {
             return false;
         }
-        let label = format!("{}: {user} on {server}", if app == super::SOCIAL { "Shale social" } else { "Shale CalDAV" });
+        let label = format!(
+            "{}: {user} on {server}",
+            if app == super::CALDAV {
+                "Shale CalDAV"
+            } else if app == super::SOCIAL {
+                "Shale social"
+            } else {
+                "Shale mail"
+            }
+        );
         let mut args = vec!["store", "--label", label.as_str()];
         args.extend(attrs(app, server, user));
         // the stored password must read back exactly (no trailing newline is added)
@@ -205,9 +266,14 @@ mod backend {
     }
 }
 
+/// A mail account with this id has no keyring in tests: saving its password fails.
+#[cfg(test)]
+pub const NO_KEYRING_ACCOUNT: &str = "no-keyring";
+
 /// Tests: a pretend keyring in memory (never the real one).
 #[cfg(test)]
 mod backend {
+    use super::NO_KEYRING_ACCOUNT;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -225,6 +291,9 @@ mod backend {
         FAKE.lock().unwrap().as_ref()?.get(&key(app, server, user)).cloned()
     }
     pub fn store(app: &str, server: &str, user: &str, password: &str) -> bool {
+        if server == NO_KEYRING_ACCOUNT {
+            return false;
+        }
         FAKE.lock().unwrap().get_or_insert_with(HashMap::new).insert(key(app, server, user), password.into());
         true
     }
@@ -285,5 +354,21 @@ mod tests {
         // the account is removed: its keyring entry goes too
         let _ = for_file(&sources[2..]);
         assert_eq!(backend::lookup(CALDAV, "https://dav.example.com:443", "ada"), None);
+    }
+
+    // spec: MAIL-021
+    #[test]
+    fn mail_secrets_have_their_own_entries() {
+        assert!(set_mail_secret("acct-1", MailSecret::Password, "pw-1"));
+        assert!(set_mail_secret("acct-1", MailSecret::RefreshToken, "tok-1"));
+        assert_eq!(mail_secret("acct-1", MailSecret::Password).as_deref(), Some("pw-1"));
+        assert_eq!(mail_secret("acct-1", MailSecret::RefreshToken).as_deref(), Some("tok-1"));
+        assert_eq!(mail_secret("acct-2", MailSecret::Password), None);
+        // a CalDAV entry of the same names is a different entry
+        assert_eq!(backend::lookup(CALDAV, "acct-1", "password"), None);
+        clear_mail_secret("acct-1", MailSecret::Password);
+        assert_eq!(mail_secret("acct-1", MailSecret::Password), None);
+        assert_eq!(mail_secret("acct-1", MailSecret::RefreshToken).as_deref(), Some("tok-1"));
+        clear_mail_secret("acct-1", MailSecret::RefreshToken);
     }
 }

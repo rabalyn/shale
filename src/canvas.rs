@@ -126,7 +126,11 @@ fn side_point(side: Option<&str>) -> Option<[f64; 2]> {
 fn facing_sides(a: [f64; 4], b: [f64; 4]) -> ([f64; 2], [f64; 2]) {
     let (dx, dy) = ((b[0] + b[2] / 2.0) - (a[0] + a[2] / 2.0), (b[1] + b[3] / 2.0) - (a[1] + a[3] / 2.0));
     if dx.abs() >= dy.abs() {
-        if dx >= 0.0 { ([1.0, 0.5], [0.0, 0.5]) } else { ([0.0, 0.5], [1.0, 0.5]) }
+        if dx >= 0.0 {
+            ([1.0, 0.5], [0.0, 0.5])
+        } else {
+            ([0.0, 0.5], [1.0, 0.5])
+        }
     } else if dy >= 0.0 {
         ([0.5, 1.0], [0.5, 0.0])
     } else {
@@ -267,7 +271,7 @@ pub fn find_converted(vault: &crate::vault::Vault, canvas_rel: &Path) -> Option<
     let mut candidates: Vec<&crate::vault::FileEntry> = vault.files.iter().filter(|f| crate::excalidraw_md::is_plugin_file(&f.rel)).collect();
     // the usual place first: next to the canvas
     candidates.sort_by_key(|f| f.rel.parent() != canvas_rel.parent());
-    candidates.into_iter().map(|f| f.rel.clone()).find(|rel| std::fs::read_to_string(vault.abs(rel)).is_ok_and(|t| is_converted_from(&t, canvas_rel)))
+    candidates.into_iter().map(|f| f.rel.clone()).find(|rel| crate::fsutil::read_to_string(vault.abs(rel)).is_ok_and(|t| is_converted_from(&t, canvas_rel)))
 }
 
 #[cfg(test)]

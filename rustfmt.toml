@@ -1,0 +1,4 @@
+edition = "2021"
+# the code base is written with long lines; this keeps the formatter close to that style
+max_width = 240
+use_small_heuristics = "Max"

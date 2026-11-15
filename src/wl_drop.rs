@@ -21,16 +21,29 @@ use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 /// What happened with a drag from another program. Positions are in window pixels.
 #[derive(Debug, Clone)]
 pub enum DropEvent {
-    Hover { x: f32, y: f32 },
+    Hover {
+        x: f32,
+        y: f32,
+    },
     Leave,
     /// `parts`: every useful kind the other program offered, with what it sent for it;
     /// `report`: for troubleshooting, how each kind went
-    Drop { x: f32, y: f32, parts: Vec<(String, Vec<u8>)>, offered: Vec<String>, report: Vec<String> },
+    Drop {
+        x: f32,
+        y: f32,
+        parts: Vec<(String, Vec<u8>)>,
+        offered: Vec<String>,
+        report: Vec<String>,
+    },
     /// a drop is being read
     Busy,
     /// something was dragged over the window that Shale can't take
     /// (sent while it moves over the window, so the window can say so at the pointer)
-    Refused { x: f32, y: f32, offered: Vec<String> },
+    Refused {
+        x: f32,
+        y: f32,
+        offered: Vec<String>,
+    },
 }
 
 /// The kinds Shale takes, best first.
@@ -38,7 +51,8 @@ pub const ACCEPTED: [&str; 7] = ["text/uri-list", "message/rfc822", "text/calend
 
 /// Kinds read on a drop (a mail program may send an empty file list but a link to the
 /// message and its file name).
-const WANTED: [&str; 10] = ["text/uri-list", "message/rfc822", "text/calendar", "text/x-moz-url", "application/x-moz-file-promise-url", "application/x-moz-file-promise-dest-filename", "text/plain;charset=utf-8", "utf8_string", "text/plain", "string"];
+const WANTED: [&str; 10] =
+    ["text/uri-list", "message/rfc822", "text/calendar", "text/x-moz-url", "application/x-moz-file-promise-url", "application/x-moz-file-promise-dest-filename", "text/plain;charset=utf-8", "utf8_string", "text/plain", "string"];
 
 /// "text/plain; charset=UTF-8" → "text/plain;charset=utf-8"
 pub fn norm(m: &str) -> String {
@@ -229,6 +243,7 @@ struct State {
     current: Option<(wl_data_offer::WlDataOffer, Vec<String>, Option<String>)>,
     pos: (f64, f64),
     /// data read while dragging, for the current offer
+    #[allow(clippy::type_complexity)]
     prefetch: Option<(ObjectId, std::thread::JoinHandle<Vec<(String, Got)>>)>,
 }
 
@@ -372,12 +387,10 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
                     send(DropEvent::Drop { x, y, parts, offered: unique(&offered), report });
                 });
             }
-            E::Selection { id } => {
+            E::Selection { id: Some(o) } => {
                 // the clipboard: handled by egui's clipboard helper
-                if let Some(o) = id {
-                    state.offers.remove(&o.id());
-                    o.destroy();
-                }
+                state.offers.remove(&o.id());
+                o.destroy();
             }
             _ => {}
         }
@@ -400,7 +413,21 @@ mod tests {
         assert_eq!(pick_mime(&o(&["text/plain", "text/calendar"])).as_deref(), Some("text/calendar"));
         assert_eq!(pick_mime(&o(&["application/x-moz-file-promise", "text/x-moz-message"])), None);
         // what Thunderbird offers (each kind twice, spelled in different ways)
-        let tb = o(&["text/plain", "text/plain; charset=utf-8", "UTF8_STRING", "STRING", "application/x-moz-custom-clipdata", "text/x-moz-url", "application/x-moz-file-promise-url", "text/uri-list", "application/x-moz-file-promise", "application/x-moz-file-promise-dest-filename", "text/plain", "text/plain;charset=utf-8", "DELETE"]);
+        let tb = o(&[
+            "text/plain",
+            "text/plain; charset=utf-8",
+            "UTF8_STRING",
+            "STRING",
+            "application/x-moz-custom-clipdata",
+            "text/x-moz-url",
+            "application/x-moz-file-promise-url",
+            "text/uri-list",
+            "application/x-moz-file-promise",
+            "application/x-moz-file-promise-dest-filename",
+            "text/plain",
+            "text/plain;charset=utf-8",
+            "DELETE",
+        ]);
         assert_eq!(pick_mime(&tb).as_deref(), Some("text/uri-list"));
         assert_eq!(wanted_kinds(&tb), o(&["text/uri-list", "text/x-moz-url", "application/x-moz-file-promise-url", "application/x-moz-file-promise-dest-filename", "text/plain; charset=utf-8", "UTF8_STRING", "text/plain", "STRING"]));
         assert_eq!(unique(&tb).len(), 11);

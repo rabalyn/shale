@@ -132,6 +132,7 @@ impl GraphView {
             force[*b] -= f;
         }
         let mut total = 0.0;
+        #[allow(clippy::needless_range_loop)] // i also indexes self.pos and self.vel
         for i in 0..n {
             force[i] -= self.pos[i] * 0.012;
             if Some(i) == self.dragging {
@@ -231,7 +232,19 @@ impl GraphView {
         });
         let highlight = self.dragging.or(hovered);
         let neighbours: Vec<usize> = match highlight {
-            Some(h) => self.edges.iter().filter_map(|(a, b)| if *a == h { Some(*b) } else if *b == h { Some(*a) } else { None }).collect(),
+            Some(h) => self
+                .edges
+                .iter()
+                .filter_map(|(a, b)| {
+                    if *a == h {
+                        Some(*b)
+                    } else if *b == h {
+                        Some(*a)
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
             None => vec![],
         };
         let current_key = current.map(crate::vault::rel_to_string);
@@ -239,7 +252,13 @@ impl GraphView {
         // edges
         for (a, b) in &self.edges {
             let lit = highlight.map(|h| h == *a || h == *b).unwrap_or(false);
-            let col = if lit { theme::ACCENT } else if highlight.is_some() { Color32::from_gray(50) } else { Color32::from_gray(78) };
+            let col = if lit {
+                theme::ACCENT
+            } else if highlight.is_some() {
+                Color32::from_gray(50)
+            } else {
+                Color32::from_gray(78)
+            };
             painter.line_segment([to_screen(self.pos[*a]), to_screen(self.pos[*b])], Stroke::new(if lit { 1.6 } else { 1.0 }, col));
         }
         // nodes

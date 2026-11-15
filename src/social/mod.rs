@@ -23,11 +23,14 @@ pub mod markup;
 pub mod mastodon;
 pub mod note;
 pub mod state;
+#[cfg(test)]
+mod ui_tests;
 
 use crate::cal_dav::{self, check_url, same_server, Origin};
 use crate::cal_time as t;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 
 // ---------------------------------------------------------------- data model
 
@@ -125,7 +128,11 @@ pub struct Author {
 impl Author {
     /// Display name, or the handle when there is none.
     pub fn name(&self) -> &str {
-        if self.display_name.trim().is_empty() { &self.handle } else { &self.display_name }
+        if self.display_name.trim().is_empty() {
+            &self.handle
+        } else {
+            &self.display_name
+        }
     }
 }
 
@@ -197,11 +204,46 @@ pub struct Feed {
     pub title: String,
 }
 
+/// The feed a Feeds tab shows: an account (its id) and one of its feeds ("" = the feed used last
+/// for the account, or the first; the tab fills it in once the feeds are known).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FeedRef {
+    pub account: String,
+    pub feed: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Page {
     pub posts: Vec<Post>,
     /// pass it to `timeline` for the next (older) page; None at the end
     pub cursor: Option<String>,
+    /// Mastodon: the id of the newest timeline entry of the page (a boost has its own id, not the
+    /// one of the post); what the next check for newer posts asks after. None on Bluesky.
+    pub top: Option<String>,
+}
+
+/// The most posts one check for newer posts brings in (SOC-026).
+pub const MAX_NEW: usize = 200;
+
+/// What a check for newer posts is told about the posts already there.
+#[derive(Clone, Debug, Default)]
+pub struct Since {
+    /// Mastodon: the id of the newest timeline entry known (`Page::top`)
+    pub top: Option<String>,
+    /// Bluesky: the keys (`state::post_key`) of the posts known, in the list or waiting
+    pub known: HashSet<String>,
+}
+
+/// What a check for newer posts found.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Fresh {
+    /// the new posts, newest first
+    pub posts: Vec<Post>,
+    /// Mastodon: the id of the newest timeline entry now known
+    pub top: Option<String>,
+    /// Bluesky: the check stopped at its limit before it met a known post; this cursor continues
+    /// below the last of `posts`
+    pub gap: Option<String>,
 }
 
 // ---------------------------------------------------------------- HTTP
@@ -362,7 +404,13 @@ pub(crate) fn file_name_from_url(url: &str, fallback: &str) -> String {
     let last = path.rsplit('/').next().unwrap_or("");
     let last = last.replace('@', ".").replace(':', "_");
     let last = last.trim_matches('.');
-    if last.is_empty() || last.len() > 120 { fallback.to_string() } else if !last.contains('.') { format!("{last}.{}", fallback.rsplit('.').next().unwrap_or("bin")) } else { last.to_string() }
+    if last.is_empty() || last.len() > 120 {
+        fallback.to_string()
+    } else if !last.contains('.') {
+        format!("{last}.{}", fallback.rsplit('.').next().unwrap_or("bin"))
+    } else {
+        last.to_string()
+    }
 }
 
 pub(crate) fn text(v: &Value) -> String {
@@ -441,7 +489,7 @@ pub fn conversation(thread: &[Post], descendants: &[Post]) -> Vec<Reply> {
     for v in kids.values_mut() {
         v.sort_by_key(|p| p.created_at);
     }
-    fn walk<'a>(id: &str, depth: usize, kids: &std::collections::HashMap<&str, Vec<&'a Post>>, seen: &mut std::collections::HashSet<String>, out: &mut Vec<Reply>) {
+    fn walk(id: &str, depth: usize, kids: &std::collections::HashMap<&str, Vec<&Post>>, seen: &mut std::collections::HashSet<String>, out: &mut Vec<Reply>) {
         for p in kids.get(id).into_iter().flatten() {
             if out.len() >= MAX_REPLIES || !seen.insert(p.id.clone()) {
                 continue;
@@ -505,6 +553,14 @@ impl Client {
         match &mut self.backend {
             Backend::Mastodon { token } => mastodon::timeline(&self.account.server, token, feed, cursor),
             Backend::Bluesky(api) => bluesky::timeline(api, feed, cursor),
+        }
+    }
+
+    /// The posts newer than the known ones, newest first, at most `MAX_NEW` (see `Fresh`).
+    pub fn newer(&mut self, feed: &Feed, since: &Since) -> Result<Fresh, String> {
+        match &mut self.backend {
+            Backend::Mastodon { token } => mastodon::newer(&self.account.server, token, feed, since.top.as_deref(), MAX_NEW),
+            Backend::Bluesky(api) => bluesky::newer(api, feed, &since.known, MAX_NEW),
         }
     }
 

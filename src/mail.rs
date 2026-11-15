@@ -23,6 +23,9 @@ pub struct Mail {
     /// when it was sent (UTC seconds), if the date could be read
     pub date: Option<i64>,
     pub message_id: String,
+    /// `Reply-To` and `References` as written (replies, MAIL-126)
+    pub reply_to: String,
+    pub references: String,
     /// the message text (plain text; HTML-only mails are converted)
     pub text: String,
     pub attachments: Vec<Attachment>,
@@ -194,7 +197,7 @@ fn pct_decode(s: &str) -> Vec<u8> {
 // ---------------------------------------------------------------- headers
 
 /// Split into (headers, body). Headers: (lower-case name, unfolded raw value).
-fn split_message(raw: &[u8]) -> (Vec<(String, String)>, &[u8]) {
+pub(crate) fn split_message(raw: &[u8]) -> (Vec<(String, String)>, &[u8]) {
     let mut i = 0;
     let mut lines: Vec<String> = Vec::new();
     // an mbox "From " line before the headers
@@ -247,7 +250,7 @@ fn header<'a>(h: &'a [(String, String)], name: &str) -> Option<&'a str> {
 
 /// `text/plain; charset="utf-8"; name*0*=…` → ("text/plain", params). RFC 2231 parameters
 /// (charset'' and continuations) are put together and decoded.
-fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
+pub(crate) fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
     let mut parts = Vec::new();
     let mut cur = String::new();
     let mut quoted = false;
@@ -264,6 +267,7 @@ fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
     parts.push(cur);
     let main = parts.first().map(|s| s.trim().to_ascii_lowercase()).unwrap_or_default();
     // name → (pieces by number, was encoded)
+    #[allow(clippy::type_complexity)]
     let mut acc: Vec<(String, Vec<(u32, String, bool)>)> = Vec::new();
     for p in parts.iter().skip(1) {
         let Some((k, val)) = p.split_once('=') else { continue };
@@ -310,7 +314,7 @@ fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
     (main, params)
 }
 
-fn param<'a>(p: &'a [(String, String)], name: &str) -> Option<&'a str> {
+pub(crate) fn param<'a>(p: &'a [(String, String)], name: &str) -> Option<&'a str> {
     p.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str())
 }
 
@@ -335,7 +339,11 @@ pub fn parse_date(s: &str) -> Option<i64> {
     let off = if let Some(z) = zone.strip_prefix('+').or_else(|| zone.strip_prefix('-')) {
         let v: i64 = z.get(..4).and_then(|z| z.parse().ok()).unwrap_or(0);
         let o = (v / 100) * 3600 + (v % 100) * 60;
-        if zone.starts_with('-') { -o } else { o }
+        if zone.starts_with('-') {
+            -o
+        } else {
+            o
+        }
     } else {
         match zone.to_ascii_uppercase().as_str() {
             "EST" => -5 * 3600,
@@ -476,7 +484,11 @@ pub fn html_to_text(html: &str) -> String {
                     let href = raw_tag.split_once("href=").map(|(_, r)| {
                         let r = r.trim_start();
                         let q = r.chars().next().unwrap_or(' ');
-                        if q == '"' || q == '\'' { r[1..].split(q).next().unwrap_or("").to_string() } else { r.split_whitespace().next().unwrap_or("").to_string() }
+                        if q == '"' || q == '\'' {
+                            r[1..].split(q).next().unwrap_or("").to_string()
+                        } else {
+                            r.split_whitespace().next().unwrap_or("").to_string()
+                        }
                     });
                     link = href.map(|h| (decode_entities(&h), out.len()));
                 }
@@ -532,7 +544,7 @@ pub fn html_to_text(html: &str) -> String {
 
 // ---------------------------------------------------------------- the message tree
 
-fn transfer_decode(body: &[u8], enc: &str) -> Vec<u8> {
+pub(crate) fn transfer_decode(body: &[u8], enc: &str) -> Vec<u8> {
     match enc.trim().to_ascii_lowercase().as_str() {
         "base64" => base64_decode(body),
         "quoted-printable" => qp_decode(body, false),
@@ -540,7 +552,7 @@ fn transfer_decode(body: &[u8], enc: &str) -> Vec<u8> {
     }
 }
 
-fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
+pub(crate) fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
     let delim = format!("--{boundary}");
     let mut parts = Vec::new();
     let mut start: Option<usize> = None;
@@ -588,7 +600,11 @@ struct Walk {
 fn clean_name(n: &str) -> String {
     let n: String = n.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '\0'..='\x1f') { '_' } else { c }).collect();
     let n = n.trim().trim_start_matches('.').to_string();
-    if n.is_empty() { "attachment".into() } else { n }
+    if n.is_empty() {
+        "attachment".into()
+    } else {
+        n
+    }
 }
 
 fn ext_for(mime: &str) -> &'static str {
@@ -670,6 +686,8 @@ pub fn parse(raw: &[u8]) -> Mail {
         date: parse_date(&date_raw),
         date_raw,
         message_id: header(&h, "message-id").unwrap_or("").trim().to_string(),
+        reply_to: get("reply-to"),
+        references: header(&h, "references").unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" "),
         text: text.trim_end().to_string(),
         attachments: w.attachments,
     }

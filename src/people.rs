@@ -138,6 +138,26 @@ pub fn emails_in(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Name and e-mail address of every address in the contact notes of `dir`, for completing addresses
+/// when writing a mail (MAIL-128): the note's name with each address found in its text.
+pub fn addresses(vault: &Vault, dir: &str) -> Vec<(String, String)> {
+    let dir = dir.trim().trim_matches('/');
+    if dir.is_empty() {
+        return vec![];
+    }
+    let prefix = format!("{}/", dir.to_lowercase());
+    let mut notes: Vec<(&PathBuf, &crate::vault::NoteIndex)> = vault.notes.iter().filter(|(p, _)| rel_to_string(p).to_lowercase().starts_with(&prefix)).collect();
+    notes.sort_by(|a, b| a.0.cmp(b.0));
+    let mut out = vec![];
+    for (p, n) in notes {
+        let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        for e in emails_in(&n.text) {
+            out.push((clean_name(&stem), e));
+        }
+    }
+    out
+}
+
 impl Contacts {
     pub fn index(vault: &Vault, dir: &str) -> Self {
         let dir = dir.trim().trim_matches('/');
@@ -259,17 +279,38 @@ mod tests {
     #[test]
     fn addresses_and_names() {
         let a = parse_addresses("\"Müller, Hans\" <H.Mueller@Arch.example>, info@lindner.example; Team Bau <bau@uni.example>, =?x?=, Ada Lovelace");
-        assert_eq!(a, vec![
-            ("Hans Müller".to_string(), "h.mueller@arch.example".to_string()),
-            ("Info".into(), "info@lindner.example".into()),
-            ("Team Bau".into(), "bau@uni.example".into()),
-            ("=?x?=".into(), String::new()),
-            ("Ada Lovelace".into(), String::new()),
-        ]);
+        assert_eq!(
+            a,
+            vec![
+                ("Hans Müller".to_string(), "h.mueller@arch.example".to_string()),
+                ("Info".into(), "info@lindner.example".into()),
+                ("Team Bau".into(), "bau@uni.example".into()),
+                ("=?x?=".into(), String::new()),
+                ("Ada Lovelace".into(), String::new()),
+            ]
+        );
         assert_eq!(parse_addresses("<anna.schmidt@x.de>")[0].0, "Anna Schmidt");
         assert_eq!(clean_name("  Schmidt,  Anna "), "Anna Schmidt");
         assert_eq!(clean_name("Bauamt, Abteilung Technik, Haus 2"), "Bauamt, Abteilung Technik, Haus 2", "not a person's name");
         assert_eq!(emails_in("- **E-mail:** h.mueller@arch.example, (alt: <hm@x.de>) mailto:A@B.de."), vec!["h.mueller@arch.example", "hm@x.de", "a@b.de"]);
+    }
+
+    // spec: MAIL-128
+    #[test]
+    fn the_addresses_of_the_people_notes_are_offered_for_completion_with_their_names() {
+        let d = std::env::temp_dir().join(format!("shale-people-addr-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("Adressbuch")).unwrap();
+        std::fs::create_dir_all(d.join("Other")).unwrap();
+        std::fs::write(d.join("Adressbuch/Hans Müller.md"), "# Hans Müller\n- E-mail: hans@arch.example\n").unwrap();
+        std::fs::write(d.join("Adressbuch/Bauamt Info.md"), "- **E-mail:** bau@uni.example, zweite@uni.example\n").unwrap();
+        std::fs::write(d.join("Other/Not a person.md"), "x@y.example\n").unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        v.rescan();
+        let a = addresses(&v, "Adressbuch/");
+        assert_eq!(a, vec![("Bauamt Info".to_string(), "bau@uni.example".to_string()), ("Bauamt Info".to_string(), "zweite@uni.example".to_string()), ("Hans Müller".to_string(), "hans@arch.example".to_string())]);
+        assert!(addresses(&v, "").is_empty());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: PPL-002, PPL-003

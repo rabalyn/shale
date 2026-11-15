@@ -82,7 +82,7 @@ fn inline_pairs(line: &str, off: usize, fmts: &mut [Fmt], code: &[Range<usize>])
         }
     }
     // single * or _ italics (not part of ** and not list markers)
-    for m in [b'*', b'_'] {
+    for m in *b"*_" {
         let mut i = 0;
         while i < b.len() {
             let is_single = |j: usize| b[j] == m && (j == 0 || b[j - 1] != m) && (j + 1 >= b.len() || b[j + 1] != m);
@@ -332,7 +332,11 @@ enum Art {
 
 /// What the editor asks the app to do.
 pub enum EditorAction {
-    OpenLink { target: String, heading: Option<String>, new_tab: bool },
+    OpenLink {
+        target: String,
+        heading: Option<String>,
+        new_tab: bool,
+    },
     /// A web link: open it in the default browser.
     OpenUrl(String),
     /// A file was copied into the vault; the file list should be refreshed.
@@ -376,7 +380,23 @@ pub struct NoteEditor {
 
 impl NoteEditor {
     pub fn new(id: egui::Id) -> Self {
-        NoteEditor { id, cache: Cache::default(), assist: crate::link_assist::LinkAssist::new(id), pending_cursor: None, request_focus: false, last_layout: None, inline_images: false, dark_canvas: true, last_cursor: None, vim_enabled: false, vim: crate::vim::Vim::default(), vim_was_focused: false, vim_lost_at: None, vim_expected: None, vim_scroll: None }
+        NoteEditor {
+            id,
+            cache: Cache::default(),
+            assist: crate::link_assist::LinkAssist::new(id),
+            pending_cursor: None,
+            request_focus: false,
+            last_layout: None,
+            inline_images: false,
+            dark_canvas: true,
+            last_cursor: None,
+            vim_enabled: false,
+            vim: crate::vim::Vim::default(),
+            vim_was_focused: false,
+            vim_lost_at: None,
+            vim_expected: None,
+            vim_scroll: None,
+        }
     }
 
     /// Is the `[!` file picker popup on screen?
@@ -541,10 +561,13 @@ impl NoteEditor {
         let key = h.finish();
         if key != self.cache.key {
             self.cache.key = key;
-            self.cache.links = markdown::find_links(text).into_iter().map(|l| {
-                let ok = vault.exists(&l.target, Some(rel));
-                (l, ok)
-            }).collect();
+            self.cache.links = markdown::find_links(text)
+                .into_iter()
+                .map(|l| {
+                    let ok = vault.exists(&l.target, Some(rel));
+                    (l, ok)
+                })
+                .collect();
         }
     }
 
@@ -687,10 +710,13 @@ impl NoteEditor {
             let use_links: &[(LinkSpan, bool)] = if s == links_text {
                 &links
             } else {
-                fresh = markdown::find_links(s).into_iter().map(|l| {
-                    let ok = vault.exists(&l.target, Some(rel));
-                    (l, ok)
-                }).collect::<Vec<_>>();
+                fresh = markdown::find_links(s)
+                    .into_iter()
+                    .map(|l| {
+                        let ok = vault.exists(&l.target, Some(rel));
+                        (l, ok)
+                    })
+                    .collect::<Vec<_>>();
                 &fresh
             };
             let ranges: Vec<(Range<usize>, f32)> = remap_images(s, &image_keys).into_iter().map(|(r, h, _)| (r, h)).collect();
@@ -794,18 +820,23 @@ impl NoteEditor {
                     let hint = if ctrl_to_follow { "Ctrl+click to follow" } else { "Ctrl+click to edit the link text" };
                     let colour = if *exists { theme::LINK } else { theme::LINK_MISSING };
                     let image = vault.resolve(&l.target, Some(rel)).filter(|p| crate::media::is_image(p)).map(|p| vault.abs(&p));
+                    // several files share the name, or a red path has several candidates (LINK-008, LINK-012)
+                    let note = vault.link_hint(&l.target, Some(rel));
                     resp.clone().on_hover_ui_at_pointer(|ui| {
                         if let Some(img) = image.as_ref().and_then(|p| crate::media::image_widget(ui.ctx(), p, 320.0, 240.0)) {
                             ui.add(img);
                         }
                         ui.label(egui::RichText::new(tip).color(colour));
+                        if let Some(n) = &note {
+                            ui.label(egui::RichText::new(n).small().color(theme::TEXT));
+                        }
                         ui.label(egui::RichText::new(hint).small().color(theme::MUTED));
                     });
                 }
-                if resp.clicked() && web.is_some() {
+                if let (true, Some(web)) = (resp.clicked(), web.as_ref()) {
                     let follow = if ctrl_to_follow { modifiers.command } else { !modifiers.command };
                     if follow {
-                        action = Some(EditorAction::OpenUrl(web.unwrap().url));
+                        action = Some(EditorAction::OpenUrl(web.url.clone()));
                     }
                 } else if resp.clicked() {
                     if let Some((l, _)) = link {
@@ -884,7 +915,6 @@ pub fn char_under(galley: &Galley, galley_pos: Pos2, p: Pos2) -> Option<usize> {
     }
     None
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1531,10 +1561,13 @@ mod tests {
     #[test]
     fn highlight_colours_links() {
         let text = "See [[Yes]] and [[No]]";
-        let links: Vec<(LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| {
-            let ok = l.target == "Yes";
-            (l, ok)
-        }).collect();
+        let links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
+            .into_iter()
+            .map(|l| {
+                let ok = l.target == "Yes";
+                (l, ok)
+            })
+            .collect();
         let job = highlight(text, &links, 15.0);
         let color_at = |byte: usize| job.sections.iter().find(|s| s.byte_range.start.0 <= byte && byte < s.byte_range.end.0).unwrap().format.color;
         assert_eq!(color_at(text.find("Yes").unwrap()), theme::LINK);

@@ -8,7 +8,7 @@
 use super::markup::{md_link, md_url};
 use super::*;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 const PAGE_SIZE: &str = "30";
@@ -54,7 +54,13 @@ fn session_from(v: &Value, server: &str) -> Result<Session, String> {
     if access.is_empty() || refresh.is_empty() || did.is_empty() {
         return Err("the server did not answer like a Bluesky server".into());
     }
-    Ok(Session { pds: pds_of_did_doc(&v["didDoc"]).filter(|p| check_url(p).is_ok()).map(|p| p.trim_end_matches('/').to_string()).unwrap_or_else(|| server.to_string()), did, handle: text(&v["handle"]), access_jwt: access, refresh_jwt: refresh })
+    Ok(Session {
+        pds: pds_of_did_doc(&v["didDoc"]).filter(|p| check_url(p).is_ok()).map(|p| p.trim_end_matches('/').to_string()).unwrap_or_else(|| server.to_string()),
+        did,
+        handle: text(&v["handle"]),
+        access_jwt: access,
+        refresh_jwt: refresh,
+    })
 }
 
 /// `serviceEndpoint` of the `#atproto_pds` service of a DID document.
@@ -147,7 +153,11 @@ pub fn saved_feed_uris(prefs: &Value) -> Vec<String> {
         for i in v2["items"].as_array().into_iter().flatten() {
             if text(&i["type"]) == "feed" {
                 let u = text(&i["value"]);
-                if i["pinned"].as_bool().unwrap_or(false) { pinned.push(u) } else { saved.push(u) }
+                if i["pinned"].as_bool().unwrap_or(false) {
+                    pinned.push(u)
+                } else {
+                    saved.push(u)
+                }
             }
         }
     } else if let Some(old) = list.iter().find(|p| text(&p["$type"]).ends_with("#savedFeedsPref")) {
@@ -180,7 +190,43 @@ pub fn timeline(api: &mut Api, feed: &Feed, cursor: Option<&str>) -> Result<Page
         api.get("app.bsky.feed.getFeed", &params)?
     };
     let posts = v["feed"].as_array().into_iter().flatten().filter_map(parse_feed_item).collect();
-    Ok(Page { posts, cursor: Some(text(&v["cursor"])).filter(|c| !c.is_empty()) })
+    Ok(Page { posts, cursor: Some(text(&v["cursor"])).filter(|c| !c.is_empty()), top: None })
+}
+
+/// The most pages one check asks for.
+const MAX_CHECK_PAGES: usize = 12;
+
+/// The posts newer than the known ones: the first pages of the feed, up to the first post that
+/// is already known (`known`: `state::post_key`s). At most `cap` posts; if that limit comes
+/// first, `Fresh::gap` has the cursor to go on with.
+pub fn newer(api: &mut Api, feed: &Feed, known: &HashSet<String>, cap: usize) -> Result<Fresh, String> {
+    newer_with(known, cap, |cursor| timeline(api, feed, cursor))
+}
+
+/// `newer` with the pages left to the caller (`page(cursor)`).
+pub(crate) fn newer_with(known: &HashSet<String>, cap: usize, mut page: impl FnMut(Option<&str>) -> Result<Page, String>) -> Result<Fresh, String> {
+    let mut posts: Vec<Post> = vec![];
+    let mut have: HashSet<String> = HashSet::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_CHECK_PAGES {
+        let pg = page(cursor.as_deref())?;
+        for p in pg.posts {
+            let key = super::state::post_key(&p);
+            if known.contains(&key) {
+                // met the posts of the list: everything above was new
+                return Ok(Fresh { posts, ..Default::default() });
+            }
+            if have.insert(key) {
+                posts.push(p);
+            }
+        }
+        let Some(next) = pg.cursor else { return Ok(Fresh { posts, ..Default::default() }) };
+        cursor = Some(next);
+        if posts.len() >= cap {
+            break;
+        }
+    }
+    Ok(Fresh { posts, top: None, gap: cursor })
 }
 
 fn parse_feed_item(item: &Value) -> Option<Post> {
@@ -307,7 +353,14 @@ fn embed_parts(e: &Value, media: &mut Vec<Media>, quote: &mut Option<Box<Post>>,
         "app.bsky.embed.video#view" => {
             let (cid, playlist) = (text(&e["cid"]), text(&e["playlist"]));
             if !playlist.is_empty() {
-                media.push(Media { kind: MediaKind::Video, url: playlist, preview_url: text(&e["thumbnail"]), alt: text(&e["alt"]), file_name_hint: if cid.is_empty() { "video.mp4".into() } else { format!("{cid}.mp4") }, blob_cid: Some(cid).filter(|c| !c.is_empty()) });
+                media.push(Media {
+                    kind: MediaKind::Video,
+                    url: playlist,
+                    preview_url: text(&e["thumbnail"]),
+                    alt: text(&e["alt"]),
+                    file_name_hint: if cid.is_empty() { "video.mp4".into() } else { format!("{cid}.mp4") },
+                    blob_cid: Some(cid).filter(|c| !c.is_empty()),
+                });
             }
         }
         "app.bsky.embed.external#view" => {
@@ -493,7 +546,8 @@ mod tests {
 
     #[test]
     fn reposts_and_feed_items() {
-        let item = json!({"post": post_view("1", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "hi"), "reason": {"$type": "app.bsky.feed.defs#reasonRepost", "by": {"did": "did:plc:cy", "handle": "cy.test", "displayName": "Cy"}}});
+        let item =
+            json!({"post": post_view("1", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "hi"), "reason": {"$type": "app.bsky.feed.defs#reasonRepost", "by": {"did": "did:plc:cy", "handle": "cy.test", "displayName": "Cy"}}});
         let p = parse_feed_item(&item).unwrap();
         assert_eq!(p.reposted_by.unwrap().handle, "cy.test");
         assert!(parse_feed_item(&json!({"post": post_view("1", "did:plc:ada", "ada.test", "2024-05-17T10:30:00Z", None, "hi")})).unwrap().reposted_by.is_none());
@@ -565,7 +619,9 @@ mod tests {
                     ok(json!({"accessJwt": "jwt-1", "refreshJwt": "ref-1", "did": did, "handle": "ada.test", "didDoc": {"service": [{"id": "#atproto_pds", "serviceEndpoint": format!("http://{host}")}]}}))
                 }
                 ("POST", "/xrpc/com.atproto.server.refreshSession") if bearer("ref-1") => ok(json!({"accessJwt": "jwt-2", "refreshJwt": "ref-2", "did": did, "handle": "ada.test"})),
-                ("GET", "/xrpc/app.bsky.actor.getPreferences") if bearer("jwt-1") => ok(json!({"preferences": [{"$type": "app.bsky.actor.defs#savedFeedsPrefV2", "items": [{"type": "feed", "value": "at://did:plc:x/app.bsky.feed.generator/cats", "pinned": true}]}]})),
+                ("GET", "/xrpc/app.bsky.actor.getPreferences") if bearer("jwt-1") => {
+                    ok(json!({"preferences": [{"$type": "app.bsky.actor.defs#savedFeedsPrefV2", "items": [{"type": "feed", "value": "at://did:plc:x/app.bsky.feed.generator/cats", "pinned": true}]}]}))
+                }
                 ("GET", "/xrpc/app.bsky.feed.getFeedGenerators") => ok(json!({"feeds": [{"uri": "at://did:plc:x/app.bsky.feed.generator/cats", "displayName": "Cats"}]})),
                 ("GET", "/xrpc/app.bsky.feed.getTimeline") => {
                     if bearer("jwt-1") && !expired_once.swap(true, Ordering::SeqCst) {
@@ -613,5 +669,57 @@ mod tests {
         assert_eq!(bytes, b"VIDEODATA", "the video file comes from the author's server, not the playlist");
         let seen = handle.join().unwrap();
         assert_eq!(seen.len(), 11, "{seen:?}");
+    }
+
+    fn page_of(ids: &[&str], cursor: Option<&str>) -> Page {
+        Page { posts: ids.iter().map(|i| crate::social::tests::post(i, "bob", 1, None)).collect(), cursor: cursor.map(String::from), top: None }
+    }
+
+    fn keys(ids: &[&str]) -> HashSet<String> {
+        ids.iter().map(|i| crate::social::state::post_key(&crate::social::tests::post(i, "bob", 1, None))).collect()
+    }
+
+    // spec: SOC-026
+    #[test]
+    fn newer_posts_are_the_pages_from_the_top_up_to_the_first_known_post() {
+        let pages = vec![page_of(&["n3", "n2"], Some("c1")), page_of(&["n1", "k1", "k0"], Some("c2"))];
+        let mut asked: Vec<Option<String>> = vec![];
+        let mut it = pages.into_iter();
+        let f = newer_with(&keys(&["k1", "k0"]), 200, |c| {
+            asked.push(c.map(String::from));
+            Ok(it.next().unwrap())
+        })
+        .unwrap();
+        assert_eq!(asked, [None, Some("c1".to_string())]);
+        assert_eq!(f.posts.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["n3", "n2", "n1"], "stopped at the first known post");
+        assert_eq!(f.gap, None);
+        // the first post is known: nothing is new, and no second page is asked for
+        let mut n = 0;
+        let f = newer_with(&keys(&["k1"]), 200, |_| {
+            n += 1;
+            Ok(page_of(&["k1", "n9"], Some("c")))
+        })
+        .unwrap();
+        assert_eq!((f.posts.len(), n), (0, 1));
+        // the end of the feed also ends the check
+        let f = newer_with(&keys(&[]), 200, |_| Ok(page_of(&["a", "b"], None))).unwrap();
+        assert_eq!((f.posts.len(), f.gap), (2, None));
+    }
+
+    // spec: SOC-026
+    #[test]
+    fn the_cap_leaves_a_gap_with_the_cursor_to_go_on() {
+        let mut n = 0;
+        let f = newer_with(&keys(&["old"]), 4, |_| {
+            n += 1;
+            let ids = [format!("p{n}a"), format!("p{n}b"), format!("p{n}c")];
+            Ok(page_of(&ids.iter().map(|s| s.as_str()).collect::<Vec<_>>(), Some(&format!("cur{n}"))))
+        })
+        .unwrap();
+        assert_eq!((n, f.posts.len(), f.gap.as_deref()), (2, 6, Some("cur2")));
+        // a post twice in the pages counts once
+        let f = newer_with(&keys(&[]), 200, |c| Ok(if c.is_none() { page_of(&["a", "b"], Some("x")) } else { page_of(&["b", "c"], None) })).unwrap();
+        assert_eq!(f.posts.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
+        assert!(newer_with(&keys(&[]), 200, |_| Err("offline".into())).is_err());
     }
 }

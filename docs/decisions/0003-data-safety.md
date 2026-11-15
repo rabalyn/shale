@@ -65,3 +65,9 @@ Open drawings are also never reloaded when changed outside.
   keeping both versions.
 - *File watcher (inotify) instead of polling*: it shrinks the window but does not close it. It
   is still useful later (OPEN-006).
+
+## Decisions
+
+- this is top priority - WE NEVER LOOSE OR CORRUPT DATA. I would even say that its worth to add fuzzy tests for all our write operations (I consider updates/puts as writes in this context). loosing / deleting because of a bug is not tolerable, if this would happen to me I would never touch this application again. therefore I agree to the proposed decisions.
+- the consequences are fine.
+- inotify is not supported on all filesystems IIRC? its the better approach, but I think we might still need polling as a fallback anyway ?

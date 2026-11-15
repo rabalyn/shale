@@ -249,7 +249,11 @@ fn layered(nodes: &[(String, Rect)], edges: &[(usize, usize)], vertical: bool, o
     let pos_key = |v: usize| -> f32 {
         if v < n {
             let c = nodes[v].1.center();
-            if vertical { c.x } else { c.y }
+            if vertical {
+                c.x
+            } else {
+                c.y
+            }
         } else {
             0.0
         }
@@ -326,7 +330,13 @@ fn layered(nodes: &[(String, Rect)], edges: &[(usize, usize)], vertical: bool, o
     // --- 5. coordinates
     let gap_layer = 90.0;
     let gap_item = 60.0;
-    let size = |v: usize| -> Vec2 { if v < n { nodes[v].1.size() } else { Vec2::splat(10.0) } };
+    let size = |v: usize| -> Vec2 {
+        if v < n {
+            nodes[v].1.size()
+        } else {
+            Vec2::splat(10.0)
+        }
+    };
     let along = |s: Vec2| if vertical { s.y } else { s.x };
     let across = |s: Vec2| if vertical { s.x } else { s.y };
     let mut rects = nodes.iter().map(|n| n.1).collect::<Vec<_>>();
@@ -376,9 +386,7 @@ pub fn spread(nodes: &[(String, Rect)], edges: &[(usize, usize)], factor: f32) -
     }
     let centre = nodes.iter().fold(Vec2::ZERO, |acc, n| acc + n.1.center().to_vec2()) / nodes.len() as f32;
     let before = count_crossings(nodes, edges);
-    let apply = |f: f32| -> Vec<Rect> {
-        nodes.iter().map(|n| Rect::from_center_size((centre + (n.1.center().to_vec2() - centre) * f).to_pos2(), n.1.size())).collect()
-    };
+    let apply = |f: f32| -> Vec<Rect> { nodes.iter().map(|n| Rect::from_center_size((centre + (n.1.center().to_vec2() - centre) * f).to_pos2(), n.1.size())).collect() };
     let ok = |rects: &Vec<Rect>| -> bool {
         if overlaps(rects, 16.0) && !overlaps(&nodes.iter().map(|n| n.1).collect::<Vec<_>>(), 16.0) {
             return false;

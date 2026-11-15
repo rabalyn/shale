@@ -132,7 +132,6 @@ pub fn strip_md_ext(name: &str) -> &str {
     }
 }
 
-
 /// Find every internal link in `text`, skipping fenced and inline code.
 pub fn find_links(text: &str) -> Vec<LinkSpan> {
     let code = fenced_code_lines(text);
@@ -360,11 +359,7 @@ pub fn find_tags(text: &str) -> Vec<(Range<usize>, String)> {
         while i < b.len() {
             if b[i] == b'#' && (i == 0 || b[i - 1] == b' ' || b[i - 1] == b'\t' || b[i - 1] == b'(') && !in_ranges(i, &codes) {
                 let rest = &line[i + 1..];
-                let len: usize = rest
-                    .char_indices()
-                    .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '/')
-                    .map(|(_, c)| c.len_utf8())
-                    .sum();
+                let len: usize = rest.char_indices().take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '/').map(|(_, c)| c.len_utf8()).sum();
                 let tag = &rest[..len];
                 if len > 0 && !tag.chars().all(|c| c.is_ascii_digit()) {
                     out.push((off + i..off + i + 1 + len, tag.to_string()));
@@ -403,27 +398,60 @@ pub fn heading_level(line: &str) -> Option<usize> {
     }
 }
 
-/// Rewrite links that point to `old` (note name, case-insensitive) so they point to `new`.
-/// Keeps aliases and headings. Returns the new text and how many links changed.
-pub fn rename_links(text: &str, old: &str, new: &str) -> (String, usize) {
-    let mut links = find_links(text);
-    links.retain(|l| {
-        let t = l.target.rsplit('/').next().unwrap_or(&l.target);
-        t.eq_ignore_ascii_case(old) || l.target.eq_ignore_ascii_case(old)
-    });
-    let mut out = text.to_string();
-    let n = links.len();
-    for l in links.iter().rev() {
-        let replacement = if l.markdown_style {
-            let had_ext = text[l.target_range.clone()].to_ascii_lowercase().ends_with(".md");
-            let enc = new.replace(' ', "%20");
-            if had_ext { format!("{enc}.md") } else { enc }
-        } else {
-            new.to_string()
-        };
-        out.replace_range(l.target_range.clone(), &replacement);
+/// The link's target as written in the text: `Projects/Old.md`, `../Old` (percent-decoded,
+/// without `<…>`, `#heading` or `|alias`). Unlike [`LinkSpan::target`] it keeps a `.md`.
+pub fn written_target(text: &str, link: &LinkSpan) -> String {
+    let raw = text.get(link.target_range.clone()).unwrap_or("");
+    if !link.markdown_style {
+        return raw.trim().to_string();
     }
-    (out, n)
+    let (_, core, _) = split_md_target(raw);
+    let core = core.trim_start_matches('<').trim_end_matches('>');
+    let decoded = percent_decode(core);
+    match decoded.find('#') {
+        Some(p) => decoded[..p].to_string(),
+        None => decoded,
+    }
+}
+
+/// Leading space, the target itself and trailing space of a markdown link's `(…)` part.
+fn split_md_target(raw: &str) -> (&str, &str, &str) {
+    let core = raw.trim();
+    let lead = raw.len() - raw.trim_start().len();
+    (&raw[..lead], core, &raw[lead + core.len()..])
+}
+
+/// The text that replaces `link.target_range` so the link points to `new_target` (a path or name
+/// as it should be written, e.g. `Projects/New` or `New.md`). Everything else is kept: alias and
+/// heading (outside the range for `[[…]]`), and for markdown links the `#heading`, `<…>` and the
+/// spaces around the target. Markdown links without `<…>` get spaces and parentheses encoded.
+pub fn replace_target(text: &str, link: &LinkSpan, new_target: &str) -> String {
+    if !link.markdown_style {
+        return new_target.to_string();
+    }
+    let raw = text.get(link.target_range.clone()).unwrap_or("");
+    let (lead, core, trail) = split_md_target(raw);
+    let angle = core.starts_with('<') && core.ends_with('>') && core.len() >= 2;
+    let inner = if angle { &core[1..core.len() - 1] } else { core };
+    let fragment = inner.find('#').map(|p| &inner[p..]).unwrap_or("");
+    // `%`, `#` and parentheses are always encoded (the parser stops at the first `)` and splits
+    // at `#`); spaces only outside `<…>`
+    let mut target = String::with_capacity(new_target.len());
+    for c in new_target.chars() {
+        match c {
+            '%' => target.push_str("%25"),
+            ' ' if !angle => target.push_str("%20"),
+            '(' => target.push_str("%28"),
+            ')' => target.push_str("%29"),
+            '#' => target.push_str("%23"),
+            c => target.push(c),
+        }
+    }
+    if angle {
+        format!("{lead}<{target}{fragment}>{trail}")
+    } else {
+        format!("{lead}{target}{fragment}{trail}")
+    }
 }
 
 /// Byte index of the start of 0-based line `line`.
@@ -494,10 +522,7 @@ pub fn find_ci(line: &str, query_lower: &str) -> Option<usize> {
 }
 
 pub fn sanitize_note_name(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .map(|c| if matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0') { '-' } else { c })
-        .collect();
+    let cleaned: String = name.chars().map(|c| if matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0') { '-' } else { c }).collect();
     cleaned.trim().trim_matches('.').trim().to_string()
 }
 
@@ -607,13 +632,27 @@ mod tests {
         assert_eq!(tags, vec!["one", "two/sub"]);
     }
 
-    // spec: VAULT-013
+    // spec: VAULT-016
     #[test]
-    fn rename() {
-        let t = "[[Old]] [[old|alias]] [[Old#H]] [x](Old.md) [[Older]]";
-        let (n, c) = rename_links(t, "Old", "New Name");
-        assert_eq!(c, 4);
-        assert_eq!(n, "[[New Name]] [[New Name|alias]] [[New Name#H]] [x](New%20Name.md) [[Older]]");
+    fn replace_target_keeps_heading_and_brackets() {
+        let t = "[[Projects/Old#H|alias]] [x](Old.md#Intro) [y]( <My Old.md#A b> ) [z](../Old%20One.md)";
+        let l = find_links(t);
+        assert_eq!(written_target(t, &l[0]), "Projects/Old");
+        assert_eq!(written_target(t, &l[1]), "Old.md");
+        assert_eq!(written_target(t, &l[2]), "My Old.md");
+        assert_eq!(written_target(t, &l[3]), "../Old One.md");
+        let mut out = t.to_string();
+        let new = ["Projects/New Name", "New Name.md", "New (1).md", "../a%b.md"];
+        for (l, n) in l.iter().zip(new).rev() {
+            out.replace_range(l.target_range.clone(), &replace_target(t, l, n));
+        }
+        assert_eq!(out, "[[Projects/New Name#H|alias]] [x](New%20Name.md#Intro) [y]( <New %281%29.md#A b> ) [z](../a%25b.md)");
+        // what was written reads back as the new target
+        let back = find_links(&out);
+        assert_eq!(back[1].target, "New Name");
+        assert_eq!(back[1].heading.as_deref(), Some("Intro"));
+        assert_eq!(back[2].target, "New (1)");
+        assert_eq!(back[3].target, "../a%b");
     }
 
     // spec: TAG-001, LINK-006, VAULT-012

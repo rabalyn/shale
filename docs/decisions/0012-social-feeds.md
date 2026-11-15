@@ -1,4 +1,4 @@
-# ADR-0007: Social feeds — Mastodon and Bluesky, saved as notes
+# ADR-0012: Social feeds — Mastodon and Bluesky, saved as notes
 
 - **Status**: Proposed
 - **Date**: 2026-11-14
@@ -44,10 +44,26 @@ no TLS or OAuth crates.
    or list the id in `thread-ids`. The Import dialog marks such posts, also single posts of a
    thread that was saved before.
 8. **Background work**: the window never waits for the network. Feeds, pages, saving and sign-in
-   run on threads that send their result over a channel, wrapped in `catch_unwind` (as
-   [ADR-0006](0006-engineering-baseline.md) asks). Pictures come from 4 worker threads into a
-   cache folder, once per address.
-9. **Opening links**: only `http` and `https` addresses from a server are handed to `xdg-open`.
+   run as `jobs::run` jobs (a panic arrives as an error message, as
+   [ADR-0006](0006-engineering-baseline.md) asks) that send their result over a channel. Pictures
+   come from 4 worker jobs into a cache folder, once per address, each file written with
+   `fsutil::write_atomic`.
+9. **Opening links**: only `http` and `https` addresses from a server are handed to the system
+   through `opener::open_url`; the Mastodon sign-in page opens through `opener::open_signin_url`.
+
+10. **Feeds in tabs and new posts** (SOC-021 to SOC-029): the feed belongs to the tab
+    (`View::Social(Option<FeedRef>)`), so each tab has its own scroll and history, and open feed
+    tabs are saved in `state.json` (`open_feeds`). A timer checks every feed open in a tab (also
+    in the background) for posts newer than the newest known one: Mastodon with `min_id` (the
+    page directly above the newest timeline entry, so the block is contiguous), Bluesky from
+    the first page down to the first known post (a limit of 200 per check can leave a gap, filled
+    page by page on request). New posts wait in the timeline and are only inserted when the user
+    asks. The view is kept still by *scroll anchoring*: each frame the post at the top of the
+    window and its distance from the window's top are remembered; when that post moves because
+    posts above it changed in height (inserted, a picture arrived) the scroll offset is set back
+    in a second pass of the same frame (`Context::request_discard`; without a second pass, in the
+    next frame). A scroll by the user moves the anchor with it. Posts and pages can come from a
+    `Source` (screenshots, tests) instead of a `Client`.
 
 ## Consequences
 

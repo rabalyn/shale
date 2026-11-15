@@ -14,12 +14,23 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug)]
 pub enum Source {
     /// `original`: file name and bytes of the message (kept when asked to)
-    Email { mail: Mail, original: (String, Vec<u8>) },
-    Event { event: Event, calendar: String, original: Option<(String, Vec<u8>)> },
+    Email {
+        mail: Mail,
+        original: (String, Vec<u8>),
+    },
+    Event {
+        event: Event,
+        calendar: String,
+        original: Option<(String, Vec<u8>)>,
+    },
     Files(Vec<PathBuf>),
     Text(String),
     /// a Mastodon / Bluesky post (or thread) with its pictures; `network` is "Mastodon" / "Bluesky"
-    Social { saved: crate::social::note::SavedPost, network: &'static str, replies: bool },
+    Social {
+        saved: crate::social::note::SavedPost,
+        network: &'static str,
+        replies: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -56,7 +67,9 @@ impl Item {
             Source::Event { event, .. } => format!("{}\n{}\n{}", event.summary, event.location, event.description),
             Source::Files(p) => p.iter().map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(" "),
             Source::Text(t) => t.clone(),
-            Source::Social { saved, .. } => saved.thread.iter().map(|p| format!("{}\n{}", crate::social::markup::plain_text(&p.text_markdown), p.media.iter().map(|m| m.alt.as_str()).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n"),
+            Source::Social { saved, .. } => {
+                saved.thread.iter().map(|p| format!("{}\n{}", crate::social::markup::plain_text(&p.text_markdown), p.media.iter().map(|m| m.alt.as_str()).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n")
+            }
         }
     }
 
@@ -93,7 +106,11 @@ impl Item {
             let n = saved.failed_media.len();
             parts.push(format!("{n} picture{} or video{} could not be downloaded; the note links to {} instead.", if n == 1 { "" } else { "s" }, if n == 1 { "" } else { "s" }, if n == 1 { "it" } else { "them" }));
         }
-        if parts.is_empty() { None } else { Some(parts.join(" ")) }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" "))
+        }
     }
 
     /// The line that marks a note as made from this item (to spot a second import).
@@ -135,11 +152,19 @@ fn local_ymd(utc: i64) -> (i32, u32, u32) {
 pub(crate) fn local_stamp(utc: i64, date_only: bool) -> String {
     let (day, secs) = t::utc_to_local(utc);
     let d = ymd_text(t::civil_from_days(day));
-    if date_only { d } else { format!("{d} {}", t::hhmm(secs)) }
+    if date_only {
+        d
+    } else {
+        format!("{d} {}", t::hhmm(secs))
+    }
 }
 
 fn event_ymd(e: &Event) -> (i32, u32, u32) {
-    if e.all_day { t::civil_from_days(e.start.div_euclid(86_400)) } else { local_ymd(e.start) }
+    if e.all_day {
+        t::civil_from_days(e.start.div_euclid(86_400))
+    } else {
+        local_ymd(e.start)
+    }
 }
 
 pub(crate) fn safe_title(s: &str) -> String {
@@ -158,6 +183,14 @@ pub fn email_item(mail: Mail, original: (String, Vec<u8>)) -> Item {
     Item { source: Source::Email { mail, original }, include: true, title, att_on, already: None, people: vec![] }
 }
 
+/// An item for a stored message, like a dropped `.eml` file: the original is kept under
+/// `file_name` (default: the subject).
+pub fn eml_item(raw: Vec<u8>, file_name: Option<&str>) -> Item {
+    let m = mail::parse(&raw);
+    let name = file_name.map(String::from).unwrap_or_else(|| format!("{}.eml", if m.subject.trim().is_empty() { "message".to_string() } else { safe_title(&m.subject) }));
+    email_item(m, (name, raw))
+}
+
 /// An item for a saved post or thread (see `social::note::fetch_saved`). All its files are ticked.
 /// `replies`: include the replies of other people (the dialog's tick box; off by default).
 pub fn social_item(saved: crate::social::note::SavedPost, network: &'static str, replies: bool) -> Item {
@@ -172,11 +205,7 @@ pub fn event_item(event: Event, calendar: String, original: Option<(String, Vec<
 }
 
 fn files_item(paths: Vec<PathBuf>) -> Item {
-    let title = if paths.len() == 1 {
-        paths[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "File".into())
-    } else {
-        format!("{} Files", ymd_text(today_ymd()))
-    };
+    let title = if paths.len() == 1 { paths[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "File".into()) } else { format!("{} Files", ymd_text(today_ymd())) };
     Item { source: Source::Files(paths), include: true, title: safe_title(&title), att_on: vec![], already: None, people: vec![] }
 }
 
@@ -214,11 +243,11 @@ pub fn items_from_paths(paths: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
         }
         let ext = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
         match ext.as_str() {
-            "eml" => match std::fs::read(p) {
+            "eml" => match crate::fsutil::read(p) {
                 Ok(raw) => items.push(email_item(mail::parse(&raw), (name, raw))),
                 Err(e) => notes.push(format!("Could not read “{name}”: {e}")),
             },
-            "ics" => match std::fs::read(p) {
+            "ics" => match crate::fsutil::read(p) {
                 Ok(raw) => {
                     let found = calendar_items(&raw, &name, &name);
                     if found.is_empty() {
@@ -240,9 +269,9 @@ pub fn items_from_paths(paths: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
 
 /// Text from a drop: UTF-8, or UTF-16 (which some programs send).
 pub fn text_of(data: &[u8]) -> String {
-    let utf16 = data.starts_with(&[0xFF, 0xFE]) || (data.len() >= 4 && data.len() % 2 == 0 && data[1] == 0 && data[3] == 0);
+    let utf16 = data.starts_with(&[0xFF, 0xFE]) || (data.len() >= 4 && data.len().is_multiple_of(2) && data[1] == 0 && data[3] == 0);
     if utf16 {
-        let units: Vec<u16> = data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = data.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         String::from_utf16_lossy(&units).trim_start_matches('\u{feff}').trim_end_matches('\0').to_string()
     } else {
         String::from_utf8_lossy(data).into_owned()
@@ -340,10 +369,15 @@ pub fn items_from_parts_in(parts: &[(String, Vec<u8>)], tb_roots: &[PathBuf]) ->
                     .collect();
                 if n > 1 {
                     // the newest is most likely the dragged one
-                    let newest = items.iter().enumerate().max_by_key(|(_, it)| match &it.source {
-                        Source::Email { mail, .. } => mail.date.unwrap_or(i64::MIN),
-                        _ => i64::MIN,
-                    }).map(|(i, _)| i).unwrap_or(0);
+                    let newest = items
+                        .iter()
+                        .enumerate()
+                        .max_by_key(|(_, it)| match &it.source {
+                            Source::Email { mail, .. } => mail.date.unwrap_or(i64::MIN),
+                            _ => i64::MIN,
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
                     for (i, it) in items.iter_mut().enumerate() {
                         it.include = i == newest;
                     }
@@ -475,18 +509,8 @@ pub fn parse_tags(s: &str) -> Vec<String> {
 
 /// A folder typed in the dialog → a safe vault-relative folder.
 pub fn clean_folder(s: &str) -> Result<PathBuf, String> {
-    let mut p = PathBuf::new();
-    for part in s.split(['/', '\\']) {
-        let part = part.trim();
-        if part.is_empty() || part == "." {
-            continue;
-        }
-        if part == ".." {
-            return Err("The folder can't go above the vault (“..”).".into());
-        }
-        p.push(crate::markdown::sanitize_note_name(part));
-    }
-    Ok(p)
+    // the one check for typed vault paths (VAULT-018)
+    crate::vault_path::VaultPath::parse(s).map(|p| p.into_path_buf()).map_err(|e| e.to_string())
 }
 
 pub(crate) fn yaml(s: &str) -> String {
@@ -527,7 +551,15 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
     let subject = if mail.subject.trim().is_empty() { "(no subject)" } else { mail.subject.trim() };
     let date = mail.date.map(|d| local_stamp(d, false)).unwrap_or_default();
     let mut s = front(
-        &[("type", "email".into()), ("subject", yaml(subject)), ("from", yaml(&mail.from)), ("to", if mail.to.is_empty() { String::new() } else { yaml(&mail.to) }), ("cc", if mail.cc.is_empty() { String::new() } else { yaml(&mail.cc) }), ("date", date.clone()), ("message-id", if mail.message_id.is_empty() { String::new() } else { yaml(&mail.message_id) })],
+        &[
+            ("type", "email".into()),
+            ("subject", yaml(subject)),
+            ("from", yaml(&mail.from)),
+            ("to", if mail.to.is_empty() { String::new() } else { yaml(&mail.to) }),
+            ("cc", if mail.cc.is_empty() { String::new() } else { yaml(&mail.cc) }),
+            ("date", date.clone()),
+            ("message-id", if mail.message_id.is_empty() { String::new() } else { yaml(&mail.message_id) }),
+        ],
         tags,
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(subject)));
@@ -561,7 +593,16 @@ pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&
     let stamp = |v: i64| if e.all_day { ymd_text(t::civil_from_days(v.div_euclid(86_400))) } else { local_stamp(v, false) };
     let end = if e.all_day { e.end - 86_400 } else { e.end };
     let mut s = front(
-        &[("type", "event".into()), ("title", yaml(&e.summary)), ("start", stamp(e.start)), ("end", stamp(end.max(e.start))), ("all-day", if e.all_day { "true".into() } else { String::new() }), ("location", if e.location.is_empty() { String::new() } else { yaml(&e.location) }), ("calendar", yaml(calendar)), ("event-uid", if e.uid.is_empty() { String::new() } else { yaml(&event_key(e)) })],
+        &[
+            ("type", "event".into()),
+            ("title", yaml(&e.summary)),
+            ("start", stamp(e.start)),
+            ("end", stamp(end.max(e.start))),
+            ("all-day", if e.all_day { "true".into() } else { String::new() }),
+            ("location", if e.location.is_empty() { String::new() } else { yaml(&e.location) }),
+            ("calendar", yaml(calendar)),
+            ("event-uid", if e.uid.is_empty() { String::new() } else { yaml(&event_key(e)) }),
+        ],
         tags,
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(if e.summary.is_empty() { "Event" } else { &e.summary })));
@@ -708,7 +749,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let eml = dir.join("Neubau Hörsaal B.eml");
         std::fs::write(&eml, &raw).unwrap();
-        let (mut items, notes) = items_from_paths(&[eml.clone()]);
+        let (mut items, notes) = items_from_paths(std::slice::from_ref(&eml));
         assert!(notes.is_empty());
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "2026-11-13 Neubau Hörsaal B – Pläne Stand 3");
@@ -754,13 +795,22 @@ mod tests {
     fn events_files_and_text() {
         let mut v = temp_vault("ev");
         let day = t::days_from_civil(2026, 12, 2);
-        let e = Event { uid: "ev-1@x".into(), summary: "Baubesprechung".into(), location: "Raum 1.12".into(), description: "Agenda: Medientechnik".into(), start: t::local_to_utc(day, 10 * 3600), end: t::local_to_utc(day, 11 * 3600), attendees: vec!["A".into(), "B".into()], ..Default::default() };
+        let e = Event {
+            uid: "ev-1@x".into(),
+            summary: "Baubesprechung".into(),
+            location: "Raum 1.12".into(),
+            description: "Agenda: Medientechnik".into(),
+            start: t::local_to_utc(day, 10 * 3600),
+            end: t::local_to_utc(day, 11 * 3600),
+            attendees: vec!["A".into(), "B".into()],
+            ..Default::default()
+        };
         let mut items = vec![event_item(e.clone(), "Work".into(), Some(("x.ics".into(), cal_ics::to_ics("", std::slice::from_ref(&e)).into_bytes())))];
         assert_eq!(items[0].title, "2026-12-02 Baubesprechung");
         // a file next to it
         let src = v.root.join("..").join(format!("shale-import-plan-{}.pdf", std::process::id()));
         std::fs::write(&src, b"%PDF-1.4").unwrap();
-        let (more, _) = items_from_paths(&[src.clone()]);
+        let (more, _) = items_from_paths(std::slice::from_ref(&src));
         items.extend(more);
         let (snips, _) = items_from_drop("text/plain", "Beamer tauschen\nim Hörsaal".as_bytes());
         items.extend(snips);
@@ -856,7 +906,7 @@ mod tests {
             ("application/x-moz-file-promise-dest-filename".to_string(), b"Neubau Hoersaal B.eml".to_vec()),
             ("text/plain".to_string(), link.clone().into_bytes()),
         ];
-        let (items, notes) = items_from_parts_in(&parts, &[root.clone()]);
+        let (items, notes) = items_from_parts_in(&parts, std::slice::from_ref(&root));
         assert_eq!(items.len(), 1, "{notes:?}");
         assert!(items[0].title.ends_with("Stand 3"), "{}", items[0].title);
         match &items[0].source {
@@ -869,7 +919,7 @@ mod tests {
         }
         // not found: explained, no text note made of the link
         let parts = vec![("text/plain".to_string(), b"imap-message://ada@imap.x/INBOX#5".to_vec())];
-        let (items, notes) = items_from_parts_in(&parts, &[root.clone()]);
+        let (items, notes) = items_from_parts_in(&parts, std::slice::from_ref(&root));
         assert!(items.is_empty() && notes[0].contains("only a link"), "{notes:?}");
         // nothing at all: shows what was sent
         let (items, notes) = items_from_parts_in(&[("text/uri-list".into(), vec![]), ("STRING".into(), vec![])], &[]);

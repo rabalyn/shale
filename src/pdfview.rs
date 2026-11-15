@@ -23,13 +23,7 @@ pub fn render_pages(data: Vec<u8>, max_pages: usize, scale: f32) -> Result<Rende
     let total = pages.len();
     let mut images = Vec::new();
     for page in pages.iter().take(max_pages) {
-        let pm = hayro::render(
-            page,
-            &cache,
-            &Default::default(),
-            &Default::default(),
-            &hayro::PixmapSettings { x_scale: scale, y_scale: scale, bg_color: hayro::vello_cpu::color::palette::css::WHITE },
-        );
+        let pm = hayro::render(page, &cache, &Default::default(), &Default::default(), &hayro::PixmapSettings { x_scale: scale, y_scale: scale, bg_color: hayro::vello_cpu::color::palette::css::WHITE });
         let size = [pm.width() as usize, pm.height() as usize];
         images.push(ColorImage::from_rgba_premultiplied(size, pm.data_as_u8_slice()));
     }
@@ -74,11 +68,14 @@ pub fn pdf_pages(ctx: &egui::Context, abs: &Path, max_pages: usize) -> PdfState 
             let j = Arc::new(Mutex::new(Job::Running));
             map.insert(key.clone(), j.clone());
             let (path, jc, ctx2) = (abs.to_path_buf(), j.clone(), ctx.clone());
-            std::thread::spawn(move || {
-                let result = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|d| render_pages(d, max_pages, 1.5));
-                *jc.lock().unwrap() = Job::Done(result);
-                ctx2.request_repaint();
-            });
+            // a panic in the renderer (a malformed PDF) ends as an error, not an endless spinner
+            crate::jobs::run(
+                move || crate::fsutil::read(&path).map_err(|e| e.to_string()).and_then(|d| render_pages(d, max_pages, 1.5)),
+                move |result| {
+                    *jc.lock().unwrap() = Job::Done(result.and_then(|r| r));
+                    ctx2.request_repaint();
+                },
+            );
             j
         }
     };

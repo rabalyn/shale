@@ -44,7 +44,7 @@ impl ShaleApp {
 
     /// Tags to offer: the recently used ones, then the vault's most used ones.
     pub fn tag_choices(&self) -> Vec<String> {
-        let mut out: Vec<String> = self.cfg.recent_tags.clone();
+        let mut out: Vec<String> = self.vdata.state.recent_tags.clone();
         if let Some(v) = &self.vault {
             let mut all = v.all_tags();
             all.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
@@ -66,7 +66,7 @@ impl ShaleApp {
             return;
         };
         import::mark_duplicates(v, &mut items);
-        import::find_people(v, &self.cfg.people_dir, &mut items);
+        import::find_people(v, &self.vdata.settings.people_dir, &mut items);
         if let Some(Modal::Import(mut d)) = self.modal.take() {
             d.items.extend(items);
             d.notes.extend(notes);
@@ -85,9 +85,9 @@ impl ShaleApp {
             Some((f, note)) => (rel_to_string(&f), note.clone(), note.is_some()),
             None => {
                 let open_note = self.current_path().filter(|p| p.extension().map(|e| e == "md").unwrap_or(false));
-                let mut folder = if self.cfg.last_import_folder.is_empty() { rel_to_string(&self.current_folder()) } else { self.cfg.last_import_folder.clone() };
+                let mut folder = if self.vdata.state.last_import_folder.is_empty() { rel_to_string(&self.current_folder()) } else { self.vdata.state.last_import_folder.clone() };
                 // not into the contacts because a contact note happens to be open
-                let pd = self.cfg.people_dir.trim().trim_matches('/').to_lowercase();
+                let pd = self.vdata.settings.people_dir.trim().trim_matches('/').to_lowercase();
                 if !pd.is_empty() && (folder.to_lowercase() == pd || folder.to_lowercase().starts_with(&format!("{pd}/"))) {
                     folder.clear();
                 }
@@ -95,7 +95,7 @@ impl ShaleApp {
             }
         };
         let mut d = Box::new(ImportDialog::new(items, notes, folder, String::new(), link_into, link_on));
-        d.people_dir = self.cfg.people_dir.clone();
+        d.people_dir = self.vdata.settings.people_dir.clone();
         self.suggest_tags(&mut d);
         self.modal = Some(Modal::Import(d));
     }
@@ -123,9 +123,14 @@ impl ShaleApp {
     pub fn learn_tags_tick(&mut self) {
         if let Some(rx) = &self.tag_job {
             match rx.try_recv() {
-                Ok(tw) => {
-                    if let Some(v) = &self.vault {
-                        let _ = crate::tagwords::save(&v.root, &tw);
+                Ok(Err(e)) => {
+                    self.tag_job = None;
+                    self.toast(format!("Learning tag words failed: {e}"));
+                }
+                Ok(Ok(tw)) => {
+                    let saved = self.vault.as_ref().map(|v| crate::tagwords::save(&v.root, &tw));
+                    if let Some(Err(e)) = saved {
+                        self.toast(format!("Could not save the tag words: {e}"));
                     }
                     self.tag_words = Some(tw);
                     self.tag_job = None;
@@ -147,17 +152,13 @@ impl ShaleApp {
             self.tag_gen = v.generation;
             self.tag_at = Some(std::time::Instant::now());
             let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
-            let (tx, rx) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
-                let _ = tx.send(crate::tagwords::learn_from_vault(&notes));
-            });
-            self.tag_job = Some(rx);
+            self.tag_job = Some(crate::jobs::spawn(move || crate::tagwords::learn_from_vault(&notes), || {}));
         }
     }
 
     /// A contact note for `[[p Name` (made in the people folder).
     pub fn create_person(&mut self, name: &str) {
-        let dir = self.cfg.people_dir.clone();
+        let dir = self.vdata.settings.people_dir.clone();
         let Some(v) = &mut self.vault else { return };
         let p = crate::people::Person { name: name.trim().to_string(), email: String::new(), role: crate::people::Role::From, existing: None, on: true };
         match crate::people::ensure_note(v, &dir, &p) {
@@ -177,7 +178,7 @@ impl ShaleApp {
                     import::mark_duplicates(v, &mut items);
                 }
                 if let Some(v) = &self.vault {
-                    import::find_people(v, &self.cfg.people_dir, &mut items);
+                    import::find_people(v, &self.vdata.settings.people_dir, &mut items);
                 }
                 if !items.is_empty() {
                     d.add_path.clear();
@@ -197,7 +198,7 @@ impl ShaleApp {
                 };
                 let tags = import::parse_tags(&d.tags);
                 let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
-                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.cfg.people_dir.clone() };
+                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.vdata.settings.people_dir.clone() };
                 let Some(v) = &mut self.vault else { return true };
                 let (made, errors) = import::import(v, &d.items, &opts);
                 if made.is_empty() {
@@ -211,22 +212,28 @@ impl ShaleApp {
                 }
                 // remember the folder and tags for next time
                 // remember whether replies of others were wanted (only asked when there were some)
-                if let Some(on) = d.items.iter().filter(|i| i.include).filter_map(|i| match &i.source {
-                    import::Source::Social { saved, replies, .. } if !saved.replies.is_empty() => Some(*replies),
-                    _ => None,
-                }).last() {
+                if let Some(on) = d
+                    .items
+                    .iter()
+                    .filter(|i| i.include)
+                    .filter_map(|i| match &i.source {
+                        import::Source::Social { saved, replies, .. } if !saved.replies.is_empty() => Some(*replies),
+                        _ => None,
+                    })
+                    .next_back()
+                {
                     self.cfg.social_replies = on;
                 }
                 if social_only {
-                    self.cfg.last_social_folder = rel_to_string(&folder);
+                    self.vdata.state.last_social_folder = rel_to_string(&folder);
                 } else {
-                    self.cfg.last_import_folder = rel_to_string(&folder);
+                    self.vdata.state.last_import_folder = rel_to_string(&folder);
                 }
                 for t in tags.iter().rev() {
-                    self.cfg.recent_tags.retain(|o| !o.eq_ignore_ascii_case(t));
-                    self.cfg.recent_tags.insert(0, t.clone());
+                    self.vdata.state.recent_tags.retain(|o| !o.eq_ignore_ascii_case(t));
+                    self.vdata.state.recent_tags.insert(0, t.clone());
                 }
-                self.cfg.recent_tags.truncate(30);
+                self.vdata.state.recent_tags.truncate(30);
                 self.save_config();
                 let place = if folder.as_os_str().is_empty() { "the vault".to_string() } else { format!("“{}”", rel_to_string(&folder)) };
                 self.toast(if made.len() == 1 { format!("Imported 1 note into {place}") } else { format!("Imported {} notes into {place}", made.len()) });
@@ -266,8 +273,8 @@ impl ShaleApp {
             return;
         }
         let Some(v) = &mut self.vault else { return };
-        let old = std::fs::read_to_string(v.abs(note)).unwrap_or_default();
-        if let Err(e) = v.write_note(note, &join(&old)) {
+        // the file as it is now; one that can't be read is left alone
+        if let Err(e) = v.edit_note(note, |old| Some(join(old))) {
             self.toast(format!("Could not add the links: {e}"));
         }
     }
@@ -311,18 +318,19 @@ impl ShaleApp {
                         self.last_offered = offered;
                         let zone = self.zone_at(Pos2::new(x / zoom, y / zoom)).map(|z| (z.folder, z.note));
                         // looking a message up in Thunderbird's folders can take a moment
-                        let (tx, rx) = std::sync::mpsc::channel();
                         let c = ctx.clone();
-                        std::thread::spawn(move || {
-                            let (items, mut notes) = import::items_from_parts(&parts);
-                            if items.is_empty() && !report.is_empty() {
-                                // the exact story of each kind instead of just "(empty)"
-                                notes.retain(|n| !n.starts_with("  "));
-                                notes.extend(report);
-                            }
-                            let _ = tx.send((items, notes));
-                            c.request_repaint();
-                        });
+                        let rx = crate::jobs::spawn(
+                            move || {
+                                let (items, mut notes) = import::items_from_parts(&parts);
+                                if items.is_empty() && !report.is_empty() {
+                                    // the exact story of each kind instead of just "(empty)"
+                                    notes.retain(|n| !n.starts_with("  "));
+                                    notes.extend(report);
+                                }
+                                (items, notes)
+                            },
+                            move || c.request_repaint(),
+                        );
                         self.pending_drops.push((rx, zone));
                     }
                 }
@@ -336,7 +344,8 @@ impl ShaleApp {
         let mut done = Vec::new();
         self.pending_drops.retain(|(rx, zone)| match rx.try_recv() {
             Ok(r) => {
-                done.push((r, zone.clone()));
+                // a crash while reading the drop ends as a message in the import dialog
+                done.push((r.unwrap_or_else(|e| (vec![], vec![format!("Reading the drop failed: {e}")])), zone.clone()));
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => true,
@@ -346,7 +355,9 @@ impl ShaleApp {
             if items.is_empty() && !self.last_offered.is_empty() {
                 notes.push(format!("It offered: {}", self.last_offered.join(", ")));
                 if self.last_offered.iter().any(|o| o == "DELETE" || o == "STRING") {
-                    notes.push("That program runs through X11 (XWayland). If it still sends nothing, start it as a Wayland program (for Thunderbird: MOZ_ENABLE_WAYLAND=1), or drag the message to a folder first and drop the .eml file.".into());
+                    notes.push(
+                        "That program runs through X11 (XWayland). If it still sends nothing, start it as a Wayland program (for Thunderbird: MOZ_ENABLE_WAYLAND=1), or drag the message to a folder first and drop the .eml file.".into(),
+                    );
                 }
             }
             self.last_offered.clear();

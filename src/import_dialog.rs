@@ -95,7 +95,11 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                 });
                 ui.label(muted(&it.detail()));
                 if let Some(p) = &it.already {
-                    ui.label(egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))).size(12.0).color(theme::LINK_MISSING));
+                    ui.label(
+                        egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())))
+                            .size(12.0)
+                            .color(theme::LINK_MISSING),
+                    );
                 }
                 if let Some(w) = it.warning() {
                     ui.add(egui::Label::new(egui::RichText::new(w).size(12.0).color(theme::LINK_MISSING)).wrap());
@@ -120,7 +124,8 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                 }
                 if let Source::Social { saved, replies, .. } = &mut it.source {
                     if !saved.replies.is_empty() {
-                        rec(format!("replies:{i}"), ui.checkbox(replies, egui::RichText::new(format!("Include replies from others ({})", saved.replies.len())).size(12.5))).on_hover_text("Adds a Replies section with other people's answers to the thread, nested; their pictures are only linked");
+                        rec(format!("replies:{i}"), ui.checkbox(replies, egui::RichText::new(format!("Include replies from others ({})", saved.replies.len())).size(12.5)))
+                            .on_hover_text("Adds a Replies section with other people's answers to the thread, nested; their pictures are only linked");
                     }
                     for (k, (m, on)) in saved.media.iter().zip(it.att_on.iter_mut()).enumerate() {
                         let label = format!("{}  ({})", m.file_name, size_text(m.data.len()));

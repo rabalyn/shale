@@ -74,3 +74,9 @@ The review found these gaps:
   discipline.
 - Restructuring is spread out, so each step stays reviewable.
 - Dropping `vendor/` needs network access for builds, which is normal outside the old sandbox.
+
+## Decisions
+
+- proposed decisions and consequences are fine for me, we do it like this.
+- when there are additional good practices for rust development to catch errors / warnings / issues we should introduce them aswell. "always run strict" is a MUST in my opinion, it does not hurt.
+- can we save as a baseline that read/write functions MUST use a baseline read/write util func of ours, that runs atomic calls and so that we only need to test that behaviour in one spot?

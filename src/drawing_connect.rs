@@ -165,12 +165,8 @@ impl DrawingDoc {
             Drag::Pan => "pan",
             _ => "other",
         };
-        let lines: Vec<String> = self
-            .scene
-            .live()
-            .filter(|e| e.is_linear())
-            .map(|e| format!("{}->{}", binding_of(e, "startBinding").map(|b| b.0).unwrap_or("-".into()), binding_of(e, "endBinding").map(|b| b.0).unwrap_or("-".into())))
-            .collect();
+        let lines: Vec<String> =
+            self.scene.live().filter(|e| e.is_linear()).map(|e| format!("{}->{}", binding_of(e, "startBinding").map(|b| b.0).unwrap_or("-".into()), binding_of(e, "endBinding").map(|b| b.0).unwrap_or("-".into()))).collect();
         format!("tool={:?} drag={drag} elements={} selected={} lines={lines:?}", self.tool, self.scene.live().count(), self.selection.len())
     }
 
@@ -334,6 +330,7 @@ impl DrawingDoc {
     /// After shapes moved: a connection that now runs through one of its own shapes switches to
     /// the pair of anchors that face each other. Connections that still look fine keep the
     /// anchors the person picked.
+    #[allow(clippy::type_complexity)]
     pub(super) fn tidy_connections(&mut self, moved: &[String]) {
         let shapes: HashMap<String, (String, Rect)> = self.scene.live().filter(|e| is_bindable(e)).map(|e| (e.id.clone(), (e.kind.clone(), e.bounds()))).collect();
         let mut fixes: Vec<(String, String, [f32; 2], String, [f32; 2])> = Vec::new();
@@ -360,12 +357,8 @@ impl DrawingDoc {
     /// When lines are dragged on their own, their ends let go of shapes that stay put.
     pub(super) fn detach_unselected(&mut self) {
         let sel = self.selection.clone();
-        let lines: Vec<(String, Option<String>, Option<String>)> = self
-            .scene
-            .live()
-            .filter(|e| sel.contains(&e.id) && e.is_linear())
-            .map(|e| (e.id.clone(), binding_of(e, "startBinding").map(|b| b.0), binding_of(e, "endBinding").map(|b| b.0)))
-            .collect();
+        let lines: Vec<(String, Option<String>, Option<String>)> =
+            self.scene.live().filter(|e| sel.contains(&e.id) && e.is_linear()).map(|e| (e.id.clone(), binding_of(e, "startBinding").map(|b| b.0), binding_of(e, "endBinding").map(|b| b.0))).collect();
         for (id, s, en) in lines {
             if s.map(|s| !sel.contains(&s)).unwrap_or(false) {
                 self.set_binding(&id, true, None);
@@ -379,6 +372,7 @@ impl DrawingDoc {
     // ------------------------------------------------------------------ arrange / spread
 
     /// Shapes to arrange (the selected ones, or all) and the connections between them.
+    #[allow(clippy::type_complexity)]
     fn layout_input(&self) -> (Vec<String>, Vec<(String, Rect)>, Vec<(usize, usize, String)>) {
         let sel_shapes: Vec<&Element> = self.scene.live().filter(|e| is_bindable(e) && self.selection.contains(&e.id)).collect();
         let pool: Vec<&Element> = if sel_shapes.len() >= 2 { sel_shapes } else { self.scene.live().filter(|e| is_bindable(e)).collect() };
@@ -428,14 +422,7 @@ impl DrawingDoc {
             Some(res) => {
                 self.snapshot();
                 self.apply_rects(&ids, &nodes, &res.rects, &edges);
-                self.layout_msg = Some(format!(
-                    "Arranged {} shapes · crossing connections {} → {} · stopped after {} step{}",
-                    ids.len(),
-                    res.crossings_before,
-                    res.crossings_after,
-                    res.sweeps,
-                    if res.sweeps == 1 { "" } else { "s" }
-                ));
+                self.layout_msg = Some(format!("Arranged {} shapes · crossing connections {} → {} · stopped after {} step{}", ids.len(), res.crossings_before, res.crossings_after, res.sweeps, if res.sweeps == 1 { "" } else { "s" }));
             }
         }
     }
@@ -535,7 +522,11 @@ impl DrawingDoc {
         let fsize = label.as_ref().and_then(|e| e.font_size).unwrap_or(st.font_size);
         let tcolor = label.as_ref().map(|e| e.stroke_color.clone()).unwrap_or(st.text_color.clone());
         let lbg = label.as_ref().map(|e| e.background_color.clone()).unwrap_or(st.label_bg.clone());
-        let align = label.as_ref().and_then(|e| e.extra.get("textAlign").and_then(|v| v.as_str()).map(|s| s.to_string())).unwrap_or(if text_el && first.as_ref().map(|e| container_of(e).is_none()).unwrap_or(true) { "left".into() } else { "center".into() });
+        let align = label.as_ref().and_then(|e| e.extra.get("textAlign").and_then(|v| v.as_str()).map(|s| s.to_string())).unwrap_or(if text_el && first.as_ref().map(|e| container_of(e).is_none()).unwrap_or(true) {
+            "left".into()
+        } else {
+            "center".into()
+        });
         let start_head = first.as_ref().map(|e| e.arrowhead("startArrowhead")).unwrap_or(st.start_head.clone());
         let end_head = first.as_ref().map(|e| e.arrowhead("endArrowhead")).unwrap_or(if kind == "arrow" { st.end_head.clone() } else { None });
 
