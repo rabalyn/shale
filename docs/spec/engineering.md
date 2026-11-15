@@ -1,23 +1,58 @@
 # Spec: Build, quality and performance (BUILD, PERF, JOB)
 
 **IS NOW** = true today (⚠ = known gap) · **SHOULD BE** = agreed target.
-Tests are named `file.rs::test_fn`. Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Decisions: [ADR-0006](../decisions/0006-engineering-baseline.md).
+Tests are named `file.rs::test_fn`. Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Decisions: [ADR-0006](../decisions/0006-engineering-baseline.md), [ADR-0013](../decisions/0013-forgejo-and-issue-tracking.md).
+Issues are on Forgejo, written `raba/shale#N` (<https://git.home.rabalyn.de/raba/shale/issues>).
+
+## Forge and work tracking (FORGE)
+
+These rules bind everyone who changes Shale, people and agents alike. "Process" in the Test column
+means the rule is checked in review, not by a test.
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| FORGE-001 | Development happens on Forgejo, `git.home.rabalyn.de/raba/shale` (the git remote of BUILD-002): branches, pull requests and issues live there, and `fj --host git.home.rabalyn.de` is signed in with a token for issue and PR work. | IS NOW | git remotes, `fj` | process |
+| FORGE-002 | Every push, pull request and `v*` tag on Forgejo runs the checks of BUILD-001, BUILD-004, BUILD-008 and BUILD-009 and the packaging of BUILD-010 on the Forgejo runner (BUILD-002, BUILD-003). | IS NOW | `.forgejo/workflows/ci.yml` | CI |
+| FORGE-003 | GitHub runs only for releases: a `v*` tag (cut in larger, timed gaps than day-to-day work) is built and tested again on GitHub, which writes the checksums and publishes the release with its notes (BUILD-010…012); ordinary pushes and pull requests never run on GitHub, and GitHub receives only release commits and tags. | IS NOW | `.github/workflows/build.yml`, `make-release.sh` | CI |
+| FORGE-004 | Every open to-do (a SHOULD BE row with planned work, a bug, an owner note such as `TO-TELL.md`, a follow-up found while working) is an open Forgejo issue; no other list is authoritative. `open-points.md` keeps undecided questions only. | IS NOW | Forgejo issues | process |
+| FORGE-005 | Work starts from an issue: before a change is made, its issue exists (it is created first if not), and the commits name it (`Refs #N` or `Closes #N`; `no-issue:` only for typo or formatting fixes). | IS NOW | — | process (CI: FORGE-008) |
+| FORGE-006 | Done work is reflected in the issues: the change that finishes an issue closes it (`Closes #N`, or `fj issue close` with a comment naming the commit), partial progress or a changed plan is a comment on the issue, and work found in passing becomes a new issue instead of a note in chat or a file. | IS NOW | — | process |
+| FORGE-007 | A SHOULD BE row with planned work names its issue (`raba/shale#N`) in its Code column; the change that flips it to IS NOW closes that issue, and a new SHOULD BE row gets an issue in the same change. | IS NOW | `docs/spec/*.md` | process |
+| FORGE-008 | CI on Forgejo fails when a commit pushed to `main` or in a pull request (merge commits excepted) names no issue and does not start with `no-issue:`. | SHOULD BE | raba/shale#4 | — |
+| FORGE-009 | An agent session reads the open issues of its area before it starts, and its final report lists the issues it opened, commented on or closed. | IS NOW | — | process |
+
+## Development rules (DEV)
+
+From the owner's notes of 2026-11-15 ([ADR-0013](../decisions/0013-forgejo-and-issue-tracking.md) §7).
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| DEV-001 | No warning is acceptable (BUILD-001). A warning that cannot be fixed cleanly is taken to the owner (asked, and recorded in an issue) instead of being silenced or retried in a loop; an `#[allow(…)]` needs the owner's OK and a comment saying why. | IS NOW | `Cargo.toml` `[lints]` | CI (clippy, build) + process |
+| DEV-002 | There is no dead code: no unused functions, types, modules or dependencies, and no `#[allow(dead_code)]` without an agreed reason; CI checks for unused dependencies. | SHOULD BE | raba/shale#6 | — |
+| DEV-003 | Every code path has a sensible test; coverage is measured in CI (`cargo llvm-cov`) and gaps are tracked as issues. | SHOULD BE | raba/shale#7 | — |
+| DEV-004 | When a sensible test for a feature is hard to write, the first step is to consider developer tooling (a test server, a fixture generator, a debug setting or a new helper tool) and to propose it to the owner as a side track (an issue) before a shallow or bad test is added. | IS NOW | — | process |
+| DEV-005 | External behaviour is tested against a real server in a podman test stack with seeded users and data (mail: MAIL-090). ⚠ CalDAV is tested only against a pretend server driven through `curl`. | SHOULD BE | `tests/mail-env/`; CalDAV: raba/shale#8 | — |
+| DEV-006 | Every change checks the docs (README, FEATURES, specs, CHANGELOG, IMPLEMENTATION) and the screenshots they show, and updates whatever the change made stale, in the same change. | IS NOW | — | process |
+| DEV-007 | Every screenshot in `docs/screenshots/` is regenerated by one command from a recorded `--screenshot --view --keys` recipe (BUILD-007), so stale pictures are cheap to fix. | SHOULD BE | raba/shale#9 | — |
+| DEV-008 | Code is modular: features live in their own folders and `ShaleApp` owns sub-states instead of ~50 flat fields (ADR-0006 §6), restructured step by step. | SHOULD BE | raba/shale#5 | — |
 
 ## Build and release (BUILD)
 
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
-| BUILD-001 | `cargo build`, `cargo build --all-targets` and `cargo build --release` produce zero warnings, `cargo clippy --all-targets -- -D warnings` is clean and `cargo fmt --check` passes (`rustfmt.toml` matches the long-line style). CI builds with `RUSTFLAGS=-D warnings`. `Cargo.toml` `[lints]` also denies `unsafe_op_in_unsafe_fn`, `unused_must_use`, `dbg!`, `todo!` and `unimplemented!`. | IS NOW | `Cargo.toml` `[lints]`, `rustfmt.toml`, `build.yml` | CI (fmt, clippy, build, test steps) |
-| BUILD-002 | Every push to `main` builds on Ubuntu 22.04, runs `cargo test` and updates the `latest` pre-release. | IS NOW | `.github/workflows/build.yml` | CI |
-| BUILD-003 | A `v*` tag builds a release only if the tag equals `Cargo.toml`'s version and `CHANGELOG.md` has notes for it. | IS NOW | `build.yml`, `.github/release-notes.sh` | CI |
-| BUILD-004 | CI also runs on pull requests, with `cargo fmt --check` and `cargo clippy --all-targets --locked -- -D warnings`; actions are pinned by commit SHA (the tag is in a comment). | IS NOW | `.github/workflows/build.yml` | CI |
+| BUILD-001 | `cargo build`, `cargo build --all-targets` and `cargo build --release` produce zero warnings, `cargo clippy --all-targets -- -D warnings` is clean and `cargo fmt --check` passes (`rustfmt.toml` matches the long-line style). CI builds with `RUSTFLAGS=-D warnings`. `Cargo.toml` `[lints]` also denies `unsafe_op_in_unsafe_fn`, `unused_must_use`, `dbg!`, `todo!` and `unimplemented!`. | IS NOW | `Cargo.toml` `[lints]`, `rustfmt.toml`, `.forgejo/workflows/ci.yml`, `.github/workflows/build.yml` | CI (fmt, clippy, build, test steps) |
+| BUILD-002 | Every push (any branch) and pull request on the homelab Forgejo (git remote `origin`) runs in a `rust:1.100.0-bookworm` container: `cargo fmt --check`, clippy, `cargo build --release`, `cargo test --release` and the packaging of BUILD-010; nothing is published from there. Its steps are plain shell (no JavaScript actions: the Rust image has no Node and the runner may use Podman). Until 2026-11-15 this ran on GitHub for every push to `main` and updated a rolling `latest` pre-release; that pre-release is not updated any more. | IS NOW | `.forgejo/workflows/ci.yml` | CI (Forgejo) |
+| BUILD-003 | A `v*` tag builds a release only if the tag equals `Cargo.toml`'s version and `CHANGELOG.md` has notes for it; Forgejo checks the same for the tag, without publishing. | IS NOW | `.github/workflows/build.yml`, `.forgejo/workflows/ci.yml`, `.github/release-notes.sh` | CI |
+| BUILD-004 | CI runs on pull requests too (on Forgejo), with `cargo fmt --check` and `cargo clippy --all-targets --locked -- -D warnings`; GitHub actions are pinned by commit SHA (the tag is in a comment); the Forgejo workflow uses no actions. | IS NOW | `.forgejo/workflows/ci.yml`, `.github/workflows/build.yml` | CI |
 | BUILD-005 | The supported platform is stated: Linux (Wayland and X11) is supported and tested in CI; other systems are unsupported. | SHOULD BE | README | OPEN-007 |
 | BUILD-006 | Crates come from crates.io; anything vendored has a written reason (`cargo audit` runs in CI since BUILD-009). ⚠ Today 22 crates are vendored only because an old offline sandbox lacked them. | SHOULD BE | `Cargo.toml` `[patch.crates-io]` | — |
 | BUILD-008 | `cargo test` also runs against a real vault: `notes/` next to `Cargo.toml` (git-ignored, kept by hand) or the folder in `SHALE_TEST_VAULT`. Each test works on a copy and checks that the original is unchanged; without such a folder the tests pass with a note (CI). It checks that every file is listed and readable, every note parses, renders and exports to PDF, links agree with backlinks and the graph, every drawing opens and saves without loss, tasks toggle cleanly, and renaming the most linked notes keeps their links working. | IS NOW | `notes_vault_tests.rs` | all 6 tests in `notes_vault_tests.rs` |
 | BUILD-007 | `--screenshot <png>` with `--view` and `--keys` runs a temporary demo vault for real-window checks and documentation screenshots. | IS NOW | `main.rs`, `app.rs` | used by checks |
-| BUILD-009 | A separate `audit` job (not a step of the build job) runs `cargo audit` on `Cargo.lock` on every push and pull request and weekly (`on: schedule`); a new advisory fails only that job, never the release build, and the scheduled run does not rebuild or publish. | IS NOW | `.github/workflows/build.yml` | CI (cannot be run locally) |
-| BUILD-010 | The build writes `shale-linux-x86_64.tar.gz.sha256` in `sha256sum` format and uploads it with the tarball as a workflow artifact and to the `latest` pre-release; the tagged release gets `shale-<version>-linux-x86_64.tar.gz.sha256` naming the versioned file. | IS NOW | `.github/workflows/build.yml` | CI |
-| BUILD-011 | The release notes of a tagged release, the `latest` notes and the README say how to check the download (`sha256sum -c <file>.sha256`). The checksum guards against a damaged download only; releases are not signed. | IS NOW | `build.yml`, `README.md` | CI |
+| BUILD-009 | A separate `audit` job (not a step of the build job) runs `cargo audit` on `Cargo.lock`: on Forgejo on every push and pull request and weekly (`on: schedule`, where only the audit runs), and on GitHub for every release tag. A new advisory fails only that job, never the build or the release. | IS NOW | `.forgejo/workflows/ci.yml`, `.github/workflows/build.yml` | CI (cannot be run locally) |
+| BUILD-010 | The build writes `shale-linux-x86_64.tar.gz.sha256` in `sha256sum` format and checks it with `sha256sum -c` (Forgejo, every push); the tagged GitHub release uploads `shale-<version>-linux-x86_64.tar.gz` with `shale-<version>-linux-x86_64.tar.gz.sha256` naming the versioned file, checked the same way before the upload, and the tarball and its checksum as a workflow artifact. | IS NOW | `.forgejo/workflows/ci.yml`, `.github/workflows/build.yml` | CI |
+| BUILD-011 | The release notes of a tagged release and the README say how to check the download (`sha256sum -c <file>.sha256`). The checksum guards against a damaged download only; releases are not signed (OPEN-018). | IS NOW | `build.yml`, `README.md` | CI |
+| BUILD-012 | GitHub (`rabalyn/shale`, remote `github`) is only for publishing: its workflow runs for `v*` tags (and by hand, `workflow_dispatch`, which builds without publishing), builds and tests the tagged commit again on Ubuntu 22.04 and publishes the release. `make-release.sh` pushes the commit and the tag to Forgejo and then to GitHub; day-to-day pushes go to Forgejo only. | IS NOW | `.github/workflows/build.yml`, `make-release.sh` | CI |
+| BUILD-013 | A `v*` tag builds a release only if its version is valid semver and greater than the previous `v*` tag, `Cargo.lock` has the same version for `shale`, and its `CHANGELOG.md` section is not empty and covers the changes since the previous tag; `make-release.sh` runs the same check before pushing. ⚠ Today CI checks only tag = `Cargo.toml` and that a section exists; the `Cargo.lock` check is local only. | SHOULD BE | raba/shale#3 | — |
 
 ## Background jobs (JOB)
 

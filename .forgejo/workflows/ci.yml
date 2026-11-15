@@ -1,0 +1,149 @@
+# Day-to-day CI on the homelab Forgejo (git remote `origin`): every push and pull
+# request is formatted, linted, built, tested and packaged here, and the dependencies are audited.
+# Nothing is published from here. Releases are built and published by GitHub from `v*` tags
+# (.github/workflows/build.yml; Forgejo ignores .github/workflows because this folder exists).
+#
+# The runner starts the job in a container (Docker or Podman). Steps are plain shell: JavaScript
+# actions (checkout, cache, upload-artifact) need Node, which the Rust image does not have, and
+# copying them into the container fails under Podman's Docker API.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  # weekly, so advisories published for unchanged code are noticed (only the audit job runs then)
+  schedule:
+    - cron: '17 5 * * 1'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    # the scheduled run is only for the audit below
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    # same compiler as rust-toolchain.toml (rustup in the image reads it and agrees)
+    container:
+      image: docker.io/library/rust:1.100.0-bookworm
+    env:
+      # always strict: any warning (also in vendored crates) fails the build
+      RUSTFLAGS: -D warnings
+    steps:
+      # A self-hosted runner may mount an extra CA certificate (the private CA in front of
+      # Forgejo) at this path; add it so git trusts it without losing the public CAs.
+      - name: Trust the runner's extra CA, if any
+        run: |
+          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
+            update-ca-certificates >/dev/null 2>&1
+            echo "Added the runner's extra CA."
+          fi
+
+      - name: Check out
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "Workspace already populated (local act_runner exec)."
+          else
+            git init -q .
+            git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+            auth=()
+            if [ -n "$TOKEN" ]; then
+              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+            fi
+            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.sha }}"
+            git checkout -q FETCH_HEAD
+          fi
+          git log -1 --oneline 2>/dev/null || true
+
+      - name: Check the version and the release notes (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CARGO=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "$TAG" != "$CARGO" ]; then
+            echo "::error::tag v$TAG does not match the version $CARGO in Cargo.toml"
+            exit 1
+          fi
+          sh .github/release-notes.sh "$TAG"
+
+      - name: Libraries for the window (Wayland, X11, OpenGL)
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev >/dev/null
+
+      - name: Toolchain
+        run: |
+          rustup show active-toolchain
+          rustup component add rustfmt clippy
+          cargo --version
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Test
+        run: cargo test --release --locked
+
+      # the same package and checksum as the GitHub release build, checked here so a broken
+      # packaging step shows up before a release tag
+      - name: Package and check the checksum
+        shell: bash
+        run: |
+          mkdir -p dist/shale
+          cp target/release/shale LICENSE README.md CHANGELOG.md dist/shale/
+          cp -r docs dist/shale/
+          tar -C dist -czf shale-linux-x86_64.tar.gz shale
+          sha256sum shale-linux-x86_64.tar.gz > shale-linux-x86_64.tar.gz.sha256
+          cat shale-linux-x86_64.tar.gz.sha256
+          sha256sum -c shale-linux-x86_64.tar.gz.sha256
+          tar -tzf shale-linux-x86_64.tar.gz shale/shale >/dev/null
+
+  # separate from the build, so an advisory published overnight shows up as a red job of its own
+  # but never blocks the build
+  audit:
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/rust:1.100.0-bookworm
+    steps:
+      - name: Trust the runner's extra CA, if any
+        run: |
+          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
+            update-ca-certificates >/dev/null 2>&1
+            echo "Added the runner's extra CA."
+          fi
+
+      - name: Check out
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "Workspace already populated (local act_runner exec)."
+          else
+            git init -q .
+            git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+            auth=()
+            if [ -n "$TOKEN" ]; then
+              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+            fi
+            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.sha }}"
+            git checkout -q FETCH_HEAD
+          fi
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # reads only Cargo.lock, so it needs no build and no system libraries
+      - name: Audit the dependencies
+        run: cargo audit

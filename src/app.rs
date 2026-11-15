@@ -2173,11 +2173,13 @@ pub(crate) mod tests {
         let ctx = egui::Context::default();
         let mut pw = String::new();
         let mut show = || {
-            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
                     crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut pw));
                 });
             });
+            // no renderer here: drop the font texture upload on purpose (debug builds assert)
+            out.textures_delta.clear();
         };
         show();
         app.log_input(&typed("hunter2-secret"));

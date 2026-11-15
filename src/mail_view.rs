@@ -353,7 +353,10 @@ impl MailView {
                 }
             }
         }
-        if let Some(t) = self.pending_text() {
+        if let Some((t, why)) = self.orphaned_text(cfg) {
+            ui.label(muted(t).size(12.0)).on_hover_text(why);
+        }
+        if let Some(t) = self.pending_text(cfg) {
             let why = self.offline.values().next().cloned();
             let l = ui.label(muted(t).size(12.0));
             if let Some(w) = why {

@@ -9,9 +9,9 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 | [links-and-editor.md](links-and-editor.md) | Link syntax and resolution, editing, navigation and keys | LINK, EDIT, NAV |
 | [features.md](features.md) | Tasks, drawings, calendar, network security, import, people, tags, PDF | TASK, DRAW, CAL, SEC, IMP, PPL, TAG, PDF |
 | [social.md](social.md) | Mastodon and Bluesky feeds, saving posts as notes | SOC |
-| [engineering.md](engineering.md) | Build and release, background jobs, performance | BUILD, JOB, PERF |
+| [engineering.md](engineering.md) | Forge and work tracking, development rules, build and release, background jobs, performance | FORGE, DEV, BUILD, JOB, PERF |
 | [mail.md](mail.md) | Local mail store, IMAP account and sync, flags and moves, sending, signing and encrypting | MAIL |
-| [open-points.md](open-points.md) | Undecided questions and the ordered SHOULD BE work list | OPEN |
+| [open-points.md](open-points.md) | Undecided questions (open work: Forgejo issues) | OPEN |
 
 ## Rules for editing
 
@@ -21,3 +21,5 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 - Change the spec **before** the code; flip `SHOULD BE` → `IS NOW` in the same change that
   makes it true, with the test name in the Test column.
 - Tests that check a rule carry its ID in the name or a `// spec: ID` comment.
+- A `SHOULD BE` row with planned work names its Forgejo issue (`raba/shale#N`); open work is
+  tracked in the issues, not in these files (FORGE-004, FORGE-007).
