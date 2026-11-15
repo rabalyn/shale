@@ -13,6 +13,8 @@ mod cal_ics;
 mod cal_store;
 mod cal_time;
 mod cal_ui;
+#[cfg(test)]
+mod caldav_env_tests;
 mod canvas;
 mod compose;
 mod config;
@@ -80,6 +82,8 @@ mod smtp_client;
 #[cfg(test)]
 mod smtp_fake_tests;
 mod social;
+#[cfg(test)]
+mod tab_order_tests;
 mod tagwords;
 mod tb_store;
 mod theme;

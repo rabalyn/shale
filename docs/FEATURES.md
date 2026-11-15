@@ -42,6 +42,16 @@ built-in demo vault (`shale --screenshot out.png`).
   the last item you trashed back.
 - Every dialog is a window you can move by its title bar and resize from any edge or corner.
 
+## Tabs
+
+- Drag a tab left or right to reorder it; a marker shows where it will land. A click without
+  moving still just selects the tab, and the ✕ or a middle click closes it.
+- Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far left,
+  show a small pin and keep their order. Drag reorders pinned tabs among themselves and the
+  others among themselves, never across the border. A pinned tab can still be closed.
+- The order of the open notes and which of them are pinned come back at the next start (a pinned
+  Feeds tab is not remembered as pinned).
+
 ## Keyboard only: sidebar, file list and vim-style editing
 
 ![The keybindings dialog](screenshots/keybindings.png)
