@@ -221,7 +221,8 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    tests): `app/drops.rs` 403 lines, 42 missed, **89.58 %** (before: 216 missed, 46.40 %); the total
    is 52,421 lines, 48,408 covered, **92.34 %** (functions 7,171 of 7,812, 91.79 %; regions 87,332
    of 94,673, 92.25 %). The total includes the other waves merged into `99e8a6e`, not only these
-   tests; `.forgejo/coverage-baseline` (88.75) is not changed here.
+   tests. Measured again on 2026-11-16 with main (#90, #92) merged, 1020 tests: **92.39 %**.
+   `.forgejo/coverage-baseline` is raised from 88.75 to 92.0, a little below the measured figure.
 10. **`drawing.rs` `continue_drag`, `begin_drag`, `end_drag`, `click` (1450 to 1815), 270 lines, and
     `panels.rs` `modals`, `tasks_view`, `tree` (218 to 1110), 330 lines**: moving, resizing and
     rotating elements, the modal dialogs, the task list view and the folder tree. Test: headless UI
