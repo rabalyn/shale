@@ -286,6 +286,11 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| e.to_string())?;
     drop(cfg);
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    // curl stops at the size limit (exit code 63) when the server announces a bigger answer: that is
+    // an error, not an empty answer with status 200
+    if out.status.code() == Some(63) {
+        return Err(too_big(max_bytes));
+    }
     let raw = &out.stdout;
     let stderr = || String::from_utf8_lossy(&out.stderr).trim().to_string();
     let Some(pos) = raw.windows(MARK.len()).rposition(|w| w == MARK.as_bytes()) else {
@@ -306,7 +311,7 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
         return Err(if err.is_empty() { "could not reach the server".into() } else { err });
     }
     if body.len() as u64 > max_bytes {
-        return Err(format!("the answer is bigger than {} MB", max_bytes / 1_000_000));
+        return Err(too_big(max_bytes));
     }
     let effective = if effective.trim().is_empty() { url.to_string() } else { effective.trim().to_string() };
     if effective != url {
@@ -316,6 +321,14 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
         }
     }
     Ok(BytesResponse { status, body, url: effective, etag: clean_etag(&etag), content_type })
+}
+
+fn too_big(max_bytes: u64) -> String {
+    if max_bytes >= 1_000_000 {
+        format!("the answer is bigger than {} MB", max_bytes / 1_000_000)
+    } else {
+        format!("the answer is bigger than {max_bytes} bytes")
+    }
 }
 
 /// A header of the last response in curl's `-i` output (after redirects and "100 Continue").

@@ -177,12 +177,15 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    settings and the retry back-off with a fake connector that fails twice; and measure the env
    suites (the `env-tests` job, once the runner runs containers). Kind: test.
 6. **`cal_dav.rs` `discover` (469 to 513), `request_bytes_opts` (245 to 315), `write_error`,
-   `delete_event` (585 to 709)**: well-known and principal discovery with redirects and the words
+   `delete_event` (585 to 709)**: closed (#59, CAL-018, CAL-019).
+   `cal_dav_status_tests.rs` runs the client against the scripted loopback server
+   `cal_dav::tests::mock_http_with` (and a raw socket that is not HTTP). Originally: well-known and principal discovery with redirects and the words
    for 401, 403, 412 and 5xx are reached mainly by the ignored `caldav_env` suite. Test: a scripted
    HTTP server for the status and redirect cases (the "redirect and certificate rules" test of
    CALENV-002 shows the shape). Kind: test.
 7. **`cal_store.rs` `delete_occurrence`, `save_event`, `poll`, `default_trash_dir` (139 to 638)**:
-   removing one date of a repeating event in a local calendar, saving to a read-only or missing
+   closed (#59, CAL-020, CAL-021): `cal_store_failure_tests.rs`, with write failures made by a folder
+   where the file should be (also holds for root, so no seam was needed). Originally: removing one date of a repeating event in a local calendar, saving to a read-only or missing
    directory, and the polling refresh. Test: a local calendar in a temp dir, delete one occurrence,
    save with the folder made read-only, poll after an outside change. Kind: test.
 8. **`gpg.rs` `trust_words`, `inv_recp_words`, `op_failure`, `signatures`, `decrypt` (301 to 691) and
