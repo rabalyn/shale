@@ -2,6 +2,8 @@
 # request is formatted, linted, built, tested and packaged here, and the dependencies are audited.
 # Nothing is published from here. Releases are built and published by GitHub from `v*` tags
 # (.github/workflows/build.yml; Forgejo ignores .github/workflows because this folder exists).
+# A push to `main` that passes the build is also pushed to GitHub's `main` (the `mirror` job),
+# where macOS and Windows are built and tested: the homelab cannot run those (BUILD-016).
 #
 # The runner starts the job in a container (Docker or Podman). Steps are plain shell: JavaScript
 # actions (checkout, cache, upload-artifact) need Node, which the Rust image does not have, and
@@ -177,3 +179,56 @@ jobs:
       # reads only Cargo.lock, so it needs no build and no system libraries
       - name: Audit the dependencies
         run: cargo audit
+
+  # A `main` that is green on Linux goes to GitHub's `main`, whose workflow builds and tests it on
+  # macOS and Windows (BUILD-016, FORGE-003). Only `main`, never a branch or a pull request. The
+  # write credential is the owner's: an SSH deploy key of rabalyn/shale with write access, kept as
+  # the Forgejo Actions secret MIRROR_DEPLOY_KEY (Forgejo refuses names that start with GITHUB_). Without it the job says so and fails.
+  mirror:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/rust:1.100.0-bookworm
+    steps:
+      - name: Trust the runner's extra CA, if any
+        run: |
+          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
+            update-ca-certificates >/dev/null 2>&1
+            echo "Added the runner's extra CA."
+          fi
+
+      - name: Push this commit to GitHub's main
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+          DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error::the secret MIRROR_DEPLOY_KEY is not set (see raba/shale#52)"
+            exit 1
+          fi
+          command -v ssh >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-client >/dev/null; }
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/github_deploy
+          # GitHub's published host key (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/github_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          # the whole history of main (a shallow push is refused by GitHub)
+          git init -q .
+          git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+          auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+          git "${auth[@]}" fetch -q origin "+refs/heads/main:refs/remotes/origin/main"
+          git cat-file -e "$SHA^{commit}"
+          git remote add github git@github.com:rabalyn/shale.git
+          git fetch -q github "+refs/heads/main:refs/remotes/github/main" || true
+          # a later push of main got there first: nothing to do (an older commit is never forced over it)
+          if git rev-parse -q --verify refs/remotes/github/main >/dev/null && git merge-base --is-ancestor "$SHA" refs/remotes/github/main; then
+            echo "GitHub's main already contains $SHA."
+            exit 0
+          fi
+          git push github "$SHA:refs/heads/main"
+          echo "Pushed $SHA to GitHub's main."
