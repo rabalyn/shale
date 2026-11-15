@@ -20,6 +20,7 @@ rusqlite = { version = "0.42.0", features = ["bundled"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-platform-verifier = "0.7.1"
 lettre = { version = "0.11.23", default-features = false, features = ["builder"] }
+zeroize = "1.9"
 
 [dev-dependencies]
 # self-signed certificate for the pretend mail server in tests

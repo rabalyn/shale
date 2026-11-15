@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn social_accounts_are_saved_without_secrets_that_the_keyring_holds() {
         use crate::social::{Account, Network, SocialAccountEntry};
-        let in_keyring = SocialAccountEntry { account: Account::new(Network::Mastodon, "https://m.test", "ada@m.test", "Ada"), secret: String::new() };
+        let in_keyring = SocialAccountEntry { account: Account::new(Network::Mastodon, "https://m.test", "ada@m.test", "Ada"), secret: Default::default() };
         let kept = SocialAccountEntry { account: Account::new(Network::Bluesky, "https://bsky.social", "ada.bsky.social", ""), secret: "app-pw-123".into() };
         let c = Config { social_accounts: vec![in_keyring.clone(), kept.clone()], social_last: Some(("a".into(), "home".into())), ..Config::default() };
         let json = serde_json::to_string(&c).unwrap();

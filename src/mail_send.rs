@@ -63,7 +63,7 @@ pub fn smtp_settings(a: &MailAccount) -> ConnectSettings {
 }
 
 /// The connector of a configured account; the password comes from the keyring (or `session`, typed for this run).
-pub fn connector_for_account(a: &MailAccount, session: Option<String>) -> Result<Arc<dyn SmtpConnector>, String> {
+pub fn connector_for_account(a: &MailAccount, session: Option<crate::secret::Secret>) -> Result<Arc<dyn SmtpConnector>, String> {
     if a.smtp_host.trim().is_empty() {
         return Err("This account has no SMTP server yet (account settings: Sending).".into());
     }

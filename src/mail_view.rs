@@ -410,7 +410,7 @@ impl MailView {
         ui.label(format!("Password for {name} (kept in memory until you quit):"));
         let mut go = false;
         if let Some(p) = self.prompt.as_mut() {
-            let r = crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut p.text).desired_width(200.0));
+            let r = crate::secrets::password_edit(ui, &mut p.text, "", 200.0);
             rec(rects, "mail:password", &r);
             if std::mem::take(&mut p.focus) {
                 r.request_focus();

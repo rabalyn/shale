@@ -7,7 +7,7 @@ use super::*;
 use std::path::PathBuf;
 
 pub fn account() -> SocialAccountEntry {
-    SocialAccountEntry { account: Account::new(Network::Mastodon, "https://demo.social", "ada@demo.social", "Ada Demo"), secret: String::new() }
+    SocialAccountEntry { account: Account::new(Network::Mastodon, "https://demo.social", "ada@demo.social", "Ada Demo"), secret: Default::default() }
 }
 
 pub fn feeds() -> Vec<Feed> {

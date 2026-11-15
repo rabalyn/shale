@@ -82,6 +82,7 @@ mod reader;
 mod recovery;
 mod script;
 mod search_all;
+mod secret;
 mod secrets;
 mod sidebar;
 #[cfg(test)]
@@ -116,6 +117,10 @@ fn parse_size(s: &str) -> Option<[f32; 2]> {
 }
 
 fn main() -> eframe::Result {
+    // release builds: no core dumps, no memory reads by other processes (SEC-019)
+    if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {
+        eprintln!("shale: could not make the process undumpable: {e}");
+    }
     let mut screenshot: Option<PathBuf> = None;
     let mut vault: Option<PathBuf> = None;
     let mut view: Option<String> = None;

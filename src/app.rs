@@ -2509,11 +2509,11 @@ pub(crate) mod tests {
         assert!(read().contains("visible-text"));
         // while a password field is on screen, nothing of it is
         let ctx = egui::Context::default();
-        let mut pw = String::new();
+        let mut pw = crate::secret::Secret::default();
         let mut show = || {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut pw));
+                    crate::secrets::password_edit(ui, &mut pw, "", 200.0);
                 });
             });
             // no renderer here: drop the font texture upload on purpose (debug builds assert)

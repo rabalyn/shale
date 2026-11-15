@@ -23,18 +23,19 @@ use crate::cal_ics::{self, Event};
 use roxmltree::{Document, Node};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Clone, PartialEq)]
 pub struct Account {
     /// for calendars: the calendar's address (the server addresses of events are checked against it)
     pub url: String,
     pub username: String,
-    pub password: String,
+    pub password: crate::secret::Secret,
 }
 
 impl std::fmt::Debug for Account {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Account").field("url", &self.url).field("username", &self.username).field("password", &redacted(&self.password)).finish()
+        f.debug_struct("Account").field("url", &self.url).field("username", &self.username).field("password", &redacted(self.password.expose())).finish()
     }
 }
 
@@ -182,9 +183,22 @@ pub struct Response {
     pub etag: Option<String>,
 }
 
-fn curl_quote(s: &str) -> String {
-    // curl config strings: backslash escapes, and line breaks must be written as \r / \n
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\r', "\\r").replace('\n', "\\n").replace('\t', "\\t"))
+/// Append `parts` as one curl config string: backslash escapes, and line breaks must be written
+/// as \r / \n. `out` must have room (twice the text plus two) or it will grow, and a grown
+/// `String` leaves its old buffer unwiped; `request_bytes_opts` sizes it ahead.
+fn quote_into(out: &mut String, parts: &[&str]) {
+    out.push('"');
+    for c in parts.iter().flat_map(|p| p.chars()) {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\r' => out.push_str("\\r"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
 }
 
 fn has_control(s: &str) -> bool {
@@ -215,8 +229,10 @@ pub fn request_with(method: &str, url: &str, headers: &[&str], body: &str, acct:
 /// Like [`request_with`]; `follow` = false never follows a redirect (the OAuth2 token endpoint:
 /// its form holds secrets and must go only where it was addressed).
 pub fn request_opts(method: &str, url: &str, headers: &[&str], body: &str, acct: &Account, follow: bool) -> Result<Response, String> {
-    let r = request_bytes_opts(method, url, headers, body, acct, MAX_BYTES, follow)?;
-    Ok(Response { status: r.status, body: String::from_utf8_lossy(&r.body).into_owned(), url: r.url, etag: r.etag })
+    let mut r = request_bytes_opts(method, url, headers, body, acct, MAX_BYTES, follow)?;
+    let text = String::from_utf8_lossy(&r.body).into_owned();
+    r.body.zeroize();
+    Ok(Response { status: r.status, body: text, url: r.url, etag: r.etag })
 }
 
 /// The answer to `request_bytes`: the body is raw (pictures, video).
@@ -250,18 +266,27 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     if acct.username.contains(':') || has_control(&acct.username) {
         return Err("the user name must not contain ':' or control characters".into());
     }
-    if acct.password.contains('\0') || body.contains('\0') {
+    if acct.password.expose().contains('\0') || body.contains('\0') {
         return Err("the password or the event contains a NUL character".into());
     }
-    let mut cfg = String::new();
+    // the config holds the password, the body and the headers (tokens): sized ahead so that it never
+    // reallocates, and zeroed when dropped (SEC-017)
+    let room = 2 * (acct.username.len() + acct.password.len() + body.len() + headers.iter().map(|h| h.len()).sum::<usize>()) + 40 * (headers.len() + 3);
+    let mut cfg = Zeroizing::new(String::with_capacity(room));
     if !acct.username.is_empty() {
-        cfg.push_str(&format!("user = {}\n", curl_quote(&format!("{}:{}", acct.username, acct.password))));
+        cfg.push_str("user = ");
+        quote_into(&mut cfg, &[&acct.username, ":", acct.password.expose()]);
+        cfg.push('\n');
     }
     if !body.is_empty() {
-        cfg.push_str(&format!("data-binary = {}\n", curl_quote(body)));
+        cfg.push_str("data-binary = ");
+        quote_into(&mut cfg, &[body]);
+        cfg.push('\n');
     }
     for h in headers {
-        cfg.push_str(&format!("header = {}\n", curl_quote(h)));
+        cfg.push_str("header = ");
+        quote_into(&mut cfg, &[h]);
+        cfg.push('\n');
     }
     let with_auth = headers.iter().any(|h| h.trim_start().to_ascii_lowercase().starts_with("authorization:"));
     // a local http server may redirect to http; the final address is checked below
@@ -286,7 +311,8 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| e.to_string())?;
     drop(cfg);
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    let raw = &out.stdout;
+    // the answer can hold a token (the OAuth2 endpoint): wiped when this function is done
+    let raw = Zeroizing::new(out.stdout);
     let stderr = || String::from_utf8_lossy(&out.stderr).trim().to_string();
     let Some(pos) = raw.windows(MARK.len()).rposition(|w| w == MARK.as_bytes()) else {
         let err = stderr();
@@ -713,6 +739,14 @@ pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>, before: &[Ev
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    // spec: SEC-017
+    #[test]
+    fn curl_config_strings_are_escaped() {
+        let mut s = String::new();
+        quote_into(&mut s, &["a\"b", ":", "c\\d\r\n\te"]);
+        assert_eq!(s, "\"a\\\"b:c\\\\d\\r\\n\\te\"");
+    }
     use std::io::{BufRead, BufReader, Read};
     use std::net::TcpListener;
 
@@ -1008,7 +1042,7 @@ pub(crate) mod tests {
             "PUT" => (204, String::new()),
             _ => (404, String::new()),
         });
-        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: Default::default() };
         put_event(&acct.url, &acct, std::slice::from_ref(&e), Some((&format!("{b}/c/a.ics"), None)), &before).unwrap();
         assert_eq!(h.join().unwrap(), vec!["PROPFIND /c/a.ics".to_string(), "GET /c/a.ics".into(), "PUT /c/a.ics".into()]);
         // the server has something else now: nothing is sent
@@ -1017,26 +1051,26 @@ pub(crate) mod tests {
             "GET" => (200, changed.clone()),
             _ => (500, String::new()),
         });
-        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: Default::default() };
         let err = put_event(&acct.url, &acct, std::slice::from_ref(&e), Some((&format!("{b}/c/a.ics"), None)), &before).unwrap_err();
         assert!(err.contains("changed on the server meanwhile"), "{err}");
         assert!(h.join().unwrap().iter().all(|s| !s.starts_with("PUT")));
         // gone from the server: also a change for a save
         let (b, h) = mock_http(2, |_, _, _, _| (404, String::new()));
-        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: Default::default() };
         let err = put_event(&acct.url, &acct, std::slice::from_ref(&e), Some((&format!("{b}/c/a.ics"), None)), &before).unwrap_err();
         assert!(err.contains("changed on the server meanwhile"), "{err}");
         assert!(h.join().unwrap().iter().all(|s| !s.starts_with("PUT")));
         // a delete of a changed event sends no DELETE
         let changed = SERVER_ICS.replace("Lunch", "Brunch");
         let (b, h) = mock_http(1, move |_, _, _, _| (200, changed.clone()));
-        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: Default::default() };
         let err = delete_event(&format!("{b}/c/a.ics"), &acct, None, &before).unwrap_err();
         assert!(err.contains("changed on the server meanwhile"), "{err}");
         assert_eq!(h.join().unwrap(), vec!["GET /c/a.ics".to_string()]);
         // with a version tag there is no extra GET
         let (b, h) = mock_http(1, |_, _, _, _| (204, String::new()));
-        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: String::new() };
+        let acct = Account { url: format!("{b}/c/"), username: String::new(), password: Default::default() };
         delete_event(&format!("{b}/c/a.ics"), &acct, Some("\"v1\""), &before).unwrap();
         assert_eq!(h.join().unwrap(), vec!["DELETE /c/a.ics".to_string()]);
     }
@@ -1053,7 +1087,7 @@ pub(crate) mod tests {
             "/a" => (301, "Location: /b\r\nETag: \"old\"\r\n".into(), String::new()),
             _ => (207, "ETag: \"new\"\r\n".into(), "<x>HTTP/1.1 200 OK\r\n\r\nnot a header</x>".into()),
         });
-        let acct = Account { url: base.clone(), username: String::new(), password: String::new() };
+        let acct = Account { url: base.clone(), username: String::new(), password: Default::default() };
         let r = request("PROPFIND", &format!("{base}/a"), "0", "<x/>", &acct).unwrap();
         assert_eq!((r.status, r.etag.as_deref(), r.url.as_str()), (207, Some("\"new\""), format!("{base}/b").as_str()));
         assert_eq!(r.body, "<x>HTTP/1.1 200 OK\r\n\r\nnot a header</x>");
@@ -1088,7 +1122,7 @@ END:VCALENDAR
                     .to_string(),
             )
         });
-        let acct = Account { url: base.clone(), username: String::new(), password: String::new() };
+        let acct = Account { url: base.clone(), username: String::new(), password: Default::default() };
         let ev = fetch_events(&format!("{base}/cal/rw/"), &acct, 0, i64::MAX / 4).unwrap();
         assert_eq!(ev.len(), 2);
         assert_eq!(ev[0].href.as_deref(), Some(format!("{base}/cal/rw/a.ics").as_str()));
@@ -1106,7 +1140,7 @@ END:VCALENDAR
         let (base, _h) = mock_http(1, |_, _, _, _| {
             (207, r#"<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:response><d:href>/c/</d:href><d:propstat><d:prop><cs:getctag>42</cs:getctag><d:current-user-privilege-set><d:privilege><d:read/></d:privilege></d:current-user-privilege-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat><d:propstat><d:prop><d:sync-token/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response></d:multistatus>"#.into())
         });
-        let acct = Account { url: format!("{base}/c/"), username: String::new(), password: String::new() };
+        let acct = Account { url: format!("{base}/c/"), username: String::new(), password: Default::default() };
         let st = calendar_state(&acct.url, &acct).unwrap();
         assert_eq!(st, CalState { tag: Some("ctag:42".into()), read_only: Some(true) });
     }
@@ -1117,7 +1151,7 @@ END:VCALENDAR
         if !has_curl() {
             return;
         }
-        let acct = Account { url: "http://127.0.0.1:1/".into(), username: String::new(), password: String::new() };
+        let acct = Account { url: "http://127.0.0.1:1/".into(), username: String::new(), password: Default::default() };
         assert!(discover(&acct).is_err());
     }
 }
