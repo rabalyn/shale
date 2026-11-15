@@ -144,6 +144,9 @@ impl super::state::Source for DemoSource {
     fn page(&self, _feed: &Feed, _cursor: Option<&str>) -> Result<Page, String> {
         Ok(Page::default())
     }
+    fn post(&self, id: &str) -> Result<Post, String> {
+        posts().into_iter().chain(thread()).chain(new_posts()).find(|p| p.id == id).ok_or_else(|| "no such post".to_string())
+    }
     fn newer(&self, _feed: &Feed, since: &Since) -> Result<Fresh, String> {
         Ok(Fresh { posts: new_posts().into_iter().filter(|p| !since.known.contains(&super::state::post_key(p))).collect(), ..Default::default() })
     }

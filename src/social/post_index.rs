@@ -79,6 +79,7 @@ fn setup(c: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS posts_by_stamp ON posts (account, stamp DESC);
         CREATE INDEX IF NOT EXISTS posts_by_post_id ON posts (account, post_id);
+        CREATE INDEX IF NOT EXISTS posts_by_reply_to ON posts (account, reply_to);
         CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5 (text, author, context, link, date, tokenize = 'unicode61 remove_diacritics 2');",
     )?;
     c.pragma_update(None, "user_version", VERSION)
@@ -93,6 +94,54 @@ fn plain(md: &str) -> (String, Vec<String>) {
         links.extend(l);
     }
     (text, links)
+}
+
+/// The text of a post as searched (content warning first) and the addresses in it.
+fn searchable(p: &Post) -> (String, Vec<String>) {
+    let (text, links) = plain(&p.text_markdown);
+    let text = match &p.content_warning {
+        Some(w) => format!("{w}\n{text}"),
+        None => text,
+    };
+    (text, links)
+}
+
+/// (Re)write the search row of the post at `id`: its text, author, date, links and the context
+/// around it, with the parent's author and text when the parent is in the index now.
+fn write_fts(tx: &rusqlite::Transaction, account: &str, id: i64, p: &Post) -> rusqlite::Result<()> {
+    let (text, mut links) = searchable(p);
+    links.push(p.url.clone());
+    links.push(p.id.clone());
+    let mut context = String::new();
+    let mut add = |s: &str| {
+        context.push_str(s);
+        context.push('\n');
+    };
+    if let Some(b) = &p.reposted_by {
+        add(&format!("boosted by {} {}", b.name(), b.handle));
+    }
+    if let Some(parent) = &p.reply_to {
+        let found: Option<(i64, String, String)> = tx.query_row("SELECT id, author_name, author_handle FROM posts WHERE account = ?1 AND post_id = ?2 LIMIT 1", params![account, parent], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok();
+        if let Some((pid, name, handle)) = found {
+            let parent_text: String = tx.query_row("SELECT text FROM posts_fts WHERE rowid = ?1", [pid], |r| r.get(0)).unwrap_or_default();
+            add(&format!("reply to {name} {handle}: {parent_text}"));
+        }
+        links.push(parent.clone());
+    }
+    if let Some(q) = &p.quote {
+        add(&format!("quoting {} {}: {}", q.author.name(), q.author.handle, plain(&q.text_markdown).0));
+        links.push(q.url.clone());
+    }
+    if let Some(c) = &p.link_card {
+        add(&format!("{} {}", c.title, c.description));
+        links.push(c.url.clone());
+    }
+    for m in &p.media {
+        add(&m.alt);
+    }
+    tx.execute("DELETE FROM posts_fts WHERE rowid = ?1", [id])?;
+    tx.execute("INSERT INTO posts_fts (rowid, text, author, context, link, date) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![id, text, format!("{} {}", p.author.name(), p.author.handle), context, links.join("\n"), date_text(p.created_at)])?;
+    Ok(())
 }
 
 /// "2026-11-15" (UTC), searchable by `date:2026-11`.
@@ -175,42 +224,8 @@ impl PostIndex {
                 continue;
             }
             let key = super::state::post_key(p);
-            let (text, mut links) = plain(&p.text_markdown);
-            links.push(p.url.clone());
-            links.push(p.id.clone());
-            let mut context = String::new();
-            let mut add = |s: &str| {
-                context.push_str(s);
-                context.push('\n');
-            };
-            if let Some(b) = &p.reposted_by {
-                add(&format!("boosted by {} {}", b.name(), b.handle));
-            }
-            if let Some(parent) = &p.reply_to {
-                let found: Option<(i64, String, String)> =
-                    tx.query_row("SELECT id, author_name, author_handle FROM posts WHERE account = ?1 AND post_id = ?2 LIMIT 1", params![account, parent], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok();
-                if let Some((id, name, handle)) = found {
-                    let parent_text: String = tx.query_row("SELECT text FROM posts_fts WHERE rowid = ?1", [id], |r| r.get(0)).unwrap_or_default();
-                    add(&format!("reply to {name} {handle}: {parent_text}"));
-                }
-                links.push(parent.clone());
-            }
-            if let Some(q) = &p.quote {
-                add(&format!("quoting {} {}: {}", q.author.name(), q.author.handle, plain(&q.text_markdown).0));
-                links.push(q.url.clone());
-            }
-            if let Some(c) = &p.link_card {
-                add(&format!("{} {}", c.title, c.description));
-                links.push(c.url.clone());
-            }
-            for m in &p.media {
-                add(&m.alt);
-            }
-            let text = match &p.content_warning {
-                Some(w) => format!("{w}\n{text}"),
-                None => text,
-            };
             let json = serde_json::to_string(p).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let (text, _) = searchable(p);
             let id: i64 = tx.query_row(
                 "INSERT INTO posts (account, key, feed, post_id, author_name, author_handle, created_at, stamp, url, reply_to, snippet, json)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
@@ -219,11 +234,18 @@ impl PostIndex {
                 params![account, key, feed, p.id, p.author.name(), p.author.handle, p.created_at, stamp, p.url, p.reply_to, one_line(&text, 160), json],
                 |r| r.get(0),
             )?;
-            tx.execute("DELETE FROM posts_fts WHERE rowid = ?1", [id])?;
-            tx.execute(
-                "INSERT INTO posts_fts (rowid, text, author, context, link, date) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![id, text, format!("{} {}", p.author.name(), p.author.handle), context, links.join("\n"), date_text(p.created_at)],
-            )?;
+            write_fts(&tx, account, id, p)?;
+            // the replies already indexed get the (new) text of their parent as context (SOC-038)
+            let children: Vec<(i64, String)> = {
+                let mut st = tx.prepare("SELECT id, json FROM posts WHERE account = ?1 AND reply_to = ?2 AND id <> ?3")?;
+                let rows = st.query_map(params![account, p.id, id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.filter_map(Result::ok).collect()
+            };
+            for (cid, cjson) in children {
+                if let Ok(child) = serde_json::from_str::<Post>(&cjson) {
+                    write_fts(&tx, account, cid, &child)?;
+                }
+            }
         }
         // the limits: the days (for every account), then the newest `keep_posts` of each account
         tx.execute("DELETE FROM posts_fts WHERE rowid IN (SELECT id FROM posts WHERE stamp < ?1)", [cutoff])?;
@@ -247,8 +269,19 @@ impl PostIndex {
         }
     }
 
-    /// How many posts are indexed (all accounts, or one); for tests.
-    #[cfg(test)]
+    /// Forget every post (Settings, SOC-040).
+    pub fn clear(&mut self) {
+        if let Err(e) = self.conn.execute_batch("DELETE FROM posts_fts; DELETE FROM posts;") {
+            eprintln!("post index: {e}");
+        }
+    }
+
+    /// Whether the post (a `state::post_key`) of the account is indexed.
+    pub fn contains(&self, account: &str, key: &str) -> bool {
+        self.conn.query_row("SELECT 1 FROM posts WHERE account = ?1 AND key = ?2", [account, key], |_| Ok(())).is_ok()
+    }
+
+    /// How many posts are indexed (all accounts, or one).
     pub fn count(&self, account: Option<&str>) -> usize {
         self.conn.query_row("SELECT COUNT(*) FROM posts WHERE ?1 IS NULL OR account = ?1", [account], |r| r.get::<_, i64>(0)).unwrap_or(0) as usize
     }

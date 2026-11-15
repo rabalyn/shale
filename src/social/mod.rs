@@ -567,6 +567,14 @@ impl Client {
         }
     }
 
+    /// One post by its id (to open a search hit the index and the feed no longer hold, SOC-039).
+    pub fn fetch_post(&mut self, id: &str) -> Result<Post, String> {
+        match &mut self.backend {
+            Backend::Mastodon { token } => mastodon::fetch_post(&self.account.server, token, id),
+            Backend::Bluesky(api) => bluesky::fetch_post(api, id),
+        }
+    }
+
     /// The whole self-thread of a post (see `self_thread`), in reading order, including the post, and the
     /// replies of other people below it (see `conversation`).
     pub fn thread_with_replies(&mut self, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {

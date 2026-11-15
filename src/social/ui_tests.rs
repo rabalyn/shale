@@ -16,11 +16,18 @@ use std::time::{Duration, Instant};
 pub(crate) struct Script {
     pub newer: Mutex<Vec<(String, Fresh)>>,
     pub first_page: Mutex<Option<Page>>,
+    /// what fetching a post by id gives (SOC-039); missing ids fail
+    pub posts: Mutex<Vec<Post>>,
+    pub post_calls: Mutex<Vec<String>>,
 }
 
 impl Source for Script {
     fn page(&self, _feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
         Ok(if cursor.is_none() { self.first_page.lock().unwrap().clone().unwrap_or_default() } else { Page::default() })
+    }
+    fn post(&self, id: &str) -> Result<Post, String> {
+        self.post_calls.lock().unwrap().push(id.to_string());
+        self.posts.lock().unwrap().iter().find(|p| p.id == id).cloned().ok_or_else(|| "the server does not know this post".to_string())
     }
     fn newer(&self, feed: &Feed, _since: &Since) -> Result<Fresh, String> {
         let mut q = self.newer.lock().unwrap();
@@ -667,4 +674,127 @@ fn without_a_second_pass_the_view_is_put_back_in_the_next_frame() {
     w.click("new-posts");
     w.frames(3);
     assert!((w.post_y(&anchor) - y0).abs() < 1.0, "{} vs {y0}", w.post_y(&anchor));
+}
+
+impl W {
+    /// Run frames until `until` holds (jobs finish in the background).
+    fn wait_for(&mut self, what: &str, until: impl Fn(&W) -> bool) {
+        let start = Instant::now();
+        while !until(self) {
+            self.frames(1);
+            assert!(start.elapsed() < Duration::from_secs(10), "{what}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
+fn hit_of(account: &str, feed: &str, post: Post) -> crate::social::post_index::PostHit {
+    crate::social::post_index::PostHit {
+        account: account.into(),
+        feed: feed.into(),
+        key: post_key(&post),
+        author_name: String::new(),
+        author_handle: String::new(),
+        created_at: 0,
+        snippet: String::new(),
+        url: String::new(),
+        reply_to: None,
+        post,
+    }
+}
+
+// spec: SOC-037
+#[test]
+fn saving_a_thread_puts_its_posts_and_replies_into_the_index() {
+    let mut w = W::new("saveindex");
+    let entry = demo::account();
+    let acct = entry.account.id.clone();
+    assert_eq!(w.app.social.index.count(None), 0);
+    let ctx = w.ctx.clone();
+    w.app.social.save(&ctx, &entry, "home", &demo::posts().remove(4));
+    w.wait_for("the save did not finish", |w| w.app.social.index.count(None) > 0);
+    // the three posts of the thread and the three replies of other people
+    assert_eq!(w.app.social.index.count(Some(&acct)), 6);
+    let hits = w.app.social.index.search("grep", 10);
+    assert_eq!((hits.len(), hits[0].post.id.as_str(), hits[0].feed.as_str()), (1, "demo-reply-3", "home"), "a reply of another person");
+    // a reply has the text of the thread post it answers as context
+    let ids = |q: &str| w.app.social.index.search(q, 10).iter().map(|h| h.post.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids("in:\"folder I mean\""), ["demo-reply-3"]);
+    assert_eq!(ids("in:\"Formats with one reader\""), ["demo-reply-1", "demo-thread-3"], "the two replies to the second post");
+    assert_eq!(ids("folder").len(), 2, "the third post of the thread, and the reply that has it as context");
+}
+
+// spec: SOC-039
+#[test]
+fn a_hit_whose_post_is_gone_is_fetched_from_the_network_and_an_error_is_shown() {
+    let mut w = W::new("fetchhit");
+    let (acct, list_key) = (home().account, (home().account, "list:1".to_string()));
+    let mut gone = post("gone1", "bob", crate::cal_time::now() - 3600 * 11 - 1800, None);
+    gone.text_markdown = "an unusual walrus".into();
+    // a hit of the search, then the index is cleared (Settings) before the click: the index is empty and the feed has no such post
+    w.app.social.index.add(&acct, "list:1", std::slice::from_ref(&gone));
+    let hit = w.app.social.index.search("walrus", 5).remove(0);
+    w.app.social.index.clear();
+    *w.script.posts.lock().unwrap() = vec![Post { text_markdown: "an unusual walrus, from the server".into(), ..gone.clone() }];
+    w.app.open_post_hit(&hit);
+    assert_eq!((w.app.tabs.len(), w.app.active), (2, 1), "the feed opens in a new tab at once");
+    w.wait_for("the post was not fetched", |w| w.app.social.timelines[&list_key].posts.iter().any(|p| p.id == "gone1"));
+    w.frames(4);
+    assert_eq!(*w.script.post_calls.lock().unwrap(), ["gone1"]);
+    let t = &w.app.social.timelines[&list_key];
+    assert_eq!(t.posts.iter().find(|p| p.id == "gone1").unwrap().text_markdown, "an unusual walrus, from the server");
+    assert!(w.app.social.index.contains(&acct, &post_key(&gone)), "indexed again");
+    let y = w.app.social.post_rects.iter().find(|r| r.0 == post_key(&gone)).expect("shown").1.min.y - w.app.social.list_rect.min.y;
+    assert!(y.abs() < 2.0, "at the top of the list: {y}");
+    // a post the server does not know: a message, and the list is as it was
+    let n = w.app.social.timelines[&list_key].posts.len();
+    w.app.social.index.clear();
+    w.app.open_post_hit(&hit_of(&acct, "list:1", Post { id: "nowhere".into(), ..gone }));
+    w.wait_for("no message", |w| w.app.toasts.iter().any(|t| t.0.contains("Could not fetch the post")));
+    assert_eq!(w.app.social.timelines[&list_key].posts.len(), n);
+    assert!(w.app.social.focus.is_none());
+    // a post the feed still holds is not fetched
+    let held = w.app.social.timelines[&list_key].posts[5].clone();
+    let calls = w.script.post_calls.lock().unwrap().len();
+    w.app.open_post_hit(&hit_of(&acct, "list:1", held));
+    w.frames(6);
+    assert_eq!(w.script.post_calls.lock().unwrap().len(), calls);
+}
+
+// spec: SOC-040
+#[test]
+fn the_settings_clear_and_rebuild_the_post_index() {
+    let mut w = W::new("indexsettings");
+    let acct = home().account;
+    // what the feeds hold is not indexed (the fixtures were put in without a load); something older is
+    for (f, p) in [("home", "h"), ("list:1", "l")] {
+        w.app.social.timelines.get_mut(&(acct.clone(), f.to_string())).unwrap().posts = recent(p, 40);
+    }
+    let old = post("old1", "bob", crate::cal_time::now() - 3600, None);
+    w.app.social.index.add(&acct, "home", std::slice::from_ref(&old));
+    w.app.open_settings(crate::app::SettingsTab::General);
+    w.frames(3);
+    assert_eq!(w.app.social.index.count(None), 1);
+    // Rebuild: clears and indexes what the open feeds hold (two lists of 40; a waiting post too)
+    w.app.social.timelines.get_mut(&(acct.clone(), "home".into())).unwrap().waiting = vec![post("waiting1", "bob", crate::cal_time::now() - 5, None)];
+    // the dialog scrolls: bring the section into view
+    while w.rect("index-rebuild").max.y > 850.0 {
+        w.scroll(150.0);
+    }
+    w.click("index-rebuild");
+    assert_eq!(w.app.social.index.count(None), 81);
+    assert!(w.app.social.index.search("old1", 5).is_empty(), "what no feed holds is gone");
+    assert!(w.app.toasts.iter().any(|t| t.0.contains("rebuilt: 81")));
+    // Clear asks first
+    w.click("index-clear");
+    assert!(w.app.social.confirm_clear);
+    assert_eq!(w.app.social.index.count(None), 81, "nothing is deleted before the answer");
+    w.click("index-clear-no");
+    assert!(!w.app.social.confirm_clear);
+    assert_eq!(w.app.social.index.count(None), 81);
+    w.click("index-clear");
+    w.click("index-clear-yes");
+    assert!(!w.app.social.confirm_clear);
+    assert_eq!(w.app.social.index.count(None), 0);
+    assert_eq!(w.app.social.timelines[&(acct, "home".to_string())].posts.len(), 40, "the feeds are untouched");
 }

@@ -22,6 +22,8 @@ pub const MAX_WAITING: usize = 1000;
 pub trait Source: Send + Sync {
     fn page(&self, feed: &Feed, cursor: Option<&str>) -> Result<Page, String>;
     fn newer(&self, feed: &Feed, since: &Since) -> Result<Fresh, String>;
+    /// One post by its id (SOC-039).
+    fn post(&self, id: &str) -> Result<Post, String>;
 }
 
 /// A hole in a list: posts between the post `above` (a `post_key`) and the one below it were not
@@ -158,7 +160,8 @@ enum Msg {
     Page { key: (String, String), client: Option<Client>, replace: bool, result: Result<Page, String> },
     Check { key: (String, String), client: Option<Client>, result: Result<Fresh, String> },
     Gap { key: (String, String), above: String, client: Option<Client>, result: Result<Page, String> },
-    Saved { post: String, label: &'static str, result: Result<SavedPost, String> },
+    Saved { post: String, account: String, feed: String, label: &'static str, result: Result<SavedPost, String> },
+    Fetched { tab: u64, account: String, feed: String, client: Option<Client>, result: Result<Box<Post>, String> },
 }
 
 pub struct SocialState {
@@ -196,6 +199,10 @@ pub struct SocialState {
     pub index: PostIndex,
     /// a search hit that a tab is to show (SOC-035)
     pub focus: Option<Focus>,
+    /// hits whose post has to be fetched first (tab, account, feed, post id), started by `start_fetches` (SOC-039)
+    pub fetch_wanted: Vec<(u64, String, String, String)>,
+    /// the Settings dialog asked "Clear the post search index?" and waits for the answer (SOC-040)
+    pub confirm_clear: bool,
     clients: HashMap<String, Client>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -238,6 +245,8 @@ impl SocialState {
             anchors: HashMap::new(),
             index: PostIndex::in_memory(),
             focus: None,
+            fetch_wanted: vec![],
+            confirm_clear: false,
             clients: HashMap::new(),
             tx,
             rx,
@@ -290,6 +299,31 @@ impl SocialState {
         let f = self.focus.take()?;
         self.timelines.get_mut(key)?.insert_found(f.post);
         Some(k)
+    }
+
+    /// Start the fetches that `open_post_hit` asked for: each post by its id, in a background job.
+    pub fn start_fetches(&mut self, ctx: &Context, accounts: &[SocialAccountEntry]) {
+        for (tab, account, feed, id) in std::mem::take(&mut self.fetch_wanted) {
+            let Some(e) = accounts.iter().find(|e| e.account.id == account) else { continue };
+            let (client, src) = (self.client_source(e), self.source.clone());
+            let (account2, feed2) = (account.clone(), feed.clone());
+            run(
+                ctx,
+                &self.tx,
+                move || {
+                    let (client, result) = match src {
+                        Some(s) => (None, s.post(&id).map(Box::new)),
+                        None => {
+                            let mut c = client();
+                            let r = c.fetch_post(&id).map(Box::new);
+                            (Some(c), r)
+                        }
+                    };
+                    Msg::Fetched { tab, account, feed, client, result }
+                },
+                move |m| Msg::Fetched { tab, account: account2, feed: feed2, client: None, result: Err(m) },
+            );
+        }
     }
 
     /// Forget everything about an account (removed).
@@ -490,20 +524,22 @@ impl SocialState {
     }
 
     /// Fetch the thread and the media of a post for the Import dialog.
-    pub fn save(&mut self, ctx: &Context, e: &SocialAccountEntry, post: &Post) {
+    pub fn save(&mut self, ctx: &Context, e: &SocialAccountEntry, feed: &str, post: &Post) {
         let key = post_key(post);
         if !self.saving.insert(key.clone()) {
             return;
         }
         let (client, post, label, demo, key2) = (self.client_source(e), post.clone(), e.account.network.label(), self.demo, key.clone());
+        let (account, feed) = (e.account.id.clone(), feed.to_string());
+        let (account2, feed2) = (account.clone(), feed.clone());
         run(
             ctx,
             &self.tx,
             move || {
                 let result = if demo { Ok(super::demo::saved(&post)) } else { Ok(client().save(&post)) };
-                Msg::Saved { post: key, label, result }
+                Msg::Saved { post: key, account, feed, label, result }
             },
-            move |m| Msg::Saved { post: key2, label, result: Err(m) },
+            move |m| Msg::Saved { post: key2, account: account2, feed: feed2, label, result: Err(m) },
         );
     }
 
@@ -593,16 +629,50 @@ impl SocialState {
                         Err(e) => t.check_error = Some(e),
                     }
                 }
-                Msg::Saved { post, label, result } => {
+                Msg::Saved { post, account, feed, label, result } => {
                     self.saving.remove(&post);
                     match result {
-                        Ok(s) => self.saved.push((s, label)),
+                        Ok(s) => {
+                            // the thread and the replies of other people are posts of the account too (SOC-037)
+                            let all: Vec<Post> = s.thread.iter().rev().cloned().chain(s.replies.iter().map(|r| r.post.clone())).collect();
+                            self.index.add(&account, &feed, &all);
+                            self.saved.push((s, label));
+                        }
                         Err(e) => self.messages.push(format!("Could not save the post: {e}")),
+                    }
+                }
+                Msg::Fetched { tab, account, feed, client, result } => {
+                    if let Some(c) = client {
+                        self.clients.insert(account.clone(), c);
+                    }
+                    match result {
+                        Ok(post) => {
+                            self.index.add(&account, &feed, std::slice::from_ref(&*post));
+                            self.focus = Some(Focus { tab, account, post: *post });
+                        }
+                        Err(e) => self.messages.push(format!("Could not fetch the post: {e}")),
                     }
                 }
             }
         }
         any
+    }
+
+    /// Forget every indexed post (Settings, SOC-040).
+    pub fn clear_index(&mut self) {
+        self.confirm_clear = false;
+        self.index.clear();
+    }
+
+    /// Clear the index and put in again every post the feeds hold in memory (the waiting ones too).
+    /// What no open feed holds is gone. Returns how many posts the index holds then (SOC-040).
+    pub fn rebuild_index(&mut self) -> usize {
+        self.index.clear();
+        for ((account, feed), t) in &self.timelines {
+            self.index.add(account, feed, &t.waiting);
+            self.index.add(account, feed, &t.posts);
+        }
+        self.index.count(None)
     }
 
     /// Fill the view with made-up posts (screenshots, tests).
@@ -640,7 +710,7 @@ mod tests {
         let mut st = SocialState::new(std::env::temp_dir());
         // a job that panics
         let tx = st.tx.clone();
-        run(&ctx, &tx, || panic!("boom"), |m| Msg::Saved { post: "p".into(), label: "Mastodon", result: Err(m) });
+        run(&ctx, &tx, || panic!("boom"), |m| Msg::Saved { post: "p".into(), account: "a".into(), feed: "home".into(), label: "Mastodon", result: Err(m) });
         st.saving.insert("p".into());
         wait(&mut st, |s| s.saving.is_empty());
         assert!(st.messages[0].contains("crashed"), "{:?}", st.messages);
@@ -683,6 +753,9 @@ mod tests {
     }
 
     impl Source for Fake {
+        fn post(&self, _id: &str) -> Result<Post, String> {
+            Err("no such post".into())
+        }
         fn page(&self, _feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
             self.page_calls.fetch_add(1, Ordering::SeqCst);
             Ok(self.pages.lock().unwrap().get(cursor.unwrap_or("")).cloned().unwrap_or_default())

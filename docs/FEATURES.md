@@ -417,7 +417,11 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   the notes; click one to open a new Feeds tab scrolled to it, also when the feed no longer has
   it. `from:ada`, `text:`, `in:` (quote, link card, the post answered, who boosted), `link:` and
   `date:2026-11` limit a word to one part. At most 10 000 posts per account and one year are
-  kept; removing an account removes its posts. (Mouse only for now.)
+  kept; removing an account removes its posts. Posts you save to the vault (the thread and the
+  replies below it) are searchable too, a reply knows the post it answers even when that arrives
+  later, and a hit whose post is gone from both index and feed is fetched from the server.
+  **Settings → General → Post search index** shows how many posts are indexed, **Rebuild**s it
+  from the posts your open feeds hold, or **Clear…**s it (after a question). (Mouse only for now.)
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.
