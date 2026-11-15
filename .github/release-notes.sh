@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints the release page text of one version: the AI notice (.github/ai-notice.md, BUILD-014)
+# Prints the release page text of one version: the AI notice (.github/ai-notice.md, BUILD-015)
 # and then the CHANGELOG.md section of the version (without its heading).
 # Fails when the changelog has no (or an empty) section for it.
 #   sh .github/release-notes.sh 0.2.0

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks the AI-development notice (spec BUILD-014): the first block of the README after the
+# Checks the AI-development notice (spec BUILD-015): the first block of the README after the
 # title and the badge is a "> [!WARNING]" alert whose next line is the headline of
 # .github/ai-notice.md, and the release notes start with .github/ai-notice.md.
 #   sh .github/check-ai-notice.sh [README.md]

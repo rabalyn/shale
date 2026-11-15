@@ -1,5 +1,5 @@
 #!/bin/sh
-# Tests .github/check-ai-notice.sh on throwaway READMEs (spec BUILD-014).
+# Tests .github/check-ai-notice.sh on throwaway READMEs (spec BUILD-015).
 #   sh .github/test-check-ai-notice.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"

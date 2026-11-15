@@ -114,7 +114,7 @@ jobs:
           sh .github/test-check-release.sh
           sh .forgejo/scripts/test-check-commit-issues.sh
 
-      # BUILD-014: the README and every release page start with the AI-development notice
+      # BUILD-015: the README and every release page start with the AI-development notice
       - name: Check the AI notice
         run: |
           sh .github/check-ai-notice.sh
