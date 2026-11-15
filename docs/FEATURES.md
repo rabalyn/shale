@@ -54,9 +54,13 @@ built-in demo vault (`shale --screenshot out.png`).
 
 ## Keyboard only: sidebar, file list and vim-style editing
 
+![The keybindings dialog](screenshots/keybindings.png)
+
 - Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back into the note. Ctrl+Shift+B opens
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
   folder to folder, Space opens or closes a folder, Enter opens a file.
+- Every shortcut of this section can be changed in Settings → Keybindings…; a key that another
+  action already uses is refused, and a binding can be a sequence of keys.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
@@ -447,16 +451,22 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Keyboard
 
+The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
+(everywhere, file list, search results; double bindings are refused). Text editing keys, vim
+keys and the keys inside the mail view are fixed.
+
 | Keys | Action |
 |---|---|
 | Ctrl+N | New note |
 | Ctrl+O | Quick switcher (find or create a note) |
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
+| Ctrl+S | Save now (notes also save automatically) |
+| Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
-| Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
-| ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
+| ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back |
 | Alt+← / Alt+→ | Back / forward |
 | Alt+↑ / Alt+↓ | Move the current line |

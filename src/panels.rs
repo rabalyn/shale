@@ -2,6 +2,7 @@
 //! to-do list and the dialogs.
 
 use crate::app::{graph_click, muted, Action, LeftPanel, Modal, RightPanel, ShaleApp, View};
+use crate::keys::{Action as KeyAction, Scope};
 use crate::layout::{icon_button, paint_icon, Icon};
 use crate::markdown;
 use crate::theme;
@@ -157,17 +158,9 @@ impl ShaleApp {
             self.tree_sel = None;
             return;
         };
-        let (next, prev, next_dir, prev_dir, space, enter, esc) = ui.input_mut(|i| {
-            (
-                i.consume_key(Modifiers::NONE, Key::J) | i.consume_key(Modifiers::NONE, Key::ArrowDown),
-                i.consume_key(Modifiers::NONE, Key::K) | i.consume_key(Modifiers::NONE, Key::ArrowUp),
-                i.consume_key(Modifiers::COMMAND, Key::J),
-                i.consume_key(Modifiers::COMMAND, Key::K),
-                i.consume_key(Modifiers::NONE, Key::Space),
-                i.consume_key(Modifiers::NONE, Key::Enter),
-                i.consume_key(Modifiers::NONE, Key::Escape),
-            )
-        });
+        let (action, enter, esc) = ui.input_mut(|i| (self.keymap.poll(i, Scope::FileList), i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
+        let is = |k: KeyAction| action == Some(k);
+        let (next, prev, next_dir, prev_dir, space) = (is(KeyAction::TreeNextFile), is(KeyAction::TreePrevFile), is(KeyAction::TreeNextFolder), is(KeyAction::TreePrevFolder), is(KeyAction::TreeToggleFolder));
         // the next row of the wanted kind in that direction (stays put at the ends)
         let step = |down: bool, dirs: bool| -> usize {
             let pick = |i: &usize| rows[*i].1 == dirs;
@@ -352,16 +345,9 @@ impl ShaleApp {
                 self.search_sel = None;
             } else {
                 let sel = sel.min(stops.len() - 1);
-                let (next, prev, next_file, prev_file, enter, back) = ui.input_mut(|i| {
-                    (
-                        i.consume_key(Modifiers::NONE, Key::J) | i.consume_key(Modifiers::NONE, Key::ArrowDown),
-                        i.consume_key(Modifiers::NONE, Key::K) | i.consume_key(Modifiers::NONE, Key::ArrowUp),
-                        i.consume_key(Modifiers::COMMAND, Key::J),
-                        i.consume_key(Modifiers::COMMAND, Key::K),
-                        i.consume_key(Modifiers::NONE, Key::Enter),
-                        i.consume_key(Modifiers::NONE, Key::Escape) | i.consume_key(Modifiers::NONE, Key::Slash),
-                    )
-                });
+                let (action, enter, back) = ui.input_mut(|i| (self.keymap.poll(i, Scope::SearchResults), i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape) | i.consume_key(Modifiers::NONE, Key::Slash)));
+                let is = |k: KeyAction| action == Some(k);
+                let (next, prev, next_file, prev_file) = (is(KeyAction::HitNext), is(KeyAction::HitPrev), is(KeyAction::HitNextFile), is(KeyAction::HitPrevFile));
                 let file = stops[sel].0;
                 let new = if next_file {
                     stops.iter().position(|s| s.0 > file).unwrap_or(sel)
@@ -709,6 +695,7 @@ impl ShaleApp {
         let Some(mut modal) = self.modal.take() else { return };
         let mut keep = true;
         let mut open_calendars = false;
+        let mut open_keybindings = false;
         let ctx = ui.ctx().clone();
         match &mut modal {
             Modal::QuickSwitch { query, sel } => {
@@ -838,7 +825,7 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) => {}
+            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::Keybindings(_) => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -918,6 +905,15 @@ impl ShaleApp {
                         keep = false;
                     }
                     ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Keyboard").color(theme::MUTED));
+                    ui.horizontal(|ui| {
+                        if ui.button("Keybindings…").on_hover_text("Change the shortcuts").clicked() {
+                            open_keybindings = true;
+                        }
+                        let changed = self.keymap.overrides().len();
+                        ui.label(muted(if changed == 0 { "all default".to_string() } else { format!("{changed} changed") }).size(12.0));
+                    });
+                    ui.add_space(8.0);
                     ui.label(egui::RichText::new("Links").color(theme::MUTED));
                     let mut changed = false;
                     changed |= ui.checkbox(&mut self.cfg.ctrl_to_follow, "Follow links only with Ctrl+click (plain click places the cursor)").changed();
@@ -985,6 +981,24 @@ impl ShaleApp {
         if open_calendars {
             self.open_calendar_settings();
             keep = false;
+        }
+        if open_keybindings {
+            self.modal = Some(Modal::Keybindings(Box::default()));
+            keep = false;
+        }
+        if let Modal::Keybindings(d) = &mut modal {
+            let mut changed = false;
+            let resp = crate::dialog::Dialog::new("keybindings", "Keybindings").width(560.0).show(&ctx, |ui| {
+                changed = crate::keys_ui::show(ui, d, &mut self.keymap);
+            });
+            if changed {
+                self.cfg.keybindings = self.keymap.overrides();
+                self.save_config();
+            }
+            if resp.should_close() {
+                self.keymap.recording = false;
+                keep = false;
+            }
         }
         if let Modal::Calendars(d) = &mut modal {
             let mut out = None;

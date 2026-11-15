@@ -109,12 +109,16 @@ Other options:
 
 - `--screenshot out.png` starts with a temporary demo vault, draws about 120 frames, saves a
   picture of the window and exits. Automated checks use it.
-- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import` (with `--screenshot`) chooses which
+- `--view tasks|graph|drawing|reading|calendar|mail|social|social-import|keybindings` (with `--screenshot`) chooses which
   view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
   `social-import` made-up posts; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
   shows a canvas without the question, and `convert:<file>.canvas` converts it first.
 
 ## Keyboard
+
+The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
+(everywhere, file list, search results; double bindings are refused). Text editing keys, vim
+keys and the keys inside the mail view are fixed.
 
 | Keys | Action |
 |---|---|
@@ -124,8 +128,8 @@ Other options:
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
 | Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back; u read, s or f flag, d delete, m move; **c compose, r reply, Shift+R reply all, Shift+F forward**. In a new mail: Ctrl+Enter sends, Esc closes (it asks whether to keep the draft) |
-| Ctrl+Shift+B | File list with the keyboard in it: j / k next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
-| ↓ or Enter in the search box | Browse the results: j / k next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
+| Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
+| ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Drag a tab | Reorder tabs; a marker shows where it lands |
