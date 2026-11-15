@@ -210,6 +210,18 @@ fn clean_message(mut raw: Vec<u8>) -> Vec<u8> {
     out
 }
 
+/// A header line: a field name (printable ASCII except the colon, RFC 5322) right before a colon.
+fn is_header_line(line: &[u8]) -> bool {
+    let name = line.iter().position(|&c| c == b':').unwrap_or(0);
+    name > 0 && line[..name].iter().all(|c| (33..=126).contains(c))
+}
+
+/// Thunderbird marked the message deleted (flag 0x0008 of `X-Mozilla-Status`) but has not compacted
+/// the folder yet, so its text is still in the file.
+fn is_deleted(headers: &str) -> bool {
+    mail::header_value(headers, "x-mozilla-status").and_then(|v| u32::from_str_radix(v.trim(), 16).ok()).map(|f| f & 0x0008 != 0).unwrap_or(false)
+}
+
 /// The message starting at `offset` in an mbox file.
 fn read_at(file: &Path, offset: u64) -> Option<Vec<u8>> {
     let mut f = crate::fsutil::open_read(file).ok()?;
@@ -227,7 +239,7 @@ fn read_at(file: &Path, offset: u64) -> Option<Vec<u8>> {
         if !first && prev_blank && line.starts_with(b"From ") {
             break;
         }
-        if first && !(line.starts_with(b"From ") || line.contains(&b':')) {
+        if first && !(line.starts_with(b"From ") || is_header_line(&line)) {
             return None; // not the start of a message (the folder was compacted?)
         }
         first = false;
@@ -319,11 +331,13 @@ fn scan_maildir(dir: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
     out
 }
 
+/// Messages in a folder whose headers pass `pick`; copies marked deleted are skipped.
 fn scan(place: &Path, pick: &dyn Fn(&str) -> bool) -> Vec<Vec<u8>> {
+    let live = |h: &str| !is_deleted(h) && pick(h);
     if place.is_dir() {
-        scan_maildir(place, pick)
+        scan_maildir(place, &live)
     } else {
-        scan_mbox(place, pick)
+        scan_mbox(place, &live)
     }
 }
 
