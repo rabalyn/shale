@@ -896,7 +896,7 @@ impl MailView {
         match it.state {
             State::Queued => {
                 ui.label(RichText::new(format!("Waiting: {}.", wait_text(it.send_after, now))).color(theme::TEXT));
-                let r = ui.button("Undo send");
+                let r = self.key_button(ui, "Undo send", KeyAction::MailUndoSend);
                 rec(rects, "mail:outbox:undo", &r);
                 if r.on_hover_text(self.tip("Take the mail back into the editor", KeyAction::MailUndoSend)).clicked() {
                     out.undo = Some(key.clone());
@@ -907,7 +907,7 @@ impl MailView {
             }
             State::Sent => {
                 ui.label(RichText::new("Sent.").color(theme::TEXT));
-                let r = ui.button("Dismiss");
+                let r = self.key_button(ui, "Dismiss", KeyAction::MailDelete);
                 rec(rects, "mail:outbox:discard", &r);
                 if r.on_hover_text(self.tip("Move this record to the mail trash folder; the mail itself is in Sent", KeyAction::MailDelete)).clicked() {
                     out.discard = Some(key.clone());
@@ -917,12 +917,12 @@ impl MailView {
                 ui.label(RichText::new("This mail was not sent.").size(15.0).color(theme::LINK_MISSING));
                 ui.label(muted(it.error.clone().unwrap_or_default()));
                 ui.horizontal(|ui| {
-                    for (k, label, slot, tip) in [
-                        ("mail:outbox:retry", "Retry", 0, self.tip("Send the mail again", KeyAction::MailRetry)),
-                        ("mail:outbox:edit", "Edit", 1, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
-                        ("mail:outbox:discard", "Discard", 2, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
+                    for (k, label, slot, action, tip) in [
+                        ("mail:outbox:retry", "Retry", 0, KeyAction::MailRetry, self.tip("Send the mail again", KeyAction::MailRetry)),
+                        ("mail:outbox:edit", "Edit", 1, KeyAction::MailEdit, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
+                        ("mail:outbox:discard", "Discard", 2, KeyAction::MailDelete, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
                     ] {
-                        let r = ui.button(label);
+                        let r = self.key_button(ui, label, action);
                         rec(rects, k, &r);
                         if r.on_hover_text(tip).clicked() {
                             match slot {
@@ -941,12 +941,12 @@ impl MailView {
                     ui.label(muted(e.clone()).size(12.0));
                 }
                 ui.horizontal(|ui| {
-                    for (k, label, slot, tip) in [
-                        ("mail:outbox:send-again", "Send again", 0, self.tip("Send the mail again, after you looked in Sent", KeyAction::MailRetry)),
-                        ("mail:outbox:edit", "Edit", 1, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
-                        ("mail:outbox:discard", "Discard", 2, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
+                    for (k, label, slot, action, tip) in [
+                        ("mail:outbox:send-again", "Send again", 0, KeyAction::MailRetry, self.tip("Send the mail again, after you looked in Sent", KeyAction::MailRetry)),
+                        ("mail:outbox:edit", "Edit", 1, KeyAction::MailEdit, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
+                        ("mail:outbox:discard", "Discard", 2, KeyAction::MailDelete, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
                     ] {
-                        let r = ui.button(label);
+                        let r = self.key_button(ui, label, action);
                         rec(rects, k, &r);
                         if r.on_hover_text(tip).clicked() {
                             match slot {

@@ -271,7 +271,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   results), Esc steps back. Everything has a key (see the Keyboard section), also syncing, the
   attachments, loading a message that is not here and switching the search scope, and all of them
   can be changed in Settings → Keybindings (Mail view). Keys do not act while you type. The row
-  menu shows the key of each entry, and the tooltip of a button names its key; both follow what you
+  menu shows the key of each entry, and the tooltip of a button names its key (the buttons of an outbox mail show it on the button too); all follow what you
   set in Keybindings.
 - **Read, flag, move, delete** (also with the buttons above the message, a right click on a row,
   and the buttons that appear when mails are marked). The keys work on the marked mails, else on

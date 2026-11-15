@@ -3043,16 +3043,23 @@ fn key_hints_on_menu_entries_and_tooltips_follow_the_registry() {
     w.frame(vec![]);
     w.outbox_go("Failed hint");
     w.frame(vec![]);
+    // the buttons of the detail also paint the key on the button itself (no hover needed)
+    assert!(w.shows_exactly("Shift+S") && w.shows_exactly("e") && w.shows_exactly("d / Delete"), "painted keys: {:?}", w.texts);
+    assert!(w.shows_exactly("Retry") && w.shows_exactly("Edit") && w.shows_exactly("Discard"), "the labels stay");
     w.hover("mail:outbox:retry");
     assert!(w.shows("Send the mail again (Shift+S)"), "the default key");
     w.hover("mail:outbox:edit");
     assert!(w.shows("(e)"), "Edit shows e");
     w.unhover();
     w.app.keymap.set(KeyAction::MailRetry, Binding::parse("X").unwrap()).unwrap();
+    w.frame(vec![]);
+    assert!(w.shows_exactly("x") && !w.shows_exactly("Shift+S"), "the rebound key is painted");
     w.hover("mail:outbox:retry");
     assert!(w.shows("Send the mail again (x)") && !w.shows("Shift+S"), "the rebound key");
     w.unhover();
     w.app.keymap.clear(KeyAction::MailRetry);
+    w.frame(vec![]);
+    assert!(!w.shows_exactly("x") && !w.shows_exactly("Shift+S") && w.shows_exactly("Retry"), "unbound: no key on the button");
     w.hover("mail:outbox:retry");
     assert!(w.shows_exactly("Send the mail again"), "no key, no hint: {:?}", w.texts);
 }

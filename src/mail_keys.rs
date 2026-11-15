@@ -55,6 +55,15 @@ impl MailView {
         }
     }
 
+    /// A button whose label is followed by the key of its action, as shortcut text; none when the action is unbound (MAIL-072).
+    pub(crate) fn key_button(&self, ui: &mut egui::Ui, label: &str, a: KeyAction) -> egui::Response {
+        let mut b = egui::Button::new(label);
+        if let Some(k) = self.kbd.hints.get(&a) {
+            b = b.shortcut_text(k.as_str());
+        }
+        ui.add(b)
+    }
+
     fn drafts_here(&self) -> Vec<DraftInfo> {
         match &self.local_view {
             Some(LocalView::Drafts(a)) => self.local_drafts.iter().filter(|d| &d.account == a).cloned().collect(),
