@@ -394,7 +394,7 @@ jobs:
           engine=$(sh .forgejo/scripts/env-tests.sh detect)
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
           if [ "$engine" = none ]; then
-            echo "SKIPPED: this runner cannot run containers inside the job container (neither 'podman info' nor 'docker info' works)."
+            echo "SKIPPED: this runner cannot run containers inside the job container (podman and docker cannot start a container here; the reason is above)."
             echo "The CalDAV and mail real-server tests did NOT run. What the runner needs: tests/caldav-env/README.md, section 'In CI'."
           else
             echo "Container engine: $engine"
