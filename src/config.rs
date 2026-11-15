@@ -403,7 +403,17 @@ pub fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
     crate::fsutil::write_atomic_private(path, data)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: the settings file of this thread (never the real one in ~/.config).
+    pub static CONFIG_TEST_PATH: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 pub fn config_path() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(p) = CONFIG_TEST_PATH.with(|c| c.borrow().clone()) {
+        return Some(p);
+    }
     dirs::config_dir().map(|d| d.join("shale").join("config.json"))
 }
 
@@ -628,6 +638,88 @@ mod tests {
         assert_eq!(c.font_size, 20.0);
         assert_eq!(c.other.get("new_thing"), Some(&serde_json::Value::Bool(true)));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Points the settings file of this test thread at `dir/shale/config.json`, and back at the
+    /// end (also when the test fails).
+    struct TestConfig(PathBuf);
+
+    impl TestConfig {
+        fn new(tag: &str) -> TestConfig {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let dir = std::env::temp_dir().join(format!("shale-config-{tag}-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            CONFIG_TEST_PATH.with(|c| *c.borrow_mut() = Some(dir.join("shale").join("config.json")));
+            TestConfig(dir)
+        }
+        fn file(&self) -> PathBuf {
+            self.0.join("shale").join("config.json")
+        }
+    }
+
+    impl Drop for TestConfig {
+        fn drop(&mut self) {
+            CONFIG_TEST_PATH.with(|c| *c.borrow_mut() = None);
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    // spec: CFG-001
+    #[test]
+    fn cfg_001_the_settings_are_saved_to_the_config_folder_and_loaded_again() {
+        let t = TestConfig::new("roundtrip");
+        let (c, problem) = Config::load();
+        assert!(problem.is_none() && !c.read_only, "a first start has no file and no problem");
+        let mut c = c;
+        c.font_size = 21.0;
+        c.remember_vault("/some/vault".into());
+        c.save().unwrap();
+        assert!(t.file().exists());
+        let (back, problem) = Config::load();
+        assert!(problem.is_none());
+        assert_eq!(back.font_size, 21.0);
+        assert_eq!(back.vault, Some(PathBuf::from("/some/vault")));
+        assert_eq!(back.recent, vec![PathBuf::from("/some/vault")]);
+    }
+
+    // spec: CFG-004
+    #[test]
+    fn cfg_004_load_reports_a_broken_file_and_save_still_works_afterwards() {
+        let t = TestConfig::new("corrupt");
+        write_private(&t.file(), b"{not json").unwrap();
+        let (mut c, problem) = Config::load();
+        assert!(problem.unwrap().contains("config.json.broken-"));
+        assert!(!c.read_only, "a broken file is replaced by the defaults, the original is kept");
+        c.font_size = 19.0;
+        c.save().unwrap();
+        assert_eq!(Config::load().0.font_size, 19.0);
+    }
+
+    // spec: CFG-007
+    #[test]
+    fn cfg_007_a_config_of_a_newer_shale_is_not_overwritten_by_save() {
+        let t = TestConfig::new("newer");
+        let newer = br#"{"version": 99, "font_size": 20.0}"#;
+        write_private(&t.file(), newer).unwrap();
+        let (mut c, problem) = Config::load();
+        assert!(c.read_only && problem.is_some());
+        c.font_size = 12.0;
+        assert!(c.save().is_ok(), "nothing to report: saving is skipped on purpose");
+        assert_eq!(std::fs::read(t.file()).unwrap(), newer);
+    }
+
+    // spec: DATA-009
+    #[test]
+    fn data_009_a_settings_file_that_cannot_be_written_is_an_error_for_the_caller() {
+        let t = TestConfig::new("unwritable");
+        // a folder where the file should be: the replacing rename cannot succeed
+        std::fs::create_dir_all(t.file().join("in-the-way")).unwrap();
+        let c = Config { font_size: 17.0, ..Config::default() };
+        let e = c.save().unwrap_err();
+        assert!(e.starts_with("could not save the settings"), "{e}");
+        assert!(t.file().is_dir(), "what was there is left alone");
+        assert_eq!(std::fs::read_dir(t.file().parent().unwrap()).unwrap().count(), 1, "no temporary file left");
     }
 
     // spec: VAULT-006

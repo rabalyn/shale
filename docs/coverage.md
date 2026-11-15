@@ -148,13 +148,13 @@ The first ten are ordered by how much a silent bug costs (data loss, wrong mail 
 not by line count. **Tooling** means a plain test is not sensible and a helper (DEV-004) should be
 proposed to the owner first; **test** means a plain unit or UI test is enough.
 
-1. **`vault.rs` `relocate` / `rewrite_drawing` (link rewrite, VAULT-016), 39 lines**: the
+1. **Closed (#56): `vault.rs` `relocate` / `rewrite_drawing` (link rewrite, VAULT-016), 39 lines**: tests now cover a note changed after the scan, an unreadable note and a drawing that cannot be written; `trash` and `restore` onto a taken name were already tested. Original gap: the
    `failed_rewrites` branches (lines 914, 929, 951 to 952: a note or drawing that changes on disk
    between planning and writing, a write that fails) have no test, and neither do `trash` and
    `restore` when the name is taken (1056 to 1088: "already there; the trashed copy stays"). Test:
    rename a note whose referrer is made read-only or edited meanwhile, and check `failed_rewrites`,
    that the other files are rewritten and that nothing is lost; restore into an occupied name. Kind: test.
-2. **`fsutil.rs` `rename_noreplace` fallback (209 to 219), `try_lock_file`, `open_private_log`**: the
+2. **Closed (#56): `fsutil.rs` `rename_noreplace` fallback (now `rename_noreplace_fallback`, tested directly) and `open_private_log`**; original gap: the
    path for systems without `renameat2` (hard link, then the exists check) is never run, yet every
    rename, trash and restore relies on its guarantee. Test: split the fallback into a function that
    takes "renameat2 unavailable" as an argument and check the three outcomes (new name, name taken,
@@ -233,8 +233,7 @@ More, in the order of the table:
   opener. Kind: tooling. **Closed (#63):** `FakeXdgOpen` is a recording fake `xdg-open` for one test
   thread (it never touches `PATH`); `opener.rs::real_opener_tests` check every SEC-006 rule through
   the real opener.
-- **`config.rs` `save`, `load`, `config_path` (397 to 445) and `vault_state.rs` `reload_settings`,
-  `adopt_legacy` (272 to 316)**: reading and writing the settings file and the first-start
+- **Closed (#56): `config.rs` `save`, `load`, `config_path` (a test-only path seam) and `vault_state.rs` `reload_settings`** (`adopt_legacy` was tested already). Original gap: reading and writing the settings file and the first-start
   migration. Test: point `XDG_CONFIG_HOME` at a temp dir; save, load, a corrupt file, a read-only
   directory. Kind: test.
 - **`tb_store.rs`: closed** (#63 part 2). `tb_fixture_tests.rs` generates Thunderbird profiles

@@ -536,6 +536,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // spec: CFG-006
+    #[test]
+    fn reload_settings_reads_what_git_sync_brought_and_reports_a_broken_file() {
+        let root = tmp("reload");
+        let (mut d, _) = VaultData::load(&root);
+        assert!(!d.settings_existed);
+        let p = VaultData::settings_path(&root);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        crate::fsutil::write_atomic(&p, br#"{"version": 1, "people_dir": "Kontakte"}"#).unwrap();
+        assert!(d.reload_settings().is_none());
+        assert_eq!(d.settings.people_dir, "Kontakte");
+        assert!(d.settings_existed && d.settings_writable());
+        // a file of a newer Shale is used, not writable, and reported
+        crate::fsutil::write_atomic(&p, br#"{"version": 99, "people_dir": "Neu"}"#).unwrap();
+        assert!(d.reload_settings().unwrap().contains("newer"));
+        assert_eq!(d.settings.people_dir, "Neu");
+        assert!(!d.settings_writable());
+        // a broken one is kept aside and the defaults are used
+        crate::fsutil::write_atomic(&p, b"{ nope").unwrap();
+        assert!(d.reload_settings().unwrap().contains("settings.json.broken-"));
+        assert_eq!(d.settings, VaultSettings::default());
+        // no vault open: nothing to read
+        let mut none = VaultData::default();
+        assert!(none.reload_settings().is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     // spec: CFG-008
     #[test]
     fn legacy_fields_fill_only_files_the_vault_did_not_have() {
