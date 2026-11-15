@@ -177,6 +177,104 @@ fn report_line(kind: &str, early: Option<&Got>, late: Option<&Got>) -> String {
     format!("  {kind}: while dragging {}, after the drop {}", say(early), say(late))
 }
 
+/// A drag from another program over the window, without any protocol: what the data offer
+/// listed, whether Shale takes it, and where the pointer is (IMP-011). The Wayland glue only
+/// feeds it events and sends what it returns; tests feed it the same way.
+#[derive(Debug, Clone)]
+pub struct Drag {
+    offered: Vec<String>,
+    /// the kind accepted (None: Shale can't take this drag)
+    mime: Option<String>,
+    pos: (f64, f64),
+}
+
+impl Drag {
+    /// The drag enters the window at `x`,`y`: the drag and the event to show.
+    pub fn enter(offered: Vec<String>, x: f64, y: f64) -> (Drag, DropEvent) {
+        let d = Drag { mime: pick_mime(&offered), offered, pos: (x, y) };
+        let e = d.over();
+        (d, e)
+    }
+
+    /// The kind accepted, if any.
+    pub fn mime(&self) -> Option<&str> {
+        self.mime.as_deref()
+    }
+
+    /// The pointer moves.
+    pub fn motion(&mut self, x: f64, y: f64) -> DropEvent {
+        self.pos = (x, y);
+        self.over()
+    }
+
+    fn over(&self) -> DropEvent {
+        let (x, y) = (self.pos.0 as f32, self.pos.1 as f32);
+        match &self.mime {
+            Some(_) => DropEvent::Hover { x, y },
+            None => DropEvent::Refused { x, y, offered: unique(&self.offered) },
+        }
+    }
+
+    /// The kinds to read while the drag is still over the window (none for a refused drag).
+    pub fn prefetch_kinds(&self) -> Vec<String> {
+        if self.mime.is_none() {
+            return vec![];
+        }
+        wanted_kinds(&self.offered).into_iter().filter(|k| early(k)).collect()
+    }
+
+    /// The drop: what to read, or (for a drag Shale can't take) the event that ends it.
+    pub fn drop(self) -> Result<Landing, DropEvent> {
+        if self.mime.is_none() {
+            return Err(DropEvent::Leave);
+        }
+        Ok(Landing { x: self.pos.0 as f32, y: self.pos.1 as f32, offered: self.offered })
+    }
+}
+
+/// A drop whose data is to be read.
+#[derive(Debug, Clone)]
+pub struct Landing {
+    x: f32,
+    y: f32,
+    offered: Vec<String>,
+}
+
+impl Landing {
+    /// The kinds to ask for after the drop, in reading order (the quick text kinds first).
+    pub fn read_order(&self) -> Vec<String> {
+        let kinds = wanted_kinds(&self.offered);
+        let mut order: Vec<String> = kinds.iter().filter(|k| early(k)).cloned().collect();
+        order.extend(kinds.iter().filter(|k| !early(k)).cloned());
+        order
+    }
+
+    /// The finished drop: `before` was read while dragging, `late` after the drop; the data of
+    /// the drop wins, the earlier data is the fallback (IMP-012).
+    pub fn finish(self, before: &[(String, Got)], late: &[(String, Got)]) -> DropEvent {
+        let find = |v: &[(String, Got)], k: &str| v.iter().find(|(m, _)| m == k).map(|(_, g)| g.clone());
+        let mut parts = Vec::new();
+        let mut report = Vec::new();
+        for k in wanted_kinds(&self.offered) {
+            let (e, l) = (find(before, &k), find(late, &k));
+            report.push(report_line(&k, e.as_ref(), l.as_ref()));
+            let data = l.as_ref().filter(|g| !g.data.is_empty()).or(e.as_ref().filter(|g| !g.data.is_empty())).map(|g| g.data.clone()).unwrap_or_default();
+            parts.push((k, data));
+        }
+        DropEvent::Drop { x: self.x, y: self.y, parts, offered: unique(&self.offered), report }
+    }
+}
+
+/// The same drop reaching the second listener (IMP-012): `last` is when the previous drop was
+/// taken; true when this one came too soon after it. Otherwise `now` is kept as `last`.
+fn is_repeat(last: &mut Option<Instant>, now: Instant) -> bool {
+    if last.map(|t| now.saturating_duration_since(t) < Duration::from_millis(800)).unwrap_or(false) {
+        return true;
+    }
+    *last = Some(now);
+    false
+}
+
 struct Shared {
     tx: Sender<DropEvent>,
     rx: Mutex<Option<Receiver<DropEvent>>>,
@@ -226,7 +324,7 @@ pub fn attach(handle: &impl winit::raw_window_handle::HasDisplayHandle) -> bool 
             let mut queue = conn.new_event_queue::<State>();
             let qh = queue.handle();
             conn.display().get_registry(&qh, ());
-            let mut state = State { conn: conn.clone(), manager: None, seats: vec![], devices: vec![], offers: HashMap::new(), current: None, pos: (0.0, 0.0), prefetch: None };
+            let mut state = State { conn: conn.clone(), manager: None, seats: vec![], devices: vec![], offers: HashMap::new(), current: None, prefetch: None };
             while queue.blocking_dispatch(&mut state).is_ok() {}
         })
         .is_ok()
@@ -239,9 +337,8 @@ struct State {
     devices: Vec<wl_data_device::WlDataDevice>,
     /// kinds offered by each pending offer
     offers: HashMap<ObjectId, Vec<String>>,
-    /// the drag over the window: its offer and the kind we accepted
-    current: Option<(wl_data_offer::WlDataOffer, Vec<String>, Option<String>)>,
-    pos: (f64, f64),
+    /// the drag over the window: its offer and what Shale made of it
+    current: Option<(wl_data_offer::WlDataOffer, Drag)>,
     /// data read while dragging, for the current offer
     prefetch: Option<(ObjectId, std::thread::JoinHandle<Vec<(String, Got)>>)>,
 }
@@ -303,87 +400,63 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
             }
             E::Enter { serial, x, y, id, .. } => {
                 let Some(offer) = id else { return };
-                let offered = state.offers.remove(&offer.id()).unwrap_or_default();
-                let mime = pick_mime(&offered);
-                offer.accept(serial, mime.clone());
+                let (drag, event) = Drag::enter(state.offers.remove(&offer.id()).unwrap_or_default(), x, y);
+                offer.accept(serial, drag.mime().map(str::to_string));
                 if offer.version() >= 3 {
                     // a copy only: never let the other program move (delete) its original
                     offer.set_actions(DndAction::Copy, DndAction::Copy);
                 }
-                state.pos = (x, y);
-                match &mime {
-                    Some(_) => send(DropEvent::Hover { x: x as f32, y: y as f32 }),
-                    None => send(DropEvent::Refused { x: x as f32, y: y as f32, offered: unique(&offered) }),
-                }
+                send(event);
                 // read what can be read already now (the drop may come too late for some programs)
-                if mime.is_some() {
-                    let kinds: Vec<String> = wanted_kinds(&offered).into_iter().filter(|k| early(k)).collect();
+                let kinds = drag.prefetch_kinds();
+                if !kinds.is_empty() {
                     let (o2, c2) = (offer.clone(), state.conn.clone());
                     // up to 6 s: making the message file may need the mail server
                     let h = std::thread::spawn(move || read_kinds(&o2, &c2, &kinds, Duration::from_millis(6000)));
                     state.prefetch = Some((offer.id(), h));
                 }
-                state.current = Some((offer, offered, mime));
+                state.current = Some((offer, drag));
                 let _ = conn.flush();
             }
             E::Motion { x, y, .. } => {
-                state.pos = (x, y);
-                match &state.current {
-                    Some((_, _, Some(_))) => send(DropEvent::Hover { x: x as f32, y: y as f32 }),
-                    Some((_, offered, None)) => send(DropEvent::Refused { x: x as f32, y: y as f32, offered: unique(offered) }),
-                    None => {}
+                if let Some((_, drag)) = &mut state.current {
+                    send(drag.motion(x, y));
                 }
             }
             E::Leave => {
-                if let Some((offer, _, _)) = state.current.take() {
+                if let Some((offer, _)) = state.current.take() {
                     offer.destroy();
                 }
                 send(DropEvent::Leave);
             }
             E::Drop => {
-                let Some((offer, offered, mime)) = state.current.take() else { return };
-                let Some(mime) = mime else {
-                    offer.destroy();
-                    send(DropEvent::Leave);
-                    return;
-                };
-                // the same drop reaching our second listener
-                {
-                    let mut last = shared().last_drop.lock().unwrap();
-                    if last.map(|t| t.elapsed() < Duration::from_millis(800)).unwrap_or(false) {
+                let Some((offer, drag)) = state.current.take() else { return };
+                let landing = match drag.drop() {
+                    Ok(l) => l,
+                    Err(end) => {
                         offer.destroy();
+                        send(end);
                         return;
                     }
-                    *last = Some(Instant::now());
+                };
+                if is_repeat(&mut shared().last_drop.lock().unwrap(), Instant::now()) {
+                    offer.destroy();
+                    return;
                 }
-                let _ = mime;
-                let (x, y) = (state.pos.0 as f32, state.pos.1 as f32);
                 let conn2 = state.conn.clone();
                 let _ = conn.flush();
                 let prefetch = state.prefetch.take().filter(|(id, _)| *id == offer.id()).map(|(_, h)| h);
                 send(DropEvent::Busy);
                 std::thread::spawn(move || {
-                    let kinds = wanted_kinds(&offered);
                     // everything at once, the quick text kinds first, with a short time limit
-                    let mut order: Vec<String> = kinds.iter().filter(|k| early(k)).cloned().collect();
-                    order.extend(kinds.iter().filter(|k| !early(k)).cloned());
-                    let late = read_kinds(&offer, &conn2, &order, Duration::from_millis(2500));
+                    let late = read_kinds(&offer, &conn2, &landing.read_order(), Duration::from_millis(2500));
                     let before: Vec<(String, Got)> = prefetch.and_then(|h| h.join().ok()).unwrap_or_default();
                     if offer.version() >= 3 {
                         offer.finish();
                     }
                     offer.destroy();
                     let _ = conn2.flush();
-                    let find = |v: &[(String, Got)], k: &str| v.iter().find(|(m, _)| m == k).map(|(_, g)| g.clone());
-                    let mut parts = Vec::new();
-                    let mut report = Vec::new();
-                    for k in &kinds {
-                        let (e, l) = (find(&before, k), find(&late, k));
-                        report.push(report_line(k, e.as_ref(), l.as_ref()));
-                        let data = l.as_ref().filter(|g| !g.data.is_empty()).or(e.as_ref().filter(|g| !g.data.is_empty())).map(|g| g.data.clone()).unwrap_or_default();
-                        parts.push((k.clone(), data));
-                    }
-                    send(DropEvent::Drop { x, y, parts, offered: unique(&offered), report });
+                    send(landing.finish(&before, &late));
                 });
             }
             E::Selection { id: Some(o) } => {
@@ -460,5 +533,67 @@ mod tests {
         assert_eq!((got[1].data.len(), got[1].closed), (0, true));
         assert_eq!((got[2].data.len(), got[2].closed), (0, false));
         assert!(report_line("text/plain", Some(&got[2]), Some(&got[1])).contains("while dragging no answer, after the drop empty"));
+    }
+
+    fn o(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    // spec: IMP-011
+    #[test]
+    fn imp_011_an_entering_drag_is_hovered_or_refused_and_follows_the_pointer() {
+        let (mut d, e) = Drag::enter(o(&["text/plain", "text/uri-list", "text/plain"]), 10.0, 20.0);
+        assert!(matches!(e, DropEvent::Hover { x, y } if (x, y) == (10.0, 20.0)));
+        assert_eq!(d.mime(), Some("text/uri-list"));
+        assert_eq!(d.prefetch_kinds(), o(&["text/uri-list", "text/plain"]));
+        assert!(matches!(d.motion(30.5, 40.0), DropEvent::Hover { x, y } if (x, y) == (30.5, 40.0)));
+        // a browser tab: refused, with every kind once, wherever it goes
+        let (mut d, e) = Drag::enter(o(&["application/x-tab", "DELETE", "DELETE"]), 1.0, 2.0);
+        assert!(matches!(&e, DropEvent::Refused { offered, .. } if *offered == o(&["application/x-tab", "DELETE"])));
+        assert!(d.mime().is_none() && d.prefetch_kinds().is_empty());
+        assert!(matches!(d.motion(5.0, 6.0), DropEvent::Refused { x, y, .. } if (x, y) == (5.0, 6.0)));
+    }
+
+    // spec: IMP-011
+    #[test]
+    fn imp_011_dropping_a_refused_drag_only_ends_it() {
+        let (d, _) = Drag::enter(o(&["application/x-tab"]), 1.0, 2.0);
+        assert!(matches!(d.drop(), Err(DropEvent::Leave)));
+        let (mut d, _) = Drag::enter(o(&["text/uri-list", "text/plain"]), 1.0, 2.0);
+        d.motion(7.0, 8.0);
+        let l = d.drop().unwrap();
+        assert_eq!(l.read_order(), o(&["text/uri-list", "text/plain"]));
+        assert!(matches!(l.finish(&[], &[]), DropEvent::Drop { x, y, .. } if (x, y) == (7.0, 8.0)));
+    }
+
+    // spec: IMP-012
+    #[test]
+    fn imp_012_a_finished_drop_prefers_late_data_and_reports_every_kind() {
+        let got = |d: &str, closed| Got { data: d.as_bytes().to_vec(), closed };
+        let (d, _) = Drag::enter(o(&["text/uri-list", "text/plain; charset=utf-8", "text/x-moz-url", "text/uri-list"]), 3.0, 4.0);
+        let l = d.drop().unwrap();
+        let before = vec![("text/uri-list".to_string(), got("file:///early", true)), ("text/plain; charset=utf-8".to_string(), got("early text", true)), ("text/x-moz-url".to_string(), got("", false))];
+        let late = vec![("text/uri-list".to_string(), got("file:///late", true)), ("text/plain; charset=utf-8".to_string(), got("", true)), ("text/x-moz-url".to_string(), got("", false))];
+        let DropEvent::Drop { x, y, parts, offered, report } = l.finish(&before, &late) else { panic!("not a drop") };
+        assert_eq!((x, y), (3.0, 4.0));
+        assert_eq!(offered, o(&["text/uri-list", "text/plain; charset=utf-8", "text/x-moz-url"]));
+        let data: Vec<(&str, &[u8])> = parts.iter().map(|(k, d)| (k.as_str(), d.as_slice())).collect();
+        assert_eq!(data, vec![("text/uri-list", &b"file:///late"[..]), ("text/x-moz-url", &b""[..]), ("text/plain; charset=utf-8", &b"early text"[..])]);
+        assert_eq!(report.len(), 3);
+        assert!(report[0].contains("while dragging 13 bytes, after the drop 12 bytes"), "{report:?}");
+        assert!(report[1].contains("while dragging no answer, after the drop no answer"), "{report:?}");
+        assert!(report[2].contains("while dragging 10 bytes, after the drop empty"), "{report:?}");
+    }
+
+    // spec: IMP-012
+    #[test]
+    fn imp_012_the_second_copy_of_a_drop_is_ignored() {
+        let t0 = Instant::now();
+        let mut last = None;
+        assert!(!is_repeat(&mut last, t0));
+        assert!(is_repeat(&mut last, t0 + Duration::from_millis(300)));
+        assert!(is_repeat(&mut last, t0 + Duration::from_millis(799)));
+        assert!(!is_repeat(&mut last, t0 + Duration::from_millis(900)), "a new drop later is taken");
+        assert!(is_repeat(&mut last, t0 + Duration::from_millis(1000)), "and starts a new window");
     }
 }

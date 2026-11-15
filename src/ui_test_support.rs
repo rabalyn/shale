@@ -31,8 +31,15 @@ impl Headless {
 
     /// Run one frame of a 1500 x 900 window with these events.
     pub fn frame(&mut self, app: &mut ShaleApp, events: Vec<Event>) -> egui::FullOutput {
+        self.frame_with(app, events, |_, _| {})
+    }
+
+    /// Like `frame`, with a last look at the input of the frame (files dropped through the
+    /// window system, a scripted step) before it runs.
+    pub fn frame_with(&mut self, app: &mut ShaleApp, events: Vec<Event>, adjust: impl FnOnce(&mut ShaleApp, &mut RawInput)) -> egui::FullOutput {
         self.t += 0.05;
-        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
+        let mut raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
+        adjust(app, &mut raw);
         let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
         out.textures_delta.clear();
         self.cursor = out.platform_output.cursor_icon;

@@ -193,9 +193,13 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    message. Kind: test.
 9. **`app/drops.rs` `handle_drops` (291 to 447, 46 % covered) and `wl_drop.rs` `event` (264 to 397,
    45 %)**: dropping files, folders and mails from other programs (Wayland data offers, MIME kinds,
-   the import dialog). The real drag-and-drop protocol cannot be driven by a headless UI test. Kind:
-   tooling (a small Wayland client or fake data-offer feeder for `wl_drop`, and a `--keys` step that
-   injects egui drops for `handle_drops`).
+   the import dialog). Done in #61 (DEV-012): `wl_drop.rs` is split into a protocol-free part
+   (`Drag`, `Landing`, `is_repeat`) with unit tests and a thin Wayland glue; `app/drops_tests.rs` feeds
+   `DropEvent`s and window-system files to `handle_drops` in the headless window (drop on a folder, a
+   note, the editor, nowhere; into an open dialog; hover, refusal and busy hints; unusable drops; no
+   vault; a drag inside the file list); the `--keys` step `drop:T:/a;;/b` drops files at a place. What
+   stays outside the tests is the Wayland glue itself (the calls on a real data offer) and the drag
+   out of the calendar. The line figures above are from before; measure again with the next report.
 10. **`drawing.rs` `continue_drag`, `begin_drag`, `end_drag`, `click` (1450 to 1815), 270 lines, and
     `panels.rs` `modals`, `tasks_view`, `tree` (218 to 1110), 330 lines**: moving, resizing and
     rotating elements, the modal dialogs, the task list view and the folder tree. Test: headless UI
