@@ -830,8 +830,18 @@ pub(crate) mod testkit {
         let have = ["gpg", "gpgsm", "gpgconf"].iter().all(|p| Command::new(p).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok());
         if !have {
             eprintln!("skipping: gpg, gpgsm and gpgconf are not installed here");
+            return false;
         }
-        have
+        // The GnuPG that comes with Git for Windows is an MSYS program: it reads `C:/…` as a relative path,
+        // so a throw-away home cannot be handed to it. Gpg4win's native GnuPG prints its home as a Windows path.
+        if cfg!(windows) {
+            let out = Command::new("gpg").arg("--version").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+            if out.lines().any(|l| l.starts_with("Home: /")) {
+                eprintln!("skipping: the gpg on the path is an MSYS build (Git for Windows); the tests need Gpg4win's native GnuPG");
+                return false;
+            }
+        }
+        true
     }
 
     impl TestHome {

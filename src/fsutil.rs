@@ -66,11 +66,32 @@ pub fn copy_new(src: &Path, dest: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Open a file for reading. On Windows a file that is being replaced at that moment (by an
+/// atomic save of another program, or of Shale) is "access denied" for a few milliseconds, so
+/// that error is tried again for a moment before it counts (DATA-013).
+fn open_retrying(path: &Path) -> io::Result<File> {
+    #[cfg(windows)]
+    {
+        let mut tries = 0;
+        loop {
+            match File::open(path) {
+                Err(e) if tries < 40 && e.kind() == io::ErrorKind::PermissionDenied => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                r => return r,
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    File::open(path)
+}
+
 /// Read a whole file. The error says which file could not be read.
 pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     let path = path.as_ref();
     let mut buf = Vec::new();
-    File::open(path).and_then(|mut f| f.read_to_end(&mut buf)).map_err(|e| named(path, e))?;
+    open_retrying(path).and_then(|mut f| f.read_to_end(&mut buf)).map_err(|e| named(path, e))?;
     Ok(buf)
 }
 
@@ -88,7 +109,7 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
 #[cfg(target_os = "linux")]
 pub fn open_read(path: impl AsRef<Path>) -> io::Result<File> {
     let path = path.as_ref();
-    File::open(path).map_err(|e| named(path, e))
+    open_retrying(path).map_err(|e| named(path, e))
 }
 
 /// Flush a file this program did not write itself (a copy another library made, such as a
@@ -857,7 +878,7 @@ mod tests {
             std::thread::spawn(move || {
                 let mut seen = 0;
                 while !stop.load(Ordering::Relaxed) {
-                    let data = fs::read(&*p).unwrap();
+                    let data = read(&*p).unwrap();
                     assert!(c.contains(&data), "torn read of {} bytes", data.len());
                     seen += 1;
                 }
