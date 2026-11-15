@@ -53,6 +53,9 @@ if [ "${1:-}" = "--list" ]; then
 fi
 
 [ -n "$shale" ] || { echo "regen: no shale binary; run cargo build --release or set SHALE" >&2; exit 1; }
+# an old build may not know a newer option and take its value for something else (BUILD-019, #85)
+newer=$(find "$root/src" "$root/Cargo.toml" "$root/Cargo.lock" -type f -newer "$shale" -print -quit 2>/dev/null || true)
+[ -z "$newer" ] || { echo "regen: $shale is older than ${newer#"$root"/}; build it again (or set SHALE)" >&2; exit 1; }
 if [ "${SHALE_REGEN_DISPLAY:-}" != host ]; then
     command -v xvfb-run >/dev/null || { echo "regen: xvfb-run is missing (or SHALE_REGEN_DISPLAY=host to use this session's display)" >&2; exit 1; }
 fi
