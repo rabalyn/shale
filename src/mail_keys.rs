@@ -37,9 +37,24 @@ pub struct Kbd {
     pub menu: Option<RowMenu>,
     /// The marked entry of the window of the unsent copies.
     pub unsent_sel: usize,
+    /// The current key of every action of the mail view, for the hints (MAIL-072); refreshed each frame.
+    pub hints: std::collections::HashMap<KeyAction, String>,
 }
 
 impl MailView {
+    /// Remember the keys of the registry as they are now (MAIL-072).
+    pub(crate) fn note_hints(&mut self, keys: &crate::keys::Keymap) {
+        self.kbd.hints = crate::keys::DEFS.iter().filter(|d| d.scope == crate::keys::Scope::MailView).filter_map(|d| keys.hint(d.action).map(|h| (d.action, h))).collect();
+    }
+
+    /// The tip of a control whose action has a key: `text (key)`, or `text` when the key is unbound.
+    pub(crate) fn tip(&self, text: &str, a: KeyAction) -> String {
+        match self.kbd.hints.get(&a) {
+            Some(k) => format!("{text} ({k})"),
+            None => text.to_string(),
+        }
+    }
+
     fn drafts_here(&self) -> Vec<DraftInfo> {
         match &self.local_view {
             Some(LocalView::Drafts(a)) => self.local_drafts.iter().filter(|d| &d.account == a).cloned().collect(),
@@ -172,19 +187,26 @@ impl MailView {
         self.open_menu_at(target, at);
     }
 
-    fn menu_entries(&self, target: MenuTarget) -> Vec<(String, String, MenuCmd)> {
+    /// Key, label, what it does, and the key of its action (empty: none).
+    fn menu_entries(&self, target: MenuTarget) -> Vec<(String, String, MenuCmd, String)> {
+        let hint = |a: KeyAction| self.kbd.hints.get(&a).cloned().unwrap_or_default();
         match target {
             MenuTarget::Message(i) => {
                 let Some(m) = self.row(i) else { return vec![] };
                 let read = if m.is_seen() { "Mark unread" } else { "Mark read" };
                 let flag = if m.is_flagged() { "Unflag" } else { "Flag" };
                 let del = if self.in_trash(m) { "Delete forever…" } else { "Delete" };
-                [("mail:ctx-read", read, Act::Read), ("mail:ctx-flag", flag, Act::Flag), ("mail:ctx-move", "Move…", Act::Move), ("mail:ctx-delete", del, Act::Delete)]
-                    .into_iter()
-                    .map(|(k, l, a)| (k.to_string(), l.to_string(), MenuCmd::Act(a)))
-                    .collect()
+                [
+                    ("mail:ctx-read", read, Act::Read, KeyAction::MailRead),
+                    ("mail:ctx-flag", flag, Act::Flag, KeyAction::MailFlag),
+                    ("mail:ctx-move", "Move…", Act::Move, KeyAction::MailMove),
+                    ("mail:ctx-delete", del, Act::Delete, KeyAction::MailDelete),
+                ]
+                .into_iter()
+                .map(|(k, l, a, key)| (k.to_string(), l.to_string(), MenuCmd::Act(a), hint(key)))
+                .collect()
             }
-            MenuTarget::Draft(i) => vec![(format!("mail:draft-discard:{i}"), "Discard draft".to_string(), MenuCmd::DiscardDraft)],
+            MenuTarget::Draft(i) => vec![(format!("mail:draft-discard:{i}"), "Discard draft".to_string(), MenuCmd::DiscardDraft, hint(KeyAction::MailDelete))],
         }
     }
 
@@ -246,8 +268,12 @@ impl MailView {
         let area = egui::Area::new(egui::Id::unique("mail-row-menu")).order(egui::Order::Foreground).fixed_pos(menu.at).show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_min_width(150.0);
-                for (k, (key, label, cmd)) in entries.iter().enumerate() {
-                    let b = ui.add(egui::Button::new(label.as_str()).selected(k == menu.sel).min_size(Vec2::new(ui.available_width(), 0.0)));
+                for (k, (key, label, cmd, hint)) in entries.iter().enumerate() {
+                    let mut button = egui::Button::new(label.as_str()).selected(k == menu.sel).min_size(Vec2::new(ui.available_width(), 0.0));
+                    if !hint.is_empty() {
+                        button = button.shortcut_text(hint.as_str());
+                    }
+                    let b = ui.add(button);
                     rects.push((key.clone(), b.rect));
                     if k == menu.sel {
                         rects.push(("mail:menu-sel".into(), b.rect));

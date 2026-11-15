@@ -2978,3 +2978,105 @@ fn z_takes_back_the_waiting_mail() {
     }
     assert!(smtp.state().received.is_empty() && smtp.state().commands.is_empty(), "nothing was sent");
 }
+
+impl W {
+    /// Is a text drawn that is exactly this (a key hint is a text of its own)?
+    fn shows_exactly(&self, text: &str) -> bool {
+        self.texts.iter().any(|(t, _)| t == text)
+    }
+
+    /// Rest the pointer on a control long enough for its tooltip to show.
+    fn hover(&mut self, key: &str) {
+        let p = self.rect(key).center();
+        self.frame(vec![Event::PointerMoved(p)]);
+        for _ in 0..16 {
+            self.frame(vec![]);
+        }
+    }
+
+    /// Move the pointer away, so the tooltip goes.
+    fn unhover(&mut self) {
+        self.frame(vec![Event::PointerMoved(Pos2::new(1400.0, 880.0))]);
+        for _ in 0..3 {
+            self.frame(vec![]);
+        }
+    }
+}
+
+// spec: MAIL-072
+#[test]
+fn key_hints_on_menu_entries_and_tooltips_follow_the_registry() {
+    use crate::keys::{Action as KeyAction, Binding};
+    let (mut w, _smtp) = compose_world("hints", 30);
+    let acct = w.account.id.clone();
+    // the row menu shows the keys that are set now (the keymap belongs to this app only)
+    w.press(Key::J, Modifiers::NONE);
+    w.press(Key::Menu, Modifiers::NONE);
+    assert!(w.has("mail:ctx-read"));
+    for hint in ["u", "s / f", "m", "d / Delete"] {
+        assert!(w.shows_exactly(hint), "the menu shows {hint:?}");
+    }
+    w.press(Key::Escape, Modifiers::NONE);
+    // a rebound key shows the new key, an unbound action none
+    w.app.keymap.set(KeyAction::MailRead, Binding::parse("G").unwrap()).unwrap();
+    w.app.keymap.clear(KeyAction::MailFlag);
+    w.press(Key::Menu, Modifiers::NONE);
+    assert!(w.has("mail:ctx-flag"), "the entry stays");
+    assert!(w.shows_exactly("g") && !w.shows_exactly("u"), "the rebound key replaces the old one");
+    assert!(!w.shows_exactly("s / f") && !w.shows_exactly("s") && !w.shows_exactly("f"), "an unbound action shows no hint");
+    assert!(w.shows_exactly("m") && w.shows_exactly("d / Delete"));
+    w.press(Key::Escape, Modifiers::NONE);
+    // the menu of a draft
+    Outbox::new(&w.app.mail.root).save_draft(&crate::outbox::tests::draft(&acct, "Hint draft", "words"), NOW).unwrap();
+    w.app.mail.refresh_local();
+    w.click(&format!("mail:drafts:{acct}"));
+    w.press(Key::J, Modifiers::NONE);
+    w.press(Key::Menu, Modifiers::NONE);
+    assert!(w.has("mail:draft-discard:0") && w.shows_exactly("d / Delete"));
+    w.press(Key::Escape, Modifiers::NONE);
+
+    // a button of the outbox shows its key in its tooltip
+    w.app.keymap.reset(KeyAction::MailFlag);
+    w.put_in_outbox("Failed hint", 1);
+    w.click(&format!("mail:outbox:{acct}"));
+    w.frame(vec![]);
+    w.outbox_go("Failed hint");
+    w.frame(vec![]);
+    w.hover("mail:outbox:retry");
+    assert!(w.shows("Send the mail again (Shift+S)"), "the default key");
+    w.hover("mail:outbox:edit");
+    assert!(w.shows("(e)"), "Edit shows e");
+    w.unhover();
+    w.app.keymap.set(KeyAction::MailRetry, Binding::parse("X").unwrap()).unwrap();
+    w.hover("mail:outbox:retry");
+    assert!(w.shows("Send the mail again (x)") && !w.shows("Shift+S"), "the rebound key");
+    w.unhover();
+    w.app.keymap.clear(KeyAction::MailRetry);
+    w.hover("mail:outbox:retry");
+    assert!(w.shows_exactly("Send the mail again"), "no key, no hint: {:?}", w.texts);
+}
+
+// spec: MAIL-073
+#[test]
+fn tab_focus_is_drawn_on_the_rows_of_drafts_and_outbox() {
+    let (mut w, _smtp) = compose_world("tabfocus", 30);
+    let acct = w.account.id.clone();
+    Outbox::new(&w.app.mail.root).save_draft(&crate::outbox::tests::draft(&acct, "Focus draft", "words"), NOW).unwrap();
+    w.put_in_outbox("Focus failed", 1);
+    for (folder, mark) in [(format!("mail:drafts:{acct}"), "mail:draft-focus:0"), (format!("mail:outbox:{acct}"), "mail:outbox-focus:0")] {
+        w.click(&folder);
+        w.frame(vec![]);
+        assert!(!w.has(mark), "{mark} is not drawn before Tab moves there");
+        let mut found = false;
+        for _ in 0..80 {
+            w.frame(vec![Event::Key { key: Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+            w.frame(vec![]);
+            if w.has(mark) {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "Tab reaches the row and {mark} is drawn");
+        assert!(w.rect(mark).width() > 100.0, "it frames the whole row");
+    }
+}

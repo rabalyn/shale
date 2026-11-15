@@ -52,6 +52,7 @@ impl MailView {
         if self.compose.is_some() {
             self.kbd.menu = None;
         }
+        self.note_hints(keys);
         self.handle_keys(ui, cfg, keys, modal_open, &mut actions);
         let full = ui.available_rect_before_wrap();
         ui.allocate_rect(full, Sense::hover());
@@ -84,13 +85,14 @@ impl MailView {
         if let Some((_, _, text)) = crate::mail_compose::queued_text(&self.local_items, crate::cal_time::now()) {
             let strip = Rect::from_min_size(body.min, Vec2::new(body.width(), 30.0));
             let mut undo = false;
+            let undo_tip = self.tip("Take the mail back into the editor", KeyAction::MailUndoSend);
             ui.scope_builder(UiBuilder::new().max_rect(strip).layout(Layout::left_to_right(Align::Center)), |ui| {
                 ui.set_clip_rect(strip.intersect(ui.clip_rect()));
                 ui.add_space(10.0);
                 ui.label(RichText::new(text).size(12.5).color(theme::TEXT));
                 let r = ui.small_button("Undo send");
                 rects.push(("mail:undo-send".into(), r.rect));
-                if r.clicked() {
+                if r.on_hover_text(undo_tip).clicked() {
                     undo = true;
                 }
             });
@@ -327,24 +329,24 @@ impl MailView {
         if self.any_sync_running() {
             let r = ui.button("Cancel sync");
             rec(rects, "mail:cancel", &r);
-            if r.clicked() {
+            if r.on_hover_text(self.tip("Stop the running sync", KeyAction::MailSync)).clicked() {
                 self.cancel_syncs();
             }
         } else {
             let r = ui.add_enabled(ready, egui::Button::new("Sync"));
             rec(rects, "mail:sync", &r);
-            if r.on_hover_text("Fetch new mail from the server (read-only)").clicked() {
+            if r.on_hover_text(self.tip("Fetch new mail from the server (read-only)", KeyAction::MailSync)).clicked() {
                 self.start_sync_all(cfg);
             }
         }
         let r = ui.add_enabled(ready, egui::Button::new("Compose"));
         rec(rects, "mail:compose", &r);
-        if r.on_hover_text("Write a new mail (c)").clicked() {
+        if r.on_hover_text(self.tip("Write a new mail", KeyAction::MailCompose)).clicked() {
             self.compose_new(cfg);
         }
         let r = ui.button("Accounts…");
         rec(rects, "mail:accounts", &r);
-        if r.clicked() {
+        if r.on_hover_text(self.tip("The settings of the mail accounts", KeyAction::MailAccounts)).clicked() {
             actions.push(MailAction::OpenAccounts);
         }
         ui.add_space(10.0);
@@ -356,7 +358,12 @@ impl MailView {
             st.store(ui.ctx(), id);
             ui.ctx().memory_mut(|m| m.request_focus(id));
         }
-        let r = ui.add(egui::TextEdit::singleline(&mut self.query).id(id).hint_text("Search mail  (from:  to:  subject:  \"phrase\")  ·  /").desired_width(300.0));
+        let r = ui.add(
+            egui::TextEdit::singleline(&mut self.query)
+                .id(id)
+                .hint_text(format!("Search mail  (from:  to:  subject:  \"phrase\"){}", self.kbd.hints.get(&KeyAction::MailSearch).map(|k| format!("  ·  {k}")).unwrap_or_default()))
+                .desired_width(300.0),
+        );
         rec(rects, "mail:search", &r);
         if r.changed() {
             self.query_edited();
@@ -368,12 +375,14 @@ impl MailView {
         let before = self.search_all;
         let a = ui.selectable_label(self.search_all, "All folders");
         rec(rects, "mail:scope-all", &a);
+        let scope_tip = self.tip("Search all folders or only this one", KeyAction::MailSearchScope);
+        let a = a.on_hover_text(scope_tip.as_str());
         if a.clicked() {
             self.search_all = true;
         }
         let b = ui.selectable_label(!self.search_all, "This folder");
         rec(rects, "mail:scope-folder", &b);
-        if b.clicked() {
+        if b.on_hover_text(scope_tip.as_str()).clicked() {
             self.search_all = false;
         }
         if before != self.search_all && !self.query.trim().is_empty() {
@@ -583,6 +592,7 @@ impl MailView {
             ui.label(RichText::new(title).size(13.0).color(theme::MUTED));
         });
         // what is going on with a folder that is not synced
+        let load_tip = self.tip("Load the list of this folder from the server", KeyAction::MailLoad);
         if let (None, Some(id)) = (&self.results, self.folder) {
             let row = self.folder_row(id).cloned();
             match self.listings.get(&id) {
@@ -599,7 +609,7 @@ impl MailView {
                         ui.label(RichText::new(format!("Could not load the list: {e}")).size(12.0).color(theme::LINK_MISSING));
                         let r = ui.small_button("Try again");
                         rec(rects, "mail:retry-list", &r);
-                        if r.clicked() {
+                        if r.on_hover_text(load_tip.as_str()).clicked() {
                             self.list_on_demand(cfg, id, true);
                         }
                     });
@@ -611,7 +621,7 @@ impl MailView {
                         ui.label(muted(format!("Not synced automatically: the list comes from the server when you open the folder ({n} new).")).size(12.0));
                         let r = ui.small_button("Refresh");
                         rec(rects, "mail:refresh-list", &r);
-                        if r.clicked() {
+                        if r.on_hover_text(load_tip.as_str()).clicked() {
                             self.list_on_demand(cfg, id, true);
                         }
                     });
@@ -632,7 +642,7 @@ impl MailView {
                 let n = self.marked.len();
                 let r = ui.button(format!("Import {n} to vault"));
                 rec(rects, "mail:import-marked", &r);
-                if r.clicked() {
+                if r.on_hover_text(self.tip("Make notes of the marked mails in the Import dialog", KeyAction::MailImport)).clicked() {
                     actions.push(MailAction::Import(self.marked.values().cloned().collect()));
                 }
                 if ui.small_button("Clear marks").clicked() {
@@ -646,10 +656,15 @@ impl MailView {
                 let read = if marked.iter().all(|m| m.is_seen()) { "Mark unread" } else { "Mark read" };
                 let flag = if marked.iter().all(|m| m.is_flagged()) { "Unflag" } else { "Flag" };
                 let del = if marked.iter().all(|m| self.in_trash(m)) { "Delete forever…" } else { "Delete" };
-                for (key, label, a) in [("mail:marked-read", read, Act::Read), ("mail:marked-flag", flag, Act::Flag), ("mail:marked-move", "Move…", Act::Move), ("mail:marked-delete", del, Act::Delete)] {
+                for (key, label, a, k) in [
+                    ("mail:marked-read", read, Act::Read, KeyAction::MailRead),
+                    ("mail:marked-flag", flag, Act::Flag, KeyAction::MailFlag),
+                    ("mail:marked-move", "Move…", Act::Move, KeyAction::MailMove),
+                    ("mail:marked-delete", del, Act::Delete, KeyAction::MailDelete),
+                ] {
                     let r = ui.small_button(label);
                     rec(rects, key, &r);
-                    if r.clicked() {
+                    if r.on_hover_text(self.tip(label.trim_end_matches('…'), k)).clicked() {
                         act = Some(a);
                     }
                 }
@@ -876,7 +891,7 @@ impl MailView {
                 let r = ui.add_enabled(can || !self.marked.is_empty(), egui::Button::new("Import to vault"));
                 rec(rects, "mail:import", &r);
                 let r = if can {
-                    r.on_hover_text("Make a note of this mail (or of the marked ones) in the Import dialog; nothing is written until you press Import there (i)")
+                    r.on_hover_text(self.tip("Make a note of this mail (or of the marked ones) in the Import dialog; nothing is written until you press Import there", KeyAction::MailImport))
                 } else {
                     r.on_disabled_hover_text("Load the message first: it was not downloaded")
                 };
@@ -889,13 +904,13 @@ impl MailView {
                 // answering needs the message text (MAIL-126)
                 let ready = msg.state == STATE_FULL;
                 for (key, label, kind, tip) in [
-                    ("mail:reply", "Reply", Kind::Reply, "Answer the sender (r)"),
-                    ("mail:reply-all", "Reply all", Kind::ReplyAll, "Answer everyone (Shift+R)"),
-                    ("mail:forward", "Forward", Kind::Forward, "Forward with the attachments (Shift+F)"),
+                    ("mail:reply", "Reply", Kind::Reply, self.tip("Answer the sender", KeyAction::MailReply)),
+                    ("mail:reply-all", "Reply all", Kind::ReplyAll, self.tip("Answer everyone", KeyAction::MailReplyAll)),
+                    ("mail:forward", "Forward", Kind::Forward, self.tip("Forward with the attachments", KeyAction::MailForward)),
                 ] {
                     let r = ui.add_enabled(ready, egui::Button::new(label));
                     rec(rects, key, &r);
-                    let r = if ready { r.on_hover_text(tip) } else { r.on_disabled_hover_text("Load the message first") };
+                    let r = if ready { r.on_hover_text(tip.as_str()) } else { r.on_disabled_hover_text("Load the message first") };
                     if r.clicked() {
                         answer = Some(kind);
                     }
@@ -906,14 +921,19 @@ impl MailView {
                 let live = !msg.gone_on_server;
                 let why = "This mail is gone from the server";
                 for (key, label, a, tip) in [
-                    ("mail:read-toggle", if all_read { format!("Mark{n} unread") } else { format!("Mark{n} read") }, Act::Read, "Mark as read or unread on the server (u)"),
-                    ("mail:flag-toggle", if all_flagged { format!("Unflag{n}") } else { format!("Flag{n}") }, Act::Flag, "Set or clear the flag on the server (s)"),
-                    ("mail:move", format!("Move{n}…"), Act::Move, "Move to another folder: type to find it (m)"),
-                    ("mail:delete", if all_trash { format!("Delete{n} forever…") } else { format!("Delete{n}") }, Act::Delete, if all_trash { "Remove from Trash for good, after you confirm (d)" } else { "Move to Trash (d)" }),
+                    ("mail:read-toggle", if all_read { format!("Mark{n} unread") } else { format!("Mark{n} read") }, Act::Read, self.tip("Mark as read or unread on the server", KeyAction::MailRead)),
+                    ("mail:flag-toggle", if all_flagged { format!("Unflag{n}") } else { format!("Flag{n}") }, Act::Flag, self.tip("Set or clear the flag on the server", KeyAction::MailFlag)),
+                    ("mail:move", format!("Move{n}…"), Act::Move, self.tip("Move to another folder: type to find it", KeyAction::MailMove)),
+                    (
+                        "mail:delete",
+                        if all_trash { format!("Delete{n} forever…") } else { format!("Delete{n}") },
+                        Act::Delete,
+                        self.tip(if all_trash { "Remove from Trash for good, after you confirm" } else { "Move to Trash" }, KeyAction::MailDelete),
+                    ),
                 ] {
                     let r = ui.add_enabled(live, egui::Button::new(label));
                     rec(rects, key, &r);
-                    let r = if live { r.on_hover_text(tip) } else { r.on_disabled_hover_text(why) };
+                    let r = if live { r.on_hover_text(tip.as_str()) } else { r.on_disabled_hover_text(why) };
                     if r.clicked() {
                         act = Some(a);
                     }
@@ -955,7 +975,7 @@ impl MailView {
                     ui.add_space(6.0);
                     let r = ui.button("Load this message");
                     rec(rects, "mail:load", &r);
-                    if r.clicked() {
+                    if r.on_hover_text(self.tip("Download this message from the server", KeyAction::MailLoad)).clicked() {
                         load = true;
                     }
                 }
@@ -976,12 +996,12 @@ impl MailView {
                                 ui.label(muted(size_text(a.data.len() as u64)).size(12.0));
                                 let o = ui.small_button("Open");
                                 rec(rects, format!("mail:att-open:{i}"), &o);
-                                if o.on_hover_text("Open a temporary copy with the default program").clicked() {
+                                if o.on_hover_text(self.tip("Open a temporary copy with the default program", KeyAction::MailAttOpen)).clicked() {
                                     open_att = Some(i);
                                 }
                                 let s = ui.small_button("Save to vault");
                                 rec(rects, format!("mail:att-save:{i}"), &s);
-                                if s.clicked() {
+                                if s.on_hover_text(self.tip("Save the attachment into the vault", KeyAction::MailAttSave)).clicked() {
                                     save_att = Some(i);
                                 }
                             });
