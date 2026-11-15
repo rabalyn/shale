@@ -2381,7 +2381,8 @@ fn compose_toggles_show_the_key_of_every_recipient_refuse_a_missing_one_and_send
     w.until("the keys were looked up again", |a| a.mail.compose.as_ref().is_some_and(|c| c.keys_for.is_some() && c.keys_for == Some(c.keys_signature())));
     w.ctrl_enter();
     let root = w.app.mail.root.clone();
-    w.until("the mail is in the outbox", move |_| !crate::outbox::Outbox::new(&root).list(None).is_empty());
+    // the job writes the outbox file before the window hears back, so wait for both (a slow runner sees the gap)
+    w.until("the mail is in the outbox and the window closed", move |a| a.mail.compose.is_none() && !crate::outbox::Outbox::new(&root).list(None).is_empty());
     let item = w.items().remove(0);
     let eml = crate::outbox::Outbox::new(&w.app.mail.root).read_eml(&item.account, &item.id).unwrap();
     assert!(!String::from_utf8_lossy(&eml).contains("the secret plan"), "the outbox holds the encrypted bytes");
