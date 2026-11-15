@@ -217,13 +217,15 @@ More, in the order of the table:
   `after_sync`, `sync_tick` (84 to 223), `app/mail.rs` `mail_dialog_action` (56 to 143),
   `link_assist.rs` `after` (219 to 393, 83 %), `social/accounts_ui.rs` `sign_in`, `poll` (110 to
   161, 76 %)**: the app-level glue and the views. Test: UI tests that drive the action and check
-  the state (the pattern of `mail_ui_tests.rs`). Kind: test. The sign-in of the Feeds dialog and
-  `oauth.rs` `sign_in` / `wait_for_code` (422 to 757) need a pretend browser: tooling (a helper that
-  opens the login URL like a person would; the mail-env provider could serve the Mastodon and
-  Bluesky sign-in too).
+  the state (the pattern of `mail_ui_tests.rs`). Kind: test. **Closed for the sign-in of the Feeds
+  dialog and `oauth.rs` `sign_in` / `wait_for_code` (#63):** the pretend browser
+  (`oauth_fake_tests.rs::pretend_browser`, `social/fake_server.rs::pretend_browser`) opens the login
+  URL like a person would (approve, deny, wrong state, never answers); the Feeds dialog is tested
+  against a pretend Mastodon and Bluesky server.
 - **`opener.rs` `launch`, `open_url`, `open_recovery_folder` (17 to 293)**: starting the desktop's
-  opener. Kind: tooling (a fake `xdg-open` first on `PATH` that records its arguments; the rule "no
-  other code starts an opener" is tested, the call itself is not).
+  opener. Kind: tooling. **Closed (#63):** `FakeXdgOpen` is a recording fake `xdg-open` for one test
+  thread (it never touches `PATH`); `opener.rs::real_opener_tests` check every SEC-006 rule through
+  the real opener.
 - **`config.rs` `save`, `load`, `config_path` (397 to 445) and `vault_state.rs` `reload_settings`,
   `adopt_legacy` (272 to 316)**: reading and writing the settings file and the first-start
   migration. Test: point `XDG_CONFIG_HOME` at a temp dir; save, load, a corrupt file, a read-only

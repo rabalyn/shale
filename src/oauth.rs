@@ -1266,3 +1266,153 @@ mod tests {
         assert!(matches!(refresh(&cfg, "x"), Err(OAuthError::Config(_))));
     }
 }
+
+/// The whole `sign_in` (the real listener, the real token exchange, the keyring of the tests)
+/// against the pretend provider, with the pretend browser deciding what the person does.
+#[cfg(test)]
+mod pretend_browser_tests {
+    use super::*;
+    use crate::oauth_fake_tests::{pretend_browser, FakeOAuth, Visit};
+
+    fn has_curl() -> bool {
+        std::process::Command::new("curl").arg("--version").output().is_ok()
+    }
+
+    /// An account of the pretend provider with an id of its own (keyring and registry are shared by tests).
+    fn account(id: &str, f: &FakeOAuth) -> MailAccount {
+        MailAccount {
+            id: id.into(),
+            user: "ada@example.com".into(),
+            oauth_provider: OAuthProvider::Custom,
+            oauth_client_id: "shale-test".into(),
+            oauth_auth_url: format!("http://127.0.0.1:{}/authorize", f.port),
+            oauth_token_url: format!("http://127.0.0.1:{}/token", f.port),
+            oauth_scope: "mail".into(),
+            ..MailAccount::default()
+        }
+    }
+
+    fn forget(id: &str) {
+        secrets::clear_mail_secret(id, MailSecret::RefreshToken);
+        forget_source(id);
+    }
+
+    // spec: MAIL-080, MAIL-083
+    #[test]
+    fn the_pretend_browser_approves_and_the_sign_in_keeps_the_refresh_token_in_the_keyring() {
+        if !has_curl() {
+            return;
+        }
+        let f = FakeOAuth::start();
+        let a = account("oauth-pb-ok", &f);
+        let (_guard, log) = pretend_browser(Visit::Approve);
+        let shown = Mutex::new(Vec::<String>::new());
+        let r = sign_in(&a, None, &AtomicBool::new(false), Duration::from_secs(20), &|u| shown.lock().unwrap().push(u.to_string())).unwrap();
+        assert_eq!(r.user.as_deref(), Some("ada@example.com"));
+        assert!(r.kept, "the keyring took the refresh token");
+        assert_eq!(log.wait_callbacks(1), vec![200], "the callback said the sign-in worked");
+        assert_eq!(*log.problems.lock().unwrap(), Vec::<String>::new(), "the address the app gave the browser was right");
+        // the address that was shown is the one that was opened, once
+        assert_eq!(*shown.lock().unwrap(), *log.opened.lock().unwrap());
+        assert_eq!(log.opened.lock().unwrap().len(), 1);
+        // the provider saw one sign-in page and one code exchange with the matching PKCE verifier
+        let st = f.state.lock().unwrap();
+        assert_eq!((st.authorize_requests.len(), st.token_requests.len()), (1, 1));
+        drop(st);
+        assert!(secrets::mail_secret("oauth-pb-ok", MailSecret::RefreshToken).is_some());
+        assert!(is_signed_in(&a));
+        forget("oauth-pb-ok");
+    }
+
+    // spec: MAIL-081
+    #[test]
+    fn a_no_in_the_browser_ends_the_sign_in_with_a_message_and_keeps_nothing() {
+        let f = FakeOAuth::start();
+        let a = account("oauth-pb-denied", &f);
+        forget(&a.id);
+        // the person says no on the callback itself ...
+        let (guard, log) = pretend_browser(Visit::Deny);
+        let r = sign_in(&a, None, &AtomicBool::new(false), Duration::from_secs(20), &|_| {});
+        assert!(matches!(&r, Err(OAuthError::Denied(t)) if t.contains("cancelled")), "{r:?}");
+        assert_eq!(log.wait_callbacks(1), vec![200], "the browser page tells the person that it is over");
+        assert!(log.problems.lock().unwrap().is_empty());
+        drop(guard);
+        // ... or the provider's own sign-in page redirects with the error
+        f.state.lock().unwrap().deny = true;
+        let (_guard, log) = pretend_browser(Visit::Approve);
+        let r = sign_in(&a, None, &AtomicBool::new(false), Duration::from_secs(20), &|_| {});
+        assert!(matches!(&r, Err(OAuthError::Denied(_))), "{r:?}");
+        assert!(log.problems.lock().unwrap().is_empty());
+        let st = f.state.lock().unwrap();
+        assert!(st.token_requests.is_empty(), "no code was exchanged: {:?}", st.token_requests);
+        drop(st);
+        assert!(secrets::mail_secret(&a.id, MailSecret::RefreshToken).is_none());
+        assert!(!is_signed_in(&a));
+    }
+
+    // spec: MAIL-081
+    #[test]
+    fn an_answer_with_the_wrong_state_is_refused_and_the_real_answer_still_signs_in() {
+        if !has_curl() {
+            return;
+        }
+        let f = FakeOAuth::start();
+        let a = account("oauth-pb-state", &f);
+        forget(&a.id);
+        let (_guard, log) = pretend_browser(Visit::WrongStateThenApprove);
+        let r = sign_in(&a, None, &AtomicBool::new(false), Duration::from_secs(20), &|_| {});
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(log.wait_callbacks(2), vec![400, 200], "the wrong state got an error page, the right one the success page");
+        assert!(log.problems.lock().unwrap().is_empty());
+        assert_eq!(f.state.lock().unwrap().token_requests.len(), 1, "only the real code was exchanged, not `evil`");
+        forget(&a.id);
+    }
+
+    // spec: MAIL-081, JOB-002
+    #[test]
+    fn a_wrong_state_alone_does_not_sign_in_and_cancel_ends_the_job() {
+        let f = FakeOAuth::start();
+        let a = account("oauth-pb-cancel", &f);
+        forget(&a.id);
+        let (_guard, log) = pretend_browser(Visit::WrongStateOnly);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (c2, a2) = (cancel.clone(), a.clone());
+        // the sign-in runs as a job, the way the account settings run it
+        let rx = crate::jobs::spawn(move || sign_in(&a2, None, &c2, Duration::from_secs(60), &|_| {}), || {});
+        assert_eq!(log.wait_callbacks(1), vec![400], "the wrong state is refused");
+        assert!(rx.try_recv().is_err(), "and the sign-in keeps waiting");
+        cancel.store(true, Ordering::SeqCst);
+        let r = rx.recv_timeout(Duration::from_secs(10)).expect("the job ended (the spinner stops)");
+        assert_eq!(r.unwrap().err(), Some(OAuthError::Cancelled));
+        assert!(f.state.lock().unwrap().token_requests.is_empty());
+        assert!(secrets::mail_secret(&a.id, MailSecret::RefreshToken).is_none());
+    }
+
+    // spec: MAIL-081, JOB-002
+    #[test]
+    fn a_browser_that_never_answers_ends_with_a_time_out_and_cancel_works_without_any_callback() {
+        let f = FakeOAuth::start();
+        let a = account("oauth-pb-silent", &f);
+        forget(&a.id);
+        let (_guard, log) = pretend_browser(Visit::Silent);
+        // time-out
+        let (a2, f_port) = (a.clone(), f.port);
+        let rx = crate::jobs::spawn(move || sign_in(&a2, None, &AtomicBool::new(false), Duration::from_millis(300), &|_| {}), || {});
+        let r = rx.recv_timeout(Duration::from_secs(10)).expect("the job ended (the spinner stops)");
+        assert_eq!(r.unwrap().err(), Some(OAuthError::TimedOut));
+        assert_eq!(log.opened.lock().unwrap().len(), 1);
+        // cancel, as soon as the browser was opened
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (c2, a3) = (cancel.clone(), a.clone());
+        let rx = crate::jobs::spawn(move || sign_in(&a3, None, &c2, Duration::from_secs(60), &|_| {}), || {});
+        log.wait_opened(2);
+        cancel.store(true, Ordering::SeqCst);
+        let r = rx.recv_timeout(Duration::from_secs(10)).expect("the job ended (the spinner stops)");
+        assert_eq!(r.unwrap().err(), Some(OAuthError::Cancelled));
+        // the browser was given a good address both times and nothing was kept
+        assert!(log.problems.lock().unwrap().is_empty(), "{:?}", log.problems.lock().unwrap());
+        assert!(log.opened.lock().unwrap().iter().all(|u| u.starts_with(&format!("http://127.0.0.1:{f_port}/authorize?"))));
+        assert!(log.callbacks.lock().unwrap().is_empty());
+        assert!(!is_signed_in(&a));
+    }
+}

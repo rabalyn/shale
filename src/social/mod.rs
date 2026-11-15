@@ -17,6 +17,8 @@
 pub mod accounts_ui;
 pub mod bluesky;
 pub mod demo;
+#[cfg(test)]
+mod fake_server;
 pub mod feed_ui;
 pub mod images;
 pub mod markup;

@@ -284,3 +284,121 @@ fn serve(mut s: TcpStream, st: &Arc<Mutex<FakeOAuthState>>) {
         _ => respond(&mut s, 404, "", "{}"),
     }
 }
+
+// ---------------------------------------------------------------- the pretend browser
+
+/// What the pretend browser does with the sign-in address it is given.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Visit {
+    /// Ask the provider's sign-in page, follow its redirect to the callback (what a person
+    /// who says "yes" gets; with `FakeOAuthState::deny` the provider's redirect says "no").
+    Approve,
+    /// The person says "no": the callback gets `error=access_denied`.
+    Deny,
+    /// Something else on the computer calls the callback with a wrong `state` first, then the
+    /// person approves.
+    WrongStateThenApprove,
+    /// Only the call with the wrong `state`; the real answer never comes.
+    WrongStateOnly,
+    /// The browser opens but nothing ever comes back (the tab is closed, the person went away).
+    Silent,
+}
+
+/// The record of a [`pretend_browser`]: what it was given and what the callback answered.
+#[derive(Clone, Default)]
+pub struct BrowserLog {
+    /// The addresses it was given.
+    pub opened: Arc<Mutex<Vec<String>>>,
+    /// HTTP status of every call it made to the local callback.
+    pub callbacks: Arc<Mutex<Vec<u16>>>,
+    /// What was wrong with the address (state, PKCE challenge, redirect), as sentences; empty when it was right.
+    pub problems: Arc<Mutex<Vec<String>>>,
+}
+
+impl BrowserLog {
+    /// Wait until the browser got `n` addresses.
+    pub fn wait_opened(&self, n: usize) {
+        self.wait("the browser to be opened", |l| l.opened.lock().unwrap().len() >= n);
+    }
+
+    /// Wait until the callback answered `n` times.
+    pub fn wait_callbacks(&self, n: usize) -> Vec<u16> {
+        self.wait("the callback to answer", |l| l.callbacks.lock().unwrap().len() >= n);
+        self.callbacks.lock().unwrap().clone()
+    }
+
+    fn wait(&self, what: &str, done: impl Fn(&BrowserLog) -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while !done(self) {
+            assert!(std::time::Instant::now() < deadline, "waited for {what}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
+/// Install the pretend browser: the program the app starts instead of a real browser in tests.
+/// It checks the address like a provider would (`response_type=code`, a `state`, an S256 PKCE
+/// challenge, the redirect to the loopback callback, no verifier) and then calls the callback
+/// the way a browser does after the person decided. Mistakes of the app are in
+/// [`BrowserLog::problems`] (the browser runs on its own thread, so it cannot fail the test itself).
+pub fn pretend_browser(visit: Visit) -> (crate::opener::BrowserGuard, BrowserLog) {
+    let log = BrowserLog::default();
+    let l = log.clone();
+    let guard = crate::opener::install_test_browser(Box::new(move |url| {
+        l.opened.lock().unwrap().push(url.to_string());
+        let (url, l) = (url.to_string(), l.clone());
+        std::thread::spawn(move || browse(&url, visit, &l));
+    }));
+    (guard, log)
+}
+
+fn browse(url: &str, visit: Visit, log: &BrowserLog) {
+    let problem = |t: String| log.problems.lock().unwrap().push(t);
+    let q = pairs(url.split_once('?').map(|(_, q)| q).unwrap_or(""));
+    let (state, redirect, challenge) = (get(&q, "state"), get(&q, "redirect_uri"), get(&q, "code_challenge"));
+    if get(&q, "response_type") != "code" {
+        problem("response_type is not code".into());
+    }
+    if state.len() < 16 {
+        problem(format!("the state is too short to be random: {state:?}"));
+    }
+    if get(&q, "code_challenge_method") != "S256" || challenge.len() != 43 {
+        problem(format!("not an S256 PKCE challenge: {challenge:?}"));
+    }
+    let port_ok = redirect.strip_prefix("http://127.0.0.1:").and_then(|r| r.strip_suffix('/')).is_some_and(|p| p.parse::<u16>().is_ok());
+    if !port_ok {
+        problem(format!("the redirect is not the loopback callback: {redirect:?}"));
+    }
+    if url.contains("code_verifier") {
+        problem("the PKCE verifier is in the address".into());
+    }
+    let callback = |query: String| {
+        let (status, _, _) = http_get(&format!("{redirect}?{query}"));
+        log.callbacks.lock().unwrap().push(status);
+    };
+    let approve = || {
+        // the provider's sign-in page: answers with the redirect a browser follows
+        let (status, head, _) = http_get(url);
+        let loc = head.lines().find_map(|l| l.strip_prefix("Location: ").or_else(|| l.strip_prefix("location: "))).map(|l| l.trim().to_string());
+        match (status, loc) {
+            (302, Some(loc)) => {
+                if !loc.starts_with(&redirect) || !loc.contains(&format!("state={state}")) {
+                    problem(format!("the provider did not redirect to the callback with our state: {loc}"));
+                }
+                let (status, _, _) = http_get(&loc);
+                log.callbacks.lock().unwrap().push(status);
+            }
+            (status, _) => problem(format!("the provider's sign-in page answered {status}, not a redirect")),
+        }
+    };
+    match visit {
+        Visit::Approve => approve(),
+        Visit::Deny => callback(format!("error=access_denied&error_description=The+user+denied&state={state}")),
+        Visit::WrongStateThenApprove => {
+            callback("code=evil&state=not-the-state".into());
+            approve();
+        }
+        Visit::WrongStateOnly => callback("code=evil&state=not-the-state".into()),
+        Visit::Silent => {}
+    }
+}
