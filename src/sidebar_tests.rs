@@ -6,26 +6,14 @@ use crate::app::{Options, RightPanel, ShaleApp};
 use crate::config::Config;
 use crate::sidebar::{Item, Layout};
 use crate::sidebar_ui::Cue;
-use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
+use crate::ui_test_support::Headless;
+use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, Rect, Vec2};
 use std::path::PathBuf;
 
 pub(crate) struct W {
     pub app: ShaleApp,
-    ctx: egui::Context,
-    t: f64,
+    hl: Headless,
     dir: PathBuf,
-    /// the text painted in the last frame, and where
-    pub text: Vec<(String, Pos2)>,
-    /// the mouse cursor the last frame asked for
-    pub cursor: egui::CursorIcon,
-}
-
-fn collect_text(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
-    match shape {
-        egui::Shape::Text(t) => out.push((t.galley.text().to_string(), t.pos)),
-        egui::Shape::Vec(v) => v.iter().for_each(|s| collect_text(s, out)),
-        _ => {}
-    }
 }
 
 impl W {
@@ -36,9 +24,7 @@ impl W {
         std::fs::write(dir.join("Welcome.md"), "# Welcome\n\n## First\n\n[[Other]]\n\n## Second\n").unwrap();
         std::fs::write(dir.join("Other.md"), "# Other\n\nSee [[Welcome]].\n").unwrap();
         let app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
-        let ctx = egui::Context::default();
-        crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, dir, text: vec![], cursor: egui::CursorIcon::Default };
+        let mut w = W { app, hl: Headless::new(), dir };
         w.frames(4);
         w
     }
@@ -56,14 +42,7 @@ impl W {
     }
 
     pub fn frame(&mut self, events: Vec<Event>) {
-        self.t += 0.05;
-        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
-        let app = &mut self.app;
-        let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
-        out.textures_delta.clear();
-        self.cursor = out.platform_output.cursor_icon;
-        self.text.clear();
-        out.shapes.iter().for_each(|c| collect_text(&c.shape, &mut self.text));
+        self.hl.frame(&mut self.app, events);
     }
 
     pub fn frames(&mut self, n: usize) {
@@ -72,22 +51,13 @@ impl W {
         }
     }
 
-    fn button(p: Pos2, pressed: bool) -> Event {
-        Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }
-    }
-
-    /// Press at `from`, move to `to` in two steps, and stay there with the button down.
+    /// Press at `from`, move to `to` and stay there with the button down.
     pub fn drag_to(&mut self, from: Pos2, to: Pos2) {
-        self.frame(vec![Event::PointerMoved(from)]);
-        self.frame(vec![Self::button(from, true)]);
-        self.frame(vec![Event::PointerMoved(from + Vec2::new(0.0, 12.0))]);
-        self.frame(vec![Event::PointerMoved(to)]);
-        self.frames(2);
+        self.hl.press_and_move(&mut self.app, from, &[from + Vec2::new(0.0, 12.0), to]);
     }
 
     pub fn release(&mut self, at: Pos2) {
-        self.frame(vec![Self::button(at, false)]);
-        self.frames(3);
+        self.hl.release(&mut self.app, at);
     }
 
     /// A whole drag and drop.
@@ -104,10 +74,7 @@ impl W {
     }
 
     pub fn click_at(&mut self, p: Pos2) {
-        self.frame(vec![Event::PointerMoved(p)]);
-        self.frame(vec![Self::button(p, true)]);
-        self.frame(vec![Self::button(p, false)]);
-        self.frames(3);
+        self.hl.click(&mut self.app, p, PointerButton::Primary);
     }
 
     pub fn ribbon_icon(&self, item: Item) -> Rect {
@@ -131,7 +98,7 @@ impl W {
     /// What the right sidebar says, one string per text.
     pub fn right_text(&self) -> Vec<String> {
         let x = self.app.side.right_rect.unwrap().min.x;
-        self.text.iter().filter(|(_, p)| p.x >= x).map(|(t, _)| t.clone()).collect()
+        self.hl.text.iter().filter(|(_, p)| p.x >= x).map(|(t, _)| t.clone()).collect()
     }
 
     pub fn right_has(&self, text: &str) -> bool {
@@ -322,7 +289,7 @@ fn lay_006_a_ribbon_icon_that_cannot_live_on_the_right_is_refused_with_a_no_drop
     let bar = w.bar(0).center();
     w.drag_to(mail, bar);
     assert_eq!(w.app.side.cue, Cue::Refused);
-    assert_eq!(w.cursor, egui::CursorIcon::NoDrop, "the pointer says no");
+    assert_eq!(w.hl.cursor, egui::CursorIcon::NoDrop, "the pointer says no");
     w.release(bar);
     assert_eq!(w.app.side.layout, before, "nothing changed");
     // over the content area, where a panel icon would make a new view
@@ -335,7 +302,7 @@ fn lay_006_a_ribbon_icon_that_cannot_live_on_the_right_is_refused_with_a_no_drop
     // a panel icon over the same place is accepted: the pointer is the grabbing hand
     let from = w.bar_icon(0, panel(RightPanel::Outline)).center();
     w.drag_to(from, body);
-    assert_eq!(w.cursor, egui::CursorIcon::Grabbing);
+    assert_eq!(w.hl.cursor, egui::CursorIcon::Grabbing);
     w.release(body);
 }
 
