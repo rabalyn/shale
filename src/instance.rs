@@ -75,7 +75,6 @@ mod tests {
 
     // spec: DATA-012
     #[test]
-    #[cfg(unix)]
     fn a_second_instance_is_refused_until_the_first_has_ended() {
         let dir = Dir::new();
         let first = acquire(&dir.0).unwrap();

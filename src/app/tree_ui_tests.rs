@@ -1,4 +1,4 @@
-//! Dragging in the file list (IMP-016) in the headless whole window: a note or folder is picked
+//! Dragging in the file list (IMP-017) in the headless whole window: a note or folder is picked
 //! up with the pointer, carried over rows, and let go; the tests look at the hint under the
 //! pointer and at the files on disk afterwards.
 
@@ -52,9 +52,9 @@ fn window(tag: &str) -> W {
     w
 }
 
-// spec: IMP-016
+// spec: IMP-017
 #[test]
-fn imp_016_a_folder_can_not_go_into_itself_or_into_its_own_child() {
+fn imp_017_a_folder_can_not_go_into_itself_or_into_its_own_child() {
     let mut w = window("tree-self");
     let sub = w.row("Sub");
     let deep = w.row("Sub/Deep");
@@ -75,9 +75,9 @@ fn imp_016_a_folder_can_not_go_into_itself_or_into_its_own_child() {
     assert!(w.app.toasts.is_empty(), "{:?}", w.app.toasts);
 }
 
-// spec: IMP-016
+// spec: IMP-017
 #[test]
-fn imp_016_dropping_where_it_already_is_changes_nothing() {
+fn imp_017_dropping_where_it_already_is_changes_nothing() {
     let mut w = window("tree-here");
     // a note onto the folder it is in
     let inner = w.row("Sub/Inner.md");
@@ -104,9 +104,9 @@ fn imp_016_dropping_where_it_already_is_changes_nothing() {
     assert!(w.root().join("Top.md").is_file() && w.app.toasts.is_empty());
 }
 
-// spec: IMP-016
+// spec: IMP-017
 #[test]
-fn imp_016_a_name_that_is_taken_is_refused_and_both_files_stay() {
+fn imp_017_a_name_that_is_taken_is_refused_and_both_files_stay() {
     let mut w = window("tree-clash");
     let welcome = w.row("Welcome.md");
     let sub = w.row("Sub");
@@ -120,9 +120,9 @@ fn imp_016_a_name_that_is_taken_is_refused_and_both_files_stay() {
     assert_eq!(std::fs::read_to_string(w.root().join("Sub/Welcome.md")).unwrap(), "# The other Welcome\n");
 }
 
-// spec: IMP-016
+// spec: IMP-017
 #[test]
-fn imp_016_a_note_dropped_on_a_folder_a_note_or_the_empty_list_moves_there() {
+fn imp_017_a_note_dropped_on_a_folder_a_note_or_the_empty_list_moves_there() {
     let mut w = window("tree-move");
     // on a note in another folder: next to it
     let top = w.row("Top.md");
@@ -154,9 +154,9 @@ fn imp_016_a_note_dropped_on_a_folder_a_note_or_the_empty_list_moves_there() {
     assert!(!root.join("Sub/Inner.md").exists());
 }
 
-// spec: IMP-016
+// spec: IMP-017
 #[test]
-fn imp_016_off_the_list_nothing_moves_and_a_closed_folder_opens_under_the_pointer() {
+fn imp_017_off_the_list_nothing_moves_and_a_closed_folder_opens_under_the_pointer() {
     let mut w = window("tree-hover");
     w.app.expanded.clear();
     w.frames(3);

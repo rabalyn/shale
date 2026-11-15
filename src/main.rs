@@ -7,6 +7,8 @@
 //!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
 //!   shale --screenshot out.png --keys 'click:@Sync|waitfor:@Compose'   (scripted input, see script.rs)
 //!   shale --screenshot out.png --size 1000x700   (window size; docs/screenshots/regen.sh makes all pictures)
+//!
+//! An unknown option or a missing value is an error (exit code 2), never a vault folder.
 
 mod app;
 mod cal_dav;
@@ -102,8 +104,10 @@ mod start_dialog_tests;
 #[cfg(test)]
 mod tab_order_tests;
 mod tagwords;
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tb_fixture_tests;
+// Thunderbird's own mail folders, looked up for dropped messages (Wayland, IMP-008)
+#[cfg(target_os = "linux")]
 mod tb_store;
 mod theme;
 #[cfg(test)]
@@ -127,13 +131,18 @@ fn parse_size(s: &str) -> Option<[f32; 2]> {
     (w >= 720.0 && h >= 480.0).then_some([w, h])
 }
 
+const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [--screenshot <file.png> [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]";
+
 /// What the command line asked for.
 #[derive(Debug, PartialEq)]
 struct Cli {
     screenshot: Option<PathBuf>,
     vault: Option<PathBuf>,
+    /// testing aid for screenshots: tasks | graph | drawing | reading | …
     view: Option<String>,
+    /// testing aid with --screenshot: scripted input, e.g. "text:[!/|key:Down|key:Tab"
     keys: Option<String>,
+    /// testing aid with --screenshot: the window size in points
     size: [f32; 2],
 }
 
@@ -143,37 +152,41 @@ enum Parsed {
     Run(Cli),
     /// `-h`: print the usage and end with success
     Help,
-    /// a value that cannot be used: the message for stderr; the exit code is 2
+    /// something that cannot be used: the message for stderr; the exit code is 2
     Bad(String),
 }
 
-/// Read the arguments after the program name. Unknown options are ignored; a bare word is the vault
-/// (when `--vault` did not give one).
-fn parse_args(args: impl Iterator<Item = String>) -> Parsed {
+/// Read the arguments after the program name (DEV-013), without any output or exit. Anything it
+/// does not understand is an error, so the value of an unknown option never becomes a vault
+/// folder (BUILD-019); a bare word is the vault folder, and only one is allowed.
+fn parse_args(args: impl IntoIterator<Item = String>) -> Parsed {
+    read_args(args).unwrap_or_else(Parsed::Bad)
+}
+
+fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
     let mut cli = Cli { screenshot: None, vault: None, view: None, keys: None, size: [1360.0, 840.0] };
-    let mut args = args;
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--screenshot" => cli.screenshot = args.next().map(PathBuf::from),
-            "--vault" => cli.vault = args.next().map(PathBuf::from),
-            // testing aid for screenshots: tasks | graph | drawing | reading
-            "--view" => cli.view = args.next(),
-            // testing aid with --screenshot: scripted typing, e.g. "text:[!/|key:Down|key:Tab"
-            "--keys" => cli.keys = args.next(),
-            // testing aid with --screenshot: the window size in points, e.g. 1000x700
-            "--size" => match args.next().as_deref().and_then(parse_size) {
-                Some(s) => cli.size = s,
-                None => return Parsed::Bad("--size needs WIDTHxHEIGHT, e.g. 1360x840".into()),
+    let mut args = args.into_iter();
+    while let Some(opt) = args.next() {
+        let mut value = || args.next().ok_or_else(|| format!("{opt} needs a value"));
+        match opt.as_str() {
+            "--screenshot" => cli.screenshot = Some(PathBuf::from(value()?)),
+            "--vault" => cli.vault = Some(PathBuf::from(value()?)),
+            "--view" => cli.view = Some(value()?),
+            "--keys" => cli.keys = Some(value()?),
+            "--size" => {
+                let v = value()?;
+                cli.size = parse_size(&v).ok_or_else(|| format!("--size needs WIDTHxHEIGHT (at least 720x480), e.g. 1360x840, not {v}"))?;
+            }
+            "-h" | "--help" => return Ok(Parsed::Help),
+            o if o.starts_with('-') => return Err(format!("unknown option {o}")),
+            folder => match &cli.vault {
+                None => cli.vault = Some(PathBuf::from(folder)),
+                Some(v) => return Err(format!("one vault folder only, got {} and {folder}", v.display())),
             },
-            "-h" | "--help" => return Parsed::Help,
-            other if !other.starts_with('-') && cli.vault.is_none() => cli.vault = Some(PathBuf::from(other)),
-            _ => {}
         }
     }
-    if let Err(e) = script::parse(cli.keys.as_deref().unwrap_or("")) {
-        return Parsed::Bad(format!("--keys: {e}"));
-    }
-    Parsed::Run(cli)
+    script::parse(cli.keys.as_deref().unwrap_or("")).map_err(|e| format!("--keys: {e}"))?;
+    Ok(Parsed::Run(cli))
 }
 
 fn main() -> eframe::Result {
@@ -184,11 +197,11 @@ fn main() -> eframe::Result {
     let Cli { screenshot, vault, view, keys, size } = match parse_args(std::env::args().skip(1)) {
         Parsed::Run(cli) => cli,
         Parsed::Help => {
-            println!("shale [--vault <folder>] [--screenshot <file.png>]");
+            println!("{USAGE}");
             return Ok(());
         }
         Parsed::Bad(message) => {
-            eprintln!("{message}");
+            eprintln!("shale: {message}\n{USAGE}");
             std::process::exit(2);
         }
     };
@@ -261,6 +274,31 @@ mod tests {
         }
     }
 
+    fn bad(args: &[&str]) -> String {
+        match parse(args) {
+            Parsed::Bad(m) => m,
+            other => panic!("{args:?}: {other:?}"),
+        }
+    }
+
+    // spec: BUILD-019 (#85: an old build skipped --size and opened "1360x840" as a new vault)
+    #[test]
+    fn an_unknown_option_is_an_error_not_a_vault() {
+        assert_eq!(bad(&["--sise", "1360x840"]), "unknown option --sise");
+        assert_eq!(bad(&["-x"]), "unknown option -x");
+        assert_eq!(bad(&["notes", "1360x840"]), "one vault folder only, got notes and 1360x840");
+        assert_eq!(bad(&["--vault", "a", "b"]), "one vault folder only, got a and b");
+        assert!(bad(&["--size", "1360"]).contains("not 1360"));
+    }
+
+    // spec: BUILD-019
+    #[test]
+    fn an_option_needs_its_value() {
+        for o in ["--screenshot", "--vault", "--view", "--keys", "--size"] {
+            assert_eq!(bad(&[o]), format!("{o} needs a value"));
+        }
+    }
+
     // spec: DEV-007
     #[test]
     fn a_window_size_is_width_x_height_and_not_tiny() {
@@ -283,22 +321,22 @@ mod tests {
         assert_eq!(c, Cli { screenshot: Some("out.png".into()), vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1000.0, 700.0] });
     }
 
-    // spec: DEV-013
+    // spec: DEV-013, BUILD-019
     #[test]
-    fn a_bare_word_is_the_vault_unless_one_was_given() {
+    fn a_bare_word_is_the_vault_and_a_second_one_is_an_error() {
         assert_eq!(cli(parse(&["/notes"])).vault, Some(PathBuf::from("/notes")));
-        assert_eq!(cli(parse(&["--vault", "/a", "/b"])).vault, Some(PathBuf::from("/a")), "--vault wins over a bare word before it");
-        assert_eq!(cli(parse(&["/b", "--vault", "/a"])).vault, Some(PathBuf::from("/a")), "and after it");
-        assert_eq!(cli(parse(&["/a", "/b"])).vault, Some(PathBuf::from("/a")), "the first bare word counts");
+        assert_eq!(cli(parse(&["/b", "--vault", "/a"])).vault, Some(PathBuf::from("/a")), "--vault after a bare word wins");
+        assert_eq!(bad(&["--vault", "/a", "/b"]), "one vault folder only, got /a and /b");
+        assert_eq!(bad(&["/a", "/b"]), "one vault folder only, got /a and /b");
     }
 
-    // spec: DEV-013
+    // spec: DEV-013, BUILD-019
     #[test]
-    fn unknown_options_and_missing_values_are_ignored() {
-        let c = cli(parse(&["--nonsense", "--vault"]));
-        assert_eq!((c.vault, c.screenshot), (None, None));
-        assert_eq!(cli(parse(&["--screenshot"])).screenshot, None);
-        assert_eq!(cli(parse(&["-x", "--view"])).view, None);
+    fn unknown_options_and_missing_values_are_errors() {
+        assert_eq!(bad(&["--nonsense", "--vault"]), "unknown option --nonsense");
+        assert_eq!(bad(&["--vault"]), "--vault needs a value");
+        assert_eq!(bad(&["--screenshot"]), "--screenshot needs a value");
+        assert_eq!(bad(&["-x", "--view"]), "unknown option -x");
     }
 
     // spec: DEV-013
@@ -312,11 +350,9 @@ mod tests {
     // spec: DEV-013
     #[test]
     fn a_bad_size_is_an_error_for_exit_code_2() {
-        for bad in [&["--size", "100x100"][..], &["--size", "1360"], &["--size", "axb"], &["--size"]] {
-            match parse(bad) {
-                Parsed::Bad(m) => assert!(m.contains("--size needs WIDTHxHEIGHT"), "{m}"),
-                other => panic!("{bad:?}: {other:?}"),
-            }
+        for bad_args in [&["--size", "100x100"][..], &["--size", "1360"], &["--size", "axb"], &["--size"]] {
+            let m = self::bad(bad_args);
+            assert!(m.contains("--size needs"), "{m}");
         }
         assert_eq!(cli(parse(&["--size", "720x480"])).size, [720.0, 480.0], "the smallest window is allowed");
     }

@@ -1,1 +1,4 @@
+# Text files are LF in the working tree on every system (Windows checkouts would otherwise turn
+# them into CRLF, and tests compare exact bytes of fixtures and source files, BUILD-005)
+* text=auto eol=lf
 docs/screenshots/fixtures/*.eml -text

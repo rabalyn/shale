@@ -1,18 +1,23 @@
-# Builds and publishes Shale's releases on GitHub. Day-to-day CI (every push and pull request,
-# and the weekly dependency audit) runs on the homelab Forgejo instead: .forgejo/workflows/ci.yml.
-# GitHub only gets `main` and the version tags that make-release.sh pushes.
-# - every version tag (v0.2.0, …): checks, builds and tests it again, and publishes a release page
-#   named after the version, with that version's notes from CHANGELOG.md (the tag must match the
-#   version in Cargo.toml), the tarball, its .sha256 file and its build attestation
-# - workflow_dispatch: the same checks, build and attestation without publishing, to try the
-#   workflow (the files are a workflow artifact)
-# The attestation (BUILD-014) is keyless: GitHub signs it through Sigstore with a short-lived
-# certificate naming this repository, this workflow and the tag, so there is no key to keep.
+# GitHub does two jobs for Shale. Day-to-day CI for Linux (every push and pull request, and the
+# weekly dependency audit) runs on the homelab Forgejo instance instead: .forgejo/workflows/ci.yml.
+# 1. Releases (BUILD-012): GitHub gets the version tags that make-release.sh pushes.
+#    - every version tag (v0.2.0, ...): checks, builds and tests it again on Linux, and publishes a
+#      release page named after the version, with that version's notes from CHANGELOG.md (the tag
+#      must match the version in Cargo.toml), the tarball, its .sha256 file and its build attestation
+#    - workflow_dispatch: the same checks, build and attestation without publishing, to try the
+#      workflow (the files are a workflow artifact)
+#    The attestation (BUILD-014) is keyless: GitHub signs it through Sigstore with a short-lived
+#    certificate naming this repository, this workflow and the tag, so there is no key to keep.
+# 2. macOS and Windows (BUILD-005, BUILD-017): the homelab cannot run those systems, so the jobs
+#    `macos` and `windows` lint, build and test Shale there on every push to `main` (the Forgejo
+#    mirror job pushes `main` here once Forgejo's CI has passed, BUILD-016) and by hand. They
+#    publish nothing; the Linux release job and the audit do not run for a push to `main`.
 name: build
 
 on:
   push:
     tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 # each job asks for what it needs
@@ -20,6 +25,8 @@ permissions: {}
 
 jobs:
   linux:
+    # releases only: a push to `main` runs the macOS and Windows jobs
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write # the release page
       id-token: write # the OIDC token that Sigstore turns into the signing certificate
@@ -144,9 +151,63 @@ jobs:
             gh release create "$GITHUB_REF_NAME" release/* --title "Shale $VERSION" --notes-file release-notes.md --verify-tag
           fi
 
+  # Shale on macOS and on Windows (BUILD-017): each lints the code of its own system (the `cfg`
+  # parts), builds and tests it. Same pinned actions and compiler as the Linux job.
+  macos:
+    permissions:
+      contents: read
+    env:
+      RUSTFLAGS: -D warnings
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.100.0
+          components: clippy
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Test
+        run: cargo test --release --locked
+
+  windows:
+    permissions:
+      contents: read
+    env:
+      RUSTFLAGS: -D warnings
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: 1.100.0
+          components: clippy
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Test
+        run: cargo test --release --locked
+
   # separate from the build, so an advisory shows up as a red job of its own but never blocks the
   # release (Forgejo runs the same audit on every push and weekly)
   audit:
+    # Forgejo audits every push already, so a push to `main` does not run it here
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
     runs-on: ubuntu-22.04

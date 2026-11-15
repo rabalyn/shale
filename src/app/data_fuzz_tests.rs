@@ -20,7 +20,6 @@
 use super::*;
 use crate::vault::Stamp;
 use std::collections::BTreeMap;
-use std::os::unix::fs::PermissionsExt;
 
 /// xorshift64*: small, fixed, no dependency.
 struct Rng(u64);
@@ -161,15 +160,25 @@ impl Sim {
         f
     }
 
+    /// Close a folder for writing. Only Unix folders can be closed that way: on Windows a
+    /// read-only folder still takes files, so there this operation of the run does nothing.
     fn lock(&mut self, dir: &Path) {
-        std::fs::set_permissions(self.root.join(dir), std::fs::Permissions::from_mode(0o555)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(self.root.join(dir), std::fs::Permissions::from_mode(0o555)).unwrap();
+        }
         self.locked.push(dir.to_path_buf());
     }
 
     /// Make every folder writable again (a locked folder may have been renamed meanwhile).
     fn unlock_all(&mut self) {
         fn walk(p: &Path) {
-            let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755));
+            }
             if let Ok(rd) = std::fs::read_dir(p) {
                 for e in rd.flatten() {
                     if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {

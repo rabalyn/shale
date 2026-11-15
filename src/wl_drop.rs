@@ -178,7 +178,7 @@ fn report_line(kind: &str, early: Option<&Got>, late: Option<&Got>) -> String {
 }
 
 /// A drag from another program over the window, without any protocol: what the data offer
-/// listed, whether Shale takes it, and where the pointer is (IMP-011). The Wayland glue only
+/// listed, whether Shale takes it, and where the pointer is (IMP-012). The Wayland glue only
 /// feeds it events and sends what it returns; tests feed it the same way.
 #[derive(Debug, Clone)]
 pub struct Drag {
@@ -250,7 +250,7 @@ impl Landing {
     }
 
     /// The finished drop: `before` was read while dragging, `late` after the drop; the data of
-    /// the drop wins, the earlier data is the fallback (IMP-012).
+    /// the drop wins, the earlier data is the fallback (IMP-013).
     pub fn finish(self, before: &[(String, Got)], late: &[(String, Got)]) -> DropEvent {
         let find = |v: &[(String, Got)], k: &str| v.iter().find(|(m, _)| m == k).map(|(_, g)| g.clone());
         let mut parts = Vec::new();
@@ -265,7 +265,7 @@ impl Landing {
     }
 }
 
-/// The same drop reaching the second listener (IMP-012): `last` is when the previous drop was
+/// The same drop reaching the second listener (IMP-013): `last` is when the previous drop was
 /// taken; true when this one came too soon after it. Otherwise `now` is kept as `last`.
 fn is_repeat(last: &mut Option<Instant>, now: Instant) -> bool {
     if last.map(|t| now.saturating_duration_since(t) < Duration::from_millis(800)).unwrap_or(false) {
@@ -539,9 +539,9 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
-    // spec: IMP-011
+    // spec: IMP-012
     #[test]
-    fn imp_011_an_entering_drag_is_hovered_or_refused_and_follows_the_pointer() {
+    fn imp_012_an_entering_drag_is_hovered_or_refused_and_follows_the_pointer() {
         let (mut d, e) = Drag::enter(o(&["text/plain", "text/uri-list", "text/plain"]), 10.0, 20.0);
         assert!(matches!(e, DropEvent::Hover { x, y } if (x, y) == (10.0, 20.0)));
         assert_eq!(d.mime(), Some("text/uri-list"));
@@ -554,9 +554,9 @@ mod tests {
         assert!(matches!(d.motion(5.0, 6.0), DropEvent::Refused { x, y, .. } if (x, y) == (5.0, 6.0)));
     }
 
-    // spec: IMP-011
+    // spec: IMP-012
     #[test]
-    fn imp_011_dropping_a_refused_drag_only_ends_it() {
+    fn imp_012_dropping_a_refused_drag_only_ends_it() {
         let (d, _) = Drag::enter(o(&["application/x-tab"]), 1.0, 2.0);
         assert!(matches!(d.drop(), Err(DropEvent::Leave)));
         let (mut d, _) = Drag::enter(o(&["text/uri-list", "text/plain"]), 1.0, 2.0);
@@ -566,9 +566,9 @@ mod tests {
         assert!(matches!(l.finish(&[], &[]), DropEvent::Drop { x, y, .. } if (x, y) == (7.0, 8.0)));
     }
 
-    // spec: IMP-012
+    // spec: IMP-013
     #[test]
-    fn imp_012_a_finished_drop_prefers_late_data_and_reports_every_kind() {
+    fn imp_013_a_finished_drop_prefers_late_data_and_reports_every_kind() {
         let got = |d: &str, closed| Got { data: d.as_bytes().to_vec(), closed };
         let (d, _) = Drag::enter(o(&["text/uri-list", "text/plain; charset=utf-8", "text/x-moz-url", "text/uri-list"]), 3.0, 4.0);
         let l = d.drop().unwrap();
@@ -585,9 +585,9 @@ mod tests {
         assert!(report[2].contains("while dragging 10 bytes, after the drop empty"), "{report:?}");
     }
 
-    // spec: IMP-012
+    // spec: IMP-013
     #[test]
-    fn imp_012_the_second_copy_of_a_drop_is_ignored() {
+    fn imp_013_the_second_copy_of_a_drop_is_ignored() {
         let t0 = Instant::now();
         let mut last = None;
         assert!(!is_repeat(&mut last, t0));

@@ -1036,7 +1036,8 @@ mod tests {
             let (_s, _) = listener.accept().unwrap();
             std::thread::sleep(Duration::from_secs(3));
         });
-        let mut settings = ConnectSettings { host: "localhost".into(), port, security: MailSecurity::ImplicitTls, limits: Limits::default() };
+        // an address, not "localhost": Windows tries ::1 first, and a refused connection there takes a second
+        let mut settings = ConnectSettings { host: "127.0.0.1".into(), port, security: MailSecurity::ImplicitTls, limits: Limits::default() };
         settings.limits.io_timeout = Duration::from_millis(300);
         let mut auth = PlainAuth::new("a", "b");
         let started = std::time::Instant::now();

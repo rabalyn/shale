@@ -2425,6 +2425,7 @@ fn compose_toggles_show_the_key_of_every_recipient_refuse_a_missing_one_and_send
 }
 
 // spec: MAIL-171
+#[cfg(unix)]
 #[test]
 fn a_gnupg_call_that_waits_for_a_dialog_never_blocks_the_window_and_cancel_stops_it() {
     use std::os::unix::fs::PermissionsExt;

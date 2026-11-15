@@ -157,9 +157,9 @@ fn imp_002_a_drop_into_an_open_import_dialog_adds_to_it() {
     assert_eq!(w.dialog().folder, "Sub");
 }
 
-// spec: IMP-014
+// spec: IMP-015
 #[test]
-fn imp_014_hover_refusal_and_busy_show_and_go_away() {
+fn imp_015_hover_refusal_and_busy_show_and_go_away() {
     let mut w = W::new("hint");
     let at = w.zone("Sub", None, true).center();
     w.app.fake_drops.push(DropEvent::Hover { x: at.x, y: at.y });
@@ -187,9 +187,9 @@ fn imp_014_hover_refusal_and_busy_show_and_go_away() {
     assert!(!w.app.drop_busy && w.app.pending_drops.is_empty());
 }
 
-// spec: IMP-015
+// spec: IMP-016
 #[test]
-fn imp_015_files_dropped_through_the_window_system_open_the_import_dialog() {
+fn imp_016_files_dropped_through_the_window_system_open_the_import_dialog() {
     let mut w = W::new("x11");
     let p = w.file("first drop.md");
     w.hl.frame_with(&mut w.app, vec![], |_, raw| raw.dropped_files.push(std::sync::Arc::new(super::ScriptDrop(p))));
@@ -214,9 +214,9 @@ fn imp_015_files_dropped_through_the_window_system_open_the_import_dialog() {
     assert_eq!((w.dialog().folder.as_str(), w.dialog().items.len()), ("Sub", 1));
 }
 
-// spec: IMP-015
+// spec: IMP-016
 #[test]
-fn imp_015_an_unusable_drop_says_what_was_offered() {
+fn imp_016_an_unusable_drop_says_what_was_offered() {
     let mut w = W::new("nothing");
     let at = w.zone("Sub", None, true).center();
     w.drop_data(at, "text/uri-list", b"https://example.org/a.md\r\nfile:///no/such/folder/gone.md\r\n");
@@ -236,9 +236,9 @@ fn imp_015_an_unusable_drop_says_what_was_offered() {
     assert!(notes.contains("XWayland") && notes.contains("text/plain: while dragging empty"), "{notes}");
 }
 
-// spec: IMP-015
+// spec: IMP-016
 #[test]
-fn imp_015_a_drop_without_a_vault_says_so() {
+fn imp_016_a_drop_without_a_vault_says_so() {
     let mut w = W::new("novault");
     w.app.vault = None;
     let at = Pos2::new(300.0, 300.0);
@@ -247,9 +247,9 @@ fn imp_015_a_drop_without_a_vault_says_so() {
     assert!(!w.dialog_open());
 }
 
-// spec: IMP-016
+// spec: IMP-017
 #[test]
-fn imp_016_dragging_in_the_file_list_hints_and_moves_onto_a_folder() {
+fn imp_017_dragging_in_the_file_list_hints_and_moves_onto_a_folder() {
     use eframe::egui::Vec2;
     let mut w = W::new("tree");
     let note = w.zone("", Some("Welcome.md"), true).center();

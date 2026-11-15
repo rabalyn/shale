@@ -17,7 +17,7 @@ fn local(fx: &TbFixture) -> PathBuf {
     fx.account("server1", Kind::Local, "Local Folders", "nobody", "Mail/Local Folders")
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn profiles_are_the_folders_with_a_prefs_file_and_the_root_itself() {
     let fx = TbFixture::new("profiles");
@@ -34,7 +34,7 @@ fn profiles_are_the_folders_with_a_prefs_file_and_the_root_itself() {
     assert!(profiles(&[]).is_empty());
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn accounts_come_from_prefs_with_host_user_kind_and_folder() {
     let fx = TbFixture::new("accounts");
@@ -60,7 +60,7 @@ fn accounts_come_from_prefs_with_host_user_kind_and_folder() {
     assert!(servers(&fx.root.join("missing")).is_empty());
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn a_local_folder_is_read_at_the_position_in_the_link_with_its_flags_and_unescaped_from_lines() {
     let fx = TbFixture::new("local");
@@ -81,7 +81,7 @@ fn a_local_folder_is_read_at_the_position_in_the_link_with_its_flags_and_unescap
     assert!(t.contains("\nFrom the architects\nFrom here on"), "the >From escape is undone: {t}");
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn nested_folders_and_names_with_non_ascii_letters_are_found() {
     let fx = TbFixture::new("nested");
@@ -95,7 +95,7 @@ fn nested_folders_and_names_with_non_ascii_letters_are_found() {
     assert!(text(&find(&fx, &link, None).unwrap()[0]).contains("unten"));
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn imap_folders_with_modified_utf7_names_are_found_by_the_imap_link() {
     let fx = TbFixture::new("utf7");
@@ -107,7 +107,7 @@ fn imap_folders_with_modified_utf7_names_are_found_by_the_imap_link() {
     assert!(text(&got[0]).contains("Text"));
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn a_message_deleted_but_not_compacted_is_still_read_at_its_position_with_its_flag() {
     let fx = TbFixture::new("deleted");
@@ -117,7 +117,7 @@ fn a_message_deleted_but_not_compacted_is_still_read_at_its_position_with_its_fl
     assert!(t.starts_with("X-Mozilla-Status: 0009") && t.contains("weg") && !t.contains("Neu"), "{t}");
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn a_large_message_is_read_whole_and_the_next_one_is_not_swallowed() {
     let fx = TbFixture::new("large");
@@ -132,7 +132,7 @@ fn a_large_message_is_read_whole_and_the_next_one_is_not_swallowed() {
     assert!(text(&last[0]).contains("Subject: Danach"));
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn maildir_folders_are_read_by_their_index_and_by_the_subject() {
     let fx = TbFixture::new("maildir");
@@ -159,7 +159,7 @@ fn maildir_folders_are_read_by_their_index_and_by_the_subject() {
     assert!(text(&got[0]).contains("zwei"));
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn the_index_finds_imap_messages_and_says_when_their_text_is_not_stored() {
     let fx = TbFixture::new("index");
@@ -178,7 +178,7 @@ fn the_index_finds_imap_messages_and_says_when_their_text_is_not_stored() {
     assert!(err.contains("not in Thunderbird's index"), "{err}");
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn accounts_are_matched_by_host_kind_and_user() {
     let fx = TbFixture::new("match");
@@ -192,7 +192,7 @@ fn accounts_are_matched_by_host_kind_and_user() {
     assert!(r("imap-message://ada@elsewhere.example/INBOX#1").is_empty());
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn without_usable_prefs_the_usual_folder_names_are_tried() {
     let fx = TbFixture::new("noprefs");
@@ -210,7 +210,7 @@ fn without_usable_prefs_the_usual_folder_names_are_tried() {
     assert!(text(&find(&fx, &format!("mailbox-message://nobody@Local%20Folders/Inbox#{}", at[0]), None).unwrap()[0]).contains("hier"));
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn a_mailbox_link_names_the_folder_file_directly_and_other_profiles_are_searched() {
     let fx = TbFixture::new("direct");
@@ -227,7 +227,7 @@ fn a_mailbox_link_names_the_folder_file_directly_and_other_profiles_are_searched
     assert!(text(&got[0]).contains("im zweiten Profil"));
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn a_compacted_folder_or_a_stale_position_falls_back_to_the_subject() {
     let fx = TbFixture::new("stale");
@@ -241,7 +241,7 @@ fn a_compacted_folder_or_a_stale_position_falls_back_to_the_subject() {
     assert_eq!(got.unwrap().len(), 1);
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn broken_folder_files_and_indexes_give_errors_and_never_a_crash() {
     let fx = TbFixture::new("broken");
@@ -268,7 +268,7 @@ fn broken_folder_files_and_indexes_give_errors_and_never_a_crash() {
     assert!(rows.len() <= 1);
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn errors_say_what_is_missing() {
     let fx = TbFixture::new("errors");
@@ -293,7 +293,7 @@ fn errors_say_what_is_missing() {
     assert!(find(&fx, "mailbox-message://nobody@Local%20Folders/Inbox#99999", Some(" .eml ")).is_err());
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 #[cfg(unix)]
 fn a_folder_file_that_cannot_be_read_is_an_error_not_a_crash() {
@@ -314,7 +314,7 @@ fn a_folder_file_that_cannot_be_read_is_an_error_not_a_crash() {
     std::fs::set_permissions(fx.profile.join("prefs.js"), std::fs::Permissions::from_mode(0o600)).unwrap();
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn message_links_of_every_kind_and_their_edge_cases_are_read() {
     // a port, a user without host part, escapes that are not escapes
@@ -339,7 +339,7 @@ fn message_links_of_every_kind_and_their_edge_cases_are_read() {
     assert_eq!(digits("abc"), None);
 }
 
-// spec: IMP-017
+// spec: IMP-018
 #[test]
 fn the_fixture_writes_what_thunderbird_writes() {
     let fx = TbFixture::new("shape");
