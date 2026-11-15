@@ -1607,6 +1607,8 @@ impl ShaleApp {
         if self.vault.is_none() {
             return;
         }
+        let in_mail = matches!(self.tabs.get(self.active).map(|t| &t.view), Some(View::Mail));
+        let sidebar_keys = self.tree_sel.is_some() || self.search_sel.is_some();
         if mail_view {
             self.show_view(View::Mail, false);
         }
@@ -1625,11 +1627,17 @@ impl ShaleApp {
         if files {
             self.left = LeftPanel::Files;
             self.focus_sidebar(ui.ctx());
-        } else if to_sidebar {
+        } else if to_sidebar && !(in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, -1, sidebar_keys)) {
             self.focus_sidebar(ui.ctx());
         }
         if to_editor {
-            self.focus_editor();
+            // in the mail view the keyboard goes to its panes (MAIL-063)
+            if in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, 1, sidebar_keys) {
+                self.tree_sel = None;
+                self.search_sel = None;
+            } else {
+                self.focus_editor();
+            }
         }
         if back || mouse_back {
             self.go_back();
