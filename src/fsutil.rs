@@ -500,7 +500,17 @@ mod tests {
         }
         assert!(try_lock_file(&path).unwrap().is_none(), "a second lock must be refused");
         drop(first);
-        assert!(try_lock_file(&path).unwrap().is_some(), "the lock is free after the first is dropped");
+        // Another test thread that starts a program (gpg, a helper process) forks: until the child's
+        // exec closes it, the child shares our descriptor and so still holds the lock for a moment.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let again = loop {
+            match try_lock_file(&path).unwrap() {
+                Some(lock) => break Some(lock),
+                None if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(10)),
+                None => break None,
+            }
+        };
+        assert!(again.is_some(), "the lock is free after the first is dropped");
         let _ = fs::remove_dir_all(&dir);
     }
 

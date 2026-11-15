@@ -103,8 +103,43 @@ pub fn today() -> i64 {
     utc_to_local(now()).0
 }
 
+/// The one clock of the app (UTC seconds): the real time, except in screenshot mode with
+/// `SHALE_FAKE_NOW` set (see `freeze`), so that pictures do not change from day to day.
 pub fn now() -> i64 {
+    FROZEN.get().copied().unwrap_or_else(real_now)
+}
+
+fn real_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+static FROZEN: OnceLock<i64> = OnceLock::new();
+
+/// Screenshot mode only: from now on `now()` answers `secs`. Only the first call counts.
+pub fn freeze(secs: i64) {
+    let _ = FROZEN.set(secs);
+}
+
+/// The frozen time, if screenshot mode froze it.
+pub fn frozen() -> Option<i64> {
+    FROZEN.get().copied()
+}
+
+/// "2026-11-15T10:00:00" (UTC; the seconds and the T may be left out or be a space) as UTC seconds.
+pub fn parse_fake_now(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let (date, time) = s.split_once(['T', ' ']).unwrap_or((s, "00:00:00"));
+    let mut d = date.split('-').map(|n| n.parse::<u32>().ok());
+    let (y, m, dd) = (d.next()??, d.next()??, d.next()??);
+    if d.next().is_some() || !(1..=12).contains(&m) || dd < 1 || dd > days_in_month(y as i32, m) {
+        return None;
+    }
+    let mut t = time.split(':').map(|n| n.parse::<i64>().ok());
+    let (h, mi, se) = (t.next()??, t.next().unwrap_or(Some(0))?, t.next().unwrap_or(Some(0))?);
+    if t.next().is_some() || !(0..24).contains(&h) || !(0..60).contains(&mi) || !(0..60).contains(&se) {
+        return None;
+    }
+    Some(days_from_civil(y as i32, m, dd) * 86_400 + h * 3600 + mi * 60 + se)
 }
 
 fn wall_to_utc(wall: i64, offset_at: impl Fn(i64) -> i64) -> i64 {
@@ -252,6 +287,20 @@ mod tests {
     use super::*;
 
     // spec: CAL-009
+    // spec: DEV-007
+    #[test]
+    fn dev_007_the_fake_now_parses_and_the_clock_is_real_unless_frozen() {
+        assert_eq!(parse_fake_now("2026-11-15T10:00:00"), Some(days_from_civil(2026, 11, 15) * 86_400 + 36_000));
+        assert_eq!(parse_fake_now("2026-11-15 10:30"), Some(days_from_civil(2026, 11, 15) * 86_400 + 37_800));
+        assert_eq!(parse_fake_now("2026-11-15"), Some(days_from_civil(2026, 11, 15) * 86_400));
+        for bad in ["", "yesterday", "2026-13-01", "2026-02-30", "2026-11-15T25:00", "2026-11-15T10:00:00:00"] {
+            assert_eq!(parse_fake_now(bad), None, "{bad}");
+        }
+        // the tests never freeze the clock of the process: it is the real one
+        assert_eq!(frozen(), None);
+        assert!((now() - real_now()).abs() < 5);
+    }
+
     #[test]
     fn civil_round_trip() {
         assert_eq!(days_from_civil(1970, 1, 1), 0);

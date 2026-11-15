@@ -8,6 +8,9 @@
 # Environment:
 #   SHALE      the program (default: target/release/shale, else target/debug/shale)
 #   OUT        where the pictures go (default: this folder)
+#   SHALE_FAKE_NOW  the frozen clock of the pictures (default 2026-11-15T10:00:00, UTC): the status
+#                   bar, the build stamp, the calendar's today and the ages in lists do not change
+#                   between runs, so only real changes show in a diff (a recipe's env may override it)
 #   SHALE_REGEN_DISPLAY=host   use the display of the session instead of a private Xvfb
 #
 # Every picture is made by one `shale --screenshot` run of its own, on a private X display
@@ -85,7 +88,7 @@ while IFS=$'\001' read -r name size view steps vault env; do
         args+=(--vault "$tmp/vault-$name/$(basename "$vault")")
     fi
     echo "== $name"
-    runner=(env)
+    runner=(env TZ=UTC "SHALE_FAKE_NOW=${SHALE_FAKE_NOW:-2026-11-15T10:00:00}")
     [ -n "$env" ] && runner+=($env)
     if [ "${SHALE_REGEN_DISPLAY:-}" = host ]; then
         launch=("${runner[@]}" "$shale" "${args[@]}")

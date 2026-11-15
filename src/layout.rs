@@ -9,7 +9,7 @@ use crate::vault::rel_to_string;
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 use std::path::PathBuf;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Icon {
     Files,
     Search,
@@ -39,6 +39,8 @@ pub enum Icon {
     Backlinks,
     Outgoing,
     Outline,
+    LocalGraph,
+    CalendarPanel,
 }
 
 pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
@@ -64,6 +66,27 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             for q in [a, b, c2] {
                 p.circle_filled(q, w * 0.1, c);
             }
+        }
+        Icon::LocalGraph => {
+            // the graph around one note: a ring of neighbours round the note in the middle
+            p.circle_stroke(cx, w * 0.34, Stroke::new(1.0, c.gamma_multiply(0.55)));
+            for k in 0..3 {
+                let a = std::f32::consts::TAU * (k as f32 / 3.0 + 0.08);
+                let q = cx + Vec2::angled(a) * (w * 0.34);
+                p.line_segment([cx, q], s);
+                p.circle_filled(q, w * 0.07, c);
+            }
+            p.circle_filled(cx, w * 0.14, c);
+        }
+        Icon::CalendarPanel => {
+            // a month grid with today's cell filled
+            let b = Rect::from_center_size(cx, Vec2::splat(w * 0.66));
+            p.rect_stroke(b, CornerRadius::same(2), s, StrokeKind::Middle);
+            for k in [1.0f32 / 3.0, 2.0 / 3.0] {
+                p.line_segment([Pos2::new(b.min.x + b.width() * k, b.min.y), Pos2::new(b.min.x + b.width() * k, b.max.y)], Stroke::new(1.0, c.gamma_multiply(0.55)));
+                p.line_segment([Pos2::new(b.min.x, b.min.y + b.height() * k), Pos2::new(b.max.x, b.min.y + b.height() * k)], Stroke::new(1.0, c.gamma_multiply(0.55)));
+            }
+            p.rect_filled(Rect::from_min_size(Pos2::new(b.min.x + b.width() / 3.0, b.min.y + b.height() / 3.0), b.size() / 3.0), CornerRadius::ZERO, c);
         }
         Icon::Tasks | Icon::Tags => {
             let b = Rect::from_center_size(cx, Vec2::splat(w * 0.66));
@@ -235,6 +258,7 @@ pub fn icon_button_sense(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: 
         theme::MUTED
     };
     paint_icon(ui.painter(), r.shrink(size * 0.22), icon, c);
+    crate::script::hint(tip, r);
     resp.on_hover_text(tip)
 }
 
@@ -429,6 +453,7 @@ impl ShaleApp {
             let cr = Rect::from_center_size(Pos2::new(r.max.x - 14.0, r.center().y), Vec2::splat(16.0));
             let close_resp = child.interact(cr, child.scope_id().with(("tab-close", self.tabs[i].id)), Sense::click());
             self.tab_rects.push((r, cr));
+            crate::script::hint(&format!("Tab {}", i + 1), r);
             let failed = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.save_error.is_some()).unwrap_or(false) || self.drawings.get(p).map(|d| d.save_error.is_some()).unwrap_or(false)).unwrap_or(false);
             if failed && dirty && !close_resp.hovered() {
                 // not saved, and the save failed: a red mark instead of the grey dot (DATA-009)

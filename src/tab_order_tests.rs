@@ -2,13 +2,13 @@
 //! places the tab bar reports in `ShaleApp::tab_rects` and `ShaleApp::tab_marks`.
 
 use crate::app::{Options, ShaleApp, View};
-use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
+use crate::ui_test_support::Headless;
+use eframe::egui::{PointerButton, Pos2, Rect};
 use std::path::{Path, PathBuf};
 
 struct W {
     app: ShaleApp,
-    ctx: egui::Context,
-    t: f64,
+    hl: Headless,
     dir: PathBuf,
 }
 
@@ -24,38 +24,19 @@ impl W {
         for n in &NOTES[1..] {
             app.open(Path::new(&format!("{n}.md")), true);
         }
-        let ctx = egui::Context::default();
-        crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, dir };
+        let mut w = W { app, hl: Headless::new(), dir };
         w.frames(4);
         w.app.active = 0;
         w.frames(2);
         w
     }
 
-    fn frame(&mut self, events: Vec<Event>) {
-        self.t += 0.05;
-        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
-        let app = &mut self.app;
-        let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
-        out.textures_delta.clear();
-    }
-
     fn frames(&mut self, n: usize) {
-        for _ in 0..n {
-            self.frame(vec![]);
-        }
-    }
-
-    fn button(p: Pos2, b: PointerButton, pressed: bool) -> Event {
-        Event::PointerButton { pos: p, button: b, pressed, modifiers: Modifiers::NONE }
+        self.hl.frames(&mut self.app, n);
     }
 
     fn click_with(&mut self, p: Pos2, b: PointerButton) {
-        self.frame(vec![Event::PointerMoved(p)]);
-        self.frame(vec![Self::button(p, b, true)]);
-        self.frame(vec![Self::button(p, b, false)]);
-        self.frames(3);
+        self.hl.click(&mut self.app, p, b);
     }
 
     fn tab(&self, i: usize) -> Rect {
@@ -65,15 +46,9 @@ impl W {
     /// Press on tab `i`, move to `to` in steps, let `while_dragging` look at the window, release.
     fn drag(&mut self, i: usize, to: Pos2, while_dragging: impl FnOnce(&mut W)) {
         let from = self.tab(i).center();
-        self.frame(vec![Event::PointerMoved(from)]);
-        self.frame(vec![Self::button(from, PointerButton::Primary, true)]);
-        for k in 1..=6 {
-            self.frame(vec![Event::PointerMoved(from + (to - from) * (k as f32 / 6.0))]);
-        }
-        self.frames(2);
+        self.hl.press_and_move(&mut self.app, from, &Headless::steps(from, to, 6));
         while_dragging(self);
-        self.frame(vec![Self::button(to, PointerButton::Primary, false)]);
-        self.frames(3);
+        self.hl.release(&mut self.app, to);
     }
 
     fn order(&self) -> Vec<String> {
@@ -121,7 +96,7 @@ fn dragging_a_tab_past_others_moves_it_and_shows_the_marker() {
     assert_eq!(w.order(), names(&["Ideas", "Daily log", "Welcome", "Garden plan"]));
     assert_eq!(w.active_name(), "Welcome", "the dragged tab is the open one");
     assert!(w.app.tab_marks.drop_marker.is_none(), "the marker is gone after the drop");
-    assert_eq!(w.app.vdata.state.open_files, vec!["Ideas.md", "Daily log.md", "Welcome.md", "Projects/Garden plan.md"], "the order is kept for the next start");
+    assert_eq!(w.app.vdata.state.tabs.iter().map(|t| t.file.clone().unwrap()).collect::<Vec<_>>(), vec!["Ideas.md", "Daily log.md", "Welcome.md", "Projects/Garden plan.md"], "the order is kept for the next start");
     // and back to the left end
     let to = Pos2::new(w.tab(0).min.x + 5.0, w.tab(0).center().y);
     w.drag(2, to, |_| {});
@@ -157,7 +132,7 @@ fn pinning_moves_a_tab_to_the_left_with_a_pin_and_unpinning_puts_it_back() {
     w.pin_via_menu(3);
     assert_eq!(w.order(), names(&["Daily log", "Garden plan", "Welcome", "Ideas"]));
     assert_eq!(w.app.tab_marks.pinned, vec![0, 1]);
-    assert_eq!(w.app.vdata.state.pinned_files, vec!["Daily log.md", "Projects/Garden plan.md"]);
+    assert_eq!(w.app.vdata.state.tabs.iter().filter(|t| t.pinned).map(|t| t.file.clone().unwrap()).collect::<Vec<_>>(), vec!["Daily log.md", "Projects/Garden plan.md"]);
     // unpinning: the tab goes right of the pinned ones
     w.pin_via_menu(0);
     assert_eq!(w.order(), names(&["Garden plan", "Daily log", "Welcome", "Ideas"]));

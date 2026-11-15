@@ -199,6 +199,8 @@ pub struct SidebarCfg {
     pub ribbon: Vec<String>,
     /// The views of the right sidebar, top to bottom. Empty: the default (one view with all panels).
     pub right: Vec<RightViewCfg>,
+    /// Icons the user removed (LAY-013); the context menu brings them back.
+    pub hidden: Vec<String>,
 }
 
 /// One view of the right sidebar: its menubar (icon ids, left to right) and the icon it shows.
@@ -207,6 +209,8 @@ pub struct SidebarCfg {
 pub struct RightViewCfg {
     pub icons: Vec<String>,
     pub active: String,
+    /// Share of the height of the right sidebar (LAY-012); 0: the equal share.
+    pub weight: u32,
 }
 
 /// A value of the wrong shape (an old or hand-edited file) loads as the default instead of
@@ -400,8 +404,13 @@ pub fn input_log_path() -> PathBuf {
 }
 
 /// When this program was built, as "YYYY-MM-DD HH:MM UTC".
+/// In screenshot mode with a frozen clock (DEV-007) it shows that time instead, so that the
+/// pictures do not change with every build.
 pub fn build_stamp() -> String {
-    let secs: i64 = env!("SHALE_BUILD_SECS").parse().unwrap_or(0);
+    stamp_of(crate::cal_time::frozen().unwrap_or_else(|| env!("SHALE_BUILD_SECS").parse().unwrap_or(0)))
+}
+
+fn stamp_of(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     let z = days + 719_468;
@@ -486,6 +495,14 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: DEV-007
+    #[test]
+    fn dev_007_the_build_stamp_is_the_build_time_unless_the_clock_is_frozen() {
+        assert_eq!(stamp_of(crate::cal_time::days_from_civil(2026, 11, 15) * 86_400 + 36_000), "2026-11-15 10:00 UTC");
+        assert_eq!(crate::cal_time::frozen(), None);
+        assert_eq!(build_stamp(), stamp_of(env!("SHALE_BUILD_SECS").parse().unwrap()));
+    }
 
     // spec: CFG-001
     #[test]

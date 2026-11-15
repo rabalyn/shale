@@ -974,6 +974,7 @@ impl ShaleApp {
                         changed |= ui.add(egui::Slider::new(&mut self.cfg.font_size, 12.0..=24.0)).changed();
                     });
                     ui.add_space(8.0);
+                    self.post_index_settings(ui);
                     ui.label(egui::RichText::new("Data and caches").color(theme::MUTED));
                     ui.horizontal(|ui| {
                         if ui.button("Data usage…").on_hover_text("What Shale keeps on disk, and its caches").clicked() {
@@ -1235,7 +1236,7 @@ pub fn strip_due(text: &str) -> String {
 
 /// Today's date as YYYY-MM-DD (UTC), without a date library.
 pub fn today() -> Option<String> {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+    let secs = crate::cal_time::now();
     let days = secs.div_euclid(86_400);
     // civil-from-days (Howard Hinnant)
     let z = days + 719_468;

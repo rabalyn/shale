@@ -206,3 +206,43 @@ fn wildcards_find_posts_by_prefix() {
     assert!(find("*text").is_empty() && find("").is_empty());
     assert_eq!(ix.search_wild("text*", 1).len(), 1);
 }
+
+// spec: SOC-038
+#[test]
+fn a_parent_that_arrives_later_gives_its_replies_their_context() {
+    let mut ix = PostIndex::in_memory();
+    let mut reply = with_text("r1", "bob", ago(2), "me too");
+    reply.reply_to = Some("p1".into());
+    ix.add("acct", "home", &[reply]);
+    assert!(ix.search("in:lighthouse", 10).is_empty(), "the parent is not known yet: no context");
+    // a feed brings the parent (and the same id of another account) later
+    let mut parent = with_text("p1", "ada", ago(3), "A lighthouse keeper writes");
+    parent.author.display_name = "Ada Lovelace".into();
+    ix.add("other", "home", &[with_text("p1", "zed", ago(3), "lighthouse of the other account")]);
+    assert!(ix.search("in:lighthouse", 10).is_empty(), "another account's post is no parent");
+    ix.add("acct", "home", &[parent.clone()]);
+    assert_eq!(ids(&ix.search("in:lighthouse", 10)), ["r1"], "the text of the parent");
+    assert_eq!(ids(&ix.search("in:lovelace", 10)), ["r1"], "the author of the parent");
+    assert_eq!(ids(&ix.search("from:bob", 10)), ["r1"], "the reply is still one entry");
+    assert_eq!(ix.count(None), 3);
+    // the parent changes (an edit): the context follows
+    ix.add("acct", "home", &[Post { text_markdown: "A beacon keeper writes".into(), ..parent }]);
+    assert!(ix.search("in:lighthouse", 10).is_empty());
+    assert_eq!(ids(&ix.search("in:beacon", 10)), ["r1"]);
+}
+
+// spec: SOC-040
+#[test]
+fn clearing_empties_the_index_and_it_fills_again() {
+    let mut ix = PostIndex::in_memory();
+    let key = crate::social::state::post_key(&post("1", "x", 0, None));
+    ix.add("a", "home", &[with_text("1", "x", ago(1), "alpha"), with_text("2", "x", ago(1), "beta")]);
+    assert!(ix.contains("a", &key));
+    assert!(!ix.contains("b", &key));
+    ix.clear();
+    assert_eq!(ix.count(None), 0);
+    assert!(ix.search("alpha", 10).is_empty());
+    assert!(!ix.contains("a", &key));
+    ix.add("a", "home", &[with_text("3", "x", ago(1), "gamma")]);
+    assert_eq!(ids(&ix.search("gamma", 10)), ["3"]);
+}

@@ -125,6 +125,12 @@ renews its access token, is refused for another user's name, and after `revoke` 
 "sign in again" error. The tests trust the CA as an extra root in test code only. Use
 `SHALE_MAIL_ENV_ENGINE=docker` if you use Docker instead of Podman.
 
+## In CI
+
+The `env-tests` job runs this suite together with the CalDAV one when the runner can run containers
+(and says `SKIPPED` when it cannot). What it does and what the runner needs:
+[tests/caldav-env/README.md](../caldav-env/README.md), "In CI".
+
 ## How it is built
 
 - `compose.yaml`: three services. `seed` (Alpine, once) writes the maildirs with exact dates and

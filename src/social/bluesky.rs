@@ -260,6 +260,12 @@ pub fn thread_full(api: &mut Api, post: &Post) -> Result<(Vec<Post>, Vec<Reply>)
     Ok((t, r))
 }
 
+/// One post by its at:// address.
+pub fn fetch_post(api: &mut Api, id: &str) -> Result<Post, String> {
+    let v = api.get("app.bsky.feed.getPosts", &[("uris", id)])?;
+    v["posts"].as_array().and_then(|a| a.first()).and_then(parse_post_view).ok_or_else(|| "the post is gone".to_string())
+}
+
 /// The replies of other people from a `getPostThread` answer, as a tree (see `conversation`).
 pub fn replies_from_response(thread: &[Post], resp: &Value) -> Vec<Reply> {
     let mut all = Vec::new();
@@ -613,7 +619,7 @@ mod tests {
             return;
         }
         let expired_once = Arc::new(AtomicBool::new(false));
-        let (base, handle) = mock_http(11, move |method, path, headers, body| {
+        let (base, handle) = mock_http(13, move |method, path, headers, body| {
             let host = headers.lines().find_map(|l| l.strip_prefix("Host: ")).unwrap_or("").trim().to_string();
             let did = format!("did:web:{}", host.replace(':', "%3A"));
             let low = headers.to_ascii_lowercase();
@@ -635,6 +641,8 @@ mod tests {
                     ok(json!({"preferences": [{"$type": "app.bsky.actor.defs#savedFeedsPrefV2", "items": [{"type": "feed", "value": "at://did:plc:x/app.bsky.feed.generator/cats", "pinned": true}]}]}))
                 }
                 ("GET", "/xrpc/app.bsky.feed.getFeedGenerators") => ok(json!({"feeds": [{"uri": "at://did:plc:x/app.bsky.feed.generator/cats", "displayName": "Cats"}]})),
+                ("GET", "/xrpc/app.bsky.feed.getPosts") if path.contains("p1") => ok(json!({"posts": [img.clone()]})),
+                ("GET", "/xrpc/app.bsky.feed.getPosts") => ok(json!({"posts": []})),
                 ("GET", "/xrpc/app.bsky.feed.getTimeline") => {
                     if bearer("jwt-1") && !expired_once.swap(true, Ordering::SeqCst) {
                         return expired();
@@ -675,12 +683,15 @@ mod tests {
         assert!(next.posts.is_empty() && next.cursor.is_none());
         let th = c.thread_with_replies(p).unwrap().0;
         assert_eq!(th.iter().map(|p| p.text_markdown.as_str()).collect::<Vec<_>>(), ["Grüße 😀 https://e.com/x", "part two"]);
+        // SOC-039: one post by its address; a post that is gone is an error
+        assert_eq!(c.fetch_post(&p.id).unwrap().text_markdown, "Grüße 😀 https://e.com/x");
+        assert!(c.fetch_post("at://x/app.bsky.feed.post/none").unwrap_err().contains("gone"));
         let (bytes, _) = c.download_media(&th[0], &th[0].media[0]).unwrap();
         assert_eq!(bytes, b"JPEGDATA");
         let (bytes, _) = c.download_media(&th[1], &th[1].media[0]).unwrap();
         assert_eq!(bytes, b"VIDEODATA", "the video file comes from the author's server, not the playlist");
         let seen = handle.join().unwrap();
-        assert_eq!(seen.len(), 11, "{seen:?}");
+        assert_eq!(seen.len(), 13, "{seen:?}");
     }
 
     fn page_of(ids: &[&str], cursor: Option<&str>) -> Page {

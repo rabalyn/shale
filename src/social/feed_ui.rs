@@ -756,7 +756,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
         st.load_more(&ctx, &entry, &feed);
     }
     if let Some(p) = save_post {
-        st.save(&ctx, &entry, &p);
+        st.save(&ctx, &entry, &feed.id, &p);
     }
     if st.images.as_ref().map(|i| i.pending() > 0).unwrap_or(false) {
         ctx.request_repaint_after(std::time::Duration::from_millis(300));

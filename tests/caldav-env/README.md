@@ -72,6 +72,39 @@ remove what they made (also what a failed earlier run left), so they can be run 
 seeded events are only read. The tests trust the CA through `cal_dav::TEST_CA`, which exists only
 in test builds. Use `SHALE_CALDAV_ENV_COMPOSE` as above for Docker.
 
+## In CI
+
+The `env-tests` job of `.forgejo/workflows/ci.yml` (DEV-011, CALENV-004, MAIL-093) runs both this
+suite and the mail suite (`tests/mail-env/`) with `.forgejo/scripts/env-tests.sh run`: on pushes to
+`main`, on pull requests that touch `src/cal_*`, `src/caldav_*`, `src/imap*`, `src/mail*`,
+`src/smtp*` or `tests/{caldav,mail}-env/`, and weekly. It starts both stacks, runs both ignored
+suites (`--test-threads=1`, and fails if a suite ran no test) and always takes the stacks down.
+
+The job runs in the `rust` container like the other jobs, so it needs a container engine **inside**
+that container. It installs `podman` and `podman-compose` with apt and then asks `podman info`
+(then `docker info`) and starts a small `alpine` container with it (an unprivileged job
+container answers `info` but cannot unpack images). If neither works, the job prints `SKIPPED: this runner cannot run containers
+…` and ends green: the real-server tests did not run. What the runner must offer for them to run:
+
+- the job container must be allowed to run containers: for the runner's `container.options` in the
+  `act_runner` configuration, `--privileged` (and a rootful or a user-namespace-capable Podman; the
+  image storage inside the job container is not shared, so every run pulls the images again), **or**
+- a Docker socket mounted into the job container (`container.valid_volumes` and
+  `container.options: -v /var/run/docker.sock:/var/run/docker.sock`, then install `docker.io` and
+  `docker-compose`) **and** host networking for the job container (`container.network: host`), because
+  the stacks publish their ports on the host's `127.0.0.1` and the tests connect to them there; the
+  repository's bind mounts then also need the same path on the host, which is why the first way is
+  the supported one, **or**
+- a runner without the container layer: a job with a label that runs on the host itself (a `host`
+  label whose runner has Podman, `openssl`, `curl` and a Rust toolchain). Then change `runs-on` of
+  `env-tests` to that label and drop the `container:`.
+
+Inside the job container Podman stores images with the `vfs` driver (the job writes
+`/etc/containers/storage.conf` before Podman first runs): its default `overlay` driver does not work on top of the job container's own overlayfs.
+
+The job has not yet been confirmed on the homelab runner (it is only known to work where Podman
+works, e.g. a developer machine: run `sh .forgejo/scripts/env-tests.sh run`).
+
 ## How it is built
 
 - `compose.yaml`: `seed` (Alpine, once) copies `seed/data/` into the volume with the dates filled

@@ -91,9 +91,16 @@ impl MailView {
             ui.label(muted("The server's Sent folder does not have these. “Upload again” sends a copy there; “Dismiss” keeps the mail in the local Sent folder and stops showing it here. Nothing is deleted.").size(12.5));
             ui.add_space(6.0);
             egui::ScrollArea::vertical().max_height(300.0).id_salt("mail-unsent-list").show(ui, |ui| {
+                let sel = self.kbd.unsent_sel.min(list.len() - 1);
                 for (k, c) in list.iter().enumerate() {
                     ui.horizontal_wrapped(|ui| {
                         let subject = if c.subject.trim().is_empty() { "(no subject)" } else { c.subject.as_str() };
+                        // the mail that Enter and d / Delete act on (MAIL-069)
+                        if k == sel {
+                            let m = ui.label(RichText::new("▸").strong().color(theme::ACCENT));
+                            rec(rects, "mail:unsent-sel", &m);
+                            m.scroll_to_me(None);
+                        }
                         ui.label(RichText::new(subject).strong());
                         let when = c.date.map(full_date).unwrap_or_default();
                         let name = self.account_names.get(&c.account).cloned().unwrap_or_else(|| c.account.clone());

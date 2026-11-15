@@ -29,7 +29,7 @@ pub mod state;
 #[cfg(test)]
 mod ui_tests;
 
-use crate::cal_dav::{self, check_url, same_server, Origin};
+use crate::cal_dav::{self, check_url, Origin};
 use crate::cal_time as t;
 use crate::secret::Secret;
 use serde::{Deserialize, Serialize};
@@ -609,6 +609,14 @@ impl Client {
         }
     }
 
+    /// One post by its id (to open a search hit the index and the feed no longer hold, SOC-039).
+    pub fn fetch_post(&mut self, id: &str) -> Result<Post, String> {
+        match &mut self.backend {
+            Backend::Mastodon { token } => mastodon::fetch_post(&self.account.server, token.expose(), id),
+            Backend::Bluesky(api) => bluesky::fetch_post(api, id),
+        }
+    }
+
     /// The whole self-thread of a post (see `self_thread`), in reading order, including the post, and the
     /// replies of other people below it (see `conversation`).
     pub fn thread_with_replies(&mut self, post: &Post) -> Result<(Vec<Post>, Vec<Reply>), String> {
@@ -629,12 +637,6 @@ impl Client {
     /// Fetch the thread of `post` and all its media in one go, ready for `note::post_note`.
     pub fn save(&mut self, post: &Post) -> note::SavedPost {
         note::fetch_saved(self, post)
-    }
-
-    /// Whether this address is on the account's own server (only those would get a login).
-    #[allow(dead_code)] // media downloads never send a login, so nothing asks yet; kept with its test-able rule
-    pub fn is_own_server(&self, url: &str) -> bool {
-        same_server(url, &self.account.server)
     }
 }
 

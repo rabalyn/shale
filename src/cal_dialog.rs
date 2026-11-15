@@ -1301,8 +1301,9 @@ mod tests {
         d.start_time = "14:00".into();
         // Save writes it, then the dialog closes
         h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
-        let r = wait_saved(&mut h, &mut d, &mut store);
+        // a fast job can finish during the click: its result comes back from the click
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let r = clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store));
         assert!(matches!(&r, Some(EventResult::Saved(m)) if m.starts_with("Saved")), "{r:?} {:?}", d.error);
         let saved = store.find(&src.id, &e.uid).expect("the event is in the calendar");
         assert_eq!(saved.summary, "Dentist");
@@ -1311,8 +1312,9 @@ mod tests {
         assert_eq!((d.title.as_str(), d.start_time.as_str(), d.end_time.as_str()), ("Dentist", "14:00", "15:00"));
         d.title = "Dentist (moved)".into();
         h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
-        wait_saved(&mut h, &mut d, &mut store).unwrap();
+        // a fast job can finish during the click: its result comes back from the click
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store)).unwrap();
         assert_eq!(store.find(&src.id, &saved.uid).unwrap().summary, "Dentist (moved)");
         assert_eq!(store.events[&src.id].iter().filter(|x| x.uid == saved.uid).count(), 1, "replaced, not copied");
         let mut d = EventDialog::new_at(src.id.clone(), start);
@@ -1350,16 +1352,18 @@ mod tests {
         d.title = "Kickoff".into();
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
         h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
-        assert!(wait_saved(&mut h, &mut d, &mut store).is_none(), "the dialog stays open");
+        // a fast job can finish during the click: its result comes back from the click
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        assert!(clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store)).is_none(), "the dialog stays open");
         assert!(d.error.as_deref().unwrap_or("").contains("permission"), "{:?}", d.error);
         // pick another calendar and save again
         h.click(rect(&d.rects, "calendar"), |ui| show_event(ui, &mut d, &mut store));
         h.click(rect(&d.rects, "cal:Work"), |ui| show_event(ui, &mut d, &mut store));
         assert_eq!(d.calendar, "work");
         assert!(d.error.is_none());
-        h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
-        let r = wait_saved(&mut h, &mut d, &mut store);
+        // a fast job can finish during the click: its result comes back from the click
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let r = clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store));
         assert!(matches!(&r, Some(EventResult::Saved(m)) if m.contains("Work")), "{r:?} {:?}", d.error);
         // editing a local event and changing "Save to": written to the server, then removed here
         let e = Event { uid: "loc1".into(), summary: "Haircut".into(), start: 1_800_000_000, end: 1_800_001_800, ..Default::default() };
@@ -1374,8 +1378,9 @@ mod tests {
         let mut d = EventDialog::edit(local.id.clone(), store.find(&local.id, "loc1").unwrap());
         d.calendar = "work".into();
         h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
-        let r = wait_saved(&mut h, &mut d, &mut store);
+        // a fast job can finish during the click: its result comes back from the click
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let r = clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store));
         assert!(matches!(&r, Some(EventResult::Saved(m)) if m.starts_with("Moved")), "{r:?} {:?}", d.error);
         assert!(store.find(&local.id, "loc1").is_none(), "removed from the old calendar after the new one accepted it");
     }
@@ -1457,8 +1462,9 @@ mod tests {
         d.end = EndMode::Count;
         // saved, loaded again: the dialog shows the same, and saving without a change changes nothing
         h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
-        assert!(wait_saved(&mut h, &mut d, &mut store).is_some(), "{:?}", d.error);
+        // a fast job can finish during the click: its result comes back from the click
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        assert!(clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store)).is_some(), "{:?}", d.error);
         let saved = store.find(&src.id, &e.uid).unwrap();
         let mut d = EventDialog::edit(src.id.clone(), saved.clone());
         assert_eq!((d.repeat, d.interval.as_str(), d.days, d.end, d.count.as_str()), (RepeatMode::Every(Freq::Weekly), "1", [true, false, true, false, false, false, false], EndMode::Count, "10"));
@@ -1491,8 +1497,9 @@ mod tests {
         assert!(!d.rects.iter().any(|r| r.0 == "repeat" || r.0 == "skip-add"), "one date has no repeat of its own");
         let one = d.event().unwrap();
         assert_eq!((one.recurrence_id, one.rrule.clone(), one.alarms.len()), (Some(occ.start), None, 1));
-        h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
-        assert!(wait_saved(&mut h, &mut d, &mut store).is_some(), "{:?}", d.error);
+        // a fast job can finish during the click: its result comes back from the click
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        assert!(clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store)).is_some(), "{:?}", d.error);
         let parts: Vec<&Event> = store.events[&src.id].iter().filter(|x| x.uid == saved.uid).collect();
         assert_eq!(parts.len(), 2, "the series and its changed date");
         assert!(parts.iter().any(|x| x.rrule.is_some() && x.summary == "Standup") && parts.iter().any(|x| x.recurrence_id == Some(occ.start) && x.summary == "Standup (short)"));

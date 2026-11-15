@@ -192,6 +192,16 @@ pub fn thread_full(server: &str, token: &str, post: &Post) -> Result<(Vec<Post>,
     Ok((t, r))
 }
 
+/// One post by its id (a boost is not fetched: its id is the original's).
+pub fn fetch_post(server: &str, token: &str, id: &str) -> Result<Post, String> {
+    let server = base(server)?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("bad post id".into());
+    }
+    let v = api("GET", &format!("{server}/api/v1/statuses/{id}"), Some(token), None)?;
+    parse_status(&v, &server).ok_or_else(|| "the server's answer is not a post".to_string())
+}
+
 /// The replies of other people from a `/context` answer, as a tree (see `conversation`).
 pub fn replies_from_context(thread: &[Post], context: &Value, server: &str) -> Vec<Reply> {
     let all: Vec<Post> = context["descendants"].as_array().into_iter().flatten().filter_map(|s| parse_status(s, server)).collect();
@@ -334,7 +344,7 @@ mod tests {
         let page1: Vec<Value> = (0..6).rev().map(|i| status(&format!("{}", 100 + i), "1", "ada", "2024-05-17T10:00:00Z", None, &format!("<p>post {i}</p>"))).collect();
         let (p1, p2) = (Value::Array(page1.clone()), json!([]));
         let ctx = json!({"ancestors": [], "descendants": [status("101", "1", "ada", "2024-05-17T10:30:00Z", Some("100"), "<p>part two</p>")]});
-        let (base, handle) = mock_http(8, move |method, path, headers, body| {
+        let (base, handle) = mock_http(9, move |method, path, headers, body| {
             let authed = headers.to_ascii_lowercase().contains("authorization: bearer tok-1");
             match (method, path) {
                 ("POST", "/api/v1/apps") => (200, json!({"client_id": "cid", "client_secret": "csec"}).to_string()),
@@ -346,6 +356,7 @@ mod tests {
                 ("GET", "/api/v1/lists") if authed => (200, json!([{"id": "7", "title": "Friends"}]).to_string()),
                 ("GET", "/api/v1/timelines/home?limit=20") if authed => (200, p1.to_string()),
                 ("GET", "/api/v1/timelines/home?limit=20&max_id=100") if authed => (200, p2.to_string()),
+                ("GET", "/api/v1/statuses/100") if authed => (200, status("100", "1", "ada", "2024-05-17T10:00:00Z", None, "<p>post 0</p>").to_string()),
                 ("GET", "/api/v1/statuses/100/context") if authed => (200, ctx.to_string()),
                 ("GET", "/files/a.png") => {
                     assert!(!headers.to_ascii_lowercase().contains("authorization"), "media gets no login: {headers}");
@@ -371,11 +382,14 @@ mod tests {
         assert_eq!(first.id, "100");
         let th = c.thread_with_replies(first).unwrap().0;
         assert_eq!(th.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["100", "101"]);
+        // SOC-039: one post by its id
+        assert_eq!(c.fetch_post("100").unwrap().text_markdown, "post 0");
+        assert!(c.fetch_post("../x").unwrap_err().contains("bad post id"));
         let m = Media { kind: MediaKind::Image, url: format!("{base}/files/a.png"), preview_url: String::new(), alt: String::new(), file_name_hint: "a.png".into(), blob_cid: None };
         let (bytes, _) = c.download_media(first, &m).unwrap();
         assert_eq!(bytes, b"PNGDATA");
         let seen = handle.join().unwrap();
-        assert_eq!(seen.len(), 8, "{seen:?}");
+        assert_eq!(seen.len(), 9, "{seen:?}");
     }
 
     #[test]

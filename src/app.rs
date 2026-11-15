@@ -377,6 +377,15 @@ pub struct ShaleApp {
 impl ShaleApp {
     pub fn new(cc: &eframe::CreationContext<'_>, opts: Options) -> Self {
         theme::apply(&cc.egui_ctx);
+        if opts.screenshot.is_some() {
+            // no fades, no scroll easing and a steady text cursor: a picture shows the end state,
+            // whatever the speed of the machine (DEV-007: two runs give the same bytes)
+            cc.egui_ctx.all_styles_mut(|s| {
+                s.animation_time = 0.0;
+                s.scroll_animation = egui::style::ScrollAnimation::none();
+                s.visuals.text_cursor.blink = false;
+            });
+        }
         #[cfg(target_os = "linux")]
         {
             // drops from other programs on Wayland (a second listener; see wl_drop)
@@ -390,6 +399,15 @@ impl ShaleApp {
     /// Set up the app without a window. `persist` = read/write the user's config file.
     pub fn build(opts: Options, persist: bool) -> Self {
         let screenshot = opts.screenshot.clone();
+        // screenshots only: SHALE_FAKE_NOW=2026-11-15T10:00:00 freezes the clock and the build stamp
+        if screenshot.is_some() {
+            if let Ok(v) = std::env::var("SHALE_FAKE_NOW") {
+                match crate::cal_time::parse_fake_now(&v) {
+                    Some(secs) => crate::cal_time::freeze(secs),
+                    None => eprintln!("SHALE_FAKE_NOW={v}: not a date-time like 2026-11-15T10:00:00, the real clock is used"),
+                }
+            }
+        }
         let (mut cfg, cfg_problem) = if persist { Config::load() } else { (Config::default(), None) };
         let persist_config = persist;
         crate::data_usage::dialog::sanitize(&mut cfg.caches);
@@ -515,7 +533,7 @@ impl ShaleApp {
             shot_requested: false,
             shot_done: Arc::new(AtomicBool::new(false)),
             cfg_error: None,
-            script: opts.keys.as_deref().map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default(),
+            script: opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default(),
             script_texts: vec![],
             script_last_frame: 0,
             recovery_root,
@@ -673,32 +691,36 @@ impl ShaleApp {
                 self.drawings.clear();
                 self.active = 0;
                 self.cfg.remember_vault(path.to_path_buf());
-                let reopen: Vec<String> = self.vdata.state.open_files.clone();
-                let pinned: Vec<String> = self.vdata.state.pinned_files.clone();
-                // (opening a note rewrites the saved lists, so read both first)
-                let reopen_feeds: Vec<crate::social::FeedRef> = self.vdata.state.open_feeds.clone();
-                for (i, f) in reopen.iter().enumerate() {
-                    let rel = PathBuf::from(f);
-                    if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
-                        continue;
-                    }
-                    // a canvas tab comes back as it was left: read-only, without the question
-                    if crate::canvas::is_canvas_path(&rel) {
-                        self.open_canvas_read_only(&rel, i > 0);
-                    } else {
-                        self.open(&rel, i > 0);
-                    }
-                }
-                // (open_files is in tab order, pinned tabs first: they stay first)
-                for t in &mut self.tabs {
-                    t.pinned = t.view.path().is_some_and(|p| pinned.contains(&rel_to_string(p)));
-                }
-                // Feeds tabs come back after the note tabs (the accounts must still exist)
-                let known: Vec<crate::social::FeedRef> = reopen_feeds.into_iter().filter(|f| self.cfg.social_accounts.iter().any(|e| e.account.id == f.account)).collect();
-                for f in known {
+                // (opening a note rewrites the saved list, so read it first)
+                let saved: Vec<crate::vault_state::SavedTab> = self.vdata.state.tabs.clone();
+                for st in &saved {
+                    let before = self.tabs.len();
                     let new_tab = !self.tabs.is_empty();
-                    self.show_view(View::Social(Some(f)), new_tab);
+                    if let Some(f) = &st.file {
+                        let rel = PathBuf::from(f);
+                        if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
+                            continue;
+                        }
+                        // a canvas tab comes back as it was left: read-only, without the question
+                        if crate::canvas::is_canvas_path(&rel) {
+                            self.open_canvas_read_only(&rel, new_tab);
+                        } else {
+                            self.open(&rel, new_tab);
+                        }
+                    } else if let Some(f) = &st.feed {
+                        // (the account must still exist)
+                        if self.cfg.social_accounts.iter().any(|e| e.account.id == f.account) {
+                            self.show_view(View::Social(Some(f.clone())), new_tab);
+                        }
+                    }
+                    if self.tabs.len() > before {
+                        self.tabs[self.active].pinned = st.pinned;
+                    }
                 }
+                // pinned tabs are left-most (a hand-edited file may say otherwise)
+                let open_id = self.tabs.get(self.active).map(|t| t.id);
+                self.tabs.sort_by_key(|t| !t.pinned);
+                self.active = open_id.and_then(|id| self.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
                 if self.tabs.is_empty() {
                     let first = self.vault.as_ref().and_then(|v| v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone()));
                     match first {
@@ -865,9 +887,14 @@ impl ShaleApp {
         if self.vault.is_none() {
             return;
         }
-        self.vdata.state.open_files = self.tabs.iter().filter_map(|t| t.view.path().map(rel_to_string)).collect();
-        self.vdata.state.pinned_files = self.tabs.iter().filter(|t| t.pinned).filter_map(|t| t.view.path().map(rel_to_string)).collect();
-        self.vdata.state.open_feeds = self.open_feed_refs();
+        self.vdata.state.tabs = self
+            .tabs
+            .iter()
+            .filter_map(|t| match &t.view {
+                View::Social(Some(f)) if !f.feed.is_empty() => Some(crate::vault_state::SavedTab { feed: Some(f.clone()), pinned: t.pinned, ..Default::default() }),
+                v => v.path().map(|p| crate::vault_state::SavedTab { file: Some(rel_to_string(p)), pinned: t.pinned, ..Default::default() }),
+            })
+            .collect();
     }
 
     pub fn current_path(&self) -> Option<PathBuf> {
@@ -2071,6 +2098,7 @@ impl ShaleApp {
                 }
             }
         });
+        out.extend(crate::script::take_hints());
         self.script_texts = out;
     }
 
@@ -2576,7 +2604,7 @@ pub(crate) mod tests {
             }
             panic!("the Import dialog did not open");
         };
-        app.social.save(&ctx, &entry, &post);
+        app.social.save(&ctx, &entry, "home", &post);
         wait_for_dialog(&mut app);
         let Some(Modal::Import(mut dlg)) = app.modal.take() else { panic!() };
         assert_eq!((dlg.items.len(), dlg.folder.as_str(), dlg.items[0].kind().as_ref()), (1, "Social", "Thread (3 posts)"));
@@ -2590,7 +2618,7 @@ pub(crate) mod tests {
         assert!(app.actions.iter().any(|a| matches!(a, Action::Open { .. })), "the new note is opened");
         // the same post again: offered, but marked as imported before
         app.rescan();
-        app.social.save(&ctx, &entry, &post);
+        app.social.save(&ctx, &entry, "home", &post);
         wait_for_dialog(&mut app);
         let Some(Modal::Import(dlg)) = app.modal.take() else { panic!() };
         assert!(dlg.items[0].already.is_some() && !dlg.items[0].include);

@@ -50,8 +50,8 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far left,
   show a small pin and keep their order. Drag reorders pinned tabs among themselves and the
   others among themselves, never across the border. A pinned tab can still be closed.
-- The order of the open notes and which of them are pinned come back at the next start (a pinned
-  Feeds tab is not remembered as pinned).
+- The order of all open tabs (notes, drawings and Feeds tabs) and which of them are pinned come
+  back at the next start.
 
 ![A pinned tab and its context menu](screenshots/tab-pinned-menu.png)
 
@@ -148,7 +148,14 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   below the views) and back. Icons that are no panels (Files, Mail, …) cannot go to the right
   sidebar: the pointer shows "not allowed" and nothing changes. Taking the last icon out of a
   view removes the view. Esc cancels a drag.
-- The layout is kept in the settings.
+- Drag the border between two views up or down to change their heights (they start equal; a
+  view never gets lower than a small minimum).
+- Right-click an icon (in the ribbon or in a view's menubar) for a menu: **Remove from the
+  ribbon** / **Remove from this view**, **Restore …** for every icon removed earlier, and
+  **Reset layout** (the default icons, order and heights). The last icon of the ribbon cannot
+  be removed. Panel shortcuts in the ribbon have their own glyphs, not those of the Graph and
+  Calendar buttons.
+- The layout (icons, heights, removed icons) is kept in the settings.
 
 ![The right sidebar split into two views: Backlinks above, Calendar below](screenshots/sidebar-split.png)
 
@@ -417,7 +424,11 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   the notes; click one to open a new Feeds tab scrolled to it, also when the feed no longer has
   it. `from:ada`, `text:`, `in:` (quote, link card, the post answered, who boosted), `link:` and
   `date:2026-11` limit a word to one part. At most 10 000 posts per account and one year are
-  kept; removing an account removes its posts. (Mouse only for now.)
+  kept; removing an account removes its posts. Posts you save to the vault (the thread and the
+  replies below it) are searchable too, a reply knows the post it answers even when that arrives
+  later, and a hit whose post is gone from both index and feed is fetched from the server.
+  **Settings → General → Post search index** shows how many posts are indexed, **Rebuild**s it
+  from the posts your open feeds hold, or **Clear…**s it (after a question). (Mouse only for now.)
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.
@@ -552,7 +563,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | Keys | Action |
 |---|---|
 | j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
-| Enter | Folder pane: go to the list; list: open the message |
+| Enter | Folder pane: go to the list; list: open the message (Drafts: open the draft; Outbox: show the mail) |
 | Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
 | Space | Mark the message for a selection (list) |
 | / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
@@ -560,7 +571,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | i | Import to vault |
 | u | Mark read or unread |
 | s or f | Set or clear the flag |
-| d or Delete | Delete (Trash: asks first) |
+| d or Delete | Delete (Trash: asks first); in Drafts and Outbox discard the draft or the record |
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |
@@ -570,4 +581,8 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | ] | Select the next attachment (marked with ▸) |
 | o, Shift+O | Open the selected attachment, save it to the vault |
 | z | Take back a mail waiting in the outbox |
+| e | Edit: open the draft, or take a mail of the outbox that was not sent back into the editor |
+| Shift+S | Retry a mail of the outbox that was not sent (or send it again when it may have been sent) |
+| Menu, Shift+F10 | Open the menu of the message or draft under the cursor (↓ / ↑ or j / k, Enter, Esc) |
+| Shift+U | Show or hide the sent mails that are only on this computer (j / k, Enter = Upload again, d = Dismiss, Esc) |
 | Esc | Step back: close the message, clear the search, clear the marks, dismiss a message |

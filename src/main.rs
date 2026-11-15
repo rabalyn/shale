@@ -55,6 +55,7 @@ mod mail_demo;
 mod mail_dialog;
 #[cfg(test)]
 mod mail_env_tests;
+mod mail_keys;
 mod mail_ops;
 mod mail_send;
 #[cfg(test)]
@@ -101,6 +102,8 @@ mod tagwords;
 #[cfg(target_os = "linux")]
 mod tb_store;
 mod theme;
+#[cfg(test)]
+mod ui_test_support;
 #[cfg(test)]
 mod utf8_tests;
 mod vault;
@@ -212,7 +215,9 @@ fn main() -> eframe::Result {
             viewport = viewport.with_window_level(egui::WindowLevel::AlwaysOnBottom);
         }
     }
-    #[allow(unused_mut)]
+    #[cfg(not(target_os = "macos"))]
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    #[cfg(target_os = "macos")]
     let mut options = eframe::NativeOptions { viewport, ..Default::default() };
     #[cfg(target_os = "macos")]
     if screenshot.is_some() {

@@ -815,17 +815,15 @@ impl MailView {
                         .min_size(Vec2::new(ui.available_width(), 44.0)),
                     );
                     rec(rects, format!("mail:draft:{i}"), &r);
+                    if self.cursor == Some(i) {
+                        ui.painter().rect_filled(r.rect, 0, theme::ACCENT.gamma_multiply(0.25));
+                    }
                     if r.clicked() {
                         out.open_draft = Some((d.account.clone(), d.id.clone()));
                     }
-                    r.context_menu(|ui| {
-                        let b = ui.button("Discard draft");
-                        rec(rects, format!("mail:draft-discard:{i}"), &b);
-                        if b.clicked() {
-                            out.discard_draft = Some((d.account.clone(), d.id.clone()));
-                            ui.close();
-                        }
-                    });
+                    if r.secondary_clicked() {
+                        self.open_menu_at(crate::mail_keys::MenuTarget::Draft(i), ui.input(|i| i.pointer.interact_pos()).unwrap_or(r.rect.center()));
+                    }
                 }
             }
             LocalView::Outbox(account) => {
@@ -857,6 +855,9 @@ impl MailView {
                             .min_size(Vec2::new(ui.available_width(), 44.0)),
                     );
                     rec(rects, format!("mail:outbox:{i}"), &r);
+                    if self.cursor == Some(i) {
+                        ui.painter().rect_filled(r.rect, 0, theme::ACCENT.gamma_multiply(0.25));
+                    }
                     if r.clicked() {
                         out.select = Some((it.account.clone(), it.id.clone()));
                     }
