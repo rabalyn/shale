@@ -93,7 +93,14 @@ static NOTICES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Secrets of social accounts the keyring refused: kept for this run only.
 static SOCIAL_SESSION: Mutex<Option<HashMap<(String, String), Secret>>> = Mutex::new(None);
 
+/// Tests: every notice ever given, which app frames never take (headless app tests running at
+/// the same time empty `NOTICES` with `take_notices`, raba/shale#80).
+#[cfg(test)]
+static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 fn notice(msg: String) {
+    #[cfg(test)]
+    SEEN.lock().unwrap_or_else(|e| e.into_inner()).push(msg.clone());
     NOTICES.lock().unwrap_or_else(|e| e.into_inner()).push(msg);
 }
 
@@ -523,9 +530,9 @@ mod tests {
         clear_mail_secret("acct-1", MailSecret::RefreshToken);
     }
 
-    /// The notices so far, without taking them (other tests run at the same time).
+    /// Every notice so far, also those an app frame of another test already took.
     fn notices_now() -> Vec<String> {
-        NOTICES.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        SEEN.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     // spec: SEC-011
