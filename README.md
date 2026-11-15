@@ -77,6 +77,14 @@ This catches a damaged download, not a compromised release page.
    and creates the release page with that section as its notes (the build stops if the tag and
    `Cargo.toml` disagree or the changelog has no notes for the version).
 
+## Development and issues
+
+Shale is developed on Forgejo: <https://git.home.rabalyn.de/raba/shale>. Branches, pull requests
+and the **issues, which are the one list of open work**, live there; GitHub only hosts the
+released downloads ([ADR-0013](docs/decisions/0013-forgejo-and-issue-tracking.md), FORGE rules in
+[engineering.md](docs/spec/engineering.md)). Moving the build to the Forgejo runner is
+raba/shale#2; until then the build above still runs on GitHub Actions.
+
 ## Build and run
 
 ```sh

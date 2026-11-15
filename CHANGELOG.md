@@ -209,6 +209,10 @@ The release page of each version on GitHub shows its section from this file.
 
 ### Changed
 
+- **Development moves to Forgejo** (`git.home.rabalyn.de/raba/shale`): its issues are now the one
+  list of open work and finished work closes its issue; GitHub will only distribute releases
+  (ADR-0013, FORGE and DEV rules in the engineering spec).
+
 - **Every dialog can be moved and resized**: drag the title bar to move it, any edge or corner
   to resize it; the content scrolls when it is made small. Dialogs open centred and as tall as
   their content, and come back where you left them. The headings that were inside the dialogs
