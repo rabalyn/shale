@@ -95,7 +95,7 @@ built; it does not show that a person checked the build.
    closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
-formats, lints, builds, tests, packages and audits every push; GitHub gets the released
+formats, lints, builds, tests, packages and audits every pull request and `main`; GitHub gets the released
 versions.
 
 ## Development and issues
