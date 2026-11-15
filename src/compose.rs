@@ -681,7 +681,8 @@ mod tests {
         d.bcc = "Secret <secret@hidden.org>".into();
         let b = build(&d, &opts()).unwrap();
         let all = String::from_utf8_lossy(&b.bytes).to_lowercase();
-        assert!(!all.contains("bcc"), "no Bcc header");
+        // the random boundary and Message-ID are hex and may contain "bcc", so look at header names
+        assert!(!all.lines().any(|l| l.starts_with("bcc:")), "no Bcc header");
         assert!(!all.contains("secret@hidden.org") && !all.contains("hidden.org"), "the hidden address is nowhere in the message");
         assert!(b.recipients.contains(&"secret@hidden.org".to_string()));
         assert_eq!(b.recipients.len(), 2);
