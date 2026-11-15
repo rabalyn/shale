@@ -116,9 +116,9 @@ built; it does not show that a person checked the build.
    closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
-formats, lints, builds, tests, packages and audits every push; GitHub gets the released
-versions, and builds and tests macOS and Windows for every push to `main` (the Linux job of
-GitHub only runs for release tags).
+formats, lints, builds, tests, packages and audits every pull request and `main`; GitHub gets the
+released versions, and builds and tests macOS and Windows for every push to `main` (the Linux
+job of GitHub only runs for release tags).
 
 ## Development and issues
 
@@ -154,9 +154,11 @@ Other options:
 - `--size 1360x840` (with `--screenshot`) sets the window size, and `--keys 'step|step|…'` scripts typing,
   keys and the mouse (`click:@Sync`, `rclick:347,21`, `drag:@Ideas>@Projects`, `waitfor:@Reply`; the
   steps are listed at the top of `src/script.rs`).
+- An option Shale does not know, or one without its value, stops the start with an error and the
+  usage line (exit code 2) instead of being skipped.
 - The pictures of `docs/screenshots/` are made by `docs/screenshots/regen.sh` (all, or the names
   given) from `docs/screenshots/recipes.conf`; it runs each picture in a private X display
-  (`xvfb-run`) and needs a built `shale` (`SHALE=…` to choose it).
+  (`xvfb-run`) and needs a built `shale` that is not older than the sources (`SHALE=…` to choose it).
 
 ## Keyboard
 
