@@ -3,7 +3,8 @@
 //!
 //! Steps (a *target* is `x,y` in window points, or `@label`: the text of a label drawn in the
 //! window, the exact text preferred over a part of it; `@label#2` is the second of several, in
-//! the order `dump` lists them):
+//! the order `dump` lists them). Icon buttons draw no text: their tooltip is their label (`@Outline of
+//! the note`, a part is enough), and the tabs are `@Tab 1`, `@Tab 2`, ...):
 //!
 //! | step | what it does |
 //! |---|---|
@@ -139,6 +140,29 @@ pub fn find_label(texts: &[(String, egui::Rect)], label: &str, nth: usize) -> Op
     exact.or_else(|| texts.iter().filter(|(t, _)| t.contains(label)).nth(nth)).map(|(_, r)| r.center())
 }
 
+/// Icon buttons draw no text, so they tell the script their tooltip and place instead: the
+/// tooltip is their `@label`. `None` = no script runs and nothing is kept.
+static HINTS: std::sync::Mutex<Option<Vec<(String, egui::Rect)>>> = std::sync::Mutex::new(None);
+
+/// A script runs: start keeping the hints of icon buttons.
+pub fn collect_hints() {
+    *HINTS.lock().unwrap_or_else(|e| e.into_inner()) = Some(Vec::new());
+}
+
+/// An icon button (or other widget without text) of this frame, found by its tooltip.
+pub fn hint(tip: &str, rect: egui::Rect) {
+    if let Some(v) = HINTS.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        if v.len() < 2000 {
+            v.push((tip.to_string(), rect));
+        }
+    }
+}
+
+/// The hints of the frame so far (they are forgotten).
+pub fn take_hints() -> Vec<(String, egui::Rect)> {
+    HINTS.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(std::mem::take).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +198,22 @@ mod tests {
     }
 
     // spec: DEV-007
+    // spec: BUILD-007
+    #[test]
+    fn build_007_an_icon_button_is_found_by_its_tooltip_and_only_while_a_script_runs() {
+        let r = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(30.0, 30.0));
+        hint("Outline of the note", r);
+        assert!(take_hints().is_empty(), "nothing is kept without a script");
+        collect_hints();
+        hint("Outline of the note", r);
+        let mut texts = vec![("Outline".to_string(), egui::Rect::from_min_size(egui::pos2(100.0, 5.0), egui::vec2(10.0, 10.0)))];
+        texts.extend(take_hints());
+        assert_eq!(find_label(&texts, "Outline of the note", 1), Some(egui::pos2(25.0, 35.0)));
+        assert_eq!(find_label(&texts, "Outline", 1), Some(egui::pos2(105.0, 10.0)), "a drawn text is preferred");
+        assert!(take_hints().iter().all(|(t, _)| t != "Outline of the note"), "forgotten once taken");
+        *HINTS.lock().unwrap() = None;
+    }
+
     #[test]
     fn a_label_is_found_exactly_before_by_a_part_of_its_text() {
         let r = |x: f32| egui::Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(10.0, 10.0));

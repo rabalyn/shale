@@ -235,6 +235,7 @@ pub fn icon_button_sense(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: 
         theme::MUTED
     };
     paint_icon(ui.painter(), r.shrink(size * 0.22), icon, c);
+    crate::script::hint(tip, r);
     resp.on_hover_text(tip)
 }
 
@@ -429,6 +430,7 @@ impl ShaleApp {
             let cr = Rect::from_center_size(Pos2::new(r.max.x - 14.0, r.center().y), Vec2::splat(16.0));
             let close_resp = child.interact(cr, child.scope_id().with(("tab-close", self.tabs[i].id)), Sense::click());
             self.tab_rects.push((r, cr));
+            crate::script::hint(&format!("Tab {}", i + 1), r);
             let failed = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.save_error.is_some()).unwrap_or(false) || self.drawings.get(p).map(|d| d.save_error.is_some()).unwrap_or(false)).unwrap_or(false);
             if failed && dirty && !close_resp.hovered() {
                 // not saved, and the save failed: a red mark instead of the grey dot (DATA-009)
