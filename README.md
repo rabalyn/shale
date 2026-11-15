@@ -113,6 +113,12 @@ Other options:
   view to capture; `mail` uses a made-up mail store (no server, no real mail), `social` and
   `social-import` made-up posts; `open:<file>` opens a file of the vault, `read-only:<file>.canvas`
   shows a canvas without the question, and `convert:<file>.canvas` converts it first.
+- `--size 1360x840` (with `--screenshot`) sets the window size, and `--keys 'step|step|…'` scripts typing,
+  keys and the mouse (`click:@Sync`, `rclick:347,21`, `drag:@Ideas>@Projects`, `waitfor:@Reply`; the
+  steps are listed at the top of `src/script.rs`).
+- The pictures of `docs/screenshots/` are made by `docs/screenshots/regen.sh` (all, or the names
+  given) from `docs/screenshots/recipes.conf`; it runs each picture in a private X display
+  (`xvfb-run`) and needs a built `shale` (`SHALE=…` to choose it).
 
 ## Keyboard
 

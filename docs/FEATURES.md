@@ -2,7 +2,8 @@
 
 Shale is a notes app for the Linux desktop. Your vault is a plain folder of markdown files,
 and notes link to each other with `[[wiki links]]`. The screenshots below come from the app's
-built-in demo vault (`shale --screenshot out.png`).
+built-in demo vault (`shale --screenshot out.png`); `docs/screenshots/regen.sh` makes them all
+again from the recipes in `docs/screenshots/recipes.conf`.
 
 ## Notes and links
 
@@ -51,6 +52,8 @@ built-in demo vault (`shale --screenshot out.png`).
   others among themselves, never across the border. A pinned tab can still be closed.
 - The order of the open notes and which of them are pinned come back at the next start (a pinned
   Feeds tab is not remembered as pinned).
+
+![A pinned tab and its context menu](screenshots/tab-pinned-menu.png)
 
 ## Keyboard only: sidebar, file list and vim-style editing
 
@@ -144,8 +147,9 @@ built-in demo vault (`shale --screenshot out.png`).
   below the views) and back. Icons that are no panels (Files, Mail, …) cannot go to the right
   sidebar: the pointer shows "not allowed" and nothing changes. Taking the last icon out of a
   view removes the view. Esc cancels a drag.
-- The layout is kept in the settings. (No screenshot: the `--screenshot … --keys` workflow
-  has no mouse drags, so it cannot show a split sidebar yet.)
+- The layout is kept in the settings.
+
+![The right sidebar split into two views: Backlinks above, Calendar below](screenshots/sidebar-split.png)
 
 ## Calendar
 

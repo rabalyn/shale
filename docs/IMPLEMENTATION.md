@@ -9,7 +9,8 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 
 | File | What it does |
 |---|---|
-| `src/main.rs` | Reads the command-line options (`--vault`, `--screenshot`, `--view`) and opens the window. |
+| `src/main.rs` | Reads the command-line options (`--vault`, `--screenshot`, `--view`, `--size`, `--keys`) and opens the window. |
+| `src/script.rs` | The `--keys` script of screenshot runs (BUILD-007): the step language and its parser (keys, text, pointer steps aimed at coordinates or at drawn texts, waits), and the tests that every picture of `docs/screenshots/` has a recipe shown in the docs (DEV-007). |
 | `src/app.rs` | App state: tabs and history, open note buffers, autosave, outside-change detection, actions (open, follow link, create, rename, trash, toggle task), screenshot mode. Includes app-level tests. |
 | `src/layout.rs` | Window layout: ribbon, tab bar, view header, note view (inline title plus editor or reading view), status bar, toasts, painted icons, start screen. |
 | `src/panels.rs` | Left sidebar (file tree, search, tags), right sidebar (backlinks and unlinked mentions, outgoing links, outline, local graph), the vault-wide task list and the dialogs (quick switcher, rename, new folder, trash, settings). |
@@ -111,7 +112,7 @@ Dependencies of the whole app are only `eframe`/egui (window and UI), `serde`/`s
 
 ## Publishing and builds
 
-- `docs/FEATURES.md`: every feature with screenshots (in `docs/screenshots/`, made with `--screenshot` and `--keys` from the demo vault).
+- `docs/FEATURES.md`: every feature with screenshots (in `docs/screenshots/`, all made by `docs/screenshots/regen.sh` from `recipes.conf`: one `--screenshot --view --keys` run each, on a private X display with `xvfb-run`; `fixtures/` holds the vault and the mail the import pictures need; see DEV-007).
 - `.forgejo/workflows/ci.yml` (homelab Forgejo, git remote `origin`): every push and pull request runs fmt, clippy, a release build, the tests and the packaging with its checked `.sha256`, plus a separate `cargo audit` job that also runs weekly (BUILD-002, BUILD-009). Pushes to `main` and pull requests also run `.forgejo/scripts/check-commit-issues.sh`, which fails for a new commit that names no issue (FORGE-008; commits up to the cut-off written in the script are exempt); both shell checks have throwaway-repository tests run in the same job. Shell steps in a `rust:1.100.0-bookworm` container, no JavaScript actions.
 - `.github/workflows/build.yml` (GitHub `rabalyn/shale`, git remote `github`): runs only for `v*` tags and by hand; it builds and tests on Ubuntu 22.04 again and publishes the release (BUILD-012). The rolling pre-release **latest** of earlier versions is not updated any more.
 - **Versions and releases**: version 0.3.0 (semver; 0.1.0 was the first public commit). `CHANGELOG.md` (Keep a Changelog). The workflow also runs for tags `v*`: it runs `.github/check-release.sh` (BUILD-013: semver, greater than the previous `v*` tag, `Cargo.toml` = `Cargo.lock` = tag, a non-empty `CHANGELOG.md` section naming every `Closes #N` issue since the previous tag; tested by `.github/test-check-release.sh`), takes the version's section from `CHANGELOG.md` (`.github/release-notes.sh`) and creates/updates the release page "Shale x.y.z" with `shale-x.y.z-linux-x86_64.tar.gz`. `make-release.sh` tags (annotated) and pushes the commit and the tag to Forgejo and GitHub. The status bar shows the version.

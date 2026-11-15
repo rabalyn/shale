@@ -345,8 +345,12 @@ pub struct ShaleApp {
     shot_done: Arc<AtomicBool>,
     /// the last failure to save the global settings (shown once)
     cfg_error: Option<String>,
-    /// scripted input steps for tests of the real window
-    script: std::collections::VecDeque<String>,
+    /// scripted input steps for tests of the real window (BUILD-007)
+    script: std::collections::VecDeque<crate::script::Step>,
+    /// the texts drawn in the last frame, for the `@label` targets of the script
+    script_texts: Vec<(String, egui::Rect)>,
+    /// the frame of the last script step: the picture waits a moment after it
+    script_last_frame: u32,
     /// where text that could not be saved at exit is put (DATA-011)
     pub recovery_root: PathBuf,
     /// recovery folders from earlier runs the person has not dismissed yet
@@ -379,7 +383,8 @@ impl ShaleApp {
         let vault_path = match (&opts.vault, &screenshot) {
             (Some(v), _) => Some(v.clone()),
             (None, Some(_)) => {
-                let d = std::env::temp_dir().join("shale-demo-vault");
+                // one folder per run: pictures made at the same time must not wipe each other's vault
+                let d = std::env::temp_dir().join(format!("shale-demo-{}", std::process::id())).join("shale-demo-vault");
                 let _ = std::fs::remove_dir_all(&d);
                 let _ = vault::write_sample_vault(&d);
                 Some(d)
@@ -462,7 +467,9 @@ impl ShaleApp {
             shot_requested: false,
             shot_done: Arc::new(AtomicBool::new(false)),
             cfg_error: None,
-            script: opts.keys.as_deref().map(|k| k.split('|').map(|x| x.to_string()).collect()).unwrap_or_default(),
+            script: opts.keys.as_deref().map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default(),
+            script_texts: vec![],
+            script_last_frame: 0,
             recovery_root: if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{}", std::process::id())) },
             recovery_notice: vec![],
         };
@@ -472,7 +479,7 @@ impl ShaleApp {
         }
         if let Some(p) = vault_path {
             app.open_vault(&p);
-            if app.screenshot.is_some() {
+            if app.screenshot.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
             }
             // screenshots: a demo calendar full of sample events
@@ -1793,7 +1800,7 @@ impl ShaleApp {
         let Some(path) = self.screenshot.clone() else { return };
         ui.ctx().request_repaint();
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
-        if self.frames >= 120 && self.script.is_empty() && !self.shot_requested {
+        if self.frames >= 120 && self.script.is_empty() && self.frames >= self.script_last_frame + 12 && !self.shot_requested {
             self.shot_requested = true;
             let done = self.shot_done.clone();
             ui.ctx().request_screenshot(move |img| {
@@ -1829,12 +1836,32 @@ impl ShaleApp {
 }
 
 impl ShaleApp {
+    /// Where a script target is in the window; a label that is not drawn ends the run (a
+    /// picture of the wrong state is worse than none).
+    fn script_point(&self, t: &crate::script::Target) -> egui::Pos2 {
+        match t {
+            crate::script::Target::At(x, y) => egui::pos2(*x, *y),
+            crate::script::Target::Label(l, n) => crate::script::find_label(&self.script_texts, l, *n).unwrap_or_else(|| {
+                eprintln!("script: no text \"{l}\" (number {n}) in the window");
+                std::process::exit(3);
+            }),
+        }
+    }
+
     /// Testing aid (`--keys`): add the next scripted step to this frame's input.
     fn feed_script(&mut self, raw: &mut egui::RawInput) {
+        use crate::script::{Button, Step};
         if self.script.is_empty() || self.frames < 30 || !self.frames.is_multiple_of(6) {
             return;
         }
+        // waiting for a text to be drawn (a view that fills in later) holds the whole script
+        if let Some(Step::WaitFor(l, n)) = self.script.front() {
+            if crate::script::find_label(&self.script_texts, l, *n).is_none() {
+                return;
+            }
+        }
         let Some(step) = self.script.pop_front() else { return };
+        self.script_last_frame = self.frames;
         let key_event = |name: &str| {
             // "ctrl+shift+F": any number of modifiers before the key
             let mut mods = Modifiers::NONE;
@@ -1851,67 +1878,89 @@ impl ShaleApp {
             let key = Key::from_name(k).unwrap_or(Key::Escape);
             vec![egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: mods }, egui::Event::Key { key, physical_key: Some(key), pressed: false, repeat: false, modifiers: mods }]
         };
-        if let Some(t) = step.strip_prefix("text:") {
-            raw.events.push(egui::Event::Text(t.to_string()));
-        } else if let Some(k) = step.strip_prefix("key:") {
-            raw.events.extend(key_event(k));
-        } else if let Some(xy) = step.strip_prefix("move:").or_else(|| step.strip_prefix("down:")).or_else(|| step.strip_prefix("up:")).or_else(|| step.strip_prefix("click:")).or_else(|| step.strip_prefix("dblclick:")) {
-            // pointer steps in window points: move:x,y  down:x,y  up:x,y  click:x,y  dblclick:x,y
-            let v: Vec<f32> = xy.split(',').filter_map(|n| n.trim().parse().ok()).collect();
-            if v.len() == 2 {
-                let pos = egui::pos2(v[0], v[1]);
-                let btn = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
-                raw.events.push(egui::Event::PointerMoved(pos));
-                if step.starts_with("down:") {
-                    raw.events.push(btn(true));
-                } else if step.starts_with("up:") {
-                    raw.events.push(btn(false));
-                } else if step.starts_with("click:") {
-                    raw.events.extend([btn(true), btn(false)]);
-                } else if step.starts_with("dblclick:") {
-                    raw.events.extend([btn(true), btn(false), btn(true), btn(false)]);
+        let button = |pos, button, pressed| egui::Event::PointerButton { pos, button, pressed, modifiers: Modifiers::NONE };
+        let left = egui::PointerButton::Primary;
+        match &step {
+            Step::Text(t) => raw.events.push(egui::Event::Text(t.clone())),
+            Step::Key(k) => raw.events.extend(key_event(k)),
+            Step::Move(t) => raw.events.push(egui::Event::PointerMoved(self.script_point(t))),
+            Step::Down(t) => {
+                let pos = self.script_point(t);
+                raw.events.extend([egui::Event::PointerMoved(pos), button(pos, left, true)]);
+            }
+            Step::Up(t) => {
+                let pos = self.script_point(t);
+                raw.events.extend([egui::Event::PointerMoved(pos), button(pos, left, false)]);
+            }
+            Step::Click(t, b) => {
+                let pos = self.script_point(t);
+                let b = if *b == Button::Right { egui::PointerButton::Secondary } else { left };
+                raw.events.extend([egui::Event::PointerMoved(pos), button(pos, b, true), button(pos, b, false)]);
+            }
+            Step::DoubleClick(t) => {
+                let pos = self.script_point(t);
+                raw.events.extend([egui::Event::PointerMoved(pos), button(pos, left, true), button(pos, left, false), button(pos, left, true), button(pos, left, false)]);
+            }
+            Step::Drag(from, to) => {
+                // press, two moves on the way, release: one step each, so the window sees a drag
+                let (a, b) = (self.script_point(from), self.script_point(to));
+                let at = |f: f32| crate::script::Target::At(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+                let steps = [Step::Down(at(0.0)), Step::Move(at(0.1)), Step::Move(at(0.5)), Step::Move(at(1.0)), Step::Up(at(1.0))];
+                for s in steps.into_iter().rev() {
+                    self.script.push_front(s);
                 }
             }
-        } else if let Some(n) = step.strip_prefix("scroll:") {
-            // the mouse wheel at the pointer, in points (positive: down): scroll:400
-            if let Ok(dy) = n.trim().parse::<f32>() {
+            Step::Scroll(dy) => {
+                // the mouse wheel at the pointer, in points (positive: down)
                 raw.events.push(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -dy), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel });
             }
-        } else if let Some(p) = step.strip_prefix("drop:") {
-            // a file dropped through the window system: drop:/path/to/file
-            raw.dropped_files.push(std::sync::Arc::new(ScriptDrop(PathBuf::from(p))));
-        } else if let Some(rest) = step.strip_prefix("dropdata:") {
-            // data dropped by another program at the pointer: dropdata:text/plain:hello
-            // (several kinds: dropdata:text/uri-list:|text/x-moz-url:link — an empty part is allowed)
-            #[cfg(target_os = "linux")]
-            if let Some((mime, data)) = rest.split_once(':') {
-                let at = self.ctx.as_ref().and_then(|c| c.input(|i| i.pointer.latest_pos())).unwrap_or_default();
-                let data = if let Some(f) = data.strip_prefix('@') { crate::fsutil::read(f).unwrap_or_default() } else { data.replace("\\n", "\n").into_bytes() };
-                let mut parts = vec![(mime.to_string(), data)];
-                // more kinds follow as ";;kind:data"
-                if let Some(pos) = parts[0].1.windows(2).position(|w| w == b";;") {
-                    let rest = String::from_utf8_lossy(&parts[0].1[pos + 2..]).into_owned();
-                    parts[0].1.truncate(pos);
-                    for p in rest.split(";;") {
-                        if let Some((m, d)) = p.split_once(':') {
-                            parts.push((m.to_string(), d.as_bytes().to_vec()));
+            Step::Wait(n) => {
+                if *n > 1 {
+                    self.script.push_front(Step::Wait(n - 1));
+                }
+            }
+            Step::WaitFor(..) => {}
+            Step::Drop(p) => raw.dropped_files.push(std::sync::Arc::new(ScriptDrop(p.clone()))),
+            Step::DropData(rest) => {
+                // data dropped by another program at the pointer: dropdata:text/plain:hello
+                // (several kinds: dropdata:text/uri-list:|text/x-moz-url:link — an empty part is allowed)
+                #[cfg(target_os = "linux")]
+                if let Some((mime, data)) = rest.split_once(':') {
+                    let at = self.ctx.as_ref().and_then(|c| c.input(|i| i.pointer.latest_pos())).unwrap_or_default();
+                    let data = if let Some(f) = data.strip_prefix('@') { crate::fsutil::read(f).unwrap_or_default() } else { data.replace("\\n", "\n").into_bytes() };
+                    let mut parts = vec![(mime.to_string(), data)];
+                    // more kinds follow as ";;kind:data"
+                    if let Some(pos) = parts[0].1.windows(2).position(|w| w == b";;") {
+                        let rest = String::from_utf8_lossy(&parts[0].1[pos + 2..]).into_owned();
+                        parts[0].1.truncate(pos);
+                        for p in rest.split(";;") {
+                            if let Some((m, d)) = p.split_once(':') {
+                                parts.push((m.to_string(), d.as_bytes().to_vec()));
+                            }
                         }
                     }
+                    let offered = parts.iter().map(|p| p.0.clone()).collect();
+                    self.fake_drops.push(crate::wl_drop::DropEvent::Drop { x: at.x, y: at.y, parts, offered, report: vec![] });
                 }
-                let offered = parts.iter().map(|p| p.0.clone()).collect();
-                self.fake_drops.push(crate::wl_drop::DropEvent::Drop { x: at.x, y: at.y, parts, offered, report: vec![] });
+                #[cfg(not(target_os = "linux"))]
+                let _ = rest;
             }
-            #[cfg(not(target_os = "linux"))]
-            let _ = rest;
-        } else if step == "focus-end" {
-            if let (Some(t), Some(p)) = (self.tabs.get(self.active), self.current_path()) {
-                let n = self.notes.get(&p).map(|d| d.text.chars().count()).unwrap_or(0);
-                let id = t.id;
-                if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
-                    t.editor.pending_cursor = Some(n);
+            Step::Dump => {
+                for (t, r) in &self.script_texts {
+                    eprintln!("script: {:?} at {:.0},{:.0}", t.chars().take(60).collect::<String>(), r.center().x, r.center().y);
+                }
+            }
+            Step::FocusEnd => {
+                if let (Some(t), Some(p)) = (self.tabs.get(self.active), self.current_path()) {
+                    let n = self.notes.get(&p).map(|d| d.text.chars().count()).unwrap_or(0);
+                    let id = t.id;
+                    if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+                        t.editor.pending_cursor = Some(n);
+                    }
                 }
             }
         }
+        let step = format!("{step:?}");
         if std::env::var_os("SHALE_DEBUG").is_some() {
             if let Some(d) = self.current_path().and_then(|p| self.drawings.get(&p)) {
                 eprintln!("step {step:?}: drawing {}", d.debug_state());
@@ -1921,6 +1970,38 @@ impl ShaleApp {
                 eprintln!("step {step:?}: tabs={} active={} tab_id={} editor={:?} picker_visible={} {} tail={tail:?}", self.tabs.len(), self.active, t.id, t.editor.id, t.editor.picker_visible(), t.editor.debug_state());
             }
         }
+    }
+
+    /// Testing aid (`--keys`): remember where each text of the window was drawn, topmost first,
+    /// so that the next step can aim at `@label`.
+    fn note_script_texts(&mut self, ctx: &egui::Context) {
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(t) => {
+                    let text = t.galley.text();
+                    if !text.trim().is_empty() {
+                        out.push((text.to_string(), t.galley.rect.translate(t.pos.to_vec2())));
+                    }
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().collect());
+        if !layers.contains(&egui::LayerId::background()) {
+            layers.insert(0, egui::LayerId::background());
+        }
+        let mut out = Vec::new();
+        ctx.graphics(|g| {
+            for l in layers.iter().rev() {
+                if let Some(list) = g.get(*l) {
+                    for clipped in list.all_entries().collect::<Vec<_>>().into_iter().rev() {
+                        walk(&clipped.shape, &mut out);
+                    }
+                }
+            }
+        });
+        self.script_texts = out;
     }
 
     /// Start a fresh troubleshooting recording (with a header describing the setup).
@@ -2002,6 +2083,11 @@ impl eframe::App for ShaleApp {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         if std::env::var_os("SHALE_DEBUG").is_some() && !self.script.is_empty() {
             eprintln!("focus: {:?} wants_keys={}", ctx.memory(|m| m.focused()), ctx.egui_wants_keyboard_input());
+        }
+        // a window without a window manager (the private X display of the pictures) never gets the
+        // focus from the system; the picture shows the window as a person would see it, focused
+        if self.screenshot.is_some() {
+            raw.focused = true;
         }
         self.feed_script(raw);
         if self.cfg.input_log {
@@ -2085,6 +2171,9 @@ impl ShaleApp {
         self.learn_tags_tick();
         self.paint_toasts(ui);
         self.paint_recovery_notice(ui);
+        if !self.script.is_empty() {
+            self.note_script_texts(ui.ctx());
+        }
         self.process_actions();
     }
 }
