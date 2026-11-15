@@ -220,7 +220,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 ![Mail accounts](screenshots/mail-accounts.png)
 
 - **Accounts…** adds an account: server, port (993 with TLS, 143 with STARTTLS), user name and
-  password. The password goes into the system keyring. Without a keyring Shale says so and asks
+  password. The password goes into the system keyring (the Keychain on macOS, the Credential Manager on Windows). Without a keyring Shale says so and asks
   again each time it starts, keeping it in memory only; it is never written to the settings
   file. **Test connection** checks the login and lists the folders. If you change the server or
   the user name of an account, it is another mailbox: it starts with an empty local copy, you
