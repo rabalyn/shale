@@ -53,6 +53,16 @@ pub enum GpgError {
     BadArgument(String),
 }
 
+/// A `GNUPGHOME` value. On Windows with forward slashes: the GnuPG that comes with Git for Windows
+/// (an MSYS program) reads a backslash path as a relative one, and Gpg4win's accepts both.
+fn home_text(p: &std::path::Path) -> std::ffi::OsString {
+    if cfg!(windows) {
+        p.to_string_lossy().replace('\\', "/").into()
+    } else {
+        p.as_os_str().to_owned()
+    }
+}
+
 /// Where to get GnuPG on this system (BUILD-018): macOS and Windows do not come with it.
 fn install_hint() -> &'static str {
     if cfg!(target_os = "macos") {
@@ -177,7 +187,7 @@ impl Gnupg {
         }
         cmd.args(args);
         if let Some(h) = &self.home {
-            cmd.env("GNUPGHOME", h);
+            cmd.env("GNUPGHOME", home_text(h));
         }
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = spawn_retrying(&mut cmd).map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GpgError::Missing(s) } else { GpgError::Io(e.to_string()) })?;
@@ -808,8 +818,8 @@ pub(crate) mod testkit {
 
     impl Drop for TestHome {
         fn drop(&mut self) {
-            let _ = Command::new("gpgconf").arg("--homedir").arg(&self.dir).args(["--kill", "gpg-agent"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-            let _ = Command::new("gpgconf").arg("--homedir").arg(&self.dir).arg("--remove-socketdir").stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let _ = Command::new("gpgconf").arg("--homedir").arg(home_text(&self.dir)).args(["--kill", "gpg-agent"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let _ = Command::new("gpgconf").arg("--homedir").arg(home_text(&self.dir)).arg("--remove-socketdir").stdout(Stdio::null()).stderr(Stdio::null()).status();
             let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
@@ -838,7 +848,7 @@ pub(crate) mod testkit {
 
         fn cmd(&self, program: &str) -> Command {
             let mut c = Command::new(program);
-            c.env("GNUPGHOME", &self.dir).stdin(Stdio::null());
+            c.env("GNUPGHOME", home_text(&self.dir)).stdin(Stdio::null());
             c
         }
 

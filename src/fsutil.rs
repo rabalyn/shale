@@ -94,7 +94,28 @@ pub fn open_read(path: impl AsRef<Path>) -> io::Result<File> {
 /// Flush a file this program did not write itself (a copy another library made, such as a
 /// database backup) to disk. The error says which file.
 pub fn sync_file(path: &Path) -> io::Result<()> {
-    File::open(path).and_then(|f| f.sync_all()).map_err(|e| named(path, e))
+    // Windows' FlushFileBuffers wants write access to the file; elsewhere a read-only open is enough
+    let mut o = OpenOptions::new();
+    o.read(true);
+    #[cfg(windows)]
+    o.write(true);
+    o.open(path).and_then(|f| f.sync_all()).map_err(|e| named(path, e))
+}
+
+/// Windows: what tells one file from another even when its name and times are the same: the volume
+/// and the file index (the counterpart of the inode, DATA-002). A file made by an atomic save has
+/// a new one. None if it cannot be read.
+#[cfg(windows)]
+pub fn file_identity(path: &Path) -> Option<(u32, u64)> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
+    let f = File::open(path).ok()?;
+    // SAFETY: the handle is open for as long as `f` lives and the struct is filled by the call.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(f.as_raw_handle(), &mut info) } == 0 {
+        return None;
+    }
+    Some((info.dwVolumeSerialNumber, (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow)))
 }
 
 /// Make a folder (and its parents) that only the owner can enter (mode 0700). A folder that
@@ -391,6 +412,28 @@ fn sync_dir(dir: &Path) {
     let _ = dir;
 }
 
+/// Rename `from` over `to` (the replacing rename of an atomic save, DATA-013). On Windows the
+/// target can be held open for a moment by a program that reads it (a virus scanner, the search
+/// indexer, another reader of Shale): the rename then fails with "access denied" or "sharing
+/// violation" and works a moment later, so it is tried again for about a second.
+fn rename_replace(from: &Path, to: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        let mut tries = 0;
+        loop {
+            match fs::rename(from, to) {
+                Err(e) if tries < 40 && (e.kind() == io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(32)) => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                r => return r,
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    fs::rename(from, to)
+}
+
 fn write_atomic_with(path: &Path, perms: Perms, fill: impl FnOnce(&mut File) -> io::Result<()>) -> io::Result<()> {
     let target = resolve(path)?;
     let existing = match fs::metadata(&target) {
@@ -399,7 +442,7 @@ fn write_atomic_with(path: &Path, perms: Perms, fill: impl FnOnce(&mut File) -> 
         Err(_) => None,
     };
     let (mut guard, tmp) = write_temp(&target, perms, existing.as_ref(), fill)?;
-    fs::rename(&tmp, &target).map_err(|e| named(path, e))?;
+    rename_replace(&tmp, &target).map_err(|e| named(path, e))?;
     guard.disarm();
     sync_dir(target.parent().unwrap_or(Path::new(".")));
     Ok(())
@@ -718,6 +761,18 @@ mod tests {
         rename_noreplace(&d.join("dir1"), &d.join("dir3")).unwrap();
         assert!(d.join("dir3").is_dir() && !d.join("dir1").exists());
         assert!(rename_noreplace(&d.join("missing"), &d.join("x")).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DATA-004
+    #[test]
+    fn a_file_another_library_wrote_can_be_synced_and_a_missing_one_is_named() {
+        // Windows refuses to flush a file that was opened for reading only: a regression of the
+        // mail index backup ("Access is denied")
+        let d = tmp("sync");
+        fs::write(d.join("backup.sqlite"), "data").unwrap();
+        sync_file(&d.join("backup.sqlite")).unwrap();
+        assert!(sync_file(&d.join("missing.sqlite")).unwrap_err().to_string().contains("missing.sqlite"));
         let _ = fs::remove_dir_all(&d);
     }
 

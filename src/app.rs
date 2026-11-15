@@ -2612,7 +2612,7 @@ mod export_tests {
             app.process_actions();
             let Some(Modal::Export(dialog)) = app.modal.take() else { panic!("export dialog should open for {rel}") };
             assert_eq!(dialog.drawing, rel.ends_with(".excalidraw"));
-            assert!(dialog.path.ends_with(&format!("exports/{}.pdf", rel.split('.').next().unwrap())), "default path {}", dialog.path);
+            assert!(dialog.path.replace('\\', "/").ends_with(&format!("exports/{}.pdf", rel.split('.').next().unwrap())), "default path {}", dialog.path);
             let out = app.run_export(&dialog).unwrap();
             let bytes = std::fs::read(&out).unwrap();
             let pdf = hayro::hayro_syntax::Pdf::new(bytes).expect("a valid PDF was written");
@@ -2629,7 +2629,8 @@ mod export_tests {
         let (mut app, d) = test_app("badpath");
         app.open_export_dialog(Path::new("Ideas.md"));
         let Some(Modal::Export(mut dialog)) = app.modal.take() else { panic!() };
-        dialog.path = "/proc/definitely/not/writable/x.pdf".into();
+        // a file where a folder is needed: cannot be written on any system
+        dialog.path = d.join("Ideas.md").join("x.pdf").to_string_lossy().into_owned();
         assert!(app.run_export(&dialog).is_err());
         let _ = std::fs::remove_dir_all(&d);
     }
