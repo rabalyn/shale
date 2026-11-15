@@ -146,6 +146,9 @@ The release page of each version on GitHub shows its section from this file.
   or free, categories and the time zone. A repeating event offers "Edit this date" / "Edit all
   repeats" and "Delete this date" / "Delete all repeats". Shale stores reminders; it does not
   ring itself. Every date field has a small calendar button to pick the day from a month.
+- "Restore last deleted" in the right-click menu of the empty space of the file list puts the item you moved to the trash last back at its original place. It never replaces anything: if the place is taken, the item stays in the trash and a message says so. (VAULT-020)
+- Release downloads come with a SHA-256 checksum file (`shale-linux-x86_64.tar.gz.sha256`, on the "latest" build and every release page); check a download with `sha256sum -c`. It catches a damaged download, not a compromised release page.
+- A separate "audit" job in the build workflow runs `cargo audit` on the dependencies, on every push and weekly; a new advisory fails only that job and never blocks a release build.
 
 ### Fixed
 
@@ -181,6 +184,28 @@ The release page of each version on GitHub shows its section from this file.
   notes inside it, and moving a note keeps its own `../` links working.
 - A rename can no longer move a note out of the vault (`../../x`, `/tmp/x`), and a new folder
   name can't point outside it either.
+- **Calendar: a CalDAV save or delete without a version tag no longer overwrites a change made on
+  the server.** Shale first fetches the event and compares it with what it read; if it differs, the
+  save or delete is refused with "the event was changed on the server meanwhile" (CAL-016).
+- **Mail: changing the server or user name of an account** no longer applies the old mailbox's local copy and queued actions to the new one. The account becomes a new mailbox with an empty local copy; the old mail stays on disk and the dialog's note says where. Queued actions of an account that is no longer set up are never sent.
+- **Mail: a draft is saved when Shale closes**, even while a question is open. If that fails, its text goes to the recovery folder and is announced at the next start.
+- **Mail: replacing a draft attachment by another file of the same name and size** now keeps the new file; the old one is moved to the local trash.
+- Mail of a folder whose server numbering (UIDVALIDITY) changed no longer disappears from the lists and search when it is older than the three years that are fetched again or is no longer on the server: it stays, shown as not on the server, and no change is sent for it. Mail the new numbering has again shows once.
+- An index restored from a backup no longer sends the actions that were queued when the backup was made: they are undone locally and the notice says how many, so you can check them.
+- The local copy of a sent mail never overwrites an older file in the Sent folder; it takes the next free number.
+- An autosave could land in the middle of a git sync's merge: the note was written, git then overwrote it with the merged version, and the text you had just typed was gone without a conflict copy. The sync and the window now take turns on one lock: the autosave skips a moment while git changes files, and every other save (save all, rename, move, trash, checkbox, fix link) waits for it for up to 30 seconds; if the sync is still busy after that, nothing is saved, your edits stay in the open note and a message says so. (SYNC-013)
+- The troubleshooting key recording no longer writes anything typed or pasted into any password
+  field (social accounts, the mail password prompt, calendar and mail settings): every password
+  field is made one way, and a test refuses a new one made differently. When Shale starts with the
+  recording on, a notice says where it is written and how to switch it off.
+- A CalDAV or social-account password that the system keyring refuses (for example the unlock
+  was cancelled) is no longer written to the settings file in plain text. It is kept for this run,
+  Shale says it was not saved, and a password already in the file from an earlier version stays there
+  until the keyring takes it. Without any keyring nothing changes (the owner-only settings file).
+- A renewed mail sign-in (OAuth) that could not be saved in the keyring is kept for this run, saved
+  at the next renewal, and reported once instead of silently needing a new sign-in after a restart.
+- GnuPG's temp folders are no longer made directly in the shared temp folder: they are made new
+  inside a private folder, and an existing path is never adopted.
 
 ### Changed
 
@@ -197,6 +222,15 @@ The release page of each version on GitHub shows its section from this file.
   (`src/link_assist.rs`) so drawings can use them; notes behave as before.
 - Dragging something Shale can't take (like a browser tab) across the window no longer leaves a
   message behind; a hint at the pointer says so while it is over the window.
+- **Calendar: "Delete event" asks first and keeps a copy.** The event popup shows "Delete “Title”?"
+  (or "… with all its repeats?" / "Delete only this date …") with Delete and Keep. Before an
+  event or one date of it goes, the whole event is written to `calendar-trash/<date>/` in the data
+  folder; if that copy cannot be written, nothing is deleted. The message says where the copy is
+  (CAL-011, CAL-017).
+- The vault trash keeps where an item came from: it goes to `.trash/<date>/<its path in the vault>`, so two notes of the same name from different folders no longer get mixed up. A name already taken that day gets ` (2)`, ` (3)` … before the extension; nothing in the trash is ever replaced. Entries directly in `.trash/` from earlier versions stay where they are. (VAULT-017)
+- Git sync refuses a remote address with a password in it (use a credential helper or an SSH key)
+  and `http://` or `git://` addresses unless the host is this computer. A password in an existing
+  remote is shown as `***` in the settings and in error messages.
 
 ## [0.3.0] - 2026-11-13
 
