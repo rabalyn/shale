@@ -443,12 +443,13 @@ mod tests {
 
     // spec: SEC-003
     #[test]
+    // its own host: other tests (the calendar dialog) save "ada" at dav.example.com at the same time
     fn passwords_go_to_the_keyring_and_come_back() {
-        let sources = vec![dav("a", "https://dav.example.com/cal/a/", "ada", "s3cret"), dav("b", "https://DAV.example.com:443/cal/b/", "ada", "s3cret"), dav("anon", "https://pub.example.com/c/", "", "")];
+        let sources = vec![dav("a", "https://sec003.example.com/cal/a/", "ada", "s3cret"), dav("b", "https://SEC003.example.com:443/cal/b/", "ada", "s3cret"), dav("anon", "https://pub.example.com/c/", "", "")];
         let file = for_file(&sources);
         let json = serde_json::to_string(&file).unwrap();
         assert!(!json.contains("s3cret"), "no password in the settings file: {json}");
-        assert_eq!(backend::lookup(CALDAV, "https://dav.example.com:443", "ada").as_deref(), Some("s3cret"), "one entry for the account");
+        assert_eq!(backend::lookup(CALDAV, "https://sec003.example.com:443", "ada").as_deref(), Some("s3cret"), "one entry for the account");
         // reading the settings back
         let mut loaded: Vec<CalendarSource> = serde_json::from_str(&json).unwrap();
         load_passwords(&mut loaded);
