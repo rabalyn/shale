@@ -112,7 +112,7 @@ pub enum LeftPanel {
     Tags,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RightPanel {
     Backlinks,
     Outgoing,
@@ -140,6 +140,8 @@ impl egui::DroppedFile for ScriptDrop {
 }
 
 pub enum Modal {
+    /// The picker window (`Space f f`, NAV-020)
+    Picker(crate::picker::Picker),
     QuickSwitch {
         query: String,
         sel: usize,
@@ -176,6 +178,8 @@ pub enum Modal {
 }
 
 pub enum Action {
+    /// put the keyboard into the editor of the open note (after opening it)
+    FocusEditor,
     /// open the "Export to PDF" dialog for a note or drawing
     Export(PathBuf),
     Open {
@@ -216,6 +220,8 @@ pub enum Action {
         col: usize,
     },
     ShowView(View),
+    /// open a post found by the search in its feed, in a new tab (SOC-035)
+    OpenPost(Box<crate::social::post_index::PostHit>),
     CloseTab(usize),
     Rename(PathBuf),
     Trash(PathBuf),
@@ -262,7 +268,8 @@ pub struct ShaleApp {
     pub notes: HashMap<PathBuf, NoteDoc>,
     pub drawings: HashMap<PathBuf, DrawingDoc>,
     pub left: LeftPanel,
-    pub right: RightPanel,
+    /// The icons of the ribbon and the right sidebar, and a drag of one of them (LAY-001).
+    pub side: crate::sidebar_ui::SideState,
     pub expanded: HashSet<PathBuf>,
     pub search: String,
     /// the selected stop in the search results while they are browsed with the keyboard
@@ -393,7 +400,7 @@ impl ShaleApp {
             notes: HashMap::new(),
             drawings: HashMap::new(),
             left: LeftPanel::Files,
-            right: RightPanel::Backlinks,
+            side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
             expanded: HashSet::new(),
             search: String::new(),
             search_sel: None,
@@ -414,7 +421,14 @@ impl ShaleApp {
             mail: crate::mail_ui::MailView::new(if persist { crate::mail_store::default_root() } else { std::env::temp_dir().join(format!("shale-mail-{}-{}", std::process::id(), NEXT_MAIL_ROOT.fetch_add(1, Ordering::SeqCst))) }),
             cal_side: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Small),
             cal_main: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Medium),
-            social: crate::social::state::SocialState::new(if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{}", std::process::id())) }),
+            social: {
+                let mut s =
+                    crate::social::state::SocialState::new(if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{}", std::process::id())) });
+                if persist {
+                    s.open_index(&crate::social::post_index::default_path());
+                }
+                s
+            },
             cal_jobs: vec![],
             last_event_calendar: None,
             ctx: None,
@@ -482,7 +496,9 @@ impl ShaleApp {
             match opts.view.as_deref() {
                 Some("calendar") => app.show_view(View::Calendar, false),
                 Some("mail") => app.show_view(View::Mail, false),
-                Some("calendar-side") => app.right = RightPanel::Calendar,
+                Some("calendar-side") => {
+                    app.side.layout.show_panel(RightPanel::Calendar);
+                }
                 Some("tasks") => app.show_view(View::Tasks, false),
                 Some("keybindings") => app.modal = Some(Modal::Keybindings(Box::default())),
                 Some("graph") => app.show_view(View::Graph, false),
@@ -649,21 +665,12 @@ impl ShaleApp {
             self.new_tab(view);
             return;
         }
-        // the Feeds button shows a Feeds tab that exists (the current one first); the same feed
-        // may be open in several tabs, so a feed is never "found" by equality
-        if view == View::Social(None) {
-            // (a new tab, still empty, becomes a second Feeds tab instead)
-            let i = if self.tabs[self.active].view == View::Empty {
-                None
-            } else if matches!(self.tabs[self.active].view, View::Social(_)) {
-                Some(self.active)
-            } else {
-                self.tabs.iter().position(|t| matches!(t.view, View::Social(_)))
-            };
-            if let Some(i) = i {
-                self.active = i;
-                return;
-            }
+        // the Feeds button always opens a new Feeds tab (to add a feed to the workflow); the same
+        // feed may be open in several tabs, so a feed is never "found" by equality. A new tab that
+        // is still empty becomes the Feeds tab instead of leaving an empty one behind.
+        if view == View::Social(None) && self.tabs[self.active].view != View::Empty {
+            self.new_tab(view);
+            return;
         }
         // reuse a tab already showing it
         if let Some(i) = self.tabs.iter().position(|t| t.view == view && !matches!(t.view, View::Social(_))) {
@@ -1554,6 +1561,44 @@ impl ShaleApp {
         }
     }
 
+    /// Make the previous (-1) or next (1) tab the open one, wrapping around at the ends
+    /// (NAV-018). `tabs` is the order the tab bar shows.
+    pub fn step_tab(&mut self, delta: isize) {
+        let n = self.tabs.len() as isize;
+        if n > 1 {
+            self.active = (self.active as isize + delta).rem_euclid(n) as usize;
+        }
+    }
+
+    /// Do the keys of the "Editor normal mode" scope apply now (EDIT-015)? Vim-style editing is
+    /// on and either the editor of the open note has the keyboard in normal mode, or the tab
+    /// shows a view without a text box (calendar, Feeds, tasks, graph, a note in reading view)
+    /// and no field has the keyboard. Not in the mail view (Space and f are mail keys, MAIL-061,
+    /// MAIL-110), not in a drawing (Space pans), not with a dialog open.
+    pub(crate) fn normal_keys_active(&self, ctx: &egui::Context) -> bool {
+        if !self.cfg.vim_mode || self.modal.is_some() {
+            return false;
+        }
+        let Some(tab) = self.tabs.get(self.active) else { return false };
+        match tab.view {
+            View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx),
+            View::Mail | View::Drawing(_) => false,
+            _ => ctx.memory(|m| m.focused().is_none()),
+        }
+    }
+
+    /// Swap the view of this tab with the one before it in its history, so that doing it again
+    /// swaps back (NAV-019). A note gets the keyboard.
+    pub fn swap_alternate(&mut self) {
+        let Some(t) = self.tabs.get_mut(self.active) else { return };
+        let Some(prev) = t.back.last_mut() else { return };
+        std::mem::swap(&mut t.view, prev);
+        if matches!(t.view, View::Note(_)) {
+            self.focus_editor();
+        }
+        self.remember_open_files();
+    }
+
     /// Where a tab dragged to the pointer at `x` would land: the gap index in `0..=tabs.len()`,
     /// kept inside the tab's own group, pinned tabs first (NAV-017). `mids` are the tabs' centres.
     pub(crate) fn tab_slot(&self, from: usize, x: f32, mids: &[f32]) -> usize {
@@ -1617,6 +1662,7 @@ impl ShaleApp {
         let actions = std::mem::take(&mut self.actions);
         for a in actions {
             match a {
+                Action::FocusEditor => self.focus_editor(),
                 Action::Open { rel, new_tab } => self.open(&rel, new_tab),
                 Action::OpenLink { target, heading, from, new_tab } => self.open_link(&target, heading, from, new_tab),
                 Action::FixLink { note, target, to } => self.fix_link(&note, &target, &to),
@@ -1626,6 +1672,7 @@ impl ShaleApp {
                 Action::GotoLine { rel, line } => self.goto_line(&rel, line),
                 Action::GotoMatch { rel, line, col } => self.goto_match(&rel, line, col),
                 Action::ShowView(v) => self.show_view(v, false),
+                Action::OpenPost(hit) => self.open_post_hit(&hit),
                 Action::CloseTab(i) => self.close_tab(i),
                 Action::Rename(rel) => {
                     let name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_else(|| rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
@@ -1668,6 +1715,24 @@ impl ShaleApp {
         if self.vault.is_none() {
             return;
         }
+        if is(KeyAction::PrevTab) {
+            self.step_tab(-1);
+        } else if is(KeyAction::NextTab) {
+            self.step_tab(1);
+        }
+        // Space sequences of vim-style normal mode (EDIT-015); a half typed one is forgotten
+        // when the keys are not read any more
+        if self.normal_keys_active(ui.ctx()) {
+            match ui.input_mut(|i| self.keymap.poll(i, Scope::EditorNormal)) {
+                Some(KeyAction::NormalAlternate) => self.swap_alternate(),
+                Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
+                _ => {}
+            }
+        } else {
+            self.keymap.cancel(Scope::EditorNormal);
+        }
+        let in_mail = matches!(self.tabs.get(self.active).map(|t| &t.view), Some(View::Mail));
+        let sidebar_keys = self.tree_sel.is_some() || self.search_sel.is_some();
         if mail_view {
             self.show_view(View::Mail, false);
         }
@@ -1686,11 +1751,17 @@ impl ShaleApp {
         if files {
             self.left = LeftPanel::Files;
             self.focus_sidebar(ui.ctx());
-        } else if to_sidebar {
+        } else if to_sidebar && !(in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, -1, sidebar_keys)) {
             self.focus_sidebar(ui.ctx());
         }
         if to_editor {
-            self.focus_editor();
+            // in the mail view the keyboard goes to its panes (MAIL-063)
+            if in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, 1, sidebar_keys) {
+                self.tree_sel = None;
+                self.search_sel = None;
+            } else {
+                self.focus_editor();
+            }
         }
         if back || mouse_back {
             self.go_back();

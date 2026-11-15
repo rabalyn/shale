@@ -4,6 +4,7 @@
 use super::{Modal, ShaleApp, View};
 use crate::social::accounts_ui::DialogAction;
 use crate::social::feed_ui::{self, Ask, TabCtx};
+use crate::social::post_index::PostHit;
 use crate::social::state::FeedsState;
 use crate::social::FeedRef;
 use eframe::egui::{Context, Ui};
@@ -29,6 +30,18 @@ impl ShaleApp {
         self.note_feed(&feed);
         self.show_view(View::Social(Some(feed)), new_tab);
         self.remember_open_files();
+    }
+
+    /// Open a post the search found in its feed, in a new Feeds tab scrolled to the post (SOC-035).
+    /// A feed that is gone shows the account's other feed (the post goes into its list from the index).
+    pub fn open_post_hit(&mut self, hit: &PostHit) {
+        if !self.cfg.social_accounts.iter().any(|e| e.account.id == hit.account) {
+            self.toast("The account of this post is no longer here");
+            return;
+        }
+        self.open_feed(FeedRef { account: hit.account.clone(), feed: hit.feed.clone() }, true);
+        let tab = self.tabs[self.active].id;
+        self.social.show_hit(tab, hit);
     }
 
     /// The tab named no feed (or one that is gone): this is the one it shows. No history step.
@@ -132,6 +145,7 @@ impl ShaleApp {
                 }
                 self.cfg.social_accounts.retain(|x| x.account.id != id);
                 self.social.forget(&id);
+                self.social.index.remove_account(&id);
                 self.save_config();
                 false
             }

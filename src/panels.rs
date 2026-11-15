@@ -398,6 +398,7 @@ impl ShaleApp {
             self.search_sel = None;
         }
         let scroll = std::mem::take(&mut self.search_scroll);
+        let posts = if self.search.trim().is_empty() { vec![] } else { self.social.index.search(&self.search, 20) };
         let mark = |ui: &Ui, rect: egui::Rect| {
             ui.painter().rect_stroke(rect.expand(1.0), CornerRadius::same(4), egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Outside);
         };
@@ -432,6 +433,25 @@ impl ShaleApp {
                 }
                 ui.add_space(6.0);
             }
+            // posts of the feeds (SOC-036): a click opens the post in its feed
+            if !posts.is_empty() {
+                ui.label(muted(format!("Posts  {}", posts.len())).size(12.0));
+            }
+            let now = crate::cal_time::now();
+            self.social.hit_rects.clear();
+            for (i, h) in posts.iter().enumerate() {
+                let resp = egui::Frame::new().fill(theme::BG_PRIMARY).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let who = format!("{} · @{} · {}", h.author_name, h.author_handle, crate::social::feed_ui::age_text(h.created_at, now));
+                    ui.add(egui::Label::new(egui::RichText::new(who).size(12.5).color(theme::TEXT_STRONG)).truncate());
+                    ui.add(egui::Label::new(egui::RichText::new(&h.snippet).size(12.5).color(theme::MUTED)).wrap());
+                });
+                self.social.hit_rects.push((i, resp.response.rect));
+                if resp.response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    self.actions.push(Action::OpenPost(Box::new(h.clone())));
+                }
+                ui.add_space(4.0);
+            }
         });
     }
 
@@ -458,16 +478,9 @@ impl ShaleApp {
         });
     }
 
-    pub fn right_sidebar(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            for (p, t) in [(RightPanel::Backlinks, "Backlinks"), (RightPanel::Outgoing, "Outgoing"), (RightPanel::Outline, "Outline"), (RightPanel::LocalGraph, "Graph"), (RightPanel::Calendar, "Calendar")] {
-                if ui.selectable_label(self.right == p, egui::RichText::new(t).size(12.5)).clicked() {
-                    self.right = p;
-                }
-            }
-        });
-        ui.separator();
-        if self.right == RightPanel::Calendar {
+    /// The panel of one view of the right sidebar (LAY-003).
+    pub fn right_panel_body(&mut self, ui: &mut Ui, panel: RightPanel) {
+        if panel == RightPanel::Calendar {
             let monday = self.cfg.week_starts_monday;
             let mut act = None;
             let area = ui.available_rect_before_wrap();
@@ -486,7 +499,7 @@ impl ShaleApp {
         };
         let Some(v) = &self.vault else { return };
         let name = v.file(&rel).map(|f| f.display_name()).unwrap_or_default();
-        match self.right {
+        match panel {
             RightPanel::Backlinks => {
                 let bl = v.backlinks(&rel);
                 let um = v.unlinked_mentions(&rel);
@@ -698,6 +711,17 @@ impl ShaleApp {
         let mut open_keybindings = false;
         let ctx = ui.ctx().clone();
         match &mut modal {
+            Modal::Picker(p) => {
+                if let Some(v) = &self.vault {
+                    let out = crate::picker::show(&ctx, p, v);
+                    keep = out.pick.is_none() && !out.close;
+                    if let Some(hit) = out.pick {
+                        // the file opens in this tab and the keyboard goes into it
+                        self.actions.push(hit.action);
+                        self.actions.push(Action::FocusEditor);
+                    }
+                }
+            }
             Modal::QuickSwitch { query, sel } => {
                 let resp = crate::dialog::Dialog::new("quick-switch", "Open a note").width(520.0).show(&ctx, |ui| {
                     let r = ui.add(egui::TextEdit::singleline(query).hint_text("Find or create a note…").desired_width(f32::INFINITY).font(FontId::proportional(16.0)));
@@ -708,20 +732,10 @@ impl ShaleApp {
                     items.truncate(12);
                     let create = !query.trim().is_empty() && !items.iter().any(|(_, _, n)| n.eq_ignore_ascii_case(query.trim()));
                     let n = items.len() + create as usize;
-                    let (down, up, enter, esc) = ui.input_mut(|i| {
-                        (i.consume_key(egui::Modifiers::NONE, Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, Key::Enter), i.consume_key(egui::Modifiers::NONE, Key::Escape))
-                    });
-                    if n > 0 {
-                        if down {
-                            *sel = (*sel + 1) % n;
-                        }
-                        if up {
-                            *sel = (*sel + n - 1) % n;
-                        }
-                        *sel = (*sel).min(n - 1);
-                    }
+                    let keys = crate::picker::ListKeys::take(ui);
+                    keys.select(sel, n);
                     ui.add_space(6.0);
-                    let mut pick: Option<usize> = if enter && n > 0 { Some(*sel) } else { None };
+                    let mut pick: Option<usize> = if keys.enter && n > 0 { Some(*sel) } else { None };
                     for (i, (_, rel, name)) in items.iter().enumerate() {
                         let folder = rel.parent().map(rel_to_string).unwrap_or_default();
                         let label = if folder.is_empty() { name.clone() } else { format!("{name}    {folder}") };
@@ -741,7 +755,7 @@ impl ShaleApp {
                         }
                         keep = false;
                     }
-                    if esc {
+                    if keys.esc {
                         keep = false;
                     }
                 });

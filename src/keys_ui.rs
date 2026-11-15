@@ -134,7 +134,7 @@ fn muted(t: impl Into<String>) -> RichText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{Modal, Options, ShaleApp};
+    use crate::app::{Modal, Options, ShaleApp, View};
     use eframe::egui::{Pos2, RawInput, Vec2};
     use std::path::Path;
 
@@ -150,7 +150,11 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("shale-keysui-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("A.md"), "# A\n").unwrap();
+            for n in ["A", "B", "C"] {
+                std::fs::write(dir.join(format!("{n}.md")), format!("# {n}\n")).unwrap();
+            }
+            std::fs::create_dir_all(dir.join("projects")).unwrap();
+            std::fs::write(dir.join("projects/Roadmap.md"), "# Roadmap\nbanana\n").unwrap();
             let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
             app.open(Path::new("A.md"), false);
             let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir };
@@ -300,5 +304,275 @@ mod tests {
         w.open_dialog();
         w.click("reset-all");
         assert!(w.app.keymap.overrides().is_empty() && w.app.cfg.keybindings.is_empty());
+    }
+
+    fn views(w: &W) -> Vec<String> {
+        w.app
+            .tabs
+            .iter()
+            .map(|t| match &t.view {
+                View::Note(p) => p.to_string_lossy().into_owned(),
+                View::Calendar => "calendar".into(),
+                View::Mail => "mail".into(),
+                _ => "other".into(),
+            })
+            .collect()
+    }
+
+    // spec: NAV-018
+    #[test]
+    fn ctrl_alt_h_and_l_switch_tabs_and_wrap() {
+        let mut w = W::new("tabs");
+        // a single tab: nothing happens
+        w.press(Key::L, CTRL_ALT);
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!((w.app.tabs.len(), w.app.active), (1, 0));
+        w.app.open(Path::new("B.md"), true);
+        w.app.show_view(View::Calendar, true);
+        assert_eq!((views(&w), w.app.active), (vec!["A.md".into(), "B.md".into(), "calendar".into()], 2));
+        // Next from the last tab wraps to the first, Previous from the first to the last
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(w.app.active, 0);
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(w.app.active, 1);
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!(w.app.active, 0);
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!(w.app.active, 2, "wraps to the last tab, a sub-app");
+        // from a sub-app (calendar is open now) and with the keyboard in the file list
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!(w.app.active, 1);
+        w.press(Key::H, CTRL);
+        assert!(w.app.tree_sel.is_some(), "Ctrl+H: the file list has the keyboard");
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(w.app.active, 2, "works from the file list too, and Ctrl+L did not take it");
+        // the order is the order the tabs are shown in (pinned and dragged tabs sit in `tabs`)
+        w.app.tabs.swap(0, 2);
+        w.app.active = 0;
+        assert_eq!(views(&w)[0], "calendar");
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "B.md");
+        // a pinned tab sits first, and so it comes first in the order
+        let a = w.app.tabs.iter().position(|t| t.view == View::Note("A.md".into())).unwrap();
+        w.app.set_tab_pinned(a, true);
+        assert_eq!(views(&w), ["A.md", "calendar", "B.md"]);
+        w.app.active = 0;
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "B.md", "Previous from the pinned first tab wraps to the last");
+        w.press(Key::L, CTRL_ALT);
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "calendar");
+        w.app.active = views(&w).iter().position(|v| v == "B.md").unwrap();
+        // another binding: the old key does nothing
+        w.app.keymap.set(Action::NextTab, Binding::parse("Ctrl+Alt+N").unwrap()).unwrap();
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "B.md", "the old key is gone");
+        w.press(Key::N, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "A.md", "the new one works");
+    }
+
+    /// A key that types a character: the key event and the text event, as the window sends them.
+    fn typed(w: &mut W, key: Key, text: &str) {
+        let ev = |pressed| Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+        let mut down = vec![ev(true)];
+        if !text.is_empty() {
+            down.push(Event::Text(text.to_string()));
+        }
+        w.frame(down);
+        w.frame(vec![ev(false)]);
+    }
+
+    fn note_text(w: &W) -> String {
+        w.app.notes[Path::new("A.md")].text.clone()
+    }
+
+    fn settle(w: &mut W) {
+        for _ in 0..3 {
+            w.frame(vec![]);
+        }
+    }
+
+    /// Vim-style editing on, the open note's editor has the keyboard (normal mode).
+    fn vim_note(tag: &str) -> W {
+        let mut w = W::new(tag);
+        w.app.cfg.vim_mode = true;
+        w.app.focus_editor();
+        settle(&mut w);
+        assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the editor has the keyboard in normal mode");
+        w
+    }
+
+    // spec: NAV-019
+    #[test]
+    fn space_tab_toggles_between_the_note_and_the_view_before_it() {
+        let mut w = vim_note("alt");
+        // nothing before the note yet: nothing happens
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        assert_eq!(views(&w), ["A.md"]);
+        w.app.show_view(View::Calendar, false);
+        settle(&mut w);
+        assert_eq!(views(&w), ["calendar"]);
+        // calendar -> note, note -> calendar, and again
+        for expect in ["A.md", "calendar", "A.md", "calendar"] {
+            typed(&mut w, Key::Space, " ");
+            typed(&mut w, Key::Tab, "");
+            settle(&mut w);
+            assert_eq!(views(&w), [expect]);
+        }
+        assert_eq!(note_text(&w), "# A\n", "nothing was typed into the note");
+        // another note in the same tab: back and forth between the two
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        settle(&mut w);
+        w.app.open(Path::new("B.md"), false);
+        w.app.focus_editor();
+        settle(&mut w);
+        assert_eq!(views(&w), ["B.md"]);
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        settle(&mut w);
+        assert_eq!(views(&w), ["A.md"]);
+        // Back still works, with the swapped history
+        w.press(Key::ArrowLeft, Modifiers::ALT);
+        assert_eq!(views(&w), ["B.md"]);
+        // the key can be changed like any other
+        w.app.keymap.set(Action::NormalAlternate, Binding::parse("Space Backspace").unwrap()).unwrap();
+        settle(&mut w);
+        let before = views(&w);
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        settle(&mut w);
+        assert_eq!(views(&w), before, "the old keys do nothing");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Backspace, "");
+        settle(&mut w);
+        assert_ne!(views(&w), before, "the new ones work");
+    }
+
+    // spec: EDIT-015
+    #[test]
+    fn space_tab_in_normal_mode_does_not_type_and_insert_mode_still_types() {
+        let mut w = vim_note("leak");
+        // a waiting Space types nothing and moves nothing; a key that does not continue it works as usual
+        typed(&mut w, Key::Space, " ");
+        assert_eq!(note_text(&w), "# A\n");
+        typed(&mut w, Key::Z, "z");
+        assert_eq!(note_text(&w), "# A\n", "z is no vim key either");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::I, "i");
+        assert!(w.app.tabs[0].editor.vim.mode == crate::vim::Mode::Insert, "i after a cancelled Space starts insert mode");
+        // insert mode: Space is typing again
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::X, "x");
+        assert!(note_text(&w).contains(" x"), "{:?}", note_text(&w));
+        // a vim command line takes every key
+        w.press(Key::Escape, Modifiers::NONE);
+        typed(&mut w, Key::Colon, ":");
+        typed(&mut w, Key::Space, " ");
+        assert!(w.app.tabs[0].editor.vim.typing_command());
+        assert!(!w.app.tabs[0].editor.vim_normal_keys(&w.ctx));
+        // with Vim-style editing off the scope is not read at all
+        w.press(Key::Escape, Modifiers::NONE);
+        w.app.cfg.vim_mode = false;
+        w.app.show_view(View::Calendar, false);
+        settle(&mut w);
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::Tab, "");
+        assert_eq!(views(&w), ["calendar"]);
+        // and the mail view keeps Space and f for itself
+        w.app.cfg.vim_mode = true;
+        w.app.show_view(View::Mail, false);
+        settle(&mut w);
+        assert!(!w.app.normal_keys_active(&w.ctx));
+    }
+
+    fn picker(w: &W) -> &crate::picker::Picker {
+        match &w.app.modal {
+            Some(Modal::Picker(p)) => p,
+            _ => panic!("the picker is not open"),
+        }
+    }
+
+    fn type_in_picker(w: &mut W, text: &str) {
+        w.frame(vec![Event::Text(text.to_string())]);
+        settle(w);
+    }
+
+    // spec: NAV-020, EDIT-015
+    #[test]
+    fn space_f_f_finds_a_file_by_name_and_opens_it_in_the_editor() {
+        let mut w = vim_note("picker");
+        for (key, text) in [(Key::Space, " "), (Key::F, "f")] {
+            typed(&mut w, key, text);
+            assert!(w.app.modal.is_none(), "half a sequence opens nothing");
+        }
+        assert_eq!(note_text(&w), "# A\n", "the sequence typed nothing into the note");
+        typed(&mut w, Key::F, "f");
+        settle(&mut w);
+        assert_eq!(picker(&w).query, "", "the window is open with an empty field");
+        assert_eq!(note_text(&w), "# A\n");
+        // typing filters by file name only: the text of a note and the folder do not count
+        type_in_picker(&mut w, "banana");
+        assert_eq!(picker(&w).query, "banana");
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.app.modal.is_some() && views(&w) == ["A.md"], "no name matches: Enter does nothing, and no note is created");
+        assert!(!w.dir.join("banana.md").exists());
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+        settle(&mut w);
+        type_in_picker(&mut w, "projects");
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.app.modal.is_some(), "the folder name is not a match");
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+        settle(&mut w);
+        // j and k are typed (the field has the keyboard); the arrows and Ctrl+J / Ctrl+K select
+        type_in_picker(&mut w, "o");
+        let names = |w: &W| crate::picker::Source::FileNames.hits(w.app.vault.as_ref().unwrap(), &picker(w).query).into_iter().map(|h| h.title).collect::<Vec<_>>();
+        assert_eq!(names(&w), ["Roadmap"], "only the Roadmap has an o in its name");
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
+        settle(&mut w);
+        assert_eq!(names(&w), ["A", "B", "C", "Roadmap"]);
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 1);
+        w.press(Key::J, CTRL);
+        assert_eq!(picker(&w).sel, 2);
+        w.press(Key::K, CTRL);
+        w.press(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 0);
+        w.press(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 3, "wraps around");
+        // Esc closes and changes nothing
+        w.press(Key::Escape, Modifiers::NONE);
+        assert!(w.app.modal.is_none());
+        assert_eq!(views(&w), ["A.md"]);
+        // Enter on the selection: opens in the current tab, the keyboard is in the editor
+        w.app.focus_editor();
+        settle(&mut w);
+        for (key, text) in [(Key::Space, " "), (Key::F, "f"), (Key::F, "f")] {
+            typed(&mut w, key, text);
+        }
+        settle(&mut w);
+        type_in_picker(&mut w, "rdmp");
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        assert_eq!((views(&w), w.app.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in the current tab");
+        assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor, in normal mode");
+        assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
+    }
+
+    // spec: KEY-008, NAV-020
+    #[test]
+    fn the_find_file_keys_can_be_changed() {
+        let mut w = vim_note("picker-keys");
+        w.app.keymap.set(Action::NormalFindFile, Binding::parse("Space p").unwrap()).unwrap();
+        for (key, text) in [(Key::Space, " "), (Key::F, "f"), (Key::F, "f")] {
+            typed(&mut w, key, text);
+        }
+        assert!(w.app.modal.is_none(), "the old keys do nothing");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::P, "p");
+        assert!(matches!(w.app.modal, Some(Modal::Picker(_))), "the new ones open the picker");
+        assert_eq!(note_text(&w), "# A\n");
     }
 }

@@ -6,7 +6,7 @@
 //! then `keymap.poll(input, scope)` in the code of that scope already returns it. A sequence is
 //! a default like `"Space f f"`; a new scope is a variant of [`Scope`] plus its name.
 
-use eframe::egui::{InputState, Key, Modifiers};
+use eframe::egui::{Event, InputState, Key, Modifiers};
 use std::collections::{BTreeMap, HashMap};
 
 /// Where a binding is active. A [`Scope::Global`] key wins over every other scope.
@@ -15,17 +15,22 @@ pub enum Scope {
     Global,
     FileList,
     SearchResults,
+    MailView,
+    /// Vim-lite normal mode (EDIT-015): sequences that start with Space.
+    EditorNormal,
 }
 
 impl Scope {
     /// The scopes in the order the keybindings list shows them.
-    pub const ALL: [Scope; 3] = [Scope::Global, Scope::FileList, Scope::SearchResults];
+    pub const ALL: [Scope; 5] = [Scope::Global, Scope::FileList, Scope::SearchResults, Scope::MailView, Scope::EditorNormal];
 
     pub fn label(self) -> &'static str {
         match self {
             Scope::Global => "Everywhere",
             Scope::FileList => "File list (Ctrl+Shift+B)",
             Scope::SearchResults => "Search results",
+            Scope::MailView => "Mail view",
+            Scope::EditorNormal => "Vim-style editing, normal mode",
         }
     }
 
@@ -35,6 +40,37 @@ impl Scope {
             Scope::Global => &[],
             Scope::FileList => &[Key::Enter, Key::Escape],
             Scope::SearchResults => &[Key::Enter, Key::Escape, Key::Slash],
+            Scope::MailView => &[Key::Enter, Key::Escape],
+            // every key vim-lite uses in normal mode (EDIT-011…014), with or without Shift
+            Scope::EditorNormal => &[
+                Key::H,
+                Key::J,
+                Key::K,
+                Key::L,
+                Key::W,
+                Key::B,
+                Key::G,
+                Key::N,
+                Key::O,
+                Key::I,
+                Key::A,
+                Key::X,
+                Key::V,
+                Key::P,
+                Key::D,
+                Key::Y,
+                Key::Num0,
+                Key::Num4,
+                Key::Colon,
+                Key::Slash,
+                Key::Escape,
+                Key::Enter,
+                Key::Backspace,
+                Key::ArrowLeft,
+                Key::ArrowRight,
+                Key::ArrowUp,
+                Key::ArrowDown,
+            ],
         }
     }
 
@@ -181,6 +217,10 @@ actions! {
     CloseTab => "global.close_tab", "Close tab", Global, ["Ctrl+W"];
     Save => "global.save", "Save now", Global, ["Ctrl+S"];
     Settings => "global.settings", "Settings", Global, ["Ctrl+Comma"];
+    PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+Alt+H"];
+    NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+Alt+L"];
+    NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
+    NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
     TreeNextFolder => "files.next_folder", "Next folder", FileList, ["Ctrl+J"];
@@ -190,6 +230,30 @@ actions! {
     HitPrev => "search.prev_hit", "Previous hit", SearchResults, ["K", "Up"];
     HitNextFile => "search.next_file", "First hit of the next file", SearchResults, ["Ctrl+J"];
     HitPrevFile => "search.prev_file", "First hit of the previous file", SearchResults, ["Ctrl+K"];
+    // Mail view: the Shift keys come before the bare key of the same letter (egui lets a bare key match with Shift held)
+    MailReplyAll => "mail.reply_all", "Reply all", MailView, ["Shift+R"];
+    MailForward => "mail.forward", "Forward", MailView, ["Shift+F"];
+    MailAttSave => "mail.attachment_save", "Save the selected attachment to the vault", MailView, ["Shift+O"];
+    MailLoad => "mail.load", "Load the message (or the list of the folder) from the server", MailView, ["Shift+L"];
+    MailNext => "mail.next", "Next folder, message or line of the pane with the keyboard", MailView, ["J", "Down"];
+    MailPrev => "mail.prev", "Previous folder, message or line of the pane with the keyboard", MailView, ["K", "Up"];
+    MailNextFolder => "mail.next_folder", "Next folder", MailView, ["Ctrl+J"];
+    MailPrevFolder => "mail.prev_folder", "Previous folder", MailView, ["Ctrl+K"];
+    MailMark => "mail.mark", "Mark the message for a selection", MailView, ["Space"];
+    MailSearch => "mail.search", "Search mail", MailView, ["Slash"];
+    MailSearchScope => "mail.search_scope", "Search all folders or this folder", MailView, ["T"];
+    MailImport => "mail.import", "Import to vault", MailView, ["I"];
+    MailRead => "mail.read", "Mark read or unread", MailView, ["U"];
+    MailFlag => "mail.flag", "Set or clear the flag", MailView, ["S", "F"];
+    MailDelete => "mail.delete", "Delete", MailView, ["D", "Delete"];
+    MailMove => "mail.move", "Move to a folder", MailView, ["M"];
+    MailCompose => "mail.compose", "Write a new mail", MailView, ["C"];
+    MailReply => "mail.reply", "Reply", MailView, ["R"];
+    MailSync => "mail.sync", "Sync, or cancel the sync", MailView, ["Ctrl+R"];
+    MailAccounts => "mail.accounts", "Account settings", MailView, ["A"];
+    MailUndoSend => "mail.undo_send", "Take back the mail waiting to be sent", MailView, ["Z"];
+    MailAttNext => "mail.attachment_next", "Select the next attachment", MailView, ["CloseBracket"];
+    MailAttOpen => "mail.attachment_open", "Open the selected attachment", MailView, ["O"];
 }
 
 impl Action {
@@ -204,6 +268,26 @@ impl Action {
 
 /// Ctrl chords of text editing, which a Global binding must not swallow.
 const RESERVED_TEXT: [(bool, Key); 7] = [(false, Key::A), (false, Key::C), (false, Key::V), (false, Key::X), (false, Key::Z), (false, Key::Y), (true, Key::Z)];
+
+/// Take this chord's key press out of the frame's input, if it was pressed with exactly these
+/// modifiers (so Ctrl+Alt+L is not Ctrl+L). A bare key also takes the character it typed, so a
+/// binding like `Space f f` never reaches a text box or vim as typing.
+fn consume_exact(input: &mut InputState, c: Chord) -> bool {
+    let want = c.modifiers();
+    let mut found = false;
+    input.events.retain(|e| {
+        let hit = matches!(e, Event::Key { key, pressed: true, modifiers, .. } if *key == c.key && modifiers.matches_exact(want));
+        found |= hit;
+        !hit
+    });
+    if found && !c.ctrl && !c.alt {
+        let typed = if c.key == Key::Space { " ".to_string() } else { c.key.symbol_or_name().to_string() };
+        if let Some(i) = input.events.iter().position(|e| matches!(e, Event::Text(t) if t.eq_ignore_ascii_case(&typed))) {
+            input.events.remove(i);
+        }
+    }
+    found
+}
 
 #[derive(Default)]
 pub struct Keymap {
@@ -261,13 +345,12 @@ impl Keymap {
         if scope == Scope::Global && !first.ctrl && !first.alt {
             return Err(format!("{} needs Ctrl or Alt: a shortcut that works everywhere must not get in the way of typing", b.display()));
         }
-        if b.0.len() == 1 {
-            if scope == Scope::Global && RESERVED_TEXT.iter().any(|(shift, key)| first.ctrl && !first.alt && first.shift == *shift && first.key == *key) {
-                return Err(format!("{} is reserved for text editing", b.display()));
-            }
-            if !first.ctrl && !first.alt && !first.shift && scope.reserved().contains(&first.key) {
-                return Err(format!("{} has a fixed meaning in this list", b.display()));
-            }
+        if b.0.len() == 1 && scope == Scope::Global && RESERVED_TEXT.iter().any(|(shift, key)| first.ctrl && !first.alt && first.shift == *shift && first.key == *key) {
+            return Err(format!("{} is reserved for text editing", b.display()));
+        }
+        // a fixed key cannot start a binding (also not a sequence, which it would never complete)
+        if !first.ctrl && !first.alt && scope.reserved().contains(&first.key) {
+            return Err(format!("{} has a fixed meaning here", b.display()));
         }
         for d in DEFS.iter().filter(|d| d.action != a && d.scope.overlaps(scope)) {
             if self.bindings(d.action).iter().any(|o| o.clashes(b)) {
@@ -286,6 +369,11 @@ impl Keymap {
             self.custom.insert(a, vec![b]);
         }
         Ok(())
+    }
+
+    /// Forget the chords of an unfinished sequence of this scope (its keys are not being read).
+    pub fn cancel(&mut self, scope: Scope) {
+        self.pending.remove(&scope);
     }
 
     pub fn reset(&mut self, a: Action) {
@@ -312,7 +400,7 @@ impl Keymap {
                     continue;
                 }
                 let next = b.0[depth];
-                if input.consume_key(next.modifiers(), next.key) {
+                if consume_exact(input, next) {
                     if b.0.len() == depth + 1 {
                         self.pending.remove(&scope);
                         return Some(d.action);
@@ -371,7 +459,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 22);
+        assert_eq!(DEFS.len(), 22 + 23 + 4);
     }
 
     // spec: KEY-003
@@ -430,12 +518,47 @@ mod tests {
         assert_eq!(k.check(Action::TreeNextFile, &b("Slash")), Ok(()));
     }
 
+    // spec: EDIT-015, KEY-005
+    #[test]
+    fn the_keys_of_vim_normal_mode_cannot_be_bound() {
+        let k = Keymap::default();
+        let a = Action::NormalAlternate;
+        for text in ["H", "Shift+W", "G", "0", "4", "Slash", "Colon", "Escape", "Enter", "Backspace", "ArrowDown", "G X", "Shift+O Tab"] {
+            assert!(k.check(a, &b(text)).unwrap_err().contains("fixed meaning"), "{text}");
+        }
+        // after the leader any key is free, and Ctrl chords are no vim keys
+        assert_eq!(k.check(a, &b("Space G")), Ok(()));
+        assert_eq!(k.check(a, &b("Space Tab")), Ok(()));
+        assert_eq!(k.check(a, &b("Ctrl+J")), Ok(()));
+        // the other scopes keep their own fixed keys
+        assert_eq!(k.check(Action::TreeNextFile, &b("H")), Ok(()));
+    }
+
+    // spec: EDIT-015
+    #[test]
+    fn a_sequence_key_does_not_leave_its_typed_character() {
+        let ctx = egui::Context::default();
+        let mut k = Keymap::default();
+        for (key, text) in [(Key::Space, " "), (Key::Tab, "")] {
+            let mut events = vec![key_event(key, Modifiers::NONE)];
+            events.push(Event::Text(text.to_string()));
+            let (mut act, mut left) = (None, usize::MAX);
+            let mut full = ctx.run_ui(RawInput { events, ..Default::default() }, |ui| {
+                act = ui.input_mut(|i| k.poll(i, Scope::EditorNormal));
+                left = ui.input(|i| i.events.iter().filter(|e| matches!(e, Event::Text(t) if !t.is_empty())).count());
+            });
+            full.textures_delta.clear();
+            assert_eq!(left, 0, "{key:?} left its character for the text box");
+            assert_eq!(act, (key == Key::Tab).then_some(Action::NormalAlternate));
+        }
+    }
+
     // spec: KEY-007
     #[test]
     fn overrides_round_trip_through_the_config_file() {
         let mut k = Keymap::default();
         assert!(k.overrides().is_empty(), "only changes are stored");
-        k.set(Action::FocusSidebar, b("Ctrl+Alt+H")).unwrap();
+        k.set(Action::FocusSidebar, b("Ctrl+Alt+B")).unwrap();
         k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
         k.set(Action::Save, b("Ctrl+S")).unwrap();
         assert_eq!(k.overrides().len(), 2, "a binding put back to its default is no change");
@@ -445,11 +568,11 @@ mod tests {
         let path = dir.join("config.json");
         crate::config::write_private(&path, serde_json::to_string(&cfg).unwrap().as_bytes()).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"global.focus_sidebar\":[\"Ctrl+Alt+H\"]") && text.contains("\"version\":1"), "{text}");
+        assert!(text.contains("\"global.focus_sidebar\":[\"Ctrl+Alt+B\"]") && text.contains("\"version\":1"), "{text}");
         let (loaded, problem) = crate::config::Config::load_from(&path);
         assert_eq!(problem, None);
         let k2 = Keymap::from_overrides(&loaded.keybindings);
-        assert_eq!(k2.bindings(Action::FocusSidebar), vec![b("Ctrl+Alt+H")]);
+        assert_eq!(k2.bindings(Action::FocusSidebar), vec![b("Ctrl+Alt+B")]);
         assert_eq!(k2.bindings(Action::TreeToggleFolder), vec![b("Space f f")]);
         assert_eq!(k2.bindings(Action::FocusEditor), Action::FocusEditor.defaults());
         // a file without the field means all defaults

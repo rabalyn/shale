@@ -8,6 +8,7 @@ use crate::app::muted;
 use crate::compose::Kind;
 use crate::config::Config;
 use crate::imap_sync::{FolderKind, NO_PASSWORD};
+use crate::keys::{Action as KeyAction, Keymap, Scope};
 use crate::mail::display_name;
 use crate::mail_compose::{LocalOut, LocalView};
 use crate::mail_db::{MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
@@ -42,11 +43,12 @@ fn rec(rects: &mut Vec<(String, Rect)>, key: impl Into<String>, r: &egui::Respon
 
 impl MailView {
     /// Draw the view into the free space of `ui`. `modal_open`: a dialog has the keyboard.
-    pub fn show(&mut self, ui: &mut Ui, cfg: &Config, modal_open: bool) -> Vec<MailAction> {
+    pub fn show(&mut self, ui: &mut Ui, cfg: &Config, keys: &mut Keymap, modal_open: bool) -> Vec<MailAction> {
         let mut actions = Vec::new();
         let mut rects: Vec<(String, Rect)> = Vec::new();
         self.set_context(ui.ctx());
-        self.handle_keys(ui, cfg, modal_open, &mut actions);
+        self.dialog = modal_open;
+        self.handle_keys(ui, cfg, keys, modal_open, &mut actions);
         let full = ui.available_rect_before_wrap();
         ui.allocate_rect(full, Sense::hover());
         let bar = Rect::from_min_size(full.min, Vec2::new(full.width(), 38.0));
@@ -131,22 +133,26 @@ impl MailView {
                 self.unsent_window(ui, cfg, &mut rects);
             }
         }
+        self.att_open = false;
+        self.att_save = false;
         self.rects = rects;
         actions
     }
 
     // ------------------------------------------------------------ keys
 
-    fn handle_keys(&mut self, ui: &mut Ui, cfg: &Config, modal_open: bool, actions: &mut Vec<MailAction>) {
+    fn handle_keys(&mut self, ui: &mut Ui, cfg: &Config, keys: &mut Keymap, modal_open: bool, actions: &mut Vec<MailAction>) {
         let ctx = ui.ctx().clone();
-        // while a mail is being written the compose window has the keyboard (MAIL-150)
-        if self.compose.is_some() {
+        // while a mail is being written the compose window has the keyboard (MAIL-150), and the
+        // left sidebar may have it too
+        if self.compose.is_some() || self.away {
             return;
         }
         let search_id = egui::Id::unique("mail-search");
         let in_search = ctx.memory(|m| m.has_focus(search_id));
         if in_search && !modal_open {
-            // Esc leaves the field; ↓ goes into the results (MAIL-061)
+            // the field belongs to the list pane; Esc leaves it, ↓ goes into the results (MAIL-061)
+            self.pane = Pane::List;
             let (esc, down) = ui.input_mut(|i| (i.consume_key(Modifiers::NONE, Key::Escape), i.consume_key(Modifiers::NONE, Key::ArrowDown)));
             if esc || down {
                 ctx.memory_mut(|m| m.surrender_focus(search_id));
@@ -161,104 +167,115 @@ impl MailView {
         if modal_open || self.mover.is_some() || self.forever.is_some() || ctx.memory(|m| m.focused().is_some()) {
             return;
         }
-        let (slash, next, prev, next_folder, prev_folder, enter, space, esc, import) = ui.input_mut(|i| {
-            (
-                i.consume_key(Modifiers::NONE, Key::Slash),
-                i.consume_key(Modifiers::NONE, Key::J) | i.consume_key(Modifiers::NONE, Key::ArrowDown),
-                i.consume_key(Modifiers::NONE, Key::K) | i.consume_key(Modifiers::NONE, Key::ArrowUp),
-                i.consume_key(Modifiers::COMMAND, Key::J),
-                i.consume_key(Modifiers::COMMAND, Key::K),
-                i.consume_key(Modifiers::NONE, Key::Enter),
-                i.consume_key(Modifiers::NONE, Key::Space),
-                i.consume_key(Modifiers::NONE, Key::Escape),
-                i.consume_key(Modifiers::NONE, Key::I),
-            )
-        });
-        // phase 3 keys: `c` compose, `r` reply, Shift+R reply all, Shift+F forward (`f` stays the flag key)
-        let (compose, reply, reply_all, forward) = ui.input_mut(|i| {
-            let plain = |i: &mut egui::InputState, k: Key| !i.modifiers.any() && i.consume_key(Modifiers::NONE, k);
-            // the Shift keys first: a plain pattern would take them too (egui ignores an extra Shift)
-            let ra = i.consume_key(Modifiers::SHIFT, Key::R);
-            let fw = i.consume_key(Modifiers::SHIFT, Key::F);
-            let c = plain(i, Key::C);
-            let r = plain(i, Key::R);
-            (c, r, ra, fw)
-        });
-        if compose || reply || reply_all || forward {
-            // the letter that came with the key must not be typed into the window that opens
+        let (enter, esc) = ui.input_mut(|i| (i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
+        let action = ui.input_mut(|i| keys.poll(i, Scope::MailView));
+        if action.is_some() {
+            // the letter that came with the key must not be typed into the field or window that opens
             ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(_))));
         }
-        if compose {
-            self.compose_new(cfg);
-        }
-        if reply {
-            self.start_reply(Kind::Reply);
-        }
-        if reply_all {
-            self.start_reply(Kind::ReplyAll);
-        }
-        if forward {
-            self.start_reply(Kind::Forward);
-        }
-        // phase 2 keys: no modifier at all, so Ctrl+D and Shift+S stay free (MAIL-110)
-        let (read, flag, del, mv) = ui.input_mut(|i| {
-            let mut plain = |k: Key| !i.modifiers.any() && i.consume_key(Modifiers::NONE, k);
-            (plain(Key::U), plain(Key::S) | plain(Key::F), plain(Key::D) | plain(Key::Delete), plain(Key::M))
-        });
-        if read {
-            self.toggle_read(cfg);
-        }
-        if flag {
-            self.toggle_flag(cfg);
-        }
-        if del {
-            self.delete_selected(cfg);
-        }
-        if mv {
-            // the "m" that came with the key must not be typed into the picker's field
-            ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(_))));
-            self.open_mover();
-        }
-        if slash {
-            // the "/" that came with the key must not be typed into the field
-            ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(t) if t == "/")));
-            self.focus_search = true;
-        }
-        if next {
-            self.move_cursor(1);
-        }
-        if prev {
-            self.move_cursor(-1);
-        }
-        if next_folder {
-            self.step_folder(cfg, 1);
-        }
-        if prev_folder {
-            self.step_folder(cfg, -1);
+        // what works on messages does nothing while the folder pane has the keyboard (MAIL-064)
+        let on_messages = self.pane != Pane::Folders;
+        match action {
+            Some(KeyAction::MailNext) => self.step_in_pane(cfg, 1),
+            Some(KeyAction::MailPrev) => self.step_in_pane(cfg, -1),
+            Some(KeyAction::MailNextFolder) => self.step_folder(cfg, 1),
+            Some(KeyAction::MailPrevFolder) => self.step_folder(cfg, -1),
+            Some(KeyAction::MailMark) if self.pane == Pane::List => {
+                if let Some(m) = self.cursor_message() {
+                    self.toggle_mark(&m);
+                }
+            }
+            Some(KeyAction::MailSearch) => {
+                self.pane = Pane::List;
+                self.focus_search = true;
+            }
+            Some(KeyAction::MailSearchScope) => {
+                self.search_all = !self.search_all;
+                if !self.query.trim().is_empty() {
+                    self.search_now();
+                }
+            }
+            Some(KeyAction::MailImport) if on_messages => {
+                let t = self.import_targets();
+                if !t.is_empty() {
+                    actions.push(MailAction::Import(t));
+                }
+            }
+            Some(KeyAction::MailRead) if on_messages => self.toggle_read(cfg),
+            Some(KeyAction::MailFlag) if on_messages => self.toggle_flag(cfg),
+            Some(KeyAction::MailDelete) if on_messages => self.delete_selected(cfg),
+            Some(KeyAction::MailMove) if on_messages => self.open_mover(),
+            Some(KeyAction::MailCompose) => self.compose_new(cfg),
+            Some(KeyAction::MailReply) if on_messages => self.start_reply(Kind::Reply),
+            Some(KeyAction::MailReplyAll) if on_messages => self.start_reply(Kind::ReplyAll),
+            Some(KeyAction::MailForward) if on_messages => self.start_reply(Kind::Forward),
+            Some(KeyAction::MailSync) => {
+                if self.any_sync_running() {
+                    self.cancel_syncs();
+                } else {
+                    self.start_sync_all(cfg);
+                }
+            }
+            Some(KeyAction::MailAccounts) => actions.push(MailAction::OpenAccounts),
+            Some(KeyAction::MailUndoSend) => self.undo_newest(),
+            Some(KeyAction::MailLoad) => self.load_from_server(cfg),
+            Some(KeyAction::MailAttNext) if on_messages => {
+                if let Some(Body::Ready(l)) = self.open.as_ref().map(|o| &o.body) {
+                    let n = l.mail.attachments.len();
+                    if n > 0 {
+                        self.att_sel = (self.att_sel + 1) % n;
+                    }
+                }
+            }
+            Some(KeyAction::MailAttOpen) if on_messages => self.att_open = true,
+            Some(KeyAction::MailAttSave) if on_messages => self.att_save = true,
+            _ => {}
         }
         if enter {
-            if let Some(m) = self.cursor_message() {
-                self.open_message(m);
-            }
-        }
-        if space {
-            if let Some(m) = self.cursor_message() {
-                self.toggle_mark(&m);
-            }
-        }
-        if import {
-            let t = self.import_targets();
-            if !t.is_empty() {
-                actions.push(MailAction::Import(t));
+            match self.pane {
+                Pane::Folders => self.pane = Pane::List,
+                Pane::List => {
+                    if let Some(m) = self.cursor_message() {
+                        self.open_message(m);
+                    }
+                }
+                Pane::Message => {}
             }
         }
         if esc {
             if self.open.is_some() {
                 self.close_message();
+                if self.pane == Pane::Message {
+                    self.pane = Pane::List;
+                }
             } else if self.results.is_some() || !self.query.is_empty() {
                 self.clear_search();
-            } else {
+            } else if !self.marked.is_empty() {
                 self.marked.clear();
+            } else {
+                self.problems.clear();
+            }
+        }
+    }
+
+    /// j / k: one step in the pane that has the keyboard (MAIL-064).
+    fn step_in_pane(&mut self, cfg: &Config, delta: isize) {
+        match self.pane {
+            Pane::Folders => self.step_entry(cfg, delta),
+            Pane::List => self.move_cursor(delta),
+            Pane::Message => self.read_scroll += delta as f32 * 60.0,
+        }
+    }
+
+    /// Shift+L: download the open message that is not here, else load the list of a folder that
+    /// is not synced again (the buttons "Load this message" and "Refresh", MAIL-055, MAIL-056).
+    fn load_from_server(&mut self, cfg: &Config) {
+        if let Some(o) = self.open.as_ref().filter(|o| matches!(o.body, Body::NeedsDownload | Body::TooLarge)) {
+            let m = o.msg.clone();
+            self.load_message(cfg, &m);
+        } else if let (None, Some(id)) = (&self.results, self.folder) {
+            if matches!(self.listings.get(&id), Some(ListingState::Done(_) | ListingState::Failed(_))) {
+                self.list_on_demand(cfg, id, true);
             }
         }
     }
@@ -390,6 +407,9 @@ impl MailView {
         if let Some(p) = self.prompt.as_mut() {
             let r = crate::secrets::password_edit(ui, egui::TextEdit::singleline(&mut p.text).desired_width(200.0));
             rec(rects, "mail:password", &r);
+            if std::mem::take(&mut p.focus) {
+                r.request_focus();
+            }
             if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                 go = true;
             }
@@ -421,6 +441,14 @@ impl MailView {
         ui.painter().line_segment([Pos2::new(left.max.x, left.min.y), Pos2::new(left.max.x, left.max.y)], Stroke::new(1.0, theme::BORDER));
         ui.painter().line_segment([Pos2::new(mid.max.x, mid.min.y), Pos2::new(mid.max.x, mid.max.y)], Stroke::new(1.0, theme::BORDER));
         ui.painter().line_segment([body.left_top(), body.right_top()], Stroke::new(1.0, theme::BORDER));
+        // a click into a pane gives it the keyboard (choosing a folder then hands it on to the list)
+        if let Some(at) = ui.input(|i| i.pointer.primary_pressed().then(|| i.pointer.press_origin()).flatten()).filter(|_| !self.dialog) {
+            for (pane, r) in [(Pane::Folders, left), (Pane::List, mid), (Pane::Message, right)] {
+                if r.contains(at) {
+                    self.pane = pane;
+                }
+            }
+        }
         ui.scope_builder(UiBuilder::new().max_rect(left.shrink2(Vec2::new(8.0, 6.0))), |ui| {
             ui.set_clip_rect(left.intersect(ui.clip_rect()));
             self.folder_pane(ui, cfg, rects);
@@ -433,6 +461,14 @@ impl MailView {
             ui.set_clip_rect(right.intersect(ui.clip_rect()));
             self.reading_pane(ui, cfg, actions, rects);
         });
+        for (key, pane, r) in [("folders", Pane::Folders, left), ("list", Pane::List, mid), ("message", Pane::Message, right)] {
+            rects.push((format!("mail:pane:{key}"), r));
+            // the pane that has the keyboard is framed in the accent colour (MAIL-062)
+            if self.pane == pane && !self.away {
+                ui.painter().rect_stroke(r.shrink(1.0), 0, Stroke::new(2.0, theme::ACCENT), egui::StrokeKind::Inside);
+                rects.push(("mail:focus".into(), r));
+            }
+        }
     }
 
     fn folder_pane(&mut self, ui: &mut Ui, cfg: &Config, rects: &mut Vec<(String, Rect)>) {
@@ -491,11 +527,15 @@ impl MailView {
                 });
             }
         });
+        let chosen_local_set = chosen_local.is_some();
         if let Some(id) = chosen {
             self.select_folder(cfg, id);
         }
         if let Some(v) = chosen_local {
             self.select_local(v);
+        }
+        if chosen.is_some() || chosen_local_set {
+            self.pane = Pane::List;
         }
     }
 
@@ -793,7 +833,12 @@ impl MailView {
         let mut save_att: Option<usize> = None;
         let mut answer: Option<Kind> = None;
         let mut strip = StripOut::default();
-        egui::ScrollArea::vertical().id_salt("mail-read").auto_shrink([false, false]).show(ui, |ui| {
+        let sel_att = self.att_sel;
+        let scroll = std::mem::take(&mut self.read_scroll);
+        let read = egui::ScrollArea::vertical().id_salt("mail-read").auto_shrink([false, false]).show(ui, |ui| {
+            if scroll != 0.0 {
+                ui.scroll_with_delta(Vec2::new(0.0, -scroll));
+            }
             ui.label(RichText::new(if msg.subject.trim().is_empty() { "(no subject)" } else { msg.subject.as_str() }).size(19.0).color(theme::TEXT_STRONG));
             ui.add_space(4.0);
             let line = |ui: &mut Ui, k: &str, v: &str| {
@@ -909,7 +954,13 @@ impl MailView {
                         ui.label(muted(format!("{} attachment{}", l.mail.attachments.len(), if l.mail.attachments.len() == 1 { "" } else { "s" })).size(12.5));
                         for (i, a) in l.mail.attachments.iter().enumerate() {
                             ui.horizontal_wrapped(|ui| {
-                                ui.label(RichText::new(if a.name.is_empty() { "(unnamed)" } else { a.name.as_str() }).color(theme::TEXT));
+                                // the attachment the keys o and Shift+O work on (MAIL-065)
+                                let name = if a.name.is_empty() { "(unnamed)" } else { a.name.as_str() };
+                                if i == sel_att {
+                                    ui.label(RichText::new(format!("▸ {name}")).color(theme::ACCENT).strong());
+                                } else {
+                                    ui.label(RichText::new(name).color(theme::TEXT));
+                                }
                                 ui.label(muted(size_text(a.data.len() as u64)).size(12.0));
                                 let o = ui.small_button("Open");
                                 rec(rects, format!("mail:att-open:{i}"), &o);
@@ -937,6 +988,13 @@ impl MailView {
                 None => {}
             }
         });
+        self.read_offset = read.state.clamped_offset().y;
+        if std::mem::take(&mut self.att_open) {
+            open_att = Some(self.att_sel);
+        }
+        if std::mem::take(&mut self.att_save) {
+            save_att = Some(self.att_sel);
+        }
         if strip.cancel {
             self.cancel_crypto();
         }
