@@ -193,7 +193,11 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    shown for an expired, revoked or untrusted key, a missing recipient key, a bad signature and an
    unsupported entity. A wrong word here misleads the person about whether a mail is safe. Test: with
    the GnuPG test kit make an expired key, a revoked key and a corrupted signature, and check each
-   message. Kind: test.
+   message. Kind: test. Done in #60 (DEV-012): status-line tests for the words and verdicts
+   (`signatures`, `decrypt_failure`, `inv_recp_words`, `op_failure`, `trust_words`), real-key tests
+   for good, bad, unknown, expired-key, expired-signature and revoked signatures and for
+   encrypting to or signing with an expired or revoked key (the test kit's `pgp_sign_expiring`),
+   `classify_entity` for odd and nested mails, and `best_key`.
 9. **`app/drops.rs` `handle_drops` (291 to 447, 46 % covered) and `wl_drop.rs` `event` (264 to 397,
    45 %)**: dropping files, folders and mails from other programs (Wayland data offers, MIME kinds,
    the import dialog). Done in #61 (DEV-012): `wl_drop.rs` is split into a protocol-free part
