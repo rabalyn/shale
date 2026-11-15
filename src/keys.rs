@@ -6,7 +6,7 @@
 //! then `keymap.poll(input, scope)` in the code of that scope already returns it. A sequence is
 //! a default like `"Space f f"`; a new scope is a variant of [`Scope`] plus its name.
 
-use eframe::egui::{InputState, Key, Modifiers};
+use eframe::egui::{Event, InputState, Key, Modifiers};
 use std::collections::{BTreeMap, HashMap};
 
 /// Where a binding is active. A [`Scope::Global`] key wins over every other scope.
@@ -181,6 +181,8 @@ actions! {
     CloseTab => "global.close_tab", "Close tab", Global, ["Ctrl+W"];
     Save => "global.save", "Save now", Global, ["Ctrl+S"];
     Settings => "global.settings", "Settings", Global, ["Ctrl+Comma"];
+    PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+Alt+H"];
+    NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+Alt+L"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
     TreeNextFolder => "files.next_folder", "Next folder", FileList, ["Ctrl+J"];
@@ -204,6 +206,26 @@ impl Action {
 
 /// Ctrl chords of text editing, which a Global binding must not swallow.
 const RESERVED_TEXT: [(bool, Key); 7] = [(false, Key::A), (false, Key::C), (false, Key::V), (false, Key::X), (false, Key::Z), (false, Key::Y), (true, Key::Z)];
+
+/// Take this chord's key press out of the frame's input, if it was pressed with exactly these
+/// modifiers (so Ctrl+Alt+L is not Ctrl+L). A bare key also takes the character it typed, so a
+/// binding like `Space f f` never reaches a text box or vim as typing.
+fn consume_exact(input: &mut InputState, c: Chord) -> bool {
+    let want = c.modifiers();
+    let mut found = false;
+    input.events.retain(|e| {
+        let hit = matches!(e, Event::Key { key, pressed: true, modifiers, .. } if *key == c.key && modifiers.matches_exact(want));
+        found |= hit;
+        !hit
+    });
+    if found && !c.ctrl && !c.alt {
+        let typed = if c.key == Key::Space { " ".to_string() } else { c.key.symbol_or_name().to_string() };
+        if let Some(i) = input.events.iter().position(|e| matches!(e, Event::Text(t) if t.eq_ignore_ascii_case(&typed))) {
+            input.events.remove(i);
+        }
+    }
+    found
+}
 
 #[derive(Default)]
 pub struct Keymap {
@@ -312,7 +334,7 @@ impl Keymap {
                     continue;
                 }
                 let next = b.0[depth];
-                if input.consume_key(next.modifiers(), next.key) {
+                if consume_exact(input, next) {
                     if b.0.len() == depth + 1 {
                         self.pending.remove(&scope);
                         return Some(d.action);
@@ -371,7 +393,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 22);
+        assert_eq!(DEFS.len(), 24);
     }
 
     // spec: KEY-003
@@ -435,7 +457,7 @@ mod tests {
     fn overrides_round_trip_through_the_config_file() {
         let mut k = Keymap::default();
         assert!(k.overrides().is_empty(), "only changes are stored");
-        k.set(Action::FocusSidebar, b("Ctrl+Alt+H")).unwrap();
+        k.set(Action::FocusSidebar, b("Ctrl+Alt+B")).unwrap();
         k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
         k.set(Action::Save, b("Ctrl+S")).unwrap();
         assert_eq!(k.overrides().len(), 2, "a binding put back to its default is no change");
@@ -445,11 +467,11 @@ mod tests {
         let path = dir.join("config.json");
         crate::config::write_private(&path, serde_json::to_string(&cfg).unwrap().as_bytes()).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"global.focus_sidebar\":[\"Ctrl+Alt+H\"]") && text.contains("\"version\":1"), "{text}");
+        assert!(text.contains("\"global.focus_sidebar\":[\"Ctrl+Alt+B\"]") && text.contains("\"version\":1"), "{text}");
         let (loaded, problem) = crate::config::Config::load_from(&path);
         assert_eq!(problem, None);
         let k2 = Keymap::from_overrides(&loaded.keybindings);
-        assert_eq!(k2.bindings(Action::FocusSidebar), vec![b("Ctrl+Alt+H")]);
+        assert_eq!(k2.bindings(Action::FocusSidebar), vec![b("Ctrl+Alt+B")]);
         assert_eq!(k2.bindings(Action::TreeToggleFolder), vec![b("Space f f")]);
         assert_eq!(k2.bindings(Action::FocusEditor), Action::FocusEditor.defaults());
         // a file without the field means all defaults

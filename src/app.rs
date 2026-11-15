@@ -1532,6 +1532,15 @@ impl ShaleApp {
         }
     }
 
+    /// Make the previous (-1) or next (1) tab the open one, wrapping around at the ends
+    /// (NAV-018). `tabs` is the order the tab bar shows.
+    pub fn step_tab(&mut self, delta: isize) {
+        let n = self.tabs.len() as isize;
+        if n > 1 {
+            self.active = (self.active as isize + delta).rem_euclid(n) as usize;
+        }
+    }
+
     pub fn go_back(&mut self) {
         if let Some(t) = self.tabs.get_mut(self.active) {
             if let Some(prev) = t.back.pop() {
@@ -1606,6 +1615,11 @@ impl ShaleApp {
             (is(KeyAction::CloseTab), is(KeyAction::Search), is(KeyAction::Save), is(KeyAction::Settings), is(KeyAction::ShowFiles), is(KeyAction::FocusSidebar), is(KeyAction::FocusEditor));
         if self.vault.is_none() {
             return;
+        }
+        if is(KeyAction::PrevTab) {
+            self.step_tab(-1);
+        } else if is(KeyAction::NextTab) {
+            self.step_tab(1);
         }
         if mail_view {
             self.show_view(View::Mail, false);

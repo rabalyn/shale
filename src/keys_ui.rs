@@ -134,7 +134,7 @@ fn muted(t: impl Into<String>) -> RichText {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{Modal, Options, ShaleApp};
+    use crate::app::{Modal, Options, ShaleApp, View};
     use eframe::egui::{Pos2, RawInput, Vec2};
     use std::path::Path;
 
@@ -150,7 +150,9 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("shale-keysui-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("A.md"), "# A\n").unwrap();
+            for n in ["A", "B", "C"] {
+                std::fs::write(dir.join(format!("{n}.md")), format!("# {n}\n")).unwrap();
+            }
             let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
             app.open(Path::new("A.md"), false);
             let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir };
@@ -300,5 +302,59 @@ mod tests {
         w.open_dialog();
         w.click("reset-all");
         assert!(w.app.keymap.overrides().is_empty() && w.app.cfg.keybindings.is_empty());
+    }
+
+    fn views(w: &W) -> Vec<String> {
+        w.app
+            .tabs
+            .iter()
+            .map(|t| match &t.view {
+                View::Note(p) => p.to_string_lossy().into_owned(),
+                View::Calendar => "calendar".into(),
+                View::Mail => "mail".into(),
+                _ => "other".into(),
+            })
+            .collect()
+    }
+
+    // spec: NAV-018
+    #[test]
+    fn ctrl_alt_h_and_l_switch_tabs_and_wrap() {
+        let mut w = W::new("tabs");
+        // a single tab: nothing happens
+        w.press(Key::L, CTRL_ALT);
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!((w.app.tabs.len(), w.app.active), (1, 0));
+        w.app.open(Path::new("B.md"), true);
+        w.app.show_view(View::Calendar, true);
+        assert_eq!((views(&w), w.app.active), (vec!["A.md".into(), "B.md".into(), "calendar".into()], 2));
+        // Next from the last tab wraps to the first, Previous from the first to the last
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(w.app.active, 0);
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(w.app.active, 1);
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!(w.app.active, 0);
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!(w.app.active, 2, "wraps to the last tab, a sub-app");
+        // from a sub-app (calendar is open now) and with the keyboard in the file list
+        w.press(Key::H, CTRL_ALT);
+        assert_eq!(w.app.active, 1);
+        w.press(Key::H, CTRL);
+        assert!(w.app.tree_sel.is_some(), "Ctrl+H: the file list has the keyboard");
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(w.app.active, 2, "works from the file list too, and Ctrl+L did not take it");
+        // the order is the order the tabs are shown in (pinned and dragged tabs sit in `tabs`)
+        w.app.tabs.swap(0, 2);
+        w.app.active = 0;
+        assert_eq!(views(&w)[0], "calendar");
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "B.md");
+        // another binding: the old key does nothing
+        w.app.keymap.set(Action::NextTab, Binding::parse("Ctrl+Alt+N").unwrap()).unwrap();
+        w.press(Key::L, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "B.md", "the old key is gone");
+        w.press(Key::N, CTRL_ALT);
+        assert_eq!(views(&w)[w.app.active], "A.md", "the new one works");
     }
 }
