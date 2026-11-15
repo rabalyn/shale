@@ -130,6 +130,23 @@ built-in demo vault (`shale --screenshot out.png`).
   graph of the open note.
 - The vault graph shows every note. Red dots are missing notes and green ones are drawings.
 
+## The ribbon and the sidebars
+
+- The icons of the ribbon (the narrow bar on the left) can be dragged into any order. A line
+  between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
+  sidebar toggles at the top and bottom and the settings button stay where they are.
+- The right sidebar is a stack of **views**. Each view has its own menubar of panel icons
+  (Backlinks, Outgoing links, Outline, Graph, Calendar) and shows the panel of the selected
+  icon, so several panels can be open at once.
+- Drag a panel icon over the content of the right sidebar: the area lights up ("Drop to open
+  this icon in a new view") and dropping makes a new view below it. Drag icons from one
+  menubar to another, from a view to the ribbon (it then is a shortcut that shows the panel
+  below the views) and back. Icons that are no panels (Files, Mail, …) cannot go to the right
+  sidebar: the pointer shows "not allowed" and nothing changes. Taking the last icon out of a
+  view removes the view. Esc cancels a drag.
+- The layout is kept in the settings. (No screenshot: the `--screenshot … --keys` workflow
+  has no mouse drags, so it cannot show a split sidebar yet.)
+
 ## Calendar
 
 ![Month view](screenshots/calendar-month.png)

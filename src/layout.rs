@@ -3,6 +3,7 @@
 use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, ShaleApp, TabMarks, View};
 use crate::markdown;
 use crate::reader;
+use crate::sidebar::Item;
 use crate::theme;
 use crate::vault::rel_to_string;
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
@@ -35,6 +36,9 @@ pub enum Icon {
     Import,
     Mail,
     Social,
+    Backlinks,
+    Outgoing,
+    Outline,
 }
 
 pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
@@ -178,6 +182,22 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
                 p.line_segment([Pos2::new(b.min.x + w * 0.14, y), Pos2::new(b.min.x + w * 0.14 + w * len, y)], Stroke::new(1.0, c));
             }
         }
+        Icon::Backlinks | Icon::Outgoing => {
+            // a line with an arrow head: into the note (backlinks) or out of it (outgoing links)
+            let (a, b) = if matches!(icon, Icon::Backlinks) { (cx + Vec2::new(w * 0.34, 0.0), cx + Vec2::new(-w * 0.34, 0.0)) } else { (cx + Vec2::new(-w * 0.34, 0.0), cx + Vec2::new(w * 0.34, 0.0)) };
+            p.line_segment([a, b], s);
+            let back = if b.x > a.x { -1.0 } else { 1.0 };
+            p.line_segment([b, b + Vec2::new(back * w * 0.2, -w * 0.2)], s);
+            p.line_segment([b, b + Vec2::new(back * w * 0.2, w * 0.2)], s);
+            p.circle_filled(a, w * 0.08, c);
+        }
+        Icon::Outline => {
+            // indented lines
+            for (k, (x, len)) in [(0.0f32, 0.62f32), (0.16, 0.46), (0.16, 0.46), (0.0, 0.62)].iter().enumerate() {
+                let y = cx.y + (k as f32 - 1.5) * w * 0.22;
+                p.line_segment([Pos2::new(cx.x - w * 0.31 + w * x, y), Pos2::new(cx.x - w * 0.31 + w * (x + len), y)], s);
+            }
+        }
         Icon::Sort => {
             for (k, len) in [0.62f32, 0.44, 0.26].iter().enumerate() {
                 let y = cx.y + (k as f32 - 1.0) * w * 0.24;
@@ -195,7 +215,12 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
 
 /// A small square icon button. Returns its response.
 pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: &str) -> egui::Response {
-    let (r, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    icon_button_sense(ui, icon, size, active, tip, Sense::click())
+}
+
+/// `icon_button` with another kind of mouse handling (the menubar icons can be dragged).
+pub fn icon_button_sense(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: &str, sense: Sense) -> egui::Response {
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(size), sense);
     let hovered = resp.hovered();
     if active {
         ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_ACTIVE);
@@ -265,6 +290,7 @@ impl ShaleApp {
     }
 
     pub fn layout(&mut self, ui: &mut Ui) {
+        self.side.clear_geometry();
         // ribbon
         egui::Panel::left("ribbon").exact_size(44.0).resizable(false).frame(egui::Frame::new().fill(theme::BG_RIBBON).inner_margin(egui::Margin::symmetric(6, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(ui, |ui| {
             self.ribbon(ui);
@@ -285,7 +311,7 @@ impl ShaleApp {
             egui::Panel::right("right-sidebar").default_size(290.0).size_range(200.0..=560.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
                 ui,
                 |ui| {
-                    self.right_sidebar(ui);
+                    self.right_views(ui);
                 },
             );
         }
@@ -294,6 +320,7 @@ impl ShaleApp {
             self.view_header(ui);
             self.content(ui);
         });
+        self.side_drag_tick(ui);
     }
 
     fn ribbon(&mut self, ui: &mut Ui) {
@@ -303,53 +330,7 @@ impl ShaleApp {
                 self.cfg.show_left = !self.cfg.show_left;
             }
             ui.add_space(4.0);
-            let files = self.cfg.show_left && self.left == LeftPanel::Files;
-            if icon_button(ui, Icon::Files, 30.0, files, "Files").clicked() {
-                self.left = LeftPanel::Files;
-                self.cfg.show_left = true;
-            }
-            let search = self.cfg.show_left && self.left == LeftPanel::Search;
-            if icon_button(ui, Icon::Search, 30.0, search, "Search all notes (Ctrl+Shift+F)").clicked() {
-                self.left = LeftPanel::Search;
-                self.cfg.show_left = true;
-                self.focus_search = true;
-            }
-            let tags = self.cfg.show_left && self.left == LeftPanel::Tags;
-            if icon_button(ui, Icon::Tags, 30.0, tags, "Tags").clicked() {
-                self.left = LeftPanel::Tags;
-                self.cfg.show_left = true;
-            }
-            ui.add_space(8.0);
-            let cur = self.tabs.get(self.active).map(|t| t.view.clone());
-            if icon_button(ui, Icon::Switcher, 30.0, false, "Quick switcher (Ctrl+O)").clicked() {
-                self.modal = Some(Modal::QuickSwitch { query: String::new(), sel: 0 });
-            }
-            if icon_button(ui, Icon::Graph, 30.0, cur == Some(View::Graph), "Graph of all notes").clicked() {
-                self.actions.push(Action::ShowView(View::Graph));
-            }
-            if icon_button(ui, Icon::Calendar, 30.0, cur == Some(View::Calendar), "Calendar").clicked() {
-                self.actions.push(Action::ShowView(View::Calendar));
-            }
-            if icon_button(ui, Icon::Mail, 30.0, cur == Some(View::Mail), "Mail (Ctrl+Shift+M)").clicked() {
-                self.actions.push(Action::ShowView(View::Mail));
-            }
-            if icon_button(ui, Icon::Tasks, 30.0, cur == Some(View::Tasks), "To-do list across all notes").clicked() {
-                self.actions.push(Action::ShowView(View::Tasks));
-            }
-            if icon_button(ui, Icon::Social, 30.0, matches!(cur, Some(View::Social(_))), "Feeds: read Mastodon and Bluesky and save posts to the vault").clicked() {
-                self.actions.push(Action::ShowView(View::Social(None)));
-            }
-            if icon_button(ui, Icon::Import, 30.0, matches!(self.modal, Some(Modal::Import(_))), "Import e-mails, events and files (or drop them on the window)").clicked() {
-                self.open_import(vec![], vec![], None);
-            }
-            if icon_button(ui, Icon::Drawing, 30.0, false, "New drawing").clicked() {
-                let f = self.current_folder();
-                self.actions.push(Action::NewDrawing { folder: f, embed_into: None });
-            }
-            if icon_button(ui, Icon::NewNote, 30.0, false, "New note (Ctrl+N)").clicked() {
-                let f = self.current_folder();
-                self.actions.push(Action::NewNote { folder: f });
-            }
+            self.ribbon_items(ui);
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 if icon_button(ui, Icon::Settings, 30.0, false, "Settings and vault (Ctrl+,)").clicked() {
                     let vp = self.cfg.vault.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
@@ -360,6 +341,41 @@ impl ShaleApp {
                 }
             });
         });
+    }
+
+    /// What a click on a ribbon icon does.
+    pub(crate) fn ribbon_click(&mut self, item: Item) {
+        match item {
+            Item::Files => {
+                self.left = LeftPanel::Files;
+                self.cfg.show_left = true;
+            }
+            Item::Search => {
+                self.left = LeftPanel::Search;
+                self.cfg.show_left = true;
+                self.focus_search = true;
+            }
+            Item::Tags => {
+                self.left = LeftPanel::Tags;
+                self.cfg.show_left = true;
+            }
+            Item::Switcher => self.modal = Some(Modal::QuickSwitch { query: String::new(), sel: 0 }),
+            Item::Graph => self.actions.push(Action::ShowView(View::Graph)),
+            Item::Calendar => self.actions.push(Action::ShowView(View::Calendar)),
+            Item::Mail => self.actions.push(Action::ShowView(View::Mail)),
+            Item::Tasks => self.actions.push(Action::ShowView(View::Tasks)),
+            Item::Social => self.actions.push(Action::ShowView(View::Social(None))),
+            Item::Import => self.open_import(vec![], vec![], None),
+            Item::Drawing => {
+                let f = self.current_folder();
+                self.actions.push(Action::NewDrawing { folder: f, embed_into: None });
+            }
+            Item::NewNote => {
+                let f = self.current_folder();
+                self.actions.push(Action::NewNote { folder: f });
+            }
+            Item::Panel(p) => self.toggle_peek(p),
+        }
     }
 
     fn tab_title(&self, view: &View) -> String {

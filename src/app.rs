@@ -112,7 +112,7 @@ pub enum LeftPanel {
     Tags,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RightPanel {
     Backlinks,
     Outgoing,
@@ -268,7 +268,8 @@ pub struct ShaleApp {
     pub notes: HashMap<PathBuf, NoteDoc>,
     pub drawings: HashMap<PathBuf, DrawingDoc>,
     pub left: LeftPanel,
-    pub right: RightPanel,
+    /// The icons of the ribbon and the right sidebar, and a drag of one of them (LAY-001).
+    pub side: crate::sidebar_ui::SideState,
     pub expanded: HashSet<PathBuf>,
     pub search: String,
     /// the selected stop in the search results while they are browsed with the keyboard
@@ -399,7 +400,7 @@ impl ShaleApp {
             notes: HashMap::new(),
             drawings: HashMap::new(),
             left: LeftPanel::Files,
-            right: RightPanel::Backlinks,
+            side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
             expanded: HashSet::new(),
             search: String::new(),
             search_sel: None,
@@ -495,7 +496,9 @@ impl ShaleApp {
             match opts.view.as_deref() {
                 Some("calendar") => app.show_view(View::Calendar, false),
                 Some("mail") => app.show_view(View::Mail, false),
-                Some("calendar-side") => app.right = RightPanel::Calendar,
+                Some("calendar-side") => {
+                    app.side.layout.show_panel(RightPanel::Calendar);
+                }
                 Some("tasks") => app.show_view(View::Tasks, false),
                 Some("keybindings") => app.modal = Some(Modal::Keybindings(Box::default())),
                 Some("graph") => app.show_view(View::Graph, false),

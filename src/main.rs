@@ -78,6 +78,10 @@ mod picker;
 mod reader;
 mod recovery;
 mod secrets;
+mod sidebar;
+#[cfg(test)]
+mod sidebar_tests;
+mod sidebar_ui;
 mod smtp_client;
 #[cfg(test)]
 mod smtp_fake_tests;
