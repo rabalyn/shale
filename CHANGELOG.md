@@ -142,6 +142,7 @@ The release page of each version on GitHub shows its section from this file.
 
 ### Fixed
 
+- A note or drawing changed by another program right after Shale read it (inside one timestamp tick of the file system) was not reloaded. Shale now also compares size and file identity, not only the modification time.
 - **Data safety (ADR-0003)**: a note changed by another program while you edit it is saved as
   `Name (conflict date time).md` next to it and the other version stays, instead of being
   overwritten; open drawings reload when changed outside; a note that cannot be read (not UTF-8,

@@ -38,9 +38,42 @@ impl FileEntry {
     }
 }
 
+/// What a file looked like on disk when it was last read: modification time, size, and (on
+/// Unix) the inode and the inode change time. The time alone is not enough: two writes inside
+/// one timestamp tick of the file system (coarse on some systems) leave it the same, and an
+/// outside change would be missed (DATA-002). An atomic replace gets a new inode, and any write
+/// moves the change time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileStamp {
+    modified: Option<SystemTime>,
+    len: u64,
+    #[cfg(unix)]
+    ino: u64,
+    #[cfg(unix)]
+    ctime: (i64, i64),
+}
+
+impl FileStamp {
+    /// None when the file's metadata cannot be read (then it is always read again).
+    pub fn of(path: &Path) -> Option<FileStamp> {
+        let m = fs::metadata(path).ok()?;
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Some(FileStamp {
+            modified: m.modified().ok(),
+            len: m.len(),
+            #[cfg(unix)]
+            ino: m.ino(),
+            #[cfg(unix)]
+            ctime: (m.ctime(), m.ctime_nsec()),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct NoteIndex {
-    pub mtime: Option<SystemTime>,
+    /// The file as it was when `text` was read; None = read it again at the next scan.
+    pub mtime: Option<FileStamp>,
     pub text: String,
     pub links: Vec<LinkSpan>,
     /// Resolution of each link in `links` (same order).
@@ -286,7 +319,7 @@ impl Vault {
             }
             seen.insert(f.rel.clone());
             let abs = self.root.join(&f.rel);
-            let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
+            let mtime = FileStamp::of(&abs);
             // a note that could not be read is tried again every time (the cause may be gone)
             let up_to_date = self.notes.get(&f.rel).map(|n| n.mtime == mtime && mtime.is_some() && n.unreadable.is_none()).unwrap_or(false);
             if !up_to_date {
@@ -363,7 +396,7 @@ impl Vault {
     /// Read a drawing's links again if the file changed. Returns true if its links changed.
     fn index_drawing(&mut self, rel: &Path) -> bool {
         let abs = self.root.join(rel);
-        let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
+        let mtime = FileStamp::of(&abs);
         if self.drawings.get(rel).is_some_and(|d| d.mtime == mtime && mtime.is_some()) {
             return false;
         }
@@ -732,7 +765,7 @@ impl Vault {
         if kind_of(rel) != FileKind::Note {
             return;
         }
-        let mtime = fs::metadata(self.abs(rel)).and_then(|m| m.modified()).ok();
+        let mtime = FileStamp::of(&self.abs(rel));
         self.set_note_text(rel, text);
         if let Some(n) = self.notes.get_mut(rel) {
             n.mtime = mtime;
@@ -1292,6 +1325,24 @@ mod tests {
         let (nodes, edges) = v.graph(true);
         assert!(nodes.iter().any(|n| n.rel.is_none() && n.label == "Reading list"));
         assert!(edges.len() >= 5);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DATA-002
+    #[test]
+    fn an_outside_change_inside_one_timestamp_tick_is_detected() {
+        let d = temp_vault("same-tick");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("N.md"), "aaaa").unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        let before = fs::metadata(d.join("N.md")).unwrap().modified().unwrap();
+        // another program replaces the file with text of the same length, and the file system
+        // gives it the same modification time (coarse timestamps)
+        crate::fsutil::write_atomic(&d.join("N.md"), b"bbbb").unwrap();
+        fs::File::options().write(true).open(d.join("N.md")).unwrap().set_modified(before).unwrap();
+        assert_eq!(fs::metadata(d.join("N.md")).unwrap().modified().unwrap(), before);
+        assert_eq!(v.rescan(), vec![PathBuf::from("N.md")]);
+        assert_eq!(v.notes[Path::new("N.md")].text, "bbbb");
         let _ = fs::remove_dir_all(&d);
     }
 
