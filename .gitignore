@@ -7,3 +7,4 @@
 notes/
 /tests/mail-env/certs/
 /tests/caldav-env/certs/
+lcov.info

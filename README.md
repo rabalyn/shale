@@ -217,6 +217,10 @@ The tests also run against a real vault if there is one: put notes, drawings and
 Each test works on a copy, so the vault itself is never changed. Without such a folder those
 tests pass with a note.
 
+CI also measures line coverage (`cargo llvm-cov`; gaps and the ratchet in
+[docs/coverage.md](docs/coverage.md)) and runs the real-server CalDAV and mail suites in podman
+(`cargo test -- --ignored caldav_env` / `mail_env`, see [tests/caldav-env](tests/caldav-env/README.md)).
+
 See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for what is done, what is tested and what is
 still missing. What Shale guarantees is in the specs ([docs/spec/](docs/spec/README.md)), and
 why it is built that way is in the decision records ([docs/decisions/](docs/decisions/README.md)).
