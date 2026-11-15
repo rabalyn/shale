@@ -121,12 +121,12 @@ pub fn connect_with_retry(auth: &dyn AuthFactory, mut connect: impl FnMut(&mut d
 /// User name and password.
 pub struct PasswordAuth {
     pub user: String,
-    pub password: String,
+    pub password: crate::secret::Secret,
 }
 
 impl AuthFactory for PasswordAuth {
     fn authenticator(&self) -> Result<Box<dyn Authenticator>, String> {
-        Ok(Box::new(PlainAuth::new(&self.user, &self.password)))
+        Ok(Box::new(PlainAuth::new(&self.user, self.password.expose())))
     }
 }
 
@@ -145,7 +145,7 @@ impl Connector for ImapConnector {
 /// A connector for a configured account; the password comes from the keyring.
 /// `typed_secret` is a client secret typed but not saved yet
 /// (OAuth2 accounts only).
-pub fn connector_for_account(account: &MailAccount, limits: Limits, typed_secret: Option<String>) -> Result<ImapConnector, String> {
+pub fn connector_for_account(account: &MailAccount, limits: Limits, typed_secret: Option<crate::secret::Secret>) -> Result<ImapConnector, String> {
     let settings = ConnectSettings { host: account.host.clone(), port: account.port, security: account.security, limits };
     let auth = auth_factory(account, typed_secret, &account.host, account.port)?;
     Ok(ImapConnector { settings, auth })
@@ -153,7 +153,7 @@ pub fn connector_for_account(account: &MailAccount, limits: Limits, typed_secret
 
 /// How an account signs in, for the server at `host:port` (IMAP, or SMTP for sending: the same password,
 /// or the same OAuth2 sign-in, whichever server it is used with).
-pub fn auth_factory(account: &MailAccount, typed_secret: Option<String>, host: &str, port: u16) -> Result<Arc<dyn AuthFactory>, String> {
+pub fn auth_factory(account: &MailAccount, typed_secret: Option<crate::secret::Secret>, host: &str, port: u16) -> Result<Arc<dyn AuthFactory>, String> {
     Ok(match account.auth {
         MailAuth::Password => {
             let password = crate::secrets::mail_secret(&account.id, crate::secrets::MailSecret::Password).ok_or("no password for this account in the keyring")?;
@@ -345,7 +345,7 @@ impl Connector for LazyConnector {
 
 /// Builds the connector of an account; the second argument is a password typed for this session
 /// (used when the keyring has none). Tests plug in a connector for the pretend server.
-pub type ConnectorFactory = Arc<dyn Fn(&MailAccount, Option<String>) -> Result<Arc<dyn Connector>, String> + Send + Sync>;
+pub type ConnectorFactory = Arc<dyn Fn(&MailAccount, Option<crate::secret::Secret>) -> Result<Arc<dyn Connector>, String> + Send + Sync>;
 
 /// The real factory: the keyring's password (or the session's) and the operating system's
 /// certificate check.

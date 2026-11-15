@@ -52,6 +52,8 @@ pub enum StoreState {
     Closed,
     Opening,
     Ready(Arc<MailStore>),
+    /// The index is being built again (USE-012): nothing syncs, sends or changes it meanwhile.
+    Rebuilding(Arc<MailStore>),
     Failed(String),
 }
 
@@ -172,7 +174,7 @@ impl SyncRun {
 /// Asked when an account has no password to sign in with (MAIL-059).
 pub struct PasswordPrompt {
     pub account: String,
-    pub text: String,
+    pub text: crate::secret::Secret,
     /// The field takes the keyboard when it first appears (MAIL-065).
     pub focus: bool,
     pub retry: Retry,
@@ -296,7 +298,7 @@ enum Event {
 }
 
 /// Makes the SMTP connector of an account (tests plug in the pretend server).
-pub type SmtpFactory = Arc<dyn Fn(&MailAccount, Option<String>) -> Result<Arc<dyn SmtpConnector>, String> + Send + Sync>;
+pub type SmtpFactory = Arc<dyn Fn(&MailAccount, Option<crate::secret::Secret>) -> Result<Arc<dyn SmtpConnector>, String> + Send + Sync>;
 
 pub fn real_smtp_factory() -> SmtpFactory {
     Arc::new(mail_send::connector_for_account)
@@ -306,7 +308,7 @@ pub fn real_smtp_factory() -> SmtpFactory {
 struct LazySmtp {
     factory: SmtpFactory,
     account: MailAccount,
-    session: Option<String>,
+    session: Option<crate::secret::Secret>,
 }
 
 impl SmtpConnector for LazySmtp {
@@ -361,7 +363,7 @@ pub struct MailView {
     // sync
     pub syncs: HashMap<String, SyncRun>,
     last_auto: Option<Instant>,
-    pub session_pw: HashMap<String, String>,
+    pub session_pw: HashMap<String, crate::secret::Secret>,
     pub prompt: Option<PasswordPrompt>,
     pub tests: HashMap<String, TestState>,
     /// The browser sign-ins of OAuth2 accounts.
@@ -589,6 +591,45 @@ impl MailView {
         }
     }
 
+    /// Why the mail index cannot be rebuilt now (USE-012): a sync, an action or a send runs,
+    /// or the store is not open.
+    pub fn rebuild_blocked(&self) -> Option<String> {
+        if !matches!(self.store, StoreState::Ready(_)) {
+            return Some("the mail store is not open".into());
+        }
+        if self.any_sync_running() {
+            return Some("mail is syncing; try again when it is done".into());
+        }
+        if !self.ops_running.is_empty() || !self.send_running.is_empty() {
+            return Some("changes or mail are being sent to the server; try again when that is done".into());
+        }
+        None
+    }
+
+    /// Hand the store over for a rebuild: until [`MailView::end_rebuild`] nothing starts that
+    /// writes the index (every such job starts from `ready_store`).
+    pub fn begin_rebuild(&mut self) -> Result<Arc<MailStore>, String> {
+        if let Some(why) = self.rebuild_blocked() {
+            return Err(why);
+        }
+        let StoreState::Ready(s) = std::mem::replace(&mut self.store, StoreState::Closed) else { unreachable!("checked above") };
+        self.close_message();
+        self.store = StoreState::Rebuilding(s.clone());
+        Ok(s)
+    }
+
+    /// The rebuild ended (well or not): the index is read again from the start.
+    pub fn end_rebuild(&mut self, cfg: &Config) {
+        let StoreState::Rebuilding(s) = std::mem::replace(&mut self.store, StoreState::Closed) else { return };
+        self.reader = s.reader().ok();
+        self.store = StoreState::Ready(s);
+        // the folders keep their rows (and ids), so the folder shown stays
+        self.refresh();
+        if self.folder.is_none() {
+            self.select_first_folder(cfg);
+        }
+    }
+
     /// Run `f` as a job; its outcome comes back as an event and wakes the window.
     fn spawn<T: Send + 'static>(&self, f: impl FnOnce() -> T + Send + 'static, wrap: impl FnOnce(Result<T, String>) -> Event + Send + 'static) {
         let tx = self.tx.clone();
@@ -656,7 +697,7 @@ impl MailView {
 
     /// Is a job, a sync or a debounce going on?
     pub fn busy(&self) -> bool {
-        matches!(self.store, StoreState::Opening)
+        matches!(self.store, StoreState::Opening | StoreState::Rebuilding(_))
             || self.any_sync_running()
             || self.searching
             || self.search_edited.is_some()
@@ -1290,7 +1331,7 @@ impl MailView {
         self.spawn(move || imap_sync::fetch_folder_listing(&store, &connector, &row.account, &row.name, LISTING_LIMIT, &opts), move |r| Event::Listing { folder: id, result: flatten(r) });
     }
 
-    fn lazy_connector(&self, account: &MailAccount, typed: Option<String>) -> LazyConnector {
+    fn lazy_connector(&self, account: &MailAccount, typed: Option<crate::secret::Secret>) -> LazyConnector {
         let factory = self.factory.clone();
         let acct = account.clone();
         let session = typed.or_else(|| self.session_pw.get(&account.id).cloned());
@@ -1479,7 +1520,7 @@ impl MailView {
     }
 
     /// The dialog's "Test connection": connect, list and record the folders, fetch nothing.
-    pub fn test_connection(&mut self, account: &MailAccount, typed: Option<String>) {
+    pub fn test_connection(&mut self, account: &MailAccount, typed: Option<crate::secret::Secret>) {
         let Some(store) = self.ready_store() else {
             self.tests.insert(account.id.clone(), TestState::Failed("The local mail copy is still being opened; try again in a moment.".into()));
             return;
@@ -1503,7 +1544,7 @@ impl MailView {
 
     /// "Sign in in the browser": the whole OAuth2 flow as a job (MAIL-086). `secret` is the
     /// client secret typed in the dialog, if any (else the keyring's is used).
-    pub fn start_sign_in(&mut self, account: &MailAccount, secret: Option<String>) {
+    pub fn start_sign_in(&mut self, account: &MailAccount, secret: Option<crate::secret::Secret>) {
         if matches!(self.signins.get(&account.id), Some(SignInState::Waiting { .. })) {
             return;
         }
@@ -1544,10 +1585,10 @@ impl MailView {
     }
 
     /// Keep a typed client secret in the keyring (never in the settings file).
-    pub fn save_client_secret(&mut self, account: &str, secret: String) {
+    pub fn save_client_secret(&mut self, account: &str, secret: crate::secret::Secret) {
         let id = account.to_string();
         let id2 = id.clone();
-        self.spawn(move || crate::secrets::set_mail_secret(&id, crate::secrets::MailSecret::ClientSecret, &secret), move |r| Event::Secret { account: id2, stored: r.unwrap_or(false) });
+        self.spawn(move || crate::secrets::set_mail_secret(&id, crate::secrets::MailSecret::ClientSecret, secret.expose()), move |r| Event::Secret { account: id2, stored: r.unwrap_or(false) });
     }
 
     /// A folder's checkbox: sync it or not (MAIL-042).
@@ -1561,11 +1602,11 @@ impl MailView {
 
     /// Save a typed password: into the keyring if there is one, and meanwhile (or instead) in
     /// memory for this session. Never into the settings file (MAIL-041).
-    pub fn save_password(&mut self, account: &str, password: String) {
+    pub fn save_password(&mut self, account: &str, password: crate::secret::Secret) {
         self.session_pw.insert(account.to_string(), password.clone());
         let id = account.to_string();
         let id2 = id.clone();
-        self.spawn(move || crate::secrets::set_mail_secret(&id, crate::secrets::MailSecret::Password, &password), move |r| Event::Secret { account: id2, stored: r.unwrap_or(false) });
+        self.spawn(move || crate::secrets::set_mail_secret(&id, crate::secrets::MailSecret::Password, password.expose()), move |r| Event::Secret { account: id2, stored: r.unwrap_or(false) });
     }
 
     /// An account was removed: its secrets go, its syncs stop; its mail files stay (MAIL-043).
@@ -1598,7 +1639,7 @@ impl MailView {
     /// Ask for the password of an account (once at a time).
     pub fn ask_password(&mut self, account: &str, retry: Retry) {
         if self.prompt.is_none() && !account.is_empty() {
-            self.prompt = Some(PasswordPrompt { account: account.to_string(), text: String::new(), focus: true, retry });
+            self.prompt = Some(PasswordPrompt { account: account.to_string(), text: Default::default(), focus: true, retry });
         }
     }
 

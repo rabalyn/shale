@@ -26,6 +26,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io::Write;
 use std::sync::Arc;
+use zeroize::Zeroizing;
 
 /// What went wrong with a send, for a message to the person and for the outbox to decide on.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -203,7 +204,8 @@ impl Smtp {
     /// Send a command (it passes the gate) and read the answer.
     fn command(&mut self, cmd: &str) -> Result<Reply> {
         check_command(cmd)?;
-        self.write_all(format!("{cmd}\r\n").as_bytes())?;
+        // an AUTH command holds a password or token: this copy is wiped
+        self.write_all(crate::secret::concat(&[cmd, "\r\n"]).as_bytes())?;
         self.read_reply()
     }
 
@@ -252,14 +254,15 @@ impl Smtp {
         }
         // a password can also sign in with LOGIN
         if let (true, true, Some((user, pass))) = (mech == "PLAIN", self.caps.contains("AUTH=LOGIN"), auth.login_credentials()) {
-            return self.auth_login(&user, &pass);
+            return self.auth_login(user, pass);
         }
         Err(SmtpError::Auth(format!("the server does not offer {mech} sign-in")))
     }
 
     fn auth_sasl(&mut self, mech: &str, auth: &mut dyn Authenticator) -> Result<()> {
         let initial = auth.initial_response();
-        let mut r = self.command(&format!("AUTH {mech} {}", base64_encode(&initial)))?;
+        let b64 = Zeroizing::new(base64_encode(&initial));
+        let mut r = self.command(&crate::secret::concat(&["AUTH ", mech, " ", &b64]))?;
         let mut reason: Option<String> = None;
         for _ in 0..4 {
             match r.code {
@@ -269,8 +272,9 @@ impl Smtp {
                     if !challenge.is_empty() {
                         reason = Some(String::from_utf8_lossy(&challenge).chars().filter(|c| !c.is_control()).take(300).collect());
                     }
-                    let answer = auth.respond(&challenge);
-                    self.write_all(format!("{}\r\n", base64_encode(&answer)).as_bytes())?;
+                    let answer = Zeroizing::new(auth.respond(&challenge));
+                    let b64 = Zeroizing::new(base64_encode(&answer));
+                    self.write_all(crate::secret::concat(&[&b64, "\r\n"]).as_bytes())?;
                     r = self.read_reply()?;
                 }
                 _ => break,
@@ -292,7 +296,8 @@ impl Smtp {
         if r.code != 334 {
             return Err(SmtpError::Auth(format!("{} {}", r.code, r.text())));
         }
-        self.write_all(format!("{}\r\n", base64_encode(pass.as_bytes())).as_bytes())?;
+        let b64 = Zeroizing::new(base64_encode(pass.as_bytes()));
+        self.write_all(crate::secret::concat(&[&b64, "\r\n"]).as_bytes())?;
         let r = self.read_reply()?;
         if r.code == 235 {
             Ok(())

@@ -481,6 +481,29 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - On the first start after the upgrade, the people folder, open notes, import folder and recent
   tags move from the old global settings into the vault you open.
 
+## Data usage and caches
+
+![The Data usage dialog](screenshots/data-usage.png)
+
+- Settings → Data and caches → **Data usage…** (or Ctrl+Shift+D) shows what Shale keeps on disk.
+  **Saved**: the vault by kind (notes, drawings, pictures, PDFs, other attachments, `.shale/`,
+  `.trash/`, `.git/`), its 10 largest files and folders (a click opens the file or shows the
+  folder), and your data outside the vault: mail per account, drafts, outbox, mail trash, local
+  calendars, calendar trash and recovered notes. Nothing in this part can be deleted here.
+- **Caches** are what Shale can build or fetch again: social pictures, the social post index,
+  the mail index, its daily backups, damaged copies of the mail index, the learned tag words and
+  the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
+  has a **Clear** button. The mail index is **rebuilt** from the message files instead (it asks
+  first; not while mail syncs or a change waits for the server), and damaged copies are only
+  deleted after you confirm.
+- How long each cache is kept is a setting (on its row, and in Settings under "How long caches
+  are kept"): social pictures 30 days and 500 MB, social posts 365 days and 10 000 per account,
+  the newest 3 mail index backups, damaged copies forever, the debug log 10 MB. Every value can
+  also be "forever" / "no limit".
+- A cleanup runs in the background a minute after the start (when the last one is more than a
+  day ago) and then daily, and 2 seconds after you change a setting. It never touches your notes,
+  files or mail.
+
 ## Git sync
 
 - Needs `git` installed. In Settings → Git sync, enter the URL of a git repository
@@ -511,6 +534,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+O | Quick switcher (find or create a note) |
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
+| Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |

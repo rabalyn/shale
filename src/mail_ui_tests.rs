@@ -52,7 +52,7 @@ impl Connector for OAuthTestConnector {
 /// A connector factory like the real one (the password is the session's or the keyring's), but
 /// for the pretend server's certificate.
 fn factory(offline: Arc<std::sync::atomic::AtomicBool>) -> ConnectorFactory {
-    Arc::new(move |acct: &MailAccount, session: Option<String>| {
+    Arc::new(move |acct: &MailAccount, session: Option<crate::secret::Secret>| {
         if acct.auth == crate::config::MailAuth::OAuth2 {
             // like `connector_for_account`, but trusting the pretend server's certificate
             let cfg = crate::oauth::OAuthConfig::for_account(acct, session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::ClientSecret))).map_err(|e| e.to_string())?;
@@ -63,7 +63,7 @@ fn factory(offline: Arc<std::sync::atomic::AtomicBool>) -> ConnectorFactory {
         }
         let password = session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::Password)).ok_or_else(|| NO_PASSWORD.to_string())?;
         let settings = ConnectSettings { host: acct.host.clone(), port: acct.port, security: acct.security, limits: Limits { io_timeout: Duration::from_secs(15), max_message: 20_000, ..Limits::default() } };
-        Ok(Arc::new(TestConnector { settings, user: acct.user.clone(), password, offline: offline.clone() }) as Arc<dyn Connector>)
+        Ok(Arc::new(TestConnector { settings, user: acct.user.clone(), password: password.expose().to_string(), offline: offline.clone() }) as Arc<dyn Connector>)
     })
 }
 
@@ -421,7 +421,7 @@ fn an_account_is_added_in_the_dialog_tested_and_saved_with_its_password_in_the_k
     assert_eq!((a.name.as_str(), a.host.as_str(), a.user.as_str(), a.port), ("Work mail", "localhost", "ada", w.server.port));
     let id3 = id.clone();
     w.until("the keyring has the password", move |_| secrets::mail_secret(&id3, MailSecret::Password).is_some());
-    assert_eq!(secrets::mail_secret(&id, MailSecret::Password).as_deref(), Some(PASSWORD));
+    assert_eq!(secrets::mail_secret(&id, MailSecret::Password).as_ref().map(|s| s.expose()), Some(PASSWORD));
     let json = serde_json::to_string(&w.app.cfg).unwrap();
     assert!(!json.contains(PASSWORD), "the password is never in the settings file");
     // the new account is synced right away
@@ -602,10 +602,10 @@ fn a_message_over_the_size_limit_has_a_load_button() {
     // the person asks for it: with a bigger limit it comes
     w.app.mail.opts.limits.max_message = 10_000_000;
     // (the factory above sets its own limit, so make it the bigger one too)
-    w.app.mail.factory = Arc::new(|acct: &MailAccount, session: Option<String>| {
+    w.app.mail.factory = Arc::new(|acct: &MailAccount, session: Option<crate::secret::Secret>| {
         let password = session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::Password)).ok_or_else(|| NO_PASSWORD.to_string())?;
         let settings = ConnectSettings { host: acct.host.clone(), port: acct.port, security: acct.security, limits: Limits { io_timeout: Duration::from_secs(15), max_message: 10_000_000, ..Limits::default() } };
-        Ok(Arc::new(TestConnector { settings, user: acct.user.clone(), password, offline: Arc::new(std::sync::atomic::AtomicBool::new(false)) }) as Arc<dyn Connector>)
+        Ok(Arc::new(TestConnector { settings, user: acct.user.clone(), password: password.expose().to_string(), offline: Arc::new(std::sync::atomic::AtomicBool::new(false)) }) as Arc<dyn Connector>)
     });
     w.click("mail:load");
     w.until("the message arrives", |a| matches!(a.mail.open.as_ref().map(|o| &o.body), Some(Body::Ready(_))));
@@ -706,7 +706,7 @@ fn an_account_without_a_password_asks_for_it_and_syncs_with_it() {
     w.typ("mail:password", PASSWORD);
     w.click("mail:password-ok");
     assert!(w.app.mail.prompt.is_none());
-    assert_eq!(w.app.mail.session_pw.get(&w.account.id).map(String::as_str), Some(PASSWORD));
+    assert_eq!(w.app.mail.session_pw.get(&w.account.id).map(|s| s.expose()), Some(PASSWORD));
     let id = w.account.id.clone();
     w.until("the sync after it ends well", move |a| a.mail.syncs.get(&id).is_some_and(|r| r.finished.is_some() && r.errors.is_empty()));
     assert!(w.app.mail.total >= 3);
@@ -2631,7 +2631,7 @@ fn sync_load_attachments_search_scope_and_the_password_field_work_from_the_keybo
     w.frame(vec![]);
     assert!(w.ctx.memory(|m| m.focused().is_some()), "the password field has the keyboard");
     w.type_text(PASSWORD);
-    assert_eq!(w.app.mail.prompt.as_ref().map(|p| p.text.as_str()), Some(PASSWORD));
+    assert_eq!(w.app.mail.prompt.as_ref().map(|p| p.text.expose()), Some(PASSWORD));
     assert!(w.app.mail.compose.is_none(), "the letters typed no mail keys");
     w.frame(vec![Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
     let id = w.account.id.clone();

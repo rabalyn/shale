@@ -708,6 +708,7 @@ impl ShaleApp {
         let Some(mut modal) = self.modal.take() else { return };
         let mut keep = true;
         let mut open_calendars = false;
+        let mut open_usage = false;
         let ctx = ui.ctx().clone();
         match &mut modal {
             Modal::Picker(p) => {
@@ -842,7 +843,7 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) => {}
+            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -974,6 +975,25 @@ impl ShaleApp {
                     });
                     ui.add_space(8.0);
                     self.post_index_settings(ui);
+                    ui.label(egui::RichText::new("Data and caches").color(theme::MUTED));
+                    ui.horizontal(|ui| {
+                        if ui.button("Data usage…").on_hover_text("What Shale keeps on disk, and its caches").clicked() {
+                            open_usage = true;
+                        }
+                        let total = self.usage.total().map(|t| format!("caches: {}", crate::data_usage::human_bytes(t))).unwrap_or_else(|| "caches: not counted yet".into());
+                        ui.label(muted(total).size(12.0));
+                    });
+                    egui::CollapsingHeader::new("How long caches are kept").id_salt("settings-retention").show(ui, |ui| {
+                        for id in crate::data_usage::CacheId::ALL.into_iter().filter(|id| !id.kept_current()) {
+                            ui.label(id.name());
+                            ui.indent(("retention", id), |ui| {
+                                if crate::data_usage::dialog::retention_ui(ui, id, &mut self.cfg.caches) {
+                                    self.usage.setting_changed(id);
+                                    changed = true;
+                                }
+                            });
+                        }
+                    });
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Troubleshooting").color(theme::MUTED));
                     if ui.checkbox(&mut self.cfg.input_log, "Record keyboard input to a file (to find keyboard problems)").changed() {
@@ -1009,6 +1029,25 @@ impl ShaleApp {
         if open_calendars {
             self.open_calendar_settings();
             keep = false;
+        }
+        if open_usage {
+            self.open_data_usage();
+            keep = false;
+        }
+        if let Modal::DataUsage = &modal {
+            let mut asks = vec![];
+            let resp = crate::dialog::Dialog::new("data-usage", "Data usage").width(620.0).show(&ctx, |ui| {
+                asks = crate::data_usage::dialog::show(ui, &mut self.usage, &mut self.cfg.caches);
+            });
+            for a in asks {
+                if self.usage_ask(a) {
+                    keep = false;
+                }
+            }
+            if resp.should_close() {
+                self.usage.confirm = None;
+                keep = false;
+            }
         }
         if let Modal::Calendars(d) = &mut modal {
             let mut out = None;
