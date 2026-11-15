@@ -71,6 +71,8 @@ pub struct FakeState {
     pub uidplus: bool,
     /// The next write command (STORE, COPY, MOVE, EXPUNGE) is answered `NO` with this text.
     pub fail_next_write: Option<String>,
+    /// Every write command with this verb (`COPY`, `STORE`, `EXPUNGE`, `MOVE`) is answered `NO`, until it is reset.
+    pub fail_every: Option<&'static str>,
     /// The connection is closed, without an answer and without doing anything, when a command with
     /// this verb (`UID MOVE`, `UID EXPUNGE` …) arrives.
     pub hang_up_on: Option<String>,
@@ -223,6 +225,7 @@ impl FakeServer {
             move_cap: true,
             uidplus: true,
             fail_next_write: None,
+            fail_every: None,
             hang_up_on: None,
             no_copyuid: false,
             appended: vec![],
@@ -617,6 +620,9 @@ fn write_command<W: Write>(out: &mut W, st: &Arc<Mutex<FakeState>>, selected: &O
     let mut g = st.lock().unwrap();
     if let Some(why) = g.fail_next_write.take() {
         return write!(out, "{tag} NO {why}\r\n");
+    }
+    if g.fail_every == Some(sub) {
+        return write!(out, "{tag} NO [SERVERBUG] the pretend server fails every {sub}\r\n");
     }
     let Some(name) = selected.clone() else { return write!(out, "{tag} NO no folder selected\r\n") };
     if !rw {

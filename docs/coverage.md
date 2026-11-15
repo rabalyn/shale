@@ -159,12 +159,12 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    rename, trash and restore relies on its guarantee. Test: split the fallback into a function that
    takes "renameat2 unavailable" as an argument and check the three outcomes (new name, name taken,
    directory). Kind: test (small refactor).
-3. **`mail_ops.rs` `exec_move`, `copy_then_delete`, `exec_expunge` (488 to 679), 32 lines**: the
-   fallback for servers without MOVE or UIDPLUS (COPY, verify, STORE, UID EXPUNGE) and the failure
-   branches of the verified copy are only partly reached. Test: a server without MOVE and without
-   UIDPLUS, a copy that does not arrive, an expunge that fails; check that the mail is never deleted
-   before the copy is verified. Kind: tooling (a Dovecot variant in `tests/mail-env/` with the
-   capabilities trimmed, or a scripted fake that can drop MOVE; `imap_fake_tests.rs` cannot yet).
+3. **`mail_ops.rs` `exec_move`, `copy_then_delete`, `exec_expunge`**: closed (#58, DEV-004). The
+   pretend IMAP server has the switches `move_cap`, `uidplus`, `no_copyuid` and `fail_every`
+   (every `COPY`, `STORE` or `EXPUNGE` answered `NO`); `mail_ops.rs` tests cover the copy that the
+   server refuses, the mark and the expunge that fail (the mail then exists in both folders and
+   the mark is undone), verification by Message-ID with one mail not found, and "delete forever"
+   without UIDPLUS. A Dovecot variant was not needed: the fake reaches the same client branches.
 4. **`imap_client.rs` response parsing (`skip_value`, `skip_value_open`, `parse_fetch`,
    `parse_untagged`, 727 to 973) and `append` (1538 to 1564)**: odd server replies (nested
    literals, NIL, unterminated lists) and the APPEND error paths. Test: feed the parser byte strings
