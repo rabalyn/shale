@@ -472,16 +472,9 @@ impl ShaleApp {
         });
     }
 
-    pub fn right_sidebar(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            for (p, t) in [(RightPanel::Backlinks, "Backlinks"), (RightPanel::Outgoing, "Outgoing"), (RightPanel::Outline, "Outline"), (RightPanel::LocalGraph, "Graph"), (RightPanel::Calendar, "Calendar")] {
-                if ui.selectable_label(self.right == p, egui::RichText::new(t).size(12.5)).clicked() {
-                    self.right = p;
-                }
-            }
-        });
-        ui.separator();
-        if self.right == RightPanel::Calendar {
+    /// The panel of one view of the right sidebar (LAY-003).
+    pub fn right_panel_body(&mut self, ui: &mut Ui, panel: RightPanel) {
+        if panel == RightPanel::Calendar {
             let monday = self.cfg.week_starts_monday;
             let mut act = None;
             let area = ui.available_rect_before_wrap();
@@ -500,7 +493,7 @@ impl ShaleApp {
         };
         let Some(v) = &self.vault else { return };
         let name = v.file(&rel).map(|f| f.display_name()).unwrap_or_default();
-        match self.right {
+        match panel {
             RightPanel::Backlinks => {
                 let bl = v.backlinks(&rel);
                 let um = v.unlinked_mentions(&rel);

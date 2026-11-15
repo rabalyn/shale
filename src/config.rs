@@ -197,6 +197,16 @@ impl Default for MailAccount {
 pub struct SidebarCfg {
     /// The ribbon (left menubar), top to bottom. Empty: the default order.
     pub ribbon: Vec<String>,
+    /// The views of the right sidebar, top to bottom. Empty: the default (one view with all panels).
+    pub right: Vec<RightViewCfg>,
+}
+
+/// One view of the right sidebar: its menubar (icon ids, left to right) and the icon it shows.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct RightViewCfg {
+    pub icons: Vec<String>,
+    pub active: String,
 }
 
 /// A value of the wrong shape (an old or hand-edited file) loads as the default instead of

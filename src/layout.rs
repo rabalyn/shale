@@ -35,6 +35,9 @@ pub enum Icon {
     Import,
     Mail,
     Social,
+    Backlinks,
+    Outgoing,
+    Outline,
 }
 
 pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
@@ -172,6 +175,22 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
                 p.line_segment([Pos2::new(b.min.x + w * 0.14, y), Pos2::new(b.min.x + w * 0.14 + w * len, y)], Stroke::new(1.0, c));
             }
         }
+        Icon::Backlinks | Icon::Outgoing => {
+            // a line with an arrow head: into the note (backlinks) or out of it (outgoing links)
+            let (a, b) = if matches!(icon, Icon::Backlinks) { (cx + Vec2::new(w * 0.34, 0.0), cx + Vec2::new(-w * 0.34, 0.0)) } else { (cx + Vec2::new(-w * 0.34, 0.0), cx + Vec2::new(w * 0.34, 0.0)) };
+            p.line_segment([a, b], s);
+            let back = if b.x > a.x { -1.0 } else { 1.0 };
+            p.line_segment([b, b + Vec2::new(back * w * 0.2, -w * 0.2)], s);
+            p.line_segment([b, b + Vec2::new(back * w * 0.2, w * 0.2)], s);
+            p.circle_filled(a, w * 0.08, c);
+        }
+        Icon::Outline => {
+            // indented lines
+            for (k, (x, len)) in [(0.0f32, 0.62f32), (0.16, 0.46), (0.16, 0.46), (0.0, 0.62)].iter().enumerate() {
+                let y = cx.y + (k as f32 - 1.5) * w * 0.22;
+                p.line_segment([Pos2::new(cx.x - w * 0.31 + w * x, y), Pos2::new(cx.x - w * 0.31 + w * (x + len), y)], s);
+            }
+        }
         Icon::Sort => {
             for (k, len) in [0.62f32, 0.44, 0.26].iter().enumerate() {
                 let y = cx.y + (k as f32 - 1.0) * w * 0.24;
@@ -285,7 +304,7 @@ impl ShaleApp {
             egui::Panel::right("right-sidebar").default_size(290.0).size_range(200.0..=560.0).frame(egui::Frame::new().fill(theme::BG_SECONDARY).inner_margin(egui::Margin::symmetric(10, 8)).stroke(Stroke::new(1.0, theme::BORDER))).show(
                 ui,
                 |ui| {
-                    self.right_sidebar(ui);
+                    self.right_views(ui);
                 },
             );
         }
@@ -348,6 +367,7 @@ impl ShaleApp {
                 let f = self.current_folder();
                 self.actions.push(Action::NewNote { folder: f });
             }
+            Item::Panel(p) => self.toggle_peek(p),
         }
     }
 

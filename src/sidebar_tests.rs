@@ -2,7 +2,8 @@
 //! (`ShaleApp::run_frame`) and the mouse is real pointer events at the places the window reports
 //! in `ShaleApp::side`.
 
-use crate::app::{Options, ShaleApp};
+use crate::app::{Options, RightPanel, ShaleApp};
+use crate::sidebar_ui::Cue;
 use crate::config::Config;
 use crate::sidebar::{Item, Layout};
 use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
@@ -13,6 +14,18 @@ pub(crate) struct W {
     ctx: egui::Context,
     t: f64,
     dir: PathBuf,
+    /// the text painted in the last frame, and where
+    pub text: Vec<(String, Pos2)>,
+    /// the mouse cursor the last frame asked for
+    pub cursor: egui::CursorIcon,
+}
+
+fn collect_text(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
+    match shape {
+        egui::Shape::Text(t) => out.push((t.galley.text().to_string(), t.pos)),
+        egui::Shape::Vec(v) => v.iter().for_each(|s| collect_text(s, out)),
+        _ => {}
+    }
 }
 
 impl W {
@@ -25,7 +38,7 @@ impl W {
         let app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
         let ctx = egui::Context::default();
         crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, dir };
+        let mut w = W { app, ctx, t: 0.0, dir, text: vec![], cursor: egui::CursorIcon::Default };
         w.frames(4);
         w
     }
@@ -48,6 +61,9 @@ impl W {
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
         out.textures_delta.clear();
+        self.cursor = out.platform_output.cursor_icon;
+        self.text.clear();
+        out.shapes.iter().for_each(|c| collect_text(&c.shape, &mut self.text));
     }
 
     pub fn frames(&mut self, n: usize) {
@@ -96,6 +112,35 @@ impl W {
 
     pub fn ribbon_icon(&self, item: Item) -> Rect {
         self.app.side.ribbon_icons.iter().find(|(i, _)| *i == item).unwrap_or_else(|| panic!("no ribbon icon {item:?}")).1
+    }
+
+    /// The icon of a panel in the menubar of a view.
+    pub fn bar_icon(&self, view: usize, item: Item) -> Rect {
+        self.app.side.bars.iter().find(|b| b.view == view).and_then(|b| b.icons.iter().find(|(i, _)| *i == item)).unwrap_or_else(|| panic!("no icon {item:?} in view {view}")).1
+    }
+
+    pub fn bar(&self, view: usize) -> Rect {
+        self.app.side.bars.iter().find(|b| b.view == view).unwrap_or_else(|| panic!("no view {view}")).rect
+    }
+
+    /// The content area of a view (or of the panel a ribbon shortcut shows).
+    pub fn body(&self, view: usize) -> Rect {
+        self.app.side.bodies.iter().find(|(at, _)| *at == view + 1).unwrap_or_else(|| panic!("no body {view}")).1
+    }
+
+    /// What the right sidebar says, one string per text.
+    pub fn right_text(&self) -> Vec<String> {
+        let x = self.app.side.right_rect.unwrap().min.x;
+        self.text.iter().filter(|(_, p)| p.x >= x).map(|(t, _)| t.clone()).collect()
+    }
+
+    pub fn right_has(&self, text: &str) -> bool {
+        self.right_text().iter().any(|t| t.contains(text))
+    }
+
+    /// The panels of each view, top to bottom.
+    pub fn views(&self) -> Vec<Vec<Item>> {
+        self.app.side.layout.views.iter().map(|v| v.icons.clone()).collect()
     }
 
     pub fn ribbon(&self) -> Vec<Item> {
@@ -159,4 +204,219 @@ fn lay_001_dropping_a_ribbon_icon_outside_the_ribbon_or_pressing_esc_changes_not
     assert_eq!(w.app.side.drag, None, "Esc ends the drag");
     w.release(Pos2::new(mail.x, between));
     assert_eq!(w.ribbon(), Item::ALL.to_vec(), "and the button let go afterwards drops nothing");
+}
+
+fn panel(p: RightPanel) -> Item {
+    Item::Panel(p)
+}
+
+// spec: LAY-003, LAY-004, LAY-009
+#[test]
+fn lay_009_dropping_an_icon_on_the_content_makes_a_new_view_and_two_panels_show_at_once() {
+    let mut w = W::new("split");
+    w.app.open(std::path::Path::new("Welcome.md"), false);
+    w.frames(4);
+    assert_eq!(w.views().len(), 1, "one view by default, with all five panels");
+    assert!(w.right_has("Linked mentions") && !w.right_has("Second"), "it shows the backlinks, not the outline: {:?}", w.right_text());
+    // drag the Outline icon over the content of the view: the zone shows, nothing is created yet
+    let from = w.bar_icon(0, panel(RightPanel::Outline)).center();
+    let into = w.body(0).center();
+    w.drag_to(from, into);
+    match w.app.side.cue {
+        Cue::Zone { at, rect } => assert_eq!((at, rect), (1, w.body(0)), "the zone is the content of the view"),
+        c => panic!("no drop zone: {c:?}"),
+    }
+    assert!(w.right_has("Drop to open this icon in a new view"), "the zone says what dropping does: {:?}", w.right_text());
+    assert_eq!(w.views().len(), 1);
+    // let go: a second view with its own menubar holds the icon, and both panels are drawn
+    w.release(into);
+    assert_eq!(w.views(), vec![vec![panel(RightPanel::Backlinks), panel(RightPanel::Outgoing), panel(RightPanel::LocalGraph), panel(RightPanel::Calendar)], vec![panel(RightPanel::Outline)]]);
+    assert_eq!(w.app.side.bars.len(), 2, "each view has its menubar");
+    assert!(w.bar(1).min.y > w.body(0).min.y && w.body(1).min.y > w.bar(1).max.y - 1.0, "the views are stacked");
+    assert!(w.right_has("Linked mentions") && w.right_has("Second") && w.right_has("First"), "backlinks and outline at once: {:?}", w.right_text());
+    assert_eq!(w.app.side.cue, Cue::None);
+    // each view shows what its own icon says
+    w.click_at(w.bar_icon(0, panel(RightPanel::Outgoing)).center());
+    assert!(w.right_has("Not created yet") && w.right_has("Second"), "the other view keeps its panel: {:?}", w.right_text());
+    assert!(!w.right_has("Linked mentions"));
+    // and it is all in the settings
+    assert_eq!(w.app.cfg.sidebars.right.len(), 2);
+    assert_eq!(w.app.cfg.sidebars.right[1].icons, ["panel:outline"]);
+    assert_eq!(w.app.cfg.sidebars.right[0].active, "panel:outgoing");
+}
+
+// spec: LAY-010
+#[test]
+fn lay_010_esc_or_dropping_elsewhere_cancels_a_drop_on_the_content() {
+    let mut w = W::new("zone-cancel");
+    let before = w.app.side.layout.clone();
+    let from = w.bar_icon(0, panel(RightPanel::Outline)).center();
+    let into = w.body(0).center();
+    // Esc while the zone shows
+    w.drag_to(from, into);
+    assert!(matches!(w.app.side.cue, Cue::Zone { .. }));
+    w.press_esc();
+    assert_eq!((w.app.side.drag, w.app.side.cue), (None, Cue::None), "the zone is gone");
+    assert!(!w.right_has("Drop to open"));
+    w.release(into);
+    assert_eq!(w.app.side.layout, before, "the button let go after Esc drops nothing");
+    // dropping on the note, the tab bar and the status bar
+    for elsewhere in [Pos2::new(700.0, 400.0), Pos2::new(700.0, 18.0), Pos2::new(700.0, 890.0)] {
+        w.drag_to(from, elsewhere);
+        assert_eq!(w.app.side.cue, Cue::None, "no zone at {elsewhere:?}");
+        w.release(elsewhere);
+        assert_eq!(w.app.side.layout, before, "dropped at {elsewhere:?}");
+    }
+    // moving the pointer out of the zone again takes the zone away
+    w.drag_to(from, into);
+    assert!(matches!(w.app.side.cue, Cue::Zone { .. }));
+    w.frame(vec![Event::PointerMoved(Pos2::new(700.0, 400.0))]);
+    assert_eq!(w.app.side.cue, Cue::None);
+    w.release(Pos2::new(700.0, 400.0));
+    assert_eq!(w.app.side.layout, before);
+}
+
+// spec: LAY-005
+#[test]
+fn lay_005_icons_are_dragged_between_menubars_right_to_right_left_to_right_and_right_to_left() {
+    let mut w = W::new("between");
+    let view = |icons: &[&str], active: &str| crate::config::RightViewCfg { icons: icons.iter().map(|s| s.to_string()).collect(), active: active.into() };
+    let sidebars = crate::config::SidebarCfg { ribbon: vec![], right: vec![view(&["panel:backlinks", "panel:outline"], "panel:backlinks"), view(&["panel:outgoing", "panel:graph", "panel:calendar"], "panel:outgoing")] };
+    w.app.side.layout = Layout::from_config(&Config { sidebars, ..Config::default() });
+    w.frames(3);
+    assert_eq!(w.views().len(), 2);
+    // right to right: Outline into the menubar of the second view, behind the first icon
+    let from = w.bar_icon(0, panel(RightPanel::Outline)).center();
+    let first = w.bar_icon(1, panel(RightPanel::Outgoing));
+    let to = Pos2::new(first.max.x + 2.0, first.center().y);
+    w.drag_to(from, to);
+    assert!(matches!(w.app.side.cue, Cue::Bar { view: 1, at: 1, .. }), "{:?}", w.app.side.cue);
+    w.release(to);
+    assert_eq!(w.views()[0], [panel(RightPanel::Backlinks)]);
+    assert_eq!(w.views()[1], [panel(RightPanel::Outgoing), panel(RightPanel::Outline), panel(RightPanel::LocalGraph), panel(RightPanel::Calendar)]);
+    assert!(w.right_has("Second") || w.right_has("No headings"), "the moved icon is the active one of its view and its panel shows");
+    // right to left: Calendar into the ribbon, between Files and Search
+    let cal = w.bar_icon(1, panel(RightPanel::Calendar)).center();
+    let between = (w.ribbon_icon(Item::Files).max.y + w.ribbon_icon(Item::Search).min.y) / 2.0;
+    w.drag_and_drop(cal, Pos2::new(w.ribbon_icon(Item::Files).center().x, between));
+    assert_eq!(&w.app.side.layout.ribbon[..3], [Item::Files, panel(RightPanel::Calendar), Item::Search]);
+    assert!(!w.views()[1].contains(&panel(RightPanel::Calendar)));
+    assert_eq!(w.ribbon()[1], panel(RightPanel::Calendar), "the ribbon draws it");
+    // left to right: the shortcut goes back to the menubar of the first view
+    let sc = w.ribbon_icon(panel(RightPanel::Calendar)).center();
+    let b0 = w.bar(0);
+    w.drag_and_drop(sc, Pos2::new(b0.max.x - 4.0, b0.center().y));
+    assert_eq!(w.views()[0], [panel(RightPanel::Backlinks), panel(RightPanel::Calendar)]);
+    assert!(!w.ribbon().contains(&panel(RightPanel::Calendar)));
+    assert_eq!(w.app.cfg.sidebars.right[0].icons, ["panel:backlinks", "panel:calendar"], "stored");
+    assert!(!w.app.cfg.sidebars.ribbon.contains(&"panel:calendar".to_string()));
+}
+
+// spec: LAY-006
+#[test]
+fn lay_006_a_ribbon_icon_that_cannot_live_on_the_right_is_refused_with_a_no_drop_cue() {
+    let mut w = W::new("refused");
+    let before = w.app.side.layout.clone();
+    let mail = w.ribbon_icon(Item::Mail).center();
+    // over a menubar of the right sidebar
+    let bar = w.bar(0).center();
+    w.drag_to(mail, bar);
+    assert_eq!(w.app.side.cue, Cue::Refused);
+    assert_eq!(w.cursor, egui::CursorIcon::NoDrop, "the pointer says no");
+    w.release(bar);
+    assert_eq!(w.app.side.layout, before, "nothing changed");
+    // over the content area, where a panel icon would make a new view
+    let body = w.body(0).center();
+    w.drag_to(mail, body);
+    assert_eq!(w.app.side.cue, Cue::Refused);
+    assert!(!w.right_has("Drop to open"), "no zone for what cannot live there");
+    w.release(body);
+    assert_eq!(w.app.side.layout, before);
+    // a panel icon over the same place is accepted: the pointer is the grabbing hand
+    let from = w.bar_icon(0, panel(RightPanel::Outline)).center();
+    w.drag_to(from, body);
+    assert_eq!(w.cursor, egui::CursorIcon::Grabbing);
+    w.release(body);
+}
+
+// spec: LAY-007
+#[test]
+fn lay_007_taking_the_last_icon_out_of_a_view_removes_the_view_and_an_empty_sidebar_takes_a_drop() {
+    let mut w = W::new("last-icon");
+    // split Outline off, then drag it back to the ribbon: the second view goes away
+    w.drag_and_drop(w.bar_icon(0, panel(RightPanel::Outline)).center(), w.body(0).center());
+    assert_eq!(w.views().len(), 2);
+    let end = w.ribbon_icon(Item::NewNote);
+    let below = Pos2::new(end.center().x, end.max.y + 4.0);
+    w.drag_and_drop(w.bar_icon(1, panel(RightPanel::Outline)).center(), below);
+    assert_eq!(w.views().len(), 1, "the view without icons is gone");
+    assert_eq!(w.app.side.bars.len(), 1);
+    assert_eq!(w.ribbon().last(), Some(&panel(RightPanel::Outline)));
+    // every panel goes to the ribbon: the sidebar has no view and says so
+    for p in [RightPanel::Backlinks, RightPanel::Outgoing, RightPanel::LocalGraph, RightPanel::Calendar] {
+        w.drag_and_drop(w.bar_icon(0, panel(p)).center(), below);
+    }
+    assert!(w.views().is_empty());
+    assert!(w.right_has("Drag a panel icon here"), "{:?}", w.right_text());
+    // a drop on the empty sidebar makes the first view; a ribbon icon is refused there
+    let area = w.app.side.right_rect.unwrap().center();
+    w.drag_and_drop(w.ribbon_icon(Item::Mail).center(), area);
+    assert!(w.views().is_empty());
+    w.drag_and_drop(w.ribbon_icon(panel(RightPanel::Calendar)).center(), area);
+    assert_eq!(w.views(), vec![vec![panel(RightPanel::Calendar)]]);
+}
+
+// spec: LAY-008
+#[test]
+fn lay_008_the_split_layout_is_stored_and_comes_back_and_a_broken_one_gives_the_default() {
+    let mut w = W::new("restore");
+    w.drag_and_drop(w.bar_icon(0, panel(RightPanel::Outline)).center(), w.body(0).center());
+    let first = w.ribbon_icon(Item::Files).center();
+    let last = w.ribbon_icon(Item::NewNote);
+    w.drag_and_drop(first, Pos2::new(first.x, last.max.y + 4.0));
+    let (views, ribbon) = (w.views(), w.ribbon());
+    assert_eq!(views.len(), 2);
+    let w2 = w.restarted("restore-2");
+    assert_eq!((w2.views(), w2.ribbon()), (views, ribbon), "both menubars come back as they were");
+    assert_eq!(w2.app.side.bars.len(), 2);
+    // a settings file with a layout that cannot be read: the rest loads, the layout is the default
+    for broken in [r#"{"sidebars": {"right": "nonsense"}, "font_size": 17.0}"#, r#"{"sidebars": 5}"#, r#"{"sidebars": {"ribbon": ["x"], "right": [{"icons": ["mail", "nope"], "active": 3}]}}"#] {
+        let (cfg, _) = crate::vault_state::parse::<Config>(broken.as_bytes()).unwrap();
+        assert_eq!(Layout::from_config(&cfg), Layout::default(), "{broken}");
+    }
+}
+
+// spec: LAY-011
+#[test]
+fn lay_011_a_panel_shortcut_in_the_ribbon_shows_its_panel_below_the_views_and_closes_again() {
+    let mut w = W::new("shortcut");
+    w.app.open(std::path::Path::new("Welcome.md"), false);
+    // Outline goes to the ribbon, and the sidebar is hidden
+    let files = w.ribbon_icon(Item::Files);
+    w.drag_and_drop(w.bar_icon(0, panel(RightPanel::Outline)).center(), Pos2::new(files.center().x, files.max.y + 3.0));
+    assert!(!w.right_has("Second"));
+    w.app.cfg.show_right = false;
+    w.frames(3);
+    assert!(w.app.side.bars.is_empty(), "no sidebar, no menubars");
+    // the shortcut opens the sidebar with a view of its own at the bottom
+    w.click_at(w.ribbon_icon(panel(RightPanel::Outline)).center());
+    assert!(w.app.cfg.show_right);
+    assert_eq!(w.app.side.peek, Some(RightPanel::Outline));
+    assert!(w.right_has("Second") && w.right_has("Linked mentions"), "{:?}", w.right_text());
+    assert_eq!(w.views().len(), 1, "it is not part of the stored layout");
+    // the same click closes it
+    w.click_at(w.ribbon_icon(panel(RightPanel::Outline)).center());
+    assert_eq!(w.app.side.peek, None);
+    assert!(!w.right_has("Second"));
+    // and so does the icon in its own menubar
+    w.click_at(w.ribbon_icon(panel(RightPanel::Outline)).center());
+    let own_bar = w.body(1).min + Vec2::new(14.0, -16.0);
+    w.click_at(own_bar);
+    assert_eq!(w.app.side.peek, None, "the icon of the shortcut's own menubar closes it");
+    // moving the shortcut's icon into a view takes the temporary view away
+    w.click_at(w.ribbon_icon(panel(RightPanel::Outline)).center());
+    assert_eq!(w.app.side.peek, Some(RightPanel::Outline));
+    w.drag_and_drop(w.ribbon_icon(panel(RightPanel::Outline)).center(), Pos2::new(w.bar(0).max.x - 4.0, w.bar(0).center().y));
+    assert_eq!(w.app.side.peek, None);
+    assert!(w.views()[0].contains(&panel(RightPanel::Outline)));
 }
