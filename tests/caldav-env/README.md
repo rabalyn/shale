@@ -82,7 +82,7 @@ suites (`--test-threads=1`, and fails if a suite ran no test) and always takes t
 
 The job runs in the `rust` container like the other jobs, so it needs a container engine **inside**
 that container. It installs `podman` and `podman-compose` with apt and then asks `podman info`
-(then `docker info`). If neither works, the job prints `SKIPPED: this runner cannot run containers
+(then `docker info`) and starts a tiny `busybox` container with it. If neither works, the job prints `SKIPPED: this runner cannot run containers
 …` and ends green: the real-server tests did not run. What the runner must offer for them to run:
 
 - the job container must be allowed to run containers: for the runner's `container.options` in the
