@@ -1466,6 +1466,87 @@ fn queued_actions_of_an_account_that_is_not_configured_any_more_are_never_sent_a
     assert_eq!(queued(&w), 1, "and nothing was deleted from the queue");
 }
 
+/// A world after a sync, with `n` local sent copies whose queued append is gone (as after a restore from a backup).
+fn world_with_unsent(tag: &str, n: u32) -> W {
+    let mut w = W::new(tag, true);
+    w.sync_and_wait();
+    let store = w.app.mail.ready_store().unwrap();
+    for i in 0..n {
+        let raw = dated(&format!("Lost copy {i}"), "ada@example.com", "only here", 14 + i);
+        crate::mail_ops::record_sent_copy(&store, &w.account.id, &raw, NOW + i64::from(i)).unwrap().unwrap();
+    }
+    let ids: Vec<i64> = store.reader().unwrap().pending_ops(None).unwrap().iter().map(|p| p.id).collect();
+    store.commit(ids.into_iter().map(|id| crate::mail_db::Op::PendingDone { id }).collect()).unwrap();
+    w.app.mail.refresh();
+    w.frame(vec![]);
+    w
+}
+
+// spec: MAIL-214
+#[test]
+fn sent_copies_that_only_exist_here_are_announced_and_uploaded_again_once_even_when_clicked_twice() {
+    let mut w = world_with_unsent("unsent-up", 2);
+    assert!(w.shows("2 sent mails are only on this computer"), "{:?}", w.texts);
+    assert_eq!(w.server_uids("Sent").len(), 1);
+    w.click("mail:unsent-open");
+    w.settle();
+    assert!(w.shows("Lost copy 0") && w.shows("Lost copy 1"));
+    assert!(w.shows("Test mail"), "the account is named");
+    // two quick clicks on the same row: the second works on the stale list and queues nothing
+    let stale = w.app.mail.unsent.clone();
+    let cfg = w.app.cfg.clone();
+    assert_eq!(w.app.mail.unsent_upload(&cfg, &stale[..1]), 1);
+    assert_eq!(w.app.mail.unsent_upload(&cfg, &stale[..1]), 1);
+    assert_eq!(w.app.mail.ready_store().unwrap().reader().unwrap().pending_ops(None).unwrap().len(), 1, "one append queued");
+    w.settle_ops();
+    assert_eq!(w.server_uids("Sent").len(), 2, "one copy arrived");
+    // the other one through the button of the list
+    w.click("mail:unsent-upload-all");
+    w.settle_ops();
+    assert_eq!(w.server_uids("Sent").len(), 3);
+    w.frame(vec![]);
+    assert!(w.app.mail.unsent.is_empty());
+    assert!(!w.shows("only on this computer"));
+}
+
+// spec: MAIL-212
+#[test]
+fn dismissing_in_the_list_keeps_the_mail_and_stops_the_notice() {
+    let mut w = world_with_unsent("unsent-dismiss", 2);
+    w.click("mail:unsent-open");
+    w.settle();
+    w.click("mail:unsent-dismiss:0");
+    w.frame(vec![]);
+    assert_eq!(w.app.mail.unsent.len(), 1);
+    assert!(w.shows("1 sent mail is only on this computer"), "{:?}", w.texts);
+    w.click("mail:unsent-dismiss-all");
+    w.frame(vec![]);
+    assert!(w.app.mail.unsent.is_empty() && !w.has("mail:unsent-notice"));
+    assert_eq!(w.server_uids("Sent").len(), 1, "nothing was uploaded");
+    let r = w.app.mail.ready_store().unwrap().reader().unwrap();
+    let sent = w.folder_id("Sent");
+    assert_eq!(r.list(sent, 10, 0).unwrap().iter().filter(|m| m.uidvalidity == 0).count(), 2, "both stay in the local Sent folder");
+}
+
+// spec: MAIL-213
+#[test]
+fn a_copy_of_an_account_that_is_not_set_up_any_more_can_only_be_dismissed() {
+    let mut w = world_with_unsent("unsent-gone", 1);
+    // the account of the copy was removed; another one is set up
+    w.app.cfg.mail_accounts = vec![MailAccount { id: "other".into(), name: "Other".into(), host: "localhost".into(), ..MailAccount::default() }];
+    w.frame(vec![]);
+    w.click("mail:unsent-open");
+    w.settle();
+    assert!(w.shows("not set up any more"));
+    assert!(!w.has("mail:unsent-upload:0") && !w.has("mail:unsent-upload-all"));
+    assert!(w.has("mail:unsent-dismiss:0"));
+    // even asked directly, nothing is queued for it
+    let stale = w.app.mail.unsent.clone();
+    let cfg = w.app.cfg.clone();
+    assert_eq!(w.app.mail.unsent_upload(&cfg, &stale), 0);
+    assert!(w.app.mail.ready_store().unwrap().reader().unwrap().pending_ops(None).unwrap().is_empty());
+}
+
 // spec: MAIL-201
 #[test]
 fn an_open_draft_is_saved_when_the_app_closes_without_waiting_for_the_autosave() {

@@ -416,6 +416,9 @@ pub struct MailView {
     pub vault: Option<VaultInfo>,
     /// Drafts and outbox entries were announced once at start.
     announced_local: bool,
+    /// Local sent copies that the server does not have and nothing uploads (MAIL-210).
+    pub unsent: Vec<crate::mail_db::UnsentCopy>,
+    pub unsent_open: bool,
 }
 
 /// Opening the store and the jobs report errors as text; a panic in a job is one too.
@@ -500,6 +503,8 @@ impl MailView {
             gnupg_probing: false,
             vault: None,
             announced_local: false,
+            unsent: vec![],
+            unsent_open: false,
         }
     }
 
@@ -973,6 +978,8 @@ impl MailView {
         let waiting = r.pending_ops(None).unwrap_or_default();
         self.pending_total = waiting.len() as i64;
         self.pending_accounts = waiting.iter().map(|p| p.account.clone()).collect();
+        self.unsent = r.unsent_copies(false).unwrap_or_default();
+        self.unsent_open &= !self.unsent.is_empty();
         // the marked mails and the open one as the index has them now (flags change, mail moves away)
         let ids: Vec<i64> = self.marked.keys().copied().collect();
         for id in ids {

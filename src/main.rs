@@ -54,6 +54,7 @@ mod mail_store;
 mod mail_ui;
 #[cfg(test)]
 mod mail_ui_tests;
+mod mail_unsent;
 mod mail_view;
 mod markdown;
 mod media;

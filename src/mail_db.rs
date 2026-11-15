@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Newest schema version this program knows.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// What went wrong, in words for the person (the store never panics on bad data).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +62,7 @@ pub const STATE_TOO_LARGE: i64 = 2;
 // ---------------------------------------------------------------- schema
 
 /// Migration `n` (index `n - 1`) brings the schema from version `n - 1` to `n`.
-const MIGRATIONS: [&str; 2] = [
+const MIGRATIONS: [&str; 3] = [
     r#"
 CREATE TABLE accounts (
     id TEXT PRIMARY KEY,
@@ -127,6 +127,11 @@ CREATE TABLE pending_ops (
     last_error TEXT
 );
 CREATE INDEX pending_by_message ON pending_ops (folder, uidvalidity, uid);
+"#,
+    // version 3 (MAIL-210): the person said "keep it here" about a local sent copy that the server never got
+    r#"
+ALTER TABLE messages ADD COLUMN upload_dismissed INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX messages_local_copies ON messages (folder, uid) WHERE uidvalidity = 0;
 "#,
 ];
 
@@ -310,6 +315,18 @@ pub enum Op {
     /// Record an action of the person; a `flags` action also changes the local flags in the same
     /// transaction (the previous flags are kept in the row, for a rollback).
     PendingAdd(Box<PendingRow>),
+    /// Queue a fresh `append` for a local sent copy (UIDVALIDITY 0), unless one waits for it already or the row is
+    /// gone. The check and the insert are one transaction, so two clicks queue one (MAIL-211).
+    QueueAppend {
+        folder: i64,
+        uid: u32,
+        created: i64,
+    },
+    /// The person keeps a local sent copy as it is: it is not offered for upload again (MAIL-212). Nothing is deleted.
+    DismissUnsent {
+        folder: i64,
+        uid: u32,
+    },
     /// The server confirmed (or the action ended some other way that the caller has handled): forget it.
     PendingDone {
         id: i64,
@@ -451,6 +468,22 @@ fn apply_op(tx: &rusqlite::Transaction<'_>, op: &Op) -> Result<()> {
                 params![p.account, p.kind, p.folder, p.uidvalidity, p.uid, p.target, p.flags_add, p.flags_remove, prev, p.created],
             )?;
         }
+        Op::QueueAppend { folder, uid, created } => {
+            let row: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT f.account, f.name FROM messages m JOIN folders f ON f.id = m.folder WHERE m.folder = ?1 AND m.uidvalidity = 0 AND m.uid = ?2 AND NOT EXISTS (SELECT 1 FROM pending_ops p WHERE p.folder = m.folder AND p.uidvalidity = 0 AND p.uid = m.uid)",
+                    params![folder, uid],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if let Some((account, name)) = row {
+                tx.execute("INSERT INTO pending_ops (account, kind, folder, uidvalidity, uid, target, flags_add, created) VALUES (?1, 'append', ?2, 0, ?3, ?4, '\\Seen', ?5)", params![account, folder, uid, name, created])?;
+                tx.execute("UPDATE messages SET upload_dismissed = 0 WHERE folder = ?1 AND uidvalidity = 0 AND uid = ?2", params![folder, uid])?;
+            }
+        }
+        Op::DismissUnsent { folder, uid } => {
+            tx.execute("UPDATE messages SET upload_dismissed = 1 WHERE folder = ?1 AND uidvalidity = 0 AND uid = ?2", params![folder, uid])?;
+        }
         Op::PendingDone { id } => {
             tx.execute("DELETE FROM pending_ops WHERE id = ?1", [id])?;
         }
@@ -541,6 +574,35 @@ pub fn drop_restored_queue(c: &mut Connection) -> Result<usize> {
     }
     tx.commit()?;
     Ok(ids.len())
+}
+
+/// A local sent copy that nothing uploads (MAIL-210).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnsentCopy {
+    pub account: String,
+    pub folder: i64,
+    pub uid: u32,
+    pub subject: String,
+    pub to_addr: String,
+    pub date: Option<i64>,
+    pub dismissed: bool,
+}
+
+/// Local sent copies (UIDVALIDITY 0) that have no `append` waiting and that the server does not have (no row of the
+/// same Message-ID under a real UIDVALIDITY): they are only on this computer. Derived from the data, no flag: the
+/// copy of a refused or restored append is here the moment its queue row is gone (MAIL-210). Newest first.
+pub fn unsent_copies(c: &Connection, with_dismissed: bool) -> Result<Vec<UnsentCopy>> {
+    let mut st = c.prepare(
+        "SELECT f.account, m.folder, m.uid, m.subject, m.to_addr, m.date, m.upload_dismissed FROM messages m JOIN folders f ON f.id = m.folder
+         WHERE m.uidvalidity = 0 AND (?1 OR m.upload_dismissed = 0)
+           AND NOT EXISTS (SELECT 1 FROM pending_ops p WHERE p.folder = m.folder AND p.uidvalidity = 0 AND p.uid = m.uid)
+           AND NOT (m.message_id <> '' AND EXISTS (SELECT 1 FROM messages s WHERE s.message_id = m.message_id AND s.folder = m.folder AND s.uidvalidity <> 0))
+         ORDER BY m.date DESC, m.uid DESC",
+    )?;
+    let rows = st
+        .query_map([with_dismissed], |r| Ok(UnsentCopy { account: r.get(0)?, folder: r.get(1)?, uid: r.get(2)?, subject: r.get(3)?, to_addr: r.get(4)?, date: r.get(5)?, dismissed: r.get::<_, i64>(6)? != 0 }))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 /// UIDs of a folder (in one UIDVALIDITY) that have an action waiting: the sync leaves their
@@ -903,8 +965,10 @@ mod tests {
         let f = inbox(&c);
         add(&mut c, f.id, 1, fields("old mail", "a@x.de", "text", 5));
         migrate(&c).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 2);
+        assert_eq!(current_version(&c).unwrap(), SCHEMA_VERSION);
         assert_eq!(count_messages(&c).unwrap(), 1, "the mail of version 1 is untouched");
+        // migration 3 (MAIL-210): nothing is dismissed and the old mail is not a local copy
+        assert!(unsent_copies(&c, true).unwrap().is_empty());
         assert_eq!(list(&c, f.id, 10, 0).unwrap()[0].pending, None);
         assert!(pending_ops(&c, None).unwrap().is_empty());
     }
