@@ -16,11 +16,72 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use zeroize::{Zeroize, Zeroizing};
 
-/// The smallest buffer: room for any normal password or token. A bigger buffer is chosen at
-/// creation for a longer text; it never grows afterwards.
-const MIN_CAPACITY: usize = 256;
-/// Buffer sizes are a multiple of this.
-const ROUND: usize = 64;
+/// The size of a memory page (buffers are made of whole pages), 4096 if the system does not say.
+fn page_size() -> usize {
+    static SIZE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *SIZE.get_or_init(|| {
+        #[cfg(unix)]
+        {
+            // SAFETY: sysconf only reads a system constant.
+            let n = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+            if n > 0 && (n as usize).is_power_of_two() {
+                return n as usize;
+            }
+        }
+        4096
+    })
+}
+
+/// Whole pages that belong to one `Secret` alone. `mlock` and `munlock` work on pages and do not
+/// count: if two secrets shared a page, dropping one would unlock the other. Zeroed when made,
+/// never moved or resized, freed on drop.
+struct Pages {
+    ptr: std::ptr::NonNull<u8>,
+    cap: usize,
+}
+
+impl Pages {
+    /// At least `min` bytes, rounded up to a multiple of the page size, page-aligned.
+    fn new(min: usize) -> Pages {
+        let page = page_size();
+        let cap = min.max(1).div_ceil(page) * page;
+        let layout = std::alloc::Layout::from_size_align(cap, page).expect("a page-aligned size");
+        // SAFETY: the layout has a non-zero size.
+        let raw = unsafe { std::alloc::alloc_zeroed(layout) };
+        match std::ptr::NonNull::new(raw) {
+            Some(ptr) => Pages { ptr, cap },
+            None => std::alloc::handle_alloc_error(layout),
+        }
+    }
+}
+
+impl std::ops::Deref for Pages {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        // SAFETY: `ptr` points to `cap` initialised (zeroed) bytes owned by `self`.
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.cap) }
+    }
+}
+
+impl std::ops::DerefMut for Pages {
+    fn deref_mut(&mut self) -> &mut [u8] {
+        // SAFETY: as above, and `&mut self` is the only way in.
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.cap) }
+    }
+}
+
+impl Drop for Pages {
+    fn drop(&mut self) {
+        let layout = std::alloc::Layout::from_size_align(self.cap, page_size()).expect("the layout it was made with");
+        // SAFETY: allocated in `new` with this very layout, and freed only here.
+        unsafe { std::alloc::dealloc(self.ptr.as_ptr(), layout) };
+    }
+}
+
+// SAFETY: `Pages` owns its memory exclusively and has no interior mutability.
+unsafe impl Send for Pages {}
+// SAFETY: shared access only reads; writing needs `&mut`.
+unsafe impl Sync for Pages {}
 
 /// How many times `mlock` failed in this process (RLIMIT_MEMLOCK too low, or no such call).
 static LOCK_FAILURES: AtomicUsize = AtomicUsize::new(0);
@@ -45,10 +106,6 @@ pub fn fail_locks_on_this_thread(on: bool) {
 /// How many secret buffers could not be locked into memory so far in this run (SEC-018).
 pub fn lock_failures() -> usize {
     LOCK_FAILURES.load(Ordering::Relaxed)
-}
-
-fn capacity_for(len: usize) -> usize {
-    len.max(MIN_CAPACITY).div_ceil(ROUND) * ROUND
 }
 
 /// Try to lock `buf` into RAM. False if that did not work.
@@ -83,17 +140,17 @@ fn unlock(buf: &[u8]) {
 /// A secret text in a locked, fixed-size buffer that is zeroed on drop.
 pub struct Secret {
     /// The whole capacity; never reallocated. Bytes past `len` are always zero.
-    buf: Box<[u8]>,
+    buf: Pages,
     /// Bytes in use; `buf[..len]` is valid UTF-8.
     len: usize,
     locked: bool,
 }
 
 impl Secret {
-    /// A secret holding `text`. The buffer is at least 256 bytes; a longer text gets a bigger
-    /// one (rounded up to 64 bytes). It never grows afterwards.
+    /// A secret holding `text`. The buffer is whole pages of its own (at least one, so 4096 bytes
+    /// or more); a longer text gets more pages. It never grows afterwards.
     pub fn new(text: &str) -> Secret {
-        let mut buf = vec![0u8; capacity_for(text.len())].into_boxed_slice();
+        let mut buf = Pages::new(text.len());
         let locked = lock(&buf);
         if !locked {
             LOCK_FAILURES.fetch_add(1, Ordering::Relaxed);
@@ -332,12 +389,36 @@ mod tests {
 
     // spec: SEC-014
     #[test]
-    fn the_capacity_is_at_least_256_and_a_multiple_of_64() {
-        assert_eq!(Secret::new("").raw().len(), 256);
-        assert_eq!(Secret::new(&"a".repeat(256)).raw().len(), 256);
-        assert_eq!(Secret::new(&"a".repeat(257)).raw().len(), 320);
-        assert_eq!(Secret::new(&"a".repeat(1000)).raw().len(), 1024);
-        assert_eq!(Secret::new(&"a".repeat(1000)).expose().len(), 1000, "a long text is kept whole");
+    fn a_buffer_is_whole_page_aligned_pages() {
+        let page = page_size();
+        assert!(page.is_power_of_two() && page >= 4096);
+        for (len, pages) in [(0, 1), (1, 1), (page, 1), (page + 1, 2), (3 * page, 3)] {
+            let s = Secret::new(&"a".repeat(len));
+            assert_eq!(s.raw().len(), pages * page, "{len} bytes");
+            assert_eq!(s.raw().as_ptr() as usize % page, 0, "page-aligned");
+            assert_eq!(s.expose().len(), len, "a long text is kept whole");
+        }
+    }
+
+    // spec: SEC-014, SEC-018
+    #[test]
+    fn two_secrets_never_share_a_page_so_dropping_one_cannot_unlock_the_other() {
+        let page = page_size();
+        // (mlock does not count: if they shared a page, munlock of one would unlock the other.
+        // Reading the kernel's locked-page count in a test would be disturbed by the other tests
+        // that run at the same time, so the property is checked on the address ranges.)
+        let all: Vec<Secret> = (0..16).map(|i| Secret::new(&format!("secret-{i}"))).collect();
+        let mut pages: Vec<usize> = all.iter().flat_map(|s| (0..s.raw().len() / page).map(move |k| s.raw().as_ptr() as usize / page + k)).collect();
+        let n = pages.len();
+        pages.sort_unstable();
+        pages.dedup();
+        assert_eq!(pages.len(), n, "no page belongs to two secrets");
+        let (mut a, b) = (Secret::new("one"), Secret::new("two"));
+        let locked = b.is_locked();
+        a.clear();
+        drop(a);
+        assert_eq!(b.is_locked(), locked, "the other one is as locked as before");
+        assert_eq!(b.expose(), "two");
     }
 
     // spec: SEC-014
@@ -356,13 +437,14 @@ mod tests {
     // spec: SEC-014
     #[test]
     fn an_insert_beyond_the_capacity_is_refused() {
-        let mut s = Secret::new(&"y".repeat(255));
+        let cap = page_size();
+        let mut s = Secret::new(&"y".repeat(cap - 1));
         assert_eq!(s.insert_text("zz", CharIndex(10)), 0, "two bytes do not fit into one");
-        assert_eq!(s.expose(), "y".repeat(255));
-        assert_eq!(s.insert_text("z", CharIndex(255)), 1);
+        assert_eq!(s.expose(), "y".repeat(cap - 1));
+        assert_eq!(s.insert_text("z", CharIndex(cap - 1)), 1);
         assert_eq!(s.insert_text("z", CharIndex(0)), 0, "full");
-        assert_eq!(s.len(), 256);
-        assert_eq!(s.raw().len(), 256);
+        assert_eq!(s.len(), cap);
+        assert_eq!(s.raw().len(), cap);
     }
 
     // spec: SEC-014
@@ -402,7 +484,7 @@ mod tests {
         assert_eq!(s.expose(), "new");
         assert!(s.raw()[3..].iter().all(|b| *b == 0), "no rest of the old text");
         assert_eq!(s.raw().as_ptr(), addr);
-        s.replace_with(&"q".repeat(257));
+        s.replace_with(&"q".repeat(page_size() + 1));
         assert_eq!(s.expose(), "new", "refused: the buffer never grows");
     }
 
