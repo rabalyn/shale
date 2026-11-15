@@ -101,7 +101,13 @@ fn local_write(file: &std::path::Path, name: &str, events: &[Event]) -> Result<(
     if let Some(d) = file.parent() {
         std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
     }
-    crate::fsutil::write_atomic(file, cal_ics::to_ics(name, events).as_bytes()).map_err(|e| format!("could not save {}: {e}", file.display()))
+    // what else the file holds (tasks, properties of another program) is written back as it is (CAL-012)
+    let other = match crate::fsutil::read_to_string(file) {
+        Ok(t) => cal_ics::parse_calendar(&t).other,
+        Err(_) if !file.exists() => vec![],
+        Err(e) => return Err(format!("could not read {}: {e}", file.display())),
+    };
+    crate::fsutil::write_atomic(file, cal_ics::to_ics_with(name, events, &other).as_bytes()).map_err(|e| format!("could not save {}: {e}", file.display()))
 }
 
 /// Write an event into a calendar. `parts`: the event first, then the other parts of the same
@@ -428,10 +434,7 @@ impl CalendarStore {
     fn write_local(&mut self, id: &str, events: Vec<Event>) -> Result<(), String> {
         let Some(s) = self.sources.iter().find(|s| s.id == id) else { return Err("no such calendar".into()) };
         let SourceKind::Local { file } = &s.kind else { return Err("only local calendars can be edited here".into()) };
-        if let Some(d) = file.parent() {
-            std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
-        }
-        crate::fsutil::write_atomic(file, cal_ics::to_ics(&s.name, &events).as_bytes()).map_err(|e| e.to_string())?;
+        local_write(file, &s.name, &events)?;
         self.events.insert(id.to_string(), events);
         self.generation += 1;
         Ok(())
@@ -471,6 +474,15 @@ impl CalendarStore {
         if let Some((sid, _)) = &original {
             parts.extend(self.events.get(sid).into_iter().flatten().filter(|x| x.uid == event.uid && x.recurrence_id != event.recurrence_id).cloned());
         }
+        // the series starts at another time now: its changed single dates stay with the dates they replace
+        if let (None, Some((_, old))) = (event.recurrence_id, &original) {
+            let delta = old.wall_delta(&event);
+            if old.rrule.is_some() && delta != 0 {
+                for p in parts.iter_mut().skip(1) {
+                    p.recurrence_id = p.recurrence_id.map(|r| old.shift(r, delta));
+                }
+            }
+        }
         if !in_place {
             for p in &mut parts {
                 p.href = None;
@@ -504,6 +516,36 @@ impl CalendarStore {
             return Err(format!("“{name}” is read-only"));
         }
         Ok(run_job(move || remove_from(&target, &event).map(|_| "Event deleted".to_string()).map_err(|e| format!("Could not delete the event from “{name}”: {e}")), ctx))
+    }
+
+    /// Remove one date of a repeating event in the background (CAL-007): the series gets an
+    /// excluded date, and a changed copy of that date (an override) goes. `event` is what was
+    /// clicked (the series, or the changed copy), `start` the date's start as the series has it.
+    /// The rest of the series is written back as it is.
+    pub fn delete_occurrence(&self, source_id: &str, event: &Event, start: i64, ctx: Option<eframe::egui::Context>) -> Result<Job, String> {
+        let (target, name) = self.target(source_id)?;
+        if self.read_only.contains(source_id) {
+            return Err(format!("“{name}” is read-only"));
+        }
+        let date = event.recurrence_id.unwrap_or(start);
+        let series: Vec<Event> = self.events.get(source_id).into_iter().flatten().filter(|x| x.uid == event.uid).cloned().collect();
+        let mut parts: Vec<Event> = Vec::new();
+        if let Some(master) = series.iter().find(|x| x.recurrence_id.is_none()) {
+            let mut m = master.clone();
+            if !m.exdates.contains(&date) {
+                m.exdates.push(date);
+            }
+            parts.push(m);
+        }
+        parts.extend(series.iter().filter(|x| x.recurrence_id.is_some() && x.recurrence_id != Some(date)).cloned());
+        let event = event.clone();
+        Ok(run_job(
+            move || {
+                let r = if parts.is_empty() { remove_from(&target, &event) } else { write_to(&target, &parts, true).map(|_| ()) };
+                r.map(|_| "This date was removed".to_string()).map_err(|e| format!("Could not remove the date from “{name}”: {e}"))
+            },
+            ctx,
+        ))
     }
 
     /// After a save / delete: load the touched calendars again.
@@ -893,5 +935,119 @@ pub(crate) mod tests {
         assert!(j.contains("\"type\":\"local\"") && j.contains("\"type\":\"caldav\""));
         let back: Vec<CalendarSource> = serde_json::from_str(&j).unwrap();
         assert_eq!(back, s);
+    }
+
+    // spec: CAL-007, CAL-012
+    #[test]
+    fn one_date_is_removed_and_the_rest_of_the_file_stays_as_it_was() {
+        if !t::zone_known("Europe/Berlin") {
+            return; // no zoneinfo on this system
+        }
+        let mut store = CalendarStore::new(vec![], tmp("one-date"));
+        let src = store.new_local_source("Home", &[]);
+        let file = file_of(&src).unwrap().to_path_buf();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        crate::fsutil::write_atomic(&file, cal_ics::tests::RICH.as_bytes()).unwrap();
+        store.set_sources(vec![src.clone()]);
+        let series = store.events[&src.id].iter().find(|e| e.rrule.is_some()).unwrap().clone();
+        let changed = store.events[&src.id].iter().find(|e| e.recurrence_id.is_some()).unwrap().clone();
+        let at = |d: u32, h: i64| series.at_wall(days_from_civil(2026, 1, d), h * 3600);
+        // a plain date of the series: it gets an excluded date
+        wait(&store.delete_occurrence(&src.id, &series, at(19, 9), None).unwrap()).unwrap();
+        let text = crate::fsutil::read_to_string(&file).unwrap();
+        assert!(text.contains("EXDATE;TZID=Europe/Berlin:20260107T090000\r\n") && text.contains("EXDATE;TZID=Europe/Berlin:20260119T090000\r\n"), "{text}");
+        // everything else of the file is there as it was: the task, the people, the reminders, the unknown lines, the changed date
+        for keep in [
+            "BEGIN:VTODO",
+            "SUMMARY:Buy milk",
+            "CALSCALE:GREGORIAN",
+            "PARTSTAT=ACCEPTED",
+            "ACTION:EMAIL",
+            "X-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC",
+            "CLASS:PRIVATE",
+            "X-LIC-LOCATION:Europe/Berlin",
+            "SUMMARY:Standup (late)",
+            "RDATE;TZID=Europe/Berlin:20260110T090000",
+            "RRULE:FREQ=WEEKLY;BYDAY=MO,WE;WKST=MO",
+        ] {
+            assert!(text.contains(keep), "{keep} in {text}");
+        }
+        store.reload_local();
+        // the date that was changed on its own: its copy goes, and the series leaves the date out
+        wait(&store.delete_occurrence(&src.id, &changed, changed.start, None).unwrap()).unwrap();
+        store.reload_local();
+        let evs = &store.events[&src.id];
+        assert_eq!(evs.len(), 1, "only the series is left");
+        assert!(evs[0].exdates.contains(&at(12, 9)) && evs[0].exdates.contains(&at(19, 9)) && evs[0].exdates.len() == 3);
+        let days: Vec<i64> = store.occurrences(days_from_civil(2026, 1, 5) - 1, days_from_civil(2026, 1, 22)).iter().map(|o| evs[0].wall(o.start).0 - days_from_civil(2026, 1, 5)).collect();
+        assert_eq!(days, vec![0, 5, 9, 16], "5 Jan, the extra 10 Jan, 14 Jan, 21 Jan; 7, 12 and 19 Jan are left out");
+        assert!(crate::fsutil::read_to_string(&file).unwrap().contains("BEGIN:VTODO"));
+    }
+
+    // spec: CAL-012, CAL-007, CAL-004
+    #[test]
+    fn a_caldav_save_sends_back_everything_that_was_read() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() || !t::zone_known("Europe/Berlin") {
+            return;
+        }
+        let bodies = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let b2 = bodies.clone();
+        let (base, _h) = crate::cal_dav::tests::mock_http(40, move |method, _, headers, body| {
+            if method == "PUT" {
+                b2.lock().unwrap().push((headers.to_string(), body.to_string()));
+                return (204, String::new());
+            }
+            (404, String::new())
+        });
+        let mut store = CalendarStore::new(vec![], tmp("dav-lossless"));
+        store.set_sources(vec![dav_source("work", format!("{base}/work/"))]);
+        let mut evs = cal_ics::parse_ics(cal_ics::tests::RICH);
+        for e in &mut evs {
+            e.href = Some(format!("{base}/work/rich-1.ics"));
+            e.etag = Some("\"v1\"".into());
+        }
+        store.events.insert("work".into(), evs.clone());
+        // the title of the series changes
+        let edited = Event { summary: "Daily".into(), ..evs[0].clone() };
+        wait(&store.save_event("work", edited, Some(("work".into(), evs[0].clone())), None).unwrap()).unwrap();
+        // one date of the series is changed on its own
+        let one = Event { summary: "Standup, long".into(), ..evs[0].override_at(evs[0].at_wall(days_from_civil(2026, 1, 21), 9 * 3600), evs[0].at_wall(days_from_civil(2026, 1, 21), 11 * 3600)) };
+        wait(&store.save_event("work", one.clone(), Some(("work".into(), one)), None).unwrap()).unwrap();
+        // and one date is removed
+        wait(&store.delete_occurrence("work", &evs[0], evs[0].at_wall(days_from_civil(2026, 1, 26), 9 * 3600), None).unwrap()).unwrap();
+        let sent = bodies.lock().unwrap().clone();
+        assert_eq!(sent.len(), 3);
+        for (headers, body) in &sent {
+            assert!(headers.to_ascii_lowercase().contains("if-match: \"v1\""), "only if nobody changed it meanwhile: {headers}");
+            for keep in [
+                "BEGIN:VTIMEZONE",
+                "X-LIC-LOCATION:Europe/Berlin",
+                "DTSTART;TZID=Europe/Berlin:20260105T090000",
+                "RRULE:FREQ=WEEKLY;BYDAY=MO,WE;WKST=MO",
+                "RDATE;TZID=Europe/Berlin:20260110T090000",
+                "ATTENDEE;CN=Bob;PARTSTAT=ACCEPTED;ROLE=REQ-PARTICIPANT:mailto:bob@example.com",
+                "ACTION:EMAIL",
+                "TRIGGER;VALUE=DATE-TIME:20260105T080000Z",
+                "X-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC",
+                "CLASS:PRIVATE",
+                "STATUS:TENTATIVE",
+                "TRANSP:TRANSPARENT",
+                "CATEGORIES:Work,Team",
+                "RECURRENCE-ID;TZID=Europe/Berlin:20260112T090000",
+                "SUMMARY:Standup (late)",
+            ] {
+                assert!(body.replace("\r\n ", "").contains(keep), "{keep} in {body}");
+            }
+        }
+        assert!(sent[0].1.contains("SUMMARY:Daily\r\n") && !sent[0].1.contains("SUMMARY;LANGUAGE=de:Standup"));
+        let second = sent[1].1.replace("\r\n ", "");
+        assert!(second.contains("RECURRENCE-ID;TZID=Europe/Berlin:20260121T090000") && second.contains("DTEND;TZID=Europe/Berlin:20260121T110000") && second.contains("SUMMARY:Standup\\, long"), "{second}");
+        assert_eq!(second.matches("BEGIN:VEVENT").count(), 3, "the series, the date changed before and the new one");
+        assert!(sent[2].1.contains("EXDATE;TZID=Europe/Berlin:20260126T090000\r\n") && sent[2].1.contains("EXDATE;TZID=Europe/Berlin:20260107T090000\r\n"), "{}", sent[2].1);
+        // a series that moves an hour takes its changed dates along
+        let later = Event { start: evs[0].start + 3600, end: evs[0].end + 3600, ..evs[0].clone() };
+        wait(&store.save_event("work", later, Some(("work".into(), evs[0].clone())), None).unwrap()).unwrap();
+        let last = bodies.lock().unwrap().last().unwrap().1.clone();
+        assert!(last.contains("DTSTART;TZID=Europe/Berlin:20260105T100000\r\n") && last.contains("RECURRENCE-ID;TZID=Europe/Berlin:20260112T100000\r\n"), "{last}");
     }
 }

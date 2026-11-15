@@ -107,6 +107,37 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Open (creating it owner-only) a lock file and take an exclusive advisory lock on it without
+/// waiting. `Ok(Some(file))`: the lock is held as long as the file value lives; the operating
+/// system releases it when the process ends, also after a crash. `Ok(None)`: another process
+/// (or another open of the file) holds it. Any other problem is an error.
+/// On systems that are not unix there is no locking: this always succeeds.
+pub fn try_lock_file(path: &Path) -> io::Result<Option<File>> {
+    if let Some(dir) = path.parent() {
+        ensure_private_dir(dir)?;
+    }
+    let mut o = OpenOptions::new();
+    o.create(true).read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(PRIVATE_MODE);
+        let f = o.open(path).map_err(|e| named(path, e))?;
+        // SAFETY: the descriptor is open for as long as `f` lives.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(Some(f));
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() == io::ErrorKind::WouldBlock {
+            return Ok(None);
+        }
+        Err(named(path, e))
+    }
+    #[cfg(not(unix))]
+    o.open(path).map(Some).map_err(|e| named(path, e))
+}
+
 /// Open an owner-only file for a debug log (not user data): started empty, or with `append`
 /// added to. Created with mode 0600.
 pub fn open_private_log(path: &Path, append: bool) -> io::Result<File> {
@@ -311,6 +342,24 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     use std::sync::Arc;
+
+    // spec: DATA-012
+    #[test]
+    fn a_lock_file_can_be_taken_once_and_again_after_it_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("shale-lock-test-{}", std::process::id()));
+        let path = dir.join("sub").join("instance.lock");
+        let first = try_lock_file(&path).unwrap();
+        assert!(first.is_some());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+            assert!(try_lock_file(&path).unwrap().is_none(), "a second lock must be refused");
+        }
+        drop(first);
+        assert!(try_lock_file(&path).unwrap().is_some(), "the lock is free after the first is dropped");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     /// A small deterministic random generator, so the tests need no extra crate.
     struct Rng(u64);

@@ -1311,14 +1311,42 @@ impl ShaleApp {
                 let srcs = &self.calendar.sources;
                 let target = self.last_event_calendar.as_ref().and_then(|id| srcs.iter().find(|s| s.id == *id)).or_else(|| srcs.iter().find(|s| s.enabled)).or_else(|| srcs.first()).map(|s| s.id.clone());
                 match target {
-                    Some(id) => self.modal = Some(Modal::Event(Box::new(crate::cal_dialog::EventDialog::new_at(id, start)))),
+                    Some(id) => {
+                        let mut d = crate::cal_dialog::EventDialog::new_at(id, start);
+                        d.week_monday = self.cfg.week_starts_monday;
+                        self.modal = Some(Modal::Event(Box::new(d)));
+                    }
                     None => self.open_calendar_settings(),
                 }
             }
             CalAction::Edit(occ) => {
                 let found = self.calendar.sources.get(occ.source).map(|s| s.id.clone()).zip(self.calendar.event(&occ).cloned());
                 if let Some((sid, ev)) = found {
-                    self.modal = Some(Modal::Event(Box::new(crate::cal_dialog::EventDialog::edit(sid, ev))));
+                    // "all repeats" asked on a changed single date: the series itself is edited
+                    let series = self.calendar.events.get(&sid).and_then(|v| v.iter().find(|x| x.uid == ev.uid && x.recurrence_id.is_none())).cloned();
+                    let ev = if ev.recurrence_id.is_some() { series.unwrap_or(ev) } else { ev };
+                    let mut d = crate::cal_dialog::EventDialog::edit(sid, ev);
+                    d.week_monday = self.cfg.week_starts_monday;
+                    self.modal = Some(Modal::Event(Box::new(d)));
+                }
+            }
+            CalAction::EditOne(occ) => {
+                let found = self.calendar.sources.get(occ.source).map(|s| s.id.clone()).zip(self.calendar.event(&occ).cloned());
+                if let Some((sid, ev)) = found {
+                    // a date that was changed before is edited as it is; else it becomes a copy of the series for that date
+                    let one = if ev.recurrence_id.is_some() { ev } else { ev.override_at(occ.start, occ.end) };
+                    let mut d = crate::cal_dialog::EventDialog::edit(sid, one);
+                    d.week_monday = self.cfg.week_starts_monday;
+                    self.modal = Some(Modal::Event(Box::new(d)));
+                }
+            }
+            CalAction::DeleteOne(occ) => {
+                let found = self.calendar.sources.get(occ.source).map(|s| s.id.clone()).zip(self.calendar.event(&occ).cloned());
+                if let Some((sid, ev)) = found {
+                    match self.calendar.delete_occurrence(&sid, &ev, occ.start, self.ctx.clone()) {
+                        Ok(job) => self.cal_jobs.push((job, sid)),
+                        Err(e) => self.toast(format!("Could not remove the date: {e}")),
+                    }
                 }
             }
             CalAction::Delete(occ) => {

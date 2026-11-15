@@ -160,6 +160,57 @@ pub fn zoned_to_utc(tzid: &str, days: i64, secs_of_day: i64) -> i64 {
     }
 }
 
+/// UTC → (day number, seconds since midnight) on the wall clock of a named zone. An unknown zone
+/// is treated as the computer's local time, like [`zoned_to_utc`] does.
+pub fn utc_to_zoned(tzid: &str, utc: i64) -> (i64, i64) {
+    match zone(tzid) {
+        Some(z) => {
+            let w = utc + z.offset(utc);
+            (w.div_euclid(86_400), w.rem_euclid(86_400))
+        }
+        None => utc_to_local(utc),
+    }
+}
+
+/// Does this computer know the zone (a zoneinfo file of that name)?
+pub fn zone_known(tzid: &str) -> bool {
+    !tzid.trim().is_empty() && zone(tzid).is_some()
+}
+
+/// Seconds east of UTC of a named zone at a UTC instant (None for an unknown zone).
+pub fn zone_offset(tzid: &str, utc: i64) -> Option<i64> {
+    zone(tzid).map(|z| z.offset(utc))
+}
+
+/// The changes of a zone's offset in [from, to): (UTC instant, offset before, offset after).
+pub fn zone_changes(tzid: &str, from: i64, to: i64) -> Vec<(i64, i64, i64)> {
+    let Some(z) = zone(tzid) else { return vec![] };
+    let mut out = Vec::new();
+    let mut before = z.initial;
+    for (at, after) in &z.transitions {
+        if *at >= to {
+            break;
+        }
+        if *at >= from && *after != before {
+            out.push((*at, before, *after));
+        }
+        before = *after;
+    }
+    out
+}
+
+/// The name of the computer's time zone ("Europe/Berlin"), when it can be told and its zoneinfo
+/// file is there: from `TZ`, else from where `/etc/localtime` points.
+pub fn local_zone_name() -> Option<String> {
+    let from_env = std::env::var("TZ").ok().map(|v| v.trim_start_matches(':').to_string()).filter(|v| v.contains('/') && !v.starts_with('/'));
+    let from_link = || {
+        let target = std::fs::read_link("/etc/localtime").ok()?;
+        let s = target.to_string_lossy().into_owned();
+        s.rfind("zoneinfo/").map(|p| s[p + "zoneinfo/".len()..].to_string())
+    };
+    from_env.or_else(from_link).filter(|n| zone_known(n))
+}
+
 /// "14:05"
 pub fn hhmm(secs_of_day: i64) -> String {
     format!("{:02}:{:02}", secs_of_day / 3600, secs_of_day % 3600 / 60)

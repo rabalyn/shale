@@ -118,8 +118,21 @@ built-in demo vault (`shale --screenshot out.png`).
 
 ![Week view and event details](screenshots/calendar-week.png)
 
-- Click an event to see its details: when, how it repeats, where, organizer, attendees and
-  notes. **Edit** and **Delete** work for local and CalDAV calendars.
+- Click an event to see its details: when, how it repeats, where, organizer, attendees,
+  categories, reminders and notes. **Edit** and **Delete** work for local and CalDAV calendars.
+- A repeating event asks what you mean: **Edit this date** or **Edit all repeats**, **Delete this
+  date** or **Delete all repeats**. A date you change becomes its own entry next to the series; a
+  date you delete is left out of the series.
+- The event dialog sets how an event **repeats** (daily, weekly on the days you pick, monthly,
+  yearly; every N; ending never, on a date or after N times), the dates it **skips**,
+  **reminders** (minutes, hours or days before), its status, whether it shows as busy or free,
+  categories and the time zone its times are stored in. Shale stores and edits reminders but
+  does not ring itself; your phone or another calendar program does. Every date can be typed or
+  picked from a small month.
+- **Nothing is lost when you save.** Shale writes back every line of an event that it read and
+  you did not change: reminders and repeat rules made in other programs, who accepted an
+  invitation, time zones, and fields Shale has never heard of. A repeating event keeps its
+  clock time over summer time in every program.
 
 ![New event](screenshots/event-dialog.png)
 

@@ -19,7 +19,7 @@ pub enum Source {
         original: (String, Vec<u8>),
     },
     Event {
-        event: Event,
+        event: Box<Event>,
         calendar: String,
         original: Option<(String, Vec<u8>)>,
     },
@@ -201,7 +201,7 @@ pub fn social_item(saved: crate::social::note::SavedPost, network: &'static str,
 
 pub fn event_item(event: Event, calendar: String, original: Option<(String, Vec<u8>)>) -> Item {
     let title = safe_title(&format!("{} {}", ymd_text(event_ymd(&event)), if event.summary.trim().is_empty() { "Event" } else { event.summary.trim() }));
-    Item { source: Source::Event { event, calendar, original }, include: true, title, att_on: vec![], already: None, people: vec![] }
+    Item { source: Source::Event { event: Box::new(event), calendar, original }, include: true, title, att_on: vec![], already: None, people: vec![] }
 }
 
 fn files_item(paths: Vec<PathBuf>) -> Item {

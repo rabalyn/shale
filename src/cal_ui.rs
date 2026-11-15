@@ -32,8 +32,12 @@ pub enum CalAction {
     NewEventAt(i64),
     /// open the event dialog for this event
     Edit(Occ),
-    /// remove this event from its calendar
+    /// remove this event (a repeating one with all its repeats) from its calendar
     Delete(Occ),
+    /// open the event dialog for this one date of a repeating event (CAL-007)
+    EditOne(Occ),
+    /// remove this one date of a repeating event (CAL-007)
+    DeleteOne(Occ),
     /// open the event's link (checked before it is opened)
     OpenUrl(String),
 }
@@ -91,6 +95,19 @@ pub struct CalendarView {
 
 fn parse_hex(c: &str) -> Color32 {
     crate::drawing::parse_color(c).unwrap_or(theme::ACCENT)
+}
+
+/// "15 minutes before" for a reminder.
+pub fn reminder_text(a: &crate::cal_ics::Alarm) -> String {
+    let say = |n: i64, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
+    match a.before {
+        Some(0) => "at the start".into(),
+        Some(b) if b > 0 && b % 86_400 == 0 => format!("{} before", say(b / 86_400, "day")),
+        Some(b) if b > 0 && b % 3600 == 0 => format!("{} before", say(b / 3600, "hour")),
+        Some(b) if b > 0 => format!("{} before", say((b + 59) / 60, "minute")),
+        Some(b) => format!("{} after the start", say((-b + 59) / 60, "minute")),
+        None => "set in another program".into(),
+    }
 }
 
 pub fn rrule_text(rule: &str) -> String {
@@ -644,6 +661,7 @@ impl CalendarView {
         let w = 330.0;
         let pos = Pos2::new((popup.pos.x + 12.0).min(screen.max.x - w - 12.0).max(screen.min.x + 4.0), (popup.pos.y - 20.0).clamp(screen.min.y + 4.0, (screen.max.y - 380.0).max(screen.min.y + 4.0)));
         let occ = popup.occ.clone();
+        let series = e.rrule.is_some() || e.recurrence_id.is_some();
         let opened = popup.opened_frame;
         let mut close = false;
         let mut action = None;
@@ -692,6 +710,12 @@ impl CalendarView {
                 if !e.status.is_empty() {
                     row(ui, "Status", &e.status.to_lowercase());
                 }
+                if !e.categories.is_empty() {
+                    row(ui, "Categories", &e.categories.join(", "));
+                }
+                if !e.alarms.is_empty() {
+                    row(ui, "Reminders", &e.alarms.iter().map(reminder_text).collect::<Vec<_>>().join("\n"));
+                }
                 if !e.url.is_empty() {
                     ui.horizontal(|ui| {
                         ui.add_sized([72.0, 16.0], egui::Label::new(egui::RichText::new("Link").size(11.5).color(theme::MUTED)));
@@ -715,20 +739,52 @@ impl CalendarView {
                     if b.clicked() {
                         close = true;
                     }
-                    let b = ui.button("Edit").on_hover_text("Change the event or move it to another calendar");
-                    rects.push(("popup-edit".into(), b.rect));
-                    if b.clicked() {
-                        action = Some(CalAction::Edit(occ.clone()));
-                        close = true;
-                    }
-                    let tip = if e.rrule.is_some() { format!("Remove it, with all its repeats, from “{}”", src.name) } else { format!("Remove it from “{}”", src.name) };
-                    let b = ui.button(egui::RichText::new("Delete event").color(theme::LINK_MISSING)).on_hover_text(tip);
-                    rects.push(("popup-delete".into(), b.rect));
-                    if b.clicked() {
-                        action = Some(CalAction::Delete(occ.clone()));
-                        close = true;
+                    if !series {
+                        let b = ui.button("Edit").on_hover_text("Change the event or move it to another calendar");
+                        rects.push(("popup-edit".into(), b.rect));
+                        if b.clicked() {
+                            action = Some(CalAction::Edit(occ.clone()));
+                            close = true;
+                        }
+                        let b = ui.button(egui::RichText::new("Delete event").color(theme::LINK_MISSING)).on_hover_text(format!("Remove it from “{}”", src.name));
+                        rects.push(("popup-delete".into(), b.rect));
+                        if b.clicked() {
+                            action = Some(CalAction::Delete(occ.clone()));
+                            close = true;
+                        }
                     }
                 });
+                // a repeating event: this date only, or all of them (CAL-007)
+                if series {
+                    ui.horizontal(|ui| {
+                        let b = ui.button("Edit this date").on_hover_text("Change only this date; the other repeats stay as they are");
+                        rects.push(("popup-edit-one".into(), b.rect));
+                        if b.clicked() {
+                            action = Some(CalAction::EditOne(occ.clone()));
+                            close = true;
+                        }
+                        let b = ui.button("Edit all repeats").on_hover_text("Change the repeating event: its times, how it repeats, its reminders");
+                        rects.push(("popup-edit".into(), b.rect));
+                        if b.clicked() {
+                            action = Some(CalAction::Edit(occ.clone()));
+                            close = true;
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        let b = ui.button(egui::RichText::new("Delete this date").color(theme::LINK_MISSING)).on_hover_text("Remove only this date; the other repeats stay");
+                        rects.push(("popup-delete-one".into(), b.rect));
+                        if b.clicked() {
+                            action = Some(CalAction::DeleteOne(occ.clone()));
+                            close = true;
+                        }
+                        let b = ui.button(egui::RichText::new("Delete all repeats").color(theme::LINK_MISSING)).on_hover_text(format!("Remove it, with all its repeats, from “{}”", src.name));
+                        rects.push(("popup-delete".into(), b.rect));
+                        if b.clicked() {
+                            action = Some(CalAction::Delete(occ.clone()));
+                            close = true;
+                        }
+                    });
+                }
             });
         });
         self.rects.extend(rects);
@@ -778,6 +834,8 @@ mod tests {
                     CalAction::OpenLarge => "large".into(),
                     CalAction::NewEventAt(s) => format!("new:{s}"),
                     CalAction::Edit(o) => format!("edit:{}", store.event(&o).map(|e| e.summary.clone()).unwrap_or_default()),
+                    CalAction::EditOne(o) => format!("edit-one:{}:{}", store.event(&o).map(|e| e.summary.clone()).unwrap_or_default(), o.start),
+                    CalAction::DeleteOne(o) => format!("delete-one:{}:{}", store.event(&o).map(|e| e.uid.clone()).unwrap_or_default(), o.start),
                     CalAction::Delete(o) => format!("delete:{}", store.event(&o).map(|e| e.uid.clone()).unwrap_or_default()),
                 });
             }
@@ -941,6 +999,30 @@ mod tests {
         // clicking a day header shows that day
         h.click(&mut v, &store, true, &format!("day:{}", today));
         assert_eq!(v.mode, Mode::Day);
+    }
+
+    // spec: CAL-007
+    #[test]
+    fn a_repeating_event_offers_this_date_or_all_repeats() {
+        let (store, _) = store_with_samples("series");
+        let mut v = CalendarView::new(Size::Medium);
+        v.mode = Mode::Week;
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, actions: vec![] };
+        h.frame(&mut v, &store, true, vec![]);
+        h.frame(&mut v, &store, true, vec![]);
+        for (key, action) in [("popup-edit-one", "edit-one:Book club:"), ("popup-delete-one", "delete-one:sample-book"), ("popup-edit", "edit:Book club"), ("popup-delete", "delete:sample-book")] {
+            h.click(&mut v, &store, true, "event:Book club");
+            assert!(v.popup.is_some());
+            h.click(&mut v, &store, true, key);
+            assert!(h.actions.last().unwrap().starts_with(action), "{key}: {:?}", h.actions);
+            assert!(v.popup.is_none());
+        }
+        // an event that does not repeat has the two plain buttons only
+        h.click(&mut v, &store, true, "event:Gym");
+        assert!(!v.rects.iter().any(|r| r.0 == "popup-edit-one" || r.0 == "popup-delete-one"));
+        assert_eq!(reminder_text(&crate::cal_ics::Alarm::before_start(900)), "15 minutes before");
+        assert_eq!(reminder_text(&crate::cal_ics::Alarm::before_start(86_400)), "1 day before");
+        assert_eq!(reminder_text(&crate::cal_ics::Alarm::before_start(0)), "at the start");
     }
 
     // spec: CAL-008

@@ -32,6 +32,7 @@ mod imap_fake_tests;
 mod imap_sync;
 mod import;
 mod import_dialog;
+mod instance;
 mod jobs;
 mod layout;
 mod link_assist;
@@ -111,6 +112,24 @@ fn main() -> eframe::Result {
             _ => {}
         }
     }
+
+    // Not for screenshots: they use their own temporary folders and may run beside the real app.
+    let _instance_lock = if screenshot.is_none() {
+        match instance::acquire(&instance::default_dir()) {
+            Ok(Some(lock)) => Some(lock),
+            Ok(None) => {
+                instance::show_already_running();
+                std::process::exit(1);
+            }
+            Err(e) => {
+                // a broken data folder must not lock the person out of their notes
+                eprintln!("Shale could not check whether it is already running ({e}); starting anyway.");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let mut viewport = egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size([1360.0, 840.0]).with_min_inner_size([720.0, 480.0]);
     if screenshot.is_some() {

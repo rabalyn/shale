@@ -140,7 +140,25 @@ The release page of each version on GitHub shows its section from this file.
 - **Pictures in drawings**: pictures in Obsidian Excalidraw drawings and excalidraw.com files are
   shown instead of a dashed box, also in embeds and PDF export.
 
+- **Calendar: repeats, single dates and reminders can be edited.** The event dialog sets how an
+  event repeats (daily, weekly on chosen days, monthly, yearly; every N; ending never, on a date
+  or after N times), the dates it skips, reminders (minutes, hours or days before), status, busy
+  or free, categories and the time zone. A repeating event offers "Edit this date" / "Edit all
+  repeats" and "Delete this date" / "Delete all repeats". Shale stores reminders; it does not
+  ring itself. Every date field has a small calendar button to pick the day from a month.
+
 ### Fixed
+
+- **Only one Shale runs at a time**: starting Shale a second time now shows a message and does not open, so a mail can no longer be sent twice and settings changed in one window can no longer be overwritten by the other.
+
+- **Calendar: saving an event no longer drops what Shale does not show.** Before, changing an
+  event rewrote it from the few fields Shale knew: reminders, the answers of invited people,
+  categories, the status and every field of other programs were lost on the server, a changed
+  single date of a repeating event came back as a duplicate, and a repeating event was stored
+  in UTC, so other programs showed it an hour off in the other half of the year. Now every line
+  that was read and not changed is written back as it was, times keep their zone, and a local
+  calendar file keeps its tasks and other entries. A repeating event made by an older Shale is
+  repaired by opening it with "Edit all repeats" and saving it once.
 
 - A note or drawing changed by another program right after Shale read it (inside one timestamp tick of the file system) was not reloaded. Shale now also compares size and file identity, not only the modification time.
 - **Data safety (ADR-0003)**: a note changed by another program while you edit it is saved as
