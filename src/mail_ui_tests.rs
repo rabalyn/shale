@@ -1438,6 +1438,87 @@ fn the_account_settings_have_the_mark_as_read_setting_and_its_delay() {
     assert_eq!(w.app.cfg.mail_mark_read_secs, 5);
 }
 
+// spec: MAIL-202
+#[test]
+fn queued_actions_of_an_account_that_is_not_configured_any_more_are_never_sent_and_stay_queued() {
+    let mut w = inbox_with_cursor("orphan-ops");
+    w.app.mail.ops_retry = Duration::from_millis(50);
+    w.offline.store(true, std::sync::atomic::Ordering::SeqCst);
+    w.press(Key::S, Modifiers::NONE);
+    w.until("the attempt fails", |a| a.mail.offline.values().next().is_some());
+    let queued = |w: &W| w.app.mail.ready_store().unwrap().reader().unwrap().pending_ops(None).unwrap().len();
+    assert_eq!(queued(&w), 1);
+    // the account is gone from the settings, the network is back
+    w.app.cfg.mail_accounts.clear();
+    w.offline.store(false, std::sync::atomic::Ordering::SeqCst);
+    let flags = w.server_flags("INBOX", 3);
+    let id = w.account.id.clone();
+    let cfg = w.app.cfg.clone();
+    w.app.mail.start_ops(&cfg, &id);
+    assert!(!w.app.mail.busy_with_ops(), "no job is started for an account that is not configured");
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_millis(400) {
+        w.frame(vec![]);
+        assert!(!w.app.mail.busy_with_ops());
+        std::thread::sleep(Duration::from_millis(8));
+    }
+    assert_eq!(w.server_flags("INBOX", 3), flags, "nothing reached the server");
+    assert_eq!(queued(&w), 1, "and nothing was deleted from the queue");
+}
+
+// spec: MAIL-201
+#[test]
+fn an_open_draft_is_saved_when_the_app_closes_without_waiting_for_the_autosave() {
+    let (mut w, _smtp) = compose_world("exit-draft", 10);
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Typed just before closing");
+    w.write_body("these words must survive");
+    assert!(w.drafts_on_disk().is_empty(), "the autosave has not run yet");
+    // the question dialog pauses the autosave; closing the app must save anyway
+    w.app.mail.compose.as_mut().unwrap().ask = Some(crate::mail_compose::Ask::Close);
+    eframe::App::on_exit(&mut w.app);
+    let ob = crate::outbox::Outbox::new(&w.app.mail.root);
+    let drafts = w.drafts_on_disk();
+    assert_eq!(drafts.len(), 1);
+    let (d, problems) = ob.load_draft(&drafts[0].account, &drafts[0].id).unwrap();
+    assert!(problems.is_empty());
+    assert_eq!((d.subject.as_str(), d.to.as_str()), ("Typed just before closing", "bob@x.de"));
+    assert!(d.body.contains("these words must survive"), "{}", d.body);
+}
+
+// spec: MAIL-201
+#[test]
+fn when_the_draft_cannot_be_saved_at_exit_its_text_goes_to_the_recovery_folder() {
+    let (mut w, _smtp) = compose_world("exit-rescue", 10);
+    w.app.recovery_root = w.dir.join("recovery");
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    w.typ("mail:compose:to", "bob@x.de");
+    w.typ("mail:compose:subject", "Rescue me");
+    w.write_body("unsaved words");
+    // a file where the drafts folder should be: the save fails
+    let drafts = w.app.mail.root.join("drafts");
+    let _ = std::fs::remove_dir_all(&drafts);
+    std::fs::write(&drafts, b"in the way").unwrap();
+    assert!(w.app.mail.flush_draft().is_err());
+    eframe::App::on_exit(&mut w.app);
+    let mut found = vec![];
+    fn walk(p: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(p).into_iter().flatten().flatten() {
+            if e.path().is_dir() {
+                walk(&e.path(), out);
+            } else {
+                out.push(e.path());
+            }
+        }
+    }
+    walk(&w.dir.join("recovery"), &mut found);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].to_string_lossy().contains("mail-drafts"));
+    let text = std::fs::read_to_string(&found[0]).unwrap();
+    assert!(text.contains("bob@x.de") && text.contains("Rescue me") && text.contains("unsaved words"), "{text}");
+}
+
 // ---------------------------------------------------------------- phase 3: writing and sending (MAIL-120…MAIL-151)
 
 use crate::mail_compose::LocalView;

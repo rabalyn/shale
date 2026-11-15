@@ -175,7 +175,9 @@ built-in demo vault (`shale --screenshot out.png`).
 - **Accounts…** adds an account: server, port (993 with TLS, 143 with STARTTLS), user name and
   password. The password goes into the system keyring. Without a keyring Shale says so and asks
   again each time it starts, keeping it in memory only; it is never written to the settings
-  file. **Test connection** checks the login and lists the folders.
+  file. **Test connection** checks the login and lists the folders. If you change the server or
+  the user name of an account, it is another mailbox: it starts with an empty local copy, you
+  enter the password (or sign in) again, and the mail copied from the old one stays on disk.
 - **OAuth2 sign-in** (Google, Microsoft, or your own provider): choose "OAuth2 (in the browser)",
   the provider and your own **client ID** (Shale ships none; see below), press **Sign in in the
   browser**, and sign in on the provider's page. Shale shows who signed in, keeps only a refresh

@@ -25,6 +25,8 @@ pub struct MailDialog {
     pub client_secrets: HashMap<String, String>,
     /// Ids of accounts that were removed (their keyring entries are cleared with Done).
     pub removed: Vec<String>,
+    /// Id, server and user of each account as the dialog opened (MAIL-199).
+    originals: Vec<(String, String, String)>,
     pub minutes: String,
     /// "Mark as read when opened" and its delay in seconds as typed (MAIL-109).
     pub mark_read: bool,
@@ -67,6 +69,7 @@ impl MailDialog {
         let ports = accounts.iter().map(|a| a.port.to_string()).collect();
         let smtp_ports = accounts.iter().map(|a| a.smtp_port.to_string()).collect();
         let sel = if accounts.is_empty() { None } else { Some(0) };
+        let originals = accounts.iter().map(|a| (a.id.clone(), a.host.clone(), a.user.clone())).collect();
         MailDialog {
             accounts,
             ports,
@@ -76,6 +79,7 @@ impl MailDialog {
             passwords: HashMap::new(),
             client_secrets: HashMap::new(),
             removed: vec![],
+            originals,
             minutes: minutes.to_string(),
             mark_read: true,
             mark_read_secs: "2".into(),
@@ -186,6 +190,33 @@ impl MailDialog {
             self.removed.push(a.id);
             self.sel = if self.accounts.is_empty() { None } else { Some(i.min(self.accounts.len() - 1)) };
         }
+    }
+
+    /// An existing account that now has another server or user is another mailbox: it gets a new id and the old id
+    /// is treated as removed, so the old local copy and queued actions are never applied to the new mailbox (MAIL-199).
+    /// Typed passwords and secrets move to the new id. Call after `validate`. Returns (old id, new id) of each such account.
+    pub fn split_changed_mailboxes(&mut self, store_root: &Path) -> Vec<(String, String)> {
+        let mut changed = vec![];
+        for i in 0..self.accounts.len() {
+            let Some((_, host, user)) = self.originals.iter().find(|o| o.0 == self.accounts[i].id).cloned() else { continue };
+            let a = &self.accounts[i];
+            if a.host.trim().eq_ignore_ascii_case(host.trim()) && a.user.trim() == user.trim() {
+                continue;
+            }
+            let old = a.id.clone();
+            self.removed.push(old.clone());
+            let new = self.fresh_id(store_root);
+            self.accounts[i].id = new.clone();
+            if let Some(p) = self.passwords.remove(&old) {
+                self.passwords.insert(new.clone(), p);
+            }
+            if let Some(p) = self.client_secrets.remove(&old) {
+                self.client_secrets.insert(new.clone(), p);
+            }
+            self.originals.push((new.clone(), self.accounts[i].host.clone(), self.accounts[i].user.clone()));
+            changed.push((old, new));
+        }
+        changed
     }
 
     /// Check what was typed and put the ports into the accounts; the reason if something is wrong.
@@ -769,4 +800,65 @@ fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &
         }
     });
     ui.label(muted("Shale uses the key from your GnuPG; the passphrase is asked by GnuPG's own dialog. Encrypted mail is always also encrypted to this key, so the copy in Sent stays readable. Import keys with gpg --import / gpgsm --import (see Encryption below).").size(12.0));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(id: &str, host: &str, user: &str) -> MailAccount {
+        MailAccount { id: id.into(), name: "Work".into(), host: host.into(), user: user.into(), port: 993, ..MailAccount::default() }
+    }
+
+    fn done(d: &mut MailDialog) -> Vec<(String, String)> {
+        d.validate().unwrap();
+        d.split_changed_mailboxes(Path::new("/nonexistent-shale-store"))
+    }
+
+    // spec: MAIL-199
+    #[test]
+    fn another_user_or_server_is_another_mailbox_with_a_new_id_and_the_old_one_is_removed() {
+        for (host, user) in [("imap.example.org", "ada"), ("imap.example.com", "bob")] {
+            let mut d = MailDialog::new(vec![account("mail1", "imap.example.com", "ada")], 5, false);
+            d.passwords.insert("mail1".into(), "typed".into());
+            d.accounts[0].host = host.into();
+            d.accounts[0].user = user.into();
+            let changed = done(&mut d);
+            assert_eq!(changed, vec![("mail1".to_string(), "mail2".to_string())], "{host} {user}");
+            assert_eq!(d.accounts[0].id, "mail2");
+            assert_eq!(d.removed, vec!["mail1".to_string()]);
+            assert_eq!(d.passwords.get("mail2").map(String::as_str), Some("typed"), "the typed password moves along");
+            assert!(!d.passwords.contains_key("mail1"));
+            // done again with nothing new changes nothing
+            assert!(done(&mut d).is_empty());
+        }
+    }
+
+    // spec: MAIL-199
+    #[test]
+    fn spaces_and_upper_case_in_the_host_and_other_settings_do_not_make_a_new_mailbox() {
+        let mut d = MailDialog::new(vec![account("mail1", "imap.example.com", "ada")], 5, false);
+        d.accounts[0].host = "  IMAP.Example.COM ".into();
+        d.accounts[0].user = " ada ".into();
+        d.accounts[0].name = "Other name".into();
+        d.ports[0] = "143".into();
+        d.accounts[0].security = MailSecurity::StartTls;
+        d.accounts[0].smtp_host = "smtp.example.com".into();
+        assert!(done(&mut d).is_empty());
+        assert_eq!(d.accounts[0].id, "mail1");
+        assert!(d.removed.is_empty());
+    }
+
+    // spec: MAIL-199
+    #[test]
+    fn a_new_account_and_two_changed_ones_get_different_ids() {
+        let mut d = MailDialog::new(vec![account("mail1", "a.example.com", "ada"), account("mail2", "b.example.com", "ada")], 5, false);
+        d.accounts[0].user = "x".into();
+        d.accounts[1].user = "y".into();
+        let changed = done(&mut d);
+        assert_eq!(changed.len(), 2);
+        let ids: Vec<&str> = d.accounts.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["mail3", "mail4"]);
+        assert_eq!(d.removed.len(), 2);
+    }
 }
