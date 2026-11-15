@@ -229,10 +229,13 @@ built-in demo vault (`shale --screenshot out.png`).
   `.eml` file: attachments, people and tags work the same, a mail that was imported before is
   recognised, and nothing is written until you press Import. Mark several mails (Space or
   Ctrl+click) to import them together.
-- Keys while no text field has the keyboard: j / k or ↑ / ↓ move in the list, Enter opens the
-  message, Space marks it, Ctrl+J / Ctrl+K go to the next / previous folder, `/` goes to the
-  search field (↓ or Enter there go into the results), `i` imports, Esc steps back (closes the
-  message, then clears the search).
+- **Keyboard first.** One of the three panes has the keyboard and is framed in the accent
+  colour; Ctrl+H / Ctrl+L (the keys that go between the file list and the editor) move it between
+  folders, list and message, and from the folders on into the left sidebar. j / k act in that pane
+  only: folder, message or scroll. `/` goes to the search field (↓ or Enter there go into the
+  results), Esc steps back. Everything has a key (see the Keyboard section), also syncing, the
+  attachments, loading a message that is not here and switching the search scope, and all of them
+  can be changed in Settings → Keybindings… (Mail view). Keys do not act while you type.
 - **Read, flag, move, delete** (also with the buttons above the message, a right click on a row,
   and the buttons that appear when mails are marked). The keys work on the marked mails, else on
   the open one, else on the one under the cursor, and need no Ctrl or Shift:
@@ -460,8 +463,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 ## Keyboard
 
 The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
-(everywhere, file list, search results; double bindings are refused). Text editing keys, vim
-keys and the keys inside the mail view are fixed.
+(everywhere, file list, search results, mail view; double bindings are refused). Text editing
+keys and vim keys are fixed.
 
 | Keys | Action |
 |---|---|
@@ -475,7 +478,38 @@ keys and the keys inside the mail view are fixed.
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
-| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back |
+| Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
+
+### Mail view keys
+
+In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
+keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
+the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). Letters work
+only while no text field has the keyboard. Every key can be changed in Settings → Keybindings…
+(scope Mail view); Enter and Esc are fixed.
+
+| Keys | Action |
+|---|---|
+| j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
+| Enter | Folder pane: go to the list; list: open the message |
+| Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
+| Space | Mark the message for a selection (list) |
+| / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
+| t | Search all folders or only this one |
+| i | Import to vault |
+| u | Mark read or unread |
+| s or f | Set or clear the flag |
+| d or Delete | Delete (Trash: asks first) |
+| m | Move to a folder |
+| c | Write a new mail |
+| r, Shift+R, Shift+F | Reply, reply all, forward |
+| Ctrl+R | Sync, or cancel the sync |
+| a | Account settings |
+| Shift+L | Load the open message (or the list of a folder that is not synced) from the server |
+| ] | Select the next attachment (marked with ▸) |
+| o, Shift+O | Open the selected attachment, save it to the vault |
+| z | Take back a mail waiting in the outbox |
+| Esc | Step back: close the message, clear the search, clear the marks, dismiss a message |

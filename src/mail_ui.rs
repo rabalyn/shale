@@ -173,6 +173,8 @@ impl SyncRun {
 pub struct PasswordPrompt {
     pub account: String,
     pub text: String,
+    /// The field takes the keyboard when it first appears (MAIL-065).
+    pub focus: bool,
     pub retry: Retry,
 }
 
@@ -421,6 +423,36 @@ pub struct MailView {
     /// Local sent copies that the server does not have and nothing uploads (MAIL-210).
     pub unsent: Vec<crate::mail_db::UnsentCopy>,
     pub unsent_open: bool,
+    // the keyboard (MAIL-062…065)
+    /// The pane that has the keyboard.
+    pub pane: Pane,
+    /// The keyboard is in the left sidebar: the mail keys wait and no pane is marked.
+    pub away: bool,
+    /// A dialog of the app is open (set by `show`).
+    pub(crate) dialog: bool,
+    /// Pending scroll of the message pane in points (j / k there).
+    pub(crate) read_scroll: f32,
+    /// Test aid: how far the message pane is scrolled.
+    pub read_offset: f32,
+    /// The selected attachment of the open message, and a key asked to open or save it.
+    pub att_sel: usize,
+    pub(crate) att_open: bool,
+    pub(crate) att_save: bool,
+}
+
+/// What the folder pane lists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum FolderEntry {
+    Folder(i64),
+    Local(LocalView),
+}
+
+/// The three panes of the mail view, left to right.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pane {
+    Folders,
+    List,
+    Message,
 }
 
 /// Opening the store and the jobs report errors as text; a panic in a job is one too.
@@ -508,6 +540,14 @@ impl MailView {
             announced_local: false,
             unsent: vec![],
             unsent_open: false,
+            pane: Pane::List,
+            away: false,
+            dialog: false,
+            read_scroll: 0.0,
+            read_offset: 0.0,
+            att_sel: 0,
+            att_open: false,
+            att_save: false,
         }
     }
 
@@ -1136,6 +1176,72 @@ impl MailView {
         self.list_on_demand(cfg, id, false);
     }
 
+    /// The entries of the folder pane in the order they are drawn: per account its folders, then
+    /// Drafts and Outbox.
+    fn folder_entries(&self, cfg: &Config) -> Vec<FolderEntry> {
+        let mut v = Vec::new();
+        for a in &cfg.mail_accounts {
+            v.extend(self.account_folders(&a.id).into_iter().map(|f| FolderEntry::Folder(f.id)));
+            v.push(FolderEntry::Local(LocalView::Drafts(a.id.clone())));
+            v.push(FolderEntry::Local(LocalView::Outbox(a.id.clone())));
+        }
+        v
+    }
+
+    /// j / k in the folder pane: select the next or previous entry and show its list.
+    pub(crate) fn step_entry(&mut self, cfg: &Config, delta: isize) {
+        let entries = self.folder_entries(cfg);
+        if entries.is_empty() {
+            return;
+        }
+        let cur = entries.iter().position(|e| match e {
+            FolderEntry::Folder(id) => self.local_view.is_none() && self.folder == Some(*id),
+            FolderEntry::Local(v) => self.local_view.as_ref() == Some(v),
+        });
+        let at = match cur {
+            Some(c) => (c as isize + delta).clamp(0, entries.len() as isize - 1) as usize,
+            None if delta < 0 => entries.len() - 1,
+            None => 0,
+        };
+        if Some(at) == cur {
+            return;
+        }
+        match entries[at].clone() {
+            FolderEntry::Folder(id) => self.select_folder(cfg, id),
+            FolderEntry::Local(v) => self.select_local(v),
+        }
+    }
+
+    /// Ctrl+H / Ctrl+L: the keyboard one pane to the left (-1) or right (+1). False when there
+    /// is nowhere to go: left of the folder pane (the caller goes on into the sidebar), or the
+    /// view does not show its panes (MAIL-063). `sidebar`: the keyboard comes from the left
+    /// sidebar, so it enters at the folder pane. The search field of the view is left first.
+    pub fn step_pane(&mut self, ctx: &egui::Context, cfg: &Config, delta: isize, sidebar: bool) -> bool {
+        if self.compose.is_some() || !matches!(self.store, StoreState::Ready(_)) || cfg.mail_accounts.is_empty() {
+            return false;
+        }
+        let search_id = egui::Id::unique("mail-search");
+        let foreign = ctx.memory(|m| m.focused()).is_some_and(|f| f != search_id);
+        if let Some(f) = ctx.memory(|m| m.focused()) {
+            ctx.memory_mut(|m| m.surrender_focus(f));
+        }
+        let to = match (self.pane, delta) {
+            _ if sidebar || foreign => {
+                if delta < 0 {
+                    return false;
+                }
+                Pane::Folders
+            }
+            (Pane::Folders, d) if d < 0 => return false,
+            (Pane::Folders, _) => Pane::List,
+            (Pane::List, d) if d < 0 => Pane::Folders,
+            (Pane::List, _) | (Pane::Message, 1..) => Pane::Message,
+            (Pane::Message, _) => Pane::List,
+        };
+        self.pane = to;
+        true
+    }
+
     /// Ctrl+J / Ctrl+K: the next or previous folder of the account of the open folder.
     pub fn step_folder(&mut self, cfg: &Config, delta: isize) {
         let Some(cur) = self.folder.and_then(|id| self.folder_row(id)).cloned() else { return };
@@ -1214,6 +1320,8 @@ impl MailView {
         let id = msg.id;
         let loading = matches!(body, Body::Loading);
         self.cancel_crypto();
+        self.att_sel = 0;
+        self.read_scroll = 0.0;
         self.open = Some(OpenMail { msg: msg.clone(), body });
         if loading {
             if let Some(store) = self.ready_store() {
@@ -1470,7 +1578,7 @@ impl MailView {
     /// Ask for the password of an account (once at a time).
     pub fn ask_password(&mut self, account: &str, retry: Retry) {
         if self.prompt.is_none() && !account.is_empty() {
-            self.prompt = Some(PasswordPrompt { account: account.to_string(), text: String::new(), retry });
+            self.prompt = Some(PasswordPrompt { account: account.to_string(), text: String::new(), focus: true, retry });
         }
     }
 

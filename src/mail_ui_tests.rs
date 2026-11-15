@@ -9,7 +9,7 @@ use crate::imap_client::{Client, ConnectSettings, ImapError, Limits, PlainAuth};
 use crate::imap_fake_tests::{server_cert, FakeServer};
 use crate::imap_sync::{Connector, ConnectorFactory, SyncOptions, NO_PASSWORD};
 use crate::mail_db::{STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
-use crate::mail_ui::{Body, ListingState, TestState};
+use crate::mail_ui::{Body, ListingState, Pane, TestState};
 use crate::secrets::{self, MailSecret};
 use eframe::egui::{self, Color32, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Shape, Vec2};
 use std::path::{Path, PathBuf};
@@ -246,6 +246,8 @@ impl W {
             Key::F => Some("f"),
             Key::D => Some("d"),
             Key::M => Some("m"),
+            Key::T => Some("t"),
+            Key::A => Some("a"),
             _ => None,
         };
         let mut ev = vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }];
@@ -1268,6 +1270,7 @@ fn the_reading_pane_buttons_the_marked_bar_and_the_row_menu_do_the_same_things()
     // the marked bar
     w.frame(vec![]);
     w.app.mail.cursor = Some(0);
+    w.app.mail.pane = Pane::List; // the clicks into the reading pane gave it the keyboard
     w.press(Key::Space, Modifiers::NONE);
     w.frame(vec![]);
     w.click("mail:marked-flag");
@@ -2452,4 +2455,200 @@ fn queued_actions_of_an_account_that_is_not_configured_are_not_counted_as_waitin
     assert!(w.shows("2 queued changes belong to removed accounts (not sent)"), "{:?}", w.texts.iter().map(|t| &t.0).collect::<Vec<_>>());
     assert_eq!(w.app.mail.pending_split(&w.app.cfg), (0, 2));
     assert_eq!(w.app.mail.pending_total, 2, "they stay queued");
+}
+
+/// The inbox of the pretend server with one very long mail on top, synced, the list has the keyboard.
+fn inbox_with_a_long_mail(tag: &str) -> W {
+    let mut w = W::new(tag, true);
+    let body = (1..=150).map(|i| format!("line {i} of a long text")).collect::<Vec<_>>().join("\r\n");
+    w.server.state().add_message("INBOX", dated("Long text", "Bob <bob@x.de>", &body, 14), NOW);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 4);
+    w.frame(vec![]);
+    w
+}
+
+// spec: MAIL-062, MAIL-063
+#[test]
+fn ctrl_h_and_ctrl_l_move_the_keyboard_across_the_panes_and_the_marker_follows() {
+    let mut w = inbox_with_a_long_mail("panes");
+    let marked = |w: &W, pane: &str| w.has("mail:focus") && w.rect("mail:focus") == w.rect(&format!("mail:pane:{pane}"));
+    // the list has the keyboard when the view opens, and it is marked
+    assert_eq!(w.app.mail.pane, Pane::List);
+    assert!(marked(&w, "list"));
+    // Ctrl+L: list → message, and at the message pane it stays
+    w.press(Key::L, Modifiers::COMMAND);
+    assert_eq!(w.app.mail.pane, Pane::Message);
+    assert!(marked(&w, "message"));
+    w.press(Key::L, Modifiers::COMMAND);
+    assert_eq!(w.app.mail.pane, Pane::Message, "nothing to the right of the message");
+    assert!(marked(&w, "message"));
+    // Ctrl+H: message → list → folders
+    w.press(Key::H, Modifiers::COMMAND);
+    assert_eq!(w.app.mail.pane, Pane::List);
+    assert!(marked(&w, "list"));
+    w.press(Key::H, Modifiers::COMMAND);
+    assert_eq!(w.app.mail.pane, Pane::Folders);
+    assert!(marked(&w, "folders"));
+    // Ctrl+H at the folders goes on into the left sidebar (NAV-011); the mail view lets go
+    w.press(Key::H, Modifiers::COMMAND);
+    assert!(w.app.tree_sel.is_some(), "the file list has the keyboard");
+    assert!(!w.has("mail:focus"), "no pane is marked while the keyboard is in the sidebar");
+    let cursor = w.app.mail.cursor;
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, cursor, "j belongs to the file list now");
+    // Ctrl+L from the sidebar comes back into the folder pane
+    w.press(Key::L, Modifiers::COMMAND);
+    assert!(w.app.tree_sel.is_none());
+    assert_eq!(w.app.mail.pane, Pane::Folders);
+    assert!(marked(&w, "folders"));
+    // the search field belongs to the list pane; Ctrl+H leaves it and moves on
+    w.press(Key::Slash, Modifiers::NONE);
+    assert!(w.ctx.memory(|m| m.has_focus(egui::Id::unique("mail-search"))));
+    w.frame(vec![]);
+    assert_eq!(w.app.mail.pane, Pane::List, "the field is part of the list pane");
+    w.press(Key::H, Modifiers::COMMAND);
+    assert!(!w.ctx.memory(|m| m.focused().is_some()), "the field was left");
+    assert_eq!(w.app.mail.pane, Pane::Folders);
+    // a click gives a pane the keyboard; choosing a folder hands it to the list
+    let r = w.rect("mail:pane:message");
+    w.click_at(Pos2::new(r.center().x, r.max.y - 20.0), Modifiers::NONE);
+    assert_eq!(w.app.mail.pane, Pane::Message);
+    assert!(marked(&w, "message"));
+    let inbox = w.folder_id("INBOX");
+    w.click(&format!("mail:folder:{inbox}"));
+    assert_eq!(w.app.mail.pane, Pane::List);
+    assert!(marked(&w, "list"));
+}
+
+// spec: MAIL-064
+#[test]
+fn j_and_k_act_in_the_pane_that_has_the_keyboard_only() {
+    let mut w = inbox_with_a_long_mail("jk");
+    let inbox = w.folder_id("INBOX");
+    // folder pane: j / k select folders, the list stays
+    w.press(Key::H, Modifiers::COMMAND);
+    assert_eq!(w.app.mail.pane, Pane::Folders);
+    w.press(Key::J, Modifiers::NONE);
+    assert_ne!(w.app.mail.folder, Some(inbox), "j: the next folder");
+    assert_eq!(w.app.mail.cursor, None);
+    w.press(Key::K, Modifiers::NONE);
+    assert_eq!(w.app.mail.folder, Some(inbox), "k: back to the Inbox");
+    // keys that work on messages do nothing here: a key meant for a folder never deletes a mail
+    w.app.mail.cursor = Some(0);
+    w.press(Key::D, Modifiers::NONE);
+    w.press(Key::U, Modifiers::NONE);
+    w.press(Key::Space, Modifiers::NONE);
+    w.frame(vec![]);
+    assert!(w.pending_is_empty() && w.app.mail.marked.is_empty() && w.app.mail.problems.is_empty());
+    assert_eq!(w.server_uids("INBOX").len(), 4);
+    w.app.mail.cursor = None;
+    // Enter in the folder pane goes on into the list
+    w.press(Key::Enter, Modifiers::NONE);
+    assert_eq!(w.app.mail.pane, Pane::List);
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, Some(0));
+    assert_eq!(w.app.mail.folder, Some(inbox), "in the list j does not change the folder");
+    // message pane: j / k scroll the text and leave the cursor alone
+    w.press(Key::Enter, Modifiers::NONE);
+    w.until("the long mail is read", |a| matches!(a.mail.open.as_ref().map(|o| &o.body), Some(Body::Ready(_))));
+    assert_eq!(w.app.mail.open.as_ref().unwrap().msg.subject, "Long text");
+    w.press(Key::L, Modifiers::COMMAND);
+    assert_eq!(w.app.mail.pane, Pane::Message);
+    w.frame(vec![]);
+    assert_eq!(w.app.mail.read_offset, 0.0);
+    w.press(Key::J, Modifiers::NONE);
+    w.press(Key::J, Modifiers::NONE);
+    w.until("the message scrolled", |a| a.mail.read_offset > 0.0);
+    let down = w.app.mail.read_offset;
+    assert_eq!(w.app.mail.cursor, Some(0), "the list did not move");
+    w.press(Key::K, Modifiers::NONE);
+    w.until("the message scrolled back", move |a| a.mail.read_offset < down);
+    assert_eq!(w.app.mail.cursor, Some(0));
+    // back in the list the cursor moves again
+    w.press(Key::H, Modifiers::COMMAND);
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, Some(1));
+}
+
+// spec: MAIL-061
+#[test]
+fn a_rebound_mail_key_works_and_the_old_one_does_not() {
+    use crate::keys::{Action as KeyAction, Binding};
+    let mut w = inbox_with_a_long_mail("rebind");
+    // the keymap refuses what clashes: a Global key, another key of the same scope, a fixed key
+    let b = |s: &str| Binding::parse(s).unwrap();
+    assert!(w.app.keymap.check(KeyAction::MailRead, &b("Ctrl+H")).unwrap_err().contains("already used"));
+    assert!(w.app.keymap.check(KeyAction::MailRead, &b("D")).unwrap_err().contains("already used"));
+    assert!(w.app.keymap.check(KeyAction::MailRead, &b("Enter")).unwrap_err().contains("fixed"));
+    w.app.keymap.set(KeyAction::MailRead, b("G")).unwrap();
+    w.press(Key::J, Modifiers::NONE);
+    assert_eq!(w.app.mail.cursor, Some(0));
+    // the old key does nothing now
+    w.press(Key::U, Modifiers::NONE);
+    w.frame(vec![]);
+    assert!(w.pending_is_empty() && w.has("mail:unread:0"), "u no longer marks read");
+    // the new key does
+    w.press(Key::G, Modifiers::NONE);
+    w.settle_ops();
+    w.frame(vec![]);
+    assert!(!w.has("mail:unread:0"), "g marks read");
+    assert_eq!(w.server_flags("INBOX", 4), vec!["\\Seen"]);
+}
+
+// spec: MAIL-065, MAIL-066
+#[test]
+fn sync_load_attachments_search_scope_and_the_password_field_work_from_the_keyboard() {
+    let mut w = W::new("kbd", true);
+    secrets::clear_mail_secret(&w.account.id, MailSecret::Password);
+    w.frame(vec![]);
+    // Ctrl+R syncs; with no password the question appears with the keyboard in its field, so the
+    // letters of the password are typed and trigger no mail key (s, e, c, r, t)
+    w.press(Key::R, Modifiers::COMMAND);
+    w.until("the question appears", |a| a.mail.prompt.is_some());
+    w.frame(vec![]);
+    assert!(w.ctx.memory(|m| m.focused().is_some()), "the password field has the keyboard");
+    w.type_text(PASSWORD);
+    assert_eq!(w.app.mail.prompt.as_ref().map(|p| p.text.as_str()), Some(PASSWORD));
+    assert!(w.app.mail.compose.is_none(), "the letters typed no mail keys");
+    w.frame(vec![Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+    let id = w.account.id.clone();
+    w.until("the sync ends well", move |a| a.mail.syncs.get(&id).is_some_and(|r| r.finished.is_some() && r.errors.is_empty()) && a.mail.total == 3);
+    w.frame(vec![]);
+    // `t` switches the search between all folders and this one
+    assert!(w.app.mail.search_all);
+    w.press(Key::T, Modifiers::NONE);
+    assert!(!w.app.mail.search_all);
+    w.press(Key::T, Modifiers::NONE);
+    assert!(w.app.mail.search_all);
+    // `]` selects the attachment, Shift+O saves it into the vault
+    w.open_mail("Report attached");
+    w.frame(vec![]);
+    w.press(Key::CloseBracket, Modifiers::NONE);
+    assert_eq!(w.app.mail.att_sel, 0);
+    assert!(w.shows("▸ report.pdf"), "the selected attachment is marked");
+    let before = w.vault_files();
+    w.press(Key::O, Modifiers::SHIFT);
+    let saved: Vec<String> = w.vault_files().into_iter().filter(|f| !before.contains(f)).collect();
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    assert_eq!(std::fs::read(w.dir.join(&saved[0])).unwrap(), b"Hello PDF");
+    // Shift+L loads a message that is not here
+    w.open_folder("Trash");
+    let trash = w.folder_id("Trash");
+    w.until("the listing arrives", move |a| matches!(a.mail.listings.get(&trash), Some(ListingState::Done(_))) && a.mail.total == 2);
+    w.open_row(0);
+    assert!(matches!(w.app.mail.open.as_ref().map(|o| &o.body), Some(Body::NeedsDownload)));
+    w.press(Key::L, Modifiers::SHIFT);
+    w.until("the message arrives", |a| matches!(a.mail.open.as_ref().map(|o| &o.body), Some(Body::Ready(_))));
+    // Esc closes the message, and at last dismisses the note of a failed action
+    w.app.mail.problems.push("the server said no".into());
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(w.app.mail.open.is_none());
+    assert_eq!(w.app.mail.problems.len(), 1);
+    w.press(Key::Escape, Modifiers::NONE);
+    assert!(w.app.mail.problems.is_empty());
+    // `a` opens the account settings
+    w.press(Key::A, Modifiers::NONE);
+    w.frame(vec![]);
+    assert!(matches!(w.app.modal, Some(Modal::MailAccounts(_))));
 }

@@ -15,17 +15,19 @@ pub enum Scope {
     Global,
     FileList,
     SearchResults,
+    MailView,
 }
 
 impl Scope {
     /// The scopes in the order the keybindings list shows them.
-    pub const ALL: [Scope; 3] = [Scope::Global, Scope::FileList, Scope::SearchResults];
+    pub const ALL: [Scope; 4] = [Scope::Global, Scope::FileList, Scope::SearchResults, Scope::MailView];
 
     pub fn label(self) -> &'static str {
         match self {
             Scope::Global => "Everywhere",
             Scope::FileList => "File list (Ctrl+Shift+B)",
             Scope::SearchResults => "Search results",
+            Scope::MailView => "Mail view",
         }
     }
 
@@ -35,6 +37,7 @@ impl Scope {
             Scope::Global => &[],
             Scope::FileList => &[Key::Enter, Key::Escape],
             Scope::SearchResults => &[Key::Enter, Key::Escape, Key::Slash],
+            Scope::MailView => &[Key::Enter, Key::Escape],
         }
     }
 
@@ -190,6 +193,30 @@ actions! {
     HitPrev => "search.prev_hit", "Previous hit", SearchResults, ["K", "Up"];
     HitNextFile => "search.next_file", "First hit of the next file", SearchResults, ["Ctrl+J"];
     HitPrevFile => "search.prev_file", "First hit of the previous file", SearchResults, ["Ctrl+K"];
+    // Mail view: the Shift keys come before the bare key of the same letter (egui lets a bare key match with Shift held)
+    MailReplyAll => "mail.reply_all", "Reply all", MailView, ["Shift+R"];
+    MailForward => "mail.forward", "Forward", MailView, ["Shift+F"];
+    MailAttSave => "mail.attachment_save", "Save the selected attachment to the vault", MailView, ["Shift+O"];
+    MailLoad => "mail.load", "Load the message (or the list of the folder) from the server", MailView, ["Shift+L"];
+    MailNext => "mail.next", "Next folder, message or line of the pane with the keyboard", MailView, ["J", "Down"];
+    MailPrev => "mail.prev", "Previous folder, message or line of the pane with the keyboard", MailView, ["K", "Up"];
+    MailNextFolder => "mail.next_folder", "Next folder", MailView, ["Ctrl+J"];
+    MailPrevFolder => "mail.prev_folder", "Previous folder", MailView, ["Ctrl+K"];
+    MailMark => "mail.mark", "Mark the message for a selection", MailView, ["Space"];
+    MailSearch => "mail.search", "Search mail", MailView, ["Slash"];
+    MailSearchScope => "mail.search_scope", "Search all folders or this folder", MailView, ["T"];
+    MailImport => "mail.import", "Import to vault", MailView, ["I"];
+    MailRead => "mail.read", "Mark read or unread", MailView, ["U"];
+    MailFlag => "mail.flag", "Set or clear the flag", MailView, ["S", "F"];
+    MailDelete => "mail.delete", "Delete", MailView, ["D", "Delete"];
+    MailMove => "mail.move", "Move to a folder", MailView, ["M"];
+    MailCompose => "mail.compose", "Write a new mail", MailView, ["C"];
+    MailReply => "mail.reply", "Reply", MailView, ["R"];
+    MailSync => "mail.sync", "Sync, or cancel the sync", MailView, ["Ctrl+R"];
+    MailAccounts => "mail.accounts", "Account settings", MailView, ["A"];
+    MailUndoSend => "mail.undo_send", "Take back the mail waiting to be sent", MailView, ["Z"];
+    MailAttNext => "mail.attachment_next", "Select the next attachment", MailView, ["CloseBracket"];
+    MailAttOpen => "mail.attachment_open", "Open the selected attachment", MailView, ["O"];
 }
 
 impl Action {
@@ -371,7 +398,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 22);
+        assert_eq!(DEFS.len(), 22 + 23);
     }
 
     // spec: KEY-003

@@ -117,8 +117,8 @@ Other options:
 ## Keyboard
 
 The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings…**
-(everywhere, file list, search results; double bindings are refused). Text editing keys, vim
-keys and the keys inside the mail view are fixed.
+(everywhere, file list, search results, mail view; double bindings are refused). Text editing
+keys and vim keys are fixed.
 
 | Keys | Action |
 |---|---|
@@ -127,7 +127,7 @@ keys and the keys inside the mail view are fixed.
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
-| Ctrl+Shift+M | Mail view. There, with no text field in use: j / k next / previous message, Enter opens, Space marks, Ctrl+J / Ctrl+K next / previous folder, / search, i import to vault, Esc back; u read, s or f flag, d delete, m move; **c compose, r reply, Shift+R reply all, Shift+F forward**. In a new mail: Ctrl+Enter sends, Esc closes (it asks whether to keep the draft) |
+| Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+S | Save now (notes also save automatically) |
@@ -139,6 +139,37 @@ keys and the keys inside the mail view are fixed.
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |
 | Middle-click on a link | Open it in a new tab |
+
+### Mail view keys
+
+In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
+keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
+the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). Letters work
+only while no text field has the keyboard. Every key can be changed in Settings → Keybindings…
+(scope Mail view); Enter and Esc are fixed.
+
+| Keys | Action |
+|---|---|
+| j / ↓, k / ↑ | Next / previous: folder in the folder pane, message in the list, scroll in the message pane |
+| Enter | Folder pane: go to the list; list: open the message |
+| Ctrl+J / Ctrl+K | Next / previous folder, from any pane |
+| Space | Mark the message for a selection (list) |
+| / | Search mail (Esc leaves the field, ↓ or Enter go into the results) |
+| t | Search all folders or only this one |
+| i | Import to vault |
+| u | Mark read or unread |
+| s or f | Set or clear the flag |
+| d or Delete | Delete (Trash: asks first) |
+| m | Move to a folder |
+| c | Write a new mail |
+| r, Shift+R, Shift+F | Reply, reply all, forward |
+| Ctrl+R | Sync, or cancel the sync |
+| a | Account settings |
+| Shift+L | Load the open message (or the list of a folder that is not synced) from the server |
+| ] | Select the next attachment (marked with ▸) |
+| o, Shift+O | Open the selected attachment, save it to the vault |
+| z | Take back a mail waiting in the outbox |
+| Esc | Step back: close the message, clear the search, clear the marks, dismiss a message |
 
 With **Vim-style editing** turned on in Settings, a note you go to is in normal mode:
 h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / N go to the next /
