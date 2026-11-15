@@ -60,12 +60,12 @@ See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
 Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
 with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`,
-unpack it and run `./shale/shale`. The newest build of `main` (between releases) is the
-[latest build](https://github.com/rabalyn/shale/releases/tag/latest). Both are made by GitHub
-Actions (`.github/workflows/build.yml`).
+unpack it and run `./shale/shale`. Releases are built by GitHub Actions
+(`.github/workflows/build.yml`); there are no builds between releases. To try an unreleased
+version, build it from source (below).
 
 Each download has a `.sha256` file next to it; to check the download, put both files in one folder and run
-`sha256sum -c shale-linux-x86_64.tar.gz.sha256` (for a release, use the file name of the version).
+`sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256`.
 This catches a damaged download, not a compromised release page.
 
 ### Making a release
@@ -73,9 +73,15 @@ This catches a damaged download, not a compromised release page.
 1. Raise `version` in `Cargo.toml` ([semver](https://semver.org/): before 1.0, new features raise
    the middle number, fixes the last one) and run `cargo build` (updates `Cargo.lock`).
 2. Move the notes from `## [Unreleased]` in `CHANGELOG.md` to a new `## [x.y.z] - date` section.
-3. Commit, then run `sh make-release.sh`: it tags the commit `vx.y.z` and pushes. GitHub builds it
-   and creates the release page with that section as its notes (the build stops if the tag and
-   `Cargo.toml` disagree or the changelog has no notes for the version).
+3. Commit, then run `sh make-release.sh`: it tags the commit `vx.y.z` and pushes the commit and
+   the tag to the development server (remote `origin`) and to GitHub (remote `github`). GitHub
+   builds it and creates the release page with that section as its notes and the `.sha256` file
+   (the build stops if the tag and `Cargo.toml` disagree or the changelog has no notes for the
+   version).
+
+Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
+formats, lints, builds, tests, packages and audits every push; GitHub gets the released
+versions.
 
 ## Build and run
 
