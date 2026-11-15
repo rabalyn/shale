@@ -29,7 +29,7 @@ pub mod state;
 #[cfg(test)]
 mod ui_tests;
 
-use crate::cal_dav::{self, check_url, same_server, Origin};
+use crate::cal_dav::{self, check_url, Origin};
 use crate::cal_time as t;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -587,12 +587,6 @@ impl Client {
     /// Fetch the thread of `post` and all its media in one go, ready for `note::post_note`.
     pub fn save(&mut self, post: &Post) -> note::SavedPost {
         note::fetch_saved(self, post)
-    }
-
-    /// Whether this address is on the account's own server (only those would get a login).
-    #[allow(dead_code)] // media downloads never send a login, so nothing asks yet; kept with its test-able rule
-    pub fn is_own_server(&self, url: &str) -> bool {
-        same_server(url, &self.account.server)
     }
 }
 

@@ -48,7 +48,9 @@ fn test_browser() -> &'static std::sync::Mutex<Option<TestBrowser>> {
 
 /// Holds the pretend browser; the next test that wants one waits for this one to be dropped.
 #[cfg(test)]
-pub struct BrowserGuard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+pub struct BrowserGuard {
+    _serial: std::sync::MutexGuard<'static, ()>,
+}
 
 #[cfg(test)]
 impl Drop for BrowserGuard {
@@ -63,7 +65,7 @@ pub fn install_test_browser(b: TestBrowser) -> BrowserGuard {
     static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     *test_browser().lock().unwrap_or_else(|e| e.into_inner()) = Some(b);
-    BrowserGuard(g)
+    BrowserGuard { _serial: g }
 }
 
 /// Open a file of the vault with its default program.

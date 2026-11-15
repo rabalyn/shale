@@ -243,7 +243,6 @@ struct State {
     current: Option<(wl_data_offer::WlDataOffer, Vec<String>, Option<String>)>,
     pos: (f64, f64),
     /// data read while dragging, for the current offer
-    #[allow(clippy::type_complexity)]
     prefetch: Option<(ObjectId, std::thread::JoinHandle<Vec<(String, Got)>>)>,
 }
 

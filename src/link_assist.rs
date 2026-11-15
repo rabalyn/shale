@@ -509,7 +509,6 @@ impl LinkAssist {
     /// Tab in the `[!` picker: only ever completes the path, never finishes the link.
     /// 1) extend to the longest common part / unique match (like zsh);
     /// 2) otherwise put the highlighted entry into the path (folders get a `/`).
-    #[allow(clippy::too_many_arguments)]
     fn media_tab(&mut self, ui: &Ui, text: &mut String, vault: &Vault, home: &Path, start: usize, cursor: usize, typed: &str) -> bool {
         let n = self.media.items.len();
         let (_, _, typed_dir) = crate::media::split_typed(typed, &vault.root, home);
@@ -531,7 +530,6 @@ impl LinkAssist {
     }
 
     /// Pick an entry in the `[!` picker: folders open, files are brought into the vault and linked.
-    #[allow(clippy::too_many_arguments)]
     fn media_accept(&mut self, ui: &Ui, text: &mut String, vault: &Vault, home: &Path, start: usize, cursor: usize, typed: &str, e: &crate::media::Entry) -> (bool, Option<EditorAction>) {
         let (dir, _partial, typed_dir) = crate::media::split_typed(typed, &vault.root, home);
         if e.is_dir {

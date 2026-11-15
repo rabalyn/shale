@@ -572,7 +572,6 @@ fn copyuid_map(c: &Option<CopyUid>) -> HashMap<u32, u32> {
 
 /// The fallback for a server without `MOVE` (MAIL-103): copy, verify the copy, mark the originals
 /// `\Deleted`, `UID EXPUNGE` those UIDs. Requires `UIDPLUS`; refused without it, before anything is sent.
-#[allow(clippy::too_many_arguments)]
 fn copy_then_delete(store: &MailStore, client: &mut Client, folder: &FolderRow, target: &str, present: &[u32], uidvalidity: u32, group: &[PendingRow], res: &mut MoveResult) -> Result<(), Fail> {
     if !client.can_expunge_uids() {
         return Err(Fail::Refused("This server can neither move mail (MOVE) nor remove single mails safely (UIDPLUS), so Shale did not copy or delete anything. Nothing was changed.".into()));

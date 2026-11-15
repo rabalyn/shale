@@ -364,7 +364,6 @@ pub fn real_factory() -> ConnectorFactory {
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn worker(store: &MailStore, connector: &dyn Connector, opts: &SyncOptions, queue: &Mutex<VecDeque<FolderRow>>, first: &Mutex<Option<Client>>, result: &Mutex<SyncSummary>, progress: &Sender<Progress>, cancel: &AtomicBool) {
     let mut client = first.lock().unwrap_or_else(|e| e.into_inner()).take();
     loop {

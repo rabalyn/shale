@@ -178,7 +178,9 @@ fn main() -> eframe::Result {
             viewport = viewport.with_window_level(egui::WindowLevel::AlwaysOnBottom);
         }
     }
-    #[allow(unused_mut)]
+    #[cfg(not(target_os = "macos"))]
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    #[cfg(target_os = "macos")]
     let mut options = eframe::NativeOptions { viewport, ..Default::default() };
     #[cfg(target_os = "macos")]
     if screenshot.is_some() {
