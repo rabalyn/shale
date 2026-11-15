@@ -199,6 +199,8 @@ pub struct SidebarCfg {
     pub ribbon: Vec<String>,
     /// The views of the right sidebar, top to bottom. Empty: the default (one view with all panels).
     pub right: Vec<RightViewCfg>,
+    /// Icons the user removed (LAY-013); the context menu brings them back.
+    pub hidden: Vec<String>,
 }
 
 /// One view of the right sidebar: its menubar (icon ids, left to right) and the icon it shows.
@@ -207,6 +209,8 @@ pub struct SidebarCfg {
 pub struct RightViewCfg {
     pub icons: Vec<String>,
     pub active: String,
+    /// Share of the height of the right sidebar (LAY-012); 0: the equal share.
+    pub weight: u32,
 }
 
 /// A value of the wrong shape (an old or hand-edited file) loads as the default instead of

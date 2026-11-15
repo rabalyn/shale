@@ -628,32 +628,36 @@ impl ShaleApp {
                 self.drawings.clear();
                 self.active = 0;
                 self.cfg.remember_vault(path.to_path_buf());
-                let reopen: Vec<String> = self.vdata.state.open_files.clone();
-                let pinned: Vec<String> = self.vdata.state.pinned_files.clone();
-                // (opening a note rewrites the saved lists, so read both first)
-                let reopen_feeds: Vec<crate::social::FeedRef> = self.vdata.state.open_feeds.clone();
-                for (i, f) in reopen.iter().enumerate() {
-                    let rel = PathBuf::from(f);
-                    if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
-                        continue;
-                    }
-                    // a canvas tab comes back as it was left: read-only, without the question
-                    if crate::canvas::is_canvas_path(&rel) {
-                        self.open_canvas_read_only(&rel, i > 0);
-                    } else {
-                        self.open(&rel, i > 0);
-                    }
-                }
-                // (open_files is in tab order, pinned tabs first: they stay first)
-                for t in &mut self.tabs {
-                    t.pinned = t.view.path().is_some_and(|p| pinned.contains(&rel_to_string(p)));
-                }
-                // Feeds tabs come back after the note tabs (the accounts must still exist)
-                let known: Vec<crate::social::FeedRef> = reopen_feeds.into_iter().filter(|f| self.cfg.social_accounts.iter().any(|e| e.account.id == f.account)).collect();
-                for f in known {
+                // (opening a note rewrites the saved list, so read it first)
+                let saved: Vec<crate::vault_state::SavedTab> = self.vdata.state.tabs.clone();
+                for st in &saved {
+                    let before = self.tabs.len();
                     let new_tab = !self.tabs.is_empty();
-                    self.show_view(View::Social(Some(f)), new_tab);
+                    if let Some(f) = &st.file {
+                        let rel = PathBuf::from(f);
+                        if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
+                            continue;
+                        }
+                        // a canvas tab comes back as it was left: read-only, without the question
+                        if crate::canvas::is_canvas_path(&rel) {
+                            self.open_canvas_read_only(&rel, new_tab);
+                        } else {
+                            self.open(&rel, new_tab);
+                        }
+                    } else if let Some(f) = &st.feed {
+                        // (the account must still exist)
+                        if self.cfg.social_accounts.iter().any(|e| e.account.id == f.account) {
+                            self.show_view(View::Social(Some(f.clone())), new_tab);
+                        }
+                    }
+                    if self.tabs.len() > before {
+                        self.tabs[self.active].pinned = st.pinned;
+                    }
                 }
+                // pinned tabs are left-most (a hand-edited file may say otherwise)
+                let open_id = self.tabs.get(self.active).map(|t| t.id);
+                self.tabs.sort_by_key(|t| !t.pinned);
+                self.active = open_id.and_then(|id| self.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
                 if self.tabs.is_empty() {
                     let first = self.vault.as_ref().and_then(|v| v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone()));
                     match first {
@@ -820,9 +824,14 @@ impl ShaleApp {
         if self.vault.is_none() {
             return;
         }
-        self.vdata.state.open_files = self.tabs.iter().filter_map(|t| t.view.path().map(rel_to_string)).collect();
-        self.vdata.state.pinned_files = self.tabs.iter().filter(|t| t.pinned).filter_map(|t| t.view.path().map(rel_to_string)).collect();
-        self.vdata.state.open_feeds = self.open_feed_refs();
+        self.vdata.state.tabs = self
+            .tabs
+            .iter()
+            .filter_map(|t| match &t.view {
+                View::Social(Some(f)) if !f.feed.is_empty() => Some(crate::vault_state::SavedTab { feed: Some(f.clone()), pinned: t.pinned, ..Default::default() }),
+                v => v.path().map(|p| crate::vault_state::SavedTab { file: Some(rel_to_string(p)), pinned: t.pinned, ..Default::default() }),
+            })
+            .collect();
     }
 
     pub fn current_path(&self) -> Option<PathBuf> {

@@ -97,6 +97,8 @@ mod tagwords;
 mod tb_store;
 mod theme;
 #[cfg(test)]
+mod ui_test_support;
+#[cfg(test)]
 mod utf8_tests;
 mod vault;
 mod vault_path;

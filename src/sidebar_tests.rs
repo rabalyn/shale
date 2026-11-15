@@ -6,26 +6,14 @@ use crate::app::{Options, RightPanel, ShaleApp};
 use crate::config::Config;
 use crate::sidebar::{Item, Layout};
 use crate::sidebar_ui::Cue;
-use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
+use crate::ui_test_support::Headless;
+use eframe::egui::{self, Event, Modifiers, PointerButton, Pos2, Rect, Vec2};
 use std::path::PathBuf;
 
 pub(crate) struct W {
     pub app: ShaleApp,
-    ctx: egui::Context,
-    t: f64,
+    hl: Headless,
     dir: PathBuf,
-    /// the text painted in the last frame, and where
-    pub text: Vec<(String, Pos2)>,
-    /// the mouse cursor the last frame asked for
-    pub cursor: egui::CursorIcon,
-}
-
-fn collect_text(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
-    match shape {
-        egui::Shape::Text(t) => out.push((t.galley.text().to_string(), t.pos)),
-        egui::Shape::Vec(v) => v.iter().for_each(|s| collect_text(s, out)),
-        _ => {}
-    }
 }
 
 impl W {
@@ -36,9 +24,7 @@ impl W {
         std::fs::write(dir.join("Welcome.md"), "# Welcome\n\n## First\n\n[[Other]]\n\n## Second\n").unwrap();
         std::fs::write(dir.join("Other.md"), "# Other\n\nSee [[Welcome]].\n").unwrap();
         let app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
-        let ctx = egui::Context::default();
-        crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, dir, text: vec![], cursor: egui::CursorIcon::Default };
+        let mut w = W { app, hl: Headless::new(), dir };
         w.frames(4);
         w
     }
@@ -56,14 +42,7 @@ impl W {
     }
 
     pub fn frame(&mut self, events: Vec<Event>) {
-        self.t += 0.05;
-        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
-        let app = &mut self.app;
-        let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
-        out.textures_delta.clear();
-        self.cursor = out.platform_output.cursor_icon;
-        self.text.clear();
-        out.shapes.iter().for_each(|c| collect_text(&c.shape, &mut self.text));
+        self.hl.frame(&mut self.app, events);
     }
 
     pub fn frames(&mut self, n: usize) {
@@ -72,22 +51,13 @@ impl W {
         }
     }
 
-    fn button(p: Pos2, pressed: bool) -> Event {
-        Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }
-    }
-
-    /// Press at `from`, move to `to` in two steps, and stay there with the button down.
+    /// Press at `from`, move to `to` and stay there with the button down.
     pub fn drag_to(&mut self, from: Pos2, to: Pos2) {
-        self.frame(vec![Event::PointerMoved(from)]);
-        self.frame(vec![Self::button(from, true)]);
-        self.frame(vec![Event::PointerMoved(from + Vec2::new(0.0, 12.0))]);
-        self.frame(vec![Event::PointerMoved(to)]);
-        self.frames(2);
+        self.hl.press_and_move(&mut self.app, from, &[from + Vec2::new(0.0, 12.0), to]);
     }
 
     pub fn release(&mut self, at: Pos2) {
-        self.frame(vec![Self::button(at, false)]);
-        self.frames(3);
+        self.hl.release(&mut self.app, at);
     }
 
     /// A whole drag and drop.
@@ -104,10 +74,7 @@ impl W {
     }
 
     pub fn click_at(&mut self, p: Pos2) {
-        self.frame(vec![Event::PointerMoved(p)]);
-        self.frame(vec![Self::button(p, true)]);
-        self.frame(vec![Self::button(p, false)]);
-        self.frames(3);
+        self.hl.click(&mut self.app, p, PointerButton::Primary);
     }
 
     pub fn ribbon_icon(&self, item: Item) -> Rect {
@@ -131,7 +98,7 @@ impl W {
     /// What the right sidebar says, one string per text.
     pub fn right_text(&self) -> Vec<String> {
         let x = self.app.side.right_rect.unwrap().min.x;
-        self.text.iter().filter(|(_, p)| p.x >= x).map(|(t, _)| t.clone()).collect()
+        self.hl.text.iter().filter(|(_, p)| p.x >= x).map(|(t, _)| t.clone()).collect()
     }
 
     pub fn right_has(&self, text: &str) -> bool {
@@ -280,8 +247,8 @@ fn lay_010_esc_or_dropping_elsewhere_cancels_a_drop_on_the_content() {
 #[test]
 fn lay_005_icons_are_dragged_between_menubars_right_to_right_left_to_right_and_right_to_left() {
     let mut w = W::new("between");
-    let view = |icons: &[&str], active: &str| crate::config::RightViewCfg { icons: icons.iter().map(|s| s.to_string()).collect(), active: active.into() };
-    let sidebars = crate::config::SidebarCfg { ribbon: vec![], right: vec![view(&["panel:backlinks", "panel:outline"], "panel:backlinks"), view(&["panel:outgoing", "panel:graph", "panel:calendar"], "panel:outgoing")] };
+    let view = |icons: &[&str], active: &str| crate::config::RightViewCfg { icons: icons.iter().map(|s| s.to_string()).collect(), active: active.into(), weight: 0 };
+    let sidebars = crate::config::SidebarCfg { ribbon: vec![], right: vec![view(&["panel:backlinks", "panel:outline"], "panel:backlinks"), view(&["panel:outgoing", "panel:graph", "panel:calendar"], "panel:outgoing")], hidden: vec![] };
     w.app.side.layout = Layout::from_config(&Config { sidebars, ..Config::default() });
     w.frames(3);
     assert_eq!(w.views().len(), 2);
@@ -322,7 +289,7 @@ fn lay_006_a_ribbon_icon_that_cannot_live_on_the_right_is_refused_with_a_no_drop
     let bar = w.bar(0).center();
     w.drag_to(mail, bar);
     assert_eq!(w.app.side.cue, Cue::Refused);
-    assert_eq!(w.cursor, egui::CursorIcon::NoDrop, "the pointer says no");
+    assert_eq!(w.hl.cursor, egui::CursorIcon::NoDrop, "the pointer says no");
     w.release(bar);
     assert_eq!(w.app.side.layout, before, "nothing changed");
     // over the content area, where a panel icon would make a new view
@@ -335,7 +302,7 @@ fn lay_006_a_ribbon_icon_that_cannot_live_on_the_right_is_refused_with_a_no_drop
     // a panel icon over the same place is accepted: the pointer is the grabbing hand
     let from = w.bar_icon(0, panel(RightPanel::Outline)).center();
     w.drag_to(from, body);
-    assert_eq!(w.cursor, egui::CursorIcon::Grabbing);
+    assert_eq!(w.hl.cursor, egui::CursorIcon::Grabbing);
     w.release(body);
 }
 
@@ -419,4 +386,90 @@ fn lay_011_a_panel_shortcut_in_the_ribbon_shows_its_panel_below_the_views_and_cl
     w.drag_and_drop(w.ribbon_icon(panel(RightPanel::Outline)).center(), Pos2::new(w.bar(0).max.x - 4.0, w.bar(0).center().y));
     assert_eq!(w.app.side.peek, None);
     assert!(w.views()[0].contains(&panel(RightPanel::Outline)));
+}
+
+impl W {
+    fn right_click_at(&mut self, p: Pos2) {
+        self.hl.click(&mut self.app, p, PointerButton::Secondary);
+    }
+
+    /// Two views: Backlinks and Outline above, the other panels below.
+    fn two_views(&mut self) {
+        let view = |icons: &[&str], active: &str| crate::config::RightViewCfg { icons: icons.iter().map(|s| s.to_string()).collect(), active: active.into(), weight: 0 };
+        let sidebars = crate::config::SidebarCfg { ribbon: vec![], right: vec![view(&["panel:backlinks", "panel:outline"], "panel:backlinks"), view(&["panel:outgoing", "panel:graph", "panel:calendar"], "panel:outgoing")], hidden: vec![] };
+        self.app.side.layout = Layout::from_config(&Config { sidebars, ..Config::default() });
+        self.frames(3);
+    }
+}
+
+// spec: LAY-012
+#[test]
+fn lay_012_dragging_a_split_border_resizes_two_views_and_the_heights_come_back() {
+    let mut w = W::new("border");
+    w.two_views();
+    assert_eq!(w.app.side.borders.len(), 1);
+    let (h0, h1) = (w.body(0).height(), w.body(1).height());
+    assert!((h0 - h1).abs() < 4.0, "the views start equal: {h0} and {h1}");
+    // the pointer says the border can be dragged
+    let grip = w.app.side.borders[0].1.center();
+    w.frame(vec![Event::PointerMoved(grip)]);
+    assert_eq!(w.hl.cursor, egui::CursorIcon::ResizeVertical);
+    // drag it down: the upper view grows by what the lower one loses
+    w.drag_and_drop(grip, grip + Vec2::new(0.0, 100.0));
+    let (n0, n1) = (w.body(0).height(), w.body(1).height());
+    assert!((n0 - (h0 + 100.0)).abs() < 8.0 && (n1 - (h1 - 100.0)).abs() < 8.0, "{h0} {h1} -> {n0} {n1}");
+    assert!(w.app.side.layout.views[0].weight > w.app.side.layout.views[1].weight);
+    assert_eq!(w.app.cfg.sidebars.right[0].weight, w.app.side.layout.views[0].weight, "stored");
+    // a restart draws the same heights
+    let w2 = w.restarted("border-2");
+    assert_eq!(w2.app.side.layout.views.iter().map(|v| v.weight).collect::<Vec<_>>(), w.app.side.layout.views.iter().map(|v| v.weight).collect::<Vec<_>>());
+    assert!((w2.body(0).height() - n0).abs() < 2.0);
+    // far past the end of the sidebar: the lower view keeps its minimum
+    let grip = w.app.side.borders[0].1.center();
+    w.drag_and_drop(grip, grip + Vec2::new(0.0, 2000.0));
+    assert!(w.body(1).height() > 20.0, "{}", w.body(1).height());
+    assert!(w.bar(1).height() + w.body(1).height() >= crate::sidebar::MIN_VIEW_H - 8.0);
+}
+
+// spec: LAY-013, LAY-014
+#[test]
+fn lay_013_the_icon_menu_removes_restores_and_resets() {
+    let mut w = W::new("menu");
+    w.two_views();
+    // remove Mail from the ribbon
+    w.right_click_at(w.ribbon_icon(Item::Mail).center());
+    let remove = w.app.side.menu.remove.expect("the right click opens the menu");
+    w.click_at(remove.center());
+    assert!(!w.ribbon().contains(&Item::Mail));
+    assert_eq!(w.app.side.layout.hidden, [Item::Mail]);
+    assert_eq!(w.app.cfg.sidebars.hidden, ["mail"], "stored");
+    assert_eq!(w.restarted("menu-2").app.side.layout.hidden, [Item::Mail], "it stays hidden after a restart");
+    // remove Outline from its view
+    w.right_click_at(w.bar_icon(0, panel(RightPanel::Outline)).center());
+    w.click_at(w.app.side.menu.remove.unwrap().center());
+    assert_eq!(w.views()[0], [panel(RightPanel::Backlinks)]);
+    // the menu of another icon lists both hidden ones; restoring Mail puts it at the end of the ribbon
+    w.right_click_at(w.ribbon_icon(Item::Files).center());
+    assert_eq!(w.app.side.menu.restore.iter().map(|(i, _)| *i).collect::<Vec<_>>(), [Item::Mail, panel(RightPanel::Outline)]);
+    w.click_at(w.app.side.menu.restore[0].1.center());
+    assert_eq!(w.ribbon().last(), Some(&Item::Mail));
+    // the panel comes back at the end of the last view
+    w.right_click_at(w.ribbon_icon(Item::Files).center());
+    w.click_at(w.app.side.menu.restore[0].1.center());
+    assert_eq!(w.views()[1].last(), Some(&panel(RightPanel::Outline)));
+    assert!(w.app.side.layout.hidden.is_empty());
+    // the last icon of the ribbon cannot be removed
+    w.app.side.layout.ribbon = vec![Item::Files];
+    w.frames(3);
+    w.right_click_at(w.ribbon_icon(Item::Files).center());
+    w.click_at(w.app.side.menu.remove.unwrap().center());
+    assert_eq!(w.app.side.layout.ribbon, [Item::Files]);
+    // reset layout (LAY-014): the default again, hidden icons back too
+    w.app.side.layout.hide(panel(RightPanel::Calendar));
+    w.frames(3);
+    w.right_click_at(w.ribbon_icon(Item::Files).center());
+    w.click_at(w.app.side.menu.reset.unwrap().center());
+    assert_eq!(w.app.side.layout, Layout::default());
+    assert_eq!(w.app.cfg.sidebars, crate::config::SidebarCfg { ribbon: w.app.cfg.sidebars.ribbon.clone(), right: w.app.cfg.sidebars.right.clone(), hidden: vec![] });
+    assert_eq!(Layout::from_config(&w.app.cfg), Layout::default(), "kept");
 }

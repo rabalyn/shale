@@ -9,7 +9,7 @@
 `~/.config/shale/config.json` holds two kinds of state:
 
 - **Machine and user settings**: font size, sort order, the calendar list, the recent vaults.
-- **Per-vault state**: `open_files`, `people_dir`, `last_import_folder` and `recent_tags`
+- **Per-vault state**: `open_files` (since NAV-026 `tabs`), `people_dir`, `last_import_folder` and `recent_tags`
   (`config.rs:51, 64-69`).
 
 `<vault>/.shale/` exists, but it holds only `tag-words.json` (`tagwords.rs:150`).

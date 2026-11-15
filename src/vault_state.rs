@@ -185,12 +185,8 @@ impl Versioned for VaultSettings {
 #[serde(default)]
 pub struct VaultState {
     pub version: u64,
-    /// Notes open when the app was closed (vault-relative, '/' separated).
-    pub open_files: Vec<String>,
-    /// Which of `open_files` were pinned tabs (NAV-016); older files have none.
-    pub pinned_files: Vec<String>,
-    /// Feeds tabs open when the app was closed (SOC-024); older files have none.
-    pub open_feeds: Vec<crate::social::FeedRef>,
+    /// The tabs open when the app was closed, in tab order, each with its pin (NAV-026).
+    pub tabs: Vec<SavedTab>,
     /// The folder used for the last import (vault-relative).
     pub last_import_folder: String,
     /// The folder used for the last saved post (vault-relative); empty: "Social".
@@ -203,17 +199,51 @@ pub struct VaultState {
 
 impl Default for VaultState {
     fn default() -> Self {
-        VaultState { version: Self::CURRENT, open_files: vec![], pinned_files: vec![], open_feeds: vec![], last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
+        VaultState { version: Self::CURRENT, tabs: vec![], last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
     }
 }
 
+/// One saved tab: a note or drawing (`file`, vault-relative, '/' separated) or a Feeds tab
+/// (`feed`), and whether it is pinned.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct SavedTab {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feed: Option<crate::social::FeedRef>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
 impl Versioned for VaultState {
-    const CURRENT: u64 = 1;
+    const CURRENT: u64 = 2;
     const WHAT: &'static str = "vault session state";
-    fn step(_json: &mut Map<String, Value>, from: u64) {
+    fn step(json: &mut Map<String, Value>, from: u64) {
         match from {
             // 0 → 1: the first versioned format; the fields are unchanged.
             0 => {}
+            // 1 → 2 (NAV-026): `open_files`, `pinned_files` and `open_feeds` become one ordered
+            // list `tabs`: the notes in their order (pinned ones first), then the Feeds tabs.
+            1 => {
+                let take = |json: &mut Map<String, Value>, k: &str| match json.remove(k) {
+                    Some(Value::Array(a)) => a,
+                    _ => vec![],
+                };
+                let files = take(json, "open_files");
+                let pinned = take(json, "pinned_files");
+                let feeds = take(json, "open_feeds");
+                let mut tabs: Vec<(bool, Value)> = vec![];
+                for f in files.into_iter().filter(|f| f.is_string()) {
+                    let pin = pinned.contains(&f);
+                    tabs.push((pin, serde_json::json!({"file": f, "pinned": pin})));
+                }
+                tabs.extend(feeds.into_iter().map(|f| (false, serde_json::json!({"feed": f}))));
+                tabs.sort_by_key(|(pin, _)| !pin);
+                json.insert("tabs".into(), Value::Array(tabs.into_iter().map(|(_, t)| t).collect()));
+            }
             _ => unreachable!("no migration from version {from}"),
         }
     }
@@ -302,7 +332,7 @@ impl VaultData {
         }
         if !self.state_existed && self.state_writable {
             if let Some(f) = &old.open_files {
-                self.state.open_files = f.clone();
+                self.state.tabs = f.iter().map(|f| SavedTab { file: Some(f.clone()), ..SavedTab::default() }).collect();
                 any = true;
             }
             if let Some(f) = &old.last_import_folder {
@@ -362,33 +392,45 @@ mod tests {
         assert!(s.sync.enabled);
     }
 
+    fn file_tab(f: &str, pinned: bool) -> SavedTab {
+        SavedTab { file: Some(f.into()), pinned, ..SavedTab::default() }
+    }
+
+    fn feed_tab(account: &str, feed: &str) -> SavedTab {
+        SavedTab { feed: Some(crate::social::FeedRef { account: account.into(), feed: feed.into() }), ..SavedTab::default() }
+    }
+
     // spec: CFG-006
     #[test]
-    fn state_migration_0_to_1_keeps_the_fields() {
+    fn state_migration_0_to_1_to_2_makes_one_tab_list() {
         let (s, newer) = parse::<VaultState>(br#"{"open_files": ["a.md"], "recent_tags": ["x"]}"#).unwrap();
         assert!(!newer);
-        assert_eq!(s.version, 1);
-        assert_eq!(s.open_files, vec!["a.md".to_string()]);
+        assert_eq!(s.version, 2);
+        assert_eq!(s.tabs, vec![file_tab("a.md", false)]);
         assert_eq!(s.recent_tags, vec!["x".to_string()]);
-        assert!(s.open_feeds.is_empty(), "files from before Feeds tabs have none");
     }
 
-    // spec: SOC-024
+    // spec: NAV-026
     #[test]
-    fn feeds_tabs_are_part_of_the_state_and_unknown_fields_are_kept() {
-        let (s, _) = parse::<VaultState>(br#"{"version": 1, "open_feeds": [{"account": "a", "feed": "home"}], "future": 7}"#).unwrap();
-        assert_eq!(s.open_feeds, vec![crate::social::FeedRef { account: "a".into(), feed: "home".into() }]);
-        assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"future\""));
+    fn an_old_state_file_with_two_lists_loads_as_one_ordered_tab_list() {
+        let old = br#"{"version": 1, "open_files": ["a.md", "b.md", "c.md"], "pinned_files": ["b.md"],
+            "open_feeds": [{"account": "x", "feed": "home"}], "future": 7}"#;
+        let (s, _) = parse::<VaultState>(old).unwrap();
+        assert_eq!(s.tabs, vec![file_tab("b.md", true), file_tab("a.md", false), file_tab("c.md", false), feed_tab("x", "home")]);
+        let text = String::from_utf8(to_bytes(&s)).unwrap();
+        assert!(text.contains("\"future\""), "unknown fields are kept");
+        assert!(!text.contains("open_files") && !text.contains("pinned_files") && !text.contains("open_feeds"));
+        // the saved list round-trips, with pins and Feeds tabs in place
+        let mixed = VaultState { tabs: vec![file_tab("d.canvas", true), feed_tab("x", "home"), file_tab("a.md", false)], ..VaultState::default() };
+        let (back, _) = parse::<VaultState>(&to_bytes(&mixed)).unwrap();
+        assert_eq!(back.tabs, mixed.tabs);
     }
 
-    // spec: NAV-016
+    // spec: CFG-007
     #[test]
-    fn pinned_files_are_part_of_the_state_and_an_old_file_still_loads() {
-        let (old, _) = parse::<VaultState>(br#"{"version": 1, "open_files": ["a.md"]}"#).unwrap();
-        assert!(old.pinned_files.is_empty());
-        let (s, _) = parse::<VaultState>(br#"{"version": 1, "open_files": ["a.md", "b.md"], "pinned_files": ["b.md"]}"#).unwrap();
-        assert_eq!(s.pinned_files, vec!["b.md".to_string()]);
-        assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"pinned_files\""));
+    fn unknown_fields_in_a_saved_tab_are_kept() {
+        let (s, _) = parse::<VaultState>(br#"{"version": 2, "tabs": [{"file": "a.md", "scroll": 4}]}"#).unwrap();
+        assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"scroll\""));
     }
 
     // spec: CFG-006
@@ -399,7 +441,7 @@ mod tests {
         assert!(problems.is_empty());
         d.settings.people_dir = "Leute".into();
         d.settings.sync.commit_prefix = "[notes] ".into();
-        d.state.open_files = vec!["Welcome.md".into()];
+        d.state.tabs = vec![file_tab("Welcome.md", false)];
         d.save().unwrap();
         let text = crate::fsutil::read_to_string(VaultData::settings_path(&root)).unwrap();
         assert!(text.contains("\"version\": 1"), "{text}");
@@ -466,7 +508,7 @@ mod tests {
         assert!(problems[0].contains(&kept[0]));
         // a wrong type is broken too
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::fsutil::write_atomic(&p, br#"{"version": 1, "open_files": 5}"#).unwrap();
+        crate::fsutil::write_atomic(&p, br#"{"version": 2, "tabs": 5}"#).unwrap();
         let (_, problems) = VaultData::load(&root);
         assert_eq!(problems.len(), 1);
         d.save().unwrap();
@@ -502,7 +544,7 @@ mod tests {
         let (mut d, _) = VaultData::load(&fresh);
         assert!(d.adopt_legacy(&old));
         assert_eq!(d.settings.people_dir, "Adressbuch");
-        assert_eq!(d.state.open_files, vec!["a.md".to_string()]);
+        assert_eq!(d.state.tabs, vec![file_tab("a.md", false)]);
         assert_eq!(d.state.last_import_folder, "In");
         let had = tmp("legacy-had");
         std::fs::create_dir_all(VaultData::settings_path(&had).parent().unwrap()).unwrap();

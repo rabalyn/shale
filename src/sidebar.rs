@@ -97,8 +97,31 @@ impl Item {
             Item::Panel(RightPanel::Backlinks) => Icon::Backlinks,
             Item::Panel(RightPanel::Outgoing) => Icon::Outgoing,
             Item::Panel(RightPanel::Outline) => Icon::Outline,
-            Item::Panel(RightPanel::LocalGraph) => Icon::Graph,
-            Item::Panel(RightPanel::Calendar) => Icon::Calendar,
+            Item::Panel(RightPanel::LocalGraph) => Icon::LocalGraph,
+            Item::Panel(RightPanel::Calendar) => Icon::CalendarPanel,
+        }
+    }
+
+    /// The name in the context menu of an icon (LAY-013).
+    pub fn name(self) -> &'static str {
+        match self {
+            Item::Files => "Files",
+            Item::Search => "Search",
+            Item::Tags => "Tags",
+            Item::Switcher => "Quick switcher",
+            Item::Graph => "Graph",
+            Item::Calendar => "Calendar",
+            Item::Mail => "Mail",
+            Item::Tasks => "Tasks",
+            Item::Social => "Feeds",
+            Item::Import => "Import",
+            Item::Drawing => "New drawing",
+            Item::NewNote => "New note",
+            Item::Panel(RightPanel::Backlinks) => "Backlinks panel",
+            Item::Panel(RightPanel::Outgoing) => "Outgoing links panel",
+            Item::Panel(RightPanel::Outline) => "Outline panel",
+            Item::Panel(RightPanel::LocalGraph) => "Local graph panel",
+            Item::Panel(RightPanel::Calendar) => "Calendar panel",
         }
     }
 
@@ -125,11 +148,41 @@ impl Item {
     }
 }
 
+/// The share of the height every view starts with (LAY-012).
+pub const EQUAL: u32 = 1000;
+/// What a stored weight is kept between.
+const MIN_WEIGHT: u32 = 50;
+const MAX_WEIGHT: u32 = 100_000;
+/// The smallest height of a view of the right sidebar, in points (LAY-012).
+pub const MIN_VIEW_H: f32 = 80.0;
+
 /// One view of the right sidebar: a menubar of panel icons and the panel of the active one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
     pub icons: Vec<Item>,
     pub active: Item,
+    /// its share of the height of the sidebar, against the shares of the other views (LAY-012)
+    pub weight: u32,
+}
+
+impl View {
+    pub fn new(icons: Vec<Item>, active: Item) -> View {
+        View { icons, active, weight: EQUAL }
+    }
+}
+
+/// The border between two neighbouring views was dragged so that the upper one is `top_h` high
+/// (in points) of a sidebar `full` high; the weights of the two, `a` (upper) and `b`, change and
+/// keep their sum, so the other views do not move. `all` is the sum of all weights. Neither view
+/// gets smaller than `MIN_VIEW_H` (LAY-012).
+pub fn drag_border(a: u32, b: u32, all: u32, full: f32, top_h: f32) -> (u32, u32) {
+    let pair = (a + b) as f32 / all as f32 * full;
+    if pair < 2.0 * MIN_VIEW_H {
+        return (a, b);
+    }
+    let top = top_h.clamp(MIN_VIEW_H, pair - MIN_VIEW_H);
+    let wa = ((top / pair) * (a + b) as f32).round() as u32;
+    (wa, a + b - wa)
 }
 
 /// Where an icon is dropped. Counts are "this many icons (views) above or before it", in the
@@ -150,12 +203,14 @@ pub struct Refused;
 pub struct Layout {
     pub ribbon: Vec<Item>,
     pub views: Vec<View>,
+    /// icons the user removed; they are in no menubar until restored (LAY-013)
+    pub hidden: Vec<Item>,
 }
 
 impl Default for Layout {
     fn default() -> Self {
         let panels: Vec<Item> = Item::ALL.into_iter().filter(|i| i.is_panel()).collect();
-        Layout { ribbon: Item::ALL.into_iter().filter(|i| !i.is_panel()).collect(), views: vec![View { active: panels[0], icons: panels }] }
+        Layout { ribbon: Item::ALL.into_iter().filter(|i| !i.is_panel()).collect(), views: vec![View::new(panels.clone(), panels[0])], hidden: vec![] }
     }
 }
 
@@ -173,24 +228,27 @@ impl Layout {
             let icons: Vec<Item> = v.icons.iter().filter_map(|id| Item::from_id(id)).filter(|i| i.is_panel() && seen.insert(*i)).collect();
             if let Some(first) = icons.first().copied() {
                 let active = Item::from_id(&v.active).filter(|a| icons.contains(a)).unwrap_or(first);
-                views.push(View { icons, active });
+                let weight = if v.weight == 0 { EQUAL } else { v.weight.clamp(MIN_WEIGHT, MAX_WEIGHT) };
+                views.push(View { icons, active, weight });
             }
         }
         let mut ribbon: Vec<Item> = cfg.sidebars.ribbon.iter().filter_map(|id| Item::from_id(id)).filter(|i| seen.insert(*i)).collect();
+        // an icon that is shown is not hidden; a hidden one does not come back as a missing one
+        let hidden: Vec<Item> = cfg.sidebars.hidden.iter().filter_map(|id| Item::from_id(id)).filter(|i| seen.insert(*i)).collect();
         for item in Item::ALL.into_iter().filter(|i| seen.insert(*i)) {
             match (item.is_panel(), views.last_mut()) {
                 (false, _) => ribbon.push(item),
                 (true, Some(v)) => v.icons.push(item),
-                (true, None) => views.push(View { icons: vec![item], active: item }),
+                (true, None) => views.push(View::new(vec![item], item)),
             }
         }
-        Layout { ribbon, views }
+        Layout { ribbon, views, hidden }
     }
 
     /// Write the layout into the settings.
     pub fn store(&self, cfg: &mut Config) {
         let ids = |v: &[Item]| v.iter().map(|i| i.id().to_string()).collect();
-        cfg.sidebars = SidebarCfg { ribbon: ids(&self.ribbon), right: self.views.iter().map(|v| RightViewCfg { icons: ids(&v.icons), active: v.active.id().to_string() }).collect() };
+        cfg.sidebars = SidebarCfg { ribbon: ids(&self.ribbon), right: self.views.iter().map(|v| RightViewCfg { icons: ids(&v.icons), active: v.active.id().to_string(), weight: v.weight }).collect(), hidden: ids(&self.hidden) };
     }
 
     /// Move an icon to a place (LAY-005). A right menubar or a new view takes panel icons only
@@ -247,9 +305,41 @@ impl Layout {
                 v.icons.insert(at.min(v.icons.len()), item);
                 v.active = item;
             }
-            Dest::NewView { at } => self.views.insert(at.min(self.views.len()), View { icons: vec![item], active: item }),
+            Dest::NewView { at } => self.views.insert(at.min(self.views.len()), View::new(vec![item], item)),
         }
         Ok(())
+    }
+
+    /// Remove an icon from its menubar into the hidden ones (LAY-013). A view that loses its last
+    /// icon is removed (LAY-007). False: the icon is not in a menubar.
+    pub fn hide(&mut self, item: Item) -> bool {
+        if let Some(p) = self.ribbon.iter().position(|i| *i == item) {
+            self.ribbon.remove(p);
+        } else if let Some((v, p)) = self.views.iter().enumerate().find_map(|(v, w)| w.icons.iter().position(|i| *i == item).map(|p| (v, p))) {
+            self.views[v].icons.remove(p);
+            if self.views[v].icons.is_empty() {
+                self.views.remove(v);
+            } else if self.views[v].active == item {
+                self.views[v].active = self.views[v].icons[0];
+            }
+        } else {
+            return false;
+        }
+        self.hidden.push(item);
+        true
+    }
+
+    /// Bring a hidden icon back (LAY-013): a ribbon item to the end of the ribbon, a panel to the
+    /// end of the last view (a new view if there is none). False: it was not hidden.
+    pub fn restore(&mut self, item: Item) -> bool {
+        let Some(p) = self.hidden.iter().position(|i| *i == item) else { return false };
+        self.hidden.remove(p);
+        match (item.is_panel(), self.views.last_mut()) {
+            (false, _) => self.ribbon.push(item),
+            (true, Some(v)) => v.icons.push(item),
+            (true, None) => self.views.push(View::new(vec![item], item)),
+        }
+        true
     }
 
     /// Show a panel in the view that has it (LAY-003). False: no view has it.
@@ -275,20 +365,21 @@ mod tests {
     }
 
     fn view(icons: &[RightPanel]) -> View {
-        View { icons: icons.iter().map(|x| p(*x)).collect(), active: p(icons[0]) }
+        View::new(icons.iter().map(|x| p(*x)).collect(), p(icons[0]))
     }
 
     fn two_views() -> Layout {
-        Layout { ribbon: Layout::default().ribbon, views: vec![view(&[Backlinks, Outline]), view(&[Outgoing, LocalGraph, Calendar])] }
+        Layout { ribbon: Layout::default().ribbon, views: vec![view(&[Backlinks, Outline]), view(&[Outgoing, LocalGraph, Calendar])], hidden: vec![] }
     }
 
     fn cfg_with(ribbon: &[&str], views: &[(&[&str], &str)]) -> Config {
         let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect();
-        Config { sidebars: SidebarCfg { ribbon: ids(ribbon), right: views.iter().map(|(i, a)| RightViewCfg { icons: ids(i), active: a.to_string() }).collect() }, ..Config::default() }
+        Config { sidebars: SidebarCfg { ribbon: ids(ribbon), right: views.iter().map(|(i, a)| RightViewCfg { icons: ids(i), active: a.to_string(), weight: 0 }).collect(), hidden: vec![] }, ..Config::default() }
     }
 
     fn every_icon_once(l: &Layout) {
         let all: Vec<Item> = l.ribbon.iter().copied().chain(l.views.iter().flat_map(|v| v.icons.iter().copied())).collect();
+        let all: Vec<Item> = all.into_iter().chain(l.hidden.iter().copied()).collect();
         assert_eq!(all.iter().collect::<HashSet<_>>().len(), Item::ALL.len(), "{all:?}");
         assert_eq!(all.len(), Item::ALL.len(), "each icon exactly once: {all:?}");
     }
@@ -317,7 +408,7 @@ mod tests {
     fn lay_002_stored_views_are_repaired_too() {
         // a ribbon item inside a view, a double across views, an unknown id, a view that ends up empty, an active icon not in its view
         let l = Layout::from_config(&cfg_with(&["files"], &[(&["panel:outline", "mail", "panel:outline", "nope"], "panel:calendar"), (&["files", "x"], "files"), (&["panel:backlinks", "panel:outgoing"], "panel:outgoing")]));
-        assert_eq!(l.views, vec![view(&[Outline]), View { icons: vec![p(Backlinks), p(Outgoing), p(LocalGraph), p(Calendar)], active: p(Outgoing) }]);
+        assert_eq!(l.views, vec![view(&[Outline]), View::new(vec![p(Backlinks), p(Outgoing), p(LocalGraph), p(Calendar)], p(Outgoing))]);
         assert!(l.ribbon.contains(&Item::Mail) && l.ribbon.contains(&Item::Files), "a ribbon item found in a view goes back to the ribbon");
         assert!(!l.ribbon.iter().any(|i| i.is_panel()));
         every_icon_once(&l);
@@ -378,23 +469,23 @@ mod tests {
     // spec: LAY-007
     #[test]
     fn lay_007_the_last_icon_leaving_a_view_removes_the_view() {
-        let mut l = Layout { ribbon: vec![], views: vec![view(&[Backlinks]), view(&[Outline, Outgoing]), view(&[Calendar])] };
+        let mut l = Layout { ribbon: vec![], views: vec![view(&[Backlinks]), view(&[Outline, Outgoing]), view(&[Calendar])], hidden: vec![] };
         // the first view's only icon goes to the third view: the view is gone and the indexes shift
         l.apply(p(Backlinks), Dest::Bar { view: 2, at: 1 }).unwrap();
-        assert_eq!(l.views, vec![view(&[Outline, Outgoing]), View { icons: vec![p(Calendar), p(Backlinks)], active: p(Backlinks) }]);
+        assert_eq!(l.views, vec![view(&[Outline, Outgoing]), View::new(vec![p(Calendar), p(Backlinks)], p(Backlinks))]);
         // an only icon to the ribbon: gone, no view left over
         l.apply(p(Backlinks), Dest::Ribbon(0)).unwrap();
         l.apply(p(Calendar), Dest::Ribbon(0)).unwrap();
         assert_eq!(l.views, vec![view(&[Outline, Outgoing])]);
         // an only icon dropped on its own bar or beside its own view: no change
-        let mut one = Layout { ribbon: vec![], views: vec![view(&[Calendar])] };
+        let mut one = Layout { ribbon: vec![], views: vec![view(&[Calendar])], hidden: vec![] };
         let before = one.clone();
         one.apply(p(Calendar), Dest::Bar { view: 0, at: 0 }).unwrap();
         one.apply(p(Calendar), Dest::NewView { at: 1 }).unwrap();
         one.apply(p(Calendar), Dest::NewView { at: 0 }).unwrap();
         assert_eq!(one, before);
         // no view at all is a valid layout, and a drop makes the first one
-        let mut none = Layout { ribbon: vec![p(Outline)], views: vec![] };
+        let mut none = Layout { ribbon: vec![p(Outline)], views: vec![], hidden: vec![] };
         none.apply(p(Outline), Dest::NewView { at: 0 }).unwrap();
         assert_eq!((none.ribbon.len(), none.views), (0, vec![view(&[Outline])]));
     }
@@ -406,11 +497,11 @@ mod tests {
         l.apply(p(Calendar), Dest::NewView { at: 1 }).unwrap();
         assert_eq!(l.views, vec![view(&[Backlinks, Outline]), view(&[Calendar]), view(&[Outgoing, LocalGraph])]);
         // from a view that disappears above the place: the place shifts up with the stack
-        let mut l = Layout { ribbon: vec![], views: vec![view(&[Backlinks]), view(&[Outline]), view(&[Calendar])] };
+        let mut l = Layout { ribbon: vec![], views: vec![view(&[Backlinks]), view(&[Outline]), view(&[Calendar])], hidden: vec![] };
         l.apply(p(Backlinks), Dest::NewView { at: 3 }).unwrap();
         assert_eq!(l.views, vec![view(&[Outline]), view(&[Calendar]), view(&[Backlinks])]);
         // from the ribbon
-        let mut l = Layout { ribbon: vec![p(Outline)], views: vec![view(&[Backlinks])] };
+        let mut l = Layout { ribbon: vec![p(Outline)], views: vec![view(&[Backlinks])], hidden: vec![] };
         l.apply(p(Outline), Dest::NewView { at: 0 }).unwrap();
         assert_eq!((l.ribbon.len(), l.views), (0, vec![view(&[Outline]), view(&[Backlinks])]));
     }
@@ -421,7 +512,89 @@ mod tests {
         assert!(l.show_panel(Calendar));
         assert_eq!(l.views[1].active, p(Calendar));
         assert_eq!(l.views[0].active, p(Backlinks), "the other view keeps its panel");
-        let mut none = Layout { ribbon: vec![p(Outline)], views: vec![] };
+        let mut none = Layout { ribbon: vec![p(Outline)], views: vec![], hidden: vec![] };
         assert!(!none.show_panel(Outline), "a panel in the ribbon is in no view");
+    }
+
+    // spec: LAY-012
+    #[test]
+    fn lay_012_dragging_a_border_moves_height_between_two_views_and_keeps_a_minimum() {
+        // three equal views in 900 points: the first border goes 60 points down
+        let all = 3 * EQUAL;
+        let (a, b) = drag_border(EQUAL, EQUAL, all, 900.0, 300.0 + 60.0);
+        assert_eq!(a + b, 2 * EQUAL, "the pair keeps its sum, so the third view does not move");
+        assert!((a as f32 / all as f32 * 900.0 - 360.0).abs() < 1.0);
+        // never below the minimum, on either side
+        let (a, b) = drag_border(EQUAL, EQUAL, all, 900.0, -50.0);
+        assert!((a as f32 / all as f32 * 900.0 - MIN_VIEW_H).abs() < 1.0, "{a}");
+        let (a, b2) = drag_border(EQUAL, EQUAL, all, 900.0, 5000.0);
+        assert!((b2 as f32 / all as f32 * 900.0 - MIN_VIEW_H).abs() < 1.0, "{b2}");
+        assert_eq!((a + b2, b > 0), (2 * EQUAL, true));
+        // two views too small for the minimum stay as they are
+        assert_eq!(drag_border(EQUAL, EQUAL, 2 * EQUAL, 100.0, 70.0), (EQUAL, EQUAL));
+    }
+
+    // spec: LAY-012
+    #[test]
+    fn lay_012_stored_weights_come_back_and_a_layout_without_them_is_equal() {
+        let mut cfg = cfg_with(&[], &[(&["panel:backlinks"], "panel:backlinks"), (&["panel:outline"], "panel:outline")]);
+        let l = Layout::from_config(&cfg);
+        assert_eq!(l.views.iter().map(|v| v.weight).collect::<Vec<_>>(), [EQUAL, EQUAL], "no weight stored: equal heights");
+        cfg.sidebars.right[0].weight = 3000;
+        cfg.sidebars.right[1].weight = 1;
+        let mut l = Layout::from_config(&cfg);
+        assert_eq!(l.views.iter().map(|v| v.weight).collect::<Vec<_>>(), [3000, MIN_WEIGHT], "a silly weight is brought into range");
+        l.views[1].weight = 1500;
+        let mut stored = Config::default();
+        l.store(&mut stored);
+        assert_eq!(Layout::from_config(&stored), l);
+        // an old settings file has no weights and no hidden icons
+        let (old, _) = crate::vault_state::parse::<Config>(br#"{"sidebars": {"ribbon": ["mail"], "right": [{"icons": ["panel:outline"], "active": "panel:outline"}]}}"#).unwrap();
+        assert_eq!(Layout::from_config(&old).views[0].weight, EQUAL);
+    }
+
+    // spec: LAY-013
+    #[test]
+    fn lay_013_hiding_and_restoring_icons_keeps_each_icon_in_exactly_one_place() {
+        let mut l = two_views();
+        assert!(l.hide(Item::Mail));
+        assert!(l.hide(p(Backlinks)));
+        assert!(!l.hide(Item::Mail), "an icon that is hidden cannot be hidden again");
+        assert_eq!(l.hidden, [Item::Mail, p(Backlinks)]);
+        assert_eq!((l.views[0].icons.clone(), l.views[0].active), (vec![p(Outline)], p(Outline)));
+        every_icon_once(&l);
+        // the last icon of a view takes the view with it
+        assert!(l.hide(p(Outline)));
+        assert_eq!(l.views, vec![view(&[Outgoing, LocalGraph, Calendar])]);
+        // what is hidden stays hidden when the layout is stored and loaded
+        let mut c = Config::default();
+        l.store(&mut c);
+        assert_eq!(Layout::from_config(&c), l);
+        every_icon_once(&Layout::from_config(&c));
+        // restoring: a ribbon item at the end of the ribbon, a panel at the end of the last view
+        assert!(l.restore(Item::Mail));
+        assert_eq!(l.ribbon.last(), Some(&Item::Mail));
+        assert!(l.restore(p(Backlinks)));
+        assert_eq!(l.views[0].icons.last(), Some(&p(Backlinks)));
+        assert!(!l.restore(Item::Mail), "it is not hidden any more");
+        // with no view a restored panel makes one
+        let mut none = Layout { ribbon: vec![], views: vec![], hidden: vec![p(Outline)] };
+        assert!(none.restore(p(Outline)));
+        assert_eq!(none.views, vec![view(&[Outline])]);
+        // an icon that is in a menubar is not hidden, whatever the file says
+        let l = Layout::from_config(&{
+            let mut c = cfg_with(&["mail"], &[]);
+            c.sidebars.hidden = vec!["mail".into(), "files".into(), "nope".into()];
+            c
+        });
+        assert_eq!(l.hidden, [Item::Files]);
+        assert!(l.ribbon.contains(&Item::Mail) && !l.ribbon.contains(&Item::Files));
+    }
+
+    // spec: LAY-015
+    #[test]
+    fn lay_015_every_icon_has_its_own_glyph() {
+        let glyphs: HashSet<crate::layout::Icon> = Item::ALL.into_iter().map(|i| i.icon()).collect();
+        assert_eq!(glyphs.len(), Item::ALL.len(), "two icons share a glyph");
     }
 }

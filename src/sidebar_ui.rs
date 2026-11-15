@@ -3,7 +3,7 @@
 
 use crate::app::{muted, LeftPanel, Modal, RightPanel, ShaleApp, View};
 use crate::layout::{icon_button_sense, paint_icon};
-use crate::sidebar::{Dest, Item, Layout};
+use crate::sidebar::{drag_border, Dest, Item, Layout, EQUAL};
 use crate::theme;
 use eframe::egui::{self, Align, CornerRadius, FontId, Id, LayerId, Layout as UiLayout, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
 
@@ -19,6 +19,8 @@ pub struct SideState {
     pub drag: Option<Item>,
     /// a panel shown by a click on its shortcut in the ribbon (LAY-011), below the views
     pub peek: Option<RightPanel>,
+    /// the share of the height of that panel (not stored, LAY-012); 0: the equal share
+    pub(crate) peek_weight: u32,
     /// where things were drawn this frame (and the frame before the next one)
     pub(crate) ribbon_rect: Option<Rect>,
     pub(crate) ribbon_icons: Vec<(Item, Rect)>,
@@ -26,8 +28,20 @@ pub struct SideState {
     /// the content of each view and the place a new view would get if an icon is dropped there
     pub(crate) bodies: Vec<(usize, Rect)>,
     pub(crate) right_rect: Option<Rect>,
+    /// the grips between two views: the index of the lower view and the place to grab (LAY-012)
+    pub(crate) borders: Vec<(usize, Rect)>,
+    /// the entries of the open icon menu (LAY-013)
+    pub(crate) menu: IconMenu,
     /// what dropping now would do (for the marker, and for tests)
     pub(crate) cue: Cue,
+}
+
+/// Where the entries of the open icon menu are (LAY-013, LAY-014).
+#[derive(Default)]
+pub(crate) struct IconMenu {
+    pub remove: Option<Rect>,
+    pub reset: Option<Rect>,
+    pub restore: Vec<(Item, Rect)>,
 }
 
 /// The menubar of one view of the right sidebar, as drawn.
@@ -64,6 +78,8 @@ impl SideState {
         self.bars.clear();
         self.bodies.clear();
         self.right_rect = None;
+        self.borders.clear();
+        self.menu = IconMenu::default();
     }
 
     /// What dropping `item` at `pos` would do.
@@ -107,6 +123,7 @@ impl ShaleApp {
             self.side.peek = None;
         } else {
             self.side.peek = Some(panel);
+            self.side.peek_weight = EQUAL;
             self.cfg.show_right = true;
         }
     }
@@ -136,6 +153,42 @@ impl ShaleApp {
             } else if resp.clicked() {
                 self.ribbon_click(item);
             }
+            resp.context_menu(|ui| self.icon_menu(ui, item, false));
+        }
+    }
+
+    /// The right-click menu of an icon: remove it, restore removed ones, reset the layout
+    /// (LAY-013, LAY-014).
+    fn icon_menu(&mut self, ui: &mut Ui, item: Item, in_view: bool) {
+        // the last icon of the ribbon stays, so that this menu can always be opened
+        let removable = in_view || self.side.layout.ribbon.len() > 1;
+        let remove = ui.add_enabled(removable, egui::Button::new(if in_view { "Remove from this view" } else { "Remove from the ribbon" }));
+        self.side.menu.remove = Some(remove.rect);
+        if remove.clicked() {
+            self.side.layout.hide(item);
+            if matches!(item, Item::Panel(p) if self.side.peek == Some(p)) {
+                self.side.peek = None;
+            }
+            self.layout_changed();
+            ui.close();
+        }
+        for hidden in self.side.layout.hidden.clone() {
+            let entry = ui.button(format!("Restore {}", hidden.name()));
+            self.side.menu.restore.push((hidden, entry.rect));
+            if entry.clicked() {
+                self.side.layout.restore(hidden);
+                self.layout_changed();
+                ui.close();
+            }
+        }
+        ui.separator();
+        let reset = ui.button("Reset layout");
+        self.side.menu.reset = Some(reset.rect);
+        if reset.clicked() {
+            self.side.layout = Layout::default();
+            self.side.peek = None;
+            self.layout_changed();
+            ui.close();
         }
     }
 
@@ -150,9 +203,17 @@ impl ShaleApp {
             ui.label(muted("No panel is shown here. Drag a panel icon here, for example from the ribbon."));
             return;
         }
-        let h = full.height() / n as f32;
+        let mut weights: Vec<u32> = self.side.layout.views.iter().map(|v| v.weight).collect();
+        if self.side.peek.is_some() {
+            weights.push(if self.side.peek_weight == 0 { EQUAL } else { self.side.peek_weight });
+        }
+        let all: u32 = weights.iter().sum();
+        let mut tops = vec![full.min.y];
+        for w in &weights {
+            tops.push(tops.last().copied().unwrap_or(full.min.y) + full.height() * *w as f32 / all as f32);
+        }
         for i in 0..n {
-            let rect = Rect::from_min_size(Pos2::new(full.min.x, full.min.y + h * i as f32), Vec2::new(full.width(), h));
+            let rect = Rect::from_min_max(Pos2::new(full.min.x, tops[i]), Pos2::new(full.max.x, tops[i + 1]));
             if i > 0 {
                 ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, theme::BORDER));
             }
@@ -173,6 +234,7 @@ impl ShaleApp {
                         self.side.layout.views[i].active = item;
                         self.layout_changed();
                     }
+                    resp.context_menu(|ui| self.icon_menu(ui, item, true));
                 }
                 self.side.bars.push(Bar { view: i, rect: bar, icons: drawn });
                 self.side.bodies.push((i + 1, body));
@@ -193,6 +255,24 @@ impl ShaleApp {
             let mut body_ui = ui.new_child(UiBuilder::new().max_rect(body));
             body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
             self.right_panel_body(&mut body_ui, panel);
+        }
+        // the grips between the views come last, so that they win where a panel reaches the border
+        for i in 1..n {
+            let grip = Rect::from_min_max(Pos2::new(full.min.x, tops[i] - 1.0), Pos2::new(full.max.x, tops[i] + 3.0));
+            self.side.borders.push((i, grip));
+            let resp = ui.interact(grip, ui.scope_id().with(("view-border", i)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeVertical);
+            if resp.dragged() {
+                let (wa, wb) = drag_border(weights[i - 1], weights[i], all, full.height(), tops[i] - tops[i - 1] + resp.drag_delta().y);
+                for (k, w) in [(i - 1, wa), (i, wb)] {
+                    match self.side.layout.views.get_mut(k) {
+                        Some(v) => v.weight = w,
+                        None => self.side.peek_weight = w,
+                    }
+                }
+            }
+            if resp.drag_stopped() {
+                self.layout_changed();
+            }
         }
     }
 
