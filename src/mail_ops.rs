@@ -867,7 +867,8 @@ pub(crate) mod tests {
                 s.add_message("INBOX", message(&format!("mail {i}"), "Bob <bob@x.de>", &format!("hello number {i}")), NOW - (10 - i) * DAY);
             }
         }
-        let dir = std::env::temp_dir().join(format!("shale-ops-{tag}-{}", std::process::id()));
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!("shale-ops-{tag}-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&dir);
         let store = MailStore::open(&dir).unwrap();
         let st = server.state();
@@ -1138,6 +1139,105 @@ pub(crate) mod tests {
         assert!(r.failed[0].contains("could not be verified"), "{:?}", r.failed);
         assert!(e2.server_uids("INBOX").contains(&3), "the original is untouched");
         assert!(e2.write_commands().iter().all(|c| !c.contains("Deleted") && !c.contains("EXPUNGE")), "{:?}", e2.write_commands());
+    }
+
+    // spec: MAIL-103
+    #[test]
+    fn without_move_a_copy_the_server_refuses_deletes_nothing_and_the_mail_stays_where_it_is() {
+        let e = env("copyno");
+        {
+            let mut s = e.server.state();
+            s.move_cap = false;
+            s.fail_every = Some("COPY");
+        }
+        enqueue(&e.store, &[e.by_uid("INBOX", 1)], &Action::Delete, NOW).unwrap();
+        let r = e.run();
+        assert_eq!((r.done, r.failed.len()), (0, 1), "{r:?}");
+        assert_eq!(e.server_uids("INBOX"), vec![1, 2, 3, 4, 5]);
+        assert!(e.server_uids("Trash").is_empty());
+        assert!(e.write_commands().iter().all(|c| !c.contains("Deleted") && !c.contains("EXPUNGE")), "{:?}", e.write_commands());
+        assert!(e.by_uid("INBOX", 1).pending.is_none() && e.store.abs_path(&e.by_uid("INBOX", 1).path).is_file());
+    }
+
+    // spec: MAIL-103
+    #[test]
+    fn without_move_a_mail_that_cannot_be_marked_or_expunged_exists_in_both_folders_and_says_so() {
+        // the mark fails: nothing is expunged
+        let e = env("markno");
+        {
+            let mut s = e.server.state();
+            s.move_cap = false;
+            s.fail_every = Some("STORE");
+        }
+        enqueue(&e.store, &[e.by_uid("INBOX", 2)], &Action::Delete, NOW).unwrap();
+        let r = e.run();
+        assert_eq!((r.done, r.failed.len()), (0, 1), "{r:?}");
+        assert!(r.failed[0].contains("both folders"), "{:?}", r.failed);
+        assert_eq!(e.server_uids("INBOX"), vec![1, 2, 3, 4, 5]);
+        assert_eq!(e.server_uids("Trash"), vec![1], "copied, so nothing is lost");
+        assert!(e.write_commands().iter().all(|c| !c.contains("EXPUNGE")), "{:?}", e.write_commands());
+        assert!(e.store.abs_path(&e.by_uid("INBOX", 2).path).is_file());
+        // the expunge fails: the mark is taken back, so the other program's view of the mail is as it was
+        let e = env("expungeno");
+        {
+            let mut s = e.server.state();
+            s.move_cap = false;
+            s.fail_every = Some("EXPUNGE");
+        }
+        enqueue(&e.store, &[e.by_uid("INBOX", 2)], &Action::Delete, NOW).unwrap();
+        let r = e.run();
+        assert_eq!((r.done, r.failed.len()), (0, 1), "{r:?}");
+        assert!(r.failed[0].contains("both folders"), "{:?}", r.failed);
+        assert_eq!(e.server_uids("INBOX"), vec![1, 2, 3, 4, 5]);
+        assert!(!e.server_flags("INBOX", 2).iter().any(|f| f == "\\Deleted"), "{:?}", e.server_flags("INBOX", 2));
+        let cmds = e.write_commands();
+        assert!(cmds.iter().any(|c| c == "UID STORE 2 -FLAGS (\\Deleted)"), "the mark is undone: {cmds:?}");
+        assert!(cmds.iter().all(|c| c != "EXPUNGE"), "{cmds:?}");
+    }
+
+    // spec: MAIL-103
+    #[test]
+    fn without_move_or_copyuid_only_the_mails_found_in_the_target_are_removed_from_the_source() {
+        let e = env("partial");
+        {
+            let mut s = e.server.state();
+            s.move_cap = false;
+            s.no_copyuid = true;
+        }
+        let (m2, m3) = (e.by_uid("INBOX", 2), e.by_uid("INBOX", 3));
+        let conn = rusqlite::Connection::open(e.store.index_path()).unwrap();
+        conn.execute("UPDATE messages SET message_id = '' WHERE uid = 3", []).unwrap();
+        drop(conn);
+        enqueue(&e.store, &[m2, m3], &Action::Delete, NOW).unwrap();
+        let r = e.run();
+        assert_eq!(r.done, 1, "{r:?}");
+        assert!(r.failed.iter().any(|f| f.contains("both")), "{r:?}");
+        assert_eq!(e.server_uids("INBOX"), vec![1, 3, 4, 5], "mail 3 could not be verified and was left alone");
+        assert_eq!(e.server_uids("Trash").len(), 2);
+        let cmds = e.write_commands();
+        assert!(cmds.iter().any(|c| c == "UID EXPUNGE 2") && cmds.iter().all(|c| !c.contains("EXPUNGE 3") && !c.contains("2,3") && c != "EXPUNGE"), "{cmds:?}");
+    }
+
+    // spec: MAIL-105
+    #[test]
+    fn delete_forever_without_uidplus_is_refused_before_anything_is_sent_and_other_deleted_mail_survives() {
+        let e = env("foreveruidplus");
+        {
+            let mut s = e.server.state();
+            s.add_message("Trash", message("bin 1", "x@x.de", "in the bin"), NOW - DAY);
+            s.add_message("Trash", message("bin 2", "x@x.de", "flagged by another"), NOW - 2 * DAY);
+            s.set_flags("Trash", 2, &["\\Deleted"]);
+            s.uidplus = false;
+        }
+        crate::imap_sync::fetch_folder_listing(&e.store, &e.conn, "acct1", "Trash", 100, &SyncOptions { now: Some(NOW), ..SyncOptions::default() }).unwrap();
+        let bin1 = e.by_uid("Trash", 1);
+        enqueue(&e.store, &[bin1], &Action::DeleteForever(Confirmed::after_dialog(1)), NOW).unwrap();
+        let r = e.run();
+        assert_eq!((r.done, r.failed.len()), (0, 1), "{r:?}");
+        assert!(r.failed[0].contains("UIDPLUS"), "{:?}", r.failed);
+        assert_eq!(e.server_uids("Trash"), vec![1, 2]);
+        assert!(e.write_commands().is_empty(), "nothing was selected, marked or expunged: {:?}", e.write_commands());
+        assert!(e.by_uid("Trash", 1).pending.is_none());
     }
 
     // spec: MAIL-103, MAIL-104, MAIL-105
