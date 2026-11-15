@@ -232,8 +232,6 @@ impl MailDialog {
 pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDialogAction> {
     let mut rects: Vec<(String, Rect)> = Vec::new();
     let mut out = None;
-    ui.set_width(720.0);
-    ui.label(RichText::new("Mail accounts").size(18.0).color(theme::TEXT_STRONG));
     ui.label(
         muted(
             "Shale reads your mail over IMAP and keeps a local copy. Syncing never changes anything on the server; only what you do yourself does (mark read, flag, move, delete). The local copy is not encrypted: use full-disk encryption.",
@@ -279,7 +277,7 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
             });
             ui.add_space(12.0);
             ui.vertical(|ui| {
-                ui.set_width(520.0);
+                ui.set_width((ui.available_width()).max(360.0));
                 let Some(i) = d.sel.filter(|i| *i < d.accounts.len()) else {
                     ui.label(muted("Add an account to read your mail here."));
                     return;

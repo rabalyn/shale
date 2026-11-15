@@ -999,46 +999,41 @@ impl MailView {
             }
             return;
         }
-        let screen = ui.ctx().content_rect();
-        let pos = Pos2::new(screen.center().x - 180.0, screen.min.y + 120.0);
         let mut chosen: Option<FolderRowPick> = None;
         let mut cancel = false;
         let count = self.mover.as_ref().map_or(0, |p| p.msgs.len());
         let mut changed = false;
-        egui::Area::new(egui::Id::unique("mail-mover")).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
-                ui.set_width(340.0);
-                ui.label(RichText::new(format!("Move {count} message{} to…", if count == 1 { "" } else { "s" })).size(15.0).color(theme::TEXT_STRONG));
-                ui.add_space(4.0);
-                if let Some(p) = self.mover.as_mut() {
-                    let id = egui::Id::unique("mail-mover-field");
-                    let r = ui.add(egui::TextEdit::singleline(&mut p.query).id(id).hint_text("Type to find a folder (↑ ↓ Enter, Esc)").desired_width(f32::INFINITY));
-                    rec(rects, "mail:mover-field", &r);
-                    if std::mem::take(&mut p.focus) {
-                        r.request_focus();
-                    }
-                    changed = r.changed();
+        let title = format!("Move {count} message{} to…", if count == 1 { "" } else { "s" });
+        let resp = crate::dialog::Dialog::new("mail-mover", title).width(340.0).non_modal().show(ui.ctx(), |ui| {
+            if let Some(p) = self.mover.as_mut() {
+                let id = egui::Id::unique("mail-mover-field");
+                let r = ui.add(egui::TextEdit::singleline(&mut p.query).id(id).hint_text("Type to find a folder (↑ ↓ Enter, Esc)").desired_width(f32::INFINITY));
+                rec(rects, "mail:mover-field", &r);
+                if std::mem::take(&mut p.focus) {
+                    r.request_focus();
                 }
-                ui.add_space(4.0);
-                let at = self.mover.as_ref().map_or(0, |p| p.cursor);
-                egui::ScrollArea::vertical().max_height(260.0).id_salt("mail-mover-list").show(ui, |ui| {
-                    if cands.is_empty() {
-                        ui.label(muted("No folder of that name."));
+                changed = r.changed();
+            }
+            ui.add_space(4.0);
+            let at = self.mover.as_ref().map_or(0, |p| p.cursor);
+            egui::ScrollArea::vertical().max_height(260.0).id_salt("mail-mover-list").show(ui, |ui| {
+                if cands.is_empty() {
+                    ui.label(muted("No folder of that name."));
+                }
+                for (k, f) in cands.iter().enumerate() {
+                    let label = crate::imap_client::decode_mutf7(&f.name);
+                    let r = ui.selectable_label(k == at, label);
+                    rec(rects, format!("mail:mover-item:{k}"), &r);
+                    if r.clicked() {
+                        chosen = Some(FolderRowPick(k));
                     }
-                    for (k, f) in cands.iter().enumerate() {
-                        let label = crate::imap_client::decode_mutf7(&f.name);
-                        let r = ui.selectable_label(k == at, label);
-                        rec(rects, format!("mail:mover-item:{k}"), &r);
-                        if r.clicked() {
-                            chosen = Some(FolderRowPick(k));
-                        }
-                    }
-                });
-                if ui.button("Cancel").clicked() {
-                    cancel = true;
                 }
             });
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
         });
+        cancel |= resp.should_close();
         if changed {
             if let Some(p) = self.mover.as_mut() {
                 p.cursor = 0;
@@ -1061,30 +1056,25 @@ impl MailView {
             self.forever = None;
             return;
         }
-        let screen = ui.ctx().content_rect();
-        let pos = Pos2::new(screen.center().x - 190.0, screen.min.y + 160.0);
         let (mut yes, mut no) = (false, false);
-        egui::Area::new(egui::Id::unique("mail-forever")).order(egui::Order::Foreground).fixed_pos(pos).show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
-                ui.set_width(380.0);
-                ui.label(RichText::new(format!("Delete {n} message{} forever?", if n == 1 { "" } else { "s" })).size(16.0).color(theme::LINK_MISSING));
-                ui.add_space(4.0);
-                ui.label(muted("They are removed from the server and cannot be brought back from there. Shale keeps its own local copy of each, in the folder “.trash” of its mail folder.").size(12.5));
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let r = ui.button(RichText::new(format!("Delete {n} forever")).color(theme::LINK_MISSING));
-                    rec(rects, "mail:forever-confirm", &r);
-                    if r.clicked() {
-                        yes = true;
-                    }
-                    let r = ui.button("Cancel");
-                    rec(rects, "mail:forever-cancel", &r);
-                    if r.clicked() {
-                        no = true;
-                    }
-                });
+        let title = format!("Delete {n} message{} forever?", if n == 1 { "" } else { "s" });
+        let resp = crate::dialog::Dialog::new("mail-forever", title).width(380.0).non_modal().show(ui.ctx(), |ui| {
+            ui.label(muted("They are removed from the server and cannot be brought back from there. Shale keeps its own local copy of each, in the folder “.trash” of its mail folder.").size(12.5));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let r = ui.button(RichText::new(format!("Delete {n} forever")).color(theme::LINK_MISSING));
+                rec(rects, "mail:forever-confirm", &r);
+                if r.clicked() {
+                    yes = true;
+                }
+                let r = ui.button("Cancel");
+                rec(rects, "mail:forever-cancel", &r);
+                if r.clicked() {
+                    no = true;
+                }
             });
         });
+        no |= resp.should_close();
         if yes {
             self.confirm_forever(cfg);
         } else if no {

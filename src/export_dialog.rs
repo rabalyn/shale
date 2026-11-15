@@ -39,9 +39,6 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
         r
     };
     let mut result = DialogResult::Open;
-    ui.set_width(460.0);
-    ui.label(egui::RichText::new(format!("Export “{}” to PDF", d.name)).size(17.0).color(theme::TEXT_STRONG));
-    ui.add_space(6.0);
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     egui::Grid::new("export-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
         ui.label(muted("Paper"));

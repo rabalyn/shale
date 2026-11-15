@@ -626,55 +626,59 @@ impl MailView {
         let vault = self.vault.clone();
         let Some(c) = self.compose.as_mut() else { return };
         if let Some(ask) = c.ask.clone() {
-            egui::Window::new("compose-ask").title_bar(false).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
-                ui.set_max_width(420.0);
-                match &ask {
-                    Ask::Close => {
-                        ui.label(RichText::new("Keep this draft?").size(16.0).color(theme::TEXT_STRONG));
-                        ui.label(muted("You have written something that is not sent. A kept draft is saved and can be opened from Drafts; a discarded one is moved to the mail trash folder (nothing is deleted)."));
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            let r = ui.button(RichText::new("Keep draft").strong());
-                            rec(rects, "mail:compose:keep", &r);
-                            if r.clicked() {
-                                out.keep_and_close = true;
-                            }
-                            let r = ui.button("Discard");
-                            rec(rects, "mail:compose:discard", &r);
-                            if r.clicked() {
-                                out.discard_and_close = true;
-                            }
-                            let r = ui.button("Keep writing");
-                            rec(rects, "mail:compose:keep-writing", &r);
-                            if r.clicked() {
-                                out.cancel_ask = true;
-                            }
-                        });
-                    }
-                    Ask::Confirm(list) => {
-                        let q = list.first().map(|q| q.question()).unwrap_or("");
-                        ui.label(RichText::new("Send this mail?").size(16.0).color(theme::TEXT_STRONG));
-                        ui.label(q);
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            let r = ui.button("Send anyway");
-                            rec(rects, "mail:compose:confirm-yes", &r);
-                            if r.clicked() {
-                                out.confirm_yes = true;
-                            }
-                            let r = ui.button("Back to the mail");
-                            rec(rects, "mail:compose:confirm-no", &r);
-                            if r.clicked() {
-                                out.cancel_ask = true;
-                            }
-                        });
-                    }
+            let title = match &ask {
+                Ask::Close => "Keep this draft?",
+                Ask::Confirm(_) => "Send this mail?",
+            };
+            let resp = crate::dialog::Dialog::new("compose-ask", title).width(420.0).non_modal().show(ctx, |ui| match &ask {
+                Ask::Close => {
+                    ui.label(muted("You have written something that is not sent. A kept draft is saved and can be opened from Drafts; a discarded one is moved to the mail trash folder (nothing is deleted)."));
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        let r = ui.button(RichText::new("Keep draft").strong());
+                        rec(rects, "mail:compose:keep", &r);
+                        if r.clicked() {
+                            out.keep_and_close = true;
+                        }
+                        let r = ui.button("Discard");
+                        rec(rects, "mail:compose:discard", &r);
+                        if r.clicked() {
+                            out.discard_and_close = true;
+                        }
+                        let r = ui.button("Keep writing");
+                        rec(rects, "mail:compose:keep-writing", &r);
+                        if r.clicked() {
+                            out.cancel_ask = true;
+                        }
+                    });
+                }
+                Ask::Confirm(list) => {
+                    let q = list.first().map(|q| q.question()).unwrap_or("");
+                    ui.label(q);
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        let r = ui.button("Send anyway");
+                        rec(rects, "mail:compose:confirm-yes", &r);
+                        if r.clicked() {
+                            out.confirm_yes = true;
+                        }
+                        let r = ui.button("Back to the mail");
+                        rec(rects, "mail:compose:confirm-no", &r);
+                        if r.clicked() {
+                            out.cancel_ask = true;
+                        }
+                    });
                 }
             });
+            // the ✕ in the title bar: back to the mail, as "Keep writing" / "Back to the mail"
+            if resp.should_close() {
+                out.cancel_ask = true;
+            }
         }
         if let (Some(p), Some(v)) = (c.picker.as_mut(), vault) {
             let mut close = false;
-            egui::Window::new(if p.notes_only { "Attach a note" } else { "Attach a file from the vault" }).collapsible(false).resizable(true).default_width(420.0).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
+            let title = if p.notes_only { "Attach a note" } else { "Attach a file from the vault" };
+            let resp = crate::dialog::Dialog::new("compose-picker", title).width(420.0).non_modal().show(ctx, |ui| {
                 let r = ui.add(egui::TextEdit::singleline(&mut p.query).desired_width(f32::INFINITY).hint_text("type to filter"));
                 rec(rects, "mail:picker:query", &r);
                 r.request_focus();
@@ -694,6 +698,7 @@ impl MailView {
                     close = true;
                 }
             });
+            close |= resp.should_close();
             if close {
                 c.picker = None;
             }

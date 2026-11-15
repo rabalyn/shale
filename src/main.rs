@@ -16,6 +16,7 @@ mod cal_ui;
 mod canvas;
 mod compose;
 mod config;
+mod dialog;
 mod drawing;
 mod drawing_layout;
 mod drawing_pictures;

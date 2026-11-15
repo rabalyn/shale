@@ -707,8 +707,7 @@ impl ShaleApp {
         let ctx = ui.ctx().clone();
         match &mut modal {
             Modal::QuickSwitch { query, sel } => {
-                let resp = egui::Modal::new(egui::Id::unique("quick-switch")).show(&ctx, |ui| {
-                    ui.set_width(520.0);
+                let resp = crate::dialog::Dialog::new("quick-switch", "Open a note").width(520.0).show(&ctx, |ui| {
                     let r = ui.add(egui::TextEdit::singleline(query).hint_text("Find or create a note…").desired_width(f32::INFINITY).font(FontId::proportional(16.0)));
                     r.request_focus();
                     let Some(v) = &self.vault else { return };
@@ -759,9 +758,7 @@ impl ShaleApp {
                 }
             }
             Modal::Rename { rel, name, error } => {
-                let resp = egui::Modal::new(egui::Id::unique("rename")).show(&ctx, |ui| {
-                    ui.set_width(420.0);
-                    ui.label(egui::RichText::new("Rename").size(16.0));
+                let resp = crate::dialog::Dialog::new("rename", "Rename").width(420.0).show(&ctx, |ui| {
                     let r = ui.add(egui::TextEdit::singleline(name).desired_width(f32::INFINITY));
                     r.request_focus();
                     if self.cfg.update_links_on_rename {
@@ -790,9 +787,7 @@ impl ShaleApp {
                 }
             }
             Modal::NewFolder { parent, name } => {
-                let resp = egui::Modal::new(egui::Id::unique("new-folder")).show(&ctx, |ui| {
-                    ui.set_width(380.0);
-                    ui.label(egui::RichText::new("New folder").size(16.0));
+                let resp = crate::dialog::Dialog::new("new-folder", "New folder").width(380.0).show(&ctx, |ui| {
                     let r = ui.add(egui::TextEdit::singleline(name).hint_text("Folder name").desired_width(f32::INFINITY));
                     r.request_focus();
                     let enter = ui.input(|i| i.key_pressed(Key::Enter));
@@ -820,9 +815,7 @@ impl ShaleApp {
                 }
             }
             Modal::ConfirmTrash { rel } => {
-                let resp = egui::Modal::new(egui::Id::unique("trash")).show(&ctx, |ui| {
-                    ui.set_width(400.0);
-                    ui.label(egui::RichText::new("Move to trash?").size(16.0));
+                let resp = crate::dialog::Dialog::new("trash", "Move to trash?").width(400.0).show(&ctx, |ui| {
                     ui.label(format!("“{}” will be moved to the .trash folder inside your vault. You can get it back from there.", rel_to_string(rel)));
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
@@ -842,10 +835,8 @@ impl ShaleApp {
             }
             Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
-                let resp = egui::Modal::new(egui::Id::unique("convert-canvas")).show(&ctx, |ui| {
-                    ui.set_width(460.0);
+                let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    ui.label(egui::RichText::new("Convert to an editable drawing?").size(16.0));
                     ui.label(format!("“{name}” is an Obsidian Canvas. Shale shows canvases read-only."));
                     match existing.as_ref() {
                         Some(copy) => ui.label(format!("It was converted before: “{}”.", rel_to_string(copy))),
@@ -888,10 +879,7 @@ impl ShaleApp {
                 }
             }
             Modal::Settings { vault_path } => {
-                let resp = egui::Modal::new(egui::Id::unique("settings")).show(&ctx, |ui| {
-                    ui.set_width(520.0);
-                    ui.label(egui::RichText::new("Settings").size(18.0));
-                    ui.add_space(6.0);
+                let resp = crate::dialog::Dialog::new("settings", "Settings").width(520.0).show(&ctx, |ui| {
                     ui.label(egui::RichText::new("Vault folder").color(theme::MUTED));
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(vault_path).desired_width(360.0));
@@ -995,11 +983,8 @@ impl ShaleApp {
         }
         if let Modal::Calendars(d) = &mut modal {
             let mut out = None;
-            let resp = egui::Modal::new(egui::Id::unique("calendars")).show(&ctx, |ui| {
-                let h = ctx.content_rect().height() - 80.0;
-                egui::ScrollArea::vertical().max_height(h).min_scrolled_height(h).show(ui, |ui| {
-                    out = crate::cal_dialog::show(ui, d, &self.calendar);
-                });
+            let resp = crate::dialog::Dialog::new("calendars", "Calendars").width(560.0).show(&ctx, |ui| {
+                out = crate::cal_dialog::show(ui, d, &self.calendar);
             });
             if let Some(a) = out {
                 if self.calendar_dialog_action(d, a) {
@@ -1013,7 +998,7 @@ impl ShaleApp {
         if let Modal::MailAccounts(d) = &mut modal {
             let mut out = None;
             let mail = &self.mail;
-            let resp = egui::Modal::new(egui::Id::unique("mail-accounts")).show(&ctx, |ui| {
+            let resp = crate::dialog::Dialog::new("mail-accounts", "Mail accounts").width(720.0).show(&ctx, |ui| {
                 out = crate::mail_dialog::show(ui, d, mail);
             });
             if let Some(a) = out {
@@ -1028,9 +1013,9 @@ impl ShaleApp {
         if let Modal::Social(d) = &mut modal {
             let accounts = self.cfg.social_accounts.clone();
             let check_minutes = self.cfg.social_check_minutes;
-            let resp = egui::Modal::new(egui::Id::unique("social-accounts")).show(&ctx, |ui| crate::social::accounts_ui::show(ui, d, &accounts, check_minutes));
+            let resp = crate::dialog::Dialog::new("social-accounts", "Feed accounts").width(560.0).show(&ctx, |ui| crate::social::accounts_ui::show(ui, d, &accounts, check_minutes));
             let close_asked = resp.should_close();
-            if let Some(a) = resp.inner {
+            if let Some(a) = resp.inner.flatten() {
                 if self.social_dialog_action(a) {
                     keep = false;
                 }
@@ -1043,9 +1028,9 @@ impl ShaleApp {
         if let Modal::Import(d) = &mut modal {
             let folders = self.import_folders();
             let tags = self.tag_choices();
-            let resp = egui::Modal::new(egui::Id::unique("import")).show(&ctx, |ui| crate::import_dialog::show(ui, d, &folders, &tags));
+            let resp = crate::dialog::Dialog::new("import", "Import into the vault").width(620.0).show(&ctx, |ui| crate::import_dialog::show(ui, d, &folders, &tags));
             let close_asked = resp.should_close();
-            if let Some(a) = resp.inner {
+            if let Some(a) = resp.inner.flatten() {
                 if self.import_action(d, a) {
                     keep = false;
                 }
@@ -1056,9 +1041,10 @@ impl ShaleApp {
         }
         if let Modal::Event(d) = &mut modal {
             let store = &mut self.calendar;
-            let resp = egui::Modal::new(egui::Id::unique("event")).show(&ctx, |ui| crate::cal_dialog::show_event(ui, d, store));
+            let title = if d.original.is_some() { "Edit event" } else { "New event" };
+            let resp = crate::dialog::Dialog::new("event", title).width(460.0).show(&ctx, |ui| crate::cal_dialog::show_event(ui, d, store));
             let close_asked = resp.should_close();
-            match resp.inner {
+            match resp.inner.flatten() {
                 Some(crate::cal_dialog::EventResult::Saved(msg)) => {
                     self.last_event_calendar = Some(d.calendar.clone());
                     self.toast(msg);
@@ -1073,8 +1059,10 @@ impl ShaleApp {
             }
         }
         if let Modal::Export(d) = &mut modal {
-            let resp = egui::Modal::new(egui::Id::unique("export-pdf")).show(&ctx, |ui| crate::export_dialog::show(ui, d));
-            match resp.inner {
+            let title = format!("Export “{}” to PDF", d.name);
+            let resp = crate::dialog::Dialog::new("export-pdf", title).width(460.0).show(&ctx, |ui| crate::export_dialog::show(ui, d));
+            let close_asked = resp.should_close();
+            match resp.inner.unwrap_or(crate::export_dialog::DialogResult::Open) {
                 crate::export_dialog::DialogResult::Export => match self.run_export(d) {
                     Ok(out) => {
                         self.toast(format!("Exported to {}", out.display()));
@@ -1090,7 +1078,7 @@ impl ShaleApp {
                 crate::export_dialog::DialogResult::Cancel => keep = false,
                 crate::export_dialog::DialogResult::Open => {}
             }
-            if resp.should_close() {
+            if close_asked {
                 keep = false;
             }
         }
@@ -1556,9 +1544,12 @@ mod canvas_dialog_tests {
         tree.nodes.iter().filter_map(|(_, n)| Some((n.label()?.to_string(), n.bounds().map(|b| Rect::from_min_max(Pos2::new(b.x0 as f32, b.y0 as f32), Pos2::new(b.x1 as f32, b.y1 as f32)))?))).collect()
     }
 
-    /// The widgets on screen once the dialog has settled (a new window is laid out unseen first).
+    /// The widgets on screen once the dialog has settled (a new dialog is laid out unseen first,
+    /// then measures its content and takes that size).
     fn look(ctx: &egui::Context, app: &mut ShaleApp, t: &mut f64) -> Vec<(String, Rect)> {
-        frame(ctx, app, t, vec![]);
+        for _ in 0..4 {
+            frame(ctx, app, t, vec![]);
+        }
         frame(ctx, app, t, vec![])
     }
 

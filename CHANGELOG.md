@@ -184,6 +184,10 @@ The release page of each version on GitHub shows its section from this file.
 
 ### Changed
 
+- **Every dialog can be moved and resized**: drag the title bar to move it, any edge or corner
+  to resize it; the content scrolls when it is made small. Dialogs open centred and as tall as
+  their content, and come back where you left them. The headings that were inside the dialogs
+  are now their title bars, with a ✕ to close.
 - **Path links are stricter**: `[[Archive/Plan]]` is now red when `Archive/Plan.md` does not
   exist, instead of quietly opening some other note called “Plan”. `./` and `../` links work
   relative to the note. If exactly one note has that name, the link is fixed automatically
