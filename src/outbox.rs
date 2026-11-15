@@ -97,6 +97,34 @@ struct DraftFile {
     draft: Draft,
 }
 
+/// One attachment file that is being replaced (MAIL-215), kept in `<id>.attrepl` next to the draft or mail.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+struct ReplaceRecord {
+    /// The file in `<id>.att/`.
+    file: String,
+    /// The attachment's name as the person knows it.
+    name: String,
+    /// Where the old file goes, relative to the mail store.
+    trash: String,
+}
+
+/// An attachment that a cut-off replacement left missing (MAIL-216).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttAlert {
+    pub file: String,
+    pub name: String,
+    pub trash: PathBuf,
+    /// The old version is still in the trash.
+    pub trash_present: bool,
+}
+
+impl AttAlert {
+    pub fn message(&self) -> String {
+        let tail = if self.trash_present { format!("The previous version is in the trash at {}.", self.trash.display()) } else { "The previous version is not in the trash any more.".to_string() };
+        format!("The attachment “{}” is missing: Shale stopped while replacing it. {tail}", self.name)
+    }
+}
+
 /// What a start-up check found.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Recovery {
@@ -195,26 +223,108 @@ impl Outbox {
     }
 
     /// An attachment file that is about to be replaced by other bytes goes to the trash, not into nothing (MAIL-200).
-    fn put_away_att(&self, kind: &str, account: &str, id: &str, file: &str) -> Result<()> {
+    /// Before it moves, the intent (the file and the trash path it goes to) is written to the replace record (MAIL-215);
+    /// the caller removes the record after the new file is written.
+    fn put_away_att(&self, kind: &str, account: &str, id: &str, file: &str, name: &str) -> Result<()> {
         let src = self.path(kind, account, id, ".att")?.join(file);
-        self.step()?;
-        let dest_dir = self.root.join(".trash").join(crate::mail_store::today_string()).join(kind).join(account).join(format!("{id}.att"));
-        fsutil::ensure_private_dir(&dest_dir).map_err(err)?;
-        let mut dest = dest_dir.join(file);
+        let rel_dir = Path::new(".trash").join(crate::mail_store::today_string()).join(kind).join(account).join(format!("{id}.att"));
+        fsutil::ensure_private_dir(&self.root.join(&rel_dir)).map_err(err)?;
+        let mut rel = rel_dir.join(file);
         for n in 2..1000 {
-            match fsutil::rename_noreplace(&src, &dest) {
-                Ok(()) => return Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => dest = dest_dir.join(format!("{n}-{file}")),
-                Err(e) => return Err(err(e)),
+            if std::fs::symlink_metadata(self.root.join(&rel)).is_err() {
+                break;
             }
+            rel = rel_dir.join(format!("{n}-{file}"));
         }
-        Err("too many files with that name in the local trash".into())
+        let mut recs = self.read_records(kind, account, id);
+        recs.retain(|r| r.file != file);
+        recs.push(ReplaceRecord { file: file.to_string(), name: name.to_string(), trash: rel.to_string_lossy().into_owned() });
+        self.write_records(kind, account, id, &recs)?;
+        self.step()?;
+        fsutil::rename_noreplace(&src, &self.root.join(&rel)).map_err(err)
+    }
+
+    // ------------------------------------------------------------ the replace record (MAIL-215)
+
+    fn read_records(&self, kind: &str, account: &str, id: &str) -> Vec<ReplaceRecord> {
+        self.path(kind, account, id, ".attrepl").ok().and_then(|p| fsutil::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    fn write_records(&self, kind: &str, account: &str, id: &str, recs: &[ReplaceRecord]) -> Result<()> {
+        let p = self.path(kind, account, id, ".attrepl")?;
+        if recs.is_empty() {
+            // the record is not a document of the person: it goes when it has done its job (the trash copy stays)
+            return match std::fs::remove_file(&p) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(err(e)),
+                _ => Ok(()),
+            };
+        }
+        self.write(&p, &serde_json::to_vec_pretty(recs).map_err(err)?)
+    }
+
+    fn clear_record(&self, kind: &str, account: &str, id: &str, file: &str) -> Result<()> {
+        let mut recs = self.read_records(kind, account, id);
+        let before = recs.len();
+        recs.retain(|r| r.file != file);
+        if recs.len() != before {
+            self.write_records(kind, account, id, &recs)?;
+        }
+        Ok(())
+    }
+
+    /// Is the attachment file there, whole? The length is in its name (`<n>-<length>-<name>`); a write is atomic, so
+    /// a file that is there is whole, and the length is a second check.
+    fn att_whole(&self, kind: &str, account: &str, id: &str, file: &str) -> bool {
+        let want = file.split('-').nth(1).and_then(|l| l.parse::<u64>().ok());
+        self.path(kind, account, id, ".att").ok().and_then(|d| std::fs::metadata(d.join(file)).ok()).is_some_and(|m| m.is_file() && want.is_none_or(|w| w == m.len()))
+    }
+
+    /// What is left of a replacement that was cut off (MAIL-216): the records of attachments of this draft or mail
+    /// whose file is missing or incomplete. A record whose new file is whole, or whose attachment is not in the
+    /// draft any more, is cleared silently. The trash copy is never touched.
+    pub fn att_alerts(&self, kind: &str, account: &str, id: &str, atts: &[Att]) -> Vec<AttAlert> {
+        let _g = lock();
+        let mut out = vec![];
+        for r in self.read_records(kind, account, id) {
+            if !atts.iter().any(|a| a.file == r.file) || self.att_whole(kind, account, id, &r.file) {
+                let _ = self.clear_record(kind, account, id, &r.file);
+                continue;
+            }
+            let trash = self.root.join(&r.trash);
+            out.push(AttAlert { file: r.file, name: r.name, trash_present: trash.is_file(), trash });
+        }
+        out
+    }
+
+    /// Put the old version back into the draft (MAIL-217): its bytes are copied from the trash (the trash copy stays) and the
+    /// record is cleared. Returns the bytes.
+    pub fn restore_att(&self, kind: &str, account: &str, id: &str, file: &str) -> Result<Vec<u8>> {
+        let _g = lock();
+        let rec = self.read_records(kind, account, id).into_iter().find(|r| r.file == file).ok_or("there is nothing to restore")?;
+        let bytes = fsutil::read(self.root.join(&rec.trash)).map_err(|e| format!("the old version is not in the trash any more: {e}"))?;
+        if !self.att_whole(kind, account, id, file) {
+            self.write(&self.path(kind, account, id, ".att")?.join(file), &bytes)?;
+        }
+        self.clear_record(kind, account, id, file)?;
+        Ok(bytes)
+    }
+
+    /// The attachments of a saved entry that are not there, as sentences (MAIL-218).
+    fn missing_atts(&self, kind: &str, account: &str, id: &str, atts: &[Att]) -> Vec<String> {
+        let recs = self.read_records(kind, account, id);
+        atts.iter()
+            .filter(|a| a.file.is_empty() || !self.att_whole(kind, account, id, &a.file))
+            .map(|a| match recs.iter().find(|r| r.file == a.file) {
+                Some(r) => AttAlert { file: r.file.clone(), name: a.name.clone(), trash_present: self.root.join(&r.trash).is_file(), trash: self.root.join(&r.trash) }.message(),
+                None => format!("The attachment “{}” is missing.", a.name),
+            })
+            .collect()
     }
 
     fn put_away_all(&self, kind: &str, account: &str, id: &str, date: &str) -> Result<()> {
         // the JSON goes first: without it the rest is not a draft or a mail any more, and a crash
         // in between leaves only files that nothing lists
-        for ext in [".json", ".eml", ".att"] {
+        for ext in [".json", ".eml", ".att", ".attrepl"] {
             self.put_away(kind, account, &format!("{id}{ext}"), date)?;
         }
         Ok(())
@@ -228,14 +338,21 @@ impl Outbox {
         for (i, a) in atts.iter_mut().enumerate() {
             let file = format!("{i}-{}-{}", a.data.len(), crate::compose::safe_file_name(&a.name));
             let p = dir.join(&file);
+            // a saved attachment whose file is gone and whose bytes were not read back is kept as it is: an empty file
+            // written in its place would become an empty attachment (MAIL-216)
+            if a.data.is_empty() && !a.file.is_empty() && std::fs::symlink_metadata(dir.join(&a.file)).is_err() {
+                continue;
+            }
             // the length is in the name, so only the bytes can tell a replaced file of the same size apart
             let same = std::fs::metadata(&p).map(|m| m.len() == a.data.len() as u64).unwrap_or(false) && fsutil::read(&p).is_ok_and(|b| b == *a.data);
             if !same {
                 if std::fs::symlink_metadata(&p).is_ok() {
-                    self.put_away_att(kind, account, id, &file)?;
+                    self.put_away_att(kind, account, id, &file, &a.name)?;
                 }
                 self.write(&p, &a.data)?;
             }
+            // whole on disk (or there all along): the replace record, if any, has done its job
+            self.clear_record(kind, account, id, &file)?;
             a.file = file;
         }
         Ok(())
@@ -399,6 +516,15 @@ impl Outbox {
         }
         if now < item.send_after {
             return Err("the time to take it back has not passed yet".into());
+        }
+        // the mail is not sent without an attachment it was written with: it is put away as not sent, with the reason (MAIL-218)
+        let missing = self.missing_atts("outbox", account, id, &item.draft.attachments);
+        if !missing.is_empty() {
+            let msg = format!("{} The mail was not sent.", missing.join(" "));
+            item.state = State::Failed;
+            item.error = Some(msg.clone());
+            self.write_item(&item)?;
+            return Err(msg);
         }
         let bytes = fsutil::read(self.path("outbox", account, id, ".eml")?).map_err(err)?;
         item.state = State::Sending;
@@ -980,5 +1106,152 @@ pub mod tests {
         ob.save_draft(&d, NOW + 2).unwrap();
         assert_eq!(files(&root).iter().filter(|p| p.starts_with(".trash/") && p.contains(".att/")).count(), 1);
         let _ = std::fs::remove_dir_all(&root);
+    }
+    /// A draft with one attachment "report.pdf" saved, then the same name and size with other bytes, cut off at step `n`.
+    fn cut_off_replacement(tag: &str, n: usize) -> (PathBuf, Outbox, Draft) {
+        let root = temp(tag);
+        let ob = Outbox::new(&root);
+        let mut d = draft("acct1", "R", "text");
+        d.attachments.push(Att { name: "report.pdf".into(), mime: "application/pdf".into(), data: Arc::new(b"old-bytes".to_vec()), file: String::new() });
+        ob.save_draft(&d, NOW).unwrap();
+        d.attachments[0].data = Arc::new(b"new-bytes".to_vec());
+        ob.crash_at_step(n);
+        assert!(ob.save_draft(&d, NOW + 1).is_err());
+        ob.no_crash();
+        let ob = Outbox::new(&root);
+        (root, ob, d)
+    }
+
+    fn trashed_atts(root: &Path) -> Vec<String> {
+        files(root).into_iter().filter(|p| p.starts_with(".trash/") && p.contains(".att/")).collect()
+    }
+
+    // spec: MAIL-215
+    #[test]
+    fn the_intent_to_replace_an_attachment_is_on_disk_before_the_old_file_moves_and_gone_after_the_new_one_is_written() {
+        // cut off after the record, before the move: the record names the file and the trash path, the old file is still there
+        let (root, _, d) = cut_off_replacement("repl-record", 1);
+        let rec = std::fs::read_to_string(root.join(format!("drafts/acct1/{}.attrepl", d.id))).unwrap();
+        assert!(rec.contains("0-9-report.pdf") && rec.contains(".trash/") && rec.contains("report.pdf"), "{rec}");
+        assert!(files(&root).iter().any(|p| p.ends_with(".att/0-9-report.pdf")));
+        assert!(trashed_atts(&root).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+        // an uncut save leaves no record, and the old file is in the trash
+        let root = temp("repl-done");
+        let ob = Outbox::new(&root);
+        let mut d = draft("acct1", "R", "text");
+        d.attachments.push(Att { name: "report.pdf".into(), mime: "application/pdf".into(), data: Arc::new(b"old-bytes".to_vec()), file: String::new() });
+        ob.save_draft(&d, NOW).unwrap();
+        d.attachments[0].data = Arc::new(b"new-bytes".to_vec());
+        ob.save_draft(&d, NOW + 1).unwrap();
+        assert!(!files(&root).iter().any(|p| p.ends_with(".attrepl")), "{:?}", files(&root));
+        assert_eq!(trashed_atts(&root).len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: MAIL-216
+    #[test]
+    fn after_a_cut_off_replacement_the_draft_says_the_attachment_is_missing_and_where_the_old_one_is() {
+        let (root, ob, d) = cut_off_replacement("repl-alert", 2);
+        let (back, problems) = ob.load_draft("acct1", &d.id).unwrap();
+        assert_eq!(problems.len(), 1, "the file is missing");
+        let alerts = ob.att_alerts("drafts", "acct1", &d.id, &back.attachments);
+        assert_eq!(alerts.len(), 1);
+        let m = alerts[0].message();
+        assert!(m.starts_with("The attachment “report.pdf” is missing: Shale stopped while replacing it. The previous version is in the trash at "), "{m}");
+        assert!(m.contains(&alerts[0].trash.display().to_string()) && alerts[0].trash_present);
+        // asking again keeps the record (nothing was decided)
+        assert_eq!(ob.att_alerts("drafts", "acct1", &d.id, &back.attachments).len(), 1);
+        // saving the draft as it is (the bytes were not read back) does not turn the missing file into an empty attachment
+        ob.save_draft(&back, NOW + 2).unwrap();
+        assert!(!files(&root).iter().any(|p| p.contains(".att/0-0-")), "{:?}", files(&root));
+        assert_eq!(ob.att_alerts("drafts", "acct1", &d.id, &back.attachments).len(), 1);
+        // cut off before the move: the old file is still the attachment, the record goes silently
+        let _ = std::fs::remove_dir_all(&root);
+        let (root, ob, d) = cut_off_replacement("repl-silent", 1);
+        let (back, problems) = ob.load_draft("acct1", &d.id).unwrap();
+        assert!(problems.is_empty());
+        assert!(ob.att_alerts("drafts", "acct1", &d.id, &back.attachments).is_empty());
+        assert!(!files(&root).iter().any(|p| p.ends_with(".attrepl")));
+        let _ = std::fs::remove_dir_all(&root);
+        // a record whose new file was written completely (cut off after the write): silent too
+        let (root, ob, d) = cut_off_replacement("repl-whole", 2);
+        let dir = root.join(format!("drafts/acct1/{}.att", d.id));
+        std::fs::write(dir.join("0-9-report.pdf"), b"new-bytes").unwrap();
+        let (back, _) = ob.load_draft("acct1", &d.id).unwrap();
+        assert!(ob.att_alerts("drafts", "acct1", &d.id, &back.attachments).is_empty());
+        assert!(!files(&root).iter().any(|p| p.ends_with(".attrepl")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: MAIL-217
+    #[test]
+    fn the_old_attachment_is_restored_from_the_trash_and_the_trash_copy_stays() {
+        let (root, ob, d) = cut_off_replacement("repl-restore", 2);
+        let (back, _) = ob.load_draft("acct1", &d.id).unwrap();
+        let alert = ob.att_alerts("drafts", "acct1", &d.id, &back.attachments).remove(0);
+        assert_eq!(ob.restore_att("drafts", "acct1", &d.id, &alert.file).unwrap(), b"old-bytes");
+        let (back, problems) = ob.load_draft("acct1", &d.id).unwrap();
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(back.attachments[0].data.as_slice(), b"old-bytes");
+        assert!(ob.att_alerts("drafts", "acct1", &d.id, &back.attachments).is_empty());
+        assert_eq!(std::fs::read(&alert.trash).unwrap(), b"old-bytes", "the trash copy is not deleted");
+        assert!(ob.restore_att("drafts", "acct1", &d.id, &alert.file).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+        // the old file gone from the trash too: said, not invented
+        let (root, ob, d) = cut_off_replacement("repl-restore-gone", 2);
+        let (back, _) = ob.load_draft("acct1", &d.id).unwrap();
+        let alert = ob.att_alerts("drafts", "acct1", &d.id, &back.attachments).remove(0);
+        std::fs::rename(&alert.trash, root.join("elsewhere")).unwrap();
+        assert!(ob.restore_att("drafts", "acct1", &d.id, &alert.file).is_err());
+        let again = ob.att_alerts("drafts", "acct1", &d.id, &back.attachments);
+        assert!(!again[0].trash_present && again[0].message().contains("not in the trash any more"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: MAIL-218
+    #[test]
+    fn an_outbox_entry_with_a_missing_attachment_file_is_not_sent_and_says_why() {
+        let root = temp("send-missing");
+        let ob = Outbox::new(&root);
+        let mut d = draft("acct1", "S", "text");
+        d.attachments.push(Att { name: "report.pdf".into(), mime: "application/pdf".into(), data: Arc::new(b"bytes".to_vec()), file: String::new() });
+        let item = ob.queue(&d, &built(&d), NOW, NOW, DATE).unwrap();
+        let att = root.join(format!("outbox/acct1/{}.att/0-5-report.pdf", d.id));
+        std::fs::rename(&att, root.join("elsewhere")).unwrap();
+        let e = ob.begin_send("acct1", &item.id, NOW + 1).unwrap_err();
+        assert!(e.contains("“report.pdf” is missing") && e.contains("was not sent"), "{e}");
+        let now = ob.get("acct1", &item.id).unwrap();
+        assert_eq!(now.state, State::Failed);
+        assert_eq!(now.error.as_deref(), Some(e.as_str()));
+        assert!(ob.begin_send("acct1", &item.id, NOW + 2).is_err(), "and it stays unsent");
+        // with the file there, a queued entry is sent as before
+        let root2 = temp("send-present");
+        let ob2 = Outbox::new(&root2);
+        let item2 = ob2.queue(&d, &built(&d), NOW, NOW, DATE).unwrap();
+        assert!(ob2.begin_send("acct1", &item2.id, NOW + 1).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&root2);
+    }
+
+    // spec: MAIL-219
+    #[test]
+    fn removing_the_missing_attachment_from_the_draft_ends_the_alert_and_never_deletes_the_trash_copy() {
+        let (root, ob, d) = cut_off_replacement("repl-remove", 2);
+        let (mut back, _) = ob.load_draft("acct1", &d.id).unwrap();
+        let alert = ob.att_alerts("drafts", "acct1", &d.id, &back.attachments).remove(0);
+        back.attachments.clear();
+        ob.save_draft(&back, NOW + 3).unwrap();
+        assert!(ob.att_alerts("drafts", "acct1", &d.id, &back.attachments).is_empty());
+        assert!(!files(&root).iter().any(|p| p.ends_with(".attrepl")));
+        assert_eq!(std::fs::read(&alert.trash).unwrap(), b"old-bytes");
+        // discarding a draft with a record puts the record away with it
+        let (root2, ob2, d2) = cut_off_replacement("repl-discard", 2);
+        ob2.discard_draft("acct1", &d2.id, DATE).unwrap();
+        assert!(!files(&root2).iter().any(|p| p.starts_with("drafts/")), "{:?}", files(&root2));
+        assert!(files(&root2).iter().any(|p| p.starts_with(".trash/") && p.ends_with(".attrepl")));
+        assert_eq!(trashed_atts(&root2).iter().filter(|p| !p.ends_with(".attrepl")).count(), 1, "{:?}", trashed_atts(&root2));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&root2);
     }
 }

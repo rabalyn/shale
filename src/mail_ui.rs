@@ -1878,8 +1878,11 @@ impl MailView {
         let Some(ob) = self.outbox.clone() else { return };
         match ob.load_draft(account, id) {
             Ok((d, problems)) => {
+                let alerts = ob.att_alerts("drafts", account, id, &d.attachments);
                 let mut c = Compose::from_saved(d, crate::cal_time::now());
-                c.notes = problems;
+                // an attachment with an alert is told by the alert, not twice
+                c.notes = problems.into_iter().filter(|p| !alerts.iter().any(|a| p.contains(&format!("“{}”", a.name)))).collect();
+                c.att_alerts = alerts.into_iter().map(|alert| crate::mail_compose::AttAlertState { alert, dismissed: false }).collect();
                 self.open_compose(c, Field::Body);
             }
             Err(e) => self.problems.push(format!("The draft could not be opened: {e}")),
@@ -2002,6 +2005,11 @@ impl MailView {
             c.error = Some("This account has no SMTP server yet: set it in the account settings (Sending).".into());
             return;
         }
+        // never send without an attachment the draft has (MAIL-218), hidden alert or not
+        if let Some(al) = c.att_alerts.first() {
+            c.error = Some(format!("Not sent. {} Restore the old file or remove the attachment first.", al.alert.message()));
+            return;
+        }
         if (c.draft.sign || c.draft.encrypt) && a.key_for(c.draft.standard).is_empty() {
             c.error = Some(format!("No {} key is chosen for this account yet: choose one in the account settings (Encryption), or switch Sign and Encrypt off.", c.draft.standard.label()));
             return;
@@ -2112,8 +2120,34 @@ impl MailView {
         if let Some(i) = out.remove_att {
             if let Some(c) = self.compose.as_mut() {
                 if i < c.draft.attachments.len() {
-                    c.draft.attachments.remove(i);
+                    let gone = c.draft.attachments.remove(i);
+                    c.att_alerts.retain(|a| a.alert.file != gone.file);
                     c.touch();
+                }
+            }
+        }
+        if let Some(file) = out.att_remove_missing {
+            if let Some(c) = self.compose.as_mut() {
+                c.draft.attachments.retain(|a| a.file != file);
+                c.att_alerts.retain(|a| a.alert.file != file);
+                c.touch();
+            }
+        }
+        if let Some(file) = out.att_dismiss {
+            if let Some(c) = self.compose.as_mut() {
+                c.att_alerts.iter_mut().filter(|a| a.alert.file == file).for_each(|a| a.dismissed = true);
+            }
+        }
+        if let Some(file) = out.att_restore {
+            if let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_mut()) {
+                match ob.restore_att("drafts", &c.draft.account, &c.draft.id, &file) {
+                    Ok(bytes) => {
+                        if let Some(a) = c.draft.attachments.iter_mut().find(|a| a.file == file) {
+                            a.data = Arc::new(bytes);
+                        }
+                        c.att_alerts.retain(|a| a.alert.file != file);
+                    }
+                    Err(e) => c.error = Some(format!("The old file could not be restored: {e}")),
                 }
             }
         }
