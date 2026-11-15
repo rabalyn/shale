@@ -266,7 +266,7 @@ fn pointer_shape_tools_draw_by_dragging() {
     let r = d.scene.elements.last().unwrap();
     assert_eq!(r.kind, "rectangle");
     assert!(near(r.x, 300.0) && near(r.y, 200.0) && near(r.width, 100.0) && near(r.height, 60.0), "{} {} {} {}", r.x, r.y, r.width, r.height);
-    assert_eq!(d.selection, [r.id.clone()]);
+    assert_eq!(d.selection, std::slice::from_ref(&r.id));
     assert_eq!(d.tool, Tool::Select, "the tool goes back to Select");
     // dragging up and to the left still gives a positive size, Shift makes it square
     tool(&mut h, &mut d, Tool::Ellipse);
@@ -401,7 +401,7 @@ fn pointer_double_clicks_edit_labels_and_texts() {
     h.double_click_at_w(&mut d, (300.0, 250.0));
     assert_eq!(count(&d), n + 1);
     let id = d.editing_text.clone().expect("editing the new text");
-    assert_eq!(d.selection, [id.clone()]);
+    assert_eq!(d.selection, std::slice::from_ref(&id));
     // dragging elsewhere ends it as well
     h.drag_w(&mut d, (300.0, 500.0), (350.0, 520.0));
     assert!(d.editing_text.is_none());

@@ -206,6 +206,16 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
     tests with scripted pointer events as in `drawing_ui_tests.rs` (drag a rectangle, resize by a
     handle, shift-drag to constrain, drag after zoom), and one test per modal that opens it by its
     key, changes a value and closes it with Esc. Kind: test (large; split into issues per area).
+    Done in #62: `drawing_pointer_tests.rs` (16 tests, DRAW-019) drives `begin_drag`,
+    `continue_drag`, `end_drag` and `click` with real pointer events (select, Shift, move, zoomed
+    drag, frame, corner resize with turn-over, text and scribbles, arrow ends, every shape tool,
+    snapping, 45-degree lock, pencil, eraser, hand and Space pan, double-click editing) and found a
+    bug (an arrow end dragged off its shape sprang back). `panels_ui_tests.rs` (8 tests,
+    VAULT-023, VAULT-024, TASK-005) drives the quick switcher, Rename, New folder, Move to trash
+    and Settings dialogs, the task list and the file tree. Left open: the dialogs of other modules
+    (`Export`, `Import`, `Event`, mail and feed accounts, `Calendars` content) belong to their own
+    modules; the linear branch of the resize code is reached only by scribbles; Convert-again of
+    the canvas question; the sort menu and drag-and-drop in the tree.
 
 More, in the order of the table:
 
