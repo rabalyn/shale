@@ -219,6 +219,7 @@ actions! {
     Settings => "global.settings", "Settings", Global, ["Ctrl+Comma"];
     PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+Alt+H"];
     NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+Alt+L"];
+    AlternateView => "global.alternate_view", "Alternate view: swap with the previous view of this tab (again: back)", Global, ["Ctrl+6"];
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
@@ -289,11 +290,15 @@ fn consume_exact(input: &mut InputState, c: Chord) -> bool {
     found
 }
 
+/// How long an unfinished sequence waits for its next key (KEY-009).
+pub const SEQUENCE_TIMEOUT: f64 = 1.5;
+
 #[derive(Default)]
 pub struct Keymap {
     custom: BTreeMap<Action, Vec<Binding>>,
-    /// The chords typed so far of an unfinished sequence, per scope.
-    pending: HashMap<Scope, Vec<Chord>>,
+    /// The chords typed so far of an unfinished sequence, per scope, and the time (egui seconds)
+    /// of the last one (KEY-009).
+    pending: HashMap<Scope, (Vec<Chord>, f64)>,
     /// Set while the keybindings dialog records a key: nothing may trigger meanwhile.
     pub recording: bool,
 }
@@ -305,8 +310,8 @@ impl Keymap {
         let mut k = Keymap::default();
         for d in DEFS {
             let Some(texts) = saved.get(d.id) else { continue };
-            let parsed: Result<Vec<Binding>, String> = texts.iter().map(|t| Binding::parse(t)).collect();
-            if let Ok(b) = parsed.and_then(|b| if b.is_empty() { Err(String::new()) } else { Ok(b) }) {
+            // an empty list is an action the user cleared: it stays unbound
+            if let Ok(b) = texts.iter().map(|t| Binding::parse(t)).collect::<Result<Vec<Binding>, String>>() {
                 k.custom.insert(d.action, b);
             }
         }
@@ -333,9 +338,13 @@ impl Keymap {
         !self.custom.contains_key(&a)
     }
 
-    /// The bindings as the user reads them, e.g. `j / ↓`.
+    /// The bindings as the user reads them, e.g. `j / ↓`; `not set` for a cleared action.
     pub fn display(&self, a: Action) -> String {
-        self.bindings(a).iter().map(Binding::display).collect::<Vec<_>>().join(" / ")
+        let b = self.bindings(a);
+        if b.is_empty() {
+            return "not set".to_string();
+        }
+        b.iter().map(Binding::display).collect::<Vec<_>>().join(" / ")
     }
 
     /// Can `a` take `b`? The error is the message for the user (KEY-004, KEY-005).
@@ -363,12 +372,33 @@ impl Keymap {
     /// Give `a` this one binding (replacing its others); nothing changes when it is refused.
     pub fn set(&mut self, a: Action, b: Binding) -> Result<(), String> {
         self.check(a, &b)?;
-        if a.defaults() == [b.clone()] {
+        self.store(a, vec![b]);
+        Ok(())
+    }
+
+    /// Give `a` this binding in addition to its others (KEY-006); nothing changes when it is refused.
+    pub fn add(&mut self, a: Action, b: Binding) -> Result<(), String> {
+        self.check(a, &b)?;
+        let mut all = self.bindings(a);
+        if !all.contains(&b) {
+            all.push(b);
+        }
+        self.store(a, all);
+        Ok(())
+    }
+
+    /// Leave `a` without a key; it stays so until it is reset (KEY-007).
+    pub fn clear(&mut self, a: Action) {
+        self.custom.insert(a, vec![]);
+    }
+
+    /// Keep these bindings of `a` as a change, or forget the change when they are the defaults.
+    fn store(&mut self, a: Action, all: Vec<Binding>) {
+        if a.defaults() == all {
             self.custom.remove(&a);
         } else {
-            self.custom.insert(a, vec![b]);
+            self.custom.insert(a, all);
         }
-        Ok(())
     }
 
     /// Forget the chords of an unfinished sequence of this scope (its keys are not being read).
@@ -384,6 +414,12 @@ impl Keymap {
         self.custom.clear();
     }
 
+    /// The keys of the sequence that waits for its next key at time `now`, e.g. `Space f`, for
+    /// the status bar; `None` when nothing waits or the wait is over (KEY-009).
+    pub fn pending_text(&self, now: f64) -> Option<(String, f64)> {
+        self.pending.values().find(|(c, at)| !c.is_empty() && now - at < SEQUENCE_TIMEOUT).map(|(c, at)| (Binding(c.clone()).display(), SEQUENCE_TIMEOUT - (now - at)))
+    }
+
     /// The action of this scope whose binding was just completed by the keys pressed this frame
     /// (the keys are consumed). Starting a sequence returns `None` and remembers its chords; a
     /// key that continues no sequence forgets them (KEY-009).
@@ -391,7 +427,11 @@ impl Keymap {
         if self.recording {
             return None;
         }
-        let pending: Vec<Chord> = self.pending.get(&scope).cloned().unwrap_or_default();
+        let now = input.time;
+        if self.pending.get(&scope).is_some_and(|(_, at)| now - at >= SEQUENCE_TIMEOUT) {
+            self.pending.remove(&scope);
+        }
+        let pending: Vec<Chord> = self.pending.get(&scope).map(|(c, _)| c.clone()).unwrap_or_default();
         let depth = pending.len();
         let mut started = None;
         for d in DEFS.iter().filter(|d| d.scope == scope) {
@@ -414,7 +454,11 @@ impl Keymap {
             }
         }
         match started {
-            Some(c) => self.pending.entry(scope).or_default().push(c),
+            Some(c) => {
+                let entry = self.pending.entry(scope).or_default();
+                entry.0.push(c);
+                entry.1 = now;
+            }
             None if depth > 0 && input.events.iter().any(|e| matches!(e, eframe::egui::Event::Key { pressed: true, .. })) => {
                 self.pending.remove(&scope);
             }
@@ -459,7 +503,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 22 + 23 + 4);
+        assert_eq!(DEFS.len(), 23 + 23 + 4);
     }
 
     // spec: KEY-003
@@ -596,8 +640,96 @@ mod tests {
         .map(|(k, v)| (k.to_string(), v.into_iter().map(String::from).collect()))
         .collect();
         let k = Keymap::from_overrides(&saved);
-        assert_eq!(k.overrides().keys().collect::<Vec<_>>(), ["global.new_note"]);
-        assert!(k.is_default(Action::Back) && k.is_default(Action::Forward) && k.is_default(Action::CloseTab));
+        // an empty list is a cleared action (KEY-007), not a bad entry
+        assert_eq!(k.overrides().keys().collect::<Vec<_>>(), ["global.forward", "global.new_note"]);
+        assert!(k.is_default(Action::Back) && k.is_default(Action::CloseTab));
+    }
+
+    // spec: KEY-007, KEY-006
+    #[test]
+    fn a_cleared_action_stays_unbound() {
+        let mut k = Keymap::default();
+        k.clear(Action::MailFlag);
+        assert!(k.bindings(Action::MailFlag).is_empty() && !k.is_default(Action::MailFlag));
+        assert_eq!(k.display(Action::MailFlag), "not set");
+        assert_eq!(frame(&mut k, Scope::MailView, vec![key_event(Key::S, Modifiers::NONE)]), None, "s does nothing now");
+        assert_eq!(frame(&mut k, Scope::MailView, vec![key_event(Key::F, Modifiers::NONE)]), None, "nor does f");
+        // stored as an empty list, read back as unbound
+        assert_eq!(k.overrides().get("mail.flag"), Some(&vec![]));
+        let k2 = Keymap::from_overrides(&k.overrides());
+        assert!(k2.bindings(Action::MailFlag).is_empty());
+        // the freed keys can go to another action; reset brings the defaults back
+        let mut k2 = k2;
+        k2.set(Action::MailRead, b("S")).unwrap();
+        k2.reset(Action::MailFlag);
+        assert_eq!(k2.check(Action::MailFlag, &b("S")), Err("s is already used by “Mark read or unread”".to_string()));
+        k.reset(Action::MailFlag);
+        assert!(k.overrides().is_empty());
+    }
+
+    // spec: KEY-006
+    #[test]
+    fn add_keeps_the_other_bindings() {
+        let mut k = Keymap::default();
+        k.add(Action::TreeNextFile, b("Ctrl+Alt+J")).unwrap();
+        assert_eq!(k.bindings(Action::TreeNextFile), vec![b("J"), b("Down"), b("Ctrl+Alt+J")]);
+        k.add(Action::TreeNextFile, b("Ctrl+Alt+J")).unwrap();
+        assert_eq!(k.bindings(Action::TreeNextFile).len(), 3, "the same binding twice is one");
+        // a refused one changes nothing and names the other action
+        assert_eq!(k.add(Action::TreeNextFile, b("K")), Err("k is already used by “Previous file”".to_string()));
+        assert_eq!(k.bindings(Action::TreeNextFile).len(), 3);
+        // adding the missing default of a changed action ends in "not changed"
+        k.set(Action::MailFlag, b("S")).unwrap();
+        k.add(Action::MailFlag, b("F")).unwrap();
+        assert!(k.is_default(Action::MailFlag));
+    }
+
+    // spec: KEY-010
+    #[test]
+    fn a_bare_key_does_not_fire_with_shift_or_alt() {
+        let mut k = Keymap::default();
+        let sc = Scope::MailView;
+        for (key, bare, shift) in [(Key::S, Some(Action::MailFlag), None), (Key::R, Some(Action::MailReply), Some(Action::MailReplyAll)), (Key::F, Some(Action::MailFlag), Some(Action::MailForward)), (Key::D, Some(Action::MailDelete), None)]
+        {
+            assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::NONE)]), bare, "{key:?}");
+            assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::SHIFT)]), shift, "Shift+{key:?}");
+            assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::ALT)]), None, "Alt+{key:?}");
+        }
+        // in a sequence too: a later chord needs its exact modifiers
+        k.set(Action::MailMove, b("G X")).unwrap();
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::G, Modifiers::NONE)]), None);
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::X, Modifiers::SHIFT)]), None);
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::G, Modifiers::NONE)]), None);
+        assert_eq!(frame(&mut k, sc, vec![key_event(Key::X, Modifiers::NONE)]), Some(Action::MailMove));
+    }
+
+    // spec: KEY-009
+    #[test]
+    fn a_waiting_sequence_is_shown_and_times_out() {
+        let ctx = egui::Context::default();
+        let mut k = Keymap::default();
+        k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
+        let at = |k: &mut Keymap, t: f64, key: Key| {
+            let mut out = None;
+            let mut full = ctx.run_ui(RawInput { time: Some(t), events: vec![key_event(key, Modifiers::NONE)], ..Default::default() }, |ui| out = ui.input_mut(|i| k.poll(i, Scope::FileList)));
+            full.textures_delta.clear();
+            out
+        };
+        assert_eq!(k.pending_text(10.0), None);
+        at(&mut k, 10.0, Key::Space);
+        at(&mut k, 10.2, Key::F);
+        assert_eq!(k.pending_text(10.5).map(|p| p.0), Some("Space f".to_string()));
+        let left = k.pending_text(10.5).unwrap().1;
+        assert!((left - 1.2).abs() < 1e-9, "{left}");
+        assert_eq!(k.pending_text(11.8), None, "after 1.5 s the status bar drops it");
+        // the dropped sequence does not complete late: the last f starts nothing
+        assert_eq!(at(&mut k, 12.0, Key::F), None);
+        assert_eq!(k.pending_text(12.1), None);
+        // within the time it completes, and a completed one shows nothing
+        at(&mut k, 20.0, Key::Space);
+        at(&mut k, 21.0, Key::F);
+        assert_eq!(at(&mut k, 22.4, Key::F), Some(Action::TreeToggleFolder));
+        assert_eq!(k.pending_text(22.5), None);
     }
 
     fn key_event(key: Key, mods: Modifiers) -> Event {

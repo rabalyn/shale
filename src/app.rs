@@ -139,6 +139,13 @@ impl egui::DroppedFile for ScriptDrop {
     }
 }
 
+/// The tabs of the Settings dialog (KEY-006).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SettingsTab {
+    General,
+    Keybindings,
+}
+
 pub enum Modal {
     /// The picker window (`Space f f`, NAV-020)
     Picker(crate::picker::Picker),
@@ -160,8 +167,10 @@ pub enum Modal {
     },
     Settings {
         vault_path: String,
+        tab: SettingsTab,
+        /// State of the Keybindings tab (KEY-006).
+        keys: Box<crate::keys_ui::KeyDialog>,
     },
-    Keybindings(Box<crate::keys_ui::KeyDialog>),
     Export(Box<crate::export_dialog::ExportDialog>),
     Calendars(Box<crate::cal_dialog::CalendarDialog>),
     Event(Box<crate::cal_dialog::EventDialog>),
@@ -500,7 +509,7 @@ impl ShaleApp {
                     app.side.layout.show_panel(RightPanel::Calendar);
                 }
                 Some("tasks") => app.show_view(View::Tasks, false),
-                Some("keybindings") => app.modal = Some(Modal::Keybindings(Box::default())),
+                Some("keybindings") => app.open_settings(SettingsTab::Keybindings),
                 Some("graph") => app.show_view(View::Graph, false),
                 // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
                 Some(v @ ("social" | "social-import")) => {
@@ -1720,6 +1729,10 @@ impl ShaleApp {
         } else if is(KeyAction::NextTab) {
             self.step_tab(1);
         }
+        // the alternate view from every view, also mail and drawings (KEY-011)
+        if is(KeyAction::AlternateView) && self.modal.is_none() {
+            self.swap_alternate();
+        }
         // Space sequences of vim-style normal mode (EDIT-015); a half typed one is forgotten
         // when the keys are not read any more
         if self.normal_keys_active(ui.ctx()) {
@@ -1783,9 +1796,14 @@ impl ShaleApp {
             self.toast("Saved");
         }
         if settings {
-            let vp = self.cfg.vault.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-            self.modal = Some(Modal::Settings { vault_path: vp });
+            self.open_settings(SettingsTab::General);
         }
+    }
+
+    /// Open the Settings dialog on this tab.
+    pub fn open_settings(&mut self, tab: SettingsTab) {
+        let vault_path = self.cfg.vault.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        self.modal = Some(Modal::Settings { vault_path, tab, keys: Box::default() });
     }
 
     fn screenshot_tick(&mut self, ui: &Ui) {
