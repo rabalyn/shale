@@ -63,14 +63,14 @@ impl Env {
     }
 
     fn sync(&self, vault: &Path) -> Report {
-        let busy = AtomicBool::new(false);
-        let r = sync(&self.git, vault, &self.opts("test"), &busy).unwrap_or_else(|e| panic!("sync of {} failed: {e}", vault.display()));
-        assert!(!busy.load(Ordering::SeqCst));
+        let tree = TreeLock::default();
+        let r = sync(&self.git, vault, &self.opts("test"), &tree).unwrap_or_else(|e| panic!("sync of {} failed: {e}", vault.display()));
+        assert!(tree.try_hold().is_some(), "the sync must release the tree lock");
         r
     }
 
     fn try_sync(&self, vault: &Path) -> Result<Report, String> {
-        sync(&self.git, vault, &self.opts("test"), &AtomicBool::new(false))
+        sync(&self.git, vault, &self.opts("test"), &TreeLock::default())
     }
 }
 
@@ -116,7 +116,7 @@ fn commits_everything_with_prefix_and_suffix_but_not_temp_files() {
     write(&v, "sub/.shale-tmp-1-2-3", "half written");
     write(&v, ".shale-tmp-4-5-6", "half written");
     let opts = Options { commit_prefix: "[notes] ".into(), commit_suffix: " #auto".into(), host: "laptop".into(), stamp: STAMP.into() };
-    let r = sync(&env.git, &v, &opts, &AtomicBool::new(false)).unwrap();
+    let r = sync(&env.git, &v, &opts, &TreeLock::default()).unwrap();
     assert_eq!(r.committed, 2);
     assert!(!r.remote);
     assert_eq!(env.git(&v, &["log", "-1", "--format=%s"]), "[notes] Sync from laptop: 2 file(s) #auto");
@@ -412,7 +412,7 @@ fn without_git_the_sync_reports_it() {
     fs::create_dir_all(v.join(".git")).unwrap();
     let missing = Git { program: env.root.join("no-such-git"), env: vec![] };
     assert_eq!(missing.version(), None);
-    let e = sync(&missing, &v, &env.opts("x"), &AtomicBool::new(false)).unwrap_err();
+    let e = sync(&missing, &v, &env.opts("x"), &TreeLock::default()).unwrap_err();
     assert!(e.contains("could not be started"), "{e}");
     assert!(env.git.version().unwrap().starts_with("git version"));
 }

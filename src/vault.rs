@@ -182,6 +182,39 @@ pub fn rel_to_string(p: &Path) -> String {
     p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
 }
 
+/// The vault's trash folder. Shale never empties it.
+pub const TRASH_DIR: &str = ".trash";
+
+/// `rel` with ` (n)` before the extension of its name (a folder: at the end); `n` 1 is `rel`.
+fn numbered(rel: &Path, n: u32, is_dir: bool) -> PathBuf {
+    if n <= 1 {
+        return rel.to_path_buf();
+    }
+    let Some(name) = rel.file_name().map(|s| s.to_string_lossy().into_owned()) else { return rel.to_path_buf() };
+    let ext = rel.extension().map(|e| e.to_string_lossy().into_owned()).filter(|_| !is_dir);
+    let new = match ext {
+        Some(e) => format!("{} ({n}).{e}", &name[..name.len() - e.len() - 1]),
+        None => format!("{name} ({n})"),
+    };
+    rel.with_file_name(new)
+}
+
+/// Where `.trash/<YYYY-MM-DD>/<path>` came from: `<path>`. None for anything else (an old
+/// entry directly in `.trash/`, a path outside the trash).
+pub fn trash_origin(trash_rel: &Path) -> Option<PathBuf> {
+    let mut c = trash_rel.components();
+    if c.next()?.as_os_str() != TRASH_DIR {
+        return None;
+    }
+    let day = c.next()?.as_os_str().to_str()?;
+    let b = day.as_bytes();
+    if b.len() != 10 || !b.iter().enumerate().all(|(i, x)| if i == 4 || i == 7 { *x == b'-' } else { x.is_ascii_digit() }) {
+        return None;
+    }
+    let rest = c.as_path();
+    (!rest.as_os_str().is_empty()).then(|| rest.to_path_buf())
+}
+
 /// A note with search hits: (note, [(line, byte offset of the match in the line, line text)]).
 pub type SearchHit = (PathBuf, Vec<(usize, usize, String)>);
 
@@ -1009,21 +1042,51 @@ impl Vault {
         Ok(if self.rewrite_note(rel, &text, edits)? { count } else { 0 })
     }
 
-    /// Move a file or folder to `<vault>/.trash/` instead of deleting it for good.
-    pub fn trash(&mut self, rel: &Path) -> io::Result<()> {
+    /// Move a file or folder to `<vault>/.trash/<date>/<its path in the vault>` instead of
+    /// deleting it for good (VAULT-017). Nothing there is replaced: a taken path gets ` (2)`,
+    /// ` (3)` … before the extension. Returns where it went, relative to the vault.
+    pub fn trash(&mut self, rel: &Path) -> io::Result<PathBuf> {
         self.abs_checked(rel)?;
-        let trash = self.root.join(".trash");
-        fs::create_dir_all(&trash)?;
-        let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "item".into());
-        let mut dest = trash.join(&name);
-        let mut i = 1;
-        while dest.exists() {
-            dest = trash.join(format!("{i} {name}"));
-            i += 1;
+        let day = Path::new(TRASH_DIR).join(crate::mail_store::today_string());
+        let is_dir = fs::symlink_metadata(self.abs(rel)).map(|m| m.is_dir()).unwrap_or(false);
+        for n in 1..=1000 {
+            let dest = day.join(numbered(rel, n, is_dir));
+            if let Some(parent) = self.abs(&dest).parent() {
+                fs::create_dir_all(parent)?;
+            }
+            match fsutil::rename_noreplace(&self.abs(rel), &self.abs(&dest)) {
+                Ok(()) => {
+                    self.rescan();
+                    return Ok(dest);
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e),
+            }
         }
-        fsutil::rename_noreplace(&self.abs(rel), &dest)?;
-        self.rescan();
-        Ok(())
+        Err(io::Error::other("there are too many files with that name in today's trash"))
+    }
+
+    /// Put an entry of the dated trash (`.trash/<date>/<path>`) back at its original path
+    /// (VAULT-020). Never replaces: if something is there, it stays and nothing moves.
+    /// Returns the restored path, relative to the vault.
+    pub fn restore(&mut self, trash_rel: &Path) -> io::Result<PathBuf> {
+        let orig = trash_origin(trash_rel).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "that is not an entry of the dated trash"))?;
+        self.abs_checked(trash_rel)?;
+        let to = self.abs_checked(&orig)?;
+        if fs::symlink_metadata(self.abs(trash_rel)).is_err() {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "it is no longer in the trash"));
+        }
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        match fsutil::rename_noreplace(&self.abs(trash_rel), &to) {
+            Ok(()) => {
+                self.rescan();
+                Ok(orig)
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("“{}” is already there; the trashed copy stays in the trash", rel_to_string(&orig)))),
+            Err(e) => Err(e),
+        }
     }
 
     /// Nodes and edges for the graph view. Unresolved link targets become extra nodes.
@@ -1310,9 +1373,10 @@ mod tests {
         let p2 = v.new_note_path(Path::new(""), "Thoughts");
         assert_eq!(p2, PathBuf::from("Thoughts 1.md"));
         // trash
-        v.trash(Path::new("Reading list.md")).unwrap();
+        let gone = v.trash(Path::new("Reading list.md")).unwrap();
         assert!(!v.exists("Reading list", None));
-        assert!(d.join(".trash/Reading list.md").exists());
+        assert!(d.join(&gone).exists());
+        assert_eq!(gone, Path::new(".trash").join(crate::mail_store::today_string()).join("Reading list.md"));
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -1550,6 +1614,122 @@ mod tests {
         assert_eq!(v.fix_link(rel, "Archive/Plan", Path::new("b/Plan.md")).unwrap(), 1);
         assert_eq!(text(&v, "Index.md"), "[[b/Plan]]");
         assert_eq!(v.fix_candidates("b/Plan", Some(rel)), Vec::<PathBuf>::new());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    fn day() -> PathBuf {
+        Path::new(".trash").join(crate::mail_store::today_string())
+    }
+
+    fn put(d: &Path, rel: &str, text: &str) {
+        let p = d.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fsutil::write_atomic(&p, text.as_bytes()).unwrap();
+    }
+
+    // spec: VAULT-017
+    #[test]
+    fn trash_keeps_the_original_path_so_same_names_from_different_folders_do_not_mix() {
+        let d = temp_vault("trash-origin");
+        put(&d, "a/Note.md", "from a\n");
+        put(&d, "b/Note.md", "from b\n");
+        let mut v = Vault::open(&d).unwrap();
+        let ta = v.trash(Path::new("a/Note.md")).unwrap();
+        let tb = v.trash(Path::new("b/Note.md")).unwrap();
+        assert_eq!(ta, day().join("a/Note.md"));
+        assert_eq!(tb, day().join("b/Note.md"));
+        assert_eq!(fsutil::read_to_string(d.join(&ta)).unwrap(), "from a\n");
+        assert_eq!(fsutil::read_to_string(d.join(&tb)).unwrap(), "from b\n");
+        assert!(!d.join("a/Note.md").exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-017
+    #[test]
+    fn trash_takes_a_folder_with_its_content() {
+        let d = temp_vault("trash-folder");
+        put(&d, "proj/one.md", "1\n");
+        put(&d, "proj/deep/two.md", "2\n");
+        let mut v = Vault::open(&d).unwrap();
+        let t = v.trash(Path::new("proj")).unwrap();
+        assert_eq!(t, day().join("proj"));
+        assert_eq!(fsutil::read_to_string(d.join(&t).join("one.md")).unwrap(), "1\n");
+        assert_eq!(fsutil::read_to_string(d.join(&t).join("deep/two.md")).unwrap(), "2\n");
+        assert!(!d.join("proj").exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-017
+    #[test]
+    fn a_name_clash_on_the_same_day_gets_a_number_before_the_extension_and_nothing_is_replaced() {
+        let d = temp_vault("trash-clash");
+        let mut v = Vault::open(&d).unwrap();
+        let mut got = vec![];
+        for i in 1..=3 {
+            put(&d, "Note.md", &format!("version {i}\n"));
+            v.rescan();
+            got.push(v.trash(Path::new("Note.md")).unwrap());
+        }
+        assert_eq!(got, vec![day().join("Note.md"), day().join("Note (2).md"), day().join("Note (3).md")]);
+        for (i, t) in got.iter().enumerate() {
+            assert_eq!(fsutil::read_to_string(d.join(t)).unwrap(), format!("version {}\n", i + 1));
+        }
+        // folders: the number goes at the end of the name, even when it has a dot
+        for _ in 0..2 {
+            put(&d, "v1.2/x.md", "x\n");
+            v.rescan();
+            v.trash(Path::new("v1.2")).unwrap();
+        }
+        assert!(d.join(day()).join("v1.2 (2)/x.md").exists());
+        // an old entry directly in .trash/ stays where it is
+        put(&d, ".trash/Old.md", "old\n");
+        put(&d, "Old.md", "new\n");
+        v.rescan();
+        v.trash(Path::new("Old.md")).unwrap();
+        assert_eq!(fsutil::read_to_string(d.join(".trash/Old.md")).unwrap(), "old\n");
+        assert_eq!(fsutil::read_to_string(d.join(day()).join("Old.md")).unwrap(), "new\n");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-020
+    #[test]
+    fn restore_brings_a_file_back_and_refuses_when_the_place_is_taken() {
+        let d = temp_vault("trash-restore");
+        put(&d, "a/b/Note.md", "precious\n");
+        let mut v = Vault::open(&d).unwrap();
+        let t = v.trash(Path::new("a/b/Note.md")).unwrap();
+        fs::remove_dir_all(d.join("a")).unwrap(); // the folder is gone too: restore makes it again
+        let back = v.restore(&t).unwrap();
+        assert_eq!(back, PathBuf::from("a/b/Note.md"));
+        assert_eq!(fsutil::read_to_string(d.join(&back)).unwrap(), "precious\n");
+        assert!(!d.join(&t).exists());
+        assert!(v.notes.contains_key(Path::new("a/b/Note.md")));
+        // trash it again, then put something else in its place
+        let t2 = v.trash(Path::new("a/b/Note.md")).unwrap();
+        assert_eq!(t2, t, "restore moved the first trashed copy away, so the path is free again");
+        put(&d, "a/b/Note.md", "newer\n");
+        v.rescan();
+        let e = v.restore(&t2).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
+        assert!(e.to_string().contains("already there"), "{e}");
+        assert_eq!(fsutil::read_to_string(d.join("a/b/Note.md")).unwrap(), "newer\n");
+        assert_eq!(fsutil::read_to_string(d.join(&t2)).unwrap(), "precious\n");
+        // only entries of the dated trash are restored
+        assert!(v.restore(Path::new("Note.md")).is_err());
+        assert!(v.restore(Path::new(".trash/Old.md")).is_err());
+        assert!(v.restore(&day().join("../../x")).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-020
+    #[test]
+    fn restore_brings_a_folder_back_with_its_content() {
+        let d = temp_vault("trash-restore-dir");
+        put(&d, "proj/deep/two.md", "2\n");
+        let mut v = Vault::open(&d).unwrap();
+        let t = v.trash(Path::new("proj")).unwrap();
+        assert_eq!(v.restore(&t).unwrap(), PathBuf::from("proj"));
+        assert_eq!(fsutil::read_to_string(d.join("proj/deep/two.md")).unwrap(), "2\n");
         let _ = fs::remove_dir_all(&d);
     }
 }

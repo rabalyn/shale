@@ -272,6 +272,7 @@ impl ShaleApp {
             doc.last_edit = std::time::Instant::now() - std::time::Duration::from_secs(10);
             return;
         }
+        let Some(_tree) = self.hold_sync_tree() else { return };
         let Some(v) = &mut self.vault else { return };
         // the file as it is now; one that can't be read is left alone
         if let Err(e) = v.edit_note(note, |old| Some(join(old))) {
