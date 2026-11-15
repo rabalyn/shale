@@ -5,6 +5,7 @@ use crate::drawing::DrawingDoc;
 use crate::editor::{EditorAction, NoteEditor};
 use crate::fsutil;
 use crate::graph::{GraphClick, GraphView};
+use crate::keys::{Action as KeyAction, Scope};
 use crate::markdown;
 use crate::reader::{ReaderAction, SceneCache};
 use crate::theme;
@@ -58,9 +59,22 @@ pub struct Tab {
     pub back: Vec<View>,
     pub fwd: Vec<View>,
     pub reading: bool,
+    /// Pinned tabs sit left of all others (NAV-016).
+    pub pinned: bool,
     pub editor: NoteEditor,
     pub title_buf: String,
     pub title_for: Option<PathBuf>,
+}
+
+/// What the tab bar drew last frame besides the tabs themselves.
+#[derive(Default)]
+pub(crate) struct TabMarks {
+    /// the drop marker while a tab is dragged (NAV-014)
+    pub drop_marker: Option<egui::Rect>,
+    /// the tabs (by index) that show a pin (NAV-016)
+    pub pinned: Vec<usize>,
+    /// the "Pin tab" / "Unpin tab" entry of an open tab menu
+    pub menu_pin: Option<egui::Rect>,
 }
 
 pub struct NoteDoc {
@@ -145,6 +159,7 @@ pub enum Modal {
     Settings {
         vault_path: String,
     },
+    Keybindings(Box<crate::keys_ui::KeyDialog>),
     Export(Box<crate::export_dialog::ExportDialog>),
     Calendars(Box<crate::cal_dialog::CalendarDialog>),
     Event(Box<crate::cal_dialog::EventDialog>),
@@ -282,6 +297,8 @@ pub struct ShaleApp {
     pub(crate) tree_targets: Vec<(egui::Rect, PathBuf, bool)>,
     /// where the tabs of the tab bar are, and their close marks (for tests)
     pub(crate) tab_rects: Vec<(egui::Rect, egui::Rect)>,
+    /// what the tab bar showed last frame besides the tabs (for tests)
+    pub(crate) tab_marks: TabMarks,
     /// a closed folder hovered while dragging, since when (it opens after a moment)
     tree_hover: Option<(PathBuf, Instant)>,
     calendar_areas: Vec<egui::Rect>,
@@ -306,6 +323,8 @@ pub struct ShaleApp {
     pending_drops: Vec<(std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>)>,
     pub scenes: SceneCache,
     pub modal: Option<Modal>,
+    /// The key registry with the user's changes (KEY-001…009).
+    pub keymap: crate::keys::Keymap,
     pub actions: Vec<Action>,
     pub toasts: Vec<(String, Instant)>,
     /// What this session moved to the trash, newest last: where it is in `.trash/` (VAULT-020).
@@ -362,6 +381,7 @@ impl ShaleApp {
         };
         let default_welcome = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_default().join("Notes");
         let mut app = ShaleApp {
+            keymap: crate::keys::Keymap::from_overrides(&cfg.keybindings),
             cfg: cfg.clone(),
             persist_config,
             vdata: crate::vault_state::VaultData::default(),
@@ -401,6 +421,7 @@ impl ShaleApp {
             drop_zones: vec![],
             tree_targets: vec![],
             tab_rects: vec![],
+            tab_marks: TabMarks::default(),
             tree_hover: None,
             calendar_areas: vec![],
             ext_hover: None,
@@ -463,6 +484,7 @@ impl ShaleApp {
                 Some("mail") => app.show_view(View::Mail, false),
                 Some("calendar-side") => app.right = RightPanel::Calendar,
                 Some("tasks") => app.show_view(View::Tasks, false),
+                Some("keybindings") => app.modal = Some(Modal::Keybindings(Box::default())),
                 Some("graph") => app.show_view(View::Graph, false),
                 // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
                 Some(v @ ("social" | "social-import")) => {
@@ -573,6 +595,7 @@ impl ShaleApp {
                 self.active = 0;
                 self.cfg.remember_vault(path.to_path_buf());
                 let reopen: Vec<String> = self.vdata.state.open_files.clone();
+                let pinned: Vec<String> = self.vdata.state.pinned_files.clone();
                 // (opening a note rewrites the saved lists, so read both first)
                 let reopen_feeds: Vec<crate::social::FeedRef> = self.vdata.state.open_feeds.clone();
                 for (i, f) in reopen.iter().enumerate() {
@@ -586,6 +609,10 @@ impl ShaleApp {
                     } else {
                         self.open(&rel, i > 0);
                     }
+                }
+                // (open_files is in tab order, pinned tabs first: they stay first)
+                for t in &mut self.tabs {
+                    t.pinned = t.view.path().is_some_and(|p| pinned.contains(&rel_to_string(p)));
                 }
                 // Feeds tabs come back after the note tabs (the accounts must still exist)
                 let known: Vec<crate::social::FeedRef> = reopen_feeds.into_iter().filter(|f| self.cfg.social_accounts.iter().any(|e| e.account.id == f.account)).collect();
@@ -613,7 +640,7 @@ impl ShaleApp {
     pub fn new_tab(&mut self, view: View) {
         let id = self.next_tab_id;
         self.next_tab_id += 1;
-        self.tabs.push(Tab { id, view, back: vec![], fwd: vec![], reading: false, editor: NoteEditor::new(egui::Id::unique(("note-editor", id))), title_buf: String::new(), title_for: None });
+        self.tabs.push(Tab { id, view, back: vec![], fwd: vec![], reading: false, pinned: false, editor: NoteEditor::new(egui::Id::unique(("note-editor", id))), title_buf: String::new(), title_for: None });
         self.active = self.tabs.len() - 1;
     }
 
@@ -769,6 +796,7 @@ impl ShaleApp {
             return;
         }
         self.vdata.state.open_files = self.tabs.iter().filter_map(|t| t.view.path().map(rel_to_string)).collect();
+        self.vdata.state.pinned_files = self.tabs.iter().filter(|t| t.pinned).filter_map(|t| t.view.path().map(rel_to_string)).collect();
         self.vdata.state.open_feeds = self.open_feed_refs();
     }
 
@@ -1526,6 +1554,45 @@ impl ShaleApp {
         }
     }
 
+    /// Where a tab dragged to the pointer at `x` would land: the gap index in `0..=tabs.len()`,
+    /// kept inside the tab's own group, pinned tabs first (NAV-017). `mids` are the tabs' centres.
+    pub(crate) fn tab_slot(&self, from: usize, x: f32, mids: &[f32]) -> usize {
+        let pinned = self.tabs.iter().take_while(|t| t.pinned).count();
+        let (lo, hi) = if self.tabs[from].pinned { (0, pinned) } else { (pinned, self.tabs.len()) };
+        mids.iter().filter(|m| **m < x).count().clamp(lo, hi)
+    }
+
+    /// Move the tab `from` into the gap `slot` (as `tab_slot` counts it); the open tab stays open.
+    pub(crate) fn move_tab(&mut self, from: usize, slot: usize) {
+        self.move_tab_to(from, if slot > from { slot - 1 } else { slot });
+    }
+
+    fn move_tab_to(&mut self, from: usize, to: usize) {
+        if from >= self.tabs.len() || to == from {
+            return;
+        }
+        let active_id = self.tabs.get(self.active).map(|t| t.id);
+        let t = self.tabs.remove(from);
+        self.tabs.insert(to, t);
+        if let Some(id) = active_id {
+            self.active = self.tabs.iter().position(|t| t.id == id).unwrap_or(0);
+        }
+        self.remember_open_files();
+    }
+
+    /// Pin or unpin a tab: it moves to the end of the pinned tabs (NAV-016).
+    pub(crate) fn set_tab_pinned(&mut self, i: usize, pinned: bool) {
+        let Some(t) = self.tabs.get_mut(i) else { return };
+        if t.pinned == pinned {
+            return;
+        }
+        t.pinned = pinned;
+        let count = self.tabs.iter().filter(|t| t.pinned).count();
+        // the end of the pinned group (the unpinned tab is not counted: it is the first outside)
+        self.move_tab_to(i, if pinned { count - 1 } else { count });
+        self.remember_open_files();
+    }
+
     pub fn go_back(&mut self) {
         if let Some(t) = self.tabs.get_mut(self.active) {
             if let Some(prev) = t.back.pop() {
@@ -1592,22 +1659,12 @@ impl ShaleApp {
         // mouse side buttons: back / forward through the notes opened in this tab
         let (mouse_back, mouse_fwd) = ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2)));
         // Ctrl+H / Ctrl+L (like vim's h / l): keyboard into the sidebar / back into the editor;
-        // Ctrl+Shift+B: the file list
-        let (to_sidebar, to_editor, files) = ui.input_mut(|i| (i.consume_key(Modifiers::COMMAND, Key::H), i.consume_key(Modifiers::COMMAND, Key::L), i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::B)));
-        let mail_view = ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::M));
-        let (quick, new_note, toggle, back, fwd, close, search, save, settings) = ui.input_mut(|i| {
-            (
-                i.consume_key(Modifiers::COMMAND, Key::O),
-                i.consume_key(Modifiers::COMMAND, Key::N),
-                i.consume_key(Modifiers::COMMAND, Key::E),
-                i.consume_key(Modifiers::ALT, Key::ArrowLeft),
-                i.consume_key(Modifiers::ALT, Key::ArrowRight),
-                i.consume_key(Modifiers::COMMAND, Key::W),
-                i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::F),
-                i.consume_key(Modifiers::COMMAND, Key::S),
-                i.consume_key(Modifiers::COMMAND, Key::Comma),
-            )
-        });
+        // Ctrl+Shift+B: the file list; all of them are in the key registry (KEY-001)
+        let action = ui.input_mut(|i| self.keymap.poll(i, Scope::Global));
+        let is = |k: KeyAction| action == Some(k);
+        let (mail_view, quick, new_note, toggle, back, fwd) = (is(KeyAction::MailView), is(KeyAction::QuickSwitcher), is(KeyAction::NewNote), is(KeyAction::ToggleReading), is(KeyAction::Back), is(KeyAction::Forward));
+        let (close, search, save, settings, files, to_sidebar, to_editor) =
+            (is(KeyAction::CloseTab), is(KeyAction::Search), is(KeyAction::Save), is(KeyAction::Settings), is(KeyAction::ShowFiles), is(KeyAction::FocusSidebar), is(KeyAction::FocusEditor));
         if self.vault.is_none() {
             return;
         }

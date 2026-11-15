@@ -1,0 +1,25 @@
+# Radicale for Shale's CalDAV test environment (CALENV-001). Test values only.
+[server]
+hosts = 0.0.0.0:5232
+ssl = True
+certificate = /certs/tls.crt
+key = /certs/tls.key
+
+[auth]
+type = htpasswd
+htpasswd_filename = /config/users
+htpasswd_encryption = plain
+# Radicale delays a wrong password by this many seconds
+delay = 1
+
+[rights]
+type = owner_only
+
+[storage]
+filesystem_folder = /data/collections
+
+[web]
+type = none
+
+[logging]
+level = info

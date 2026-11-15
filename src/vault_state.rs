@@ -187,6 +187,8 @@ pub struct VaultState {
     pub version: u64,
     /// Notes open when the app was closed (vault-relative, '/' separated).
     pub open_files: Vec<String>,
+    /// Which of `open_files` were pinned tabs (NAV-016); older files have none.
+    pub pinned_files: Vec<String>,
     /// Feeds tabs open when the app was closed (SOC-024); older files have none.
     pub open_feeds: Vec<crate::social::FeedRef>,
     /// The folder used for the last import (vault-relative).
@@ -201,7 +203,7 @@ pub struct VaultState {
 
 impl Default for VaultState {
     fn default() -> Self {
-        VaultState { version: Self::CURRENT, open_files: vec![], open_feeds: vec![], last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
+        VaultState { version: Self::CURRENT, open_files: vec![], pinned_files: vec![], open_feeds: vec![], last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
     }
 }
 
@@ -377,6 +379,16 @@ mod tests {
         let (s, _) = parse::<VaultState>(br#"{"version": 1, "open_feeds": [{"account": "a", "feed": "home"}], "future": 7}"#).unwrap();
         assert_eq!(s.open_feeds, vec![crate::social::FeedRef { account: "a".into(), feed: "home".into() }]);
         assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"future\""));
+    }
+
+    // spec: NAV-016
+    #[test]
+    fn pinned_files_are_part_of_the_state_and_an_old_file_still_loads() {
+        let (old, _) = parse::<VaultState>(br#"{"version": 1, "open_files": ["a.md"]}"#).unwrap();
+        assert!(old.pinned_files.is_empty());
+        let (s, _) = parse::<VaultState>(br#"{"version": 1, "open_files": ["a.md", "b.md"], "pinned_files": ["b.md"]}"#).unwrap();
+        assert_eq!(s.pinned_files, vec!["b.md".to_string()]);
+        assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"pinned_files\""));
     }
 
     // spec: CFG-006
