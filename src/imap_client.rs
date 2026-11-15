@@ -563,6 +563,9 @@ impl Wire {
             let avail = &self.buf[self.pos..self.len];
             if let Some(i) = avail[scanned.min(avail.len().saturating_sub(1))..].windows(2).position(|w| w == b"\r\n") {
                 let end = scanned.min(avail.len().saturating_sub(1)) + i;
+                if end > self.max_line {
+                    return Err(ImapError::Protocol("a line of the answer is too long".into()));
+                }
                 let line = avail[..end].to_vec();
                 self.pos += end + 2;
                 return Ok(line);
@@ -1619,5 +1622,236 @@ mod tests {
             let r = RawResponse { text: t.as_bytes().to_vec(), lits: vec![] };
             let _ = parse_untagged(&r);
         }
+    }
+
+    /// An answer as `read_response` leaves it: `\0` stands where a literal was.
+    fn resp(text: &str, lits: &[&[u8]]) -> RawResponse {
+        RawResponse { text: text.as_bytes().to_vec(), lits: lits.iter().map(|l| Literal::Data(l.to_vec())).collect() }
+    }
+
+    fn fetch(text: &str, lits: &[&[u8]]) -> Result<Fetched> {
+        match parse_untagged(&resp(text, lits))? {
+            Untagged::Fetch(f) => Ok(f),
+            other => panic!("not a fetch: {other:?}"),
+        }
+    }
+
+    /// Runs `f` on its own thread and fails if it does not come back (a parser that loops is a hang of the sync).
+    fn within_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(Duration::from_secs(20)).expect("the parser did not finish")
+    }
+
+    // spec: MAIL-221
+    #[test]
+    fn a_fetch_answer_with_literals_nested_lists_nil_and_escaped_strings_is_read_and_the_odd_parts_skipped() {
+        // items the client does not ask for come in lists inside lists, with strings that hold quotes and parentheses
+        let f = fetch(
+            "3 FETCH (ENVELOPE (\"Tue, 1 Jan\" \"a \\\"quoted\\\" ) subject (\" NIL ((\"Bob\" NIL \"bob\" \"x.de\")(NIL NIL \"\\0\" NIL)) \0) BODYSTRUCTURE ((\"TEXT\" \"PLAIN\" (\"CHARSET\" \"UTF-8\") NIL NIL \"7BIT\" 12 1)) UID 42 FLAGS (\\Seen \\answered $Junk \\Flagged) RFC822.SIZE 777 INTERNALDATE \"17-Jul-1996 02:44:25 -0700\" MODSEQ (9001) BODY[] \0)",
+            &[b"a)(\"literal\r\nwith (parens", b"body\r\n\r\nline\r\n"],
+        )
+        .unwrap();
+        assert_eq!(f.uid, 42);
+        assert_eq!(f.flags.as_deref(), Some("$Junk \\answered \\Flagged \\Seen"), "sorted ignoring case");
+        assert_eq!(f.size, Some(777));
+        assert_eq!(f.internal_date, Some(837_596_665));
+        assert_eq!(f.modseq, Some(9001));
+        assert_eq!(f.body, Some(Body::Data(b"body\r\n\r\nline\r\n".to_vec())));
+        // keywords in any case, UID last, a section name that holds spaces and parentheses, NIL body
+        let f = fetch("1 FETCH (flags (\\seen) body[header.fields (from to)] NIL uid 7)", &[]).unwrap();
+        assert_eq!((f.uid, f.flags.as_deref(), f.body.clone()), (7, Some("\\seen"), None));
+        let f = fetch("1 FETCH (UID 8 BODY[HEADER.FIELDS (FROM TO)] \0)", &[b"From: a\r\n\r\n"]).unwrap();
+        assert_eq!(f.body, Some(Body::Data(b"From: a\r\n\r\n".to_vec())));
+        // an empty literal and an empty flag list are values too
+        let f = fetch("1 FETCH (UID 9 FLAGS () BODY[] \0)", &[b""]).unwrap();
+        assert_eq!((f.flags.as_deref(), f.body), (Some(""), Some(Body::Data(vec![]))));
+        // a literal over the limit is only a size, a NIL date and a garbled date are no date
+        let r = RawResponse { text: b"1 FETCH (UID 4 BODY[] \0 INTERNALDATE NIL)".to_vec(), lits: vec![Literal::Skipped(999)] };
+        let Untagged::Fetch(f) = parse_untagged(&r).unwrap() else { panic!() };
+        assert_eq!((f.body, f.internal_date), (Some(Body::TooLarge(999)), None));
+        let f = fetch("1 FETCH (UID 4 INTERNALDATE \"garbage\" RFC822.SIZE x MODSEQ (x))", &[]).unwrap();
+        assert_eq!((f.internal_date, f.size, f.modseq), (None, None, None));
+    }
+
+    // spec: MAIL-221
+    #[test]
+    fn skip_value_skips_exactly_one_value_whatever_it_holds() {
+        let after = |text: &str, lits: &[&[u8]]| {
+            let r = resp(text, lits);
+            let mut t = Toks::new(&r);
+            t.skip_value();
+            t.next()
+        };
+        let atom = |s: &str| Tok::Atom(s.into());
+        assert_eq!(after("a b", &[]), atom("b"));
+        assert_eq!(after("\"a b\" c", &[]), atom("c"));
+        assert_eq!(after("\"a \\\" b\" c", &[]), atom("c"), "an escaped quote does not end the string");
+        assert_eq!(after("\"a \\\\\" c", &[]), atom("c"), "an escaped backslash does");
+        assert_eq!(after("\0 c", &[b"x ) (y"]), atom("c"), "a literal with parentheses is one value");
+        assert_eq!(after("(a (b (c \0 \"d)\")) e) f", &[b")))"]), atom("f"));
+        assert_eq!(after("() x", &[]), atom("x"));
+        assert_eq!(after("NIL x", &[]), atom("x"));
+        assert_eq!(after("BODY[HEADER.FIELDS (A B)] x", &[]), atom("x"));
+        // a close with nothing open is consumed; no value at all is the end
+        assert_eq!(after(") x", &[]), atom("x"));
+        assert_eq!(after("", &[]), Tok::End);
+        // cut off inside: the rest is gone, no panic
+        assert_eq!(after("(a (b", &[]), Tok::End);
+        assert_eq!(after("\"open", &[]), Tok::End);
+        // a literal that is not there (the text says one, the list has none)
+        assert_eq!(after("\0", &[]), Tok::End);
+        // skip_value_open and skip_value_until_close stop at the matching parenthesis
+        let r = resp("a (b c) d) e f", &[]);
+        let mut t = Toks::new(&r);
+        t.skip_value_until_close();
+        assert_eq!(t.next(), atom("e"));
+        let r = resp("b (c) d) e", &[]);
+        let mut t = Toks::new(&r);
+        t.skip_value_open();
+        assert_eq!(t.next(), atom("e"));
+    }
+
+    // spec: MAIL-221
+    #[test]
+    fn folder_search_and_status_answers_with_odd_but_legal_shapes_are_understood() {
+        let Untagged::List(e) = parse_untagged(&resp("LIST (\\HasNoChildren \\Sent) NIL \0", &[b"Entw&APw-rfe/\"x\""])).unwrap() else { panic!() };
+        assert_eq!((e.name.as_str(), e.delimiter.as_deref()), ("Entw&APw-rfe/\"x\"", None));
+        assert!(e.has_attr("\\sent") && e.has_attr("\\HASNOCHILDREN"));
+        let Untagged::List(e) = parse_untagged(&resp("lsub () \"/\" \"a\\\"b\"", &[])).unwrap() else { panic!() };
+        assert_eq!((e.name.as_str(), e.delimiter.as_deref(), e.attributes.len()), ("a\"b", Some("/"), 0));
+        let Untagged::List(e) = parse_untagged(&resp("LIST () \".\" INBOX", &[])).unwrap() else { panic!() };
+        assert_eq!(e.name, "INBOX");
+        let Untagged::Search(v) = parse_untagged(&resp("SEARCH 4 8 15 (MODSEQ 99)", &[])).unwrap() else { panic!() };
+        assert_eq!(v, vec![4, 8, 15]);
+        let Untagged::Search(v) = parse_untagged(&resp("SEARCH", &[])).unwrap() else { panic!() };
+        assert!(v.is_empty());
+        let Untagged::Status { kind, code, text } = parse_untagged(&resp("ok [uidnext 12]  fine and [dandy]", &[])).unwrap() else { panic!() };
+        assert_eq!((kind.as_str(), code, text.as_str()), ("OK", Some(("UIDNEXT".into(), "12".into())), "fine and [dandy]"));
+        let Untagged::Status { code, text, .. } = parse_untagged(&resp("BYE", &[])).unwrap() else { panic!() };
+        assert_eq!((code, text.as_str()), (None, ""));
+        let Untagged::Capability(c) = parse_untagged(&resp("capability IMAP4rev1 move UIDPLUS", &[])).unwrap() else { panic!() };
+        assert_eq!(c, ["IMAP4REV1", "MOVE", "UIDPLUS"]);
+        assert!(matches!(parse_untagged(&resp("4 EXISTS", &[])).unwrap(), Untagged::Exists(4)));
+        assert!(matches!(parse_untagged(&resp("4 EXPUNGE", &[])).unwrap(), Untagged::Other));
+        assert!(matches!(parse_untagged(&resp("4", &[])).unwrap(), Untagged::Other));
+        assert!(matches!(parse_untagged(&resp("XSOMETHING (a b)", &[])).unwrap(), Untagged::Other));
+    }
+
+    // spec: MAIL-221
+    #[test]
+    fn broken_answers_are_a_protocol_error_and_never_a_panic() {
+        for text in [
+            "1 FETCH UID 5",
+            "1 FETCH (UID 5 FLAGS \\Seen)",
+            "1 FETCH (FLAGS (\\Seen))",
+            "1 FETCH (UID abc)",
+            "1 FETCH (UID -1)",
+            "1 FETCH (UID 99999999999)",
+            "1 FETCH (UID (5))",
+            "1 FETCH (UID 5 (x))",
+            "1 FETCH (UID 5 BODY[] (x))",
+            "1 FETCH (UID 5 BODY[] 12)",
+            "1 FETCH (UID 5 \"x\" 1)",
+            "LIST",
+            "LIST \\Noselect \"/\" x",
+            "LIST (\"a\") \"/\" x",
+            "LIST () \"/\"",
+            "LIST () \"/\" NIL",
+            "LIST () \"/\" \0",
+            "(a)",
+            "\"x\"",
+            "",
+        ] {
+            assert!(matches!(parse_untagged(&resp(text, &[])), Err(ImapError::Protocol(_))), "{text:?} must be a protocol error");
+        }
+        // a literal that is too long for a folder name
+        let r = RawResponse { text: b"LIST () \"/\" \0".to_vec(), lits: vec![Literal::Skipped(1 << 30)] };
+        assert!(matches!(parse_untagged(&r), Err(ImapError::Protocol(_))));
+    }
+
+    // spec: MAIL-221
+    #[test]
+    fn an_answer_cut_off_after_every_byte_and_random_bytes_end_without_a_panic_or_a_hang() {
+        within_seconds(|| {
+            let whole = "3 FETCH (ENVELOPE (\"a \\\"q\\\" )\" NIL ((\"B\" NIL \"b\" \"x.de\")) \0) UID 42 FLAGS (\\Seen $x) MODSEQ (7 (8)) INTERNALDATE \"17-Jul-1996 02:44:25 -0700\" BODY[HEADER.FIELDS (A B)] \0)";
+            let lits: [&[u8]; 2] = [b"l)(\"", b"body"];
+            for n in 0..=whole.len() {
+                let cut = &whole.as_bytes()[..n];
+                let nlits = cut.iter().filter(|&&b| b == 0).count();
+                for with in [nlits, 0] {
+                    let r = resp("", &lits[..with.min(2)]);
+                    let r = RawResponse { text: cut.to_vec(), lits: r.lits };
+                    let _ = parse_untagged(&r);
+                }
+            }
+            for line in ["LIST (\\a \\b) \"/\" \0", "SEARCH 1 2 3 (MODSEQ 5)", "OK [CAPABILITY IMAP4rev1] ready"] {
+                for n in 0..=line.len() {
+                    let _ = parse_untagged(&RawResponse { text: line.as_bytes()[..n].to_vec(), lits: vec![Literal::Data(b"x".to_vec())] });
+                }
+            }
+            // every byte value in every position of a short answer, and a pile of open parentheses
+            for pos in 0..12 {
+                for b in 0..=255u8 {
+                    let mut t = b"1 FETCH (UID 5)".to_vec();
+                    t[pos] = b;
+                    let _ = parse_untagged(&RawResponse { text: t, lits: vec![] });
+                }
+            }
+            let mut deep = b"1 FETCH (UID 1 X ".to_vec();
+            deep.extend(std::iter::repeat_n(b'(', 200_000));
+            let _ = parse_untagged(&RawResponse { text: deep, lits: vec![] });
+        });
+    }
+
+    /// A `Wire` that reads what a server thread writes (and then closes the connection).
+    fn wire_over(bytes: Vec<u8>, max_line: usize) -> Wire {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let _ = s.write_all(&bytes);
+        });
+        let tcp = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        tcp.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        Wire::new(Io::Plain(tcp), max_line)
+    }
+
+    // spec: MAIL-221
+    #[test]
+    fn the_wire_takes_literals_apart_and_refuses_nul_bytes_long_lines_and_a_connection_that_ends_early() {
+        // literals: kept up to the budget (in total), then read and thrown away, the line goes on after each
+        let mut w = wire_over(b"* 1 FETCH (BODY[] {5}\r\nab\r\nc BODY[HEADER] {3+}\r\nxyz UID 1 X {9}\r\n123456789)\r\n* next\r\n".to_vec(), 1000);
+        let r = w.read_response(8).unwrap();
+        assert_eq!(r.text, b"* 1 FETCH (BODY[] \0 BODY[HEADER] \0 UID 1 X \0)");
+        assert_eq!(r.lits, vec![Literal::Data(b"ab\r\nc".to_vec()), Literal::Data(b"xyz".to_vec()), Literal::Skipped(9)]);
+        assert_eq!(w.read_response(8).unwrap().text, b"* next");
+        // a line that only looks like a literal is a plain line; a zero-length literal is fine
+        let mut w = wire_over(b"* x {abc}\r\n* y {0}\r\n)\r\n".to_vec(), 1000);
+        assert_eq!(w.read_response(8).unwrap().text, b"* x {abc}");
+        let r = w.read_response(8).unwrap();
+        assert_eq!((r.text, r.lits), (b"* y \0)".to_vec(), vec![Literal::Data(vec![])]));
+        // a NUL byte in a line
+        let mut w = wire_over(b"* OK a\0b\r\n".to_vec(), 1000);
+        assert!(matches!(w.read_response(8), Err(ImapError::Protocol(t)) if t.contains("NUL")));
+        // a line longer than the limit (also one that never ends)
+        let mut w = wire_over(vec![b'x'; 5000], 100);
+        assert!(matches!(w.read_line(), Err(ImapError::Protocol(_))));
+        let mut w = wire_over([vec![b'y'; 300], b"\r\n".to_vec()].concat(), 100);
+        assert!(matches!(w.read_line(), Err(ImapError::Protocol(_))));
+        // the connection ends in a line, in a literal, and in a skipped literal
+        for bytes in [&b"* OK no end"[..], b"* 1 FETCH (BODY[] {10}\r\nabc", b"* 1 FETCH (BODY[] {10}\r\n"] {
+            for budget in [100, 0] {
+                let mut w = wire_over(bytes.to_vec(), 1000);
+                assert!(matches!(w.read_response(budget), Err(ImapError::Connection(_))), "{bytes:?}");
+            }
+        }
+        // a line with a CRLF split over two reads, and a bare LF is not a line end
+        let mut w = wire_over(b"* A\r\n* B\n\r\n".to_vec(), 1000);
+        assert_eq!(w.read_line().unwrap(), b"* A");
+        assert_eq!(w.read_line().unwrap(), b"* B\n");
+        assert!(!w.has_buffered());
     }
 }
