@@ -5,6 +5,7 @@ use crate::drawing::DrawingDoc;
 use crate::editor::{EditorAction, NoteEditor};
 use crate::fsutil;
 use crate::graph::{GraphClick, GraphView};
+use crate::keys::{Action as KeyAction, Scope};
 use crate::markdown;
 use crate::reader::{ReaderAction, SceneCache};
 use crate::theme;
@@ -145,6 +146,7 @@ pub enum Modal {
     Settings {
         vault_path: String,
     },
+    Keybindings(Box<crate::keys_ui::KeyDialog>),
     Export(Box<crate::export_dialog::ExportDialog>),
     Calendars(Box<crate::cal_dialog::CalendarDialog>),
     Event(Box<crate::cal_dialog::EventDialog>),
@@ -306,6 +308,8 @@ pub struct ShaleApp {
     pending_drops: Vec<(std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>)>,
     pub scenes: SceneCache,
     pub modal: Option<Modal>,
+    /// The key registry with the user's changes (KEY-001…009).
+    pub keymap: crate::keys::Keymap,
     pub actions: Vec<Action>,
     pub toasts: Vec<(String, Instant)>,
     /// What this session moved to the trash, newest last: where it is in `.trash/` (VAULT-020).
@@ -362,6 +366,7 @@ impl ShaleApp {
         };
         let default_welcome = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_default().join("Notes");
         let mut app = ShaleApp {
+            keymap: crate::keys::Keymap::from_overrides(&cfg.keybindings),
             cfg: cfg.clone(),
             persist_config,
             vdata: crate::vault_state::VaultData::default(),
@@ -463,6 +468,7 @@ impl ShaleApp {
                 Some("mail") => app.show_view(View::Mail, false),
                 Some("calendar-side") => app.right = RightPanel::Calendar,
                 Some("tasks") => app.show_view(View::Tasks, false),
+                Some("keybindings") => app.modal = Some(Modal::Keybindings(Box::default())),
                 Some("graph") => app.show_view(View::Graph, false),
                 // the feed view with made-up posts (no network); "social-import": and the dialog for saving some of them
                 Some(v @ ("social" | "social-import")) => {
@@ -1592,22 +1598,12 @@ impl ShaleApp {
         // mouse side buttons: back / forward through the notes opened in this tab
         let (mouse_back, mouse_fwd) = ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Extra1), i.pointer.button_pressed(egui::PointerButton::Extra2)));
         // Ctrl+H / Ctrl+L (like vim's h / l): keyboard into the sidebar / back into the editor;
-        // Ctrl+Shift+B: the file list
-        let (to_sidebar, to_editor, files) = ui.input_mut(|i| (i.consume_key(Modifiers::COMMAND, Key::H), i.consume_key(Modifiers::COMMAND, Key::L), i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::B)));
-        let mail_view = ui.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::M));
-        let (quick, new_note, toggle, back, fwd, close, search, save, settings) = ui.input_mut(|i| {
-            (
-                i.consume_key(Modifiers::COMMAND, Key::O),
-                i.consume_key(Modifiers::COMMAND, Key::N),
-                i.consume_key(Modifiers::COMMAND, Key::E),
-                i.consume_key(Modifiers::ALT, Key::ArrowLeft),
-                i.consume_key(Modifiers::ALT, Key::ArrowRight),
-                i.consume_key(Modifiers::COMMAND, Key::W),
-                i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::F),
-                i.consume_key(Modifiers::COMMAND, Key::S),
-                i.consume_key(Modifiers::COMMAND, Key::Comma),
-            )
-        });
+        // Ctrl+Shift+B: the file list; all of them are in the key registry (KEY-001)
+        let action = ui.input_mut(|i| self.keymap.poll(i, Scope::Global));
+        let is = |k: KeyAction| action == Some(k);
+        let (mail_view, quick, new_note, toggle, back, fwd) = (is(KeyAction::MailView), is(KeyAction::QuickSwitcher), is(KeyAction::NewNote), is(KeyAction::ToggleReading), is(KeyAction::Back), is(KeyAction::Forward));
+        let (close, search, save, settings, files, to_sidebar, to_editor) =
+            (is(KeyAction::CloseTab), is(KeyAction::Search), is(KeyAction::Save), is(KeyAction::Settings), is(KeyAction::ShowFiles), is(KeyAction::FocusSidebar), is(KeyAction::FocusEditor));
         if self.vault.is_none() {
             return;
         }

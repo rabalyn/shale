@@ -35,6 +35,8 @@ mod import;
 mod import_dialog;
 mod instance;
 mod jobs;
+mod keys;
+mod keys_ui;
 mod layout;
 mod link_assist;
 mod lists;
