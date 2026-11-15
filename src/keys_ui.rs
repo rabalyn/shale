@@ -527,7 +527,7 @@ mod tests {
         settle(&mut w);
         // j and k are typed (the field has the keyboard); the arrows and Ctrl+J / Ctrl+K select
         type_in_picker(&mut w, "o");
-        let names = |w: &W| crate::picker::Source::FileNames.hits(w.app.vault.as_ref().unwrap(), &picker(w).query).into_iter().map(|h| h.title).collect::<Vec<_>>();
+        let names = |w: &W| picker(w).listed().iter().map(|h| h.title.clone()).collect::<Vec<_>>();
         assert_eq!(names(&w), ["Roadmap"], "only the Roadmap has an o in its name");
         w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames)));
         settle(&mut w);
@@ -559,6 +559,164 @@ mod tests {
         assert_eq!((views(&w), w.app.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in the current tab");
         assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor, in normal mode");
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
+    }
+
+    /// A mail index with two mails ("Banana invoice" and "Lunch") that the app has open.
+    fn with_mail(w: &mut W) {
+        let root = w.dir.join("mail-store");
+        {
+            let store = crate::mail_store::MailStore::open(&root).unwrap();
+            let folder = store.ensure_folder("acct", "Acct", "INBOX", Some("/"), None, true).unwrap();
+            store.commit(vec![crate::mail_db::Op::FolderState { folder: folder.id, uidvalidity: Some(7), uidnext: Some(10), highestmodseq: None, last_sync: 1 }]).unwrap();
+            let folder = crate::mail_db::FolderRow { uidvalidity: Some(7), ..folder };
+            let mails = [(1u32, "Banana invoice"), (2, "Lunch")];
+            let ops = mails.iter().map(|(uid, subject)| {
+                let headers = format!("From: Ann <ann@x.de>\r\nSubject: {subject}\r\n\r\n");
+                crate::mail_db::Op::message(store.header_only(&folder, 7, *uid, headers.as_bytes(), "", Some(1_700_000_000 + i64::from(*uid)), 100))
+            });
+            store.commit(ops.collect()).unwrap();
+        }
+        w.app.cfg.mail_sync_minutes = 0;
+        w.app.cfg.mail_accounts = vec![crate::config::MailAccount { id: "acct".into(), name: "Acct".into(), host: "localhost".into(), user: "u".into(), ..Default::default() }];
+        w.app.mail.root = root;
+        w.app.show_view(View::Mail, false);
+        for _ in 0..200 {
+            w.frame(vec![]);
+            if w.app.mail.index().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(w.app.mail.index().is_some(), "the mail store opened");
+        w.app.open(Path::new("A.md"), false);
+        w.app.focus_editor();
+        settle(w);
+    }
+
+    /// One post about bananas in the post index, of the demo account.
+    fn with_post(w: &mut W) {
+        let entry = crate::social::demo::account();
+        w.app.cfg.social_accounts = vec![entry.clone()];
+        w.app.social.load_demo(&entry);
+        let mut p = crate::social::tests::post("b1", "bob", crate::cal_time::now() - 600, None);
+        p.text_markdown = "banana republic".into();
+        w.app.social.index.add(&entry.account.id, "home", &[p]);
+    }
+
+    /// Type into the picker of `Space f g` and let the debounce pass (NAV-024).
+    fn search_for(w: &mut W, text: &str) {
+        w.frame(vec![Event::Text(text.to_string())]);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        settle(w);
+    }
+
+    fn space_f_g(w: &mut W) {
+        for (key, text) in [(Key::Space, " "), (Key::F, "f"), (Key::G, "g")] {
+            typed(w, key, text);
+        }
+        settle(w);
+    }
+
+    fn picker_rows(w: &W) -> Vec<(&'static str, String)> {
+        picker(w).listed().iter().map(|h| (h.group, h.title.clone())).collect()
+    }
+
+    // spec: NAV-022, NAV-024, EDIT-015
+    #[test]
+    fn space_f_g_lists_notes_mail_and_posts_in_groups_with_counts() {
+        let mut w = vim_note("search-all");
+        with_mail(&mut w);
+        with_post(&mut w);
+        space_f_g(&mut w);
+        assert_eq!(picker(&w).source, crate::picker::Source::Everything);
+        assert_eq!(picker(&w).query, "");
+        assert!(picker(&w).listed().is_empty(), "nothing typed, nothing listed");
+        assert_eq!(note_text(&w), "# A\n", "the sequence typed nothing into the note");
+        search_for(&mut w, "banana");
+        assert_eq!(note_text(&w), "# A\n", "typing goes into the field");
+        assert_eq!(picker_rows(&w), [("Notes", "banana".to_string()), ("Mail", "Banana invoice".to_string()), ("Posts", "banana republic".to_string())], "grouped in this order");
+        // the wildcards reach all three
+        w.app.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything)));
+        settle(&mut w);
+        search_for(&mut w, "ban*");
+        assert_eq!(picker_rows(&w).iter().map(|r| r.0).collect::<Vec<_>>(), ["Notes", "Mail", "Posts"]);
+        // ↓ ↑ Ctrl+J Ctrl+K select across the groups, wrapping
+        assert_eq!(picker(&w).sel, 0);
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        w.press(Key::J, CTRL);
+        assert_eq!(picker(&w).sel, 2);
+        w.press(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 0, "wraps");
+        w.press(Key::K, CTRL);
+        assert_eq!(picker(&w).sel, 2);
+        w.press(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(picker(&w).sel, 1);
+        // Esc closes and changes nothing
+        w.press(Key::Escape, Modifiers::NONE);
+        assert!(w.app.modal.is_none());
+        assert_eq!((views(&w), note_text(&w)), (vec!["A.md".to_string()], "# A\n".to_string()));
+    }
+
+    // spec: NAV-025, NAV-009
+    #[test]
+    fn space_f_g_opens_a_note_line_a_mail_and_a_post() {
+        let mut w = vim_note("search-open");
+        with_mail(&mut w);
+        with_post(&mut w);
+        // a note: the found line, the keyboard in the editor
+        space_f_g(&mut w);
+        search_for(&mut w, "ban?na");
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        assert_eq!((views(&w), w.app.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in this tab");
+        assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor");
+        let cursor = egui::text_edit::TextEditState::load(&w.ctx, w.app.tabs[0].editor.id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0);
+        let text = &w.app.notes[Path::new("projects/Roadmap.md")].text;
+        let at = text.find("banana").unwrap();
+        assert_eq!(cursor, Some(text[..at].chars().count()), "the cursor is at the match on line 2");
+        // a mail: the mail view with the message open
+        w.app.open(Path::new("A.md"), false);
+        w.app.focus_editor();
+        settle(&mut w);
+        space_f_g(&mut w);
+        search_for(&mut w, "invoice");
+        assert_eq!(picker_rows(&w), [("Mail", "Banana invoice".to_string())]);
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        assert_eq!(views(&w), ["mail"]);
+        assert_eq!(w.app.mail.open.as_ref().map(|o| o.msg.subject.as_str()), Some("Banana invoice"), "the message is open");
+        assert_eq!(w.app.mail.cursor, Some(1), "the list has the cursor on it (newest first: it is the second row)");
+        // a post: its feed in a new Feeds tab
+        w.app.open(Path::new("A.md"), false);
+        w.app.focus_editor();
+        settle(&mut w);
+        let tabs = w.app.tabs.len();
+        space_f_g(&mut w);
+        search_for(&mut w, "republic");
+        assert_eq!(picker_rows(&w), [("Posts", "banana republic".to_string())]);
+        w.press(Key::Enter, Modifiers::NONE);
+        settle(&mut w);
+        assert!(w.app.modal.is_none());
+        assert_eq!(w.app.tabs.len(), tabs + 1, "a new tab");
+        let feed = crate::social::FeedRef { account: crate::social::demo::account().account.id, feed: "home".into() };
+        assert_eq!(w.app.tabs[w.app.active].view, View::Social(Some(feed)));
+        assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
+    }
+
+    // spec: KEY-008, NAV-022
+    #[test]
+    fn the_search_all_keys_can_be_changed() {
+        let mut w = vim_note("search-keys");
+        w.app.keymap.set(Action::NormalSearchAll, Binding::parse("Space s").unwrap()).unwrap();
+        for (key, text) in [(Key::Space, " "), (Key::F, "f"), (Key::G, "g")] {
+            typed(&mut w, key, text);
+        }
+        assert!(w.app.modal.is_none(), "the old keys do nothing");
+        typed(&mut w, Key::Space, " ");
+        typed(&mut w, Key::S, "s");
+        assert!(matches!(&w.app.modal, Some(Modal::Picker(p)) if p.source == crate::picker::Source::Everything));
     }
 
     // spec: KEY-008, NAV-020

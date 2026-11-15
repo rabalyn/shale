@@ -31,6 +31,12 @@ impl ShaleApp {
         }
     }
 
+    /// Open a mail the picker found (NAV-025): the mail view, its folder, the message.
+    pub fn open_mail_hit(&mut self, msg: crate::mail_db::MessageSummary) {
+        self.show_view(View::Mail, false);
+        self.mail.show_hit(&self.cfg, msg);
+    }
+
     pub fn open_mail_settings(&mut self) {
         for a in self.cfg.mail_accounts.clone() {
             self.mail.probe_sign_in(&a);

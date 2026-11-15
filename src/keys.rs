@@ -221,6 +221,7 @@ actions! {
     NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+Alt+L"];
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
+    NormalSearchAll => "normal.search_all", "Search notes, mail and posts", EditorNormal, ["Space F G"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
     TreeNextFolder => "files.next_folder", "Next folder", FileList, ["Ctrl+J"];
@@ -459,7 +460,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 22 + 23 + 4);
+        assert_eq!(DEFS.len(), 22 + 23 + 5);
     }
 
     // spec: KEY-003

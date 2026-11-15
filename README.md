@@ -138,6 +138,7 @@ Text editing keys and vim keys are fixed.
 | Alt+← / Alt+→ | Back / forward |
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
+| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | Ctrl+, | Settings |
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |
@@ -179,7 +180,7 @@ h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / 
 previous hit; i a I A o O start typing and Esc stops; x deletes a character; v / V select (the
 motions extend the selection), then d cuts and y copies to the clipboard; p pastes it. The
 status bar shows the mode. **Space Tab** goes back to the view this tab showed just before
-(a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name.
+(a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name and **Space f g** searches notes, mail and posts.
 
 In a drawing: V/1 select, H hand, R/2 rectangle, D/3 diamond, O/4 ellipse, A/5 arrow, L/6 line,
 P/7 pen, T/8 text, E/0 eraser. Ctrl+Z/Ctrl+Shift+Z undo/redo, Ctrl+D duplicate, Delete removes.

@@ -71,7 +71,8 @@ built-in demo vault (`shale --screenshot out.png`).
 - In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
   this tab showed just before, and again to come back, like vim's alternate file. Space is the
   leader key of its own list in Keybindings…; **Space f f** opens a window to find a file by its
-  name (it never creates a note, unlike Ctrl+O); the vim keys themselves cannot be rebound.
+  name (it never creates a note, unlike Ctrl+O); **Space f g** searches the text of notes, mail
+  and posts in one list grouped by source (`*` and `?` are wildcards); the vim keys themselves cannot be rebound.
 
 ## Drawings
 
@@ -506,6 +507,7 @@ Text editing keys and vim keys are fixed.
 | Alt+← / Alt+→ | Back / forward |
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
+| Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
 
