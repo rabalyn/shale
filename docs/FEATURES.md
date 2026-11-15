@@ -50,8 +50,8 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far left,
   show a small pin and keep their order. Drag reorders pinned tabs among themselves and the
   others among themselves, never across the border. A pinned tab can still be closed.
-- The order of the open notes and which of them are pinned come back at the next start (a pinned
-  Feeds tab is not remembered as pinned).
+- The order of all open tabs (notes, drawings and Feeds tabs) and which of them are pinned come
+  back at the next start.
 
 ![A pinned tab and its context menu](screenshots/tab-pinned-menu.png)
 

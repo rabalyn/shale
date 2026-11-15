@@ -53,7 +53,7 @@ no TLS or OAuth crates.
 
 10. **Feeds in tabs and new posts** (SOC-021 to SOC-029): the feed belongs to the tab
     (`View::Social(Option<FeedRef>)`), so each tab has its own scroll and history, and open feed
-    tabs are saved in `state.json` (`open_feeds`). A timer checks every feed open in a tab (also
+    tabs are saved in `state.json` (`tabs`, NAV-026). A timer checks every feed open in a tab (also
     in the background) for posts newer than the newest known one: Mastodon with `min_id` (the
     page directly above the newest timeline entry, so the block is contiguous), Bluesky from
     the first page down to the first known post (a limit of 200 per check can leave a gap, filled

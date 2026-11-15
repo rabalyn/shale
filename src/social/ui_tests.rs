@@ -403,16 +403,14 @@ fn open_feed_tabs_come_back_and_an_old_state_file_still_loads() {
     w.click_tab(0);
     w.click("feed-combo");
     w.click("feed-new-tab:list:1");
-    assert_eq!(w.app.vdata.state.open_feeds, vec![home(), list()]);
-    assert_eq!(w.app.vdata.state.open_files, vec!["Welcome.md".to_string()]);
     w.app.vdata.save().unwrap();
     let saved = std::fs::read_to_string(w.dir.join(".shale/state.json")).unwrap();
-    assert!(saved.contains("open_feeds") && saved.contains("list:1"), "{saved}");
+    assert!(saved.contains("\"tabs\"") && saved.contains("list:1"), "{saved}");
     // the next start: note tab first, then the feeds
     let mut again = ShaleApp::build(Options { screenshot: None, vault: Some(w.dir.clone()), view: None, keys: None }, false);
     again.cfg.social_accounts = vec![demo::account()];
     again.open_vault(&w.dir.clone());
-    assert_eq!(again.tabs.iter().map(|t| t.view.clone()).collect::<Vec<_>>(), vec![View::Note(PathBuf::from("Welcome.md")), View::Social(Some(home())), View::Social(Some(list()))]);
+    assert_eq!(again.tabs.iter().map(|t| t.view.clone()).collect::<Vec<_>>(), vec![View::Social(Some(home())), View::Note(PathBuf::from("Welcome.md")), View::Social(Some(list()))], "every tab comes back in its place");
     // an old state file (no open_feeds) and a feed of an account that is gone
     for (json, feeds) in [(r#"{"version": 1, "open_files": ["Welcome.md"]}"#, 0), (r#"{"version": 1, "open_files": ["Welcome.md"], "open_feeds": [{"account": "gone", "feed": "home"}]}"#, 0)] {
         crate::fsutil::write_atomic(&w.dir.join(".shale/state.json"), json.as_bytes()).unwrap();
@@ -422,6 +420,35 @@ fn open_feed_tabs_come_back_and_an_old_state_file_still_loads() {
         assert_eq!(old.tabs.len(), 1 + feeds, "{json}");
         assert!(matches!(old.tabs[0].view, View::Note(_)));
     }
+}
+
+// spec: NAV-026
+#[test]
+fn notes_a_drawing_and_feeds_tabs_come_back_in_one_order_with_their_pins() {
+    let mut w = W::new("mixed-restore");
+    std::fs::write(w.dir.join("Ideas.md"), "# Ideas\n").unwrap();
+    std::fs::write(w.dir.join("Sketch.excalidraw"), crate::drawing::SAMPLE_SCENE).unwrap();
+    // a vault opened again knows the new files (and starts with the Welcome note only)
+    let dir = w.dir.clone();
+    w.app.open_vault(&dir);
+    w.app.open(std::path::Path::new("Sketch.excalidraw"), true);
+    w.app.open_feed(home(), true);
+    w.app.open_feed(list(), true);
+    w.app.open(std::path::Path::new("Ideas.md"), true);
+    // tabs: Welcome, Sketch, home, list, Ideas; pin the drawing and the second Feeds tab
+    assert_eq!(w.app.tabs.len(), 5);
+    w.app.set_tab_pinned(1, true);
+    w.app.set_tab_pinned(3, true);
+    let order: Vec<View> = w.app.tabs.iter().map(|t| t.view.clone()).collect();
+    assert_eq!(order[..2], [View::Drawing(PathBuf::from("Sketch.excalidraw")), View::Social(Some(list()))]);
+    w.app.vdata.save().unwrap();
+    let mut again = ShaleApp::build(Options { screenshot: None, vault: Some(w.dir.clone()), view: None, keys: None }, false);
+    again.cfg.social_accounts = vec![demo::account()];
+    again.open_vault(&w.dir.clone());
+    let got: Vec<(View, bool)> = again.tabs.iter().map(|t| (t.view.clone(), t.pinned)).collect();
+    let want: Vec<(View, bool)> = w.app.tabs.iter().map(|t| (t.view.clone(), t.pinned)).collect();
+    assert_eq!(got, want);
+    assert_eq!(got.iter().filter(|(_, p)| *p).count(), 2);
 }
 
 // ---- new posts

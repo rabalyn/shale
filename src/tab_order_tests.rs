@@ -121,7 +121,7 @@ fn dragging_a_tab_past_others_moves_it_and_shows_the_marker() {
     assert_eq!(w.order(), names(&["Ideas", "Daily log", "Welcome", "Garden plan"]));
     assert_eq!(w.active_name(), "Welcome", "the dragged tab is the open one");
     assert!(w.app.tab_marks.drop_marker.is_none(), "the marker is gone after the drop");
-    assert_eq!(w.app.vdata.state.open_files, vec!["Ideas.md", "Daily log.md", "Welcome.md", "Projects/Garden plan.md"], "the order is kept for the next start");
+    assert_eq!(w.app.vdata.state.tabs.iter().map(|t| t.file.clone().unwrap()).collect::<Vec<_>>(), vec!["Ideas.md", "Daily log.md", "Welcome.md", "Projects/Garden plan.md"], "the order is kept for the next start");
     // and back to the left end
     let to = Pos2::new(w.tab(0).min.x + 5.0, w.tab(0).center().y);
     w.drag(2, to, |_| {});
@@ -157,7 +157,7 @@ fn pinning_moves_a_tab_to_the_left_with_a_pin_and_unpinning_puts_it_back() {
     w.pin_via_menu(3);
     assert_eq!(w.order(), names(&["Daily log", "Garden plan", "Welcome", "Ideas"]));
     assert_eq!(w.app.tab_marks.pinned, vec![0, 1]);
-    assert_eq!(w.app.vdata.state.pinned_files, vec!["Daily log.md", "Projects/Garden plan.md"]);
+    assert_eq!(w.app.vdata.state.tabs.iter().filter(|t| t.pinned).map(|t| t.file.clone().unwrap()).collect::<Vec<_>>(), vec!["Daily log.md", "Projects/Garden plan.md"]);
     // unpinning: the tab goes right of the pinned ones
     w.pin_via_menu(0);
     assert_eq!(w.order(), names(&["Garden plan", "Daily log", "Welcome", "Ideas"]));
