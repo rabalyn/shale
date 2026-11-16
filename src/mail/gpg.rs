@@ -33,9 +33,26 @@ pub struct Gnupg {
     pub gpgsm: String,
 }
 
-impl Default for Gnupg {
-    fn default() -> Self {
+impl Gnupg {
+    /// The machine's `gpg` and `gpgsm` against the person's own GnuPG home. Only the app itself
+    /// (through `Default`) and the test kit's `TestHome` (with a home of its own) call it.
+    pub fn system() -> Self {
         Gnupg { home: None, gpg: "gpg".into(), gpgsm: "gpgsm".into() }
+    }
+}
+
+impl Default for Gnupg {
+    /// The machine's programs; in a test build programs that do not exist, so a test never starts
+    /// the real GnuPG against the person's `~/.gnupg` (DEV-017).
+    fn default() -> Self {
+        #[cfg(test)]
+        {
+            Gnupg { home: None, gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into() }
+        }
+        #[cfg(not(test))]
+        {
+            Gnupg::system()
+        }
     }
 }
 
@@ -248,7 +265,11 @@ impl Gnupg {
 
     /// Is the program there? Its version line, or why not.
     pub fn version(&self, s: CryptoStandard) -> Result<String, GpgError> {
-        let out = Command::new(self.program(s)).arg("--version").stdin(Stdio::null()).output().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GpgError::Missing(s) } else { GpgError::Io(e.to_string()) })?;
+        let mut cmd = Command::new(self.program(s));
+        if let Some(h) = &self.home {
+            cmd.env("GNUPGHOME", home_text(h));
+        }
+        let out = cmd.arg("--version").stdin(Stdio::null()).output().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GpgError::Missing(s) } else { GpgError::Io(e.to_string()) })?;
         let text = String::from_utf8_lossy(&out.stdout);
         Ok(text.lines().next().unwrap_or("").trim().to_string())
     }
@@ -836,7 +857,9 @@ pub(crate) mod testkit {
     /// Are `gpg`, `gpgsm` and `gpgconf` here? Tests that need them skip themselves with a note when they are not (the
     /// Linux CI image has them; macOS and Windows usually do not, BUILD-018).
     pub fn have_gnupg() -> bool {
-        let have = ["gpg", "gpgsm", "gpgconf"].iter().all(|p| Command::new(p).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok());
+        // asked with a home that is not the person's, so even a version line does not look at `~/.gnupg` (DEV-017)
+        let home = std::env::temp_dir().join("shale-gnupg-probe-home");
+        let have = ["gpg", "gpgsm", "gpgconf"].iter().all(|p| Command::new(p).env("GNUPGHOME", home_text(&home)).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok());
         if !have {
             eprintln!("skipping: gpg, gpgsm and gpgconf are not installed here");
             return false;
@@ -862,7 +885,7 @@ pub(crate) mod testkit {
             crate::fsutil::ensure_private_dir(&dir).expect("temp home");
             std::fs::write(dir.join("gpg-agent.conf"), "allow-loopback-pinentry\n").expect("agent conf");
             std::fs::write(dir.join("gpgsm.conf"), "disable-crl-checks\n").expect("gpgsm conf");
-            TestHome { g: Gnupg { home: Some(dir.clone()), ..Gnupg::default() }, dir }
+            TestHome { g: Gnupg { home: Some(dir.clone()), ..Gnupg::system() }, dir }
         }
 
         fn cmd(&self, program: &str) -> Command {
@@ -1082,6 +1105,21 @@ mod tests {
         assert!(matches!(g.key_info(CryptoStandard::OpenPgp, "--help", &no_cancel()), Err(GpgError::BadArgument(_))));
     }
 
+    // spec: DEV-017
+    #[test]
+    fn dev_017_the_default_gnupg_of_a_test_build_names_programs_that_do_not_exist() {
+        let g = Gnupg::default();
+        assert!(g.home.is_none());
+        for s in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
+            assert!(!std::path::Path::new(g.program(s)).exists(), "{}", g.program(s));
+            assert_eq!(g.version(s), Err(GpgError::Missing(s)));
+            assert_eq!(g.list_keys(s, true, None, &no_cancel()), Err(GpgError::Missing(s)));
+        }
+        // the machine's programs have to be asked for by name
+        let system = Gnupg::system();
+        assert_eq!((system.gpg.as_str(), system.gpgsm.as_str(), system.home), ("gpg", "gpgsm", None));
+    }
+
     // spec: MAIL-170
     #[test]
     fn a_missing_program_is_reported_in_words() {
@@ -1112,6 +1150,22 @@ mod tests {
         }
         assert!(args.iter().all(|a| !a.contains("keyserver") && !a.contains("auto-key-locate=")), "{args:?}");
         assert!(seen.contains("stdin:cipher; rm -rf / $(evil)"), "data goes on stdin, never into a shell: {seen}");
+    }
+
+    // spec: DEV-017
+    #[cfg(unix)]
+    #[test]
+    fn dev_017_the_version_is_asked_with_the_home_of_the_gnupg_too() {
+        let dir = TempDir::new().unwrap();
+        // a stand-in that says which home it was given
+        let script = dir.write("fake-gpg", b"#!/bin/sh\necho \"home:${GNUPGHOME:-UNSET}\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let program = script.to_string_lossy().into_owned();
+        let g = Gnupg { gpg: program.clone(), gpgsm: program, home: Some(dir.path.clone()) };
+        for s in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
+            assert_eq!(g.version(s).unwrap(), format!("home:{}", dir.path.display()));
+        }
     }
 
     // spec: MAIL-194, MAIL-197
