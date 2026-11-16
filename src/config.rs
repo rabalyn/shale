@@ -376,7 +376,7 @@ impl Default for Config {
             inline_images: true,
             line_numbers: true,
             format_toolbar: true,
-            toolbar_size: 120,
+            toolbar_size: 110,
             font_colours: DEFAULT_FONT_COLOURS.to_vec(),
             highlight_colours: DEFAULT_HIGHLIGHT_COLOURS.to_vec(),
             live_preview: false,
@@ -574,7 +574,7 @@ mod tests {
     fn the_toolbar_settings_have_defaults_and_round_trip_without_a_version_bump() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
         assert!(c.format_toolbar, "the toolbar is on by default");
-        assert_eq!(c.toolbar_size, 120, "the buttons a bit bigger than the base size by default");
+        assert_eq!(c.toolbar_size, 110, "the buttons a bit bigger than the base size by default");
         assert_eq!(c.font_colours.len(), 5);
         assert_eq!(c.highlight_colours, vec![[255, 255, 0], [0x39, 0xFF, 0x14], [0, 255, 255], [255, 0, 255]], "neon yellow, green, cyan, magenta");
         assert_eq!(c.version, 1, "new fields with defaults need no migration (CFG-001)");
