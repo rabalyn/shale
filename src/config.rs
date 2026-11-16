@@ -249,10 +249,10 @@ impl Default for CacheRetention {
     }
 }
 
-/// The font colour presets of the formatting toolbar: red, orange, blue, green, purple (EDIT-027).
+/// The font colour presets of the formatting toolbar: red, orange, blue, green, purple (EDIT-028).
 pub const DEFAULT_FONT_COLOURS: [[u8; 3]; 5] = [[0xE5, 0x3E, 0x3E], [0xF0, 0x8A, 0x1C], [0x2F, 0x80, 0xED], [0x2E, 0xA0, 0x4F], [0x8E, 0x4B, 0xD6]];
 
-/// The highlight presets of the formatting toolbar: neon yellow, green, cyan and magenta (EDIT-027).
+/// The highlight presets of the formatting toolbar: neon yellow, green, cyan and magenta (EDIT-028).
 pub const DEFAULT_HIGHLIGHT_COLOURS: [[u8; 3]; 4] = [[0xFF, 0xFF, 0x00], [0x39, 0xFF, 0x14], [0x00, 0xFF, 0xFF], [0xFF, 0x00, 0xFF]];
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -285,11 +285,11 @@ pub struct Config {
     pub inline_images: bool,
     /// Show a gutter with line numbers in the editor (EDIT-018).
     pub line_numbers: bool,
-    /// Show the formatting toolbar above the text of a note (EDIT-025).
+    /// Show the formatting toolbar above the text of a note (EDIT-026).
     pub format_toolbar: bool,
-    /// The preset font colours of the toolbar's palette (EDIT-027), as RGB.
+    /// The preset font colours of the toolbar's palette (EDIT-028), as RGB.
     pub font_colours: Vec<[u8; 3]>,
-    /// The preset highlight colours of the toolbar's palette (EDIT-027), as RGB.
+    /// The preset highlight colours of the toolbar's palette (EDIT-028), as RGB.
     pub highlight_colours: Vec<[u8; 3]>,
     /// Markdown preview in the editor: every line but the cursor's is drawn rendered (EDIT-016).
     pub live_preview: bool,
@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(c.file_sort, FileSort::NameAsc);
     }
 
-    // spec: EDIT-025, EDIT-027, CFG-001
+    // spec: EDIT-026, EDIT-028, CFG-001
     #[test]
     fn the_toolbar_settings_have_defaults_and_round_trip_without_a_version_bump() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();

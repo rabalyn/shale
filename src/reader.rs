@@ -71,12 +71,12 @@ struct Inline {
     strike: bool,
     code: bool,
     highlight: bool,
-    /// the innermost `<mark style="background: …">` and `<span style="color: …">` here (EDIT-027)
+    /// the innermost `<mark style="background: …">` and `<span style="color: …">` here (EDIT-028)
     bg: Option<[u8; 4]>,
     fg: Option<[u8; 4]>,
 }
 
-/// Where a line's text got its own colours (EDIT-028): its bytes in the job's text, the background
+/// Where a line's text got its own colours (EDIT-029): its bytes in the job's text, the background
 /// and the text colour as written. The PDF export draws these exactly as written.
 pub(crate) type Paint = (Range<usize>, Option<[u8; 4]>, Option<[u8; 4]>);
 
@@ -124,7 +124,7 @@ pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, 
         if st.bold {
             f.extra_letter_spacing = 0.3;
         }
-        // a coloured highlight with readable text on it, and a font colour (EDIT-028)
+        // a coloured highlight with readable text on it, and a font colour (EDIT-029)
         if let Some(bg) = st.bg {
             f.background = Color32::from_rgba_unmultiplied(bg[0], bg[1], bg[2], bg[3]);
             f.color = if colour_tags::dark_text_on(bg) { Color32::BLACK } else { Color32::WHITE };
@@ -616,7 +616,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: EDIT-028
+    // spec: EDIT-029
     #[test]
     fn the_reading_view_colours_the_text_and_hides_the_tags() {
         let line = "a <mark style=\"background: #FFFF00;\">hi <span style=\"color: #FF0000;\">there</span></mark> **b** <mark style=\"background: #FFFF00\">open";

@@ -1,4 +1,4 @@
-//! The formatting toolbar (EDIT-025, EDIT-026, EDIT-027) driven in the whole window with real clicks.
+//! The formatting toolbar (EDIT-026, EDIT-027, EDIT-028) driven in the whole window with real clicks.
 
 use crate::app::{Options, ShaleApp};
 use crate::ui_test_support::Headless;
@@ -75,7 +75,7 @@ impl Drop for Fx {
     }
 }
 
-// spec: EDIT-025
+// spec: EDIT-026
 #[test]
 fn the_toolbar_is_above_the_text_of_a_note_and_the_setting_and_the_reading_view_hide_it() {
     let mut fx = Fx::new("shown", "one two three\n");
@@ -119,7 +119,7 @@ fn the_toolbar_is_above_the_text_of_a_note_and_the_setting_and_the_reading_view_
     assert!(!fx.has("Highlight colour"));
 }
 
-// spec: EDIT-026
+// spec: EDIT-027
 #[test]
 fn a_click_wraps_the_selection_is_one_undo_step_and_gives_the_keyboard_back() {
     let mut fx = Fx::new("bold", "one two three\n");
@@ -145,7 +145,7 @@ fn a_click_wraps_the_selection_is_one_undo_step_and_gives_the_keyboard_back() {
     assert_eq!(text, "one two three\n", "and the wrap is one step");
 }
 
-// spec: EDIT-026
+// spec: EDIT-027
 #[test]
 fn line_buttons_and_the_heading_menu_work_on_the_lines_of_the_selection() {
     let mut fx = Fx::new("lines", "alpha\nbeta\ngamma\n");
@@ -166,7 +166,7 @@ fn line_buttons_and_the_heading_menu_work_on_the_lines_of_the_selection() {
     assert_eq!(fx.text(), "- [ ] alpha\n- [ ] beta\n- [ ] gamma\n");
 }
 
-// spec: EDIT-026, EDIT-016
+// spec: EDIT-027, EDIT-016
 #[test]
 fn the_buttons_work_with_the_markdown_preview_on() {
     let mut fx = Fx::new("preview", "one two\n\nlast line\n");
@@ -180,7 +180,7 @@ fn the_buttons_work_with_the_markdown_preview_on() {
     assert_eq!(fx.text(), "*==one==* two\n\nlast line\n");
 }
 
-// spec: EDIT-026, EDIT-010
+// spec: EDIT-027, EDIT-010
 #[test]
 fn with_vim_lite_on_a_click_leaves_the_editor_in_a_mode_that_takes_keys() {
     let mut fx = Fx::new("vim", "one two three\n");
@@ -215,7 +215,7 @@ fn with_vim_lite_on_a_click_leaves_the_editor_in_a_mode_that_takes_keys() {
     assert_eq!(fx.text().len(), n + 1, "typing still goes into the note");
 }
 
-// spec: EDIT-026
+// spec: EDIT-027
 #[test]
 fn the_embed_button_opens_the_file_picker() {
     let mut fx = Fx::new("embed", "see \n");
@@ -225,7 +225,7 @@ fn the_embed_button_opens_the_file_picker() {
     assert!(fx.app.tabbar.tabs[fx.app.tabbar.active].editor.picker_visible(), "the `[!` file picker is open");
 }
 
-// spec: EDIT-027
+// spec: EDIT-028
 #[test]
 fn the_colour_palettes_write_canonical_tags_and_replace_the_colour_of_a_marked_text() {
     let mut fx = Fx::new("palette", "one two three\n");
@@ -257,7 +257,7 @@ fn the_colour_palettes_write_canonical_tags_and_replace_the_colour_of_a_marked_t
     assert_eq!(fx.text(), "one <mark style=\"background: #010203;\">two</mark> three\n");
 }
 
-// spec: EDIT-027
+// spec: EDIT-028
 #[test]
 fn a_custom_colour_from_the_picker_is_written_in_the_canonical_form() {
     let mut fx = Fx::new("custom", "one two three\n");

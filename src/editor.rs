@@ -37,7 +37,7 @@ struct Fmt {
     hidden: bool,
     /// > 0: this text is an image link shown as a picture; the row is this many points tall
     image_h: u16,
-    /// the background of `<mark style="background: …">` text (EDIT-027)
+    /// the background of `<mark style="background: …">` text (EDIT-028)
     bg: Option<[u8; 4]>,
     /// the colour of `<span style="color: …">` text
     fg: Option<[u8; 4]>,
@@ -136,7 +136,7 @@ fn inline_pairs(line: &str, off: usize, fmts: &mut [Fmt], code: &[Range<usize>])
     }
 }
 
-/// The tags of coloured highlights and font colours (EDIT-027): the tags are dimmed markup, the text
+/// The tags of coloured highlights and font colours (EDIT-028): the tags are dimmed markup, the text
 /// between them gets the colour. Outer runs come first so that inner ones win.
 fn colour_pairs(line: &str, off: usize, fmts: &mut [Fmt]) {
     let mut runs = colour_tags::find(line);
@@ -364,7 +364,7 @@ fn to_format(f: Fmt, base: f32) -> TextFormat {
     if f.strike {
         color = theme::DONE;
     }
-    // a font colour, or readable text on a coloured highlight (EDIT-028)
+    // a font colour, or readable text on a coloured highlight (EDIT-029)
     if let Some(bg) = f.bg {
         color = if colour_tags::dark_text_on(bg) { Color32::BLACK } else { Color32::WHITE };
     }
@@ -495,9 +495,9 @@ pub struct NoteEditor {
     vim_scroll: Option<usize>,
     /// `gt` was typed this frame: follow the link under vim's cursor (EDIT-023)
     vim_follow: bool,
-    /// The formatting toolbar above the text (EDIT-025)
+    /// The formatting toolbar above the text (EDIT-026)
     bar: crate::format_bar::FormatBar,
-    /// A toolbar command to do to the text at the start of the next frame of the editor (EDIT-026)
+    /// A toolbar command to do to the text at the start of the next frame of the editor (EDIT-027)
     format_request: Option<crate::format::Cmd>,
     /// The selection (char indices, as the text box has them) when the editor last had the keyboard:
     /// a press on the toolbar takes the keyboard away, and the text box then drops its selection
@@ -553,7 +553,7 @@ impl NoteEditor {
         }
     }
 
-    /// Draw the formatting toolbar (EDIT-025); a click is done to the text by the next `show`.
+    /// Draw the formatting toolbar (EDIT-026); a click is done to the text by the next `show`.
     pub fn toolbar(&mut self, ui: &mut Ui, text: &str, palettes: &crate::format_bar::Palettes) {
         let sel = self.selection_bytes(ui.ctx(), text);
         if let Some(cmd) = self.bar.show(ui, text, sel, palettes) {
@@ -565,7 +565,7 @@ impl NoteEditor {
     }
 
     /// Do a toolbar command to the text: one undo step (EDIT-021), the result selected, the keyboard
-    /// back in the text box, and vim-lite in a mode that takes keys (EDIT-026). True when the text changed.
+    /// back in the text box, and vim-lite in a mode that takes keys (EDIT-027). True when the text changed.
     fn apply_format(&mut self, ui: &Ui, text: &mut String, cmd: crate::format::Cmd, hist: &mut crate::undo::History) -> bool {
         self.request_focus = true;
         let sel = self.selection_bytes(ui.ctx(), text);
@@ -2930,7 +2930,7 @@ mod tests {
         &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format
     }
 
-    // spec: EDIT-028
+    // spec: EDIT-029
     #[test]
     fn marks_and_spans_colour_the_text_between_their_dimmed_tags() {
         let text = "a <mark style=\"background: #FFFF00;\">hi <span style=\"color: #FF0000;\">there</span></mark> b";
@@ -2955,7 +2955,7 @@ mod tests {
         assert_eq!(format_of(&job, text, "G").color, Color32::from_rgba_unmultiplied(0, 255, 0, 128));
     }
 
-    // spec: EDIT-028
+    // spec: EDIT-029
     #[test]
     fn colours_nest_with_bold_and_italic_and_garbled_tags_are_plain_text() {
         let text = "<mark style=\"background: #39FF14;\">**bold** and *it*</mark>";
@@ -2971,7 +2971,7 @@ mod tests {
         }
     }
 
-    // spec: EDIT-028, EDIT-016
+    // spec: EDIT-029, EDIT-016
     #[test]
     fn the_preview_hides_the_colour_tags_away_from_the_cursor_and_shows_them_raw_at_it() {
         let text = "a <mark style=\"background: #FFFF00;\">hi</mark> <span style=\"color: #F00\">x</span>\nraw";

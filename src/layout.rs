@@ -715,7 +715,7 @@ impl ShaleApp {
         let active = self.tabbar.active;
         let display_name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_default();
         let mut rename_to: Option<String> = None;
-        // the formatting toolbar sits above the text and stays when the note scrolls (EDIT-025)
+        // the formatting toolbar sits above the text and stays when the note scrolls (EDIT-026)
         if self.cfg.format_toolbar && !self.tabbar.tabs[active].reading {
             if let Some(doc) = self.notes.get(&rel).filter(|d| d.unreadable.is_none()) {
                 let palettes = crate::format_bar::Palettes { highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours };

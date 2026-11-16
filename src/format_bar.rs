@@ -1,4 +1,4 @@
-//! The formatting toolbar above the text of a note (EDIT-025): a row of buttons that returns the
+//! The formatting toolbar above the text of a note (EDIT-026): a row of buttons that returns the
 //! command a click asks for. What the commands do to the text is `format.rs`.
 
 use crate::format::{self, Cmd};
@@ -6,7 +6,7 @@ use crate::theme;
 use eframe::egui::{self, text::LayoutJob, Color32, CornerRadius, FontId, Pos2, Rect, Response, Sense, Stroke, TextFormat, Ui, Vec2};
 use std::ops::Range;
 
-/// The colours the palettes offer (the settings, EDIT-027).
+/// The colours the palettes offer (the settings, EDIT-028).
 pub struct Palettes<'a> {
     pub highlight: &'a [[u8; 3]],
     pub font: &'a [[u8; 3]],
@@ -286,7 +286,7 @@ fn heading_menu(ui: &mut Ui, text: &str, sel: &Range<usize>) -> Option<Cmd> {
 /// How many preset colours a palette can have.
 pub const MAX_PRESETS: usize = 8;
 
-/// The settings row of a palette (EDIT-027): a colour picker per preset, "−" and "+" to take one
+/// The settings row of a palette (EDIT-028): a colour picker per preset, "−" and "+" to take one
 /// away or add one, and a button to go back to the defaults. True when something changed.
 pub fn preset_editor(ui: &mut Ui, label: &str, colours: &mut Vec<[u8; 3]>, defaults: &[[u8; 3]]) -> bool {
     let mut changed = false;

@@ -1,4 +1,4 @@
-//! The text transforms of the formatting toolbar (EDIT-026): what a button does to the note's text
+//! The text transforms of the formatting toolbar (EDIT-027): what a button does to the note's text
 //! and selection. Pure functions on a string and a byte selection, no UI.
 
 use crate::colour_tags::{self, Kind, Run};
@@ -828,7 +828,7 @@ mod tests {
         }
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn inline_buttons_wrap_the_selection_and_unwrap_it_again() {
         assert_eq!(run(Cmd::Bold, "a ⟦word⟧ b"), "a **⟦word⟧** b");
@@ -842,7 +842,7 @@ mod tests {
         assert_eq!(run(Cmd::Italic, "⟦é ü⟧"), "*⟦é ü⟧*");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn with_no_selection_the_markers_go_in_with_the_cursor_between_and_come_out_when_empty() {
         assert_eq!(run(Cmd::Bold, "a |b"), "a **|**b");
@@ -852,7 +852,7 @@ mod tests {
         assert_eq!(run(Cmd::WikiLink, "|"), "[[|]]");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn bold_and_italic_do_not_take_each_other_apart() {
         assert_eq!(run(Cmd::Italic, "**⟦x⟧**"), "***⟦x⟧***", "italic on bold text adds");
@@ -863,7 +863,7 @@ mod tests {
         assert_eq!(run(Cmd::Italic, "⟦***x***⟧"), "⟦**x**⟧");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn a_selection_over_several_lines_is_wrapped_line_by_line_without_the_list_markers() {
         assert_eq!(run(Cmd::Bold, "⟦- one\n- two\n> three⟧"), "- **⟦one**\n- **two**\n> **three⟧**");
@@ -873,7 +873,7 @@ mod tests {
         assert_eq!(run(Cmd::Bold, "⟦ spaced \n⟧x"), " **⟦spaced⟧** \nx", "blanks at the edges stay outside the markers");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn heading_buttons_set_replace_and_toggle_off() {
         assert_eq!(run(Cmd::Heading(2), "ab|c"), "## ab|c");
@@ -889,7 +889,7 @@ mod tests {
         assert_eq!(run(Cmd::Heading(0), "- a|"), "- a|", "normal text leaves a list alone");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn list_buttons_apply_to_every_line_touched_and_toggle_off() {
         assert_eq!(run(Cmd::Bullet, "a|b\nc"), "- a|b\nc");
@@ -906,14 +906,14 @@ mod tests {
         assert_eq!(run(Cmd::Bullet, "|"), "- |");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn a_selection_ending_at_the_start_of_a_line_does_not_touch_that_line() {
         assert_eq!(run(Cmd::Quote, "⟦a\n⟧b"), "⟦> a⟧\nb");
         assert_eq!(run(Cmd::Quote, "⟦a\nb⟧"), "⟦> a\n> b⟧");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn quote_adds_a_level_to_lines_without_one_and_takes_the_outer_level_off() {
         assert_eq!(run(Cmd::Quote, "a|b"), "> a|b");
@@ -923,7 +923,7 @@ mod tests {
         assert_eq!(run(Cmd::Quote, "- a|"), "> - a|");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn lines_in_fenced_code_are_left_alone_by_the_line_buttons() {
         assert_eq!(run(Cmd::Bullet, "```\na|\n```"), "<none>");
@@ -931,7 +931,7 @@ mod tests {
         assert_eq!(run(Cmd::Bullet, "⟦a\n```\nb\n```⟧"), "⟦- a\n```\nb\n```⟧");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn code_block_fences_the_lines_and_toggles() {
         assert_eq!(run(Cmd::CodeBlock, "x\n⟦a\nb⟧\ny"), "x\n```\n⟦a\nb⟧\n```\ny");
@@ -940,7 +940,7 @@ mod tests {
         assert_eq!(run(Cmd::CodeBlock, "ab|c"), "abc\n```\n|\n```");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn rule_and_table_are_blocks_of_their_own_after_the_line() {
         assert_eq!(run(Cmd::Rule, "a|b\nc"), "ab\n\n---\n|c");
@@ -954,7 +954,7 @@ mod tests {
         assert_eq!((tables[0].table.header.len(), tables[0].table.rows.len()), (2, 2));
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn links_wrap_the_selection_and_the_embed_starts_the_file_picker() {
         assert_eq!(run(Cmd::WebLink, "⟦text⟧"), "[text](⟦url⟧)");
@@ -966,7 +966,7 @@ mod tests {
         assert_eq!(run(Cmd::Embed, "a⟦b⟧c"), "ab[!|c", "inserted after the selection");
     }
 
-    // spec: EDIT-027
+    // spec: EDIT-028
     #[test]
     fn a_highlight_colour_wraps_in_a_mark_and_a_font_colour_in_a_span() {
         let y = Some([255, 255, 0]);
@@ -978,7 +978,7 @@ mod tests {
         assert_eq!(run(Cmd::FontColour(Some([0, 0, 255])), "⟦a\nb⟧"), "<span style=\"color: #0000FF;\">⟦a</span>\n<span style=\"color: #0000FF;\">b⟧</span>");
     }
 
-    // spec: EDIT-027
+    // spec: EDIT-028
     #[test]
     fn a_colour_on_coloured_text_replaces_the_colour_instead_of_nesting() {
         let g = Some([0x39, 0xff, 0x14]);
@@ -996,7 +996,7 @@ mod tests {
         assert_eq!(run(Cmd::HighlightColour(g), "x ⟦y <mark style=\"background: #FFFF00;\">a⟧b</mark>"), format!("x {}", m("#39FF14", "⟦y ab⟧")));
     }
 
-    // spec: EDIT-027
+    // spec: EDIT-028
     #[test]
     fn no_highlight_takes_off_the_mark_and_the_plain_highlight() {
         let m = |t: &str| format!("<mark style=\"background: #FFFF00;\">{t}</mark>");
@@ -1013,7 +1013,7 @@ mod tests {
         assert_eq!(t, "<span style=\"color: #FF0000;\">abc</span>");
     }
 
-    // spec: EDIT-027, EDIT-028
+    // spec: EDIT-028, EDIT-029
     #[test]
     fn mark_and_span_nest_properly_and_never_cross() {
         let src = "<mark style=\"background: #FFFF00;\">ab</mark>";
@@ -1030,7 +1030,7 @@ mod tests {
         assert!(mark.open.start < font.open.start && font.close.end <= mark.close.start, "properly nested: {t}");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn clear_formatting_removes_markers_colours_and_the_line_markers() {
         assert_eq!(run(Cmd::Clear, "⟦**a** *b* ~~c~~ ==d== `e`⟧"), "⟦a b c d e⟧");
@@ -1042,7 +1042,7 @@ mod tests {
         assert_eq!(run(Cmd::Clear, "a|b"), "<none>");
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn is_on_tells_what_is_applied_at_the_cursor() {
         let on = |cmd, src: &str| {
@@ -1062,7 +1062,7 @@ mod tests {
         assert!(!on(Cmd::Rule, "a|"));
     }
 
-    // spec: EDIT-026
+    // spec: EDIT-027
     #[test]
     fn odd_selections_never_panic_or_split_a_character() {
         for cmd in [

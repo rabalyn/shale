@@ -402,7 +402,7 @@ impl<'a> Writer<'a> {
         for s in &job.sections {
             let r = s.byte_range.start.0..s.byte_range.end.0;
             let f = &s.format;
-            // colours the note asks for are printed as written (EDIT-027), not mapped for paper
+            // colours the note asks for are printed as written (EDIT-028), not mapped for paper
             let paint = paints.iter().find(|(pr, ..)| pr.start <= r.start && r.end <= pr.end);
             let link = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)).map(|(_, l, _)| l.target.clone());
             out.push(Piece {
@@ -1001,7 +1001,7 @@ mod tests {
         assert!(export_drawing(&Scene::default(), "x", &ExportOptions::for_drawing(&Scene::default()), &HashMap::new()).is_err());
     }
 
-    // spec: PDF-004, EDIT-028
+    // spec: PDF-006, EDIT-029
     #[test]
     fn colours_are_printed_as_a_filled_rectangle_and_a_text_colour_without_their_tags() {
         let (v, d) = vault();

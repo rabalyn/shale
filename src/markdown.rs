@@ -368,7 +368,7 @@ pub fn find_tags(text: &str) -> Vec<(Range<usize>, String)> {
             continue;
         }
         let mut codes = inline_code_ranges(line);
-        // the colour in `<mark style="background: #FFFF00;">` is no tag (EDIT-027)
+        // the colour in `<mark style="background: #FFFF00;">` is no tag (EDIT-028)
         codes.extend(crate::colour_tags::open_tags(line));
         // a "#" inside a [[link]] is part of the link (heading or file name), not a tag
         let mut from = 0;
@@ -747,7 +747,7 @@ mod tests {
         assert_eq!(char_to_byte(t, 3), 4);
     }
 
-    // spec: EDIT-027
+    // spec: EDIT-028
     #[test]
     fn the_colour_in_a_mark_or_span_tag_is_no_hashtag() {
         let text = "<mark style=\"background: #FFFF00;\">hi</mark> <span style='color: #F00'>x</span> <mark style=\"background: #0F0\">open #real";

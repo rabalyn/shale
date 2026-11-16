@@ -470,7 +470,7 @@ mod tests {
         assert_eq!((r, c), (1, 2));
     }
 
-    // spec: EDIT-028
+    // spec: EDIT-029
     #[test]
     fn a_cell_shows_colours_without_their_tags() {
         let l = laid(600.0, vec![Col::Left], &["Head"], &[&["<mark style=\"background: #39FF14;\">neon</mark> and <span style=\"color: #FF0000;\">**red**</span>"]]);

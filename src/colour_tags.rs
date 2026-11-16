@@ -1,7 +1,7 @@
-//! Coloured highlight and font colour as inline HTML (EDIT-027): `<mark style="background: #FFFF00;">`
+//! Coloured highlight and font colour as inline HTML (EDIT-028): `<mark style="background: #FFFF00;">`
 //! and `<span style="color: #FF0000;">`, the convention of Obsidian's colour plugins. Reading is
 //! tolerant, writing is always the canonical form. No UI; the editor, the reading view, tables and
-//! the PDF export find the colours here (EDIT-028).
+//! the PDF export find the colours here (EDIT-029).
 
 use std::ops::Range;
 
@@ -213,7 +213,7 @@ pub fn colours_at(runs: &[Run], at: usize) -> (Option<[u8; 4]>, Option<[u8; 4]>)
 mod tests {
     use super::*;
 
-    // spec: EDIT-027
+    // spec: EDIT-028
     #[test]
     fn the_canonical_tags_are_written_in_upper_case_hex() {
         assert_eq!(mark_open([255, 255, 0]), "<mark style=\"background: #FFFF00;\">");
@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(MARK_CLOSE, "</mark>");
     }
 
-    // spec: EDIT-027
+    // spec: EDIT-028
     #[test]
     fn hex_colours_come_in_three_six_and_eight_digits() {
         assert_eq!(parse_hex("#fa0"), Some([255, 170, 0, 255]));
@@ -232,7 +232,7 @@ mod tests {
         }
     }
 
-    // spec: EDIT-027
+    // spec: EDIT-028
     #[test]
     fn tolerant_variants_are_read() {
         for tag in [
@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(runs.iter().map(|r| (r.kind, r.rgba)).collect::<Vec<_>>(), vec![(Kind::Font, [255, 0, 0, 255]), (Kind::Font, [0, 255, 0, 128])]);
     }
 
-    // spec: EDIT-027
+    // spec: EDIT-028
     #[test]
     fn a_span_takes_color_but_no_background_and_a_mark_the_other_way_round() {
         assert!(find("<span style=\"background: #FFFF00;\">x</span>").is_empty());
@@ -259,7 +259,7 @@ mod tests {
         assert!(find("<span style=\"background-color: #FFFF00; color: #123456\">x</span>").iter().all(|r| r.rgba == [0x12, 0x34, 0x56, 255]));
     }
 
-    // spec: EDIT-027, EDIT-028
+    // spec: EDIT-028, EDIT-029
     #[test]
     fn nesting_and_mixing_find_each_tag_pair() {
         let line = "<mark style=\"background: #FFFF00;\">a <span style=\"color: #FF0000;\">b</span> c</mark>";
@@ -279,7 +279,7 @@ mod tests {
         assert_eq!(colours_at(&runs, y).0, Some([0x11, 0x11, 0x11, 255]));
     }
 
-    // spec: EDIT-027, EDIT-028
+    // spec: EDIT-028, EDIT-029
     #[test]
     fn garbled_unclosed_and_code_tags_are_plain_text() {
         for line in [
@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(runs[0].rgba[0], 0x22);
     }
 
-    // spec: EDIT-028
+    // spec: EDIT-029
     #[test]
     fn text_on_a_highlight_is_dark_on_bright_and_light_on_dark_backgrounds() {
         assert!(dark_text_on([255, 255, 0, 255]));

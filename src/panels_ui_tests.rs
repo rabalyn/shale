@@ -309,7 +309,7 @@ fn panel_trash_dialog_moves_to_trash_or_cancels() {
     assert!(p.app.modal.is_none() && p.dir.join("Welcome.md").exists());
 }
 
-// spec: EDIT-025, EDIT-027
+// spec: EDIT-026, EDIT-028
 #[test]
 fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {
     let mut p = P::new("editing-settings", &[]);
