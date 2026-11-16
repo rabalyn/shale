@@ -2581,6 +2581,26 @@ fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_of
     }
 }
 
+// spec: NAV-013
+#[test]
+fn nav_013_the_mail_settings_open_centred_in_a_window_of_any_height_and_grow_downwards() {
+    let frame = |w: &W| w.ctx.memory(|m| m.area_rect(egui::Id::unique(("dialog", "mail-accounts")))).expect("the dialog is shown");
+    for height in [700.0, 900.0, 1100.0, 1300.0, 2400.0] {
+        let mut w = W::new(&format!("centred-{height}"), true);
+        w.size = Vec2::new(1500.0, height);
+        w.app.open_mail_settings();
+        w.settle();
+        let opened = frame(&w);
+        assert!((opened.center().y - height / 2.0).abs() < 2.0 && (opened.center().x - 750.0).abs() < 2.0, "window {height} high: opened at {opened:?}");
+        // more content: the top-left corner stays and the bottom edge moves; only when that would leave the window the dialog is pushed up just enough to end at the window's bottom edge
+        w.click("md:enc-header");
+        w.settle();
+        let grown = frame(&w);
+        assert!((grown.min - opened.min).length() < 1.0 || grown.bottom() >= height - 1.0, "window {height} high: {opened:?} -> {grown:?}");
+        assert!(grown.top() >= 0.0 && grown.bottom() <= height + 0.5, "window {height} high: {grown:?}");
+    }
+}
+
 // spec: MAIL-207, MAIL-208
 #[test]
 fn queued_actions_of_an_account_that_is_not_configured_are_not_counted_as_waiting_but_noted_and_kept() {
