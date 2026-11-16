@@ -6,7 +6,7 @@
 //!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
 //!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
 //!   shale --screenshot out.png --keys 'click:@Sync|waitfor:@Compose'   (scripted input, see script.rs)
-//!   shale --screenshot out.png --size 1000x700   (window size; docs/screenshots/regen.sh makes all pictures)
+//!   shale --screenshot out.png --size 1400x900   (window size; docs/screenshots/regen.sh makes all pictures)
 //!
 //! An unknown option or a missing value is an error (exit code 2), never a vault folder.
 
@@ -65,11 +65,20 @@ mod vim;
 use eframe::egui;
 use std::path::PathBuf;
 
+/// The smallest window, in points: the window cannot be made smaller and `--size` takes no
+/// less (NAV-030). A hint to the window manager; a tiling one can still give Shale less.
+const MIN_WINDOW: [f32; 2] = [1280.0, 720.0];
+
 /// `1360x840` as window points.
 fn parse_size(s: &str) -> Option<[f32; 2]> {
     let (w, h) = s.split_once('x')?;
     let (w, h): (f32, f32) = (w.parse().ok()?, h.parse().ok()?);
-    (w >= 720.0 && h >= 480.0).then_some([w, h])
+    (w >= MIN_WINDOW[0] && h >= MIN_WINDOW[1]).then_some([w, h])
+}
+
+/// The Shale window of `size` points, with its smallest size.
+fn window(size: [f32; 2]) -> egui::ViewportBuilder {
+    egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size(size).with_min_inner_size(MIN_WINDOW)
 }
 
 const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [--screenshot <file.png> [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]";
@@ -116,7 +125,7 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
             "--keys" => cli.keys = Some(value()?),
             "--size" => {
                 let v = value()?;
-                cli.size = parse_size(&v).ok_or_else(|| format!("--size needs WIDTHxHEIGHT (at least 720x480), e.g. 1360x840, not {v}"))?;
+                cli.size = parse_size(&v).ok_or_else(|| format!("--size needs WIDTHxHEIGHT (at least 1280x720), e.g. 1360x840, not {v}"))?;
             }
             "-h" | "--help" => return Ok(Parsed::Help),
             o if o.starts_with('-') => return Err(format!("unknown option {o}")),
@@ -165,7 +174,7 @@ fn main() -> eframe::Result {
         None
     };
 
-    let mut viewport = egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size(size).with_min_inner_size([720.0, 480.0]);
+    let mut viewport = window(size);
     if screenshot.is_some() {
         // Don't steal focus from whatever the person is doing.
         viewport = viewport.with_active(false);
@@ -201,7 +210,8 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_args, parse_size, Cli, Parsed};
+    use super::{parse_args, parse_size, window, Cli, Parsed, MIN_WINDOW};
+    use eframe::egui;
     use std::path::PathBuf;
 
     fn parse(args: &[&str]) -> Parsed {
@@ -258,8 +268,8 @@ mod tests {
     // spec: DEV-013
     #[test]
     fn every_option_is_read() {
-        let c = cli(parse(&["--vault", "/v", "--screenshot", "out.png", "--view", "tasks", "--keys", "key:Down|key:Tab", "--size", "1000x700"]));
-        assert_eq!(c, Cli { screenshot: Some("out.png".into()), vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1000.0, 700.0] });
+        let c = cli(parse(&["--vault", "/v", "--screenshot", "out.png", "--view", "tasks", "--keys", "key:Down|key:Tab", "--size", "1400x900"]));
+        assert_eq!(c, Cli { screenshot: Some("out.png".into()), vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1400.0, 900.0] });
     }
 
     // spec: DEV-013, BUILD-019
@@ -291,11 +301,20 @@ mod tests {
     // spec: DEV-013
     #[test]
     fn a_bad_size_is_an_error_for_exit_code_2() {
-        for bad_args in [&["--size", "100x100"][..], &["--size", "1360"], &["--size", "axb"], &["--size"]] {
+        for bad_args in [&["--size", "100x100"][..], &["--size", "1279x720"], &["--size", "1280x719"], &["--size", "1360"], &["--size", "axb"], &["--size"]] {
             let m = self::bad(bad_args);
             assert!(m.contains("--size needs"), "{m}");
         }
-        assert_eq!(cli(parse(&["--size", "720x480"])).size, [720.0, 480.0], "the smallest window is allowed");
+        assert_eq!(cli(parse(&["--size", "1280x720"])).size, MIN_WINDOW, "the smallest window is allowed");
+    }
+
+    // spec: NAV-030
+    #[test]
+    fn nav_030_the_window_cannot_be_made_smaller_than_1280x720() {
+        let w = window([1360.0, 840.0]);
+        assert_eq!(w.inner_size, Some(egui::vec2(1360.0, 840.0)));
+        assert_eq!(w.min_inner_size, Some(egui::vec2(1280.0, 720.0)));
+        assert_eq!(MIN_WINDOW, [1280.0, 720.0]);
     }
 
     // spec: DEV-013
