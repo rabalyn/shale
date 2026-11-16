@@ -2557,12 +2557,12 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
 // spec: MAIL-191
 #[cfg(unix)]
 #[test]
-fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_it_fills_when_the_gnupg_result_arrives() {
+fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_of_any_height_when_the_gnupg_result_arrives() {
     if !have_gnupg() {
         return;
     }
-    // windows the dialog fills and scrolls in (in a taller one the dialog grows with the lines that arrive: raba/shale#151)
-    for height in [900.0, 1000.0] {
+    // windows the dialog fills and scrolls in, and taller ones it does not fill (it grew, and moved up, with the lines: raba/shale#151)
+    for height in [900.0, 1000.0, 1100.0, 1300.0, 2400.0] {
         let [pending, arrived, missing] = encryption_layouts(height);
         for (what, a, b) in [("pending -> arrived", &pending, &arrived), ("arrived -> missing", &arrived, &missing)] {
             assert_eq!(a.len(), b.len());
