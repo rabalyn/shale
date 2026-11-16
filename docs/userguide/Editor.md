@@ -46,6 +46,18 @@ editor, the preview and the reading view, and stops when the note's tab is close
 vault is opened. Nothing ever starts by itself. How opaque the play button is (60 % by
 default) is set in Settings → General → Appearance, see [[Settings reference]].
 
+## Resizing pictures and videos
+
+Move the mouse over a picture or a video in the editor: its edges and corners
+become handles, and a drag changes the size (the proportions stay). The width is written into
+the link when you let go: `![[photo.png|300]]` (points; this is also what Obsidian writes), and
+the reading view shows the embed at that width. Two round buttons sit in the corner of the
+picture, looking like the play button of the sound player: **100%** sets the natural size, and the
+fullscreen button shows the picture (or the video, with its controls) over the whole window; Esc,
+the cross or a click beside it closes it.
+
+![[image-resize.png]]
+
 ## Vim-style editing
 
 Settings → General → Appearance, off by default. Notes open in normal mode.

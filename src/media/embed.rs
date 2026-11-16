@@ -192,7 +192,7 @@ fn round_button(ui: &Ui, painter: &Painter, at: Pos2, id: Id, opacity: f32, labe
     r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     let alpha = button_alpha(opacity, r.hovered());
     painter.circle_filled(at, BUTTON_R, Color32::from_black_alpha(alpha));
-    mark(painter, at, Color32::from_white_alpha(alpha.max(120)));
+    mark(painter, at, Color32::from_white_alpha(alpha.max(220)));
     if r.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }
