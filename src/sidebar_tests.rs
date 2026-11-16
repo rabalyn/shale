@@ -473,3 +473,15 @@ fn lay_013_the_icon_menu_removes_restores_and_resets() {
     assert_eq!(w.app.cfg.sidebars, crate::config::SidebarCfg { ribbon: w.app.cfg.sidebars.ribbon.clone(), right: w.app.cfg.sidebars.right.clone(), hidden: vec![] });
     assert_eq!(Layout::from_config(&w.app.cfg), Layout::default(), "kept");
 }
+
+// spec: LAY-016
+#[test]
+fn lay_016_the_right_sidebar_keeps_the_width_it_is_dragged_to() {
+    let mut w = W::new("width");
+    let r = w.app.side.right_rect.unwrap();
+    let edge = Pos2::new(r.min.x - 6.0, r.center().y);
+    w.drag_and_drop(edge, edge - Vec2::new(80.0, 0.0));
+    w.frames(3);
+    let n = w.app.side.right_rect.unwrap();
+    assert!((n.width() - (r.width() + 80.0)).abs() < 12.0, "{} -> {}", r.width(), n.width());
+}

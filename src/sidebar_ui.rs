@@ -258,6 +258,9 @@ impl ShaleApp {
             body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
             self.right_panel_body(&mut body_ui, panel);
         }
+        // the views are laid out by hand: claim the whole width, or the panel takes the width of
+        // nothing when the drag ends and snaps back
+        ui.allocate_rect(full, Sense::hover());
         // the grips between the views come last, so that they win where a panel reaches the border
         for i in 1..n {
             let grip = Rect::from_min_max(Pos2::new(full.min.x, tops[i] - 1.0), Pos2::new(full.max.x, tops[i] + 3.0));
