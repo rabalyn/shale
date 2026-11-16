@@ -2526,14 +2526,14 @@ fn ctrl_h_and_ctrl_l_move_the_keyboard_across_the_panes_and_the_marker_follows()
     assert!(marked(&w, "folders"));
     // Ctrl+H at the folders goes on into the left sidebar (NAV-011); the mail view lets go
     w.press(Key::H, Modifiers::COMMAND);
-    assert!(w.app.tree_sel.is_some(), "the file list has the keyboard");
+    assert!(w.app.tree.sel.is_some(), "the file list has the keyboard");
     assert!(!w.has("mail:focus"), "no pane is marked while the keyboard is in the sidebar");
     let cursor = w.app.mail.cursor;
     w.press(Key::J, Modifiers::NONE);
     assert_eq!(w.app.mail.cursor, cursor, "j belongs to the file list now");
     // Ctrl+L from the sidebar comes back into the folder pane
     w.press(Key::L, Modifiers::COMMAND);
-    assert!(w.app.tree_sel.is_none());
+    assert!(w.app.tree.sel.is_none());
     assert_eq!(w.app.mail.pane, Pane::Folders);
     assert!(marked(&w, "folders"));
     // the search field belongs to the list pane; Ctrl+H leaves it and moves on

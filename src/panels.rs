@@ -8,6 +8,7 @@ use crate::markdown;
 use crate::theme;
 use crate::vault::{rel_to_string, FileKind};
 use eframe::egui::{self, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 impl ShaleApp {
@@ -37,7 +38,7 @@ impl ShaleApp {
                 self.actions.push(Action::NewDrawing { folder: folder.clone(), embed_into: None });
             }
             if icon_button(ui, Icon::Collapse, 26.0, false, "Collapse all folders").clicked() {
-                self.expanded.clear();
+                self.tree.expanded.clear();
             }
             let sort_resp = icon_button(ui, Icon::Sort, 26.0, false, &format!("Sort: {}", self.cfg.file_sort.label()));
             egui::Popup::menu(&sort_resp).show(|ui| {
@@ -133,7 +134,7 @@ impl ShaleApp {
         fn walk(app: &ShaleApp, dir: &Path, out: &mut Vec<(PathBuf, bool)>) {
             for f in app.sorted_folders_in(dir) {
                 out.push((f.clone(), true));
-                if app.expanded.contains(&f) {
+                if app.tree.expanded.contains(&f) {
                     walk(app, &f, out);
                 }
             }
@@ -147,15 +148,15 @@ impl ShaleApp {
     /// Keys while the file list has the keyboard: j / k files, Ctrl+J / Ctrl+K folders, Space
     /// opens or closes a folder, Enter opens, Esc back to the editor.
     fn tree_keys(&mut self, ui: &Ui) {
-        let Some(sel) = self.tree_sel.clone() else { return };
+        let Some(sel) = self.tree.sel.clone() else { return };
         if ui.ctx().memory(|m| m.focused().is_some()) {
             // something else took the keyboard (a click into the editor, a dialog)
-            self.tree_sel = None;
+            self.tree.sel = None;
             return;
         }
         let rows = self.visible_tree_rows();
         let Some(cur) = rows.iter().position(|(r, _)| *r == sel).or(if rows.is_empty() { None } else { Some(0) }) else {
-            self.tree_sel = None;
+            self.tree.sel = None;
             return;
         };
         let (action, enter, esc) = ui.input_mut(|i| (self.keymap.poll(i, Scope::FileList), i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
@@ -179,11 +180,11 @@ impl ShaleApp {
             cur
         };
         let (path, is_dir) = rows[new].clone();
-        self.tree_scroll |= new != cur;
-        self.tree_sel = Some(path.clone());
+        self.tree.scroll |= new != cur;
+        self.tree.sel = Some(path.clone());
         if (space || enter) && is_dir {
-            if !self.expanded.remove(&path) {
-                self.expanded.insert(path);
+            if !self.tree.expanded.remove(&path) {
+                self.tree.expanded.insert(path);
             }
         } else if enter {
             self.actions.push(Action::Open { rel: path, new_tab: false });
@@ -195,9 +196,9 @@ impl ShaleApp {
 
     /// Outline the row selected by the keyboard (and scroll to it once after it changed).
     fn mark_tree_sel(&mut self, ui: &Ui, rel: &Path, resp: &egui::Response) {
-        if self.tree_sel.as_deref() == Some(rel) {
+        if self.tree.sel.as_deref() == Some(rel) {
             ui.painter().rect_stroke(resp.rect, CornerRadius::same(4), egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
-            if std::mem::take(&mut self.tree_scroll) {
+            if std::mem::take(&mut self.tree.scroll) {
                 resp.scroll_to_me(Some(egui::Align::Center));
             }
         }
@@ -208,7 +209,7 @@ impl ShaleApp {
         let files = self.sorted_files_in(dir);
         let current = self.current_path();
         for f in folders {
-            let open = self.expanded.contains(&f);
+            let open = self.tree.expanded.contains(&f);
             let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let resp = tree_row(ui, depth, &name, Some(open), false, theme::TEXT, "");
             self.mark_tree_sel(ui, &f, &resp);
@@ -219,9 +220,9 @@ impl ShaleApp {
             }
             if resp.clicked() {
                 if open {
-                    self.expanded.remove(&f);
+                    self.tree.expanded.remove(&f);
                 } else {
-                    self.expanded.insert(f.clone());
+                    self.tree.expanded.insert(f.clone());
                 }
             }
             resp.context_menu(|ui| {
@@ -807,7 +808,7 @@ impl ShaleApp {
                                 Ok(rel) => {
                                     let mut p = Some(rel.as_path());
                                     while let Some(dir) = p.filter(|d| !d.as_os_str().is_empty()) {
-                                        self.expanded.insert(dir.to_path_buf());
+                                        self.tree.expanded.insert(dir.to_path_buf());
                                         p = dir.parent();
                                     }
                                 }
@@ -1174,6 +1175,16 @@ pub struct SearchBox {
     pub focus: bool,
 }
 
+/// The file list of the left sidebar: the open folders and the keyboard selection.
+#[derive(Default)]
+pub struct FileTree {
+    pub expanded: HashSet<PathBuf>,
+    /// the selected row of the file list while it has the keyboard (Ctrl+H, Ctrl+Shift+B)
+    pub sel: Option<PathBuf>,
+    /// scroll the selected file list row into view on the next frame
+    pub(crate) scroll: bool,
+}
+
 /// One row in the file tree. `open` is Some for folders.
 /// A file or folder being dragged in the file list.
 #[derive(Clone, Debug)]
@@ -1340,7 +1351,7 @@ mod move_tests {
                 }
             }
         }
-        assert!(app.expanded.contains(Path::new("Archiv")));
+        assert!(app.tree.expanded.contains(Path::new("Archiv")));
         // back to the top of the vault
         app.move_into(Path::new("Archiv/Ideas.md"), Path::new("")).unwrap();
         assert!(d.join("Ideas.md").exists());
@@ -1376,7 +1387,7 @@ mod tree_key_tests {
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
         app.left = LeftPanel::Files;
         app.open(Path::new("r1.md"), false);
-        app.expanded.clear(); // the start opened a first note (and its folder)
+        app.tree.expanded.clear(); // the start opened a first note (and its folder)
         let ctx = egui::Context::default();
         let mut t = 0.0;
         let mut press = |app: &mut ShaleApp, k: Key, m: Modifiers| {
@@ -1390,12 +1401,12 @@ mod tree_key_tests {
                 egui::CentralPanel::default().show(ui, |ui| app.file_explorer(ui));
             });
             out.textures_delta.clear();
-            app.tree_sel.clone()
+            app.tree.sel.clone()
         };
         let p = |s: &str| Some(PathBuf::from(s));
         // Ctrl+H / Ctrl+Shift+B: the file list gets the keyboard with the open note selected
         app.focus_sidebar(&ctx);
-        assert_eq!(app.tree_sel, p("r1.md"));
+        assert_eq!(app.tree.sel, p("r1.md"));
         // rows: A, B (closed folders), r1, r2. j / k only stop on files
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("r2.md"));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("r2.md"), "stops at the end");
@@ -1408,7 +1419,7 @@ mod tree_key_tests {
         assert_eq!(press(&mut app, Key::K, CTRL), p("A"));
         // Space opens the folder; its files join the rows
         press(&mut app, Key::Space, Modifiers::NONE);
-        assert!(app.expanded.contains(Path::new("A")));
+        assert!(app.tree.expanded.contains(Path::new("A")));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("A/a1.md"));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("A/a2.md"));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("r1.md"), "B is a folder: skipped");
@@ -1419,9 +1430,9 @@ mod tree_key_tests {
         // Space again closes A (select it first); Enter on a file opens it, keyboard to the editor
         press(&mut app, Key::K, CTRL);
         press(&mut app, Key::K, CTRL);
-        assert_eq!(app.tree_sel, p("A"));
+        assert_eq!(app.tree.sel, p("A"));
         press(&mut app, Key::Space, Modifiers::NONE);
-        assert!(!app.expanded.contains(Path::new("A")));
+        assert!(!app.tree.expanded.contains(Path::new("A")));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("B/b1.md"));
         app.actions.clear();
         assert_eq!(press(&mut app, Key::Enter, Modifiers::NONE), None, "Enter leaves the file list");
@@ -1429,11 +1440,11 @@ mod tree_key_tests {
         assert!(app.tabbar.tabs[app.tabbar.active].editor.request_focus, "…and the editor gets the keyboard");
         // Esc and Ctrl+L also give the keyboard back; a click elsewhere ends browsing
         app.focus_sidebar(&ctx);
-        assert!(app.tree_sel.is_some());
+        assert!(app.tree.sel.is_some());
         assert_eq!(press(&mut app, Key::Escape, Modifiers::NONE), None);
         app.focus_sidebar(&ctx);
         app.focus_editor();
-        assert_eq!(app.tree_sel, None);
+        assert_eq!(app.tree.sel, None);
         app.focus_sidebar(&ctx);
         ctx.memory_mut(|m| m.request_focus(egui::Id::unique("somewhere else")));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), None);

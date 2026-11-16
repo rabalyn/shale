@@ -243,11 +243,11 @@ impl ShaleApp {
                 for e in errors {
                     self.toast(e);
                 }
-                self.expanded.insert(folder.clone());
+                self.tree.expanded.insert(folder.clone());
                 let mut p = folder.parent();
                 while let Some(x) = p {
                     if !x.as_os_str().is_empty() {
-                        self.expanded.insert(x.to_path_buf());
+                        self.tree.expanded.insert(x.to_path_buf());
                     }
                     p = x.parent();
                 }
@@ -392,7 +392,7 @@ impl ShaleApp {
                 Some((_, f, true)) => match &self.drag.tree_hover {
                     Some((h, since)) if h == f => {
                         if since.elapsed() > std::time::Duration::from_millis(700) {
-                            self.expanded.insert(f.clone());
+                            self.tree.expanded.insert(f.clone());
                             self.drag.tree_hover = None;
                         }
                     }

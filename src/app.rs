@@ -7,7 +7,7 @@ use crate::fsutil;
 use crate::graph::{GraphClick, GraphView};
 use crate::keys::{Action as KeyAction, Scope};
 use crate::markdown;
-use crate::panels::SearchBox;
+use crate::panels::{FileTree, SearchBox};
 use crate::reader::{ReaderAction, SceneCache};
 use crate::theme;
 use crate::vault::{self, rel_to_string, FileKind, Saved, Vault};
@@ -289,11 +289,7 @@ pub struct ShaleApp {
     pub left: LeftPanel,
     /// The icons of the ribbon and the right sidebar, and a drag of one of them (LAY-001).
     pub side: crate::sidebar_ui::SideState,
-    pub expanded: HashSet<PathBuf>,
-    /// the selected row of the file list while it has the keyboard (Ctrl+H, Ctrl+Shift+B)
-    pub tree_sel: Option<PathBuf>,
-    /// scroll the selected file list row into view on the next frame
-    pub(crate) tree_scroll: bool,
+    pub tree: FileTree,
     pub search: SearchBox,
     pub tasks: TasksFilter,
     pub graph: GraphView,
@@ -447,9 +443,7 @@ impl ShaleApp {
             drawings: HashMap::new(),
             left: LeftPanel::Files,
             side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
-            expanded: HashSet::new(),
-            tree_sel: None,
-            tree_scroll: false,
+            tree: FileTree::default(),
             search: SearchBox::default(),
             tasks: TasksFilter::default(),
             graph: GraphView::new(false),
@@ -727,7 +721,7 @@ impl ShaleApp {
             if dir.as_os_str().is_empty() {
                 break;
             }
-            self.expanded.insert(dir.to_path_buf());
+            self.tree.expanded.insert(dir.to_path_buf());
             p = dir.parent();
         }
         match f.kind {
@@ -1305,11 +1299,11 @@ impl ShaleApp {
             }
         }
         // open folders in the file list move along
-        let exp: Vec<PathBuf> = self.expanded.iter().cloned().collect();
+        let exp: Vec<PathBuf> = self.tree.expanded.iter().cloned().collect();
         for e in exp {
             if let Ok(rest) = e.strip_prefix(rel) {
-                self.expanded.remove(&e);
-                self.expanded.insert(to.join(rest));
+                self.tree.expanded.remove(&e);
+                self.tree.expanded.insert(to.join(rest));
             }
         }
     }
@@ -1330,7 +1324,7 @@ impl ShaleApp {
             self.toast(m);
         }
         if !into.as_os_str().is_empty() {
-            self.expanded.insert(into.to_path_buf());
+            self.tree.expanded.insert(into.to_path_buf());
         }
         let name = rel.file_name().map(|n| markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
         let place = if into.as_os_str().is_empty() { "the vault".to_string() } else { format!("“{}”", rel_to_string(into)) };
@@ -1411,12 +1405,12 @@ impl ShaleApp {
                 // the open note's folders open, so it can be selected
                 let mut p = cur.as_deref().and_then(|c| c.parent());
                 while let Some(d) = p.filter(|d| !d.as_os_str().is_empty()) {
-                    self.expanded.insert(d.to_path_buf());
+                    self.tree.expanded.insert(d.to_path_buf());
                     p = d.parent();
                 }
                 let rows = self.visible_tree_rows();
-                self.tree_sel = cur.filter(|c| rows.iter().any(|(r, _)| r == c)).or_else(|| rows.first().map(|(r, _)| r.clone()));
-                self.tree_scroll = true;
+                self.tree.sel = cur.filter(|c| rows.iter().any(|(r, _)| r == c)).or_else(|| rows.first().map(|(r, _)| r.clone()));
+                self.tree.scroll = true;
             }
             LeftPanel::Search => self.search.focus = true,
             LeftPanel::Tags => {}
@@ -1425,7 +1419,7 @@ impl ShaleApp {
 
     /// Put the keyboard back into the editor of the open note (Ctrl+L).
     pub fn focus_editor(&mut self) {
-        self.tree_sel = None;
+        self.tree.sel = None;
         self.search.sel = None;
         if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             t.editor.request_focus = true;
@@ -1772,7 +1766,7 @@ impl ShaleApp {
             self.keymap.cancel(Scope::EditorNormal);
         }
         let in_mail = matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Mail));
-        let sidebar_keys = self.tree_sel.is_some() || self.search.sel.is_some();
+        let sidebar_keys = self.tree.sel.is_some() || self.search.sel.is_some();
         if mail_view {
             self.show_view(View::Mail, false);
         }
@@ -1797,7 +1791,7 @@ impl ShaleApp {
         if to_editor {
             // in the mail view the keyboard goes to its panes (MAIL-063)
             if in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, 1, sidebar_keys) {
-                self.tree_sel = None;
+                self.tree.sel = None;
                 self.search.sel = None;
             } else {
                 self.focus_editor();
@@ -2305,7 +2299,7 @@ pub(crate) mod tests {
         assert!(app.usage_ask(Ask::Open(PathBuf::from("Ideas.md"))), "opening a file closes the dialog");
         assert_eq!(app.current_path(), Some(PathBuf::from("Ideas.md")));
         app.usage_ask(Ask::ShowFolder(PathBuf::from("Projects")));
-        assert!(app.expanded.contains(Path::new("Projects")));
+        assert!(app.tree.expanded.contains(Path::new("Projects")));
         let _ = std::fs::remove_dir_all(&d);
     }
 

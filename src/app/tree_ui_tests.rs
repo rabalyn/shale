@@ -46,8 +46,8 @@ impl W {
 /// A vault with a folder inside a folder, open down to the leaf.
 fn window(tag: &str) -> W {
     let mut w = W::with_files(tag, FILES);
-    w.app.expanded.insert(PathBuf::from("Sub"));
-    w.app.expanded.insert(PathBuf::from("Sub/Deep"));
+    w.app.tree.expanded.insert(PathBuf::from("Sub"));
+    w.app.tree.expanded.insert(PathBuf::from("Sub/Deep"));
     w.frames(4);
     w
 }
@@ -158,7 +158,7 @@ fn imp_017_a_note_dropped_on_a_folder_a_note_or_the_empty_list_moves_there() {
 #[test]
 fn imp_017_off_the_list_nothing_moves_and_a_closed_folder_opens_under_the_pointer() {
     let mut w = window("tree-hover");
-    w.app.expanded.clear();
+    w.app.tree.expanded.clear();
     w.frames(3);
     let top = w.row("Top.md");
     // let go over the editor: not a place for it
@@ -171,11 +171,11 @@ fn imp_017_off_the_list_nothing_moves_and_a_closed_folder_opens_under_the_pointe
     // resting on a closed folder opens it (once the pointer has stayed there long enough)
     let sub = w.row("Sub");
     w.carry(top, sub);
-    assert!(!w.app.expanded.contains(Path::new("Sub")));
+    assert!(!w.app.tree.expanded.contains(Path::new("Sub")));
     assert!(matches!(&w.app.drag.tree_hover, Some((f, _)) if f == Path::new("Sub")));
     w.app.drag.tree_hover = Some((PathBuf::from("Sub"), Instant::now() - Duration::from_secs(2)));
     w.frames(2);
-    assert!(w.app.expanded.contains(Path::new("Sub")));
+    assert!(w.app.tree.expanded.contains(Path::new("Sub")));
     assert!(w.hl.text.iter().any(|(t, _)| t == "Inner"), "its notes are listed now");
     // moving off it forgets the rest
     w.hl.release(&mut w.app, editor);

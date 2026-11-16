@@ -262,7 +262,7 @@ fn panel_new_folder_dialog_creates_opens_the_path_and_refuses_nothing_silently()
     p.click(Show::Modals, "Create");
     assert!(p.app.modal.is_none());
     assert!(p.dir.join("Archive").is_dir());
-    assert!(p.app.expanded.contains(Path::new("Archive")), "the new folder is open in the tree");
+    assert!(p.app.tree.expanded.contains(Path::new("Archive")), "the new folder is open in the tree");
     // Enter creates too, inside a folder
     p.app.modal = Some(Modal::NewFolder { parent: PathBuf::from("Archive"), name: String::new() });
     p.look(Show::Modals);
@@ -408,16 +408,16 @@ fn panel_task_list_says_so_when_there_are_none() {
 #[test]
 fn panel_file_tree_opens_folds_and_offers_menus() {
     let mut p = P::new("tree", &[("Box/Inner.md", "inner\n")]);
-    p.app.expanded.clear();
+    p.app.tree.expanded.clear();
     // a folder opens and closes by a click
     let r = p.row("Box");
     p.click_rect(Show::Files, r, PointerButton::Primary);
-    assert!(p.app.expanded.contains(Path::new("Box")));
+    assert!(p.app.tree.expanded.contains(Path::new("Box")));
     p.look(Show::Files);
     assert!(p.painted.iter().any(|(t, _)| t == "Inner"), "its files are listed");
     let r = p.row("Box");
     p.click_rect(Show::Files, r, PointerButton::Primary);
-    assert!(!p.app.expanded.contains(Path::new("Box")));
+    assert!(!p.app.tree.expanded.contains(Path::new("Box")));
     // a click on a note opens it
     let r = p.row("Ideas");
     p.click_rect(Show::Files, r, PointerButton::Primary);
@@ -437,10 +437,10 @@ fn panel_file_tree_opens_folds_and_offers_menus() {
             a.len()
         );
     }
-    p.app.expanded.insert(PathBuf::from("Box"));
+    p.app.tree.expanded.insert(PathBuf::from("Box"));
     let r = p.find(Show::Files, None, "Collapse all folders");
     p.click_rect(Show::Files, r, PointerButton::Primary);
-    assert!(p.app.expanded.is_empty());
+    assert!(p.app.tree.expanded.is_empty());
     // the menu of a note
     let r = p.row("Ideas");
     p.click_rect(Show::Files, r, PointerButton::Secondary);
