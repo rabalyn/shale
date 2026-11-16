@@ -306,14 +306,10 @@ pub struct ShaleApp {
     pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
     pub mail: crate::mail::ui::MailView,
-    pub cal_side: crate::calendar::ui::CalendarView,
-    pub cal_main: crate::calendar::ui::CalendarView,
+    /// the calendar views, the jobs of their popups and the default calendar for new events
+    pub cal: crate::calendar::ui::CalendarUi,
     /// the feed view (Mastodon / Bluesky)
     pub social: crate::social::state::SocialState,
-    /// deletes started from the event popup: (job, calendar)
-    pub cal_jobs: Vec<(crate::calendar::store::Job, String)>,
-    /// the calendar the last event was saved to (the default for the next new one)
-    pub last_event_calendar: Option<String>,
     /// for background jobs to wake the window up when they finish
     ctx: Option<egui::Context>,
     /// drag and drop: where things can be dropped, what is dragged over the window, drops being read
@@ -488,8 +484,7 @@ impl ShaleApp {
                 c
             },
             mail: crate::mail::ui::MailView::new(mail_root),
-            cal_side: crate::calendar::ui::CalendarView::new(crate::calendar::ui::Size::Small),
-            cal_main: crate::calendar::ui::CalendarView::new(crate::calendar::ui::Size::Medium),
+            cal: crate::calendar::ui::CalendarUi::new(),
             social: {
                 let mut s = crate::social::state::SocialState::new(social_dir);
                 if persist {
@@ -497,8 +492,6 @@ impl ShaleApp {
                 }
                 s
             },
-            cal_jobs: vec![],
-            last_event_calendar: None,
             ctx: None,
             drag: drops::DragState::default(),
             tab_rects: vec![],
@@ -1488,7 +1481,7 @@ impl ShaleApp {
             CalAction::OpenLarge => self.show_view(View::Calendar, false),
             CalAction::NewEventAt(start) => {
                 let srcs = &self.calendar.sources;
-                let target = self.last_event_calendar.as_ref().and_then(|id| srcs.iter().find(|s| s.id == *id)).or_else(|| srcs.iter().find(|s| s.enabled)).or_else(|| srcs.first()).map(|s| s.id.clone());
+                let target = self.cal.last_event_calendar.as_ref().and_then(|id| srcs.iter().find(|s| s.id == *id)).or_else(|| srcs.iter().find(|s| s.enabled)).or_else(|| srcs.first()).map(|s| s.id.clone());
                 match target {
                     Some(id) => {
                         let mut d = crate::calendar::dialog::EventDialog::new_at(id, start);
@@ -1523,7 +1516,7 @@ impl ShaleApp {
                 let found = self.calendar.sources.get(occ.source).map(|s| s.id.clone()).zip(self.calendar.event(&occ).cloned());
                 if let Some((sid, ev)) = found {
                     match self.calendar.delete_occurrence(&sid, &ev, occ.start, self.ctx.clone()) {
-                        Ok(job) => self.cal_jobs.push((job, sid)),
+                        Ok(job) => self.cal.jobs.push((job, sid)),
                         Err(e) => self.toast(format!("Could not remove the date: {e}")),
                     }
                 }
@@ -1532,7 +1525,7 @@ impl ShaleApp {
                 let found = self.calendar.sources.get(occ.source).map(|s| s.id.clone()).zip(self.calendar.event(&occ).cloned());
                 if let Some((sid, ev)) = found {
                     match self.calendar.delete_event(&sid, ev, self.ctx.clone()) {
-                        Ok(job) => self.cal_jobs.push((job, sid)),
+                        Ok(job) => self.cal.jobs.push((job, sid)),
                         Err(e) => self.toast(format!("Could not delete the event: {e}")),
                     }
                 }
@@ -2228,7 +2221,7 @@ impl ShaleApp {
             self.ctx = Some(ui.ctx().clone());
         }
         let mut finished = Vec::new();
-        self.cal_jobs.retain(|(job, sid)| match crate::calendar::store::job_result(job) {
+        self.cal.jobs.retain(|(job, sid)| match crate::calendar::store::job_result(job) {
             Some(r) => {
                 finished.push((r, sid.clone()));
                 false
@@ -2241,7 +2234,7 @@ impl ShaleApp {
                 Ok(m) | Err(m) => self.toast(m),
             }
         }
-        if !self.cal_jobs.is_empty() {
+        if !self.cal.jobs.is_empty() {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
         if self.calendar.is_loading() {

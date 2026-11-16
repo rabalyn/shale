@@ -631,7 +631,7 @@ impl ShaleApp {
                 let monday = self.cfg.week_starts_monday;
                 let mut act = None;
                 egui::Frame::new().inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
-                    act = self.cal_main.show(ui, &self.calendar, monday, true);
+                    act = self.cal.main.show(ui, &self.calendar, monday, true);
                 });
                 if let Some(a) = act {
                     self.calendar_action(a);

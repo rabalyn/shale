@@ -486,7 +486,7 @@ impl ShaleApp {
             let area = ui.available_rect_before_wrap();
             self.drag.add_calendar_area(area);
             egui::ScrollArea::vertical().id_salt("side-calendar").auto_shrink([false, false]).show(ui, |ui| {
-                act = self.cal_side.show(ui, &self.calendar, monday, false);
+                act = self.cal.side.show(ui, &self.calendar, monday, false);
             });
             if let Some(a) = act {
                 self.calendar_action(a);
@@ -1115,7 +1115,7 @@ impl ShaleApp {
             let close_asked = resp.should_close();
             match resp.inner.flatten() {
                 Some(crate::calendar::dialog::EventResult::Saved(msg)) => {
-                    self.last_event_calendar = Some(d.calendar.clone());
+                    self.cal.last_event_calendar = Some(d.calendar.clone());
                     self.toast(msg);
                     keep = false;
                 }
