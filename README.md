@@ -97,7 +97,15 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
 
 Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
 with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`,
-unpack it and run `./shale/shale`. Releases are built by GitHub Actions
+unpack it and run `./shale/shale`. To start Shale from the app menu with its icon (on Wayland the
+taskbar needs this to show the icon), install the desktop file and the icon from the unpacked folder:
+
+```sh
+install -Dm644 shale/shale.svg ~/.local/share/icons/hicolor/scalable/apps/shale.svg
+sed "s|^Exec=shale|Exec=$PWD/shale/shale|" shale/shale.desktop > ~/.local/share/applications/shale.desktop
+```
+
+Releases are built by GitHub Actions
 (`.github/workflows/build.yml`); there are no builds between releases. To try an unreleased
 version, build it from source (below).
 
