@@ -6,7 +6,9 @@ use crate::drawing::DrawingDoc;
 use crate::gitsync::{self, lfs, Git, Report, TreeGuard, TreeLock};
 use crate::theme;
 use crate::vault::rel_to_string;
+use crate::vault_state::LfsDownload;
 use eframe::egui::{self, Ui};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
@@ -16,6 +18,17 @@ type SyncResult = Result<Result<Report, String>, String>;
 
 /// What a Git LFS setup job sends back: the number of files it converted, or why it failed.
 type LfsResult = Result<Result<usize, String>, String>;
+
+/// What an LFS download job sends back (the outer error: the job itself died).
+type PullResult = Result<Result<(), String>, String>;
+
+/// A running `git lfs pull`: for one file a player asked for, or for the whole vault (`always`).
+struct PullJob {
+    vault: PathBuf,
+    /// The file (absolute); None: the whole repository.
+    file: Option<PathBuf>,
+    rx: Receiver<PullResult>,
+}
 
 /// The sync's state in the app.
 #[derive(Default)]
@@ -36,6 +49,10 @@ pub struct SyncState {
     pub lfs: lfs::Status,
     /// A running "Store media with Git LFS": its vault and where its result arrives (SYNC-017).
     lfs_job: Option<(PathBuf, Receiver<LfsResult>)>,
+    /// The running LFS download (SYNC-020); one at a time, the others wait in `pulls`.
+    pull: Option<PullJob>,
+    /// Files asked for while a download runs (absolute paths); None: the whole vault.
+    pulls: VecDeque<Option<PathBuf>>,
     /// `git --version`, looked up once (None inside = git is missing).
     git_version: Option<Option<String>>,
     /// The URL field in the settings.
@@ -123,6 +140,54 @@ impl ShaleApp {
         true
     }
 
+    /// Every frame: take the downloads the players and pictures asked for, run them one at a time
+    /// in the background, and hand each result back (SYNC-020).
+    fn lfs_pull_tick(&mut self, ctx: &egui::Context) {
+        let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
+        for abs in self.media.take_download_requests() {
+            self.sync.pulls.push_back(Some(abs));
+        }
+        if let Some(job) = &self.sync.pull {
+            let r = match job.rx.try_recv() {
+                Ok(r) => r.unwrap_or_else(|e| Err(format!("the download stopped with an internal error: {e}"))),
+                Err(TryRecvError::Empty) => {
+                    ctx.request_repaint_after(Duration::from_millis(200));
+                    return;
+                }
+                Err(TryRecvError::Disconnected) => Err("the download stopped unexpectedly".into()),
+            };
+            let (file, same_vault) = (job.file.clone(), job.vault == root);
+            self.sync.pull = None;
+            match (file, same_vault, r) {
+                (Some(abs), _, r) => self.media.download_done(ctx, &abs, r),
+                (None, true, Err(e)) => self.toast(format!("Downloading the LFS files failed: {e}")),
+                _ => {}
+            }
+            ctx.request_repaint();
+        }
+        if self.sync.pull.is_none() {
+            if let Some(next) = self.sync.pulls.pop_front() {
+                self.start_pull(ctx, root, next);
+            }
+        }
+    }
+
+    /// `git lfs pull` in the background, holding the tree lock: for one file (SYNC-020, VAULT-018
+    /// checks its path) or for the whole vault.
+    fn start_pull(&mut self, ctx: &egui::Context, root: PathBuf, file: Option<PathBuf>) {
+        let (git, tree, ctx2, job_root) = (self.sync.git.clone(), self.sync.tree.clone(), ctx.clone(), root.clone());
+        let rel = file.as_ref().map(|abs| abs.strip_prefix(&root).map(Path::to_path_buf).map_err(|_| "the file is not in the vault".to_string()));
+        let rx = crate::jobs::spawn(
+            move || match rel {
+                None => lfs::pull_all(&git, &job_root, &tree),
+                Some(Ok(rel)) => lfs::download(&git, &job_root, &rel, &tree),
+                Some(Err(e)) => Err(e),
+            },
+            move || ctx2.request_repaint(),
+        );
+        self.sync.pull = Some(PullJob { vault: root, file, rx });
+    }
+
     fn git_version(&mut self) -> Option<String> {
         if self.sync.git_version.is_none() {
             self.sync.git_version = Some(self.sync.git.version());
@@ -146,6 +211,7 @@ impl ShaleApp {
 
     /// Every frame: collect a finished sync, start one when it is due (SYNC-002).
     pub(crate) fn sync_tick(&mut self, ctx: &egui::Context) {
+        self.lfs_pull_tick(ctx);
         if self.lfs_job_done(ctx) {
             return;
         }
@@ -224,6 +290,9 @@ impl ShaleApp {
         };
         self.sync.last = Some((when, Ok(report.summary())));
         self.refresh_lfs();
+        if lfs::pull_after_sync(&self.vdata.settings.sync.lfs_download, root) && self.vault.as_ref().map(|v| v.root.as_path()) == Some(root) {
+            self.sync.pulls.push_back(None);
+        }
         if self.vault.as_ref().map(|v| v.root.as_path()) != Some(root) {
             return; // another vault was opened meanwhile
         }
@@ -342,6 +411,7 @@ impl ShaleApp {
         }
         self.lfs_settings_ui(ui);
         let writable = self.vdata.settings_writable();
+        let lfs_installed = self.sync.lfs.version.is_some();
         let rects = ui.add_enabled_ui(writable, |ui| {
             let s = &mut self.vdata.settings.sync;
             let r = ui.checkbox(&mut s.enabled, "Sync this vault automatically");
@@ -362,7 +432,18 @@ impl ShaleApp {
                 changed |= ui.add(egui::TextEdit::singleline(&mut s.commit_suffix).desired_width(120.0)).changed();
             });
             ui.label(muted(format!("Commits look like: {}Sync from {}: 3 file(s){}", s.commit_prefix, gitsync::host_name(), s.commit_suffix)).size(12.0));
-            [("enabled", enabled_rect), ("prefix", prefix_rect)]
+            let mut rects = vec![("enabled", enabled_rect), ("prefix", prefix_rect)];
+            if lfs_installed {
+                // SYNC-020: `sync.lfs_download`
+                let mut always = s.lfs_download == LfsDownload::Always;
+                let r = ui.checkbox(&mut always, "Download media files after every sync (otherwise when you play or open them)");
+                if r.changed() {
+                    s.lfs_download = if always { LfsDownload::Always } else { LfsDownload::OnDemand };
+                    changed = true;
+                }
+                rects.push(("lfs-always", r.rect));
+            }
+            rects
         });
         self.sync.rects.extend(rects.inner);
         ui.horizontal(|ui| {
@@ -775,6 +856,84 @@ mod tests {
         let o = std::process::Command::new("git").arg("-C").arg(&remote).args(["show", "main:Song.mp3"]).envs(git.env.iter().cloned()).output().unwrap();
         assert!(String::from_utf8_lossy(&o.stdout).starts_with("version https://git-lfs"), "the remote holds a pointer");
         assert_eq!(std::fs::read(v.join("Song.mp3")).unwrap(), vec![200u8; 50]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Frames until no download runs and none waits.
+    fn wait_pulls(app: &mut ShaleApp) {
+        let ctx = egui::Context::default();
+        let t = Instant::now();
+        loop {
+            app.lfs_pull_tick(&ctx);
+            if app.sync.pull.is_none() && app.sync.pulls.is_empty() {
+                return;
+            }
+            assert!(t.elapsed() < Duration::from_secs(30), "the download did not finish");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    // spec: SYNC-020
+    #[test]
+    fn a_finished_sync_is_followed_by_a_pull_only_when_the_setting_is_always() {
+        let root = std::env::temp_dir().join(format!("shale-app-lfs-always-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        crate::fsutil::write_atomic(&root.join(".gitattributes"), b"*.mp3 filter=lfs diff=lfs merge=lfs -text\n").unwrap();
+        let git = hermetic();
+        assert!(std::process::Command::new("git").arg("-C").arg(&root).args(["init", "--quiet"]).envs(git.env.iter().cloned()).status().unwrap().success());
+        let mut app = app_on(&root);
+        // on demand, the default: nothing is pulled
+        assert_eq!(app.vdata.settings.sync.lfs_download, LfsDownload::OnDemand);
+        app.after_sync(&root, Ok(Report::default()));
+        assert!(app.sync.pulls.is_empty() && app.sync.pull.is_none());
+        // always: the pull is queued, runs in the background, and says why when it cannot (no git-lfs here)
+        app.vdata.settings.sync.lfs_download = LfsDownload::Always;
+        app.after_sync(&root, Ok(Report::default()));
+        assert_eq!(app.sync.pulls.len(), 1);
+        wait_pulls(&mut app);
+        assert!(app.toasts.iter().any(|(t, _)| t.contains("Downloading the LFS files failed") && t.contains("not installed")), "{:?}", app.toasts);
+        // a failed sync pulls nothing
+        app.after_sync(&root, Err("offline".into()));
+        assert!(app.sync.pulls.is_empty());
+        // and a vault without LFS lines has nothing to pull
+        std::fs::remove_file(root.join(".gitattributes")).unwrap();
+        app.after_sync(&root, Ok(Report::default()));
+        assert!(app.sync.pulls.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: SYNC-020
+    #[test]
+    fn a_download_the_player_asks_for_runs_in_the_background_and_hands_the_file_back() {
+        let Some(git) = hermetic_lfs() else { return };
+        let root = std::env::temp_dir().join(format!("shale-app-lfs-pull-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let remote = root.join("remote.git");
+        std::fs::create_dir_all(&remote).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet", "--bare"]).arg(&remote).envs(git.env.iter().cloned()).status().unwrap().success());
+        let (a, b) = (root.join("a"), root.join("b"));
+        for v in [&a, &b] {
+            std::fs::create_dir_all(v).unwrap();
+            gitsync::connect(&git, v, remote.to_str().unwrap()).unwrap();
+        }
+        let song = vec![77u8; 3000];
+        crate::fsutil::write_atomic(&a.join("Song.mp3"), &song).unwrap();
+        let opts = gitsync::Options { host: "a".into(), stamp: "2026-11-14 1200".into(), ..Default::default() };
+        gitsync::sync(&git, &a, &opts, &TreeLock::default()).unwrap();
+        let mut app = app_on(&b);
+        app.sync.git = git.clone();
+        app.start_sync();
+        wait(&mut app);
+        let abs = b.join("Song.mp3");
+        assert!(lfs::parse_pointer(&std::fs::read(&abs).unwrap()).is_some(), "synced as a pointer");
+        // the player asks; the app downloads and tells the player
+        let ctx = egui::Context::default();
+        app.media.toggle(&ctx, &abs, Path::new("Note.md"));
+        app.media.use_silent_output();
+        wait_pulls(&mut app);
+        assert_eq!(std::fs::read(&abs).unwrap(), song);
+        assert_eq!(app.media.notice(&abs), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

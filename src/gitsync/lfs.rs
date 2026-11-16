@@ -189,7 +189,7 @@ pub(super) fn guard(git: &Git, vault: &Path) -> Result<(), String> {
 }
 
 /// This repository sends files to LFS, so the sync uploads them before it pushes (SYNC-021).
-pub(super) fn in_use(vault: &Path) -> bool {
+pub fn in_use(vault: &Path) -> bool {
     read_attributes(vault).is_ok_and(|a| uses_lfs(&a))
 }
 
@@ -224,6 +224,57 @@ pub fn parse_pointer(bytes: &[u8]) -> Option<Pointer> {
         }
     }
     Some(Pointer { oid: oid?, size: size? })
+}
+
+/// The arguments of `git lfs pull` for one file of the vault (SYNC-020): `lfs pull
+/// --include=<path> --exclude=` (an empty exclude, so the repository's own `lfs.fetchexclude` does
+/// not keep the file back). The path is checked to stay in the vault (VAULT-018); the characters
+/// that make an include pattern a glob become `?`, which matches themselves, so the pattern meets
+/// this file (and at most files named alike).
+pub fn pull_args(rel: &Path) -> Result<Vec<OsString>, String> {
+    let checked = crate::vault_path::VaultPath::new(rel).map_err(|e| format!("“{}” is not a file in the vault: {e}", rel.display()))?;
+    let path = checked.as_path();
+    if path.as_os_str().is_empty() {
+        return Err("The vault itself is no file to download".into());
+    }
+    let text = path.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/");
+    let pattern: String = text.chars().map(|c| if matches!(c, '*' | '?' | '[' | ']' | '\\' | '!' | '{' | '}') { '?' } else { c }).collect();
+    Ok(vec![OsString::from("lfs"), OsString::from("pull"), OsString::from(format!("--include={pattern}")), OsString::from("--exclude=")])
+}
+
+/// Download the real file of the LFS pointer at `rel` (SYNC-020): `git lfs pull --include=<rel>
+/// --exclude=""`, holding the sync's tree lock, because it rewrites the file in the vault.
+pub fn download(git: &Git, vault: &Path, rel: &Path, tree: &TreeLock) -> Result<(), String> {
+    let args = pull_args(rel)?;
+    let abs = vault.join(rel);
+    let _tree = tree.hold();
+    if !is_repo(vault) {
+        return Err("The vault is not a git repository, so there is nothing to download from".into());
+    }
+    if git.lfs_version().is_none() {
+        return Err(missing());
+    }
+    let list: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+    git.ok(vault, &list).map_err(|e| format!("{e} (is the computer online, and does the remote's LFS store hold this file?)"))?;
+    match crate::fsutil::read(&abs) {
+        Ok(b) if parse_pointer(&b).is_some() => Err(format!("Git LFS did not bring the file “{}”: it is still a pointer. Has the other computer synced it, so it is uploaded to the remote?", rel.display())),
+        _ => Ok(()),
+    }
+}
+
+/// `git lfs pull` for the whole repository, the setting `always` after a sync (SYNC-020).
+pub fn pull_all(git: &Git, vault: &Path, tree: &TreeLock) -> Result<(), String> {
+    let _tree = tree.hold();
+    if git.lfs_version().is_none() {
+        return Err(missing());
+    }
+    git.ok(vault, args!["lfs", "pull"]).map(|_| ())
+}
+
+/// Whether a finished sync is followed by `git lfs pull`: the vault's setting says `always` and
+/// the repository sends files to LFS (SYNC-020).
+pub fn pull_after_sync(setting: &crate::vault_state::LfsDownload, vault: &Path) -> bool {
+    *setting == crate::vault_state::LfsDownload::Always && in_use(vault)
 }
 
 /// For a conflict copy (SYNC-022): the real file when `blob` is a pointer whose object this

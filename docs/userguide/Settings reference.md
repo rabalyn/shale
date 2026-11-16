@@ -138,6 +138,7 @@ system keyring, never in this file):
 | `sync.interval_minutes` | 5 (1 to 1440) | Git sync, "Every … minutes" |
 | `sync.commit_prefix` | empty | Git sync, "Commit message prefix" |
 | `sync.commit_suffix` | empty | Git sync, "suffix" |
+| `sync.lfs_download` | `on_demand` (a media file stored with Git LFS is downloaded when you play or open it; `always`: after every sync) | Git sync, "Download media files after every sync" (shown only when `git-lfs` is installed) |
 
 The git remote itself is git's (`git remote`), set with **Connect** in the same section.
 

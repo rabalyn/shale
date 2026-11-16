@@ -326,3 +326,69 @@ fn the_settings_dialog_has_the_button_opacity_and_nothing_to_autoplay() {
     assert!(!fx.hl.text.iter().any(|(t, _)| t.to_lowercase().contains("autoplay") || t.contains("when the note is opened")), "nothing starts by itself, so there is no such setting");
     assert!(fx.hl.text.iter().any(|(t, _)| t.contains("Play button over the artwork")), "the opacity slider is in Appearance");
 }
+
+fn pointer_text(size: u64) -> String {
+    format!("version https://git-lfs.github.com/spec/v1\noid sha256:{}\nsize {size}\n", "b".repeat(64))
+}
+
+// spec: SYNC-020
+#[test]
+fn a_sound_that_is_an_lfs_pointer_says_not_downloaded_and_the_download_link_asks_for_it() {
+    let mut fx = Fx::new("pointer", "![[Song.mp3]]\n", &[]);
+    std::fs::write(fx.dir.join("Song.mp3"), pointer_text(12_345_678)).unwrap();
+    fx.app.vault.as_mut().unwrap().rescan();
+    fx.reading(true);
+    let notice = fx.app.media.notice(&fx.dir.join("Song.mp3")).expect("a pointer file");
+    assert_eq!(notice.line(), "Not downloaded (12 MB)");
+    fx.label("Download");
+    assert_eq!(fx.app.media.current(), None, "nothing was decoded or played");
+    // the vault is no repository here, so the download says so in words, in the player
+    fx.click_label("Download");
+    let song = fx.dir.join("Song.mp3");
+    fx.until("the download failed", |a| a.media.notice(&song).is_some_and(|n| n.error.is_some()));
+    let n = fx.app.media.notice(&song).unwrap();
+    assert!(!n.running && n.line().starts_with("Download failed: ") && n.line().contains("not a git repository"), "{}", n.line());
+    // "Download" offers it again, and playing does not decode the pointer
+    fx.label("Download");
+    fx.click_label("Play");
+    assert_eq!(fx.app.media.current(), None);
+}
+
+// spec: SYNC-020
+#[test]
+fn pressing_play_on_a_pointer_downloads_first_and_plays_when_the_file_is_there() {
+    let mut fx = Fx::new("pointer-play", "![[Song.mp3]]\n", &[]);
+    let song = fx.dir.join("Song.mp3");
+    std::fs::write(&song, pointer_text(1_000)).unwrap();
+    fx.app.vault.as_mut().unwrap().rescan();
+    fx.reading(true);
+    let ctx = egui::Context::default();
+    fx.app.media.toggle(&ctx, &song, Path::new("Player.md"));
+    assert_eq!(fx.app.media.current(), None, "asked, nothing plays yet");
+    assert!(fx.app.media.notice(&song).unwrap().running);
+    assert_eq!(fx.app.media.take_download_requests(), vec![song.clone()]);
+    // the download brought the real file
+    std::fs::copy(fixture("tone-cover.mp3"), &song).unwrap();
+    fx.app.media.download_done(&ctx, &song, Ok(()));
+    assert_eq!(fx.app.media.current(), Some(song.clone()));
+    fx.until("the sound runs", |a| a.media.position().is_some());
+    assert_eq!(fx.app.media.notice(&song), None);
+}
+
+// spec: SYNC-020
+#[test]
+fn a_picture_that_is_an_lfs_pointer_says_not_downloaded_in_the_reading_view_and_the_editor() {
+    let mut fx = Fx::new("pointer-picture", "Look:\n\n![[Photo.png]]\n\nafter\n", &[]);
+    std::fs::write(fx.dir.join("Photo.png"), pointer_text(2_500_000)).unwrap();
+    fx.app.vault.as_mut().unwrap().rescan();
+    let photo = fx.dir.join("Photo.png");
+    fx.reading(true);
+    fx.label("Download");
+    assert_eq!(fx.app.media.notice(&photo).unwrap().line(), "Not downloaded (2 MB)");
+    fx.reading(false);
+    fx.click_label("Download");
+    fx.until("asked and failed in words (the vault is no repository)", |a| a.media.notice(&photo).is_some_and(|n| n.error.is_some()));
+    // a real file is no business of this
+    std::fs::write(fx.dir.join("Other.png"), vec![1u8; 3000]).unwrap();
+    assert_eq!(fx.app.media.notice(&fx.dir.join("Other.png")), None);
+}
