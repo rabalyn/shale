@@ -18,7 +18,7 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 
 ![[editor-colours.png]]
 
-A row of buttons above the text of a note (not in the reading view): **B**old, *I*talic,
+A row of buttons centred above the text of a note (not in the reading view): **B**old, *I*talic,
 ~~S~~trikethrough, `==` highlight, `<>` inline code; the highlight colour and font colour
 palettes; a **H** menu for headings (Normal text, Heading 1 to 6); bullet list, numbered list,
 task, quote; code block, horizontal rule, table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`

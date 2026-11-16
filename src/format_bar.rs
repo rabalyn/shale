@@ -20,11 +20,13 @@ pub struct FormatBar {
     last_mark: [u8; 3],
     last_font: [u8; 3],
     picker_open: [bool; 2],
+    /// the width the bar took last frame: it is drawn centred, and its width is known only once drawn
+    width: f32,
 }
 
 impl Default for FormatBar {
     fn default() -> Self {
-        FormatBar { custom_mark: Color32::from_rgb(255, 165, 0), custom_font: Color32::from_rgb(220, 20, 60), last_mark: [255, 255, 0], last_font: [229, 62, 62], picker_open: [false; 2] }
+        FormatBar { custom_mark: Color32::from_rgb(255, 165, 0), custom_font: Color32::from_rgb(220, 20, 60), last_mark: [255, 255, 0], last_font: [229, 62, 62], picker_open: [false; 2], width: 0.0 }
     }
 }
 
@@ -152,9 +154,28 @@ impl FormatBar {
     /// Draw the toolbar; returns the command a click asked for. `text` and `sel` (bytes) are the note and
     /// its selection, which say what is "on" at the cursor.
     pub fn show(&mut self, ui: &mut Ui, text: &str, sel: Range<usize>, palettes: &Palettes) -> Option<Cmd> {
+        // centred over the editor (EDIT-026): the space left of it is half of what last frame's bar left
+        // free; a bar that wraps (more than one row of buttons) counts as the whole width and so has none
+        let full = ui.available_width();
+        let pad = ((full - self.width) / 2.0).max(0.0).floor();
+        let frame = ui.horizontal_top(|ui| {
+            ui.add_space(pad);
+            self.frame(ui, text, &sel, palettes)
+        });
+        let (size, cmd) = frame.inner;
+        let width = if size.y > BUTTON * 1.5 { full } else { size.x };
+        if (width - self.width).abs() > 0.5 {
+            self.width = width;
+            ui.ctx().request_repaint();
+        }
+        cmd
+    }
+
+    /// The bar's frame and buttons; returns the frame's size and the command a click asked for.
+    fn frame(&mut self, ui: &mut Ui, text: &str, sel: &Range<usize>, palettes: &Palettes) -> (Vec2, Option<Cmd>) {
         let mut out = None;
         let on = |cmd| format::is_on(cmd, text, sel.clone());
-        egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(CornerRadius::same(6)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+        let resp = egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(CornerRadius::same(6)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(1.0, 2.0);
                 let mono = Label { mono: true, ..Default::default() };
@@ -169,7 +190,7 @@ impl FormatBar {
                 cmds.push(self.palette(ui, 0, palettes));
                 cmds.push(self.palette(ui, 1, palettes));
                 separator(ui);
-                cmds.push(heading_menu(ui, text, &sel));
+                cmds.push(heading_menu(ui, text, sel));
                 cmds.push(draw_cmd(ui, on(Cmd::Bullet), Cmd::Bullet, "Bullet list: - item", draw_bullets));
                 cmds.push(text_cmd(ui, on(Cmd::Numbered), Cmd::Numbered, "1.", Label::default(), "Numbered list: 1. item"));
                 cmds.push(draw_cmd(ui, on(Cmd::Task), Cmd::Task, "Task: - [ ] item", draw_task));
@@ -187,7 +208,7 @@ impl FormatBar {
                 out = cmds.into_iter().flatten().next();
             });
         });
-        out
+        (resp.response.rect.size(), out)
     }
 
     /// One of the two colour buttons (0: highlight, 1: font colour) with its palette popup.
