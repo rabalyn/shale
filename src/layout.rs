@@ -652,7 +652,7 @@ impl ShaleApp {
                 });
                 if let Some(v) = &self.vault {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 4)).show(ui, |ui| {
-                        if let Some(c) = self.graph.ui(ui, v, cur.as_deref(), false) {
+                        if let Some(c) = self.graphs.global.ui(ui, v, cur.as_deref(), false) {
                             graph_click(&mut self.actions, c);
                         }
                     });

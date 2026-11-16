@@ -27,6 +27,18 @@ pub struct GraphView {
     auto_fit: bool,
 }
 
+/// The two graphs of the window: the one of the whole vault and the local one in the side panel.
+pub struct Graphs {
+    pub global: GraphView,
+    pub local: GraphView,
+}
+
+impl Graphs {
+    pub fn new() -> Self {
+        Self { global: GraphView::new(false), local: GraphView::new(true) }
+    }
+}
+
 impl GraphView {
     pub fn new(local: bool) -> Self {
         GraphView {

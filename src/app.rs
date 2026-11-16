@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::drawing::DrawingDoc;
 use crate::editor::{EditorAction, NoteEditor};
 use crate::fsutil;
-use crate::graph::{GraphClick, GraphView};
+use crate::graph::{GraphClick, Graphs};
 use crate::keys::{Action as KeyAction, Scope};
 use crate::markdown;
 use crate::panels::{FileTree, SearchBox};
@@ -292,8 +292,7 @@ pub struct ShaleApp {
     pub tree: FileTree,
     pub search: SearchBox,
     pub tasks: TasksFilter,
-    pub graph: GraphView,
-    pub local_graph: GraphView,
+    pub graphs: Graphs,
     pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
     pub mail: crate::mail::ui::MailView,
@@ -443,8 +442,7 @@ impl ShaleApp {
             tree: FileTree::default(),
             search: SearchBox::default(),
             tasks: TasksFilter::default(),
-            graph: GraphView::new(false),
-            local_graph: GraphView::new(true),
+            graphs: Graphs::new(),
             calendar: {
                 let mut c = crate::calendar::store::CalendarStore::new(cfg.calendars.clone(), calendar_dir);
                 if persist {

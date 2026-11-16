@@ -581,16 +581,16 @@ impl ShaleApp {
             RightPanel::LocalGraph => {
                 ui.horizontal(|ui| {
                     ui.label(muted("Depth"));
-                    let mut d = self.local_graph.depth as i32;
+                    let mut d = self.graphs.local.depth as i32;
                     if ui.add(egui::Slider::new(&mut d, 1..=3)).changed() {
-                        self.local_graph.depth = d as usize;
-                        self.local_graph.focus = None;
+                        self.graphs.local.depth = d as usize;
+                        self.graphs.local.focus = None;
                     }
                 });
-                if self.local_graph.focus.as_deref() != Some(rel.as_path()) {
-                    self.local_graph.focus = Some(rel.clone());
+                if self.graphs.local.focus.as_deref() != Some(rel.as_path()) {
+                    self.graphs.local.focus = Some(rel.clone());
                 }
-                if let Some(c) = self.local_graph.ui(ui, v, Some(&rel), true) {
+                if let Some(c) = self.graphs.local.ui(ui, v, Some(&rel), true) {
                     graph_click(&mut self.actions, c);
                 }
             }
