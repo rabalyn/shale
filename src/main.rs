@@ -17,6 +17,7 @@ mod data_usage;
 mod dialog;
 mod drawing;
 mod editor;
+mod editor_preview;
 mod fsutil;
 mod gitsync;
 mod graph;
@@ -37,6 +38,8 @@ mod opener;
 mod panels;
 mod pdf;
 mod picker;
+#[cfg(test)]
+mod preview_ui_tests;
 mod reader;
 mod recovery;
 mod script;
