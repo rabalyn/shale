@@ -8,3 +8,8 @@ notes/
 /tests/mail-env/certs/
 /tests/caldav-env/certs/
 lcov.info
+
+# the user guide vault: what Shale writes when it is opened
+/docs/userguide/.shale/state.json
+/docs/userguide/.shale/tag-words.json
+/docs/userguide/.trash/
