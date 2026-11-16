@@ -249,6 +249,12 @@ impl Default for CacheRetention {
     }
 }
 
+/// The font colour presets of the formatting toolbar: red, orange, blue, green, purple (EDIT-027).
+pub const DEFAULT_FONT_COLOURS: [[u8; 3]; 5] = [[0xE5, 0x3E, 0x3E], [0xF0, 0x8A, 0x1C], [0x2F, 0x80, 0xED], [0x2E, 0xA0, 0x4F], [0x8E, 0x4B, 0xD6]];
+
+/// The highlight presets of the formatting toolbar: neon yellow, green, cyan and magenta (EDIT-027).
+pub const DEFAULT_HIGHLIGHT_COLOURS: [[u8; 3]; 4] = [[0xFF, 0xFF, 0x00], [0x39, 0xFF, 0x14], [0x00, 0xFF, 0xFF], [0xFF, 0x00, 0xFF]];
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
@@ -279,6 +285,12 @@ pub struct Config {
     pub inline_images: bool,
     /// Show a gutter with line numbers in the editor (EDIT-018).
     pub line_numbers: bool,
+    /// Show the formatting toolbar above the text of a note (EDIT-025).
+    pub format_toolbar: bool,
+    /// The preset font colours of the toolbar's palette (EDIT-027), as RGB.
+    pub font_colours: Vec<[u8; 3]>,
+    /// The preset highlight colours of the toolbar's palette (EDIT-027), as RGB.
+    pub highlight_colours: Vec<[u8; 3]>,
     /// Markdown preview in the editor: every line but the cursor's is drawn rendered (EDIT-016).
     pub live_preview: bool,
     /// Lines before and after the cursor line that stay raw in the preview (EDIT-017).
@@ -361,6 +373,9 @@ impl Default for Config {
             file_sort: FileSort::NameAsc,
             inline_images: true,
             line_numbers: true,
+            format_toolbar: true,
+            font_colours: DEFAULT_FONT_COLOURS.to_vec(),
+            highlight_colours: DEFAULT_HIGHLIGHT_COLOURS.to_vec(),
             live_preview: false,
             preview_raw_lines: 0,
             media_volume: 0.8,
@@ -549,6 +564,19 @@ mod tests {
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.live_preview, back.preview_raw_lines), (true, 2));
         assert_eq!(c.file_sort, FileSort::NameAsc);
+    }
+
+    // spec: EDIT-025, EDIT-027, CFG-001
+    #[test]
+    fn the_toolbar_settings_have_defaults_and_round_trip_without_a_version_bump() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
+        assert!(c.format_toolbar, "the toolbar is on by default");
+        assert_eq!(c.font_colours.len(), 5);
+        assert_eq!(c.highlight_colours, vec![[255, 255, 0], [0x39, 0xFF, 0x14], [0, 255, 255], [255, 0, 255]], "neon yellow, green, cyan, magenta");
+        assert_eq!(c.version, 1, "new fields with defaults need no migration (CFG-001)");
+        let c: Config = serde_json::from_str(r#"{"format_toolbar": false, "font_colours": [[1, 2, 3]], "highlight_colours": []}"#).unwrap();
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!((back.format_toolbar, back.font_colours, back.highlight_colours), (false, vec![[1, 2, 3]], vec![]));
     }
 
     // spec: MEDIA-004, MEDIA-006, CFG-001

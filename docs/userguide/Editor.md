@@ -14,6 +14,43 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 - A gutter on the left shows **line numbers** (Settings → General → Appearance, on by default);
   a wrapped line keeps one number.
 
+## Formatting toolbar
+
+![[editor-colours.png]]
+
+A row of buttons above the text of a note (not in the reading view): **B**old, *I*talic,
+~~S~~trikethrough, `==` highlight, `<>` inline code; the highlight colour and font colour
+palettes; a **H** menu for headings (Normal text, Heading 1 to 6); bullet list, numbered list,
+task, quote; code block, horizontal rule, table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`
+embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatting".
+
+- With text selected, an inline button wraps it in the markers; click it again and they come
+  off. With nothing selected it puts the markers in and the cursor between them.
+- A line button (heading, list, task, quote) works on every line the selection touches, and
+  toggles off when they all have it. A heading replaces a list marker and the other way round.
+- Every click is one undo step, and the keyboard stays in the note, with the Markdown preview on
+  or off and with vim-style editing (insert mode stays, otherwise you are in normal mode).
+- Settings → General → Editing, "Show formatting toolbar" turns the toolbar off.
+
+## Colours
+
+The **highlight colour** button opens a palette of four neon colours (yellow, green, cyan, magenta),
+"No highlight", and "Custom colour…" with a colour picker. The **font colour** button does the same
+with your own preset colours: edit them under "Font colours" in Settings → General → Editing (the
+highlight presets are there too). A new colour on text that already has one replaces it.
+
+The colours are stored in the note as plain HTML, the way Obsidian's colour plugins write it, so
+other editors and renderers show them too:
+
+```
+<mark style="background: #FFFF00;">highlighted</mark> and <span style="color: #E53E3E;">red text</span>
+```
+
+`==text==` stays the plain highlight. Shale also reads `background-color:`, short `#RGB` and
+`#RRGGBBAA` colours, and single quotes, but always writes this form. A tag without its closing
+tag, or inside inline code, is just text. Colours show in the editor (the tags dimmed; the
+Markdown preview hides them), in the [[Reading view]], in table cells and in the [[PDF]] export.
+
 ## Markdown preview
 
 ![[editor-preview.png]]

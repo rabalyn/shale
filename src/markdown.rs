@@ -101,7 +101,7 @@ pub fn lines_with_offsets(text: &str) -> Vec<(usize, &str)> {
 }
 
 /// Byte ranges of inline code spans (`code`) in a single line, relative to the line.
-fn inline_code_ranges(line: &str) -> Vec<Range<usize>> {
+pub(crate) fn inline_code_ranges(line: &str) -> Vec<Range<usize>> {
     let b = line.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -368,6 +368,8 @@ pub fn find_tags(text: &str) -> Vec<(Range<usize>, String)> {
             continue;
         }
         let mut codes = inline_code_ranges(line);
+        // the colour in `<mark style="background: #FFFF00;">` is no tag (EDIT-027)
+        codes.extend(crate::colour_tags::open_tags(line));
         // a "#" inside a [[link]] is part of the link (heading or file name), not a tag
         let mut from = 0;
         while let Some(st) = line[from..].find("[[").map(|p| p + from) {
@@ -743,5 +745,13 @@ mod tests {
         assert_eq!(line_start_byte(t, 1), 4);
         assert_eq!(byte_to_char(t, 4), 3);
         assert_eq!(char_to_byte(t, 3), 4);
+    }
+
+    // spec: EDIT-027
+    #[test]
+    fn the_colour_in_a_mark_or_span_tag_is_no_hashtag() {
+        let text = "<mark style=\"background: #FFFF00;\">hi</mark> <span style='color: #F00'>x</span> <mark style=\"background: #0F0\">open #real";
+        let tags: Vec<String> = find_tags(text).into_iter().map(|(_, t)| t).collect();
+        assert_eq!(tags, vec!["real"], "only the real tag is one, also after an unclosed mark");
     }
 }

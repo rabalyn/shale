@@ -998,6 +998,12 @@ impl ShaleApp {
                         changed |= ui.add(egui::Slider::new(&mut self.cfg.font_size, 12.0..=24.0)).changed();
                     });
                     ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Editing").color(theme::MUTED));
+                    changed |= ui.checkbox(&mut self.cfg.format_toolbar, "Show formatting toolbar above the text of a note").changed();
+                    changed |= crate::format_bar::preset_editor(ui, "Font colours", &mut self.cfg.font_colours, &crate::config::DEFAULT_FONT_COLOURS);
+                    changed |= crate::format_bar::preset_editor(ui, "Highlight colours", &mut self.cfg.highlight_colours, &crate::config::DEFAULT_HIGHLIGHT_COLOURS);
+                    ui.label(muted("The colours of the toolbar's palettes. Colours are saved in the note as <span style=\"color: #RRGGBB;\"> and <mark style=\"background: #RRGGBB;\">.").size(12.0));
+                    ui.add_space(8.0);
                     self.post_index_settings(ui);
                     ui.label(egui::RichText::new("Data and caches").color(theme::MUTED));
                     ui.horizontal(|ui| {

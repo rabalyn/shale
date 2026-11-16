@@ -9,6 +9,8 @@ selectable (fonts are embedded), web links stay clickable and drawings are vecto
 sets paper size, margins, fonts and more. The default path is `<vault>/exports/<name>.pdf`, so
 the export shows up in the vault.
 
+Highlights (`==text==`) and the colours of [[Editor]] (`<mark style="background: …">` behind the text, `<span style="color: …">` as the text colour) are printed as written, with the tags left out and the text still selectable.
+
 Tables are exported as real tables: a bordered grid with a filled bold header row, aligned
 columns and long cell text wrapping inside its column. A table that runs over a page break goes
 on at the top of the next page with its header row again. Tick "Export plain text (tables as raw

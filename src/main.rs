@@ -13,12 +13,17 @@
 
 mod app;
 mod calendar;
+mod colour_tags;
 mod config;
 mod data_usage;
 mod dialog;
 mod drawing;
 mod editor;
 mod editor_preview;
+mod format;
+mod format_bar;
+#[cfg(test)]
+mod format_bar_ui_tests;
 mod fsutil;
 mod gitsync;
 mod graph;

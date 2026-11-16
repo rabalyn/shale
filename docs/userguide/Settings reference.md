@@ -37,6 +37,9 @@ You normally never edit these files; the "Where" column says which window change
 | `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → General → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
 | `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
 | `line_numbers` | on | Appearance, "Show line numbers in the editor" |
+| `format_toolbar` | on | Settings → General → Editing, "Show formatting toolbar above the text of a note" |
+| `font_colours` | red, orange, blue, green, purple (`[[229,62,62], …]`, RGB, up to 8) | Editing, "Font colours": the swatches of the toolbar's font colour palette |
+| `highlight_colours` | neon yellow, green, cyan, magenta (RGB, up to 8) | Editing, "Highlight colours": the swatches of the toolbar's highlight palette |
 | `live_preview` | off | Appearance, "Markdown preview in the editor"; the eye icon of the editor |
 | `preview_raw_lines` | 0 (range 0 to 20) | Appearance, "Raw lines around the cursor" |
 | `vim_mode` | off | Appearance, "Vim-style editing" |

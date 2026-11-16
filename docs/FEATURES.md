@@ -17,6 +17,21 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `![[photo.png|300]]`), a round **100%** button for the natural size and a round fullscreen button.
 - Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
   line keeps one number.
+- A **formatting toolbar** above the text (Settings → Editing, on by default) has a button for
+  everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
+  Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, tables, `[[note]]`
+  and `[text](url)` links, embeds (it opens the `[!` file picker) and "Clear formatting". With a
+  selection a button wraps it (or takes the markers off again); with none it puts the markers in and the
+  cursor between them; a line button works on every line the selection touches. Each click is one undo
+  step and the keyboard stays in the note, also with the Markdown preview and with vim-style editing.
+- **Colours.** The toolbar's highlight and font colour buttons open a palette (four neon highlights, a
+  "No highlight" entry and a colour picker; font colours you set in Settings → Editing) and write plain
+  HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
+  `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
+  the Markdown preview), the reading view, table cells and the PDF export, and nest with bold and italic.
+
+  ![Colours and the toolbar](userguide/z_media/screenshots/editor-colours.png)
+
 - Lists continue when you press Enter (also numbered lists and to-dos `- [ ]` / `1. [ ]`).
   Tab and Shift+Tab indent list items or change heading levels, and Alt+↑/↓ move lines.
 - Web links (`[text](https://…)`) open in your browser.
@@ -68,7 +83,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ![The note menu](userguide/z_media/screenshots/more-menu.png)
 
 - Export notes and drawings to PDF (paper size, margins, fonts and more in a dialog; tables become
-  real grids with the header repeated across pages, or raw text lines with "Export plain text"), insert a
+  real grids with the header repeated across pages, or raw text lines with "Export plain text";
+  highlights and font colours are printed as written), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
