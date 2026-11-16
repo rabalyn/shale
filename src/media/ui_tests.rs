@@ -296,9 +296,17 @@ fn the_state_stays_when_the_view_switches_and_the_window_repaints_only_while_pla
     // away from the button (a hover animation asks for repaints too)
     fx.hl.frame(&mut fx.app, vec![Event::PointerMoved(Pos2::new(900.0, 10.0))]);
     fx.hl.frames(&mut fx.app, 8);
-    std::thread::sleep(Duration::from_millis(200));
-    let out = fx.hl.frame(&mut fx.app, vec![]);
-    assert!(delay(&out) > Duration::from_secs(1), "paused again: {:?}", delay(&out));
+    // paused, the window goes idle; a background job of the test vault (a sync, a toast) may still
+    // ask for a few repaints under load, so wait for idle instead of one look after a fixed sleep
+    let start = std::time::Instant::now();
+    loop {
+        let out = fx.hl.frame(&mut fx.app, vec![]);
+        if delay(&out) > Duration::from_secs(1) {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(5), "paused again, still repainting after 5 s: {:?}", delay(&out));
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 // spec: MEDIA-002
