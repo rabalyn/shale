@@ -84,7 +84,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
   start typing, Esc stops; x deletes a character; v and V select with the same motions, d cuts
-  and y copies to the clipboard, p pastes. The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
+  and y copies to the clipboard, p pastes; `gt` follows the link under the cursor like a click (a note link or a web address). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
 - In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
   this tab showed just before, and again to come back, like vim's alternate file. Space is the
   leader key of its own list in the Keybindings tab; **Space f f** opens a window to find a file by its
