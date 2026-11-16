@@ -409,7 +409,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                             let dh = b.height() * k;
                             w.need(dh + 6.0);
                             let (x, y) = (x0 + (cw - b.width() * k) / 2.0, w.y);
-                            let pics = add_pictures(&mut w.doc, &crate::drawing_pictures::images(&scene, vault, &t));
+                            let pics = add_pictures(&mut w.doc, &crate::drawing::pictures::images(&scene, vault, &t));
                             draw_scene(w.p(), &scene, [x, y, b.width() * k, dh], false, None, &pics);
                             w.y += dh + 8.0;
                         }
@@ -553,7 +553,7 @@ pub fn draw_scene(page: &mut Page, scene: &Scene, area: [f32; 4], dark: bool, bg
     }
     let ctx = egui::Context::default();
     let painter = egui::Painter::new(ctx, egui::LayerId::background(), egui::Rect::EVERYTHING);
-    let no_textures = crate::drawing_pictures::Pictures::new();
+    let no_textures = crate::drawing::pictures::Pictures::new();
     for e in scene.live() {
         let picture = if e.kind == "image" { e.extra.get("fileId").and_then(|v| v.as_str()).and_then(|id| pictures.get(id)) } else { None };
         if let Some(&idx) = picture {
@@ -654,7 +654,7 @@ fn draw_text_element(page: &mut Page, e: &Element, view: &View, dark: bool) {
     }
 }
 
-/// Export a drawing to PDF bytes. `pictures`: its pictures by fileId (`drawing_pictures::images`).
+/// Export a drawing to PDF bytes. `pictures`: its pictures by fileId (`drawing::pictures::images`).
 pub fn export_drawing(scene: &Scene, title: &str, opts: &ExportOptions, pictures: &HashMap<String, image::RgbaImage>) -> Result<Vec<u8>, String> {
     let b = scene.bounds().ok_or("The drawing is empty")?.expand(20.0);
     let m = opts.margin_mm * MM;

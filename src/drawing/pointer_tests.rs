@@ -1,6 +1,6 @@
 //! The pointer on the drawing canvas (DRAW-019): real press, move and release events drive
 //! `begin_drag`, `continue_drag`, `end_drag` and `click`; the tests look at the scene.
-//! (A child module of `drawing_ui_tests`, which has the harness.)
+//! (A child module of `drawing::ui_tests`, which has the harness.)
 
 use super::*;
 

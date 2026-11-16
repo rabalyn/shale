@@ -7,11 +7,15 @@ use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-#[path = "drawing_connect.rs"]
+pub(crate) mod canvas;
 mod connect;
 use connect::*;
-#[path = "drawing_links.rs"]
+pub(crate) mod excalidraw_md;
+mod layout;
 mod links;
+pub(crate) mod pictures;
+#[cfg(test)]
+mod ui_tests;
 pub use links::{link_lines, rewrite_link_texts, DrawingAction};
 
 /// Excalidraw font id of a text element (1 hand-drawn, 2 normal, 3 code).
@@ -164,10 +168,10 @@ impl Scene {
     /// The scene of a drawing file's text: `.excalidraw` JSON, a `.excalidraw.md` file of the
     /// Obsidian Excalidraw plugin, or an Obsidian `.canvas`.
     pub fn from_file_text(path: &Path, text: &str) -> Result<Scene, String> {
-        if crate::excalidraw_md::is_plugin_file(path) {
-            crate::excalidraw_md::read(text)
-        } else if crate::canvas::is_canvas_path(path) {
-            crate::canvas::to_scene(text)
+        if crate::drawing::excalidraw_md::is_plugin_file(path) {
+            crate::drawing::excalidraw_md::read(text)
+        } else if crate::drawing::canvas::is_canvas_path(path) {
+            crate::drawing::canvas::to_scene(text)
         } else {
             Scene::parse(text)
         }
@@ -466,7 +470,7 @@ fn paint_grid(painter: &egui::Painter, rect: Rect, view: &View, dark: bool) {
 }
 
 /// Paint all elements. `dark` turns colours into their dark-canvas variants.
-pub fn paint_scene(painter: &egui::Painter, scene: &Scene, view: &View, dark: bool, skip_id: Option<&str>, pics: &crate::drawing_pictures::Pictures) {
+pub fn paint_scene(painter: &egui::Painter, scene: &Scene, view: &View, dark: bool, skip_id: Option<&str>, pics: &crate::drawing::pictures::Pictures) {
     let mut shapes = Vec::new();
     for e in scene.live() {
         if Some(e.id.as_str()) == skip_id {
@@ -477,7 +481,7 @@ pub fn paint_scene(painter: &egui::Painter, scene: &Scene, view: &View, dark: bo
     painter.extend(shapes);
 }
 
-pub(crate) fn paint_element(painter: &egui::Painter, e: &Element, view: &View, dark: bool, pics: &crate::drawing_pictures::Pictures, out: &mut Vec<Shape>) {
+pub(crate) fn paint_element(painter: &egui::Painter, e: &Element, view: &View, dark: bool, pics: &crate::drawing::pictures::Pictures, out: &mut Vec<Shape>) {
     let col = |s: &str| parse_color(s).map(|c| if dark { dark_variant(c) } else { c }).map(|c| with_opacity(c, e.opacity));
     let stroke_col = col(&e.stroke_color).unwrap_or(Color32::TRANSPARENT);
     let width = (e.stroke_width as f32 * view.zoom).max(0.6);
@@ -593,7 +597,7 @@ pub(crate) fn paint_element(painter: &egui::Painter, e: &Element, view: &View, d
 }
 
 /// Paint a whole scene fitted into `rect` (used for embeds in notes).
-pub fn paint_thumbnail(painter: &egui::Painter, scene: &Scene, rect: Rect, dark: bool, pics: &crate::drawing_pictures::Pictures) {
+pub fn paint_thumbnail(painter: &egui::Painter, scene: &Scene, rect: Rect, dark: bool, pics: &crate::drawing::pictures::Pictures) {
     let Some(b) = scene.bounds() else {
         painter.text(rect.center(), Align2::CENTER_CENTER, "Empty drawing", FontId::proportional(13.0), Color32::GRAY);
         return;
@@ -829,8 +833,8 @@ impl DrawingDoc {
             Ok(s) => (s, None),
             Err(e) => (Scene::default(), Some(format!("Could not read this drawing: {e}"))),
         };
-        let plugin_file = crate::excalidraw_md::is_plugin_file(&rel).then(|| text.to_string());
-        let read_only = crate::canvas::is_canvas_path(&rel).then(|| "Obsidian canvas · read-only".to_string());
+        let plugin_file = crate::drawing::excalidraw_md::is_plugin_file(&rel).then(|| text.to_string());
+        let read_only = crate::drawing::canvas::is_canvas_path(&rel).then(|| "Obsidian canvas · read-only".to_string());
         DrawingDoc {
             read_only,
             assist: crate::link_assist::LinkAssist::new(egui::Id::unique("draw-text")),
@@ -890,7 +894,7 @@ impl DrawingDoc {
             return Err("an Obsidian canvas is shown read-only and never written".into());
         }
         match &self.plugin_file {
-            Some(original) => crate::excalidraw_md::write(original, &self.scene),
+            Some(original) => crate::drawing::excalidraw_md::write(original, &self.scene),
             None => Ok(self.scene.to_json()),
         }
     }
@@ -1263,7 +1267,7 @@ impl DrawingDoc {
                 e.height = sz.y as f64;
             }
         }
-        let pics = crate::drawing_pictures::textures(ui.ctx(), &self.scene, vault, &self.rel);
+        let pics = crate::drawing::pictures::textures(ui.ctx(), &self.scene, vault, &self.rel);
         paint_scene(&painter, &self.scene, &view, dark, self.editing_text.as_deref(), &pics);
         let on_mark = self.paint_links(ui, &painter, &view, &resp, vault);
 
@@ -1401,8 +1405,8 @@ impl DrawingDoc {
             let target = self.snap_hint.clone().map(|sn| sn.0).or_else(|| hp.and_then(|p| self.find_snap(p, None)).map(|sn| sn.0));
             if let Some(tid) = target {
                 if let Some(t) = self.scene.live().find(|e| e.id == tid) {
-                    for ratio in crate::drawing_layout::anchor_ratios(&t.kind) {
-                        let ap = view.to_screen(crate::drawing_layout::anchor_point(t.bounds(), ratio));
+                    for ratio in layout::anchor_ratios(&t.kind) {
+                        let ap = view.to_screen(layout::anchor_point(t.bounds(), ratio));
                         painter.circle_stroke(ap, 4.0, Stroke::new(1.2, ACCENT));
                     }
                 }

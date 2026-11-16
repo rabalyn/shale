@@ -12,16 +12,12 @@
 
 mod app;
 mod calendar;
-mod canvas;
 mod compose;
 mod config;
 mod data_usage;
 mod dialog;
 mod drawing;
-mod drawing_layout;
-mod drawing_pictures;
 mod editor;
-mod excalidraw_md;
 mod export_dialog;
 mod fsutil;
 mod gitsync;

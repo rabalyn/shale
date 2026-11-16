@@ -35,7 +35,7 @@ pub fn is_plugin_file(p: &Path) -> bool {
 /// Obsidian canvas (`*.canvas`, shown read-only).
 pub fn is_drawing_path(p: &Path) -> bool {
     let n = file_name(p);
-    strip_suffix_ci(&n, ".excalidraw").is_some() || strip_suffix_ci(&n, ".excalidraw.md").is_some() || crate::canvas::is_canvas_path(p)
+    strip_suffix_ci(&n, ".excalidraw").is_some() || strip_suffix_ci(&n, ".excalidraw.md").is_some() || crate::drawing::canvas::is_canvas_path(p)
 }
 
 /// The drawing's name without `.excalidraw` / `.excalidraw.md` / `.canvas`.
@@ -151,7 +151,7 @@ pub fn read(text: &str) -> Result<Scene, String> {
         }
     }
     let mut scene: Scene = serde_json::from_value(value).map_err(|e| format!("the drawing data is not valid: {e}"))?;
-    scene.embedded = crate::drawing_pictures::embedded_files(text);
+    scene.embedded = crate::drawing::pictures::embedded_files(text);
     Ok(scene)
 }
 
@@ -469,7 +469,7 @@ mod tests {
 
     /// A drawing made with the Obsidian Excalidraw plugin 2.x (a rectangle and an ellipse,
     /// labelled "rectangle" and "circle"), compressed, exactly as the plugin saved it.
-    const PLUGIN_FILE: &str = include_str!("testdata/plugin-drawing.excalidraw.md");
+    const PLUGIN_FILE: &str = include_str!("../testdata/plugin-drawing.excalidraw.md");
 
     /// Change a text the way the drawing editor does (text, originalText and the plugin's rawText).
     fn set_text(e: &mut crate::drawing::Element, t: &str) {

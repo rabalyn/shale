@@ -209,8 +209,8 @@ mod tests {
         assert!(matches!(shapes("a").as_slice(), [egui::Shape::Mesh(m)] if m.texture_id == tex["f1"]));
         assert!(!shapes("c").iter().any(|s| matches!(s, egui::Shape::Mesh(_))));
         // a plugin drawing reads its `## Embedded Files`
-        let file = crate::excalidraw_md::new_file(&scene).replace("\n%%\n## Drawing", "\n## Embedded Files\nf1: [[dot.png]]\n\n%%\n## Drawing");
-        assert_eq!(crate::excalidraw_md::read(&file).unwrap().embedded, vec![("f1".to_string(), "dot.png".to_string())]);
+        let file = crate::drawing::excalidraw_md::new_file(&scene).replace("\n%%\n## Drawing", "\n## Embedded Files\nf1: [[dot.png]]\n\n%%\n## Drawing");
+        assert_eq!(crate::drawing::excalidraw_md::read(&file).unwrap().embedded, vec![("f1".to_string(), "dot.png".to_string())]);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

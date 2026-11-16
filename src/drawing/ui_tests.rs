@@ -1,6 +1,6 @@
 //! UI tests for every button and control of the drawing editor: each test renders the real
 //! editor with egui, moves the pointer onto a control, presses and releases the mouse button,
-//! and checks that the drawing changed. (A child module of `drawing::connect`.)
+//! and checks that the drawing changed. (A child module of `drawing`.)
 
 use super::*;
 use eframe::egui::{Event, Modifiers, PointerButton, RawInput};
@@ -360,7 +360,7 @@ fn arrange_buttons() {
 fn opening_a_drawing_changes_nothing_until_it_is_edited() {
     let mut h = H::new();
     // Shale's own format and an Obsidian plugin drawing (with an arrow bound to two shapes)
-    for (name, text) in [("ui.excalidraw", SAMPLE_SCENE), ("Plan.excalidraw.md", include_str!("testdata/plugin-drawing.excalidraw.md"))] {
+    for (name, text) in [("ui.excalidraw", SAMPLE_SCENE), ("Plan.excalidraw.md", include_str!("../testdata/plugin-drawing.excalidraw.md"))] {
         let mut d = DrawingDoc::new(PathBuf::from(name), text);
         assert!(d.error.is_none(), "{name}: {:?}", d.error);
         h.settle(&mut d);
@@ -500,5 +500,5 @@ fn people_and_the_file_picker_in_a_drawing() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-#[path = "drawing_pointer_tests.rs"]
+#[path = "pointer_tests.rs"]
 mod pointer;

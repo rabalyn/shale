@@ -723,7 +723,7 @@ impl ShaleApp {
                             continue;
                         }
                         // a canvas tab comes back as it was left: read-only, without the question
-                        if crate::canvas::is_canvas_path(&rel) {
+                        if crate::drawing::canvas::is_canvas_path(&rel) {
                             self.open_canvas_read_only(&rel, new_tab);
                         } else {
                             self.open(&rel, new_tab);
@@ -832,9 +832,9 @@ impl ShaleApp {
                 }
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
             }
-            FileKind::Drawing if crate::canvas::is_canvas_path(rel) && !self.drawings.contains_key(rel) => {
+            FileKind::Drawing if crate::drawing::canvas::is_canvas_path(rel) && !self.drawings.contains_key(rel) => {
                 // a canvas: open the copy converted earlier, convert it, or ask
-                let existing = crate::canvas::find_converted(v, rel);
+                let existing = crate::drawing::canvas::find_converted(v, rel);
                 match existing {
                     Some(copy) if self.cfg.auto_convert_canvas => self.open(&copy, new_tab),
                     None if self.cfg.auto_convert_canvas => {
@@ -881,8 +881,8 @@ impl ShaleApp {
     /// Make `Name.excalidraw.md` next to the canvas `rel` and open it. The canvas is not changed.
     pub fn convert_canvas(&mut self, rel: &Path, new_tab: bool) -> Option<PathBuf> {
         let v = self.vault.as_mut()?;
-        let made = fsutil::read_to_string(v.abs(rel)).map_err(|e| e.to_string()).and_then(|text| crate::canvas::converted_file(rel, &text)).and_then(|content| {
-            let to = v.new_note_path(rel.parent().unwrap_or(Path::new("")), &crate::canvas::drawing_name_for(rel));
+        let made = fsutil::read_to_string(v.abs(rel)).map_err(|e| e.to_string()).and_then(|text| crate::drawing::canvas::converted_file(rel, &text)).and_then(|content| {
+            let to = v.new_note_path(rel.parent().unwrap_or(Path::new("")), &crate::drawing::canvas::drawing_name_for(rel));
             v.create_file(&to, &content).map_err(|e| e.to_string())
         });
         match made {
@@ -960,9 +960,9 @@ impl ShaleApp {
     pub fn create_note(&mut self, folder: &Path, name: &str, new_tab: bool) -> Option<PathBuf> {
         let v = self.vault.as_mut()?;
         let rel = v.new_note_path(folder, name);
-        let content = if crate::excalidraw_md::is_plugin_file(&rel) {
-            crate::excalidraw_md::new_file(&crate::drawing::Scene::default())
-        } else if crate::excalidraw_md::is_drawing_path(&rel) {
+        let content = if crate::drawing::excalidraw_md::is_plugin_file(&rel) {
+            crate::drawing::excalidraw_md::new_file(&crate::drawing::Scene::default())
+        } else if crate::drawing::excalidraw_md::is_drawing_path(&rel) {
             crate::drawing::Scene::default().to_json()
         } else {
             String::new()
@@ -1267,10 +1267,10 @@ impl ShaleApp {
             Some(FileKind::Note) => format!("{}.md", markdown::strip_md_ext(&new_name)),
             Some(FileKind::Drawing) => {
                 // keep the format: an Obsidian `.excalidraw.md` drawing or `.canvas` stays one
-                let stem = crate::excalidraw_md::drawing_stem(&new_name);
-                if crate::excalidraw_md::is_plugin_file(rel) {
+                let stem = crate::drawing::excalidraw_md::drawing_stem(&new_name);
+                if crate::drawing::excalidraw_md::is_plugin_file(rel) {
                     format!("{stem}.excalidraw.md")
-                } else if crate::canvas::is_canvas_path(rel) {
+                } else if crate::drawing::canvas::is_canvas_path(rel) {
                     format!("{stem}.canvas")
                 } else {
                     format!("{stem}.excalidraw")
@@ -1640,7 +1640,7 @@ impl ShaleApp {
                 Some(doc) => doc.scene.clone(),
                 None => crate::drawing::Scene::read_file(&v.abs(&d.rel))?,
             };
-            crate::pdfexport::export_drawing(&scene, &d.name, &d.opts, &crate::drawing_pictures::images(&scene, v, &d.rel))?
+            crate::pdfexport::export_drawing(&scene, &d.name, &d.opts, &crate::drawing::pictures::images(&scene, v, &d.rel))?
         } else {
             let text = self.notes.get(&d.rel).map(|n| n.text.clone()).or_else(|| v.notes.get(&d.rel).map(|n| n.text.clone())).unwrap_or_default();
             crate::pdfexport::export_note(v, &d.rel, &text, &d.opts)?
@@ -2694,7 +2694,7 @@ pub(crate) mod tests {
         assert_eq!(app.current_path(), Some(to.clone()));
         assert_eq!(app.tabs.iter().filter(|t| t.view.path() == Some(canvas)).count(), 0, "the canvas tab now shows the drawing");
         let made = std::fs::read_to_string(d.join(&to)).unwrap();
-        assert!(crate::canvas::is_converted_from(&made, canvas));
+        assert!(crate::drawing::canvas::is_converted_from(&made, canvas));
         assert!(app.drawings[&to].read_only.is_none() && app.drawings[&to].error.is_none());
         assert_eq!(std::fs::read_to_string(d.join(canvas)).unwrap(), CANVAS);
         // opening the canvas again offers the copy made before

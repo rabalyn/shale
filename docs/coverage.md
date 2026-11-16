@@ -72,7 +72,7 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/mail_compose.rs` | 782 | 106 | 86.45 % |
 | `src/pdfexport.rs` | 655 | 84 | 87.18 % |
 | `src/social/markup.rs` | 252 | 32 | 87.30 % |
-| `src/drawing_connect.rs` | 877 | 109 | 87.57 % |
+| `src/drawing/connect.rs` | 877 | 109 | 87.57 % |
 | `src/mail.rs` | 686 | 83 | 87.90 % |
 | `src/social/demo.rs` | 142 | 17 | 88.03 % |
 | `src/social/feed_ui.rs` | 780 | 88 | 88.72 % |
@@ -112,17 +112,17 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/calendar/store.rs` | 884 | 46 | 94.80 % |
 | `src/secrets.rs` | 289 | 15 | 94.81 % |
 | `src/social/post_index.rs` | 197 | 10 | 94.92 % |
-| `src/excalidraw_md.rs` | 474 | 24 | 94.94 % |
+| `src/drawing/excalidraw_md.rs` | 474 | 24 | 94.94 % |
 | `src/editor.rs` | 1357 | 66 | 95.14 % |
-| `src/drawing_links.rs` | 216 | 10 | 95.37 % |
+| `src/drawing/links.rs` | 216 | 10 | 95.37 % |
 | `src/vim.rs` | 464 | 18 | 96.12 % |
 | `src/people.rs` | 258 | 10 | 96.12 % |
-| `src/canvas.rs` | 285 | 11 | 96.14 % |
+| `src/drawing/canvas.rs` | 285 | 11 | 96.14 % |
 | `src/lists.rs` | 446 | 17 | 96.19 % |
 | `src/calendar/dialog.rs` | 1391 | 50 | 96.41 % |
 | `src/vault.rs` | 1302 | 43 | 96.70 % |
 | `src/calendar/ics.rs` | 1010 | 33 | 96.73 % |
-| `src/drawing_layout.rs` | 397 | 13 | 96.73 % |
+| `src/drawing/layout.rs` | 397 | 13 | 96.73 % |
 | `src/sidebar_ui.rs` | 184 | 6 | 96.74 % |
 | `src/vault_path.rs` | 92 | 3 | 96.74 % |
 | `src/import_dialog.rs` | 277 | 8 | 97.11 % |
@@ -130,7 +130,7 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/mail_db.rs` | 776 | 22 | 97.16 % |
 | `src/tagwords.rs` | 157 | 4 | 97.45 % |
 | `src/outbox.rs` | 925 | 23 | 97.51 % |
-| `src/drawing_pictures.rs` | 169 | 4 | 97.63 % |
+| `src/drawing/pictures.rs` | 169 | 4 | 97.63 % |
 | `src/markdown.rs` | 531 | 11 | 97.93 % |
 | `src/jobs.rs` | 52 | 1 | 98.08 % |
 | `src/export_dialog.rs` | 191 | 3 | 98.43 % |
@@ -226,10 +226,10 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
 10. **`drawing.rs` `continue_drag`, `begin_drag`, `end_drag`, `click` (1450 to 1815), 270 lines, and
     `panels.rs` `modals`, `tasks_view`, `tree` (218 to 1110), 330 lines**: moving, resizing and
     rotating elements, the modal dialogs, the task list view and the folder tree. Test: headless UI
-    tests with scripted pointer events as in `drawing_ui_tests.rs` (drag a rectangle, resize by a
+    tests with scripted pointer events as in `drawing/ui_tests.rs` (drag a rectangle, resize by a
     handle, shift-drag to constrain, drag after zoom), and one test per modal that opens it by its
     key, changes a value and closes it with Esc. Kind: test (large; split into issues per area).
-    Done in #62: `drawing_pointer_tests.rs` (16 tests, DRAW-019) drives `begin_drag`,
+    Done in #62: `drawing/pointer_tests.rs` (16 tests, DRAW-019) drives `begin_drag`,
     `continue_drag`, `end_drag` and `click` with real pointer events (select, Shift, move, zoomed
     drag, frame, corner resize with turn-over, text and scribbles, arrow ends, every shape tool,
     snapping, 45-degree lock, pencil, eraser, hand and Space pan, double-click editing) and found a
