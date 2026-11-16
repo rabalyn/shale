@@ -61,8 +61,28 @@ pub fn open_web(url: &str) {
 
 /// The height of the row above the list that holds the button for new posts.
 const NEW_ROW_HEIGHT: f32 = 28.0;
-/// Side of the spinner inside the "Check now" button.
-const CHECK_SPINNER: f32 = 12.0;
+/// Side of the spinner inside a busy button.
+const BUTTON_SPINNER: f32 = 12.0;
+
+/// A button that shows a running job as a spinner inside itself (SOC-041, SOC-042). It keeps
+/// the room for the spinner also when idle, so it has one size and nothing next to it moves;
+/// while `busy` it is disabled. Returns the button and, while busy, where the spinner is.
+fn spinner_button(ui: &mut Ui, text: impl Into<egui::WidgetText>, fill: Option<Color32>, enabled: bool, busy: bool) -> (egui::Response, Option<Rect>) {
+    let text: egui::WidgetText = text.into();
+    let pad = ui.spacing().button_padding.x;
+    let label_w = text.clone().into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x;
+    let mut button = egui::Button::new(text).min_size(egui::vec2(label_w + 2.0 * (BUTTON_SPINNER + pad) + 2.0 * pad, 0.0));
+    if let Some(fill) = fill {
+        button = button.fill(fill);
+    }
+    let r = ui.add_enabled(enabled && !busy, button);
+    let spinner = busy.then(|| {
+        let at = Rect::from_center_size(egui::pos2(r.rect.left() + pad + BUTTON_SPINNER / 2.0, r.rect.center().y), egui::Vec2::splat(BUTTON_SPINNER));
+        egui::Spinner::new().size(BUTTON_SPINNER).paint_at(ui, at);
+        at
+    });
+    (r, spinner)
+}
 
 /// "just now", "2 min ago", "3 h ago".
 fn checked_ago(secs: u64) -> String {
@@ -425,12 +445,12 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
         ui.horizontal(|ui| {
             let busy = cx.saving.contains(&key);
             let fill = theme::ACCENT.gamma_multiply(0.55);
-            let b = ui.add_enabled(!busy, egui::Button::new(RichText::new("Save to vault").strong().color(theme::TEXT_STRONG)).fill(fill));
+            let (b, spinner) = spinner_button(ui, RichText::new("Save to vault").strong().color(theme::TEXT_STRONG), Some(fill), true, busy);
+            if let Some(at) = spinner {
+                cx.rects.push((format!("save-spinner:{idx}"), at));
+            }
             if cx.rec(format!("save:{idx}"), b).on_hover_text("Copy this post (the whole thread of its author, with pictures and a link back) into your vault").clicked() {
                 save = true;
-            }
-            if busy {
-                ui.spinner();
             }
             if cx.rec(format!("open:{idx}"), ui.button("Open in browser")).clicked() {
                 open_web(&p.url);
@@ -552,14 +572,9 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                 }
             }
             let checking = feed.as_ref().and_then(|f| st.timelines.get(&(aid.clone(), f.id.clone()))).map(|t| t.checking).unwrap_or(false);
-            // the spinner sits inside the button, in room that is always there, so nothing next to it moves
-            let label_w = ui.fonts_mut(|f| f.layout_no_wrap("Check now".into(), egui::TextStyle::Button.resolve(ui.style()), Color32::WHITE).size().x);
-            let room = CHECK_SPINNER + ui.spacing().button_padding.x;
-            let r = ui.add_enabled(feed.is_some() && !checking, egui::Button::new("Check now").min_size(egui::vec2(label_w + 2.0 * room + 2.0 * ui.spacing().button_padding.x, 0.0)));
+            let (r, spinner) = spinner_button(ui, "Check now", None, feed.is_some(), checking);
             seen_rects.push(("check-now".into(), r.rect));
-            if checking {
-                let at = Rect::from_center_size(egui::pos2(r.rect.left() + ui.spacing().button_padding.x + CHECK_SPINNER / 2.0, r.rect.center().y), egui::Vec2::splat(CHECK_SPINNER));
-                egui::Spinner::new().size(CHECK_SPINNER).paint_at(ui, at);
+            if let Some(at) = spinner {
                 seen_rects.push(("check-now-spinner".into(), at));
             }
             check_now = r.on_hover_text("Look for new posts now. They wait behind the button at the top of the list.").clicked();
@@ -681,13 +696,13 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                     if gaps.contains(&k) {
                         ui.vertical_centered(|ui| {
                             ui.horizontal(|ui| {
-                                let r = ui.add_enabled(!filling, egui::Button::new("Load more in between"));
+                                let (r, spinner) = spinner_button(ui, "Load more in between", None, true, filling);
                                 cx.rects.push((format!("gap:{i}"), r.rect));
+                                if let Some(at) = spinner {
+                                    cx.rects.push((format!("gap-spinner:{i}"), at));
+                                }
                                 if r.on_hover_text("Some posts between these were not fetched").clicked() {
                                     fill_gap = Some(k.clone());
-                                }
-                                if filling {
-                                    ui.spinner();
                                 }
                             });
                         });

@@ -5,10 +5,13 @@
 #   docs/screenshots/regen.sh              all pictures
 #   docs/screenshots/regen.sh mail-view    only these (by recipe name)
 #   docs/screenshots/regen.sh --list       the recipe names
+#   docs/screenshots/regen.sh --clips ...  the same for the short videos (DEV-019): recipes in
+#                                          clips.conf, `shale --record`, into z_media/clips/ as .webm
+#                                          (docs/screenshots/regen-clips.sh is this with --clips); needs ffmpeg
 #
 # Environment:
 #   SHALE      the program (default: target/release/shale, else target/debug/shale)
-#   OUT        where the pictures go (default: docs/userguide/z_media/screenshots)
+#   OUT        where the pictures go (default: docs/userguide/z_media/screenshots; with --clips .../z_media/clips)
 #   SHALE_FAKE_NOW  the frozen clock of the pictures (default 2026-11-15T10:00:00, UTC): the status
 #                   bar, the build stamp, the calendar's today and the ages in lists do not change
 #                   between runs, so only real changes show in a diff (a recipe's env may override it)
@@ -21,8 +24,17 @@ set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd "$here/../.." && pwd)
+mode=--screenshot
+ext=png
+kind=picture
 recipes="$here/recipes.conf"
-out=${OUT:-$root/docs/userguide/z_media/screenshots}
+media=screenshots
+if [ "${1:-}" = "--clips" ]; then
+    shift
+    mode=--record ext=webm kind=clip recipes="$here/clips.conf" media=clips
+    command -v ffmpeg >/dev/null || { echo "regen: ffmpeg is missing; it encodes the clips (apt install ffmpeg, brew install ffmpeg, ...)" >&2; exit 1; }
+fi
+out=${OUT:-$root/docs/userguide/z_media/$media}
 
 shale=${SHALE:-}
 if [ -z "$shale" ]; then
@@ -78,7 +90,7 @@ while IFS=$'\001' read -r name size view steps vault env; do
         continue
     fi
     steps=${steps//\{fixtures\}/$here/fixtures}
-    args=(--screenshot "$tmp/$name.png" --size "$size")
+    args=("$mode" "$tmp/$name.$ext" --size "$size")
     [ -n "$view" ] && args+=(--view "$view")
     [ -n "$steps" ] && args+=(--keys "$steps")
     if [ -n "$vault" ]; then
@@ -96,16 +108,16 @@ while IFS=$'\001' read -r name size view steps vault env; do
     else
         launch=(env -u WAYLAND_DISPLAY xvfb-run -a -s "-screen 0 1920x1200x24" "${runner[@]}" "$shale" "${args[@]}")
     fi
-    if "${launch[@]}" 2>"$tmp/$name.log" && [ -s "$tmp/$name.png" ]; then
+    if "${launch[@]}" 2>"$tmp/$name.log" && [ -s "$tmp/$name.$ext" ]; then
         mkdir -p "$out"
-        mv "$tmp/$name.png" "$out/$name.png"
+        mv "$tmp/$name.$ext" "$out/$name.$ext"
         made=$((made + 1))
     else
-        grep -E "^(script|--keys|--size|could not|screenshot)" "$tmp/$name.log" >&2 || true
+        grep -E "^(script|--keys|--size|could not|screenshot|record|shale)" "$tmp/$name.log" >&2 || true
         echo "regen: $name FAILED" >&2
         failed+=("$name")
     fi
 done < <(read_recipes)
 
-echo "$made picture(s) made${failed:+, failed: ${failed[*]}}"
+echo "$made $kind(s) made${failed:+, failed: ${failed[*]}}"
 [ ${#failed[@]} -eq 0 ]

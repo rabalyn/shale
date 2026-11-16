@@ -56,7 +56,8 @@ folder `docs/userguide/` next to the program, where Shale looks first.
 ## How to read this guide
 
 Each note names the setting or key you need, and every picture was made by the app itself
-(`docs/screenshots/regen.sh`), so it shows the current look. Things that are planned but not
+(`docs/screenshots/regen.sh`), so it shows the current look; the short videos were recorded
+by it too (`docs/screenshots/regen-clips.sh`). Things that are planned but not
 built yet are not described here.
 
 - [ ] Open the graph (ribbon) and find the note with the most links

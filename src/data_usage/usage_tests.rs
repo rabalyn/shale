@@ -44,6 +44,105 @@ fn places_with_caches(tag: &str) -> (Places, PathBuf) {
     (p, d)
 }
 
+/// A history file with one step per entry of `times` (unix seconds), in the undo folder of the
+/// vault of `p`; `version` is that of the file.
+fn undo_file(p: &Places, name: &str, version: u32, times: &[i64]) -> PathBuf {
+    let steps: Vec<String> = times.iter().map(|t| format!(r#"{{"at": 0, "removed": "", "inserted": "x", "time": {t}}}"#)).collect();
+    let text = format!(r#"{{"version": {version}, "path": "{name}.md", "undo": [{}], "redo": [], "known": "x"}}"#, steps.join(","));
+    let f = p.vault.as_ref().unwrap().join(".shale/undo").join(format!("{name}.json"));
+    write(&f, text.as_bytes());
+    f
+}
+
+fn undo_names(p: &Places) -> Vec<String> {
+    let mut v: Vec<String> = fs::read_dir(p.vault.as_ref().unwrap().join(".shale/undo")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    v.sort();
+    v
+}
+
+// spec: USE-017, USE-006
+#[test]
+fn the_undo_histories_are_counted_with_the_age_of_the_oldest_step() {
+    let (p, d) = places_with_caches("undo-stats");
+    assert_eq!(stats(CacheId::UndoHistories, &p), Ok(CacheStats::default()), "no folder, no entries");
+    undo_file(&p, "a", 1, &[5_000, 9_000]);
+    undo_file(&p, "b", 1, &[7_000]);
+    write(&p.vault.as_ref().unwrap().join(".shale/undo/c.json.broken-2026-10-01-000000"), &[0; 7]);
+    write(&p.vault.as_ref().unwrap().join(".shale/undo/other.txt"), b"not ours");
+    let s = stats(CacheId::UndoHistories, &p).unwrap();
+    assert_eq!((s.entries, s.oldest), (3, Some(5_000)), "the files of the cache, the time of the oldest step");
+    assert!(s.bytes > 7);
+    assert!(p.location(CacheId::UndoHistories).ends_with(".shale/undo"));
+    let mut none = p.clone();
+    none.vault = None;
+    assert_eq!(stats(CacheId::UndoHistories, &none), Ok(CacheStats::default()));
+    assert_eq!(none.location(CacheId::UndoHistories), "(no vault open)");
+    let _ = fs::remove_dir_all(&d);
+}
+
+// spec: USE-017, USE-022
+#[test]
+fn the_undo_prune_drops_old_steps_empty_files_and_every_damaged_copy_and_spares_newer_files() {
+    let (p, d) = places_with_caches("undo-prune");
+    let now = crate::calendar::time::now();
+    let day = 86_400;
+    let (fresh, old) = (now - day, now - 40 * day);
+    undo_file(&p, "mixed", 1, &[old, fresh]);
+    undo_file(&p, "fresh", 1, &[fresh]);
+    undo_file(&p, "stale", 1, &[old]);
+    let newer = undo_file(&p, "newer", 99, &[old]);
+    let dir = p.vault.as_ref().unwrap().join(".shale/undo");
+    write(&dir.join("x.json.broken-2026-11-15-120000"), b"{");
+    write(&dir.join("y.json.broken-2020-01-01-000000-2"), b"{");
+    write(&dir.join("other.txt"), b"not ours");
+    let r = CacheRetention::default();
+    let freed = prune(CacheId::UndoHistories, &p, &r, now).unwrap();
+    assert_eq!(freed.entries, 4, "one rewritten, one empty file and two damaged copies");
+    assert_eq!(undo_names(&p), ["fresh.json", "mixed.json", "newer.json", "other.txt"]);
+    let mixed = fs::read_to_string(dir.join("mixed.json")).unwrap();
+    assert!(mixed.contains(&fresh.to_string()) && !mixed.contains(&old.to_string()), "only the old step went: {mixed}");
+    assert!(newer.exists(), "a file from a newer Shale is left alone");
+    // forever: no step goes, but the damaged copies still do
+    write(&dir.join("z.json.broken-2026-11-16-000000"), b"{");
+    undo_file(&p, "stale", 1, &[old]);
+    let forever = CacheRetention { undo_days: None, ..Default::default() };
+    assert_eq!(prune(CacheId::UndoHistories, &p, &forever, now).map(|f| f.entries), Ok(1));
+    assert!(undo_names(&p).contains(&"stale.json".to_string()));
+    let mut none = p.clone();
+    none.vault = None;
+    assert_eq!(prune(CacheId::UndoHistories, &none, &r, now), Ok(Freed::default()));
+    let _ = fs::remove_dir_all(&d);
+}
+
+// spec: USE-017, USE-007
+#[test]
+fn the_undo_clear_deletes_histories_and_damaged_copies_only_and_the_live_ones_forget() {
+    let (p, d) = places_with_caches("undo-clear");
+    let now = crate::calendar::time::now();
+    let dir = p.vault.as_ref().unwrap().join(".shale/undo");
+    undo_file(&p, "a", 1, &[now]);
+    undo_file(&p, "b", 1, &[now]);
+    let newer = undo_file(&p, "newer", 99, &[now]);
+    write(&dir.join("c.json.broken-2026-11-15-120000"), b"{");
+    write(&dir.join("d.json"), b"{ garbage");
+    write(&dir.join("other.txt"), b"not ours");
+    assert_eq!(clear(CacheId::UndoHistories, &p, None).map(|f| f.entries), Ok(4));
+    assert_eq!(undo_names(&p), ["newer.json", "other.txt"]);
+    assert!(newer.exists() && p.vault.as_ref().unwrap().join("Note.md").exists() && p.vault.as_ref().unwrap().join(".shale/tag-words.json").exists());
+    // the histories in memory are emptied by the window (app.rs); here: the helper
+    let mut live = crate::undo::Histories::default();
+    live.open_vault(p.vault.as_ref().unwrap(), now as u64);
+    live.of(Path::new("n.md")).checkpoint("one");
+    live.of(Path::new("n.md")).checkpoint("one two");
+    live.clear_loaded();
+    let mut t = "one two".to_string();
+    assert_eq!(live.of(Path::new("n.md")).undo(&mut t), None, "u has nothing to undo");
+    let mut none = p.clone();
+    none.vault = None;
+    assert_eq!(clear(CacheId::UndoHistories, &none, None), Ok(Freed::default()));
+    let _ = fs::remove_dir_all(&d);
+}
+
 // spec: USE-007, USE-010, USE-013, USE-014, USE-015, USE-016
 #[test]
 fn each_clear_removes_only_its_own_files_and_never_saved_data() {
@@ -99,13 +198,17 @@ fn each_prune_follows_its_retention_settings() {
     let _ = fs::remove_dir_all(&d);
 }
 
-// spec: USE-020
+// spec: USE-020, USE-017
 #[test]
 fn the_retention_settings_have_defaults_and_take_forever() {
     let c: crate::config::Config = serde_json::from_str("{}").unwrap();
     assert_eq!(c.caches, CacheRetention::default());
     assert_eq!((c.caches.picture_days, c.caches.picture_mb, c.caches.post_days, c.caches.posts_per_account), (Some(30), Some(500), Some(365), Some(10_000)));
-    assert_eq!((c.caches.mail_backups, c.caches.broken_days, c.caches.debug_log_mb), (Some(3), None, Some(10)));
+    assert_eq!((c.caches.mail_backups, c.caches.broken_days, c.caches.debug_log_mb, c.caches.undo_days), (Some(3), None, Some(10), Some(30)));
+    let c: crate::config::Config = serde_json::from_str(r#"{"caches": {"undo_days": null}}"#).unwrap();
+    assert_eq!(c.caches.undo_days, None, "forever");
+    let c: crate::config::Config = serde_json::from_str(r#"{"caches": {"picture_days": null, "mail_backups": 5}}"#).unwrap();
+    assert_eq!(c.caches.undo_days, Some(30), "a config file from before the setting gets the default");
     let c: crate::config::Config = serde_json::from_str(r#"{"caches": {"picture_days": null, "mail_backups": 5}}"#).unwrap();
     assert_eq!((c.caches.picture_days, c.caches.mail_backups, c.caches.picture_mb), (None, Some(5), Some(500)), "null is forever, missing is the default");
     let back: crate::config::Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
@@ -125,15 +228,15 @@ fn values_out_of_range_are_brought_into_it() {
     assert_eq!((r.picture_days, r.picture_mb, r.mail_backups, r.broken_days), (Some(1), Some(100_000), Some(1), None));
 }
 
-// spec: USE-008
+// spec: USE-008, USE-017
 #[test]
-fn clear_asks_first_only_for_the_mail_index_and_the_damaged_copies() {
+fn clear_asks_first_only_for_the_mail_index_the_damaged_copies_and_the_undo_histories() {
     let d = temp("confirm");
     let mut u = DataUsage::new(Places::in_folder(&d));
     for id in CacheId::ALL {
         u.confirm = None;
         let asked = dialog::clear_clicked(&mut u, id);
-        let slow = matches!(id, CacheId::MailIndex | CacheId::MailBroken);
+        let slow = matches!(id, CacheId::MailIndex | CacheId::MailBroken | CacheId::UndoHistories);
         assert_eq!(asked.is_none(), slow, "{id:?}");
         assert_eq!(u.confirm == Some(id), slow);
         assert_eq!(id.confirm_text().is_some(), slow);

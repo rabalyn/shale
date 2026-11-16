@@ -391,12 +391,20 @@ pub enum EditorAction {
     FilesChanged,
     /// `[[p Name` picked "new contact": make a contact note in the people folder
     CreatePerson(String),
+    /// pasted pictures / files were saved in the media folder (EDIT-019): refresh the file list and say what was saved
+    Pasted(String),
 }
 
 #[derive(Default)]
 struct Cache {
     key: u64,
     links: Vec<(LinkSpan, bool)>,
+}
+
+/// The note an editor shows: its vault path and the undo histories (the note's is found by the path).
+pub struct Note<'a> {
+    pub rel: &'a Path,
+    pub undo: &'a mut crate::undo::Histories,
 }
 
 pub struct NoteEditor {
@@ -533,7 +541,7 @@ impl NoteEditor {
 
     /// Vim-lite for this frame: outside insert mode every key goes to vim instead of the text.
     /// Returns true when the text changed.
-    fn vim_frame(&mut self, ui: &mut Ui, text: &mut String) -> bool {
+    fn vim_frame(&mut self, ui: &mut Ui, text: &mut String, hist: &mut crate::undo::History) -> bool {
         use crate::vim::{Effects, Mode, VimKey};
         let focused = ui.ctx().memory(|m| m.has_focus(self.id));
         let now = ui.input(|i| i.time);
@@ -541,6 +549,7 @@ impl NoteEditor {
             // the note got the keyboard: normal mode (a blink of lost focus keeps insert mode)
             let blink = self.vim.mode == Mode::Insert && self.vim_lost_at.is_some_and(|t| now - t < 0.5);
             if !blink {
+                hist.checkpoint(text);
                 let cur = self.text_cursor(ui).map(|c| c.0).unwrap_or(0);
                 self.vim.reset(text, cur);
                 self.vim_apply_cursor(ui, text);
@@ -575,11 +584,19 @@ impl NoteEditor {
         }
         // take every key that would type or move in the text box; Ctrl/Alt chords stay
         let paste_pending = self.vim.paste_pending;
+        let typing_command = self.vim.typing_command();
         let (keys, pastes) = ui.input_mut(|i| {
             let (mut keys, mut pastes) = (Vec::new(), Vec::new());
             i.events.retain(|e| match e {
                 egui::Event::Text(t) => {
                     keys.extend(t.chars().map(VimKey::Char));
+                    false
+                }
+                // Ctrl+R redoes (EDIT-021); the other Ctrl chords stay
+                egui::Event::Key { key: Key::R, pressed, modifiers, .. } if (modifiers.ctrl || modifiers.command) && !modifiers.alt && !modifiers.shift && !typing_command => {
+                    if *pressed {
+                        keys.push(VimKey::Redo);
+                    }
                     false
                 }
                 egui::Event::Key { key, pressed, modifiers, .. } if !(modifiers.ctrl || modifiers.command || modifiers.alt || modifiers.mac_cmd) => {
@@ -620,7 +637,7 @@ impl NoteEditor {
                 }
                 continue;
             }
-            self.vim.key(k, text, &mut fx);
+            self.vim.key(k, text, hist, &mut fx);
         }
         if let Some(c) = fx.copy.take() {
             ui.ctx().copy_text(c);
@@ -642,6 +659,48 @@ impl NoteEditor {
         fx.changed
     }
 
+    /// A pasted picture or list of media files becomes a link to the file saved in the media folder
+    /// (EDIT-019): the paste event is turned into a paste of the link, so the text box (or vim's `p`)
+    /// puts it in as any other paste. Other pastes are left alone.
+    fn paste_media(&mut self, ui: &mut Ui, vault: &Vault) -> Option<EditorAction> {
+        if !ui.ctx().memory(|m| m.has_focus(self.id)) {
+            return None;
+        }
+        // vim's `p` puts a link on a line of its own below the cursor line (as it does with a line of text)
+        let linewise = self.vim_enabled && self.vim.paste_pending;
+        let date = crate::media::local_date();
+        let mut messages: Vec<String> = Vec::new();
+        ui.input_mut(|i| {
+            i.events.retain_mut(|e| {
+                let links = match e {
+                    egui::Event::PasteImage(img) => match crate::media::paste_image_to_link(&vault.root, img, date) {
+                        Ok(link) => {
+                            messages.push("Saved the pasted picture to the media folder".into());
+                            Some(link)
+                        }
+                        Err(err) => {
+                            messages.push(format!("Could not paste the picture: {err}"));
+                            return false;
+                        }
+                    },
+                    egui::Event::Paste(t) => crate::media::paste_text_to_links(&vault.root, t, date).map(|(links, msg)| {
+                        messages.push(msg);
+                        links
+                    }),
+                    _ => None,
+                };
+                if let Some(mut links) = links {
+                    if linewise {
+                        links.push('\n');
+                    }
+                    *e = egui::Event::Paste(links);
+                }
+                true
+            })
+        });
+        (!messages.is_empty()).then(|| EditorAction::Pasted(messages.join(". ")))
+    }
+
     fn refresh_links(&mut self, text: &str, vault: &Vault, rel: &Path) {
         let mut h = DefaultHasher::new();
         text.hash(&mut h);
@@ -661,7 +720,8 @@ impl NoteEditor {
     }
 
     /// Show the editor. Returns (text changed, action).
-    pub fn show(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault, rel: &Path, base_size: f32, ctrl_to_follow: bool) -> (bool, Option<EditorAction>) {
+    pub fn show(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault, note: Note, base_size: f32, ctrl_to_follow: bool) -> (bool, Option<EditorAction>) {
+        let Note { rel, undo } = note;
         let mut action = None;
         let mut changed = false;
         self.refresh_links(text, vault, rel);
@@ -674,8 +734,11 @@ impl NoteEditor {
             action = keys.action.take();
         }
         let media_handled = keys.handled;
+        if let Some(a) = self.paste_media(ui, vault) {
+            action = Some(a);
+        }
 
-        if self.vim_enabled && self.vim_frame(ui, text) {
+        if self.vim_enabled && self.vim_frame(ui, text, undo.of(rel)) {
             changed = true;
             self.refresh_links(text, vault, rel);
         }
@@ -756,6 +819,8 @@ impl NoteEditor {
         } else {
             0.0
         };
+        // the raw lines of the markdown preview (EDIT-016, EDIT-017); embeds on them are raw too
+        let preview = self.live_preview.then(|| self.preview_lines(ui, text));
         if self.inline_images {
             let focused = ui.ctx().memory(|m| m.has_focus(self.id));
             let sel = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).map(|r| {
@@ -769,7 +834,8 @@ impl NoteEditor {
                     continue;
                 }
                 let inside = focused && sel.as_ref().map(|s| s.start <= l.range.end && s.end >= l.range.start).unwrap_or(false);
-                if inside {
+                let raw_line = preview.as_ref().is_some_and(|r| r.contains(&crate::editor_preview::line_of(text, l.range.start)));
+                if inside || raw_line {
                     continue;
                 }
                 let Some(p) = vault.resolve(&l.target, Some(rel)) else { continue };
@@ -806,7 +872,6 @@ impl NoteEditor {
         // text in the middle of a frame, the pictures are found again in the new text, so they
         // stay pictures instead of flashing back to link text for a frame.
         let image_keys: Vec<(String, f32)> = images.iter().map(|(r, h, _, _)| (text[r.clone()].to_string(), *h)).collect();
-        let preview = self.live_preview.then(|| self.preview_lines(ui, text));
         let links = self.cache.links.clone();
         let links_text = text.clone();
         self.assist.arm(text, media_handled);
@@ -1122,7 +1187,7 @@ mod tests {
                     // another focusable widget, like the real app's title box and sidebars
                     let mut other = String::from("title");
                     ui.add(egui::TextEdit::singleline(&mut other).id(egui::Id::unique("other-widget")));
-                    let (c, a) = ed.show(ui, text, vault, rel, 15.0, false);
+                    let (c, a) = ed.show(ui, text, vault, Note { rel, undo: &mut crate::undo::Histories::default() }, 15.0, false);
                     let mut other2 = String::from("after");
                     ui.add(egui::TextEdit::singleline(&mut other2).id(egui::Id::unique("other-widget-2")));
                     changed |= c;
@@ -1158,12 +1223,12 @@ mod tests {
     }
 
     /// Run one frame of the editor alone; returns what it copied and whether it asked for a paste.
-    fn vim_frame(ctx: &egui::Context, t: &mut f64, ed: &mut NoteEditor, text: &mut String, v: &Vault, events: Vec<Event>) -> (Option<String>, bool) {
+    fn vim_frame(ctx: &egui::Context, t: &mut f64, ed: &mut NoteEditor, text: &mut String, v: &Vault, undo: &mut crate::undo::Histories, events: Vec<Event>) -> (Option<String>, bool) {
         *t += 0.05;
         let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(*t), events, ..Default::default() };
         let mut out = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                ed.show(ui, text, v, Path::new("Welcome.md"), 15.0, false);
+                ed.show(ui, text, v, Note { rel: Path::new("Welcome.md"), undo }, 15.0, false);
             });
         });
         out.textures_delta.clear();
@@ -1181,6 +1246,7 @@ mod tests {
         let (v, d) = vault_for_tests("vim");
         let ctx = egui::Context::default();
         let mut t = 0.0;
+        let mut undo = crate::undo::Histories::default();
         let mut ed = NoteEditor::new(egui::Id::unique("vim-ed"));
         ed.vim_enabled = true;
         let mut text = String::from("alpha beta\ngamma delta\nsee [[Ide");
@@ -1188,57 +1254,160 @@ mod tests {
         let typed = |s: &str| vec![Event::Text(s.into())];
         let key = |k: Key| vec![Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }];
         ed.pending_cursor = Some(0);
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![]);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![]);
         assert_eq!(ed.vim_status().as_deref(), Some("NORMAL"), "a note that gets the keyboard is in normal mode");
         // motions move the text box's cursor and type nothing
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("w"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("w"));
         assert_eq!(cursor(&ctx, &ed), 6);
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("j"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("j"));
         assert_eq!(cursor(&ctx, &ed), 17, "same column on the next line");
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::ArrowUp));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, key(Key::ArrowUp));
         assert_eq!(cursor(&ctx, &ed), 6, "arrow keys are motions too");
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Enter));
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Backspace));
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("q z"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, key(Key::Enter));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, key(Key::Backspace));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("q z"));
         assert_eq!(text, "alpha beta\ngamma delta\nsee [[Ide", "no key types in normal mode");
         assert_eq!(cursor(&ctx, &ed), 16, "Enter = j, Backspace = h");
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("l"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("l"));
         // i: typing; Esc: back to normal on the typed character
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("i"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("i"));
         assert_eq!(ed.vim_status().as_deref(), Some("INSERT"));
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("X"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("X"));
         assert_eq!(text, "alpha beta\ngamma Xdelta\nsee [[Ide");
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Escape));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, key(Key::Escape));
         assert_eq!((ed.vim_status().as_deref(), cursor(&ctx, &ed)), (Some("NORMAL"), 17));
         // visual + d: the selection goes to the clipboard
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("0"));
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("v"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("0"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("v"));
         assert_eq!(ed.vim_status().as_deref(), Some("VISUAL"));
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("w"));
-        let (copied, _) = vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("d"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("w"));
+        let (copied, _) = vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("d"));
         assert_eq!(copied.as_deref(), Some("gamma X"));
         assert_eq!(text, "alpha beta\ndelta\nsee [[Ide");
         // p asks the window for the clipboard and puts what arrives after the cursor
-        let (_, asked) = vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("p"));
+        let (_, asked) = vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("p"));
         assert!(asked, "p sends RequestPaste");
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste("ZZ".into())]);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![Event::Paste("ZZ".into())]);
         assert_eq!(text, "alpha beta\ndZZelta\nsee [[Ide");
         // :line and /search
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed(":3"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed(":3"));
         assert_eq!(ed.vim_status().as_deref(), Some(":3"), "the command shows while it is typed");
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Enter));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, key(Key::Enter));
         assert_eq!(cursor(&ctx, &ed), 19, "start of line 3 (\"see [[Ide\")");
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("/BETA"));
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, key(Key::Enter));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("/BETA"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, key(Key::Enter));
         assert_eq!(cursor(&ctx, &ed), 6);
         // the [[ suggestions stay closed in normal mode and open while typing
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("G$"));
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("G$"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![]);
         assert!(!ed.assist.ac_active, "no suggestions in normal mode, although the cursor is in [[Ide");
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, typed("A"));
-        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("A"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![]);
         assert!(ed.assist.ac_active, "insert mode: the suggestions open");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-020, EDIT-021
+    #[test]
+    fn dd_u_and_ctrl_r_in_the_real_editor() {
+        let (v, d) = vault_for_tests("vim-undo");
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut undo = crate::undo::Histories::default();
+        let mut ed = NoteEditor::new(egui::Id::unique("vim-undo-ed"));
+        ed.vim_enabled = true;
+        let mut text = String::from("one\ntwo\nthree");
+        let cursor = |ctx: &egui::Context, ed: &NoteEditor| egui::text_edit::TextEditState::load(ctx, ed.id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0).unwrap();
+        let typed = |s: &str| vec![Event::Text(s.into())];
+        let key = |k: Key, modifiers: Modifiers| vec![Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers }];
+        ed.pending_cursor = Some(0);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![]);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![]);
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("j"));
+        // dd: the line goes to the clipboard, the cursor to the line that took its place
+        let (copied, _) = vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("dd"));
+        assert_eq!((text.as_str(), copied.as_deref(), cursor(&ctx, &ed)), ("one\nthree", Some("two\n"), 4));
+        // u brings it back, Ctrl+R deletes it again
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("u"));
+        assert_eq!((text.as_str(), cursor(&ctx, &ed)), ("one\ntwo\nthree", 4));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, key(Key::R, Modifiers::CTRL));
+        assert_eq!(text, "one\nthree", "Ctrl+R redoes and types nothing");
+        // an insert session, with everything typed in it, is one step
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("j"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("A"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("X"));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("Y"));
+        assert_eq!(text, "one\nthreeXY");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, key(Key::Escape, Modifiers::NONE));
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("u"));
+        assert_eq!(text, "one\nthree", "the whole session is undone at once");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("u"));
+        assert_eq!(text, "one\ntwo\nthree");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("u"));
+        assert_eq!(ed.vim_status().as_deref(), Some("Already at oldest change"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-022
+    #[test]
+    fn u_still_undoes_after_the_app_was_restarted() {
+        let (v, d) = vault_for_tests("vim-undo-restart");
+        let typed = |s: &str| vec![Event::Text(s.into())];
+        let start = |root: &Path, now: u64| {
+            let mut undo = crate::undo::Histories::default();
+            undo.open_vault(root, now);
+            let mut ed = NoteEditor::new(egui::Id::unique("vim-restart"));
+            ed.vim_enabled = true;
+            ed.pending_cursor = Some(0);
+            (undo, ed, egui::Context::default())
+        };
+        let now = 1_800_000_000;
+        let (mut undo, mut ed, ctx) = start(&d, now);
+        let mut text = String::from("one\ntwo\nthree");
+        let mut t = 0.0;
+        for events in [vec![], vec![], typed("j"), typed("dd"), typed("x")] {
+            vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, events);
+        }
+        assert_eq!(text, "one\nhree");
+        // the app quits (the note is saved by its own path) and starts again
+        undo.flush_all();
+        let (mut undo, mut ed, ctx) = start(&d, now + 3600);
+        let mut t = 0.0;
+        for events in [vec![], vec![], typed("u")] {
+            vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, events);
+        }
+        assert_eq!(text, "one\nthree", "the x of the first session is undone");
+        vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("u"));
+        assert_eq!(text, "one\ntwo\nthree", "and the dd");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-021
+    #[test]
+    fn two_editors_of_the_same_note_share_the_history() {
+        let (v, d) = vault_for_tests("vim-undo-tabs");
+        let mut undo = crate::undo::Histories::default();
+        let mut text = String::from("one two");
+        let typed = |s: &str| vec![Event::Text(s.into())];
+        let (ctx1, ctx2) = (egui::Context::default(), egui::Context::default());
+        let (mut t1, mut t2) = (0.0, 0.0);
+        let (mut ed1, mut ed2) = (NoteEditor::new(egui::Id::unique("tab1")), NoteEditor::new(egui::Id::unique("tab2")));
+        for ed in [&mut ed1, &mut ed2] {
+            ed.vim_enabled = true;
+            ed.pending_cursor = Some(0);
+        }
+        for _ in 0..2 {
+            vim_frame(&ctx1, &mut t1, &mut ed1, &mut text, &v, &mut undo, vec![]);
+            vim_frame(&ctx2, &mut t2, &mut ed2, &mut text, &v, &mut undo, vec![]);
+        }
+        vim_frame(&ctx1, &mut t1, &mut ed1, &mut text, &v, &mut undo, typed("x"));
+        assert_eq!(text, "ne two");
+        // the other tab undoes what this one did, then this one redoes it
+        vim_frame(&ctx2, &mut t2, &mut ed2, &mut text, &v, &mut undo, typed("u"));
+        assert_eq!(text, "one two");
+        vim_frame(&ctx1, &mut t1, &mut ed1, &mut text, &v, &mut undo, vec![Event::Key { key: Key::R, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::CTRL }]);
+        assert_eq!(text, "ne two");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1476,6 +1645,45 @@ mod tests {
         let mut ed2 = NoteEditor::new(egui::Id::unique("t10"));
         h.frame(&mut ed2, &mut text, &v, rel, vec![]);
         assert!(ed2.last_layout.as_ref().unwrap().0.size().y < 100.0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-017
+    #[test]
+    fn edit_017_embeds_on_the_raw_lines_around_the_cursor_show_their_link_text() {
+        let (v, d) = vault_for_tests("preview-embed");
+        image::RgbaImage::from_pixel(200, 120, image::Rgba([200, 30, 30, 255])).save(d.join("pic.png")).unwrap();
+        let mut v = v;
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("intro\n\n![[pic.png]]\nafter");
+        let mut ed = NoteEditor::new(egui::Id::unique("preview-embed"));
+        ed.inline_images = true;
+        ed.live_preview = true;
+        ed.preview_raw_lines = 1;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let height = |ed: &NoteEditor| ed.last_layout.as_ref().unwrap().0.size().y;
+        let mut settle = |ed: &mut NoteEditor, text: &mut String, cursor: usize| {
+            ed.pending_cursor = Some(cursor);
+            for _ in 0..3 {
+                h.frame(ed, text, &v, rel, vec![]);
+            }
+        };
+        // cursor on line 0: the embed (line 2) is two lines away, it stays a picture
+        settle(&mut ed, &mut text, 0);
+        assert!(height(&ed) > 120.0, "a picture two lines away, height {}", height(&ed));
+        // cursor on the empty line 1, next to the embed: with one raw line around it, link text
+        settle(&mut ed, &mut text, 6);
+        assert!(height(&ed) < 100.0, "the embed next to the cursor is raw, height {}", height(&ed));
+        // the same from the line after it
+        let end = text.len() - 1;
+        settle(&mut ed, &mut text, end);
+        assert!(height(&ed) < 100.0, "the embed before the cursor line is raw, height {}", height(&ed));
+        // no raw lines around the cursor: only the cursor's own line counts
+        ed.preview_raw_lines = 0;
+        settle(&mut ed, &mut text, 6);
+        assert!(height(&ed) > 120.0, "with 0 the neighbouring embed is a picture, height {}", height(&ed));
+        assert_eq!(text, "intro\n\n![[pic.png]]\nafter");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1931,6 +2139,110 @@ mod tests {
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(" **x**".into())]);
         assert_eq!(text, "first line\nGo to [[Ideas|my idea]] now\nlast **x**");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// One frame of the editor alone with these events; returns the editor's action.
+    fn paste_frame(ctx: &egui::Context, t: &mut f64, ed: &mut NoteEditor, text: &mut String, v: &Vault, events: Vec<Event>) -> Option<EditorAction> {
+        *t += 0.05;
+        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(*t), events, ..Default::default() };
+        let mut action = None;
+        let mut out = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                action = ed.show(ui, text, v, Note { rel: Path::new("Welcome.md"), undo: &mut crate::undo::Histories::default() }, 15.0, false).1;
+            });
+        });
+        out.textures_delta.clear();
+        action
+    }
+
+    fn pasted_toast(a: Option<EditorAction>) -> String {
+        match a {
+            Some(EditorAction::Pasted(m)) => m,
+            _ => panic!("no Pasted action"),
+        }
+    }
+
+    // spec: EDIT-019
+    #[test]
+    fn pasting_a_picture_or_media_files_saves_them_to_the_media_folder() {
+        let (v, d) = vault_for_tests("paste");
+        let (y, m, day) = crate::media::local_date();
+        let stamp = format!("z_media/{y:04}/{m:02}/{:02}{m:02}{day:02}_", y.rem_euclid(100));
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut ed = NoteEditor::new(egui::Id::unique("paste-ed"));
+        let mut text = String::from("ab cd");
+        ed.pending_cursor = Some(2);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        // a picture: PNG in the media folder, the link at the cursor
+        let img = egui::ColorImage::from_rgba_unmultiplied([2, 1], &[255, 0, 0, 255, 0, 255, 0, 255]);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::PasteImage(Arc::new(img))]);
+        assert_eq!(pasted_toast(a), "Saved the pasted picture to the media folder");
+        assert_eq!(text, format!("ab![[{stamp}Pasted image.png]] cd"));
+        let saved = image::open(d.join(format!("{stamp}Pasted image.png"))).unwrap().to_rgba8();
+        assert_eq!((saved.width(), saved.height(), saved.get_pixel(1, 0).0), (2, 1, [0, 255, 0, 255]));
+        // copied files (a PDF, a video, a picture): one link per line; videos and PDFs are linked, pictures embedded
+        let src = d.join("..").join(format!("shale-paste-src-{}", std::process::id()));
+        std::fs::create_dir_all(&src).unwrap();
+        for n in ["a b.pdf", "clip.mp4", "p.png"] {
+            std::fs::write(src.join(n), n).unwrap();
+        }
+        let list: String = ["a b.pdf", "clip.mp4", "p.png"].iter().map(|n| format!("file://{}/{}\r\n", src.display(), n.replace(' ', "%20"))).collect();
+        let mut text = String::new();
+        ed.pending_cursor = Some(0);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(list.clone())]);
+        assert_eq!(pasted_toast(a), "Saved 3 files to the media folder");
+        assert_eq!(text, format!("[[{stamp}a b.pdf]]\n[[{stamp}clip.mp4]]\n![[{stamp}p.png]]"));
+        assert_eq!(std::fs::read(d.join(format!("{stamp}clip.mp4"))).unwrap(), b"clip.mp4");
+        // any other text pastes as it is, a missing file too
+        let mut text = String::new();
+        ed.pending_cursor = Some(0);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste("just text\nfile:///no/such.png".into())]);
+        assert!(a.is_none() && text == "just text\nfile:///no/such.png", "{text}");
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-019
+    #[test]
+    fn vim_p_pastes_a_picture_or_media_files_like_ctrl_v() {
+        let (v, d) = vault_for_tests("vimpaste");
+        let (y, m, day) = crate::media::local_date();
+        let stamp = format!("z_media/{y:04}/{m:02}/{:02}{m:02}{day:02}_", y.rem_euclid(100));
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut ed = NoteEditor::new(egui::Id::unique("vimpaste-ed"));
+        ed.vim_enabled = true;
+        let mut text = String::from("alpha\nbeta");
+        ed.pending_cursor = Some(0);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        assert_eq!(ed.vim_status().as_deref(), Some("NORMAL"));
+        // p, then the window answers with a picture: a line of its own below the cursor line
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Text("p".into())]);
+        assert!(ed.vim.paste_pending);
+        let img = egui::ColorImage::from_rgba_unmultiplied([1, 1], &[1, 2, 3, 255]);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::PasteImage(Arc::new(img))]);
+        assert_eq!(pasted_toast(a), "Saved the pasted picture to the media folder");
+        assert_eq!(text, format!("alpha\n![[{stamp}Pasted image.png]]\nbeta"));
+        assert!(!ed.vim.paste_pending && d.join(format!("{stamp}Pasted image.png")).exists());
+        // p with copied files
+        let f = d.join("..").join(format!("shale-vimpaste-{}.pdf", std::process::id()));
+        std::fs::write(&f, b"%PDF").unwrap();
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Text("gg".into())]);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Text("p".into())]);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(format!("file://{}", f.display()))]);
+        assert_eq!(pasted_toast(a), "Saved 1 file to the media folder");
+        assert!(text.starts_with(&format!("alpha\n[[{stamp}shale-vimpaste-")), "{text}");
+        // plain text with p stays as before
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Text("p".into())]);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste("ZZ".into())]);
+        assert!(a.is_none() && text.contains("ZZ"), "{text}");
+        let _ = std::fs::remove_file(&f);
         let _ = std::fs::remove_dir_all(&d);
     }
 }

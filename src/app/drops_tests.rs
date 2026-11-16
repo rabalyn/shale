@@ -447,3 +447,31 @@ fn imp_002_an_event_drop_without_a_vault_says_so_and_without_a_pointer_does_noth
     assert!(w.app.toasts.iter().any(|(t, _)| t.contains("Open a vault first")), "{:?}", w.app.toasts);
     assert!(!w.dialog_open() && !w.dragging());
 }
+
+// spec: IMP-031
+#[test]
+fn imp_031_pictures_and_pdfs_dropped_on_a_note_are_saved_as_files_and_linked_from_it() {
+    let mut w = W::new("media");
+    std::fs::write(w.file("cat.png"), b"meow").unwrap();
+    std::fs::write(w.file("plan.pdf"), b"%PDF-1.4").unwrap();
+    let at = w.zone("", Some("Welcome.md"), true).center();
+    w.drop_files(at, &[w.file("cat.png"), w.file("plan.pdf"), w.file("first drop.md")]);
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    let d = w.dialog();
+    assert_eq!(d.items.iter().map(|i| i.kind().to_string()).collect::<Vec<_>>(), vec!["Image", "PDF", "Files"], "{:?}", d.notes);
+    assert!(d.link_on);
+    let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
+    d.items.truncate(2);
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    let root = w.app.vault.as_ref().unwrap().root.clone();
+    let (y, m, day) = crate::media::local_date();
+    let dir = root.join(format!("z_media/{y:04}/{m:02}"));
+    let stamp = format!("{:02}{m:02}{day:02}", y.rem_euclid(100));
+    assert_eq!(std::fs::read(dir.join(format!("{stamp}_cat.png"))).unwrap(), b"meow");
+    assert!(dir.join(format!("{stamp}_plan.pdf")).exists());
+    // no note was made, the open note got the links
+    let text = w.app.notes.get(Path::new("Welcome.md")).expect("the open note").text.clone();
+    assert!(text.contains(&format!("- ![[z_media/{y:04}/{m:02}/{stamp}_cat.png]]\n")) && text.contains(&format!("- [[z_media/{y:04}/{m:02}/{stamp}_plan.pdf]]\n")), "{text}");
+    assert!(w.app.toasts.iter().any(|(t, _)| t == "Saved 2 files to the media folder"), "{:?}", w.app.toasts);
+    assert!(!root.join("cat.md").exists() && std::fs::read_dir(&root).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().contains("Files")));
+}

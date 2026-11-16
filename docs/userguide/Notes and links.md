@@ -25,6 +25,8 @@ Back to [[Start here]].
 
 ![[link-suggestions.png]]
 
+![[link-completion.webm]]
+
 - Type `[[` to get matching notes; the last entry creates a new note. Esc closes the list.
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab
   completes like a shell. Files from outside the vault are copied to `z_media/<year>/<month>/`.

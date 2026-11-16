@@ -1,4 +1,4 @@
-//! F1 in the whole window (headless) opens the user guide as the vault (DEV-020, KEY-012).
+//! F1 in the whole window (headless) opens the user guide as the vault (DEV-020, KEY-013).
 
 use crate::app::{Options, ShaleApp};
 use crate::ui_test_support::Headless;
@@ -22,7 +22,7 @@ fn window(tag: &str) -> (ShaleApp, Headless, PathBuf) {
     (app, Headless::new(), dir)
 }
 
-// spec: DEV-020, KEY-012
+// spec: DEV-020, KEY-013
 #[test]
 fn dev_020_f1_copies_the_guide_once_and_opens_it_as_the_vault_at_its_start_note() {
     let (mut app, mut hl, dir) = window("f1");
