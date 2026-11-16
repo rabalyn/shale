@@ -275,6 +275,12 @@ pub struct Config {
     pub file_sort: FileSort,
     /// Show embedded images as pictures inside the editor (the link shows when the cursor is on it).
     pub inline_images: bool,
+    /// Show a gutter with line numbers in the editor (EDIT-018).
+    pub line_numbers: bool,
+    /// Markdown preview in the editor: every line but the cursor's is drawn rendered (EDIT-016).
+    pub live_preview: bool,
+    /// Lines before and after the cursor line that stay raw in the preview (EDIT-017).
+    pub preview_raw_lines: u32,
     /// Calendars shown in the calendar panel (local .ics files and CalDAV calendars).
     pub calendars: Vec<crate::calendar::store::CalendarSource>,
     /// Calendar weeks start on Monday (otherwise Sunday).
@@ -348,6 +354,9 @@ impl Default for Config {
             sidebars: SidebarCfg::default(),
             file_sort: FileSort::NameAsc,
             inline_images: true,
+            line_numbers: true,
+            live_preview: false,
+            preview_raw_lines: 0,
             calendars: vec![],
             week_starts_monday: true,
             input_log: false,
@@ -524,6 +533,13 @@ mod tests {
         assert!(c.update_links_on_rename);
         assert!(!c.ctrl_to_follow);
         assert!(c.inline_images);
+        assert!(c.line_numbers, "line numbers are on by default (EDIT-018)");
+        // spec: EDIT-016, EDIT-017
+        assert!(!c.live_preview);
+        assert_eq!(c.preview_raw_lines, 0);
+        let c: Config = serde_json::from_str(r#"{"live_preview": true, "preview_raw_lines": 2}"#).unwrap();
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!((back.live_preview, back.preview_raw_lines), (true, 2));
         assert_eq!(c.file_sort, FileSort::NameAsc);
     }
 

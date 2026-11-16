@@ -966,6 +966,14 @@ impl ShaleApp {
                     changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
                     changed |= ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed();
                     changed |= ui.checkbox(&mut self.cfg.inline_images, "Show embedded images inside the editor (the link text appears while the cursor is on it)").changed();
+                    changed |= ui.checkbox(&mut self.cfg.line_numbers, "Show line numbers in the editor").changed();
+                    changed |= ui.checkbox(&mut self.cfg.live_preview, "Markdown preview in the editor (the lines around the cursor show raw markdown)").changed();
+                    ui.add_enabled_ui(self.cfg.live_preview, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Raw lines around the cursor");
+                            changed |= ui.add(egui::DragValue::new(&mut self.cfg.preview_raw_lines).range(0..=20)).changed();
+                        });
+                    });
                     changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing: notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back").changed();
                     ui.horizontal(|ui| {
                         ui.label("Text size");
