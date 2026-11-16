@@ -30,7 +30,7 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
 - **Your final report** lists the issues you opened, commented on or closed.
 - **Docs-only merge conflicts** (FORGE-010): if a PR's CI passed and only `*.md` docs, specs or
   ADRs conflict with `main`, resolve them (keep both sides), run the docs tests locally
-  (`cargo test --test spec_refs`, `cargo test --bin shale -- the_docs_list the_definable dev_007_ dev_019_`)
+  (`cargo test --test spec_refs --test userguide`, `cargo test --bin shale -- the_docs_list the_definable dev_007_ dev_019_`)
   and merge without waiting for another CI run. Code, renumbered spec IDs or screenshots: CI as usual.
 
 ## Specs first (ADR-0001)
