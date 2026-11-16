@@ -1,59 +1,44 @@
-//! The user guide vault on the user's computer (DEV-020): where the program finds the guide it
-//! ships with, and how it puts a copy of it into a folder of its own that is opened as a vault.
-//! No drawing and no window here, so the rules can be tested alone.
-//!
-//! The guide is `docs/userguide` of the repository. A release archive has it as `docs/userguide`
-//! next to the program; a development build (`cargo run`) reads it from the source tree.
+//! The user guide vault that is built into the program (DEV-020): `docs/userguide` is embedded
+//! in the executable at compile time (`build.rs`), and this puts a copy of it into a folder of
+//! Shale's own that is opened as a vault. No drawing and no window here, so the rules can be
+//! tested alone. It works in every build on every platform: nothing is looked up next to the
+//! program or in the source tree.
 
 use crate::fsutil;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The note a folder must have to count as the guide.
-const START_NOTE: &str = "Start here.md";
+/// The files of a guide: path relative to the guide (with `/`) and content.
+pub type Files = &'static [(&'static str, &'static [u8])];
 
-/// What of the guide is never copied: what Shale writes into a vault it opens (the same names
-/// are left out of the zip of the release, `scripts/userguide-dist.sh`). Paths are relative to
-/// the guide, with `/`.
+/// The guide of this program, `docs/userguide` without what Shale writes into a vault.
+pub const EMBEDDED: Files = include!(concat!(env!("OUT_DIR"), "/userguide_files.rs"));
+
+/// What of the guide is never bundled: what Shale writes into a vault it opens (`build.rs` leaves
+/// the same names out of the table, and `scripts/userguide-dist.sh` out of the zip of the
+/// release; tests check the three agree). Paths are relative to the guide, with `/`.
+#[cfg(test)]
 pub const NOT_COPIED: [&str; 3] = [".shale/state.json", ".shale/tag-words.json", ".trash"];
 
-/// Where the guide comes from and where its copy goes.
+/// Which guide to unpack and where its copy goes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Places {
-    /// the guide that ships with this program, if one was found
-    pub source: Option<PathBuf>,
+    /// the files of the guide
+    pub files: Files,
     /// the folder that holds one copy per version (`userguide-<version>`)
     pub root: Option<PathBuf>,
 }
 
 impl Places {
-    /// The places of a program that runs on its own: the guide next to the executable or in the
-    /// source tree, the copy in Shale's data folder.
+    /// The places of a program that runs on its own: the embedded guide, the copy in Shale's data folder.
     pub fn system() -> Places {
-        let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
-        Places { source: find(exe_dir.as_deref(), dev_source()), root: dirs::data_dir().map(|d| d.join("shale")) }
+        Places { files: EMBEDDED, root: dirs::data_dir().map(|d| d.join("shale")) }
     }
 
-    /// No guide and nowhere to copy it (tests and screenshots, which never touch the real data folder).
+    /// Nowhere to copy the guide to (tests and screenshots, which never touch the real data folder).
     pub fn none() -> Places {
-        Places { source: None, root: None }
+        Places { files: EMBEDDED, root: None }
     }
-}
-
-/// The guide of the source tree, for development builds only: a release build has no business
-/// reading the folder it was compiled in, which is not there on another computer.
-fn dev_source() -> Option<PathBuf> {
-    cfg!(debug_assertions).then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("docs").join("userguide"))
-}
-
-fn is_guide(dir: &Path) -> bool {
-    dir.join(START_NOTE).is_file()
-}
-
-/// The guide to copy: `docs/userguide` next to the executable first (a release archive), else the
-/// development folder given. `None` when neither holds a guide.
-pub fn find(exe_dir: Option<&Path>, dev: Option<PathBuf>) -> Option<PathBuf> {
-    exe_dir.map(|d| d.join("docs").join("userguide")).into_iter().chain(dev).find(|d| is_guide(d))
 }
 
 /// The folder of the copy for this version of the program.
@@ -61,40 +46,24 @@ pub fn copy_dir(root: &Path, version: &str) -> PathBuf {
     root.join(format!("userguide-{version}"))
 }
 
-/// Why there is no guide to open, in words for the person.
-pub fn missing_text(version: &str) -> String {
-    format!("The user guide was not found next to Shale. Download shale-userguide-{version}.zip from the release page of this version (the same page as the program), unpack it and open the folder as a vault.")
-}
-
-fn excluded(rel: &str) -> bool {
-    NOT_COPIED.contains(&rel)
-}
-
-fn copy_tree(src: &Path, dest: &Path, rel: &str) -> io::Result<()> {
+/// Write every file of `files` below `dest`, which is made.
+fn unpack(files: Files, dest: &Path) -> io::Result<()> {
     std::fs::create_dir_all(dest)?;
-    let mut entries: Vec<_> = std::fs::read_dir(src)?.collect::<Result<_, _>>()?;
-    entries.sort_by_key(|e| e.file_name());
-    for e in entries {
-        let name = e.file_name().to_string_lossy().into_owned();
-        let child = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
-        if excluded(&child) {
-            continue;
+    for (rel, bytes) in files {
+        let path = dest.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
-        let kind = e.file_type()?;
-        if kind.is_dir() {
-            copy_tree(&e.path(), &dest.join(&name), &child)?;
-        } else if kind.is_file() {
-            fsutil::copy_new(&e.path(), &dest.join(&name))?;
-        }
+        fsutil::create_new(&path, bytes)?;
     }
     Ok(())
 }
 
-/// Make the copy of `source` for `version` in `root` and return its folder. A copy that is there
+/// Unpack `files` as the copy for `version` in `root` and return its folder. A copy that is there
 /// already is returned as it is, never touched: the person may have edited it. The copy is made
 /// in a folder of its own that is renamed into place when complete, so a copy that exists is
 /// always whole (like DATA-004 for files).
-pub fn install(source: &Path, root: &Path, version: &str) -> io::Result<PathBuf> {
+pub fn install(files: Files, root: &Path, version: &str) -> io::Result<PathBuf> {
     let target = copy_dir(root, version);
     if target.exists() {
         return Ok(target);
@@ -102,7 +71,7 @@ pub fn install(source: &Path, root: &Path, version: &str) -> io::Result<PathBuf>
     std::fs::create_dir_all(root)?;
     let tmp = root.join(format!(".userguide-{version}.tmp{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
-    if let Err(e) = copy_tree(source, &tmp, "") {
+    if let Err(e) = unpack(files, &tmp) {
         let _ = std::fs::remove_dir_all(&tmp);
         return Err(e);
     }
@@ -121,15 +90,17 @@ pub fn install(source: &Path, root: &Path, version: &str) -> io::Result<PathBuf>
 /// The folder to open as a vault: the copy for `version`, made if it is not there yet. The
 /// error is a sentence for the person.
 pub fn prepare(places: &Places, version: &str) -> Result<PathBuf, String> {
-    let Some(source) = &places.source else { return Err(missing_text(version)) };
     let Some(root) = &places.root else { return Err("There is no data folder on this computer to keep a copy of the user guide in.".into()) };
-    install(source, root, version).map_err(|e| format!("The user guide could not be copied into {}: {e}", root.display()))
+    install(places.files, root, version).map_err(|e| format!("The user guide could not be unpacked into {}: {e}", root.display()))
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use std::fs;
+
+    /// A small guide for tests that must not unpack the whole one.
+    pub const SAMPLE: Files = &[("Start here.md", b"# Start\n\n[[Other]]\n"), ("Other.md", b"other\n"), ("z_media/screenshots/a.png", &[1, 2, 3]), (".shale/settings.json", b"{}")];
 
     fn tmp(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("shale-userguide-{tag}-{}", std::process::id()));
@@ -138,75 +109,34 @@ mod tests {
         d
     }
 
-    /// A small guide with the files that must and must not be copied.
-    fn guide(dir: &Path) -> PathBuf {
-        let g = dir.join("guide");
-        fs::create_dir_all(g.join(".shale")).unwrap();
-        fs::create_dir_all(g.join(".trash")).unwrap();
-        fs::create_dir_all(g.join("z_media/screenshots")).unwrap();
-        fs::write(g.join(START_NOTE), "# Start\n").unwrap();
-        fs::write(g.join("z_media/screenshots/a.png"), [1u8, 2, 3]).unwrap();
-        fs::write(g.join(".shale/settings.json"), "{}").unwrap();
-        fs::write(g.join(".shale/state.json"), "{\"tabs\":[]}").unwrap();
-        fs::write(g.join(".shale/tag-words.json"), "{}").unwrap();
-        fs::write(g.join(".trash/old.md"), "gone").unwrap();
-        g
-    }
-
     // spec: DEV-020
     #[test]
-    fn dev_020_the_guide_is_found_next_to_the_executable_first_then_in_the_source_tree_else_nowhere() {
-        let d = tmp("find");
-        let exe = d.join("bin");
-        let dev = guide(&d);
-        fs::create_dir_all(&exe).unwrap();
-        // nothing next to the executable: the development folder
-        assert_eq!(find(Some(&exe), Some(dev.clone())), Some(dev.clone()));
-        // a folder without the start note is no guide
-        let shipped = exe.join("docs").join("userguide");
-        fs::create_dir_all(&shipped).unwrap();
-        assert_eq!(find(Some(&exe), Some(dev.clone())), Some(dev.clone()));
-        // a release archive has its own copy, which wins
-        fs::write(shipped.join(START_NOTE), "x").unwrap();
-        assert_eq!(find(Some(&exe), Some(dev)), Some(shipped));
-        // neither
-        assert_eq!(find(None, None), None);
-        assert_eq!(find(Some(&d.join("empty")), Some(d.join("also-empty"))), None);
-        let _ = fs::remove_dir_all(&d);
-    }
-
-    // spec: DEV-020
-    #[test]
-    fn dev_020_a_development_build_finds_the_guide_of_the_source_tree_and_it_is_a_guide() {
-        // CI tests the release build (`cargo test --release`), which must not look there
-        if !cfg!(debug_assertions) {
-            assert_eq!(dev_source(), None, "a release build never reads the source tree");
-            return;
-        }
-        let found = dev_source().expect("a debug build looks in the source tree");
-        assert!(is_guide(&found), "{} has the start note", found.display());
-        assert_eq!(find(None, Some(found.clone())), Some(found));
-    }
-
-    // spec: DEV-020
-    #[test]
-    fn dev_020_the_copy_is_made_per_version_without_what_shale_writes_itself() {
-        let d = tmp("copy");
-        let g = guide(&d);
-        let root = d.join("data");
-        let c = install(&g, &root, "1.2.3").unwrap();
-        assert_eq!(c, root.join("userguide-1.2.3"));
-        assert_eq!(fs::read_to_string(c.join(START_NOTE)).unwrap(), "# Start\n");
-        assert_eq!(fs::read(c.join("z_media/screenshots/a.png")).unwrap(), [1, 2, 3]);
-        assert!(c.join(".shale/settings.json").is_file(), "the guide's own settings (git sync off) come along");
+    fn dev_020_the_guide_is_embedded_with_its_start_note_and_without_what_shale_writes_itself() {
+        let names: Vec<&str> = EMBEDDED.iter().map(|(n, _)| *n).collect();
+        assert!(names.contains(&"Start here.md"), "the start note is embedded");
+        assert!(names.contains(&".shale/settings.json"), "the guide's own settings (git sync off) are embedded");
+        assert!(names.iter().any(|n| n.starts_with("z_media/screenshots/")), "the pictures are embedded");
         for n in NOT_COPIED {
-            assert!(!c.join(n).exists(), "{n} is not copied");
+            assert!(!names.iter().any(|f| *f == n || f.starts_with(&format!("{n}/"))), "{n} is not embedded");
         }
-        // another version is another folder
-        let c2 = install(&g, &root, "1.3.0").unwrap();
+        let start = EMBEDDED.iter().find(|(n, _)| *n == "Start here.md").unwrap().1;
+        assert_eq!(start, fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/userguide/Start here.md")).unwrap(), "the embedded note is the one of the source tree");
+    }
+
+    // spec: DEV-020
+    #[test]
+    fn dev_020_unpacking_writes_every_embedded_file_per_version() {
+        let d = tmp("unpack");
+        let root = d.join("data");
+        let c = install(EMBEDDED, &root, "1.2.3").unwrap();
+        assert_eq!(c, root.join("userguide-1.2.3"));
+        for (rel, bytes) in EMBEDDED {
+            assert_eq!(&fs::read(c.join(rel)).unwrap(), bytes, "{rel}");
+        }
+        // another version is another folder, and no temporary folder is left
+        let c2 = install(SAMPLE, &root, "1.3.0").unwrap();
         assert_ne!(c, c2);
-        assert!(c2.join(START_NOTE).is_file() && c.join(START_NOTE).is_file());
-        // nothing but the two copies is left in the folder (no temporary folder)
+        assert_eq!(fs::read(c2.join("z_media/screenshots/a.png")).unwrap(), [1, 2, 3]);
         let mut names: Vec<_> = fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         assert_eq!(names, ["userguide-1.2.3", "userguide-1.3.0"]);
@@ -215,19 +145,16 @@ mod tests {
 
     // spec: DEV-020
     #[test]
-    fn dev_020_a_copy_that_exists_is_never_overwritten_and_a_failed_copy_leaves_nothing() {
+    fn dev_020_a_copy_that_exists_is_never_overwritten_and_a_failed_unpack_leaves_nothing() {
         let d = tmp("keep");
-        let g = guide(&d);
         let root = d.join("data");
-        let c = install(&g, &root, "1.0.0").unwrap();
-        // the person edits their copy, and the guide of the program changes
-        fs::write(c.join(START_NOTE), "my notes\n").unwrap();
-        fs::write(g.join(START_NOTE), "# Changed\n").unwrap();
-        assert_eq!(install(&g, &root, "1.0.0").unwrap(), c);
-        assert_eq!(fs::read_to_string(c.join(START_NOTE)).unwrap(), "my notes\n");
-        // a source that is not there: no copy, no temporary folder
-        let gone = d.join("no-such-guide");
-        assert!(install(&gone, &root, "2.0.0").is_err());
+        let c = install(SAMPLE, &root, "1.0.0").unwrap();
+        fs::write(c.join("Start here.md"), "my notes\n").unwrap();
+        assert_eq!(install(SAMPLE, &root, "1.0.0").unwrap(), c);
+        assert_eq!(fs::read_to_string(c.join("Start here.md")).unwrap(), "my notes\n");
+        // the same file twice cannot be written: no copy, no temporary folder
+        let twice: Files = &[("a.md", b"1"), ("a.md", b"2")];
+        assert!(install(twice, &root, "2.0.0").is_err());
         assert!(!copy_dir(&root, "2.0.0").exists());
         assert!(fs::read_dir(&root).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().starts_with('.')));
         let _ = fs::remove_dir_all(&d);
@@ -237,13 +164,14 @@ mod tests {
     #[test]
     fn dev_020_prepare_says_in_words_what_is_missing() {
         let d = tmp("prepare");
-        let g = guide(&d);
-        let none = prepare(&Places::none(), "1.2.3").unwrap_err();
-        assert!(none.contains("shale-userguide-1.2.3.zip") && none.contains("release"), "{none}");
-        let no_root = prepare(&Places { source: Some(g.clone()), root: None }, "1.2.3").unwrap_err();
+        let no_root = prepare(&Places::none(), "1.2.3").unwrap_err();
         assert!(no_root.contains("data folder"), "{no_root}");
-        let ok = prepare(&Places { source: Some(g), root: Some(d.join("data")) }, "1.2.3").unwrap();
-        assert!(ok.join(START_NOTE).is_file());
+        let ok = prepare(&Places { files: SAMPLE, root: Some(d.join("data")) }, "1.2.3").unwrap();
+        assert!(ok.join("Start here.md").is_file());
+        // a root that is a file cannot hold the copy
+        fs::write(d.join("file"), "x").unwrap();
+        let bad = prepare(&Places { files: SAMPLE, root: Some(d.join("file")) }, "1.2.3").unwrap_err();
+        assert!(bad.contains("could not be unpacked"), "{bad}");
         let _ = fs::remove_dir_all(&d);
     }
 }

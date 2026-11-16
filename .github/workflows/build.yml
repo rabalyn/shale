@@ -86,7 +86,7 @@ jobs:
           cp target/release/shale LICENSE README.md CHANGELOG.md dist/shale/
           cp assets/icon/shale.desktop assets/icon/shale.svg dist/shale/
           cp -r docs dist/shale/
-          # DEV-020: the guide is in the archive once, as docs/userguide (Help finds it there),
+          # DEV-020: the guide is in the archive once, as docs/userguide (FEATURES.md links into it),
           # without what Shale writes into a vault; and as a zip of its own
           rm -rf dist/shale/docs/userguide
           scripts/userguide-dist.sh dist/shale/docs/userguide

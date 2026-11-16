@@ -26,20 +26,13 @@ fn window(tag: &str) -> (ShaleApp, Headless, PathBuf) {
 #[test]
 fn dev_020_f1_copies_the_guide_once_and_opens_it_as_the_vault_at_its_start_note() {
     let (mut app, mut hl, dir) = window("f1");
-    let guide = dir.join("guide");
-    std::fs::create_dir_all(guide.join(".shale")).unwrap();
-    std::fs::write(guide.join("Start here.md"), "# Start\n\n[[Other]]\n").unwrap();
-    std::fs::write(guide.join("Other.md"), "other\n").unwrap();
-    std::fs::write(guide.join(".shale/state.json"), "{}").unwrap();
     let root = dir.join("data");
-    app.guide = Places { source: Some(guide), root: Some(root.clone()) };
+    app.guide = Places { files: crate::userguide::tests::SAMPLE, root: Some(root.clone()) };
     hl.frames(&mut app, 3);
     f1(&mut hl, &mut app);
     let copy = root.join(format!("userguide-{}", env!("CARGO_PKG_VERSION")));
     assert_eq!(app.vault.as_ref().map(|v| v.root.clone()), Some(copy.clone()), "the copy is the open vault");
     assert!(copy.join("Other.md").is_file());
-    // the guide itself stays as it was
-    assert_eq!(std::fs::read_to_string(dir.join("guide/.shale/state.json")).unwrap(), "{}");
     let open: Vec<_> = app.tabbar.tabs.iter().filter_map(|t| t.view.path().map(|p| p.to_string_lossy().into_owned())).collect();
     assert_eq!(open, ["Start here.md"]);
     let _ = std::fs::remove_dir_all(&dir);
@@ -47,13 +40,13 @@ fn dev_020_f1_copies_the_guide_once_and_opens_it_as_the_vault_at_its_start_note(
 
 // spec: DEV-020
 #[test]
-fn dev_020_f1_without_a_guide_keeps_the_vault_and_says_why() {
+fn dev_020_f1_without_a_data_folder_keeps_the_vault_and_says_why() {
     let (mut app, mut hl, dir) = window("none");
     app.guide = Places::none();
     hl.frames(&mut app, 3);
     let before = app.vault.as_ref().map(|v| v.root.clone());
     f1(&mut hl, &mut app);
     assert_eq!(app.vault.as_ref().map(|v| v.root.clone()), before);
-    assert!(app.toasts.iter().any(|(m, _)| m.contains("user guide was not found") && m.contains("shale-userguide-")), "{:?}", app.toasts);
+    assert!(app.toasts.iter().any(|(m, _)| m.contains("no data folder")), "{:?}", app.toasts);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1,5 +1,6 @@
-//! How the user guide is delivered (DEV-020): the script that copies it for the release zip and
-//! the archive agrees with the program on what is left out, and both release workflows use it.
+//! How the user guide is delivered (DEV-020): it is bundled in the program by `build.rs`; the
+//! script that copies it for the release zip and the archive agrees with the program and
+//! `build.rs` on what is left out, and both release workflows use it.
 //! (The zip, the archive and the attestation themselves are only made by CI, on a tag.)
 
 use std::fs;
@@ -17,10 +18,12 @@ const NOT_DELIVERED: [&str; 3] = [".shale/state.json", ".shale/tag-words.json", 
 fn dev_020_the_dist_script_and_the_program_leave_out_the_same_files() {
     let script = fs::read_to_string(root().join("scripts/userguide-dist.sh")).unwrap();
     let program = fs::read_to_string(root().join("src/userguide.rs")).unwrap();
+    let build = fs::read_to_string(root().join("build.rs")).unwrap();
     let ignore = fs::read_to_string(root().join(".gitignore")).unwrap();
     for n in NOT_DELIVERED {
         assert!(script.contains(&format!("--exclude='{n}'")), "scripts/userguide-dist.sh does not leave out {n}");
         assert!(program.contains(&format!("\"{n}\"")), "src/userguide.rs does not leave out {n}");
+        assert!(build.contains(&format!("\"{n}\"")), "build.rs bundles {n}");
         // what Shale writes is git-ignored, so the repository holds none of it either
         let ignored = format!("/docs/userguide/{n}");
         assert!(ignore.lines().any(|l| l.trim_end_matches('/') == ignored.trim_end_matches('/')), "{n} is not git-ignored");
