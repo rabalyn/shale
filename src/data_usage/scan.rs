@@ -142,7 +142,7 @@ fn folder_line(label: &str, dir: &Path, mine: impl Fn(&Path) -> bool) -> Line {
 pub fn outside(p: &Places) -> Vec<Line> {
     let mut lines = vec![];
     let mut accounts: Vec<String> = std::fs::read_dir(&p.mail_root)
-        .map(|rd| rd.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).filter_map(|e| e.file_name().to_str().map(String::from)).filter(|n| crate::mail_store::valid_account_id(n)).collect())
+        .map(|rd| rd.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).filter_map(|e| e.file_name().to_str().map(String::from)).filter(|n| crate::mail::store::valid_account_id(n)).collect())
         .unwrap_or_default();
     accounts.sort();
     for a in accounts {

@@ -4,6 +4,38 @@
 
 use crate::calendar::time as t;
 
+pub(crate) mod compose;
+pub(crate) mod compose_ui;
+pub(crate) mod crypto;
+pub(crate) mod db;
+pub(crate) mod demo;
+pub(crate) mod dialog;
+#[cfg(test)]
+mod env_tests;
+pub(crate) mod gpg;
+pub(crate) mod imap_client;
+#[cfg(test)]
+mod imap_fake_tests;
+pub(crate) mod imap_sync;
+pub(crate) mod keys;
+pub(crate) mod oauth;
+#[cfg(test)]
+pub(crate) mod oauth_fake_tests;
+pub(crate) mod ops;
+pub(crate) mod outbox;
+pub(crate) mod send;
+#[cfg(test)]
+mod send_fuzz_tests;
+pub(crate) mod smtp_client;
+#[cfg(test)]
+mod smtp_fake_tests;
+pub(crate) mod store;
+pub(crate) mod ui;
+#[cfg(test)]
+mod ui_tests;
+pub(crate) mod unsent;
+pub(crate) mod view;
+
 #[derive(Clone, Debug, Default)]
 pub struct Attachment {
     pub name: String,

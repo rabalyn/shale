@@ -3,7 +3,7 @@
 //!
 //! Wildcards (NAV-023): in notes the whole query is one pattern matched inside a line
 //! (`*` any run of characters, `?` one character, case ignored); in mail and posts each word is
-//! one term of the FTS5 query and a wildcard makes the word a prefix (`mail_db::fts_query_wild`).
+//! one term of the FTS5 query and a wildcard makes the word a prefix (`db::fts_query_wild`).
 //! Everything is bounded (NAV-024): at most [`GROUP_LIMIT`] hits per group, and a note search
 //! stops scanning when its group is full.
 
@@ -107,7 +107,7 @@ pub fn note_hits(vault: &Vault, query: &str) -> Vec<Hit> {
 }
 
 pub fn mail_hits(db: &Connection, query: &str) -> Vec<Hit> {
-    crate::mail_db::search_wild(db, query, GROUP_LIMIT)
+    crate::mail::db::search_wild(db, query, GROUP_LIMIT)
         .unwrap_or_default()
         .into_iter()
         .map(|m| {
@@ -145,7 +145,7 @@ pub fn all_hits(ctx: &Ctx, query: &str) -> Vec<Hit> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mail_db::{self, IndexFields, NewMessage, Op, STATE_FULL};
+    use crate::mail::db::{self, IndexFields, NewMessage, Op, STATE_FULL};
     use crate::social::tests::post;
 
     // spec: NAV-023
@@ -180,13 +180,13 @@ mod tests {
 
     fn mail_db_with(mails: &[(String, i64)]) -> Connection {
         let mut c = Connection::open_in_memory().unwrap();
-        mail_db::migrate(&c).unwrap();
-        let f = mail_db::upsert_folder(&c, "a", "A", "INBOX", Some("/"), None, true).unwrap();
+        db::migrate(&c).unwrap();
+        let f = db::upsert_folder(&c, "a", "A", "INBOX", Some("/"), None, true).unwrap();
         c.execute("UPDATE folders SET uidvalidity = 1 WHERE id = ?1", [f.id]).unwrap();
         for (i, (subject, date)) in mails.iter().enumerate() {
             let fields = IndexFields { date: Some(*date), from: "ann@example.org".into(), to: "me@example.org".into(), subject: subject.clone(), ..Default::default() };
             let m = NewMessage { folder: f.id, uidvalidity: 1, uid: i as u32 + 1, path: format!("a/f/1/{i}.eml"), state: STATE_FULL, flags: String::new(), size: 10, parsed: true, fields };
-            mail_db::apply_batch(&mut c, &[Op::message(m)], None).unwrap();
+            db::apply_batch(&mut c, &[Op::message(m)], None).unwrap();
         }
         c
     }

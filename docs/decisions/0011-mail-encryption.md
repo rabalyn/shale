@@ -43,7 +43,7 @@ text inside them is unescaped (`\x3a`) and shown as plain text.
   second crypto stack next to `ring`) to a program that deliberately keeps its dependencies few. GPGME is
   the library form of exactly what Shale does here (it spawns `gpg` itself and parses the same status
   lines), needs a C library and bindings that the build must find, and brings no capability that the status
-  interface lacks. **GPGME can replace `gpg.rs` later** (the module is the one place that knows how GnuPG is
+  interface lacks. **GPGME can replace `mail/gpg.rs` later** (the module is the one place that knows how GnuPG is
   called); nothing else changes.
 - **Why `gpgsm` for S/MIME and not NSS or OpenSSL.** S/MIME needs certificate chain validation, trust, CRL and
   OCSP, and private keys. `gpgsm` is the S/MIME front end of the same agent: its keys, the `trustlist.txt`
@@ -72,7 +72,7 @@ text inside them is unescaped (`\x3a`) and shown as plain text.
 
 ### 2. Reading
 
-`mail_crypto.rs` looks at the raw `.eml` and classifies the **top-level** structure only:
+`mail/crypto.rs` looks at the raw `.eml` and classifies the **top-level** structure only:
 
 | Structure | What it is | Done with |
 |---|---|---|
@@ -156,7 +156,7 @@ text inside them is unescaped (`\x3a`) and shown as plain text.
   is listed in the message, so with S/MIME encryption and a Bcc the compose window shows a warning, and
   Send asks once ("Bcc recipients can be told apart by their certificates: send anyway?").
 - **Building.** The final bytes come from `compose::finalize(draft, opts, hook)`; the hook is
-  `mail_crypto::hook`. It takes the message `lettre` built (headers and body verbatim), cuts the MIME entity
+  `mail::crypto::hook`. It takes the message `lettre` built (headers and body verbatim), cuts the MIME entity
   (the `Content-*` headers and the body) out of it, and puts it into:
   - **PGP/MIME signed** (`multipart/signed`; `micalg=pgp-sha256`; the entity; `application/pgp-signature` with the
     armored detached signature),

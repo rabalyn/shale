@@ -16,7 +16,7 @@ pub mod files;
 pub mod scan;
 
 use crate::config::CacheRetention;
-use crate::mail_store::MailStore;
+use crate::mail::store::MailStore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -160,11 +160,11 @@ pub fn stats(id: CacheId, places: &Places) -> Result<CacheStats, String> {
         CacheId::MailIndex => {
             let base = places.mail_root.join("index.sqlite");
             let bytes = ["", "-wal", "-shm"].iter().filter_map(|e| std::fs::metadata(format!("{}{e}", base.display())).ok()).map(|m| m.len()).sum();
-            let entries = if base.exists() { crate::mail_db::open_reader(&base).ok().and_then(|c| c.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get::<_, i64>(0)).ok()).unwrap_or(0) as u64 } else { 0 };
+            let entries = if base.exists() { crate::mail::db::open_reader(&base).ok().and_then(|c| c.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get::<_, i64>(0)).ok()).unwrap_or(0) as u64 } else { 0 };
             CacheStats { bytes, entries, oldest: None }
         }
-        CacheId::MailBackups => files::stats(&crate::mail_store::backup_files(&places.mail_root)),
-        CacheId::MailBroken => files::stats(&crate::mail_store::broken_files(&places.mail_root)),
+        CacheId::MailBackups => files::stats(&crate::mail::store::backup_files(&places.mail_root)),
+        CacheId::MailBroken => files::stats(&crate::mail::store::broken_files(&places.mail_root)),
         CacheId::TagWords => match &places.vault {
             Some(v) => files::stats(&file_entry(&crate::import::tagwords::file_in(v))),
             None => CacheStats::default(),
@@ -189,8 +189,8 @@ pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<F
             let after = stats(id, places)?.bytes;
             Ok(Freed { bytes: before.saturating_sub(after), entries: n as u64 })
         }
-        CacheId::MailBackups => files::remove(&crate::mail_store::backup_files(&places.mail_root)),
-        CacheId::MailBroken => files::remove(&crate::mail_store::broken_files(&places.mail_root)),
+        CacheId::MailBackups => files::remove(&crate::mail::store::backup_files(&places.mail_root)),
+        CacheId::MailBroken => files::remove(&crate::mail::store::broken_files(&places.mail_root)),
         CacheId::TagWords => match &places.vault {
             Some(v) => files::remove(&file_entry(&crate::import::tagwords::file_in(v))),
             None => Ok(Freed::default()),
@@ -222,11 +222,11 @@ pub fn prune(id: CacheId, places: &Places, r: &CacheRetention, now: i64) -> Resu
             None => Ok(Freed::default()),
         },
         CacheId::MailBackups => {
-            let all = crate::mail_store::backup_files(&places.mail_root);
+            let all = crate::mail::store::backup_files(&places.mail_root);
             files::remove(&files::over_limits(&all, now, None, None, r.mail_backups.map(u64::from)))
         }
         CacheId::MailBroken => {
-            let all = crate::mail_store::broken_files(&places.mail_root);
+            let all = crate::mail::store::broken_files(&places.mail_root);
             files::remove(&files::over_limits(&all, now, r.broken_days, None, None))
         }
         CacheId::DebugLog => match (file_entry(&places.debug_log).first(), mb(r.debug_log_mb)) {

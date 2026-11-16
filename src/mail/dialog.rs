@@ -3,8 +3,8 @@
 
 use crate::app::muted;
 use crate::config::{MailAccount, MailAuth, MailSecurity, OAuthProvider};
-use crate::imap_sync::{kind_of, FolderKind};
-use crate::mail_ui::{MailView, SignInState, TestState};
+use crate::mail::imap_sync::{kind_of, FolderKind};
+use crate::mail::ui::{MailView, SignInState, TestState};
 use crate::theme;
 use eframe::egui::{self, Rect, RichText, Ui};
 use std::collections::HashMap;
@@ -116,7 +116,7 @@ impl MailDialog {
         if !self.phrase_ok() {
             return false;
         }
-        self.consent = Some(crate::mail_ui::full_date(now));
+        self.consent = Some(crate::mail::ui::full_date(now));
         self.consent_phrase.clear();
         true
     }
@@ -161,19 +161,19 @@ impl MailDialog {
     /// already has a server of its own.
     pub fn use_preset_server(&mut self, i: usize) {
         let a = &mut self.accounts[i];
-        let presets = [OAuthProvider::Google, OAuthProvider::Microsoft].map(crate::oauth::preset_server);
+        let presets = [OAuthProvider::Google, OAuthProvider::Microsoft].map(crate::mail::oauth::preset_server);
         let is_preset_host = a.host.trim().is_empty() || presets.iter().flatten().any(|(h, _)| *h == a.host.trim());
-        if let (true, Some((host, port))) = (is_preset_host, crate::oauth::preset_server(a.oauth_provider)) {
+        if let (true, Some((host, port))) = (is_preset_host, crate::mail::oauth::preset_server(a.oauth_provider)) {
             a.host = host.to_string();
             a.port = port;
             a.security = MailSecurity::ImplicitTls;
             self.ports[i] = port.to_string();
         }
         // sending: the preset's SMTP server, unless the account has one of its own (MAIL-120)
-        let smtp_presets = [OAuthProvider::Google, OAuthProvider::Microsoft].map(crate::oauth::preset_smtp);
+        let smtp_presets = [OAuthProvider::Google, OAuthProvider::Microsoft].map(crate::mail::oauth::preset_smtp);
         let a = &mut self.accounts[i];
         let is_preset_smtp = a.smtp_host.trim().is_empty() || smtp_presets.iter().flatten().any(|(h, ..)| *h == a.smtp_host.trim());
-        if let (true, Some((host, port, sec, stores))) = (is_preset_smtp, crate::oauth::preset_smtp(a.oauth_provider)) {
+        if let (true, Some((host, port, sec, stores))) = (is_preset_smtp, crate::mail::oauth::preset_smtp(a.oauth_provider)) {
             a.smtp_host = host.to_string();
             a.smtp_port = port;
             a.smtp_security = sec;
@@ -234,7 +234,7 @@ impl MailDialog {
                     return Err(format!("“{label}” needs the client ID of your OAuth2 app."));
                 }
                 if a.oauth_provider == OAuthProvider::Custom {
-                    crate::oauth::OAuthConfig::for_account(a, None).map_err(|e| format!("“{label}”: {e}"))?;
+                    crate::mail::oauth::OAuthConfig::for_account(a, None).map_err(|e| format!("“{label}”: {e}"))?;
                 }
             }
             a.port = p.trim().parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("“{label}”: the port must be a number between 1 and 65535."))?;
@@ -247,7 +247,7 @@ impl MailDialog {
             a.from_name = a.from_name.trim().to_string();
             a.from_address = a.from_address.trim().to_string();
             if !a.from_address.is_empty() {
-                crate::compose::sender(&a.from_name, &a.from_address).map_err(|e| format!("“{label}”: {e}"))?;
+                crate::mail::compose::sender(&a.from_name, &a.from_address).map_err(|e| format!("“{label}”: {e}"))?;
             }
             if a.from_name.contains(['\r', '\n']) {
                 return Err(format!("“{label}”: the sender name may not contain a line break."));
@@ -592,7 +592,7 @@ fn sign_in_row(ui: &mut Ui, i: usize, id: &str, mail: &MailView, rects: &mut Vec
         let state = mail.signins.get(id);
         let waiting = matches!(state, Some(SignInState::Waiting { .. }));
         let known_in = matches!(state, Some(SignInState::Done { .. })) || mail.signed_in.get(id) == Some(&true);
-        let r = ui.add_enabled(!waiting, egui::Button::new(if known_in { "Sign in again" } else { crate::oauth::SIGN_IN_BUTTON }));
+        let r = ui.add_enabled(!waiting, egui::Button::new(if known_in { "Sign in again" } else { crate::mail::oauth::SIGN_IN_BUTTON }));
         rects.push(("md:signin".into(), r.rect));
         if r.clicked() {
             *out = Some(MailDialogAction::SignIn(i));
@@ -700,7 +700,7 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
                             }
                             for k in keys {
                                 let note = if k.usable() { "" } else { " (expired, revoked or disabled)" };
-                                ui.label(muted(format!("  {} · {}{note}", k.label(), crate::mail_ui::short_fingerprint(&k.fingerprint))).size(12.0));
+                                ui.label(muted(format!("  {} · {}{note}", k.label(), crate::mail::ui::short_fingerprint(&k.fingerprint))).size(12.0));
                             }
                         }
                         Some(Err(e)) => {
@@ -754,15 +754,15 @@ fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &
                     } else {
                         keys.iter()
                             .find(|k| k.fingerprint.eq_ignore_ascii_case(&cur))
-                            .map(|k| format!("{} · {}", k.label(), crate::mail_ui::short_fingerprint(&k.fingerprint)))
-                            .unwrap_or_else(|| format!("{} (not in the keyring)", crate::mail_ui::short_fingerprint(&cur)))
+                            .map(|k| format!("{} · {}", k.label(), crate::mail::ui::short_fingerprint(&k.fingerprint)))
+                            .unwrap_or_else(|| format!("{} (not in the keyring)", crate::mail::ui::short_fingerprint(&cur)))
                     };
                     let r = egui::ComboBox::from_id_salt(("mail-key", tag, i)).width(360.0).selected_text(shown).show_ui(ui, |ui| {
                         let r = ui.selectable_label(cur.is_empty(), "(none)");
                         rects.push((format!("md:{tag}-key:none"), r.rect));
                         let mut pick: Option<String> = r.clicked().then(String::new);
                         for k in &keys {
-                            let r = ui.selectable_label(k.fingerprint.eq_ignore_ascii_case(&cur), format!("{} · {}", k.label(), crate::mail_ui::short_fingerprint(&k.fingerprint)));
+                            let r = ui.selectable_label(k.fingerprint.eq_ignore_ascii_case(&cur), format!("{} · {}", k.label(), crate::mail::ui::short_fingerprint(&k.fingerprint)));
                             rects.push((format!("md:{tag}-key:{}", k.fingerprint), r.rect));
                             if r.clicked() {
                                 pick = Some(k.fingerprint.clone());

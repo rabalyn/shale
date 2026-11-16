@@ -67,7 +67,7 @@ fn each_clear_removes_only_its_own_files_and_never_saved_data() {
 #[test]
 fn the_mail_index_is_rebuilt_through_the_open_store() {
     let (p, d) = places_with_caches("rebuild");
-    let store = crate::mail_store::MailStore::open(&p.mail_root).unwrap();
+    let store = crate::mail::store::MailStore::open(&p.mail_root).unwrap();
     assert_eq!(store.reader().unwrap().count_messages().unwrap(), 1, "the file was indexed at the start");
     let before = stats(CacheId::MailIndex, &p).unwrap();
     assert!(before.bytes > 0 && before.entries == 1, "{before:?}");

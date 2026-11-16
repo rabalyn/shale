@@ -1,4 +1,4 @@
-//! A randomized safety test of writing and sending (MAIL-152), in the style of the one in `mail_ops.rs`:
+//! A randomized safety test of writing and sending (MAIL-152), in the style of the one in `mail/ops.rs`:
 //! random sequences of compose, edit, save, close, discard, send, undo, retry, send again, server failures,
 //! crashes at any durable step and restarts. After every step:
 //!
@@ -9,16 +9,16 @@
 //! - **nothing is sent that the person did not send**: every mail the server received was queued by a Send;
 //! - **never two copies in Sent**: the Sent folder on the server has each Message-ID at most once.
 
-use crate::compose::Draft;
 use crate::config::MailSecurity;
-use crate::imap_client::PlainAuth;
-use crate::mail_ops::tests::NOW;
-use crate::mail_send::tests::{account, with_sent};
-use crate::mail_send::{queue_draft, resume_copies, send_due, SendReport, SmtpConnector};
-use crate::outbox::tests::DATE;
-use crate::outbox::{Outbox, State};
-use crate::smtp_client::{Smtp, SmtpError};
-use crate::smtp_fake_tests::FakeSmtp;
+use crate::mail::compose::Draft;
+use crate::mail::imap_client::PlainAuth;
+use crate::mail::ops::tests::NOW;
+use crate::mail::outbox::tests::DATE;
+use crate::mail::outbox::{Outbox, State};
+use crate::mail::send::tests::{account, with_sent};
+use crate::mail::send::{queue_draft, resume_copies, send_due, SendReport, SmtpConnector};
+use crate::mail::smtp_client::{Smtp, SmtpError};
+use crate::mail::smtp_fake_tests::FakeSmtp;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -45,7 +45,7 @@ impl Rng {
 
 /// A pretend SMTP server that can also be unreachable.
 struct Flaky {
-    settings: crate::imap_client::ConnectSettings,
+    settings: crate::mail::imap_client::ConnectSettings,
     offline: Arc<AtomicBool>,
 }
 
@@ -54,7 +54,7 @@ impl SmtpConnector for Flaky {
         if self.offline.load(Ordering::SeqCst) {
             return Err(SmtpError::Connection("the network is down".into()));
         }
-        Smtp::connect_test(&self.settings, crate::imap_fake_tests::server_cert(), &mut PlainAuth::new("ada", "secret1"))
+        Smtp::connect_test(&self.settings, crate::mail::imap_fake_tests::server_cert(), &mut PlainAuth::new("ada", "secret1"))
     }
 }
 
@@ -116,7 +116,7 @@ fn id_of_received(data: &[u8]) -> Option<String> {
 }
 
 fn draft_for(id: &str, version: u32) -> Draft {
-    let mut d = crate::compose::new_draft("acct1", "Ada", "ada@example.com", "");
+    let mut d = crate::mail::compose::new_draft("acct1", "Ada", "ada@example.com", "");
     d.id = id.to_string();
     d.to = "bob@x.de".into();
     d.subject = format!("S-{id}");

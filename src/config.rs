@@ -36,7 +36,7 @@ pub enum MailAuth {
     /// Password or app password, kept in the keyring.
     #[default]
     Password,
-    /// OAuth2 (XOAUTH2 / OAUTHBEARER); the sign-in is in `oauth.rs`.
+    /// OAuth2 (XOAUTH2 / OAUTHBEARER); the sign-in is in `mail/oauth.rs`.
     OAuth2,
 }
 

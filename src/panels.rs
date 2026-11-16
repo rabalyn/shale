@@ -1068,7 +1068,7 @@ impl ShaleApp {
             let mut out = None;
             let mail = &self.mail;
             let resp = crate::dialog::Dialog::new("mail-accounts", "Mail accounts").width(720.0).show(&ctx, |ui| {
-                out = crate::mail_dialog::show(ui, d, mail);
+                out = crate::mail::dialog::show(ui, d, mail);
             });
             if let Some(a) = out {
                 if self.mail_dialog_action(d, a) {

@@ -159,7 +159,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn random_hex(n: usize) -> String {
-    match crate::oauth::random_bytes(n) {
+    match crate::mail::oauth::random_bytes(n) {
         Ok(b) => hex(&b),
         // the system has no random numbers: time and a counter keep ids apart (they are not secret)
         Err(_) => {
@@ -422,7 +422,7 @@ pub fn attribution(date: Option<i64>, from: &str) -> String {
     let who = crate::mail::display_name(from);
     let who = if who.is_empty() { from.trim().to_string() } else { who };
     match date {
-        Some(d) => format!("On {}, {who} wrote:", crate::mail_ui::full_date(d)),
+        Some(d) => format!("On {}, {who} wrote:", crate::mail::ui::full_date(d)),
         None => format!("{who} wrote:"),
     }
 }
@@ -749,7 +749,7 @@ mod tests {
         assert_eq!(d.in_reply_to, "<orig@x.de>");
         assert_eq!(d.references, vec!["<first@x.de>", "<second@x.de>", "<orig@x.de>"]);
         assert!(d.attachments.is_empty());
-        let date = crate::mail_ui::full_date(o.date.unwrap());
+        let date = crate::mail::ui::full_date(o.date.unwrap());
         assert!(d.body.starts_with(&format!("On {date}, Bob Builder wrote:\n> Line one\n>> already quoted\n>\n> Last\n")), "{}", d.body);
         assert!(d.body.ends_with("\n-- \nAda\nhttps://ada.example"), "{}", d.body);
         // the headers of the built answer carry the chain

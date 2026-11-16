@@ -16,9 +16,9 @@
 
 use crate::calendar::time;
 use crate::config::{MailAccount, MailAuth};
-use crate::imap_client::{decode_mutf7, Authenticator, Body, Client, ConnectSettings, Fetched, FolderEntry, ImapError, Limits, Part, PlainAuth, SearchKey, Selected};
-use crate::mail_db::{FolderRow, MailError, MessageSummary, Op};
-use crate::mail_store::MailStore;
+use crate::mail::db::{FolderRow, MailError, MessageSummary, Op};
+use crate::mail::imap_client::{decode_mutf7, Authenticator, Body, Client, ConnectSettings, Fetched, FolderEntry, ImapError, Limits, Part, PlainAuth, SearchKey, Selected};
+use crate::mail::store::MailStore;
 use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -110,7 +110,7 @@ pub fn connect_with_retry(auth: &dyn AuthFactory, mut connect: impl FnMut(&mut d
             let mut a = auth.authenticator().map_err(ImapError::Auth)?;
             // a fresh token was refused too: the sign-in itself is no good any more
             connect(a.as_mut()).map_err(|e| match e {
-                ImapError::Auth(t) => ImapError::Auth(format!("{t} The server refused a fresh token as well. {}", crate::oauth::SIGN_IN_AGAIN)),
+                ImapError::Auth(t) => ImapError::Auth(format!("{t} The server refused a fresh token as well. {}", crate::mail::oauth::SIGN_IN_AGAIN)),
                 other => other,
             })
         }
@@ -161,9 +161,9 @@ pub fn auth_factory(account: &MailAccount, typed_secret: Option<crate::secret::S
         }
         MailAuth::OAuth2 => {
             let secret = typed_secret.filter(|s| !s.is_empty()).or_else(|| crate::secrets::mail_secret(&account.id, crate::secrets::MailSecret::ClientSecret));
-            let cfg = crate::oauth::OAuthConfig::for_account(account, secret).map_err(|e| e.to_string())?;
-            let source = crate::oauth::shared_source(&account.id, cfg);
-            Arc::new(crate::oauth::OAuthFactory { user: account.user.clone(), host: host.to_string(), port, source })
+            let cfg = crate::mail::oauth::OAuthConfig::for_account(account, secret).map_err(|e| e.to_string())?;
+            let source = crate::mail::oauth::shared_source(&account.id, cfg);
+            Arc::new(crate::mail::oauth::OAuthFactory { user: account.user.clone(), host: host.to_string(), port, source })
         }
     })
 }
@@ -421,7 +421,7 @@ fn fail(result: &Mutex<SyncSummary>, progress: &Sender<Progress>, folder: &str, 
 /// (old files and rows stay, under the old number).
 fn adopt_validity(store: &MailStore, row: &FolderRow, sel: &Selected, now: i64) -> Result<FolderRow, String> {
     let mut row = row.clone();
-    if sel.uidvalidity == crate::mail_db::LOCAL_UIDVALIDITY {
+    if sel.uidvalidity == crate::mail::db::LOCAL_UIDVALIDITY {
         // RFC 3501 does not allow 0; 0 is where Shale keeps its own copies of sent mail apart from the server's
         return Err("the server reports UIDVALIDITY 0, which is not allowed".into());
     }
@@ -508,7 +508,7 @@ fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts:
         compare_with_server(store, client, &row, &sel, opts)?;
     }
     if complete {
-        crate::mail_ops::drop_local_copies_seen_on_server(store, row.id, uv)?;
+        crate::mail::ops::drop_local_copies_seen_on_server(store, row.id, uv)?;
     }
     let keep = row.uidvalidity == Some(uv);
     store
@@ -571,7 +571,7 @@ fn compare_with_server(store: &MailStore, client: &mut Client, row: &FolderRow, 
 
 fn folder_row(store: &MailStore, account_id: &str, name: &str) -> Result<FolderRow, String> {
     let reader = store.reader().map_err(err_text)?;
-    if let Some(r) = crate::mail_db::folder_by_name(reader.conn(), account_id, name).map_err(err_text)? {
+    if let Some(r) = crate::mail::db::folder_by_name(reader.conn(), account_id, name).map_err(err_text)? {
         return Ok(r);
     }
     store.ensure_folder(account_id, account_id, name, None, None, false).map_err(err_text)
@@ -596,7 +596,7 @@ pub fn fetch_folder_listing(store: &MailStore, connector: &dyn Connector, accoun
         client
             .uid_fetch_messages(chunk, Part::Headers, |f| {
                 if let Some(Body::Data(h)) = &f.body {
-                    ops.push(Op::message(store.header_only(&row, uv, f.uid, h, crate::mail_store::ServerMeta { flags: &f.flags.clone().unwrap_or_default(), internal_date: f.internal_date, size: f.size.unwrap_or(0) })));
+                    ops.push(Op::message(store.header_only(&row, uv, f.uid, h, crate::mail::store::ServerMeta { flags: &f.flags.clone().unwrap_or_default(), internal_date: f.internal_date, size: f.size.unwrap_or(0) })));
                 }
                 Ok(())
             })
@@ -646,8 +646,8 @@ impl From<MailError> for String {
 mod tests {
     use super::*;
     use crate::config::MailSecurity;
-    use crate::imap_fake_tests::{message, server_cert, FakeServer};
-    use crate::mail_db::{STATE_HEADER, STATE_TOO_LARGE};
+    use crate::mail::db::{STATE_HEADER, STATE_TOO_LARGE};
+    use crate::mail::imap_fake_tests::{message, server_cert, FakeServer};
     use std::sync::atomic::AtomicBool;
 
     /// 2026-11-14 12:00 UTC.
@@ -726,7 +726,7 @@ mod tests {
         .err()
         .unwrap();
         assert_eq!((n.load(Ordering::SeqCst), f.asked()), (2, 2));
-        assert!(matches!(&e, ImapError::Auth(t) if t.starts_with("token expired") && t.contains("refused a fresh token as well") && t.contains(crate::oauth::SIGN_IN_AGAIN)), "{e}");
+        assert!(matches!(&e, ImapError::Auth(t) if t.starts_with("token expired") && t.contains("refused a fresh token as well") && t.contains(crate::mail::oauth::SIGN_IN_AGAIN)), "{e}");
         // a failure that is not a refusal is not retried, and one on the second try is passed on as it is
         let (f, n) = (CountingAuth::new(true, None), AtomicUsize::new(0));
         let e = connect_with_retry(&f, |_| {
@@ -789,7 +789,7 @@ mod tests {
         };
         // nothing listens: a connection error, the factory asked once even though it would give a new token
         let auth = Arc::new(CountingAuth::new(true, None));
-        let c = ImapConnector { settings: settings(crate::imap_fake_tests::closed_port()), auth: auth.clone() };
+        let c = ImapConnector { settings: settings(crate::mail::imap_fake_tests::closed_port()), auth: auth.clone() };
         assert!(matches!(c.connect(), Err(ImapError::Connection(_))));
         assert_eq!(auth.asked(), 1);
         // the pretend server's certificate is not in the system's store: refused with a TLS error, not a retry
@@ -802,7 +802,7 @@ mod tests {
         let account = MailAccount { id: "t-real".into(), host: "localhost".into(), port: server.port, user: "ada".into(), ..MailAccount::default() };
         let conn = real_factory()(&account, Some("pw".into())).unwrap();
         assert!(matches!(conn.connect(), Err(ImapError::Tls(_))));
-        let account = MailAccount { port: crate::imap_fake_tests::closed_port(), ..account };
+        let account = MailAccount { port: crate::mail::imap_fake_tests::closed_port(), ..account };
         assert!(matches!(real_factory()(&account, Some("pw".into())).unwrap().connect(), Err(ImapError::Connection(_))));
         // the lazy connector builds once, and a factory that fails is the sign-in error of every connect
         let made = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1056,8 +1056,8 @@ mod tests {
         run(&store, &server, &opts());
         assert_eq!(store.reader().unwrap().count_folder(f.id).unwrap(), 5);
         let before = server.state().commands.len();
-        for action in [crate::mail_ops::Action::Delete, crate::mail_ops::Action::MoveTo { folder: "Sent".into() }, crate::mail_ops::Action::SetFlags { add: vec![crate::imap_client::MailFlag::Seen], remove: vec![] }] {
-            let out = crate::mail_ops::enqueue(&store, std::slice::from_ref(kept[0]), &action, NOW).unwrap();
+        for action in [crate::mail::ops::Action::Delete, crate::mail::ops::Action::MoveTo { folder: "Sent".into() }, crate::mail::ops::Action::SetFlags { add: vec![crate::mail::imap_client::MailFlag::Seen], remove: vec![] }] {
+            let out = crate::mail::ops::enqueue(&store, std::slice::from_ref(kept[0]), &action, NOW).unwrap();
             assert!(!out.notes.is_empty(), "refused with a note");
         }
         assert!(store.reader().unwrap().pending_ops(None).unwrap().is_empty());

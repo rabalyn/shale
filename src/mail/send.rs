@@ -8,19 +8,19 @@
 //!    before the closing `.` of the data is a definite "not sent" (`Failed`), a missing answer after it is
 //!    `Unsure`. Neither is ever retried by this module; only the person does that.
 //! 3. `Sent` is written, then the exact bytes are stored as a message of the Sent folder together with the
-//!    `append` action for the server (one transaction, [`mail_ops::record_sent_copy`]), then the entry is
+//!    `append` action for the server (one transaction, [`ops::record_sent_copy`]), then the entry is
 //!    marked as copied. A crash between 3's steps leaves a `Sent` mail without the mark: the copy is made
 //!    at the next run, once (the Message-ID tells). The append is a queued action like the ones of phase 2:
 //!    its failure can never cause a resend, it is not even connected to the sending.
 
-use crate::compose::{BuildOptions, Draft};
 use crate::config::MailAccount;
-use crate::imap_client::{Authenticator, ConnectSettings, Limits};
-use crate::imap_sync::AuthFactory;
-use crate::mail_ops;
-use crate::mail_store::MailStore;
-use crate::outbox::{Item, Outbox, Outcome, State};
-use crate::smtp_client::{Smtp, SmtpError};
+use crate::mail::compose::{BuildOptions, Draft};
+use crate::mail::imap_client::{Authenticator, ConnectSettings, Limits};
+use crate::mail::imap_sync::AuthFactory;
+use crate::mail::ops;
+use crate::mail::outbox::{Item, Outbox, Outcome, State};
+use crate::mail::smtp_client::{Smtp, SmtpError};
+use crate::mail::store::MailStore;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,7 +43,7 @@ pub fn connect_with_retry(auth: &dyn AuthFactory, mut connect: impl FnMut(&mut d
         Err(SmtpError::Auth(_)) if auth.token_rejected() => {
             let mut a = auth.authenticator().map_err(SmtpError::Auth)?;
             connect(a.as_mut()).map_err(|e| match e {
-                SmtpError::Auth(t) => SmtpError::Auth(format!("{t} The server refused a fresh token as well. {}", crate::oauth::SIGN_IN_AGAIN)),
+                SmtpError::Auth(t) => SmtpError::Auth(format!("{t} The server refused a fresh token as well. {}", crate::mail::oauth::SIGN_IN_AGAIN)),
                 other => other,
             })
         }
@@ -69,10 +69,10 @@ pub fn connector_for_account(a: &MailAccount, session: Option<crate::secret::Sec
     }
     let settings = smtp_settings(a);
     let auth: Arc<dyn AuthFactory> = match (&a.auth, session.clone()) {
-        (crate::config::MailAuth::Password, Some(pw)) => Arc::new(crate::imap_sync::PasswordAuth { user: a.user.clone(), password: pw }),
-        _ => match crate::imap_sync::auth_factory(a, session, &settings.host, settings.port) {
+        (crate::config::MailAuth::Password, Some(pw)) => Arc::new(crate::mail::imap_sync::PasswordAuth { user: a.user.clone(), password: pw }),
+        _ => match crate::mail::imap_sync::auth_factory(a, session, &settings.host, settings.port) {
             Ok(f) => f,
-            Err(e) if e.contains("no password") => return Err(crate::imap_sync::NO_PASSWORD.into()),
+            Err(e) if e.contains("no password") => return Err(crate::mail::imap_sync::NO_PASSWORD.into()),
             Err(e) => return Err(e),
         },
     };
@@ -95,7 +95,7 @@ pub fn sender_of(a: &MailAccount) -> (String, String) {
 /// A new, empty draft for an account, with its sender and signature.
 pub fn new_draft(a: &MailAccount) -> Draft {
     let (name, addr) = sender_of(a);
-    with_crypto_defaults(crate::compose::new_draft(&a.id, &name, &addr, &a.signature), a)
+    with_crypto_defaults(crate::mail::compose::new_draft(&a.id, &name, &addr, &a.signature), a)
 }
 
 /// The standard a draft of this account starts with and whether it is signed (MAIL-190): the preferred standard if it has a
@@ -113,12 +113,12 @@ pub fn with_crypto_defaults(mut d: Draft, a: &MailAccount) -> Draft {
 /// Send pressed (MAIL-132): the mail goes into the outbox, to be sent when `undo_secs` have passed. Nothing goes
 /// to the network here.
 pub fn queue_draft(ob: &Outbox, a: &MailAccount, draft: &Draft, undo_secs: u32, now: i64, date: &str) -> Result<Item, String> {
-    queue_with(ob, &crate::gpg::Gnupg::default(), a, draft, SendTiming { undo_secs, now, date }, &std::sync::atomic::AtomicBool::new(false))
+    queue_with(ob, &crate::mail::gpg::Gnupg::default(), a, draft, SendTiming { undo_secs, now, date }, &std::sync::atomic::AtomicBool::new(false))
 }
 
 /// What a draft with Sign and/or Encrypt needs (MAIL-192, MAIL-193): the account's key for the standard and, to encrypt, a
 /// key for every recipient. None for a plain draft. The words say what is missing.
-pub fn crypto_plan(g: &crate::gpg::Gnupg, a: &MailAccount, d: &Draft, cancel: &std::sync::atomic::AtomicBool) -> Result<Option<crate::mail_crypto::Plan>, String> {
+pub fn crypto_plan(g: &crate::mail::gpg::Gnupg, a: &MailAccount, d: &Draft, cancel: &std::sync::atomic::AtomicBool) -> Result<Option<crate::mail::crypto::Plan>, String> {
     if !d.sign && !d.encrypt {
         return Ok(None);
     }
@@ -126,8 +126,8 @@ pub fn crypto_plan(g: &crate::gpg::Gnupg, a: &MailAccount, d: &Draft, cancel: &s
     if key.is_empty() {
         return Err(format!("No {} key is chosen for this account yet (account settings: Encryption).", d.standard.label()));
     }
-    let encrypt = if d.encrypt { Some(crate::mail_crypto::resolve_recipients(g, d, key, cancel)?) } else { None };
-    Ok(Some(crate::mail_crypto::Plan { standard: d.standard, sign: d.sign.then(|| key.to_string()), encrypt }))
+    let encrypt = if d.encrypt { Some(crate::mail::crypto::resolve_recipients(g, d, key, cancel)?) } else { None };
+    Ok(Some(crate::mail::crypto::Plan { standard: d.standard, sign: d.sign.then(|| key.to_string()), encrypt }))
 }
 
 /// When a draft is queued: the undo time in seconds, the time now (seconds since the epoch) and today's date text.
@@ -141,13 +141,13 @@ pub struct SendTiming<'a> {
 /// [`queue_draft`] with GnuPG: a draft with Sign or Encrypt goes through the hook of the sending pipeline (MAIL-129, MAIL-194,
 /// MAIL-195). This may wait for a passphrase dialog, so the window runs it as a job. If anything fails nothing is put into the
 /// outbox: the draft stays as it was.
-pub fn queue_with(ob: &Outbox, g: &crate::gpg::Gnupg, a: &MailAccount, draft: &Draft, timing: SendTiming, cancel: &std::sync::atomic::AtomicBool) -> Result<Item, String> {
+pub fn queue_with(ob: &Outbox, g: &crate::mail::gpg::Gnupg, a: &MailAccount, draft: &Draft, timing: SendTiming, cancel: &std::sync::atomic::AtomicBool) -> Result<Item, String> {
     let SendTiming { undo_secs, now, date } = timing;
     let plan = crypto_plan(g, a, draft, cancel)?;
     let opts = BuildOptions { now, user_agent: a.user_agent_header, safe_transfer: plan.is_some(), ..BuildOptions::default() };
-    let built = crate::compose::finalize(draft, &opts, &|b| match &plan {
-        Some(p) => crate::mail_crypto::apply(g, p, b, cancel),
-        None => crate::compose::identity(b),
+    let built = crate::mail::compose::finalize(draft, &opts, &|b| match &plan {
+        Some(p) => crate::mail::crypto::apply(g, p, b, cancel),
+        None => crate::mail::compose::identity(b),
     })
     .map_err(|e| e.0)?;
     ob.queue(draft, &built, now, now + i64::from(undo_secs), date)
@@ -218,7 +218,7 @@ pub fn send_due(ob: &Outbox, store: &MailStore, a: &MailAccount, connector: &dyn
 /// After a send: the local Sent copy and the append (MAIL-141). Accounts whose server keeps sent mail itself skip it.
 fn copy_to_sent(ob: &Outbox, store: &MailStore, a: &MailAccount, item: &Item, bytes: &[u8], now: i64, report: &mut SendReport) {
     if !a.server_stores_sent {
-        match mail_ops::record_sent_copy(store, &a.id, bytes, now) {
+        match ops::record_sent_copy(store, &a.id, bytes, now) {
             Ok(Some(_)) => {}
             Ok(None) => report.notes.push("The mail was sent. This account has no Sent folder that Shale knows of, so no copy was saved (sync the account or use “Test connection” so that its folders are known).".into()),
             Err(e) => {
@@ -248,10 +248,10 @@ pub fn resume_copies(ob: &Outbox, store: &MailStore, a: &MailAccount, now: i64, 
 pub mod tests {
     use super::*;
     use crate::config::MailSecurity;
-    use crate::imap_fake_tests::server_cert;
-    use crate::mail_ops::tests::{env, Env, NOW};
-    use crate::outbox::tests::{draft, temp, DATE};
-    use crate::smtp_fake_tests::FakeSmtp;
+    use crate::mail::imap_fake_tests::server_cert;
+    use crate::mail::ops::tests::{env, Env, NOW};
+    use crate::mail::outbox::tests::{draft, temp, DATE};
+    use crate::mail::smtp_fake_tests::FakeSmtp;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     pub struct TestSmtp {
@@ -264,7 +264,7 @@ pub mod tests {
     impl SmtpConnector for TestSmtp {
         fn connect(&self) -> Result<Smtp, SmtpError> {
             self.connects.fetch_add(1, Ordering::SeqCst);
-            Smtp::connect_test(&self.settings, server_cert(), &mut crate::imap_client::PlainAuth::new(&self.user, &self.password))
+            Smtp::connect_test(&self.settings, server_cert(), &mut crate::mail::imap_client::PlainAuth::new(&self.user, &self.password))
         }
     }
 
@@ -281,10 +281,10 @@ pub mod tests {
     pub fn with_sent(tag: &str) -> (Env, Outbox) {
         let e = env(&format!("send-{tag}"));
         e.server.state().add_folder("Sent", &["\\Sent"]);
-        crate::imap_sync::discover_folders(&e.store, &e.conn, "acct1", "Test").unwrap();
+        crate::mail::imap_sync::discover_folders(&e.store, &e.conn, "acct1", "Test").unwrap();
         // the first sync of the new folder gives it its UIDVALIDITY
         let (tx, _rx) = std::sync::mpsc::channel();
-        let sum = crate::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
+        let sum = crate::mail::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::mail::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
         assert!(sum.errors.is_empty(), "{:?}", sum.errors);
         let ob = Outbox::new(&e.dir);
         (e, ob)
@@ -295,7 +295,7 @@ pub mod tests {
         queue_draft(ob, &account(), &d, 0, NOW, DATE).unwrap()
     }
 
-    fn sent_list(e: &Env) -> Vec<crate::mail_db::MessageSummary> {
+    fn sent_list(e: &Env) -> Vec<crate::mail::db::MessageSummary> {
         e.list("Sent")
     }
 
@@ -318,7 +318,7 @@ pub mod tests {
         let sent = sent_list(&e);
         assert_eq!(sent.len(), 1);
         assert_eq!((sent[0].subject.as_str(), sent[0].pending.as_deref(), sent[0].is_seen()), ("Plans für Köln", Some("append"), true));
-        assert!(sent[0].uid >= mail_ops::SYNTHETIC_UID_BASE);
+        assert!(sent[0].uid >= ops::SYNTHETIC_UID_BASE);
         assert_eq!(e.store.read_raw(&sent[0]).unwrap(), eml);
         assert_eq!(e.pending().len(), 1);
         assert!(e.server.state().messages("Sent").is_empty(), "nothing was appended yet");
@@ -338,10 +338,10 @@ pub mod tests {
         assert_eq!(e.store.read_raw(&sent[0]).unwrap(), eml);
         assert!(e.pending().is_empty());
         // the local trash holds the synthetic file; nothing was deleted
-        assert!(!e.dir.join(format!("acct1/Sent/0/{}.eml", mail_ops::SYNTHETIC_UID_BASE)).exists());
+        assert!(!e.dir.join(format!("acct1/Sent/0/{}.eml", ops::SYNTHETIC_UID_BASE)).exists());
         // and a sync afterwards agrees: one message, no duplicate
         let (tx, _rx) = std::sync::mpsc::channel();
-        crate::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
+        crate::mail::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::mail::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
         assert_eq!(sent_list(&e).len(), 1);
     }
 
@@ -353,13 +353,13 @@ pub mod tests {
         queue(&ob, "Waiting", "x");
         send_due(&ob, &e.store, &account(), &connector(&smtp), NOW);
         let (tx, _rx) = std::sync::mpsc::channel();
-        let sum = crate::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
+        let sum = crate::mail::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::mail::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
         assert!(sum.errors.is_empty());
         let sent = sent_list(&e);
         assert_eq!(sent.len(), 1);
         assert!(!sent[0].gone_on_server, "not marked as deleted on the server");
         // a flag action on it is refused with words while the copy is on its way
-        let r = mail_ops::enqueue(&e.store, &sent, &mail_ops::Action::SetFlags { add: vec![crate::imap_client::MailFlag::Flagged], remove: vec![] }, NOW).unwrap();
+        let r = ops::enqueue(&e.store, &sent, &ops::Action::SetFlags { add: vec![crate::mail::imap_client::MailFlag::Flagged], remove: vec![] }, NOW).unwrap();
         assert_eq!(r.queued, 0);
         assert!(r.notes[0].contains("being saved"), "{:?}", r.notes);
     }
@@ -372,14 +372,14 @@ pub mod tests {
         queue(&ob, "Mine", "local text");
         send_due(&ob, &e.store, &account(), &connector(&smtp), NOW);
         let local = sent_list(&e);
-        assert_eq!((local.len(), local[0].uidvalidity), (1, crate::mail_db::LOCAL_UIDVALIDITY));
+        assert_eq!((local.len(), local[0].uidvalidity), (1, crate::mail::db::LOCAL_UIDVALIDITY));
         let local_raw = e.store.read_raw(&local[0]).unwrap();
         // a server that really numbers a message with the very same UID in its own UIDVALIDITY
         let folder = e.folder("Sent");
         let uv = folder.uidvalidity.unwrap();
         assert_ne!(uv, 0);
         let nm = e.store.save_message(&folder, uv, local[0].uid, b"Subject: other\r\nMessage-ID: <other@x>\r\n\r\nserver text\r\n", "", Some(NOW)).unwrap();
-        e.store.commit(vec![crate::mail_db::Op::message(nm)]).unwrap();
+        e.store.commit(vec![crate::mail::db::Op::message(nm)]).unwrap();
         let both = e.store.reader().unwrap().message_at(folder.id, 0, local[0].uid).unwrap().expect("the local copy is still there");
         assert_eq!(e.store.read_raw(&both).unwrap(), local_raw, "its row and its file are untouched");
         let real = e.store.reader().unwrap().message_at(folder.id, uv, local[0].uid).unwrap().unwrap();
@@ -402,9 +402,9 @@ pub mod tests {
         // the server got its copy some other way (and the append no longer waits): the next sync replaces the local one
         e.server.state().add_message("Sent", eml.clone(), NOW);
         let ids: Vec<i64> = e.pending().iter().map(|p| p.id).collect();
-        e.store.commit(ids.into_iter().map(|id| crate::mail_db::Op::PendingDone { id }).collect()).unwrap();
+        e.store.commit(ids.into_iter().map(|id| crate::mail::db::Op::PendingDone { id }).collect()).unwrap();
         let (tx, _rx) = std::sync::mpsc::channel();
-        let sum = crate::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
+        let sum = crate::mail::imap_sync::sync_account(&e.store, "acct1", "Test", &e.conn, &crate::mail::imap_sync::SyncOptions { now: Some(NOW), ..Default::default() }, &tx, &std::sync::atomic::AtomicBool::new(false));
         assert!(sum.errors.is_empty(), "{:?}", sum.errors);
         let now = sent_list(&e);
         assert_eq!(now.len(), 1, "one message, not two");
@@ -438,8 +438,8 @@ pub mod tests {
     #[test]
     fn a_signed_and_encrypted_mail_goes_through_the_outbox_and_smtp_and_verifies_and_decrypts_for_everyone_and_the_sent_copy_is_readable() {
         use crate::config::CryptoStandard;
-        use crate::gpg::testkit::{have_gnupg, no_cancel, TestHome};
-        use crate::mail_crypto::{process, Encryption, Structure};
+        use crate::mail::crypto::{process, Encryption, Structure};
+        use crate::mail::gpg::testkit::{have_gnupg, no_cancel, TestHome};
         if !have_gnupg() {
             return;
         }
@@ -469,13 +469,13 @@ pub mod tests {
         rcpts.sort();
         assert_eq!(rcpts, vec!["bob@example.org", "carol@example.org"], "the envelope has the Bcc recipient, the message does not");
         assert!(!String::from_utf8_lossy(&got.data).to_ascii_lowercase().contains("bcc:"));
-        assert!(matches!(crate::mail_crypto::classify(&got.data), Structure::Encrypted { .. }));
+        assert!(matches!(crate::mail::crypto::classify(&got.data), Structure::Encrypted { .. }));
         // each recipient and the sender can read it, and the signature is Alice's
         for (name, h) in [("bob", &bob), ("carol", &carol), ("alice", &alice)] {
             let o = process(&h.g, &got.data, true, &no_cancel(), NOW);
             assert_eq!(o.security.encryption, Encryption::Decrypted(CryptoStandard::OpenPgp), "{name}: {:?}", o.security);
             assert_eq!(o.security.lines.len(), 1, "{name}");
-            assert_eq!(o.security.lines[0].sig.state, crate::gpg::SigState::Good, "{name}");
+            assert_eq!(o.security.lines[0].sig.state, crate::mail::gpg::SigState::Good, "{name}");
             assert_eq!(crate::mail::parse(o.display.as_ref().unwrap()).text, "the secret plan", "{name}");
         }
         // the Sent copy is the same bytes and is readable for the sender
@@ -500,7 +500,7 @@ pub mod tests {
         assert!(err.contains("No OpenPGP key is chosen"), "{err}");
         // a plain draft never touches GnuPG
         let plain = draft("acct1", "Plain", "nothing secret");
-        let nope = crate::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
+        let nope = crate::mail::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
         assert!(queue_with(&ob, &nope, &account(), &plain, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &no_cancel()).is_ok());
     }
 
@@ -508,7 +508,7 @@ pub mod tests {
     #[test]
     fn a_signed_smime_mail_goes_through_smtp_and_verifies_for_the_recipient() {
         use crate::config::CryptoStandard;
-        use crate::gpg::testkit::{have_gnupg, no_cancel, TestHome};
+        use crate::mail::gpg::testkit::{have_gnupg, no_cancel, TestHome};
         if !have_gnupg() {
             return;
         }
@@ -527,9 +527,9 @@ pub mod tests {
         assert_eq!(r.sent.len(), 1, "{r:?}");
         let got = smtp.state().received[0].data.clone();
         assert_eq!(got, eml);
-        let o = crate::mail_crypto::process(&bob.g, &got, false, &no_cancel(), NOW);
+        let o = crate::mail::crypto::process(&bob.g, &got, false, &no_cancel(), NOW);
         assert_eq!(o.security.lines.len(), 1, "{:?}", o.security);
-        assert_eq!((o.security.lines[0].sig.state, o.security.lines[0].from_ok), (crate::gpg::SigState::Good, Some(true)));
+        assert_eq!((o.security.lines[0].sig.state, o.security.lines[0].from_ok), (crate::mail::gpg::SigState::Good, Some(true)));
         assert_eq!(crate::mail::parse(o.display.as_ref().unwrap()).text, "hello Bob");
     }
 
@@ -688,7 +688,7 @@ pub mod tests {
         let item = queue(&ob, "Crash copy", "x");
         // the same steps as send_due, cut off after Sent was written
         let (it, bytes) = ob.begin_send("acct1", &item.id, NOW).unwrap();
-        Smtp::connect_test(&c.settings, server_cert(), &mut crate::imap_client::PlainAuth::new("ada", "secret1")).unwrap().send(&it.from, &it.recipients, &bytes).unwrap();
+        Smtp::connect_test(&c.settings, server_cert(), &mut crate::mail::imap_client::PlainAuth::new("ada", "secret1")).unwrap().send(&it.from, &it.recipients, &bytes).unwrap();
         ob.finish("acct1", &item.id, Outcome::Sent, NOW).unwrap();
         // restart: recover, then the resume
         let ob = Outbox::new(&e.dir);
@@ -714,7 +714,7 @@ pub mod tests {
             if self.fail_on_call == Some(n) {
                 return Err(format!("no token (call {n})"));
             }
-            Ok(Box::new(crate::imap_client::PlainAuth::new("ada", "pw")))
+            Ok(Box::new(crate::mail::imap_client::PlainAuth::new("ada", "pw")))
         }
         fn token_rejected(&self) -> bool {
             self.rejects
@@ -745,7 +745,7 @@ pub mod tests {
         // a token that is refused twice: told to sign in again
         let (e, n2, asked) = tries(&counting(true, None), auth_err("expired"), auth_err("expired too"));
         assert_eq!((n2, asked), (2, 2));
-        assert!(matches!(&e, Some(SmtpError::Auth(t)) if t.starts_with("expired too") && t.contains("refused a fresh token as well") && t.contains(crate::oauth::SIGN_IN_AGAIN)), "{e:?}");
+        assert!(matches!(&e, Some(SmtpError::Auth(t)) if t.starts_with("expired too") && t.contains("refused a fresh token as well") && t.contains(crate::mail::oauth::SIGN_IN_AGAIN)), "{e:?}");
         // not a refusal: no second try; a different failure on the second try is passed on
         let (e, n3, _) = tries(&counting(true, None), Err(SmtpError::Connection("down".into())), auth_err("never"));
         assert_eq!((e, n3), (Some(SmtpError::Connection("down".into())), 1));
@@ -767,7 +767,7 @@ pub mod tests {
                     let s = server.state();
                     (s.user.clone(), s.password.clone())
                 };
-                Smtp::connect_test(&server.settings(), server_cert(), &mut crate::imap_client::PlainAuth::new(&user, &password))
+                Smtp::connect_test(&server.settings(), server_cert(), &mut crate::mail::imap_client::PlainAuth::new(&user, &password))
             }
         });
         s.unwrap().quit();
@@ -791,7 +791,7 @@ pub mod tests {
         // a password typed for this session: no keyring; a refused connection and an untrusted certificate are said as they are
         let server = FakeSmtp::start(MailSecurity::ImplicitTls);
         let at = |port: u16| MailAccount { smtp_host: "localhost".into(), smtp_port: port, smtp_security: MailSecurity::ImplicitTls, ..account() };
-        let c = connector_for_account(&at(crate::imap_fake_tests::closed_port()), Some("pw".into())).unwrap();
+        let c = connector_for_account(&at(crate::mail::imap_fake_tests::closed_port()), Some("pw".into())).unwrap();
         assert!(matches!(c.connect(), Err(SmtpError::Connection(_))));
         assert!(test_connection(c.as_ref()).is_err());
         let c = connector_for_account(&at(server.port), Some("pw".into())).unwrap();
@@ -820,7 +820,7 @@ pub mod tests {
         // an account id of its own: the pretend keyring is shared by all tests and nothing stores a password for this one
         let a = MailAccount { id: "t-smtp-no-password".into(), smtp_host: "localhost".into(), ..account() };
         assert!(crate::secrets::mail_secret(&a.id, crate::secrets::MailSecret::Password).is_none());
-        assert_eq!(connector_for_account(&a, None).err().unwrap(), crate::imap_sync::NO_PASSWORD);
+        assert_eq!(connector_for_account(&a, None).err().unwrap(), crate::mail::imap_sync::NO_PASSWORD);
         // with a password in the keyring it works
         let stored = MailAccount { id: "t-smtp-stored-password".into(), ..a };
         assert!(crate::secrets::set_mail_secret(&stored.id, crate::secrets::MailSecret::Password, "pw"));

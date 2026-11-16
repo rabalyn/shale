@@ -14,14 +14,14 @@
 //! restarting the provider (`mail-env.sh revoke`), which kills every token it handed out.
 
 use crate::config::{MailAccount, MailAuth, MailSecurity, OAuthProvider};
-use crate::imap_client::MailFlag;
-use crate::imap_client::{Client, ConnectSettings, ImapError, Limits};
-use crate::imap_sync::{connect_with_retry, discover_folders, fetch_folder_listing, sync_account, AuthFactory, Connector, PasswordAuth, SyncOptions};
-use crate::mail_db::{FolderRow, MessageSummary, Op, STATE_FULL, STATE_HEADER};
-use crate::mail_ops::{self, Action, Confirmed};
-use crate::mail_store::MailStore;
-use crate::oauth::{self, OAuthConfig, OAuthFactory};
-use crate::oauth_fake_tests::{http_get, http_post_form};
+use crate::mail::db::{FolderRow, MessageSummary, Op, STATE_FULL, STATE_HEADER};
+use crate::mail::imap_client::MailFlag;
+use crate::mail::imap_client::{Client, ConnectSettings, ImapError, Limits};
+use crate::mail::imap_sync::{connect_with_retry, discover_folders, fetch_folder_listing, sync_account, AuthFactory, Connector, PasswordAuth, SyncOptions};
+use crate::mail::oauth::{self, OAuthConfig, OAuthFactory};
+use crate::mail::oauth_fake_tests::{http_get, http_post_form};
+use crate::mail::ops::{self, Action, Confirmed};
+use crate::mail::store::MailStore;
 use crate::secrets::{self, MailSecret};
 use rustls::pki_types::CertificateDer;
 use std::path::{Path, PathBuf};
@@ -113,7 +113,7 @@ fn temp_store(tag: &str) -> (PathBuf, MailStore) {
     (dir, store)
 }
 
-fn sync(store: &MailStore, id: &str, connector: &dyn Connector) -> crate::imap_sync::SyncSummary {
+fn sync(store: &MailStore, id: &str, connector: &dyn Connector) -> crate::mail::imap_sync::SyncSummary {
     let (tx, _rx) = channel();
     sync_account(store, id, id, connector, &SyncOptions::default(), &tx, &AtomicBool::new(false))
 }
@@ -288,7 +288,7 @@ fn mail_env_oauth_account_signs_in_syncs_renews_its_token_and_a_dead_sign_in_is_
     let ImapError::Auth(text) = &err else { panic!("{err}") };
     // (this pretend provider hands out a token for a stranger on any refresh token, so what the
     // person sees is the server's refusal of a fresh token; a real provider says invalid_grant,
-    // which `oauth.rs` tests cover with its own pretend provider)
+    // which `mail/oauth.rs` tests cover with its own pretend provider)
     assert!(oauth::needs_sign_in(text) && text.contains("Authentication failed"), "{text}");
 
     // signing in again works
@@ -361,8 +361,8 @@ fn clean_scratch() {
     }
 }
 
-fn run_ops(store: &MailStore, connector: &dyn Connector) -> mail_ops::OpsReport {
-    let r = mail_ops::run_pending(store, connector, "alice");
+fn run_ops(store: &MailStore, connector: &dyn Connector) -> ops::OpsReport {
+    let r = ops::run_pending(store, connector, "alice");
     assert!(r.failed.is_empty() && r.offline.is_none(), "{r:?}");
     assert_eq!(r.remaining, 0, "{r:?}");
     r
@@ -408,8 +408,8 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
     let flags = |add: &[MailFlag], remove: &[MailFlag]| Action::SetFlags { add: add.to_vec(), remove: remove.to_vec() };
 
     // read, flagged, and back
-    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[MailFlag::Seen], &[]), now).unwrap();
-    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[MailFlag::Flagged], &[]), now).unwrap();
+    ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[MailFlag::Seen], &[]), now).unwrap();
+    ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[MailFlag::Flagged], &[]), now).unwrap();
     assert_eq!(run_ops(&store, &connector).done, 2);
     let v = server_view("Scratch");
     assert!(line_of(&v, "Scratch one").unwrap().contains("\\Seen") && !line_of(&v, "Scratch one").unwrap().contains("\\Flagged"), "{v:?}");
@@ -418,8 +418,8 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
     // the local copy took the server's answer
     assert!(by_subject("Scratch", "Scratch one").is_seen());
     assert!(by_subject("Scratch", "Scratch two").is_flagged());
-    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[], &[MailFlag::Seen]), now).unwrap();
-    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[], &[MailFlag::Flagged]), now).unwrap();
+    ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[], &[MailFlag::Seen]), now).unwrap();
+    ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[], &[MailFlag::Flagged]), now).unwrap();
     run_ops(&store, &connector);
     let v = server_view("Scratch");
     assert!(!line_of(&v, "Scratch one").unwrap().contains("\\Seen") && !line_of(&v, "Scratch two").unwrap().contains("\\Flagged"), "{v:?}");
@@ -428,7 +428,7 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
     let three = by_subject("Scratch", "Scratch three");
     let old_file = store.abs_path(&three.path);
     assert!(old_file.is_file());
-    mail_ops::enqueue(&store, &[three], &Action::MoveTo { folder: "Scratch2".into() }, now).unwrap();
+    ops::enqueue(&store, &[three], &Action::MoveTo { folder: "Scratch2".into() }, now).unwrap();
     assert_eq!(run_ops(&store, &connector).done, 1);
     assert!(line_of(&server_view("Scratch"), "Scratch three").is_none());
     assert!(line_of(&server_view("Scratch2"), "Scratch three").is_some());
@@ -438,7 +438,7 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
 
     // delete: Dovecot has it in Trash (a move, no \Deleted)
     let trash_before = server_view("Trash");
-    mail_ops::enqueue(&store, &[by_subject("Scratch", "Scratch four")], &Action::Delete, now).unwrap();
+    ops::enqueue(&store, &[by_subject("Scratch", "Scratch four")], &Action::Delete, now).unwrap();
     assert_eq!(run_ops(&store, &connector).done, 1);
     assert!(line_of(&server_view("Scratch"), "Scratch four").is_none());
     let trash_now = server_view("Trash");
@@ -452,7 +452,7 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
     fetch_folder_listing(&store, &connector, "alice", "Trash", 100, &SyncOptions::default()).unwrap();
     let rows = rows_now(&store);
     let trash_row = messages(&store, &rows, "Trash").into_iter().find(|m| m.subject == "Scratch four").expect("listed");
-    mail_ops::enqueue(&store, &[trash_row], &Action::DeleteForever(Confirmed::after_dialog(1)), now).unwrap();
+    ops::enqueue(&store, &[trash_row], &Action::DeleteForever(Confirmed::after_dialog(1)), now).unwrap();
     assert_eq!(run_ops(&store, &connector).done, 1);
     let trash_after = server_view("Trash");
     assert!(line_of(&trash_after, "Scratch four").is_none(), "{trash_after:?}");
@@ -491,10 +491,10 @@ struct EnvSmtp {
     auth: Arc<dyn AuthFactory>,
 }
 
-impl crate::mail_send::SmtpConnector for EnvSmtp {
-    fn connect(&self) -> Result<crate::smtp_client::Smtp, crate::smtp_client::SmtpError> {
+impl crate::mail::send::SmtpConnector for EnvSmtp {
+    fn connect(&self) -> Result<crate::mail::smtp_client::Smtp, crate::mail::smtp_client::SmtpError> {
         let settings = ConnectSettings { host: "localhost".into(), port: self.port, security: self.security, limits: Limits { io_timeout: Duration::from_secs(60), ..Limits::default() } };
-        crate::mail_send::connect_with_retry(self.auth.as_ref(), |a| crate::smtp_client::Smtp::connect_test(&settings, ca_cert(), a))
+        crate::mail::send::connect_with_retry(self.auth.as_ref(), |a| crate::mail::smtp_client::Smtp::connect_test(&settings, ca_cert(), a))
     }
 }
 
@@ -536,22 +536,22 @@ fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &
 
     // a mail with a non-ASCII subject and body, a hidden recipient and an attachment of binary bytes
     let bin: Vec<u8> = (0..20_000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
-    let mut d = crate::mail_send::new_draft(acct);
+    let mut d = crate::mail::send::new_draft(acct);
     d.to = "Bob Müller <bob@example.org>".into();
     d.cc = "carol@example.org".into();
     d.bcc = "hidden@example.org".into();
     d.subject = subject.clone();
     d.body = "Hallo Bob,\n\nanbei der Plan. Schöne Grüße aus Köln — ÄÖÜ ß € 日本語\n".into();
-    d.attachments.push(crate::compose::Att { name: "Plan Größe.pdf".into(), mime: "application/pdf".into(), data: Arc::new(bin.clone()), ..Default::default() });
-    let ob = crate::outbox::Outbox::new(&dir);
-    let item = crate::mail_send::queue_draft(&ob, acct, &d, 0, now, &crate::mail_store::today_string()).expect("queued");
+    d.attachments.push(crate::mail::compose::Att { name: "Plan Größe.pdf".into(), mime: "application/pdf".into(), data: Arc::new(bin.clone()), ..Default::default() });
+    let ob = crate::mail::outbox::Outbox::new(&dir);
+    let item = crate::mail::send::queue_draft(&ob, acct, &d, 0, now, &crate::mail::store::today_string()).expect("queued");
     let eml = ob.read_eml(&acct.id, &item.id).unwrap();
 
     // sent exactly once
-    let r = crate::mail_send::send_due(&ob, &store, acct, &smtp, now);
+    let r = crate::mail::send::send_due(&ob, &store, acct, &smtp, now);
     assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
-    let again = crate::mail_send::send_due(&ob, &store, acct, &smtp, now + 5);
-    assert_eq!(again, crate::mail_send::SendReport::default());
+    let again = crate::mail::send::send_due(&ob, &store, acct, &smtp, now + 5);
+    assert_eq!(again, crate::mail::send::SendReport::default());
 
     // what arrived in the sink (Mailpit gets it from Dovecot's submission service)
     let mut got = vec![];
@@ -596,14 +596,14 @@ fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &
     assert_eq!(body_of(&raw), body_of(&eml), "the body is byte for byte what was in the outbox");
 
     // the Sent copy: appended once, flagged read, the same bytes; the local row has the server's UID
-    let r = mail_ops::run_pending(&store, &imap, &acct.id);
+    let r = ops::run_pending(&store, &imap, &acct.id);
     assert_eq!((r.done, r.failed.len()), (1, 0), "{r:?}");
     let sent_now = dovecot_view(&acct.user, "Sent");
     let ours: Vec<&String> = sent_now.iter().filter(|l| l.contains("Shale send test")).collect();
     assert_eq!(ours.len(), 1, "exactly one copy in Sent: {sent_now:?}");
     assert!(ours[0].contains("\\Seen"), "{}", ours[0]);
     assert_eq!(sent_now.len(), sent_before.len() + 1, "nothing else changed in Sent");
-    assert_eq!(mail_ops::run_pending(&store, &imap, &acct.id), mail_ops::OpsReport::default(), "nothing is appended a second time");
+    assert_eq!(ops::run_pending(&store, &imap, &acct.id), ops::OpsReport::default(), "nothing is appended a second time");
     let sum = sync(&store, &acct.id, &imap);
     assert!(sum.errors.is_empty(), "{:?}", sum.errors);
     let rows = store.reader().unwrap().folders(Some(&acct.id)).unwrap();
@@ -640,11 +640,11 @@ fn mail_env_password_and_oauth_accounts_send_with_an_attachment_and_dovecot_has_
     send_end_to_end(&pw, EnvSmtp { port: SUBMISSION_PORT, security: MailSecurity::StartTls, auth: auth.clone() }, EnvConnector { auth: auth.clone() }, &format!("pw{}", std::process::id()));
     // a wrong password is an authentication error from the real submission service
     let bad = EnvSmtp { port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, auth: Arc::new(PasswordAuth { user: pw.user.clone(), password: "nope".into() }) };
-    assert!(matches!(crate::mail_send::SmtpConnector::connect(&bad).err(), Some(crate::smtp_client::SmtpError::Auth(_))));
+    assert!(matches!(crate::mail::send::SmtpConnector::connect(&bad).err(), Some(crate::mail::smtp_client::SmtpError::Auth(_))));
     // the production certificate check refuses the test CA, as for IMAP
     let mut a = auth.authenticator().unwrap();
     let settings = ConnectSettings { host: "localhost".into(), port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, limits: Limits::default() };
-    assert!(matches!(crate::smtp_client::Smtp::connect(&settings, a.as_mut()).err(), Some(crate::smtp_client::SmtpError::Tls(_))));
+    assert!(matches!(crate::mail::smtp_client::Smtp::connect(&settings, a.as_mut()).err(), Some(crate::mail::smtp_client::SmtpError::Tls(_))));
 
     // the OAuth2 account sends over implicit TLS (465) with the token of its sign-in
     let mut oa = oauth_account();
@@ -668,8 +668,8 @@ fn mail_env_password_and_oauth_accounts_send_with_an_attachment_and_dovecot_has_
 /// One signed and encrypted mail of one standard through the real submission service into the sink, and the copy in Dovecot's Sent.
 fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
     use crate::config::CryptoStandard;
-    use crate::gpg::testkit::{no_cancel, TestHome};
-    use crate::mail_crypto::{process, Encryption};
+    use crate::mail::crypto::{process, Encryption};
+    use crate::mail::gpg::testkit::{no_cancel, TestHome};
     let (alice, bob, carol) = (TestHome::new(), TestHome::new(), TestHome::new());
     let (a_key, b_key, c_key) = match std {
         CryptoStandard::OpenPgp => {
@@ -718,7 +718,7 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
     let sent_before = dovecot_view(&acct.user, "Sent");
 
     // signed and encrypted for Bob (To), and with OpenPGP for Carol on Bcc (a hidden recipient)
-    let mut d = crate::mail_send::new_draft(&acct);
+    let mut d = crate::mail::send::new_draft(&acct);
     d.to = "Bob <bob@example.org>".into();
     if std == CryptoStandard::OpenPgp {
         d.bcc = "carol@example.org".into();
@@ -728,11 +728,11 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
     let secret = format!("the secret plan {marker} — Grüße aus Köln");
     d.body = format!("{secret}\n");
     (d.sign, d.encrypt, d.standard) = (true, true, std);
-    let ob = crate::outbox::Outbox::new(&dir);
-    let item = crate::mail_send::queue_with(&ob, &alice.g, &acct, &d, crate::mail_send::SendTiming { undo_secs: 0, now, date: &crate::mail_store::today_string() }, &no_cancel()).expect("signed and encrypted");
+    let ob = crate::mail::outbox::Outbox::new(&dir);
+    let item = crate::mail::send::queue_with(&ob, &alice.g, &acct, &d, crate::mail::send::SendTiming { undo_secs: 0, now, date: &crate::mail::store::today_string() }, &no_cancel()).expect("signed and encrypted");
     let eml = ob.read_eml(&acct.id, &item.id).unwrap();
     assert!(!String::from_utf8_lossy(&eml).contains(&marker), "nothing readable in the outbox");
-    let r = crate::mail_send::send_due(&ob, &store, &acct, &smtp, now);
+    let r = crate::mail::send::send_due(&ob, &store, &acct, &smtp, now);
     assert_eq!((r.sent.len(), r.failed.len(), r.unsure.len()), (1, 0, 0), "{r:?}");
 
     // what the sink got from Dovecot's submission service: our message, byte for byte after the servers' own lines
@@ -759,13 +759,13 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
         let o = process(&h.g, arrived, true, &no_cancel(), now);
         assert_eq!(o.security.encryption, Encryption::Decrypted(std), "{name}: {:?}", o.security);
         assert_eq!(o.security.lines.len(), 1, "{name}: {:?}", o.security);
-        assert_eq!((o.security.lines[0].sig.state, o.security.lines[0].from_ok), (crate::gpg::SigState::Good, Some(true)), "{name}: {:?}", o.security);
+        assert_eq!((o.security.lines[0].sig.state, o.security.lines[0].from_ok), (crate::mail::gpg::SigState::Good, Some(true)), "{name}: {:?}", o.security);
         assert_eq!(crate::mail::parse(o.display.as_ref().unwrap()).text, secret, "{name}");
     }
     let _ = (b_key, c_key);
 
     // the copy in Dovecot's Sent folder: appended once, and Alice can read it (the mail was also encrypted to her)
-    let r = mail_ops::run_pending(&store, &imap, &acct.id);
+    let r = ops::run_pending(&store, &imap, &acct.id);
     assert_eq!((r.done, r.failed.len()), (1, 0), "{r:?}");
     let sent_now = dovecot_view(&acct.user, "Sent");
     assert_eq!(sent_now.iter().filter(|l| l.contains("Shale crypto test")).count(), 1, "{sent_now:?}");
@@ -781,7 +781,7 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
     assert_eq!(o.security.encryption, Encryption::Decrypted(std), "{:?}", o.security);
     assert_eq!(crate::mail::parse(o.display.as_ref().expect("the Sent copy decrypts")).text, secret);
     // and storing it: the decrypted copy lands beside the original, searchable
-    store.save_decrypted(&mine[0], o.display.as_ref().unwrap(), &o.security, &crate::mail_store::today_string()).unwrap();
+    store.save_decrypted(&mine[0], o.display.as_ref().unwrap(), &o.security, &crate::mail::store::today_string()).unwrap();
     assert_eq!(store.reader().unwrap().search(&marker, None, 5, 0).unwrap().len(), 1, "the text of the encrypted Sent mail is found by search");
 
     clean_sent(&acct.user, "Shale crypto test");
@@ -794,7 +794,7 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_decrypts_and_the_sent_copy_decrypts() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    if !crate::gpg::testkit::have_gnupg() {
+    if !crate::mail::gpg::testkit::have_gnupg() {
         panic!("gpg, gpgsm and gpgconf are needed for this test");
     }
     crypto_end_to_end(crate::config::CryptoStandard::OpenPgp, &format!("pgp{}", std::process::id()));

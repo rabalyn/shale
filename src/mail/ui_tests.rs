@@ -1,15 +1,15 @@
 //! UI tests of the mail view and the account settings (MAIL-040…MAIL-071): the real app is run
 //! frame by frame with egui, real controls are clicked and real keys are pressed, and the mail
-//! server is the pretend one of `imap_fake_tests.rs` (real TCP and TLS). The keyring is the
+//! server is the pretend one of `mail/imap_fake_tests.rs` (real TCP and TLS). The keyring is the
 //! pretend one of `secrets.rs`.
 
 use crate::app::{Modal, Options, ShaleApp, View};
 use crate::config::{MailAccount, MailSecurity};
-use crate::imap_client::{Client, ConnectSettings, ImapError, Limits, PlainAuth};
-use crate::imap_fake_tests::{server_cert, FakeServer};
-use crate::imap_sync::{Connector, ConnectorFactory, SyncOptions, NO_PASSWORD};
-use crate::mail_db::{STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
-use crate::mail_ui::{Body, ListingState, Pane, TestState};
+use crate::mail::db::{STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
+use crate::mail::imap_client::{Client, ConnectSettings, ImapError, Limits, PlainAuth};
+use crate::mail::imap_fake_tests::{server_cert, FakeServer};
+use crate::mail::imap_sync::{Connector, ConnectorFactory, SyncOptions, NO_PASSWORD};
+use crate::mail::ui::{Body, ListingState, Pane, TestState};
 use crate::secrets::{self, MailSecret};
 use eframe::egui::{self, Color32, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Shape, Vec2};
 use std::path::{Path, PathBuf};
@@ -40,12 +40,12 @@ impl Connector for TestConnector {
 
 struct OAuthTestConnector {
     settings: ConnectSettings,
-    auth: Arc<crate::oauth::OAuthFactory>,
+    auth: Arc<crate::mail::oauth::OAuthFactory>,
 }
 
 impl Connector for OAuthTestConnector {
     fn connect(&self) -> Result<Client, ImapError> {
-        crate::imap_sync::connect_with_retry(self.auth.as_ref(), |a| Client::connect_test(&self.settings, server_cert(), a))
+        crate::mail::imap_sync::connect_with_retry(self.auth.as_ref(), |a| Client::connect_test(&self.settings, server_cert(), a))
     }
 }
 
@@ -55,9 +55,9 @@ fn factory(offline: Arc<std::sync::atomic::AtomicBool>) -> ConnectorFactory {
     Arc::new(move |acct: &MailAccount, session: Option<crate::secret::Secret>| {
         if acct.auth == crate::config::MailAuth::OAuth2 {
             // like `connector_for_account`, but trusting the pretend server's certificate
-            let cfg = crate::oauth::OAuthConfig::for_account(acct, session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::ClientSecret))).map_err(|e| e.to_string())?;
-            let source = crate::oauth::shared_source(&acct.id, cfg);
-            let auth = Arc::new(crate::oauth::OAuthFactory { user: acct.user.clone(), host: acct.host.clone(), port: acct.port, source });
+            let cfg = crate::mail::oauth::OAuthConfig::for_account(acct, session.or_else(|| secrets::mail_secret(&acct.id, MailSecret::ClientSecret))).map_err(|e| e.to_string())?;
+            let source = crate::mail::oauth::shared_source(&acct.id, cfg);
+            let auth = Arc::new(crate::mail::oauth::OAuthFactory { user: acct.user.clone(), host: acct.host.clone(), port: acct.port, source });
             let settings = ConnectSettings { host: acct.host.clone(), port: acct.port, security: acct.security, limits: Limits { io_timeout: Duration::from_secs(15), ..Limits::default() } };
             return Ok(Arc::new(OAuthTestConnector { settings, auth }) as Arc<dyn Connector>);
         }
@@ -437,7 +437,7 @@ fn without_a_keyring_the_password_stays_in_memory_and_the_dialog_says_so() {
     let mut w = W::new("nokeyring", false);
     let mut acct = w.account.clone();
     acct.id = secrets::NO_KEYRING_ACCOUNT.into();
-    w.app.modal = Some(Modal::MailAccounts(Box::new(crate::mail_dialog::MailDialog::new(vec![acct.clone()], 0, false))));
+    w.app.modal = Some(Modal::MailAccounts(Box::new(crate::mail::dialog::MailDialog::new(vec![acct.clone()], 0, false))));
     w.settle();
     assert!(w.shows("No system keyring was found"), "the dialog says there is no keyring");
     assert!(w.app.input_is_secret(), "the key recording writes nothing while the dialog is open");
@@ -537,15 +537,15 @@ fn html_mail_is_shown_as_plain_text_and_never_loads_anything() {
 // spec: MAIL-053
 #[test]
 fn a_very_long_text_is_cut_with_a_note() {
-    let long = "x".repeat(crate::mail_ui::TEXT_CAP + 10);
-    let (shown, cut) = crate::mail_ui::cut_text(&long);
-    assert!(cut && shown.chars().count() == crate::mail_ui::TEXT_CAP);
-    let (short, cut) = crate::mail_ui::cut_text("ä short");
+    let long = "x".repeat(crate::mail::ui::TEXT_CAP + 10);
+    let (shown, cut) = crate::mail::ui::cut_text(&long);
+    assert!(cut && shown.chars().count() == crate::mail::ui::TEXT_CAP);
+    let (short, cut) = crate::mail::ui::cut_text("ä short");
     assert!(!cut && short == "ä short");
     // never in the middle of a character
-    let umlauts = "ä".repeat(crate::mail_ui::TEXT_CAP + 5);
-    let (shown, cut) = crate::mail_ui::cut_text(&umlauts);
-    assert!(cut && shown.chars().count() == crate::mail_ui::TEXT_CAP);
+    let umlauts = "ä".repeat(crate::mail::ui::TEXT_CAP + 5);
+    let (shown, cut) = crate::mail::ui::cut_text(&umlauts);
+    assert!(cut && shown.chars().count() == crate::mail::ui::TEXT_CAP);
 }
 
 // spec: MAIL-056, MAIL-055
@@ -872,22 +872,22 @@ fn fifty_thousand_messages_draw_quickly_and_a_steady_frame_runs_no_query() {
     let root = std::env::temp_dir().join(format!("shale-mail-perf-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     {
-        let store = crate::mail_store::MailStore::open(&root).unwrap();
+        let store = crate::mail::store::MailStore::open(&root).unwrap();
         let folder = store.ensure_folder("perf", "Perf", "INBOX", Some("/"), None, true).unwrap();
-        store.commit(vec![crate::mail_db::Op::FolderState { folder: folder.id, uidvalidity: Some(7), uidnext: Some(50_001), highestmodseq: None, last_sync: 1 }]).unwrap();
-        let folder = crate::mail_db::FolderRow { uidvalidity: Some(7), ..folder };
+        store.commit(vec![crate::mail::db::Op::FolderState { folder: folder.id, uidvalidity: Some(7), uidnext: Some(50_001), highestmodseq: None, last_sync: 1 }]).unwrap();
+        let folder = crate::mail::db::FolderRow { uidvalidity: Some(7), ..folder };
         let start = Instant::now();
         for chunk in 0..10u32 {
             let ops: Vec<_> = (0..5000u32)
                 .map(|i| {
                     let uid = chunk * 5000 + i + 1;
                     let headers = format!("From: Sender {} <s{}@x.de>\r\nSubject: Message number {uid}\r\n\r\n", uid % 97, uid % 97);
-                    crate::mail_db::Op::message(store.header_only(
+                    crate::mail::db::Op::message(store.header_only(
                         &folder,
                         7,
                         uid,
                         headers.as_bytes(),
-                        crate::mail_store::ServerMeta { flags: if uid % 3 == 0 { "\\Seen" } else { "" }, internal_date: Some(1_700_000_000 + i64::from(uid) * 60), size: 1000 },
+                        crate::mail::store::ServerMeta { flags: if uid % 3 == 0 { "\\Seen" } else { "" }, internal_date: Some(1_700_000_000 + i64::from(uid) * 60), size: 1000 },
                     ))
                 })
                 .collect();
@@ -961,7 +961,7 @@ fn fifty_thousand_messages_draw_quickly_and_a_steady_frame_runs_no_query() {
 // spec: MAIL-051
 #[test]
 fn folders_are_ordered_with_the_inbox_first_and_sub_folders_under_their_parent() {
-    let mk = |name: &str, su: Option<&str>| crate::mail_db::FolderRow {
+    let mk = |name: &str, su: Option<&str>| crate::mail::db::FolderRow {
         id: 0,
         account: "a".into(),
         name: name.into(),
@@ -973,16 +973,16 @@ fn folders_are_ordered_with_the_inbox_first_and_sub_folders_under_their_parent()
         sync_enabled: true,
         last_sync: None,
     };
-    let mut v = crate::mail_ui::MailView::new(std::env::temp_dir().join("shale-mail-order-unused"));
+    let mut v = crate::mail::ui::MailView::new(std::env::temp_dir().join("shale-mail-order-unused"));
     v.folders = vec![mk("Trash", Some("\\Trash")), mk("Work/Plans", None), mk("Work", None), mk("Sent", Some("\\Sent")), mk("INBOX", None), mk("Archive", None), mk("Spam", None)];
     let names: Vec<String> = v.account_folders("a").iter().map(|f| f.name.clone()).collect();
     assert_eq!(names, vec!["INBOX", "Sent", "Archive", "Work", "Work/Plans", "Spam", "Trash"]);
-    assert_eq!(crate::mail_ui::folder_depth(&mk("Work/Plans/2026", None)), 2);
-    assert_eq!(crate::mail_ui::folder_label(&mk("Work/Plans", None)), "Plans");
-    assert_eq!(crate::mail_ui::folder_label(&mk("Gesendet &AOQ-", None)), "Gesendet ä");
+    assert_eq!(crate::mail::ui::folder_depth(&mk("Work/Plans/2026", None)), 2);
+    assert_eq!(crate::mail::ui::folder_label(&mk("Work/Plans", None)), "Plans");
+    assert_eq!(crate::mail::ui::folder_label(&mk("Gesendet &AOQ-", None)), "Gesendet ä");
     // a folder whose parent is not a folder shows its whole path; one with a parent shows its own name
     v.folders.push(mk("Projects/Hall B", None));
-    let of = |v: &crate::mail_ui::MailView, n: &str| v.tree_entry(v.folders.iter().find(|f| f.name == n).unwrap());
+    let of = |v: &crate::mail::ui::MailView, n: &str| v.tree_entry(v.folders.iter().find(|f| f.name == n).unwrap());
     assert_eq!(of(&v, "Projects/Hall B"), (0, "Projects/Hall B".to_string()));
     assert_eq!(of(&v, "Work/Plans"), (1, "Plans".to_string()));
     assert_eq!(of(&v, "INBOX"), (0, "INBOX".to_string()));
@@ -993,16 +993,16 @@ fn folders_are_ordered_with_the_inbox_first_and_sub_folders_under_their_parent()
 fn dates_in_the_list_are_short() {
     let now = NOW;
     // times are local; stay away from midnight edges by using the same instant
-    assert_eq!(crate::mail_ui::list_date(None, now), "");
-    assert!(crate::mail_ui::list_date(Some(now), now).contains(':'), "today shows the time");
-    assert!(crate::mail_ui::list_date(Some(now - 100 * 86_400), now).chars().any(|c| c.is_alphabetic()), "this year shows day and month");
-    assert!(crate::mail_ui::list_date(Some(now - 800 * 86_400), now).starts_with("202"), "older shows the date");
+    assert_eq!(crate::mail::ui::list_date(None, now), "");
+    assert!(crate::mail::ui::list_date(Some(now), now).contains(':'), "today shows the time");
+    assert!(crate::mail::ui::list_date(Some(now - 100 * 86_400), now).chars().any(|c| c.is_alphabetic()), "this year shows day and month");
+    assert!(crate::mail::ui::list_date(Some(now - 800 * 86_400), now).starts_with("202"), "older shows the date");
 }
 
 // spec: MAIL-083, MAIL-084, MAIL-086
 #[test]
 fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks_to_sign_in_again_when_revoked() {
-    use crate::oauth_fake_tests::{http_get, FakeOAuth};
+    use crate::mail::oauth_fake_tests::{http_get, FakeOAuth};
     use std::sync::atomic::{AtomicBool, Ordering};
     if std::process::Command::new("curl").arg("--version").output().is_err() {
         return;
@@ -1055,7 +1055,7 @@ fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks
         _ => unreachable!(),
     };
     let id1 = id.clone();
-    w.until("the first attempt fails", move |a| matches!(a.mail.signins.get(&id1), Some(crate::mail_ui::SignInState::Failed(_))));
+    w.until("the first attempt fails", move |a| matches!(a.mail.signins.get(&id1), Some(crate::mail::ui::SignInState::Failed(_))));
     w.frame(vec![]);
     assert!(w.shows("client ID"), "the missing client ID is said in words");
     w.typ("md:oauth-auth-url", &format!("http://127.0.0.1:{}/authorize", provider.port));
@@ -1069,10 +1069,10 @@ fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks
     assert!(w.shows("Waiting for the browser") && w.has("md:signin-cancel"));
     let o = opened.clone();
     w.until("the browser got the address", move |_| !o.lock().unwrap().is_empty());
-    w.until("the address is offered", |a| a.mail.signins.values().any(|s| matches!(s, crate::mail_ui::SignInState::Waiting { url: Some(_), .. })));
+    w.until("the address is offered", |a| a.mail.signins.values().any(|s| matches!(s, crate::mail::ui::SignInState::Waiting { url: Some(_), .. })));
     w.click("md:signin-cancel");
     let id2 = id.clone();
-    w.until("the cancelled sign-in ends", move |a| matches!(a.mail.signins.get(&id2), Some(crate::mail_ui::SignInState::Failed(_))));
+    w.until("the cancelled sign-in ends", move |a| matches!(a.mail.signins.get(&id2), Some(crate::mail::ui::SignInState::Failed(_))));
     w.frame(vec![]);
     assert!(w.shows("The sign-in was cancelled."));
     assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_none(), "a cancelled sign-in keeps nothing");
@@ -1081,7 +1081,7 @@ fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks
     // sign in for real
     w.click("md:signin");
     let id3 = id.clone();
-    w.until("the sign-in ends", move |a| matches!(a.mail.signins.get(&id3), Some(crate::mail_ui::SignInState::Done { .. })));
+    w.until("the sign-in ends", move |a| matches!(a.mail.signins.get(&id3), Some(crate::mail::ui::SignInState::Done { .. })));
     w.frame(vec![]);
     assert!(w.shows("Signed in as ada@example.com"), "who signed in is shown");
     assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_some(), "the refresh token is in the keyring");
@@ -1132,8 +1132,8 @@ fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks
     w.sync_and_wait();
     let errs = w.app.mail.syncs[&id].errors.join(" ");
     let fin = w.app.mail.syncs[&id].finished.as_ref().map(|s| s.errors.join(" ")).unwrap_or_default();
-    assert!(crate::oauth::needs_sign_in(&errs) || crate::oauth::needs_sign_in(&fin), "{errs} / {fin}");
-    assert!(crate::oauth::needs_sign_in(&format!("{errs}{fin}")) && format!("{errs}{fin}").contains("revoked"));
+    assert!(crate::mail::oauth::needs_sign_in(&errs) || crate::mail::oauth::needs_sign_in(&fin), "{errs} / {fin}");
+    assert!(crate::mail::oauth::needs_sign_in(&format!("{errs}{fin}")) && format!("{errs}{fin}").contains("revoked"));
     assert_eq!(w.app.mail.signed_in.get(&id), Some(&false));
     assert!(secrets::mail_secret(&id, MailSecret::RefreshToken).is_none(), "a dead refresh token is dropped");
     w.frame(vec![]);
@@ -1147,14 +1147,14 @@ fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks
     go.store(true, Ordering::SeqCst);
     w.click("md:signin");
     let id6 = id.clone();
-    w.until("signed in again", move |a| matches!(a.mail.signins.get(&id6), Some(crate::mail_ui::SignInState::Done { .. })));
+    w.until("signed in again", move |a| matches!(a.mail.signins.get(&id6), Some(crate::mail::ui::SignInState::Done { .. })));
     w.click("md:done");
     w.app.mail.syncs.remove(&id);
     w.sync_and_wait();
     assert!(w.app.mail.syncs[&id].errors.is_empty(), "{:?}", w.app.mail.syncs[&id].errors);
     secrets::clear_mail_secret(&id, MailSecret::RefreshToken);
     secrets::clear_mail_secret(&id, MailSecret::ClientSecret);
-    crate::oauth::forget_source(&id);
+    crate::mail::oauth::forget_source(&id);
 }
 
 // ------------------------------------------------------------ phase 2: flags, move, delete
@@ -1499,10 +1499,10 @@ fn world_with_unsent(tag: &str, n: u32) -> W {
     let store = w.app.mail.ready_store().unwrap();
     for i in 0..n {
         let raw = dated(&format!("Lost copy {i}"), "ada@example.com", "only here", 14 + i);
-        crate::mail_ops::record_sent_copy(&store, &w.account.id, &raw, NOW + i64::from(i)).unwrap().unwrap();
+        crate::mail::ops::record_sent_copy(&store, &w.account.id, &raw, NOW + i64::from(i)).unwrap().unwrap();
     }
     let ids: Vec<i64> = store.reader().unwrap().pending_ops(None).unwrap().iter().map(|p| p.id).collect();
-    store.commit(ids.into_iter().map(|id| crate::mail_db::Op::PendingDone { id }).collect()).unwrap();
+    store.commit(ids.into_iter().map(|id| crate::mail::db::Op::PendingDone { id }).collect()).unwrap();
     w.app.mail.refresh();
     w.frame(vec![]);
     w
@@ -1583,9 +1583,9 @@ fn an_open_draft_is_saved_when_the_app_closes_without_waiting_for_the_autosave()
     w.write_body("these words must survive");
     assert!(w.drafts_on_disk().is_empty(), "the autosave has not run yet");
     // the question dialog pauses the autosave; closing the app must save anyway
-    w.app.mail.compose.as_mut().unwrap().ask = Some(crate::mail_compose::Ask::Close);
+    w.app.mail.compose.as_mut().unwrap().ask = Some(crate::mail::compose_ui::Ask::Close);
     eframe::App::on_exit(&mut w.app);
-    let ob = crate::outbox::Outbox::new(&w.app.mail.root);
+    let ob = crate::mail::outbox::Outbox::new(&w.app.mail.root);
     let drafts = w.drafts_on_disk();
     assert_eq!(drafts.len(), 1);
     let (d, problems) = ob.load_draft(&drafts[0].account, &drafts[0].id).unwrap();
@@ -1628,9 +1628,9 @@ fn when_the_draft_cannot_be_saved_at_exit_its_text_goes_to_the_recovery_folder()
 
 // ---------------------------------------------------------------- phase 3: writing and sending (MAIL-120…MAIL-151)
 
-use crate::mail_compose::LocalView;
-use crate::outbox::State as OutState;
-use crate::smtp_fake_tests::FakeSmtp;
+use crate::mail::compose_ui::LocalView;
+use crate::mail::outbox::State as OutState;
+use crate::mail::smtp_fake_tests::FakeSmtp;
 
 /// An app with the pretend IMAP server synced and a pretend SMTP server wired in; the undo time is `undo` seconds.
 fn compose_world(tag: &str, undo: u32) -> (W, FakeSmtp) {
@@ -1650,7 +1650,7 @@ fn compose_world(tag: &str, undo: u32) -> (W, FakeSmtp) {
         (smtp.settings(), g.user.clone(), g.password.clone())
     };
     w.app.mail.smtp_factory = Arc::new(move |_, _| {
-        Ok(Arc::new(crate::mail_send::tests::TestSmtp { settings: settings.clone(), user: user.clone(), password: password.clone(), connects: std::sync::atomic::AtomicUsize::new(0) }) as Arc<dyn crate::mail_send::SmtpConnector>)
+        Ok(Arc::new(crate::mail::send::tests::TestSmtp { settings: settings.clone(), user: user.clone(), password: password.clone(), connects: std::sync::atomic::AtomicUsize::new(0) }) as Arc<dyn crate::mail::send::SmtpConnector>)
     });
     w.sync_and_wait();
     w.until("the Inbox is open", |a| a.mail.total == 3);
@@ -1698,12 +1698,12 @@ impl W {
         self.frame(vec![]);
     }
 
-    fn items(&self) -> Vec<crate::outbox::Item> {
-        crate::outbox::Outbox::new(&self.app.mail.root).list(None)
+    fn items(&self) -> Vec<crate::mail::outbox::Item> {
+        crate::mail::outbox::Outbox::new(&self.app.mail.root).list(None)
     }
 
-    fn drafts_on_disk(&self) -> Vec<crate::outbox::DraftInfo> {
-        crate::outbox::Outbox::new(&self.app.mail.root).list_drafts(None)
+    fn drafts_on_disk(&self) -> Vec<crate::mail::outbox::DraftInfo> {
+        crate::mail::outbox::Outbox::new(&self.app.mail.root).list_drafts(None)
     }
 }
 
@@ -1733,7 +1733,7 @@ fn compose_with_c_complete_an_address_send_with_ctrl_enter_and_the_mail_appears_
     assert_eq!(it.send_after - it.created, 1, "the mail waits for the undo time: {it:?}");
     // sent after the undo time, exactly once
     w.until("the mail was sent", |_| !smtp.state().received.is_empty());
-    w.until("the outbox says sent and the copy is made", |a| a.mail.pending_total == 0 && !a.mail.busy_with_ops() && crate::outbox::Outbox::new(&a.mail.root).list(None).iter().all(|i| i.state == OutState::Sent && i.copy_done));
+    w.until("the outbox says sent and the copy is made", |a| a.mail.pending_total == 0 && !a.mail.busy_with_ops() && crate::mail::outbox::Outbox::new(&a.mail.root).list(None).iter().all(|i| i.state == OutState::Sent && i.copy_done));
     assert_eq!(smtp.state().received.len(), 1);
     let got = crate::mail::parse(&smtp.state().received[0].data);
     assert_eq!(got.subject, "Plans für Köln");
@@ -1935,12 +1935,12 @@ fn a_draft_is_saved_by_itself_after_a_pause_and_a_crash_leaves_it_in_drafts() {
     w.typ("mail:compose:subject", "Autosaved");
     w.write_body("typed before the crash");
     assert!(w.drafts_on_disk().is_empty(), "not yet: the pause has not passed");
-    w.until("the draft was saved by itself", |a| crate::outbox::Outbox::new(&a.mail.root).list_drafts(None).len() == 1);
+    w.until("the draft was saved by itself", |a| crate::mail::outbox::Outbox::new(&a.mail.root).list_drafts(None).len() == 1);
     // the program dies here: a new run finds it
     let root = w.app.mail.root.clone();
-    let ob = crate::outbox::Outbox::new(&root);
+    let ob = crate::mail::outbox::Outbox::new(&root);
     let r = ob.recover(NOW, "2026-11-14").unwrap();
-    assert_eq!(r, crate::outbox::Recovery::default());
+    assert_eq!(r, crate::mail::outbox::Recovery::default());
     let drafts = ob.list_drafts(None);
     assert_eq!(drafts.len(), 1);
     let (d, problems) = ob.load_draft(&drafts[0].account, &drafts[0].id).unwrap();
@@ -1948,7 +1948,7 @@ fn a_draft_is_saved_by_itself_after_a_pause_and_a_crash_leaves_it_in_drafts() {
     assert_eq!(d.subject, "Autosaved");
     assert!(d.body.contains("typed before the crash"));
     // a new mail view announces what it finds
-    let mut view = crate::mail_ui::MailView::new(root);
+    let mut view = crate::mail::ui::MailView::new(root);
     view.open_store();
     let cfg = w.app.cfg.clone();
     let start = Instant::now();
@@ -2021,8 +2021,8 @@ fn the_account_settings_have_the_sending_section_with_presets_and_test_connectio
     // like the real factory: the password is the one handed over (typed in the dialog), else
     // the keyring's, which the unsaved account does not have yet (MAIL-121)
     w.app.mail.smtp_factory = Arc::new(move |_, session| {
-        let password = session.ok_or_else(|| crate::imap_sync::NO_PASSWORD.to_string())?.expose().to_string();
-        Ok(Arc::new(crate::mail_send::tests::TestSmtp { settings: settings.clone(), user: user.clone(), password, connects: std::sync::atomic::AtomicUsize::new(0) }) as Arc<dyn crate::mail_send::SmtpConnector>)
+        let password = session.ok_or_else(|| crate::mail::imap_sync::NO_PASSWORD.to_string())?.expose().to_string();
+        Ok(Arc::new(crate::mail::send::tests::TestSmtp { settings: settings.clone(), user: user.clone(), password, connects: std::sync::atomic::AtomicUsize::new(0) }) as Arc<dyn crate::mail::send::SmtpConnector>)
     });
     w.app.open_mail_settings();
     w.settle();
@@ -2120,8 +2120,8 @@ fn attachments_come_from_the_vault_and_notes_and_addresses_from_the_people_notes
 
 // ------------------------------------------------------------ phase 4: signing and encrypting (ADR-0011)
 
-use crate::gpg::testkit::{have_gnupg, TestHome};
-use crate::mail_crypto::testmail;
+use crate::mail::crypto::testmail;
+use crate::mail::gpg::testkit::{have_gnupg, TestHome};
 
 fn open_by_subject(w: &mut W, subject: &str) {
     w.open_mail(subject);
@@ -2130,7 +2130,7 @@ fn open_by_subject(w: &mut W, subject: &str) {
     w.frame(vec![]);
 }
 
-fn security_of(w: &W) -> crate::mail_crypto::Security {
+fn security_of(w: &W) -> crate::mail::crypto::Security {
     match &w.app.mail.open.as_ref().unwrap().body {
         Body::Ready(l) => l.security.clone(),
         _ => panic!("no message is ready"),
@@ -2211,7 +2211,7 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     // 1. no consent: the strip says so, nothing is decrypted, nothing is stored
     w.open_mail("Zebra plans");
     w.frame(vec![]);
-    assert_eq!(security_of(&w).encryption, crate::mail_crypto::Encryption::NeedsConsent);
+    assert_eq!(security_of(&w).encryption, crate::mail::crypto::Encryption::NeedsConsent);
     assert!(w.shows("Encrypted — enable encryption in the settings"));
     assert!(!w.shows("zebrafish"));
     let store_files = |w: &W| -> Vec<String> {
@@ -2261,7 +2261,7 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     assert!(w.app.cfg.mail_encryption_consent.is_some(), "the consent and its date are in the settings");
     // 4. opening the mail now decrypts it, in a job, and stores the copy
     open_by_subject(&mut w, "Zebra plans");
-    assert_eq!(security_of(&w).encryption, crate::mail_crypto::Encryption::Decrypted(crate::config::CryptoStandard::OpenPgp), "{:?}", security_of(&w));
+    assert_eq!(security_of(&w).encryption, crate::mail::crypto::Encryption::Decrypted(crate::config::CryptoStandard::OpenPgp), "{:?}", security_of(&w));
     assert!(w.shows("the zebrafish plan") && w.shows("Decrypted"));
     let files = store_files(&w);
     assert!(files.iter().any(|f| f.ends_with(".decrypted.eml")) && files.iter().any(|f| f.ends_with(".decrypted.json")), "{files:?}");
@@ -2276,11 +2276,11 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     assert_eq!(w.app.mail.results.as_ref().unwrap().len(), 1, "search finds text that was only in the encrypted part");
     w.app.mail.clear_search();
     // reopening shows the stored copy without asking GnuPG again (no GnuPG home at all)
-    w.app.mail.gnupg = crate::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
+    w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
     open_by_subject(&mut w, "Okapi plans");
-    assert!(matches!(security_of(&w).encryption, crate::mail_crypto::Encryption::Failed(_)), "a mail that was not decrypted before needs GnuPG");
+    assert!(matches!(security_of(&w).encryption, crate::mail::crypto::Encryption::Failed(_)), "a mail that was not decrypted before needs GnuPG");
     open_by_subject(&mut w, "Zebra plans");
-    assert!(matches!(security_of(&w).encryption, crate::mail_crypto::Encryption::DecryptedEarlier(..)), "{:?}", security_of(&w));
+    assert!(matches!(security_of(&w).encryption, crate::mail::crypto::Encryption::DecryptedEarlier(..)), "{:?}", security_of(&w));
     assert!(w.shows("the zebrafish plan"));
     w.app.mail.gnupg = bob.g.clone();
     // 6. withdrawing: no further decryption, the existing copy stays and is still shown
@@ -2296,7 +2296,7 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     w.click("md:done");
     assert!(w.app.cfg.mail_encryption_consent.is_none());
     open_by_subject(&mut w, "Okapi plans");
-    assert_eq!(security_of(&w).encryption, crate::mail_crypto::Encryption::NeedsConsent);
+    assert_eq!(security_of(&w).encryption, crate::mail::crypto::Encryption::NeedsConsent);
     assert!(!w.shows("okapi plan"));
     assert!(store_files(&w).iter().filter(|f| f.ends_with(".decrypted.eml")).count() == 1, "only the first mail has a decrypted copy");
     open_by_subject(&mut w, "Zebra plans");
@@ -2406,7 +2406,7 @@ fn compose_toggles_show_the_key_of_every_recipient_refuse_a_missing_one_and_send
         let c = w.app.mail.compose.as_ref().unwrap();
         (c.draft.account.clone(), c.draft.id.clone())
     };
-    let (saved, _) = crate::outbox::Outbox::new(&w.app.mail.root).load_draft(&acct, &id).unwrap();
+    let (saved, _) = crate::mail::outbox::Outbox::new(&w.app.mail.root).load_draft(&acct, &id).unwrap();
     assert_eq!((saved.sign, saved.encrypt), (true, true));
     // Send with a recipient that has no key: refused in words, the window and the typed text stay, nothing is in the outbox
     w.ctrl_enter();
@@ -2420,16 +2420,16 @@ fn compose_toggles_show_the_key_of_every_recipient_refuse_a_missing_one_and_send
     w.ctrl_enter();
     let root = w.app.mail.root.clone();
     // the job writes the outbox file before the window hears back, so wait for both (a slow runner sees the gap)
-    w.until("the mail is in the outbox and the window closed", move |a| a.mail.compose.is_none() && !crate::outbox::Outbox::new(&root).list(None).is_empty());
+    w.until("the mail is in the outbox and the window closed", move |a| a.mail.compose.is_none() && !crate::mail::outbox::Outbox::new(&root).list(None).is_empty());
     let item = w.items().remove(0);
-    let eml = crate::outbox::Outbox::new(&w.app.mail.root).read_eml(&item.account, &item.id).unwrap();
+    let eml = crate::mail::outbox::Outbox::new(&w.app.mail.root).read_eml(&item.account, &item.id).unwrap();
     assert!(!String::from_utf8_lossy(&eml).contains("the secret plan"), "the outbox holds the encrypted bytes");
     assert!(!w.compose_open(), "the window closed when the mail was queued");
     w.until("the mail was sent", |_| !smtp.state().received.is_empty());
     let got = smtp.state().received[0].data.clone();
     assert_eq!(got, eml);
     for (name, h) in [("bob", &bob), ("alice", &alice)] {
-        let o = crate::mail_crypto::process(&h.g, &got, true, &std::sync::atomic::AtomicBool::new(false), NOW);
+        let o = crate::mail::crypto::process(&h.g, &got, true, &std::sync::atomic::AtomicBool::new(false), NOW);
         assert_eq!(o.security.lines.len(), 1, "{name}: {:?}", o.security);
         assert!(crate::mail::parse(o.display.as_ref().unwrap()).text.starts_with("the secret plan"), "{name}");
     }
@@ -2448,7 +2448,7 @@ fn a_gnupg_call_that_waits_for_a_dialog_never_blocks_the_window_and_cancel_stops
     std::fs::write(&script, "#!/bin/sh\nexec sleep 60\n").unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut w = W::new("slow-gpg", true);
-    w.app.mail.gnupg = crate::gpg::Gnupg { gpg: script.to_string_lossy().into_owned(), gpgsm: script.to_string_lossy().into_owned(), home: None };
+    w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: script.to_string_lossy().into_owned(), gpgsm: script.to_string_lossy().into_owned(), home: None };
     w.app.cfg.mail_encryption_consent = Some("2026-11-14 12:00".into());
     let alice = TestHome::new();
     let signed = testmail::pgp_signed(&alice, &alice.gen_pgp("Alice Test", "alice@example.org", "never", None), testmail::ENTITY);
@@ -2689,7 +2689,7 @@ fn sync_load_attachments_search_scope_and_the_password_field_work_from_the_keybo
 
 // ------------------------------------------------------------ the keyboard of drafts, outbox, the menu and the unsent window
 
-use crate::outbox::{Outbox, Outcome};
+use crate::mail::outbox::{Outbox, Outcome};
 
 impl W {
     /// Is the cursor colour painted over this control?
@@ -2703,8 +2703,8 @@ impl W {
     fn put_in_outbox(&mut self, subject: &str, kind: u8) {
         let ob = Outbox::new(&self.app.mail.root);
         let real = crate::calendar::time::now();
-        let d = crate::outbox::tests::draft(&self.account.id, subject, "the text");
-        let b = crate::compose::build(&d, &crate::compose::BuildOptions { now: real, ..Default::default() }).unwrap();
+        let d = crate::mail::outbox::tests::draft(&self.account.id, subject, "the text");
+        let b = crate::mail::compose::build(&d, &crate::mail::compose::BuildOptions { now: real, ..Default::default() }).unwrap();
         ob.queue(&d, &b, real, real + 3600, "2026-11-14").unwrap();
         if kind > 0 {
             ob.begin_send(&d.account, &d.id, real + 4000).unwrap();
@@ -2736,7 +2736,7 @@ fn drafts_and_outbox_lists_work_from_the_keyboard() {
     let acct = w.account.id.clone();
     let ob = Outbox::new(&w.app.mail.root);
     for (i, subject) in ["First draft", "Second draft"].iter().enumerate() {
-        ob.save_draft(&crate::outbox::tests::draft(&acct, subject, "words"), NOW + i as i64).unwrap();
+        ob.save_draft(&crate::mail::outbox::tests::draft(&acct, subject, "words"), NOW + i as i64).unwrap();
     }
     for (subject, kind) in [("Waiting", 0), ("Failed A", 1), ("Unsure", 2), ("Failed B", 1), ("Failed C", 1)] {
         w.put_in_outbox(subject, kind);
@@ -2862,7 +2862,7 @@ fn the_menu_of_a_row_opens_by_key_and_is_driven_by_the_arrows_enter_and_esc() {
     assert!(!w.has("mail:ctx-read"));
     // a draft has a menu too
     let acct = w.account.id.clone();
-    Outbox::new(&w.app.mail.root).save_draft(&crate::outbox::tests::draft(&acct, "Menu draft", "words"), NOW).unwrap();
+    Outbox::new(&w.app.mail.root).save_draft(&crate::mail::outbox::tests::draft(&acct, "Menu draft", "words"), NOW).unwrap();
     w.app.mail.refresh_local();
     w.click(&format!("mail:drafts:{acct}"));
     w.frame(vec![]);
@@ -3042,7 +3042,7 @@ fn key_hints_on_menu_entries_and_tooltips_follow_the_registry() {
     assert!(w.shows_exactly("m") && w.shows_exactly("d / Delete"));
     w.press(Key::Escape, Modifiers::NONE);
     // the menu of a draft
-    Outbox::new(&w.app.mail.root).save_draft(&crate::outbox::tests::draft(&acct, "Hint draft", "words"), NOW).unwrap();
+    Outbox::new(&w.app.mail.root).save_draft(&crate::mail::outbox::tests::draft(&acct, "Hint draft", "words"), NOW).unwrap();
     w.app.mail.refresh_local();
     w.click(&format!("mail:drafts:{acct}"));
     w.press(Key::J, Modifiers::NONE);
@@ -3083,7 +3083,7 @@ fn key_hints_on_menu_entries_and_tooltips_follow_the_registry() {
 fn tab_focus_is_drawn_on_the_rows_of_drafts_and_outbox() {
     let (mut w, _smtp) = compose_world("tabfocus", 30);
     let acct = w.account.id.clone();
-    Outbox::new(&w.app.mail.root).save_draft(&crate::outbox::tests::draft(&acct, "Focus draft", "words"), NOW).unwrap();
+    Outbox::new(&w.app.mail.root).save_draft(&crate::mail::outbox::tests::draft(&acct, "Focus draft", "words"), NOW).unwrap();
     w.put_in_outbox("Focus failed", 1);
     for (folder, mark) in [(format!("mail:drafts:{acct}"), "mail:draft-focus:0"), (format!("mail:outbox:{acct}"), "mail:outbox-focus:0")] {
         w.click(&folder);

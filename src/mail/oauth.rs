@@ -22,7 +22,7 @@
 
 use crate::calendar::dav::{self, Origin};
 use crate::config::{MailAccount, OAuthProvider};
-use crate::imap_client::{base64_encode, Authenticator};
+use crate::mail::imap_client::{base64_encode, Authenticator};
 use crate::secret::Secret;
 use crate::secrets::{self, MailSecret};
 use serde_json::Value;
@@ -865,7 +865,7 @@ pub struct OAuthFactory {
     pub source: Arc<TokenSource>,
 }
 
-impl crate::imap_sync::AuthFactory for OAuthFactory {
+impl crate::mail::imap_sync::AuthFactory for OAuthFactory {
     fn authenticator(&self) -> Result<Box<dyn Authenticator>, String> {
         let token = self.source.access_token().map_err(|e| e.to_string())?;
         Ok(Box::new(OAuthAuth::new(&self.user, token.expose(), &self.host, self.port)))
@@ -881,7 +881,7 @@ impl crate::imap_sync::AuthFactory for OAuthFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oauth_fake_tests::{http_get, FakeOAuth};
+    use crate::mail::oauth_fake_tests::{http_get, FakeOAuth};
     use std::sync::atomic::AtomicBool;
 
     fn has_curl() -> bool {
@@ -1303,7 +1303,7 @@ mod tests {
 #[cfg(test)]
 mod pretend_browser_tests {
     use super::*;
-    use crate::oauth_fake_tests::{pretend_browser, FakeOAuth, Visit};
+    use crate::mail::oauth_fake_tests::{pretend_browser, FakeOAuth, Visit};
 
     fn has_curl() -> bool {
         std::process::Command::new("curl").arg("--version").output().is_ok()

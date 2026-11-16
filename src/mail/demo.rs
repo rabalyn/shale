@@ -1,8 +1,8 @@
 //! A small made-up mail store for screenshots (`--screenshot out.png --view mail`), like the
 //! demo vault: no server and no real mail are involved.
 
-use crate::mail_db::{FolderRow, Op};
-use crate::mail_store::MailStore;
+use crate::mail::db::{FolderRow, Op};
+use crate::mail::store::MailStore;
 use std::path::Path;
 
 /// The account id of the demo.

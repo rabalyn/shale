@@ -112,7 +112,7 @@ connection or run `IDLE`. Proposed:
   single-threaded runtime inside the sync thread). Criterion: maintenance status and `CONDSTORE`,
   `QRESYNC`, `IDLE` and literal size limits.
 - **Spike result (2026-11-14)**: neither candidate fits, so Shale ships a small blocking IMAP
-  client of its own (`imap_client.rs`, about 600 lines) on `rustls` 0.23 (`ring` provider) and
+  client of its own (`mail/imap_client.rs`, about 600 lines) on `rustls` 0.23 (`ring` provider) and
   `rustls-platform-verifier` 0.7. `imap` is still `3.0.0-alpha.15` (years of alphas, `native-tls`
   by default, no `CONDSTORE`/`QRESYNC` support, no limit on literal sizes). `async-imap` 0.12 is
   maintained, but needs an async runtime (tokio or async-std, a large new dependency for one
@@ -176,7 +176,7 @@ Shale does not store private keys. On Linux, GnuPG is the shared key store for b
   `https://mail.google.com/` scope is "restricted": unverified apps work for up to 100 test users;
   public distribution needs Google's security assessment. Thunderbird's client IDs are not reused.
 
-**Implementation note (phase 1c).** `src/oauth.rs` is the whole flow. The loopback listener
+**Implementation note (phase 1c).** `src/mail/oauth.rs` is the whole flow. The loopback listener
 accepts one callback with the right path, `Host` and `state` and answers anything else with an
 error page; the token endpoint is called with the system `curl` like CalDAV (form on stdin, no
 redirects followed), so no HTTP library was added; SHA-256 and random bytes come from the TLS

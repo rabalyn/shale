@@ -743,14 +743,14 @@ mod tests {
     fn with_mail(w: &mut W) {
         let root = w.dir.join("mail-store");
         {
-            let store = crate::mail_store::MailStore::open(&root).unwrap();
+            let store = crate::mail::store::MailStore::open(&root).unwrap();
             let folder = store.ensure_folder("acct", "Acct", "INBOX", Some("/"), None, true).unwrap();
-            store.commit(vec![crate::mail_db::Op::FolderState { folder: folder.id, uidvalidity: Some(7), uidnext: Some(10), highestmodseq: None, last_sync: 1 }]).unwrap();
-            let folder = crate::mail_db::FolderRow { uidvalidity: Some(7), ..folder };
+            store.commit(vec![crate::mail::db::Op::FolderState { folder: folder.id, uidvalidity: Some(7), uidnext: Some(10), highestmodseq: None, last_sync: 1 }]).unwrap();
+            let folder = crate::mail::db::FolderRow { uidvalidity: Some(7), ..folder };
             let mails = [(1u32, "Banana invoice"), (2, "Lunch")];
             let ops = mails.iter().map(|(uid, subject)| {
                 let headers = format!("From: Ann <ann@x.de>\r\nSubject: {subject}\r\n\r\n");
-                crate::mail_db::Op::message(store.header_only(&folder, 7, *uid, headers.as_bytes(), crate::mail_store::ServerMeta { flags: "", internal_date: Some(1_700_000_000 + i64::from(*uid)), size: 100 }))
+                crate::mail::db::Op::message(store.header_only(&folder, 7, *uid, headers.as_bytes(), crate::mail::store::ServerMeta { flags: "", internal_date: Some(1_700_000_000 + i64::from(*uid)), size: 100 }))
             });
             store.commit(ops.collect()).unwrap();
         }

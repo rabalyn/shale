@@ -20,7 +20,7 @@
 //! OAuth2: `OAUTHBEARER` or `XOAUTH2`).
 
 use crate::config::MailSecurity;
-use crate::imap_client::{base64_encode, platform_tls_config, tcp_connect, tls_stream, Authenticator, ConnectSettings, ImapError, Io, Wire};
+use crate::mail::imap_client::{base64_encode, platform_tls_config, tcp_connect, tls_stream, Authenticator, ConnectSettings, ImapError, Io, Wire};
 use rustls::ClientConfig;
 use std::collections::HashSet;
 use std::fmt;
@@ -135,7 +135,7 @@ impl Smtp {
     /// Tests only: trust the pretend server's certificate in addition.
     #[cfg(test)]
     pub fn connect_test(settings: &ConnectSettings, root: rustls::pki_types::CertificateDer<'static>, auth: &mut dyn Authenticator) -> Result<Smtp> {
-        Smtp::connect_with(settings, crate::imap_client::test_tls_config(root), auth)
+        Smtp::connect_with(settings, crate::mail::imap_client::test_tls_config(root), auth)
     }
 
     fn connect_with(settings: &ConnectSettings, tls: Arc<ClientConfig>, auth: &mut dyn Authenticator) -> Result<Smtp> {
@@ -210,7 +210,7 @@ impl Smtp {
     }
 
     fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
-        self.wire.io.write_all(bytes).and_then(|_| self.wire.io.flush()).map_err(|e| from_imap(crate::imap_client::io_error(e)))
+        self.wire.io.write_all(bytes).and_then(|_| self.wire.io.flush()).map_err(|e| from_imap(crate::mail::imap_client::io_error(e)))
     }
 
     fn ehlo(&mut self) -> Result<()> {

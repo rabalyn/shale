@@ -388,7 +388,7 @@ fn a_folder_with_unsaved_edits_that_cannot_be_saved_is_not_moved_to_the_trash() 
     // once it can be saved, the trash works and the edit is in the trashed file
     app.trash(Path::new("x"));
     assert!(!d.join("x").exists());
-    let day = crate::mail_store::today_string();
+    let day = crate::mail::store::today_string();
     assert!(names(&d.join(".trash").join(&day), "x").len() == 1);
     assert_eq!(read(&d, &format!(".trash/{day}/x/N.md")), "precious\n");
     let _ = std::fs::remove_dir_all(&d);
@@ -409,7 +409,7 @@ fn text_that_cannot_be_saved_at_exit_is_put_in_the_recovery_folder_and_announced
     eframe::App::on_exit(&mut app);
     locked(&d.join("Sub"), false);
     assert_eq!(read(&d, "Sub/N.md"), "base\n", "the note on disk is untouched");
-    let day = crate::mail_store::today_string();
+    let day = crate::mail::store::today_string();
     let saved = rec.join(&day).join("Sub/N.md");
     assert_eq!(std::fs::read_to_string(&saved).unwrap(), "precious unsaved words\n");
 

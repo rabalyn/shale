@@ -21,7 +21,7 @@
 
 use crate::fsutil;
 use crate::mail;
-use crate::mail_db::{self, FolderRow, IndexFields, MailError, MessageSummary, NewMessage, Op, Result, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
+use crate::mail::db::{self, FolderRow, IndexFields, MailError, MessageSummary, NewMessage, Op, Result, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
 use rusqlite::Connection;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -248,7 +248,7 @@ impl MailStore {
 
     /// A new read-only connection for listing and searching (one per thread).
     pub fn reader(&self) -> Result<Reader> {
-        Ok(Reader { conn: mail_db::open_reader(&self.index_path())? })
+        Ok(Reader { conn: db::open_reader(&self.index_path())? })
     }
 
     fn ask<T>(&self, make: impl FnOnce(Sender<Result<T>>) -> Cmd) -> Result<T> {
@@ -308,7 +308,7 @@ impl MailStore {
     pub fn save_new_local_copy(&self, folder: &FolderRow, first: u32, raw: &[u8], flags: &str, internal_date: Option<i64>) -> Result<NewMessage> {
         let mut uid = first;
         loop {
-            let rel = eml_rel_path(&folder.account, &folder.name, mail_db::LOCAL_UIDVALIDITY, uid);
+            let rel = eml_rel_path(&folder.account, &folder.name, db::LOCAL_UIDVALIDITY, uid);
             let path = self.root.join(&rel);
             fsutil::ensure_private_dir(path.parent().ok_or("bad message path")?)?;
             self.remember_folder_name(folder)?;
@@ -316,7 +316,7 @@ impl MailStore {
                 match fsutil::create_new(&path, raw) {
                     Ok(()) => {
                         let (fields, parsed) = index_fields(raw, internal_date);
-                        return Ok(NewMessage { folder: folder.id, uidvalidity: mail_db::LOCAL_UIDVALIDITY, uid, path: rel, state: STATE_FULL, flags: flags.into(), size: raw.len() as u64, parsed, fields });
+                        return Ok(NewMessage { folder: folder.id, uidvalidity: db::LOCAL_UIDVALIDITY, uid, path: rel, state: STATE_FULL, flags: flags.into(), size: raw.len() as u64, parsed, fields });
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
                     Err(e) => return Err(e.into()),
@@ -407,7 +407,7 @@ impl MailStore {
     }
 
     /// The decrypted copy of a message and the result found when it was made, if there is one (MAIL-183).
-    pub fn read_decrypted(&self, m: &MessageSummary) -> Option<(Vec<u8>, Option<crate::mail_crypto::Security>)> {
+    pub fn read_decrypted(&self, m: &MessageSummary) -> Option<(Vec<u8>, Option<crate::mail::crypto::Security>)> {
         let bytes = fsutil::read(self.abs_path(&decrypted_rel(&m.path)?)).ok()?;
         let info = decrypted_info_rel(&m.path).and_then(|r| fsutil::read(self.abs_path(&r)).ok()).and_then(|b| serde_json::from_slice(&b).ok());
         Some((bytes, info))
@@ -415,7 +415,7 @@ impl MailStore {
 
     /// Store the decrypted copy next to the original and index its text (MAIL-183). The original is not touched. A
     /// different copy that is there already goes to the local trash first: nothing is overwritten silently.
-    pub fn save_decrypted(&self, m: &MessageSummary, bytes: &[u8], sec: &crate::mail_crypto::Security, date: &str) -> Result<()> {
+    pub fn save_decrypted(&self, m: &MessageSummary, bytes: &[u8], sec: &crate::mail::crypto::Security, date: &str) -> Result<()> {
         let (Some(rel), Some(info)) = (decrypted_rel(&m.path), decrypted_info_rel(&m.path)) else { return Err(MailError("this message has no file".into())) };
         let path = self.abs_path(&rel);
         if let Ok(old) = fsutil::read(&path) {
@@ -464,62 +464,62 @@ impl Reader {
         &self.conn
     }
     pub fn folders(&self, account: Option<&str>) -> Result<Vec<FolderRow>> {
-        mail_db::folders(&self.conn, account)
+        db::folders(&self.conn, account)
     }
     /// A page of a folder, newest first (MAIL-013).
     pub fn list(&self, folder: i64, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
-        mail_db::list(&self.conn, folder, limit, offset)
+        db::list(&self.conn, folder, limit, offset)
     }
     /// Search (MAIL-010…MAIL-012); `folder` limits it to one folder.
     pub fn search(&self, query: &str, folder: Option<i64>, limit: usize, offset: usize) -> Result<Vec<MessageSummary>> {
-        mail_db::search(&self.conn, query, folder, limit, offset)
+        db::search(&self.conn, query, folder, limit, offset)
     }
     pub fn message(&self, folder: i64, uid: u32) -> Result<Option<MessageSummary>> {
-        mail_db::message(&self.conn, folder, uid)
+        db::message(&self.conn, folder, uid)
     }
     #[cfg(test)]
     pub fn count_messages(&self) -> Result<i64> {
-        mail_db::count_messages(&self.conn)
+        db::count_messages(&self.conn)
     }
     /// (messages, unread) per folder id (MAIL-051).
     pub fn folder_counts(&self) -> Result<std::collections::HashMap<i64, (i64, i64)>> {
-        mail_db::folder_counts(&self.conn)
+        db::folder_counts(&self.conn)
     }
     pub fn count_folder(&self, folder: i64) -> Result<i64> {
-        mail_db::count_folder(&self.conn, folder)
+        db::count_folder(&self.conn, folder)
     }
     /// The row number of a message in its folder's list.
     pub fn position_in_list(&self, folder: i64, date: Option<i64>, uid: u32) -> Result<i64> {
-        mail_db::position_in_list(&self.conn, folder, date, uid)
+        db::position_in_list(&self.conn, folder, date, uid)
     }
     pub fn present_uids(&self, folder: i64, uidvalidity: u32) -> Result<HashSet<u32>> {
-        mail_db::present_uids(&self.conn, folder, uidvalidity)
+        db::present_uids(&self.conn, folder, uidvalidity)
     }
     pub fn flags_of(&self, folder: i64, uidvalidity: u32) -> Result<std::collections::HashMap<u32, (String, bool)>> {
-        mail_db::flags_of(&self.conn, folder, uidvalidity)
+        db::flags_of(&self.conn, folder, uidvalidity)
     }
     pub fn missing_uids(&self, folder: i64, uidvalidity: u32) -> Result<Vec<u32>> {
-        mail_db::missing_uids(&self.conn, folder, uidvalidity)
+        db::missing_uids(&self.conn, folder, uidvalidity)
     }
     /// The actions waiting for the server, oldest first (MAIL-107).
-    pub fn pending_ops(&self, account: Option<&str>) -> Result<Vec<mail_db::PendingRow>> {
-        mail_db::pending_ops(&self.conn, account)
+    pub fn pending_ops(&self, account: Option<&str>) -> Result<Vec<db::PendingRow>> {
+        db::pending_ops(&self.conn, account)
     }
     /// Local sent copies that nothing uploads (MAIL-210).
-    pub fn unsent_copies(&self, with_dismissed: bool) -> Result<Vec<mail_db::UnsentCopy>> {
-        mail_db::unsent_copies(&self.conn, with_dismissed)
+    pub fn unsent_copies(&self, with_dismissed: bool) -> Result<Vec<db::UnsentCopy>> {
+        db::unsent_copies(&self.conn, with_dismissed)
     }
     pub fn pending_uids(&self, folder: i64, uidvalidity: u32) -> Result<HashSet<u32>> {
-        mail_db::pending_uids(&self.conn, folder, uidvalidity)
+        db::pending_uids(&self.conn, folder, uidvalidity)
     }
     pub fn message_by_id(&self, id: i64) -> Result<Option<MessageSummary>> {
-        mail_db::message_by_id(&self.conn, id)
+        db::message_by_id(&self.conn, id)
     }
     pub fn message_at(&self, folder: i64, uidvalidity: u32, uid: u32) -> Result<Option<MessageSummary>> {
-        mail_db::message_at(&self.conn, folder, uidvalidity, uid)
+        db::message_at(&self.conn, folder, uidvalidity, uid)
     }
     pub fn folder_by_id(&self, id: i64) -> Result<Option<FolderRow>> {
-        mail_db::folder_by_id(&self.conn, id)
+        db::folder_by_id(&self.conn, id)
     }
 }
 
@@ -530,11 +530,11 @@ fn writer_loop(mut conn: Connection, root: PathBuf, rx: std::sync::mpsc::Receive
         match cmd {
             Cmd::Stop => break,
             Cmd::Batch { ops, crash_after, reply } => {
-                let r = crate::jobs::catch(|| mail_db::apply_batch(&mut conn, &ops, crash_after)).unwrap_or_else(|e| Err(MailError(e)));
+                let r = crate::jobs::catch(|| db::apply_batch(&mut conn, &ops, crash_after)).unwrap_or_else(|e| Err(MailError(e)));
                 let _ = reply.send(r);
             }
             Cmd::Folder { account, display, name, delimiter, special_use, sync_enabled, reply } => {
-                let r = mail_db::upsert_folder(&conn, &account, &display, &name, delimiter.as_deref(), special_use.as_deref(), sync_enabled);
+                let r = db::upsert_folder(&conn, &account, &display, &name, delimiter.as_deref(), special_use.as_deref(), sync_enabled);
                 let _ = reply.send(r);
             }
             Cmd::Backup { date, reply } => {
@@ -634,7 +634,7 @@ fn make_backup(conn: &Connection, root: &Path, date: &str, keep: usize) -> Resul
     let tmp = root.join(format!("{}.tmp", backup_name(date)));
     let _ = std::fs::remove_file(&tmp);
     let tmp_str = tmp.to_str().ok_or("the mail folder's name is not valid text")?;
-    let result = conn.execute("VACUUM INTO ?1", [tmp_str]).map_err(MailError::from).and_then(|_| Ok(fsutil::sync_file(&tmp)?)).and_then(|_| mail_db::quick_check(&tmp));
+    let result = conn.execute("VACUUM INTO ?1", [tmp_str]).map_err(MailError::from).and_then(|_| Ok(fsutil::sync_file(&tmp)?)).and_then(|_| db::quick_check(&tmp));
     if let Err(e) = result {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
@@ -661,7 +661,7 @@ fn prepare_index(root: &Path, date: &str, report: &mut OpenReport) -> Result<Con
     let idx = root.join("index.sqlite");
     let exists_and_used = idx.metadata().map(|m| m.len() > 0).unwrap_or(false);
     if exists_and_used {
-        if let Err(why) = mail_db::quick_check(&idx) {
+        if let Err(why) = db::quick_check(&idx) {
             eprintln!("mail index damaged ({why}); keeping it aside and rebuilding");
             let kept = quarantine(root, date)?;
             report.quarantined = Some(kept);
@@ -669,10 +669,10 @@ fn prepare_index(root: &Path, date: &str, report: &mut OpenReport) -> Result<Con
         }
     }
     // a newer index (or any other failure to open) is reported, not "repaired"
-    let mut conn = mail_db::open_writer(&idx)?;
+    let mut conn = db::open_writer(&idx)?;
     if report.restored_from.is_some() {
         // the backup's queue is old: nothing may run before it is cleared
-        report.dropped_queued = mail_db::drop_restored_queue(&mut conn)?;
+        report.dropped_queued = db::drop_restored_queue(&mut conn)?;
     }
     Ok(conn)
 }
@@ -693,7 +693,7 @@ fn quarantine(root: &Path, date: &str) -> Result<PathBuf> {
 
 /// Copy the newest backup that passes the check to `index.sqlite`; None if there is none.
 fn restore_backup(root: &Path, idx: &Path) -> Option<PathBuf> {
-    backups(root).into_iter().find(|b| mail_db::quick_check(b).is_ok() && fsutil::copy_new(b, idx).is_ok())
+    backups(root).into_iter().find(|b| db::quick_check(b).is_ok() && fsutil::copy_new(b, idx).is_ok())
 }
 
 // ---------------------------------------------------------------- files and rows agree
@@ -731,7 +731,7 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
                 for (file, path) in sorted_dir(&uvpath) {
                     let Some(uid) = file.strip_suffix(".eml").and_then(|u| u.parse::<u32>().ok()) else { continue };
                     if folder.is_none() {
-                        folder = Some(mail_db::upsert_folder(conn, &account, &account, &name, None, None, true)?);
+                        folder = Some(db::upsert_folder(conn, &account, &account, &name, None, None, true)?);
                     }
                     let f = folder.as_ref().ok_or("no folder")?;
                     let known: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM messages WHERE folder = ?1 AND uidvalidity = ?2 AND uid = ?3)", rusqlite::params![f.id, uv, uid], |r| r.get(0))?;
@@ -748,33 +748,33 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
                     batch.push(Op::message(NewMessage { folder: f.id, uidvalidity: uv, uid, path: format!("{account}/{fdir}/{uv}/{file}"), state: STATE_FULL, flags: String::new(), size: raw.len() as u64, parsed, fields }));
                     total += 1;
                     if batch.len() >= RECONCILE_BATCH {
-                        mail_db::apply_batch(conn, &std::mem::take(&mut batch), None)?;
+                        db::apply_batch(conn, &std::mem::take(&mut batch), None)?;
                     }
                 }
             }
             if let Some(f) = folder {
                 // the rows of this folder must be in before its number decides which of them are old
-                mail_db::apply_batch(conn, &std::mem::take(&mut batch), None)?;
+                db::apply_batch(conn, &std::mem::take(&mut batch), None)?;
                 adopt_uidvalidity(conn, &f, &fpath)?;
             }
         }
     }
-    mail_db::apply_batch(conn, &batch, None)?;
+    db::apply_batch(conn, &batch, None)?;
     Ok(total)
 }
 
 /// A folder rebuilt from files has no UIDVALIDITY yet: it is the newest one on disk, so a sync
 /// that finds the same number carries on instead of fetching everything again.
 fn adopt_uidvalidity(conn: &mut Connection, f: &FolderRow, fpath: &Path) -> Result<()> {
-    let current = mail_db::folder_by_id(conn, f.id)?.ok_or("folder vanished")?;
+    let current = db::folder_by_id(conn, f.id)?.ok_or("folder vanished")?;
     if let Some(uv) = current.uidvalidity {
         // files of another number that turned up now are local copies, too (MAIL-204)
-        conn.execute("UPDATE messages SET gone_on_server = 1 WHERE folder = ?1 AND uidvalidity NOT IN (0, ?2) AND gone_on_server = 0", rusqlite::params![f.id, uv]).map_err(mail_db::MailError::from)?;
+        conn.execute("UPDATE messages SET gone_on_server = 1 WHERE folder = ?1 AND uidvalidity NOT IN (0, ?2) AND gone_on_server = 0", rusqlite::params![f.id, uv]).map_err(db::MailError::from)?;
         return Ok(());
     }
-    let newest = sorted_dir(fpath).iter().filter_map(|(n, _)| n.parse::<u32>().ok()).filter(|n| *n != mail_db::LOCAL_UIDVALIDITY).max();
+    let newest = sorted_dir(fpath).iter().filter_map(|(n, _)| n.parse::<u32>().ok()).filter(|n| *n != db::LOCAL_UIDVALIDITY).max();
     if let Some(uv) = newest {
-        mail_db::apply_batch(conn, &[Op::FolderState { folder: f.id, uidvalidity: Some(uv), uidnext: None, highestmodseq: None, last_sync: 0 }], None)?;
+        db::apply_batch(conn, &[Op::FolderState { folder: f.id, uidvalidity: Some(uv), uidnext: None, highestmodseq: None, last_sync: 0 }], None)?;
     }
     Ok(())
 }
@@ -795,7 +795,7 @@ fn mark_missing_files(conn: &mut Connection, root: &Path) -> Result<usize> {
             ops.push(Op::MissingFile { id, missing: gone });
         }
     }
-    mail_db::apply_batch(conn, &ops, None)?;
+    db::apply_batch(conn, &ops, None)?;
     Ok(missing)
 }
 
@@ -1003,7 +1003,7 @@ mod tests {
         let f = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
         put(&store, &f, 1, &sample("one", "a@x.de", "first"));
         put(&store, &f, 2, &sample("two", "a@x.de", "second"));
-        let pending = |kind: &str, uid: u32, remove: &str| mail_db::PendingRow {
+        let pending = |kind: &str, uid: u32, remove: &str| db::PendingRow {
             id: 0,
             account: "acct1".into(),
             kind: kind.into(),
@@ -1041,8 +1041,8 @@ mod tests {
     /// A Sent folder with two local sent copies whose appends are queued; returns the folder and the two UIDs.
     fn sent_with_two_copies(store: &MailStore) -> (FolderRow, u32, u32) {
         let f = store.ensure_folder("acct1", "A", "Sent", Some("/"), Some("\\Sent"), true).unwrap();
-        crate::mail_ops::record_sent_copy(store, "acct1", &sample("one", "me@example.com", "first"), 100).unwrap().unwrap();
-        crate::mail_ops::record_sent_copy(store, "acct1", &sample("two", "me@example.com", "second"), 200).unwrap().unwrap();
+        crate::mail::ops::record_sent_copy(store, "acct1", &sample("one", "me@example.com", "first"), 100).unwrap().unwrap();
+        crate::mail::ops::record_sent_copy(store, "acct1", &sample("two", "me@example.com", "second"), 200).unwrap().unwrap();
         let uids: Vec<u32> = store.reader().unwrap().pending_ops(None).unwrap().iter().map(|p| p.uid).collect();
         (f, uids[0], uids[1])
     }
@@ -1142,7 +1142,7 @@ mod tests {
         let names: Vec<String> = backups(&root).iter().map(|p| p.file_name().unwrap().to_str().unwrap().to_string()).collect();
         assert_eq!(names, vec!["index.backup-2026-11-05.sqlite", "index.backup-2026-11-04.sqlite", "index.backup-2026-11-03.sqlite"]);
         assert!(std::fs::read_dir(&root).unwrap().flatten().all(|e| !e.file_name().to_str().unwrap().ends_with(".tmp")), "no temporary file left");
-        mail_db::quick_check(&root.join("index.backup-2026-11-05.sqlite")).unwrap();
+        db::quick_check(&root.join("index.backup-2026-11-05.sqlite")).unwrap();
         assert!(store.backup_if_due().unwrap().is_some());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1221,7 +1221,7 @@ mod tests {
     // spec: MAIL-009
     #[test]
     fn nothing_here_deletes_a_message_file() {
-        let sources = [include_str!("mail_store.rs"), include_str!("imap_sync.rs"), include_str!("mail_ops.rs")];
+        let sources = [include_str!("store.rs"), include_str!("imap_sync.rs"), include_str!("ops.rs")];
         for src in sources {
             let code = src.split("#[cfg(test)]").next().unwrap();
             let removals: Vec<&str> = code.lines().filter(|l| !l.trim_start().starts_with("//") && (l.contains("remove_file") || l.contains("remove_dir"))).collect();
@@ -1252,9 +1252,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    fn decrypted_security() -> crate::mail_crypto::Security {
-        let mut sec = crate::mail_crypto::Security::new();
-        sec.encryption = crate::mail_crypto::Encryption::Decrypted(crate::config::CryptoStandard::OpenPgp);
+    fn decrypted_security() -> crate::mail::crypto::Security {
+        let mut sec = crate::mail::crypto::Security::new();
+        sec.encryption = crate::mail::crypto::Encryption::Decrypted(crate::config::CryptoStandard::OpenPgp);
         sec.checked = 1_794_657_600;
         sec
     }
@@ -1359,7 +1359,7 @@ mod tests {
         files_after.retain(|(p, _)| p.extension().is_some_and(|e| e == "eml"));
         assert_eq!(files_after, files_before.into_iter().filter(|(p, _)| p.extension().is_some_and(|e| e == "eml")).collect::<Vec<_>>(), "no message file changed");
         // an action that waits for the server lives only in the index: no rebuild then
-        let pending = mail_db::PendingRow {
+        let pending = db::PendingRow {
             id: 0,
             account: "acct1".into(),
             kind: "flags".into(),

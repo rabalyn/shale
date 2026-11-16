@@ -105,7 +105,7 @@ tests/mail-env/mail-env.sh up
 cargo test -- --ignored mail_env
 ```
 
-Four tests in `src/mail_env_tests.rs` (ignored by default, so `cargo test` never needs containers).
+Four tests in `src/mail/env_tests.rs` (ignored by default, so `cargo test` never needs containers).
 The fourth (phase 3, MAIL-160) sends from both accounts through the submission service (the password account
 over STARTTLS on 10587, the OAuth2 account over TLS on 10465): a mail with a non-ASCII subject and text, a Bcc and
 a binary attachment. It reads what arrived from Mailpit's API (the envelope with the Bcc recipient, the
@@ -149,5 +149,5 @@ The `env-tests` job runs this suite together with the CalDAV one when the runner
 
 The provider is a mock. Its refresh tokens are not remembered across a restart (after `revoke` it
 still answers a refresh, with a token for a stranger, which Dovecot refuses); the real
-`invalid_grant` answer is tested against Shale's own pretend provider (`src/oauth_fake_tests.rs`).
+`invalid_grant` answer is tested against Shale's own pretend provider (`src/mail/oauth_fake_tests.rs`).
 It is no test of Google's or Microsoft's behaviour: only of the protocol.

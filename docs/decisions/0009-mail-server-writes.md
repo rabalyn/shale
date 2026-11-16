@@ -21,7 +21,7 @@ every message that is flagged `\Deleted` in the folder, including ones that anot
    direct result of an action by the person (a button or a key), or of the retry of such an action
    that was queued while the server could not be reached (the queue is an explicit record of what
    the person asked for, see 5).
-2. **One chokepoint for writes.** `imap_client::Client::write(cmd: &WriteCmd)` is the only way to
+2. **One chokepoint for writes.** `mail::imap_client::Client::write(cmd: &WriteCmd)` is the only way to
    send a command that changes a mailbox. `WriteCmd` is a typed enum: `Select`, `StoreFlags`
    (add or remove, only `\Seen` and `\Flagged`), `Move`, `Copy`, `MarkDeleted` and `ExpungeUids`.
    The text of the command is built from the enum only (no raw strings), and then passes a second
@@ -77,7 +77,7 @@ every message that is flagged `\Deleted` in the folder, including ones that anot
 ## Implementation notes
 
 - `WriteCmd` also has `Select`, `Copy` and `MarkDeleted` (set or clear `\Deleted`); the "copy, verify,
-  mark, expunge" fallback is a sequence in `mail_ops.rs` made of these, not one variant, because it must
+  mark, expunge" fallback is a sequence in `mail/ops.rs` made of these, not one variant, because it must
   look at the server between the steps. `Client::write` refuses a write before any `Select`,
   `UID EXPUNGE` without `UIDPLUS` and `UID MOVE` without `MOVE` before anything is sent.
 - The queue is the table `pending_ops` (index schema version 2): one row per message and action, with

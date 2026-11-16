@@ -1,7 +1,7 @@
 //! Reading signed and encrypted mail (ADR-0011 §2 and §3, MAIL-172 to MAIL-184).
 //!
 //! `classify` looks at the raw `.eml` and says what the top level is: PGP/MIME or S/MIME signed or encrypted,
-//! inline OpenPGP, or plain. `process` then asks GnuPG (in a job: see `gpg.rs`) and builds a [`Security`]: the
+//! inline OpenPGP, or plain. `process` then asks GnuPG (in a job: see `mail/gpg.rs`) and builds a [`Security`]: the
 //! facts for the status strip, taken from GnuPG's status lines only, and the message to show when the content
 //! is not the outer mail (a decrypted one).
 //!
@@ -14,8 +14,8 @@
 //! - Nothing in the mail is ever turned into a status: [`Security`] is built from `Status` lines only.
 
 use crate::config::CryptoStandard;
-use crate::gpg::{Gnupg, GpgError, SigState, SigStatus, Trust};
 use crate::mail;
+use crate::mail::gpg::{Gnupg, GpgError, SigState, SigStatus, Trust};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::AtomicBool;
 
@@ -403,7 +403,7 @@ impl Security {
             Encryption::Not => {}
             Encryption::NeedsConsent => out.push((Level::Warn, "Encrypted — enable encryption in the settings".to_string())),
             Encryption::Decrypted(s) => out.push((Level::Info, format!("Encrypted ({}). Decrypted; a decrypted copy is stored on this computer.", s.label()))),
-            Encryption::DecryptedEarlier(s, t) => out.push((Level::Info, format!("Encrypted ({}). This is the decrypted copy stored on this computer ({}); the signature result is from then.", s.label(), crate::mail_ui::full_date(*t)))),
+            Encryption::DecryptedEarlier(s, t) => out.push((Level::Info, format!("Encrypted ({}). This is the decrypted copy stored on this computer ({}); the signature result is from then.", s.label(), crate::mail::ui::full_date(*t)))),
             Encryption::Failed(e) => out.push((Level::Bad, e.clone())),
             Encryption::NotDecrypted(e) => out.push((Level::Warn, e.clone())),
         }
@@ -443,7 +443,7 @@ fn gpg_words(e: &GpgError) -> String {
 /// input; every failure is in the returned [`Security`].
 pub fn process(g: &Gnupg, raw: &[u8], consent: bool, cancel: &AtomicBool, now: i64) -> Outcome {
     let e = split_raw(raw);
-    let from = e.value("from").map(|f| mail::decode_words(&f)).and_then(|f| crate::gpg::address_in(&f));
+    let from = e.value("from").map(|f| mail::decode_words(&f)).and_then(|f| crate::mail::gpg::address_in(&f));
     let ctx = Ctx { g, consent, cancel, from_addr: from };
     let mut sec = Security::new();
     sec.checked = now;
@@ -464,7 +464,7 @@ fn record_error(sec: &mut Security, e: &GpgError) {
 fn add_signatures(ctx: &Ctx<'_>, sec: &mut Security, standard: CryptoStandard, sigs: Vec<SigStatus>, scope: Scope) {
     for sig in sigs {
         let from_ok = match (&ctx.from_addr, sig.state) {
-            (Some(from), SigState::Good | SigState::ExpiredKey | SigState::ExpiredSig) if crate::gpg::is_key_id(&sig.fingerprint) => match ctx.g.key_info(standard, &sig.fingerprint, ctx.cancel) {
+            (Some(from), SigState::Good | SigState::ExpiredKey | SigState::ExpiredSig) if crate::mail::gpg::is_key_id(&sig.fingerprint) => match ctx.g.key_info(standard, &sig.fingerprint, ctx.cancel) {
                 Ok(Some(k)) if !k.emails.is_empty() => Some(k.emails.iter().any(|a| a.eq_ignore_ascii_case(from))),
                 _ => None,
             },
@@ -617,8 +617,8 @@ pub fn synthesize(outer: &[u8], entity: &[u8]) -> Vec<u8> {
 
 // ---------------------------------------------------------------- writing: sign and encrypt (ADR-0011 §4)
 
-use crate::compose::{Built, ComposeError, Draft};
-use crate::gpg::KeyInfo;
+use crate::mail::compose::{Built, ComposeError, Draft};
+use crate::mail::gpg::KeyInfo;
 
 /// A recipient and the key the mail is encrypted to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -684,7 +684,7 @@ pub fn lookup_keys(g: &Gnupg, s: CryptoStandard, addresses: &[String], cancel: &
 
 /// The addresses a draft is going to: (address, on Bcc only). In order, each once.
 pub fn recipients_of(d: &Draft) -> Vec<(String, bool)> {
-    let addrs = |list: &str| -> Vec<String> { crate::compose::split_list(list).iter().filter_map(|e| crate::compose::bare_address(e)).map(|a| a.to_ascii_lowercase()).collect() };
+    let addrs = |list: &str| -> Vec<String> { crate::mail::compose::split_list(list).iter().filter_map(|e| crate::mail::compose::bare_address(e)).map(|a| a.to_ascii_lowercase()).collect() };
     let (to, cc, bcc) = (addrs(&d.to), addrs(&d.cc), addrs(&d.bcc));
     let mut out: Vec<(String, bool)> = Vec::new();
     for a in to.iter().chain(&cc) {
@@ -749,7 +749,7 @@ pub fn resolve_recipients(g: &Gnupg, d: &Draft, own_fingerprint: &str, cancel: &
 }
 
 fn b64_wrapped(data: &[u8]) -> String {
-    let t = crate::imap_client::base64_encode(data);
+    let t = crate::mail::imap_client::base64_encode(data);
     t.as_bytes().chunks(76).map(|c| String::from_utf8_lossy(c).into_owned()).collect::<Vec<_>>().join("\r\n")
 }
 
@@ -761,7 +761,7 @@ fn crlf_text(data: &[u8]) -> String {
 /// A boundary that occurs in none of `texts`.
 fn boundary(texts: &[&[u8]]) -> String {
     loop {
-        let b = format!("=-=shale-{}", crate::compose::random_hex(10));
+        let b = format!("=-=shale-{}", crate::mail::compose::random_hex(10));
         if !texts.iter().any(|t| t.windows(b.len()).any(|w| w == b.as_bytes())) {
             return b;
         }
@@ -864,7 +864,7 @@ pub fn apply(g: &Gnupg, plan: &Plan, built: Built, cancel: &AtomicBool) -> Resul
 /// Mails made with the real GnuPG programs, for the tests of this module and of the mail view.
 #[cfg(test)]
 pub(crate) mod testmail {
-    use crate::gpg::testkit::TestHome;
+    use crate::mail::gpg::testkit::TestHome;
 
     pub const OUTER: &str = "From: Alice Test <alice@example.org>\r\nTo: Bob <bob@example.org>\r\nSubject: Plans\r\nDate: Sat, 14 Nov 2026 10:00:00 +0000\r\nMessage-ID: <t1@example.org>\r\nMIME-Version: 1.0\r\n";
     pub const ENTITY: &[u8] = b"Content-Type: text/plain; charset=utf-8\r\n\r\nthe secret plan\r\n";
@@ -895,7 +895,7 @@ pub(crate) mod testmail {
     }
 
     pub fn b64_lines(data: &[u8]) -> String {
-        let t = crate::imap_client::base64_encode(data);
+        let t = crate::mail::imap_client::base64_encode(data);
         t.as_bytes().chunks(76).map(|c| String::from_utf8_lossy(c).into_owned()).collect::<Vec<_>>().join("\r\n")
     }
 
@@ -927,7 +927,7 @@ mod tests {
     // ---- with real GnuPG (a temp home; the producers are the gpg programs themselves) ----
 
     use super::testmail::*;
-    use crate::gpg::testkit::{have_gnupg, no_cancel, TestHome};
+    use crate::mail::gpg::testkit::{have_gnupg, no_cancel, TestHome};
     const NOW: i64 = 1_794_657_600;
 
     fn run(g: &Gnupg, raw: &[u8], consent: bool) -> Outcome {
@@ -1243,7 +1243,7 @@ mod tests {
 
     // ---- writing ----
 
-    use crate::compose::{BuildOptions, Draft};
+    use crate::mail::compose::{BuildOptions, Draft};
 
     fn opts() -> BuildOptions {
         BuildOptions { now: NOW, message_id: Some("<fixed@example.org>".into()), safe_transfer: true, ..Default::default() }
@@ -1280,7 +1280,7 @@ mod tests {
     }
 
     fn made(g: &Gnupg, plan: &Plan, d: &Draft) -> Built {
-        crate::compose::finalize(d, &opts(), &|b| apply(g, plan, b, &no_cancel())).expect("the mail is made")
+        crate::mail::compose::finalize(d, &opts(), &|b| apply(g, plan, b, &no_cancel())).expect("the mail is made")
     }
 
     fn recip(address: &str, fpr: &str, hidden: bool) -> Recip {
@@ -1313,7 +1313,7 @@ mod tests {
             return;
         }
         let d = draft("Bob <bob@example.org>", "", "", "Hello Bob, the plans are ready. Grüße!");
-        let plain = crate::compose::finalize_plain(&d, &opts()).unwrap();
+        let plain = crate::mail::compose::finalize_plain(&d, &opts()).unwrap();
         for (std, (alice, a, bob, _b)) in [(CryptoStandard::OpenPgp, pgp_pair()), (CryptoStandard::Smime, smime_pair())] {
             let plan = Plan { standard: std, sign: Some(a.clone()), encrypt: None };
             let out = made(&alice.g, &plan, &Draft { standard: std, ..d.clone() });
@@ -1447,7 +1447,7 @@ mod tests {
         }
         let (alice, a, bob, b) = pgp_pair();
         let mut d = draft("bob@example.org", "", "", "Schöne Grüße — 日本語");
-        d.attachments.push(crate::compose::Att { name: "data.bin".into(), mime: "application/octet-stream".into(), data: std::sync::Arc::new((0..=255u8).cycle().take(5000).collect()), file: String::new() });
+        d.attachments.push(crate::mail::compose::Att { name: "data.bin".into(), mime: "application/octet-stream".into(), data: std::sync::Arc::new((0..=255u8).cycle().take(5000).collect()), file: String::new() });
         for (sign, encrypt) in [(true, false), (false, true), (true, true)] {
             let plan = Plan { standard: CryptoStandard::OpenPgp, sign: sign.then(|| a.clone()), encrypt: encrypt.then(|| vec![recip("bob@example.org", &b, false), recip("(you)", &a, false)]) };
             let out = made(&alice.g, &plan, &d);

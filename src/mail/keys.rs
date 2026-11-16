@@ -4,10 +4,10 @@
 
 use crate::config::Config;
 use crate::keys::Action as KeyAction;
-use crate::mail_compose::{LocalOut, LocalView};
-use crate::mail_ui::*;
-use crate::mail_view::Act;
-use crate::outbox::{DraftInfo, Item, State};
+use crate::mail::compose_ui::{LocalOut, LocalView};
+use crate::mail::outbox::{DraftInfo, Item, State};
+use crate::mail::ui::*;
+use crate::mail::view::Act;
 use eframe::egui::{self, Pos2, Rect, Ui, Vec2};
 
 /// What a menu of a row belongs to: the row of the message list or of the list of drafts.

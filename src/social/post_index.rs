@@ -10,7 +10,7 @@
 //! connection of its own ([`clear_file`], [`prune_file`]).
 
 use super::{feed_ui::segments, Post};
-use crate::mail_db::{fts_query_in, fts_query_wild};
+use crate::mail::db::{fts_query_in, fts_query_wild};
 use rusqlite::{params, Connection};
 use std::path::Path;
 

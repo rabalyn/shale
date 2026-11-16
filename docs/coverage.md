@@ -66,10 +66,10 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/social/images.rs` | 98 | 19 | 80.61 % |
 | `src/app/mail.rs` | 160 | 30 | 81.25 % |
 | `src/link_assist.rs` | 472 | 81 | 82.84 % |
-| `src/mail_ui.rs` | 1836 | 269 | 85.35 % |
+| `src/mail/ui.rs` | 1836 | 269 | 85.35 % |
 | `src/import/tb_store.rs` | 524 | 73 | 86.07 % |
 | `src/opener.rs` | 309 | 42 | 86.41 % |
-| `src/mail_compose.rs` | 782 | 106 | 86.45 % |
+| `src/mail/compose_ui.rs` | 782 | 106 | 86.45 % |
 | `src/pdf/export.rs` | 655 | 84 | 87.18 % |
 | `src/social/markup.rs` | 252 | 32 | 87.30 % |
 | `src/drawing/connect.rs` | 877 | 109 | 87.57 % |
@@ -80,33 +80,33 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/social/note.rs` | 364 | 40 | 89.01 % |
 | `src/app/sync.rs` | 495 | 54 | 89.09 % |
 | `src/import.rs` | 747 | 81 | 89.16 % |
-| `src/imap_client.rs` | 1027 | 110 | 89.29 % |
+| `src/mail/imap_client.rs` | 1027 | 110 | 89.29 % |
 | `src/config.rs` | 315 | 33 | 89.52 % |
-| `src/mail_demo.rs` | 68 | 7 | 89.71 % |
-| `src/gpg.rs` | 786 | 76 | 90.33 % |
-| `src/imap_sync.rs` | 787 | 76 | 90.34 % |
+| `src/mail/demo.rs` | 68 | 7 | 89.71 % |
+| `src/mail/gpg.rs` | 786 | 76 | 90.33 % |
+| `src/mail/imap_sync.rs` | 787 | 76 | 90.34 % |
 | `src/vault_state.rs` | 301 | 28 | 90.70 % |
-| `src/mail_view.rs` | 1095 | 101 | 90.78 % |
-| `src/mail_send.rs` | 499 | 43 | 91.38 % |
+| `src/mail/view.rs` | 1095 | 101 | 90.78 % |
+| `src/mail/send.rs` | 499 | 43 | 91.38 % |
 | `src/social/state.rs` | 649 | 53 | 91.83 % |
 | `src/social/mod.rs` | 329 | 26 | 92.10 % |
 | `src/social/bluesky.rs` | 569 | 44 | 92.27 % |
 | `src/app/social.rs` | 118 | 9 | 92.37 % |
-| `src/smtp_client.rs` | 293 | 22 | 92.49 % |
-| `src/mail_ops.rs` | 1204 | 90 | 92.52 % |
+| `src/mail/smtp_client.rs` | 293 | 22 | 92.49 % |
+| `src/mail/ops.rs` | 1204 | 90 | 92.52 % |
 | `src/gitsync.rs` | 411 | 30 | 92.70 % |
 | `src/social/mastodon.rs` | 362 | 26 | 92.82 % |
 | `src/pdf/view.rs` | 101 | 7 | 93.07 % |
-| `src/mail_crypto.rs` | 1112 | 76 | 93.17 % |
+| `src/mail/crypto.rs` | 1112 | 76 | 93.17 % |
 | `src/media.rs` | 235 | 16 | 93.19 % |
 | `src/fsutil.rs` | 522 | 35 | 93.30 % |
 | `src/calendar/dav.rs` | 875 | 58 | 93.37 % |
-| `src/oauth.rs` | 856 | 56 | 93.46 % |
+| `src/mail/oauth.rs` | 856 | 56 | 93.46 % |
 | `src/calendar/ui.rs` | 969 | 58 | 94.01 % |
-| `src/compose.rs` | 587 | 35 | 94.04 % |
+| `src/mail/compose.rs` | 587 | 35 | 94.04 % |
 | `src/calendar/time.rs` | 194 | 11 | 94.33 % |
-| `src/mail_dialog.rs` | 707 | 39 | 94.48 % |
-| `src/mail_unsent.rs` | 129 | 7 | 94.57 % |
+| `src/mail/dialog.rs` | 707 | 39 | 94.48 % |
+| `src/mail/unsent.rs` | 129 | 7 | 94.57 % |
 | `src/pdf/write.rs` | 355 | 19 | 94.65 % |
 | `src/script.rs` | 190 | 10 | 94.74 % |
 | `src/calendar/store.rs` | 884 | 46 | 94.80 % |
@@ -126,10 +126,10 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/sidebar_ui.rs` | 184 | 6 | 96.74 % |
 | `src/vault_path.rs` | 92 | 3 | 96.74 % |
 | `src/import/dialog.rs` | 277 | 8 | 97.11 % |
-| `src/mail_store.rs` | 944 | 27 | 97.14 % |
-| `src/mail_db.rs` | 776 | 22 | 97.16 % |
+| `src/mail/store.rs` | 944 | 27 | 97.14 % |
+| `src/mail/db.rs` | 776 | 22 | 97.16 % |
 | `src/import/tagwords.rs` | 157 | 4 | 97.45 % |
-| `src/outbox.rs` | 925 | 23 | 97.51 % |
+| `src/mail/outbox.rs` | 925 | 23 | 97.51 % |
 | `src/drawing/pictures.rs` | 169 | 4 | 97.63 % |
 | `src/markdown.rs` | 531 | 11 | 97.93 % |
 | `src/jobs.rs` | 52 | 1 | 98.08 % |
@@ -159,26 +159,26 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    rename, trash and restore relies on its guarantee. Test: split the fallback into a function that
    takes "renameat2 unavailable" as an argument and check the three outcomes (new name, name taken,
    directory). Kind: test (small refactor).
-3. **`mail_ops.rs` `exec_move`, `copy_then_delete`, `exec_expunge`**: closed (#58, DEV-004). The
+3. **`mail/ops.rs` `exec_move`, `copy_then_delete`, `exec_expunge`**: closed (#58, DEV-004). The
    pretend IMAP server has the switches `move_cap`, `uidplus`, `no_copyuid` and `fail_every`
-   (every `COPY`, `STORE` or `EXPUNGE` answered `NO`); `mail_ops.rs` tests cover the copy that the
+   (every `COPY`, `STORE` or `EXPUNGE` answered `NO`); `mail/ops.rs` tests cover the copy that the
    server refuses, the mark and the expunge that fail (the mail then exists in both folders and
    the mark is undone), verification by Message-ID with one mail not found, and "delete forever"
    without UIDPLUS. A Dovecot variant was not needed: the fake reaches the same client branches.
-4. **`imap_client.rs` response parsing (`skip_value`, `skip_value_open`, `parse_fetch`,
+4. **`mail/imap_client.rs` response parsing (`skip_value`, `skip_value_open`, `parse_fetch`,
    `parse_untagged`) and `append`**: closed (#57, MAIL-220, MAIL-221). Unit tests feed the parser
    odd but legal answers (literals, nested lists, NIL, escaped strings) and broken ones (also cut
    off after every byte, in a thread that must finish); a loopback `Wire` tests literals, NUL bytes,
    long lines and early ends; the pretend server has the switches `append_noise`,
    `append_cut_before_plus` and `append_answer` for the APPEND failures. One real gap found: a
    line longer than the limit passed when it arrived in one chunk; fixed.
-5. **`imap_sync.rs` `real_factory`, `connector_for_account`, `connect_with_retry` and `mail_send.rs`
+5. **`mail/imap_sync.rs` `real_factory`, `connector_for_account`, `connect_with_retry` and `mail/send.rs`
    `connector_for_account`, `connect_with_retry`, `smtp_settings`**: closed (#57, MAIL-222,
    MAIL-223), except the keyring paths. Counting auth factories test the retry; loopback ports
    (`closed_port`) and the pretend servers test refused connections and untrusted certificates;
    the settings mapping is checked. Not tested: `auth_factory` for a password account without a
    session password (it asks the real keyring; a fake keyring seam in `secrets.rs` would be
-   needed) and the OAuth2 token fetch itself (covered in `oauth.rs`).
+   needed) and the OAuth2 token fetch itself (covered in `mail/oauth.rs`).
 6. **`calendar/dav.rs` `discover` (469 to 513), `request_bytes_opts` (245 to 315), `write_error`,
    `delete_event` (585 to 709)**: closed (#59, CAL-019, CAL-020).
    `calendar/dav_status_tests.rs` runs the client against the scripted loopback server
@@ -191,8 +191,8 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    where the file should be (also holds for root, so no seam was needed). Originally: removing one date of a repeating event in a local calendar, saving to a read-only or missing
    directory, and the polling refresh. Test: a local calendar in a temp dir, delete one occurrence,
    save with the folder made read-only, poll after an outside change. Kind: test.
-8. **`gpg.rs` `trust_words`, `inv_recp_words`, `op_failure`, `signatures`, `decrypt` (301 to 691) and
-   `mail_crypto.rs` `analyze`, `classify_entity`, `rank` (184 to 664), 135 lines together**: the words
+8. **`mail/gpg.rs` `trust_words`, `inv_recp_words`, `op_failure`, `signatures`, `decrypt` (301 to 691) and
+   `mail/crypto.rs` `analyze`, `classify_entity`, `rank` (184 to 664), 135 lines together**: the words
    shown for an expired, revoked or untrusted key, a missing recipient key, a bad signature and an
    unsupported entity. A wrong word here misleads the person about whether a mail is safe. Test: with
    the GnuPG test kit make an expired key, a revoked key and a corrupted signature, and check each
@@ -245,7 +245,7 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
     account and the read settings saved, Cancel, Remove) and "Convert again" of the canvas
     question; `app/tree_ui_tests.rs` (5 tests) drives drag-and-drop in the file tree. Not done:
     the feed accounts dialog (already driven against pretend servers in `social/ui_tests.rs`, #63),
-    the keyring and the real sign-in parts of the mail dialog (`mail_ui_tests.rs`), saving the sort
+    the keyring and the real sign-in parts of the mail dialog (`mail/ui_tests.rs`), saving the sort
     choice to the settings file (the tests run without one), and the linear branch of the resize
     code, which only scribbles reach. Measured: `panels.rs` 1,553 lines, 137 missed, 91.18 %
     (before: 469 missed, 68.88 %).
@@ -263,13 +263,13 @@ More, in the order of the table:
 - **`reader.rs` `embed` (380 to 462, 63 %), `layout.rs` `welcome`, `view_header`,
   `paint_recovery_notice` (242 to 817), `graph.rs` `ui` (164 to 322, 68 %), `app.rs`
   `calendar_action`, `calendar_dialog_action`, `shortcuts`, `process_actions` (1420 to 1807),
-  `mail_ui.rs` `handle`, `apply_compose_out`, `compose_send` (680 to 2301), `app/sync.rs`
+  `mail/ui.rs` `handle`, `apply_compose_out`, `compose_send` (680 to 2301), `app/sync.rs`
   `after_sync`, `sync_tick` (84 to 223), `app/mail.rs` `mail_dialog_action` (56 to 143),
   `link_assist.rs` `after` (219 to 393, 83 %), `social/accounts_ui.rs` `sign_in`, `poll` (110 to
   161, 76 %)**: the app-level glue and the views. Test: UI tests that drive the action and check
-  the state (the pattern of `mail_ui_tests.rs`). Kind: test. **Closed for the sign-in of the Feeds
-  dialog and `oauth.rs` `sign_in` / `wait_for_code` (#63):** the pretend browser
-  (`oauth_fake_tests.rs::pretend_browser`, `social/fake_server.rs::pretend_browser`) opens the login
+  the state (the pattern of `mail/ui_tests.rs`). Kind: test. **Closed for the sign-in of the Feeds
+  dialog and `mail/oauth.rs` `sign_in` / `wait_for_code` (#63):** the pretend browser
+  (`mail/oauth_fake_tests.rs::pretend_browser`, `social/fake_server.rs::pretend_browser`) opens the login
   URL like a person would (approve, deny, wrong state, never answers); the Feeds dialog is tested
   against a pretend Mastodon and Bluesky server.
 - **`opener.rs` `launch`, `open_url`, `open_recovery_folder` (17 to 293)**: starting the desktop's

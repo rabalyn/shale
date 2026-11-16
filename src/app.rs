@@ -186,7 +186,7 @@ pub enum Modal {
     Calendars(Box<crate::calendar::dialog::CalendarDialog>),
     Event(Box<crate::calendar::dialog::EventDialog>),
     Import(Box<crate::import::dialog::ImportDialog>),
-    MailAccounts(Box<crate::mail_dialog::MailDialog>),
+    MailAccounts(Box<crate::mail::dialog::MailDialog>),
     Social(Box<crate::social::accounts_ui::SocialDialog>),
     /// an Obsidian canvas is being opened: convert it or open it read-only?
     ConvertCanvas {
@@ -243,7 +243,7 @@ pub enum Action {
     /// open a post found by the search in its feed, in a new tab (SOC-035)
     OpenPost(Box<crate::social::post_index::PostHit>),
     /// open a mail found by the search in the mail view (NAV-025)
-    OpenMail(Box<crate::mail_db::MessageSummary>),
+    OpenMail(Box<crate::mail::db::MessageSummary>),
     CloseTab(usize),
     Rename(PathBuf),
     Trash(PathBuf),
@@ -309,7 +309,7 @@ pub struct ShaleApp {
     pub local_graph: GraphView,
     pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
-    pub mail: crate::mail_ui::MailView,
+    pub mail: crate::mail::ui::MailView,
     pub cal_side: crate::calendar::ui::CalendarView,
     pub cal_main: crate::calendar::ui::CalendarView,
     /// the feed view (Mastodon / Bluesky)
@@ -442,7 +442,7 @@ impl ShaleApp {
         // the data usage dialog shows these paths and two runs must give the same picture
         let tag = if screenshot.is_some() { "screenshot".to_string() } else { std::process::id().to_string() };
         let mail_root = if persist {
-            crate::mail_store::default_root()
+            crate::mail::store::default_root()
         } else if screenshot.is_some() {
             std::env::temp_dir().join("shale-mail-screenshot")
         } else {
@@ -510,7 +510,7 @@ impl ShaleApp {
                 }
                 c
             },
-            mail: crate::mail_ui::MailView::new(mail_root),
+            mail: crate::mail::ui::MailView::new(mail_root),
             cal_side: crate::calendar::ui::CalendarView::new(crate::calendar::ui::Size::Small),
             cal_main: crate::calendar::ui::CalendarView::new(crate::calendar::ui::Size::Medium),
             social: {
@@ -580,9 +580,9 @@ impl ShaleApp {
             }
             // screenshots: a made-up mail store and account (no server, no real mail)
             if app.screenshot.is_some() && opts.view.as_deref() == Some("mail") && app.cfg.mail_accounts.is_empty() {
-                match crate::mail_demo::seed(&app.mail.root) {
+                match crate::mail::demo::seed(&app.mail.root) {
                     Ok(()) => {
-                        app.cfg.mail_accounts = vec![crate::config::MailAccount { id: crate::mail_demo::ACCOUNT.into(), name: "Demo mail".into(), host: "imap.example.com".into(), user: "ada@example.com".into(), ..Default::default() }];
+                        app.cfg.mail_accounts = vec![crate::config::MailAccount { id: crate::mail::demo::ACCOUNT.into(), name: "Demo mail".into(), host: "imap.example.com".into(), user: "ada@example.com".into(), ..Default::default() }];
                         app.cfg.mail_sync_minutes = 0;
                     }
                     Err(e) => eprintln!("could not make the demo mail: {e}"),
@@ -1163,7 +1163,7 @@ impl ShaleApp {
     /// At exit: what still could not be saved goes to the recovery folder instead of being lost
     /// (DATA-011). Returns where each text went. Failures are the last resort: stderr.
     pub fn rescue_unsaved(&mut self) -> Vec<PathBuf> {
-        let date = crate::mail_store::today_string();
+        let date = crate::mail::store::today_string();
         let mut texts: Vec<(PathBuf, Vec<u8>)> = self.notes.iter().filter(|(_, d)| d.dirty && d.unreadable.is_none()).map(|(r, d)| (r.clone(), d.text.clone().into_bytes())).collect();
         for (rel, d) in &self.drawings {
             if d.dirty {
@@ -1186,7 +1186,7 @@ impl ShaleApp {
     fn save_mail_draft_at_exit(&mut self) {
         if let Err(e) = self.mail.flush_draft() {
             match self.mail.draft_rescue_text() {
-                Some((rel, text)) => match crate::recovery::rescue(&self.recovery_root, &crate::mail_store::today_string(), &rel, text.as_bytes()) {
+                Some((rel, text)) => match crate::recovery::rescue(&self.recovery_root, &crate::mail::store::today_string(), &rel, text.as_bytes()) {
                     Ok(_) => eprintln!("the mail draft could not be saved ({e}); its text is in the recovery folder"),
                     Err(e2) => eprintln!("the mail draft could not be saved ({e}) and could not be rescued either: {e2}"),
                 },
