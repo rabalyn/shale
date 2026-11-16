@@ -3102,3 +3102,52 @@ fn tab_focus_is_drawn_on_the_rows_of_drafts_and_outbox() {
         assert!(w.rect(mark).width() > 100.0, "it frames the whole row");
     }
 }
+
+impl W {
+    /// Tab until the frame of a row with this record key is drawn.
+    fn tab_to(&mut self, mark: &str) {
+        for _ in 0..80 {
+            self.frame(vec![Event::Key { key: Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+            self.frame(vec![]);
+            if self.has(mark) {
+                return;
+            }
+        }
+        panic!("Tab never reached {mark}");
+    }
+}
+
+// spec: MAIL-073
+#[test]
+fn tab_focus_is_drawn_on_the_rows_of_the_message_list() {
+    let (mut w, _smtp) = compose_world("tabfocus-list", 30);
+    assert!(!w.has("mail:row-focus:0") && !w.has("mail:row-focus:1"), "no frame before Tab moves to a row");
+    w.tab_to("mail:row-focus:0");
+    assert!(w.rect("mail:row-focus:0").width() > 100.0, "it frames the whole row");
+    assert_eq!(w.app.mail.cursor, Some(0), "the framed row is the cursor");
+}
+
+// spec: MAIL-224
+#[test]
+fn the_mail_keys_work_while_tab_has_put_the_focus_on_a_row() {
+    let (mut w, _smtp) = compose_world("tabkeys", 30);
+    let acct = w.account.id.clone();
+    Outbox::new(&w.app.mail.root).save_draft(&crate::mail::outbox::tests::draft(&acct, "Focus draft", "words"), NOW).unwrap();
+    w.click(&format!("mail:drafts:{acct}"));
+    w.frame(vec![]);
+    w.tab_to("mail:draft-focus:0");
+    assert!(w.app.mail.compose.is_none());
+    w.press_text(Key::E, Modifiers::NONE, "e");
+    assert!(w.app.mail.compose.is_some(), "e opens the draft although a row has the focus");
+    assert_eq!(w.compose_field("subject"), "Focus draft");
+}
+
+// spec: MAIL-224
+#[test]
+fn a_key_typed_in_a_text_field_stays_with_the_field_and_triggers_no_mail_action() {
+    let (mut w, _smtp) = compose_world("tabtext", 30);
+    w.click("mail:search");
+    w.press_text(Key::C, Modifiers::NONE, "c");
+    assert!(w.app.mail.compose.is_none(), "c is typed, it does not start a new mail");
+    assert_eq!(w.app.mail.query, "c");
+}

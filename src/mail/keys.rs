@@ -35,6 +35,8 @@ enum MenuCmd {
 #[derive(Default)]
 pub struct Kbd {
     pub menu: Option<RowMenu>,
+    /// The row of a list that had the Tab focus when the view was last drawn (MAIL-224).
+    pub row_focus: Option<eframe::egui::Id>,
     /// The marked entry of the window of the unsent copies.
     pub unsent_sel: usize,
     /// The current key of every action of the mail view, for the hints (MAIL-072); refreshed each frame.

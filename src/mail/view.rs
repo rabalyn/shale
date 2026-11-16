@@ -155,6 +155,7 @@ impl MailView {
 
     fn handle_keys(&mut self, ui: &mut Ui, cfg: &Config, keys: &mut Keymap, modal_open: bool, actions: &mut Vec<MailAction>) {
         let ctx = ui.ctx().clone();
+        let row_focus = self.kbd.row_focus.take();
         // while a mail is being written the compose window has the keyboard (MAIL-150), and the
         // left sidebar may have it too
         if self.compose.is_some() || self.away {
@@ -175,8 +176,10 @@ impl MailView {
             }
             return;
         }
-        // another field (or a dialog) has the keyboard: j and k type, they do not browse
-        if modal_open || self.mover.is_some() || self.forever.is_some() || ctx.memory(|m| m.focused().is_some()) {
+        // another field (or a dialog) has the keyboard: j and k type, they do not browse; a row of
+        // a list that Tab moved to does not take the keys away (MAIL-224)
+        let other_focus = ctx.memory(|m| m.focused()).is_some_and(|f| Some(f) != row_focus);
+        if modal_open || self.mover.is_some() || self.forever.is_some() || other_focus {
             return;
         }
         let (enter, esc) = ui.input_mut(|i| (i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
@@ -714,6 +717,7 @@ impl MailView {
                 };
                 let r = self.paint_row(ui, i, &m, now, rects);
                 rec(rects, format!("mail:row:{i}"), &r);
+                self.tab_focus(ui, &r, "mail:row-focus", i, rects);
                 if r.clicked() {
                     clicked = Some((i, ui.input(|i| i.modifiers.command)));
                 }
