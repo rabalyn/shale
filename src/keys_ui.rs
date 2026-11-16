@@ -750,7 +750,7 @@ mod tests {
             let mails = [(1u32, "Banana invoice"), (2, "Lunch")];
             let ops = mails.iter().map(|(uid, subject)| {
                 let headers = format!("From: Ann <ann@x.de>\r\nSubject: {subject}\r\n\r\n");
-                crate::mail_db::Op::message(store.header_only(&folder, 7, *uid, headers.as_bytes(), "", Some(1_700_000_000 + i64::from(*uid)), 100))
+                crate::mail_db::Op::message(store.header_only(&folder, 7, *uid, headers.as_bytes(), crate::mail_store::ServerMeta { flags: "", internal_date: Some(1_700_000_000 + i64::from(*uid)), size: 100 }))
             });
             store.commit(ops.collect()).unwrap();
         }

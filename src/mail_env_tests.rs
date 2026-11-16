@@ -729,7 +729,7 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
     d.body = format!("{secret}\n");
     (d.sign, d.encrypt, d.standard) = (true, true, std);
     let ob = crate::outbox::Outbox::new(&dir);
-    let item = crate::mail_send::queue_with(&ob, &alice.g, &acct, &d, 0, now, &crate::mail_store::today_string(), &no_cancel()).expect("signed and encrypted");
+    let item = crate::mail_send::queue_with(&ob, &alice.g, &acct, &d, crate::mail_send::SendTiming { undo_secs: 0, now, date: &crate::mail_store::today_string() }, &no_cancel()).expect("signed and encrypted");
     let eml = ob.read_eml(&acct.id, &item.id).unwrap();
     assert!(!String::from_utf8_lossy(&eml).contains(&marker), "nothing readable in the outbox");
     let r = crate::mail_send::send_due(&ob, &store, &acct, &smtp, now);

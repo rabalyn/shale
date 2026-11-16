@@ -174,6 +174,14 @@ pub fn when_text(o: &Occ) -> String {
     }
 }
 
+/// One event chip to draw: where, which occurrence, the key that tells it apart, and whether it shows its time.
+struct ChipSpec<'a> {
+    rect: Rect,
+    occ: &'a Occ,
+    key: String,
+    show_time: bool,
+}
+
 impl CalendarView {
     pub fn new(size: Size) -> Self {
         let today = t::today();
@@ -331,7 +339,8 @@ impl CalendarView {
         }
     }
 
-    fn chip(&mut self, ui: &mut Ui, rect: Rect, o: &Occ, store: &CalendarStore, key: String, clicked: &mut Option<(Occ, Pos2)>, show_time: bool) {
+    fn chip(&mut self, ui: &mut Ui, chip: ChipSpec, store: &CalendarStore, clicked: &mut Option<(Occ, Pos2)>) {
+        let ChipSpec { rect, occ: o, key, show_time } = chip;
         let Some(e) = store.event(o) else { return };
         let col = parse_hex(&store.sources[o.source].color);
         let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -453,7 +462,7 @@ impl CalendarView {
                         let cr = Rect::from_min_size(Pos2::new(r.min.x + 2.0, r.min.y + 19.0 + k as f32 * (chip_h + 2.0)), Vec2::new(r.width() - 4.0, chip_h));
                         let summary = store.event(o).map(|e| e.summary.clone()).unwrap_or_default();
                         let o2 = (*o).clone();
-                        self.chip(ui, cr, &o2, store, format!("event:{summary}:{d}"), clicked, true);
+                        self.chip(ui, ChipSpec { rect: cr, occ: &o2, key: format!("event:{summary}:{d}"), show_time: true }, store, clicked);
                     }
                     if list.len() > shown {
                         let mr = Rect::from_min_size(Pos2::new(r.min.x + 2.0, r.min.y + 19.0 + shown as f32 * (chip_h + 2.0)), Vec2::new(r.width() - 4.0, chip_h));
@@ -486,7 +495,7 @@ impl CalendarView {
                 let time = if o.all_day { "all day".to_string() } else { format!("{}–{}", t::hhmm(t::utc_to_local(o.start).1), t::hhmm(t::utc_to_local(o.end).1)) };
                 let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
                 let label_o = Occ { all_day: o.all_day, ..o.clone() };
-                self.chip(ui, r, &label_o, store, format!("agenda:{summary}"), clicked, false);
+                self.chip(ui, ChipSpec { rect: r, occ: &label_o, key: format!("agenda:{summary}"), show_time: false }, store, clicked);
                 ui.painter().text(r.right_center() - Vec2::new(6.0, 0.0), Align2::RIGHT_CENTER, time, FontId::proportional(11.0), if o.all_day { Color32::WHITE } else { theme::MUTED });
             }
         }
@@ -527,7 +536,7 @@ impl CalendarView {
                 for (k, o) in list.iter().take(rows).enumerate() {
                     let r = Rect::from_min_size(Pos2::new(lr.min.x + gutter + col_w * i as f32 + 1.0, lr.min.y + 2.0 + k as f32 * 18.0), Vec2::new(col_w - 2.0, 16.0));
                     let summary = store.event(o).map(|e| e.summary.clone()).unwrap_or_default();
-                    self.chip(ui, r, o, store, format!("event:{summary}:{}", days[i]), clicked, false);
+                    self.chip(ui, ChipSpec { rect: r, occ: o, key: format!("event:{summary}:{}", days[i]), show_time: false }, store, clicked);
                 }
             }
         }

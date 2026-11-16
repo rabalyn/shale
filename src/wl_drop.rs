@@ -88,6 +88,9 @@ pub struct Got {
     pub closed: bool,
 }
 
+/// Everything read for the offered kinds: each kind with what came for it.
+type KindData = Vec<(String, Got)>;
+
 /// Kinds read while the drag is still over the window (some bridges, like the one for X11
 /// programs, end the transfer soon after the drop). Not the file list: a mail program may
 /// write the promised file for it, which should only happen on a drop.
@@ -340,7 +343,7 @@ struct State {
     /// the drag over the window: its offer and what Shale made of it
     current: Option<(wl_data_offer::WlDataOffer, Drag)>,
     /// data read while dragging, for the current offer
-    prefetch: Option<(ObjectId, std::thread::JoinHandle<Vec<(String, Got)>>)>,
+    prefetch: Option<(ObjectId, std::thread::JoinHandle<KindData>)>,
 }
 
 impl State {

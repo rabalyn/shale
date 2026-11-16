@@ -882,7 +882,13 @@ fn fifty_thousand_messages_draw_quickly_and_a_steady_frame_runs_no_query() {
                 .map(|i| {
                     let uid = chunk * 5000 + i + 1;
                     let headers = format!("From: Sender {} <s{}@x.de>\r\nSubject: Message number {uid}\r\n\r\n", uid % 97, uid % 97);
-                    crate::mail_db::Op::message(store.header_only(&folder, 7, uid, headers.as_bytes(), if uid % 3 == 0 { "\\Seen" } else { "" }, Some(1_700_000_000 + i64::from(uid) * 60), 1000))
+                    crate::mail_db::Op::message(store.header_only(
+                        &folder,
+                        7,
+                        uid,
+                        headers.as_bytes(),
+                        crate::mail_store::ServerMeta { flags: if uid % 3 == 0 { "\\Seen" } else { "" }, internal_date: Some(1_700_000_000 + i64::from(uid) * 60), size: 1000 },
+                    ))
                 })
                 .collect();
             store.commit(ops).unwrap();
@@ -2925,6 +2931,9 @@ fn two_attachments(day: u32) -> Vec<u8> {
     format!("From: Carol <carol@x.de>\r\nTo: ada@example.com\r\nSubject: Two files\r\nDate: {day:02} Nov 2026 09:30:00 +0100\r\nMessage-ID: <two@fake>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b2\"\r\n\r\n--b2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBoth files are attached.\r\n--b2\r\nContent-Type: text/plain; name=\"a.txt\"\r\nContent-Disposition: attachment; filename=\"a.txt\"\r\nContent-Transfer-Encoding: base64\r\n\r\nSGVsbG8gQQ==\r\n--b2\r\nContent-Type: text/plain; name=\"b.txt\"\r\nContent-Disposition: attachment; filename=\"b.txt\"\r\nContent-Transfer-Encoding: base64\r\n\r\nSGVsbG8gQg==\r\n--b2--\r\n").into_bytes()
 }
 
+/// What the pretend opener was given: the target and the bytes of the file it points to.
+type OpenedTarget = (String, Vec<u8>);
+
 // spec: MAIL-065
 #[test]
 fn o_opens_the_selected_attachment_through_the_opener_and_the_bracket_key_cycles_through_several() {
@@ -2933,7 +2942,7 @@ fn o_opens_the_selected_attachment_through_the_opener_and_the_bracket_key_cycles
     w.sync_and_wait();
     w.until("the Inbox is open", |a| a.mail.total == 4);
     // a pretend program: nothing starts, the opener tells what it was given
-    let opened: Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>> = Arc::default();
+    let opened: Arc<std::sync::Mutex<Vec<OpenedTarget>>> = Arc::default();
     let seen = opened.clone();
     let _program = crate::opener::install_test_browser(Box::new(move |target| {
         let bytes = std::fs::read(target).unwrap_or_default();

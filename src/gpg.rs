@@ -578,12 +578,15 @@ impl Gnupg {
     }
 }
 
+/// What an opaque signed message holds: its content and the signatures on it.
+type SignedContent = (Vec<u8>, Vec<SigStatus>);
+
 impl Gnupg {
     /// An opaque signed message (S/MIME `signed-data`, where the content is inside the signature): its content and
     /// signatures, from one `--verify --output -` call. That call never uses a secret key and opens no dialog, so a
     /// message that merely *says* it is signed cannot get a decryption started without the person's consent.
     /// None: not a readable signed message.
-    pub fn extract_signed(&self, s: CryptoStandard, data: &[u8], cancel: &AtomicBool) -> Result<Option<(Vec<u8>, Vec<SigStatus>)>, GpgError> {
+    pub fn extract_signed(&self, s: CryptoStandard, data: &[u8], cancel: &AtomicBool) -> Result<Option<SignedContent>, GpgError> {
         let run = self.run(s, &["--verify", "--output", "-"], data, SHORT, cancel)?;
         let sigs = signatures(&run.status);
         if sigs.is_empty() || run.has("DECRYPTION_FAILED") || run.has("BEGIN_DECRYPTION") {

@@ -263,7 +263,7 @@ pub fn sync_account(store: &MailStore, account_id: &str, display: &str, connecto
     let result = Mutex::new(SyncSummary::default());
     std::thread::scope(|s| {
         for _ in 0..workers {
-            s.spawn(|| worker(store, connector, opts, &queue, &first, &result, progress, cancel));
+            s.spawn(|| worker(store, connector, opts, &WorkerShared { queue: &queue, first: &first, result: &result }, progress, cancel));
         }
     });
     let mut done = result.into_inner().unwrap_or_else(|e| e.into_inner());
@@ -312,11 +312,14 @@ pub fn discover_folders(store: &MailStore, connector: &dyn Connector, account_id
 /// this text to ask for the password (MAIL-059).
 pub const NO_PASSWORD: &str = "no password for this account";
 
+/// Builds an account's connector, once, in the background job.
+type MakeConnector = Box<dyn FnOnce() -> Result<Arc<dyn Connector>, String> + Send>;
+
 /// Decides how to connect only when the first connection is made, so that slow things (the
 /// keyring) never run on the window's thread: the account's connector is built by `make` inside
 /// the background job, once.
 pub struct LazyConnector {
-    make: Mutex<Option<Box<dyn FnOnce() -> Result<Arc<dyn Connector>, String> + Send>>>,
+    make: Mutex<Option<MakeConnector>>,
     made: Mutex<Option<Result<Arc<dyn Connector>, String>>>,
 }
 
@@ -364,7 +367,16 @@ pub fn real_factory() -> ConnectorFactory {
     })
 }
 
-fn worker(store: &MailStore, connector: &dyn Connector, opts: &SyncOptions, queue: &Mutex<VecDeque<FolderRow>>, first: &Mutex<Option<Client>>, result: &Mutex<SyncSummary>, progress: &Sender<Progress>, cancel: &AtomicBool) {
+/// What the parallel workers of one sync share: the folders still to do, the connection that was
+/// already open, and the summary they all add to.
+struct WorkerShared<'a> {
+    queue: &'a Mutex<VecDeque<FolderRow>>,
+    first: &'a Mutex<Option<Client>>,
+    result: &'a Mutex<SyncSummary>,
+}
+
+fn worker(store: &MailStore, connector: &dyn Connector, opts: &SyncOptions, shared: &WorkerShared, progress: &Sender<Progress>, cancel: &AtomicBool) {
+    let WorkerShared { queue, first, result } = *shared;
     let mut client = first.lock().unwrap_or_else(|e| e.into_inner()).take();
     loop {
         if cancel.load(Ordering::SeqCst) {
@@ -584,7 +596,7 @@ pub fn fetch_folder_listing(store: &MailStore, connector: &dyn Connector, accoun
         client
             .uid_fetch_messages(chunk, Part::Headers, |f| {
                 if let Some(Body::Data(h)) = &f.body {
-                    ops.push(Op::message(store.header_only(&row, uv, f.uid, h, &f.flags.clone().unwrap_or_default(), f.internal_date, f.size.unwrap_or(0))));
+                    ops.push(Op::message(store.header_only(&row, uv, f.uid, h, crate::mail_store::ServerMeta { flags: &f.flags.clone().unwrap_or_default(), internal_date: f.internal_date, size: f.size.unwrap_or(0) })));
                 }
                 Ok(())
             })

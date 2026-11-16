@@ -119,7 +119,7 @@ pub(crate) fn sample_pdf() -> Vec<u8> {
     for i in 0..3 {
         let p = d.add_page(300.0, 200.0);
         d.page(p).rect(20.0, 20.0, 260.0, 160.0, Some(crate::pdfwrite::Rgba(40, 90, 200, 255)), None);
-        d.page(p).text(crate::pdfwrite::FontKind::Sans, 24.0, 40.0, 110.0, &format!("Page {}", i + 1), crate::pdfwrite::Rgba(255, 255, 255, 255), false, false);
+        d.page(p).text(crate::pdfwrite::TextStyle::plain(crate::pdfwrite::FontKind::Sans, 24.0, crate::pdfwrite::Rgba(255, 255, 255, 255)), 40.0, 110.0, &format!("Page {}", i + 1));
     }
     d.finish()
 }
