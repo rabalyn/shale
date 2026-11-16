@@ -173,7 +173,14 @@ pub fn paste_text_to_links(vault_root: &Path, text: &str, date: (i32, u32, u32))
 /// True if pasted text is nothing but one `<img …>` tag: what a browser puts on the clipboard next
 /// to the picture when an image is copied (egui pastes that text and never offers the picture).
 pub fn is_lone_img_tag(text: &str) -> bool {
-    let t = text.trim();
+    let mut t = text.trim();
+    // Firefox puts a `<meta http-equiv=…>` tag in front of the fragment
+    while t.len() > 5 && t[..5].eq_ignore_ascii_case("<meta") {
+        match t.find('>') {
+            Some(end) => t = t[end + 1..].trim_start(),
+            None => return false,
+        }
+    }
     t.len() > 5 && t[..4].eq_ignore_ascii_case("<img") && t[4..5].trim().is_empty() && t.ends_with('>') && t.matches('<').count() == 1
 }
 
@@ -417,6 +424,8 @@ mod tests {
     fn only_a_lone_img_tag_is_a_browser_picture_paste() {
         assert!(super::is_lone_img_tag("<img src=\"image.png\">"));
         assert!(super::is_lone_img_tag("  <IMG src=\"a.png\" alt=\"x\"/>\n"));
+        assert!(super::is_lone_img_tag(" <meta http-equiv=\"content-type\" content=\"text/html; charset=utf-8\"><img width=\"30\" src=\"https://x/logo.svg\" alt=\"Logo\" aria-hidden=\"true\">"));
+        assert!(!super::is_lone_img_tag("<meta charset=\"utf-8\">"));
         assert!(!super::is_lone_img_tag("<img>"));
         assert!(!super::is_lone_img_tag("text <img src=\"a.png\">"));
         assert!(!super::is_lone_img_tag("<img src=\"a.png\"><img src=\"b.png\">"));
