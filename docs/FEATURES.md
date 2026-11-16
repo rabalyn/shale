@@ -102,7 +102,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   strike and code without their markers, links as just their text, and only the line the cursor
   is in (and, with "Raw lines around the cursor", that many lines before and after, or all the
   lines of a selection) shows the raw markdown. The note stays editable; links still open with a
-  click and task boxes still tick.
+  click and task boxes still tick. A **table** away from the cursor is drawn as a real grid (also
+  in the reading view): borders, a bold header row, aligned columns, formatted cell text, long
+  text wrapping in its own column; click it, or move the cursor into it, to edit the raw rows.
 
   ![The Markdown preview](userguide/z_media/screenshots/editor-preview.png)
 

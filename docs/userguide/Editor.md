@@ -27,6 +27,11 @@ shows the raw markdown; with "Raw lines around the cursor" that many lines befor
 too (or all the lines of a selection). The note stays editable: links still open with a click
 and task boxes still tick.
 
+A table (`| a | b |` rows with a `|---|---|` line below the header) away from the cursor is drawn as
+a real grid: borders, a bold header row, columns aligned as `:---`, `:---:` or `---:` say, code,
+bold and links inside the cells, and long text wrapping inside its own column. Click the table,
+or move the cursor into it, and its raw rows come back to edit.
+
 ## Sound players
 
 ![[sound-player.png]]
