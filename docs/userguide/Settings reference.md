@@ -125,6 +125,7 @@ system keyring, never in this file):
 | `caches.mail_backups` | 3 (newest mail index backups kept) | same |
 | `caches.broken_days` | forever (damaged mail index copies) | same |
 | `caches.debug_log_mb` | 10 | same |
+| `caches.undo_days` | 30 (undo steps of notes, days) | same |
 
 ## Vault settings (`<vault>/.shale/settings.json`)
 

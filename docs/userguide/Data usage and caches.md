@@ -14,11 +14,11 @@ on disk. Back to [[Start here]].
   per account, drafts, outbox, calendars and recovered notes. Nothing here can be deleted from
   this window.
 - **Caches** are what Shale can build or fetch again: social pictures, the social post index,
-  the mail index and its backups, damaged copies of the mail index, learned tag words and the
-  keyboard debug log. Each row shows its size and has a **Clear** button.
+  the mail index and its backups, damaged copies of the mail index, learned tag words, the
+  keyboard debug log and the undo histories of notes (vim `u` / Ctrl+R). Each row shows its size and has a **Clear** button.
 - How long each cache is kept is a setting (on its row, and in Settings under "How long caches
   are kept"): social pictures 30 days and 500 MB, social posts 365 days and 10 000 per account,
-  the newest 3 mail index backups, damaged copies forever, the debug log 10 MB. Every value can
+  the newest 3 mail index backups, damaged copies forever, the debug log 10 MB, undo steps of notes 30 days. Every value can
   also be "forever" or "no limit". The keys are in [[Settings reference]] (`caches`).
 - A cleanup runs a minute after the start and then daily. It never touches your notes, files or
   mail.
