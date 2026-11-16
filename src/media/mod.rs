@@ -170,6 +170,19 @@ pub fn paste_text_to_links(vault_root: &Path, text: &str, date: (i32, u32, u32))
     Some((links.join("\n"), msg))
 }
 
+/// True if pasted text is nothing but one `<img …>` tag: what a browser puts on the clipboard next
+/// to the picture when an image is copied (egui pastes that text and never offers the picture).
+pub fn is_lone_img_tag(text: &str) -> bool {
+    let t = text.trim();
+    t.len() > 5 && t[..4].eq_ignore_ascii_case("<img") && t[4..5].trim().is_empty() && t.ends_with('>') && t.matches('<').count() == 1
+}
+
+/// The picture on the system clipboard, if there is one.
+pub fn clipboard_image() -> Option<eframe::egui::ColorImage> {
+    let img = arboard::Clipboard::new().ok()?.get_image().ok()?;
+    Some(eframe::egui::ColorImage::from_rgba_unmultiplied([img.width, img.height], &img.bytes))
+}
+
 /// Saves a pasted picture as PNG in the media folder; returns the link to insert.
 pub fn paste_image_to_link(vault_root: &Path, img: &eframe::egui::ColorImage, date: (i32, u32, u32)) -> Result<String, String> {
     let png = png_bytes(img)?;
@@ -398,6 +411,17 @@ pub fn link_for(rel: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    // spec: EDIT-019
+    #[test]
+    fn only_a_lone_img_tag_is_a_browser_picture_paste() {
+        assert!(super::is_lone_img_tag("<img src=\"image.png\">"));
+        assert!(super::is_lone_img_tag("  <IMG src=\"a.png\" alt=\"x\"/>\n"));
+        assert!(!super::is_lone_img_tag("<img>"));
+        assert!(!super::is_lone_img_tag("text <img src=\"a.png\">"));
+        assert!(!super::is_lone_img_tag("<img src=\"a.png\"><img src=\"b.png\">"));
+        assert!(!super::is_lone_img_tag("<imgx src=\"a.png\">"));
+    }
+
     use super::*;
 
     // spec: VAULT-012

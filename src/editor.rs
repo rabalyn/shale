@@ -674,6 +674,12 @@ impl NoteEditor {
     /// (EDIT-019): the paste event is turned into a paste of the link, so the text box (or vim's `p`)
     /// puts it in as any other paste. Other pastes are left alone.
     fn paste_media(&mut self, ui: &mut Ui, vault: &Vault) -> Option<EditorAction> {
+        self.paste_media_with(ui, vault, crate::media::clipboard_image)
+    }
+
+    /// `paste_media` with the clipboard's picture given: a pasted text that is only an `<img>` tag
+    /// (a picture copied in a browser) is replaced by that picture if the clipboard has one.
+    fn paste_media_with(&mut self, ui: &mut Ui, vault: &Vault, clipboard_image: impl Fn() -> Option<egui::ColorImage>) -> Option<EditorAction> {
         if !ui.ctx().memory(|m| m.has_focus(self.id)) {
             return None;
         }
@@ -683,6 +689,13 @@ impl NoteEditor {
         let mut messages: Vec<String> = Vec::new();
         ui.input_mut(|i| {
             i.events.retain_mut(|e| {
+                if let egui::Event::Paste(t) = e {
+                    if crate::media::is_lone_img_tag(t) {
+                        if let Some(img) = clipboard_image() {
+                            *e = egui::Event::PasteImage(std::sync::Arc::new(img));
+                        }
+                    }
+                }
                 let links = match e {
                     egui::Event::PasteImage(img) => match crate::media::paste_image_to_link(&vault.root, img, date) {
                         Ok(link) => {
@@ -2400,6 +2413,39 @@ mod tests {
         let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste("just text\nfile:///no/such.png".into())]);
         assert!(a.is_none() && text == "just text\nfile:///no/such.png", "{text}");
         let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-019
+    #[test]
+    fn a_pasted_img_tag_becomes_the_clipboards_picture() {
+        let (v, d) = vault_for_tests("imgtag");
+        let (y, m, day) = crate::media::local_date();
+        let stamp = format!("z_media/{y:04}/{m:02}/{:02}{m:02}{day:02}_", y.rem_euclid(100));
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut ed = NoteEditor::new(egui::Id::unique("imgtag-ed"));
+        let mut text = String::from("ab");
+        ed.pending_cursor = Some(2);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        let mut paste = |ed: &mut NoteEditor, pic: bool| {
+            t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(t), events: vec![Event::Paste("<img src=\"image.png\">".into())], ..Default::default() };
+            let mut action = None;
+            let _ = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.memory_mut(|m| m.request_focus(ed.id));
+                    action = ed.paste_media_with(ui, &v, || pic.then(|| egui::ColorImage::from_rgba_unmultiplied([1, 1], &[1, 2, 3, 255])));
+                });
+            });
+            action
+        };
+        // no picture on the clipboard: the text stays a text paste
+        assert!(paste(&mut ed, false).is_none());
+        // a picture: saved, and the paste is the link
+        assert_eq!(pasted_toast(paste(&mut ed, true)), "Saved the pasted picture to the media folder");
+        assert!(d.join(format!("{stamp}Pasted image.png")).exists());
         let _ = std::fs::remove_dir_all(&d);
     }
 
