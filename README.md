@@ -139,7 +139,7 @@ and the **issues, which are the one list of open work**, live there; GitHub only
 releases ([ADR-0013](docs/decisions/0013-forgejo-and-issue-tracking.md), FORGE rules in
 [engineering.md](docs/spec/engineering.md)). Checks run on the Forgejo runner
 (`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012) and tests macOS and
-Windows (BUILD-017).
+Windows (BUILD-017); a red run there is reported back as a Forgejo issue (BUILD-020).
 
 ## Build and run
 
@@ -261,7 +261,8 @@ cargo test
 The tests also run against a real vault if there is one: put notes, drawings and files into
 `notes/` next to `Cargo.toml` (it is not committed), or point `SHALE_TEST_VAULT` at a folder.
 Each test works on a copy, so the vault itself is never changed. Without such a folder those
-tests pass with a note.
+tests pass with a note. On macOS and Linux the test of `scripts/report-github-ci.sh` (BUILD-020) needs
+`sh`, `curl` and `jq` on the path and fails with a message that says so when one is missing.
 
 CI also measures line coverage (`cargo llvm-cov`; gaps and the ratchet in
 [docs/coverage.md](docs/coverage.md)) and runs the real-server CalDAV and mail suites in podman

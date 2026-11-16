@@ -35,6 +35,9 @@
    runner (a Mac mini M2 with Asahi Linux) cannot test. So every commit of `main` that passed
    Forgejo's CI is also pushed to GitHub, where only macOS and Windows jobs run (FORGE-003,
    BUILD-005, BUILD-016). Feature branches and pull requests still never go to GitHub.
+   *Amended 2026-11-16 (raba/shale#94):* a red macOS or Windows run is reported back as a Forgejo
+   issue by a scheduled Forgejo workflow that reads the (public) repository's runs from GitHub, so
+   GitHub holds no Forgejo token and the homelab needs no inbound access (BUILD-020).
 4. **Forgejo issues are the one to-do list.** Every open to-do (a SHOULD BE spec row with
    planned work, a bug, an owner note, a follow-up found while working) is an open issue.
    `open-points.md` keeps undecided *questions*; `TO-TELL.md` and similar notes are input that

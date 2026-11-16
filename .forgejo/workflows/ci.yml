@@ -120,11 +120,12 @@ jobs:
           sh .github/check-ai-notice.sh
           sh .github/test-check-ai-notice.sh
 
-      - name: Libraries for the window (Wayland, X11, OpenGL)
+      # jq: the test of scripts/report-github-ci.sh runs the script (BUILD-020)
+      - name: Libraries for the window (Wayland, X11, OpenGL) and jq
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
-            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev >/dev/null
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq >/dev/null
 
       - name: Toolchain
         run: |
@@ -298,11 +299,12 @@ jobs:
             git checkout -q FETCH_HEAD
           fi
 
-      - name: Libraries for the window (Wayland, X11, OpenGL)
+      # jq: the test of scripts/report-github-ci.sh runs the script (BUILD-020)
+      - name: Libraries for the window (Wayland, X11, OpenGL) and jq
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
-            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev >/dev/null
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq >/dev/null
 
       - name: Install cargo-llvm-cov
         run: |
@@ -427,6 +429,7 @@ jobs:
   # .github/workflows/, raba/shale#52), kept as the Forgejo Actions secret MIRROR_DEPLOY_KEY (the
   # name is from the deploy key it replaced; Forgejo refuses names that start with GITHUB_).
   # Without it the job says so and fails.
+  # How those runs end is reported back by the scheduled workflow github-report.yml.
   mirror:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

@@ -1,0 +1,63 @@
+# Reports a red macOS or Windows run on GitHub back to Forgejo as an issue (BUILD-020, raba/shale#94).
+# `mirror` in ci.yml pushes every green `main` to GitHub, where .github/workflows/build.yml builds
+# and tests it on macOS and Windows. This workflow asks GitHub how those runs ended and opens an
+# issue for a red one (scripts/report-github-ci.sh has the rules).
+#
+# Why a schedule and not a waiting step in `mirror`: a GitHub run takes 2 to 18 minutes, and waiting
+# for it would hold the homelab's one runner that long for every push. This job takes seconds. So a
+# failure is reported at most about 30 minutes plus the run's length after the push.
+#
+# No GitHub credential is needed: rabalyn/shale is public, so its runs can be read without one.
+# The Forgejo token is the Actions secret ISSUE_REPORT_TOKEN, a Forgejo access token of the owner
+# with write access to the issues of this repository (Forgejo refuses secret names that start with
+# GITHUB_). Where it is not set, the job's own token is tried; if that may not write issues, the job
+# fails and says so.
+name: github-report
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/rust:1.100.0-bookworm
+    steps:
+      - name: Trust the runner's extra CA, if any
+        run: |
+          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
+            update-ca-certificates >/dev/null 2>&1
+            echo "Added the runner's extra CA."
+          fi
+
+      - name: Check out
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "Workspace already populated (local act_runner exec)."
+          else
+            git init -q .
+            git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+            auth=()
+            if [ -n "$TOKEN" ]; then
+              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+            fi
+            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.sha }}"
+            git checkout -q FETCH_HEAD
+          fi
+
+      - name: jq (the script reads JSON with it)
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends jq >/dev/null
+
+      - name: Report GitHub's red runs of main
+        env:
+          FORGEJO_API: ${{ github.server_url }}/api/v1
+          FORGEJO_REPO: ${{ github.repository }}
+          FORGEJO_TOKEN: ${{ secrets.ISSUE_REPORT_TOKEN || github.token }}
+        run: sh scripts/report-github-ci.sh

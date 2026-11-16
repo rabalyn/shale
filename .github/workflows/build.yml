@@ -11,7 +11,8 @@
 # 2. macOS and Windows (BUILD-005, BUILD-017): the homelab cannot run those systems, so the jobs
 #    `macos` and `windows` lint, build and test Shale there on every push to `main` (the Forgejo
 #    mirror job pushes `main` here once Forgejo's CI has passed, BUILD-016) and by hand. They
-#    publish nothing; the Linux release job and the audit do not run for a push to `main`.
+#    publish nothing; the Linux release job and the audit do not run for a push to `main`. A red
+#    run is reported back to Forgejo as an issue by .forgejo/workflows/github-report.yml (BUILD-020).
 name: build
 
 on:
