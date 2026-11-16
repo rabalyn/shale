@@ -275,7 +275,9 @@ More, in the order of the table:
 - **`opener.rs` `launch`, `open_url`, `open_recovery_folder` (17 to 293)**: starting the desktop's
   opener. Kind: tooling. **Closed (#63):** `FakeXdgOpen` is a recording fake `xdg-open` for one test
   thread (it never touches `PATH`); `opener.rs::real_opener_tests` check every SEC-006 rule through
-  the real opener.
+  the real opener. **Closed (#77):** the same tests run on macOS (the fake replaces `open` like
+  `xdg-open`) and on Windows (the fake takes the place of the `ShellExecuteW` call and records the
+  file, SEC-022). Windows: compiled and linted from Linux, run only on the GitHub `windows` job.
 - **Closed (#56): `config.rs` `save`, `load`, `config_path` (a test-only path seam) and `vault_state.rs` `reload_settings`** (`adopt_legacy` was tested already). Original gap: reading and writing the settings file and the first-start
   migration. Test: point `XDG_CONFIG_HOME` at a temp dir; save, load, a corrupt file, a read-only
   directory. Kind: test.
