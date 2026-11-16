@@ -176,6 +176,11 @@ Other options:
 - The pictures of the user guide (`docs/userguide/z_media/screenshots/`) are made by
   `docs/screenshots/regen.sh` (all, or the names given) from `docs/screenshots/recipes.conf`; it runs each picture in a private X display
   (`xvfb-run`) and needs a built `shale` that is not older than the sources (`SHALE=…` to choose it).
+- `shale --record clip.webm` runs a `--keys` script like `--screenshot` does, but records every frame
+  as a short VP9 video (30 frames per second of app time, so the clip does not depend on the speed of the
+  machine); it needs `ffmpeg` and says so when it is missing. The clips of the user guide
+  (`docs/userguide/z_media/clips/`) are made by `docs/screenshots/regen-clips.sh` (all, or the names given)
+  from `docs/screenshots/clips.conf`.
 
 ## Keyboard
 
@@ -249,8 +254,9 @@ view. Letters work only while no text field has the keyboard. Every key can be c
 
 With **Vim-style editing** turned on in Settings, a note you go to is in normal mode:
 h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / N go to the next /
-previous hit; i a I A o O start typing and Esc stops; x deletes a character; v / V select (the
-motions extend the selection), then d cuts and y copies to the clipboard; p pastes it. The
+previous hit; i a I A o O start typing and Esc stops; x deletes a character; `dd` deletes the line;
+v / V select (the motions extend the selection), then d cuts and y copies to the clipboard; p pastes it;
+`u` undoes and Ctrl+R redoes (an insert session is one step, per note; the history is kept in the vault for 30 days). The
 status bar shows the mode. **Space Tab** goes back to the view this tab showed just before
 (a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name and **Space f g** searches notes, mail and posts.
 

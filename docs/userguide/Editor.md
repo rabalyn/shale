@@ -18,6 +18,8 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 
 ![[editor-preview.png]]
 
+![[preview-toggle.webm]]
+
 Turn it on with Settings → General → Appearance, or the eye icon in the top right of the
 editor (off by default). Every line is drawn rendered: headings at their size, bold, italic,
 strike and code without their markers, links as just their text. Only the line the cursor is in
