@@ -378,6 +378,8 @@ enum Art {
     Pdf(egui::TextureHandle, usize),
     /// the player of a sound file (MEDIA-001): the file, and the card's number among the embeds
     Audio(std::path::PathBuf),
+    /// a picture that is still a Git LFS pointer: the "Download" strip in its place (SYNC-020)
+    Download(std::path::PathBuf),
 }
 
 /// What the editor asks the app to do.
@@ -787,6 +789,11 @@ impl NoteEditor {
                     Vec2::new(w * k, h * k)
                 };
                 if crate::media::is_image(&p) {
+                    if self.media.notice(&abs).is_some() {
+                        let size = Vec2::new(max_w.min(520.0), 28.0);
+                        images.push((l.range.clone(), size.y + 6.0, Art::Download(abs.clone()), size));
+                        continue;
+                    }
                     let Some(tex) = crate::media::texture(ui.ctx(), &abs) else { continue };
                     let [tw, th] = tex.size_vec2().into();
                     let size = fit(tw, th, 420.0);
@@ -888,6 +895,9 @@ impl NoteEditor {
                         crate::drawing::paint_thumbnail(&painter, scene, rect.shrink(4.0), self.dark_canvas, &pics);
                     }
                     Art::Audio(abs) => crate::media::widget::paint(ui, rect, &self.media, abs, rel, id),
+                    Art::Download(abs) => {
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_not_downloaded(ui, &self.media, abs));
+                    }
                     Art::Pdf(tex, total) => {
                         painter.image(tex.id(), rect, uv, Color32::WHITE);
                         painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Outside);

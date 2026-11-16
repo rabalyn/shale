@@ -122,6 +122,19 @@ pub fn broken_name(path: &Path) -> PathBuf {
 // ---------------------------------------------------------------------------------------------
 // The vault's own files
 
+/// When the files stored in Git LFS are downloaded (`sync.lfs_download`, SYNC-020).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LfsDownload {
+    /// `git lfs pull` after every successful sync.
+    Always,
+    /// A file is downloaded when it is played or shown and the person asks for it. Also what a
+    /// value this Shale does not know is read as.
+    #[serde(other)]
+    #[default]
+    OnDemand,
+}
+
 /// Git sync settings of a vault (ADR-0008, SYNC-015).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
@@ -134,13 +147,15 @@ pub struct SyncSettings {
     pub commit_prefix: String,
     /// Put after every commit message, as written.
     pub commit_suffix: String,
+    /// Download the files Git LFS holds on demand (default) or after every sync (SYNC-020).
+    pub lfs_download: LfsDownload,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
 
 impl Default for SyncSettings {
     fn default() -> Self {
-        SyncSettings { enabled: true, interval_minutes: 5, commit_prefix: String::new(), commit_suffix: String::new(), other: Map::new() }
+        SyncSettings { enabled: true, interval_minutes: 5, commit_prefix: String::new(), commit_suffix: String::new(), lfs_download: LfsDownload::default(), other: Map::new() }
     }
 }
 
@@ -390,6 +405,26 @@ mod tests {
         assert_eq!(s.people_dir, "Adressbuch");
         assert_eq!(s.sync.interval_minutes, 9);
         assert!(s.sync.enabled);
+    }
+
+    // spec: SYNC-020, CFG-006
+    #[test]
+    fn the_lfs_download_setting_defaults_to_on_demand_round_trips_and_needs_no_version_bump() {
+        // a file from before the setting: on demand, still version 1
+        let (old, newer) = parse::<VaultSettings>(br#"{"version": 1, "sync": {"interval_minutes": 9}}"#).unwrap();
+        assert!(!newer);
+        assert_eq!((old.version, old.sync.lfs_download), (1, LfsDownload::OnDemand));
+        assert_eq!(VaultSettings::CURRENT, 1, "adding a field with a default is no new file version");
+        // written as text, read back
+        let mut s = VaultSettings::default();
+        assert_eq!(serde_json::to_value(&s).unwrap()["sync"]["lfs_download"], "on_demand");
+        s.sync.lfs_download = LfsDownload::Always;
+        let json = serde_json::to_vec(&s).unwrap();
+        assert_eq!(serde_json::to_value(&s).unwrap()["sync"]["lfs_download"], "always");
+        assert_eq!(parse::<VaultSettings>(&json).unwrap().0.sync.lfs_download, LfsDownload::Always);
+        // a value this Shale does not know is read as the default instead of losing the whole file
+        let (odd, _) = parse::<VaultSettings>(br#"{"version": 1, "sync": {"lfs_download": "when_on_wifi", "interval_minutes": 9}}"#).unwrap();
+        assert_eq!((odd.sync.lfs_download, odd.sync.interval_minutes), (LfsDownload::OnDemand, 9));
     }
 
     fn file_tab(f: &str, pinned: bool) -> SavedTab {

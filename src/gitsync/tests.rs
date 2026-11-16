@@ -761,3 +761,74 @@ fn the_conflict_copy_of_an_lfs_file_is_stored_in_lfs_too() {
     env.git(&a, &["lfs", "pull", &format!("--include={copy_name}"), "--exclude="]);
     assert_eq!(crate::fsutil::read(a.join(&copy)).unwrap(), ours);
 }
+
+// spec: SYNC-020, VAULT-018
+#[test]
+fn the_download_asks_for_one_file_and_the_path_stays_in_the_vault() {
+    let args = |p: &str| lfs::pull_args(Path::new(p)).map(|a| a.iter().map(|s| s.to_string_lossy().into_owned()).collect::<Vec<_>>());
+    assert_eq!(args("Music/Song.mp3").unwrap(), ["lfs", "pull", "--include=Music/Song.mp3", "--exclude="]);
+    assert_eq!(args("./a/./b.ogg").unwrap()[2], "--include=a/b.ogg");
+    // glob characters match themselves, they do not widen the include
+    assert_eq!(args("Live [2024] *.mp3").unwrap()[2], "--include=Live ?2024? ?.mp3");
+    for bad in ["../Outside.mp3", "a/../../x.mp3", "/etc/passwd", "", "."] {
+        assert!(args(bad).is_err(), "{bad}");
+    }
+    assert!(args("../x").unwrap_err().contains("not a file in the vault"));
+    // `always`: only when the vault says so and the repository uses LFS
+    let dir = std::env::temp_dir().join(format!("shale-pull-after-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    use crate::vault_state::LfsDownload::{Always, OnDemand};
+    assert!(!lfs::pull_after_sync(Always, &dir), "no LFS lines, nothing to pull");
+    write(&dir, ".gitattributes", "*.mp3 filter=lfs diff=lfs merge=lfs -text\n");
+    assert!(lfs::pull_after_sync(Always, &dir));
+    assert!(!lfs::pull_after_sync(OnDemand, &dir), "on demand is the default");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// spec: SYNC-020
+#[test]
+fn a_download_without_git_lfs_or_outside_the_vault_says_why_and_changes_nothing() {
+    let env = Env::new("lfs-dl-missing");
+    let remote = env.bare();
+    let v = env.vault("v", &remote);
+    let pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\nsize 5\n";
+    write(&v, "Song.mp3", pointer);
+    let e = lfs::download(&env.git, &v, Path::new("Song.mp3"), &TreeLock::default()).unwrap_err();
+    assert!(e.contains("not installed") && e.contains("git-lfs.com"), "{e}");
+    assert_eq!(read(&v, "Song.mp3"), pointer);
+    let e = lfs::download(&env.git, &v, Path::new("../x.mp3"), &TreeLock::default()).unwrap_err();
+    assert!(e.contains("not a file in the vault"), "{e}");
+    let plain = env.folder("plain");
+    assert!(lfs::download(&env.git, &plain, Path::new("Song.mp3"), &TreeLock::default()).unwrap_err().contains("not a git repository"));
+    assert!(lfs::pull_all(&env.git, &v, &TreeLock::default()).unwrap_err().contains("not installed"));
+}
+
+// spec: SYNC-020
+#[test]
+fn a_pointer_is_downloaded_on_demand_from_the_remote_and_only_that_file() {
+    let Some(env) = Env::lfs("lfs-download") else { return };
+    let remote = env.bare();
+    let a = env.vault("a", &remote);
+    let (one, two) = (media(11), media(12));
+    crate::fsutil::write_atomic(&a.join("One.mp3"), &one).unwrap();
+    crate::fsutil::write_atomic(&a.join("Two.mp3"), &two).unwrap();
+    assert!(env.sync(&a).pushed);
+    // another computer: pointers only
+    let b = env.vault("b", &remote);
+    env.sync(&b);
+    assert!(lfs::parse_pointer(&crate::fsutil::read(b.join("One.mp3")).unwrap()).is_some());
+    let tree = TreeLock::default();
+    lfs::download(&env.git, &b, Path::new("One.mp3"), &tree).unwrap();
+    assert_eq!(crate::fsutil::read(b.join("One.mp3")).unwrap(), one);
+    assert!(lfs::parse_pointer(&crate::fsutil::read(b.join("Two.mp3")).unwrap()).is_some(), "only the file asked for");
+    assert!(tree.try_hold().is_some(), "the tree lock is free again");
+    assert_eq!(env.sync(&b).committed, 0, "the downloaded file is no change");
+    // the whole repository, as the setting `always` does after a sync
+    lfs::pull_all(&env.git, &b, &tree).unwrap();
+    assert_eq!(crate::fsutil::read(b.join("Two.mp3")).unwrap(), two);
+    // a file whose upload never happened is an error in words, not a silent pointer
+    let ghost = "version https://git-lfs.github.com/spec/v1\noid sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\nsize 5\n";
+    write(&b, "Ghost.mp3", ghost);
+    let e = lfs::download(&env.git, &b, Path::new("Ghost.mp3"), &tree).unwrap_err();
+    assert!(!e.is_empty(), "{e}");
+}

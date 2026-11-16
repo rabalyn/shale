@@ -60,11 +60,24 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     name.wrap.max_rows = 1;
     name.wrap.break_anywhere = true;
     painter.galley(Pos2::new(x0, rect.top() + 10.0), painter.layout_job(name), theme::TEXT_STRONG);
+    let mut download_link = None;
     if let Some(m) = &v.message {
-        let colour = if v.unplayable { theme::LINK_MISSING } else { theme::MUTED };
+        let failed = v.download.as_ref().is_some_and(|d| d.error.is_some());
+        let colour = if v.unplayable || failed { theme::LINK_MISSING } else { theme::MUTED };
         let mut job = egui::text::LayoutJob::simple(m.clone(), egui::FontId::proportional(12.0), colour, width);
         job.wrap.max_rows = 1;
-        painter.galley(Pos2::new(x0, rect.top() + 29.0), painter.layout_job(job), colour);
+        let galley = painter.layout_job(job);
+        let end = x0 + galley.size().x;
+        painter.galley(Pos2::new(x0, rect.top() + 29.0), galley, colour);
+        if v.download.as_ref().is_some_and(|d| !d.running) {
+            download_link = Some(paint_download_link(ui, &painter, Pos2::new(end + 6.0, rect.top() + 29.0), x1, id));
+        } else if v.busy && v.download.is_some() {
+            egui::Spinner::new().size(12.0).paint_at(ui, Rect::from_min_size(Pos2::new(end + 6.0, rect.top() + 30.0), Vec2::splat(12.0)));
+        }
+    }
+    if download_link.is_some_and(|l| l.clicked()) {
+        media.download(abs);
+        ctx.request_repaint();
     }
 
     // progress bar
@@ -149,6 +162,45 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     if button.hovered() {
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     }
+}
+
+/// "— Download" after the "Not downloaded (12 MB)" text (SYNC-020); the link's response.
+fn paint_download_link(ui: &Ui, painter: &Painter, at: Pos2, right: f32, id: Id) -> Response {
+    let galley = painter.layout_no_wrap("— Download".into(), egui::FontId::proportional(12.0), theme::ACCENT);
+    let rect = Rect::from_min_size(at, galley.size()).intersect(Rect::everything_left_of(right.max(at.x + 1.0)));
+    let link = ui.interact(rect, id.with("download"), Sense::click());
+    link.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Download"));
+    painter.galley(at, galley, theme::ACCENT);
+    if link.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    link
+}
+
+/// A picture that is still an LFS pointer: "Not downloaded (12 MB) — Download", or the spinner
+/// while it comes (SYNC-020). None when the file is real, so the caller shows it as it does.
+pub fn show_not_downloaded(ui: &mut Ui, media: &MediaPlayer, abs: &Path) -> Option<Response> {
+    let n = media.notice(abs)?;
+    let name = abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let failed = n.error.is_some();
+    let mut clicked = false;
+    let r = ui
+        .horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("{name}: {}", n.line())).color(if failed { theme::LINK_MISSING } else { theme::MUTED }));
+            if n.running {
+                ui.spinner();
+            } else {
+                clicked = ui.link("Download").clicked();
+            }
+        })
+        .response;
+    if clicked {
+        media.download(abs);
+    }
+    if n.running {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+    }
+    Some(r)
 }
 
 fn paint_art(painter: &Painter, art: Rect, v: &View) {

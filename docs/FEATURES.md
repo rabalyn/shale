@@ -564,7 +564,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   own lines there stay), and converts media already in the repository in one commit; the old
   versions stay in the history (`git lfs migrate` removes them, by hand). Every sync uploads the
   files to the remote's LFS store before it pushes. Other computers get small pointer files and
-  download a file when it is needed. A conflict copy of a media file is stored in LFS too. On a
+  download a file when it is needed: a sound or picture that is still a pointer shows "Not
+  downloaded (12 MB) — Download" (pressing play downloads first, then plays; a spinner shows while
+  it runs and a failure is said in words). Settings → Git sync has "Download media files after every
+  sync" (vault setting `sync.lfs_download`: `on_demand`, the default, or `always`). A conflict copy of a media file is stored in LFS too. On a
   computer without git-lfs, a vault that stores media with LFS is not synced (nothing is
   committed) and the settings say why.
 
