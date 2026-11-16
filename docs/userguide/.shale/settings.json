@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "people_dir": "People",
+  "sync": {
+    "enabled": false
+  }
+}

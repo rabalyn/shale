@@ -4,6 +4,7 @@
 
 use crate::config::Config;
 use crate::keys::Action as KeyAction;
+use crate::mail::compose::Kind;
 use crate::mail::compose_ui::{LocalOut, LocalView};
 use crate::mail::outbox::{DraftInfo, Item, State};
 use crate::mail::ui::*;
@@ -31,6 +32,10 @@ enum MenuCmd {
     DiscardDraft,
 }
 
+/// The actions of the buttons of the open mail (MAIL-229).
+pub const BUTTON_KEYS: [KeyAction; 9] =
+    [KeyAction::MailBtnImport, KeyAction::MailBtnClose, KeyAction::MailBtnReply, KeyAction::MailBtnReplyAll, KeyAction::MailBtnForward, KeyAction::MailBtnRead, KeyAction::MailBtnFlag, KeyAction::MailBtnMove, KeyAction::MailBtnDelete];
+
 /// What the keyboard adds to the mail view, as one sub-state of `MailView`.
 #[derive(Default)]
 pub struct Kbd {
@@ -43,12 +48,68 @@ pub struct Kbd {
     pub scrolled_to: Option<crate::mail::ui::Pane>,
     /// The current key of every action of the mail view, for the hints (MAIL-072); refreshed each frame.
     pub hints: std::collections::HashMap<KeyAction, String>,
+    /// The letter of the Alt key of every button action, for the underline while Alt is held (MAIL-229); refreshed each frame.
+    pub mnemonics: std::collections::HashMap<KeyAction, char>,
 }
 
 impl MailView {
     /// Remember the keys of the registry as they are now (MAIL-072).
     pub(crate) fn note_hints(&mut self, keys: &crate::keys::Keymap) {
         self.kbd.hints = crate::keys::DEFS.iter().filter(|d| d.scope == crate::keys::Scope::MailView).filter_map(|d| keys.hint(d.action).map(|h| (d.action, h))).collect();
+        self.kbd.mnemonics = BUTTON_KEYS
+            .iter()
+            .filter_map(|&a| {
+                let c = keys.bindings(a).into_iter().find(|b| b.0.len() == 1 && b.0[0].alt && !b.0[0].ctrl && !b.0[0].shift)?.0[0];
+                let mut letters = c.key.symbol_or_name().chars();
+                letters.next().filter(|l| l.is_alphabetic() && letters.next().is_none()).map(|l| (a, l.to_ascii_lowercase()))
+            })
+            .collect();
+    }
+
+    /// The label of a button of the open mail; while Alt is held the first letter that is the Alt key
+    /// of its action is underlined, none when the label has no such letter (MAIL-229).
+    pub(crate) fn mnemonic(&self, ui: &egui::Ui, label: &str, a: KeyAction) -> egui::WidgetText {
+        let at = self.kbd.mnemonics.get(&a).filter(|_| ui.input(|i| i.modifiers.alt)).and_then(|l| label.char_indices().find(|(_, c)| c.to_ascii_lowercase() == *l));
+        let Some((i, c)) = at else { return label.into() };
+        let color = if ui.is_enabled() { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
+        let font_id = egui::TextStyle::Button.resolve(ui.style());
+        let mut job = egui::text::LayoutJob::default();
+        let plain = egui::text::TextFormat { font_id: font_id.clone(), color, ..Default::default() };
+        let marked = egui::text::TextFormat { underline: egui::Stroke::new(1.0, color), ..plain.clone() };
+        job.append(&label[..i], 0.0, plain.clone());
+        job.append(&label[i..i + c.len_utf8()], 0.0, marked);
+        job.append(&label[i + c.len_utf8()..], 0.0, plain);
+        job.into()
+    }
+
+    /// An Alt key of a button of the open mail (MAIL-229): the same as a click on that button.
+    /// Nothing happens while no mail is open or a list of the outbox is shown.
+    pub(crate) fn button_key(&mut self, cfg: &Config, a: KeyAction, actions: &mut Vec<MailAction>) {
+        if self.open.is_none() || self.local_view.is_some() {
+            return;
+        }
+        match a {
+            KeyAction::MailBtnImport => {
+                let t = self.import_targets();
+                if !t.is_empty() {
+                    actions.push(MailAction::Import(t));
+                }
+            }
+            KeyAction::MailBtnClose => {
+                self.close_message();
+                if self.pane == Pane::Message {
+                    self.pane = Pane::List;
+                }
+            }
+            KeyAction::MailBtnReply => self.start_reply(Kind::Reply),
+            KeyAction::MailBtnReplyAll => self.start_reply(Kind::ReplyAll),
+            KeyAction::MailBtnForward => self.start_reply(Kind::Forward),
+            KeyAction::MailBtnRead => self.toggle_read(cfg),
+            KeyAction::MailBtnFlag => self.toggle_flag(cfg),
+            KeyAction::MailBtnMove => self.open_mover(),
+            KeyAction::MailBtnDelete => self.delete_selected(cfg),
+            _ => {}
+        }
     }
 
     /// The tip of a control whose action has a key: `text (key)`, or `text` when the key is unbound.

@@ -84,6 +84,14 @@ impl ShaleApp {
         } else {
             None
         };
+        if id == CacheId::UndoHistories {
+            // the histories in memory lose their steps first; the job runs behind the gate of
+            // the undo files, and `usage_finished` writes again what it may have deleted
+            match kind {
+                Kind::Clear => self.undo.clear_loaded(),
+                Kind::Prune => self.undo.prune_loaded(),
+            }
+        }
         let wake = self.usage_wake();
         let retention = self.cfg.caches.clone();
         self.usage.start(id, kind, &retention, mail, wake);
@@ -94,6 +102,7 @@ impl ShaleApp {
         let r = &self.cfg.caches;
         self.social.index.keep_days = r.post_days.map(i64::from);
         self.social.index.keep_posts = r.posts_per_account.map(|n| n as usize);
+        self.undo.set_keep_days(r.undo_days);
         if let Some(s) = self.mail.ready_store() {
             s.set_backups_kept(r.mail_backups);
         }
@@ -133,6 +142,7 @@ impl ShaleApp {
                 // learn again at once (USE-015)
                 self.tag_learner.forget();
             }
+            (CacheId::UndoHistories, _) => self.undo.rewrite_loaded(),
             (CacheId::MailIndex, Kind::Clear) => {
                 let cfg = self.cfg.clone();
                 self.mail.end_rebuild(&cfg);

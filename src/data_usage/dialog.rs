@@ -46,6 +46,7 @@ pub fn fields(id: CacheId) -> Vec<Field> {
         ],
         CacheId::MailBackups => vec![Field { label: "Keep the newest", unit: "backups", none: "all", range: 1..=100, get: |r| &mut r.mail_backups }],
         CacheId::MailBroken => vec![Field { label: "Keep for", unit: "days", none: "forever", range: DAYS, get: |r| &mut r.broken_days }],
+        CacheId::UndoHistories => vec![Field { label: "Keep for", unit: "days", none: "forever", range: DAYS, get: |r| &mut r.undo_days }],
         CacheId::DebugLog => vec![Field { label: "At most", unit: "MB", none: "no limit", range: MB, get: |r| &mut r.debug_log_mb }],
         CacheId::MailIndex | CacheId::TagWords => vec![],
     }

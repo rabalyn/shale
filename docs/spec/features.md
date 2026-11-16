@@ -1,4 +1,4 @@
-# Spec: Tasks, drawings, calendar, import, people, tags, PDF, window layout (TASK, DRAW, CAL, SEC, IMP, PPL, TAG, PDF, LAY)
+# Spec: Tasks, drawings, calendar, import, people, tags, PDF, window layout, media (TASK, DRAW, CAL, SEC, IMP, PPL, TAG, PDF, LAY, MEDIA)
 
 **IS NOW** = true of the code today (⚠ = known defect, described as it behaves) ·
 **SHOULD BE** = agreed target. Format: [ADR-0001](../decisions/0001-spec-driven-development.md).
@@ -175,3 +175,22 @@ are deliberately not specced beyond their guarantees; their tests check the deta
 | LAY-015 | Every icon of a menubar has a glyph of its own: a panel shortcut (the local graph, the calendar panel) does not look like the main button of the same subject (Graph, Calendar). | IS NOW | `sidebar::Item::icon`, `layout::Icon` | `sidebar.rs::lay_015_every_icon_has_its_own_glyph` |
 | LAY-016 | The right sidebar can be resized by dragging its separator to the editor: it keeps the width it was released at (it does not snap back to its first width), within its limits. | IS NOW | `layout.rs::layout`, `sidebar_ui.rs::right_views` | `sidebar_tests.rs::lay_016_the_right_sidebar_keeps_the_width_it_is_dragged_to` |
 | LAY-017 | A middle click on the Mail, Feeds or Calendar icon of the ribbon opens that view in a new tab (like a middle click on a link in a browser), also when a tab already shows it; the current tab stays as it is. | IS NOW | `sidebar_ui.rs::ribbon_middle_click` | `sidebar_tests.rs::lay_016_a_middle_click_on_mail_feeds_or_calendar_opens_a_new_tab` |
+
+## Media playback (MEDIA)
+
+Decided in [ADR-0015](../decisions/0015-media-playback-and-storage.md). Audio: raba/shale#178,
+video: raba/shale#179.
+
+| ID | Rule | Status | Code | Test |
+|---|---|---|---|---|
+| MEDIA-001 | An embedded audio file (`![[…]]`: mp3, ogg, oga, opus, flac, m4a, aac, wav) or video file (mp4, m4v, mov, webm, mkv), any case of the extension, shows an inline player in the reading view, in the editor where pictures show inline (EDIT-006) and in the markdown preview (EDIT-016). Plain `[[…]]` links stay links. | SHOULD BE (#178) | — | — |
+| MEDIA-002 | Audio is decoded in pure Rust (`symphonia`) and played by Shale's own engine (`cpal`, `rubato` when the device rate differs): a decoder thread fills a ring buffer the output callback reads. Decoding and playing never block the window; a file that cannot be decoded shows a message in the player. | SHOULD BE (#178) | — | — |
+| MEDIA-003 | The player of an audio file shows its embedded cover (ID3 APIC, FLAC PICTURE, Vorbis `METADATA_BLOCK_PICTURE`, MP4 `covr`; the front cover first), scaled to at most 2048 px and cached per path and modification time; without a cover it shows a neutral tile with the file name. | SHOULD BE (#178) | — | — |
+| MEDIA-004 | A round play/pause button is drawn over the artwork; its opacity is the setting `media_play_button_opacity` (0.0–1.0, default 0.6, Settings → Appearance, global config) and it is fully opaque on hover. A click on it, or Space while the player has focus, toggles play and pause. | SHOULD BE (#178) | — | — |
+| MEDIA-005 | A progress bar shows elapsed and total time. A click jumps there; dragging shows the target and seeks once on release. Seek, start and pause ramp the gain over about 5 ms, so the output has no jump (click) and no sample beyond full scale. | SHOULD BE (#178) | — | — |
+| MEDIA-006 | A volume slider (0–100 %) and a mute toggle set one global volume (`media_volume`, default 0.8, global config) that every player uses; the gain is smoothed and never above 1.0. | SHOULD BE (#178) | — | — |
+| MEDIA-007 | Only one file plays at a time: starting a player pauses the one playing. Closing the note's tab or switching the vault stops playback. Nothing starts by itself unless `media_autoplay` (default off) is on; then the first media embed of a note starts when the note is opened. | SHOULD BE (#178) | — | — |
+| MEDIA-008 | The player keeps its state (position, playing) while the note is scrolled or the view switches between editor, preview and reading view; it repaints only while playing. | SHOULD BE (#178) | — | — |
+| MEDIA-009 | Video is decoded by the system `ffmpeg` (`ffprobe` for length and size), run with an argument list, no shell and stdin closed (as SYNC-001). The first frame is the thumbnail (cached per path and modification time). Playback shows frames from ffmpeg in the player and plays the sound through the MEDIA-002 engine; the sound's clock leads, frames are held or dropped to match. A seek restarts ffmpeg at the target (MEDIA-005 fades). | SHOULD BE (#179) | — | — |
+| MEDIA-010 | Without ffmpeg (BUILD-018) a video shows a placeholder tile with a play mark; a click opens the file with the system's default program for its type (`opener`); the settings say that ffmpeg is missing and where to get it. | SHOULD BE (#179) | — | — |
+| MEDIA-011 | The media tests run without a sound device: the engine renders into a buffer, and the fade, seek and volume rules are checked on it. Fixture files (each format, with and without cover, a short video) are small, committed, and made again by one script (DEV-004). | SHOULD BE (#178) | — | — |
