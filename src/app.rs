@@ -625,6 +625,13 @@ impl ShaleApp {
             }
         }
         self.media.configure(self.cfg.media_volume, self.cfg.media_play_button_opacity);
+        // videos that cannot play here (no ffmpeg) go to the system's player (MEDIA-010)
+        for abs in self.media.take_open_requests() {
+            let opened = self.vault.as_ref().map(|v| crate::opener::open_vault_file(&abs, &v.root));
+            if let Some(Err(e)) = opened {
+                self.toast(e);
+            }
+        }
     }
 
     pub fn toast(&mut self, msg: impl Into<String>) {

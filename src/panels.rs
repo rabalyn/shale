@@ -986,6 +986,11 @@ impl ShaleApp {
                             .on_hover_text("How opaque the round button is; it is fully opaque while the mouse is over it")
                             .changed();
                     });
+                    // videos are decoded by the system's ffmpeg (MEDIA-010)
+                    match self.media.ffmpeg() {
+                        Some(p) => ui.label(egui::RichText::new(format!("Videos are played with ffmpeg ({})", p.display())).small().color(theme::MUTED)),
+                        None => ui.label(egui::RichText::new(crate::media::ffmpeg::MISSING_HELP).small().color(theme::LINK_MISSING)),
+                    };
                     changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing: notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back").changed();
                     ui.horizontal(|ui| {
                         ui.label("Text size");

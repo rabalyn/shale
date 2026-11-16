@@ -49,6 +49,15 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![A sound player in a note](userguide/z_media/screenshots/sound-player.png)
 
+- **Video players.** `![[clip.mp4]]` (mp4, m4v, mov, webm, mkv) shows the same player with the
+  first frame as its picture; the picture is wider (16:9) and the controls sit below it. While it
+  plays the picture shows the video, and the sound goes through the same output as sound files.
+  A click on the progress bar restarts the video at that place. Videos are decoded by the
+  **ffmpeg on your computer** (`ffmpeg` and `ffprobe`; `apt install ffmpeg`, `brew install ffmpeg`,
+  `winget install ffmpeg`). Without it the video shows a tile with a play mark, a click opens the
+  file in your system's video player, and Settings → Appearance says that ffmpeg is missing and
+  where to get it.
+
 ![Reading view](userguide/z_media/screenshots/reading.png)
 
 - Ctrl+E switches between editing and the reading view.

@@ -867,8 +867,8 @@ impl NoteEditor {
                     let b = b.expand(20.0);
                     let size = fit(b.width().max(40.0), b.height().max(40.0), 420.0);
                     images.push((l.range.clone(), size.y + 6.0, Art::Scene(scene, p.clone()), size));
-                } else if crate::media::is_audio(&p) {
-                    let size = crate::media::widget::card_size(max_w);
+                } else if crate::media::is_media(&p) {
+                    let size = crate::media::widget::card_size(&abs, max_w);
                     images.push((l.range.clone(), size.y + 6.0, Art::Audio(abs.clone()), size));
                 } else if crate::pdf::view::is_pdf(&p) {
                     match crate::pdf::view::pdf_pages(ui.ctx(), &abs, 1) {

@@ -121,7 +121,7 @@ jobs:
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
-            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq git-lfs >/dev/null
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq git-lfs ffmpeg >/dev/null
 
       - name: Toolchain
         run: |
@@ -300,7 +300,7 @@ jobs:
         run: |
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
-            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq git-lfs >/dev/null
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq git-lfs ffmpeg >/dev/null
 
       - name: Install cargo-llvm-cov
         run: |

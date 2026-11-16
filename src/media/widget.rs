@@ -17,15 +17,29 @@ const PAD: f32 = 8.0;
 /// Radius of the round play/pause button.
 pub const BUTTON_RADIUS: f32 = 22.0;
 
-/// The size of a card in a place `avail_w` wide.
-pub fn card_size(avail_w: f32) -> Vec2 {
-    Vec2::new(avail_w.clamp(260.0, CARD_MAX_WIDTH), CARD_HEIGHT)
+/// A video card is wider and has its picture (16:9) above the controls (MEDIA-009).
+const VIDEO_MAX_WIDTH: f32 = 640.0;
+/// Below a video's picture: name, progress bar and volume.
+const VIDEO_CONTROLS: f32 = 108.0;
+
+/// The size of the card of `abs` in a place `avail_w` wide.
+pub fn card_size(abs: &Path, avail_w: f32) -> Vec2 {
+    if super::is_video(abs) {
+        let w = avail_w.clamp(260.0, VIDEO_MAX_WIDTH);
+        Vec2::new(w, PAD + video_art_height(w) + VIDEO_CONTROLS)
+    } else {
+        Vec2::new(avail_w.clamp(260.0, CARD_MAX_WIDTH), CARD_HEIGHT)
+    }
+}
+
+fn video_art_height(card_w: f32) -> f32 {
+    (card_w - 2.0 * PAD) * 9.0 / 16.0
 }
 
 /// Lay out a card in the flow of `ui` and draw it.
 pub fn show(ui: &mut Ui, media: &MediaPlayer, abs: &Path, owner: &Path) -> Response {
     let id = ui.auto_id_with(("media-card", abs));
-    let (rect, resp) = ui.allocate_exact_size(card_size(ui.available_width()), Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(card_size(abs, ui.available_width()), Sense::hover());
     paint(ui, rect, media, abs, owner, id);
     resp
 }
@@ -40,8 +54,18 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     let card = ui.interact(rect, id, Sense::click());
 
     // --- artwork and the round button
-    let art = Rect::from_min_size(rect.min + Vec2::splat(PAD), Vec2::splat(ART));
+    let video = super::is_video(abs);
+    let art = if video { Rect::from_min_size(rect.min + Vec2::splat(PAD), Vec2::new(rect.width() - 2.0 * PAD, video_art_height(rect.width()))) } else { Rect::from_min_size(rect.min + Vec2::splat(PAD), Vec2::splat(ART)) };
+    // the controls: beside the artwork of a sound, below the picture of a video
+    let top = if video { art.bottom() - 2.0 } else { rect.top() };
     paint_art(&painter, art, &v);
+    if v.external {
+        // no ffmpeg: the whole tile opens the video in the system's player (MEDIA-010)
+        let tile = ui.interact(art, id.with("tile"), Sense::click());
+        if tile.clicked() {
+            media.toggle(&ctx, abs, owner);
+        }
+    }
     let button = ui.interact(Rect::from_center_size(art.center(), Vec2::splat(BUTTON_RADIUS * 2.0)), id.with("play"), Sense::click());
     let mut alpha = button_alpha(v.opacity, button.hovered());
     if v.unplayable {
@@ -53,13 +77,13 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, !v.unplayable, label));
 
     // --- the right side: name, message, progress, volume
-    let x0 = art.right() + 12.0;
+    let x0 = if video { rect.left() + 12.0 } else { art.right() + 12.0 };
     let x1 = rect.right() - 12.0;
     let width = (x1 - x0).max(40.0);
     let mut name = egui::text::LayoutJob::simple(v.file_name.clone(), egui::FontId::proportional(14.0), theme::TEXT_STRONG, width);
     name.wrap.max_rows = 1;
     name.wrap.break_anywhere = true;
-    painter.galley(Pos2::new(x0, rect.top() + 10.0), painter.layout_job(name), theme::TEXT_STRONG);
+    painter.galley(Pos2::new(x0, top + 10.0), painter.layout_job(name), theme::TEXT_STRONG);
     let mut download_link = None;
     if let Some(m) = &v.message {
         let failed = v.download.as_ref().is_some_and(|d| d.error.is_some());
@@ -68,11 +92,11 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
         job.wrap.max_rows = 1;
         let galley = painter.layout_job(job);
         let end = x0 + galley.size().x;
-        painter.galley(Pos2::new(x0, rect.top() + 29.0), galley, colour);
+        painter.galley(Pos2::new(x0, top + 29.0), galley, colour);
         if v.download.as_ref().is_some_and(|d| !d.running) {
-            download_link = Some(paint_download_link(ui, &painter, Pos2::new(end + 6.0, rect.top() + 29.0), x1, id));
+            download_link = Some(paint_download_link(ui, &painter, Pos2::new(end + 6.0, top + 29.0), x1, id));
         } else if v.busy && v.download.is_some() {
-            egui::Spinner::new().size(12.0).paint_at(ui, Rect::from_min_size(Pos2::new(end + 6.0, rect.top() + 30.0), Vec2::splat(12.0)));
+            egui::Spinner::new().size(12.0).paint_at(ui, Rect::from_min_size(Pos2::new(end + 6.0, top + 30.0), Vec2::splat(12.0)));
         }
     }
     if download_link.is_some_and(|l| l.clicked()) {
@@ -81,7 +105,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     }
 
     // progress bar
-    let bar_hit = Rect::from_min_size(Pos2::new(x0, rect.top() + 48.0), Vec2::new(width, 16.0));
+    let bar_hit = Rect::from_min_size(Pos2::new(x0, top + 48.0), Vec2::new(width, 16.0));
     let bar = ui.interact(bar_hit, id.with("seek"), Sense::click_and_drag());
     bar.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Slider, v.duration.is_some(), "Position"));
     let preview_id = id.with("seek-preview");
@@ -117,12 +141,12 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
         painter.circle_filled(Pos2::new(filled.right(), track.center().y), 5.0, theme::TEXT_STRONG);
     }
     let times = egui::FontId::proportional(11.0);
-    painter.text(Pos2::new(x0, rect.top() + 66.0), egui::Align2::LEFT_TOP, clock(shown), times.clone(), theme::MUTED);
+    painter.text(Pos2::new(x0, top + 66.0), egui::Align2::LEFT_TOP, clock(shown), times.clone(), theme::MUTED);
     let total = v.duration.map(clock).unwrap_or_else(|| "–:––".into());
-    painter.text(Pos2::new(x1, rect.top() + 66.0), egui::Align2::RIGHT_TOP, total, times.clone(), theme::MUTED);
+    painter.text(Pos2::new(x1, top + 66.0), egui::Align2::RIGHT_TOP, total, times.clone(), theme::MUTED);
 
     // volume: mute toggle and slider
-    let mute_rect = Rect::from_min_size(Pos2::new(x0, rect.top() + 82.0), Vec2::splat(20.0));
+    let mute_rect = Rect::from_min_size(Pos2::new(x0, top + 82.0), Vec2::splat(20.0));
     let mute = ui.interact(mute_rect, id.with("mute"), Sense::click());
     let mute_label = if v.muted { "Unmute" } else { "Mute" };
     mute.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, mute_label));
@@ -131,7 +155,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     }
     let icon_colour = if mute.hovered() { theme::TEXT_STRONG } else { theme::MUTED };
     paint_speaker(&painter, mute_rect.shrink(1.0), v.muted || v.volume <= 0.0, icon_colour);
-    let vol_hit = Rect::from_min_size(Pos2::new(mute_rect.right() + 6.0, rect.top() + 82.0), Vec2::new((width * 0.4).clamp(60.0, 120.0), 20.0));
+    let vol_hit = Rect::from_min_size(Pos2::new(mute_rect.right() + 6.0, top + 82.0), Vec2::new((width * 0.4).clamp(60.0, 120.0), 20.0));
     let vol = ui.interact(vol_hit, id.with("volume"), Sense::click_and_drag());
     vol.widget_info(|| egui::WidgetInfo::slider(true, v.volume as f64, "Volume"));
     if vol.dragged() || vol.clicked() {
@@ -208,7 +232,7 @@ fn paint_art(painter: &Painter, art: Rect, v: &View) {
     match &v.cover {
         Some(tex) => {
             let [w, h] = tex.size_vec2().into();
-            let k = (ART / w).min(ART / h);
+            let k = (art.width() / w).min(art.height() / h);
             let r = Rect::from_center_size(art.center(), Vec2::new(w * k, h * k));
             painter.image(tex.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
         }

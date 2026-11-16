@@ -298,7 +298,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             let (l, ok) = &line_links[0];
             if *ok {
                 if let Some(target) = vault.resolve(&l.target, Some(rel)) {
-                    if crate::media::is_audio(&target) {
+                    if crate::media::is_media(&target) {
                         // a sound is a player of its own, without the frame (MEDIA-001)
                         crate::media::widget::show(ui, caches.media, &vault.abs(&target), rel);
                         ui.add_space(6.0);

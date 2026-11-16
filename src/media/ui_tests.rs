@@ -10,6 +10,8 @@ use eframe::egui::{self, Event, Key, Modifiers, PointerButton, Pos2, Rect};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod video;
+
 struct Fx {
     app: ShaleApp,
     hl: Headless,
@@ -19,13 +21,19 @@ struct Fx {
 impl Fx {
     /// A vault with `note` as `Player.md` and these sound files from the fixtures, the note open.
     fn new(tag: &str, note: &str, sounds: &[&str]) -> Fx {
+        Fx::new_with(tag, note, sounds, |_| {})
+    }
+
+    /// Like `new`, with `setup` run on the app before the note is opened.
+    fn new_with(tag: &str, note: &str, sounds: &[&str], setup: impl FnOnce(&mut ShaleApp)) -> Fx {
         let dir = std::env::temp_dir().join(format!("shale-media-ui-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for s in sounds {
-            if *s == "bad.mp3" {
+            if s.starts_with("bad.") {
                 // not a sound at all
-                std::fs::write(dir.join(s), vec![9u8; 3000]).unwrap();
+                // (ffprobe takes bytes of 9 for a raw video)
+                std::fs::write(dir.join(s), vec![if s.ends_with("mp4") { 7u8 } else { 9u8 }; 3000]).unwrap();
             } else {
                 std::fs::copy(fixture(s), dir.join(s)).unwrap();
             }
@@ -33,6 +41,7 @@ impl Fx {
         std::fs::write(dir.join("Player.md"), note).unwrap();
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
         app.media.use_silent_output();
+        setup(&mut app);
         app.open(Path::new("Player.md"), false);
         let mut hl = Headless::new();
         hl.frames(&mut app, 4);
