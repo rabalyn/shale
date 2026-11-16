@@ -150,7 +150,7 @@ fn clicking_the_button_in_the_editor_plays_and_leaves_the_cursor_alone() {
     fx.label("Pause");
     let a = fx.app.tabbar.active;
     let id = fx.app.tabbar.tabs[a].editor.id;
-    let at = egui::text_edit::TextEditState::load(&fx.hl.ctx(), id).and_then(|st| st.cursor.char_range()).map(|r| r.primary.index.0);
+    let at = egui::text_edit::TextEditState::load(fx.hl.ctx(), id).and_then(|st| st.cursor.char_range()).map(|r| r.primary.index.0);
     assert!(at.is_none_or(|c| c == 0), "the click did not put the cursor into the text: {at:?}");
 }
 
