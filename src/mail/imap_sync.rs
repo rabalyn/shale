@@ -821,7 +821,7 @@ mod tests {
     #[test]
     fn the_connector_of_an_oauth_account_takes_its_settings_from_the_account_and_a_broken_oauth_setup_is_said_before_any_connection() {
         let account = MailAccount {
-            id: "t-oauth".into(),
+            id: "t-imap-oauth-connector".into(),
             host: "imap.example.org".into(),
             port: 1993,
             user: "ada@example.org".into(),
