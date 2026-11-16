@@ -287,6 +287,8 @@ pub struct Config {
     pub line_numbers: bool,
     /// Show the formatting toolbar above the text of a note (EDIT-026).
     pub format_toolbar: bool,
+    /// The size of the toolbar's buttons in percent of the base size (EDIT-026), 80–200.
+    pub toolbar_size: u32,
     /// The preset font colours of the toolbar's palette (EDIT-028), as RGB.
     pub font_colours: Vec<[u8; 3]>,
     /// The preset highlight colours of the toolbar's palette (EDIT-028), as RGB.
@@ -374,6 +376,7 @@ impl Default for Config {
             inline_images: true,
             line_numbers: true,
             format_toolbar: true,
+            toolbar_size: 120,
             font_colours: DEFAULT_FONT_COLOURS.to_vec(),
             highlight_colours: DEFAULT_HIGHLIGHT_COLOURS.to_vec(),
             live_preview: false,
@@ -571,12 +574,13 @@ mod tests {
     fn the_toolbar_settings_have_defaults_and_round_trip_without_a_version_bump() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
         assert!(c.format_toolbar, "the toolbar is on by default");
+        assert_eq!(c.toolbar_size, 120, "the buttons a bit bigger than the base size by default");
         assert_eq!(c.font_colours.len(), 5);
         assert_eq!(c.highlight_colours, vec![[255, 255, 0], [0x39, 0xFF, 0x14], [0, 255, 255], [255, 0, 255]], "neon yellow, green, cyan, magenta");
         assert_eq!(c.version, 1, "new fields with defaults need no migration (CFG-001)");
-        let c: Config = serde_json::from_str(r#"{"format_toolbar": false, "font_colours": [[1, 2, 3]], "highlight_colours": []}"#).unwrap();
+        let c: Config = serde_json::from_str(r#"{"format_toolbar": false, "toolbar_size": 150, "font_colours": [[1, 2, 3]], "highlight_colours": []}"#).unwrap();
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
-        assert_eq!((back.format_toolbar, back.font_colours, back.highlight_colours), (false, vec![[1, 2, 3]], vec![]));
+        assert_eq!((back.format_toolbar, back.toolbar_size, back.font_colours, back.highlight_colours), (false, 150, vec![[1, 2, 3]], vec![]));
     }
 
     // spec: MEDIA-004, MEDIA-006, CFG-001

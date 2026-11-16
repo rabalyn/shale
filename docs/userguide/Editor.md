@@ -30,7 +30,8 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
   toggles off when they all have it. A heading replaces a list marker and the other way round.
 - Every click is one undo step, and the keyboard stays in the note, with the Markdown preview on
   or off and with vim-style editing (insert mode stays, otherwise you are in normal mode).
-- Settings → General → Editing, "Show formatting toolbar" turns the toolbar off.
+- Settings → General → Editing, "Show formatting toolbar" turns the toolbar off; "Toolbar button size"
+  makes its buttons bigger or smaller (80 % to 200 %, 120 % by default).
 
 ## Colours
 
