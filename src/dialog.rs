@@ -18,7 +18,8 @@ const MARGIN: f32 = 24.0;
 const TITLE_ROOM: f32 = 40.0;
 /// The smallest a dialog can be made.
 const MIN_SIZE: Vec2 = Vec2::new(220.0, 90.0);
-/// Room kept below the scrolling content for a footer (its separator and one row of buttons).
+/// Room kept below the scrolling content for a footer (its separator and one row of buttons)
+/// in the first frame; from the second frame on the height the footer measured is used (NAV-029).
 const FOOTER_ROOM: f32 = 40.0;
 /// Frames a new dialog takes to measure its content: egui's invisible sizing pass, one frame
 /// to measure, one in which the window takes that size.
@@ -75,16 +76,18 @@ impl Dialog {
     }
 
     pub fn show<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T) -> DialogResponse<T> {
-        self.show_inner(ctx, content, None::<fn(&mut Ui)>)
+        self.show_inner(ctx, &mut (), |ui, _| content(ui), None::<fn(&mut Ui, &mut ())>)
     }
 
     /// Like [`Dialog::show`], with a footer (the buttons) below the content. Only the content
-    /// scrolls; the footer stays in view, also in a window shorter than the content.
-    pub fn show_with_footer<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T, footer: impl FnOnce(&mut Ui)) -> DialogResponse<T> {
-        self.show_inner(ctx, content, Some(footer))
+    /// scrolls; the footer stays in view, also in a window shorter than the content. The content
+    /// and the footer are closures over the same `state` (they could not both borrow what the
+    /// dialog edits); the footer runs right after the content, in the same frame.
+    pub fn show_with_footer<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse<T> {
+        self.show_inner(ctx, state, content, Some(footer))
     }
 
-    fn show_inner<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T, footer: Option<impl FnOnce(&mut Ui)>) -> DialogResponse<T> {
+    fn show_inner<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse<T> {
         let Self { id, title, width, modal } = self;
         let screen = ctx.content_rect();
         let max = (screen.size() - Vec2::splat(2.0 * MARGIN)).max(MIN_SIZE);
@@ -131,12 +134,14 @@ impl Dialog {
             window = window.pivot(Align2::CENTER_CENTER).default_pos(screen.center());
         }
         let mut overflow = false;
+        let footer_key = id.with("footer-height");
+        let footer_room = ctx.data(|d| d.get_temp::<f32>(footer_key)).unwrap_or(FOOTER_ROOM);
         let shown = window.show(ctx, |ui| {
             // The content always sits in the same scroll area (so its widgets keep their state).
             // While measuring, the scroll area may be as tall as the screen allows and shrinks to
             // the content (an inner scroll area takes what it is given), so the window takes the
             // content's height; otherwise it fills the window and scrolls.
-            let reserve = if footer.is_some() { FOOTER_ROOM } else { 0.0 };
+            let reserve = if footer.is_some() { footer_room } else { 0.0 };
             let (room, shrink) = if measuring {
                 (Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), (max.y - TITLE_ROOM - reserve).max(MIN_SIZE.y))), [false, true])
             } else {
@@ -144,18 +149,23 @@ impl Dialog {
                 room.max.y = (room.max.y - reserve).max(room.min.y);
                 (room, [false, false])
             };
-            let inner = ui
-                .scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
-                    let out = ScrollArea::vertical().id_salt("dialog-body").auto_shrink(shrink).show(ui, content);
-                    overflow = out.content_size.y > out.inner_rect.height() + 1.0;
-                    out.inner
-                })
-                .inner;
+            let scope = ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
+                let out = ScrollArea::vertical().id_salt("dialog-body").auto_shrink(shrink).show(ui, |ui| content(ui, &mut *state));
+                overflow = out.content_size.y > out.inner_rect.height() + 1.0;
+                out.inner
+            });
             if let Some(footer) = footer {
                 ui.separator();
-                footer(ui);
+                footer(ui, state);
+                // what the footer took, measured from the end of the content: the room kept for
+                // it in the next frame (a bigger font makes a taller footer)
+                let measured = ui.min_rect().bottom() - scope.response.rect.bottom() + 1.0;
+                if (measured - footer_room).abs() > 0.5 {
+                    ctx.data_mut(|d| d.insert_temp(footer_key, measured));
+                    ctx.request_repaint();
+                }
             }
-            inner
+            scope.inner
         });
 
         let Some(shown) = shown else {
@@ -270,6 +280,47 @@ mod tests {
         assert!((r.center().x - SCREEN.x / 2.0).abs() < 2.0 && (r.center().y - SCREEN.y / 2.0).abs() < 2.0, "{r:?}");
         assert!((r.width() - 400.0).abs() < 2.0, "{r:?}");
         assert!(r.height() > 5.0 * 14.0 && r.height() < 300.0, "{r:?}");
+    }
+
+    /// A dialog with 200 rows of content and a footer of an error line and a button, in a
+    /// short window; every text style scaled by `scale`. Returns the dialog and the button.
+    fn footer_at(scale: f32, screen: Vec2) -> (Rect, Rect) {
+        let ctx = Context::default();
+        ctx.all_styles_mut(|s| s.text_styles.values_mut().for_each(|f| f.size *= scale));
+        let mut button = Rect::NOTHING;
+        for i in 0..12 {
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, screen)), time: Some(f64::from(i) * 0.05), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                Dialog::new("footer", "Footer").width(400.0).show_with_footer(
+                    ui.ctx(),
+                    &mut button,
+                    |ui, _| {
+                        for i in 0..200 {
+                            ui.label(format!("line {i}"));
+                        }
+                    },
+                    |ui, button| {
+                        ui.label("An error that takes a line");
+                        *button = ui.button("Done").rect;
+                    },
+                );
+            });
+            out.textures_delta.clear();
+        }
+        (ctx.memory(|m| m.area_rect(Id::unique(("dialog", "footer")))).expect("dialog shown"), button)
+    }
+
+    // spec: NAV-029
+    #[test]
+    fn nav_029_the_footer_is_not_clipped_at_the_biggest_font_and_stays_inside_the_dialog() {
+        let screen = Vec2::new(900.0, 420.0);
+        // the biggest the settings allow for the text is 24 against the default 15.5
+        for scale in [1.0, 24.0 / 15.5, 2.5] {
+            let (dialog, button) = footer_at(scale, screen);
+            assert!(Rect::from_min_size(Pos2::ZERO, screen).contains_rect(dialog), "scale {scale}: {dialog:?}");
+            assert!(dialog.contains_rect(button), "scale {scale}: the button {button:?} is not inside the dialog {dialog:?}");
+            assert!(button.height() > 14.0, "scale {scale}: the button is not clipped to nothing: {button:?}");
+        }
     }
 
     #[test]

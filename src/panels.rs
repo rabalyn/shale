@@ -891,7 +891,7 @@ impl ShaleApp {
             }
             Modal::Settings { vault_path, tab, keys } => {
                 let mut done = false;
-                let body = |ui: &mut egui::Ui| {
+                let mut body = |ui: &mut egui::Ui| {
                     ui.horizontal(|ui| {
                         ui.selectable_value(tab, SettingsTab::General, "General");
                         ui.selectable_value(tab, SettingsTab::Keybindings, "Keybindings");
@@ -1014,11 +1014,16 @@ impl ShaleApp {
                         self.save_config();
                     }
                 };
-                let resp = crate::dialog::Dialog::new("settings", "Settings").width(640.0).show_with_footer(&ctx, body, |ui| {
-                    if ui.button("Done").clicked() {
-                        done = true;
-                    }
-                });
+                let resp = crate::dialog::Dialog::new("settings", "Settings").width(640.0).show_with_footer(
+                    &ctx,
+                    &mut done,
+                    |ui, _| body(ui),
+                    |ui, done| {
+                        if ui.button("Done").clicked() {
+                            *done = true;
+                        }
+                    },
+                );
                 if done {
                     keep = false;
                 }
@@ -1037,10 +1042,15 @@ impl ShaleApp {
             keep = false;
         }
         if let Modal::DataUsage = &modal {
-            let mut asks = vec![];
-            let resp = crate::dialog::Dialog::new("data-usage", "Data usage").width(620.0).show(&ctx, |ui| {
-                asks = crate::data_usage::dialog::show(ui, &mut self.usage, &mut self.cfg.caches);
-            });
+            // the state both parts work on, and what the footer asked for
+            let mut st = (&mut self.usage, &mut self.cfg.caches, vec![]);
+            let resp = crate::dialog::Dialog::new("data-usage", "Data usage").width(620.0).show_with_footer(
+                &ctx,
+                &mut st,
+                |ui, (usage, caches, asks)| *asks = crate::data_usage::dialog::show(ui, usage, caches),
+                |ui, (usage, _, asks)| asks.extend(crate::data_usage::dialog::footer(ui, usage)),
+            );
+            let asks = st.2;
             for a in asks {
                 if self.usage_ask(a) {
                     keep = false;
@@ -1052,10 +1062,15 @@ impl ShaleApp {
             }
         }
         if let Modal::Calendars(d) = &mut modal {
-            let mut out = None;
-            let resp = crate::dialog::Dialog::new("calendars", "Calendars").width(560.0).show(&ctx, |ui| {
-                out = crate::calendar::dialog::show(ui, d, &self.calendar);
-            });
+            let mut st = (&mut **d, None);
+            let calendar = &self.calendar;
+            let resp = crate::dialog::Dialog::new("calendars", "Calendars").width(560.0).show_with_footer(
+                &ctx,
+                &mut st,
+                |ui, (d, out)| *out = crate::calendar::dialog::show(ui, d, calendar),
+                |ui, (d, out)| *out = crate::calendar::dialog::footer(ui, d).or(out.take()),
+            );
+            let out = st.1;
             if let Some(a) = out {
                 if self.calendar_dialog_action(d, a) {
                     keep = false;
@@ -1066,11 +1081,15 @@ impl ShaleApp {
             }
         }
         if let Modal::MailAccounts(d) = &mut modal {
-            let mut out = None;
+            let mut st = (&mut **d, None);
             let mail = &self.mail;
-            let resp = crate::dialog::Dialog::new("mail-accounts", "Mail accounts").width(720.0).show(&ctx, |ui| {
-                out = crate::mail::dialog::show(ui, d, mail);
-            });
+            let resp = crate::dialog::Dialog::new("mail-accounts", "Mail accounts").width(720.0).show_with_footer(
+                &ctx,
+                &mut st,
+                |ui, (d, out)| *out = crate::mail::dialog::show(ui, d, mail),
+                |ui, (d, out)| *out = crate::mail::dialog::footer(ui, d).or(out.take()),
+            );
+            let out = st.1;
             if let Some(a) = out {
                 if self.mail_dialog_action(d, a) {
                     keep = false;
@@ -1098,9 +1117,15 @@ impl ShaleApp {
         if let Modal::Import(d) = &mut modal {
             let folders = self.import_folders();
             let tags = self.tag_choices();
-            let resp = crate::dialog::Dialog::new("import", "Import into the vault").width(620.0).show(&ctx, |ui| crate::import::dialog::show(ui, d, &folders, &tags));
+            let mut st = (&mut **d, None);
+            let resp = crate::dialog::Dialog::new("import", "Import into the vault").width(620.0).show_with_footer(
+                &ctx,
+                &mut st,
+                |ui, (d, out)| *out = crate::import::dialog::show(ui, d, &folders, &tags),
+                |ui, (d, out)| *out = crate::import::dialog::footer(ui, d).or(out.take()),
+            );
             let close_asked = resp.should_close();
-            if let Some(a) = resp.inner.flatten() {
+            if let Some(a) = st.1 {
                 if self.import_action(d, a) {
                     keep = false;
                 }

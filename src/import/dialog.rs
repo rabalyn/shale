@@ -80,59 +80,56 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     if d.items.is_empty() {
         ui.label(muted("Nothing to import yet. Drop e-mails, calendar events or files on the window, or add a file below."));
     }
-    let max_h = (ui.ctx().content_rect().height() - 430.0).max(140.0);
-    egui::ScrollArea::vertical().id_salt("import-items").max_height(max_h).show(ui, |ui| {
-        for (i, it) in d.items.iter_mut().enumerate() {
-            egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(6).inner_margin(8).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    rec(format!("include:{i}"), ui.checkbox(&mut it.include, "")).on_hover_text("Import this one");
-                    ui.label(egui::RichText::new(it.kind()).size(11.0).color(theme::ACCENT));
-                    rec(format!("title:{i}"), ui.add(egui::TextEdit::singleline(&mut it.title).desired_width(470.0))).on_hover_text("Name of the new note");
-                });
-                ui.label(muted(&it.detail()));
-                if let Some(p) = &it.already {
-                    ui.label(
-                        egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())))
-                            .size(12.0)
-                            .color(theme::LINK_MISSING),
-                    );
-                }
-                if let Some(w) = it.warning() {
-                    ui.add(egui::Label::new(egui::RichText::new(w).size(12.0).color(theme::LINK_MISSING)).wrap());
-                }
-                if !it.people.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
-                        ui.label(egui::RichText::new("People").size(12.0).color(theme::MUTED)).on_hover_text("Ticked people are linked from the note; those without a contact note get one in the people folder");
-                        for (k, p) in it.people.iter_mut().enumerate() {
-                            let what = if p.existing.is_some() { "" } else { " (new)" };
-                            let label = egui::RichText::new(format!("{}{what}", p.name)).size(12.5).color(if p.existing.is_some() { theme::LINK } else { theme::TEXT });
-                            let tip = format!("{} · {}{}", p.role.label(), if p.email.is_empty() { "no address" } else { p.email.as_str() }, if p.existing.is_some() { " · has a contact note" } else { " · a contact note will be made" });
-                            rec(format!("person:{i}:{k}"), ui.checkbox(&mut p.on, label)).on_hover_text(tip);
-                        }
-                    });
-                }
-                if let Source::Email { mail, .. } = &it.source {
-                    for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
-                        let label = format!("{}  ({}, {}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" });
-                        rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5)));
-                    }
-                }
-                if let Source::Social { saved, replies, .. } = &mut it.source {
-                    if !saved.replies.is_empty() {
-                        rec(format!("replies:{i}"), ui.checkbox(replies, egui::RichText::new(format!("Include replies from others ({})", saved.replies.len())).size(12.5)))
-                            .on_hover_text("Adds a Replies section with other people's answers to the thread, nested; their pictures are only linked");
-                    }
-                    for (k, (m, on)) in saved.media.iter().zip(it.att_on.iter_mut()).enumerate() {
-                        let label = format!("{}  ({})", m.file_name, size_text(m.data.len()));
-                        rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5))).on_hover_text("Untick to leave this file out; the note then links to its web address");
-                    }
-                }
+    for (i, it) in d.items.iter_mut().enumerate() {
+        egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(6).inner_margin(8).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                rec(format!("include:{i}"), ui.checkbox(&mut it.include, "")).on_hover_text("Import this one");
+                ui.label(egui::RichText::new(it.kind()).size(11.0).color(theme::ACCENT));
+                rec(format!("title:{i}"), ui.add(egui::TextEdit::singleline(&mut it.title).desired_width(470.0))).on_hover_text("Name of the new note");
             });
-            ui.add_space(4.0);
-        }
-    });
+            ui.label(muted(&it.detail()));
+            if let Some(p) = &it.already {
+                ui.label(
+                    egui::RichText::new(format!("Imported before as “{}”. Tick it to import it again.", crate::markdown::strip_md_ext(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())))
+                        .size(12.0)
+                        .color(theme::LINK_MISSING),
+                );
+            }
+            if let Some(w) = it.warning() {
+                ui.add(egui::Label::new(egui::RichText::new(w).size(12.0).color(theme::LINK_MISSING)).wrap());
+            }
+            if !it.people.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
+                    ui.label(egui::RichText::new("People").size(12.0).color(theme::MUTED)).on_hover_text("Ticked people are linked from the note; those without a contact note get one in the people folder");
+                    for (k, p) in it.people.iter_mut().enumerate() {
+                        let what = if p.existing.is_some() { "" } else { " (new)" };
+                        let label = egui::RichText::new(format!("{}{what}", p.name)).size(12.5).color(if p.existing.is_some() { theme::LINK } else { theme::TEXT });
+                        let tip = format!("{} · {}{}", p.role.label(), if p.email.is_empty() { "no address" } else { p.email.as_str() }, if p.existing.is_some() { " · has a contact note" } else { " · a contact note will be made" });
+                        rec(format!("person:{i}:{k}"), ui.checkbox(&mut p.on, label)).on_hover_text(tip);
+                    }
+                });
+            }
+            if let Source::Email { mail, .. } = &it.source {
+                for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
+                    let label = format!("{}  ({}, {}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" });
+                    rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5)));
+                }
+            }
+            if let Source::Social { saved, replies, .. } = &mut it.source {
+                if !saved.replies.is_empty() {
+                    rec(format!("replies:{i}"), ui.checkbox(replies, egui::RichText::new(format!("Include replies from others ({})", saved.replies.len())).size(12.5)))
+                        .on_hover_text("Adds a Replies section with other people's answers to the thread, nested; their pictures are only linked");
+                }
+                for (k, (m, on)) in saved.media.iter().zip(it.att_on.iter_mut()).enumerate() {
+                    let label = format!("{}  ({})", m.file_name, size_text(m.data.len()));
+                    rec(format!("att:{i}:{k}"), ui.checkbox(on, egui::RichText::new(label).size(12.5))).on_hover_text("Untick to leave this file out; the note then links to its web address");
+                }
+            }
+        });
+        ui.add_space(4.0);
+    }
     for n in &d.notes {
         ui.add(egui::Label::new(egui::RichText::new(n).size(12.0).color(theme::LINK_MISSING)).wrap());
     }
@@ -209,22 +206,32 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         let name = crate::markdown::strip_md_ext(&n.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).to_string();
         rec("link".into(), ui.checkbox(&mut d.link_on, format!("Add links to the new notes in “{name}”")));
     }
+    ui.label(muted("Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more."));
+    d.rects = rects;
+    action
+}
+
+/// The dialog's footer (NAV-028): the error of the last try and the buttons, below the
+/// scrolling content. Call it after [`show`] in the same frame.
+pub fn footer(ui: &mut Ui, d: &mut ImportDialog) -> Option<ImportAction> {
+    let mut action = None;
     if let Some(e) = &d.error {
         ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING)).wrap());
     }
-    ui.add_space(6.0);
+    let n = d.count();
+    let mut rec = |k: &str, r: egui::Response| -> egui::Response {
+        d.rects.push((k.to_string(), r.rect));
+        r
+    };
     ui.horizontal(|ui| {
-        let n = d.count();
         let label = if n == 1 { "Import 1 item".to_string() } else { format!("Import {n} items") };
-        if rec("import".into(), ui.add_enabled(n > 0, egui::Button::new(egui::RichText::new(label).strong()))).clicked() {
+        if rec("import", ui.add_enabled(n > 0, egui::Button::new(egui::RichText::new(label).strong()))).clicked() {
             action = Some(ImportAction::Import);
         }
-        if rec("cancel".into(), ui.button("Cancel")).clicked() {
+        if rec("cancel", ui.button("Cancel")).clicked() {
             action = Some(ImportAction::Cancel);
         }
     });
-    ui.label(muted("Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more."));
-    d.rects = rects;
     action
 }
 
@@ -244,7 +251,8 @@ mod tests {
             let mut res = None;
             let mut out = self.ctx.run_ui(raw, |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    res = show(ui, d, folders, tags);
+                    let body = show(ui, d, folders, tags);
+                    res = footer(ui, d).or(body);
                 });
             });
             out.textures_delta.clear();

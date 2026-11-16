@@ -8,7 +8,8 @@
 use super::ui_tests::{opened, Show, P};
 use super::*;
 use crate::calendar::dialog::EventDialog;
-use eframe::egui::PointerButton;
+use eframe::egui::{Event, Modifiers, PointerButton};
+use egui::accesskit::Role;
 use std::time::{Duration, Instant};
 
 /// Run frames until `done` holds (jobs run in the background; no fixed waits).
@@ -531,4 +532,100 @@ fn dialogs_mail_accounts_wrong_entries_are_explained_and_a_good_one_is_saved() {
     click_control(&mut p, "md:done");
     assert!(p.app.modal.is_none() && p.app.cfg.mail_accounts.is_empty());
     assert!(p.app.toasts.iter().any(|(t, _)| t.starts_with("The account was removed.")), "{:?}", p.app.toasts);
+}
+
+// ---- the buttons in a footer below the scrolling content (NAV-028)
+
+/// The dialog `id` is open in a window much shorter than it: it stays inside the window, every
+/// footer button (by its label) is inside the dialog and the window, and the content scrolls:
+/// the control `last` (the last of it) is below the dialog at first and in it after scrolling.
+fn footer_in_a_short_window(p: &mut P, height: f32, id: &str, last: &str, buttons: &[&str]) {
+    p.size = Vec2::new(900.0, height);
+    p.look(Show::Modals);
+    let screen = Rect::from_min_size(Pos2::ZERO, p.size);
+    let dialog = p.dialog_area(id);
+    assert!(screen.contains_rect(dialog), "{id}: the dialog {dialog:?} is not inside the window");
+    let mut fold = f32::MAX;
+    for b in buttons {
+        let r = p.find(Show::Modals, Some(Role::Button), b);
+        assert!(dialog.contains_rect(r) && screen.contains_rect(r), "{id}: {b:?} at {r:?} is outside the dialog {dialog:?}");
+        fold = fold.min(r.top());
+    }
+    // what is above the footer is what the person sees of the content
+    let seen = |r: Rect| dialog.contains_rect(r) && r.bottom() <= fold;
+    let r = p.find(Show::Modals, None, last);
+    assert!(!seen(r), "{id}: {last:?} at {r:?} should be below the short dialog {dialog:?} at first");
+    let over = dialog.center();
+    p.frame(Show::Modals, vec![Event::PointerMoved(over)]);
+    for _ in 0..40 {
+        p.frame(Show::Modals, vec![Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, -400.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }]);
+    }
+    let r = p.find(Show::Modals, None, last);
+    assert!(seen(r), "{id}: {last:?} at {r:?} did not scroll into the dialog {dialog:?} above the footer at {fold}");
+    // the buttons did not move with the content
+    for b in buttons {
+        let r = p.find(Show::Modals, Some(Role::Button), b);
+        assert!(dialog.contains_rect(r), "{id}: {b:?} at {r:?} left the dialog {dialog:?} after scrolling");
+    }
+}
+
+// spec: NAV-028
+#[test]
+fn nav_028_mail_accounts_keep_done_and_cancel_in_view_in_a_short_window() {
+    let mut p = P::new("footer-mail", &[]);
+    p.app.open_mail_settings();
+    p.look(Show::Modals);
+    click_control(&mut p, "md:add");
+    footer_in_a_short_window(&mut p, 420.0, "mail-accounts", "Encryption (OpenPGP and S/MIME)", &["Done", "Cancel"]);
+    // a real click on the footer's Cancel works
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.modal.is_none());
+}
+
+// spec: NAV-028
+#[test]
+fn nav_028_calendars_keep_done_refresh_and_cancel_in_view_in_a_short_window() {
+    let mut p = P::new("footer-cal", &[]);
+    let dir = own_calendar_dir(&mut p, "footer");
+    p.app.open_calendar_settings();
+    footer_in_a_short_window(&mut p, 420.0, "calendars", "Weeks start on Monday", &["Done", "Refresh now", "Cancel"]);
+    p.click(Show::Modals, "Done");
+    assert!(p.app.modal.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: NAV-028
+#[test]
+fn nav_028_import_keeps_import_and_cancel_in_view_in_a_short_window() {
+    let mut p = P::new("footer-import", &[]);
+    let outside = p.dir.with_extension("footer-outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("One.md"), "# One\n").unwrap();
+    let (items, notes) = crate::import::items_from_paths(&[outside.join("One.md")]);
+    p.app.open_import(items, notes, None);
+    p.look(Show::Modals);
+    // a wrong folder gives an error line: the footer grows and stays in view
+    fill(&mut p, "folder", "../outside");
+    p.click(Show::Modals, "Import 1 item");
+    assert!(matches!(&p.app.modal, Some(Modal::Import(d)) if d.error.is_some()));
+    footer_in_a_short_window(&mut p, 300.0, "import", "Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more.", &["Import 1 item", "Cancel"]);
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.modal.is_none());
+    let _ = std::fs::remove_dir_all(&outside);
+}
+
+// spec: NAV-028
+#[test]
+fn nav_028_data_usage_keeps_refresh_and_the_clear_question_in_view_in_a_short_window() {
+    let mut p = P::new("footer-usage", &[]);
+    p.app.open_data_usage();
+    let id = crate::data_usage::CacheId::MailIndex;
+    p.app.usage.confirm = Some(id);
+    let yes = format!("Yes, {}", id.clear_label().to_lowercase());
+    let last = crate::data_usage::CacheId::ALL.last().expect("caches").name();
+    footer_in_a_short_window(&mut p, 420.0, "data-usage", last, &["Refresh", &yes, "Cancel"]);
+    // the answer works from the footer: Cancel drops the question, the dialog stays
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.usage.confirm.is_none() && matches!(p.app.modal, Some(Modal::DataUsage)));
+    assert!(!p.shows(Show::Modals, &yes));
 }

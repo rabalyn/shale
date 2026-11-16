@@ -270,75 +270,79 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
         .size(12.5),
     );
     ui.add_space(8.0);
-    // the form scrolls when the window is small; the buttons below it never do
-    let max_h = (ui.ctx().content_rect().height() - 230.0).clamp(200.0, 620.0);
-    egui::ScrollArea::vertical().id_salt("mail-dialog-body").max_height(max_h).auto_shrink([true, true]).show(ui, |ui| {
-        ui.horizontal_top(|ui| {
-            // the list of accounts
-            ui.vertical(|ui| {
-                ui.set_width(170.0);
-                for i in 0..d.accounts.len() {
-                    let a = &d.accounts[i];
-                    let label = if !a.name.trim().is_empty() {
-                        a.name.clone()
-                    } else if !a.host.is_empty() {
-                        a.host.clone()
-                    } else {
-                        "New account".to_string()
-                    };
-                    let r = ui.selectable_label(d.sel == Some(i), label);
-                    rects.push((format!("md:acct:{i}"), r.rect));
-                    if r.clicked() {
-                        d.sel = Some(i);
-                    }
-                }
-                ui.add_space(4.0);
-                let r = ui.button("Add account");
-                rects.push(("md:add".into(), r.rect));
-                if r.clicked() {
-                    d.add(&mail.root);
-                }
-                if let Some(i) = d.sel {
-                    let r = ui.button("Remove account");
-                    rects.push(("md:remove".into(), r.rect));
-                    if r.on_hover_text("The settings and the saved password go; the mail already copied stays on disk").clicked() {
-                        d.remove(i);
-                    }
-                }
-            });
-            ui.add_space(12.0);
-            ui.vertical(|ui| {
-                ui.set_width((ui.available_width()).max(360.0));
-                let Some(i) = d.sel.filter(|i| *i < d.accounts.len()) else {
-                    ui.label(muted("Add an account to read your mail here."));
-                    return;
+    ui.horizontal_top(|ui| {
+        // the list of accounts
+        ui.vertical(|ui| {
+            ui.set_width(170.0);
+            for i in 0..d.accounts.len() {
+                let a = &d.accounts[i];
+                let label = if !a.name.trim().is_empty() {
+                    a.name.clone()
+                } else if !a.host.is_empty() {
+                    a.host.clone()
+                } else {
+                    "New account".to_string()
                 };
-                account_form(ui, d, i, mail, &mut rects, &mut out);
-            });
+                let r = ui.selectable_label(d.sel == Some(i), label);
+                rects.push((format!("md:acct:{i}"), r.rect));
+                if r.clicked() {
+                    d.sel = Some(i);
+                }
+            }
+            ui.add_space(4.0);
+            let r = ui.button("Add account");
+            rects.push(("md:add".into(), r.rect));
+            if r.clicked() {
+                d.add(&mail.root);
+            }
+            if let Some(i) = d.sel {
+                let r = ui.button("Remove account");
+                rects.push(("md:remove".into(), r.rect));
+                if r.on_hover_text("The settings and the saved password go; the mail already copied stays on disk").clicked() {
+                    d.remove(i);
+                }
+            }
         });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.label("Fetch new mail every");
-            let r = ui.add(egui::TextEdit::singleline(&mut d.minutes).desired_width(36.0));
-            rects.push(("md:minutes".into(), r.rect));
-            ui.label("minutes while Shale runs (0 = only with the Sync button)");
+        ui.add_space(12.0);
+        ui.vertical(|ui| {
+            ui.set_width((ui.available_width()).max(360.0));
+            let Some(i) = d.sel.filter(|i| *i < d.accounts.len()) else {
+                ui.label(muted("Add an account to read your mail here."));
+                return;
+            };
+            account_form(ui, d, i, mail, &mut rects, &mut out);
         });
-        ui.horizontal(|ui| {
-            let r = ui.checkbox(&mut d.mark_read, "Mark as read when opened, after");
-            rects.push(("md:mark-read".into(), r.rect));
-            let r = ui.add_enabled(d.mark_read, egui::TextEdit::singleline(&mut d.mark_read_secs).desired_width(36.0));
-            rects.push(("md:mark-read-secs".into(), r.rect));
-            ui.label("seconds (the server is told; 0 = at once)");
-        });
-        ui.horizontal(|ui| {
-            ui.label("Undo send: a sent mail waits");
-            let r = ui.add(egui::TextEdit::singleline(&mut d.undo_secs).desired_width(36.0));
-            rects.push(("md:undo-secs".into(), r.rect));
-            ui.label("seconds in the outbox, where you can take it back (0 = send at once)");
-        });
-        ui.add_space(6.0);
-        encryption_section(ui, d, mail, &mut rects, &mut out);
     });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.label("Fetch new mail every");
+        let r = ui.add(egui::TextEdit::singleline(&mut d.minutes).desired_width(36.0));
+        rects.push(("md:minutes".into(), r.rect));
+        ui.label("minutes while Shale runs (0 = only with the Sync button)");
+    });
+    ui.horizontal(|ui| {
+        let r = ui.checkbox(&mut d.mark_read, "Mark as read when opened, after");
+        rects.push(("md:mark-read".into(), r.rect));
+        let r = ui.add_enabled(d.mark_read, egui::TextEdit::singleline(&mut d.mark_read_secs).desired_width(36.0));
+        rects.push(("md:mark-read-secs".into(), r.rect));
+        ui.label("seconds (the server is told; 0 = at once)");
+    });
+    ui.horizontal(|ui| {
+        ui.label("Undo send: a sent mail waits");
+        let r = ui.add(egui::TextEdit::singleline(&mut d.undo_secs).desired_width(36.0));
+        rects.push(("md:undo-secs".into(), r.rect));
+        ui.label("seconds in the outbox, where you can take it back (0 = send at once)");
+    });
+    ui.add_space(6.0);
+    encryption_section(ui, d, mail, &mut rects, &mut out);
+    d.rects = rects;
+    out
+}
+
+/// The dialog's footer: the error of the last try, and the buttons. Kept below the scrolling
+/// content (NAV-028); call it after [`show`] in the same frame.
+pub fn footer(ui: &mut Ui, d: &mut MailDialog) -> Option<MailDialogAction> {
+    let mut out = None;
     if let Some(e) = &d.error {
         ui.add_space(4.0);
         ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
@@ -346,17 +350,16 @@ pub fn show(ui: &mut Ui, d: &mut MailDialog, mail: &MailView) -> Option<MailDial
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         let r = ui.button("Done");
-        rects.push(("md:done".into(), r.rect));
+        d.rects.push(("md:done".into(), r.rect));
         if r.clicked() {
             out = Some(MailDialogAction::Done);
         }
         let r = ui.button("Cancel");
-        rects.push(("md:cancel".into(), r.rect));
+        d.rects.push(("md:cancel".into(), r.rect));
         if r.clicked() {
             out = Some(MailDialogAction::Cancel);
         }
     });
-    d.rects = rects;
     out
 }
 
