@@ -376,6 +376,10 @@ enum Art {
     Scene(Arc<crate::drawing::Scene>, std::path::PathBuf),
     /// first page of a PDF, and its page count
     Pdf(egui::TextureHandle, usize),
+    /// the player of a sound file (MEDIA-001): the file, and the card's number among the embeds
+    Audio(std::path::PathBuf),
+    /// a picture that is still a Git LFS pointer: the "Download" strip in its place (SYNC-020)
+    Download(std::path::PathBuf),
 }
 
 /// What the editor asks the app to do.
@@ -424,6 +428,8 @@ pub struct NoteEditor {
     pub inline_images: bool,
     /// Draw embedded drawings on a dark canvas (set from the app's settings).
     pub dark_canvas: bool,
+    /// The app's media player, which the players of sound embeds draw from (MEDIA-001).
+    pub media: crate::media::MediaPlayer,
     /// Show a gutter with line numbers (set from the app's settings, EDIT-018).
     pub line_numbers: bool,
     /// Draw the markdown rendered except around the cursor (EDIT-016, set from the app's settings).
@@ -458,6 +464,7 @@ impl NoteEditor {
             last_layout: None,
             inline_images: false,
             dark_canvas: true,
+            media: crate::media::MediaPlayer::default(),
             line_numbers: false,
             live_preview: false,
             preview_raw_lines: 0,
@@ -845,6 +852,11 @@ impl NoteEditor {
                     Vec2::new(w * k, h * k)
                 };
                 if crate::media::is_image(&p) {
+                    if self.media.notice(&abs).is_some() {
+                        let size = Vec2::new(max_w.min(520.0), 28.0);
+                        images.push((l.range.clone(), size.y + 6.0, Art::Download(abs.clone()), size));
+                        continue;
+                    }
                     let Some(tex) = crate::media::texture(ui.ctx(), &abs) else { continue };
                     let [tw, th] = tex.size_vec2().into();
                     let size = fit(tw, th, 420.0);
@@ -855,6 +867,9 @@ impl NoteEditor {
                     let b = b.expand(20.0);
                     let size = fit(b.width().max(40.0), b.height().max(40.0), 420.0);
                     images.push((l.range.clone(), size.y + 6.0, Art::Scene(scene, p.clone()), size));
+                } else if crate::media::is_media(&p) {
+                    let size = crate::media::widget::card_size(&abs, max_w);
+                    images.push((l.range.clone(), size.y + 6.0, Art::Audio(abs.clone()), size));
                 } else if crate::pdf::view::is_pdf(&p) {
                     match crate::pdf::view::pdf_pages(ui.ctx(), &abs, 1) {
                         crate::pdf::view::PdfState::Ready { pages, total } if !pages.is_empty() => {
@@ -928,6 +943,7 @@ impl NoteEditor {
             let now_text = output.galley.job.text.clone();
             for (r, _, idx) in remap_images(&now_text, &image_keys) {
                 let (_, _, art, size) = &images[idx];
+                let id = self.id.with(("media-card", idx));
                 let c = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(&now_text, r.start)));
                 let min = output.galley_pos + Vec2::new(c.min.x, c.min.y + 3.0);
                 let rect = Rect::from_min_size(min, *size);
@@ -940,6 +956,10 @@ impl NoteEditor {
                         painter.rect_filled(rect, 6.0, bg);
                         let pics = crate::drawing::pictures::textures(ui.ctx(), scene, vault, at);
                         crate::drawing::paint_thumbnail(&painter, scene, rect.shrink(4.0), self.dark_canvas, &pics);
+                    }
+                    Art::Audio(abs) => crate::media::widget::paint(ui, rect, &self.media, abs, rel, id),
+                    Art::Download(abs) => {
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_not_downloaded(ui, &self.media, abs));
                     }
                     Art::Pdf(tex, total) => {
                         painter.image(tex.id(), rect, uv, Color32::WHITE);

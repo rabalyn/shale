@@ -752,7 +752,7 @@ impl ShaleApp {
                     }
                     if reading {
                         let text = doc.text.clone();
-                        if let Some(a) = reader::show(ui, &text, vault, &rel, &mut self.scenes, base, dark) {
+                        if let Some(a) = reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, base, dark) {
                             handle_reader_action(&mut self.actions, a, &rel);
                         }
                     } else {
@@ -763,6 +763,7 @@ impl ShaleApp {
                         tab.editor.vim_enabled = self.cfg.vim_mode;
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
                         tab.editor.dark_canvas = self.cfg.dark_canvas;
+                        tab.editor.media = self.media.clone();
                         let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, crate::editor::Note { rel: &rel, undo: &mut self.undo }, base, ctrl);
                         if changed {
                             doc.dirty = true;

@@ -283,6 +283,10 @@ pub struct Config {
     pub live_preview: bool,
     /// Lines before and after the cursor line that stay raw in the preview (EDIT-017).
     pub preview_raw_lines: u32,
+    /// The volume of the media players, 0.0–1.0 (MEDIA-006).
+    pub media_volume: f32,
+    /// How opaque the round play button over the artwork is, 0.0–1.0 (MEDIA-004).
+    pub media_play_button_opacity: f32,
     /// Calendars shown in the calendar panel (local .ics files and CalDAV calendars).
     pub calendars: Vec<crate::calendar::store::CalendarSource>,
     /// Calendar weeks start on Monday (otherwise Sunday).
@@ -359,6 +363,8 @@ impl Default for Config {
             line_numbers: true,
             live_preview: false,
             preview_raw_lines: 0,
+            media_volume: 0.8,
+            media_play_button_opacity: 0.6,
             calendars: vec![],
             week_starts_monday: true,
             input_log: false,
@@ -543,6 +549,26 @@ mod tests {
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.live_preview, back.preview_raw_lines), (true, 2));
         assert_eq!(c.file_sort, FileSort::NameAsc);
+    }
+
+    // spec: MEDIA-004, MEDIA-006, CFG-001
+    #[test]
+    fn the_media_settings_have_defaults_and_round_trip_without_a_version_bump() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
+        assert_eq!((c.media_volume, c.media_play_button_opacity), (0.8, 0.6), "an older file gets the defaults");
+        assert_eq!(c.version, 1, "new fields with defaults need no migration (CFG-001)");
+        let c: Config = serde_json::from_str(r#"{"media_volume": 0.25, "media_play_button_opacity": 1.0}"#).unwrap();
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!((back.media_volume, back.media_play_button_opacity), (0.25, 1.0));
+    }
+
+    // spec: MEDIA-007, CFG-001
+    #[test]
+    fn a_config_with_the_dropped_autoplay_setting_still_loads_and_keeps_it() {
+        let (c, newer) = crate::vault_state::parse::<Config>(br#"{"font_size": 18.0, "media_autoplay": true}"#).unwrap();
+        assert!(!newer);
+        assert_eq!(c.font_size, 18.0);
+        assert_eq!(c.other.get("media_autoplay"), Some(&serde_json::Value::Bool(true)), "an unknown field is kept as it is");
     }
 
     // spec: LAY-002

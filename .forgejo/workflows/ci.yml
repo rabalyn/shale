@@ -1,5 +1,8 @@
-# Day-to-day CI on the homelab Forgejo (git remote `origin`): every push and pull
-# request is formatted, linted, built, tested and packaged here, and the dependencies are audited.
+# CI on the homelab Forgejo (git remote `origin`): every push to `main` and every release tag is
+# formatted, linted, built, tested and packaged here, and the dependencies are audited. Changes
+# are landed locally by scripts/land.sh, which runs the checks before it pushes `main` (FORGE-011,
+# ADR-0016); this workflow checks again afterwards in a clean container, and a red `main` is
+# fixed at once.
 # Nothing is published from here. Releases are built and published by GitHub from `v*` tags
 # (.github/workflows/build.yml; Forgejo ignores .github/workflows because this folder exists).
 # A push to `main` that passes the build is also pushed to GitHub's `main` (the `mirror` job),
@@ -11,12 +14,10 @@
 name: ci
 
 on:
-  # a branch is checked through its pull request; a push runs only for main (and its mirror job)
-  # and for release tags, so a PR commit is not built twice
+  # branches and pull requests run nothing: scripts/land.sh checks them locally (FORGE-011)
   push:
     branches: [main]
     tags: ['v*']
-  pull_request:
   workflow_dispatch:
   # weekly, so advisories published for unchanged code are noticed (only the audit job runs then)
   schedule:
@@ -74,8 +75,8 @@ jobs:
 
       # The checkout above is shallow and has no tags; the release check and the commit check
       # need the history and the tags (the token is only needed when the repository is private).
-      - name: Fetch the history and the tags (tags, main and pull requests)
-        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+      - name: Fetch the history and the tags (tags and main)
+        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
         shell: bash
         env:
           TOKEN: ${{ github.token }}
@@ -88,10 +89,9 @@ jobs:
           if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
             git "${auth[@]}" fetch -q --unshallow origin
           fi
-          # the commits a pull request or push is compared with may be outside the fetched history
-          for sha in "${{ github.event.pull_request.base.sha }}" "${{ github.event.before }}"; do
-            if [ -n "$sha" ]; then git "${auth[@]}" fetch -q origin "$sha" || true; fi
-          done
+          # the commit a push is compared with may be outside the fetched history
+          sha="${{ github.event.before }}"
+          if [ -n "$sha" ]; then git "${auth[@]}" fetch -q origin "$sha" || true; fi
 
       # BUILD-013: valid semver, greater than the previous tag, Cargo.toml and Cargo.lock agree,
       # and the CHANGELOG.md section is not empty and names every issue closed since the previous tag
@@ -100,19 +100,15 @@ jobs:
         run: sh .github/check-release.sh "${GITHUB_REF_NAME#v}"
 
       # FORGE-008: every new commit names an issue or starts with "no-issue:"
-      - name: Check that commits name an issue (main and pull requests)
-        if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
-        run: |
-          if [ "${{ github.event_name }}" = pull_request ]; then
-            sh .forgejo/scripts/check-commit-issues.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
-          else
-            sh .forgejo/scripts/check-commit-issues.sh "${{ github.event.before }}" "${{ github.sha }}"
-          fi
+      - name: Check that commits name an issue (main)
+        if: github.ref == 'refs/heads/main'
+        run: sh .forgejo/scripts/check-commit-issues.sh "${{ github.event.before }}" "${{ github.sha }}"
 
       - name: Test the release and commit checks
         run: |
           sh .github/test-check-release.sh
           sh .forgejo/scripts/test-check-commit-issues.sh
+          bash scripts/test-land.sh
 
       # BUILD-015: the README and every release page start with the AI-development notice
       - name: Check the AI notice
@@ -124,8 +120,8 @@ jobs:
       - name: Libraries for the window (Wayland, X11, OpenGL) and jq
         run: |
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
-            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq >/dev/null
+          apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq git-lfs ffmpeg >/dev/null
 
       - name: Toolchain
         run: |
@@ -314,8 +310,8 @@ jobs:
       - name: Libraries for the window (Wayland, X11, OpenGL) and jq
         run: |
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
-            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq >/dev/null
+          apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq git-lfs ffmpeg >/dev/null
 
       - name: Install cargo-llvm-cov
         run: |
@@ -375,29 +371,9 @@ jobs:
             git checkout -q FETCH_HEAD
           fi
 
-      # a pull request runs the suites only when it touches the code or the environments
-      - name: Decide whether this run is wanted
-        id: wanted
-        shell: bash
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          answer=yes
-          if [ "${{ github.event_name }}" = pull_request ]; then
-            auth=()
-            if [ -n "$TOKEN" ]; then
-              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
-            fi
-            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.event.pull_request.base.sha }}"
-            answer=$(sh .forgejo/scripts/env-tests.sh wanted pull_request "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
-          fi
-          echo "wanted=$answer" >> "$GITHUB_OUTPUT"
-          if [ "$answer" = no ]; then echo "This pull request touches neither the CalDAV/mail code nor the test environments: skipped."; fi
-
       # best effort: where the container may not install packages or has no privileges, the next
       # step finds no engine and skips
       - name: Container engine (Podman)
-        if: steps.wanted.outputs.wanted == 'yes'
         run: |
           (apt-get update -qq && apt-get install -y -qq --no-install-recommends podman python3-pip openssl curl netcat-openbsd >/dev/null) \
             || echo "Could not install Podman here."
@@ -411,7 +387,6 @@ jobs:
 
       - name: Detect whether containers can run here
         id: engine
-        if: steps.wanted.outputs.wanted == 'yes'
         run: |
           engine=$(sh .forgejo/scripts/env-tests.sh detect)
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
@@ -425,7 +400,7 @@ jobs:
       - name: Libraries for the window (Wayland, X11, OpenGL)
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
         run: |
-          apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
+          apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev >/dev/null
 
       # starts both stacks, runs both ignored suites and always takes the stacks down again

@@ -933,6 +933,7 @@ impl ShaleApp {
                         self.remember_open_files();
                         self.save_config();
                         self.vdata = crate::vault_state::VaultData::default();
+                        self.media.stop();
                         self.vault = None;
                         self.tabbar.tabs.clear();
                         self.cfg.vault = None;
@@ -966,7 +967,7 @@ impl ShaleApp {
                     ui.label(egui::RichText::new("Appearance").color(theme::MUTED));
                     changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
                     changed |= ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed();
-                    changed |= ui.checkbox(&mut self.cfg.inline_images, "Show embedded images inside the editor (the link text appears while the cursor is on it)").changed();
+                    changed |= ui.checkbox(&mut self.cfg.inline_images, "Show embedded images and players inside the editor (the link text appears while the cursor is on it)").changed();
                     changed |= ui.checkbox(&mut self.cfg.line_numbers, "Show line numbers in the editor").changed();
                     changed |= ui.checkbox(&mut self.cfg.live_preview, "Markdown preview in the editor (the lines around the cursor show raw markdown)").changed();
                     ui.add_enabled_ui(self.cfg.live_preview, |ui| {
@@ -975,6 +976,22 @@ impl ShaleApp {
                             changed |= ui.add(egui::DragValue::new(&mut self.cfg.preview_raw_lines).range(0..=20)).changed();
                         });
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Play button over the artwork of a sound or video");
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(&mut self.cfg.media_play_button_opacity, 0.0..=1.0)
+                                    .custom_formatter(|v, _| format!("{:.0} %", v * 100.0))
+                                    .custom_parser(|t| t.trim().trim_end_matches('%').trim().parse::<f64>().ok().map(|v| v / 100.0)),
+                            )
+                            .on_hover_text("How opaque the round button is; it is fully opaque while the mouse is over it")
+                            .changed();
+                    });
+                    // videos are decoded by the system's ffmpeg (MEDIA-010)
+                    match self.media.ffmpeg() {
+                        Some(p) => ui.label(egui::RichText::new(format!("Videos are played with ffmpeg ({})", p.display())).small().color(theme::MUTED)),
+                        None => ui.label(egui::RichText::new(crate::media::ffmpeg::MISSING_HELP).small().color(theme::LINK_MISSING)),
+                    };
                     changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing: notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back").changed();
                     ui.horizontal(|ui| {
                         ui.label("Text size");

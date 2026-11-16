@@ -161,10 +161,15 @@ fn try_hand_over(dir: &Path, paths: &[String]) -> bool {
 
 pub const ALREADY_RUNNING: &str = "Shale is already running. Only one Shale can run at a time, so that mail is never sent twice and settings are not overwritten. Switch to the window that is open.";
 
+/// The small "already running" window, with the app icon (NAV-031).
+pub fn already_running_window() -> eframe::egui::ViewportBuilder {
+    eframe::egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_icon(crate::icon()).with_inner_size([460.0, 170.0]).with_resizable(false)
+}
+
 /// A tiny window that tells the person, so a double click on the icon is not silent.
 pub fn show_already_running() {
     eprintln!("{ALREADY_RUNNING}");
-    let options = eframe::NativeOptions { viewport: eframe::egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size([460.0, 170.0]).with_resizable(false), ..Default::default() };
+    let options = eframe::NativeOptions { viewport: already_running_window(), ..Default::default() };
     // a failure to open the window is not worth more than the message on stderr
     let _ = eframe::run_ui_native("Shale", options, |ui, _frame| {
         ui.add_space(8.0);

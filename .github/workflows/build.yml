@@ -56,8 +56,8 @@ jobs:
       - name: Libraries for the window (Wayland, X11, OpenGL)
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libx11-dev \
-            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev curl
+          sudo apt-get install -y pkg-config libasound2-dev libwayland-dev libxkbcommon-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev curl git-lfs ffmpeg
 
       # the version comes from rust-toolchain.toml, so CI and local builds use the same compiler
       # and clippy (a new stable release can add lints that fail `-D warnings` overnight)
@@ -84,6 +84,7 @@ jobs:
         run: |
           mkdir -p dist/shale
           cp target/release/shale LICENSE README.md CHANGELOG.md dist/shale/
+          cp assets/icon/shale.desktop assets/icon/shale.svg dist/shale/
           cp -r docs dist/shale/
           # DEV-020: the guide is in the archive once, as docs/userguide (Help finds it there),
           # without what Shale writes into a vault; and as a zip of its own
@@ -179,6 +180,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # the sync tests of Git LFS need it (SYNC-017); the runner image usually has it already
+      - name: Git LFS
+        run: command -v git-lfs >/dev/null || brew install git-lfs
+
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.100.0
@@ -191,6 +196,10 @@ jobs:
 
       - name: Build
         run: cargo build --release --locked
+
+      # ffmpeg: the video tests run with it (MEDIA-009); they skip with a note without it (BUILD-018)
+      - name: ffmpeg
+        run: brew install ffmpeg
 
       - name: Test
         run: cargo test --release --locked
@@ -216,6 +225,11 @@ jobs:
 
       - name: Build
         run: cargo build --release --locked
+
+      # ffmpeg for the video tests (MEDIA-009); if Chocolatey cannot get it the tests skip with a note
+      - name: ffmpeg
+        continue-on-error: true
+        run: choco install ffmpeg -y --no-progress
 
       - name: Test
         run: cargo test --release --locked

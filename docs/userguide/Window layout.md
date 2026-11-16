@@ -32,6 +32,12 @@ of **views**.
 - The layout is kept in the settings (`sidebars`, `show_left`, `show_right`), see
   [[Settings reference]].
 
+## The app icon
+
+The Shale icon (stacked slate plates) shows in the title bar and taskbar, and in the Dock on
+macOS. On Linux with Wayland the taskbar takes it from a desktop file: the download has
+`shale.desktop` and `shale.svg`, and the README says how to install them.
+
 ## Dialogs
 
 Every dialog is a window you can move by its title bar and resize from any edge or corner. In a

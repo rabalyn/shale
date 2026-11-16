@@ -85,9 +85,15 @@ fn parse_size(s: &str) -> Option<[f32; 2]> {
     (w >= MIN_WINDOW[0] && h >= MIN_WINDOW[1]).then_some([w, h])
 }
 
-/// The Shale window of `size` points, with its smallest size.
+/// The Shale app icon (NAV-031), built into the program: the title bar and taskbar on X11 and
+/// Windows and the Dock on macOS show it. Wayland takes it from `shale.desktop` instead.
+fn icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon/shale-256.png")).expect("the bundled icon is a PNG")
+}
+
+/// The Shale window of `size` points, with its smallest size and the app icon.
 fn window(size: [f32; 2]) -> egui::ViewportBuilder {
-    egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size(size).with_min_inner_size(MIN_WINDOW)
+    egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_icon(icon()).with_inner_size(size).with_min_inner_size(MIN_WINDOW)
 }
 
 const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [(--screenshot <file.png> | --record <file.webm>) [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]";
@@ -252,7 +258,7 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_args, parse_size, window, Cli, Parsed, MIN_WINDOW};
+    use super::{icon, parse_args, parse_size, window, Cli, Parsed, MIN_WINDOW};
     use eframe::egui;
     use std::path::PathBuf;
 
@@ -357,6 +363,28 @@ mod tests {
         assert_eq!(w.inner_size, Some(egui::vec2(1360.0, 840.0)));
         assert_eq!(w.min_inner_size, Some(egui::vec2(1280.0, 720.0)));
         assert_eq!(MIN_WINDOW, [1280.0, 720.0]);
+    }
+
+    // spec: NAV-031
+    #[test]
+    fn nav_031_every_shale_window_carries_the_app_icon() {
+        let i = icon();
+        assert_eq!((i.width, i.height, i.rgba.len()), (256, 256, 256 * 256 * 4));
+        assert!(i.rgba.chunks(4).any(|p| p[3] == 0), "the corners around the rounded square are transparent");
+        assert_eq!(window([1360.0, 840.0]).icon.as_deref(), Some(&i));
+        assert_eq!(crate::instance::already_running_window().icon.as_deref(), Some(&i));
+    }
+
+    // spec: NAV-031
+    #[test]
+    fn nav_031_the_linux_download_has_a_desktop_file_that_matches_the_window() {
+        let desktop = std::fs::read_to_string("assets/icon/shale.desktop").unwrap();
+        for line in ["[Desktop Entry]", "Type=Application", "Name=Shale", "Exec=shale", "Icon=shale", "StartupWMClass=shale"] {
+            assert!(desktop.lines().any(|l| l == line), "shale.desktop lacks {line}");
+        }
+        assert_eq!(window([1360.0, 840.0]).app_id.as_deref(), Some("shale"), "the app id is what Wayland matches the desktop file by");
+        let build = std::fs::read_to_string(".github/workflows/build.yml").unwrap();
+        assert!(build.contains("cp assets/icon/shale.desktop assets/icon/shale.svg dist/shale/"), "the release tarball has the desktop file and the icon");
     }
 
     // spec: DEV-013

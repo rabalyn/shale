@@ -33,7 +33,9 @@ You normally never edit these files; the "Where" column says which window change
 | `font_size` | 15.5 (range 12 to 24) | Settings → General → Appearance, "Text size" |
 | `readable_width` | on | Appearance, "Readable line length" |
 | `dark_canvas` | on | Appearance, "Dark drawing canvas" |
-| `inline_images` | on | Appearance, "Show embedded images inside the editor" |
+| `inline_images` | on | Appearance, "Show embedded images and players inside the editor" |
+| `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → General → Appearance, "Play button over the artwork of a sound or video"; global config |
+| `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
 | `line_numbers` | on | Appearance, "Show line numbers in the editor" |
 | `live_preview` | off | Appearance, "Markdown preview in the editor"; the eye icon of the editor |
 | `preview_raw_lines` | 0 (range 0 to 20) | Appearance, "Raw lines around the cursor" |
@@ -136,6 +138,7 @@ system keyring, never in this file):
 | `sync.interval_minutes` | 5 (1 to 1440) | Git sync, "Every … minutes" |
 | `sync.commit_prefix` | empty | Git sync, "Commit message prefix" |
 | `sync.commit_suffix` | empty | Git sync, "suffix" |
+| `sync.lfs_download` | `on_demand` (a media file stored with Git LFS is downloaded when you play or open it; `always`: after every sync) | Git sync, "Download media files after every sync" (shown only when `git-lfs` is installed) |
 
 The git remote itself is git's (`git remote`), set with **Connect** in the same section.
 

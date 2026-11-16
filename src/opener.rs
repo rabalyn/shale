@@ -221,8 +221,8 @@ const PROGRAM_EXTENSIONS: &[&str] = &[
 /// there is an executable bit at all).
 #[cfg(unix)]
 const DOCUMENT_EXTENSIONS: &[&str] = &[
-    "pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "txt", "md", "csv", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "mp3", "mp4", "m4a", "wav", "ogg", "flac", "mkv", "webm", "mov", "avi", "eml",
-    "ics", "vcf", "zip", "epub",
+    "pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "txt", "md", "csv", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "mp3", "mp4", "m4v", "m4a", "wav", "ogg", "flac", "mkv", "webm", "mov", "avi",
+    "eml", "ics", "vcf", "zip", "epub",
 ];
 
 fn extension(path: &Path) -> String {

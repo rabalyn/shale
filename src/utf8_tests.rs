@@ -98,12 +98,13 @@ fn reading_view_and_pdf_export_take_any_text() {
     std::fs::write(d.join("Müll.md"), "# Müll\n").unwrap();
     let v = crate::vault::Vault::open(&d).unwrap();
     let mut scenes = reader::SceneCache::default();
+    let media = crate::media::MediaPlayer::default();
     let ctx = egui::Context::default();
     let opts = crate::pdf::export::ExportOptions::for_note();
     for s in samples().into_iter().step_by(3) {
         let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, 400.0))), ..Default::default() };
         let mut out = ctx.run_ui(raw, |ui| {
-            reader::show(ui, &s, &v, &PathBuf::from("Müll.md"), &mut scenes, 15.0, true);
+            reader::show(ui, &s, &v, &PathBuf::from("Müll.md"), &mut reader::Caches { scenes: &mut scenes, media: &media }, 15.0, true);
         });
         out.textures_delta.clear();
         let _ = crate::pdf::export::export_note(&v, Path::new("Müll.md"), &s, &opts);
