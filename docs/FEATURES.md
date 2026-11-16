@@ -15,6 +15,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Pictures (`![[photo.png]]`), drawings (`![[Sketch.excalidraw]]`) and PDFs are shown inside the
   editor. Pictures and videos have draggable edges and corners (the width goes into the link,
   `![[photo.png|300]]`), a round **100%** button for the natural size and a round fullscreen button.
+  Every shown embed has its link as a one-line caption below it (the words of an alias,
+  `![[photo.png|Sea at dusk]]`, else the file's link); a click on the caption opens the file.
+
+![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
+
 - Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
   line keeps one number.
 - A **formatting toolbar** above the text (Settings → Editing, on by default) has a button for
@@ -84,7 +89,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - Export notes and drawings to PDF (paper size, margins, fonts and more in a dialog; tables become
   real grids with the header repeated across pages, or raw text lines with "Export plain text";
-  highlights and font colours are printed as written), insert a
+  embedded pictures, drawings, PDFs, the first frame of a video and the cover of a sound are
+  drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
+  the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
+  player card; highlights and font colours are printed as written), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
@@ -122,7 +130,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   lines of a selection) shows the raw markdown. The note stays editable; links still open with a
   click and task boxes still tick. A **table** away from the cursor is drawn as a real grid (also
   in the reading view): borders, a bold header row, aligned columns, formatted cell text, long
-  text wrapping in its own column; click it, or move the cursor into it, to edit the raw rows.
+  text wrapping in its own column; click it, or move the cursor into it, to edit the raw rows. Hover the grid for buttons that add a
+  row or column and delete the hovered row or column.
 
   ![The Markdown preview](userguide/z_media/screenshots/editor-preview.png)
 
@@ -328,6 +337,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   and can be stopped and resumed. **Sync** and the status bar show the progress; new mail is also
   fetched every 10 minutes (changeable, 0 = off) while Shale runs. A mail deleted on the server
   stays here, dimmed, with a note.
+- **Changes in another mail program show up within seconds.** While the mail view is open, the
+  folder you have open and each account's Inbox are watched over a read-only connection with IMAP
+  IDLE: a flag removed, mail read, new or deleted mail in Thunderbird or on your phone appears here
+  without pressing Sync (a server without IDLE is asked once a minute). Leaving the mail view
+  closes the connections; a wrong password is not tried over and over.
 - Choose which folders are synced with the tick boxes. **Trash, Junk and Gmail's "All Mail" are
   not synced automatically**: when you open one, its list is loaded from the server, and a
   message is downloaded when you press **Load this message**. The same button appears for a

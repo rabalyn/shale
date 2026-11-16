@@ -13,6 +13,7 @@
 
 mod app;
 mod calendar;
+mod caption;
 mod colour_tags;
 mod config;
 mod data_usage;
@@ -20,6 +21,7 @@ mod dialog;
 mod drawing;
 mod editor;
 mod editor_preview;
+mod embed_size;
 mod format;
 mod format_bar;
 #[cfg(test)]

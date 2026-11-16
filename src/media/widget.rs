@@ -38,6 +38,25 @@ pub fn card_size(abs: &Path, avail_w: f32, width: Option<f32>) -> Vec2 {
     }
 }
 
+/// Where the parts of a card of width `card_w` are, from its top-left corner: the artwork (the
+/// picture of a video above the controls, the cover of a sound beside them), the left edge of the
+/// name, bar and volume, and the top of the controls. The PDF export draws the card from it too.
+pub struct Geometry {
+    pub art: Rect,
+    pub text_x: f32,
+    pub top: f32,
+}
+
+pub fn geometry(abs: &Path, card_w: f32) -> Geometry {
+    if super::is_video(abs) {
+        let art = Rect::from_min_size(Pos2::new(PAD, PAD), Vec2::new(card_w - 2.0 * PAD, video_art_height(card_w)));
+        Geometry { art, text_x: 12.0, top: art.bottom() - 2.0 }
+    } else {
+        let art = Rect::from_min_size(Pos2::new(PAD, PAD), Vec2::splat(ART));
+        Geometry { art, text_x: art.right() + 12.0, top: 0.0 }
+    }
+}
+
 /// The video card that fills `room` as far as its shape lets it (the fullscreen view).
 pub fn video_card_fit(room: Vec2) -> Vec2 {
     let w = room.x.min((room.y - PAD - VIDEO_CONTROLS) * 16.0 / 9.0 + 2.0 * PAD).max(VIDEO_MIN_WIDTH);
@@ -76,10 +95,10 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     let card = ui.interact(rect, id, Sense::click_and_drag());
 
     // --- artwork and the round button
-    let video = super::is_video(abs);
-    let art = if video { Rect::from_min_size(rect.min + Vec2::splat(PAD), Vec2::new(rect.width() - 2.0 * PAD, video_art_height(rect.width()))) } else { Rect::from_min_size(rect.min + Vec2::splat(PAD), Vec2::splat(ART)) };
+    let geo = geometry(abs, rect.width());
+    let art = geo.art.translate(rect.min.to_vec2());
     // the controls: beside the artwork of a sound, below the picture of a video
-    let top = if video { art.bottom() - 2.0 } else { rect.top() };
+    let top = rect.top() + geo.top;
     paint_art(&painter, art, &v);
     if v.external {
         // no ffmpeg: the whole tile opens the video in the system's player (MEDIA-010)
@@ -99,7 +118,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, !v.unplayable, label));
 
     // --- the right side: name, message, progress, volume
-    let x0 = if video { rect.left() + 12.0 } else { art.right() + 12.0 };
+    let x0 = rect.left() + geo.text_x;
     let x1 = rect.right() - 12.0;
     let width = (x1 - x0).max(40.0);
     let mut name = egui::text::LayoutJob::simple(v.file_name.clone(), egui::FontId::proportional(14.0), theme::TEXT_STRONG, width);

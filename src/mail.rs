@@ -35,6 +35,9 @@ pub(crate) mod ui;
 mod ui_tests;
 pub(crate) mod unsent;
 pub(crate) mod view;
+pub(crate) mod watch;
+#[cfg(test)]
+mod watch_tests;
 
 #[derive(Clone, Debug, Default)]
 pub struct Attachment {

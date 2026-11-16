@@ -125,6 +125,8 @@ impl W {
         seed(&server);
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
         app.cfg.mail_sync_minutes = 0;
+        // the watched folders have their own tests; here they would add connections that other tests count
+        app.mail.watch.enabled = false;
         // marking read when a message is opened is tested on its own; elsewhere the timer must not write
         app.cfg.mail_mark_read = false;
         let offline = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -715,6 +717,43 @@ fn mail_is_fetched_by_itself_on_the_timer_and_never_twice_at_once() {
         w2.frame(vec![]);
     }
     assert_eq!(w2.server.state().connections, 0);
+}
+
+// spec: MAIL-233, MAIL-231
+#[test]
+fn a_flag_that_another_client_removes_shows_in_the_open_folder_within_seconds_and_leaving_the_view_ends_the_watching() {
+    let mut w = W::new("watch", true);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    w.app.mail.watch.enabled = true;
+    // the Inbox is the open folder and the Inbox of the account: one connection, idling
+    let st = w.server.state.clone();
+    w.until("the folder is watched with IDLE", move |_| st.lock().unwrap().verbs().iter().any(|v| v == "IDLE"));
+    assert_eq!(w.app.mail.watch.watching().len(), 1);
+    // the person flags the newest mail here (the action is sent at once) ...
+    let flagged = |a: &ShaleApp| a.mail.row(0).is_some_and(|m| m.flags.contains("\\Flagged"));
+    w.until("the list is on screen", |a| a.mail.row(0).is_some());
+    let msg = w.app.mail.row(0).unwrap().clone();
+    let cfg = w.app.cfg.clone();
+    w.app.mail.toggle_flag_on(&cfg, vec![msg.clone()]);
+    w.settle_ops();
+    w.until("the flag shows", flagged);
+    assert!(w.server.state().messages("INBOX").iter().any(|(uid, f, _)| *uid == msg.uid && f.iter().any(|x| x == "\\Flagged")), "the server has it");
+    // ... and another program takes it off again: no sync, no key, only waiting
+    let t0 = Instant::now();
+    w.server.state().set_flags("INBOX", msg.uid, &[]);
+    w.until("the flag is gone from the list", move |a| a.mail.row(0).is_some_and(|m| !m.flags.contains("\\Flagged")));
+    assert!(t0.elapsed() < Duration::from_secs(10), "{:?}", t0.elapsed());
+    assert!(!w.app.mail.any_sync_running(), "no full sync was needed");
+    // another program flags another mail and reads it
+    let other = w.app.mail.row(1).unwrap().uid;
+    w.server.state().set_flags("INBOX", other, &["\\Seen", "\\Flagged"]);
+    w.until("the second change shows", |a| a.mail.row(1).is_some_and(|m| m.flags.contains("\\Flagged") && m.flags.contains("\\Seen")));
+    // leaving the mail view ends the connection
+    w.app.show_view(View::Tasks, false);
+    let st = w.server.state.clone();
+    w.until("the connection ends", move |_| st.lock().unwrap().open_connections == 0);
+    assert!(w.app.mail.watch.watching().is_empty());
 }
 
 // spec: MAIL-059
