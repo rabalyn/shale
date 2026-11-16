@@ -3,7 +3,7 @@
 //! and broken files and the errors. They are children of `tb_store`, so they can reach its helpers.
 
 use super::*;
-use crate::tb_fixture_tests::{Kind, Msg, TbFixture};
+use crate::import::tb_fixture_tests::{Kind, Msg, TbFixture};
 
 fn find(fx: &TbFixture, link: &str, name: Option<&str>) -> Result<Vec<Vec<u8>>, String> {
     find_in(std::slice::from_ref(&fx.root), &[link.to_string()], name)

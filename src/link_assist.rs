@@ -87,7 +87,7 @@ impl LinkAssist {
     pub fn new(id: egui::Id) -> Self {
         LinkAssist {
             id,
-            people_dir: crate::people::DEFAULT_DIR.into(),
+            people_dir: crate::import::people::DEFAULT_DIR.into(),
             ac_active: false,
             ac_start: None,
             ac_dismissed: None,
@@ -423,7 +423,7 @@ impl LinkAssist {
                 .collect();
             items.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
             for (_, name, rel) in items.into_iter().take(8) {
-                let link = crate::people::link_to(vault, &rel);
+                let link = crate::import::people::link_to(vault, &rel);
                 list.push((link.trim_start_matches("[[").trim_end_matches("]]").to_string(), true));
                 labels.push(name);
             }

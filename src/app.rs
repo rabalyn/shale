@@ -185,7 +185,7 @@ pub enum Modal {
     Export(Box<crate::export_dialog::ExportDialog>),
     Calendars(Box<crate::calendar::dialog::CalendarDialog>),
     Event(Box<crate::calendar::dialog::EventDialog>),
-    Import(Box<crate::import_dialog::ImportDialog>),
+    Import(Box<crate::import::dialog::ImportDialog>),
     MailAccounts(Box<crate::mail_dialog::MailDialog>),
     Social(Box<crate::social::accounts_ui::SocialDialog>),
     /// an Obsidian canvas is being opened: convert it or open it read-only?
@@ -340,13 +340,13 @@ pub struct ShaleApp {
     ext_refused: Option<(egui::Pos2, Vec<String>)>,
     /// test drops from `--keys` (handled like drops from other programs)
     #[cfg(target_os = "linux")]
-    fake_drops: Vec<crate::wl_drop::DropEvent>,
+    fake_drops: Vec<crate::import::wl_drop::DropEvent>,
     /// drops being read in the background, and where they were dropped
     /// a drop from another program is being read
     drop_busy: bool,
     /// words typical for each tag (learned from the vault, see tagwords)
-    pub tag_words: Option<crate::tagwords::TagWords>,
-    tag_job: Option<std::sync::mpsc::Receiver<Result<crate::tagwords::TagWords, String>>>,
+    pub tag_words: Option<crate::import::tagwords::TagWords>,
+    tag_job: Option<std::sync::mpsc::Receiver<Result<crate::import::tagwords::TagWords, String>>>,
     tag_root: Option<PathBuf>,
     tag_gen: u64,
     tag_at: Option<Instant>,
@@ -397,8 +397,8 @@ impl ShaleApp {
         #[cfg(target_os = "linux")]
         {
             // drops from other programs on Wayland (a second listener; see wl_drop)
-            crate::wl_drop::set_context(&cc.egui_ctx);
-            crate::wl_drop::attach(cc);
+            crate::import::wl_drop::set_context(&cc.egui_ctx);
+            crate::import::wl_drop::attach(cc);
         }
         let persist = opts.screenshot.is_none();
         Self::build(opts, persist)
@@ -2046,7 +2046,7 @@ impl ShaleApp {
                     let pos = self.script_point(t);
                     raw.events.push(egui::Event::PointerMoved(pos));
                     let list: String = paths.iter().map(|p| format!("{}\r\n", crate::import::file_uri(p))).collect();
-                    self.fake_drops.push(crate::wl_drop::DropEvent::Drop { x: pos.x, y: pos.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
+                    self.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: pos.x, y: pos.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
                 }
                 _ => paths.iter().for_each(|p| raw.dropped_files.push(std::sync::Arc::new(ScriptDrop(p.clone())))),
             },
@@ -2069,7 +2069,7 @@ impl ShaleApp {
                         }
                     }
                     let offered = parts.iter().map(|p| p.0.clone()).collect();
-                    self.fake_drops.push(crate::wl_drop::DropEvent::Drop { x: at.x, y: at.y, parts, offered, report: vec![] });
+                    self.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: at.x, y: at.y, parts, offered, report: vec![] });
                 }
                 #[cfg(not(target_os = "linux"))]
                 let _ = rest;
@@ -2394,7 +2394,7 @@ pub(crate) mod tests {
         assert!(!app.usage.places.pictures.starts_with(dirs::cache_dir().unwrap_or_default()) || app.usage.places.pictures.starts_with(std::env::temp_dir()), "a test never sees the real caches");
         assert_eq!(app.usage.places.post_index, None);
         std::fs::create_dir_all(d.join(".shale")).unwrap();
-        crate::fsutil::write_atomic(&crate::tagwords::file_in(&d), b"{}").unwrap();
+        crate::fsutil::write_atomic(&crate::import::tagwords::file_in(&d), b"{}").unwrap();
         app.open_data_usage();
         assert!(matches!(app.modal, Some(Modal::DataUsage)));
         let mut n = 0;
@@ -2421,7 +2421,7 @@ pub(crate) mod tests {
             std::thread::sleep(Duration::from_millis(10));
             n += 1;
         }
-        assert!(!crate::tagwords::file_in(&d).exists() || app.tag_job.is_some());
+        assert!(!crate::import::tagwords::file_in(&d).exists() || app.tag_job.is_some());
         assert_eq!(app.tag_gen, u64::MAX, "learning starts again");
         assert!(app.toasts.iter().any(|(t, _)| t.starts_with("Tag words cleared")), "{:?}", app.toasts);
         assert!(app.usage_ask(Ask::Open(PathBuf::from("Ideas.md"))), "opening a file closes the dialog");
@@ -2641,7 +2641,7 @@ pub(crate) mod tests {
         let Some(Modal::Import(mut dlg)) = app.modal.take() else { panic!() };
         assert_eq!((dlg.items.len(), dlg.folder.as_str(), dlg.items[0].kind().as_ref()), (1, "Social", "Thread (3 posts)"));
         assert!(dlg.items[0].include && dlg.items[0].already.is_none() && dlg.link_into.is_none());
-        assert!(app.import_action(&mut dlg, crate::import_dialog::ImportAction::Import));
+        assert!(app.import_action(&mut dlg, crate::import::dialog::ImportAction::Import));
         assert_eq!(app.vdata.state.last_social_folder, "Social");
         assert!(app.vdata.state.last_import_folder.is_empty(), "posts have their own last folder");
         let rel = d.join("Social").read_dir().unwrap().flatten().find(|f| f.file_name().to_string_lossy().ends_with(".md")).unwrap().path();

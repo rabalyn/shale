@@ -137,7 +137,7 @@ impl Places {
             CacheId::MailIndex => self.mail_root.join("index.sqlite"),
             CacheId::MailBackups => self.mail_root.join("index.backup-<date>.sqlite"),
             CacheId::MailBroken => self.mail_root.join("index.sqlite.broken-<date>"),
-            CacheId::TagWords => self.vault.as_ref().map(|v| crate::tagwords::file_in(v)).unwrap_or_else(|| PathBuf::from("(no vault open)")),
+            CacheId::TagWords => self.vault.as_ref().map(|v| crate::import::tagwords::file_in(v)).unwrap_or_else(|| PathBuf::from("(no vault open)")),
             CacheId::DebugLog => self.debug_log.clone(),
         };
         p.display().to_string()
@@ -166,7 +166,7 @@ pub fn stats(id: CacheId, places: &Places) -> Result<CacheStats, String> {
         CacheId::MailBackups => files::stats(&crate::mail_store::backup_files(&places.mail_root)),
         CacheId::MailBroken => files::stats(&crate::mail_store::broken_files(&places.mail_root)),
         CacheId::TagWords => match &places.vault {
-            Some(v) => files::stats(&file_entry(&crate::tagwords::file_in(v))),
+            Some(v) => files::stats(&file_entry(&crate::import::tagwords::file_in(v))),
             None => CacheStats::default(),
         },
         CacheId::DebugLog => files::stats(&file_entry(&places.debug_log)),
@@ -192,7 +192,7 @@ pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<F
         CacheId::MailBackups => files::remove(&crate::mail_store::backup_files(&places.mail_root)),
         CacheId::MailBroken => files::remove(&crate::mail_store::broken_files(&places.mail_root)),
         CacheId::TagWords => match &places.vault {
-            Some(v) => files::remove(&file_entry(&crate::tagwords::file_in(v))),
+            Some(v) => files::remove(&file_entry(&crate::import::tagwords::file_in(v))),
             None => Ok(Freed::default()),
         },
         CacheId::DebugLog => empty_log(&places.debug_log),

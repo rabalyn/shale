@@ -12,7 +12,7 @@
 - **Per-vault state**: `open_files` (since NAV-026 `tabs`), `people_dir`, `last_import_folder` and `recent_tags`
   (`config.rs:51, 64-69`).
 
-`<vault>/.shale/` exists, but it holds only `tag-words.json` (`tagwords.rs:150`).
+`<vault>/.shale/` exists, but it holds only `tag-words.json` (`import/tagwords.rs:150`).
 
 Because of this:
 

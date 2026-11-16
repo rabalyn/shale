@@ -39,7 +39,7 @@ pub enum ImportAction {
 
 impl ImportDialog {
     pub fn new(items: Vec<Item>, notes: Vec<String>, folder: String, tags: String, link_into: Option<PathBuf>, link_on: bool) -> Self {
-        ImportDialog { items, folder, tags, keep_original: true, link_into, link_on, add_path: String::new(), notes, error: None, rects: vec![], auto_tags: vec![], suggested: vec![], people_dir: crate::people::DEFAULT_DIR.into() }
+        ImportDialog { items, folder, tags, keep_original: true, link_into, link_on, add_path: String::new(), notes, error: None, rects: vec![], auto_tags: vec![], suggested: vec![], people_dir: crate::import::people::DEFAULT_DIR.into() }
     }
 
     pub fn count(&self) -> usize {
@@ -299,7 +299,7 @@ mod tests {
         h.click("tag:status", &mut d, &folders, &tags);
         assert_eq!(import::parse_tags(&d.tags), vec!["beamer"], "clicking a tag again takes it out");
         // people and suggested tags
-        d.items[0].people = vec![crate::people::Person { name: "Hans Müller".into(), email: "h@x.de".into(), role: crate::people::Role::From, existing: None, on: true }];
+        d.items[0].people = vec![crate::import::people::Person { name: "Hans Müller".into(), email: "h@x.de".into(), role: crate::import::people::Role::From, existing: None, on: true }];
         d.suggested = vec![("av-technik".into(), vec!["leinwand".into(), "projektor".into()])];
         h.frame(vec![], &mut d, &folders, &tags);
         h.click("person:0:0", &mut d, &folders, &tags);

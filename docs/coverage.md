@@ -54,7 +54,7 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 |---|---:|---:|---:|
 | `src/main.rs` | 56 | 45 | 19.64 % |
 | `src/instance.rs` | 28 | 16 | 42.86 % |
-| `src/wl_drop.rs` | 292 | 162 | 44.52 % |
+| `src/import/wl_drop.rs` | 292 | 162 | 44.52 % |
 | `src/app/drops.rs` | 403 | 216 | 46.40 % |
 | `src/reader.rs` | 398 | 149 | 62.56 % |
 | `src/graph.rs` | 273 | 87 | 68.13 % |
@@ -67,7 +67,7 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/app/mail.rs` | 160 | 30 | 81.25 % |
 | `src/link_assist.rs` | 472 | 81 | 82.84 % |
 | `src/mail_ui.rs` | 1836 | 269 | 85.35 % |
-| `src/tb_store.rs` | 524 | 73 | 86.07 % |
+| `src/import/tb_store.rs` | 524 | 73 | 86.07 % |
 | `src/opener.rs` | 309 | 42 | 86.41 % |
 | `src/mail_compose.rs` | 782 | 106 | 86.45 % |
 | `src/pdfexport.rs` | 655 | 84 | 87.18 % |
@@ -116,7 +116,7 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/editor.rs` | 1357 | 66 | 95.14 % |
 | `src/drawing/links.rs` | 216 | 10 | 95.37 % |
 | `src/vim.rs` | 464 | 18 | 96.12 % |
-| `src/people.rs` | 258 | 10 | 96.12 % |
+| `src/import/people.rs` | 258 | 10 | 96.12 % |
 | `src/drawing/canvas.rs` | 285 | 11 | 96.14 % |
 | `src/lists.rs` | 446 | 17 | 96.19 % |
 | `src/calendar/dialog.rs` | 1391 | 50 | 96.41 % |
@@ -125,10 +125,10 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/drawing/layout.rs` | 397 | 13 | 96.73 % |
 | `src/sidebar_ui.rs` | 184 | 6 | 96.74 % |
 | `src/vault_path.rs` | 92 | 3 | 96.74 % |
-| `src/import_dialog.rs` | 277 | 8 | 97.11 % |
+| `src/import/dialog.rs` | 277 | 8 | 97.11 % |
 | `src/mail_store.rs` | 944 | 27 | 97.14 % |
 | `src/mail_db.rs` | 776 | 22 | 97.16 % |
-| `src/tagwords.rs` | 157 | 4 | 97.45 % |
+| `src/import/tagwords.rs` | 157 | 4 | 97.45 % |
 | `src/outbox.rs` | 925 | 23 | 97.51 % |
 | `src/drawing/pictures.rs` | 169 | 4 | 97.63 % |
 | `src/markdown.rs` | 531 | 11 | 97.93 % |
@@ -201,9 +201,9 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    for good, bad, unknown, expired-key, expired-signature and revoked signatures and for
    encrypting to or signing with an expired or revoked key (the test kit's `pgp_sign_expiring`),
    `classify_entity` for odd and nested mails, and `best_key`.
-9. **`app/drops.rs` `handle_drops` (291 to 447, 46 % covered before) and `wl_drop.rs` `event` (264 to 397,
+9. **`app/drops.rs` `handle_drops` (291 to 447, 46 % covered before) and `import/wl_drop.rs` `event` (264 to 397,
    45 %)**: dropping files, folders and mails from other programs (Wayland data offers, MIME kinds,
-   the import dialog). Done in #61 (DEV-012): `wl_drop.rs` is split into a protocol-free part
+   the import dialog). Done in #61 (DEV-012): `import/wl_drop.rs` is split into a protocol-free part
    (`Drag`, `Landing`, `is_repeat`) with unit tests and a thin Wayland glue; `app/drops_tests.rs` feeds
    `DropEvent`s and window-system files to `handle_drops` in the headless window (drop on a folder, a
    note, the editor, nowhere; into an open dialog; hover, refusal and busy hints; unusable drops; no
@@ -279,9 +279,9 @@ More, in the order of the table:
 - **Closed (#56): `config.rs` `save`, `load`, `config_path` (a test-only path seam) and `vault_state.rs` `reload_settings`** (`adopt_legacy` was tested already). Original gap: reading and writing the settings file and the first-start
   migration. Test: point `XDG_CONFIG_HOME` at a temp dir; save, load, a corrupt file, a read-only
   directory. Kind: test.
-- **`tb_store.rs`: closed** (#63 part 2). `tb_fixture_tests.rs` generates Thunderbird profiles
+- **`import/tb_store.rs`: closed** (#63 part 2). `import/tb_fixture_tests.rs` generates Thunderbird profiles
   (`profiles.ini`, `prefs.js`, mbox and maildir folders, `.sbd` nesting, non-ASCII names, `.msf`
-  indexes, flags, large and broken files); `tb_store_tests.rs` has 21 tests on them (IMP-018).
+  indexes, flags, large and broken files); `import/tb_store/fixture_tests.rs` has 21 tests on them (IMP-018).
 - **`mail.rs` `entity` (372 to 409), `parse_date` (349 to 363), `decode_charset` (108 to 126),
   `html_to_text`**: HTML entities, odd date formats and charsets in incoming mail. Test: table tests
   with real-world strings. Kind: test.

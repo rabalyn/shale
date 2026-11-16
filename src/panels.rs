@@ -947,7 +947,7 @@ impl ShaleApp {
                     ui.horizontal(|ui| {
                         ui.label("People folder");
                         changed |= ui
-                            .add(egui::TextEdit::singleline(&mut self.vdata.settings.people_dir).hint_text(crate::people::DEFAULT_DIR).desired_width(220.0))
+                            .add(egui::TextEdit::singleline(&mut self.vdata.settings.people_dir).hint_text(crate::import::people::DEFAULT_DIR).desired_width(220.0))
                             .on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.")
                             .changed();
                     });
@@ -1097,7 +1097,7 @@ impl ShaleApp {
         if let Modal::Import(d) = &mut modal {
             let folders = self.import_folders();
             let tags = self.tag_choices();
-            let resp = crate::dialog::Dialog::new("import", "Import into the vault").width(620.0).show(&ctx, |ui| crate::import_dialog::show(ui, d, &folders, &tags));
+            let resp = crate::dialog::Dialog::new("import", "Import into the vault").width(620.0).show(&ctx, |ui| crate::import::dialog::show(ui, d, &folders, &tags));
             let close_asked = resp.should_close();
             if let Some(a) = resp.inner.flatten() {
                 if self.import_action(d, a) {
