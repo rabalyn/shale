@@ -32,7 +32,7 @@ enum MenuCmd {
     DiscardDraft,
 }
 
-/// The actions of the buttons of the open mail (MAIL-228).
+/// The actions of the buttons of the open mail (MAIL-229).
 pub const BUTTON_KEYS: [KeyAction; 9] =
     [KeyAction::MailBtnImport, KeyAction::MailBtnClose, KeyAction::MailBtnReply, KeyAction::MailBtnReplyAll, KeyAction::MailBtnForward, KeyAction::MailBtnRead, KeyAction::MailBtnFlag, KeyAction::MailBtnMove, KeyAction::MailBtnDelete];
 
@@ -48,7 +48,7 @@ pub struct Kbd {
     pub scrolled_to: Option<crate::mail::ui::Pane>,
     /// The current key of every action of the mail view, for the hints (MAIL-072); refreshed each frame.
     pub hints: std::collections::HashMap<KeyAction, String>,
-    /// The letter of the Alt key of every button action, for the underline while Alt is held (MAIL-228); refreshed each frame.
+    /// The letter of the Alt key of every button action, for the underline while Alt is held (MAIL-229); refreshed each frame.
     pub mnemonics: std::collections::HashMap<KeyAction, char>,
 }
 
@@ -67,7 +67,7 @@ impl MailView {
     }
 
     /// The label of a button of the open mail; while Alt is held the first letter that is the Alt key
-    /// of its action is underlined, none when the label has no such letter (MAIL-228).
+    /// of its action is underlined, none when the label has no such letter (MAIL-229).
     pub(crate) fn mnemonic(&self, ui: &egui::Ui, label: &str, a: KeyAction) -> egui::WidgetText {
         let at = self.kbd.mnemonics.get(&a).filter(|_| ui.input(|i| i.modifiers.alt)).and_then(|l| label.char_indices().find(|(_, c)| c.to_ascii_lowercase() == *l));
         let Some((i, c)) = at else { return label.into() };
@@ -82,7 +82,7 @@ impl MailView {
         job.into()
     }
 
-    /// An Alt key of a button of the open mail (MAIL-228): the same as a click on that button.
+    /// An Alt key of a button of the open mail (MAIL-229): the same as a click on that button.
     /// Nothing happens while no mail is open or a list of the outbox is shown.
     pub(crate) fn button_key(&mut self, cfg: &Config, a: KeyAction, actions: &mut Vec<MailAction>) {
         if self.open.is_none() || self.local_view.is_some() {

@@ -260,7 +260,7 @@ actions! {
     MailAttNext => "mail.attachment_next", "Select the next attachment", MailView, ["CloseBracket"];
     MailAttOpen => "mail.attachment_open", "Open the selected attachment", MailView, ["O"];
     MailEdit => "mail.edit", "Edit the draft, or take a mail of the outbox back into the editor", MailView, ["E"];
-    // The Alt shortcuts of the buttons of the open mail (MAIL-228): the letter is underlined on the button while Alt is held
+    // The Alt shortcuts of the buttons of the open mail (MAIL-229): the letter is underlined on the button while Alt is held
     MailBtnImport => "mail.button_import", "Open mail: Import to vault button", MailView, ["Alt+I"];
     MailBtnClose => "mail.button_close", "Open mail: Close button", MailView, ["Alt+C"];
     MailBtnReply => "mail.button_reply", "Open mail: Reply button", MailView, ["Alt+R"];
@@ -723,7 +723,7 @@ mod tests {
     fn a_bare_key_does_not_fire_with_shift_or_alt() {
         let mut k = Keymap::default();
         let sc = Scope::MailView;
-        // the Alt key of a letter is the action of the button of the open mail (MAIL-228), never the bare key's
+        // the Alt key of a letter is the action of the button of the open mail (MAIL-229), never the bare key's
         for (key, bare, shift, alt) in [
             (Key::S, Some(Action::MailFlag), Some(Action::MailRetry), None),
             (Key::R, Some(Action::MailReply), Some(Action::MailReplyAll), Some(Action::MailBtnReply)),

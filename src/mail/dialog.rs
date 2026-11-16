@@ -688,32 +688,37 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
                 *out = Some(MailDialogAction::DetectGnupg);
             }
         });
-        match &mail.gnupg_info {
-            None => {
-                ui.label(muted("Looking…"));
-            }
-            Some(info) => {
-                for std in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
-                    match info.version(std) {
-                        Some(Ok(v)) => {
-                            ui.label(RichText::new(format!("{} ({}): {v}", std.label(), std.program())).color(theme::TEXT).size(12.5));
-                            let keys = info.keys(std);
-                            if keys.is_empty() {
-                                ui.label(muted("  no secret keys found: signing and decrypting need one; see below to import yours").size(12.0));
+        // the lines of the answer take room before it is there, so the dialog does not grow (and the controls and the footer do
+        // not move) when it arrives (MAIL-191)
+        ui.scope(|ui| {
+            ui.set_min_height(GNUPG_RESULT_LINES * (ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y));
+            match &mail.gnupg_info {
+                None => {
+                    ui.label(muted("Looking…"));
+                }
+                Some(info) => {
+                    for std in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
+                        match info.version(std) {
+                            Some(Ok(v)) => {
+                                ui.label(RichText::new(format!("{} ({}): {v}", std.label(), std.program())).color(theme::TEXT).size(12.5));
+                                let keys = info.keys(std);
+                                if keys.is_empty() {
+                                    ui.label(muted("  no secret keys found: signing and decrypting need one; see below to import yours").size(12.0));
+                                }
+                                for k in keys {
+                                    let note = if k.usable() { "" } else { " (expired, revoked or disabled)" };
+                                    ui.label(muted(format!("  {} · {}{note}", k.label(), crate::mail::ui::short_fingerprint(&k.fingerprint))).size(12.0));
+                                }
                             }
-                            for k in keys {
-                                let note = if k.usable() { "" } else { " (expired, revoked or disabled)" };
-                                ui.label(muted(format!("  {} · {}{note}", k.label(), crate::mail::ui::short_fingerprint(&k.fingerprint))).size(12.0));
+                            Some(Err(e)) => {
+                                ui.label(RichText::new(format!("{}: {e}", std.label())).color(theme::LINK_MISSING).size(12.5));
                             }
+                            None => {}
                         }
-                        Some(Err(e)) => {
-                            ui.label(RichText::new(format!("{}: {e}", std.label())).color(theme::LINK_MISSING).size(12.5));
-                        }
-                        None => {}
                     }
                 }
             }
-        }
+        });
         ui.add_space(6.0);
         ui.label(RichText::new("Bringing your keys here").color(theme::TEXT));
         ui.label(
@@ -733,6 +738,9 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
         d.scroll_enc = false;
     }
 }
+
+/// Lines of room kept for GnuPG's answer in the Encryption section: the two versions and a few keys.
+const GNUPG_RESULT_LINES: f32 = 5.0;
 
 /// The key pickers of an account (MAIL-190): the OpenPGP key and the S/MIME certificate, sign by default, the preferred standard.
 fn key_rows(ui: &mut Ui, d: &mut MailDialog, i: usize, mail: &MailView, rects: &mut Vec<(String, Rect)>) {

@@ -103,8 +103,10 @@ struct W {
     offline: Arc<std::sync::atomic::AtomicBool>,
     /// What the last frame painted: text and its colour.
     texts: Vec<(String, Color32)>,
-    /// The letters the last frame underlined (MAIL-228).
+    /// The letters the last frame underlined (MAIL-229).
     underlined: Vec<String>,
+    /// Where the last frame painted each text.
+    text_rects: Vec<(String, Rect)>,
     /// What the last frame filled: rectangles and their colour.
     fills: Vec<(Rect, Color32)>,
     /// The size of the window the frames are run in.
@@ -138,7 +140,7 @@ impl W {
         app.show_view(View::Mail, false);
         let ctx = egui::Context::default();
         crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, server, dir, account, offline, texts: vec![], underlined: vec![], fills: vec![], size: Vec2::new(1500.0, 900.0) };
+        let mut w = W { app, ctx, t: 0.0, server, dir, account, offline, texts: vec![], underlined: vec![], text_rects: vec![], fills: vec![], size: Vec2::new(1500.0, 900.0) };
         w.until("the mail store opens", |a| a.mail.ready_store().is_some());
         w
     }
@@ -157,25 +159,28 @@ impl W {
         let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
         out.textures_delta.clear();
         let mut texts = vec![];
+        let mut text_rects = vec![];
         let mut fills = vec![];
         let mut underlined = vec![];
-        fn walk(s: &Shape, out: &mut Vec<(String, Color32)>, fills: &mut Vec<(Rect, Color32)>, underlined: &mut Vec<String>) {
+        fn walk(s: &Shape, out: &mut Vec<(String, Color32)>, at: &mut Vec<(String, Rect)>, fills: &mut Vec<(Rect, Color32)>, underlined: &mut Vec<String>) {
             match s {
-                Shape::Vec(v) => v.iter().for_each(|s| walk(s, out, fills, underlined)),
+                Shape::Vec(v) => v.iter().for_each(|s| walk(s, out, at, fills, underlined)),
                 Shape::Text(t) => {
                     for sec in t.galley.job.sections.iter().filter(|sec| sec.format.underline != egui::Stroke::NONE) {
                         underlined.push(format!("{}={}", t.galley.job.text, &t.galley.job.text[sec.byte_range.start.0..sec.byte_range.end.0]));
                     }
                     out.push((t.galley.job.text.clone(), t.galley.job.sections.first().map(|s| s.format.color).unwrap_or(Color32::WHITE)));
+                    at.push((t.galley.job.text.clone(), t.visual_bounding_rect()));
                 }
                 Shape::Rect(r) => fills.push((r.rect, r.fill)),
                 _ => {}
             }
         }
         for c in &out.shapes {
-            walk(&c.shape, &mut texts, &mut fills, &mut underlined);
+            walk(&c.shape, &mut texts, &mut text_rects, &mut fills, &mut underlined);
         }
         self.texts = texts;
+        self.text_rects = text_rects;
         self.underlined = underlined;
         self.fills = fills;
     }
@@ -933,6 +938,7 @@ fn fifty_thousand_messages_draw_quickly_and_a_steady_frame_runs_no_query() {
         offline: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         texts: vec![],
         underlined: vec![],
+        text_rects: vec![],
         fills: vec![],
         size: Vec2::new(1500.0, 900.0),
     };
@@ -2574,12 +2580,12 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
 // spec: MAIL-191
 #[cfg(unix)]
 #[test]
-fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_it_fills_when_the_gnupg_result_arrives() {
+fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_of_any_height_when_the_gnupg_result_arrives() {
     if !have_gnupg() {
         return;
     }
-    // windows the dialog fills and scrolls in (in a taller one the dialog grows with the lines that arrive: raba/shale#151)
-    for height in [900.0, 1000.0] {
+    // windows the dialog fills and scrolls in, and taller ones it does not fill (it grew, and moved up, with the lines: raba/shale#151)
+    for height in [900.0, 1000.0, 1100.0, 1300.0, 2400.0] {
         let [pending, arrived, missing] = encryption_layouts(height);
         for (what, a, b) in [("pending -> arrived", &pending, &arrived), ("arrived -> missing", &arrived, &missing)] {
             assert_eq!(a.len(), b.len());
@@ -3228,6 +3234,43 @@ fn tab_focus_is_drawn_on_the_rows_of_drafts_and_outbox() {
     }
 }
 
+// spec: MAIL-228
+#[test]
+fn the_rows_of_drafts_and_outbox_keep_their_margin_whether_selected_or_not() {
+    let (mut w, _smtp) = compose_world("row-margin", 30);
+    let acct = w.account.id.clone();
+    let ob = Outbox::new(&w.app.mail.root);
+    for (i, subject) in ["Margin draft A", "Margin draft B"].iter().enumerate() {
+        ob.save_draft(&crate::mail::outbox::tests::draft(&acct, subject, "words"), NOW + i as i64).unwrap();
+    }
+    w.put_in_outbox("Margin failed", 1);
+    w.put_in_outbox("Margin unsure", 2);
+    // where the text of each row starts, measured from the left edge of its row (the rows are
+    // found by their key, the order of mails queued in the same second is not fixed)
+    let insets = |w: &W, rows: &[&str]| -> Vec<f32> {
+        rows.iter()
+            .map(|key| {
+                let row = w.rect(key);
+                let text = w.text_rects.iter().find(|(t, r)| t.starts_with("Margin ") && row.contains_rect(*r)).unwrap_or_else(|| panic!("a subject is painted inside the row {key} {row:?}: {:?}", w.text_rects)).1;
+                text.min.x - row.min.x
+            })
+            .collect()
+    };
+    w.click(&format!("mail:drafts:{acct}"));
+    w.settle();
+    let drafts = insets(&w, &["mail:draft:0", "mail:draft:1"]);
+    assert!(drafts.iter().all(|x| *x >= 4.0), "the draft texts keep a margin: {drafts:?}");
+    w.open_outbox();
+    for subject in ["Margin failed", "Margin unsure"] {
+        w.outbox_go(subject);
+        w.settle();
+        let x = insets(&w, &["mail:outbox:0", "mail:outbox:1"]);
+        assert!(x.iter().all(|x| *x >= 4.0), "with {subject} selected every outbox text keeps a margin: {x:?}");
+        assert!((x[0] - x[1]).abs() < 0.5, "with {subject} selected the selected and the other row start at the same place: {x:?}");
+        assert!((x[0] - drafts[0]).abs() < 0.5, "drafts and outbox rows start at the same place: {x:?} {drafts:?}");
+    }
+}
+
 impl W {
     /// Tab until the frame of a row with this record key is drawn.
     fn tab_to(&mut self, mark: &str) {
@@ -3463,7 +3506,7 @@ fn alt(w: &mut W, key: Key, letter: &str) {
     w.press_text(key, Modifiers::ALT, letter);
 }
 
-// spec: MAIL-228, KEY-012
+// spec: MAIL-229, KEY-012
 #[test]
 fn alt_keys_do_what_the_buttons_of_the_open_mail_do() {
     let mut w = inbox_with_cursor("altbuttons");
@@ -3502,7 +3545,7 @@ fn alt_keys_do_what_the_buttons_of_the_open_mail_do() {
     assert_eq!(w.server_uids("INBOX"), vec![1, 3], "Alt+D without an open mail deletes nothing");
 }
 
-// spec: MAIL-228
+// spec: MAIL-229
 #[test]
 fn alt_r_a_and_f_answer_and_forward_the_open_mail() {
     let (mut w, _smtp) = compose_world("altanswer", 10);
@@ -3521,7 +3564,7 @@ fn alt_r_a_and_f_answer_and_forward_the_open_mail() {
     assert!(!w.server.state().messages("INBOX").iter().any(|m| m.1.contains(&"\\Flagged".to_string())), "Alt+F forwards, it does not flag");
 }
 
-// spec: MAIL-228
+// spec: MAIL-229
 #[test]
 fn holding_alt_underlines_the_letter_of_each_button_and_it_follows_a_rebound_key() {
     use crate::keys::{Action as KeyAction, Binding};
@@ -3553,7 +3596,7 @@ fn holding_alt_underlines_the_letter_of_each_button_and_it_follows_a_rebound_key
     assert!(w.underlined.is_empty());
 }
 
-// spec: MAIL-228
+// spec: MAIL-229
 #[test]
 fn alt_keys_do_nothing_while_the_search_field_has_the_keyboard() {
     let mut w = inbox_with_cursor("altsearch");
