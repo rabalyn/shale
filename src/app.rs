@@ -106,8 +106,9 @@ impl NoteDoc {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum LeftPanel {
+    #[default]
     Files,
     Search,
     Tags,
@@ -286,7 +287,6 @@ pub struct ShaleApp {
     pub tabbar: tabs::TabBar,
     pub notes: HashMap<PathBuf, NoteDoc>,
     pub drawings: HashMap<PathBuf, DrawingDoc>,
-    pub left: LeftPanel,
     /// The icons of the ribbon and the right sidebar, and a drag of one of them (LAY-001).
     pub side: crate::sidebar_ui::SideState,
     pub tree: FileTree,
@@ -441,7 +441,6 @@ impl ShaleApp {
             tabbar: tabs::TabBar::new(),
             notes: HashMap::new(),
             drawings: HashMap::new(),
-            left: LeftPanel::Files,
             side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
             tree: FileTree::default(),
             search: SearchBox::default(),
@@ -1399,7 +1398,7 @@ impl ShaleApp {
         if let Some(f) = ctx.memory(|m| m.focused()) {
             ctx.memory_mut(|m| m.surrender_focus(f));
         }
-        match self.left {
+        match self.side.left {
             LeftPanel::Files => {
                 let cur = self.current_path();
                 // the open note's folders open, so it can be selected
@@ -1783,7 +1782,7 @@ impl ShaleApp {
             }
         }
         if files {
-            self.left = LeftPanel::Files;
+            self.side.left = LeftPanel::Files;
             self.focus_sidebar(ui.ctx());
         } else if to_sidebar && !(in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, -1, sidebar_keys)) {
             self.focus_sidebar(ui.ctx());
@@ -1808,7 +1807,7 @@ impl ShaleApp {
             self.close_tab(a);
         }
         if search {
-            self.left = LeftPanel::Search;
+            self.side.left = LeftPanel::Search;
             self.cfg.show_left = true;
             self.search.focus = true;
         }

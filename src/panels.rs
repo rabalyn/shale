@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 impl ShaleApp {
     pub fn left_sidebar(&mut self, ui: &mut Ui) {
-        match self.left {
+        match self.side.left {
             LeftPanel::Files => self.file_explorer(ui),
             LeftPanel::Search => self.search_panel(ui),
             LeftPanel::Tags => self.tags_panel(ui),
@@ -469,7 +469,7 @@ impl ShaleApp {
                 ui.horizontal(|ui| {
                     if ui.add(egui::Label::new(egui::RichText::new(format!("#{tag}")).color(theme::TAG)).sense(Sense::click())).on_hover_text("Search for this tag").clicked() {
                         self.search.query = format!("#{tag}");
-                        self.left = LeftPanel::Search;
+                        self.side.left = LeftPanel::Search;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(muted(n.to_string()).size(12.0));
@@ -1385,7 +1385,7 @@ mod tree_key_tests {
             std::fs::write(d.join(f), "x\n").unwrap();
         }
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
-        app.left = LeftPanel::Files;
+        app.side.left = LeftPanel::Files;
         app.open(Path::new("r1.md"), false);
         app.tree.expanded.clear(); // the start opened a first note (and its folder)
         let ctx = egui::Context::default();
@@ -1449,7 +1449,7 @@ mod tree_key_tests {
         ctx.memory_mut(|m| m.request_focus(egui::Id::unique("somewhere else")));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), None);
         // in the search panel, Ctrl+H means the search box
-        app.left = LeftPanel::Search;
+        app.side.left = LeftPanel::Search;
         app.focus_sidebar(&ctx);
         assert!(app.search.focus);
         let _ = std::fs::remove_dir_all(&d);

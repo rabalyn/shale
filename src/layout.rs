@@ -370,16 +370,16 @@ impl ShaleApp {
     pub(crate) fn ribbon_click(&mut self, item: Item) {
         match item {
             Item::Files => {
-                self.left = LeftPanel::Files;
+                self.side.left = LeftPanel::Files;
                 self.cfg.show_left = true;
             }
             Item::Search => {
-                self.left = LeftPanel::Search;
+                self.side.left = LeftPanel::Search;
                 self.cfg.show_left = true;
                 self.search.focus = true;
             }
             Item::Tags => {
-                self.left = LeftPanel::Tags;
+                self.side.left = LeftPanel::Tags;
                 self.cfg.show_left = true;
             }
             Item::Switcher => self.modal = Some(Modal::QuickSwitch { query: String::new(), sel: 0 }),

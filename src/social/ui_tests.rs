@@ -307,7 +307,7 @@ fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
     for (f, p) in [("home", "h"), ("list:1", "l")] {
         w.app.social.timelines.get_mut(&(acct.clone(), f.to_string())).unwrap().posts = recent(p, 40);
     }
-    w.app.left = crate::app::LeftPanel::Search;
+    w.app.side.left = crate::app::LeftPanel::Search;
     let search = |w: &mut W, q: &str| {
         w.app.search.query = q.into();
         w.frames(3);

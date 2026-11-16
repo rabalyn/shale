@@ -144,7 +144,7 @@ fn lay_001_a_ribbon_icon_is_dragged_to_a_new_place_and_the_order_survives_a_rest
     assert_eq!(w.app.side.drag, None);
     // a click still works on an icon that was moved, and a plain click is not a drag
     w.click_at(w.ribbon_icon(Item::Tags).center());
-    assert!(w.app.left == crate::app::LeftPanel::Tags);
+    assert!(w.app.side.left == crate::app::LeftPanel::Tags);
     assert_eq!(w.app.side.drag, None);
     // a restart: the settings hold the order and the new window draws it
     let w2 = w.restarted("ribbon-order-2");
