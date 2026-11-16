@@ -78,7 +78,7 @@ impl W {
         app.social.source = Some(script.clone());
         let mut w = W { script, app, ctx, t: 0.0, dir };
         // the window starts with the Feeds tab only (the Feeds button would add one to the note tab)
-        w.app.tabs.clear();
+        w.app.tabbar.tabs.clear();
         w.app.show_view(View::Social(None), false);
         w.frames(4);
         w
@@ -116,7 +116,7 @@ impl W {
     }
 
     pub fn click_tab(&mut self, i: usize) {
-        let p = self.app.tab_rects[i].0.center();
+        let p = self.app.tabbar.tab_rects[i].0.center();
         self.click_at(p);
     }
 
@@ -129,11 +129,11 @@ impl W {
     }
 
     pub fn view(&self, tab: usize) -> View {
-        self.app.tabs[tab].view.clone()
+        self.app.tabbar.tabs[tab].view.clone()
     }
 
     pub fn title(&self, tab: usize) -> String {
-        self.app.social_title(match &self.app.tabs[tab].view {
+        self.app.social_title(match &self.app.tabbar.tabs[tab].view {
             View::Social(f) => f.as_ref(),
             _ => None,
         })
@@ -155,7 +155,7 @@ impl Drop for W {
 #[test]
 fn two_feeds_open_in_two_tabs_each_with_its_own_scroll_and_title() {
     let mut w = W::new("tabs");
-    assert_eq!(w.app.tabs.len(), 1);
+    assert_eq!(w.app.tabbar.tabs.len(), 1);
     assert_eq!(w.view(0), View::Social(Some(home())), "the tab names the feed it shows once the feeds are known");
     assert_eq!(w.title(0), "Mastodon · Home");
     let top = w.y(0);
@@ -165,7 +165,7 @@ fn two_feeds_open_in_two_tabs_each_with_its_own_scroll_and_title() {
     // "New tab" on the entry of another feed in the feed picker
     w.click("feed-combo");
     w.click("feed-new-tab:list:1");
-    assert_eq!((w.app.tabs.len(), w.app.active), (2, 1));
+    assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (2, 1));
     assert_eq!(w.view(1), View::Social(Some(list())));
     assert_eq!(w.title(1), "Mastodon · List: Rust people");
     assert!((w.y(0) - top).abs() < 1.0, "a new tab starts at the top");
@@ -174,7 +174,7 @@ fn two_feeds_open_in_two_tabs_each_with_its_own_scroll_and_title() {
     assert!(list_scrolled < top - 100.0);
     // back to the first tab: its scroll position is where it was left, nothing was loaded again
     w.click_tab(0);
-    assert_eq!(w.app.active, 0);
+    assert_eq!(w.app.tabbar.active, 0);
     w.frames(3);
     assert!((w.y(0) - home_scrolled).abs() < 1.0, "{} vs {home_scrolled}", w.y(0));
     w.click_tab(1);
@@ -185,7 +185,7 @@ fn two_feeds_open_in_two_tabs_each_with_its_own_scroll_and_title() {
     w.click_tab(0);
     w.click("feed-combo");
     w.click("feed-new-tab:home");
-    assert_eq!((w.app.tabs.len(), w.app.active), (3, 2));
+    assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (3, 2));
     assert_eq!(w.view(2), w.view(0));
     assert!((w.y(0) - top).abs() < 1.0, "the same feed in another tab starts at the top");
     w.click_tab(0);
@@ -197,19 +197,19 @@ fn two_feeds_open_in_two_tabs_each_with_its_own_scroll_and_title() {
 #[test]
 fn the_feeds_button_always_opens_a_new_feeds_tab_and_an_empty_tab_is_filled() {
     let mut w = W::new("ribbon");
-    w.app.new_tab(View::Note(PathBuf::from("Welcome.md")));
+    w.app.tabbar.new_tab(View::Note(PathBuf::from("Welcome.md")));
     // the ribbon button, clicked twice: two more Feeds tabs, none focused or replaced
     for n in [3, 4] {
         w.app.show_view(View::Social(None), false);
-        assert_eq!((w.app.tabs.len(), w.app.active), (n, n - 1));
+        assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (n, n - 1));
         w.frames(3);
         assert_eq!(w.view(n - 1), View::Social(Some(home())), "the new tab shows the feed set-up");
     }
     assert!(matches!(w.view(1), View::Note(_)), "the note tab stays");
     // the (+) button: an empty tab, then Feeds in it, makes no extra tab
-    w.app.new_tab(View::Empty);
+    w.app.tabbar.new_tab(View::Empty);
     w.app.show_view(View::Social(None), false);
-    assert_eq!((w.app.tabs.len(), w.app.active), (5, 4));
+    assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (5, 4));
 }
 
 // spec: SOC-021
@@ -218,7 +218,7 @@ fn choosing_another_feed_is_a_step_in_the_tab_history() {
     let mut w = W::new("history");
     w.click("feed-combo");
     w.click("feed:list:1");
-    assert_eq!((w.app.tabs.len(), w.view(0)), (1, View::Social(Some(list()))));
+    assert_eq!((w.app.tabbar.tabs.len(), w.view(0)), (1, View::Social(Some(list()))));
     assert_eq!(w.title(0), "Mastodon · List: Rust people");
     w.app.go_back();
     assert_eq!(w.view(0), View::Social(Some(home())));
@@ -229,7 +229,7 @@ fn choosing_another_feed_is_a_step_in_the_tab_history() {
     w.frame(vec![Event::ModifiersChanged(Modifiers::SHIFT)]);
     w.click("feed:home");
     w.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
-    assert_eq!((w.app.tabs.len(), w.view(1)), (2, View::Social(Some(home()))));
+    assert_eq!((w.app.tabbar.tabs.len(), w.view(1)), (2, View::Social(Some(home()))));
     // and so does a middle click
     w.click_tab(0);
     w.click("feed-combo");
@@ -239,7 +239,7 @@ fn choosing_another_feed_is_a_step_in_the_tab_history() {
     w.frame(vec![b(true)]);
     w.frame(vec![b(false)]);
     w.frames(3);
-    assert_eq!(w.app.tabs.len(), 3);
+    assert_eq!(w.app.tabbar.tabs.len(), 3);
 }
 
 /// Wait (up to 2 s) until a background job of the feeds has delivered, as `until` sees it.
@@ -319,7 +319,7 @@ fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
     assert_eq!(w.app.social.hit_rects.len(), 1, "one post row in the sidebar");
     let p = w.app.social.hit_rects[0].1.center();
     w.click_at(p);
-    assert_eq!((w.app.tabs.len(), w.app.active), (2, 1), "a new Feeds tab");
+    assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (2, 1), "a new Feeds tab");
     assert_eq!(w.view(1), View::Social(Some(list())));
     assert_eq!(w.view(0), View::Social(Some(home())), "the first tab is left as it was");
     w.frames(4);
@@ -337,7 +337,7 @@ fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
     w.frames(4);
     let posts = &w.app.social.timelines[&list_key].posts;
     assert_eq!((posts.len(), posts[11].id.as_str(), posts[10].id.as_str()), (41, "zebra", "l10"));
-    assert_eq!(w.app.tabs.len(), 3);
+    assert_eq!(w.app.tabbar.tabs.len(), 3);
     assert!(at(&w, &post_key(&gone)).abs() < 2.0, "shown at the top of the list");
     // 3: older than the whole list, which has more pages: it goes to the end, with the pages between as a gap
     w.app.social.timelines.get_mut(&list_key).unwrap().cursor = Some("c".into());
@@ -369,16 +369,16 @@ fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
     let p = w.app.social.hit_rects[0].1.center();
     w.click_at(p);
     w.frames(4);
-    let n = w.app.tabs.len();
+    let n = w.app.tabbar.tabs.len();
     assert!(matches!(w.view(n - 1), View::Social(Some(f)) if f.account == acct), "{:?}", w.view(n - 1));
-    let shown = w.app.tabs[n - 1].view.clone();
+    let shown = w.app.tabbar.tabs[n - 1].view.clone();
     let View::Social(Some(shown)) = shown else { panic!() };
     assert!(w.app.social.timelines[&(acct.clone(), shown.feed)].posts.iter().any(|p| p.id == "elsewhere"));
     // 6: the account is gone: nothing opens, the user is told
     let hit = w.app.social.index.search("zebra", 1).remove(0);
-    let tabs = w.app.tabs.len();
+    let tabs = w.app.tabbar.tabs.len();
     w.app.open_post_hit(&crate::social::post_index::PostHit { account: "mastodon:nobody".into(), ..hit });
-    assert_eq!(w.app.tabs.len(), tabs);
+    assert_eq!(w.app.tabbar.tabs.len(), tabs);
 }
 
 // spec: SOC-035
@@ -417,15 +417,15 @@ fn open_feed_tabs_come_back_and_an_old_state_file_still_loads() {
     let mut again = ShaleApp::build(Options { screenshot: None, vault: Some(w.dir.clone()), view: None, keys: None }, false);
     again.cfg.social_accounts = vec![demo::account()];
     again.open_vault(&w.dir.clone());
-    assert_eq!(again.tabs.iter().map(|t| t.view.clone()).collect::<Vec<_>>(), vec![View::Social(Some(home())), View::Note(PathBuf::from("Welcome.md")), View::Social(Some(list()))], "every tab comes back in its place");
+    assert_eq!(again.tabbar.tabs.iter().map(|t| t.view.clone()).collect::<Vec<_>>(), vec![View::Social(Some(home())), View::Note(PathBuf::from("Welcome.md")), View::Social(Some(list()))], "every tab comes back in its place");
     // an old state file (no open_feeds) and a feed of an account that is gone
     for (json, feeds) in [(r#"{"version": 1, "open_files": ["Welcome.md"]}"#, 0), (r#"{"version": 1, "open_files": ["Welcome.md"], "open_feeds": [{"account": "gone", "feed": "home"}]}"#, 0)] {
         crate::fsutil::write_atomic(&w.dir.join(".shale/state.json"), json.as_bytes()).unwrap();
         let mut old = ShaleApp::build(Options { screenshot: None, vault: Some(w.dir.clone()), view: None, keys: None }, false);
         old.cfg.social_accounts = vec![demo::account()];
         old.open_vault(&w.dir.clone());
-        assert_eq!(old.tabs.len(), 1 + feeds, "{json}");
-        assert!(matches!(old.tabs[0].view, View::Note(_)));
+        assert_eq!(old.tabbar.tabs.len(), 1 + feeds, "{json}");
+        assert!(matches!(old.tabbar.tabs[0].view, View::Note(_)));
     }
 }
 
@@ -443,17 +443,17 @@ fn notes_a_drawing_and_feeds_tabs_come_back_in_one_order_with_their_pins() {
     w.app.open_feed(list(), true);
     w.app.open(std::path::Path::new("Ideas.md"), true);
     // tabs: Welcome, Sketch, home, list, Ideas; pin the drawing and the second Feeds tab
-    assert_eq!(w.app.tabs.len(), 5);
+    assert_eq!(w.app.tabbar.tabs.len(), 5);
     w.app.set_tab_pinned(1, true);
     w.app.set_tab_pinned(3, true);
-    let order: Vec<View> = w.app.tabs.iter().map(|t| t.view.clone()).collect();
+    let order: Vec<View> = w.app.tabbar.tabs.iter().map(|t| t.view.clone()).collect();
     assert_eq!(order[..2], [View::Drawing(PathBuf::from("Sketch.excalidraw")), View::Social(Some(list()))]);
     w.app.vdata.save().unwrap();
     let mut again = ShaleApp::build(Options { screenshot: None, vault: Some(w.dir.clone()), view: None, keys: None }, false);
     again.cfg.social_accounts = vec![demo::account()];
     again.open_vault(&w.dir.clone());
-    let got: Vec<(View, bool)> = again.tabs.iter().map(|t| (t.view.clone(), t.pinned)).collect();
-    let want: Vec<(View, bool)> = w.app.tabs.iter().map(|t| (t.view.clone(), t.pinned)).collect();
+    let got: Vec<(View, bool)> = again.tabbar.tabs.iter().map(|t| (t.view.clone(), t.pinned)).collect();
+    let want: Vec<(View, bool)> = w.app.tabbar.tabs.iter().map(|t| (t.view.clone(), t.pinned)).collect();
     assert_eq!(got, want);
     assert_eq!(got.iter().filter(|(_, p)| *p).count(), 2);
 }
@@ -482,7 +482,7 @@ impl W {
 
     /// The post at the top of the window: its key and the screen y of its top edge.
     fn top_post(&self) -> (String, f32) {
-        let id = self.app.tabs[self.app.active].id;
+        let id = self.app.tabbar.tabs[self.app.tabbar.active].id;
         let k = self.app.social.anchors[&id].key.clone();
         let y = self.post_y(&k);
         (k, y)
@@ -665,7 +665,7 @@ fn a_feed_in_a_background_tab_is_checked_on_time_and_its_tab_title_shows_the_cou
     let mut w = W::new("background");
     w.click("feed-combo");
     w.click("feed-new-tab:list:1");
-    assert_eq!(w.app.active, 1);
+    assert_eq!(w.app.tabbar.active, 1);
     // the first tab (Home) is in the background now: its timer comes due
     w.script.newer.lock().unwrap().push(("home".into(), fresh(&["n1", "n2", "n3"])));
     w.script.newer.lock().unwrap().push(("list:1".into(), fresh(&["x1"])));
@@ -764,7 +764,7 @@ fn a_hit_whose_post_is_gone_is_fetched_from_the_network_and_an_error_is_shown() 
     w.app.social.index.clear();
     *w.script.posts.lock().unwrap() = vec![Post { text_markdown: "an unusual walrus, from the server".into(), ..gone.clone() }];
     w.app.open_post_hit(&hit);
-    assert_eq!((w.app.tabs.len(), w.app.active), (2, 1), "the feed opens in a new tab at once");
+    assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (2, 1), "the feed opens in a new tab at once");
     w.wait_for("the post was not fetched", |w| w.app.social.timelines[&list_key].posts.iter().any(|p| p.id == "gone1"));
     w.frames(4);
     assert_eq!(*w.script.post_calls.lock().unwrap(), ["gone1"]);

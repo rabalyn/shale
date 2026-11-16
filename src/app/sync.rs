@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(copies.len(), 1, "{copies:?}");
         assert_eq!(crate::fsutil::read_to_string(b.join(&copies[0])).unwrap(), "typed during the sync\n");
         assert!(app.toasts.iter().any(|(t, _)| t.contains("both versions kept")), "{:?}", app.toasts);
-        assert!(matches!(app.tabs[app.active].view, View::Note(_)));
+        assert!(matches!(app.tabbar.tabs[app.tabbar.active].view, View::Note(_)));
 
         // the copy reaches the other machine with the next sync
         app.start_sync();

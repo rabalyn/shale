@@ -234,7 +234,7 @@ fn dialogs_event_new_event_is_typed_saved_and_changed() {
     let e = &evs[0];
     assert_eq!((e.summary.as_str(), e.location.as_str(), e.start, e.end), ("Dentist", "Main street 4", START, START + 1800));
     assert!(p.app.calendar.events.get(&src.id).is_some_and(|v| v.iter().any(|x| x.summary == "Dentist")));
-    assert_eq!(p.app.last_event_calendar.as_deref(), Some(src.id.as_str()));
+    assert_eq!(p.app.cal.last_event_calendar.as_deref(), Some(src.id.as_str()));
     assert!(!p.app.toasts.is_empty(), "the save says so");
     // change it: same event, new title
     let sid = src.id.clone();

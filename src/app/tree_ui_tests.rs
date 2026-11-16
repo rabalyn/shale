@@ -172,13 +172,13 @@ fn imp_017_off_the_list_nothing_moves_and_a_closed_folder_opens_under_the_pointe
     let sub = w.row("Sub");
     w.carry(top, sub);
     assert!(!w.app.expanded.contains(Path::new("Sub")));
-    assert!(matches!(&w.app.tree_hover, Some((f, _)) if f == Path::new("Sub")));
-    w.app.tree_hover = Some((PathBuf::from("Sub"), Instant::now() - Duration::from_secs(2)));
+    assert!(matches!(&w.app.drag.tree_hover, Some((f, _)) if f == Path::new("Sub")));
+    w.app.drag.tree_hover = Some((PathBuf::from("Sub"), Instant::now() - Duration::from_secs(2)));
     w.frames(2);
     assert!(w.app.expanded.contains(Path::new("Sub")));
     assert!(w.hl.text.iter().any(|(t, _)| t == "Inner"), "its notes are listed now");
     // moving off it forgets the rest
     w.hl.release(&mut w.app, editor);
     w.frames(2);
-    assert!(w.app.tree_hover.is_none());
+    assert!(w.app.drag.tree_hover.is_none());
 }

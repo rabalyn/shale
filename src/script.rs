@@ -148,6 +148,67 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
 
 /// The point of the `nth` (from 1) text drawn (top layer first) that is exactly `label`; if no
 /// text is, the same among the texts that contain it.
+/// The scripted input of a run (`--keys`): the steps still to do, the texts drawn in the last
+/// frame for the `@label` targets, and when the last step ran.
+pub struct ScriptRun {
+    pub steps: std::collections::VecDeque<Step>,
+    /// the texts drawn in the last frame, topmost first
+    pub texts: Vec<(String, egui::Rect)>,
+    /// the frame of the last script step: the picture waits a moment after it
+    pub last_frame: u32,
+}
+
+impl ScriptRun {
+    pub fn new(steps: std::collections::VecDeque<Step>) -> Self {
+        Self { steps, texts: vec![], last_frame: 0 }
+    }
+
+    /// Where a script target is in the window; a label that is not drawn ends the run (a
+    /// picture of the wrong state is worse than none).
+    pub fn point(&self, t: &Target) -> egui::Pos2 {
+        match t {
+            Target::At(x, y) => egui::pos2(*x, *y),
+            Target::Label(l, n) => find_label(&self.texts, l, *n).unwrap_or_else(|| {
+                eprintln!("script: no text \"{l}\" (number {n}) in the window");
+                std::process::exit(3);
+            }),
+        }
+    }
+
+    /// Testing aid (`--keys`): remember where each text of the window was drawn, topmost first,
+    /// so that the next step can aim at `@label`.
+    pub fn note_texts(&mut self, ctx: &egui::Context) {
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(t) => {
+                    let text = t.galley.text();
+                    if !text.trim().is_empty() {
+                        out.push((text.to_string(), t.galley.rect.translate(t.pos.to_vec2())));
+                    }
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().collect());
+        if !layers.contains(&egui::LayerId::background()) {
+            layers.insert(0, egui::LayerId::background());
+        }
+        let mut out = Vec::new();
+        ctx.graphics(|g| {
+            for l in layers.iter().rev() {
+                if let Some(list) = g.get(*l) {
+                    for clipped in list.all_entries().collect::<Vec<_>>().into_iter().rev() {
+                        walk(&clipped.shape, &mut out);
+                    }
+                }
+            }
+        });
+        out.extend(take_hints());
+        self.texts = out;
+    }
+}
+
 pub fn find_label(texts: &[(String, egui::Rect)], label: &str, nth: usize) -> Option<egui::Pos2> {
     let nth = nth.max(1) - 1;
     let exact = texts.iter().filter(|(t, _)| t.trim() == label).nth(nth);

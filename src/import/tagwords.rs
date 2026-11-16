@@ -332,6 +332,78 @@ pub fn save(vault_root: &std::path::Path, tw: &TagWords) -> std::io::Result<()> 
     crate::fsutil::write_atomic(&p, serde_json::to_string_pretty(tw).unwrap_or_default().as_bytes())
 }
 
+/// The learned tag words of the open vault and the background job that learns them again.
+pub struct TagLearner {
+    /// words typical for each tag (learned from the vault)
+    pub words: Option<TagWords>,
+    job: Option<std::sync::mpsc::Receiver<Result<TagWords, String>>>,
+    /// the vault the words belong to
+    root: Option<std::path::PathBuf>,
+    /// the vault generation the last job started for
+    pub(crate) generation: u64,
+    /// when the last job started
+    at: Option<std::time::Instant>,
+}
+
+impl TagLearner {
+    pub fn new() -> Self {
+        Self { words: None, job: None, root: None, generation: u64::MAX, at: None }
+    }
+
+    /// Forget the learned words so that they are learned again at once.
+    pub fn forget(&mut self) {
+        self.words = None;
+        self.generation = u64::MAX;
+        self.at = None;
+    }
+
+    /// Whether a learning job is running.
+    #[cfg(test)]
+    pub(crate) fn running(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// Learn the words again now and then (in the background), and keep them in the vault.
+    /// Returns what went wrong, for the person to see.
+    pub fn tick(&mut self, vault: Option<&crate::vault::Vault>) -> Vec<String> {
+        let mut problems = Vec::new();
+        if let Some(rx) = &self.job {
+            match rx.try_recv() {
+                Ok(Err(e)) => {
+                    self.job = None;
+                    problems.push(format!("Learning tag words failed: {e}"));
+                }
+                Ok(Ok(tw)) => {
+                    let saved = vault.map(|v| save(&v.root, &tw));
+                    if let Some(Err(e)) = saved {
+                        problems.push(format!("Could not save the tag words: {e}"));
+                    }
+                    self.words = Some(tw);
+                    self.job = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.job = None,
+                Err(_) => {}
+            }
+        }
+        let Some(v) = vault else { return problems };
+        if self.root.as_deref() != Some(v.root.as_path()) {
+            // another vault: start with what was learned there before
+            self.root = Some(v.root.clone());
+            self.words = load(&v.root);
+            self.generation = u64::MAX;
+            self.at = None;
+        }
+        let due = self.job.is_none() && v.generation != self.generation && self.at.map(|t| t.elapsed() > std::time::Duration::from_secs(120)).unwrap_or(true);
+        if due {
+            self.generation = v.generation;
+            self.at = Some(std::time::Instant::now());
+            let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
+            self.job = Some(crate::jobs::spawn(move || learn_from_vault(&notes), || {}));
+        }
+        problems
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

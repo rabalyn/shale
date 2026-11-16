@@ -89,6 +89,23 @@ impl CalDrag {
     }
 }
 
+/// The calendar state of the window: the small view of the sidebar, the main view, the deletes
+/// started from the event popup, and the calendar new events go to by default.
+pub struct CalendarUi {
+    pub side: CalendarView,
+    pub main: CalendarView,
+    /// deletes started from the event popup: (job, calendar)
+    pub jobs: Vec<(crate::calendar::store::Job, String)>,
+    /// the calendar the last event was saved to (the default for the next new one)
+    pub last_event_calendar: Option<String>,
+}
+
+impl CalendarUi {
+    pub fn new() -> Self {
+        Self { side: CalendarView::new(Size::Small), main: CalendarView::new(Size::Medium), jobs: vec![], last_event_calendar: None }
+    }
+}
+
 pub struct CalendarView {
     pub mode: Mode,
     pub size: Size,

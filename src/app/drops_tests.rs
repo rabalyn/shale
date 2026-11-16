@@ -69,7 +69,7 @@ impl W {
     /// A place something can be dropped on, as the last frame drew it (the smallest for a
     /// row of the file list, the largest for the editor of the note).
     pub(super) fn zone(&self, folder: &str, note: Option<&str>, smallest: bool) -> Rect {
-        let mut zs: Vec<Rect> = self.app.drop_zones.iter().filter(|z| z.folder == Path::new(folder) && z.note.as_deref() == note.map(Path::new)).map(|z| z.rect).collect();
+        let mut zs: Vec<Rect> = self.app.drag.drop_zones.iter().filter(|z| z.folder == Path::new(folder) && z.note.as_deref() == note.map(Path::new)).map(|z| z.rect).collect();
         zs.sort_by(|a, b| a.area().total_cmp(&b.area()));
         let z = if smallest { zs.first() } else { zs.last() };
         *z.unwrap_or_else(|| panic!("no drop zone for {folder:?} {note:?}"))
@@ -89,11 +89,11 @@ impl W {
     /// Another program drops `paths` at `at` (what `wl_drop` sends for a file list).
     pub(super) fn drop_files(&mut self, at: Pos2, paths: &[PathBuf]) {
         let list: String = paths.iter().map(|p| format!("{}\r\n", crate::import::file_uri(p))).collect();
-        self.app.fake_drops.push(DropEvent::Drop { x: at.x, y: at.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
+        self.app.drag.fake_drops.push(DropEvent::Drop { x: at.x, y: at.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
     }
 
     pub(super) fn drop_data(&mut self, at: Pos2, mime: &str, data: &[u8]) {
-        self.app.fake_drops.push(DropEvent::Drop { x: at.x, y: at.y, parts: vec![(mime.into(), data.to_vec())], offered: vec![mime.into()], report: vec![] });
+        self.app.drag.fake_drops.push(DropEvent::Drop { x: at.x, y: at.y, parts: vec![(mime.into(), data.to_vec())], offered: vec![mime.into()], report: vec![] });
         self.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
     }
 
@@ -135,7 +135,7 @@ fn imp_002_a_drop_on_a_folder_a_note_the_editor_or_nowhere_picks_the_folder() {
     assert_eq!((d.link_on, d.link_into.as_deref()), (true, Some(Path::new("Welcome.md"))));
     w.close_dialog();
     // nowhere in particular: the folder used last, nothing linked
-    let nowhere = (0..90).flat_map(|y| (0..150).map(move |x| Pos2::new(x as f32 * 10.0 + 3.0, y as f32 * 10.0 + 3.0))).find(|p| !w.app.drop_zones.iter().any(|z| z.rect.contains(*p))).expect("a place outside every zone");
+    let nowhere = (0..90).flat_map(|y| (0..150).map(move |x| Pos2::new(x as f32 * 10.0 + 3.0, y as f32 * 10.0 + 3.0))).find(|p| !w.app.drag.drop_zones.iter().any(|z| z.rect.contains(*p))).expect("a place outside every zone");
     w.app.vdata.state.last_import_folder = "Sub".into();
     w.drop_files(nowhere, &[first]);
     w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
@@ -162,29 +162,29 @@ fn imp_002_a_drop_into_an_open_import_dialog_adds_to_it() {
 fn imp_015_hover_refusal_and_busy_show_and_go_away() {
     let mut w = W::new("hint");
     let at = w.zone("Sub", None, true).center();
-    w.app.fake_drops.push(DropEvent::Hover { x: at.x, y: at.y });
+    w.app.drag.fake_drops.push(DropEvent::Hover { x: at.x, y: at.y });
     w.frames(2);
-    assert_eq!(w.app.ext_hover, Some(at));
+    assert_eq!(w.app.drag.ext_hover, Some(at));
     assert!(w.painted("Drop to import") && w.painted("into “Sub”"), "{:?}", w.hl.text);
-    w.app.fake_drops.push(DropEvent::Leave);
+    w.app.drag.fake_drops.push(DropEvent::Leave);
     w.frames(2);
-    assert!(w.app.ext_hover.is_none() && !w.painted("Drop to import"));
+    assert!(w.app.drag.ext_hover.is_none() && !w.painted("Drop to import"));
     // a browser tab: said at the pointer, until it leaves
     let offered: Vec<String> = ["application/x-tab", "a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
-    w.app.fake_drops.push(DropEvent::Refused { x: at.x, y: at.y, offered });
+    w.app.drag.fake_drops.push(DropEvent::Refused { x: at.x, y: at.y, offered });
     w.frames(2);
-    assert!(w.app.ext_hover.is_none() && w.app.ext_refused.is_some());
+    assert!(w.app.drag.ext_hover.is_none() && w.app.drag.ext_refused.is_some());
     assert!(w.painted("Shale can't take this") && w.painted("application/x-tab, a, b, c, …"), "{:?}", w.hl.text);
-    w.app.fake_drops.push(DropEvent::Leave);
+    w.app.drag.fake_drops.push(DropEvent::Leave);
     w.frames(2);
-    assert!(w.app.ext_refused.is_none() && !w.painted("Shale can't take this"));
+    assert!(w.app.drag.ext_refused.is_none() && !w.painted("Shale can't take this"));
     // reading a drop: said until the items are there
-    w.app.fake_drops.push(DropEvent::Busy);
+    w.app.drag.fake_drops.push(DropEvent::Busy);
     w.frames(2);
-    assert!(w.app.drop_busy && w.painted("Reading the dropped message"));
+    assert!(w.app.drag.drop_busy && w.painted("Reading the dropped message"));
     w.drop_files(at, &[w.file("second.md")]);
     w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
-    assert!(!w.app.drop_busy && w.app.pending_drops.is_empty());
+    assert!(!w.app.drag.drop_busy && w.app.drag.pending_drops.is_empty());
 }
 
 // spec: IMP-016
@@ -199,7 +199,7 @@ fn imp_016_files_dropped_through_the_window_system_open_the_import_dialog() {
     // the same through the script step `drop:/path`, and at a place (`drop:T:/path`)
     w.close_dialog();
     let steps = crate::script::parse(&format!("drop:{}", w.file("second.md").display())).unwrap();
-    w.app.script = steps.into();
+    w.app.script.steps = steps.into();
     w.app.frames = 36;
     w.hl.frame_with(&mut w.app, vec![], |app, raw| app.feed_script(raw));
     w.until("the dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
@@ -207,7 +207,7 @@ fn imp_016_files_dropped_through_the_window_system_open_the_import_dialog() {
     w.close_dialog();
     let place = w.zone("Sub", None, true).center();
     let steps = crate::script::parse(&format!("drop:{},{}:{}", place.x, place.y, w.file("second.md").display())).unwrap();
-    w.app.script = steps.into();
+    w.app.script.steps = steps.into();
     w.app.frames = 42;
     w.hl.frame_with(&mut w.app, vec![], |app, raw| app.feed_script(raw));
     w.until("the dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
@@ -230,7 +230,13 @@ fn imp_016_an_unusable_drop_says_what_was_offered() {
     assert!(w.dialog().items.is_empty() && w.dialog().notes.iter().any(|n| n.contains("It offered")));
     w.close_dialog();
     // a mail program on X11 offers kinds that give nothing: the way out is explained
-    w.app.fake_drops.push(DropEvent::Drop { x: at.x, y: at.y, parts: vec![("text/plain".into(), vec![])], offered: vec!["STRING".into(), "DELETE".into()], report: vec!["  text/plain: while dragging empty, after the drop empty".into()] });
+    w.app.drag.fake_drops.push(DropEvent::Drop {
+        x: at.x,
+        y: at.y,
+        parts: vec![("text/plain".into(), vec![])],
+        offered: vec!["STRING".into(), "DELETE".into()],
+        report: vec!["  text/plain: while dragging empty, after the drop empty".into()],
+    });
     w.until("the dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
     let notes = w.dialog().notes.join("\n");
     assert!(notes.contains("XWayland") && notes.contains("text/plain: while dragging empty"), "{notes}");
@@ -242,7 +248,7 @@ fn imp_016_a_drop_without_a_vault_says_so() {
     let mut w = W::new("novault");
     w.app.vault = None;
     let at = Pos2::new(300.0, 300.0);
-    w.app.fake_drops.push(DropEvent::Drop { x: at.x, y: at.y, parts: vec![("text/plain".into(), b"just text".to_vec())], offered: vec!["text/plain".into()], report: vec![] });
+    w.app.drag.fake_drops.push(DropEvent::Drop { x: at.x, y: at.y, parts: vec![("text/plain".into(), b"just text".to_vec())], offered: vec!["text/plain".into()], report: vec![] });
     w.until("the message", |a| a.toasts.iter().any(|(t, _)| t.contains("Open a vault first")));
     assert!(!w.dialog_open());
 }
@@ -299,7 +305,7 @@ impl W {
 
     /// A point outside every drop zone.
     pub(super) fn nowhere(&self) -> Pos2 {
-        (0..90).flat_map(|y| (0..150).map(move |x| Pos2::new(x as f32 * 10.0 + 3.0, y as f32 * 10.0 + 3.0))).find(|p| !self.app.drop_zones.iter().any(|z| z.rect.contains(*p))).expect("a place outside every zone")
+        (0..90).flat_map(|y| (0..150).map(move |x| Pos2::new(x as f32 * 10.0 + 3.0, y as f32 * 10.0 + 3.0))).find(|p| !self.app.drag.drop_zones.iter().any(|z| z.rect.contains(*p))).expect("a place outside every zone")
     }
 
     /// The imported event of the only item of the open Import dialog and its calendar file.
@@ -380,7 +386,7 @@ fn imp_002_an_event_dropped_back_on_the_calendar_is_not_imported() {
     let mut w = W::new("cal-back");
     w.app.show_view(crate::app::View::Calendar, false);
     w.frames(4);
-    let area = *w.app.calendar_areas.first().expect("the calendar draws its area");
+    let area = *w.app.drag.calendar_areas.first().expect("the calendar draws its area");
     let inside = area.center();
     let sub = w.zone("Sub", None, true).center();
     w.drag_event(dragged_event("Review"), sub, inside);

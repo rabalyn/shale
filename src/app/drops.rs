@@ -17,7 +17,38 @@ pub struct DropZone {
     pub note: Option<PathBuf>,
 }
 
-impl ShaleApp {
+/// A running import of dropped things: where its items arrive, and the folder zone it was dropped on
+/// (the folder, and the note inside it if any).
+pub(crate) type PendingDrop = (std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>);
+
+/// The drag-and-drop state of the window: where things can be dropped this frame, what is dragged
+/// over the window, and the drops being read in the background.
+#[derive(Default)]
+pub(crate) struct DragState {
+    /// where things can be dropped this frame
+    pub(crate) drop_zones: Vec<DropZone>,
+    /// file list drop targets this frame: (row, folder to move into, a closed folder row)
+    pub(crate) tree_targets: Vec<(Rect, PathBuf, bool)>,
+    /// a closed folder hovered while dragging, since when (it opens after a moment)
+    pub(crate) tree_hover: Option<(PathBuf, std::time::Instant)>,
+    pub(crate) calendar_areas: Vec<Rect>,
+    /// something from another program is dragged over the window (Wayland)
+    pub(crate) ext_hover: Option<Pos2>,
+    /// the kinds the last drag from another program offered
+    pub(crate) last_offered: Vec<String>,
+    /// something Shale can't take is dragged over the window: where, and what it offers
+    #[cfg(target_os = "linux")]
+    pub(crate) ext_refused: Option<(Pos2, Vec<String>)>,
+    /// test drops from `--keys` (handled like drops from other programs)
+    #[cfg(target_os = "linux")]
+    pub(crate) fake_drops: Vec<crate::import::wl_drop::DropEvent>,
+    /// imports of drops being read in the background
+    pub(crate) pending_drops: Vec<PendingDrop>,
+    /// a drop from another program is being read
+    pub(crate) drop_busy: bool,
+}
+
+impl DragState {
     /// Remember where things can be dropped this frame (the smallest zone under the pointer wins).
     pub fn add_drop_zone(&mut self, rect: Rect, folder: PathBuf, note: Option<PathBuf>) {
         if rect.is_positive() {
@@ -30,10 +61,12 @@ impl ShaleApp {
         self.calendar_areas.push(rect);
     }
 
-    fn zone_at(&self, p: Pos2) -> Option<DropZone> {
+    pub(crate) fn zone_at(&self, p: Pos2) -> Option<DropZone> {
         self.drop_zones.iter().filter(|z| z.rect.contains(p)).min_by(|a, b| a.rect.area().total_cmp(&b.rect.area())).cloned()
     }
+}
 
+impl ShaleApp {
     /// The vault's folders for the folder picker (without the media folder and hidden ones).
     pub fn import_folders(&self) -> Vec<String> {
         let Some(v) = &self.vault else { return vec![] };
@@ -116,43 +149,13 @@ impl ShaleApp {
             }
         }
         d.tags = tags.join(", ");
-        d.suggested = self.tag_words.as_ref().map(|tw| crate::import::tagwords::suggest(tw, &text, &d.auto_tags)).unwrap_or_default();
+        d.suggested = self.tag_learner.words.as_ref().map(|tw| crate::import::tagwords::suggest(tw, &text, &d.auto_tags)).unwrap_or_default();
     }
 
-    /// Learn the tag words again now and then (in the background), and keep them in the vault.
+    /// Let the tag learner work a step; what it reports is shown as toasts.
     pub fn learn_tags_tick(&mut self) {
-        if let Some(rx) = &self.tag_job {
-            match rx.try_recv() {
-                Ok(Err(e)) => {
-                    self.tag_job = None;
-                    self.toast(format!("Learning tag words failed: {e}"));
-                }
-                Ok(Ok(tw)) => {
-                    let saved = self.vault.as_ref().map(|v| crate::import::tagwords::save(&v.root, &tw));
-                    if let Some(Err(e)) = saved {
-                        self.toast(format!("Could not save the tag words: {e}"));
-                    }
-                    self.tag_words = Some(tw);
-                    self.tag_job = None;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.tag_job = None,
-                Err(_) => {}
-            }
-        }
-        let Some(v) = &self.vault else { return };
-        if self.tag_root.as_deref() != Some(v.root.as_path()) {
-            // another vault: start with what was learned there before
-            self.tag_root = Some(v.root.clone());
-            self.tag_words = crate::import::tagwords::load(&v.root);
-            self.tag_gen = u64::MAX;
-            self.tag_at = None;
-        }
-        let due = self.tag_job.is_none() && v.generation != self.tag_gen && self.tag_at.map(|t| t.elapsed() > std::time::Duration::from_secs(120)).unwrap_or(true);
-        if due {
-            self.tag_gen = v.generation;
-            self.tag_at = Some(std::time::Instant::now());
-            let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
-            self.tag_job = Some(crate::jobs::spawn(move || crate::import::tagwords::learn_from_vault(&notes), || {}));
+        for m in self.tag_learner.tick(self.vault.as_ref()) {
+            self.toast(m);
         }
     }
 
@@ -295,29 +298,29 @@ impl ShaleApp {
         {
             let zoom = ctx.zoom_factor();
             let mut events = crate::import::wl_drop::take_events();
-            events.append(&mut self.fake_drops);
+            events.append(&mut self.drag.fake_drops);
             for e in events {
                 match e {
-                    crate::import::wl_drop::DropEvent::Hover { x, y } => self.ext_hover = Some(Pos2::new(x / zoom, y / zoom)),
+                    crate::import::wl_drop::DropEvent::Hover { x, y } => self.drag.ext_hover = Some(Pos2::new(x / zoom, y / zoom)),
                     crate::import::wl_drop::DropEvent::Leave => {
-                        self.ext_hover = None;
-                        self.ext_refused = None;
+                        self.drag.ext_hover = None;
+                        self.drag.ext_refused = None;
                     }
                     crate::import::wl_drop::DropEvent::Busy => {
-                        self.ext_hover = None;
-                        self.drop_busy = true;
+                        self.drag.ext_hover = None;
+                        self.drag.drop_busy = true;
                     }
                     crate::import::wl_drop::DropEvent::Refused { x, y, offered } => {
                         // only a hint at the pointer while it is over the window: passing over
                         // the window with a browser tab is not worth a message
-                        self.ext_hover = None;
-                        self.ext_refused = Some((Pos2::new(x / zoom, y / zoom), offered));
+                        self.drag.ext_hover = None;
+                        self.drag.ext_refused = Some((Pos2::new(x / zoom, y / zoom), offered));
                     }
                     crate::import::wl_drop::DropEvent::Drop { x, y, parts, offered, report } => {
-                        self.ext_hover = None;
-                        self.drop_busy = false;
-                        self.last_offered = offered;
-                        let zone = self.zone_at(Pos2::new(x / zoom, y / zoom)).map(|z| (z.folder, z.note));
+                        self.drag.ext_hover = None;
+                        self.drag.drop_busy = false;
+                        self.drag.last_offered = offered;
+                        let zone = self.drag.zone_at(Pos2::new(x / zoom, y / zoom)).map(|z| (z.folder, z.note));
                         // looking a message up in Thunderbird's folders can take a moment
                         let c = ctx.clone();
                         let rx = crate::jobs::spawn(
@@ -332,18 +335,18 @@ impl ShaleApp {
                             },
                             move || c.request_repaint(),
                         );
-                        self.pending_drops.push((rx, zone));
+                        self.drag.pending_drops.push((rx, zone));
                     }
                 }
             }
-            if let Some((p, offered)) = &self.ext_refused {
+            if let Some((p, offered)) = &self.drag.ext_refused {
                 let shown: Vec<&str> = offered.iter().take(4).map(|s| s.as_str()).collect();
                 self.paint_hint_text(&ctx, *p, &format!("Shale can't take this\n(it offers {}{})", shown.join(", "), if offered.len() > 4 { ", …" } else { "" }));
             }
         }
         // finished drops
         let mut done = Vec::new();
-        self.pending_drops.retain(|(rx, zone)| match rx.try_recv() {
+        self.drag.pending_drops.retain(|(rx, zone)| match rx.try_recv() {
             Ok(r) => {
                 // a crash while reading the drop ends as a message in the import dialog
                 done.push((r.unwrap_or_else(|e| (vec![], vec![format!("Reading the drop failed: {e}")])), zone.clone()));
@@ -353,25 +356,25 @@ impl ShaleApp {
             Err(_) => false,
         });
         for ((items, mut notes), zone) in done {
-            if items.is_empty() && !self.last_offered.is_empty() {
-                notes.push(format!("It offered: {}", self.last_offered.join(", ")));
-                if self.last_offered.iter().any(|o| o == "DELETE" || o == "STRING") {
+            if items.is_empty() && !self.drag.last_offered.is_empty() {
+                notes.push(format!("It offered: {}", self.drag.last_offered.join(", ")));
+                if self.drag.last_offered.iter().any(|o| o == "DELETE" || o == "STRING") {
                     notes.push(
                         "That program runs through X11 (XWayland). If it still sends nothing, start it as a Wayland program (for Thunderbird: MOZ_ENABLE_WAYLAND=1), or drag the message to a folder first and drop the .eml file.".into(),
                     );
                 }
             }
-            self.last_offered.clear();
+            self.drag.last_offered.clear();
             self.open_import(items, notes, zone);
         }
-        if !self.pending_drops.is_empty() || self.drop_busy {
+        if !self.drag.pending_drops.is_empty() || self.drag.drop_busy {
             let p = ctx.content_rect().center_bottom() - Vec2::new(90.0, 60.0);
             self.paint_hint_text(&ctx, p, "Reading the dropped message…");
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         // a file or folder dragged in the file list
         if let (Some(drag), Some(p)) = (egui::DragAndDrop::payload::<crate::panels::TreeDrag>(&ctx), pointer_now(&ctx)) {
-            let target = self.tree_targets.iter().filter(|(r, _, _)| r.contains(p)).min_by(|a, b| a.0.area().total_cmp(&b.0.area())).cloned();
+            let target = self.drag.tree_targets.iter().filter(|(r, _, _)| r.contains(p)).min_by(|a, b| a.0.area().total_cmp(&b.0.area())).cloned();
             let from = drag.0.clone();
             let name = from.file_name().map(|n| crate::markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
             let here = from.parent().map(|p| p.to_path_buf()).unwrap_or_default();
@@ -386,20 +389,20 @@ impl ShaleApp {
             });
             // a closed folder opens when the pointer rests on it
             match &target {
-                Some((_, f, true)) => match &self.tree_hover {
+                Some((_, f, true)) => match &self.drag.tree_hover {
                     Some((h, since)) if h == f => {
                         if since.elapsed() > std::time::Duration::from_millis(700) {
                             self.expanded.insert(f.clone());
-                            self.tree_hover = None;
+                            self.drag.tree_hover = None;
                         }
                     }
-                    _ => self.tree_hover = Some((f.clone(), std::time::Instant::now())),
+                    _ => self.drag.tree_hover = Some((f.clone(), std::time::Instant::now())),
                 },
-                _ => self.tree_hover = None,
+                _ => self.drag.tree_hover = None,
             }
             if ctx.input(|i| i.pointer.any_released()) {
                 egui::DragAndDrop::clear_payload(&ctx);
-                self.tree_hover = None;
+                self.drag.tree_hover = None;
                 if let (Some((_, into, _)), Some(Ok(()))) = (target, verdict) {
                     self.actions.push(Action::Move { from, into });
                 }
@@ -424,8 +427,8 @@ impl ShaleApp {
         let cal = egui::DragAndDrop::payload::<crate::calendar::ui::CalDrag>(&ctx);
         let pointer = ctx.input(|i| i.pointer.latest_pos());
         if let (Some(drag), Some(p)) = (&cal, pointer) {
-            let over_calendar = self.calendar_areas.iter().any(|r| r.contains(p));
-            let zone = if over_calendar { None } else { self.zone_at(p) };
+            let over_calendar = self.drag.calendar_areas.iter().any(|r| r.contains(p));
+            let zone = if over_calendar { None } else { self.drag.zone_at(p) };
             if ctx.input(|i| i.pointer.any_released()) {
                 egui::DragAndDrop::clear_payload(&ctx);
                 if !over_calendar {
@@ -440,9 +443,9 @@ impl ShaleApp {
                 self.paint_drop_hint(&ctx, p, zone.as_ref(), &label);
             }
         }
-        let ext = self.ext_hover.or(if hovering_files { pointer } else { None });
+        let ext = self.drag.ext_hover.or(if hovering_files { pointer } else { None });
         if let Some(p) = ext {
-            let zone = self.zone_at(p);
+            let zone = self.drag.zone_at(p);
             self.paint_drop_hint(&ctx, p, zone.as_ref(), "Drop to import");
             ctx.request_repaint();
         }

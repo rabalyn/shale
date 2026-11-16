@@ -23,7 +23,7 @@ impl ShaleApp {
         self.tree_keys(ui);
         // dropping anywhere on the file list (outside a folder) moves to the top of the vault
         let panel = ui.available_rect_before_wrap();
-        self.tree_targets.push((panel, PathBuf::new(), false));
+        self.drag.tree_targets.push((panel, PathBuf::new(), false));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let folder = self.current_folder();
@@ -212,8 +212,8 @@ impl ShaleApp {
             let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let resp = tree_row(ui, depth, &name, Some(open), false, theme::TEXT, "");
             self.mark_tree_sel(ui, &f, &resp);
-            self.add_drop_zone(resp.rect.intersect(ui.clip_rect()), f.clone(), None);
-            self.tree_targets.push((resp.rect.intersect(ui.clip_rect()), f.clone(), !open));
+            self.drag.add_drop_zone(resp.rect.intersect(ui.clip_rect()), f.clone(), None);
+            self.drag.tree_targets.push((resp.rect.intersect(ui.clip_rect()), f.clone(), !open));
             if resp.drag_started() {
                 egui::DragAndDrop::set_payload(ui.ctx(), TreeDrag(f.clone()));
             }
@@ -263,11 +263,11 @@ impl ShaleApp {
             let resp = tree_row(ui, depth, &name, None, active, color, badge);
             self.mark_tree_sel(ui, &rel, &resp);
             // dropping on a file puts the dragged thing next to it
-            self.tree_targets.push((resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), false));
+            self.drag.tree_targets.push((resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), false));
             if resp.drag_started() {
                 egui::DragAndDrop::set_payload(ui.ctx(), TreeDrag(rel.clone()));
             }
-            self.add_drop_zone(resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), (kind == FileKind::Note).then(|| rel.clone()));
+            self.drag.add_drop_zone(resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), (kind == FileKind::Note).then(|| rel.clone()));
             if resp.clicked() {
                 let new_tab = ui.input(|i| i.modifiers.command);
                 self.actions.push(Action::Open { rel: rel.clone(), new_tab });
@@ -484,9 +484,9 @@ impl ShaleApp {
             let monday = self.cfg.week_starts_monday;
             let mut act = None;
             let area = ui.available_rect_before_wrap();
-            self.add_calendar_area(area);
+            self.drag.add_calendar_area(area);
             egui::ScrollArea::vertical().id_salt("side-calendar").auto_shrink([false, false]).show(ui, |ui| {
-                act = self.cal_side.show(ui, &self.calendar, monday, false);
+                act = self.cal.side.show(ui, &self.calendar, monday, false);
             });
             if let Some(a) = act {
                 self.calendar_action(a);
@@ -932,7 +932,7 @@ impl ShaleApp {
                         self.save_config();
                         self.vdata = crate::vault_state::VaultData::default();
                         self.vault = None;
-                        self.tabs.clear();
+                        self.tabbar.tabs.clear();
                         self.cfg.vault = None;
                         keep = false;
                     }
@@ -1115,7 +1115,7 @@ impl ShaleApp {
             let close_asked = resp.should_close();
             match resp.inner.flatten() {
                 Some(crate::calendar::dialog::EventResult::Saved(msg)) => {
-                    self.last_event_calendar = Some(d.calendar.clone());
+                    self.cal.last_event_calendar = Some(d.calendar.clone());
                     self.toast(msg);
                     keep = false;
                 }
@@ -1414,7 +1414,7 @@ mod tree_key_tests {
         app.actions.clear();
         assert_eq!(press(&mut app, Key::Enter, Modifiers::NONE), None, "Enter leaves the file list");
         assert!(matches!(app.actions.first(), Some(Action::Open { rel, .. }) if rel == Path::new("B/b1.md")));
-        assert!(app.tabs[app.active].editor.request_focus, "…and the editor gets the keyboard");
+        assert!(app.tabbar.tabs[app.tabbar.active].editor.request_focus, "…and the editor gets the keyboard");
         // Esc and Ctrl+L also give the keyboard back; a click elsewhere ends browsing
         app.focus_sidebar(&ctx);
         assert!(app.tree_sel.is_some());
@@ -1506,7 +1506,7 @@ mod search_tests {
         app.goto_match(&rel, line, col);
         assert_eq!(app.current_path(), Some(PathBuf::from("A.md")));
         let text = &app.notes[Path::new("A.md")].text;
-        let cursor = app.tabs[app.active].editor.pending_cursor.expect("cursor placed (and the editor focused)");
+        let cursor = app.tabbar.tabs[app.tabbar.active].editor.pending_cursor.expect("cursor placed (and the editor focused)");
         assert!(text.chars().skip(cursor).collect::<String>().starts_with("Apple here"));
         // a name-only stop opens the file; non-ASCII text before the match is counted right
         frame(&mut app, vec![]);

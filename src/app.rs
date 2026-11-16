@@ -127,13 +127,10 @@ mod drops_tests;
 mod mail;
 mod social;
 mod sync;
+mod tabs;
 #[cfg(all(test, target_os = "linux"))]
 mod tree_ui_tests;
 mod usage;
-
-/// A running import of dropped things: where its items arrive, and the folder zone it was dropped on
-/// (the folder, and the note inside it if any).
-type PendingDrop = (std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>);
 
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
@@ -284,9 +281,8 @@ pub struct ShaleApp {
     /// Git sync of the open vault (ADR-0008).
     pub sync: sync::SyncState,
     pub vault: Option<Vault>,
-    pub tabs: Vec<Tab>,
-    pub active: usize,
-    next_tab_id: u64,
+    /// the open tabs, the active one and what the tab bar drew last frame
+    pub tabbar: tabs::TabBar,
     pub notes: HashMap<PathBuf, NoteDoc>,
     pub drawings: HashMap<PathBuf, DrawingDoc>,
     pub left: LeftPanel,
@@ -310,47 +306,16 @@ pub struct ShaleApp {
     pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
     pub mail: crate::mail::ui::MailView,
-    pub cal_side: crate::calendar::ui::CalendarView,
-    pub cal_main: crate::calendar::ui::CalendarView,
+    /// the calendar views, the jobs of their popups and the default calendar for new events
+    pub cal: crate::calendar::ui::CalendarUi,
     /// the feed view (Mastodon / Bluesky)
     pub social: crate::social::state::SocialState,
-    /// deletes started from the event popup: (job, calendar)
-    pub cal_jobs: Vec<(crate::calendar::store::Job, String)>,
-    /// the calendar the last event was saved to (the default for the next new one)
-    pub last_event_calendar: Option<String>,
     /// for background jobs to wake the window up when they finish
     ctx: Option<egui::Context>,
-    /// where things can be dropped this frame
-    drop_zones: Vec<drops::DropZone>,
-    /// file list drop targets this frame: (row, folder to move into, a closed folder row)
-    pub(crate) tree_targets: Vec<(egui::Rect, PathBuf, bool)>,
-    /// where the tabs of the tab bar are, and their close marks (for tests)
-    pub(crate) tab_rects: Vec<(egui::Rect, egui::Rect)>,
-    /// what the tab bar showed last frame besides the tabs (for tests)
-    pub(crate) tab_marks: TabMarks,
-    /// a closed folder hovered while dragging, since when (it opens after a moment)
-    tree_hover: Option<(PathBuf, Instant)>,
-    calendar_areas: Vec<egui::Rect>,
-    /// something from another program is dragged over the window (Wayland)
-    ext_hover: Option<egui::Pos2>,
-    /// the kinds the last drag from another program offered
-    last_offered: Vec<String>,
-    /// something Shale can't take is dragged over the window: where, and what it offers
-    #[cfg(target_os = "linux")]
-    ext_refused: Option<(egui::Pos2, Vec<String>)>,
-    /// test drops from `--keys` (handled like drops from other programs)
-    #[cfg(target_os = "linux")]
-    fake_drops: Vec<crate::import::wl_drop::DropEvent>,
-    /// drops being read in the background, and where they were dropped
-    /// a drop from another program is being read
-    drop_busy: bool,
-    /// words typical for each tag (learned from the vault, see tagwords)
-    pub tag_words: Option<crate::import::tagwords::TagWords>,
-    tag_job: Option<std::sync::mpsc::Receiver<Result<crate::import::tagwords::TagWords, String>>>,
-    tag_root: Option<PathBuf>,
-    tag_gen: u64,
-    tag_at: Option<Instant>,
-    pending_drops: Vec<PendingDrop>,
+    /// drag and drop: where things can be dropped, what is dragged over the window, drops being read
+    pub(crate) drag: drops::DragState,
+    /// the tag words learned from the vault, and the job that learns them (see tagwords)
+    pub tag_learner: crate::import::tagwords::TagLearner,
     pub scenes: SceneCache,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
@@ -370,12 +335,8 @@ pub struct ShaleApp {
     shot_done: Arc<AtomicBool>,
     /// the last failure to save the global settings (shown once)
     cfg_error: Option<String>,
-    /// scripted input steps for tests of the real window (BUILD-007)
-    script: std::collections::VecDeque<crate::script::Step>,
-    /// the texts drawn in the last frame, for the `@label` targets of the script
-    script_texts: Vec<(String, egui::Rect)>,
-    /// the frame of the last script step: the picture waits a moment after it
-    script_last_frame: u32,
+    /// the scripted input of tests of the real window (BUILD-007)
+    script: crate::script::ScriptRun,
     /// where text that could not be saved at exit is put (DATA-011)
     pub recovery_root: PathBuf,
     /// recovery folders from earlier runs the person has not dismissed yet
@@ -486,9 +447,7 @@ impl ShaleApp {
             vdata: crate::vault_state::VaultData::default(),
             sync: sync::SyncState::default(),
             vault: None,
-            tabs: vec![],
-            active: 0,
-            next_tab_id: 1,
+            tabbar: tabs::TabBar::new(),
             notes: HashMap::new(),
             drawings: HashMap::new(),
             left: LeftPanel::Files,
@@ -511,8 +470,7 @@ impl ShaleApp {
                 c
             },
             mail: crate::mail::ui::MailView::new(mail_root),
-            cal_side: crate::calendar::ui::CalendarView::new(crate::calendar::ui::Size::Small),
-            cal_main: crate::calendar::ui::CalendarView::new(crate::calendar::ui::Size::Medium),
+            cal: crate::calendar::ui::CalendarUi::new(),
             social: {
                 let mut s = crate::social::state::SocialState::new(social_dir);
                 if persist {
@@ -520,28 +478,9 @@ impl ShaleApp {
                 }
                 s
             },
-            cal_jobs: vec![],
-            last_event_calendar: None,
             ctx: None,
-            drop_zones: vec![],
-            tree_targets: vec![],
-            tab_rects: vec![],
-            tab_marks: TabMarks::default(),
-            tree_hover: None,
-            calendar_areas: vec![],
-            ext_hover: None,
-            last_offered: vec![],
-            #[cfg(target_os = "linux")]
-            ext_refused: None,
-            #[cfg(target_os = "linux")]
-            fake_drops: vec![],
-            pending_drops: vec![],
-            drop_busy: false,
-            tag_words: None,
-            tag_job: None,
-            tag_root: None,
-            tag_gen: u64::MAX,
-            tag_at: None,
+            drag: drops::DragState::default(),
+            tag_learner: crate::import::tagwords::TagLearner::new(),
             scenes: SceneCache::default(),
             modal: None,
             actions: vec![],
@@ -554,9 +493,7 @@ impl ShaleApp {
             shot_requested: false,
             shot_done: Arc::new(AtomicBool::new(false)),
             cfg_error: None,
-            script: opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default(),
-            script_texts: vec![],
-            script_last_frame: 0,
+            script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery_root,
             usage: crate::data_usage::DataUsage::new(places),
             recovery_notice: vec![],
@@ -626,7 +563,7 @@ impl ShaleApp {
                     app.convert_canvas(Path::new(&v["convert:".len()..]), false);
                 }
                 Some("reading") => {
-                    if let Some(t) = app.tabs.get_mut(app.active) {
+                    if let Some(t) = app.tabbar.tabs.get_mut(app.tabbar.active) {
                         t.reading = true;
                     }
                 }
@@ -707,16 +644,16 @@ impl ShaleApp {
                 }
                 self.load_vault_data(&v.root);
                 self.vault = Some(v);
-                self.tabs.clear();
+                self.tabbar.tabs.clear();
                 self.notes.clear();
                 self.drawings.clear();
-                self.active = 0;
+                self.tabbar.active = 0;
                 self.cfg.remember_vault(path.to_path_buf());
                 // (opening a note rewrites the saved list, so read it first)
                 let saved: Vec<crate::vault_state::SavedTab> = self.vdata.state.tabs.clone();
                 for st in &saved {
-                    let before = self.tabs.len();
-                    let new_tab = !self.tabs.is_empty();
+                    let before = self.tabbar.tabs.len();
+                    let new_tab = !self.tabbar.tabs.is_empty();
                     if let Some(f) = &st.file {
                         let rel = PathBuf::from(f);
                         if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
@@ -734,19 +671,19 @@ impl ShaleApp {
                             self.show_view(View::Social(Some(f.clone())), new_tab);
                         }
                     }
-                    if self.tabs.len() > before {
-                        self.tabs[self.active].pinned = st.pinned;
+                    if self.tabbar.tabs.len() > before {
+                        self.tabbar.tabs[self.tabbar.active].pinned = st.pinned;
                     }
                 }
                 // pinned tabs are left-most (a hand-edited file may say otherwise)
-                let open_id = self.tabs.get(self.active).map(|t| t.id);
-                self.tabs.sort_by_key(|t| !t.pinned);
-                self.active = open_id.and_then(|id| self.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
-                if self.tabs.is_empty() {
+                let open_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
+                self.tabbar.tabs.sort_by_key(|t| !t.pinned);
+                self.tabbar.active = open_id.and_then(|id| self.tabbar.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
+                if self.tabbar.tabs.is_empty() {
                     let first = self.vault.as_ref().and_then(|v| v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone()));
                     match first {
                         Some(r) => self.open(&r, false),
-                        None => self.new_tab(View::Empty),
+                        None => self.tabbar.new_tab(View::Empty),
                     }
                 }
                 if !had_files {
@@ -759,31 +696,24 @@ impl ShaleApp {
         }
     }
 
-    pub fn new_tab(&mut self, view: View) {
-        let id = self.next_tab_id;
-        self.next_tab_id += 1;
-        self.tabs.push(Tab { id, view, back: vec![], fwd: vec![], reading: false, pinned: false, editor: NoteEditor::new(egui::Id::unique(("note-editor", id))), title_buf: String::new(), title_for: None });
-        self.active = self.tabs.len() - 1;
-    }
-
     pub fn show_view(&mut self, view: View, new_tab: bool) {
-        if self.tabs.is_empty() || new_tab {
-            self.new_tab(view);
+        if self.tabbar.tabs.is_empty() || new_tab {
+            self.tabbar.new_tab(view);
             return;
         }
         // the Feeds button always opens a new Feeds tab (to add a feed to the workflow); the same
         // feed may be open in several tabs, so a feed is never "found" by equality. A new tab that
         // is still empty becomes the Feeds tab instead of leaving an empty one behind.
-        if view == View::Social(None) && self.tabs[self.active].view != View::Empty {
-            self.new_tab(view);
+        if view == View::Social(None) && self.tabbar.tabs[self.tabbar.active].view != View::Empty {
+            self.tabbar.new_tab(view);
             return;
         }
         // reuse a tab already showing it
-        if let Some(i) = self.tabs.iter().position(|t| t.view == view && !matches!(t.view, View::Social(_))) {
-            self.active = i;
+        if let Some(i) = self.tabbar.tabs.iter().position(|t| t.view == view && !matches!(t.view, View::Social(_))) {
+            self.tabbar.active = i;
             return;
         }
-        let tab = &mut self.tabs[self.active];
+        let tab = &mut self.tabbar.tabs[self.tabbar.active];
         if tab.view != view {
             let old = std::mem::replace(&mut tab.view, view);
             if old != View::Empty {
@@ -889,8 +819,8 @@ impl ShaleApp {
             Ok(to) => {
                 self.toast(format!("Converted to “{}” (the canvas is unchanged)", rel_to_string(&to)));
                 // the canvas's read-only tab (if open) shows the new drawing instead
-                if let Some(i) = self.tabs.iter().position(|t| t.view.path() == Some(rel)) {
-                    self.active = i;
+                if let Some(i) = self.tabbar.tabs.iter().position(|t| t.view.path() == Some(rel)) {
+                    self.tabbar.active = i;
                     self.open(&to, false);
                 } else {
                     self.open(&to, new_tab);
@@ -909,6 +839,7 @@ impl ShaleApp {
             return;
         }
         self.vdata.state.tabs = self
+            .tabbar
             .tabs
             .iter()
             .filter_map(|t| match &t.view {
@@ -919,7 +850,7 @@ impl ShaleApp {
     }
 
     pub fn current_path(&self) -> Option<PathBuf> {
-        self.tabs.get(self.active).and_then(|t| t.view.path().map(|p| p.to_path_buf()))
+        self.tabbar.tabs.get(self.tabbar.active).and_then(|t| t.view.path().map(|p| p.to_path_buf()))
     }
 
     pub fn current_folder(&self) -> PathBuf {
@@ -972,7 +903,7 @@ impl ShaleApp {
                 let shown = v.file(&rel).map(|f| f.display_name()).unwrap_or_default();
                 self.toast(format!("Created “{shown}”"));
                 self.open(&rel, new_tab);
-                if let Some(t) = self.tabs.get_mut(self.active) {
+                if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
                     t.editor.request_focus = true;
                 }
                 Some(rel)
@@ -1021,7 +952,7 @@ impl ShaleApp {
     /// in the editor.
     pub fn goto_match(&mut self, rel: &Path, line: usize, col: usize) {
         self.open(rel, false);
-        if let (Some(doc), Some(tab)) = (self.notes.get(rel), self.tabs.get_mut(self.active)) {
+        if let (Some(doc), Some(tab)) = (self.notes.get(rel), self.tabbar.tabs.get_mut(self.tabbar.active)) {
             let start = markdown::line_start_byte(&doc.text, line);
             let line_len = doc.text[start..].find('\n').unwrap_or(doc.text.len() - start);
             let mut byte = start + col.min(line_len);
@@ -1246,7 +1177,7 @@ impl ShaleApp {
         }
         // tabs pointing at files that vanished
         let files: HashSet<PathBuf> = v.files.iter().map(|f| f.rel.clone()).collect();
-        for t in &mut self.tabs {
+        for t in &mut self.tabbar.tabs {
             if let Some(p) = t.view.path() {
                 if !files.contains(p) {
                     t.view = View::Empty;
@@ -1355,7 +1286,7 @@ impl ShaleApp {
                 }
             }
         }
-        for t in &mut self.tabs {
+        for t in &mut self.tabbar.tabs {
             for view in std::iter::once(&mut t.view).chain(t.back.iter_mut()).chain(t.fwd.iter_mut()) {
                 match view {
                     View::Note(p) | View::Drawing(p) => {
@@ -1430,7 +1361,7 @@ impl ShaleApp {
                 self.trashed.push(in_trash);
                 self.notes.retain(|k, _| !k.starts_with(rel));
                 self.drawings.retain(|k, _| !k.starts_with(rel));
-                for t in &mut self.tabs {
+                for t in &mut self.tabbar.tabs {
                     if t.view.path().map(|p| p.starts_with(rel)).unwrap_or(false) {
                         t.view = t.back.pop().unwrap_or(View::Empty);
                     }
@@ -1504,7 +1435,7 @@ impl ShaleApp {
     pub fn focus_editor(&mut self) {
         self.tree_sel = None;
         self.search_sel = None;
-        if let Some(t) = self.tabs.get_mut(self.active) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             t.editor.request_focus = true;
         }
     }
@@ -1522,7 +1453,7 @@ impl ShaleApp {
             CalAction::OpenLarge => self.show_view(View::Calendar, false),
             CalAction::NewEventAt(start) => {
                 let srcs = &self.calendar.sources;
-                let target = self.last_event_calendar.as_ref().and_then(|id| srcs.iter().find(|s| s.id == *id)).or_else(|| srcs.iter().find(|s| s.enabled)).or_else(|| srcs.first()).map(|s| s.id.clone());
+                let target = self.cal.last_event_calendar.as_ref().and_then(|id| srcs.iter().find(|s| s.id == *id)).or_else(|| srcs.iter().find(|s| s.enabled)).or_else(|| srcs.first()).map(|s| s.id.clone());
                 match target {
                     Some(id) => {
                         let mut d = crate::calendar::dialog::EventDialog::new_at(id, start);
@@ -1557,7 +1488,7 @@ impl ShaleApp {
                 let found = self.calendar.sources.get(occ.source).map(|s| s.id.clone()).zip(self.calendar.event(&occ).cloned());
                 if let Some((sid, ev)) = found {
                     match self.calendar.delete_occurrence(&sid, &ev, occ.start, self.ctx.clone()) {
-                        Ok(job) => self.cal_jobs.push((job, sid)),
+                        Ok(job) => self.cal.jobs.push((job, sid)),
                         Err(e) => self.toast(format!("Could not remove the date: {e}")),
                     }
                 }
@@ -1566,7 +1497,7 @@ impl ShaleApp {
                 let found = self.calendar.sources.get(occ.source).map(|s| s.id.clone()).zip(self.calendar.event(&occ).cloned());
                 if let Some((sid, ev)) = found {
                     match self.calendar.delete_event(&sid, ev, self.ctx.clone()) {
-                        Ok(job) => self.cal_jobs.push((job, sid)),
+                        Ok(job) => self.cal.jobs.push((job, sid)),
                         Err(e) => self.toast(format!("Could not delete the event: {e}")),
                     }
                 }
@@ -1660,13 +1591,13 @@ impl ShaleApp {
     }
 
     pub fn close_tab(&mut self, i: usize) {
-        if i < self.tabs.len() {
+        if i < self.tabbar.tabs.len() {
             self.flush_all();
-            self.tabs.remove(i);
-            if self.active >= self.tabs.len() && self.active > 0 {
-                self.active = self.tabs.len() - 1;
-            } else if i < self.active {
-                self.active -= 1;
+            self.tabbar.tabs.remove(i);
+            if self.tabbar.active >= self.tabbar.tabs.len() && self.tabbar.active > 0 {
+                self.tabbar.active = self.tabbar.tabs.len() - 1;
+            } else if i < self.tabbar.active {
+                self.tabbar.active -= 1;
             }
             self.remember_open_files();
         }
@@ -1675,9 +1606,9 @@ impl ShaleApp {
     /// Make the previous (-1) or next (1) tab the open one, wrapping around at the ends
     /// (NAV-018). `tabs` is the order the tab bar shows.
     pub fn step_tab(&mut self, delta: isize) {
-        let n = self.tabs.len() as isize;
+        let n = self.tabbar.tabs.len() as isize;
         if n > 1 {
-            self.active = (self.active as isize + delta).rem_euclid(n) as usize;
+            self.tabbar.active = (self.tabbar.active as isize + delta).rem_euclid(n) as usize;
         }
     }
 
@@ -1690,7 +1621,7 @@ impl ShaleApp {
         if !self.cfg.vim_mode || self.modal.is_some() {
             return false;
         }
-        let Some(tab) = self.tabs.get(self.active) else { return false };
+        let Some(tab) = self.tabbar.tabs.get(self.tabbar.active) else { return false };
         match tab.view {
             View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx),
             View::Mail | View::Drawing(_) => false,
@@ -1701,7 +1632,7 @@ impl ShaleApp {
     /// Swap the view of this tab with the one before it in its history, so that doing it again
     /// swaps back (NAV-019). A note gets the keyboard.
     pub fn swap_alternate(&mut self) {
-        let Some(t) = self.tabs.get_mut(self.active) else { return };
+        let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) else { return };
         let Some(prev) = t.back.last_mut() else { return };
         std::mem::swap(&mut t.view, prev);
         if matches!(t.view, View::Note(_)) {
@@ -1713,8 +1644,8 @@ impl ShaleApp {
     /// Where a tab dragged to the pointer at `x` would land: the gap index in `0..=tabs.len()`,
     /// kept inside the tab's own group, pinned tabs first (NAV-017). `mids` are the tabs' centres.
     pub(crate) fn tab_slot(&self, from: usize, x: f32, mids: &[f32]) -> usize {
-        let pinned = self.tabs.iter().take_while(|t| t.pinned).count();
-        let (lo, hi) = if self.tabs[from].pinned { (0, pinned) } else { (pinned, self.tabs.len()) };
+        let pinned = self.tabbar.tabs.iter().take_while(|t| t.pinned).count();
+        let (lo, hi) = if self.tabbar.tabs[from].pinned { (0, pinned) } else { (pinned, self.tabbar.tabs.len()) };
         mids.iter().filter(|m| **m < x).count().clamp(lo, hi)
     }
 
@@ -1724,33 +1655,33 @@ impl ShaleApp {
     }
 
     fn move_tab_to(&mut self, from: usize, to: usize) {
-        if from >= self.tabs.len() || to == from {
+        if from >= self.tabbar.tabs.len() || to == from {
             return;
         }
-        let active_id = self.tabs.get(self.active).map(|t| t.id);
-        let t = self.tabs.remove(from);
-        self.tabs.insert(to, t);
+        let active_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
+        let t = self.tabbar.tabs.remove(from);
+        self.tabbar.tabs.insert(to, t);
         if let Some(id) = active_id {
-            self.active = self.tabs.iter().position(|t| t.id == id).unwrap_or(0);
+            self.tabbar.active = self.tabbar.tabs.iter().position(|t| t.id == id).unwrap_or(0);
         }
         self.remember_open_files();
     }
 
     /// Pin or unpin a tab: it moves to the end of the pinned tabs (NAV-016).
     pub(crate) fn set_tab_pinned(&mut self, i: usize, pinned: bool) {
-        let Some(t) = self.tabs.get_mut(i) else { return };
+        let Some(t) = self.tabbar.tabs.get_mut(i) else { return };
         if t.pinned == pinned {
             return;
         }
         t.pinned = pinned;
-        let count = self.tabs.iter().filter(|t| t.pinned).count();
+        let count = self.tabbar.tabs.iter().filter(|t| t.pinned).count();
         // the end of the pinned group (the unpinned tab is not counted: it is the first outside)
         self.move_tab_to(i, if pinned { count - 1 } else { count });
         self.remember_open_files();
     }
 
     pub fn go_back(&mut self) {
-        if let Some(t) = self.tabs.get_mut(self.active) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             if let Some(prev) = t.back.pop() {
                 let cur = std::mem::replace(&mut t.view, prev);
                 t.fwd.push(cur);
@@ -1760,7 +1691,7 @@ impl ShaleApp {
     }
 
     pub fn go_forward(&mut self) {
-        if let Some(t) = self.tabs.get_mut(self.active) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             if let Some(next) = t.fwd.pop() {
                 let cur = std::mem::replace(&mut t.view, next);
                 t.back.push(cur);
@@ -1848,7 +1779,7 @@ impl ShaleApp {
         } else {
             self.keymap.cancel(Scope::EditorNormal);
         }
-        let in_mail = matches!(self.tabs.get(self.active).map(|t| &t.view), Some(View::Mail));
+        let in_mail = matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Mail));
         let sidebar_keys = self.tree_sel.is_some() || self.search_sel.is_some();
         if mail_view {
             self.show_view(View::Mail, false);
@@ -1861,7 +1792,7 @@ impl ShaleApp {
             self.new_untitled(&f);
         }
         if toggle {
-            if let Some(t) = self.tabs.get_mut(self.active) {
+            if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
                 t.reading = !t.reading;
             }
         }
@@ -1887,7 +1818,7 @@ impl ShaleApp {
             self.go_forward();
         }
         if close {
-            let a = self.active;
+            let a = self.tabbar.active;
             self.close_tab(a);
         }
         if search {
@@ -1918,7 +1849,7 @@ impl ShaleApp {
         let Some(path) = self.screenshot.clone() else { return };
         ui.ctx().request_repaint();
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
-        if self.frames >= 120 && self.script.is_empty() && self.frames >= self.script_last_frame + 12 && !self.shot_requested {
+        if self.frames >= 120 && self.script.steps.is_empty() && self.frames >= self.script.last_frame + 12 && !self.shot_requested {
             self.shot_requested = true;
             let done = self.shot_done.clone();
             ui.ctx().request_screenshot(move |img| {
@@ -1954,32 +1885,20 @@ impl ShaleApp {
 }
 
 impl ShaleApp {
-    /// Where a script target is in the window; a label that is not drawn ends the run (a
-    /// picture of the wrong state is worse than none).
-    fn script_point(&self, t: &crate::script::Target) -> egui::Pos2 {
-        match t {
-            crate::script::Target::At(x, y) => egui::pos2(*x, *y),
-            crate::script::Target::Label(l, n) => crate::script::find_label(&self.script_texts, l, *n).unwrap_or_else(|| {
-                eprintln!("script: no text \"{l}\" (number {n}) in the window");
-                std::process::exit(3);
-            }),
-        }
-    }
-
     /// Testing aid (`--keys`): add the next scripted step to this frame's input.
     fn feed_script(&mut self, raw: &mut egui::RawInput) {
         use crate::script::{Button, Step};
-        if self.script.is_empty() || self.frames < 30 || !self.frames.is_multiple_of(6) {
+        if self.script.steps.is_empty() || self.frames < 30 || !self.frames.is_multiple_of(6) {
             return;
         }
         // waiting for a text to be drawn (a view that fills in later) holds the whole script
-        if let Some(Step::WaitFor(l, n)) = self.script.front() {
-            if crate::script::find_label(&self.script_texts, l, *n).is_none() {
+        if let Some(Step::WaitFor(l, n)) = self.script.steps.front() {
+            if crate::script::find_label(&self.script.texts, l, *n).is_none() {
                 return;
             }
         }
-        let Some(step) = self.script.pop_front() else { return };
-        self.script_last_frame = self.frames;
+        let Some(step) = self.script.steps.pop_front() else { return };
+        self.script.last_frame = self.frames;
         let key_event = |name: &str| {
             // "ctrl+shift+F": any number of modifiers before the key
             let mut mods = Modifiers::NONE;
@@ -2001,31 +1920,31 @@ impl ShaleApp {
         match &step {
             Step::Text(t) => raw.events.push(egui::Event::Text(t.clone())),
             Step::Key(k) => raw.events.extend(key_event(k)),
-            Step::Move(t) => raw.events.push(egui::Event::PointerMoved(self.script_point(t))),
+            Step::Move(t) => raw.events.push(egui::Event::PointerMoved(self.script.point(t))),
             Step::Down(t) => {
-                let pos = self.script_point(t);
+                let pos = self.script.point(t);
                 raw.events.extend([egui::Event::PointerMoved(pos), button(pos, left, true)]);
             }
             Step::Up(t) => {
-                let pos = self.script_point(t);
+                let pos = self.script.point(t);
                 raw.events.extend([egui::Event::PointerMoved(pos), button(pos, left, false)]);
             }
             Step::Click(t, b) => {
-                let pos = self.script_point(t);
+                let pos = self.script.point(t);
                 let b = if *b == Button::Right { egui::PointerButton::Secondary } else { left };
                 raw.events.extend([egui::Event::PointerMoved(pos), button(pos, b, true), button(pos, b, false)]);
             }
             Step::DoubleClick(t) => {
-                let pos = self.script_point(t);
+                let pos = self.script.point(t);
                 raw.events.extend([egui::Event::PointerMoved(pos), button(pos, left, true), button(pos, left, false), button(pos, left, true), button(pos, left, false)]);
             }
             Step::Drag(from, to) => {
                 // press, two moves on the way, release: one step each, so the window sees a drag
-                let (a, b) = (self.script_point(from), self.script_point(to));
+                let (a, b) = (self.script.point(from), self.script.point(to));
                 let at = |f: f32| crate::script::Target::At(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
                 let steps = [Step::Down(at(0.0)), Step::Move(at(0.1)), Step::Move(at(0.5)), Step::Move(at(1.0)), Step::Up(at(1.0))];
                 for s in steps.into_iter().rev() {
-                    self.script.push_front(s);
+                    self.script.steps.push_front(s);
                 }
             }
             Step::Scroll(dy) => {
@@ -2034,7 +1953,7 @@ impl ShaleApp {
             }
             Step::Wait(n) => {
                 if *n > 1 {
-                    self.script.push_front(Step::Wait(n - 1));
+                    self.script.steps.push_front(Step::Wait(n - 1));
                 }
             }
             Step::WaitFor(..) => {}
@@ -2043,10 +1962,10 @@ impl ShaleApp {
                 // way `wl_drop` delivers it (IMP-002, BUILD-007)
                 #[cfg(target_os = "linux")]
                 Some(t) => {
-                    let pos = self.script_point(t);
+                    let pos = self.script.point(t);
                     raw.events.push(egui::Event::PointerMoved(pos));
                     let list: String = paths.iter().map(|p| format!("{}\r\n", crate::import::file_uri(p))).collect();
-                    self.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: pos.x, y: pos.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
+                    self.drag.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: pos.x, y: pos.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
                 }
                 _ => paths.iter().for_each(|p| raw.dropped_files.push(std::sync::Arc::new(ScriptDrop(p.clone())))),
             },
@@ -2069,21 +1988,21 @@ impl ShaleApp {
                         }
                     }
                     let offered = parts.iter().map(|p| p.0.clone()).collect();
-                    self.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: at.x, y: at.y, parts, offered, report: vec![] });
+                    self.drag.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: at.x, y: at.y, parts, offered, report: vec![] });
                 }
                 #[cfg(not(target_os = "linux"))]
                 let _ = rest;
             }
             Step::Dump => {
-                for (t, r) in &self.script_texts {
+                for (t, r) in &self.script.texts {
                     eprintln!("script: {:?} at {:.0},{:.0}", t.chars().take(60).collect::<String>(), r.center().x, r.center().y);
                 }
             }
             Step::FocusEnd => {
-                if let (Some(t), Some(p)) = (self.tabs.get(self.active), self.current_path()) {
+                if let (Some(t), Some(p)) = (self.tabbar.tabs.get(self.tabbar.active), self.current_path()) {
                     let n = self.notes.get(&p).map(|d| d.text.chars().count()).unwrap_or(0);
                     let id = t.id;
-                    if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+                    if let Some(t) = self.tabbar.tabs.iter_mut().find(|t| t.id == id) {
                         t.editor.pending_cursor = Some(n);
                     }
                 }
@@ -2094,44 +2013,11 @@ impl ShaleApp {
             if let Some(d) = self.current_path().and_then(|p| self.drawings.get(&p)) {
                 eprintln!("step {step:?}: drawing {}", d.debug_state());
             }
-            if let (Some(t), Some(p)) = (self.tabs.get(self.active), self.current_path()) {
+            if let (Some(t), Some(p)) = (self.tabbar.tabs.get(self.tabbar.active), self.current_path()) {
                 let tail: String = self.notes.get(&p).map(|d| d.text.chars().rev().take(40).collect::<Vec<_>>().into_iter().rev().collect()).unwrap_or_default();
-                eprintln!("step {step:?}: tabs={} active={} tab_id={} editor={:?} picker_visible={} {} tail={tail:?}", self.tabs.len(), self.active, t.id, t.editor.id, t.editor.picker_visible(), t.editor.debug_state());
+                eprintln!("step {step:?}: tabs={} active={} tab_id={} editor={:?} picker_visible={} {} tail={tail:?}", self.tabbar.tabs.len(), self.tabbar.active, t.id, t.editor.id, t.editor.picker_visible(), t.editor.debug_state());
             }
         }
-    }
-
-    /// Testing aid (`--keys`): remember where each text of the window was drawn, topmost first,
-    /// so that the next step can aim at `@label`.
-    fn note_script_texts(&mut self, ctx: &egui::Context) {
-        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
-            match shape {
-                egui::Shape::Text(t) => {
-                    let text = t.galley.text();
-                    if !text.trim().is_empty() {
-                        out.push((text.to_string(), t.galley.rect.translate(t.pos.to_vec2())));
-                    }
-                }
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
-                _ => {}
-            }
-        }
-        let mut layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().collect());
-        if !layers.contains(&egui::LayerId::background()) {
-            layers.insert(0, egui::LayerId::background());
-        }
-        let mut out = Vec::new();
-        ctx.graphics(|g| {
-            for l in layers.iter().rev() {
-                if let Some(list) = g.get(*l) {
-                    for clipped in list.all_entries().collect::<Vec<_>>().into_iter().rev() {
-                        walk(&clipped.shape, &mut out);
-                    }
-                }
-            }
-        });
-        out.extend(crate::script::take_hints());
-        self.script_texts = out;
     }
 
     /// Start a fresh troubleshooting recording (with a header describing the setup).
@@ -2192,7 +2078,7 @@ impl ShaleApp {
         if lines.is_empty() {
             return;
         }
-        let state = match (self.tabs.get(self.active), self.current_path()) {
+        let state = match (self.tabbar.tabs.get(self.tabbar.active), self.current_path()) {
             (Some(t), Some(p)) => {
                 let line = self.notes.get(&p).map(|d| d.text.lines().last().unwrap_or("").chars().rev().take(50).collect::<Vec<_>>().into_iter().rev().collect::<String>()).unwrap_or_default();
                 format!("{} | last line: {line:?}", t.editor.debug_state())
@@ -2211,7 +2097,7 @@ impl ShaleApp {
 impl eframe::App for ShaleApp {
     /// Testing aid: feed scripted keys into the real window, one step every few frames.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
-        if std::env::var_os("SHALE_DEBUG").is_some() && !self.script.is_empty() {
+        if std::env::var_os("SHALE_DEBUG").is_some() && !self.script.steps.is_empty() {
             eprintln!("focus: {:?} wants_keys={}", ctx.memory(|m| m.focused()), ctx.egui_wants_keyboard_input());
         }
         // a window without a window manager (the private X display of the pictures) never gets the
@@ -2242,9 +2128,9 @@ impl eframe::App for ShaleApp {
 impl ShaleApp {
     /// One frame of the window (the body of `eframe::App::ui`; tests call it directly).
     pub(crate) fn run_frame(&mut self, ui: &mut Ui) {
-        self.drop_zones.clear();
-        self.calendar_areas.clear();
-        self.tree_targets.clear();
+        self.drag.drop_zones.clear();
+        self.drag.calendar_areas.clear();
+        self.drag.tree_targets.clear();
         self.screenshot_tick(ui);
         self.shortcuts(ui);
         self.autosave();
@@ -2262,7 +2148,7 @@ impl ShaleApp {
             self.ctx = Some(ui.ctx().clone());
         }
         let mut finished = Vec::new();
-        self.cal_jobs.retain(|(job, sid)| match crate::calendar::store::job_result(job) {
+        self.cal.jobs.retain(|(job, sid)| match crate::calendar::store::job_result(job) {
             Some(r) => {
                 finished.push((r, sid.clone()));
                 false
@@ -2275,7 +2161,7 @@ impl ShaleApp {
                 Ok(m) | Err(m) => self.toast(m),
             }
         }
-        if !self.cal_jobs.is_empty() {
+        if !self.cal.jobs.is_empty() {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
         if self.calendar.is_loading() {
@@ -2302,8 +2188,8 @@ impl ShaleApp {
         self.usage_tick();
         self.paint_toasts(ui);
         self.paint_recovery_notice(ui);
-        if !self.script.is_empty() {
-            self.note_script_texts(ui.ctx());
+        if !self.script.steps.is_empty() {
+            self.script.note_texts(ui.ctx());
         }
         self.process_actions();
     }
@@ -2413,7 +2299,7 @@ pub(crate) mod tests {
         assert!(app.toasts.iter().any(|(t, _)| t.contains("not now")), "{:?}", app.toasts);
         assert!(app.usage.record.caches[&CacheId::MailIndex].error.is_some());
         // tag words: cleared, and learned again at once
-        app.tag_gen = 0;
+        app.tag_learner.generation = 0;
         app.usage_ask(Ask::Clear(CacheId::TagWords));
         let mut n = 0;
         while app.usage.running(CacheId::TagWords) && n < 300 {
@@ -2421,8 +2307,8 @@ pub(crate) mod tests {
             std::thread::sleep(Duration::from_millis(10));
             n += 1;
         }
-        assert!(!crate::import::tagwords::file_in(&d).exists() || app.tag_job.is_some());
-        assert_eq!(app.tag_gen, u64::MAX, "learning starts again");
+        assert!(!crate::import::tagwords::file_in(&d).exists() || app.tag_learner.running());
+        assert_eq!(app.tag_learner.generation, u64::MAX, "learning starts again");
         assert!(app.toasts.iter().any(|(t, _)| t.starts_with("Tag words cleared")), "{:?}", app.toasts);
         assert!(app.usage_ask(Ask::Open(PathBuf::from("Ideas.md"))), "opening a file closes the dialog");
         assert_eq!(app.current_path(), Some(PathBuf::from("Ideas.md")));
@@ -2692,7 +2578,7 @@ pub(crate) mod tests {
         let to = app.convert_canvas(canvas, false).unwrap();
         assert_eq!(to, Path::new("Maps/Map.excalidraw.md"));
         assert_eq!(app.current_path(), Some(to.clone()));
-        assert_eq!(app.tabs.iter().filter(|t| t.view.path() == Some(canvas)).count(), 0, "the canvas tab now shows the drawing");
+        assert_eq!(app.tabbar.tabs.iter().filter(|t| t.view.path() == Some(canvas)).count(), 0, "the canvas tab now shows the drawing");
         let made = std::fs::read_to_string(d.join(&to)).unwrap();
         assert!(crate::drawing::canvas::is_converted_from(&made, canvas));
         assert!(app.drawings[&to].read_only.is_none() && app.drawings[&to].error.is_none());

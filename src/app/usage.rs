@@ -131,9 +131,7 @@ impl ShaleApp {
             }
             (CacheId::TagWords, Kind::Clear) => {
                 // learn again at once (USE-015)
-                self.tag_words = None;
-                self.tag_gen = u64::MAX;
-                self.tag_at = None;
+                self.tag_learner.forget();
             }
             (CacheId::MailIndex, Kind::Clear) => {
                 let cfg = self.cfg.clone();
