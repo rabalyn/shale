@@ -1,8 +1,13 @@
 //! Only one Shale runs per user: a second one would send a queued mail again, undo the first
-//! one's "sending" state and overwrite its settings.
+//! one's "sending" state and overwrite its settings. A second start does not just fail: it hands
+//! its folder or file to the running Shale (DATA-015) over a socket on the loopback interface.
 
 use std::fs::File;
-use std::path::Path;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 /// How long a start that finds the lock taken keeps trying before it says "already running". A
@@ -49,6 +54,109 @@ pub fn claim(dir: &Path) -> Claim {
 /// The folder of the lock: next to the mail store, under the user's data folder.
 pub fn default_dir() -> std::path::PathBuf {
     dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale")
+}
+
+/// Where the running Shale says how to reach it: its port and a secret, owner-only (DATA-014).
+const HANDOVER_FILE: &str = "instance.port";
+/// What a message may be at most: a handful of paths.
+const MAX_MESSAGE: u64 = 64 * 1024;
+/// How long a second start keeps trying to reach the first (which may just be starting up).
+const REACH: Duration = Duration::from_secs(2);
+
+/// What the running Shale listens to: the paths that later starts handed over, one list per start.
+pub struct Handover {
+    rx: Receiver<Vec<PathBuf>>,
+    /// set by the window on its first frame, so a message can wake it
+    wake: Arc<OnceLock<eframe::egui::Context>>,
+}
+
+impl Handover {
+    /// The lists of paths that arrived since the last call (an empty list: just "come forward").
+    pub fn take(&self) -> Vec<Vec<PathBuf>> {
+        self.rx.try_iter().collect()
+    }
+
+    /// Give the listener the window to wake.
+    pub fn attach(&self, ctx: &eframe::egui::Context) {
+        let _ = self.wake.set(ctx.clone());
+    }
+}
+
+/// A secret for this run: eight random words from the system-seeded hasher, no dependency needed.
+fn secret() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    (0..4).map(|_| format!("{:016x}", std::collections::hash_map::RandomState::new().build_hasher().finish())).collect()
+}
+
+/// Start listening in `dir` (the owner calls this once, after it took the lock).
+pub fn listen(dir: &Path) -> std::io::Result<Handover> {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+    let port = listener.local_addr()?.port();
+    let token = secret();
+    crate::fsutil::write_atomic_private(&dir.join(HANDOVER_FILE), format!("{port}\n{token}\n").as_bytes())?;
+    let (tx, rx) = channel();
+    let wake: Arc<OnceLock<eframe::egui::Context>> = Arc::new(OnceLock::new());
+    let wake_in = wake.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            if let Some(paths) = read_message(stream, &token) {
+                if tx.send(paths).is_err() {
+                    return;
+                }
+                if let Some(ctx) = wake_in.get() {
+                    ctx.request_repaint();
+                }
+            }
+        }
+    });
+    Ok(Handover { rx, wake })
+}
+
+/// One message: a line of JSON `{"token": …, "paths": […]}`. Anything else (wrong secret, too
+/// long, too slow, not JSON) is dropped without an answer.
+fn read_message(mut stream: TcpStream, token: &str) -> Option<Vec<PathBuf>> {
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    let mut line = String::new();
+    BufReader::new((&stream).take(MAX_MESSAGE)).read_line(&mut line).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&line).ok()?;
+    if v.get("token")?.as_str()? != token {
+        return None;
+    }
+    let paths = v.get("paths")?.as_array()?.iter().filter_map(|p| p.as_str().map(PathBuf::from)).collect();
+    stream.write_all(b"ok\n").ok()?;
+    Some(paths)
+}
+
+/// Hand `paths` (made absolute here, the other Shale has another working folder) to the Shale
+/// that runs. `true` when it took them. Tries for a moment: the first Shale may not have opened
+/// its socket yet, and a file left by a crash names a port nobody listens on.
+pub fn hand_over(dir: &Path, paths: &[PathBuf]) -> bool {
+    let paths: Vec<String> = paths.iter().map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone()).to_string_lossy().into_owned()).collect();
+    let start = Instant::now();
+    loop {
+        if try_hand_over(dir, &paths) {
+            return true;
+        }
+        if start.elapsed() >= REACH {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn try_hand_over(dir: &Path, paths: &[String]) -> bool {
+    let Ok(text) = crate::fsutil::read_to_string(dir.join(HANDOVER_FILE)) else { return false };
+    let mut lines = text.lines();
+    let (Some(Ok(port)), Some(token)) = (lines.next().map(str::parse::<u16>), lines.next()) else { return false };
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(1)) else { return false };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let msg = serde_json::json!({ "token": token, "paths": paths }).to_string();
+    if stream.write_all(format!("{msg}\n").as_bytes()).is_err() {
+        return false;
+    }
+    let mut answer = String::new();
+    BufReader::new(&stream).read_line(&mut answer).is_ok() && answer.trim() == "ok"
 }
 
 pub const ALREADY_RUNNING: &str = "Shale is already running. Only one Shale can run at a time, so that mail is never sent twice and settings are not overwritten. Switch to the window that is open.";
@@ -176,6 +284,82 @@ mod tests {
         assert!(!e.to_string().is_empty());
         // the same when the folder is below a file
         assert!(matches!(claim(&dir.0.join("deeper")), Claim::Unchecked(_)));
+    }
+
+    /// A message from a second start, as the running one gets it.
+    fn deliver(dir: &Dir, paths: &[&str]) -> bool {
+        hand_over(&dir.0, &paths.iter().map(PathBuf::from).collect::<Vec<_>>())
+    }
+
+    fn wait_for(h: &Handover) -> Vec<Vec<PathBuf>> {
+        let t = Instant::now();
+        loop {
+            let got = h.take();
+            if !got.is_empty() || t.elapsed() > Duration::from_secs(3) {
+                return got;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    // spec: DATA-015
+    #[test]
+    fn a_second_start_hands_its_paths_to_the_running_one_in_order() {
+        let dir = Dir::new();
+        let Claim::Owner(_lock) = claim(&dir.0) else { panic!("owner") };
+        let h = listen(&dir.0).unwrap();
+        assert!(deliver(&dir, &["/vault/a", "/vault/a/Note ü.md"]));
+        assert!(deliver(&dir, &[]));
+        let mut got = wait_for(&h);
+        if got.len() < 2 {
+            got.extend(wait_for(&h));
+        }
+        assert_eq!(got, vec![vec![PathBuf::from("/vault/a"), PathBuf::from("/vault/a/Note ü.md")], vec![]]);
+    }
+
+    // spec: DATA-015
+    #[test]
+    fn a_relative_path_is_made_absolute_by_the_sender() {
+        let dir = Dir::new();
+        let _h = listen(&dir.0).unwrap_or_else(|_| {
+            std::fs::create_dir_all(&dir.0).unwrap();
+            listen(&dir.0).unwrap()
+        });
+        assert!(hand_over(&dir.0, &[PathBuf::from("notes/x.md")]));
+        let got = wait_for(&_h);
+        assert!(got[0][0].is_absolute() && got[0][0].ends_with("notes/x.md"), "{got:?}");
+    }
+
+    // spec: DATA-015
+    #[test]
+    fn a_message_with_the_wrong_secret_or_garbage_is_dropped() {
+        let dir = Dir::new();
+        std::fs::create_dir_all(&dir.0).unwrap();
+        let h = listen(&dir.0).unwrap();
+        let port: u16 = std::fs::read_to_string(dir.0.join(HANDOVER_FILE)).unwrap().lines().next().unwrap().parse().unwrap();
+        for msg in ["{\"token\":\"nope\",\"paths\":[\"/x\"]}\n", "not json\n", "{\"paths\":[\"/x\"]}\n"] {
+            let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+            s.write_all(msg.as_bytes()).unwrap();
+            let mut answer = String::new();
+            BufReader::new(&s).read_line(&mut answer).unwrap();
+            assert_eq!(answer, "", "no answer for {msg:?}");
+        }
+        assert!(h.take().is_empty());
+    }
+
+    // spec: DATA-015
+    #[test]
+    fn a_port_file_nobody_listens_to_means_the_hand_over_fails() {
+        let dir = Dir::new();
+        std::fs::create_dir_all(&dir.0).unwrap();
+        // nothing at all
+        assert!(!try_hand_over(&dir.0, &[]));
+        // a crashed Shale's file: a port that is free now
+        let free = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap().local_addr().unwrap().port();
+        std::fs::write(dir.0.join(HANDOVER_FILE), format!("{free}\nsecret\n")).unwrap();
+        assert!(!try_hand_over(&dir.0, &[]));
+        std::fs::write(dir.0.join(HANDOVER_FILE), "garbage").unwrap();
+        assert!(!try_hand_over(&dir.0, &[]));
     }
 
     // spec: DATA-012

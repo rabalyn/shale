@@ -157,10 +157,22 @@ fn main() -> eframe::Result {
     };
 
     // Not for screenshots: they use their own temporary folders and may run beside the real app.
+    let mut handover = None;
     let _instance_lock = if screenshot.is_none() {
-        match instance::claim(&instance::default_dir()) {
-            instance::Claim::Owner(lock) => Some(lock),
+        let dir = instance::default_dir();
+        match instance::claim(&dir) {
+            instance::Claim::Owner(lock) => {
+                match instance::listen(&dir) {
+                    Ok(h) => handover = Some(h),
+                    Err(e) => eprintln!("Shale could not open its hand-over socket ({e}); a second start cannot pass its files on."),
+                }
+                Some(lock)
+            }
             instance::Claim::AlreadyRunning => {
+                // DATA-015: the running Shale takes the folder or file and comes forward
+                if instance::hand_over(&dir, vault.as_slice()) {
+                    std::process::exit(0);
+                }
                 instance::show_already_running();
                 std::process::exit(1);
             }
@@ -201,11 +213,11 @@ fn main() -> eframe::Result {
         // before the clipboard helper starts (see wl_drop).
         let event_loop = winit::event_loop::EventLoop::<eframe::UserEvent>::with_user_event().build().map_err(eframe::Error::WinitEventLoop)?;
         import::wl_drop::attach(&event_loop);
-        let mut app = eframe::create_native("Shale", options, Box::new(move |cc| Ok(Box::new(app::ShaleApp::new(cc, opts)))), &event_loop);
+        let mut app = eframe::create_native("Shale", options, Box::new(move |cc| Ok(Box::new(app::ShaleApp::new(cc, opts, handover)))), &event_loop);
         event_loop.run_app(&mut app).map_err(eframe::Error::WinitEventLoop)
     }
     #[cfg(not(target_os = "linux"))]
-    eframe::run_native("Shale", options, Box::new(move |cc| Ok(Box::new(app::ShaleApp::new(cc, opts)))))
+    eframe::run_native("Shale", options, Box::new(move |cc| Ok(Box::new(app::ShaleApp::new(cc, opts, handover)))))
 }
 
 #[cfg(test)]
