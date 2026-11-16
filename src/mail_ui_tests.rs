@@ -1722,7 +1722,9 @@ fn compose_with_c_complete_an_address_send_with_ctrl_enter_and_the_mail_appears_
     w.ctrl_enter();
     assert!(!w.compose_open(), "Ctrl+Enter sends: the window closes");
     assert_eq!(w.items().len(), 1);
-    assert!(w.has("mail:undo-send") || w.items()[0].state != OutState::Queued, "the mail waits for the undo time");
+    // the outbox item itself records the undo time, however long the frames above took (#106)
+    let it = &w.items()[0];
+    assert_eq!(it.send_after - it.created, 1, "the mail waits for the undo time: {it:?}");
     // sent after the undo time, exactly once
     w.until("the mail was sent", |_| !smtp.state().received.is_empty());
     w.until("the outbox says sent and the copy is made", |a| a.mail.pending_total == 0 && !a.mail.busy_with_ops() && crate::outbox::Outbox::new(&a.mail.root).list(None).iter().all(|i| i.state == OutState::Sent && i.copy_done));
