@@ -190,7 +190,7 @@ impl FormatBar {
                 cmds.push(self.palette(ui, 0, palettes));
                 cmds.push(self.palette(ui, 1, palettes));
                 separator(ui);
-                cmds.push(heading_menu(ui, text, &sel));
+                cmds.push(heading_menu(ui, text, sel));
                 cmds.push(draw_cmd(ui, on(Cmd::Bullet), Cmd::Bullet, "Bullet list: - item", draw_bullets));
                 cmds.push(text_cmd(ui, on(Cmd::Numbered), Cmd::Numbered, "1.", Label::default(), "Numbered list: 1. item"));
                 cmds.push(draw_cmd(ui, on(Cmd::Task), Cmd::Task, "Task: - [ ] item", draw_task));
