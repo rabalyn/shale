@@ -2,7 +2,8 @@
 # Makes a release: tags the current commit with the version from Cargo.toml and pushes the
 # commit and the tag to both servers: the homelab Forgejo (remote `origin`, where CI runs) and
 # GitHub (remote `github`), which builds it again and creates the release page with that
-# version's CHANGELOG.md notes and the download's .sha256 file. Other remote names:
+# version's CHANGELOG.md notes, the downloads (the program's tarball and shale-userguide-<version>.zip)
+# and their .sha256 files. Other remote names:
 #   FORGEJO_REMOTE=… GITHUB_REMOTE=… sh make-release.sh
 #
 # Before running: raise `version` in Cargo.toml (semver), run `cargo build` once (updates

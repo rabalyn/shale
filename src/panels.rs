@@ -710,6 +710,7 @@ impl ShaleApp {
         let mut keep = true;
         let mut open_calendars = false;
         let mut open_usage = false;
+        let mut open_guide = false;
         let ctx = ui.ctx().clone();
         match &mut modal {
             Modal::Picker(p) => {
@@ -1001,6 +1002,11 @@ impl ShaleApp {
                         }
                     });
                     ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Help").color(theme::MUTED));
+                    if ui.button("Open user guide (F1)").on_hover_text("The guide is a vault: a copy of it is made in Shale's data folder, once per version, and opened").clicked() {
+                        open_guide = true;
+                    }
+                    ui.add_space(8.0);
                     ui.label(egui::RichText::new("Troubleshooting").color(theme::MUTED));
                     if ui.checkbox(&mut self.cfg.input_log, "Record keyboard input to a file (to find keyboard problems)").changed() {
                         if self.cfg.input_log {
@@ -1047,6 +1053,10 @@ impl ShaleApp {
         }
         if open_usage {
             self.open_data_usage();
+            keep = false;
+        }
+        if open_guide {
+            self.open_user_guide();
             keep = false;
         }
         if let Modal::DataUsage = &modal {

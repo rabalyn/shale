@@ -43,6 +43,16 @@ Keeping it safe and tidy:
 - [[Data usage and caches]]: what Shale keeps on disk.
 - [[Settings reference]]: every setting, its default, and where it lives.
 
+## Where this guide comes from
+
+Press **F1** in Shale (or Settings → Help → **Open user guide**) to open it. Shale copies the
+guide once per version into its data folder (on Linux
+`~/.local/share/shale/userguide-<version>/`; on macOS and Windows the "data" folder of the
+system) and opens that copy as a vault. Your notes, tabs and edits stay in the copy: the next
+version of Shale makes a new copy, and a copy that exists is never overwritten. The release
+also has the guide as `shale-userguide-<version>.zip`, and the program's archive has it as the
+folder `userguide/` next to the program, where Shale looks first.
+
 ## How to read this guide
 
 Each note names the setting or key you need, and every picture was made by the app itself

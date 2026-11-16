@@ -15,6 +15,8 @@ of **views**.
   else, cancels. The sidebar toggles and the settings button stay where they are.
 - A middle click on **Mail**, **Feeds** or **Calendar** opens that view in a new tab
   ([[Mail]], [[Feeds]], [[Calendar]]).
+- The settings button at the bottom opens Settings; its **Help** section has **Open user guide**
+  (F1), which opens this guide (see [[Start here]]).
 - Right-click an icon: **Remove from the ribbon** / **Remove from this view**, **Restore …** for
   every icon removed earlier, and **Reset layout**. The last icon cannot be removed.
 

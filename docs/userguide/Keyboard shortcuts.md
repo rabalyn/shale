@@ -19,6 +19,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| F1 | Open the user guide (a copy in Shale's data folder, opened as a vault) |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |
