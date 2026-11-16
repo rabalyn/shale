@@ -59,7 +59,7 @@ impl ImportDialog {
     }
 }
 
-fn size_text(n: usize) -> String {
+pub(crate) fn size_text(n: usize) -> String {
     if n >= 1 << 20 {
         format!("{:.1} MB", n as f64 / (1 << 20) as f64)
     } else {
@@ -78,7 +78,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     // ---- what
     if d.items.is_empty() {
-        ui.label(muted("Nothing to import yet. Drop e-mails, calendar events or files on the window, or add a file below."));
+        ui.label(muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
     }
     for (i, it) in d.items.iter_mut().enumerate() {
         egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(6).inner_margin(8).show(ui, |ui| {
@@ -86,7 +86,8 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
             ui.horizontal(|ui| {
                 rec(format!("include:{i}"), ui.checkbox(&mut it.include, "")).on_hover_text("Import this one");
                 ui.label(egui::RichText::new(it.kind()).size(11.0).color(theme::ACCENT));
-                rec(format!("title:{i}"), ui.add(egui::TextEdit::singleline(&mut it.title).desired_width(470.0))).on_hover_text("Name of the new note");
+                let tip = if matches!(it.source, Source::Media { .. }) { "File name in the media folder" } else { "Name of the new note" };
+                rec(format!("title:{i}"), ui.add(egui::TextEdit::singleline(&mut it.title).desired_width(470.0))).on_hover_text(tip);
             });
             ui.label(muted(&it.detail()));
             if let Some(p) = &it.already {
@@ -202,9 +203,26 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. })) {
         rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
     }
+    let included = || d.items.iter().filter(|i| i.include);
+    let media = included().filter(|i| matches!(i.source, Source::Media { .. })).count();
+    if media > 0 {
+        let what = if media == included().count() {
+            "Pictures, PDFs and audio files are saved as files in the media folder (no note, no folder or tags)."
+        } else {
+            "Pictures, PDFs and audio files are saved as files in the media folder; folder and tags are for the notes."
+        };
+        ui.label(muted(what));
+    }
     if let Some(n) = &d.link_into {
         let name = crate::markdown::strip_md_ext(&n.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).to_string();
-        rec("link".into(), ui.checkbox(&mut d.link_on, format!("Add links to the new notes in “{name}”")));
+        let new = if media == 0 {
+            "notes"
+        } else if media == included().count() {
+            "files"
+        } else {
+            "notes and files"
+        };
+        rec("link".into(), ui.checkbox(&mut d.link_on, format!("Add links to the new {new} in “{name}”")));
     }
     ui.label(muted("Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more."));
     d.rects = rects;

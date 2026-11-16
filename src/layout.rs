@@ -764,7 +764,7 @@ impl ShaleApp {
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
                         tab.editor.dark_canvas = self.cfg.dark_canvas;
                         tab.editor.media = self.media.clone();
-                        let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, &rel, base, ctrl);
+                        let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, crate::editor::Note { rel: &rel, undo: &mut self.undo }, base, ctrl);
                         if changed {
                             doc.dirty = true;
                             doc.last_edit = std::time::Instant::now();

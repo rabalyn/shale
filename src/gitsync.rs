@@ -332,7 +332,7 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
     let mut report = Report::default();
 
     // 1. commit everything (SYNC-006)
-    git.ok(vault, args!["add", "-A", "--", ".", ":(exclude,glob)**/.shale-tmp-*"])?;
+    git.ok(vault, args!["add", "-A", "--", ".", ":(exclude,glob)**/.shale-tmp-*", ":(exclude).shale/undo"])?;
     let staged = git.ok(vault, args!["diff", "--cached", "--name-only", "-z"])?;
     report.committed = staged.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).count();
     if report.committed > 0 {

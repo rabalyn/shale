@@ -651,6 +651,30 @@ fn a_running_check_shows_its_spinner_in_the_check_now_button_and_nothing_moves()
     assert_eq!(w.rect("feed-menu"), menu);
 }
 
+#[test]
+// spec: SOC-042
+fn saving_and_filling_a_gap_show_their_spinner_in_the_button_and_nothing_moves() {
+    let mut w = W::new("spinner-save");
+    w.frames(60);
+    let key = (home().account, home().feed);
+    let first = post_key(&w.app.social.timelines[&key].posts[0]);
+    w.app.social.timelines.get_mut(&key).unwrap().gaps.push(super::state::Gap { above: first.clone(), cursor: "older".into() });
+    w.frames(5);
+    let (save, open, copy, gap) = (w.rect("save:0"), w.rect("open:0"), w.rect("copy:0"), w.rect("gap:0"));
+    assert!(!w.rects_has("save-spinner:0") && !w.rects_has("gap-spinner:0"));
+    w.app.social.saving.insert(first);
+    w.app.social.timelines.get_mut(&key).unwrap().filling = true;
+    w.frames(5);
+    assert!(save.contains_rect(w.rect("save-spinner:0")), "the save spinner is inside its button");
+    assert!(gap.contains_rect(w.rect("gap-spinner:0")), "the gap spinner is inside its button");
+    assert_eq!((w.rect("save:0"), w.rect("open:0"), w.rect("copy:0"), w.rect("gap:0")), (save, open, copy, gap), "nothing moves or changes size");
+    w.app.social.saving.clear();
+    w.app.social.timelines.get_mut(&key).unwrap().filling = false;
+    w.frames(5);
+    assert!(!w.rects_has("save-spinner:0") && !w.rects_has("gap-spinner:0"));
+    assert_eq!((w.rect("save:0"), w.rect("open:0"), w.rect("copy:0"), w.rect("gap:0")), (save, open, copy, gap));
+}
+
 fn key_of_h(id: &str) -> String {
     post_key(&post(id, "bob", 0, None))
 }

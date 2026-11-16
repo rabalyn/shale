@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (owner decision, 2026-11-15)
 - **Date**: 2026-11-15
-- **Specs**: FORGE-001…FORGE-009, DEV-001…DEV-008, BUILD-013
+- **Specs**: FORGE-001…FORGE-010, DEV-001…DEV-008, BUILD-013
 - **Issue**: Forgejo raba/shale#1
 
 ## Context

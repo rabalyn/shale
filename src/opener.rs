@@ -955,8 +955,12 @@ mod real_opener_tests {
         }
         assert_eq!(fake.recorded().len(), 2, "{:?}", fake.recorded());
         // ... and their copies are not left in the temp folder
-        assert!(open_temp_copy("only-in-this-test.desktop", b"x").is_err());
-        let left = fs::read_dir(temp_root().unwrap()).unwrap().flatten().filter(|e| e.path().join("only-in-this-test.desktop").exists()).count();
+        // (the temp folder is shared by every process of the user, so the name is this run's own:
+        // another test process's refused copy, caught between written and removed, must not count)
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let own = format!("only-in-this-test-{}-{nanos:x}.desktop", std::process::id());
+        assert!(open_temp_copy(&own, b"x").is_err());
+        let left = fs::read_dir(temp_root().unwrap()).unwrap().flatten().filter(|e| e.path().join(&own).exists()).count();
         assert_eq!(left, 0, "a refused copy was removed");
         for c in &calls {
             let _ = fs::remove_dir_all(PathBuf::from(&c[0]).parent().unwrap());
