@@ -527,13 +527,15 @@ mod tests {
         }
         for name in ["Europe/Berlin", "America/New_York", "Australia/Sydney", "Asia/Tokyo", "Europe/Dublin", "America/Nuuk", "Asia/Kolkata", "Pacific/Auckland", "America/Sao_Paulo", "UTC"] {
             let (system, bundled) = (system_zone(name).unwrap(), bundled_zone(name).unwrap());
-            // every 6 hours from 1970 to 2060, and every change in the years 2020 to 2060
+            // every 6 hours from 1970 to the end of 2025, and every change of 2010 to 2025. Only the
+            // past: the two databases can be of different releases, and a new rule changes the years to
+            // come (those are checked against fixed values above)
             let mut utc = 0;
-            while utc < year(2060).0 {
+            while utc < year(2026).0 {
                 assert_eq!(system.offset(utc), bundled.offset(utc), "{name} at {utc}");
                 utc += 6 * 3600;
             }
-            assert_eq!(system.changes(year(2020).0, year(2060).0), bundled.changes(year(2020).0, year(2060).0), "{name}");
+            assert_eq!(system.changes(year(2010).0, year(2026).0), bundled.changes(year(2010).0, year(2026).0), "{name}");
         }
     }
 
