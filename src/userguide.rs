@@ -178,6 +178,11 @@ mod tests {
     // spec: DEV-020
     #[test]
     fn dev_020_a_development_build_finds_the_guide_of_the_source_tree_and_it_is_a_guide() {
+        // CI tests the release build (`cargo test --release`), which must not look there
+        if !cfg!(debug_assertions) {
+            assert_eq!(dev_source(), None, "a release build never reads the source tree");
+            return;
+        }
         let found = dev_source().expect("a debug build looks in the source tree");
         assert!(is_guide(&found), "{} has the start note", found.display());
         assert_eq!(find(None, Some(found.clone())), Some(found));
