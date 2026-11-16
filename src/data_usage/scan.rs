@@ -94,8 +94,11 @@ fn walk(root: &Path) -> (Vec<(PathBuf, u64)>, Option<String>) {
     (out, problem)
 }
 
+/// The biggest files or folders with their sizes in bytes.
+type Largest = Vec<(PathBuf, u64)>;
+
 /// Count the vault (USE-002, USE-003).
-pub fn vault(root: &Path) -> (Vec<Line>, Vec<(PathBuf, u64)>, Vec<(PathBuf, u64)>) {
+pub fn vault(root: &Path) -> (Vec<Line>, Largest, Largest) {
     let (files, problem) = walk(root);
     let mut lines: Vec<Line> = KINDS.iter().map(|k| Line { label: (*k).to_string(), ..Default::default() }).collect();
     let mut folders: HashMap<PathBuf, u64> = HashMap::new();

@@ -11,12 +11,15 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
+/// What a sync job sends back: its report, or why it failed (the outer error: the job itself died).
+type SyncResult = Result<Result<Report, String>, String>;
+
 /// The sync's state in the app.
 #[derive(Default)]
 pub struct SyncState {
     pub git: Git,
     /// A running sync: its vault and where its result arrives.
-    job: Option<(PathBuf, Receiver<Result<Result<Report, String>, String>>)>,
+    job: Option<(PathBuf, Receiver<SyncResult>)>,
     /// Held by the job while it changes files in the vault, and by the window while it writes
     /// notes (SYNC-013).
     pub tree: TreeLock,

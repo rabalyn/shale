@@ -131,6 +131,10 @@ mod sync;
 mod tree_ui_tests;
 mod usage;
 
+/// A running import of dropped things: where its items arrive, and the folder zone it was dropped on
+/// (the folder, and the note inside it if any).
+type PendingDrop = (std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>);
+
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
 struct ScriptDrop(PathBuf);
@@ -346,7 +350,7 @@ pub struct ShaleApp {
     tag_root: Option<PathBuf>,
     tag_gen: u64,
     tag_at: Option<Instant>,
-    pending_drops: Vec<(std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>)>,
+    pending_drops: Vec<PendingDrop>,
     pub scenes: SceneCache,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,

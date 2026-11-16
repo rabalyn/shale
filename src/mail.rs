@@ -250,6 +250,9 @@ fn header<'a>(h: &'a [(String, String)], name: &str) -> Option<&'a str> {
     h.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str())
 }
 
+/// One piece of an RFC 2231 parameter: its number, its text, and whether it is percent-encoded.
+type ParamPiece = (u32, String, bool);
+
 /// `text/plain; charset="utf-8"; name*0*=…` → ("text/plain", params). RFC 2231 parameters
 /// (charset'' and continuations) are put together and decoded.
 pub(crate) fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
@@ -269,7 +272,7 @@ pub(crate) fn parse_params(v: &str) -> (String, Vec<(String, String)>) {
     parts.push(cur);
     let main = parts.first().map(|s| s.trim().to_ascii_lowercase()).unwrap_or_default();
     // name → (pieces by number, was encoded)
-    let mut acc: Vec<(String, Vec<(u32, String, bool)>)> = Vec::new();
+    let mut acc: Vec<(String, Vec<ParamPiece>)> = Vec::new();
     for p in parts.iter().skip(1) {
         let Some((k, val)) = p.split_once('=') else { continue };
         let k = k.trim().to_ascii_lowercase();

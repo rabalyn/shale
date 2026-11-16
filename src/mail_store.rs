@@ -196,6 +196,14 @@ pub struct OpenReport {
     pub missing_files: usize,
 }
 
+/// What the server said about a message besides its headers: the flags, the internal date and the size in bytes.
+#[derive(Clone, Copy)]
+pub struct ServerMeta<'a> {
+    pub flags: &'a str,
+    pub internal_date: Option<i64>,
+    pub size: u64,
+}
+
 impl MailStore {
     /// Open (or create) the store at `root`. Checks and if need be repairs the index and makes
     /// it match the files (see the module comment). Can take a while for a big store: call it
@@ -319,7 +327,8 @@ impl MailStore {
     }
 
     /// An index row for a message of which only the headers are known (a listing of Trash).
-    pub fn header_only(&self, folder: &FolderRow, uidvalidity: u32, uid: u32, headers: &[u8], flags: &str, internal_date: Option<i64>, size: u64) -> NewMessage {
+    pub fn header_only(&self, folder: &FolderRow, uidvalidity: u32, uid: u32, headers: &[u8], meta: ServerMeta) -> NewMessage {
+        let ServerMeta { flags, internal_date, size } = meta;
         let (fields, parsed) = index_fields(headers, internal_date);
         NewMessage { folder: folder.id, uidvalidity, uid, path: String::new(), state: STATE_HEADER, flags: flags.into(), size, parsed, fields: IndexFields { body: String::new(), ..fields } }
     }

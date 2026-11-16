@@ -354,7 +354,7 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
         let remote_ref = format!("refs/remotes/{REMOTE}/{branch}");
         if let Some(theirs) = rev(git, vault, &remote_ref)? {
             if local.as_deref() != Some(theirs.as_str()) {
-                integrate(git, vault, opts, &ident, local.as_deref(), &theirs, tree, &mut report)?;
+                integrate(git, vault, opts, &ident, Heads { local: local.as_deref(), theirs: &theirs }, tree, &mut report)?;
             }
         }
         if rev(git, vault, "HEAD")?.is_none() {
@@ -422,8 +422,16 @@ fn align_branch(git: &Git, vault: &Path, branch: &str) -> Result<String, String>
     Ok(theirs)
 }
 
+/// The two sides of an integration: our commit (None: no commits yet) and the remote's.
+#[derive(Clone, Copy)]
+struct Heads<'a> {
+    local: Option<&'a str>,
+    theirs: &'a str,
+}
+
 /// Bring the remote commit `theirs` into HEAD: fast-forward or merge, conflicts as copies.
-fn integrate(git: &Git, vault: &Path, opts: &Options, ident: &[String], local: Option<&str>, theirs: &str, tree: &TreeLock, report: &mut Report) -> Result<(), String> {
+fn integrate(git: &Git, vault: &Path, opts: &Options, ident: &[String], heads: Heads, tree: &TreeLock, report: &mut Report) -> Result<(), String> {
+    let Heads { local, theirs } = heads;
     if let Some(l) = local {
         if git.run(vault, args!["merge-base", "--is-ancestor", theirs, l])?.ok {
             return Ok(()); // the remote is behind: just push

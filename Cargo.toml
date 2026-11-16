@@ -38,10 +38,6 @@ unused_must_use = "deny"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
-# the egui drawing code passes many small values and returns tuples; wrapping them in types
-# would only add churn, so these two readability lints stay off
-type_complexity = "allow"
-too_many_arguments = "allow"
 
 [profile.dev]
 opt-level = 1

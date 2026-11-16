@@ -2212,7 +2212,10 @@ impl MailView {
             c.error = None;
             let (g, a, draft, undo, id) = (self.gnupg.clone(), a.clone(), c.draft.clone(), cfg.mail_undo_secs, c.draft.id.clone());
             let draft_id = id.clone();
-            self.spawn(move || mail_send::queue_with(&ob, &g, &a, &draft, undo, now, &crate::mail_store::today_string(), &cancel).map(Box::new), move |r| Event::Queued { draft_id, result: flatten(r) });
+            self.spawn(
+                move || mail_send::queue_with(&ob, &g, &a, &draft, mail_send::SendTiming { undo_secs: undo, now, date: &crate::mail_store::today_string() }, &cancel).map(Box::new),
+                move |r| Event::Queued { draft_id, result: flatten(r) },
+            );
             return;
         }
         match mail_send::queue_draft(&ob, a, &c.draft, cfg.mail_undo_secs, now, &crate::mail_store::today_string()) {

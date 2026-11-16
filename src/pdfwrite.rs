@@ -133,6 +133,23 @@ pub struct Image {
     pub alpha: Option<Vec<u8>>,
 }
 
+/// How a piece of text is drawn: the font, the size, the colour, and whether it is slanted or bold.
+#[derive(Clone, Copy)]
+pub struct TextStyle {
+    pub kind: FontKind,
+    pub size: f32,
+    pub color: Rgba,
+    pub italic: bool,
+    pub bold: bool,
+}
+
+impl TextStyle {
+    /// Upright, regular weight.
+    pub fn plain(kind: FontKind, size: f32, color: Rgba) -> TextStyle {
+        TextStyle { kind, size, color, italic: false, bold: false }
+    }
+}
+
 pub struct Page {
     pub width: f32,
     pub height: f32,
@@ -209,7 +226,8 @@ impl Page {
 
     /// Text on a baseline at (x, y). Returns the width. Embedded fonts give selectable text;
     /// the hand-drawn font and characters outside WinAnsi are drawn as glyph outlines.
-    pub fn text(&mut self, kind: FontKind, size: f32, x: f32, y: f32, s: &str, color: Rgba, italic: bool, bold: bool) -> f32 {
+    pub fn text(&mut self, style: TextStyle, x: f32, y: f32, s: &str) -> f32 {
+        let TextStyle { kind, size, color, italic, bold } = style;
         let mut cx = x;
         let mut run = String::new();
         let mut run_x = x;
@@ -238,7 +256,7 @@ impl Page {
             } else {
                 flush(self, &mut run, run_x);
                 if !c.is_whitespace() {
-                    self.glyph_outline(kind, size, cx, y, c, color, skew);
+                    self.glyph_outline(style, cx, y, c, skew);
                 }
             }
             cx += w;
@@ -247,7 +265,8 @@ impl Page {
         cx - x
     }
 
-    fn glyph_outline(&mut self, kind: FontKind, size: f32, x: f32, y: f32, c: char, color: Rgba, skew: f32) {
+    fn glyph_outline(&mut self, style: TextStyle, x: f32, y: f32, c: char, skew: f32) {
+        let TextStyle { kind, size, color, .. } = style;
         let (k, g) = face_for(kind, c);
         let f = &font(k).face;
         let scale = size / f.units_per_em() as f32;
@@ -497,9 +516,9 @@ mod tests {
         let mut d = Doc::new("Test");
         let p = d.add_page(300.0, 200.0);
         d.page(p).rect(10.0, 10.0, 100.0, 50.0, Some(Rgba(200, 30, 30, 255)), None);
-        let w = d.page(p).text(FontKind::Sans, 18.0, 20.0, 120.0, "Hello Üml €", Rgba::BLACK, false, false);
+        let w = d.page(p).text(TextStyle::plain(FontKind::Sans, 18.0, Rgba::BLACK), 20.0, 120.0, "Hello Üml €");
         assert!(w > 50.0);
-        d.page(p).text(FontKind::Hand, 18.0, 20.0, 160.0, "hand → drawn", Rgba(0, 0, 200, 128), false, false);
+        d.page(p).text(TextStyle::plain(FontKind::Hand, 18.0, Rgba(0, 0, 200, 128)), 20.0, 160.0, "hand → drawn");
         d.page(p).link(20.0, 100.0, 80.0, 20.0, "https://example.com");
         let img = d.add_image(Image { width: 2, height: 2, rgb: vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255], alpha: Some(vec![255, 128, 255, 0]) });
         d.page(p).image(img, 200.0, 20.0, 40.0, 40.0);

@@ -8,7 +8,7 @@
 
 use crate::drawing::{self, Element, Scene, View};
 use crate::markdown;
-use crate::pdfwrite::{Doc, FontKind, Image, Page, Rgba};
+use crate::pdfwrite::{Doc, FontKind, Image, Page, Rgba, TextStyle};
 use crate::theme;
 use crate::vault::{FileKind, Vault};
 use eframe::egui::{self, Color32, Pos2, Shape, Vec2};
@@ -263,7 +263,7 @@ impl<'a> Writer<'a> {
                     let pad = p.size * 0.15;
                     self.p().rect(x - pad * 0.5, base - p.size * 0.95, pw + pad, p.size * 1.25, Some(bg), None);
                 }
-                self.p().text(p.kind, p.size, x, base, &p.text, p.color, p.italic, p.bold);
+                self.p().text(TextStyle { kind: p.kind, size: p.size, color: p.color, italic: p.italic, bold: p.bold }, x, base, &p.text);
                 let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) {
                     pw
                 } else {
@@ -382,7 +382,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                     w.need(lh);
                     let y = w.y;
                     w.p().rect(x0, y, cw, lh, Some(Rgba(238, 238, 240, 255)), None);
-                    w.p().text(FontKind::Mono, size, x0 + 6.0, y + size * 1.05, now, Rgba(150, 70, 0, 255), false, false);
+                    w.p().text(TextStyle::plain(FontKind::Mono, size, Rgba(150, 70, 0, 255)), x0 + 6.0, y + size * 1.05, now);
                     w.y += lh;
                     if later.is_empty() {
                         break;
@@ -475,7 +475,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
             let ind = (line.len() - line.trim_start().len()) as f32 * 4.0;
             w.need(base * 1.45);
             let y = w.y;
-            w.p().text(FontKind::Sans, base, x0 + ind + 2.0, y + base * 1.08, &marker, Rgba(105, 65, 198, 255), false, false);
+            w.p().text(TextStyle::plain(FontKind::Sans, base, Rgba(105, 65, 198, 255)), x0 + ind + 2.0, y + base * 1.08, &marker);
             let ps = w.pieces(vault, rel, &line[rest_off..], base, ink, false);
             let indent = ind + base * 1.6;
             w.paragraph(&ps, x0 + indent, cw - indent);
@@ -519,7 +519,7 @@ fn finish(mut doc: Doc, opts: &ExportOptions) -> Result<Vec<u8>, String> {
             let (pw, ph) = (doc.pages[i].width, doc.pages[i].height);
             let label = format!("{} / {n}", i + 1);
             let tw = crate::pdfwrite::text_width(FontKind::Sans, 9.0, &label);
-            doc.page(i).text(FontKind::Sans, 9.0, (pw - tw) / 2.0, ph - opts.margin_mm * MM * 0.5, &label, Rgba(120, 120, 120, 255), false, false);
+            doc.page(i).text(TextStyle::plain(FontKind::Sans, 9.0, Rgba(120, 120, 120, 255)), (pw - tw) / 2.0, ph - opts.margin_mm * MM * 0.5, &label);
         }
     }
     Ok(doc.finish())
@@ -650,7 +650,7 @@ fn draw_text_element(page: &mut Page, e: &Element, view: &View, dark: bool) {
             _ => left.x,
         };
         let base = left.y + i as f32 * lh + size * (0.25 * 0.5) + size * crate::pdfwrite::ascent(kind).min(1.0);
-        page.text(kind, size, x, base, l, color, false, false);
+        page.text(TextStyle::plain(kind, size, color), x, base, l);
     }
 }
 

@@ -113,7 +113,7 @@ pub fn with_crypto_defaults(mut d: Draft, a: &MailAccount) -> Draft {
 /// Send pressed (MAIL-132): the mail goes into the outbox, to be sent when `undo_secs` have passed. Nothing goes
 /// to the network here.
 pub fn queue_draft(ob: &Outbox, a: &MailAccount, draft: &Draft, undo_secs: u32, now: i64, date: &str) -> Result<Item, String> {
-    queue_with(ob, &crate::gpg::Gnupg::default(), a, draft, undo_secs, now, date, &std::sync::atomic::AtomicBool::new(false))
+    queue_with(ob, &crate::gpg::Gnupg::default(), a, draft, SendTiming { undo_secs, now, date }, &std::sync::atomic::AtomicBool::new(false))
 }
 
 /// What a draft with Sign and/or Encrypt needs (MAIL-192, MAIL-193): the account's key for the standard and, to encrypt, a
@@ -130,10 +130,19 @@ pub fn crypto_plan(g: &crate::gpg::Gnupg, a: &MailAccount, d: &Draft, cancel: &s
     Ok(Some(crate::mail_crypto::Plan { standard: d.standard, sign: d.sign.then(|| key.to_string()), encrypt }))
 }
 
+/// When a draft is queued: the undo time in seconds, the time now (seconds since the epoch) and today's date text.
+#[derive(Clone, Copy)]
+pub struct SendTiming<'a> {
+    pub undo_secs: u32,
+    pub now: i64,
+    pub date: &'a str,
+}
+
 /// [`queue_draft`] with GnuPG: a draft with Sign or Encrypt goes through the hook of the sending pipeline (MAIL-129, MAIL-194,
 /// MAIL-195). This may wait for a passphrase dialog, so the window runs it as a job. If anything fails nothing is put into the
 /// outbox: the draft stays as it was.
-pub fn queue_with(ob: &Outbox, g: &crate::gpg::Gnupg, a: &MailAccount, draft: &Draft, undo_secs: u32, now: i64, date: &str, cancel: &std::sync::atomic::AtomicBool) -> Result<Item, String> {
+pub fn queue_with(ob: &Outbox, g: &crate::gpg::Gnupg, a: &MailAccount, draft: &Draft, timing: SendTiming, cancel: &std::sync::atomic::AtomicBool) -> Result<Item, String> {
+    let SendTiming { undo_secs, now, date } = timing;
     let plan = crypto_plan(g, a, draft, cancel)?;
     let opts = BuildOptions { now, user_agent: a.user_agent_header, safe_transfer: plan.is_some(), ..BuildOptions::default() };
     let built = crate::compose::finalize(draft, &opts, &|b| match &plan {
@@ -449,7 +458,7 @@ pub mod tests {
         let acct = crypto_account(CryptoStandard::OpenPgp, &a);
         let mut d = draft("acct1", "Plans für Köln", "the secret plan");
         (d.to, d.cc, d.bcc, d.sign, d.encrypt, d.standard, d.from_addr) = ("bob@example.org".into(), String::new(), "carol@example.org".into(), true, true, CryptoStandard::OpenPgp, "alice@example.org".into());
-        let item = queue_with(&ob, &alice.g, &acct, &d, 0, NOW, DATE, &no_cancel()).unwrap();
+        let item = queue_with(&ob, &alice.g, &acct, &d, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &no_cancel()).unwrap();
         let eml = ob.read_eml("acct1", &item.id).unwrap();
         assert!(!String::from_utf8_lossy(&eml).contains("the secret plan"), "the outbox holds the encrypted bytes");
         let r = send_due(&ob, &e.store, &acct, &c, NOW);
@@ -479,20 +488,20 @@ pub mod tests {
         let before = ob.list(None).len();
         let mut d2 = d.clone();
         d2.cc = "dave@example.org".into();
-        let err = queue_with(&ob, &alice.g, &acct, &d2, 0, NOW, DATE, &no_cancel()).unwrap_err();
+        let err = queue_with(&ob, &alice.g, &acct, &d2, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &no_cancel()).unwrap_err();
         assert!(err.contains("dave@example.org"), "{err}");
         assert_eq!(ob.list(None).len(), before);
         // a cancelled run: nothing in the outbox either
         let cancelled = std::sync::atomic::AtomicBool::new(true);
-        assert!(queue_with(&ob, &alice.g, &acct, &d, 0, NOW, DATE, &cancelled).is_err());
+        assert!(queue_with(&ob, &alice.g, &acct, &d, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &cancelled).is_err());
         assert_eq!(ob.list(None).len(), before);
         // an account without a key for the standard
-        let err = queue_with(&ob, &alice.g, &account(), &d, 0, NOW, DATE, &no_cancel()).unwrap_err();
+        let err = queue_with(&ob, &alice.g, &account(), &d, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &no_cancel()).unwrap_err();
         assert!(err.contains("No OpenPGP key is chosen"), "{err}");
         // a plain draft never touches GnuPG
         let plain = draft("acct1", "Plain", "nothing secret");
         let nope = crate::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
-        assert!(queue_with(&ob, &nope, &account(), &plain, 0, NOW, DATE, &no_cancel()).is_ok());
+        assert!(queue_with(&ob, &nope, &account(), &plain, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &no_cancel()).is_ok());
     }
 
     // spec: MAIL-195, MAIL-196
@@ -512,7 +521,7 @@ pub mod tests {
         let acct = crypto_account(CryptoStandard::Smime, &a);
         let mut d = draft("acct1", "Signed plans", "hello Bob");
         (d.to, d.sign, d.standard, d.from_addr) = ("bob@example.org".into(), true, CryptoStandard::Smime, "alice@example.org".into());
-        let item = queue_with(&ob, &alice.g, &acct, &d, 0, NOW, DATE, &no_cancel()).unwrap();
+        let item = queue_with(&ob, &alice.g, &acct, &d, SendTiming { undo_secs: 0, now: NOW, date: DATE }, &no_cancel()).unwrap();
         let eml = ob.read_eml("acct1", &item.id).unwrap();
         let r = send_due(&ob, &e.store, &acct, &c, NOW);
         assert_eq!(r.sent.len(), 1, "{r:?}");

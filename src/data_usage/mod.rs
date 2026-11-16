@@ -303,6 +303,11 @@ pub const EVERY: Duration = Duration::from_secs(24 * 3_600);
 /// A changed retention setting prunes its cache this long after the last change.
 pub const SETTLE: Duration = Duration::from_secs(2);
 
+/// What a cache-statistics job sends back: every cache's numbers, or why the job died.
+type StatsResult = Result<Vec<(CacheId, Result<CacheStats, String>)>, String>;
+/// A running clear or prune: what it does and where its result arrives.
+type ClearJob = (Kind, Receiver<Result<Result<Freed, String>, String>>);
+
 /// The sub-state of the window: the dialog's numbers, the running jobs, the schedule.
 pub struct DataUsage {
     pub places: Places,
@@ -310,8 +315,8 @@ pub struct DataUsage {
     pub saved: Option<Result<scan::Saved, String>>,
     saved_job: Option<Receiver<Result<scan::Saved, String>>>,
     pub stats: HashMap<CacheId, Result<CacheStats, String>>,
-    stats_job: Option<Receiver<Result<Vec<(CacheId, Result<CacheStats, String>)>, String>>>,
-    jobs: HashMap<CacheId, (Kind, Receiver<Result<Result<Freed, String>, String>>)>,
+    stats_job: Option<Receiver<StatsResult>>,
+    jobs: HashMap<CacheId, ClearJob>,
     pub record: cleanup::Record,
     /// a cache asked about before it is cleared (USE-008)
     pub confirm: Option<CacheId>,

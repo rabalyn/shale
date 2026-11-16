@@ -11,6 +11,11 @@ use eframe::egui::text::LayoutJob;
 use eframe::egui::{Align, FontFamily};
 use std::collections::HashMap;
 
+/// A connection to re-anchor: the line, its start shape and anchor ratios, its end shape and anchor ratios.
+type BindingFix = (String, String, [f32; 2], String, [f32; 2]);
+/// A connection for the layout: the indexes of its two shapes and the line's id.
+type LayoutEdge = (usize, usize, String);
+
 /// Excalidraw font ids: 1 Virgil (hand-drawn), 5 Excalifont (hand-drawn), 2 normal, 3 code.
 pub fn font_id_for(family: u64, size: f32) -> FontId {
     match family {
@@ -331,7 +336,7 @@ impl DrawingDoc {
     /// anchors the person picked.
     pub(super) fn tidy_connections(&mut self, moved: &[String]) {
         let shapes: HashMap<String, (String, Rect)> = self.scene.live().filter(|e| is_bindable(e)).map(|e| (e.id.clone(), (e.kind.clone(), e.bounds()))).collect();
-        let mut fixes: Vec<(String, String, [f32; 2], String, [f32; 2])> = Vec::new();
+        let mut fixes: Vec<BindingFix> = Vec::new();
         for e in self.scene.live().filter(|e| e.is_linear() && e.points.len() == 2) {
             let (Some((a, Some(fa))), Some((b, Some(fb)))) = (binding_of(e, "startBinding"), binding_of(e, "endBinding")) else { continue };
             if !moved.contains(&a) && !moved.contains(&b) {
@@ -370,7 +375,7 @@ impl DrawingDoc {
     // ------------------------------------------------------------------ arrange / spread
 
     /// Shapes to arrange (the selected ones, or all) and the connections between them.
-    fn layout_input(&self) -> (Vec<String>, Vec<(String, Rect)>, Vec<(usize, usize, String)>) {
+    fn layout_input(&self) -> (Vec<String>, Vec<(String, Rect)>, Vec<LayoutEdge>) {
         let sel_shapes: Vec<&Element> = self.scene.live().filter(|e| is_bindable(e) && self.selection.contains(&e.id)).collect();
         let pool: Vec<&Element> = if sel_shapes.len() >= 2 { sel_shapes } else { self.scene.live().filter(|e| is_bindable(e)).collect() };
         let ids: Vec<String> = pool.iter().map(|e| e.id.clone()).collect();
@@ -390,7 +395,7 @@ impl DrawingDoc {
     }
 
     /// Move shapes to new rects and re-pick the best anchors for their connections.
-    fn apply_rects(&mut self, ids: &[String], nodes: &[(String, Rect)], rects: &[Rect], edges: &[(usize, usize, String)]) {
+    fn apply_rects(&mut self, ids: &[String], nodes: &[(String, Rect)], rects: &[Rect], edges: &[LayoutEdge]) {
         for (id, r) in ids.iter().zip(rects) {
             if let Some(e) = self.scene.elements.iter_mut().find(|e| e.id == *id) {
                 e.x = r.min.x as f64;

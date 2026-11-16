@@ -505,7 +505,7 @@ fn exec_move(store: &MailStore, client: &mut Client, folder: &FolderRow, group: 
                 }
             }
         } else {
-            copy_then_delete(store, client, folder, &target, &present, first.uidvalidity, group, &mut res)?;
+            copy_then_delete(store, client, folder, CopyTarget { target: &target, present: &present, uidvalidity: first.uidvalidity }, group, &mut res)?;
         }
     }
     let target_row = reader.folders(Some(&first.account)).map_err(|e| Fail::Refused(err(e)))?.into_iter().find(|f| f.name == target);
@@ -572,7 +572,17 @@ fn copyuid_map(c: &Option<CopyUid>) -> HashMap<u32, u32> {
 
 /// The fallback for a server without `MOVE` (MAIL-103): copy, verify the copy, mark the originals
 /// `\Deleted`, `UID EXPUNGE` those UIDs. Requires `UIDPLUS`; refused without it, before anything is sent.
-fn copy_then_delete(store: &MailStore, client: &mut Client, folder: &FolderRow, target: &str, present: &[u32], uidvalidity: u32, group: &[PendingRow], res: &mut MoveResult) -> Result<(), Fail> {
+/// Where the mails go and which of them are still on the server: the target folder's name, their UIDs
+/// in the source folder, and that folder's UIDVALIDITY.
+#[derive(Clone, Copy)]
+struct CopyTarget<'a> {
+    target: &'a str,
+    present: &'a [u32],
+    uidvalidity: u32,
+}
+
+fn copy_then_delete(store: &MailStore, client: &mut Client, folder: &FolderRow, to: CopyTarget, group: &[PendingRow], res: &mut MoveResult) -> Result<(), Fail> {
+    let CopyTarget { target, present, uidvalidity } = to;
     if !client.can_expunge_uids() {
         return Err(Fail::Refused("This server can neither move mail (MOVE) nor remove single mails safely (UIDPLUS), so Shale did not copy or delete anything. Nothing was changed.".into()));
     }

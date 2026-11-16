@@ -72,6 +72,17 @@ pub struct LinkAssist {
     picker_before: Option<(usize, usize, String)>,
 }
 
+/// What was typed after a `[!` in the text: the path so far (`typed`) sits at `start..cursor` (byte
+/// offsets), to be completed against the vault and the home folder.
+#[derive(Clone, Copy)]
+struct MediaTyped<'a> {
+    vault: &'a Vault,
+    home: &'a Path,
+    start: usize,
+    cursor: usize,
+    typed: &'a str,
+}
+
 impl LinkAssist {
     pub fn new(id: egui::Id) -> Self {
         LinkAssist {
@@ -179,11 +190,11 @@ impl LinkAssist {
                     self.media.active = false;
                 }
                 if tab {
-                    out.changed |= self.media_tab(ui, text, vault, &home, start, cb, &typed);
+                    out.changed |= self.media_tab(ui, text, &MediaTyped { vault, home: &home, start, cursor: cb, typed: &typed });
                 }
                 if enter {
                     if let Some(e) = self.media.items.get(self.media.sel.min(n - 1)).cloned() {
-                        let (c, a) = self.media_accept(ui, text, vault, &home, start, cb, &typed, &e);
+                        let (c, a) = self.media_accept(ui, text, &MediaTyped { vault, home: &home, start, cursor: cb, typed: &typed }, &e);
                         out.changed |= c;
                         if a.is_some() {
                             out.action = a;
@@ -284,7 +295,7 @@ impl LinkAssist {
             if inserted("\t") {
                 *text = before.clone();
                 self.set_cursor_byte(ui, text, pcb);
-                self.media_tab(ui, text, vault, &home, pstart, pcb, &ptyped);
+                self.media_tab(ui, text, &MediaTyped { vault, home: &home, start: pstart, cursor: pcb, typed: &ptyped });
                 changed = true;
                 media_handled = true;
             } else if inserted("\n") || inserted("\r\n") || inserted("\r") {
@@ -292,7 +303,7 @@ impl LinkAssist {
                 self.set_cursor_byte(ui, text, pcb);
                 let n = self.media.items.len();
                 if let Some(e) = self.media.items.get(self.media.sel.min(n.saturating_sub(1))).cloned() {
-                    let (_, a) = self.media_accept(ui, text, vault, &home, pstart, pcb, &ptyped, &e);
+                    let (_, a) = self.media_accept(ui, text, &MediaTyped { vault, home: &home, start: pstart, cursor: pcb, typed: &ptyped }, &e);
                     if a.is_some() {
                         action = a;
                     }
@@ -360,7 +371,7 @@ impl LinkAssist {
                     ui.ctx().memory_mut(|m| m.request_focus(self.id));
                     ui.ctx().request_repaint();
                 } else if let Some(e) = clicked {
-                    let (c, a) = self.media_accept(ui, text, vault, &home, start, cb, &typed, &e);
+                    let (c, a) = self.media_accept(ui, text, &MediaTyped { vault, home: &home, start, cursor: cb, typed: &typed }, &e);
                     changed |= c;
                     if a.is_some() {
                         action = a;
@@ -509,7 +520,8 @@ impl LinkAssist {
     /// Tab in the `[!` picker: only ever completes the path, never finishes the link.
     /// 1) extend to the longest common part / unique match (like zsh);
     /// 2) otherwise put the highlighted entry into the path (folders get a `/`).
-    fn media_tab(&mut self, ui: &Ui, text: &mut String, vault: &Vault, home: &Path, start: usize, cursor: usize, typed: &str) -> bool {
+    fn media_tab(&mut self, ui: &Ui, text: &mut String, m: &MediaTyped) -> bool {
+        let MediaTyped { vault, home, start, cursor, typed } = *m;
         let n = self.media.items.len();
         let (_, _, typed_dir) = crate::media::split_typed(typed, &vault.root, home);
         let completed = crate::media::tab_complete(typed, &vault.root, home).or_else(|| {
@@ -530,7 +542,8 @@ impl LinkAssist {
     }
 
     /// Pick an entry in the `[!` picker: folders open, files are brought into the vault and linked.
-    fn media_accept(&mut self, ui: &Ui, text: &mut String, vault: &Vault, home: &Path, start: usize, cursor: usize, typed: &str, e: &crate::media::Entry) -> (bool, Option<EditorAction>) {
+    fn media_accept(&mut self, ui: &Ui, text: &mut String, m: &MediaTyped, e: &crate::media::Entry) -> (bool, Option<EditorAction>) {
+        let MediaTyped { vault, home, start, cursor, typed } = *m;
         let (dir, _partial, typed_dir) = crate::media::split_typed(typed, &vault.root, home);
         if e.is_dir {
             let done = format!("{typed_dir}{}/", e.name);
