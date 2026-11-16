@@ -1630,7 +1630,9 @@ impl ShaleApp {
             crate::pdf::export::export_drawing(&scene, &d.name, &d.opts, &crate::drawing::pictures::images(&scene, v, &d.rel))?
         } else {
             let text = self.notes.get(&d.rel).map(|n| n.text.clone()).or_else(|| v.notes.get(&d.rel).map(|n| n.text.clone())).unwrap_or_default();
-            crate::pdf::export::export_note(v, &d.rel, &text, &d.opts)?
+            // embeds as big in proportion to the text as in the editor that shows the note (PDF-005)
+            let column = self.tabbar.tabs.iter().filter(|t| matches!(&t.view, View::Note(p) if *p == d.rel)).find_map(|t| t.editor.column);
+            crate::pdf::export::export_note(v, &d.rel, &text, &crate::pdf::export::ExportOptions { column, ..d.opts.clone() })?
         };
         let out = PathBuf::from(crate::layout::shellexpand(&d.path));
         if out.as_os_str().is_empty() {
@@ -2782,6 +2784,31 @@ mod export_tests {
             assert!(app.vault.as_ref().unwrap().exists(&format!("exports/{}.pdf", rel.split('.').next().unwrap()), None));
             let _ = std::fs::remove_dir_all(&d);
         }
+    }
+
+    // spec: PDF-005
+    #[test]
+    fn the_export_takes_the_text_column_of_the_editor_that_shows_the_note() {
+        let (mut app, d) = test_app("column");
+        image::RgbaImage::from_pixel(400, 200, image::Rgba([10, 120, 10, 255])).save(d.join("wide.png")).unwrap();
+        let note = d.join("Welcome.md");
+        let text = std::fs::read_to_string(&note).unwrap();
+        std::fs::write(&note, format!("{text}\n![[wide.png|300]]\n")).unwrap();
+        app.vault.as_mut().unwrap().rescan();
+        app.open(Path::new("Welcome.md"), false);
+        let page_w = |app: &mut ShaleApp, column: Option<f32>| {
+            let a = app.tabbar.active;
+            app.tabbar.tabs[a].editor.column = column;
+            app.open_export_dialog(Path::new("Welcome.md"));
+            let Some(Modal::Export(dialog)) = app.modal.take() else { panic!("the export dialog opens") };
+            let out = app.run_export(&dialog).unwrap();
+            crate::pdf::export::tests::image_sizes(&std::fs::read(out).unwrap())[0].0
+        };
+        let (a, b) = (page_w(&mut app, Some(600.0)), page_w(&mut app, Some(1200.0)));
+        assert!((a / b - 2.0).abs() < 0.05, "half a 600 column is twice a quarter of a 1200 one: {a} {b}");
+        let none = page_w(&mut app, None);
+        assert!((none / a - 600.0 / 720.0).abs() < 0.05, "no column known: 720 is used: {none} {a}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: PDF-001
