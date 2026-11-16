@@ -11,4 +11,5 @@ pub(crate) mod store;
 #[cfg(test)]
 mod store_failure_tests;
 pub(crate) mod time;
+mod tzrule;
 pub(crate) mod ui;

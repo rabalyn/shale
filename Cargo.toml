@@ -23,6 +23,8 @@ lettre = { version = "0.11.23", default-features = false, features = ["builder"]
 zeroize = "1.9"
 
 [dev-dependencies]
+# the time zone database that Windows builds bundle (below): the tests read it on every system
+jiff-tzdb = "1"
 # self-signed certificate for the pretend mail server in tests
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 
@@ -49,6 +51,8 @@ opt-level = 2
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+# named time zones (CalDAV TZID): Windows has no zoneinfo files, so the database is compiled in
+jiff-tzdb = "1"
 # the few Win32 calls Shale needs: no-replace rename, VirtualLock, local time zone, opening files
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
