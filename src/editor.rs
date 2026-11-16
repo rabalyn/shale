@@ -280,7 +280,7 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, imag
     }
     for (r, h) in images {
         if r.end <= text.len() && text.is_char_boundary(r.start) && text.is_char_boundary(r.end) {
-            set(&mut fmts, r.clone(), |f| f.image_h = h.round().clamp(1.0, 4000.0) as u16);
+            set(&mut fmts, r.clone(), |f| f.image_h = h.round().clamp(1.0, 30000.0) as u16);
         }
     }
     let mut job = LayoutJob { text: text.to_string(), ..Default::default() };
@@ -395,7 +395,7 @@ pub enum EditorAction {
     FilesChanged,
     /// `[[p Name` picked "new contact": make a contact note in the people folder
     CreatePerson(String),
-    /// pasted pictures / files were saved in the media folder (EDIT-019): refresh the file list and say what was saved
+    /// pasted pictures / files were saved in the media folder (EDIT-024): refresh the file list and say what was saved
     Pasted(String),
 }
 
@@ -671,7 +671,7 @@ impl NoteEditor {
     }
 
     /// A pasted picture or list of media files becomes a link to the file saved in the media folder
-    /// (EDIT-019): the paste event is turned into a paste of the link, so the text box (or vim's `p`)
+    /// (EDIT-024): the paste event is turned into a paste of the link, so the text box (or vim's `p`)
     /// puts it in as any other paste. Other pastes are left alone.
     fn paste_media(&mut self, ui: &mut Ui, vault: &Vault) -> Option<EditorAction> {
         self.paste_media_with(ui, vault, crate::media::clipboard_image)
@@ -862,6 +862,20 @@ impl NoteEditor {
         };
         // the raw lines of the markdown preview (EDIT-016, EDIT-017); embeds on them are raw too
         let preview = self.live_preview.then(|| self.preview_lines(ui, text));
+        // the tables away from the cursor are drawn as grids (EDIT-024); their text is hidden
+        let mut tables: Vec<(String, f32, crate::table::Laid)> = Vec::new();
+        if let Some(raw) = &preview {
+            let width = (ui.available_width() - gutter - 8.0).max(120.0);
+            for b in crate::table::find_tables(text) {
+                if lines_overlap(&b.lines, raw) {
+                    continue;
+                }
+                let src = text[crate::table::byte_range(text, &b.lines)].to_string();
+                let laid = crate::table::layout(ui.ctx(), &b.table, base_size, width, &|l| vault.exists(&l.target, Some(rel)));
+                tables.push((src, laid.size().y + TABLE_GAP, laid));
+            }
+        }
+        let table_keys: Vec<(String, f32)> = tables.iter().map(|(s, h, _)| (s.clone(), *h)).collect();
         if self.inline_images {
             let focused = ui.ctx().memory(|m| m.has_focus(self.id));
             let sel = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).map(|r| {
@@ -941,7 +955,10 @@ impl NoteEditor {
                     .collect::<Vec<_>>();
                 &fresh
             };
-            let ranges: Vec<(Range<usize>, f32)> = remap_images(s, &image_keys).into_iter().map(|(r, h, _)| (r, h)).collect();
+            let mut ranges: Vec<(Range<usize>, f32)> = remap_images(s, &image_keys).into_iter().map(|(r, h, _)| (r, h)).collect();
+            if let Some(raw) = &preview {
+                ranges.extend(table_rows(s, &table_keys, raw).into_iter().flat_map(|(_, rows)| rows));
+            }
             let mut job = highlight_preview(s, use_links, base_size, &ranges, preview.clone());
             job.wrap.max_width = wrap_width;
             ui.ctx().fonts_mut(|f| f.layout_job(job))
@@ -1005,6 +1022,15 @@ impl NoteEditor {
                         painter.galley(tag.min + Vec2::new(5.0, 2.0), g, Color32::WHITE);
                     }
                 }
+            }
+        }
+        // paint the tables over their hidden text
+        if let Some(raw) = preview.as_ref().filter(|_| !tables.is_empty()) {
+            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            let now_text = output.galley.job.text.clone();
+            for (idx, rows) in table_rows(&now_text, &table_keys, raw) {
+                let c = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(&now_text, rows[0].0.start)));
+                crate::table::paint(&painter, output.galley_pos + Vec2::new(c.min.x, c.min.y + 1.0), &tables[idx].2);
             }
         }
         if gutter > 0.0 {
@@ -1130,6 +1156,50 @@ impl NoteEditor {
     }
 }
 
+/// Space below a table drawn as a grid (EDIT-024).
+const TABLE_GAP: f32 = 8.0;
+
+/// Whether the lines of a table and the raw lines (EDIT-017) share a line.
+fn lines_overlap(a: &Range<usize>, b: &Range<usize>) -> bool {
+    a.start < b.end && b.start < a.end
+}
+
+/// A line of a table drawn as a grid: its byte range and the height of its row.
+type TableRow = (Range<usize>, f32);
+
+/// The tables of `text` that are drawn as grids: those away from the raw lines whose text is one
+/// of `keys` (the source text of a table and the height reserved for its grid). For each: the
+/// index into `keys` and the byte range and row height of each of its lines. The first line gets
+/// the whole height (less one point for every other line, which are one point tall), so the
+/// grid fits where the hidden text is; the line breaks belong to their lines, so no row is
+/// taller than that (EDIT-024).
+fn table_rows(text: &str, keys: &[(String, f32)], raw: &Range<usize>) -> Vec<(usize, Vec<TableRow>)> {
+    if keys.is_empty() {
+        return vec![];
+    }
+    let all = markdown::lines_with_offsets(text);
+    let mut out = Vec::new();
+    for b in crate::table::find_tables(text) {
+        if lines_overlap(&b.lines, raw) {
+            continue;
+        }
+        let whole = crate::table::byte_range(text, &b.lines);
+        let Some(idx) = keys.iter().position(|(k, _)| *k == text[whole.clone()]) else { continue };
+        let n = b.lines.len();
+        let rows = b
+            .lines
+            .clone()
+            .map(|l| {
+                let start = all[l].0;
+                let end = all.get(l + 1).map_or(text.len(), |(o, _)| *o);
+                (start..end, if l == b.lines.start { (keys[idx].1 - (n - 1) as f32).max(1.0) } else { 1.0 })
+            })
+            .collect();
+        out.push((idx, rows));
+    }
+    out
+}
+
 /// Space between the line numbers and the text (EDIT-018).
 const GUTTER_GAP: f32 = 14.0;
 
@@ -1147,8 +1217,15 @@ enum NumberAt {
 fn gutter_numbers(galley: &Galley) -> Vec<(usize, NumberAt)> {
     let mut out = Vec::new();
     let mut starts_line = true;
+    let mut line = 0;
     for row in &galley.rows {
         if starts_line {
+            line += 1;
+            // the hidden lines of a table drawn as a grid are one point tall: no number
+            if row.rect().height() < 2.5 {
+                starts_line = row.ends_with_newline;
+                continue;
+            }
             let top = row.pos.y;
             // hidden text (embeds, hidden markup) is laid out in a tiny font: not a baseline
             let baseline = row.row.glyphs.iter().filter(|g| g.font_height > 2.0).map(|g| g.pos.y).reduce(f32::max);
@@ -1157,7 +1234,7 @@ fn gutter_numbers(galley: &Galley) -> Vec<(usize, NumberAt)> {
                 None if row.row.glyphs.is_empty() => NumberAt::Baseline(top + row.rect().height() * 0.78),
                 None => NumberAt::Top(top),
             };
-            out.push((out.len() + 1, at));
+            out.push((line, at));
         }
         starts_line = row.ends_with_newline;
     }
@@ -2351,6 +2428,83 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-024
+    #[test]
+    fn a_table_away_from_the_cursor_is_a_grid_and_raw_text_when_the_cursor_is_in_it() {
+        let (v, d) = vault_for_tests("preview-table");
+        let rel = Path::new("Welcome.md");
+        let long = "many words in one cell ".repeat(30);
+        let mut text = format!("before\n\n| Where | What |\n|:--|--:|\n| `a.json` | {long}|\n| [[Ideas]] | **b** |\n\nafter");
+        let mut ed = NoteEditor::new(egui::Id::unique("preview-table"));
+        ed.live_preview = true;
+        ed.pending_cursor = Some(0);
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        for _ in 0..4 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        // the cursor is in the first line: the table is a grid; its cells are painted on their own
+        for cell in ["Where", "What", "a.json", "Ideas", "b"] {
+            assert!(h.texts.iter().any(|t| t == cell), "cell {cell} is painted: {:?}", h.texts);
+        }
+        let hidden = |ed: &NoteEditor, text: &str| {
+            let (g, _) = ed.last_layout.clone().unwrap();
+            let at = text.find("|:--").unwrap();
+            g.job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format.color == Color32::TRANSPARENT
+        };
+        assert!(hidden(&ed, &text), "the table's own text is invisible");
+        let (galley, _) = ed.last_layout.clone().unwrap();
+        let start = markdown::byte_to_char(&text, text.find("| Where").unwrap());
+        let after = markdown::byte_to_char(&text, text.find("after").unwrap());
+        let table_h = galley.pos_from_cursor(CCursor::new(after)).min.y - galley.pos_from_cursor(CCursor::new(start)).min.y;
+        assert!(table_h > 100.0, "the long cell wraps, the text box reserves room for the grid: {table_h}");
+        assert_eq!(text.matches('\n').count(), 7, "the text is untouched");
+        // a click on the grid puts the cursor into the table, which turns into raw text
+        h.click_text(&mut ed, &mut text, &v, rel, "What");
+        for _ in 0..3 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        let (galley, _) = ed.last_layout.clone().unwrap();
+        let cursor = egui::text_edit::TextEditState::load(&h.ctx, ed.id).and_then(|st| st.cursor.char_range()).unwrap().primary.index.0;
+        let lo = markdown::byte_to_char(&text, text.find("| Where").unwrap());
+        let hi = markdown::byte_to_char(&text, text.find("\n\nafter").unwrap());
+        assert!((lo..=hi).contains(&cursor), "the click landed in the table: {cursor} not in {lo}..{hi}");
+        assert!(!h.texts.iter().any(|t| t == "Where"), "no grid cell any more: {:?}", h.texts);
+        assert!(!hidden(&ed, &text), "the raw source is shown");
+        let raw_h = galley.pos_from_cursor(CCursor::new(after)).min.y - galley.pos_from_cursor(CCursor::new(start)).min.y;
+        assert!(raw_h < table_h, "raw lines take their own room");
+        // the cursor leaves: the grid is back
+        ed.pending_cursor = Some(after);
+        for _ in 0..3 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        assert!(h.texts.iter().any(|t| t == "Where") && hidden(&ed, &text), "the grid is back: {:?}", h.texts);
+        // the preview off: raw, always
+        ed.live_preview = false;
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(!h.texts.iter().any(|t| t == "Where") && !hidden(&ed, &text), "the preview off: raw");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-018, EDIT-024
+    #[test]
+    fn the_hidden_lines_of_a_grid_get_no_line_number() {
+        let (v, d) = vault_for_tests("table-gutter");
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("before\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nafter");
+        let mut ed = NoteEditor::new(egui::Id::unique("table-gutter"));
+        ed.live_preview = true;
+        ed.line_numbers = true;
+        ed.pending_cursor = Some(0);
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        for _ in 0..4 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        let (galley, _) = ed.last_layout.clone().unwrap();
+        let numbers: Vec<usize> = gutter_numbers(&galley).iter().map(|(n, _)| *n).collect();
+        assert_eq!(numbers, [1, 2, 3, 6, 7], "the delimiter row and the data row are one point tall: no number");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// One frame of the editor alone with these events; returns the editor's action.
     fn paste_frame(ctx: &egui::Context, t: &mut f64, ed: &mut NoteEditor, text: &mut String, v: &Vault, events: Vec<Event>) -> Option<EditorAction> {
         *t += 0.05;
@@ -2372,7 +2526,7 @@ mod tests {
         }
     }
 
-    // spec: EDIT-019
+    // spec: EDIT-024
     #[test]
     fn pasting_a_picture_or_media_files_saves_them_to_the_media_folder() {
         let (v, d) = vault_for_tests("paste");
@@ -2416,7 +2570,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: EDIT-019
+    // spec: EDIT-024
     #[test]
     fn a_pasted_img_tag_becomes_the_clipboards_picture() {
         let (v, d) = vault_for_tests("imgtag");

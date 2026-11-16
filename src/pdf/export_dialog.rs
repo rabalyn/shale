@@ -101,6 +101,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
                 rec("title", ui.checkbox(&mut d.opts.title, "The note's name as a title"));
                 rec("pagenumbers", ui.checkbox(&mut d.opts.page_numbers, "Page numbers"));
                 rec("embeds", ui.checkbox(&mut d.opts.embeds, "Embedded pictures, drawings and PDFs"));
+                rec("plain-tables", ui.checkbox(&mut d.opts.plain_tables, "Export plain text (tables as raw text lines)"));
             });
             ui.end_row();
         }
@@ -209,10 +210,11 @@ mod tests {
         let f = d.rects.iter().find(|r| r.0 == "font").unwrap().1;
         h.click_at(&mut d, Pos2::new(f.min.x + 3.0, f.center().y));
         assert!(d.opts.font_pt < 9.0, "text size slider: {}", d.opts.font_pt);
-        for (key, get) in [("title", 0), ("pagenumbers", 1), ("embeds", 2)] {
-            let before = [d.opts.title, d.opts.page_numbers, d.opts.embeds][get];
+        assert!(!d.opts.plain_tables, "tables are a grid unless asked otherwise");
+        for (key, get) in [("title", 0), ("pagenumbers", 1), ("embeds", 2), ("plain-tables", 3)] {
+            let before = [d.opts.title, d.opts.page_numbers, d.opts.embeds, d.opts.plain_tables][get];
             h.click(&mut d, key);
-            assert_ne!([d.opts.title, d.opts.page_numbers, d.opts.embeds][get], before, "checkbox {key}");
+            assert_ne!([d.opts.title, d.opts.page_numbers, d.opts.embeds, d.opts.plain_tables][get], before, "checkbox {key}");
         }
         h.click(&mut d, "open-after");
         assert!(d.open_after);

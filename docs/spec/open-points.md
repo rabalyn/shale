@@ -53,7 +53,7 @@ FORGE-004, [ADR-0013](../decisions/0013-forgejo-and-issue-tracking.md)). The tab
 
 ## Backlog carried over from IMPLEMENTATION.md (still open after checking)
 
-Editor: blockquote continuation, indent width setting, live preview hiding syntax, tables,
+Editor: blockquote continuation, indent width setting, live preview hiding syntax,
 auto-pairing brackets, find and replace in a note, spell check, paste images. Links: block
 links (`#^id`), heading scroll in reading view, hover previews. Tasks: priorities, recurring
 tasks, grouping. Graph: colour groups, filters, Barnes–Hut. Drawings: SVG/PDF pictures, frames, groups,

@@ -73,6 +73,8 @@ pub struct ExportOptions {
     pub page_numbers: bool,
     /// notes: include embedded pictures, drawings and PDF pages
     pub embeds: bool,
+    /// notes: print tables as plain text lines instead of a grid (EDIT-024)
+    pub plain_tables: bool,
     /// drawings
     pub background: Background,
     /// drawings: scale to fill the page (otherwise 100%, shrunk only if it doesn't fit)
@@ -81,11 +83,11 @@ pub struct ExportOptions {
 
 impl ExportOptions {
     pub fn for_note() -> Self {
-        ExportOptions { paper: Paper::A4, landscape: false, margin_mm: 20.0, font_pt: 11.0, title: true, page_numbers: true, embeds: true, background: Background::White, fill_page: true }
+        ExportOptions { paper: Paper::A4, landscape: false, margin_mm: 20.0, font_pt: 11.0, title: true, page_numbers: true, embeds: true, plain_tables: false, background: Background::White, fill_page: true }
     }
     pub fn for_drawing(scene: &Scene) -> Self {
         let wide = scene.bounds().map(|b| b.width() > b.height()).unwrap_or(true);
-        ExportOptions { paper: Paper::FitDrawing, landscape: wide, margin_mm: 10.0, font_pt: 11.0, title: false, page_numbers: false, embeds: true, background: Background::White, fill_page: true }
+        ExportOptions { paper: Paper::FitDrawing, landscape: wide, margin_mm: 10.0, font_pt: 11.0, title: false, page_numbers: false, embeds: true, plain_tables: false, background: Background::White, fill_page: true }
     }
     fn page_size(&self) -> [f32; 2] {
         let [w, h] = self.paper.size().unwrap_or([595.0, 842.0]);
@@ -165,6 +167,68 @@ struct Piece {
     link: Option<String>,
 }
 
+fn piece_width(p: &Piece) -> f32 {
+    crate::pdf::write::text_width(p.kind, p.size, &p.text)
+}
+
+/// Break pieces into lines of at most `avail` points (words stay whole unless longer than a line).
+fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
+    // split into words (keeping the trailing spaces with each word)
+    let mut words: Vec<Piece> = Vec::new();
+    for p in pieces {
+        let mut cur = String::new();
+        for c in p.text.chars() {
+            cur.push(c);
+            if c == ' ' {
+                words.push(Piece { text: std::mem::take(&mut cur), ..p.clone() });
+            }
+        }
+        if !cur.is_empty() {
+            words.push(Piece { text: cur, ..p.clone() });
+        }
+    }
+    let width = piece_width;
+    let mut lines: Vec<Vec<Piece>> = vec![vec![]];
+    let mut line_w = 0.0;
+    for wd in words {
+        let ww = width(&wd);
+        if line_w + ww > avail && !lines.last().unwrap().is_empty() {
+            lines.push(vec![]);
+            line_w = 0.0;
+            if wd.text.trim().is_empty() {
+                continue;
+            }
+        }
+        if ww > avail {
+            // a very long word: break it by characters
+            let mut part = String::new();
+            for c in wd.text.chars() {
+                let cw = crate::pdf::write::char_width(wd.kind, wd.size, c);
+                if line_w + cw > avail && !(lines.last().unwrap().is_empty() && part.is_empty()) {
+                    if !part.is_empty() {
+                        lines.last_mut().unwrap().push(Piece { text: std::mem::take(&mut part), ..wd.clone() });
+                    }
+                    lines.push(vec![]);
+                    line_w = 0.0;
+                }
+                part.push(c);
+                line_w += cw;
+            }
+            if !part.is_empty() {
+                lines.last_mut().unwrap().push(Piece { text: part, ..wd.clone() });
+            }
+            continue;
+        }
+        lines.last_mut().unwrap().push(wd);
+        line_w += ww;
+    }
+    lines
+}
+
+/// Space between a table cell's border and its text.
+const CELL_PAD_X: f32 = 5.0;
+const CELL_PAD_Y: f32 = 3.0;
+
 struct Writer<'a> {
     doc: Doc,
     opts: &'a ExportOptions,
@@ -200,87 +264,121 @@ impl<'a> Writer<'a> {
         }
     }
 
-    /// Lay out pieces from `x0` with width `avail`; returns nothing, moves `y`.
+    /// Lay out pieces from `x0` with width `avail`; moves `y`.
     fn paragraph(&mut self, pieces: &[Piece], x0: f32, avail: f32) {
-        // split into words (keeping the trailing spaces with each word)
-        let mut words: Vec<Piece> = Vec::new();
-        for p in pieces {
-            let mut cur = String::new();
-            for c in p.text.chars() {
-                cur.push(c);
-                if c == ' ' {
-                    words.push(Piece { text: std::mem::take(&mut cur), ..p.clone() });
-                }
-            }
-            if !cur.is_empty() {
-                words.push(Piece { text: cur, ..p.clone() });
-            }
-        }
-        let width = |p: &Piece| crate::pdf::write::text_width(p.kind, p.size, &p.text);
-        let mut lines: Vec<Vec<Piece>> = vec![vec![]];
-        let mut line_w = 0.0;
-        for wd in words {
-            let ww = width(&wd);
-            if line_w + ww > avail && !lines.last().unwrap().is_empty() {
-                lines.push(vec![]);
-                line_w = 0.0;
-                if wd.text.trim().is_empty() {
-                    continue;
-                }
-            }
-            if ww > avail {
-                // a very long word: break it by characters
-                let mut part = String::new();
-                for c in wd.text.chars() {
-                    let cw = crate::pdf::write::char_width(wd.kind, wd.size, c);
-                    if line_w + cw > avail && !(lines.last().unwrap().is_empty() && part.is_empty()) {
-                        if !part.is_empty() {
-                            lines.last_mut().unwrap().push(Piece { text: std::mem::take(&mut part), ..wd.clone() });
-                        }
-                        lines.push(vec![]);
-                        line_w = 0.0;
-                    }
-                    part.push(c);
-                    line_w += cw;
-                }
-                if !part.is_empty() {
-                    lines.last_mut().unwrap().push(Piece { text: part, ..wd.clone() });
-                }
-                continue;
-            }
-            lines.last_mut().unwrap().push(wd);
-            line_w += ww;
-        }
-        for line in lines {
-            let size = line.iter().map(|p| p.size).fold(self.opts.font_pt, f32::max);
-            let lh = size * 1.45;
+        for line in wrap_pieces(pieces, avail) {
+            let lh = self.line_height(&line);
             self.need(lh);
-            let base = self.y + size * 1.08;
-            let mut x = x0;
-            for p in &line {
-                let pw = width(p);
-                if let Some(bg) = p.bg {
-                    let pad = p.size * 0.15;
-                    self.p().rect(x - pad * 0.5, base - p.size * 0.95, pw + pad, p.size * 1.25, Some(bg), None);
-                }
-                self.p().text(TextStyle { kind: p.kind, size: p.size, color: p.color, italic: p.italic, bold: p.bold }, x, base, &p.text);
-                let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) {
-                    pw
-                } else {
-                    crate::pdf::write::text_width(p.kind, p.size, p.text.trim_end())
-                };
-                if p.underline {
-                    self.p().line([x, base + p.size * 0.15], [x + tw, base + p.size * 0.15], p.color, p.size * 0.06);
-                }
-                if p.strike {
-                    self.p().line([x, base - p.size * 0.3], [x + tw, base - p.size * 0.3], p.color, p.size * 0.06);
-                }
-                if let Some(uri) = &p.link {
-                    self.p().link(x, base - p.size, tw, p.size * 1.3, uri);
-                }
-                x += pw;
-            }
+            let base = self.y + self.line_size(&line) * 1.08;
+            self.draw_line(&line, x0, base);
             self.y += lh;
+        }
+    }
+
+    /// A table as a grid (EDIT-024): column widths from the same rule as on screen, cells
+    /// wrapped inside their column, the header filled and bold. A table that does not fit the
+    /// rest of the page goes on at the next page between two rows, with the header row again.
+    fn table(&mut self, vault: &Vault, rel: &Path, t: &crate::table::Table, ink: Color32) {
+        let base = self.opts.font_pt;
+        let x0 = self.m;
+        let ncols = t.header.len();
+        let rows: Vec<Vec<Vec<Piece>>> = std::iter::once(&t.header)
+            .chain(&t.rows)
+            .enumerate()
+            .map(|(r, row)| {
+                row.iter()
+                    .map(|cell| {
+                        let mut ps = self.pieces(vault, rel, cell, base, ink, false);
+                        ps.iter_mut().for_each(|p| p.bold |= r == 0);
+                        ps
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut natural = vec![0.0f32; ncols];
+        let mut least = vec![0.0f32; ncols];
+        for row in &rows {
+            for (c, ps) in row.iter().enumerate() {
+                natural[c] = natural[c].max(ps.iter().map(piece_width).sum::<f32>());
+                for p in ps {
+                    for word in p.text.split_whitespace() {
+                        least[c] = least[c].max(crate::pdf::write::text_width(p.kind, p.size, word));
+                    }
+                }
+            }
+        }
+        let text_w = crate::table::column_widths(&natural, &least, self.cw() - 2.0 * CELL_PAD_X * ncols as f32);
+        let lines: Vec<Vec<Vec<Vec<Piece>>>> = rows.iter().map(|row| row.iter().enumerate().map(|(c, ps)| wrap_pieces(ps, text_w[c].max(1.0))).collect()).collect();
+        let heights: Vec<f32> = lines.iter().map(|row| row.iter().map(|ls| ls.iter().map(|l| self.line_height(l)).sum::<f32>()).fold(base * 1.45, f32::max) + 2.0 * CELL_PAD_Y).collect();
+        let widths: Vec<f32> = text_w.iter().map(|w| w + 2.0 * CELL_PAD_X).collect();
+        self.need(heights[0] + heights.get(1).copied().unwrap_or(0.0));
+        for r in 0..lines.len() {
+            if r > 0 && self.y + heights[r] > self.h - self.m && self.y > self.m + 0.5 {
+                self.new_page();
+                self.table_row(x0, &widths, &t.aligns, &lines[0], heights[0], true);
+            }
+            self.table_row(x0, &widths, &t.aligns, &lines[r], heights[r], r == 0);
+        }
+        self.y += base * 0.6;
+    }
+
+    fn table_row(&mut self, x0: f32, widths: &[f32], aligns: &[crate::table::Col], cells: &[Vec<Vec<Piece>>], height: f32, header: bool) {
+        let y = self.y;
+        let mut x = x0;
+        for (c, cell) in cells.iter().enumerate() {
+            let fill = header.then_some(Rgba(236, 234, 246, 255));
+            self.p().rect(x, y, widths[c], height, fill, Some((Rgba(150, 150, 150, 255), 0.6)));
+            let mut top = y + CELL_PAD_Y;
+            for line in cell {
+                let size = self.line_size(line);
+                let used = line.iter().map(piece_width).sum::<f32>() - line.last().map_or(0.0, |p| piece_width(p) - crate::pdf::write::text_width(p.kind, p.size, p.text.trim_end()));
+                let room = widths[c] - 2.0 * CELL_PAD_X - used;
+                let dx = match aligns[c] {
+                    crate::table::Col::Left => 0.0,
+                    crate::table::Col::Center => room / 2.0,
+                    crate::table::Col::Right => room,
+                };
+                self.draw_line(line, x + CELL_PAD_X + dx.max(0.0), top + size * 1.08);
+                top += self.line_height(line);
+            }
+            x += widths[c];
+        }
+        self.y += height;
+    }
+
+    fn line_size(&self, line: &[Piece]) -> f32 {
+        line.iter().map(|p| p.size).fold(self.opts.font_pt, f32::max)
+    }
+
+    fn line_height(&self, line: &[Piece]) -> f32 {
+        self.line_size(line) * 1.45
+    }
+
+    /// One wrapped line with its baseline at `base`, starting at `x`.
+    fn draw_line(&mut self, line: &[Piece], x: f32, base: f32) {
+        let mut x = x;
+        for p in line {
+            let pw = piece_width(p);
+            if let Some(bg) = p.bg {
+                let pad = p.size * 0.15;
+                self.p().rect(x - pad * 0.5, base - p.size * 0.95, pw + pad, p.size * 1.25, Some(bg), None);
+            }
+            self.p().text(TextStyle { kind: p.kind, size: p.size, color: p.color, italic: p.italic, bold: p.bold }, x, base, &p.text);
+            let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) {
+                pw
+            } else {
+                crate::pdf::write::text_width(p.kind, p.size, p.text.trim_end())
+            };
+            if p.underline {
+                self.p().line([x, base + p.size * 0.15], [x + tw, base + p.size * 0.15], p.color, p.size * 0.06);
+            }
+            if p.strike {
+                self.p().line([x, base - p.size * 0.3], [x + tw, base - p.size * 0.3], p.color, p.size * 0.06);
+            }
+            if let Some(uri) = &p.link {
+                self.p().link(x, base - p.size, tw, p.size * 1.3, uri);
+            }
+            x += pw;
         }
     }
 
@@ -349,7 +447,13 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
             i = end + 2;
         }
     }
+    let tables = if opts.plain_tables { vec![] } else { crate::table::find_tables(text) };
     while i < lines.len() {
+        if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
+            w.table(vault, rel, &b.table, ink);
+            i = b.lines.end;
+            continue;
+        }
         let (off, line) = lines[i];
         let trimmed = line.trim();
         let x0 = w.m;
@@ -773,6 +877,75 @@ mod tests {
         let small = export_note(&v, rel, &long, &ExportOptions { font_pt: 9.0, ..ExportOptions::for_note() }).unwrap();
         let big = export_note(&v, rel, &long, &ExportOptions { font_pt: 16.0, ..ExportOptions::for_note() }).unwrap();
         assert!(render(&big).len() > render(&small).len());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The x of the text drawn as `word` (one piece) in the page content.
+    fn x_of(content: &str, word: &str) -> f32 {
+        let at = content.find(&format!("<{}> Tj", hex(word))).unwrap_or_else(|| panic!("{word} is not drawn"));
+        let head = &content[..at];
+        let toks: Vec<&str> = head.split_whitespace().collect();
+        toks[toks.len() - 3].parse().unwrap()
+    }
+
+    // spec: EDIT-024, PDF-001
+    #[test]
+    fn a_table_is_a_grid_in_the_pdf_and_plain_text_lines_when_asked() {
+        let (v, d) = vault();
+        let rel = Path::new("Ideas.md");
+        let text = "Intro\n\n| Where | What |\n|---|--:|\n| `a.json` | **yes** [[Ideas]] |\n\nAfter\n";
+        let grid = export_note(&v, rel, text, &ExportOptions::for_note()).unwrap();
+        let c = contents(&grid);
+        for w in ["Where", "What", "a.json", "yes", "Ideas"] {
+            assert!(c.contains(&hex(w)), "cell text {w} is drawn");
+        }
+        assert!(!c.contains(&hex("|---|--:|")), "the delimiter row is not printed");
+        assert!(c.contains(" h B") && c.contains(" h S"), "a filled header cell and bordered cells");
+        let plain = export_note(&v, rel, text, &ExportOptions { plain_tables: true, ..ExportOptions::for_note() }).unwrap();
+        let c = contents(&plain);
+        assert!(c.contains(&hex("|---|--:|")), "plain text: the raw lines");
+        assert!(!c.contains(" h B"), "and no grid");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-024, PDF-001
+    #[test]
+    fn table_columns_follow_the_alignment_and_long_cells_wrap_in_their_column() {
+        let (v, d) = vault();
+        let rel = Path::new("Ideas.md");
+        let long = "words ".repeat(120);
+        let text = format!("| LeftHeadLong | CtrHeadLong | RightHeadLong |\n|:--|:-:|--:|\n| l | c | r |\n| {long}| c | r |\n");
+        let bytes = export_note(&v, rel, &text, &ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() }).unwrap();
+        let c = contents(&bytes);
+        let (hl, hc, hr) = (x_of(&c, "LeftHeadLong"), x_of(&c, "CtrHeadLong"), x_of(&c, "RightHeadLong"));
+        let (l, ce, r) = (x_of(&c, "l"), x_of(&c, "c"), x_of(&c, "r"));
+        assert!((l - hl).abs() < 0.5, "left aligned: {l} {hl}");
+        assert!(ce > hc + 10.0, "centred: {ce} {hc}");
+        assert!(r > hr + 30.0, "right aligned: {r} {hr}");
+        assert!(hr < 595.0 - 20.0 * MM + 1.0, "inside the page");
+        // the long cell wraps in its column: the table is a few lines tall but still one page wide
+        assert!(c.matches(&format!("<{}> Tj", hex("words "))).count() >= 119, "all the words are drawn");
+        assert_eq!(render(&bytes).len(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-024, PDF-001
+    #[test]
+    fn a_long_table_breaks_between_rows_and_repeats_its_header() {
+        let (v, d) = vault();
+        let rel = Path::new("Ideas.md");
+        let mut text = String::from("| Hdrcol | Other |\n|---|---|\n");
+        for i in 0..150 {
+            text.push_str(&format!("| row{i} | x |\n"));
+        }
+        let bytes = export_note(&v, rel, &text, &ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() }).unwrap();
+        let pages = render(&bytes).len();
+        assert!(pages >= 3, "150 rows need several pages, got {pages}");
+        let c = contents(&bytes);
+        assert_eq!(c.matches(&format!("<{}> Tj", hex("Hdrcol"))).count(), pages, "the header row is at the top of every page");
+        for i in [0, 75, 149] {
+            assert_eq!(c.matches(&format!("<{}> Tj", hex(&format!("row{i}")))).count(), 1, "row {i} is drawn once");
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 
