@@ -28,6 +28,16 @@ fn names(p: &P) -> Vec<String> {
 }
 
 fn set_mtime(path: &Path, secs: u64) {
+    // Windows changes the times of a file or folder only through a handle with the right to
+    // write its attributes; a read-only handle is refused with "Access is denied".
+    #[cfg(windows)]
+    let f = {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_WRITE_ATTRIBUTES};
+        // backup semantics: a folder can be opened at all
+        std::fs::OpenOptions::new().access_mode(FILE_WRITE_ATTRIBUTES).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(path).unwrap()
+    };
+    #[cfg(not(windows))]
     let f = std::fs::File::open(path).unwrap();
     f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(secs)).unwrap();
 }

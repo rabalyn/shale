@@ -1,0 +1,24 @@
+# Windows tests that fail under Wine but pass on real Windows (GitHub's `windows` job, BUILD-017).
+# scripts/cross-check.sh --wine skips them by their full name, so any failure that is left is new.
+# One test per line: `<full test name>  # <why it fails under Wine>`. A name that is no longer a
+# test fails tests/cross_check.rs (DEV-015).
+
+# Wine has no git (Git for Windows is not installed in the prefix).
+app::sync::tests::a_pull_under_unsaved_edits_gives_a_conflict_copy_even_if_autosave_comes_first  # no git under Wine
+app::sync::tests::buffers_follow_the_sync_and_edits_made_meanwhile_become_copies  # no git under Wine
+app::sync::tests::settings_connect_a_remote_and_change_the_sync_settings  # no git under Wine
+gitsync::tests::a_file_deleted_on_one_side_and_changed_on_the_other_is_kept  # no git under Wine
+gitsync::tests::a_repository_in_a_parent_folder_is_not_used  # no git under Wine
+gitsync::tests::a_state_conflict_keeps_the_local_state_without_a_copy  # no git under Wine
+gitsync::tests::a_vault_with_notes_joins_a_remote_with_notes_and_another_branch_name  # no git under Wine
+gitsync::tests::an_empty_vault_and_an_empty_remote_sync_without_errors  # no git under Wine
+gitsync::tests::commits_everything_with_prefix_and_suffix_but_not_temp_files  # no git under Wine
+gitsync::tests::connect_creates_the_repository_and_updates_the_url  # no git under Wine
+gitsync::tests::edits_on_both_sides_become_a_conflict_copy  # no git under Wine
+gitsync::tests::refuses_to_start_during_a_merge_or_on_a_detached_head  # no git under Wine
+gitsync::tests::two_vaults_sync_through_a_bare_remote  # no git under Wine
+gitsync::tests::without_git_the_sync_reports_it  # checks that the real git is there, which it is not under Wine
+
+# Wine's own versions of Windows services behave differently.
+secrets::wincred::tests::credential_manager_refuses_what_it_cannot_hold  # Wine's credential manager takes blobs over CRED_MAX_CREDENTIAL_BLOB_SIZE
+fsutil::tests::concurrent_writers_never_produce_a_torn_file  # under Wine an atomic replace can fail while another thread replaces the same file

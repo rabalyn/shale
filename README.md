@@ -266,6 +266,19 @@ CI also measures line coverage (`cargo llvm-cov`; gaps and the ratchet in
 [docs/coverage.md](docs/coverage.md)) and runs the real-server CalDAV and mail suites in podman
 (`cargo test -- --ignored calendar::env_tests` / `mail_env`, see [tests/caldav-env](tests/caldav-env/README.md)).
 
+The macOS and Windows code can be checked on Linux before pushing (DEV-015):
+
+```sh
+sh scripts/cross-check.sh          # clippy for Windows and macOS
+sh scripts/cross-check.sh --wine   # also the Windows tests under Wine (about 5 minutes)
+```
+
+It needs the Rust targets `x86_64-pc-windows-gnu` and `aarch64-apple-darwin`, `mingw-w64-gcc`
+for Windows, `zig` for macOS and `wine` for `--wine`, and it says which one is missing. Tests
+that fail only under Wine are listed with their reason in `scripts/wine-known-failures.txt`
+and skipped. GitHub's macOS and Windows jobs stay the real check: they build with the
+platform's own toolchain, run real Windows and run the macOS tests.
+
 See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for what is done, what is tested and what is
 still missing. What Shale guarantees is in the specs ([docs/spec/](docs/spec/README.md)), and
 why it is built that way is in the decision records ([docs/decisions/](docs/decisions/README.md)).

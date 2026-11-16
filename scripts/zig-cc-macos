@@ -1,0 +1,12 @@
+#!/bin/sh
+# C compiler for the macOS target on Linux (DEV-015): `zig cc` for aarch64-macos. The `cc` crate
+# adds `--target=…` and `-mmacosx-version-min=…`, which zig rejects next to its own `-target`, so
+# they are dropped. Used by scripts/cross-check.sh as CC_aarch64_apple_darwin.
+for a in "$@"; do
+  shift
+  case "$a" in
+    --target=* | -mmacosx-version-min=*) ;;
+    *) set -- "$@" "$a" ;;
+  esac
+done
+exec zig cc -target aarch64-macos "$@"
