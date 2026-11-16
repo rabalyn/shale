@@ -18,7 +18,7 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 
 ![[editor-colours.png]]
 
-A row of buttons above the text of a note (not in the reading view): **B**old, *I*talic,
+A row of buttons centred above the text of a note (not in the reading view): **B**old, *I*talic,
 ~~S~~trikethrough, `==` highlight, `<>` inline code; the highlight colour and font colour
 palettes; a **H** menu for headings (Normal text, Heading 1 to 6); bullet list, numbered list,
 task, quote; code block, horizontal rule, table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`
@@ -30,7 +30,8 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
   toggles off when they all have it. A heading replaces a list marker and the other way round.
 - Every click is one undo step, and the keyboard stays in the note, with the Markdown preview on
   or off and with vim-style editing (insert mode stays, otherwise you are in normal mode).
-- Settings → General → Editing, "Show formatting toolbar" turns the toolbar off.
+- Settings → General → Editing, "Show formatting toolbar" turns the toolbar off; "Toolbar button size"
+  makes its buttons bigger or smaller (80 % to 200 %, 120 % by default).
 
 ## Colours
 

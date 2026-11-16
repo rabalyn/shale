@@ -314,7 +314,7 @@ fn panel_trash_dialog_moves_to_trash_or_cancels() {
 fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {
     let mut p = P::new("editing-settings", &[]);
     p.app.open_settings(SettingsTab::General);
-    for want in ["Editing", "Font colours", "Highlight colours"] {
+    for want in ["Editing", "Toolbar button size", "Font colours", "Highlight colours"] {
         assert!(p.shows(Show::Modals, want), "{want:?} missing");
     }
     assert!(p.app.cfg.format_toolbar, "on by default");

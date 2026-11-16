@@ -22,7 +22,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
   line keeps one number.
-- A **formatting toolbar** above the text (Settings → Editing, on by default) has a button for
+- A **formatting toolbar** above the text (Settings → Editing, on by default, button size 80–200 %) has a button for
   everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
   Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, tables, `[[note]]`
   and `[text](url)` links, embeds (it opens the `[!` file picker) and "Clear formatting". With a

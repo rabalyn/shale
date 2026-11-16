@@ -275,3 +275,67 @@ fn a_custom_colour_from_the_picker_is_written_in_the_canonical_form() {
     fx.click("Highlight colour");
     assert!(fx.has("No highlight"));
 }
+
+/// The Bold and the Clear button of the toolbar drawn alone in a window `width` wide (a few frames,
+/// as the bar needs one to know its width): the first and the last button.
+fn bar_ends(width: f32, scale: f32) -> (egui::Rect, egui::Rect) {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let mut bar = crate::format_bar::FormatBar::default();
+    let palettes = crate::format_bar::Palettes { highlight: &[[255, 255, 0]], font: &[[255, 0, 0]], scale };
+    let mut nodes = vec![];
+    for _ in 0..3 {
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 400.0))), ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().frame(egui::Frame::new()).show(ui, |ui| {
+                bar.show(ui, "text", 0..0, &palettes);
+            });
+        });
+        out.textures_delta.clear();
+        nodes = out.platform_output.accesskit_update.take().expect("accessibility is on").nodes;
+    }
+    let find = |label: &str| {
+        let b = nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.bounds()).unwrap_or_else(|| panic!("no {label:?}"));
+        egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32))
+    };
+    (find("Bold: **text**"), find("Clear formatting"))
+}
+
+// spec: EDIT-026
+#[test]
+fn the_toolbar_is_centred_over_the_editor_and_a_wrapping_one_starts_at_the_left() {
+    let (bold, clear) = bar_ends(1400.0, 1.0);
+    let (left, right) = (bold.left(), 1400.0 - clear.right());
+    assert!(left > 100.0, "space left of a bar that fits: {left}");
+    assert!((left - right).abs() <= 4.0, "as much space on both sides: {left} / {right}");
+    let (bold, clear) = bar_ends(300.0, 1.0);
+    assert!(bold.left() < 20.0, "a bar that wraps starts at the left: {bold:?}");
+    assert!(clear.top() > bold.bottom(), "and has more than one row: {clear:?}");
+}
+
+// spec: EDIT-026
+#[test]
+fn the_toolbar_button_size_setting_scales_the_buttons() {
+    let (bold, clear) = bar_ends(1400.0, 1.0);
+    let (big_bold, big_clear) = bar_ends(1400.0, 1.5);
+    assert!((bold.height() - 26.0).abs() < 0.5, "base size: {bold:?}");
+    assert!((big_bold.height() - 39.0).abs() < 0.5, "150 %: {big_bold:?}");
+    assert!((big_clear.width() - clear.width() * 1.5).abs() < 0.5, "drawn buttons grow too");
+    let (w, big_w) = (clear.right() - bold.left(), big_clear.right() - big_bold.left());
+    assert!(big_w > w * 1.4, "the whole bar grows: {w} -> {big_w}");
+    assert!(((1400.0 - big_clear.right()) - big_bold.left()).abs() <= 4.0, "and stays centred");
+}
+
+// spec: EDIT-026
+#[test]
+fn the_app_draws_the_toolbar_at_the_size_of_the_setting() {
+    let mut fx = Fx::new("size", "one two");
+    let base = fx.hl.find_label(&mut fx.app, "Bold: **text**");
+    assert!((base.height() - 26.0 * 1.2).abs() < 0.5, "120 % by default: {base:?}");
+    fx.app.cfg.toolbar_size = 200;
+    fx.hl.frames(&mut fx.app, 3);
+    assert!((fx.hl.find_label(&mut fx.app, "Bold: **text**").height() - 52.0).abs() < 0.5);
+    fx.app.cfg.toolbar_size = 5;
+    fx.hl.frames(&mut fx.app, 3);
+    assert!((fx.hl.find_label(&mut fx.app, "Bold: **text**").height() - 26.0 * 0.8).abs() < 0.5, "a value out of range is clamped to 80 %");
+}

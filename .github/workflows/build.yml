@@ -133,7 +133,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ASSET: ${{ steps.files.outputs.asset }}
           GUIDE: ${{ steps.files.outputs.guide }}
-          BUNDLE:${{ steps.attest.outputs.bundle-path }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
           cp "$BUNDLE" "release/$ASSET.sigstore.json"
           for f in "$ASSET" "$ASSET.sha256" "$GUIDE" "$GUIDE.sha256"; do
