@@ -2554,6 +2554,11 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
     let _ = std::fs::remove_dir_all(&dir);
     let bob = TestHome::new();
     bob.gen_pgp("Bob Test", "bob@example.org", "never", None);
+    // an answer longer than the room kept for it: several secret keys across both standards
+    for (i, name) in ["Carol", "Dave", "Erin"].iter().enumerate() {
+        bob.gen_pgp(&format!("{name} Test"), &format!("{}@example.org", name.to_lowercase()), "never", None);
+        bob.gen_smime(&format!("{name} Cert"), &format!("{}-{i}@example.org", name.to_lowercase()));
+    }
     w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: slow_gnupg_script(&dir, "slow-gpg", "gpg"), gpgsm: slow_gnupg_script(&dir, "slow-gpgsm", "gpgsm"), ..bob.g.clone() };
     w.app.open_mail_settings();
     w.settle();
