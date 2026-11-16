@@ -3,15 +3,27 @@
 This file keeps track of the work so it can carry on across sessions. Update it whenever a
 feature lands, a gap is found or a test is added.
 
-_Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
+_Last updated: 2026-11-16 (module split: feature folders and ShaleApp sub-states, raba/shale#5)_
 
 ## Architecture
+
+`src/main.rs` declares only top-level modules (DEV-008). A feature with several files has a
+folder: `src/<feature>.rs` is the parent module (its `mod` list and shared types) and the children
+are `src/<feature>/<child>.rs`, with their tests next to them. The feature folders are `calendar/`,
+`mail/`, `drawing/`, `import/` and `pdf/`; `app/`, `social/`, `data_usage/`, `secrets/` and `gitsync/`
+are folders of the same kind. `ShaleApp` (`src/app.rs`, 44 fields) owns five sub-states, each defined
+beside its feature: `drag: DragState` (`app/drops.rs`), `cal: CalendarUi` (`calendar/ui.rs`),
+`tag_learner: TagLearner` (`import/tagwords.rs`), `script: ScriptRun` (`script.rs`) and
+`tabbar: TabBar` (`app/tabs.rs`). The other fields (search, file tree, side panels, graphs, screenshot
+mode …) are not grouped yet.
 
 | File | What it does |
 |---|---|
 | `src/main.rs` | Reads the command-line options (`--vault`, `--screenshot`, `--view`, `--size`, `--keys`) and opens the window. |
-| `src/script.rs` | The `--keys` script of screenshot runs (BUILD-007): the step language and its parser (keys, text, pointer steps aimed at coordinates or at drawn texts, waits), and the tests that every picture of `docs/screenshots/` has a recipe shown in the docs (DEV-007). |
-| `src/app.rs` | App state: tabs and history, open note buffers, autosave, outside-change detection, actions (open, follow link, create, rename, trash, toggle task), screenshot mode. Includes app-level tests. |
+| `src/script.rs` | The `--keys` script of screenshot runs (BUILD-007; `ScriptRun` is the run's state in `ShaleApp`): the step language and its parser (keys, text, pointer steps aimed at coordinates or at drawn texts, waits), and the tests that every picture of `docs/screenshots/` has a recipe shown in the docs (DEV-007). |
+| `src/app.rs` | App state (`ShaleApp`, with the five sub-states above): history, open note buffers, autosave, outside-change detection, actions (open, follow link, create, rename, trash, toggle task), screenshot mode. Includes app-level tests. |
+| `src/app/tabs.rs` | `TabBar`: the open tabs in order, the active one and where the tab bar drew them last frame (for tests). |
+| `src/app/sync.rs`, `src/app/usage.rs`, `src/app/social.rs` | Git sync in the window (when it runs, open buffers, settings), the Data usage dialog and the daily cleanup, the feed view and its accounts dialog. |
 | `src/layout.rs` | Window layout: ribbon, tab bar, view header, note view (inline title plus editor or reading view), status bar, toasts, painted icons, start screen. |
 | `src/panels.rs` | Left sidebar (file tree, search, tags), right sidebar (backlinks and unlinked mentions, outgoing links, outline, local graph), the vault-wide task list and the dialogs (quick switcher, rename, new folder, trash, settings). |
 | `src/editor.rs` | Markdown editor: live colouring, blue and red links, clicking links and checkboxes. Includes headless UI tests that simulate mouse clicks and typing. |
@@ -19,17 +31,19 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 | `src/reader.rs` | Reading view: rendered markdown with clickable links, checkboxes, embedded drawings and notes. |
 | `src/lists.rs` | Smart editing: continue lists on Enter, Tab and Shift+Tab indent for lists and heading levels, web-link parsing, opening the browser. |
 | `src/media.rs` | The `[!` file picker: path splitting (`/` = vault root, `~/` = home), shell-style Tab completion, copying files into `z_media/<year>/<month>/<YYMMDD>_<name>`, link text, local date. |
+| `src/pdf.rs` | Parent of the `pdf/` folder (the files below). |
 | `src/pdf/write.rs` | Minimal PDF writer: pages, vector paths, embedded TrueType fonts (Ubuntu Light, Hack) for selectable text, glyph outlines for the hand-drawn font and other characters, images with transparency, link annotations, compression. |
 | `src/pdf/export.rs` | Export of notes (markdown laid out on pages with the reading view's inline parser; pictures, drawings and PDF pages included) and drawings (vector) to PDF, with `ExportOptions`. |
 | `src/pdf/export_dialog.rs` | The "Export to PDF" dialog (paper, orientation, margins, text size, what to include, background, scale, save path, open afterwards). |
 | `src/pdf/view.rs` | Renders PDF pages with the bundled pure-Rust `hayro` renderer on a background thread, as textures for the editor and reading view. |
+| `src/calendar.rs` | Parent of the `calendar/` folder (the files below). |
 | `src/calendar/time.rs` | Dates without a date library: civil dates and day numbers, the computer's time zone (`localtime_r` on Linux and macOS, `SystemTimeToTzSpecificLocalTime` on Windows), named time zones read from the system's zoneinfo files. |
 | `src/calendar/ics.rs` | iCalendar reading and writing (folding, escapes, UTC/TZID/floating times, all-day, duration, organizer, attendees, URL, reminders, categories, busy/free) and expanding repeating events on the event's own clock (daily/weekly with BYDAY/monthly/yearly, interval, count, until, EXDATE, RDATE, RECURRENCE-ID overrides). An event keeps the lines it was read from; writing puts back every line of a field that was not changed and everything Shale does not know (CAL-012), keeps the form of a time, and adds a time zone definition for a zone that has none. The simple repeat rules as a value the dialog edits. |
 | `src/calendar/dav.rs` | CalDAV client over the system `curl` program (discovery: principal, calendar home, calendars with name, colour, read-only flag, task-only lists left out; calendar state (ctag / sync-token, write permission); events by time range, each with its address and version tag; writing an event with PUT, removing one with DELETE, with clear messages for no permission / read-only / changed on the server). Answers are read with `roxmltree` (no DTDs). Security rules are enforced in `request_with`: https only (http only for localhost), no credentials in addresses, `-q` (no `~/.curlrc`), redirects only to allowed addresses, no control characters in headers, 50 MB answer limit; the password goes to curl on its standard input, and event addresses on another server than the calendar are never used. |
 | `src/secret.rs` | `Secret`: a password or token in a fixed-size heap buffer locked into memory (`mlock`, `VirtualLock` on Windows) that never reallocates, zeroed on drop, redacted in `Debug`, an egui `TextBuffer` for password fields; `concat` for wiped short-lived strings; `harden_process` (release builds: not dumpable on Linux, no core file and no debugger on macOS, nothing on Windows). SEC-014 to SEC-023. |
 | `src/secrets.rs` | CalDAV passwords, mail and social secrets in the system keyring (Linux: `secret-tool`; macOS: Keychain, `secrets/keychain.rs`; Windows: Credential Manager, `secrets/wincred.rs`; names in `secrets/names.rs`, SEC-024, SEC-025; one entry per app + server + user) instead of the settings file; falls back to the owner-only settings file without a keyring (SEC-021). Tests of `secrets.rs` use a pretend keyring in memory; `keychain.rs` and `wincred.rs` test the real stores on GitHub's macOS and Windows jobs. |
 | `src/calendar/store.rs` | Calendar sources (local .ics / CalDAV) from the settings, loaded events, a separate sync timer per CalDAV calendar, sample events, and background save / move / delete jobs for local and CalDAV calendars, also for one date of a repeating event. |
-| `src/calendar/ui.rs` | The calendar panel: month/week/day views in sizes S/M/L, navigation, double-click to create an event, the event details popup (Edit, Delete; for a repeating event: this date or all repeats). |
+| `src/calendar/ui.rs` | `CalendarUi` (the calendar state of `ShaleApp`) and the calendar panel: month/week/day views in sizes S/M/L, navigation, double-click to create an event, the event details popup (Edit, Delete; for a repeating event: this date or all repeats). |
 | `src/calendar/dialog.rs` | The "Calendars" settings dialog (with the sync interval per CalDAV calendar) and the event dialog for new and existing events and for one date of a repeating event (repeat, skipped dates, reminders, status, busy/free, categories, time zone). |
 | `src/mail.rs` | Reading e-mail messages (.eml): headers with encoded words (UTF-8, Latin-1/-15, Windows-1252), multipart bodies, base64 / quoted-printable, attachment names (also RFC 2231 and encoded), attached messages, dates, and HTML-only mails turned into readable text. |
 | `src/mail/imap_client.rs` | A small blocking IMAP client on rustls (system certificate check): only read-only commands, enforced in one place; size limits for lines and literals. |
@@ -51,18 +65,23 @@ _Last updated: 2026-11-13 (thirteenth round: zero compiler warnings)_
 | `src/mail/gpg.rs` | GnuPG as programs (ADR-0011): `gpg` / `gpgsm` with argument lists, data on stdin, results from `[GNUPG:]` status lines only, time-outs and cancel (the child is killed), no network key lookup; key lists, signature verification, decryption. Also the test kit that makes a temp `GNUPGHOME` with generated keys. |
 | `src/mail/crypto.rs` | Reading signed and encrypted mail: what the top level is (PGP/MIME, S/MIME, inline OpenPGP), the job that asks GnuPG, the `Security` facts for the status strip, the decrypted message shown as its own message (EFAIL rules). |
 | `src/app/mail.rs` | The mail view in the app: settings actions, saving attachments to the vault, handing mails to the Import dialog. |
+| `src/mail/keys.rs` | The keys of the Drafts and Outbox lists, the row menu and the window of local sent copies that the server never got. |
+| `src/mail/unsent.rs` | Local sent copies the server never got (MAIL-210 to MAIL-214): telling the person and uploading them again. |
 | `src/mail/demo.rs` | The made-up mail store for `--screenshot --view mail`. |
 | `src/recovery.rs` | Text that could not be saved at exit, put aside and announced at the next start. |
 | `src/import.rs` | Turning e-mails, calendar events, files and text into tagged notes (with attachments in the media folder), spotting things imported before, reading what other programs drop. |
 | `src/import/from_programs.rs` | What other programs hand over in a drop (a whole message, calendar data, links, text, Thunderbird lookups): compiled on Linux only, because only Wayland delivers those kinds (IMP-011). |
+| `src/import/people.rs` | Contact notes in the people folder: finding the people of an imported mail or event and matching them to contact notes. |
+| `src/import/tagwords.rs` | Tags for imports by plain counting over the vault's notes; `TagLearner` is the learned words and their background job in `ShaleApp`. |
 | `src/import/dialog.rs` | The Import dialog: what to import (with attachment choices), note names, folder, tags, options. |
 | `src/social/` | Mastodon and Bluesky: `mod.rs` (data model, `Client`, HTTP, self-thread), `mastodon.rs`, `bluesky.rs`, `markup.rs` (HTML to Markdown), `note.rs` (fetch a post with its thread and media, write the note), `state.rs` (feed state, background jobs, checks for new posts), `feed_ui.rs` (the Feeds view), `accounts_ui.rs` (the accounts dialog), `images.rs` (picture cache with 4 workers), `demo.rs` (made-up posts for screenshots and tests). `src/app/social.rs` connects it to the app and the Import dialog. |
-| `src/app/drops.rs` | Drop handling in the window (tests in `app/drops_tests.rs`): drop zones (folders, notes, the editor), the drop highlight, events dragged out of the calendar, running the import, linking the new notes. |
+| `src/app/drops.rs` | Drop handling in the window (tests in `app/drops_tests.rs`); `DragState` is its state in `ShaleApp`: drop zones (folders, notes, the editor), the drop highlight, events dragged out of the calendar, running the import, linking the new notes. |
 | `src/import/wl_drop.rs` | Drag and drop from other programs on Wayland (Linux only; macOS and Windows deliver dropped files through the window toolkit), on the window's own Wayland connection; reads every useful kind a drop offers. The protocol-free part (`Drag`, `Landing`, `is_repeat`) is plain state that tests and the `--keys` `drop:` step feed without a compositor (DEV-012). |
 | `src/import/tb_store.rs` | Finding a dragged message in Thunderbird's own folders on this computer (profiles, accounts from prefs.js, mbox and maildir folders, Thunderbird's folder index `.msf` in its "Mork" format: message key/UID → Message-ID and position; local folders by position, subject as the last resort). |
 | `src/markdown.rs` | Pure parsing: links, tasks, tags, headings, link renaming, fuzzy matching. |
 | `src/vault.rs` | Folder scanning, link index (resolution, backlinks, unlinked mentions, outgoing links), tasks, tags, search, create, rename (with link rewriting), trash, graph data, sample vault. |
 | `src/drawing.rs` | Excalidraw-compatible scene model (serde, unknown fields kept), hand-drawn renderer, canvas editor (tools, selection, resize, undo and redo, properties panel). |
+| `src/drawing/layout.rs`, `src/drawing/connect.rs` | Connection anchors and automatic arrangement (pure geometry); labels, connections, line endings and the style panel of the editor. |
 | `src/drawing/links.rs` | Child module of `drawing`: links of elements (text or Excalidraw `link` field), the ↗ link marks and following them, and the read-only view used for Obsidian canvases. |
 | `src/drawing/pictures.rs` | Pictures in drawings: where each `image` element's picture comes from (plugin `## Embedded Files` or a `dataURL`), as textures for painting and as images for PDF export. |
 | `src/drawing/canvas.rs` | Obsidian Canvas (`.canvas`, JSON Canvas 1.0): turns cards and edges into an Excalidraw scene, writes the converted `.excalidraw.md` copy (marked `shale-converted-from` in its front matter) and finds it again. |
