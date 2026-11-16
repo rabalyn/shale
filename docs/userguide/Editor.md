@@ -58,6 +58,8 @@ the cross or a click beside it closes it.
 
 ![[image-resize.png]]
 
+![[image-resize.webm]]
+
 ## Vim-style editing
 
 Settings → General → Appearance, off by default. Notes open in normal mode.
