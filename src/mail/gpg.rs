@@ -717,10 +717,12 @@ fn inv_recp_words(reason: &str) -> &'static str {
 /// What went wrong in a signing or encrypting call, in words, from its status lines.
 fn op_failure(run: &Run, doing: &str) -> String {
     let code = error_code(&run.status);
-    if code == Some(99) {
+    // a signing call whose dialog is cancelled or whose passphrase is wrong says `FAILURE sign <number>`, not `ERROR`
+    let failed_with = |c: u32| run.status.iter().filter(|s| s.keyword == "FAILURE").any(|s| s.fields().get(1).and_then(|n| n.parse::<u32>().ok()).is_some_and(|n| n & 0xFFFF == c));
+    if code == Some(99) || failed_with(99) {
         return format!("The passphrase dialog was cancelled, so the mail was not {doing}.");
     }
-    if run.has("BAD_PASSPHRASE") || code == Some(11) {
+    if run.has("BAD_PASSPHRASE") || code == Some(11) || failed_with(11) {
         return format!("The passphrase was not accepted, so the mail was not {doing}.");
     }
     let refused: Vec<String> = run
@@ -911,7 +913,15 @@ pub(crate) mod testkit {
 
         /// A new unprotected, self-signed S/MIME certificate with its key (RSA 2048), trusted as a root; its fingerprint.
         pub fn gen_smime(&self, cn: &str, email: &str) -> String {
-            let params = format!("Key-Type: RSA\nKey-Length: 2048\nKey-Usage: sign, encrypt\nSerial: random\nName-DN: CN={cn},O=Shale Test\nName-Email: {email}\nNot-After: 2031-01-01\n");
+            self.gen_smime_valid(cn, email, None, "2031-01-01")
+        }
+
+        /// Like [`gen_smime`](Self::gen_smime), but valid from `created` (`YYYY-MM-DD`, default: now) until `not_after`:
+        /// gpgsm signs the certificate with whatever dates it is given, so a certificate that expired in the past
+        /// (`created` 2020-01-01, `not_after` 2020-01-10) needs no other tool.
+        pub fn gen_smime_valid(&self, cn: &str, email: &str, created: Option<&str>, not_after: &str) -> String {
+            let from = created.map(|c| format!("Creation-Date: {c}\n")).unwrap_or_default();
+            let params = format!("Key-Type: RSA\nKey-Length: 2048\nKey-Usage: sign, encrypt\nSerial: random\nName-DN: CN={cn},O=Shale Test\nName-Email: {email}\n{from}Not-After: {not_after}\n");
             let pf = self.dir.join(format!("gen-{}.txt", COUNT.fetch_add(1, Ordering::SeqCst)));
             std::fs::write(&pf, params).unwrap();
             let out = self.cmd("gpgsm").args(["--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--gen-key", "--armor", "-o"]).arg(self.dir.join("new.crt")).arg(&pf).output().expect("gpgsm runs");
@@ -921,6 +931,53 @@ pub(crate) mod testkit {
             let fpr = self.g.list_keys(CryptoStandard::Smime, true, Some(email), &no_cancel()).unwrap().into_iter().next().expect("the new certificate").fingerprint;
             self.trust_smime(&fpr);
             fpr
+        }
+
+        /// A new OpenPGP key that is protected by `passphrase`; its fingerprint. A call that needs the key asks the
+        /// agent's pinentry, which in the tests is the stub of [`use_pinentry_stub`](Self::use_pinentry_stub).
+        pub fn gen_pgp_protected(&self, name: &str, email: &str, passphrase: &str) -> String {
+            let uid = format!("{name} <{email}>");
+            let out = self.cmd("gpg").args(["--batch", "--pinentry-mode", "loopback", "--passphrase", passphrase, "--quick-gen-key", &uid, "default", "default", "never"]).output().expect("gpg runs");
+            assert!(out.status.success(), "gpg --quick-gen-key: {}", String::from_utf8_lossy(&out.stderr));
+            self.g.list_keys(CryptoStandard::OpenPgp, true, Some(email), &no_cancel()).unwrap().into_iter().next().expect("the new key").fingerprint
+        }
+
+        /// Make the agent of this home use a pinentry stub (a shell script) instead of a dialog, and keep no passphrase
+        /// in its cache, so every call asks. What the stub answers is set with [`pinentry_says`](Self::pinentry_says).
+        #[cfg(unix)]
+        pub fn use_pinentry_stub(&self) {
+            use std::os::unix::fs::PermissionsExt;
+            let stub = self.dir.join("pinentry-stub");
+            let script = "#!/bin/sh\n\
+                answer() { cat \"$(dirname \"$0\")/pinentry-answer\"; }\n\
+                echo 'OK Pleased to meet you'\n\
+                while read -r cmd rest; do\n\
+                  case \"$cmd\" in\n\
+                    GETPIN)\n\
+                      a=$(answer)\n\
+                      case \"$a\" in\n\
+                        cancel) echo 'ERR 83886179 Operation cancelled <Pinentry>' ;;\n\
+                        hang) sleep 120 ;;\n\
+                        *) echo \"D $a\"; echo OK ;;\n\
+                      esac ;;\n\
+                    BYE) echo 'OK closing connection'; exit 0 ;;\n\
+                    *) echo OK ;;\n\
+                  esac\n\
+                done\n";
+            std::fs::write(&stub, script).unwrap();
+            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let mut conf = std::fs::read_to_string(self.dir.join("gpg-agent.conf")).unwrap_or_default();
+            conf.push_str(&format!("pinentry-program {}\ndefault-cache-ttl 0\nmax-cache-ttl 0\n", stub.display()));
+            std::fs::write(self.dir.join("gpg-agent.conf"), conf).unwrap();
+            self.pinentry_says("cancel");
+            let _ = self.cmd("gpgconf").args(["--reload", "gpg-agent"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+
+        /// What the pinentry stub does at the next passphrase question: `cancel`, `hang` (never answers), or any other
+        /// text, which is typed as the passphrase.
+        #[cfg(unix)]
+        pub fn pinentry_says(&self, answer: &str) {
+            std::fs::write(self.dir.join("pinentry-answer"), answer).unwrap();
         }
 
         pub fn import_smime(&self, cert: &[u8]) {
@@ -1010,6 +1067,11 @@ pub(crate) mod testkit {
         }
 
         /// A detached S/MIME signature (DER) over `data`.
+        /// A detached S/MIME signature made at `faked_time` (`YYYYMMDDTHHMMSS`), when the certificate was still valid.
+        pub fn smime_sign_at(&self, fpr: &str, data: &[u8], faked_time: &str) -> Vec<u8> {
+            self.pipe("gpgsm", &["--detach-sign", "-u", fpr, "--faked-system-time", faked_time], data)
+        }
+
         pub fn smime_sign(&self, fpr: &str, data: &[u8]) -> Vec<u8> {
             self.pipe("gpgsm", &["--detach-sign", "-u", fpr], data)
         }
@@ -1372,6 +1434,8 @@ mod tests {
             let t = w(s);
             assert!(t.contains("no secret key here (or has expired)") && t.contains("not signed"), "{t}");
         }
+        assert!(w(&[("FAILURE", "sign 83886179")]).contains("dialog was cancelled"), "a cancelled signing dialog is a FAILURE line");
+        assert!(w(&[("FAILURE", "sign 67108875")]).contains("passphrase was not accepted"), "a wrong passphrase when signing is a FAILURE line too");
         assert_eq!(w(&[("FAILURE", "sign 33554433")]), "GnuPG could not do it, so the mail was not signed (FAILURE sign 33554433).");
         assert_eq!(w(&[]), "GnuPG could not do it, so the mail was not signed.");
     }
@@ -1515,5 +1579,77 @@ mod tests {
         let e = old.g.sign_detached(CryptoStandard::OpenPgp, &o_fpr, b"x", &no_cancel()).unwrap_err();
         assert!(e.starts_with("The mail was not signed"), "{e}");
         assert!(me.g.sign_detached(CryptoStandard::OpenPgp, "not a key", b"x", &no_cancel()).unwrap_err().contains("not a key fingerprint"));
+    }
+
+    // spec: MAIL-171, MAIL-182
+    #[cfg(unix)]
+    #[test]
+    fn a_protected_key_with_a_pinentry_stub_gives_cancelled_a_wrong_passphrase_a_time_out_and_the_right_one() {
+        if !have_gnupg() {
+            return;
+        }
+        let h = TestHome::new();
+        let fpr = h.gen_pgp_protected("Pat Protected", "pat@example.org", "correct horse");
+        h.use_pinentry_stub();
+        let data = b"protected text\r\n";
+        let cipher = h.pgp_encrypt(&[&fpr], None, data);
+        let decrypt = |h: &TestHome| h.g.decrypt(CryptoStandard::OpenPgp, &cipher, &no_cancel()).unwrap();
+        // the dialog is cancelled
+        h.pinentry_says("cancel");
+        assert_eq!(decrypt(&h).unwrap_err(), DecryptFailure::Cancelled);
+        // a wrong passphrase is typed
+        h.pinentry_says("wrong passphrase");
+        assert_eq!(decrypt(&h).unwrap_err(), DecryptFailure::BadPassphrase);
+        // the right one opens it (so the stub does reach gpg)
+        h.pinentry_says("correct horse");
+        assert_eq!(decrypt(&h).unwrap().plain, data);
+        // signing with the protected key asks the same way and says so in words
+        h.pinentry_says("cancel");
+        let e = h.g.sign_detached(CryptoStandard::OpenPgp, &fpr, b"x", &no_cancel()).unwrap_err();
+        assert!(e.contains("dialog was cancelled") && e.contains("not signed"), "{e}");
+        h.pinentry_says("wrong passphrase");
+        let e = h.g.sign_detached(CryptoStandard::OpenPgp, &fpr, b"x", &no_cancel()).unwrap_err();
+        assert!(e.contains("passphrase was not accepted"), "{e}");
+        // a dialog nobody answers: the call is killed at its time limit, and by cancel
+        h.pinentry_says("hang");
+        let t = Instant::now();
+        let r = h.g.run(CryptoStandard::OpenPgp, &["--decrypt"], &cipher, Duration::from_millis(1500), &no_cancel());
+        assert_eq!(r.unwrap_err(), GpgError::Timeout);
+        assert!(t.elapsed() < Duration::from_secs(20));
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let c2 = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(800));
+            c2.store(true, Ordering::SeqCst);
+        });
+        let r = h.g.run(CryptoStandard::OpenPgp, &["--decrypt"], &cipher, DIALOG, &cancel);
+        assert_eq!(r.unwrap_err(), GpgError::Cancelled);
+        // (the agent still waits for the stub, so nothing may ask it after this; the home's drop kills it)
+    }
+
+    // spec: MAIL-174, MAIL-193
+    #[test]
+    fn an_s_mime_certificate_that_has_expired_is_shown_as_expired_and_is_refused_for_encrypting() {
+        if !have_gnupg() {
+            return;
+        }
+        let me = TestHome::new();
+        let my = me.gen_smime("Me S/MIME", "me@example.org");
+        let old = TestHome::new();
+        let fpr = old.gen_smime_valid("Old S/MIME", "old@example.org", Some("2020-01-01"), "2020-01-10");
+        let data = b"signed while it was valid\r\n";
+        let sig = old.smime_sign_at(&fpr, data, "20200105T000000");
+        let v = old.g.verify_detached(CryptoStandard::Smime, &sig, data, &no_cancel()).unwrap();
+        assert_eq!(v[0].state, SigState::ExpiredKey, "{v:?}");
+        let k = old.g.key_info(CryptoStandard::Smime, &fpr, &no_cancel()).unwrap().unwrap();
+        assert_eq!((k.trust_words(), k.usable()), ("expired", false), "{k:?}");
+        // encrypting to it is refused, signing with it too
+        old.share_smime_with(&me, &fpr);
+        let to = |f: &str| vec![(f.to_string(), false)];
+        let e = me.g.encrypt(CryptoStandard::Smime, &to(&fpr), None, b"x", &no_cancel()).unwrap_err();
+        assert!(e.starts_with("The mail was not encrypted:"), "{e}");
+        let e = old.g.sign_detached(CryptoStandard::Smime, &fpr, b"x", &no_cancel()).unwrap_err();
+        assert!(e.starts_with("The mail was not signed"), "{e}");
+        assert!(me.g.encrypt(CryptoStandard::Smime, &to(&my), None, b"x", &no_cancel()).is_ok());
     }
 }
