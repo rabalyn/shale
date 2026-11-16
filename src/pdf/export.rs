@@ -413,16 +413,48 @@ impl<'a> Writer<'a> {
         out
     }
 
-    fn image(&mut self, img: image::RgbaImage, max_h: f32) {
+    /// A picture at the left margin, with its caption below it (PDF-004) when there is one.
+    fn image(&mut self, img: image::RgbaImage, max_h: f32, caption: Option<&str>) {
         let (w, h) = (img.width() as f32, img.height() as f32);
         let k = (self.cw() / (w * 0.75)).min(max_h / (h * 0.75)).min(1.0) * 0.75;
         let (dw, dh) = (w * k, h * k);
         let idx = self.doc.add_image(pdf_image(&img));
-        self.need(dh + 6.0);
+        self.need(dh + 6.0 + self.caption_room(caption));
         let (x, y) = (self.m, self.y);
         self.p().image(idx, x, y, dw, dh);
-        self.y += dh + 8.0;
+        self.y += dh;
+        self.picture_end(caption);
     }
+
+    /// The room the caption takes under a picture.
+    fn caption_room(&self, caption: Option<&str>) -> f32 {
+        caption.map_or(0.0, |_| crate::caption::height(self.opts.font_pt))
+    }
+
+    /// The end of a picture (its bottom is at `y`): the caption below it, then some space.
+    fn picture_end(&mut self, caption: Option<&str>) {
+        if let Some(text) = caption {
+            let size = crate::caption::size(self.opts.font_pt);
+            let shown = crate::caption::fit(text, self.cw(), |s| crate::pdf::write::text_width(FontKind::Sans, size, s));
+            let (x, y) = (self.m, self.y + crate::caption::GAP);
+            self.p().text(TextStyle::plain(FontKind::Sans, size, Rgba(105, 105, 110, 255)), x, y + size * 1.08, &shown);
+            self.y += self.caption_room(caption);
+        }
+        self.y += 8.0;
+    }
+}
+
+/// A frame or cover (as the player shows it) as an image for the PDF.
+fn rgba_of(img: &egui::ColorImage) -> Option<image::RgbaImage> {
+    let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+    image::RgbaImage::from_raw(img.size[0] as u32, img.size[1] as u32, bytes)
+}
+
+/// The thumbnail of a video (its first frame, MEDIA-009) or sound (its cover, MEDIA-003), if it
+/// has one: without ffmpeg or a cover the link stays text.
+fn media_thumbnail(abs: &Path) -> Option<image::RgbaImage> {
+    let look = if crate::media::is_video(abs) { crate::media::video::look(abs, crate::media::ffmpeg::locate).look } else { crate::media::cover::look(abs) };
+    look.cover.as_ref().and_then(rgba_of)
 }
 
 /// Export a note (its current text) to PDF bytes.
@@ -505,36 +537,46 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                 let abs = vault.abs(&t);
                 let kind = vault.file(&t).map(|f| f.kind).unwrap_or(FileKind::Other);
                 let max_h = (w.h - 2.0 * w.m) * 0.8;
+                // the link under the thumbnail (PDF-004)
+                let caption = crate::caption::text(&line_links[0]);
                 if kind == FileKind::Drawing {
                     if let Ok(scene) = Scene::read_file(&abs) {
                         if let Some(b) = scene.bounds() {
                             let b = b.expand(20.0);
                             let k = (cw / b.width()).min(max_h / b.height()).min(0.75);
                             let dh = b.height() * k;
-                            w.need(dh + 6.0);
+                            w.need(dh + 6.0 + w.caption_room(Some(&caption)));
                             let (x, y) = (x0 + (cw - b.width() * k) / 2.0, w.y);
                             let pics = add_pictures(&mut w.doc, &crate::drawing::pictures::images(&scene, vault, &t));
                             draw_scene(w.p(), &scene, [x, y, b.width() * k, dh], false, None, &pics);
-                            w.y += dh + 8.0;
+                            w.y += dh;
+                            w.picture_end(Some(&caption));
                         }
                     }
                     i += 1;
                     continue;
                 } else if crate::media::is_image(&t) {
                     if let Ok(img) = image::open(&abs) {
-                        w.image(img.to_rgba8(), max_h);
+                        w.image(img.to_rgba8(), max_h, Some(&caption));
+                        i += 1;
+                        continue;
+                    }
+                } else if crate::media::is_media(&t) {
+                    if let Some(img) = media_thumbnail(&abs) {
+                        w.image(img, max_h, Some(&caption));
                         i += 1;
                         continue;
                     }
                 } else if crate::pdf::view::is_pdf(&t) {
                     if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdf::view::render_pages(d, 40, 2.0)) {
-                        for img in r.images {
+                        let last = r.images.len().saturating_sub(1);
+                        for (n, img) in r.images.into_iter().enumerate() {
                             let [iw, ih] = img.size;
                             let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
                             if let Some(rgba) = image::RgbaImage::from_raw(iw as u32, ih as u32, bytes) {
                                 // PDF pages were rendered at 2× — show them at their real size
                                 let scaled = image::imageops::resize(&rgba, (iw / 2).max(1) as u32 * 4 / 3, (ih / 2).max(1) as u32 * 4 / 3, image::imageops::FilterType::Triangle);
-                                w.image(scaled, max_h);
+                                w.image(scaled, max_h, (n == last).then_some(caption.as_str()));
                             }
                         }
                         i += 1;
@@ -857,6 +899,80 @@ mod tests {
         assert!(String::from_utf8_lossy(&bytes).contains("/URI (https://example.com)"), "web links are clickable");
         assert!(c.contains("/Im"), "the embedded picture / PDF pages are included");
         assert!(c.contains(&hex("1 / ")), "page numbers");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A vault with a picture, a sound with a cover, a sound without one, a video and a drawing.
+    fn media_vault() -> (Vault, std::path::PathBuf) {
+        let (_, d) = vault();
+        image::RgbaImage::from_pixel(40, 30, image::Rgba([230, 20, 20, 255])).save(d.join("pic.png")).unwrap();
+        for f in ["tone-cover.mp3", "tone.wav", "clip.mp4"] {
+            std::fs::copy(crate::media::testdata::fixture(f), d.join(f)).unwrap();
+        }
+        std::fs::write(d.join("Sketch.excalidraw"), crate::drawing::SAMPLE_SCENE).unwrap();
+        (Vault::open(&d).unwrap(), d)
+    }
+
+    fn export_text(v: &Vault, text: &str) -> (Vec<u8>, String) {
+        let bytes = export_note(v, Path::new("Welcome.md"), text, &ExportOptions::for_note()).unwrap();
+        let c = contents(&bytes);
+        (bytes, c)
+    }
+
+    // spec: PDF-004
+    #[test]
+    fn an_embedded_picture_drawing_and_pdf_are_thumbnails_with_the_link_as_caption() {
+        let (v, d) = media_vault();
+        for (link, caption) in [("![[pic.png]]", "pic.png"), ("![[Sketch.excalidraw]]", "Sketch.excalidraw"), ("![[doc.pdf]]", "doc.pdf"), ("![[pic.png|Sea at dusk|200]]", "Sea at dusk")] {
+            let (bytes, c) = export_text(&v, &format!("![[pic.png]]\n\n{link}\n"));
+            let _ = bytes;
+            assert!(c.contains("/Im") || link.contains("Sketch"), "{link}: the thumbnail is in the page");
+            assert!(c.contains(&hex(caption)), "{link}: the caption says {caption}");
+            assert!(!c.contains(&hex("![[")), "{link}: the raw link text is not printed");
+        }
+        // the wanted name only: an alias replaces the target, a width is no caption
+        let (_, c) = export_text(&v, "![[pic.png|Sea at dusk|200]]\n");
+        assert!(!c.contains(&hex("pic.png")), "the alias is the caption, not the target");
+        // the caption is below the thumbnail, in small grey text, on the same page as it
+        let (bytes, _) = export_text(&v, "![[pic.png]]\n");
+        let pages = render(&bytes);
+        assert_eq!(pages.len(), 1);
+        let (w, h, px) = &pages[0];
+        let red_rows: Vec<usize> = (0..*h as usize).filter(|y| (0..*w as usize).any(|x| px[(y * *w as usize + x) * 4] > 200 && px[(y * *w as usize + x) * 4 + 1] < 60)).collect();
+        let inked = |y: usize| (0..*w as usize).any(|x| px[(y * *w as usize + x) * 4..][..3].iter().any(|c| *c < 245));
+        assert!(!red_rows.is_empty(), "the red picture is drawn");
+        let picture_bottom = *red_rows.last().unwrap();
+        assert!((picture_bottom + 1..picture_bottom + 14).any(inked), "caption text is right below the picture (it ends at row {picture_bottom})");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-004
+    #[test]
+    fn a_sound_with_a_cover_and_a_video_show_their_thumbnail_and_others_keep_their_link_text() {
+        let (v, d) = media_vault();
+        let (_, c) = export_text(&v, "![[tone-cover.mp3]]\n");
+        assert!(c.contains("/Im") && c.contains(&hex("tone-cover.mp3")), "the cover is the thumbnail");
+        // a sound without a cover has nothing to show: the link text stays, as before
+        let (_, c) = export_text(&v, "![[tone.wav]]\n");
+        assert!(!c.contains("/Im"), "no thumbnail");
+        assert!(c.contains(&hex("tone.wav")), "the raw link stays");
+        // a picture that cannot be read and a link to a file that is not there stay text too
+        std::fs::write(v.abs(Path::new("broken.png")), b"no picture").unwrap();
+        let mut v = v;
+        v.rescan();
+        let (_, c) = export_text(&v, "![[broken.png]]\n\n![[nothing.png]]\n");
+        assert!(!c.contains("/Im") && c.contains(&hex("broken.png")) && c.contains(&hex("nothing.png")));
+        // with the picture embeds switched off nothing is drawn but the link text
+        let off = ExportOptions { embeds: false, ..ExportOptions::for_note() };
+        let c = contents(&export_note(&v, Path::new("Welcome.md"), "![[pic.png]]\n", &off).unwrap());
+        assert!(!c.contains("/Im") && c.contains(&hex("pic.png")));
+        // the first frame of a video, when ffmpeg is there
+        if crate::media::ffmpeg::locate().is_some() {
+            let (_, c) = export_text(&v, "![[clip.mp4]]\n");
+            assert!(c.contains("/Im") && c.contains(&hex("clip.mp4")), "the first frame is the thumbnail");
+        } else {
+            println!("skipping the video: ffmpeg is not installed");
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 

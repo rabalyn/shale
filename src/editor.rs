@@ -754,6 +754,27 @@ impl NoteEditor {
         (link, web)
     }
 
+    /// The caption of an embed shown inside the editor (EDIT-025), one line of muted text below
+    /// `art` (the picture's rectangle), shortened to the room it has. A click on it opens the
+    /// link's target.
+    fn paint_caption(ui: &mut Ui, link: &LinkSpan, art: Rect, (base_size, max_w): (f32, f32), id: egui::Id) -> Option<EditorAction> {
+        let size = crate::caption::size(base_size);
+        let font = egui::FontId::proportional(size);
+        let room = art.width().max(160.0).min(max_w);
+        let shown = crate::caption::fit(&crate::caption::text(link), room, |t| ui.painter().layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x);
+        let galley = ui.painter().layout_no_wrap(shown, font, theme::MUTED);
+        let rect = Rect::from_min_size(Pos2::new(art.min.x, art.max.y + crate::caption::GAP), galley.size());
+        // click and drag, as the player's controls: the text box under it would take a plain click
+        let resp = ui.interact(rect, id, egui::Sense::click_and_drag());
+        let hovered = resp.hovered();
+        if hovered {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let colour = if hovered { theme::LINK } else { theme::MUTED };
+        ui.painter().with_clip_rect(ui.clip_rect()).galley(rect.min, galley, colour);
+        resp.clicked().then(|| EditorAction::OpenLink { target: link.target.clone(), heading: link.heading.clone(), new_tab: false })
+    }
+
     /// What following a link does: the one place a click and `gt` (EDIT-023) share.
     fn follow_action(link: Option<&(LinkSpan, bool)>, web: Option<&crate::lists::WebLink>, new_tab: bool) -> Option<EditorAction> {
         match (web, link) {
@@ -855,6 +876,8 @@ impl NoteEditor {
         // Inline embeds: pictures, drawings and PDFs are shown in place of their link unless the
         // cursor is inside the link.
         let mut images: Vec<(Range<usize>, f32, Art, Vec2)> = Vec::new();
+        // the caption under each shown embed (EDIT-025) is part of its row
+        let caption_h = crate::caption::height(base_size);
         // the widest a shown embed can be (where the text can go)
         let mut max_w = 80.0;
         // line numbers (EDIT-018): a gutter wide enough for the last number, left of the text
@@ -909,7 +932,7 @@ impl NoteEditor {
                 if crate::media::is_image(&p) {
                     if self.media.notice(&abs).is_some() {
                         let size = Vec2::new(max_w.min(520.0), 28.0);
-                        images.push((l.range.clone(), size.y + 6.0, Art::Download(abs.clone()), size));
+                        images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Download(abs.clone()), size));
                         continue;
                     }
                     let Some(tex) = crate::media::texture(ui.ctx(), &abs) else { continue };
@@ -921,22 +944,22 @@ impl NoteEditor {
                         }
                         None => fit(tw, th, 420.0),
                     };
-                    images.push((l.range.clone(), size.y + 6.0, Art::Tex(tex), size));
+                    images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Tex(tex), size));
                 } else if crate::drawing::excalidraw_md::is_drawing_path(&p) {
                     let Some(scene) = crate::reader::scene_cached(ui.ctx(), &abs) else { continue };
                     let Some(b) = scene.bounds() else { continue };
                     let b = b.expand(20.0);
                     let size = fit(b.width().max(40.0), b.height().max(40.0), 420.0);
-                    images.push((l.range.clone(), size.y + 6.0, Art::Scene(scene, p.clone()), size));
+                    images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Scene(scene, p.clone()), size));
                 } else if crate::media::is_media(&p) {
                     let size = crate::media::widget::card_size(&abs, max_w, asked);
-                    images.push((l.range.clone(), size.y + 6.0, Art::Audio(abs.clone()), size));
+                    images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Audio(abs.clone()), size));
                 } else if crate::pdf::view::is_pdf(&p) {
                     match crate::pdf::view::pdf_pages(ui.ctx(), &abs, 1) {
                         crate::pdf::view::PdfState::Ready { pages, total } if !pages.is_empty() => {
                             let [tw, th] = pages[0].size_vec2().into();
                             let size = fit(tw, th, 520.0);
-                            images.push((l.range.clone(), size.y + 6.0, Art::Pdf(pages[0].clone(), total), size));
+                            images.push((l.range.clone(), size.y + 6.0 + caption_h, Art::Pdf(pages[0].clone(), total), size));
                         }
                         crate::pdf::view::PdfState::Loading => ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)),
                         _ => {}
@@ -1062,6 +1085,12 @@ impl NoteEditor {
                         let tag = Rect::from_min_size(rect.min + Vec2::new(6.0, 6.0), g.size() + Vec2::new(10.0, 4.0));
                         painter.rect_filled(tag, 4.0, Color32::from_black_alpha(170));
                         painter.galley(tag.min + Vec2::new(5.0, 2.0), g, Color32::WHITE);
+                    }
+                }
+                // the link as the caption below the picture; a click on it follows the link (EDIT-025)
+                if let Some(link) = markdown::find_links(&now_text[r.clone()]).into_iter().next() {
+                    if let Some(a) = Self::paint_caption(ui, &link, rect, (base_size, max_w), id.with("caption")) {
+                        action = Some(a);
                     }
                 }
             }
@@ -1925,6 +1954,55 @@ mod tests {
 
     fn press(pos: Pos2, pressed: bool) -> Event {
         Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+    }
+
+    // spec: EDIT-025
+    #[test]
+    fn a_shown_embed_has_its_link_as_a_caption_below_it_and_a_click_on_it_follows_the_link() {
+        let (v, d) = vault_for_tests("caption");
+        image::RgbaImage::from_pixel(200, 120, image::Rgba([200, 30, 30, 255])).save(d.join("pic.png")).unwrap();
+        image::RgbaImage::from_pixel(200, 120, image::Rgba([30, 30, 200, 255])).save(d.join("other.png")).unwrap();
+        let mut v = v;
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("intro\n![[pic.png]]\n![[other.png|Sea at dusk|200]]\nafter");
+        let mut ed = NoteEditor::new(egui::Id::unique("caption"));
+        ed.inline_images = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        for _ in 0..3 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        let find = |h: &Harness, t: &str| h.rects.iter().find(|(s, _)| s == t).map(|(_, r)| *r);
+        let pic = find(&h, "pic.png").expect("the link target is the caption");
+        let other = find(&h, "Sea at dusk").expect("the alias words are the caption");
+        assert!(other.top() > pic.bottom() + 100.0, "the second picture comes below the first one and its caption");
+        // the caption is below its picture, which is 3 points under the row's top
+        let (galley, pos) = ed.last_layout.clone().unwrap();
+        let top = pos.y + galley.pos_from_cursor(CCursor::new(6)).min.y + 3.0;
+        assert!(pic.top() >= top + 120.0, "below the picture: {} vs {}", pic.top(), top);
+        // a click on the caption opens the file instead of showing the link text
+        let at = pic.center();
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(at)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(at, true)]);
+        let (_, action) = h.frame(&mut ed, &mut text, &v, rel, vec![press(at, false)]);
+        assert!(matches!(action, Some(EditorAction::OpenLink { ref target, .. }) if target == "pic.png"), "the caption opens the target");
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(find(&h, "pic.png").is_some(), "the click did not put the cursor into the link");
+        // with the cursor in the link there is no picture and no caption: the link text is shown
+        ed.pending_cursor = Some(9);
+        for _ in 0..3 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        assert!(find(&h, "pic.png").is_none(), "no caption while the link is edited");
+        // a picture that cannot be shown keeps its link text, without a caption
+        let mut broken = String::from("![[missing.png]]");
+        let mut ed2 = NoteEditor::new(egui::Id::unique("caption2"));
+        ed2.inline_images = true;
+        for _ in 0..3 {
+            h.frame(&mut ed2, &mut broken, &v, rel, vec![]);
+        }
+        assert!(find(&h, "missing.png").is_none() && h.texts.iter().any(|t| t.contains("![[missing.png]]")));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: EDIT-024

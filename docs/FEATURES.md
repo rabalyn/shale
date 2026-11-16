@@ -15,6 +15,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Pictures (`![[photo.png]]`), drawings (`![[Sketch.excalidraw]]`) and PDFs are shown inside the
   editor. Pictures and videos have draggable edges and corners (the width goes into the link,
   `![[photo.png|300]]`), a round **100%** button for the natural size and a round fullscreen button.
+  Every shown embed has its link as a one-line caption below it (the words of an alias,
+  `![[photo.png|Sea at dusk]]`, else the file's link); a click on the caption opens the file.
 - Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
   line keeps one number.
 - Lists continue when you press Enter (also numbered lists and to-dos `- [ ]` / `1. [ ]`).
@@ -68,7 +70,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ![The note menu](userguide/z_media/screenshots/more-menu.png)
 
 - Export notes and drawings to PDF (paper size, margins, fonts and more in a dialog; tables become
-  real grids with the header repeated across pages, or raw text lines with "Export plain text"), insert a
+  real grids with the header repeated across pages, or raw text lines with "Export plain text";
+  embedded pictures, drawings, PDFs, the first frame of a video and the cover of a sound are
+  drawn as thumbnails with their link as the caption below), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
