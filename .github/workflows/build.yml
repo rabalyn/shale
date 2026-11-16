@@ -47,6 +47,7 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           sh .github/check-release.sh "$TAG"
+          sh .github/check-ai-notice.sh
           sh .github/release-notes.sh "$TAG" > release-notes.md
           cat release-notes.md
 

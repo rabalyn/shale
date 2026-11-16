@@ -114,6 +114,12 @@ jobs:
           sh .github/test-check-release.sh
           sh .forgejo/scripts/test-check-commit-issues.sh
 
+      # BUILD-015: the README and every release page start with the AI-development notice
+      - name: Check the AI notice
+        run: |
+          sh .github/check-ai-notice.sh
+          sh .github/test-check-ai-notice.sh
+
       - name: Libraries for the window (Wayland, X11, OpenGL)
         run: |
           apt-get update -qq
