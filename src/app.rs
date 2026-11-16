@@ -135,6 +135,7 @@ mod tabs;
 #[cfg(all(test, target_os = "linux"))]
 mod tree_ui_tests;
 mod usage;
+mod userguide;
 
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
@@ -321,6 +322,8 @@ pub struct ShaleApp {
     pub media: crate::media::MediaPlayer,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
+    /// where the user guide comes from and where its copy goes (DEV-020)
+    pub guide: crate::userguide::Places,
     /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
     pub handover: Option<crate::instance::Handover>,
     pub modal: Option<Modal>,
@@ -526,6 +529,7 @@ impl ShaleApp {
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             usage: crate::data_usage::DataUsage::new(places),
+            guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
         };
         app.recovery.notice = crate::recovery::unseen(&app.recovery.root);
@@ -1893,6 +1897,9 @@ impl ShaleApp {
         }
         if settings {
             self.open_settings(SettingsTab::General);
+        }
+        if is(KeyAction::UserGuide) {
+            self.open_user_guide();
         }
         if is(KeyAction::DataUsage) {
             self.open_data_usage();

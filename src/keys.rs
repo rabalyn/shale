@@ -219,6 +219,7 @@ actions! {
     Save => "global.save", "Save now", Global, ["Ctrl+S"];
     Settings => "global.settings", "Settings", Global, ["Ctrl+Comma"];
     DataUsage => "global.data_usage", "Data usage (what Shale keeps on disk, its caches)", Global, ["Ctrl+Shift+D"];
+    UserGuide => "global.user_guide", "Open the user guide", Global, ["F1"];
     PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+Alt+H"];
     NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+Alt+L"];
     AlternateView => "global.alternate_view", "Alternate view: swap with the previous view of this tab (again: back)", Global, ["Ctrl+6"];
@@ -374,7 +375,8 @@ impl Keymap {
     pub fn check(&self, a: Action, b: &Binding) -> Result<(), String> {
         let scope = a.def().scope;
         let first = b.0[0];
-        if scope == Scope::Global && !first.ctrl && !first.alt {
+        let function_key = first.key.name().strip_prefix('F').is_some_and(|n| n.parse::<u8>().is_ok());
+        if scope == Scope::Global && !first.ctrl && !first.alt && !function_key {
             return Err(format!("{} needs Ctrl or Alt: a shortcut that works everywhere must not get in the way of typing", b.display()));
         }
         if b.0.len() == 1 && scope == Scope::Global && RESERVED_TEXT.iter().any(|(shift, key)| first.ctrl && !first.alt && first.shift == *shift && first.key == *key) {
@@ -528,7 +530,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 24 + 36 + 5);
+        assert_eq!(DEFS.len(), 25 + 36 + 5);
     }
 
     // spec: KEY-003
@@ -578,6 +580,7 @@ mod tests {
     fn reserved_and_plain_global_keys_are_refused() {
         let k = Keymap::default();
         assert!(k.check(Action::Save, &b("G")).unwrap_err().contains("needs Ctrl or Alt"));
+        assert!(k.check(Action::Save, &b("F5")).is_ok(), "a function key does not get in the way of typing");
         assert!(k.check(Action::Save, &b("Space g")).is_err());
         assert!(k.check(Action::Save, &b("Ctrl+C")).unwrap_err().contains("reserved"));
         assert!(k.check(Action::Save, &b("Ctrl+Shift+Z")).unwrap_err().contains("reserved"));

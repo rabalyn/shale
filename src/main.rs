@@ -61,6 +61,9 @@ mod theme;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;
+mod userguide;
+#[cfg(test)]
+mod userguide_ui_tests;
 #[cfg(test)]
 mod utf8_tests;
 mod vault;

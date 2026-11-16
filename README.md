@@ -67,8 +67,12 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
-**User guide**: `docs/userguide` is a Shale vault. Open it as a vault (`shale --vault docs/userguide`, or
-Settings → Vault folder) and start with "Start here": the guide shows the features it explains.
+**User guide**: `docs/userguide` is a Shale vault: it shows the features it explains. In Shale press **F1**
+(or Settings → Help → **Open user guide**): Shale copies the guide once per version into its data folder
+(`~/.local/share/shale/userguide-<version>/` on Linux; a copy you edited is never overwritten) and opens it as a
+vault, at "Start here". The release archive has the guide as the folder `docs/userguide/` next to the program; a
+build from source finds it in the source tree. Each release also has `shale-userguide-<version>.zip` (with
+its `.sha256` file) to unpack anywhere and open as a vault (`shale --vault <folder>`, or Settings → Vault folder).
 
 ## Supported systems
 
@@ -106,7 +110,8 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
 
 Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
 with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`,
-unpack it and run `./shale/shale`. To start Shale from the app menu with its icon (on Wayland the
+unpack it and run `./shale/shale`. (The user guide is in the archive as `shale/docs/userguide/`, and
+alone as `shale-userguide-<version>.zip`.) To start Shale from the app menu with its icon (on Wayland the
 taskbar needs this to show the icon), install the desktop file and the icon from the unpacked folder:
 
 ```sh
@@ -119,7 +124,7 @@ Releases are built by GitHub Actions
 version, build it from source (below).
 
 Each download has a `.sha256` file next to it; to check the download, put both files in one folder and run
-`sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256`.
+`sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256` (the same for `shale-userguide-<version>.zip`).
 This catches a damaged download, not a compromised release page.
 
 To check that a download was built by Shale's release workflow from its version tag, use the
@@ -230,6 +235,7 @@ Text editing keys and vim keys are fixed.
 | Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
+| F1 | Open the user guide (a copy in Shale's data folder, opened as a vault) |
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |
 | Middle-click on a link | Open it in a new tab |
