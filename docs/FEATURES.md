@@ -325,6 +325,10 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   nobody can know whether it went out: the mail shows as "may have been sent", Shale never sends it
   again by itself, and you look in Sent and choose **Send again** or **Discard**. The same if Shale was
   closed in the middle of sending.
+
+  ![An outbox mail that was not sent](screenshots/outbox-failed.png)
+  ![An outbox mail that may have been sent](screenshots/outbox-unsure.png)
+
 - **Questions before sending**: with no subject, with no text, and when the text says "attached" /
   "attachment" / "angehängt" / "anbei" / "Anhang" but nothing is attached. Bcc recipients get the mail
   but are never written into it; no read receipt is requested; the `User-Agent` header is off unless
