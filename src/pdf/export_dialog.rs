@@ -31,14 +31,13 @@ impl ExportDialog {
     }
 }
 
-pub fn show(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
+pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     d.rects.clear();
     let mut rects: Vec<(String, Rect)> = Vec::new();
     let mut rec = |k: &str, r: egui::Response| -> egui::Response {
         rects.push((k.to_string(), r.rect));
         r
     };
-    let mut result = DialogResult::Open;
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     egui::Grid::new("export-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
         ui.label(muted("Paper"));
@@ -112,11 +111,22 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
     });
     ui.add_space(4.0);
     rec("open-after", ui.checkbox(&mut d.open_after, "Open the PDF after exporting"));
+    d.rects = rects;
+}
+
+/// The dialog's footer (NAV-028): the error of the last try, Export and Cancel. Call it after
+/// [`show`] in the same frame.
+pub fn footer(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
+    let mut result = DialogResult::Open;
     if let Some(e) = &d.error {
         ui.colored_label(theme::LINK_MISSING, e);
     }
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
+        let mut rec = |k: &str, r: egui::Response| -> egui::Response {
+            d.rects.push((k.to_string(), r.rect));
+            r
+        };
         if rec("export", ui.button(egui::RichText::new("Export").strong())).clicked() {
             result = DialogResult::Export;
         }
@@ -124,7 +134,6 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
             result = DialogResult::Cancel;
         }
     });
-    d.rects = rects;
     result
 }
 
@@ -146,7 +155,9 @@ mod tests {
             let mut res = DialogResult::Open;
             let mut out = self.ctx.run_ui(raw, |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let r = show(ui, d);
+                    // the content and the footer, as the dialog window shows them together
+                    show(ui, d);
+                    let r = footer(ui, d);
                     if r != DialogResult::Open {
                         res = r;
                     }

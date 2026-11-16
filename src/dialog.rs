@@ -21,6 +21,9 @@ const MIN_SIZE: Vec2 = Vec2::new(220.0, 90.0);
 /// Room kept below the scrolling content for a footer (its separator and one row of buttons)
 /// in the first frame; from the second frame on the height the footer measured is used (NAV-029).
 const FOOTER_ROOM: f32 = 40.0;
+/// What the room kept for the footer is larger than the footer measured: not to clip it by a
+/// rounding error.
+const FOOTER_SLACK: f32 = 1.0;
 /// Frames a new dialog takes to measure its content: egui's invisible sizing pass, one frame
 /// to measure, one in which the window takes that size.
 const FIT_FRAMES: u8 = 3;
@@ -33,6 +36,11 @@ enum Sizing {
     /// Placed and its content grew past it: one frame of following the content height again,
     /// with the top-left corner kept where it is.
     Growing,
+    /// Measured, the frame in which the window is set to exactly the measured size: egui keeps
+    /// the largest size it was asked for while measuring (a wrapping label is taller in the
+    /// first frames, before the window has its width), which left an empty band below the
+    /// content.
+    Settling { size: Vec2 },
     /// Placed. `auto` until the user resizes it: then it no longer grows by itself.
     Placed { auto: bool, size: Vec2 },
 }
@@ -44,13 +52,11 @@ pub struct Dialog {
     modal: bool,
 }
 
-pub struct DialogResponse<T> {
-    /// What the content returned; `None` when the window was not shown (only on a hidden frame).
-    pub inner: Option<T>,
+pub struct DialogResponse {
     close: bool,
 }
 
-impl<T> DialogResponse<T> {
+impl DialogResponse {
     /// Esc (on the top dialog, with no popup open), the ✕, or a click outside a modal dialog.
     pub fn should_close(&self) -> bool {
         self.close
@@ -75,7 +81,7 @@ impl Dialog {
         self
     }
 
-    pub fn show<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T) -> DialogResponse<T> {
+    pub fn show<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T) -> DialogResponse {
         self.show_inner(ctx, &mut (), |ui, _| content(ui), None::<fn(&mut Ui, &mut ())>)
     }
 
@@ -83,12 +89,13 @@ impl Dialog {
     /// scrolls; the footer stays in view, also in a window shorter than the content. The content
     /// and the footer are closures over the same `state` (they could not both borrow what the
     /// dialog edits); the footer runs right after the content, in the same frame.
-    pub fn show_with_footer<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse<T> {
+    pub fn show_with_footer<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse {
         self.show_inner(ctx, state, content, Some(footer))
     }
 
-    fn show_inner<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse<T> {
+    fn show_inner<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse {
         let Self { id, title, width, modal } = self;
+        let has_footer = footer.is_some();
         let screen = ctx.content_rect();
         let max = (screen.size() - Vec2::splat(2.0 * MARGIN)).max(MIN_SIZE);
         let sizing_key = id.with("sizing");
@@ -125,9 +132,12 @@ impl Dialog {
             .max_size(screen.size())
             .default_width(width.min(max.x))
             .default_height(MIN_SIZE.y);
-        let measuring = !matches!(sizing, Sizing::Placed { .. });
+        let measuring = matches!(sizing, Sizing::Fitting { .. } | Sizing::Growing);
         if measuring {
             window = window.max_height(max.y);
+        }
+        if let Sizing::Settling { size } = sizing {
+            window = window.fixed_size(size);
         }
         if matches!(sizing, Sizing::Fitting { .. }) {
             // centred while it finds its height; from then on it stays where it is put
@@ -159,7 +169,7 @@ impl Dialog {
                 footer(ui, state);
                 // what the footer took, measured from the end of the content: the room kept for
                 // it in the next frame (a bigger font makes a taller footer)
-                let measured = ui.min_rect().bottom() - scope.response.rect.bottom() + 1.0;
+                let measured = ui.min_rect().bottom() - scope.response.rect.bottom() + FOOTER_SLACK;
                 if (measured - footer_room).abs() > 0.5 {
                     ctx.data_mut(|d| d.insert_temp(footer_key, measured));
                     ctx.request_repaint();
@@ -169,7 +179,7 @@ impl Dialog {
         });
 
         let Some(shown) = shown else {
-            return DialogResponse { inner: None, close: !open };
+            return DialogResponse { close: !open };
         };
         let rect = shown.response.rect;
 
@@ -179,9 +189,11 @@ impl Dialog {
             Sizing::Fitting { .. } => {
                 // done measuring: pin the top-left corner so a resize does not move the dialog
                 pin_left_top(ctx, id, rect.min);
-                Sizing::Placed { auto: true, size: rect.size() }
+                // the window gets the slack of the footer's room too, or the content (as tall as
+                // it is) would be a hair too tall for the scroll area and get a scroll bar
+                Sizing::Settling { size: rect.size() + Vec2::new(0.0, if has_footer { FOOTER_SLACK } else { 0.0 }) }
             }
-            Sizing::Growing => Sizing::Placed { auto: true, size: rect.size() },
+            Sizing::Settling { .. } | Sizing::Growing => Sizing::Placed { auto: true, size: rect.size() },
             Sizing::Placed { auto, size } => {
                 let resized = (rect.size() - size).length() > 0.5 && ctx.input(|i| i.pointer.any_down());
                 let auto = auto && !resized;
@@ -198,7 +210,7 @@ impl Dialog {
             ctx.request_repaint();
         }
         let esc = modal && is_top && !any_popup_open && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
-        DialogResponse { inner: shown.inner, close: !open || backdrop_clicked || esc }
+        DialogResponse { close: !open || backdrop_clicked || esc }
     }
 }
 
