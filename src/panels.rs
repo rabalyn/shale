@@ -986,7 +986,6 @@ impl ShaleApp {
                             .on_hover_text("How opaque the round button is; it is fully opaque while the mouse is over it")
                             .changed();
                     });
-                    changed |= ui.checkbox(&mut self.cfg.media_autoplay, "Start the first sound or video of a note when the note is opened").changed();
                     changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing: notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back").changed();
                     ui.horizontal(|ui| {
                         ui.label("Text size");

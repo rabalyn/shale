@@ -613,14 +613,13 @@ impl ShaleApp {
     /// The player settings go to the media player each frame; a volume that was set in a player
     /// is saved once the mouse is let go (MEDIA-006).
     fn media_tick(&mut self, ctx: &egui::Context) {
-        self.media.end_frame();
         if !ctx.input(|i| i.pointer.any_down()) {
             if let Some(v) = self.media.take_volume_change() {
                 self.cfg.media_volume = v;
                 self.save_config();
             }
         }
-        self.media.configure(self.cfg.media_volume, self.cfg.media_play_button_opacity, self.cfg.media_autoplay);
+        self.media.configure(self.cfg.media_volume, self.cfg.media_play_button_opacity);
     }
 
     pub fn toast(&mut self, msg: impl Into<String>) {
@@ -800,7 +799,6 @@ impl ShaleApp {
                     }
                 }
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
-                self.media.arm_autoplay();
             }
             FileKind::Drawing if crate::drawing::canvas::is_canvas_path(rel) && !self.drawings.contains_key(rel) => {
                 // a canvas: open the copy converted earlier, convert it, or ask
