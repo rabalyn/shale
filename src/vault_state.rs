@@ -123,16 +123,36 @@ pub fn broken_name(path: &Path) -> PathBuf {
 // The vault's own files
 
 /// When the files stored in Git LFS are downloaded (`sync.lfs_download`, SYNC-020).
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum LfsDownload {
-    /// `git lfs pull` after every successful sync.
-    Always,
-    /// A file is downloaded when it is played or shown and the person asks for it. Also what a
-    /// value this Shale does not know is read as.
-    #[serde(other)]
+    /// A file is downloaded when it is played or shown and the person asks for it.
     #[default]
     OnDemand,
+    /// `git lfs pull` after every successful sync.
+    Always,
+    /// A value this Shale does not know (written by a newer one): it acts as `OnDemand`, and is
+    /// written back as it was until the person changes the setting (CFG-007).
+    Other(String),
+}
+
+impl Serialize for LfsDownload {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(match self {
+            LfsDownload::OnDemand => "on_demand",
+            LfsDownload::Always => "always",
+            LfsDownload::Other(v) => v,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for LfsDownload {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match String::deserialize(d)?.as_str() {
+            "on_demand" => LfsDownload::OnDemand,
+            "always" => LfsDownload::Always,
+            other => LfsDownload::Other(other.to_string()),
+        })
+    }
 }
 
 /// Git sync settings of a vault (ADR-0008, SYNC-015).
@@ -422,9 +442,28 @@ mod tests {
         let json = serde_json::to_vec(&s).unwrap();
         assert_eq!(serde_json::to_value(&s).unwrap()["sync"]["lfs_download"], "always");
         assert_eq!(parse::<VaultSettings>(&json).unwrap().0.sync.lfs_download, LfsDownload::Always);
-        // a value this Shale does not know is read as the default instead of losing the whole file
+        // a value this Shale does not know acts as the default, keeps the file readable and is written back as it was
         let (odd, _) = parse::<VaultSettings>(br#"{"version": 1, "sync": {"lfs_download": "when_on_wifi", "interval_minutes": 9}}"#).unwrap();
-        assert_eq!((odd.sync.lfs_download, odd.sync.interval_minutes), (LfsDownload::OnDemand, 9));
+        assert_eq!((&odd.sync.lfs_download, odd.sync.interval_minutes), (&LfsDownload::Other("when_on_wifi".into()), 9));
+        assert!(!crate::gitsync::lfs::pull_after_sync(&odd.sync.lfs_download, std::path::Path::new("/nonexistent")));
+        let back: Value = serde_json::from_slice(&serde_json::to_vec(&odd).unwrap()).unwrap();
+        assert_eq!(back["sync"]["lfs_download"], "when_on_wifi");
+        // ... also through a save of the vault's files
+        let root = tmp("lfs-unknown");
+        let p = VaultData::settings_path(&root);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        crate::fsutil::write_atomic(&p, br#"{"version": 1, "sync": {"lfs_download": "when_on_wifi"}}"#).unwrap();
+        let (mut d, _) = VaultData::load(&root);
+        d.settings.people_dir = "Q".into();
+        d.save().unwrap();
+        let v: Value = serde_json::from_slice(&crate::fsutil::read(&p).unwrap()).unwrap();
+        assert_eq!(v["sync"]["lfs_download"], "when_on_wifi");
+        // the person changing the setting replaces it
+        d.settings.sync.lfs_download = LfsDownload::OnDemand;
+        d.save().unwrap();
+        let v: Value = serde_json::from_slice(&crate::fsutil::read(&p).unwrap()).unwrap();
+        assert_eq!(v["sync"]["lfs_download"], "on_demand");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn file_tab(f: &str, pinned: bool) -> SavedTab {

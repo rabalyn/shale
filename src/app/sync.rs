@@ -290,7 +290,7 @@ impl ShaleApp {
         };
         self.sync.last = Some((when, Ok(report.summary())));
         self.refresh_lfs();
-        if lfs::pull_after_sync(self.vdata.settings.sync.lfs_download, root) && self.vault.as_ref().map(|v| v.root.as_path()) == Some(root) {
+        if lfs::pull_after_sync(&self.vdata.settings.sync.lfs_download, root) && self.vault.as_ref().map(|v| v.root.as_path()) == Some(root) {
             self.sync.pulls.push_back(None);
         }
         if self.vault.as_ref().map(|v| v.root.as_path()) != Some(root) {

@@ -273,8 +273,8 @@ pub fn pull_all(git: &Git, vault: &Path, tree: &TreeLock) -> Result<(), String> 
 
 /// Whether a finished sync is followed by `git lfs pull`: the vault's setting says `always` and
 /// the repository sends files to LFS (SYNC-020).
-pub fn pull_after_sync(setting: crate::vault_state::LfsDownload, vault: &Path) -> bool {
-    setting == crate::vault_state::LfsDownload::Always && in_use(vault)
+pub fn pull_after_sync(setting: &crate::vault_state::LfsDownload, vault: &Path) -> bool {
+    *setting == crate::vault_state::LfsDownload::Always && in_use(vault)
 }
 
 /// For a conflict copy (SYNC-022): the real file when `blob` is a pointer whose object this

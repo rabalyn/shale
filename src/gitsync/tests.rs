@@ -778,10 +778,10 @@ fn the_download_asks_for_one_file_and_the_path_stays_in_the_vault() {
     let dir = std::env::temp_dir().join(format!("shale-pull-after-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     use crate::vault_state::LfsDownload::{Always, OnDemand};
-    assert!(!lfs::pull_after_sync(Always, &dir), "no LFS lines, nothing to pull");
+    assert!(!lfs::pull_after_sync(&Always, &dir), "no LFS lines, nothing to pull");
     write(&dir, ".gitattributes", "*.mp3 filter=lfs diff=lfs merge=lfs -text\n");
-    assert!(lfs::pull_after_sync(Always, &dir));
-    assert!(!lfs::pull_after_sync(OnDemand, &dir), "on demand is the default");
+    assert!(lfs::pull_after_sync(&Always, &dir));
+    assert!(!lfs::pull_after_sync(&OnDemand, &dir), "on demand is the default");
     let _ = fs::remove_dir_all(&dir);
 }
 
