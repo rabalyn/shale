@@ -115,7 +115,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   lines of a selection) shows the raw markdown. The note stays editable; links still open with a
   click and task boxes still tick. A **table** away from the cursor is drawn as a real grid (also
   in the reading view): borders, a bold header row, aligned columns, formatted cell text, long
-  text wrapping in its own column; click it, or move the cursor into it, to edit the raw rows.
+  text wrapping in its own column; click it, or move the cursor into it, to edit the raw rows. Hover the grid for buttons that add a
+  row or column and delete the hovered row or column.
 
   ![The Markdown preview](userguide/z_media/screenshots/editor-preview.png)
 
