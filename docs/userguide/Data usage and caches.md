@@ -1,0 +1,26 @@
+---
+features:
+  - "Data usage and caches"
+---
+# Data usage and caches
+
+![[data-usage.png]]
+
+Settings → General → Data and caches → **Data usage…** (or Ctrl+Shift+D) shows what Shale keeps
+on disk. Back to [[Start here]].
+
+- **Saved**: the vault by kind (notes, drawings, pictures, PDFs, other files, `.shale/`,
+  `.trash/`, `.git/`), its 10 largest files and folders, and your data outside the vault: mail
+  per account, drafts, outbox, calendars and recovered notes. Nothing here can be deleted from
+  this window.
+- **Caches** are what Shale can build or fetch again: social pictures, the social post index,
+  the mail index and its backups, damaged copies of the mail index, learned tag words and the
+  keyboard debug log. Each row shows its size and has a **Clear** button.
+- How long each cache is kept is a setting (on its row, and in Settings under "How long caches
+  are kept"): social pictures 30 days and 500 MB, social posts 365 days and 10 000 per account,
+  the newest 3 mail index backups, damaged copies forever, the debug log 10 MB. Every value can
+  also be "forever" or "no limit". The keys are in [[Settings reference]] (`caches`).
+- A cleanup runs a minute after the start and then daily. It never touches your notes, files or
+  mail.
+
+#userguide #data

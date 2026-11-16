@@ -67,6 +67,9 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
+**User guide**: `docs/userguide` is a Shale vault. Open it as a vault (`shale --vault docs/userguide`, or
+Settings → Vault folder) and start with "Start here": the guide shows the features it explains.
+
 ## Supported systems
 
 | System | Tested | Notes |
@@ -168,8 +171,8 @@ Other options:
   steps are listed at the top of `src/script.rs`).
 - An option Shale does not know, or one without its value, stops the start with an error and the
   usage line (exit code 2) instead of being skipped.
-- The pictures of `docs/screenshots/` are made by `docs/screenshots/regen.sh` (all, or the names
-  given) from `docs/screenshots/recipes.conf`; it runs each picture in a private X display
+- The pictures of the user guide (`docs/userguide/z_media/screenshots/`) are made by
+  `docs/screenshots/regen.sh` (all, or the names given) from `docs/screenshots/recipes.conf`; it runs each picture in a private X display
   (`xvfb-run`) and needs a built `shale` that is not older than the sources (`SHALE=…` to choose it).
 
 ## Keyboard
