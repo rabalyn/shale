@@ -125,6 +125,8 @@ pub enum RightPanel {
 mod drops;
 #[cfg(all(test, target_os = "linux"))]
 mod drops_tests;
+#[cfg(test)]
+mod handover_tests;
 mod mail;
 mod screenshot;
 mod social;
@@ -312,6 +314,8 @@ pub struct ShaleApp {
     pub scenes: SceneCache,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
+    /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
+    pub handover: Option<crate::instance::Handover>,
     pub modal: Option<Modal>,
     /// The key registry with the user's changes (KEY-001…009).
     pub keymap: crate::keys::Keymap,
@@ -334,7 +338,7 @@ pub struct ShaleApp {
 }
 
 impl ShaleApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, opts: Options) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, opts: Options, handover: Option<crate::instance::Handover>) -> Self {
         theme::apply(&cc.egui_ctx);
         if opts.screenshot.is_some() {
             // no fades, no scroll easing and a steady text cursor: a picture shows the end state,
@@ -352,7 +356,43 @@ impl ShaleApp {
             crate::import::wl_drop::attach(cc);
         }
         let persist = opts.screenshot.is_none();
-        Self::build(opts, persist)
+        let mut app = Self::build(opts, persist);
+        if let Some(h) = &handover {
+            h.attach(&cc.egui_ctx);
+        }
+        app.handover = handover;
+        app
+    }
+
+    /// What later starts of Shale handed over (DATA-015): come forward, open a folder as the vault
+    /// or a file of the open vault in a tab.
+    pub(crate) fn take_handover(&mut self, ctx: &egui::Context) {
+        let Some(batches) = self.handover.as_ref().map(|h| h.take()) else { return };
+        for paths in batches {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            for p in paths {
+                self.open_handed_over(&p);
+            }
+        }
+    }
+
+    fn open_handed_over(&mut self, path: &Path) {
+        if path.is_dir() {
+            let same = self.vault.as_ref().is_some_and(|v| std::fs::canonicalize(&v.root).ok() == std::fs::canonicalize(path).ok());
+            if !same {
+                self.open_vault(path);
+            }
+            return;
+        }
+        let rel = self.vault.as_ref().and_then(|v| {
+            let root = std::fs::canonicalize(&v.root).ok()?;
+            std::fs::canonicalize(path).ok()?.strip_prefix(root).ok().map(Path::to_path_buf)
+        });
+        match rel {
+            Some(rel) => self.open(&rel, true),
+            None => self.toast(format!("“{}” is not in the open vault", path.display())),
+        }
     }
 
     /// Set up the app without a window. `persist` = read/write the user's config file.
@@ -477,6 +517,7 @@ impl ShaleApp {
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             usage: crate::data_usage::DataUsage::new(places),
+            handover: None,
         };
         app.recovery.notice = crate::recovery::unseen(&app.recovery.root);
         if let Some(p) = cfg_problem {
@@ -2119,6 +2160,7 @@ impl ShaleApp {
             self.toast(m);
         }
         let ctx = ui.ctx().clone();
+        self.take_handover(&ctx);
         self.sync_tick(&ctx);
         self.mail_tick(&ctx);
         if self.calendar.poll() {
