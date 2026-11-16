@@ -266,6 +266,7 @@ impl MailView {
             }
             Some(KeyAction::MailAttOpen) if on_messages => self.att_open = true,
             Some(KeyAction::MailAttSave) if on_messages => self.att_save = true,
+            Some(a) if crate::mail::keys::BUTTON_KEYS.contains(&a) => self.button_key(cfg, a, actions),
             _ => {}
         }
         if enter {
@@ -925,7 +926,7 @@ impl MailView {
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 let can = msg.state == STATE_FULL;
-                let r = ui.add_enabled(can || !self.marked.is_empty(), egui::Button::new("Import to vault"));
+                let r = ui.add_enabled(can || !self.marked.is_empty(), egui::Button::new(self.mnemonic(ui, "Import to vault", KeyAction::MailBtnImport)));
                 rec(rects, "mail:import", &r);
                 let r = if can {
                     r.on_hover_text(self.tip("Make a note of this mail (or of the marked ones) in the Import dialog; nothing is written until you press Import there", KeyAction::MailImport))
@@ -935,17 +936,17 @@ impl MailView {
                 if r.clicked() {
                     import = true;
                 }
-                if ui.button("Close").clicked() {
+                if ui.button(self.mnemonic(ui, "Close", KeyAction::MailBtnClose)).clicked() {
                     close = true;
                 }
                 // answering needs the message text (MAIL-126)
                 let ready = msg.state == STATE_FULL;
-                for (key, label, kind, tip) in [
-                    ("mail:reply", "Reply", Kind::Reply, self.tip("Answer the sender", KeyAction::MailReply)),
-                    ("mail:reply-all", "Reply all", Kind::ReplyAll, self.tip("Answer everyone", KeyAction::MailReplyAll)),
-                    ("mail:forward", "Forward", Kind::Forward, self.tip("Forward with the attachments", KeyAction::MailForward)),
+                for (key, label, kind, tip, a) in [
+                    ("mail:reply", "Reply", Kind::Reply, self.tip("Answer the sender", KeyAction::MailReply), KeyAction::MailBtnReply),
+                    ("mail:reply-all", "Reply all", Kind::ReplyAll, self.tip("Answer everyone", KeyAction::MailReplyAll), KeyAction::MailBtnReplyAll),
+                    ("mail:forward", "Forward", Kind::Forward, self.tip("Forward with the attachments", KeyAction::MailForward), KeyAction::MailBtnForward),
                 ] {
-                    let r = ui.add_enabled(ready, egui::Button::new(label));
+                    let r = ui.add_enabled(ready, egui::Button::new(self.mnemonic(ui, label, a)));
                     rec(rects, key, &r);
                     let r = if ready { r.on_hover_text(tip.as_str()) } else { r.on_disabled_hover_text("Load the message first") };
                     if r.clicked() {
@@ -957,18 +958,19 @@ impl MailView {
                 let n = if self.marked.is_empty() { String::new() } else { format!(" {}", self.marked.len()) };
                 let live = !msg.gone_on_server;
                 let why = "This mail is gone from the server";
-                for (key, label, a, tip) in [
-                    ("mail:read-toggle", if all_read { format!("Mark{n} unread") } else { format!("Mark{n} read") }, Act::Read, self.tip("Mark as read or unread on the server", KeyAction::MailRead)),
-                    ("mail:flag-toggle", if all_flagged { format!("Unflag{n}") } else { format!("Flag{n}") }, Act::Flag, self.tip("Set or clear the flag on the server", KeyAction::MailFlag)),
-                    ("mail:move", format!("Move{n}…"), Act::Move, self.tip("Move to another folder: type to find it", KeyAction::MailMove)),
+                for (key, label, a, tip, btn) in [
+                    ("mail:read-toggle", if all_read { format!("Mark{n} unread") } else { format!("Mark{n} read") }, Act::Read, self.tip("Mark as read or unread on the server", KeyAction::MailRead), KeyAction::MailBtnRead),
+                    ("mail:flag-toggle", if all_flagged { format!("Unflag{n}") } else { format!("Flag{n}") }, Act::Flag, self.tip("Set or clear the flag on the server", KeyAction::MailFlag), KeyAction::MailBtnFlag),
+                    ("mail:move", format!("Move{n}…"), Act::Move, self.tip("Move to another folder: type to find it", KeyAction::MailMove), KeyAction::MailBtnMove),
                     (
                         "mail:delete",
                         if all_trash { format!("Delete{n} forever…") } else { format!("Delete{n}") },
                         Act::Delete,
                         self.tip(if all_trash { "Remove from Trash for good, after you confirm" } else { "Move to Trash" }, KeyAction::MailDelete),
+                        KeyAction::MailBtnDelete,
                     ),
                 ] {
-                    let r = ui.add_enabled(live, egui::Button::new(label));
+                    let r = ui.add_enabled(live, egui::Button::new(self.mnemonic(ui, &label, btn)));
                     rec(rects, key, &r);
                     let r = if live { r.on_hover_text(tip.as_str()) } else { r.on_disabled_hover_text(why) };
                     if r.clicked() {
