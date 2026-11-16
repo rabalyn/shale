@@ -106,7 +106,7 @@ alone as `shale-userguide-<version>.zip`.) Releases are built by GitHub Actions
 version, build it from source (below).
 
 Each download has a `.sha256` file next to it; to check the download, put both files in one folder and run
-`sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256`.
+`sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256` (the same for `shale-userguide-<version>.zip`).
 This catches a damaged download, not a compromised release page.
 
 To check that a download was built by Shale's release workflow from its version tag, use the

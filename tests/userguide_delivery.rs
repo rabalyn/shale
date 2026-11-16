@@ -74,11 +74,14 @@ fn dev_020_both_release_workflows_pack_the_guide_with_the_script_and_check_the_z
         let text = fs::read_to_string(root().join(wf)).unwrap();
         assert!(text.contains("scripts/userguide-dist.sh dist/shale/userguide"), "{wf}: the archive has no userguide/ next to the program");
         assert!(text.contains("scripts/userguide-dist.sh dist/zip/userguide"), "{wf}: no zip of the guide");
+        assert!(text.contains("tar -C docs --exclude=./userguide"), "{wf}: the archive would hold the guide twice (docs/userguide and userguide/)");
+        assert!(!text.contains("cp -r docs dist/shale/"), "{wf}: the whole docs folder is copied, with the guide");
         assert!(text.contains("shale-userguide"), "{wf}: the zip is not named");
         assert!(text.contains("unzip -tq"), "{wf}: the zip is not checked");
     }
     let gh = fs::read_to_string(root().join(".github/workflows/build.yml")).unwrap();
     assert!(gh.contains("shale-userguide-${LABEL}.zip"), "the release asset is versioned");
     assert!(gh.contains("steps.files.outputs.guide }}.sha256"), "the zip's checksum is attested");
+    assert!(gh.contains("sha256sum -c %s.sha256` (the same for the user guide") && gh.contains("The user guide zip"), "the release notes say how to check the zip (BUILD-011)");
     assert!(gh.contains("\"$GUIDE\" \"$GUIDE.sha256\"; do"), "the zip and its checksum are verified against the attestation");
 }
