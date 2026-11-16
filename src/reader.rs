@@ -23,6 +23,12 @@ pub enum ReaderAction {
     OpenUrl(String),
 }
 
+/// What the reading view draws embeds from.
+pub struct Caches<'a> {
+    pub scenes: &'a mut SceneCache,
+    pub media: &'a crate::media::MediaPlayer,
+}
+
 /// Parsed drawings, re-read when the file changes.
 #[derive(Default)]
 pub struct SceneCache {
@@ -227,7 +233,7 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
     (out, plain_click)
 }
 
-pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, scenes: &mut SceneCache, base: f32, dark_canvas: bool) -> Option<ReaderAction> {
+pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Caches, base: f32, dark_canvas: bool) -> Option<ReaderAction> {
     let mut out = None;
     let hint = |t: &str| vault.link_hint(t, Some(rel));
     let all_links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
@@ -292,7 +298,13 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, scenes: &mut Sce
             let (l, ok) = &line_links[0];
             if *ok {
                 if let Some(target) = vault.resolve(&l.target, Some(rel)) {
-                    embed(ui, vault, &target, scenes, base, dark_canvas, &mut out);
+                    if crate::media::is_audio(&target) {
+                        // a sound is a player of its own, without the frame (MEDIA-001)
+                        crate::media::widget::show(ui, caches.media, &vault.abs(&target), rel);
+                        ui.add_space(6.0);
+                    } else {
+                        embed(ui, vault, &target, caches.scenes, base, dark_canvas, &mut out);
+                    }
                     i += 1;
                     continue;
                 }

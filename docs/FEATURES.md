@@ -32,6 +32,17 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab completes
   like a shell. Files from outside the vault are copied to `z_media/<year>/<month>/`.
 
+- **Sound players.** `![[song.mp3]]` shows a small player instead of a link, in the editor, the
+  markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play; opus files
+  are recognised but cannot be played yet). It shows the cover from the file's tags (or a tile
+  with the file name), a round play/pause button over it (Space too, while the player has the
+  keyboard), a progress bar (click to jump, drag to choose and seek on release) with the time,
+  and a mute button and volume slider. Only one file plays at a time; it keeps playing while
+  you scroll or switch between the editor, the preview and the reading view, and stops when
+  the note's tab is closed or another vault is opened. In Settings → Appearance: how opaque the
+  play button is (60 % by default) and "start the first sound of a note when the note is opened"
+  (off). The volume is one setting for all players.
+
 ![Reading view](screenshots/reading.png)
 
 - Ctrl+E switches between editing and the reading view.

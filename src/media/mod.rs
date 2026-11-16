@@ -4,12 +4,32 @@
 //! `[!/…`  starts at the vault root, `[!~/…` at the home folder, `[!…` (anything else) at the
 //! vault root as well.
 
+pub mod cover;
+pub mod decode;
+pub mod engine;
+pub mod output;
+pub mod player;
+#[cfg(test)]
+pub mod testdata;
+#[cfg(test)]
+mod ui_tests;
+pub mod widget;
+
+pub use player::MediaPlayer;
+
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 pub const MEDIA_DIR: &str = "z_media";
 const IMAGE_EXTS: [&str; 5] = ["png", "jpg", "jpeg", "webp", "bmp"];
+
+/// The sound files that get a player when they are embedded (MEDIA-001).
+const AUDIO_EXTS: [&str; 8] = ["mp3", "ogg", "oga", "opus", "flac", "m4a", "aac", "wav"];
+
+pub fn is_audio(p: &Path) -> bool {
+    p.extension().and_then(|e| e.to_str()).map(|e| AUDIO_EXTS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)
+}
 
 pub fn is_image(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).map(|e| IMAGE_EXTS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)

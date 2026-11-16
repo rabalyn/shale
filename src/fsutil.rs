@@ -104,9 +104,8 @@ pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
 }
 
 /// Open a file for reading (for files too big or too odd to read whole, such as mailboxes).
-/// The error says which file could not be opened. (Only the Thunderbird lookup of dropped
-/// messages uses it, and that is Linux only.)
-#[cfg(target_os = "linux")]
+/// The error says which file could not be opened. (The Thunderbird lookup of dropped messages
+/// and the sound decoder use it.)
 pub fn open_read(path: impl AsRef<Path>) -> io::Result<File> {
     let path = path.as_ref();
     open_retrying(path).map_err(|e| named(path, e))

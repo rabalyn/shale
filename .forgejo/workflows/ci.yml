@@ -124,7 +124,7 @@ jobs:
       - name: Libraries for the window (Wayland, X11, OpenGL) and jq
         run: |
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
+          apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq >/dev/null
 
       - name: Toolchain
@@ -303,7 +303,7 @@ jobs:
       - name: Libraries for the window (Wayland, X11, OpenGL) and jq
         run: |
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
+          apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev jq >/dev/null
 
       - name: Install cargo-llvm-cov
@@ -414,7 +414,7 @@ jobs:
       - name: Libraries for the window (Wayland, X11, OpenGL)
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
         run: |
-          apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev \
+          apt-get install -y -qq --no-install-recommends pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev >/dev/null
 
       # starts both stacks, runs both ignored suites and always takes the stacks down again

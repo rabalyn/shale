@@ -313,6 +313,8 @@ pub struct ShaleApp {
     /// the tag words learned from the vault, and the job that learns them (see tagwords)
     pub tag_learner: crate::import::tagwords::TagLearner,
     pub scenes: SceneCache,
+    /// the one media player state (MEDIA-007); the players in the views draw from it
+    pub media: crate::media::MediaPlayer,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
     /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
@@ -506,6 +508,7 @@ impl ShaleApp {
             drag: drops::DragState::default(),
             tag_learner: crate::import::tagwords::TagLearner::new(),
             scenes: SceneCache::default(),
+            media: crate::media::MediaPlayer::default(),
             modal: None,
             actions: vec![],
             toasts: vec![],
@@ -607,6 +610,19 @@ impl ShaleApp {
         app
     }
 
+    /// The player settings go to the media player each frame; a volume that was set in a player
+    /// is saved once the mouse is let go (MEDIA-006).
+    fn media_tick(&mut self, ctx: &egui::Context) {
+        self.media.end_frame();
+        if !ctx.input(|i| i.pointer.any_down()) {
+            if let Some(v) = self.media.take_volume_change() {
+                self.cfg.media_volume = v;
+                self.save_config();
+            }
+        }
+        self.media.configure(self.cfg.media_volume, self.cfg.media_play_button_opacity, self.cfg.media_autoplay);
+    }
+
     pub fn toast(&mut self, msg: impl Into<String>) {
         self.toasts.push((msg.into(), Instant::now()));
     }
@@ -665,6 +681,7 @@ impl ShaleApp {
                     }
                 }
                 self.load_vault_data(&v.root);
+                self.media.stop();
                 self.vault = Some(v);
                 self.tabbar.tabs.clear();
                 self.notes.clear();
@@ -783,6 +800,7 @@ impl ShaleApp {
                     }
                 }
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
+                self.media.arm_autoplay();
             }
             FileKind::Drawing if crate::drawing::canvas::is_canvas_path(rel) && !self.drawings.contains_key(rel) => {
                 // a canvas: open the copy converted earlier, convert it, or ask
@@ -1615,7 +1633,13 @@ impl ShaleApp {
     pub fn close_tab(&mut self, i: usize) {
         if i < self.tabbar.tabs.len() {
             self.flush_all();
-            self.tabbar.tabs.remove(i);
+            let closed = self.tabbar.tabs.remove(i);
+            // the sound of a note stops with its tab (MEDIA-007)
+            if let View::Note(rel) = &closed.view {
+                if !self.tabbar.tabs.iter().any(|t| t.view == closed.view) {
+                    self.media.stop_for_note(rel);
+                }
+            }
             if self.tabbar.active >= self.tabbar.tabs.len() && self.tabbar.active > 0 {
                 self.tabbar.active = self.tabbar.tabs.len() - 1;
             } else if i < self.tabbar.active {
@@ -2162,6 +2186,7 @@ impl ShaleApp {
             self.toast(m);
         }
         let ctx = ui.ctx().clone();
+        self.media_tick(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
         self.mail_tick(&ctx);

@@ -21,6 +21,9 @@ rustls = { version = "0.23.46", default-features = false, features = ["ring", "s
 rustls-platform-verifier = "0.7.1"
 lettre = { version = "0.11.23", default-features = false, features = ["builder"] }
 zeroize = "1.9"
+symphonia = { version = "0.6.1", default-features = false, features = ["mp3", "ogg", "vorbis", "flac", "isomp4", "aac", "alac", "wav", "pcm", "id3v1", "id3v2"] }
+cpal = "0.18.2"
+rubato = "5.1.0"
 
 [dev-dependencies]
 # the time zone database that Windows builds bundle (below): the tests read it on every system
