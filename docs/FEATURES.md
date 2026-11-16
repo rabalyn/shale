@@ -205,9 +205,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   Calendar buttons.
 - The layout (icons, heights, removed icons) is kept in the settings.
 - **F1** (or Settings → Help → **Open user guide**) opens the user guide, itself a Shale vault:
-  Shale copies it once per version into its data folder (a copy you edited is not overwritten) and
-  opens it at "Start here". If the guide is not found next to the program it says so; the release
-  has it as `shale-userguide-<version>.zip`.
+  The guide is built into the program, which unpacks it once per version into its data folder (a
+  copy you edited is not overwritten) and opens it at "Start here". This works in every build on
+  every system; the release also has it as `shale-userguide-<version>.zip`.
 
 ![The right sidebar split into two views: Backlinks above, Calendar below](userguide/z_media/screenshots/sidebar-split.png)
 
@@ -621,7 +621,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+E | Edit / reading view |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
-| F1 | Open the user guide (a copy in Shale's data folder, opened as a vault) |
+| F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |

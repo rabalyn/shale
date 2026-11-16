@@ -45,13 +45,12 @@ Keeping it safe and tidy:
 
 ## Where this guide comes from
 
-Press **F1** in Shale (or Settings → Help → **Open user guide**) to open it. Shale copies the
-guide once per version into its data folder (on Linux
+Press **F1** in Shale (or Settings → Help → **Open user guide**) to open it. The guide is built
+into the program, which unpacks it once per version into its data folder (on Linux
 `~/.local/share/shale/userguide-<version>/`; on macOS and Windows the "data" folder of the
 system) and opens that copy as a vault. Your notes, tabs and edits stay in the copy: the next
 version of Shale makes a new copy, and a copy that exists is never overwritten. The release
-also has the guide as `shale-userguide-<version>.zip`, and the program's archive has it as the
-folder `docs/userguide/` next to the program, where Shale looks first.
+also has the guide as `shale-userguide-<version>.zip`, to unpack anywhere and open as a vault.
 
 ## How to read this guide
 

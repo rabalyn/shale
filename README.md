@@ -68,10 +68,9 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 
 **User guide**: `docs/userguide` is a Shale vault: it shows the features it explains. In Shale press **F1**
-(or Settings → Help → **Open user guide**): Shale copies the guide once per version into its data folder
-(`~/.local/share/shale/userguide-<version>/` on Linux; a copy you edited is never overwritten) and opens it as a
-vault, at "Start here". The release archive has the guide as the folder `docs/userguide/` next to the program; a
-build from source finds it in the source tree. Each release also has `shale-userguide-<version>.zip` (with
+(or Settings → Help → **Open user guide**): the guide is built into the program, which unpacks it once per
+version into its data folder (`~/.local/share/shale/userguide-<version>/` on Linux; a copy you edited is never
+overwritten) and opens it as a vault, at "Start here". This works in every build, on every system. Each release also has `shale-userguide-<version>.zip` (with
 its `.sha256` file) to unpack anywhere and open as a vault (`shale --vault <folder>`, or Settings → Vault folder).
 
 ## Supported systems
@@ -235,7 +234,7 @@ Text editing keys and vim keys are fixed.
 | Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
-| F1 | Open the user guide (a copy in Shale's data folder, opened as a vault) |
+| F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |
 | Click on a link | Open it (or create it if it's red) |
 | Ctrl+click on a link | Put the cursor in it so you can edit it (you can swap this in Settings) |
 | Middle-click on a link | Open it in a new tab |

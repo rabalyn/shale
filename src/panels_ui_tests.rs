@@ -489,11 +489,8 @@ fn panel_file_tree_opens_folds_and_offers_menus() {
 #[test]
 fn dev_020_the_help_button_in_settings_opens_the_user_guide_as_the_vault() {
     let mut p = P::new("userguide-help", &[]);
-    let guide = p.dir.join("guide-source");
-    std::fs::create_dir_all(&guide).unwrap();
-    std::fs::write(guide.join("Start here.md"), "# Start\n").unwrap();
     let root = p.dir.join("guide-data");
-    p.app.guide = crate::userguide::Places { source: Some(guide), root: Some(root.clone()) };
+    p.app.guide = crate::userguide::Places { files: crate::userguide::tests::SAMPLE, root: Some(root.clone()) };
     p.app.open_settings(SettingsTab::General);
     let shown = p.look(Show::Modals);
     assert!(shown.iter().any(|(_, l, _)| l == "Help"), "the Help section is shown");
