@@ -84,6 +84,10 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
   [Gpg4win](https://www.gpg4win.org) on Windows); without it Shale says so and everything else works.
 - **CalDAV** and **git sync** need `curl` and `git` on the path (both come with macOS and Windows 10 and later; Git
   for Windows is a separate install).
+- **Media files in git sync** (audio and video, stored with Git LFS) need `git-lfs` as well
+  (<https://git-lfs.com>; `apt install git-lfs`, `brew install git-lfs`; Git for Windows brings it). Without it Shale
+  says so in the settings and everything else works; a vault that already stores media with LFS is not synced on a
+  computer without git-lfs, so no media file lands in the history as a plain file.
 - **Drag and drop**: files dropped on the window are imported everywhere; mail messages, links and
   text dragged out of Thunderbird need Wayland.
 - **Time zones**: calendar events in a named zone (`Europe/Berlin`) use the system's zoneinfo

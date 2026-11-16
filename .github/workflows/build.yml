@@ -56,7 +56,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libasound2-dev libwayland-dev libxkbcommon-dev libx11-dev \
-            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev curl
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev curl git-lfs
 
       # the version comes from rust-toolchain.toml, so CI and local builds use the same compiler
       # and clippy (a new stable release can add lints that fail `-D warnings` overnight)
@@ -163,6 +163,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # the sync tests of Git LFS need it (SYNC-017); the runner image usually has it already
+      - name: Git LFS
+        run: command -v git-lfs >/dev/null || brew install git-lfs
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
