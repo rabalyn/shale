@@ -1598,7 +1598,7 @@ fn an_open_draft_is_saved_when_the_app_closes_without_waiting_for_the_autosave()
 #[test]
 fn when_the_draft_cannot_be_saved_at_exit_its_text_goes_to_the_recovery_folder() {
     let (mut w, _smtp) = compose_world("exit-rescue", 10);
-    w.app.recovery_root = w.dir.join("recovery");
+    w.app.recovery.root = w.dir.join("recovery");
     w.press_text(Key::C, Modifiers::NONE, "c");
     w.typ("mail:compose:to", "bob@x.de");
     w.typ("mail:compose:subject", "Rescue me");

@@ -817,7 +817,7 @@ impl ShaleApp {
     /// Text from an earlier run that could not be saved and was put aside (DATA-011): stays until
     /// it is dismissed.
     pub fn paint_recovery_notice(&mut self, ui: &mut Ui) {
-        let Some(first) = self.recovery_notice.last().cloned() else { return };
+        let Some(first) = self.recovery.notice.last().cloned() else { return };
         let screen = ui.ctx().content_rect();
         let mut dismissed = false;
         egui::Area::new(egui::Id::unique("recovery-notice")).order(egui::Order::Tooltip).fixed_pos(Pos2::new(screen.min.x + 60.0, screen.max.y - 120.0)).show(ui.ctx(), |ui| {
@@ -826,7 +826,7 @@ impl ShaleApp {
                 ui.label(egui::RichText::new("Some changes could not be saved when Shale was closed last time. They were put aside so nothing is lost.").color(theme::TEXT));
                 ui.horizontal(|ui| {
                     if ui.link("Open the folder").clicked() {
-                        if let Err(e) = crate::opener::open_recovery_folder(&first, &self.recovery_root) {
+                        if let Err(e) = crate::opener::open_recovery_folder(&first, &self.recovery.root) {
                             self.toasts.push((e, std::time::Instant::now()));
                         }
                     }
@@ -837,8 +837,8 @@ impl ShaleApp {
             });
         });
         if dismissed {
-            crate::recovery::dismiss(&self.recovery_notice);
-            self.recovery_notice.clear();
+            crate::recovery::dismiss(&self.recovery.notice);
+            self.recovery.notice.clear();
         }
     }
 

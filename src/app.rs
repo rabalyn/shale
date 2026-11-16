@@ -325,10 +325,7 @@ pub struct ShaleApp {
     cfg_error: Option<String>,
     /// the scripted input of tests of the real window (BUILD-007)
     script: crate::script::ScriptRun,
-    /// where text that could not be saved at exit is put (DATA-011)
-    pub recovery_root: PathBuf,
-    /// recovery folders from earlier runs the person has not dismissed yet
-    pub recovery_notice: Vec<PathBuf>,
+    pub recovery: crate::recovery::RecoveryState,
 }
 
 impl ShaleApp {
@@ -473,11 +470,10 @@ impl ShaleApp {
             frames: 0,
             cfg_error: None,
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
-            recovery_root,
+            recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             usage: crate::data_usage::DataUsage::new(places),
-            recovery_notice: vec![],
         };
-        app.recovery_notice = crate::recovery::unseen(&app.recovery_root);
+        app.recovery.notice = crate::recovery::unseen(&app.recovery.root);
         if let Some(p) = cfg_problem {
             app.toast(p);
         }
@@ -1084,7 +1080,7 @@ impl ShaleApp {
         }
         let mut out = Vec::new();
         for (rel, bytes) in texts {
-            match crate::recovery::rescue(&self.recovery_root, &date, &rel, &bytes) {
+            match crate::recovery::rescue(&self.recovery.root, &date, &rel, &bytes) {
                 Ok(p) => out.push(p),
                 Err(e) => eprintln!("could not save “{}” and could not rescue it either: {e}", rel_to_string(&rel)),
             }
@@ -1096,7 +1092,7 @@ impl ShaleApp {
     fn save_mail_draft_at_exit(&mut self) {
         if let Err(e) = self.mail.flush_draft() {
             match self.mail.draft_rescue_text() {
-                Some((rel, text)) => match crate::recovery::rescue(&self.recovery_root, &crate::mail::store::today_string(), &rel, text.as_bytes()) {
+                Some((rel, text)) => match crate::recovery::rescue(&self.recovery.root, &crate::mail::store::today_string(), &rel, text.as_bytes()) {
                     Ok(_) => eprintln!("the mail draft could not be saved ({e}); its text is in the recovery folder"),
                     Err(e2) => eprintln!("the mail draft could not be saved ({e}) and could not be rescued either: {e2}"),
                 },
