@@ -258,7 +258,7 @@ impl Proc {
         &mut self.stdout
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn pid(&self) -> u32 {
         self.child.id()
     }
