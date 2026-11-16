@@ -4,6 +4,7 @@
 //! only one file plays at a time. The handle is cheap to clone; all work that can be slow (opening
 //! the file, decoding the cover, opening the sound card) happens on threads.
 
+use super::download::{Downloads, Notice};
 use super::engine::Shared;
 use super::ffmpeg::{self, Info, Tools};
 use super::output::Output;
@@ -58,6 +59,8 @@ enum LookSlot {
 struct State {
     looks: HashMap<(PathBuf, Option<SystemTime>), LookSlot>,
     current: Option<Playback>,
+    /// files that are still LFS pointers, and their downloads (SYNC-020)
+    downloads: Downloads,
     volume: f32,
     muted: bool,
     /// the volume the person changed in a player, for the app to save
@@ -81,6 +84,7 @@ impl Default for MediaPlayer {
         MediaPlayer(Arc::new(Mutex::new(State {
             looks: HashMap::new(),
             current: None,
+            downloads: Downloads::default(),
             volume: 0.8,
             muted: false,
             volume_changed: false,
@@ -111,6 +115,8 @@ pub struct View {
     pub volume: f32,
     pub muted: bool,
     pub opacity: f32,
+    /// the file is a Git LFS pointer: not downloaded, or downloading (SYNC-020)
+    pub download: Option<Notice>,
 }
 
 fn key(abs: &Path) -> (PathBuf, Option<SystemTime>) {
@@ -184,6 +190,12 @@ impl MediaPlayer {
     /// Play or pause `abs`; another file that plays is stopped first (MEDIA-007).
     pub fn toggle(&self, ctx: &egui::Context, abs: &Path, owner: &Path) {
         let mut s = self.lock();
+        if s.downloads.notice(abs).is_some() {
+            // not downloaded: fetch first, the sound starts when it is here (SYNC-020)
+            s.downloads.request(abs, Some(owner));
+            ctx.request_repaint();
+            return;
+        }
         if s.is_external(abs) {
             // no ffmpeg: the system's player gets the file (MEDIA-010)
             s.open_requests.push(abs.to_path_buf());
@@ -210,6 +222,27 @@ impl MediaPlayer {
     /// the first player of a new note when asked to, asks for a repaint while something moves.
     pub fn view(&self, ctx: &egui::Context, abs: &Path) -> View {
         let mut s = self.lock();
+        if let Some(n) = s.downloads.notice(abs) {
+            // an LFS pointer has nothing to decode: say so, with the Download link (SYNC-020)
+            if n.running {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            return View {
+                file_name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                cover: None,
+                duration: None,
+                position: 0.0,
+                playing: false,
+                busy: n.running,
+                message: Some(n.line()),
+                unplayable: false,
+                external: false,
+                volume: s.volume,
+                muted: s.muted,
+                opacity: s.opacity,
+                download: Some(n),
+            };
+        }
         let slot_key = key(abs);
         if !s.looks.contains_key(&slot_key) {
             if s.looks.len() >= LOOKS_KEPT {
@@ -252,6 +285,7 @@ impl MediaPlayer {
             volume: s.volume,
             muted: s.muted,
             opacity: s.opacity,
+            download: None,
         };
         if let Some(c) = s.current.as_mut().filter(|c| c.path == abs) {
             view.playing = c.want_play;
@@ -299,6 +333,31 @@ impl MediaPlayer {
         }
         s.apply_state();
         view
+    }
+
+    /// What to say about a file that may be an LFS pointer; None for a real file (SYNC-020).
+    pub fn notice(&self, abs: &Path) -> Option<Notice> {
+        self.lock().downloads.notice(abs)
+    }
+
+    /// Ask for the real file of an LFS pointer (the Download link, SYNC-020).
+    pub fn download(&self, abs: &Path) {
+        self.lock().downloads.request(abs, None);
+    }
+
+    /// The files asked for since the last call; the app downloads them.
+    pub fn take_download_requests(&self) -> Vec<PathBuf> {
+        self.lock().downloads.take_requests()
+    }
+
+    /// A download ended; when a play button asked for it, the sound starts now.
+    pub fn download_done(&self, ctx: &egui::Context, abs: &Path, result: Result<(), String>) {
+        let mut s = self.lock();
+        if let Some(owner) = s.downloads.finish(abs, result) {
+            s.begin(ctx, abs, &owner).want_play = true;
+            s.apply_state();
+        }
+        ctx.request_repaint();
     }
 
     /// Tests: play into a thread that only keeps time, never into a sound card.

@@ -152,6 +152,27 @@ fn without_ffmpeg_a_click_on_the_play_mark_or_the_tile_opens_the_system_player()
     assert_eq!(opened.lock().unwrap().len(), 2);
 }
 
+// spec: SYNC-020, MEDIA-010
+#[test]
+fn a_video_that_is_an_lfs_pointer_is_downloaded_first_even_without_ffmpeg() {
+    let (_guard, opened) = pretend_player();
+    let mut fx = Fx::new_with("v-pointer", VIDEO_NOTE, &[], |a| a.media.use_ffmpeg(|| None));
+    let clip = fx.dir.join("clip.mp4");
+    std::fs::write(&clip, super::pointer_text(2_000_000)).unwrap();
+    fx.app.vault.as_mut().unwrap().rescan();
+    fx.reading(true);
+    fx.hl.frames(&mut fx.app, 3);
+    // the pointer is not probed: it says "not downloaded", not "ffmpeg is not installed"
+    assert_eq!(fx.app.media.notice(&clip).map(|n| n.line()), Some("Not downloaded (2 MB)".to_string()));
+    assert!(!texts(&fx).iter().any(|t| t.contains("ffmpeg is not installed")), "{:?}", texts(&fx));
+    // Play asks for the download; the system player does not get the pointer file
+    let ctx = egui::Context::default();
+    fx.app.media.toggle(&ctx, &clip, Path::new("Watch.md"));
+    assert_eq!(fx.app.media.take_download_requests(), vec![clip.clone()]);
+    assert!(opened.lock().unwrap().is_empty(), "{:?}", opened.lock().unwrap());
+    assert_eq!(fx.app.media.current(), None);
+}
+
 // spec: MEDIA-010
 #[test]
 fn the_settings_say_where_ffmpeg_is_or_that_it_is_missing_and_where_to_get_it() {

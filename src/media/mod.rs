@@ -6,6 +6,7 @@
 
 pub mod cover;
 pub mod decode;
+pub mod download;
 pub mod engine;
 pub mod ffmpeg;
 pub mod output;

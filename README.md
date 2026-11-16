@@ -90,6 +90,12 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
   system's video player and Settings says so; everything else works.
 - **CalDAV** and **git sync** need `curl` and `git` on the path (both come with macOS and Windows 10 and later; Git
   for Windows is a separate install).
+- **Media files in git sync** (audio and video, stored with Git LFS) need `git-lfs` as well
+  (<https://git-lfs.com>; `apt install git-lfs`, `brew install git-lfs`; Git for Windows brings it). Without it Shale
+  says so in the settings and everything else works; a vault that already stores media with LFS is not synced on a
+  computer without git-lfs, so no media file lands in the history as a plain file. On another computer a media
+  file arrives as a small pointer and is downloaded when you play or open it (or after every sync, if you switch
+  that on in the git sync settings).
 - **Drag and drop**: files dropped on the window are imported everywhere (pictures, PDFs, audio and
   video as files in the media folder, pasting a picture into the editor does the same); mail messages, links and
   text dragged out of Thunderbird need Wayland.
@@ -100,7 +106,15 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
 
 Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
 with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`,
-unpack it and run `./shale/shale`. Releases are built by GitHub Actions
+unpack it and run `./shale/shale`. To start Shale from the app menu with its icon (on Wayland the
+taskbar needs this to show the icon), install the desktop file and the icon from the unpacked folder:
+
+```sh
+install -Dm644 shale/shale.svg ~/.local/share/icons/hicolor/scalable/apps/shale.svg
+sed "s|^Exec=shale|Exec=$PWD/shale/shale|" shale/shale.desktop > ~/.local/share/applications/shale.desktop
+```
+
+Releases are built by GitHub Actions
 (`.github/workflows/build.yml`); there are no builds between releases. To try an unreleased
 version, build it from source (below).
 
@@ -135,7 +149,7 @@ built; it does not show that a person checked the build.
    closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
-formats, lints, builds, tests, packages and audits every pull request and `main`; GitHub gets the
+formats, lints, builds, tests, packages and audits every push to `main`; GitHub gets the
 released versions, and builds and tests macOS and Windows for every push to `main` (the Linux
 job of GitHub only runs for release tags).
 
@@ -144,8 +158,10 @@ job of GitHub only runs for release tags).
 Shale is developed on Forgejo: <https://git.home.rabalyn.de/raba/shale>. Branches, pull requests
 and the **issues, which are the one list of open work**, live there; GitHub only builds and hosts the
 releases ([ADR-0013](docs/decisions/0013-forgejo-and-issue-tracking.md), FORGE rules in
-[engineering.md](docs/spec/engineering.md)). Checks run on the Forgejo runner
-(`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012) and tests macOS and
+[engineering.md](docs/spec/engineering.md)). Changes land locally: `scripts/land.sh <branch>`
+merges a branch into `main`, runs fmt, clippy and the tests, and pushes only when they pass
+([ADR-0016](docs/decisions/0016-local-landing.md)). The Forgejo runner checks `main` again
+afterwards (`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012) and tests macOS and
 Windows (BUILD-017); a red run there is reported back as a Forgejo issue (BUILD-020).
 
 ## Build and run

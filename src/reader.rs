@@ -303,7 +303,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                         crate::media::widget::show(ui, caches.media, &vault.abs(&target), rel);
                         ui.add_space(6.0);
                     } else {
-                        embed(ui, vault, &target, caches.scenes, base, dark_canvas, &mut out);
+                        embed(ui, vault, &target, caches, base, dark_canvas, &mut out);
                     }
                     i += 1;
                     continue;
@@ -389,7 +389,7 @@ fn list_marker(line: &str) -> Option<(String, usize)> {
     None
 }
 
-fn embed(ui: &mut Ui, vault: &Vault, target: &Path, scenes: &mut SceneCache, base: f32, dark: bool, out: &mut Option<ReaderAction>) {
+fn embed(ui: &mut Ui, vault: &Vault, target: &Path, caches: &mut Caches, base: f32, dark: bool, out: &mut Option<ReaderAction>) {
     let kind = vault.file(target).map(|f| f.kind).unwrap_or(FileKind::Other);
     let name = vault.file(target).map(|f| f.display_name()).unwrap_or_default();
     let frame = egui::Frame::new().fill(theme::BG_SECONDARY).stroke(Stroke::new(1.0, theme::BORDER)).corner_radius(CornerRadius::same(8)).inner_margin(8);
@@ -409,7 +409,7 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, scenes: &mut SceneCache, bas
                 let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click());
                 let bg = if dark { Color32::from_rgb(18, 18, 18) } else { Color32::WHITE };
                 ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
-                if let Some(scene) = scenes.get(vault, target) {
+                if let Some(scene) = caches.scenes.get(vault, target) {
                     let pics = crate::drawing::pictures::textures(ui.ctx(), scene, vault, target);
                     drawing::paint_thumbnail(ui.painter(), scene, rect.shrink(6.0), dark, &pics);
                 }
@@ -453,6 +453,11 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, scenes: &mut SceneCache, bas
             }
             FileKind::Other if crate::media::is_image(target) => {
                 let w = ui.available_width();
+                // still a Git LFS pointer: "Not downloaded (12 MB) — Download" (SYNC-020)
+                if crate::media::widget::show_not_downloaded(ui, caches.media, &vault.abs(target)).is_some() {
+                    ui.add_space(6.0);
+                    return;
+                }
                 match crate::media::image_widget(ui.ctx(), &vault.abs(target), w, 520.0) {
                     Some(img) => {
                         let resp = ui.add(img.corner_radius(CornerRadius::same(4)).sense(Sense::click()));

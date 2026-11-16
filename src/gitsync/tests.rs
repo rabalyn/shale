@@ -12,7 +12,22 @@ struct Env {
 }
 
 impl Env {
+    /// A hermetic git without Git LFS (`hide_lfs`), so the tests behave the same on machines with
+    /// and without git-lfs (SYNC-016).
     fn new(tag: &str) -> Env {
+        Env::build(tag, false)
+    }
+
+    /// A hermetic git with the real git-lfs, or None (and a printed note) without it (BUILD-018).
+    fn lfs(tag: &str) -> Option<Env> {
+        if Git::default().lfs_version().is_none() {
+            eprintln!("skipping: git-lfs is not installed here (CI installs it)");
+            return None;
+        }
+        Some(Env::build(tag, true))
+    }
+
+    fn build(tag: &str, lfs: bool) -> Env {
         let root = std::env::temp_dir().join(format!("shale-gitsync-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
@@ -28,7 +43,10 @@ impl Env {
             ("GIT_CONFIG_KEY_2", "core.autocrlf"),
             ("GIT_CONFIG_VALUE_2", "false"),
         ];
-        let git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() };
+        let mut git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() };
+        if !lfs {
+            hide_lfs(&mut git);
+        }
         Env { root, git }
     }
 
@@ -503,4 +521,316 @@ fn conflict_copy_names() {
 fn the_computer_has_a_name_for_commit_messages() {
     let h = host_name();
     assert!(!h.is_empty() && !h.contains('\n') && h == h.trim(), "{h:?}");
+}
+
+/// 70 bytes that are no text and no pointer.
+fn media(seed: u8) -> Vec<u8> {
+    (0..70u8).map(|i| i.wrapping_mul(7).wrapping_add(seed) | 0x80).collect()
+}
+
+/// The LFS object file in a bare remote's store.
+fn remote_object(remote: &Path, oid: &str) -> PathBuf {
+    remote.join("lfs").join("objects").join(&oid[..2]).join(&oid[2..4]).join(oid)
+}
+
+/// The pointer stored in a commit for a path, None if the blob is not a pointer.
+fn stored_pointer(env: &Env, vault: &Path, rev_path: &str) -> Option<lfs::Pointer> {
+    let o = env.git.run(vault, args!["cat-file", "blob", rev_path]).unwrap();
+    assert!(o.ok, "{rev_path}: {}", o.stderr);
+    lfs::parse_pointer(&o.stdout)
+}
+
+// spec: SYNC-017
+#[test]
+fn shales_block_keeps_the_users_lines_and_is_written_the_same_every_time() {
+    let block = lfs::with_block("").unwrap();
+    assert!(block.starts_with("# shale-media-begin\n") && block.ends_with("# shale-media-end\n"));
+    assert_eq!(block.lines().count(), 2 + 26);
+    for e in lfs::MEDIA_EXTENSIONS {
+        assert!(block.contains(&format!("\n*.{e} filter=lfs diff=lfs merge=lfs -text\n")), "{e}");
+        assert!(block.contains(&format!("\n*.{} filter=lfs diff=lfs merge=lfs -text\n", e.to_ascii_uppercase())), "{e}");
+    }
+    let mine = "# mine\n*.md text eol=lf\n";
+    let once = lfs::with_block(mine).unwrap();
+    assert!(once.starts_with(mine) && once.ends_with(&block));
+    assert_eq!(lfs::with_block(&once).unwrap(), once, "writing it again changes nothing");
+    // lines before and after the block, and a last line without a newline, are kept
+    let both = format!("first\n{block}last");
+    assert_eq!(lfs::with_block(&both).unwrap(), both);
+    assert_eq!(lfs::with_block("no newline").unwrap(), format!("no newline\n\n{block}"));
+    // a block without its end is not guessed at
+    assert!(lfs::with_block("# shale-media-begin\n*.mp3 filter=lfs\n").unwrap_err().contains("shale-media-end"));
+    assert!(lfs::has_block(&once) && !lfs::has_block(mine));
+    assert!(lfs::uses_lfs(&once) && !lfs::uses_lfs(mine) && !lfs::uses_lfs("# *.mp3 filter=lfs\n"));
+}
+
+#[test]
+fn pointer_files_are_recognised_and_other_files_are_not() {
+    let oid = "4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393";
+    let text = format!("version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize 12345\n");
+    assert_eq!(lfs::parse_pointer(text.as_bytes()), Some(lfs::Pointer { oid: oid.into(), size: 12345 }));
+    assert_eq!(lfs::parse_pointer(&media(1)), None);
+    assert_eq!(lfs::parse_pointer(b"version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 1\n"), None);
+    assert_eq!(lfs::parse_pointer(b"just a note\n"), None);
+    assert_eq!(lfs::parse_pointer(&vec![b'x'; 2000]), None);
+}
+
+// spec: SYNC-016
+#[test]
+fn a_missing_git_lfs_is_reported_and_nothing_changes() {
+    let env = Env::new("lfs-missing");
+    assert_eq!(env.git.lfs_version(), None);
+    let v = env.folder("v");
+    env.git(&v, &["init", "--quiet"]);
+    assert_eq!(lfs::status(&env.git, &v), lfs::Status::default());
+    write(&v, "Song.mp3", "raw");
+    let e = lfs::setup(&env.git, &v, &env.opts("x"), &TreeLock::default()).unwrap_err();
+    assert!(e.contains("not installed") && e.contains("git-lfs.com"), "{e}");
+    assert!(!v.join(".gitattributes").exists(), "nothing was written");
+    // a new repository made by connect stays as it was without git-lfs
+    let remote = env.bare();
+    let w = env.vault("w", &remote);
+    assert!(!w.join(".gitattributes").exists());
+    assert!(!lfs::configured(&env.git, &w));
+}
+
+// spec: SYNC-019
+#[test]
+fn without_git_lfs_a_repository_that_uses_it_commits_nothing() {
+    let env = Env::new("lfs-guard");
+    let v = env.folder("v");
+    env.git(&v, &["init", "--quiet"]);
+    write(&v, "Note.md", "a note\n");
+    env.sync(&v);
+    let head = env.git(&v, &["rev-parse", "HEAD"]);
+    // another machine set LFS up: its lines are here, this computer has no git-lfs
+    write(&v, ".gitattributes", "# mine\n*.mp3 filter=lfs diff=lfs merge=lfs -text\n");
+    write(&v, "Song.mp3", "raw media");
+    let e = env.try_sync(&v).unwrap_err();
+    assert!(e.contains("Git LFS is not installed") && e.contains("Nothing was committed"), "{e}");
+    assert_eq!(env.git(&v, &["rev-parse", "HEAD"]), head, "no commit");
+    assert_eq!(env.git(&v, &["diff", "--cached", "--name-only"]), "", "nothing staged");
+    assert!(env.git(&v, &["ls-files"]).lines().all(|f| f != "Song.mp3"));
+    // without LFS lines everything is as it always was
+    fs::remove_file(v.join(".gitattributes")).unwrap();
+    let r = env.sync(&v);
+    assert_eq!(r.committed, 1, "Song.mp3 is an ordinary file in a repository that does not use LFS");
+}
+
+// spec: SYNC-017, SYNC-018, SYNC-005
+#[test]
+fn storing_media_with_lfs_converts_what_is_tracked_in_one_commit_and_rewrites_nothing() {
+    let Some(env) = Env::lfs("lfs-setup") else { return };
+    let v = env.folder("v");
+    env.git(&v, &["init", "--quiet"]);
+    let song = media(3);
+    write(&v, "Note.md", "a note\n");
+    write(&v, ".gitattributes", "# mine\n*.md text eol=lf\n");
+    fs::create_dir_all(v.join("z_media")).unwrap();
+    crate::fsutil::write_atomic(&v.join("z_media/Song.mp3"), &song).unwrap();
+    crate::fsutil::write_atomic(&v.join("Clip.MOV"), &media(4)).unwrap();
+    env.sync(&v);
+    let before = env.git(&v, &["rev-parse", "HEAD"]);
+    assert!(stored_pointer(&env, &v, "HEAD:z_media/Song.mp3").is_none(), "tracked as a plain file so far");
+
+    let opts = Options { commit_prefix: "[n] ".into(), commit_suffix: " #a".into(), ..env.opts("t") };
+    let tree = TreeLock::default();
+    // SYNC-005: not while a merge runs
+    write(&v, ".git/MERGE_HEAD", &format!("{before}\n"));
+    let e = lfs::setup(&env.git, &v, &opts, &tree).unwrap_err();
+    assert!(e.contains("merge"), "{e}");
+    assert!(!lfs::configured(&env.git, &v), "nothing set up");
+    fs::remove_file(v.join(".git/MERGE_HEAD")).unwrap();
+
+    assert_eq!(lfs::setup(&env.git, &v, &opts, &tree).unwrap(), 3, ".gitattributes and the two media files");
+    assert!(tree.try_hold().is_some(), "the tree lock is released");
+    assert_eq!(env.git(&v, &["log", "-1", "--format=%s"]), "[n] Store media files with Git LFS #a");
+    assert_eq!(env.git(&v, &["rev-list", "--count", "HEAD"]), "2", "history is not rewritten");
+    assert_eq!(env.git(&v, &["rev-parse", "HEAD^"]), before);
+    assert_eq!(stored_pointer(&env, &v, "HEAD:z_media/Song.mp3").unwrap().size, 70);
+    assert!(stored_pointer(&env, &v, "HEAD:Clip.MOV").is_some());
+    assert_eq!(crate::fsutil::read(v.join("z_media/Song.mp3")).unwrap(), song, "the work tree keeps the real file");
+    let attrs = read(&v, ".gitattributes");
+    assert!(attrs.starts_with("# mine\n*.md text eol=lf\n") && attrs.contains("# shale-media-begin\n"), "{attrs}");
+    assert!(env.git(&v, &["config", "--local", "--get", "filter.lfs.smudge"]).contains("--skip"), "pointers stay pointers on checkout");
+    assert!(lfs::status(&env.git, &v).stores_media);
+    assert!(env.git.run(&v, args!["config", "--global", "--list"]).unwrap().text().is_empty(), "the global config is never touched");
+
+    // again: nothing to do, no commit
+    assert_eq!(lfs::setup(&env.git, &v, &opts, &tree).unwrap(), 0);
+    assert_eq!(env.git(&v, &["rev-list", "--count", "HEAD"]), "2");
+    assert_eq!(read(&v, ".gitattributes"), attrs);
+}
+
+// spec: SYNC-017
+#[test]
+fn connect_sets_a_new_repository_up_for_lfs_and_leaves_an_existing_one_alone() {
+    let Some(env) = Env::lfs("lfs-connect") else { return };
+    let remote = env.bare();
+    let v = env.vault("new", &remote);
+    assert!(lfs::status(&env.git, &v).stores_media);
+    assert!(read(&v, ".gitattributes").contains("*.mp3 filter=lfs"));
+    assert!(!env.git.run(&v, args!["rev-parse", "--verify", "--quiet", "HEAD"]).unwrap().ok, "nothing is committed by connect");
+    let old = env.folder("old");
+    env.git(&old, &["init", "--quiet"]);
+    connect(&env.git, &old, remote.to_str().unwrap()).unwrap();
+    assert!(!old.join(".gitattributes").exists() && !lfs::configured(&env.git, &old));
+}
+
+// spec: SYNC-021, SYNC-017
+#[test]
+fn the_sync_uploads_the_lfs_files_and_another_computer_downloads_them_on_demand() {
+    let Some(env) = Env::lfs("lfs-push") else { return };
+    let remote = env.bare();
+    let a = env.vault("a", &remote);
+    let song = media(5);
+    crate::fsutil::write_atomic(&a.join("Song.mp3"), &song).unwrap();
+    write(&a, "Note.md", "a note\n");
+    let r = env.sync(&a);
+    assert!(r.pushed);
+    let p = stored_pointer(&env, &a, "HEAD:Song.mp3").expect("committed as a pointer");
+    assert!(remote_object(&remote, &p.oid).is_file(), "the file reached the remote's LFS store");
+    assert!(stored_pointer(&env, &remote, "main:Song.mp3").is_some(), "the history holds only the pointer");
+
+    // another computer: pointer files (no smudge), the real file when asked for
+    let b = env.vault("b", &remote);
+    env.sync(&b);
+    assert_eq!(lfs::parse_pointer(&crate::fsutil::read(b.join("Song.mp3")).unwrap()), Some(p));
+    assert_eq!(read(&b, "Note.md"), "a note\n");
+    env.git(&b, &["lfs", "pull", "--include=Song.mp3", "--exclude="]);
+    assert_eq!(crate::fsutil::read(b.join("Song.mp3")).unwrap(), song);
+    // the pulled file is no change for the next sync
+    assert_eq!(env.sync(&b).committed, 0);
+}
+
+// spec: SYNC-019
+#[test]
+fn a_merge_that_brings_in_lfs_lines_sets_this_repository_up() {
+    let Some(env) = Env::lfs("lfs-merge") else { return };
+    let remote = env.bare();
+    let a = env.vault("a", &remote);
+    crate::fsutil::write_atomic(&a.join("Song.mp3"), &media(6)).unwrap();
+    env.sync(&a);
+    // an older repository without LFS, with notes of its own
+    let b = env.folder("b");
+    env.git(&b, &["init", "--quiet"]);
+    connect(&env.git, &b, remote.to_str().unwrap()).unwrap();
+    write(&b, "Mine.md", "mine\n");
+    assert!(!lfs::configured(&env.git, &b));
+    let r = env.sync(&b);
+    assert!(r.pushed);
+    assert!(lfs::configured(&env.git, &b), "set up after the merge");
+    assert!(env.git(&b, &["config", "--local", "--get", "filter.lfs.smudge"]).contains("--skip"));
+    assert!(lfs::parse_pointer(&crate::fsutil::read(b.join("Song.mp3")).unwrap()).is_some());
+    assert_eq!(read(&b, "Mine.md"), "mine\n");
+    // media added here from now on goes to LFS
+    crate::fsutil::write_atomic(&b.join("Two.ogg"), &media(7)).unwrap();
+    env.sync(&b);
+    assert!(stored_pointer(&env, &b, "HEAD:Two.ogg").is_some());
+}
+
+// spec: SYNC-022, SYNC-008
+#[test]
+fn the_conflict_copy_of_an_lfs_file_is_stored_in_lfs_too() {
+    let Some(env) = Env::lfs("lfs-copy") else { return };
+    let remote = env.bare();
+    let (a, b) = (env.vault("a", &remote), env.vault("b", &remote));
+    crate::fsutil::write_atomic(&a.join("Song.mp3"), &media(1)).unwrap();
+    env.sync(&a);
+    env.sync(&b);
+    // both change the file
+    let (theirs, ours) = (media(2), media(3));
+    crate::fsutil::write_atomic(&a.join("Song.mp3"), &theirs).unwrap();
+    env.sync(&a);
+    crate::fsutil::write_atomic(&b.join("Song.mp3"), &ours).unwrap();
+    let r = env.sync(&b);
+    assert_eq!(r.conflicts.len(), 1, "{r:?}");
+    let copy = r.conflicts[0].1.clone();
+    assert_eq!(copy, PathBuf::from("Song (conflict 2026-11-14 1200).mp3"));
+    // the remote's version stays at the path (a pointer here, its file was never downloaded);
+    // the local version, whose file is here, is a real file again under the copy's name
+    assert!(lfs::parse_pointer(&crate::fsutil::read(b.join("Song.mp3")).unwrap()).is_some());
+    assert_eq!(crate::fsutil::read(b.join(&copy)).unwrap(), ours);
+    // both are in LFS: pointers in the history, files in the remote's store
+    let copy_name = copy.to_string_lossy().into_owned();
+    let p = stored_pointer(&env, &b, &format!("HEAD:{copy_name}")).expect("the copy is a pointer in the history");
+    assert!(stored_pointer(&env, &b, "HEAD:Song.mp3").is_some());
+    assert!(r.pushed && remote_object(&remote, &p.oid).is_file());
+    assert_eq!(env.git(&b, &["status", "--porcelain"]), "", "nothing is left over");
+    // the other computer gets the copy and can download it
+    env.sync(&a);
+    assert!(lfs::parse_pointer(&crate::fsutil::read(a.join(&copy)).unwrap()).is_some());
+    env.git(&a, &["lfs", "pull", &format!("--include={copy_name}"), "--exclude="]);
+    assert_eq!(crate::fsutil::read(a.join(&copy)).unwrap(), ours);
+}
+
+// spec: SYNC-020, VAULT-018
+#[test]
+fn the_download_asks_for_one_file_and_the_path_stays_in_the_vault() {
+    let args = |p: &str| lfs::pull_args(Path::new(p)).map(|a| a.iter().map(|s| s.to_string_lossy().into_owned()).collect::<Vec<_>>());
+    assert_eq!(args("Music/Song.mp3").unwrap(), ["lfs", "pull", "--include=Music/Song.mp3", "--exclude="]);
+    assert_eq!(args("./a/./b.ogg").unwrap()[2], "--include=a/b.ogg");
+    // glob characters match themselves, they do not widen the include
+    assert_eq!(args("Live [2024] *.mp3").unwrap()[2], "--include=Live ?2024? ?.mp3");
+    for bad in ["../Outside.mp3", "a/../../x.mp3", "/etc/passwd", "", "."] {
+        assert!(args(bad).is_err(), "{bad}");
+    }
+    assert!(args("../x").unwrap_err().contains("not a file in the vault"));
+    // `always`: only when the vault says so and the repository uses LFS
+    let dir = std::env::temp_dir().join(format!("shale-pull-after-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    use crate::vault_state::LfsDownload::{Always, OnDemand};
+    assert!(!lfs::pull_after_sync(&Always, &dir), "no LFS lines, nothing to pull");
+    write(&dir, ".gitattributes", "*.mp3 filter=lfs diff=lfs merge=lfs -text\n");
+    assert!(lfs::pull_after_sync(&Always, &dir));
+    assert!(!lfs::pull_after_sync(&OnDemand, &dir), "on demand is the default");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// spec: SYNC-020
+#[test]
+fn a_download_without_git_lfs_or_outside_the_vault_says_why_and_changes_nothing() {
+    let env = Env::new("lfs-dl-missing");
+    let remote = env.bare();
+    let v = env.vault("v", &remote);
+    let pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\nsize 5\n";
+    write(&v, "Song.mp3", pointer);
+    let e = lfs::download(&env.git, &v, Path::new("Song.mp3"), &TreeLock::default()).unwrap_err();
+    assert!(e.contains("not installed") && e.contains("git-lfs.com"), "{e}");
+    assert_eq!(read(&v, "Song.mp3"), pointer);
+    let e = lfs::download(&env.git, &v, Path::new("../x.mp3"), &TreeLock::default()).unwrap_err();
+    assert!(e.contains("not a file in the vault"), "{e}");
+    let plain = env.folder("plain");
+    assert!(lfs::download(&env.git, &plain, Path::new("Song.mp3"), &TreeLock::default()).unwrap_err().contains("not a git repository"));
+    assert!(lfs::pull_all(&env.git, &v, &TreeLock::default()).unwrap_err().contains("not installed"));
+}
+
+// spec: SYNC-020
+#[test]
+fn a_pointer_is_downloaded_on_demand_from_the_remote_and_only_that_file() {
+    let Some(env) = Env::lfs("lfs-download") else { return };
+    let remote = env.bare();
+    let a = env.vault("a", &remote);
+    let (one, two) = (media(11), media(12));
+    crate::fsutil::write_atomic(&a.join("One.mp3"), &one).unwrap();
+    crate::fsutil::write_atomic(&a.join("Two.mp3"), &two).unwrap();
+    assert!(env.sync(&a).pushed);
+    // another computer: pointers only
+    let b = env.vault("b", &remote);
+    env.sync(&b);
+    assert!(lfs::parse_pointer(&crate::fsutil::read(b.join("One.mp3")).unwrap()).is_some());
+    let tree = TreeLock::default();
+    lfs::download(&env.git, &b, Path::new("One.mp3"), &tree).unwrap();
+    assert_eq!(crate::fsutil::read(b.join("One.mp3")).unwrap(), one);
+    assert!(lfs::parse_pointer(&crate::fsutil::read(b.join("Two.mp3")).unwrap()).is_some(), "only the file asked for");
+    assert!(tree.try_hold().is_some(), "the tree lock is free again");
+    assert_eq!(env.sync(&b).committed, 0, "the downloaded file is no change");
+    // the whole repository, as the setting `always` does after a sync
+    lfs::pull_all(&env.git, &b, &tree).unwrap();
+    assert_eq!(crate::fsutil::read(b.join("Two.mp3")).unwrap(), two);
+    // a file whose upload never happened is an error in words, not a silent pointer
+    let ghost = "version https://git-lfs.github.com/spec/v1\noid sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\nsize 5\n";
+    write(&b, "Ghost.mp3", ghost);
+    let e = lfs::download(&env.git, &b, Path::new("Ghost.mp3"), &tree).unwrap_err();
+    assert!(!e.is_empty(), "{e}");
 }

@@ -177,6 +177,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ## The ribbon and the sidebars
 
+- **App icon**: three slate plates stacked on a dark square. The window shows it in the title
+  bar, taskbar or Dock; the Linux download has `shale.desktop` and `shale.svg` for the app menu
+  and the Wayland taskbar (see the README).
 - The icons of the ribbon (the narrow bar on the left) can be dragged into any order. A line
   between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
   sidebar toggles at the top and bottom and the settings button stay where they are.
@@ -581,6 +584,22 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Edits you type while a sync runs are never overwritten: if the sync brought a new version of
   that note, your text is saved as a conflict copy next to it.
 - Passwords are git's business (credential helper or SSH key); Shale never asks for one.
+- **Media in Git LFS.** Audio and video files are large, so they do not belong in the git history.
+  With `git-lfs` installed, a repository Shale creates (Connect on a folder that is no repository
+  yet) stores media with Git LFS from the start, and for an existing repository Settings → Git sync
+  has the button **Store media with Git LFS**. The settings show whether git-lfs is installed
+  (and where to get it if not) and whether the repository uses it. Shale sets LFS up in this
+  repository only (never your global git configuration), routes mp3, ogg, oga, opus, flac, m4a,
+  aac, wav, mp4, m4v, mov, webm and mkv (any case) to it with a block in `.gitattributes` (your
+  own lines there stay), and converts media already in the repository in one commit; the old
+  versions stay in the history (`git lfs migrate` removes them, by hand). Every sync uploads the
+  files to the remote's LFS store before it pushes. Other computers get small pointer files and
+  download a file when it is needed: a sound or picture that is still a pointer shows "Not
+  downloaded (12 MB) — Download" (pressing play downloads first, then plays; a spinner shows while
+  it runs and a failure is said in words). Settings → Git sync has "Download media files after every
+  sync" (vault setting `sync.lfs_download`: `on_demand`, the default, or `always`). A conflict copy of a media file is stored in LFS too. On a
+  computer without git-lfs, a vault that stores media with LFS is not synced (nothing is
+  committed) and the settings say why.
 
 ## Keyboard
 
