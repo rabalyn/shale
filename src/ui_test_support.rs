@@ -30,6 +30,8 @@ impl Headless {
     }
 
     /// The egui context the frames run in (to set a drag-and-drop payload the way a view does).
+    /// Only the drop tests use it, and they run on Linux only (#123).
+    #[cfg(target_os = "linux")]
     pub fn ctx(&self) -> &egui::Context {
         &self.ctx
     }
