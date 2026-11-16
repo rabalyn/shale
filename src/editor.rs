@@ -756,6 +756,8 @@ impl NoteEditor {
         } else {
             0.0
         };
+        // the raw lines of the markdown preview (EDIT-016, EDIT-017); embeds on them are raw too
+        let preview = self.live_preview.then(|| self.preview_lines(ui, text));
         if self.inline_images {
             let focused = ui.ctx().memory(|m| m.has_focus(self.id));
             let sel = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).map(|r| {
@@ -769,7 +771,8 @@ impl NoteEditor {
                     continue;
                 }
                 let inside = focused && sel.as_ref().map(|s| s.start <= l.range.end && s.end >= l.range.start).unwrap_or(false);
-                if inside {
+                let raw_line = preview.as_ref().is_some_and(|r| r.contains(&crate::editor_preview::line_of(text, l.range.start)));
+                if inside || raw_line {
                     continue;
                 }
                 let Some(p) = vault.resolve(&l.target, Some(rel)) else { continue };
@@ -806,7 +809,6 @@ impl NoteEditor {
         // text in the middle of a frame, the pictures are found again in the new text, so they
         // stay pictures instead of flashing back to link text for a frame.
         let image_keys: Vec<(String, f32)> = images.iter().map(|(r, h, _, _)| (text[r.clone()].to_string(), *h)).collect();
-        let preview = self.live_preview.then(|| self.preview_lines(ui, text));
         let links = self.cache.links.clone();
         let links_text = text.clone();
         self.assist.arm(text, media_handled);
@@ -1476,6 +1478,45 @@ mod tests {
         let mut ed2 = NoteEditor::new(egui::Id::unique("t10"));
         h.frame(&mut ed2, &mut text, &v, rel, vec![]);
         assert!(ed2.last_layout.as_ref().unwrap().0.size().y < 100.0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-017
+    #[test]
+    fn edit_017_embeds_on_the_raw_lines_around_the_cursor_show_their_link_text() {
+        let (v, d) = vault_for_tests("preview-embed");
+        image::RgbaImage::from_pixel(200, 120, image::Rgba([200, 30, 30, 255])).save(d.join("pic.png")).unwrap();
+        let mut v = v;
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("intro\n\n![[pic.png]]\nafter");
+        let mut ed = NoteEditor::new(egui::Id::unique("preview-embed"));
+        ed.inline_images = true;
+        ed.live_preview = true;
+        ed.preview_raw_lines = 1;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let height = |ed: &NoteEditor| ed.last_layout.as_ref().unwrap().0.size().y;
+        let mut settle = |ed: &mut NoteEditor, text: &mut String, cursor: usize| {
+            ed.pending_cursor = Some(cursor);
+            for _ in 0..3 {
+                h.frame(ed, text, &v, rel, vec![]);
+            }
+        };
+        // cursor on line 0: the embed (line 2) is two lines away, it stays a picture
+        settle(&mut ed, &mut text, 0);
+        assert!(height(&ed) > 120.0, "a picture two lines away, height {}", height(&ed));
+        // cursor on the empty line 1, next to the embed: with one raw line around it, link text
+        settle(&mut ed, &mut text, 6);
+        assert!(height(&ed) < 100.0, "the embed next to the cursor is raw, height {}", height(&ed));
+        // the same from the line after it
+        let end = text.len() - 1;
+        settle(&mut ed, &mut text, end);
+        assert!(height(&ed) < 100.0, "the embed before the cursor line is raw, height {}", height(&ed));
+        // no raw lines around the cursor: only the cursor's own line counts
+        ed.preview_raw_lines = 0;
+        settle(&mut ed, &mut text, 6);
+        assert!(height(&ed) > 120.0, "with 0 the neighbouring embed is a picture, height {}", height(&ed));
+        assert_eq!(text, "intro\n\n![[pic.png]]\nafter");
         let _ = std::fs::remove_dir_all(&d);
     }
 

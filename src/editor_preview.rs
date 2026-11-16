@@ -7,9 +7,13 @@ use std::ops::Range;
 /// not have the keyboard) no line is raw.
 pub fn raw_lines(text: &str, sel: Option<Range<usize>>, around: usize) -> Range<usize> {
     let Some(sel) = sel else { return 0..0 };
-    let line_of = |byte: usize| text.as_bytes()[..byte.min(text.len())].iter().filter(|b| **b == b'\n').count();
-    let (first, last) = (line_of(sel.start), line_of(sel.end));
+    let (first, last) = (line_of(text, sel.start), line_of(text, sel.end));
     first.saturating_sub(around)..last + around + 1
+}
+
+/// The line number (from 0) of byte offset `byte`.
+pub fn line_of(text: &str, byte: usize) -> usize {
+    text.as_bytes()[..byte.min(text.len())].iter().filter(|b| **b == b'\n').count()
 }
 
 #[cfg(test)]
