@@ -774,14 +774,6 @@ pub struct LocalOut {
     pub discard_draft: Option<(String, String)>,
 }
 
-/// The row that Tab moved to is framed like the pane that has the keyboard (MAIL-073).
-fn tab_focus(ui: &Ui, r: &egui::Response, key: &str, i: usize, rects: &mut Vec<(String, Rect)>) {
-    if r.has_focus() {
-        ui.painter().rect_stroke(r.rect.shrink(1.0), 0, egui::Stroke::new(2.0, theme::ACCENT), egui::StrokeKind::Inside);
-        rects.push((format!("{key}:{i}"), r.rect));
-    }
-}
-
 /// "in 7 s" for a mail that waits.
 pub fn wait_text(send_after: i64, now: i64) -> String {
     let left = send_after - now;
@@ -793,6 +785,20 @@ pub fn wait_text(send_after: i64, now: i64) -> String {
 }
 
 impl MailView {
+    /// The row that Tab moved to is framed like the pane that has the keyboard (MAIL-073)
+    /// and becomes the cursor, so the mail keys act on it; the mail keys know it as the row that
+    /// has the focus (`Kbd::row_focus`).
+    pub(crate) fn tab_focus(&mut self, ui: &Ui, r: &egui::Response, key: &str, i: usize, rects: &mut Vec<(String, Rect)>) {
+        if r.has_focus() {
+            ui.painter().rect_stroke(r.rect.shrink(1.0), 0, egui::Stroke::new(2.0, theme::ACCENT), egui::StrokeKind::Inside);
+            rects.push((format!("{key}:{i}"), r.rect));
+            self.kbd.row_focus = Some(r.id);
+            if r.gained_focus() {
+                self.cursor = Some(i);
+            }
+        }
+    }
+
     /// The middle pane when Drafts or Outbox is open.
     pub fn local_list(&mut self, ui: &mut Ui, now: i64, rects: &mut Vec<(String, Rect)>, out: &mut LocalOut) {
         let Some(view) = self.local_view.clone() else { return };
@@ -824,7 +830,7 @@ impl MailView {
                         .min_size(Vec2::new(ui.available_width(), 44.0)),
                     );
                     rec(rects, format!("mail:draft:{i}"), &r);
-                    tab_focus(ui, &r, "mail:draft-focus", i, rects);
+                    self.tab_focus(ui, &r, "mail:draft-focus", i, rects);
                     if self.cursor == Some(i) {
                         ui.painter().rect_filled(r.rect, 0, theme::ACCENT.gamma_multiply(0.25));
                     }
@@ -865,7 +871,7 @@ impl MailView {
                             .min_size(Vec2::new(ui.available_width(), 44.0)),
                     );
                     rec(rects, format!("mail:outbox:{i}"), &r);
-                    tab_focus(ui, &r, "mail:outbox-focus", i, rects);
+                    self.tab_focus(ui, &r, "mail:outbox-focus", i, rects);
                     if self.cursor == Some(i) {
                         ui.painter().rect_filled(r.rect, 0, theme::ACCENT.gamma_multiply(0.25));
                     }
