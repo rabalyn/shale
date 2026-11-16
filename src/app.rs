@@ -16,8 +16,7 @@ use eframe::egui::{self, Key, Modifiers, Ui};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 /// Gives each app built without persistence (tests, screenshots) its own mail folder.
@@ -127,6 +126,7 @@ mod drops;
 #[cfg(all(test, target_os = "linux"))]
 mod drops_tests;
 mod mail;
+mod screenshot;
 mod social;
 mod sync;
 mod tabs;
@@ -320,10 +320,8 @@ pub struct ShaleApp {
     last_scan: Instant,
     pub welcome_path: String,
     // screenshot mode
-    screenshot: Option<PathBuf>,
+    shot: screenshot::ScreenshotRun,
     frames: u32,
-    shot_requested: bool,
-    shot_done: Arc<AtomicBool>,
     /// the last failure to save the global settings (shown once)
     cfg_error: Option<String>,
     /// the scripted input of tests of the real window (BUILD-007)
@@ -473,10 +471,8 @@ impl ShaleApp {
             trashed: vec![],
             last_scan: Instant::now(),
             welcome_path: default_welcome.to_string_lossy().into_owned(),
-            screenshot,
+            shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
-            shot_requested: false,
-            shot_done: Arc::new(AtomicBool::new(false)),
             cfg_error: None,
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery_root,
@@ -489,11 +485,11 @@ impl ShaleApp {
         }
         if let Some(p) = vault_path {
             app.open_vault(&p);
-            if app.screenshot.is_some() && p.join("Welcome.md").is_file() {
+            if app.shot.path.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
             }
             // screenshots: a demo calendar full of sample events
-            if app.screenshot.is_some() && app.cfg.calendars.is_empty() {
+            if app.shot.path.is_some() && app.cfg.calendars.is_empty() {
                 let src = app.calendar.new_local_source("Demo calendar", &[]);
                 let id = src.id.clone();
                 app.cfg.calendars = vec![src];
@@ -501,7 +497,7 @@ impl ShaleApp {
                 let _ = app.calendar.fill_sample(&id);
             }
             // screenshots: a made-up mail store and account (no server, no real mail)
-            if app.screenshot.is_some() && opts.view.as_deref() == Some("mail") && app.cfg.mail_accounts.is_empty() {
+            if app.shot.path.is_some() && opts.view.as_deref() == Some("mail") && app.cfg.mail_accounts.is_empty() {
                 match crate::mail::demo::seed(&app.mail.root) {
                     Ok(()) => {
                         app.cfg.mail_accounts = vec![crate::config::MailAccount { id: crate::mail::demo::ACCOUNT.into(), name: "Demo mail".into(), host: "imap.example.com".into(), user: "ada@example.com".into(), ..Default::default() }];
@@ -1831,12 +1827,12 @@ impl ShaleApp {
 
     fn screenshot_tick(&mut self, ui: &Ui) {
         self.frames += 1;
-        let Some(path) = self.screenshot.clone() else { return };
+        let Some(path) = self.shot.path.clone() else { return };
         ui.ctx().request_repaint();
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
-        if self.frames >= 120 && self.script.steps.is_empty() && self.frames >= self.script.last_frame + 12 && !self.shot_requested {
-            self.shot_requested = true;
-            let done = self.shot_done.clone();
+        if self.frames >= 120 && self.script.steps.is_empty() && self.frames >= self.script.last_frame + 12 && !self.shot.requested {
+            self.shot.requested = true;
+            let done = self.shot.done.clone();
             ui.ctx().request_screenshot(move |img| {
                 let [w, h] = img.size;
                 let mut bytes = Vec::with_capacity(w * h * 4);
@@ -1859,7 +1855,7 @@ impl ShaleApp {
                 done.store(true, Ordering::SeqCst);
             });
         }
-        if self.shot_done.load(Ordering::SeqCst) {
+        if self.shot.done.load(Ordering::SeqCst) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if self.frames > 900 {
@@ -2087,7 +2083,7 @@ impl eframe::App for ShaleApp {
         }
         // a window without a window manager (the private X display of the pictures) never gets the
         // focus from the system; the picture shows the window as a person would see it, focused
-        if self.screenshot.is_some() {
+        if self.shot.path.is_some() {
             raw.focused = true;
         }
         self.feed_script(raw);
