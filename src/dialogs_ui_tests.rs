@@ -790,3 +790,45 @@ fn nav_028_import_has_no_empty_band_between_its_content_and_its_footer() {
     assert_eq!(top, after, "the content scrolled");
     let _ = std::fs::remove_dir_all(&outside);
 }
+
+// spec: NAV-028
+#[test]
+fn nav_028_import_opened_again_with_one_item_has_no_empty_band_left_from_many() {
+    let mut p = P::new("band-import-again", &[]);
+    let outside = p.dir.with_extension("band-again-outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let many: Vec<_> = (0..12)
+        .map(|i| {
+            let f = outside.join(format!("Note {i}.md"));
+            std::fs::write(&f, format!("# Note {i}\n")).unwrap();
+            f
+        })
+        .collect();
+    let (items, mut notes) = crate::import::items_from_paths(&many);
+    // a line for each thing that could not be read makes the dialog tall
+    notes.extend((0..12).map(|i| format!("Skipped file {i}")));
+    p.app.open_import(items, notes, None);
+    p.look(Show::Modals);
+    p.look(Show::Modals);
+    let tall = p.dialog_area("import");
+    // closed, and a while later opened again with one item: the dialog comes back where it was
+    // left, but not as tall as it was with the many lines
+    p.app.modal = None;
+    for _ in 0..5 {
+        p.look(Show::Modals);
+    }
+    let (items, notes) = crate::import::items_from_paths(&[many[0].clone()]);
+    p.app.open_import(items, notes, None);
+    let last_line = "Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more.";
+    for n in 0..12 {
+        p.look(Show::Modals);
+        let last = p.find(Show::Modals, None, last_line);
+        let import = p.find(Show::Modals, Some(Role::Button), "Import 1 item");
+        let gap = import.top() - last.bottom();
+        assert!(gap < 20.0, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?} (the dialog was {tall:?} with many lines)");
+    }
+    let short = p.dialog_area("import");
+    assert!(short.height() < tall.height() - 100.0, "{tall:?} with many lines, {short:?} with one");
+    assert_eq!(short.min, tall.min, "it comes back where it was");
+    let _ = std::fs::remove_dir_all(&outside);
+}

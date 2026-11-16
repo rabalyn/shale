@@ -6,9 +6,11 @@
 //! click on the dimmed part asks to close it ([`DialogResponse::should_close`]), as before.
 //!
 //! Size: a dialog opens at its given width and as tall as its content (at most the window
-//! height). Until the user resizes it, it grows when its content grows (a form that gets more
-//! fields). Position and size are kept while the app runs, so a dialog opened again comes back
-//! where it was left.
+//! height). Until the user resizes it, it follows its content both ways: it grows when the
+//! content grows (a form that gets more fields) and gets shorter when the content does, also
+//! when it is opened again with less content, so no empty room is left above the footer or at
+//! the bottom. Only the bottom edge moves. Position and size are kept while the app runs, so a
+//! dialog opened again comes back where it was left; one the user sized by hand keeps that size.
 
 use eframe::egui::{self, Align2, Color32, Context, Id, Key, Modifiers, Order, Pos2, Rect, ScrollArea, Sense, Ui, Vec2};
 
@@ -24,6 +26,9 @@ const FOOTER_ROOM: f32 = 40.0;
 /// What the room kept for the footer is larger than the footer measured: not to clip it by a
 /// rounding error.
 const FOOTER_SLACK: f32 = 1.0;
+/// How much room below the content a dialog that follows its content must have before it gets
+/// shorter (more than the rounding and the footer's slack leave).
+const SHRINK_MIN: f32 = 3.0;
 /// Frames a new dialog takes to measure its content: egui's invisible sizing pass, one frame
 /// to measure, one in which the window takes that size.
 const FIT_FRAMES: u8 = 3;
@@ -34,15 +39,19 @@ enum Sizing {
     /// New: measuring the content. The window follows the content height, centred on the screen.
     Fitting { frames: u8 },
     /// Placed and its content grew past it: one frame of following the content height again,
-    /// with the top-left corner kept where it is.
+    /// with the top-left corner kept where it is; then it is set to what it measured
+    /// ([`Sizing::Settling`]) like a new dialog, so it ends the same.
     Growing,
     /// Measured, the frame in which the window is set to exactly the measured size: egui keeps
     /// the largest size it was asked for while measuring (a wrapping label is taller in the
     /// first frames, before the window has its width), which left an empty band below the
     /// content.
-    Settling { size: Vec2 },
-    /// Placed. `auto` until the user resizes it: then it no longer grows by itself.
-    Placed { auto: bool, size: Vec2 },
+    /// Also the frame in which a dialog gets shorter because its content did. `floor` is the
+    /// height the window turned out not to get below (egui's smallest size), 0 if not known.
+    Settling { size: Vec2, floor: f32 },
+    /// Placed. `auto` until the user resizes it: then it keeps its size, it neither grows nor
+    /// gets shorter with its content.
+    Placed { auto: bool, size: Vec2, floor: f32 },
 }
 
 pub struct Dialog {
@@ -81,7 +90,7 @@ impl Dialog {
         self
     }
 
-    pub fn show<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T) -> DialogResponse {
+    pub fn show(self, ctx: &Context, content: impl FnOnce(&mut Ui)) -> DialogResponse {
         self.show_inner(ctx, &mut (), |ui, _| content(ui), None::<fn(&mut Ui, &mut ())>)
     }
 
@@ -89,11 +98,11 @@ impl Dialog {
     /// scrolls; the footer stays in view, also in a window shorter than the content. The content
     /// and the footer are closures over the same `state` (they could not both borrow what the
     /// dialog edits); the footer runs right after the content, in the same frame.
-    pub fn show_with_footer<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse {
+    pub fn show_with_footer<S>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S), footer: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse {
         self.show_inner(ctx, state, content, Some(footer))
     }
 
-    fn show_inner<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse {
+    fn show_inner<S>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S), footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse {
         let Self { id, title, width, modal } = self;
         let has_footer = footer.is_some();
         let screen = ctx.content_rect();
@@ -136,7 +145,7 @@ impl Dialog {
         if measuring {
             window = window.max_height(max.y);
         }
-        if let Sizing::Settling { size } = sizing {
+        if let Sizing::Settling { size, .. } = sizing {
             window = window.fixed_size(size);
         }
         if matches!(sizing, Sizing::Fitting { .. }) {
@@ -144,6 +153,7 @@ impl Dialog {
             window = window.pivot(Align2::CENTER_CENTER).default_pos(screen.center());
         }
         let mut overflow = false;
+        let mut spare = 0.0;
         let footer_key = id.with("footer-height");
         let footer_room = ctx.data(|d| d.get_temp::<f32>(footer_key)).unwrap_or(FOOTER_ROOM);
         let shown = window.show(ctx, |ui| {
@@ -162,7 +172,7 @@ impl Dialog {
             let scope = ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
                 let out = ScrollArea::vertical().id_salt("dialog-body").auto_shrink(shrink).show(ui, |ui| content(ui, &mut *state));
                 overflow = out.content_size.y > out.inner_rect.height() + 1.0;
-                out.inner
+                spare = out.inner_rect.height() - out.content_size.y;
             });
             if let Some(footer) = footer {
                 ui.separator();
@@ -175,7 +185,6 @@ impl Dialog {
                     ctx.request_repaint();
                 }
             }
-            scope.inner
         });
 
         let Some(shown) = shown else {
@@ -191,17 +200,27 @@ impl Dialog {
                 pin_left_top(ctx, id, rect.min);
                 // the window gets the slack of the footer's room too, or the content (as tall as
                 // it is) would be a hair too tall for the scroll area and get a scroll bar
-                Sizing::Settling { size: rect.size() + Vec2::new(0.0, if has_footer { FOOTER_SLACK } else { 0.0 }) }
+                Sizing::Settling { size: rect.size() + Vec2::new(0.0, if has_footer { FOOTER_SLACK } else { 0.0 }), floor: 0.0 }
             }
-            Sizing::Settling { .. } | Sizing::Growing => Sizing::Placed { auto: true, size: rect.size() },
-            Sizing::Placed { auto, size } => {
+            Sizing::Settling { size, floor } => {
+                // asked for less than egui lets a window be: that is the lowest it gets
+                let floor = if rect.height() > size.y + 1.0 { rect.height() } else { floor };
+                Sizing::Placed { auto: true, size: rect.size(), floor }
+            }
+            // measured again: set to that size with the footer's slack, as a new dialog is
+            Sizing::Growing => Sizing::Settling { size: rect.size() + Vec2::new(0.0, if has_footer { FOOTER_SLACK } else { 0.0 }), floor: 0.0 },
+            Sizing::Placed { auto, size, floor } => {
                 let resized = (rect.size() - size).length() > 0.5 && ctx.input(|i| i.pointer.any_down());
                 let auto = auto && !resized;
                 if auto && overflow && rect.height() < max.y - 1.0 {
                     // the content grew and the user has not sized the dialog: grow with it
                     Sizing::Growing
+                } else if auto && spare > SHRINK_MIN && !ctx.input(|i| i.pointer.any_down()) && rect.height() - spare > floor + 0.5 {
+                    // the content got shorter and the user has not sized the dialog: follow it
+                    // (the footer's slack too, as when the dialog was new)
+                    Sizing::Settling { size: rect.size() - Vec2::new(0.0, spare - if has_footer { FOOTER_SLACK } else { 0.0 }), floor }
                 } else {
-                    Sizing::Placed { auto, size: rect.size() }
+                    Sizing::Placed { auto, size: rect.size(), floor }
                 }
             }
         };
@@ -389,6 +408,246 @@ mod tests {
         w.frames(4);
         let r = w.rect();
         assert!(r.height() > h + 100.0, "{h} -> {r:?}");
+    }
+
+    /// What a [`B`] dialog drew in its last frame.
+    struct Seen {
+        rows: usize,
+        wrap: bool,
+        last: Rect,
+        visible: Rect,
+        button: Rect,
+    }
+
+    /// A dialog with a footer (one button) and `rows` lines of content, optionally followed by a
+    /// long wrapping label; the content can change between frames, and the dialog can be left
+    /// out of some frames (closed).
+    struct B {
+        ctx: Context,
+        t: f64,
+        rows: usize,
+        wrap: bool,
+        footer: bool,
+        shown: bool,
+        seen: Seen,
+        repaints: usize,
+    }
+
+    const LONG: &str = "A long line of text that wraps at the width of the dialog, so that it is measured taller while the window has no width yet and shorter after it, the way the lines of the Import dialog do.";
+
+    impl B {
+        fn new(rows: usize, footer: bool) -> Self {
+            let mut b = B { ctx: Context::default(), t: 0.0, rows, wrap: false, footer, shown: true, seen: Seen { rows: 0, wrap: false, last: Rect::NOTHING, visible: Rect::NOTHING, button: Rect::NOTHING }, repaints: 0 };
+            b.frames(8);
+            b
+        }
+        fn frame(&mut self, events: Vec<Event>) {
+            self.t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SCREEN)), time: Some(self.t), events, ..Default::default() };
+            self.seen.rows = self.rows;
+            self.seen.wrap = self.wrap;
+            let (shown, has_footer) = (self.shown, self.footer);
+            let seen = &mut self.seen;
+            let mut out = self.ctx.run_ui(raw, |ui| {
+                if !shown {
+                    return;
+                }
+                let content = |ui: &mut Ui, seen: &mut Seen| {
+                    for i in 0..seen.rows {
+                        seen.last = ui.label(format!("line {i}")).rect;
+                    }
+                    if seen.wrap {
+                        seen.last = ui.label(LONG).rect;
+                    }
+                    seen.visible = ui.clip_rect();
+                };
+                let d = Dialog::new("b", "B").width(400.0);
+                if has_footer {
+                    d.show_with_footer(ui.ctx(), seen, content, |ui, seen| seen.button = ui.button("Done").rect);
+                } else {
+                    d.show(ui.ctx(), |ui| content(ui, &mut *seen));
+                }
+            });
+            if out.viewport_output.values().any(|v| v.repaint_delay.is_zero()) {
+                self.repaints += 1;
+            }
+            out.textures_delta.clear();
+        }
+        fn frames(&mut self, n: usize) {
+            for _ in 0..n {
+                self.frame(vec![]);
+            }
+        }
+        fn rect(&self) -> Rect {
+            self.ctx.memory(|m| m.area_rect(Id::unique(("dialog", "b")))).expect("dialog shown")
+        }
+        /// Between the last line and the footer's button (a footer dialog), or the dialog's bottom
+        /// edge (without a footer).
+        fn gap(&self) -> f32 {
+            if self.footer {
+                self.seen.button.top() - self.seen.last.bottom()
+            } else {
+                self.rect().bottom() - self.seen.last.bottom()
+            }
+        }
+        /// How far the last line is below what the scroll area shows (it scrolls).
+        fn hidden(&self) -> f32 {
+            self.seen.last.bottom() - self.seen.visible.bottom()
+        }
+        fn drag(&mut self, from: Pos2, to: Pos2) {
+            let b = |pos, pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+            self.frame(vec![Event::PointerMoved(from)]);
+            self.frame(vec![b(from, true)]);
+            for k in 1..=5 {
+                self.frame(vec![Event::PointerMoved(from + (to - from) * (k as f32 / 5.0))]);
+            }
+            self.frame(vec![b(to, false)]);
+            self.frames(3);
+        }
+    }
+
+    impl B {
+        /// A new dialog with `rows` lines, run until it has settled.
+        fn fresh(rows: usize, footer: bool, wrap: bool) -> Self {
+            let mut b = B::new(rows, footer);
+            b.wrap = wrap;
+            b.frames(8);
+            b
+        }
+        fn placed(&self) -> bool {
+            let key = Id::unique(("dialog", "b")).with("sizing");
+            self.ctx.data(|d| d.get_temp::<Sizing>(key)).is_some_and(|s| matches!(s, Sizing::Placed { .. }))
+        }
+    }
+
+    /// Every case: with and without a footer, with and without a wrapping line after the rows.
+    const CASES: [(bool, bool); 4] = [(true, false), (true, true), (false, false), (false, true)];
+
+    fn same_as_fresh(b: &B, fresh: &B, what: &str) {
+        let (r, f) = (b.rect(), fresh.rect());
+        assert!((r.height() - f.height()).abs() <= 1.5, "{what}: {r:?} against a new dialog {f:?}");
+        assert!((b.gap() - fresh.gap()).abs() <= 1.5, "{what}: {} px of room against {} in a new dialog", b.gap(), fresh.gap());
+        assert!(b.hidden() <= fresh.hidden() + 0.5, "{what}: the content scrolls by {} px, a new dialog by {}", b.hidden(), fresh.hidden());
+        assert!(b.placed(), "{what}: not settled");
+        if b.footer {
+            assert!(r.contains_rect(b.seen.button), "{what}: the button {:?} is not inside the dialog {r:?}", b.seen.button);
+        }
+    }
+
+    // spec: NAV-028
+    #[test]
+    fn nav_028_a_dialog_that_grew_ends_like_a_new_one_with_that_content() {
+        for (footer, wrap) in CASES {
+            let mut b = B::fresh(3, footer, wrap);
+            let before = b.rect();
+            b.rows = 12;
+            b.frames(10);
+            let r = b.rect();
+            assert_eq!(r.min, before.min, "footer {footer}, wrap {wrap}: the top-left corner stays");
+            assert_eq!(r.width(), before.width());
+            same_as_fresh(&b, &B::fresh(12, footer, wrap), &format!("footer {footer}, wrap {wrap}, grown"));
+        }
+    }
+
+    // spec: NAV-028
+    #[test]
+    fn nav_028_a_dialog_gets_shorter_with_its_content_and_keeps_its_corner_and_width() {
+        for (footer, wrap) in CASES {
+            for rows in [1, 3, 6] {
+                let mut b = B::fresh(12, footer, wrap);
+                let before = b.rect();
+                b.rows = rows;
+                b.frames(10);
+                let r = b.rect();
+                assert_eq!(r.min, before.min, "footer {footer}, wrap {wrap}, {rows} rows: the top-left corner stays");
+                assert_eq!(r.width(), before.width());
+                assert!(r.height() <= before.height(), "{r:?}");
+                same_as_fresh(&b, &B::fresh(rows, footer, wrap), &format!("footer {footer}, wrap {wrap}, 12 -> {rows} rows"));
+            }
+        }
+    }
+
+    // spec: NAV-028
+    #[test]
+    fn nav_028_a_dialog_opened_again_with_less_content_is_as_short_as_a_new_one() {
+        for (footer, wrap) in CASES {
+            let mut b = B::fresh(12, footer, wrap);
+            let before = b.rect();
+            b.shown = false;
+            b.frames(5);
+            b.shown = true;
+            b.rows = 3;
+            b.frames(10);
+            assert_eq!(b.rect().min, before.min, "footer {footer}, wrap {wrap}: it comes back where it was");
+            same_as_fresh(&b, &B::fresh(3, footer, wrap), &format!("footer {footer}, wrap {wrap}, opened again with 3 rows"));
+        }
+    }
+
+    // spec: NAV-028
+    #[test]
+    fn nav_028_a_new_dialog_keeps_its_size_and_asks_for_no_more_frames_once_placed() {
+        for (footer, wrap) in CASES {
+            // one row and no row are shorter than egui lets a window be: there is room left that
+            // the dialog must not try to get rid of again and again
+            for rows in [0, 1, 3, 12] {
+                let mut b = B::fresh(rows, footer, wrap);
+                assert!(b.placed(), "footer {footer}, wrap {wrap}, {rows} rows");
+                let r = b.rect();
+                b.repaints = 0;
+                for n in 0..20 {
+                    b.frame(vec![]);
+                    assert_eq!(b.rect(), r, "footer {footer}, wrap {wrap}, {rows} rows: frame {n}");
+                }
+                assert!(b.placed(), "footer {footer}, wrap {wrap}, {rows} rows");
+                assert_eq!(b.repaints, 0, "footer {footer}, wrap {wrap}, {rows} rows: the dialog keeps asking for frames");
+            }
+        }
+    }
+
+    // spec: NAV-013
+    #[test]
+    fn nav_013_a_dialog_sized_by_hand_keeps_its_size_when_the_content_gets_shorter() {
+        for footer in [true, false] {
+            let mut b = B::fresh(3, footer, false);
+            let r = b.rect();
+            let corner = r.max - Vec2::splat(2.0);
+            b.drag(corner, corner + Vec2::new(100.0, 200.0));
+            let sized = b.rect();
+            assert!(sized.height() > r.height() + 150.0, "{r:?} -> {sized:?}");
+            // the content is shorter than the dialog all along: nothing moves
+            b.frames(10);
+            assert_eq!(b.rect(), sized, "footer {footer}");
+            // grows and gets shorter again: the size is the person's
+            b.rows = 40;
+            b.frames(10);
+            assert_eq!(b.rect(), sized, "footer {footer}: it does not grow");
+            b.rows = 1;
+            b.frames(10);
+            assert_eq!(b.rect(), sized, "footer {footer}: it does not get shorter");
+            // also not after it was closed and opened again
+            b.shown = false;
+            b.frames(5);
+            b.shown = true;
+            b.frames(10);
+            assert_eq!(b.rect(), sized, "footer {footer}: opened again");
+        }
+    }
+
+    // spec: NAV-013
+    #[test]
+    fn nav_013_a_dialog_does_not_get_shorter_while_the_pointer_is_down_on_it() {
+        let mut b = B::fresh(12, true, false);
+        let h = b.rect().height();
+        let p = Pos2::new(b.rect().center().x, b.rect().top() + 10.0);
+        let btn = |pressed| Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        b.frame(vec![Event::PointerMoved(p)]);
+        b.frame(vec![btn(true)]);
+        b.rows = 3;
+        b.frames(6);
+        assert_eq!(b.rect().height(), h, "it waits for the button to go up");
+        b.frame(vec![btn(false)]);
+        b.frames(6);
+        assert!(b.rect().height() < h - 100.0, "{h} -> {:?}", b.rect());
     }
 
     #[test]
