@@ -692,4 +692,116 @@ pub mod tests {
         assert!(ob.get("acct1", &item.id).unwrap().copy_done);
         assert_eq!(smtp.state().received.len(), 1);
     }
+
+    struct CountingAuth {
+        rejects: bool,
+        fail_on_call: Option<usize>,
+        asked: AtomicUsize,
+    }
+
+    impl AuthFactory for CountingAuth {
+        fn authenticator(&self) -> Result<Box<dyn Authenticator>, String> {
+            let n = self.asked.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.fail_on_call == Some(n) {
+                return Err(format!("no token (call {n})"));
+            }
+            Ok(Box::new(crate::imap_client::PlainAuth::new("ada", "pw")))
+        }
+        fn token_rejected(&self) -> bool {
+            self.rejects
+        }
+    }
+
+    fn counting(rejects: bool, fail_on_call: Option<usize>) -> CountingAuth {
+        CountingAuth { rejects, fail_on_call, asked: AtomicUsize::new(0) }
+    }
+
+    // spec: MAIL-223
+    #[test]
+    fn smtp_connect_with_retry_asks_again_once_only_for_a_refused_sign_in_of_a_factory_that_can_get_a_new_token() {
+        let auth_err = |t: &str| Err::<Smtp, _>(SmtpError::Auth(t.into()));
+        let n = AtomicUsize::new(0);
+        let tries = |f: &CountingAuth, first: Result<Smtp, SmtpError>, second: Result<Smtp, SmtpError>| {
+            n.store(0, Ordering::SeqCst);
+            let (mut first, mut second) = (Some(first), Some(second));
+            let r = connect_with_retry(f, |_| match n.fetch_add(1, Ordering::SeqCst) {
+                0 => first.take().unwrap(),
+                _ => second.take().expect("a third try"),
+            });
+            (r.err(), n.load(Ordering::SeqCst), f.asked.load(Ordering::SeqCst))
+        };
+        // a password: refused once, said as it is
+        let (e, n1, asked) = tries(&counting(false, None), auth_err("wrong"), auth_err("never"));
+        assert_eq!((e, n1, asked), (Some(SmtpError::Auth("wrong".into())), 1, 1));
+        // a token that is refused twice: told to sign in again
+        let (e, n2, asked) = tries(&counting(true, None), auth_err("expired"), auth_err("expired too"));
+        assert_eq!((n2, asked), (2, 2));
+        assert!(matches!(&e, Some(SmtpError::Auth(t)) if t.starts_with("expired too") && t.contains("refused a fresh token as well") && t.contains(crate::oauth::SIGN_IN_AGAIN)), "{e:?}");
+        // not a refusal: no second try; a different failure on the second try is passed on
+        let (e, n3, _) = tries(&counting(true, None), Err(SmtpError::Connection("down".into())), auth_err("never"));
+        assert_eq!((e, n3), (Some(SmtpError::Connection("down".into())), 1));
+        let (e, n4, _) = tries(&counting(true, None), auth_err("expired"), Err(SmtpError::Tls("bad certificate".into())));
+        assert_eq!((e, n4), (Some(SmtpError::Tls("bad certificate".into())), 2));
+        // no authenticator to be had
+        let (e, n5, _) = tries(&counting(true, Some(1)), auth_err("x"), auth_err("x"));
+        assert_eq!((e, n5), (Some(SmtpError::Auth("no token (call 1)".into())), 0));
+        let (e, n6, _) = tries(&counting(true, Some(2)), auth_err("x"), auth_err("x"));
+        assert_eq!((e, n6), (Some(SmtpError::Auth("no token (call 2)".into())), 1));
+        // the second try works
+        let server = FakeSmtp::start(MailSecurity::ImplicitTls);
+        let f = counting(true, None);
+        let n = AtomicUsize::new(0);
+        let s = connect_with_retry(&f, |_| match n.fetch_add(1, Ordering::SeqCst) {
+            0 => auth_err("expired"),
+            _ => {
+                let (user, password) = {
+                    let s = server.state();
+                    (s.user.clone(), s.password.clone())
+                };
+                Smtp::connect_test(&server.settings(), server_cert(), &mut crate::imap_client::PlainAuth::new(&user, &password))
+            }
+        });
+        s.unwrap().quit();
+        assert_eq!((n.load(Ordering::SeqCst), f.asked.load(Ordering::SeqCst)), (2, 2));
+    }
+
+    // spec: MAIL-223
+    #[test]
+    fn the_smtp_settings_come_from_the_account_and_the_production_connector_reports_what_it_meets() {
+        let a = MailAccount { smtp_host: "  smtp.example.org ".into(), smtp_port: 465, smtp_security: MailSecurity::ImplicitTls, ..account() };
+        let s = smtp_settings(&a);
+        assert_eq!((s.host.as_str(), s.port, s.security, s.limits.io_timeout), ("smtp.example.org", 465, MailSecurity::ImplicitTls, Duration::from_secs(120)));
+        assert_eq!(s.limits.max_message, Limits::default().max_message);
+        let s = smtp_settings(&MailAccount { smtp_port: 587, smtp_security: MailSecurity::StartTls, ..a.clone() });
+        assert_eq!((s.port, s.security), (587, MailSecurity::StartTls));
+        // no server yet: the sentence for the settings, even with a password at hand
+        for host in ["", "   "] {
+            let e = connector_for_account(&MailAccount { smtp_host: host.into(), ..a.clone() }, Some("pw".into())).err().unwrap();
+            assert!(e.contains("no SMTP server yet"), "{e}");
+        }
+        // a password typed for this session: no keyring; a refused connection and an untrusted certificate are said as they are
+        let server = FakeSmtp::start(MailSecurity::ImplicitTls);
+        let at = |port: u16| MailAccount { smtp_host: "localhost".into(), smtp_port: port, smtp_security: MailSecurity::ImplicitTls, ..account() };
+        let c = connector_for_account(&at(crate::imap_fake_tests::closed_port()), Some("pw".into())).unwrap();
+        assert!(matches!(c.connect(), Err(SmtpError::Connection(_))));
+        assert!(test_connection(c.as_ref()).is_err());
+        let c = connector_for_account(&at(server.port), Some("pw".into())).unwrap();
+        assert!(matches!(c.connect(), Err(SmtpError::Tls(_))));
+        let e = test_connection(c.as_ref()).err().unwrap();
+        assert!(!e.is_empty());
+        // OAuth2: the sign-in of the account is used for SMTP too; a broken OAuth2 setup is said before any connection
+        let oauth = MailAccount {
+            id: "t-smtp-oauth".into(),
+            auth: crate::config::MailAuth::OAuth2,
+            oauth_provider: crate::config::OAuthProvider::Custom,
+            oauth_client_id: "shale".into(),
+            oauth_auth_url: "http://127.0.0.1:1/authorize".into(),
+            oauth_token_url: "http://127.0.0.1:1/token".into(),
+            oauth_scope: "mail".into(),
+            ..at(server.port)
+        };
+        assert!(connector_for_account(&oauth, Some("typed-secret".into())).is_ok());
+        let e = connector_for_account(&MailAccount { oauth_client_id: "".into(), ..oauth }, Some("typed-secret".into())).err().unwrap();
+        assert!(e.contains("client ID"), "{e}");
+    }
 }

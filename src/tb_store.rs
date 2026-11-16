@@ -689,3 +689,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+#[cfg(test)]
+#[path = "tb_store_tests.rs"]
+mod fixture_tests;

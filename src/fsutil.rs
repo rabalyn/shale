@@ -251,22 +251,25 @@ pub fn open_private_log(path: &Path, append: bool) -> io::Result<File> {
 pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
     match renameat2_noreplace(from, to) {
         Some(r) => r,
-        None => {
-            // no atomic way here: a hard link fails if the target exists (files only)
-            #[cfg(unix)]
-            if fs::symlink_metadata(from).map(|m| m.is_file()).unwrap_or(false) {
-                match fs::hard_link(from, to) {
-                    Ok(()) => return fs::remove_file(from),
-                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Err(e),
-                    Err(_) => {}
-                }
-            }
-            if fs::symlink_metadata(to).is_ok() {
-                return Err(io::Error::new(io::ErrorKind::AlreadyExists, "the target exists"));
-            }
-            fs::rename(from, to)
+        None => rename_noreplace_fallback(from, to),
+    }
+}
+
+/// The way without `renameat2`: a hard link fails if the target exists (files only), else check
+/// first and rename.
+fn rename_noreplace_fallback(from: &Path, to: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    if fs::symlink_metadata(from).map(|m| m.is_file()).unwrap_or(false) {
+        match fs::hard_link(from, to) {
+            Ok(()) => return fs::remove_file(from),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Err(e),
+            Err(_) => {}
         }
     }
+    if fs::symlink_metadata(to).is_ok() {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "the target exists"));
+    }
+    fs::rename(from, to)
 }
 
 /// `renameat2(RENAME_NOREPLACE)` on Linux. `None` when it is not available here (old kernels,
@@ -512,6 +515,28 @@ mod tests {
         };
         assert!(again.is_some(), "the lock is free after the first is dropped");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_private_log_is_started_empty_or_appended_and_owner_only() {
+        let d = tmp("log");
+        let p = d.join("sub").join("x.log");
+        use std::io::Write;
+        open_private_log(&p, false).unwrap().write_all(b"one").unwrap();
+        open_private_log(&p, true).unwrap().write_all(b"two").unwrap();
+        assert_eq!(fs::read_to_string(&p).unwrap(), "onetwo");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // an older, wider file is narrowed again
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+            drop(open_private_log(&p, true).unwrap());
+            assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(fs::metadata(p.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        open_private_log(&p, false).unwrap();
+        assert_eq!(fs::read_to_string(&p).unwrap(), "", "started empty");
+        let _ = fs::remove_dir_all(&d);
     }
 
     /// A small deterministic random generator, so the tests need no extra crate.
@@ -792,6 +817,36 @@ mod tests {
         rename_noreplace(&d.join("dir1"), &d.join("dir3")).unwrap();
         assert!(d.join("dir3").is_dir() && !d.join("dir1").exists());
         assert!(rename_noreplace(&d.join("missing"), &d.join("x")).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DATA-004
+    #[test]
+    fn the_fallback_without_renameat2_has_the_same_no_replace_guarantee() {
+        let d = tmp("rename-fallback");
+        fs::write(d.join("a"), "A").unwrap();
+        fs::write(d.join("b"), "B").unwrap();
+        // name taken: nothing moves, nothing is replaced
+        assert_eq!(rename_noreplace_fallback(&d.join("a"), &d.join("b")).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(d.join("a")).unwrap(), b"A");
+        assert_eq!(fs::read(d.join("b")).unwrap(), b"B");
+        // free name: the file is moved (no second name is left behind)
+        rename_noreplace_fallback(&d.join("a"), &d.join("c")).unwrap();
+        assert_eq!(fs::read(d.join("c")).unwrap(), b"A");
+        assert_eq!(names(&d), vec!["b", "c"]);
+        // folders: no hard link, so the exists check decides (also for an empty target folder)
+        fs::create_dir(d.join("dir1")).unwrap();
+        fs::write(d.join("dir1/x"), "X").unwrap();
+        fs::create_dir(d.join("dir2")).unwrap();
+        assert_eq!(rename_noreplace_fallback(&d.join("dir1"), &d.join("dir2")).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        rename_noreplace_fallback(&d.join("dir1"), &d.join("dir3")).unwrap();
+        assert_eq!(fs::read(d.join("dir3/x")).unwrap(), b"X");
+        assert!(!d.join("dir1").exists());
+        // a file onto a folder, a missing source, a missing target folder
+        assert_eq!(rename_noreplace_fallback(&d.join("b"), &d.join("dir2")).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(rename_noreplace_fallback(&d.join("missing"), &d.join("y")).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(rename_noreplace_fallback(&d.join("b"), &d.join("nodir/z")).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(fs::read(d.join("b")).unwrap(), b"B");
         let _ = fs::remove_dir_all(&d);
     }
 

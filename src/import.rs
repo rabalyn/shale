@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "linux")]
 mod from_programs;
 #[cfg(target_os = "linux")]
-pub use from_programs::items_from_parts;
+pub use from_programs::{file_uri, items_from_parts};
 #[cfg(all(target_os = "linux", test))]
 pub use from_programs::{items_from_drop, text_of};
 

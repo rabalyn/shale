@@ -645,24 +645,28 @@ impl Gnupg {
         if run.has("DECRYPTION_OKAY") && !run.has("DECRYPTION_FAILED") {
             return Ok(Ok(Decrypted { plain: run.stdout, signatures: signatures(&run.status) }));
         }
-        let missing: Vec<String> = run.status.iter().filter(|s| s.keyword == "NO_SECKEY").filter_map(|s| s.fields().first().map(|f| f.to_string())).collect();
-        let code = error_code(&run.status);
-        let fail = if code == Some(99) || run.status.iter().any(|s| s.keyword == "ERROR" && s.args.contains("cancel")) {
-            DecryptFailure::Cancelled
-        } else if run.has("BAD_PASSPHRASE") || code == Some(11) {
-            DecryptFailure::BadPassphrase
-        } else if !missing.is_empty() || code == Some(17) {
-            DecryptFailure::NoSecretKey(missing)
-        } else if run.has("NODATA") || code == Some(58) {
-            DecryptFailure::Corrupt
-        } else if s == CryptoStandard::Smime && run.has("DECRYPTION_FAILED") && code.is_none() {
-            DecryptFailure::NoKeyOrDamaged
-        } else if run.has("DECRYPTION_FAILED") {
-            DecryptFailure::Corrupt
-        } else {
-            DecryptFailure::Other(run.status.iter().find(|s| s.keyword == "ERROR" || s.keyword == "FAILURE").map(|s| format!("{} {}", s.keyword, s.args)).unwrap_or_else(|| format!("exit code {}", run.code)))
-        };
-        Ok(Err(fail))
+        Ok(Err(decrypt_failure(&run, s)))
+    }
+}
+
+/// Why a decryption gave nothing, from its status lines.
+fn decrypt_failure(run: &Run, s: CryptoStandard) -> DecryptFailure {
+    let missing: Vec<String> = run.status.iter().filter(|s| s.keyword == "NO_SECKEY").filter_map(|s| s.fields().first().map(|f| f.to_string())).collect();
+    let code = error_code(&run.status);
+    if code == Some(99) || run.status.iter().any(|s| s.keyword == "ERROR" && s.args.contains("cancel")) {
+        DecryptFailure::Cancelled
+    } else if run.has("BAD_PASSPHRASE") || code == Some(11) {
+        DecryptFailure::BadPassphrase
+    } else if !missing.is_empty() || code == Some(17) {
+        DecryptFailure::NoSecretKey(missing)
+    } else if run.has("NODATA") || code == Some(58) {
+        DecryptFailure::Corrupt
+    } else if s == CryptoStandard::Smime && run.has("DECRYPTION_FAILED") && code.is_none() {
+        DecryptFailure::NoKeyOrDamaged
+    } else if run.has("DECRYPTION_FAILED") {
+        DecryptFailure::Corrupt
+    } else {
+        DecryptFailure::Other(run.status.iter().find(|s| s.keyword == "ERROR" || s.keyword == "FAILURE").map(|s| format!("{} {}", s.keyword, s.args)).unwrap_or_else(|| format!("exit code {}", run.code)))
     }
 }
 
@@ -671,6 +675,8 @@ impl Gnupg {
 /// Why `INV_RECP` refused a recipient (the reason numbers of GnuPG).
 fn inv_recp_words(reason: &str) -> &'static str {
     match reason {
+        // what gpg says for an expired, revoked or disabled key (it gives no better reason)
+        "0" => "the key cannot be used (it has expired, been revoked or been disabled)",
         "1" => "no such key in your keyring",
         "2" => "the name matches several keys",
         "3" => "the key may not be used for encryption",
@@ -939,6 +945,11 @@ pub(crate) mod testkit {
                 args.extend(["--faked-system-time", t]);
             }
             self.pipe("gpg", &args, data)
+        }
+
+        /// Like [`pgp_sign`](Self::pgp_sign), made at `faked_time` and valid for `expire` (gpg's `--default-sig-expire`).
+        pub fn pgp_sign_expiring(&self, fpr: &str, data: &[u8], faked_time: &str, expire: &str) -> Vec<u8> {
+            self.pipe("gpg", &["--armor", "--detach-sign", "-u", fpr, "--faked-system-time", faked_time, "--default-sig-expire", expire], data)
         }
 
         /// An armored OpenPGP message for `to`, signed by `sign_with` in the same operation if given.
@@ -1227,5 +1238,225 @@ mod tests {
         assert!(h.g.list_keys(CryptoStandard::Smime, false, Some("nobody@example.org"), &no_cancel()).unwrap().is_empty());
         assert_eq!(h.g.key_info(CryptoStandard::OpenPgp, &pgp, &no_cancel()).unwrap().unwrap().fingerprint, pgp);
         assert!(h.g.version(CryptoStandard::OpenPgp).unwrap().contains("gpg"));
+    }
+
+    fn key(validity: char) -> KeyInfo {
+        KeyInfo { fingerprint: "0123456789ABCDEF0123456789ABCDEF01234567".into(), key_id: "89ABCDEF01234567".into(), uids: Vec::new(), emails: Vec::new(), validity, can_encrypt: true, can_sign: true, expires: None, secret: false }
+    }
+
+    fn st(keyword: &str, args: &str) -> Status {
+        Status { keyword: keyword.into(), args: args.into() }
+    }
+
+    fn run_of(status: &[(&str, &str)], code: i32) -> Run {
+        Run { stdout: Vec::new(), status: status.iter().map(|(k, a)| st(k, a)).collect(), code }
+    }
+
+    // spec: MAIL-174, MAIL-193
+    #[test]
+    fn each_trust_level_of_a_key_has_its_words_and_expired_revoked_disabled_and_invalid_keys_are_not_usable() {
+        let words: Vec<(char, &str, bool)> = vec![
+            ('u', "yours", true),
+            ('f', "trusted", true),
+            ('m', "marginally trusted", true),
+            ('e', "expired", false),
+            ('r', "revoked", false),
+            ('d', "disabled", false),
+            ('i', "invalid", false),
+            ('n', "not trusted", true),
+            ('-', "not certified", true),
+            ('q', "not certified", true),
+        ];
+        for (letter, text, usable) in words {
+            let k = key(letter);
+            assert_eq!((k.trust_words(), k.usable()), (text, usable), "validity {letter}");
+        }
+        // the label is the first user id, or the fingerprint when there is none
+        let mut k = key('u');
+        assert_eq!(k.label(), k.fingerprint);
+        k.uids = vec!["Ada <ada@x.org>".into(), "Other".into()];
+        assert_eq!(k.label(), "Ada <ada@x.org>");
+    }
+
+    // spec: MAIL-193
+    #[test]
+    fn a_refused_recipient_is_explained_in_words_for_every_reason_gnupg_gives() {
+        let reasons = [
+            ("0", "has expired, been revoked or been disabled"),
+            ("1", "no such key"),
+            ("2", "several keys"),
+            ("3", "may not be used for encryption"),
+            ("4", "has been revoked"),
+            ("5", "has expired"),
+            ("6", "revocation list"),
+            ("7", "revocation list"),
+            ("8", "policy"),
+            ("10", "not trusted"),
+            ("11", "chain is incomplete"),
+            ("12", "chain is incomplete"),
+            ("99", "refused the key"),
+        ];
+        for (n, text) in reasons {
+            assert!(inv_recp_words(n).contains(text), "reason {n}: {}", inv_recp_words(n));
+        }
+        // the words name the address (unescaped) and every refused recipient
+        let r = run_of(&[("INV_RECP", "5 bob@example.org"), ("INV_RECP", "4 Eve\\x20Ex <eve@example.org>")], 2);
+        assert_eq!(op_failure(&r, "encrypted"), "The mail was not encrypted: bob@example.org: the key has expired; Eve Ex <eve@example.org>: the key has been revoked.");
+    }
+
+    // spec: MAIL-195
+    #[test]
+    fn a_failed_signing_or_encrypting_says_why_in_words() {
+        let w = |status: &[(&str, &str)]| op_failure(&run_of(status, 2), "signed");
+        assert!(w(&[("ERROR", "sign 83886179")]).contains("dialog was cancelled"), "{}", w(&[("ERROR", "sign 83886179")]));
+        assert!(w(&[("BAD_PASSPHRASE", "ABCD")]).contains("passphrase was not accepted"));
+        assert!(w(&[("ERROR", "sign 83886091")]).contains("passphrase was not accepted"), "error code 11");
+        for s in [&[("INV_SGNR", "9 Ada")][..], &[("NO_SECKEY", "ABCD")][..], &[("ERROR", "sign 67108881")][..]] {
+            let t = w(s);
+            assert!(t.contains("no secret key here (or has expired)") && t.contains("not signed"), "{t}");
+        }
+        assert_eq!(w(&[("FAILURE", "sign 33554433")]), "GnuPG could not do it, so the mail was not signed (FAILURE sign 33554433).");
+        assert_eq!(w(&[]), "GnuPG could not do it, so the mail was not signed.");
+    }
+
+    // spec: MAIL-182
+    #[test]
+    fn a_failed_decryption_is_told_apart_by_its_status_lines() {
+        let f = |s: CryptoStandard, status: &[(&str, &str)]| decrypt_failure(&run_of(status, 2), s);
+        let pgp = CryptoStandard::OpenPgp;
+        assert_eq!(f(pgp, &[("ERROR", "pkdecrypt_failed 83886179")]), DecryptFailure::Cancelled);
+        assert_eq!(f(pgp, &[("ERROR", "pkdecrypt_failed cancelled by user")]), DecryptFailure::Cancelled);
+        assert_eq!(f(pgp, &[("BAD_PASSPHRASE", "AA")]), DecryptFailure::BadPassphrase);
+        assert_eq!(f(pgp, &[("ERROR", "x 83886091")]), DecryptFailure::BadPassphrase);
+        assert_eq!(f(pgp, &[("NO_SECKEY", "AA"), ("NO_SECKEY", "BB")]), DecryptFailure::NoSecretKey(vec!["AA".into(), "BB".into()]));
+        assert_eq!(f(pgp, &[("ERROR", "x 67108881")]), DecryptFailure::NoSecretKey(Vec::new()));
+        assert_eq!(f(pgp, &[("NODATA", "1")]), DecryptFailure::Corrupt);
+        assert_eq!(f(pgp, &[("ERROR", "x 67108922")]), DecryptFailure::Corrupt);
+        assert_eq!(f(pgp, &[("DECRYPTION_FAILED", "")]), DecryptFailure::Corrupt);
+        // gpgsm only says DECRYPTION_FAILED, without an error code
+        assert_eq!(f(CryptoStandard::Smime, &[("DECRYPTION_FAILED", "")]), DecryptFailure::NoKeyOrDamaged);
+        assert_eq!(f(pgp, &[("FAILURE", "decrypt 5")]), DecryptFailure::Other("FAILURE decrypt 5".into()));
+        assert_eq!(f(pgp, &[]), DecryptFailure::Other("exit code 2".into()));
+        // every failure has words for the person
+        let words = |d: DecryptFailure| d.to_string();
+        assert!(words(DecryptFailure::NoSecretKey(Vec::new())).contains("not in your keyring"));
+        assert!(words(DecryptFailure::Cancelled).contains("cancelled"));
+        assert!(words(DecryptFailure::BadPassphrase).contains("not accepted"));
+        assert!(words(DecryptFailure::NoKeyOrDamaged).contains("none of your certificates fits"));
+        assert!(words(DecryptFailure::Corrupt).contains("damaged"));
+        assert!(words(DecryptFailure::Other("boom".into())).ends_with("boom"));
+    }
+
+    // spec: MAIL-174
+    #[test]
+    fn signature_verdicts_are_read_from_status_lines_with_signer_fingerprint_trust_and_time() {
+        let sigs = |status: &[(&str, &str)]| signatures(&status.iter().map(|(k, a)| st(k, a)).collect::<Vec<_>>());
+        let good = sigs(&[
+            ("NEWSIG", ""),
+            ("GOODSIG", "AAAA1111 Ada\\x20L <ada@x.org>"),
+            ("VALIDSIG", "FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000 2026-11-14 1794650000 0 4 0 22 8 00 0123456789ABCDEF0123456789ABCDEF01234567"),
+            ("TRUST_FULLY", "0 pgp"),
+        ]);
+        assert_eq!(good.len(), 1);
+        assert_eq!((good[0].state, good[0].trust, good[0].signer.as_str(), good[0].key_id.as_str()), (SigState::Good, Trust::Full, "Ada L <ada@x.org>", "AAAA1111"));
+        assert_eq!((good[0].fingerprint.as_str(), good[0].time), ("0123456789ABCDEF0123456789ABCDEF01234567", Some(1_794_650_000)), "the primary key's fingerprint wins");
+        for (line, trust) in [("TRUST_NEVER", Trust::Never), ("TRUST_UNDEFINED", Trust::Undefined), ("TRUST_MARGINAL", Trust::Marginal), ("TRUST_ULTIMATE", Trust::Ultimate)] {
+            assert_eq!(sigs(&[("GOODSIG", "A x"), (line, "0 pgp")])[0].trust, trust, "{line}");
+        }
+        assert_eq!(sigs(&[("GOODSIG", "A x")])[0].trust, Trust::Unknown);
+        for (kw, state) in [("BADSIG", SigState::Bad), ("EXPKEYSIG", SigState::ExpiredKey), ("EXPSIG", SigState::ExpiredSig), ("REVKEYSIG", SigState::RevokedKey)] {
+            let s = sigs(&[(kw, "BBBB2222 Bob <bob@x.org>")]);
+            assert_eq!((s[0].state, s[0].fingerprint.as_str(), s[0].signer.as_str()), (state, "BBBB2222", "Bob <bob@x.org>"), "{kw}");
+        }
+        // a status line that belongs to no signature changes nothing
+        assert!(sigs(&[("VALIDSIG", "AA"), ("TRUST_FULLY", "0 pgp"), ("NEWSIG", "")]).is_empty());
+        // ERRSIG: rc 9 is a missing key, anything else is an error
+        let miss = sigs(&[("ERRSIG", "CCCC3333 1 8 00 1794650000 9 -")]);
+        assert_eq!((miss[0].state, miss[0].key_id.as_str()), (SigState::UnknownKey, "CCCC3333"));
+        assert_eq!(sigs(&[("ERRSIG", "CCCC3333 1 8 00 1794650000 4 -")])[0].state, SigState::Error);
+        // gpgsm names no signer for a certificate it does not have
+        let sm = sigs(&[("ERROR", "verify.findkey 50331657")]);
+        assert_eq!((sm.len(), sm[0].state), (1, SigState::UnknownKey));
+        assert!(sigs(&[("ERROR", "verify.findkey 50331658")]).is_empty(), "another code is not a missing key");
+        assert!(sigs(&[]).is_empty());
+    }
+
+    // spec: MAIL-174, MAIL-197
+    #[test]
+    fn real_signatures_are_good_bad_unknown_expired_by_key_expired_by_date_or_revoked() {
+        if !have_gnupg() {
+            return;
+        }
+        let h = TestHome::new();
+        let fpr = h.gen_pgp("Ada Test", "ada@example.org", "never", None);
+        let data = b"the signed text\r\n";
+        let sig = h.pgp_sign(&fpr, data, None);
+        let verdict = |g: &Gnupg, sig: &[u8], data: &[u8]| g.verify_detached(CryptoStandard::OpenPgp, sig, data, &no_cancel()).unwrap();
+        let good = verdict(&h.g, &sig, data);
+        assert_eq!((good[0].state, good[0].fingerprint.as_str(), good[0].signer.as_str()), (SigState::Good, fpr.as_str(), "Ada Test <ada@example.org>"), "{good:?}");
+        assert!(good[0].time.is_some());
+        // one changed byte: bad
+        let bad = verdict(&h.g, &sig, b"the signed Text\r\n");
+        assert_eq!((bad.len(), bad[0].state), (1, SigState::Bad), "{bad:?}");
+        // a keyring without the key: unknown signer, with the key id of the signature
+        let other = TestHome::new();
+        let unknown = verdict(&other.g, &sig, data);
+        assert_eq!(unknown[0].state, SigState::UnknownKey, "{unknown:?}");
+        assert!(fpr.ends_with(&unknown[0].key_id), "{unknown:?}");
+        // a signature with an end date that has passed (made in 2020 with a key that already existed then)
+        let dated = TestHome::new();
+        let d_fpr = dated.gen_pgp("Dated Key", "dated@example.org", "never", Some("20200101T000000"));
+        let old = dated.pgp_sign_expiring(&d_fpr, data, "20200110T000000", "1d");
+        let exp = verdict(&dated.g, &old, data);
+        assert_eq!(exp[0].state, SigState::ExpiredSig, "{exp:?}");
+        // a key that has expired since
+        let short = TestHome::new();
+        let s_fpr = short.gen_pgp("Short Key", "short@example.org", "30d", Some("20200101T000000"));
+        let s_sig = short.pgp_sign(&s_fpr, data, Some("20200110T000000"));
+        let ek = verdict(&short.g, &s_sig, data);
+        assert_eq!(ek[0].state, SigState::ExpiredKey, "{ek:?}");
+        // the key list says the same in words
+        let k = short.g.key_info(CryptoStandard::OpenPgp, &s_fpr, &no_cancel()).unwrap().unwrap();
+        assert_eq!((k.trust_words(), k.usable()), ("expired", false), "{k:?}");
+        assert!(k.expires.is_some());
+        // revoked after signing
+        h.revoke_pgp(&fpr);
+        let rk = verdict(&h.g, &sig, data);
+        assert_eq!(rk[0].state, SigState::RevokedKey, "{rk:?}");
+        let k = h.g.key_info(CryptoStandard::OpenPgp, &fpr, &no_cancel()).unwrap().unwrap();
+        assert_eq!((k.trust_words(), k.usable()), ("revoked", false), "{k:?}");
+    }
+
+    // spec: MAIL-193, MAIL-195
+    #[test]
+    fn encrypting_to_an_expired_or_revoked_key_and_signing_with_one_are_refused_in_words() {
+        if !have_gnupg() {
+            return;
+        }
+        let me = TestHome::new();
+        let my = me.gen_pgp("Me", "me@example.org", "never", None);
+        let old = TestHome::new();
+        let o_fpr = old.gen_pgp("Old Key", "old@example.org", "30d", Some("20200101T000000"));
+        old.share_pgp_with(&me, &o_fpr);
+        let rev = TestHome::new();
+        let r_fpr = rev.gen_pgp("Rev Key", "rev@example.org", "never", None);
+        rev.revoke_pgp(&r_fpr);
+        rev.share_pgp_with(&me, &r_fpr);
+        let to = |f: &str| vec![(f.to_string(), false)];
+        let e = me.g.encrypt(CryptoStandard::OpenPgp, &to(&o_fpr), None, b"x", &no_cancel()).unwrap_err();
+        assert!(e.starts_with("The mail was not encrypted:") && e.contains("has expired, been revoked or been disabled"), "{e}");
+        let e = me.g.encrypt(CryptoStandard::OpenPgp, &to(&r_fpr), None, b"x", &no_cancel()).unwrap_err();
+        assert!(e.contains("has expired, been revoked or been disabled"), "{e}");
+        // a key that is not in the keyring
+        let e = me.g.encrypt(CryptoStandard::OpenPgp, &to("0123456789ABCDEF0123456789ABCDEF01234567"), None, b"x", &no_cancel()).unwrap_err();
+        assert!(e.contains("no such key in your keyring"), "{e}");
+        // the good key still works
+        assert!(me.g.encrypt(CryptoStandard::OpenPgp, &to(&my), Some(&my), b"x", &no_cancel()).is_ok());
+        // signing with a key that is not here, and with one that has expired
+        let e = me.g.sign_detached(CryptoStandard::OpenPgp, "0123456789ABCDEF0123456789ABCDEF01234567", b"x", &no_cancel()).unwrap_err();
+        assert!(e.starts_with("The mail was not signed") && e.contains("no secret key here"), "{e}");
+        let e = old.g.sign_detached(CryptoStandard::OpenPgp, &o_fpr, b"x", &no_cancel()).unwrap_err();
+        assert!(e.starts_with("The mail was not signed"), "{e}");
+        assert!(me.g.sign_detached(CryptoStandard::OpenPgp, "not a key", b"x", &no_cancel()).unwrap_err().contains("not a key fingerprint"));
     }
 }

@@ -357,4 +357,119 @@ mod tests {
         assert_eq!(click(&ctx, &mut t, "remove:0", &mut d, &accounts), Some(DialogAction::Remove("bluesky:ada.bsky.social".into())));
         assert_eq!(click(&ctx, &mut t, "close", &mut d, &accounts), Some(DialogAction::Close));
     }
+
+    /// Frames until the dialog's job has ended (the spinner is gone); the action it produced, if any.
+    fn until_idle(ctx: &egui::Context, t: &mut f64, d: &mut SocialDialog) -> Option<DialogAction> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let r = frame(ctx, t, vec![], d, &[]);
+            if r.is_some() || !d.busy() {
+                return r;
+            }
+            assert!(std::time::Instant::now() < deadline, "the spinner never stopped");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    /// Click and wait for the job that the click started.
+    fn click_and_wait(ctx: &egui::Context, t: &mut f64, key: &str, d: &mut SocialDialog) -> Option<DialogAction> {
+        click(ctx, t, key, d, &[]).or_else(|| until_idle(ctx, t, d))
+    }
+
+    fn has_curl() -> bool {
+        std::process::Command::new("curl").arg("--version").output().is_ok()
+    }
+
+    // spec: SOC-001, SOC-004, SOC-010
+    #[test]
+    fn a_mastodon_sign_in_opens_the_browser_takes_the_code_and_adds_the_account() {
+        if !has_curl() {
+            return;
+        }
+        use super::super::fake_server::{pretend_browser, FakeServer, Person};
+        let server = FakeServer::start();
+        let (_guard, log) = pretend_browser(server.port, Person::Allows);
+        let (ctx, mut t, mut d) = (egui::Context::default(), 0.0, SocialDialog::new());
+        frame(&ctx, &mut t, vec![], &mut d, &[]);
+        d.server = server.address();
+        assert!(click_and_wait(&ctx, &mut t, "open-browser", &mut d).is_none());
+        assert!(d.error.is_none(), "{:?}", d.error);
+        assert!(d.app.is_some(), "the app is registered, the dialog says \"opened\"");
+        // the person reads the code off the server's page and pastes it
+        d.code = log.wait_for_code();
+        assert_eq!(log.opened.lock().unwrap().len(), 1);
+        assert!(log.problems.lock().unwrap().is_empty(), "{:?}", log.problems.lock().unwrap());
+        let added = click_and_wait(&ctx, &mut t, "sign-in", &mut d);
+        let Some(DialogAction::Added(e)) = added else { panic!("no account was added: {:?}", d.error) };
+        assert_eq!((e.account.network, e.account.handle.as_str(), e.account.display_name.as_str(), e.account.server.as_str()), (Network::Mastodon, "ada@127.0.0.1", "Ada L.", server.address().as_str()));
+        assert!(e.secret.is_empty() && server.state.lock().unwrap().tokens.iter().any(|t| t == e.secret().expose()), "the access token the server made is in the keyring, not in the entry");
+        crate::secrets::social_clear(&e.account.server, &e.account.handle);
+        assert_eq!(server.state.lock().unwrap().requests, ["POST /api/v1/apps", "GET /oauth/authorize", "POST /oauth/token", "GET /api/v1/accounts/verify_credentials"]);
+        assert!(d.code.is_empty() && d.server.is_empty() && d.app.is_none(), "the dialog is ready for the next account");
+    }
+
+    // spec: SOC-004, SOC-010
+    #[test]
+    fn a_no_on_the_sign_in_page_or_a_wrong_code_ends_with_a_message_and_adds_nothing() {
+        if !has_curl() {
+            return;
+        }
+        use super::super::fake_server::{pretend_browser, FakeServer, Person};
+        let server = FakeServer::start();
+        let (_guard, log) = pretend_browser(server.port, Person::Denies);
+        let (ctx, mut t, mut d) = (egui::Context::default(), 0.0, SocialDialog::new());
+        frame(&ctx, &mut t, vec![], &mut d, &[]);
+        d.server = server.address();
+        click_and_wait(&ctx, &mut t, "open-browser", &mut d);
+        assert!(d.app.is_some());
+        // the person said no (or closed the tab): there is no code, and signing in says so
+        click(&ctx, &mut t, "sign-in", &mut d, &[]);
+        assert!(!d.busy() && d.error.as_deref().unwrap().contains("Paste the code"), "{:?}", d.error);
+        // a made-up code is refused by the server: the error is shown and the spinner stops
+        d.code = "made-up".into();
+        assert!(click_and_wait(&ctx, &mut t, "sign-in", &mut d).is_none(), "no account");
+        assert!(d.error.as_deref().is_some_and(|e| e.contains("400") && e.contains("invalid")), "{:?}", d.error);
+        assert!(!d.busy());
+        assert!(d.app.is_some(), "the person can paste another code");
+        assert!(server.state.lock().unwrap().tokens.is_empty());
+        assert!(log.code.lock().unwrap().is_none() && log.problems.lock().unwrap().is_empty());
+    }
+
+    // spec: SOC-004, SEC-006
+    #[test]
+    fn the_feeds_sign_in_page_is_only_opened_for_https_servers() {
+        if !has_curl() {
+            return;
+        }
+        // no pretend browser is installed: a plain http server must not reach any program
+        let server = super::super::fake_server::FakeServer::start();
+        let (ctx, mut t, mut d) = (egui::Context::default(), 0.0, SocialDialog::new());
+        frame(&ctx, &mut t, vec![], &mut d, &[]);
+        d.server = server.address();
+        click_and_wait(&ctx, &mut t, "open-browser", &mut d);
+        assert!(d.error.as_deref().is_some_and(|e| e.contains("https://")), "{:?}", d.error);
+        assert!(d.app.is_none());
+    }
+
+    // spec: SOC-002, SOC-004
+    #[test]
+    fn a_bluesky_sign_in_with_a_wrong_app_password_says_so_and_the_right_one_adds_the_account() {
+        if !has_curl() {
+            return;
+        }
+        let server = super::super::fake_server::FakeServer::start();
+        let (ctx, mut t, mut d) = (egui::Context::default(), 0.0, SocialDialog::new());
+        frame(&ctx, &mut t, vec![], &mut d, &[]);
+        click(&ctx, &mut t, "network:bluesky", &mut d, &[]);
+        d.server = server.address();
+        d.handle = "ada.test".into();
+        d.secret = "wrong-wrong-wrong-wrong".into();
+        assert!(click_and_wait(&ctx, &mut t, "sign-in", &mut d).is_none() && !d.busy());
+        assert_eq!(d.error.as_deref(), Some("Bluesky refused the handle or app password"));
+        d.secret = "abcd-efgh-ijkl-mnop".into();
+        let Some(DialogAction::Added(e)) = click_and_wait(&ctx, &mut t, "sign-in", &mut d) else { panic!("no account was added: {:?}", d.error) };
+        assert_eq!((e.account.network, e.account.handle.as_str(), e.secret.expose(), e.secret().expose()), (Network::Bluesky, "ada.test", "", "abcd-efgh-ijkl-mnop"), "the app password is in the keyring");
+        crate::secrets::social_clear(&e.account.server, &e.account.handle);
+        assert!(d.secret.is_empty() && d.handle.is_empty(), "the app password does not stay in the dialog");
+    }
 }

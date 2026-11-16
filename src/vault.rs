@@ -1746,6 +1746,102 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// Make the index believe `rel` is as before: write `text`, then put the old time stamp back,
+    /// so a rescan does not read the file again.
+    fn change_unnoticed(d: &Path, rel: &str, text: &str) {
+        let p = d.join(rel);
+        let before = fs::metadata(&p).unwrap().modified().unwrap();
+        fs::write(&p, text).unwrap();
+        fs::File::options().write(true).open(&p).unwrap().set_modified(before).unwrap();
+    }
+
+    // spec: VAULT-016
+    #[test]
+    fn a_note_changed_after_the_scan_is_not_rewritten_and_is_reported() {
+        let (mut v, d) = vault_with("relocate-stale", &[("Target.md", "t\n"), ("A.md", "see [[Target]]\n"), ("B.md", "see [[Target]]\n")]);
+        // same time stamp: the rescan after the rename keeps the old text, the check right before
+        // writing reads the new one
+        change_unnoticed(&d, "B.md", "see [[Target]] +\n");
+        let done = v.rename(Path::new("Target.md"), Path::new("Goal.md"), true).unwrap();
+        assert_eq!(done.changed, vec![PathBuf::from("A.md")]);
+        assert_eq!(v.failed_rewrites.len(), 1);
+        assert_eq!(v.failed_rewrites[0].0, PathBuf::from("B.md"));
+        assert!(v.failed_rewrites[0].1.contains("another program"), "{:?}", v.failed_rewrites);
+        assert_eq!(fsutil::read_to_string(d.join("B.md")).unwrap(), "see [[Target]] +\n", "the other program's text is kept");
+        assert_eq!(fsutil::read_to_string(d.join("A.md")).unwrap(), "see [[Goal]]\n");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-016
+    #[cfg(unix)]
+    #[test]
+    fn a_note_that_cannot_be_read_when_the_links_are_rewritten_is_reported() {
+        use std::os::unix::fs::PermissionsExt;
+        let (mut v, d) = vault_with("relocate-unreadable", &[("Target.md", "t\n"), ("A.md", "see [[Target]]\n"), ("B.md", "see [[Target]]\n")]);
+        fs::set_permissions(d.join("B.md"), fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read(d.join("B.md")).is_ok() {
+            return; // running as root: permissions do not hold
+        }
+        let done = v.rename(Path::new("Target.md"), Path::new("Goal.md"), true).unwrap();
+        fs::set_permissions(d.join("B.md"), fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(done.changed, vec![PathBuf::from("A.md")]);
+        assert_eq!(v.failed_rewrites.iter().map(|f| f.0.clone()).collect::<Vec<_>>(), vec![PathBuf::from("B.md")]);
+        assert_eq!(fsutil::read_to_string(d.join("B.md")).unwrap(), "see [[Target]]\n");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-016
+    #[cfg(unix)]
+    #[test]
+    fn a_drawing_that_cannot_be_written_when_the_links_are_rewritten_is_reported() {
+        use std::os::unix::fs::PermissionsExt;
+        let (d, mut v) = vault_with_drawings("drawing-rename-fail");
+        // a folder that cannot take the temporary file of the atomic write
+        fs::create_dir_all(d.join("Locked")).unwrap();
+        fs::rename(d.join("Plain.excalidraw"), d.join("Locked/Plain.excalidraw")).unwrap();
+        v.rescan();
+        fs::set_permissions(d.join("Locked"), fs::Permissions::from_mode(0o500)).unwrap();
+        if fs::File::create(d.join("Locked/probe")).is_ok() {
+            return; // running as root: permissions do not hold
+        }
+        let done = v.rename(Path::new("Ideas.md"), Path::new("Thoughts.md"), true).unwrap();
+        fs::set_permissions(d.join("Locked"), fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(done.changed.contains(&PathBuf::from("Plugin.excalidraw.md")), "{done:?}");
+        assert!(!done.changed.contains(&PathBuf::from("Locked/Plain.excalidraw")));
+        assert_eq!(v.failed_rewrites.iter().map(|f| f.0.clone()).collect::<Vec<_>>(), vec![PathBuf::from("Locked/Plain.excalidraw")]);
+        assert!(texts(&v, "Locked/Plain.excalidraw").contains(&"see [[Ideas]]".to_string()), "the drawing is as it was");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-017
+    #[test]
+    fn trash_numbers_a_taken_name_on_the_same_day_and_a_missing_item_is_an_error() {
+        let d = temp_vault("trash-taken");
+        put(&d, "Note.md", "one\n");
+        let mut v = Vault::open(&d).unwrap();
+        let first = v.trash(Path::new("Note.md")).unwrap();
+        put(&d, "Note.md", "two\n");
+        v.rescan();
+        let second = v.trash(Path::new("Note.md")).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(fsutil::read_to_string(d.join(&first)).unwrap(), "one\n");
+        assert_eq!(fsutil::read_to_string(d.join(&second)).unwrap(), "two\n");
+        assert!(v.trash(Path::new("Gone.md")).is_err(), "a missing item is not silently ignored");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-020
+    #[test]
+    fn restore_of_a_missing_trash_entry_says_so() {
+        let d = temp_vault("trash-restore-missing");
+        put(&d, "Note.md", "x\n");
+        let mut v = Vault::open(&d).unwrap();
+        let t = v.trash(Path::new("Note.md")).unwrap();
+        v.restore(&t).unwrap();
+        assert_eq!(v.restore(&t).unwrap_err().kind(), io::ErrorKind::NotFound, "the entry is gone after the first restore");
+        let _ = fs::remove_dir_all(&d);
+    }
+
     // spec: VAULT-020
     #[test]
     fn restore_brings_a_folder_back_with_its_content() {

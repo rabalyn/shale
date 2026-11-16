@@ -1669,3 +1669,7 @@ mod canvas_dialog_tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
+
+#[cfg(test)]
+#[path = "panels_ui_tests.rs"]
+mod ui_tests;

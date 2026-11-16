@@ -660,6 +660,185 @@ mod tests {
         TestConnector { settings: server.settings(), user: s.user.clone(), password: s.password.clone() }
     }
 
+    /// An auth factory that counts what is asked of it.
+    struct CountingAuth {
+        rejects: bool,
+        fail_on_call: Option<usize>,
+        asked: std::sync::atomic::AtomicUsize,
+        rejected: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CountingAuth {
+        fn new(rejects: bool, fail_on_call: Option<usize>) -> CountingAuth {
+            CountingAuth { rejects, fail_on_call, asked: Default::default(), rejected: Default::default() }
+        }
+        fn asked(&self) -> usize {
+            self.asked.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl AuthFactory for CountingAuth {
+        fn authenticator(&self) -> Result<Box<dyn Authenticator>, String> {
+            let n = self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if self.fail_on_call == Some(n) {
+                return Err(format!("no token (call {n})"));
+            }
+            Ok(Box::new(PlainAuth::new("ada", "pw")))
+        }
+        fn token_rejected(&self) -> bool {
+            self.rejected.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.rejects
+        }
+    }
+
+    // spec: MAIL-222
+    #[test]
+    fn connect_with_retry_asks_again_once_only_for_a_refused_sign_in_of_a_factory_that_can_get_a_new_token() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let auth_err = |t: &str| Err::<Client, _>(ImapError::Auth(t.into()));
+        // a password: one try, the refusal as it is
+        let (f, n) = (CountingAuth::new(false, None), AtomicUsize::new(0));
+        let e = connect_with_retry(&f, |_| {
+            n.fetch_add(1, Ordering::SeqCst);
+            auth_err("wrong password")
+        })
+        .err()
+        .unwrap();
+        assert_eq!((e, n.load(Ordering::SeqCst), f.asked()), (ImapError::Auth("wrong password".into()), 1, 1));
+        // a token that is refused: a second try with a second authenticator, and a second refusal says to sign in again
+        let (f, n) = (CountingAuth::new(true, None), AtomicUsize::new(0));
+        let e = connect_with_retry(&f, |_| {
+            n.fetch_add(1, Ordering::SeqCst);
+            auth_err("token expired")
+        })
+        .err()
+        .unwrap();
+        assert_eq!((n.load(Ordering::SeqCst), f.asked()), (2, 2));
+        assert!(matches!(&e, ImapError::Auth(t) if t.starts_with("token expired") && t.contains("refused a fresh token as well") && t.contains(crate::oauth::SIGN_IN_AGAIN)), "{e}");
+        // a failure that is not a refusal is not retried, and one on the second try is passed on as it is
+        let (f, n) = (CountingAuth::new(true, None), AtomicUsize::new(0));
+        let e = connect_with_retry(&f, |_| {
+            n.fetch_add(1, Ordering::SeqCst);
+            Err::<Client, _>(ImapError::Connection("down".into()))
+        })
+        .err()
+        .unwrap();
+        assert_eq!((e, n.load(Ordering::SeqCst), f.asked()), (ImapError::Connection("down".into()), 1, 1));
+        let (f, n) = (CountingAuth::new(true, None), AtomicUsize::new(0));
+        let e = connect_with_retry(&f, |_| match n.fetch_add(1, Ordering::SeqCst) {
+            0 => auth_err("expired"),
+            _ => Err(ImapError::Tls("bad certificate".into())),
+        })
+        .err()
+        .unwrap();
+        assert_eq!((e, n.load(Ordering::SeqCst)), (ImapError::Tls("bad certificate".into()), 2));
+        // no authenticator at all: an auth error, nothing is connected; none on the second ask: one connection was tried
+        let (f, n) = (CountingAuth::new(true, Some(1)), AtomicUsize::new(0));
+        let e = connect_with_retry(&f, |_| {
+            n.fetch_add(1, Ordering::SeqCst);
+            auth_err("x")
+        })
+        .err()
+        .unwrap();
+        assert_eq!((e, n.load(Ordering::SeqCst)), (ImapError::Auth("no token (call 1)".into()), 0));
+        let (f, n) = (CountingAuth::new(true, Some(2)), AtomicUsize::new(0));
+        let e = connect_with_retry(&f, |_| {
+            n.fetch_add(1, Ordering::SeqCst);
+            auth_err("x")
+        })
+        .err()
+        .unwrap();
+        assert_eq!((e, n.load(Ordering::SeqCst)), (ImapError::Auth("no token (call 2)".into()), 1));
+        // the second try works: a signed-in client, two authenticators asked for
+        let server = server();
+        let (f, n) = (CountingAuth::new(true, None), AtomicUsize::new(0));
+        let c = connect_with_retry(&f, |_| match n.fetch_add(1, Ordering::SeqCst) {
+            0 => auth_err("expired"),
+            _ => {
+                let (user, password) = {
+                    let s = server.state();
+                    (s.user.clone(), s.password.clone())
+                };
+                Client::connect_test(&server.settings(), server_cert(), &mut PlainAuth::new(&user, &password))
+            }
+        });
+        c.unwrap().logout();
+        assert_eq!((n.load(Ordering::SeqCst), f.asked()), (2, 2));
+    }
+
+    // spec: MAIL-222
+    #[test]
+    fn the_production_connector_says_a_refused_connection_and_an_untrusted_certificate_as_they_are_and_does_not_retry() {
+        let settings = |port: u16| ConnectSettings {
+            host: "localhost".into(),
+            port,
+            security: MailSecurity::ImplicitTls,
+            limits: Limits { connect_timeout: std::time::Duration::from_secs(5), io_timeout: std::time::Duration::from_secs(5), ..Limits::default() },
+        };
+        // nothing listens: a connection error, the factory asked once even though it would give a new token
+        let auth = Arc::new(CountingAuth::new(true, None));
+        let c = ImapConnector { settings: settings(crate::imap_fake_tests::closed_port()), auth: auth.clone() };
+        assert!(matches!(c.connect(), Err(ImapError::Connection(_))));
+        assert_eq!(auth.asked(), 1);
+        // the pretend server's certificate is not in the system's store: refused with a TLS error, not a retry
+        let server = server();
+        let auth = Arc::new(CountingAuth::new(true, None));
+        let c = ImapConnector { settings: settings(server.port), auth: auth.clone() };
+        assert!(matches!(c.connect(), Err(ImapError::Tls(_))));
+        assert_eq!(auth.asked(), 1);
+        // the real factory with a password typed for this session builds the connector from the account without the keyring
+        let account = MailAccount { id: "t-real".into(), host: "localhost".into(), port: server.port, user: "ada".into(), ..MailAccount::default() };
+        let conn = real_factory()(&account, Some("pw".into())).unwrap();
+        assert!(matches!(conn.connect(), Err(ImapError::Tls(_))));
+        let account = MailAccount { port: crate::imap_fake_tests::closed_port(), ..account };
+        assert!(matches!(real_factory()(&account, Some("pw".into())).unwrap().connect(), Err(ImapError::Connection(_))));
+        // the lazy connector builds once, and a factory that fails is the sign-in error of every connect
+        let made = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let m = made.clone();
+        let lazy = LazyConnector::new(move || {
+            m.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err("no password for this account".into())
+        });
+        for _ in 0..3 {
+            assert!(matches!(lazy.connect(), Err(ImapError::Auth(t)) if t == NO_PASSWORD));
+        }
+        assert_eq!(made.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    // spec: MAIL-222
+    #[test]
+    fn the_connector_of_an_oauth_account_takes_its_settings_from_the_account_and_a_broken_oauth_setup_is_said_before_any_connection() {
+        let account = MailAccount {
+            id: "t-oauth".into(),
+            host: "imap.example.org".into(),
+            port: 1993,
+            user: "ada@example.org".into(),
+            auth: crate::config::MailAuth::OAuth2,
+            security: MailSecurity::StartTls,
+            oauth_provider: crate::config::OAuthProvider::Custom,
+            oauth_client_id: "shale".into(),
+            oauth_auth_url: "http://127.0.0.1:1/authorize".into(),
+            oauth_token_url: "http://127.0.0.1:1/token".into(),
+            oauth_scope: "mail".into(),
+            ..MailAccount::default()
+        };
+        let limits = Limits { max_message: 5, ..Limits::default() };
+        let c = connector_for_account(&account, limits, Some("typed-secret".into())).unwrap();
+        assert_eq!((c.settings.host.as_str(), c.settings.port, c.settings.security, c.settings.limits.max_message), ("imap.example.org", 1993, MailSecurity::StartTls, 5));
+        // the real factory: a typed secret is no password for an OAuth2 account
+        assert!(real_factory()(&account, Some("typed-secret".into())).is_ok());
+        // no client ID, a scope that is empty, an endpoint that is not an address: the sentence for the settings dialog
+        for (what, broken) in [
+            ("client ID", MailAccount { oauth_client_id: " ".into(), ..account.clone() }),
+            ("scope", MailAccount { oauth_scope: "".into(), ..account.clone() }),
+            ("Token address", MailAccount { oauth_token_url: "nonsense".into(), ..account.clone() }),
+        ] {
+            let e = connector_for_account(&broken, Limits::default(), Some("s".into())).err().unwrap();
+            assert!(e.contains(what), "{what}: {e}");
+            assert_eq!(real_factory()(&broken, Some("s".into())).err().unwrap(), e);
+        }
+    }
+
     fn opts() -> SyncOptions {
         SyncOptions { now: Some(NOW), batch_size: 2, ..SyncOptions::default() }
     }

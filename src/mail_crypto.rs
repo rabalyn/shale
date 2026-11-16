@@ -1598,4 +1598,218 @@ mod tests {
         let (l, t) = line(SigState::Good, Trust::Full, Scope::Inline, None).describe();
         assert!(l == Level::Warn && t.contains("weaker"), "{t}");
     }
+
+    // spec: MAIL-172
+    #[test]
+    fn mails_that_only_look_signed_or_encrypted_are_not_taken_for_it() {
+        // a signature protocol Shale does not know: an ordinary mail
+        assert_eq!(classify(&signed_mail("application/x-unknown", "application/x-unknown", "SIG")), Structure::Plain);
+        // the second part is not a signature of the declared kind
+        let w = classify(&signed_mail("application/pgp-signature", "text/plain", "SIG"));
+        assert!(matches!(&w, Structure::Mixed { why } if why.contains("second part is not a signature")), "{w:?}");
+        let w = classify(&signed_mail("application/pkcs7-signature", "application/pgp-signature", "SIG"));
+        assert!(matches!(w, Structure::Mixed { .. }), "an S/MIME mail with an OpenPGP signature part");
+        // x-pkcs7-signature is the same as pkcs7-signature
+        let x = classify(&signed_mail("application/x-pkcs7-signature", "application/x-pkcs7-signature", "SIG"));
+        assert!(matches!(x, Structure::Signed { standard: CryptoStandard::Smime, .. }), "{x:?}");
+        // encrypted: an unknown protocol, and the wrong number of parts
+        let e = |proto: &str, parts: &str| format!("From: a@x\r\nContent-Type: multipart/encrypted; protocol=\"{proto}\"; boundary=\"E\"\r\n\r\n{parts}--E--\r\n").into_bytes();
+        let w = classify(&e("application/x-other", "--E\r\n\r\na\r\n--E\r\n\r\nb\r\n"));
+        assert!(matches!(&w, Structure::Mixed { why } if why.contains("kind Shale does not know")), "{w:?}");
+        let w = classify(&e("application/pgp-encrypted", "--E\r\n\r\na\r\n--E\r\n\r\nb\r\n--E\r\n\r\nc\r\n"));
+        assert!(matches!(&w, Structure::Mixed { why } if why.contains("exactly two parts") && why.contains("not decrypted")), "{w:?}");
+        // S/MIME of a kind Shale does not read, and one without a smime-type (taken as enveloped)
+        let other = b"From: a@x\r\nContent-Type: application/pkcs7-mime; smime-type=certs-only\r\nContent-Transfer-Encoding: base64\r\n\r\nAAEC\r\n";
+        assert!(matches!(classify(other), Structure::Mixed { why } if why.contains("certs-only")));
+        let none = b"From: a@x\r\nContent-Type: application/x-pkcs7-mime\r\n\r\nAAEC\r\n";
+        assert!(matches!(classify(none), Structure::Encrypted { standard: CryptoStandard::Smime, data } if data == [0, 1, 2]));
+        // other kinds of content are plain
+        assert_eq!(classify(b"From: a@x\r\nContent-Type: image/png\r\n\r\nxx"), Structure::Plain);
+        // a text/plain without any block
+        assert_eq!(classify(b"From: a@x\r\nContent-Type: text/plain\r\n\r\n-----END PGP SIGNATURE----- before -----BEGIN PGP SIGNED MESSAGE-----\r\n"), Structure::Plain);
+    }
+
+    // spec: MAIL-172, MAIL-177
+    #[test]
+    fn nested_parts_are_looked_into_only_so_deep_and_the_first_trouble_wins() {
+        let enc = "Content-Type: multipart/encrypted; protocol=\"application/pgp-encrypted\"; boundary=\"E\"\r\n\r\n--E\r\n\r\nVersion: 1\r\n--E\r\n\r\nxx\r\n--E--\r\n";
+        let bad_signed = "Content-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=\"S\"\r\n\r\n--S\r\n\r\nonly one\r\n--S--\r\n";
+        let wrap = |inner: &str| format!("Content-Type: multipart/mixed; boundary=\"M\"\r\n\r\n--M\r\n{inner}\r\n--M--\r\n");
+        // a broken signed part in a mixed mail is told about, not a verdict
+        let w = classify(wrap(bad_signed).as_bytes());
+        assert!(matches!(&w, Structure::Mixed { why } if why.contains("exactly two parts")), "{w:?}");
+        // an encrypted part makes the whole mail mixed
+        assert!(matches!(classify(wrap(enc).as_bytes()), Structure::Mixed { .. }));
+        // inline blocks inside a part: encrypted blocks are refused, signed ones are no trouble
+        let enc_inline = "Content-Type: text/plain\r\n\r\n-----BEGIN PGP MESSAGE-----\r\n\r\nabc\r\n-----END PGP MESSAGE-----";
+        assert!(matches!(classify(wrap(enc_inline).as_bytes()), Structure::Mixed { .. }));
+        let signed_inline = "Content-Type: text/plain\r\n\r\n-----BEGIN PGP SIGNED MESSAGE-----\r\n\r\nt\r\n-----BEGIN PGP SIGNATURE-----\r\n\r\nabc\r\n-----END PGP SIGNATURE-----";
+        assert_eq!(classify(wrap(signed_inline).as_bytes()), Structure::Plain);
+        // deeper than MAX_DEPTH levels of multipart: not looked into; one level less is
+        let shallow = |n: usize| (0..n).fold(enc.to_string(), |d, level| format!("Content-Type: multipart/mixed; boundary=\"L{level}\"\r\n\r\n--L{level}\r\n{d}\r\n--L{level}--\r\n"));
+        assert!(matches!(classify(shallow(MAX_DEPTH - 1).as_bytes()), Structure::Mixed { .. }));
+        let mut deep = enc.to_string();
+        for level in 0..=MAX_DEPTH {
+            deep = format!("Content-Type: multipart/mixed; boundary=\"L{level}\"\r\n\r\n--L{level}\r\n{deep}\r\n--L{level}--\r\n");
+        }
+        assert_eq!(classify(deep.as_bytes()), Structure::Plain);
+        // a signed part that is not the first trouble is kept; a later broken one replaces it
+        let two = format!("Content-Type: multipart/mixed; boundary=\"M\"\r\n\r\n--M\r\nContent-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=\"S\"\r\n\r\n--S\r\nContent-Type: text/plain\r\n\r\nx\r\n--S\r\nContent-Type: application/pgp-signature\r\n\r\nSIG\r\n--S--\r\n--M\r\n{bad_signed}\r\n--M--\r\n");
+        assert!(matches!(classify(two.as_bytes()), Structure::Mixed { .. }));
+    }
+
+    fn info(validity: char, can_encrypt: bool, fpr: &str) -> KeyInfo {
+        KeyInfo { fingerprint: fpr.into(), key_id: String::new(), uids: Vec::new(), emails: Vec::new(), validity, can_encrypt, can_sign: true, expires: None, secret: false }
+    }
+
+    // spec: MAIL-192, MAIL-193
+    #[test]
+    fn the_best_key_for_an_address_is_usable_able_to_encrypt_and_the_most_trusted() {
+        let pgp = CryptoStandard::OpenPgp;
+        let best = |keys: Vec<KeyInfo>, s| best_key(keys, s).map(|k| k.fingerprint);
+        // ranked: ultimate, full, marginal, unknown, never
+        let all = vec![info('n', true, "N"), info('-', true, "U"), info('m', true, "M"), info('f', true, "F"), info('u', true, "T")];
+        assert_eq!(best(all.clone(), pgp), Some("T".into()));
+        assert_eq!(best(all[..4].to_vec(), pgp), Some("F".into()));
+        assert_eq!(best(all[..3].to_vec(), pgp), Some("M".into()));
+        assert_eq!(best(all[..2].to_vec(), pgp), Some("U".into()));
+        // a tie goes to the first
+        assert_eq!(best(vec![info('-', true, "A"), info('q', true, "B")], pgp), Some("A".into()));
+        // expired, revoked, disabled, invalid and keys that cannot encrypt are never chosen
+        let unusable = vec![info('e', true, "E"), info('r', true, "R"), info('d', true, "D"), info('i', true, "I"), info('u', false, "X")];
+        assert_eq!(best(unusable.clone(), pgp), None);
+        assert_eq!(best(unusable, CryptoStandard::Smime), None);
+        // "never trusted" is refused for OpenPGP only
+        assert_eq!(best(vec![info('n', true, "N")], pgp), None);
+        assert_eq!(best(vec![info('n', true, "N")], CryptoStandard::Smime), Some("N".into()));
+        assert_eq!(best(Vec::new(), pgp), None);
+    }
+
+    // spec: MAIL-174, MAIL-181, MAIL-197
+    #[test]
+    fn a_tampered_or_expired_or_revoked_signature_is_shown_in_words_and_never_as_valid() {
+        if !have_gnupg() {
+            return;
+        }
+        let alice = TestHome::new();
+        let a_fpr = alice.gen_pgp("Alice Test", "alice@example.org", "never", None);
+        let bob = TestHome::new();
+        alice.share_pgp_with(&bob, &a_fpr);
+        // good
+        let mail = pgp_signed(&alice, &a_fpr, ENTITY);
+        let o = run(&bob.g, &mail, false);
+        let (level, words) = only_line(&o).describe();
+        assert_eq!(only_line(&o).sig.state, SigState::Good);
+        assert_eq!(level, Level::Warn, "valid, but Bob has not certified Alice's key");
+        assert!(words.contains("valid") && words.contains("Alice Test <alice@example.org>") && !words.contains("not the sender"), "{words}");
+        // tampered text: bad, in red, and the words do not call it valid
+        let text = String::from_utf8(mail.clone()).unwrap().replace("the secret plan", "the secret plot");
+        let o = run(&bob.g, text.as_bytes(), false);
+        let (level, words) = only_line(&o).describe();
+        assert_eq!((only_line(&o).sig.state, level), (SigState::Bad, Level::Bad), "{:?}", o.security);
+        assert!(words.starts_with("BAD OpenPGP signature") && words.contains("changed after it was signed") && !words.contains("is valid"), "{words}");
+        // a signature of somebody else than the sender is flagged next to the verdict
+        let eve = TestHome::new();
+        let e_fpr = eve.gen_pgp("Eve", "eve@example.org", "never", None);
+        eve.share_pgp_with(&bob, &e_fpr);
+        let o = run(&bob.g, &pgp_signed(&eve, &e_fpr, ENTITY), false);
+        assert_eq!(only_line(&o).from_ok, Some(false));
+        assert!(only_line(&o).describe().1.contains("not the sender"));
+        // the key expired after the mail was signed: warn; revoked: bad
+        let o = run(&bob.g, &mail_with_expired_key(&bob), false);
+        assert_eq!((only_line(&o).sig.state, only_line(&o).describe().0), (SigState::ExpiredKey, Level::Warn), "{:?}", o.security);
+        assert!(only_line(&o).describe().1.to_lowercase().contains("expired"));
+        alice.share_pgp_with(&bob, &a_fpr);
+        alice.revoke_pgp(&a_fpr);
+        alice.share_pgp_with(&bob, &a_fpr);
+        let o = run(&bob.g, &mail, false);
+        assert_eq!((only_line(&o).sig.state, only_line(&o).describe().0), (SigState::RevokedKey, Level::Bad), "{:?}", o.security);
+        assert!(only_line(&o).describe().1.to_lowercase().contains("revoked"));
+    }
+
+    /// A PGP/MIME mail signed in 2020 by a key that lived 30 days, whose public key is in `into`.
+    fn mail_with_expired_key(into: &TestHome) -> Vec<u8> {
+        let old = TestHome::new();
+        let fpr = old.gen_pgp("Old Key", "alice@example.org", "30d", Some("20200101T000000"));
+        old.share_pgp_with(into, &fpr);
+        let sig = old.pgp_sign(&fpr, ENTITY, Some("20200110T000000"));
+        let mut m = mail_of("Content-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=\"SB\"\r\n\r\n--SB\r\n");
+        m.extend_from_slice(ENTITY);
+        m.extend_from_slice(b"\r\n--SB\r\nContent-Type: application/pgp-signature\r\n\r\n");
+        m.extend_from_slice(&sig);
+        m.extend_from_slice(b"\r\n--SB--\r\n");
+        m
+    }
+
+    // spec: MAIL-172, MAIL-174, MAIL-177
+    #[test]
+    fn odd_mails_give_notes_and_never_a_verdict_or_a_panic() {
+        let g = Gnupg::default();
+        let none = |raw: &[u8]| {
+            let o = process(&g, raw, true, &AtomicBool::new(false), NOW);
+            (o.security, o.display, o.decrypted)
+        };
+        // plain: nothing at all
+        let (sec, shown, dec) = none(b"From: a@x.org\r\nSubject: hi\r\n\r\nhello\r\n");
+        assert!(sec.is_empty() && shown.is_none() && !dec);
+        // a signed mail with one part: a note, no verdict
+        let (sec, _, _) = none(b"From: a@x.org\r\nContent-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=B\r\n\r\n--B\r\n\r\nx\r\n--B--\r\n");
+        assert!(sec.lines.is_empty() && sec.notes.iter().any(|n| n.contains("exactly two parts")), "{sec:?}");
+        // an encrypted part with other parts: said so, with its own wording, and nothing decrypted
+        let mixed = "From: m@evil.example\r\nContent-Type: multipart/mixed; boundary=\"M\"\r\n\r\n--M\r\nContent-Type: text/plain\r\n\r\nx\r\n--M\r\nContent-Type: application/pkcs7-mime; smime-type=enveloped-data\r\nContent-Transfer-Encoding: base64\r\n\r\nAAEC\r\n--M--\r\n";
+        let (sec, shown, dec) = none(mixed.as_bytes());
+        assert!(matches!(sec.encryption, Encryption::NotDecrypted(ref w) if w.contains("mixes encrypted")) && shown.is_none() && !dec, "{sec:?}");
+        // GnuPG is not there at all: said in words, for every kind of entity
+        let missing = Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), ..Gnupg::default() };
+        for raw in [
+            signed_mail("application/pgp-signature", "application/pgp-signature", "SIG"),
+            signed_mail("application/pkcs7-signature", "application/pkcs7-signature", "SIG"),
+            b"From: a@x\r\nContent-Type: application/pkcs7-mime; smime-type=signed-data\r\nContent-Transfer-Encoding: base64\r\n\r\nAAEC\r\n".to_vec(),
+            b"From: a@x\r\n\r\n-----BEGIN PGP SIGNED MESSAGE-----\r\n\r\nt\r\n-----BEGIN PGP SIGNATURE-----\r\n\r\nabc\r\n-----END PGP SIGNATURE-----\r\n".to_vec(),
+        ] {
+            let o = process(&missing, &raw, true, &AtomicBool::new(false), NOW);
+            assert!(o.security.lines.is_empty() && o.security.unavailable.as_deref().is_some_and(|w| w.contains("not installed")), "{:?}", o.security);
+        }
+        let enc = b"From: a@x\r\nContent-Type: application/pkcs7-mime; smime-type=enveloped-data\r\nContent-Transfer-Encoding: base64\r\n\r\nAAEC\r\n";
+        let o = process(&missing, enc, true, &AtomicBool::new(false), NOW);
+        assert!(matches!(o.security.encryption, Encryption::Failed(ref w) if w.contains("not installed")) && o.security.unavailable.is_some() && o.display.is_none(), "{:?}", o.security);
+        let inline = b"From: a@x\r\n\r\n-----BEGIN PGP MESSAGE-----\r\n\r\nabc\r\n-----END PGP MESSAGE-----\r\n";
+        let o = process(&missing, inline, true, &AtomicBool::new(false), NOW);
+        assert!(matches!(o.security.encryption, Encryption::Failed(ref w) if w.contains("not installed")), "{:?}", o.security);
+        // without consent, an inline encrypted block asks for it
+        let o = process(&missing, inline, false, &AtomicBool::new(false), NOW);
+        assert_eq!(o.security.encryption, Encryption::NeedsConsent);
+        // a cancelled or timed out call is put in the notes
+        let mut sec = Security::new();
+        record_error(&mut sec, &GpgError::Timeout);
+        record_error(&mut sec, &GpgError::Cancelled);
+        assert_eq!(sec.notes.len(), 2);
+        assert!(sec.unavailable.is_none());
+    }
+
+    // spec: MAIL-175, MAIL-176
+    #[test]
+    fn an_inline_encrypted_block_is_decrypted_with_a_weaker_note_and_a_corrupt_opaque_smime_message_is_a_note() {
+        if !have_gnupg() {
+            return;
+        }
+        let alice = TestHome::new();
+        let a_fpr = alice.gen_pgp("Alice Test", "alice@example.org", "never", None);
+        let cipher = String::from_utf8(alice.pgp_encrypt(&[&a_fpr], Some(&a_fpr), b"inline secret")).unwrap().replace('\n', "\r\n");
+        let mail = format!("{OUTER}Content-Type: text/plain; charset=utf-8\r\n\r\n{cipher}");
+        let o = run(&alice.g, mail.as_bytes(), true);
+        assert_eq!(o.security.encryption, Encryption::Decrypted(CryptoStandard::OpenPgp), "{:?}", o.security);
+        assert!(o.decrypted && o.security.notes.iter().any(|n| n.contains("weaker")), "{:?}", o.security);
+        assert_eq!((o.security.lines.len(), o.security.lines[0].scope), (1, Scope::Inline));
+        assert_eq!(mail::parse(o.display.as_ref().unwrap()).text, "inline secret");
+        // no secret key for it: failed, in words
+        let bob = TestHome::new();
+        let o = run(&bob.g, mail.as_bytes(), true);
+        assert!(matches!(o.security.encryption, Encryption::Failed(ref w) if w.contains("not in your keyring")) && !o.decrypted && o.display.is_none(), "{:?}", o.security);
+        // an opaque S/MIME mail that is not signed data
+        let s = TestHome::new();
+        let junk = mail_of(&format!("Content-Type: application/pkcs7-mime; smime-type=signed-data; name=smime.p7m\r\nContent-Transfer-Encoding: base64\r\n\r\n{}\r\n", b64_lines(b"not a message")));
+        let o = run(&s.g, &junk, false);
+        assert!(o.security.lines.is_empty() && o.display.is_none() && o.security.notes.iter().any(|n| n.contains("could not be read")), "{:?}", o.security);
+    }
 }

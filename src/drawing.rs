@@ -1564,6 +1564,9 @@ impl DrawingDoc {
                 };
                 set_abs_points(e, &abs);
             }
+            // the dragged end is free until the button goes up; a binding that stayed would pull
+            // it back to its shape on the next frame
+            self.set_binding(&id, start, None);
             self.changed();
             return;
         }

@@ -311,6 +311,11 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| e.to_string())?;
     drop(cfg);
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    // curl stops at the size limit (exit code 63) when the server announces a bigger answer: that is
+    // an error, not an empty answer with status 200
+    if out.status.code() == Some(63) {
+        return Err(too_big(max_bytes));
+    }
     // the answer can hold a token (the OAuth2 endpoint): wiped when this function is done
     let raw = Zeroizing::new(out.stdout);
     let stderr = || String::from_utf8_lossy(&out.stderr).trim().to_string();
@@ -332,9 +337,11 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
         return Err(if err.is_empty() { "could not reach the server".into() } else { err });
     }
     if body.len() as u64 > max_bytes {
-        return Err(format!("the answer is bigger than {} MB", max_bytes / 1_000_000));
+        return Err(too_big(max_bytes));
     }
-    let effective = if effective.trim().is_empty() { url.to_string() } else { effective.trim().to_string() };
+    // older curl (7.x) puts the request's user name and password into the final address after a
+    // redirect: never check, compare or return them
+    let effective = if effective.trim().is_empty() { url.to_string() } else { without_user_info(effective.trim()) };
     if effective != url {
         check_url(&effective).map_err(|e| format!("the server redirected to an address that is not allowed: {e}"))?;
         if with_auth && !same_server(&effective, url) {
@@ -342,6 +349,24 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
         }
     }
     Ok(BytesResponse { status, body, url: effective, etag: clean_etag(&etag), content_type })
+}
+
+/// The address without a `user:password@` part in its authority.
+fn without_user_info(url: &str) -> String {
+    let Some(start) = url.find("://").map(|i| i + 3) else { return url.to_string() };
+    let end = url[start..].find(['/', '?', '#']).map_or(url.len(), |i| start + i);
+    match url[start..end].rfind('@') {
+        Some(at) => format!("{}{}", &url[..start], &url[start + at + 1..]),
+        None => url.to_string(),
+    }
+}
+
+fn too_big(max_bytes: u64) -> String {
+    if max_bytes >= 1_000_000 {
+        format!("the answer is bigger than {} MB", max_bytes / 1_000_000)
+    } else {
+        format!("the answer is bigger than {max_bytes} bytes")
+    }
 }
 
 /// A header of the last response in curl's `-i` output (after redirects and "100 Continue").
@@ -739,6 +764,17 @@ pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>, before: &[Ev
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    // spec: CAL-019
+    #[test]
+    fn the_final_address_after_a_redirect_never_keeps_a_user_name_or_password() {
+        // older curl reports it like this after a redirect (raba/shale#104)
+        assert_eq!(without_user_info("https://ada:s3cret@dav.example.com/cal/"), "https://dav.example.com/cal/");
+        assert_eq!(without_user_info("https://ada@dav.example.com:8443/x?a=b@c"), "https://dav.example.com:8443/x?a=b@c");
+        assert_eq!(without_user_info("http://127.0.0.1:5232/p@q/"), "http://127.0.0.1:5232/p@q/", "an @ in the path stays");
+        assert_eq!(without_user_info("https://dav.example.com"), "https://dav.example.com");
+        assert_eq!(without_user_info("not a url"), "not a url");
+    }
 
     // spec: SEC-017
     #[test]

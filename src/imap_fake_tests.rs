@@ -71,6 +71,8 @@ pub struct FakeState {
     pub uidplus: bool,
     /// The next write command (STORE, COPY, MOVE, EXPUNGE) is answered `NO` with this text.
     pub fail_next_write: Option<String>,
+    /// Every write command with this verb (`COPY`, `STORE`, `EXPUNGE`, `MOVE`) is answered `NO`, until it is reset.
+    pub fail_every: Option<&'static str>,
     /// The connection is closed, without an answer and without doing anything, when a command with
     /// this verb (`UID MOVE`, `UID EXPUNGE` …) arrives.
     pub hang_up_on: Option<String>,
@@ -82,6 +84,12 @@ pub struct FakeState {
     pub hang_up_after_append: bool,
     /// The server does not say `APPENDUID` (also the case without `UIDPLUS`).
     pub no_appenduid: bool,
+    /// Untagged lines written before the `+` of an `APPEND` (a chatty server).
+    pub append_noise: Option<String>,
+    /// Written instead of the `+` of an `APPEND`, then the connection is closed (empty: closed without a word).
+    pub append_cut_before_plus: Option<String>,
+    /// Written instead of the answer to an `APPEND` after its literal (`{tag}` is the tag); the message is not stored.
+    pub append_answer: Option<String>,
 }
 
 pub struct FakeServer {
@@ -103,6 +111,11 @@ fn certified() -> &'static (CertificateDer<'static>, Vec<u8>) {
 /// The certificate that the pretend server presents (what a test client must be told to trust).
 pub fn server_cert() -> CertificateDer<'static> {
     certified().0.clone()
+}
+
+/// A loopback port that nothing listens on (a refused connection).
+pub fn closed_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 
 pub(crate) fn server_config() -> Arc<ServerConfig> {
@@ -223,11 +236,15 @@ impl FakeServer {
             move_cap: true,
             uidplus: true,
             fail_next_write: None,
+            fail_every: None,
             hang_up_on: None,
             no_copyuid: false,
             appended: vec![],
             hang_up_after_append: false,
             no_appenduid: false,
+            append_noise: None,
+            append_cut_before_plus: None,
+            append_answer: None,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let (st, sp) = (state.clone(), stop.clone());
@@ -583,12 +600,30 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                         continue;
                     }
                 }
+                let (noise, cut) = {
+                    let g = st.lock().unwrap();
+                    (g.append_noise.clone(), g.append_cut_before_plus.clone())
+                };
+                if let Some(cut) = cut {
+                    write!(r.get_mut(), "{cut}")?;
+                    r.get_mut().flush()?;
+                    return Ok(Next::Done);
+                }
+                if let Some(noise) = noise {
+                    write!(r.get_mut(), "{noise}")?;
+                }
                 write!(r.get_mut(), "+ Ready for literal data\r\n")?;
                 r.get_mut().flush()?;
                 let mut buf = vec![0u8; n];
                 r.read_exact(&mut buf)?;
                 let mut rest_of_line = String::new();
                 r.read_line(&mut rest_of_line)?;
+                let scripted = st.lock().unwrap().append_answer.clone();
+                if let Some(answer) = scripted {
+                    write!(r.get_mut(), "{}", answer.replace("{tag}", tag))?;
+                    r.get_mut().flush()?;
+                    continue;
+                }
                 let (answer, hang) = {
                     let mut g = st.lock().unwrap();
                     let uv = g.folders.iter().find(|f| f.name == name).map(|f| f.uidvalidity).unwrap_or(0);
@@ -617,6 +652,9 @@ fn write_command<W: Write>(out: &mut W, st: &Arc<Mutex<FakeState>>, selected: &O
     let mut g = st.lock().unwrap();
     if let Some(why) = g.fail_next_write.take() {
         return write!(out, "{tag} NO {why}\r\n");
+    }
+    if g.fail_every == Some(sub) {
+        return write!(out, "{tag} NO [SERVERBUG] the pretend server fails every {sub}\r\n");
     }
     let Some(name) = selected.clone() else { return write!(out, "{tag} NO no folder selected\r\n") };
     if !rw {
@@ -1426,5 +1464,51 @@ mod tests {
         let e = w(&mut c, "Sent").err().unwrap();
         assert!(matches!(e, ImapError::Connection(_)), "{e}");
         assert_eq!(server.state().messages("Sent").len(), 2);
+    }
+
+    // spec: MAIL-220
+    #[test]
+    fn an_append_refused_after_the_literal_or_cut_off_or_answered_oddly_is_an_error_that_stores_nothing_and_never_hangs() {
+        let server = seeded_for_writes(MailSecurity::ImplicitTls);
+        server.state().add_folder("Sent", &["\\Sent"]);
+        let w = |c: &mut Client| c.write(&WriteCmd::Append { folder: "Sent".into(), flags: vec![], bytes: b"Subject: x\r\n\r\nhi\r\n".to_vec() });
+        let mut c = connect(&server).unwrap();
+        // refused only after the bytes went over (a quota that is checked late): the server's words, the connection stays in step
+        server.state().append_answer = Some("{tag} NO [OVERQUOTA] mailbox is full\r\n".into());
+        let e = w(&mut c).err().unwrap();
+        assert!(matches!(&e, ImapError::Server(t) if t.contains("OVERQUOTA")), "{e}");
+        server.state().append_answer = Some("{tag} BAD [CLIENTBUG] what\r\n".into());
+        assert!(matches!(w(&mut c), Err(ImapError::Server(t)) if t.contains("CLIENTBUG")));
+        // an OK without a usable APPENDUID is a success without a UID, never a guess
+        for answer in ["{tag} OK appended\r\n", "{tag} OK [APPENDUID] done\r\n", "{tag} OK [APPENDUID x y] done\r\n", "{tag} OK [APPENDUID 5] done\r\n", "{tag} OK [APPENDUID 5 6 7] done\r\n"] {
+            server.state().append_answer = Some(answer.into());
+            let out = w(&mut c).unwrap_or_else(|e| panic!("{answer:?}: {e}"));
+            let expect = if answer.contains("5 6 7") { Some((5, 6)) } else { None };
+            assert_eq!(out.appenduid, expect, "{answer:?}");
+        }
+        // untagged chatter before the continuation request is read past
+        {
+            let mut g = server.state();
+            g.append_answer = None;
+            g.append_noise = Some("* 7 EXISTS\r\n* OK [ALERT] nothing\r\n".into());
+        }
+        assert!(w(&mut c).unwrap().appenduid.is_some());
+        assert_eq!(server.state().appended.len(), 1, "only this one was stored");
+        server.state().append_noise = None;
+        // BYE or silence in place of the continuation request, and BYE after the literal: connection errors, no hang
+        for (cut, after) in [(Some("* BYE shutting down\r\n"), None), (Some(""), None), (Some("* BYE x\r\n* OK more\r\n"), None), (None, Some("* BYE shutting down\r\n"))] {
+            let mut c = connect(&server).unwrap();
+            {
+                let mut g = server.state();
+                g.append_cut_before_plus = cut.map(String::from);
+                g.append_answer = after.map(String::from);
+            }
+            let e = w(&mut c).err().unwrap();
+            assert!(matches!(e, ImapError::Connection(_)), "{cut:?} {after:?}: {e}");
+            let mut g = server.state();
+            g.append_cut_before_plus = None;
+            g.append_answer = None;
+        }
+        assert_eq!(server.state().appended.len(), 1, "nothing else was stored");
     }
 }

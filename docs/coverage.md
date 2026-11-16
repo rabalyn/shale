@@ -148,41 +148,47 @@ The first ten are ordered by how much a silent bug costs (data loss, wrong mail 
 not by line count. **Tooling** means a plain test is not sensible and a helper (DEV-004) should be
 proposed to the owner first; **test** means a plain unit or UI test is enough.
 
-1. **`vault.rs` `relocate` / `rewrite_drawing` (link rewrite, VAULT-016), 39 lines**: the
+1. **Closed (#56): `vault.rs` `relocate` / `rewrite_drawing` (link rewrite, VAULT-016), 39 lines**: tests now cover a note changed after the scan, an unreadable note and a drawing that cannot be written; `trash` and `restore` onto a taken name were already tested. Original gap: the
    `failed_rewrites` branches (lines 914, 929, 951 to 952: a note or drawing that changes on disk
    between planning and writing, a write that fails) have no test, and neither do `trash` and
    `restore` when the name is taken (1056 to 1088: "already there; the trashed copy stays"). Test:
    rename a note whose referrer is made read-only or edited meanwhile, and check `failed_rewrites`,
    that the other files are rewritten and that nothing is lost; restore into an occupied name. Kind: test.
-2. **`fsutil.rs` `rename_noreplace` fallback (209 to 219), `try_lock_file`, `open_private_log`**: the
+2. **Closed (#56): `fsutil.rs` `rename_noreplace` fallback (now `rename_noreplace_fallback`, tested directly) and `open_private_log`**; original gap: the
    path for systems without `renameat2` (hard link, then the exists check) is never run, yet every
    rename, trash and restore relies on its guarantee. Test: split the fallback into a function that
    takes "renameat2 unavailable" as an argument and check the three outcomes (new name, name taken,
    directory). Kind: test (small refactor).
-3. **`mail_ops.rs` `exec_move`, `copy_then_delete`, `exec_expunge` (488 to 679), 32 lines**: the
-   fallback for servers without MOVE or UIDPLUS (COPY, verify, STORE, UID EXPUNGE) and the failure
-   branches of the verified copy are only partly reached. Test: a server without MOVE and without
-   UIDPLUS, a copy that does not arrive, an expunge that fails; check that the mail is never deleted
-   before the copy is verified. Kind: tooling (a Dovecot variant in `tests/mail-env/` with the
-   capabilities trimmed, or a scripted fake that can drop MOVE; `imap_fake_tests.rs` cannot yet).
+3. **`mail_ops.rs` `exec_move`, `copy_then_delete`, `exec_expunge`**: closed (#58, DEV-004). The
+   pretend IMAP server has the switches `move_cap`, `uidplus`, `no_copyuid` and `fail_every`
+   (every `COPY`, `STORE` or `EXPUNGE` answered `NO`); `mail_ops.rs` tests cover the copy that the
+   server refuses, the mark and the expunge that fail (the mail then exists in both folders and
+   the mark is undone), verification by Message-ID with one mail not found, and "delete forever"
+   without UIDPLUS. A Dovecot variant was not needed: the fake reaches the same client branches.
 4. **`imap_client.rs` response parsing (`skip_value`, `skip_value_open`, `parse_fetch`,
-   `parse_untagged`, 727 to 973) and `append` (1538 to 1564)**: odd server replies (nested
-   literals, NIL, unterminated lists) and the APPEND error paths. Test: feed the parser byte strings
-   of real-world oddities (also cut off after every byte, as the UTF-8 test does for text) and APPEND
-   refusals ([OVERQUOTA], missing continuation). Kind: test (the fake server exists).
-5. **`imap_sync.rs` `real_factory`, `auth_factory`, `connector_for_account`, `connect_with_retry`
-   (113 to 364) and `mail_send.rs` `connector_for_account`, `connect_with_retry`, `smtp_settings`
-   (40 to 80)**: the production connection set-up (password or OAuth2 login, retry, settings for a
-   provider) is probably reached only by the ignored `mail_env` suite. Test: unit tests of the
-   settings and the retry back-off with a fake connector that fails twice; and measure the env
-   suites (the `env-tests` job, once the runner runs containers). Kind: test.
+   `parse_untagged`) and `append`**: closed (#57, MAIL-220, MAIL-221). Unit tests feed the parser
+   odd but legal answers (literals, nested lists, NIL, escaped strings) and broken ones (also cut
+   off after every byte, in a thread that must finish); a loopback `Wire` tests literals, NUL bytes,
+   long lines and early ends; the pretend server has the switches `append_noise`,
+   `append_cut_before_plus` and `append_answer` for the APPEND failures. One real gap found: a
+   line longer than the limit passed when it arrived in one chunk; fixed.
+5. **`imap_sync.rs` `real_factory`, `connector_for_account`, `connect_with_retry` and `mail_send.rs`
+   `connector_for_account`, `connect_with_retry`, `smtp_settings`**: closed (#57, MAIL-222,
+   MAIL-223), except the keyring paths. Counting auth factories test the retry; loopback ports
+   (`closed_port`) and the pretend servers test refused connections and untrusted certificates;
+   the settings mapping is checked. Not tested: `auth_factory` for a password account without a
+   session password (it asks the real keyring; a fake keyring seam in `secrets.rs` would be
+   needed) and the OAuth2 token fetch itself (covered in `oauth.rs`).
 6. **`cal_dav.rs` `discover` (469 to 513), `request_bytes_opts` (245 to 315), `write_error`,
-   `delete_event` (585 to 709)**: well-known and principal discovery with redirects and the words
+   `delete_event` (585 to 709)**: closed (#59, CAL-019, CAL-020).
+   `cal_dav_status_tests.rs` runs the client against the scripted loopback server
+   `cal_dav::tests::mock_http_with` (and a raw socket that is not HTTP). Originally: well-known and principal discovery with redirects and the words
    for 401, 403, 412 and 5xx are reached mainly by the ignored `caldav_env` suite. Test: a scripted
    HTTP server for the status and redirect cases (the "redirect and certificate rules" test of
    CALENV-002 shows the shape). Kind: test.
 7. **`cal_store.rs` `delete_occurrence`, `save_event`, `poll`, `default_trash_dir` (139 to 638)**:
-   removing one date of a repeating event in a local calendar, saving to a read-only or missing
+   closed (#59, CAL-021, CAL-022): `cal_store_failure_tests.rs`, with write failures made by a folder
+   where the file should be (also holds for root, so no seam was needed). Originally: removing one date of a repeating event in a local calendar, saving to a read-only or missing
    directory, and the polling refresh. Test: a local calendar in a temp dir, delete one occurrence,
    save with the folder made read-only, poll after an outside change. Kind: test.
 8. **`gpg.rs` `trust_words`, `inv_recp_words`, `op_failure`, `signatures`, `decrypt` (301 to 691) and
@@ -190,26 +196,47 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    shown for an expired, revoked or untrusted key, a missing recipient key, a bad signature and an
    unsupported entity. A wrong word here misleads the person about whether a mail is safe. Test: with
    the GnuPG test kit make an expired key, a revoked key and a corrupted signature, and check each
-   message. Kind: test.
+   message. Kind: test. Done in #60 (DEV-012): status-line tests for the words and verdicts
+   (`signatures`, `decrypt_failure`, `inv_recp_words`, `op_failure`, `trust_words`), real-key tests
+   for good, bad, unknown, expired-key, expired-signature and revoked signatures and for
+   encrypting to or signing with an expired or revoked key (the test kit's `pgp_sign_expiring`),
+   `classify_entity` for odd and nested mails, and `best_key`.
 9. **`app/drops.rs` `handle_drops` (291 to 447, 46 % covered) and `wl_drop.rs` `event` (264 to 397,
    45 %)**: dropping files, folders and mails from other programs (Wayland data offers, MIME kinds,
-   the import dialog). The real drag-and-drop protocol cannot be driven by a headless UI test. Kind:
-   tooling (a small Wayland client or fake data-offer feeder for `wl_drop`, and a `--keys` step that
-   injects egui drops for `handle_drops`).
+   the import dialog). Done in #61 (DEV-012): `wl_drop.rs` is split into a protocol-free part
+   (`Drag`, `Landing`, `is_repeat`) with unit tests and a thin Wayland glue; `app/drops_tests.rs` feeds
+   `DropEvent`s and window-system files to `handle_drops` in the headless window (drop on a folder, a
+   note, the editor, nowhere; into an open dialog; hover, refusal and busy hints; unusable drops; no
+   vault; a drag inside the file list); the `--keys` step `drop:T:/a;;/b` drops files at a place. What
+   stays outside the tests is the Wayland glue itself (the calls on a real data offer) and the drag
+   out of the calendar. The line figures above are from before; measure again with the next report.
 10. **`drawing.rs` `continue_drag`, `begin_drag`, `end_drag`, `click` (1450 to 1815), 270 lines, and
     `panels.rs` `modals`, `tasks_view`, `tree` (218 to 1110), 330 lines**: moving, resizing and
     rotating elements, the modal dialogs, the task list view and the folder tree. Test: headless UI
     tests with scripted pointer events as in `drawing_ui_tests.rs` (drag a rectangle, resize by a
     handle, shift-drag to constrain, drag after zoom), and one test per modal that opens it by its
     key, changes a value and closes it with Esc. Kind: test (large; split into issues per area).
+    Done in #62: `drawing_pointer_tests.rs` (16 tests, DRAW-019) drives `begin_drag`,
+    `continue_drag`, `end_drag` and `click` with real pointer events (select, Shift, move, zoomed
+    drag, frame, corner resize with turn-over, text and scribbles, arrow ends, every shape tool,
+    snapping, 45-degree lock, pencil, eraser, hand and Space pan, double-click editing) and found a
+    bug (an arrow end dragged off its shape sprang back). `panels_ui_tests.rs` (8 tests,
+    VAULT-023, VAULT-024, TASK-005) drives the quick switcher, Rename, New folder, Move to trash
+    and Settings dialogs, the task list and the file tree. Left open: the dialogs of other modules
+    (`Export`, `Import`, `Event`, mail and feed accounts, `Calendars` content) belong to their own
+    modules; the linear branch of the resize code is reached only by scribbles; Convert-again of
+    the canvas question; the sort menu and drag-and-drop in the tree.
 
 More, in the order of the table:
 
-- **`main.rs` `main` (117 to 202, 20 %), `instance.rs` `show_already_running` (21 to 33, 43 %)**:
-  start-up, the single-instance check and its dialog. Test: start the binary with `--screenshot`
-  and a second instance against a temp config dir and check the exit status and the message. Kind:
-  tooling for the dialog (a headless display, which the screenshot runner already needs); test for
-  the rest.
+- **`main.rs` `main`, `instance.rs` `show_already_running`: closed for everything that can be run
+  without a window** (#63 part 2). The command line is read by `parse_args` (DEV-013, 7 tests), the
+  lock check by `instance::claim` (DATA-012: owner, second start refused, stale file after a crash,
+  broken data folder) and the start dialog is driven through the headless harness
+  (`start_dialog_tests.rs`, VAULT-021, VAULT-022). What stays uncovered is `main` itself (the real
+  window and event loop) and the little window of `show_already_running`: both need a real display.
+  There is no hand-over of a second start's arguments to the running Shale (the second one only
+  says it is running); that is a missing feature, not a missing test.
 - **`reader.rs` `embed` (380 to 462, 63 %), `layout.rs` `welcome`, `view_header`,
   `paint_recovery_notice` (242 to 817), `graph.rs` `ui` (164 to 322, 68 %), `app.rs`
   `calendar_action`, `calendar_dialog_action`, `shortcuts`, `process_actions` (1420 to 1807),
@@ -217,20 +244,21 @@ More, in the order of the table:
   `after_sync`, `sync_tick` (84 to 223), `app/mail.rs` `mail_dialog_action` (56 to 143),
   `link_assist.rs` `after` (219 to 393, 83 %), `social/accounts_ui.rs` `sign_in`, `poll` (110 to
   161, 76 %)**: the app-level glue and the views. Test: UI tests that drive the action and check
-  the state (the pattern of `mail_ui_tests.rs`). Kind: test. The sign-in of the Feeds dialog and
-  `oauth.rs` `sign_in` / `wait_for_code` (422 to 757) need a pretend browser: tooling (a helper that
-  opens the login URL like a person would; the mail-env provider could serve the Mastodon and
-  Bluesky sign-in too).
+  the state (the pattern of `mail_ui_tests.rs`). Kind: test. **Closed for the sign-in of the Feeds
+  dialog and `oauth.rs` `sign_in` / `wait_for_code` (#63):** the pretend browser
+  (`oauth_fake_tests.rs::pretend_browser`, `social/fake_server.rs::pretend_browser`) opens the login
+  URL like a person would (approve, deny, wrong state, never answers); the Feeds dialog is tested
+  against a pretend Mastodon and Bluesky server.
 - **`opener.rs` `launch`, `open_url`, `open_recovery_folder` (17 to 293)**: starting the desktop's
-  opener. Kind: tooling (a fake `xdg-open` first on `PATH` that records its arguments; the rule "no
-  other code starts an opener" is tested, the call itself is not).
-- **`config.rs` `save`, `load`, `config_path` (397 to 445) and `vault_state.rs` `reload_settings`,
-  `adopt_legacy` (272 to 316)**: reading and writing the settings file and the first-start
+  opener. Kind: tooling. **Closed (#63):** `FakeXdgOpen` is a recording fake `xdg-open` for one test
+  thread (it never touches `PATH`); `opener.rs::real_opener_tests` check every SEC-006 rule through
+  the real opener.
+- **Closed (#56): `config.rs` `save`, `load`, `config_path` (a test-only path seam) and `vault_state.rs` `reload_settings`** (`adopt_legacy` was tested already). Original gap: reading and writing the settings file and the first-start
   migration. Test: point `XDG_CONFIG_HOME` at a temp dir; save, load, a corrupt file, a read-only
   directory. Kind: test.
-- **`tb_store.rs` `scan_maildir`, `find_in`, `by_index`, `mork_rows` (301 to 608, 86 %)**: the
-  Thunderbird profile reader. Kind: tooling (a generator for Thunderbird profile fixtures, with Mork
-  files and a local-folder maildir; the formats are hard to write by hand).
+- **`tb_store.rs`: closed** (#63 part 2). `tb_fixture_tests.rs` generates Thunderbird profiles
+  (`profiles.ini`, `prefs.js`, mbox and maildir folders, `.sbd` nesting, non-ASCII names, `.msf`
+  indexes, flags, large and broken files); `tb_store_tests.rs` has 21 tests on them (IMP-018).
 - **`mail.rs` `entity` (372 to 409), `parse_date` (349 to 363), `decode_charset` (108 to 126),
   `html_to_text`**: HTML entities, odd date formats and charsets in incoming mail. Test: table tests
   with real-world strings. Kind: test.

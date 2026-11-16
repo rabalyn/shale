@@ -499,3 +499,6 @@ fn people_and_the_file_picker_in_a_drawing() {
     assert!(d.editing_text.is_some(), "the first Esc only closes the picker");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[path = "drawing_pointer_tests.rs"]
+mod pointer;
