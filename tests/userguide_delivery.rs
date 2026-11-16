@@ -72,10 +72,14 @@ fn dev_020_the_dist_script_copies_the_guide_without_what_shale_writes_and_refuse
 fn dev_020_both_release_workflows_pack_the_guide_with_the_script_and_check_the_zip() {
     for wf in [".forgejo/workflows/ci.yml", ".github/workflows/build.yml"] {
         let text = fs::read_to_string(root().join(wf)).unwrap();
-        assert!(text.contains("scripts/userguide-dist.sh dist/shale/userguide"), "{wf}: the archive has no userguide/ next to the program");
+        // the guide is in the archive once, as docs/userguide, made by the script (so without
+        // what Shale writes into a vault): the docs are copied, then their guide is replaced
+        let copy = text.find("cp -r docs dist/shale/").unwrap_or_else(|| panic!("{wf}: docs are not copied into the archive"));
+        let drop = text.find("rm -rf dist/shale/docs/userguide").unwrap_or_else(|| panic!("{wf}: the plain copy of the guide stays in the archive"));
+        let made = text.find("scripts/userguide-dist.sh dist/shale/docs/userguide").unwrap_or_else(|| panic!("{wf}: the archive's guide is not made by the script"));
+        assert!(copy < drop && drop < made, "{wf}: the guide of the archive is made before the docs are copied");
+        assert!(!text.contains("dist/shale/userguide"), "{wf}: a second copy of the guide next to the program");
         assert!(text.contains("scripts/userguide-dist.sh dist/zip/userguide"), "{wf}: no zip of the guide");
-        assert!(text.contains("tar -C docs --exclude=./userguide"), "{wf}: the archive would hold the guide twice (docs/userguide and userguide/)");
-        assert!(!text.contains("cp -r docs dist/shale/"), "{wf}: the whole docs folder is copied, with the guide");
         assert!(text.contains("shale-userguide"), "{wf}: the zip is not named");
         assert!(text.contains("unzip -tq"), "{wf}: the zip is not checked");
     }

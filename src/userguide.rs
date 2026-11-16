@@ -2,7 +2,7 @@
 //! ships with, and how it puts a copy of it into a folder of its own that is opened as a vault.
 //! No drawing and no window here, so the rules can be tested alone.
 //!
-//! The guide is `docs/userguide` of the repository. A release archive has it as `userguide/`
+//! The guide is `docs/userguide` of the repository. A release archive has it as `docs/userguide`
 //! next to the program; a development build (`cargo run`) reads it from the source tree.
 
 use crate::fsutil;
@@ -50,10 +50,10 @@ fn is_guide(dir: &Path) -> bool {
     dir.join(START_NOTE).is_file()
 }
 
-/// The guide to copy: `userguide/` next to the executable first (a release archive), else the
+/// The guide to copy: `docs/userguide` next to the executable first (a release archive), else the
 /// development folder given. `None` when neither holds a guide.
 pub fn find(exe_dir: Option<&Path>, dev: Option<PathBuf>) -> Option<PathBuf> {
-    exe_dir.map(|d| d.join("userguide")).into_iter().chain(dev).find(|d| is_guide(d))
+    exe_dir.map(|d| d.join("docs").join("userguide")).into_iter().chain(dev).find(|d| is_guide(d))
 }
 
 /// The folder of the copy for this version of the program.
@@ -163,7 +163,7 @@ mod tests {
         // nothing next to the executable: the development folder
         assert_eq!(find(Some(&exe), Some(dev.clone())), Some(dev.clone()));
         // a folder without the start note is no guide
-        let shipped = exe.join("userguide");
+        let shipped = exe.join("docs").join("userguide");
         fs::create_dir_all(&shipped).unwrap();
         assert_eq!(find(Some(&exe), Some(dev.clone())), Some(dev.clone()));
         // a release archive has its own copy, which wins

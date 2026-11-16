@@ -51,7 +51,7 @@ guide once per version into its data folder (on Linux
 system) and opens that copy as a vault. Your notes, tabs and edits stay in the copy: the next
 version of Shale makes a new copy, and a copy that exists is never overwritten. The release
 also has the guide as `shale-userguide-<version>.zip`, and the program's archive has it as the
-folder `userguide/` next to the program, where Shale looks first.
+folder `docs/userguide/` next to the program, where Shale looks first.
 
 ## How to read this guide
 

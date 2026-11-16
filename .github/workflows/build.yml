@@ -84,10 +84,11 @@ jobs:
         run: |
           mkdir -p dist/shale
           cp target/release/shale LICENSE README.md CHANGELOG.md dist/shale/
-          # (the guide is copied once, as userguide/ below)
-          tar -C docs --exclude=./userguide -cf - . | (mkdir -p dist/shale/docs && tar -C dist/shale/docs -xf -)
-          # DEV-020: the user guide next to the program (Help finds it there), and as a zip of its own
-          scripts/userguide-dist.sh dist/shale/userguide
+          cp -r docs dist/shale/
+          # DEV-020: the guide is in the archive once, as docs/userguide (Help finds it there),
+          # without what Shale writes into a vault; and as a zip of its own
+          rm -rf dist/shale/docs/userguide
+          scripts/userguide-dist.sh dist/shale/docs/userguide
           tar -C dist -czf shale-linux-x86_64.tar.gz shale
           sha256sum shale-linux-x86_64.tar.gz > shale-linux-x86_64.tar.gz.sha256
           sha256sum -c shale-linux-x86_64.tar.gz.sha256
