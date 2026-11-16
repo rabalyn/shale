@@ -341,7 +341,9 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     if body.len() as u64 > max_bytes {
         return Err(too_big(max_bytes));
     }
-    let effective = if effective.trim().is_empty() { url.to_string() } else { effective.trim().to_string() };
+    // older curl (7.x) puts the request's user name and password into the final address after a
+    // redirect: never check, compare or return them
+    let effective = if effective.trim().is_empty() { url.to_string() } else { without_user_info(effective.trim()) };
     if effective != url {
         check_url(&effective).map_err(|e| format!("the server redirected to an address that is not allowed: {e}"))?;
         if with_auth && !same_server(&effective, url) {
@@ -365,6 +367,16 @@ fn curl_failure(code: i32, max_bytes: u64) -> String {
         56 => "the connection broke while the answer was coming in".into(),
         63 => too_big(max_bytes),
         c => format!("the connection to the server failed (curl error {c})"),
+    }
+}
+
+/// The address without a `user:password@` part in its authority.
+fn without_user_info(url: &str) -> String {
+    let Some(start) = url.find("://").map(|i| i + 3) else { return url.to_string() };
+    let end = url[start..].find(['/', '?', '#']).map_or(url.len(), |i| start + i);
+    match url[start..end].rfind('@') {
+        Some(at) => format!("{}{}", &url[..start], &url[start + at + 1..]),
+        None => url.to_string(),
     }
 }
 
@@ -794,6 +806,17 @@ pub(crate) mod tests {
             assert!(!text.contains("status"), "{code}: {text}");
         }
         assert!(curl_failure(63, 20_000_000).contains("20 MB"));
+    }
+
+    // spec: CAL-019
+    #[test]
+    fn the_final_address_after_a_redirect_never_keeps_a_user_name_or_password() {
+        // older curl reports it like this after a redirect (raba/shale#104)
+        assert_eq!(without_user_info("https://ada:s3cret@dav.example.com/cal/"), "https://dav.example.com/cal/");
+        assert_eq!(without_user_info("https://ada@dav.example.com:8443/x?a=b@c"), "https://dav.example.com:8443/x?a=b@c");
+        assert_eq!(without_user_info("http://127.0.0.1:5232/p@q/"), "http://127.0.0.1:5232/p@q/", "an @ in the path stays");
+        assert_eq!(without_user_info("https://dav.example.com"), "https://dav.example.com");
+        assert_eq!(without_user_info("not a url"), "not a url");
     }
 
     // spec: SEC-017

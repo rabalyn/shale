@@ -54,7 +54,7 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # the few Win32 calls Shale needs: no-replace rename, VirtualLock, local time zone, opening files
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_Time", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # drag and drop from other programs on Wayland (the window toolkit only does it on X11)
@@ -64,6 +64,9 @@ wayland-backend = { version = "0.3", features = ["client_system"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 winit = "0.30"
+# the Keychain (secrets/keychain.rs); the versions the TLS stack already pulls in
+security-framework = "3.7"
+security-framework-sys = "2.17"
 
 # PDF rendering (hayro) needs crates that are not in the offline build cache;
 # their unmodified sources are kept in vendor/ (licences: MIT / Apache-2.0 / BSD-3-Clause).

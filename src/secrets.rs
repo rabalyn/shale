@@ -2,6 +2,7 @@
 //!
 //! On Linux the Secret Service (GNOME Keyring, KWallet, KeePassXC …) is used through the
 //! `secret-tool` program; the password goes to it on standard input, never on the command line.
+//! On macOS the Keychain (`keychain.rs`) and on Windows the Credential Manager (`wincred.rs`) hold them.
 //! One entry per account (server + user name), shared by all calendars of that account.
 //! Where no keyring is available at all the password stays in the settings file, which only its
 //! owner can read. Where there is a keyring that refuses (the unlock prompt was cancelled) the
@@ -287,20 +288,35 @@ pub fn secret_field_shown() -> bool {
 /// Where passwords end up, for the settings dialog. Says so when secrets could not be locked
 /// into memory (they are then only wiped when dropped, SEC-018).
 pub fn where_stored() -> String {
-    let base = if backend::available() { "Passwords are kept in the system keyring." } else { no_keyring_text() };
+    let base = if backend::available() { format!("Passwords are kept in {}.", store_name()) } else { no_keyring_text().to_string() };
     if crate::secret::lock_failures() > 0 {
         format!("{base} The system would not lock typed passwords into memory ({}), so they could end up in swap; use encrypted swap.", crate::secret::LOCK_LIMIT)
     } else {
-        base.to_string()
+        base
     }
 }
 
-/// What the settings dialog says when there is no keyring (SEC-003, SEC-021).
+/// What the settings dialog calls the store of this system (SEC-003).
+fn store_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "the macOS Keychain"
+    } else if cfg!(windows) {
+        "the Windows Credential Manager"
+    } else {
+        "the system keyring"
+    }
+}
+
+/// What the settings dialog says when the system's store cannot be used (SEC-003, SEC-021).
 fn no_keyring_text() -> &'static str {
     if cfg!(target_os = "linux") {
         "No system keyring found (install secret-tool / libsecret to use one): passwords are stored in the settings file, readable only by you."
+    } else if cfg!(target_os = "macos") {
+        "The macOS Keychain cannot be reached: passwords are stored in the settings file, readable only by you."
+    } else if cfg!(windows) {
+        "The Windows Credential Manager cannot be used: passwords are stored in the settings file, readable only by you."
     } else {
-        "This system has no keyring support in Shale yet: passwords are stored in the settings file, readable only by you."
+        "This system has no keyring support in Shale: passwords are stored in the settings file, readable only by you."
     }
 }
 
@@ -452,8 +468,20 @@ mod backend {
     }
 }
 
-/// Other systems: no keyring support yet, passwords stay in the owner-only settings file.
-#[cfg(all(not(target_os = "linux"), not(test)))]
+/// macOS: the Keychain (`secrets/keychain.rs`).
+#[cfg(all(target_os = "macos", not(test)))]
+mod backend {
+    pub use super::keychain::{available, clear, lookup, store};
+}
+
+/// Windows: the Credential Manager (`secrets/wincred.rs`).
+#[cfg(all(windows, not(test)))]
+mod backend {
+    pub use super::wincred::{available, clear, lookup, store};
+}
+
+/// Other systems: no keyring support, passwords stay in the owner-only settings file.
+#[cfg(all(not(any(target_os = "linux", target_os = "macos", windows)), not(test)))]
 mod backend {
     pub fn available() -> bool {
         false
@@ -466,6 +494,15 @@ mod backend {
     }
     pub fn clear(_: &str, _: &str, _: &str) {}
 }
+
+// The real macOS and Windows stores are compiled in test builds too: the tests of this file use
+// the pretend keyring above, `keychain` and `wincred` have tests of their own against the real one.
+#[cfg(target_os = "macos")]
+mod keychain;
+#[cfg(any(target_os = "macos", windows, test))]
+mod names;
+#[cfg(windows)]
+mod wincred;
 
 #[cfg(test)]
 mod tests {
@@ -693,5 +730,20 @@ mod tests {
         pretend_no_keyring(false);
         assert!(text.contains("settings file") && text.contains("readable only by you"), "{text}");
         assert_eq!(text.contains("secret-tool"), cfg!(target_os = "linux"), "{text}");
+    }
+
+    // spec: SEC-003
+    #[test]
+    fn the_dialog_names_the_store_of_this_system() {
+        let _serial = serial();
+        let text = where_stored();
+        let name = if cfg!(target_os = "macos") {
+            "macOS Keychain"
+        } else if cfg!(windows) {
+            "Windows Credential Manager"
+        } else {
+            "system keyring"
+        };
+        assert!(text.contains(name), "{text}");
     }
 }
