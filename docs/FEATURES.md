@@ -31,6 +31,9 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - Type `[[` to get matching notes; the last entry creates a new note. Esc closes the list.
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab completes
   like a shell. Files from outside the vault are copied to `z_media/<year>/<month>/`.
+- Paste a picture (Ctrl+V, or `p` in vim mode) and it is saved in the media folder as
+  `Pasted image.png` with a link at the cursor; paste files copied in a file manager (pictures, PDFs,
+  audio, video) and they are copied there and linked, one link per line. Other text pastes as usual.
 
 ![Reading view](screenshots/reading.png)
 
@@ -397,6 +400,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Drag e-mails from Thunderbird, events from a calendar (Shale's own or another program), `.eml`
   or `.ics` files, or any other files (plans, PDFs…) onto the window. The ribbon's Import button
   opens the same dialog.
+- Pictures, PDFs, audio and video files are not made into notes: each is its own item (Image, PDF,
+  Audio, Video) and is saved as a file in the media folder (`z_media/YYYY/MM/YYMMDD_name`). Dropped
+  on a note, the note gets a link line for each. An image dragged out of a web browser (Wayland) is
+  saved the same way, from the picture the browser hands over or downloaded from its address.
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
