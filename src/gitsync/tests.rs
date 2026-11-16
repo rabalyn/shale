@@ -12,8 +12,8 @@ struct Env {
 }
 
 impl Env {
-    /// A hermetic git without Git LFS: a `git-lfs` that fails is first on the `PATH`, so the tests
-    /// behave the same on machines with and without git-lfs (SYNC-016; not on Windows).
+    /// A hermetic git without Git LFS (`hide_lfs`), so the tests behave the same on machines with
+    /// and without git-lfs (SYNC-016).
     fn new(tag: &str) -> Env {
         Env::build(tag, false)
     }
@@ -43,11 +43,10 @@ impl Env {
             ("GIT_CONFIG_KEY_2", "core.autocrlf"),
             ("GIT_CONFIG_VALUE_2", "false"),
         ];
-        let mut env: Vec<(OsString, OsString)> = env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect();
+        let mut git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() };
         if !lfs {
-            env.push(("PATH".into(), lfs::path_without_lfs(&root.join("no-lfs-bin"))));
+            hide_lfs(&mut git);
         }
-        let git = Git { program: "git".into(), env };
         Env { root, git }
     }
 
@@ -576,7 +575,6 @@ fn pointer_files_are_recognised_and_other_files_are_not() {
 
 // spec: SYNC-016
 #[test]
-#[cfg(unix)]
 fn a_missing_git_lfs_is_reported_and_nothing_changes() {
     let env = Env::new("lfs-missing");
     assert_eq!(env.git.lfs_version(), None);
@@ -596,7 +594,6 @@ fn a_missing_git_lfs_is_reported_and_nothing_changes() {
 
 // spec: SYNC-019
 #[test]
-#[cfg(unix)]
 fn without_git_lfs_a_repository_that_uses_it_commits_nothing() {
     let env = Env::new("lfs-guard");
     let v = env.folder("v");

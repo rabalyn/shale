@@ -239,27 +239,3 @@ pub(super) fn expand(git: &Git, vault: &Path, blob: Vec<u8>) -> Vec<u8> {
         _ => blob,
     }
 }
-
-/// For tests: a `PATH` whose first folder holds a `git-lfs` that always fails, so git finds no
-/// working git-lfs on any machine (git runs an installed `git-lfs` before it looks at aliases).
-/// Where scripts cannot be run (Windows keeps git-lfs next to git itself) the `PATH` is unchanged.
-#[cfg(test)]
-pub(crate) fn path_without_lfs(dir: &Path) -> OsString {
-    let old = std::env::var_os("PATH").unwrap_or_default();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::create_dir_all(dir).unwrap();
-        let script = dir.join("git-lfs");
-        crate::fsutil::write_atomic(&script, b"#!/bin/sh\nexit 1\n").unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut paths = vec![dir.to_path_buf()];
-        paths.extend(std::env::split_paths(&old));
-        std::env::join_paths(paths).unwrap()
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = dir;
-        old
-    }
-}

@@ -413,13 +413,12 @@ mod tests {
     use crate::app::{Options, View};
     use std::ffi::OsString;
 
-    /// A hermetic git with a failing `git-lfs` first on the `PATH`, so these tests are the same
-    /// with and without git-lfs on the machine (not on Windows).
+    /// A hermetic git that finds no git-lfs (`hide_lfs`), so these tests are the same with and
+    /// without git-lfs on the machine.
     fn hermetic() -> Git {
-        let env = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "init.defaultBranch"), ("GIT_CONFIG_VALUE_0", "main")];
-        let mut env: Vec<(OsString, OsString)> = env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect();
-        env.push(("PATH".into(), lfs::path_without_lfs(&std::env::temp_dir().join(format!("shale-no-lfs-bin-{}", std::process::id())))));
-        Git { program: "git".into(), env }
+        let mut git = hermetic_with_lfs();
+        crate::gitsync::hide_lfs(&mut git);
+        git
     }
 
     /// The same with the real git-lfs: None (and a printed note) when it is not installed.
@@ -428,14 +427,19 @@ mod tests {
             eprintln!("skipping: git-lfs is not installed here (CI installs it)");
             return None;
         }
-        let mut git = hermetic();
-        git.env.retain(|(k, _)| k != "PATH");
-        Some(git)
+        Some(hermetic_with_lfs())
+    }
+
+    fn hermetic_with_lfs() -> Git {
+        let env = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "init.defaultBranch"), ("GIT_CONFIG_VALUE_0", "main")];
+        Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() }
     }
 
     fn app_on(vault: &Path) -> ShaleApp {
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(vault.to_path_buf()), view: None, keys: None }, false);
         app.sync.git = hermetic();
+        // the vault was opened with the computer's git: look again with the test's (SYNC-016)
+        app.refresh_lfs();
         app
     }
 
@@ -722,7 +726,6 @@ mod tests {
 
     // spec: SYNC-016
     #[test]
-    #[cfg(unix)]
     fn the_settings_say_that_git_lfs_is_missing_and_offer_nothing() {
         let root = std::env::temp_dir().join(format!("shale-app-lfs-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
