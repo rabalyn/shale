@@ -75,6 +75,10 @@ pub struct ExportOptions {
     pub embeds: bool,
     /// notes: print tables as plain text lines instead of a grid (EDIT-024)
     pub plain_tables: bool,
+    /// notes: the width in points of the editor's text column, where the note was shown
+    /// (`NoteEditor::column`); embeds are as big in proportion to the text as there (PDF-005).
+    /// None: the column of `embed_size::DEFAULT_COLUMN`.
+    pub column: Option<f32>,
     /// drawings
     pub background: Background,
     /// drawings: scale to fill the page (otherwise 100%, shrunk only if it doesn't fit)
@@ -83,11 +87,15 @@ pub struct ExportOptions {
 
 impl ExportOptions {
     pub fn for_note() -> Self {
-        ExportOptions { paper: Paper::A4, landscape: false, margin_mm: 20.0, font_pt: 11.0, title: true, page_numbers: true, embeds: true, plain_tables: false, background: Background::White, fill_page: true }
+        ExportOptions { paper: Paper::A4, landscape: false, margin_mm: 20.0, font_pt: 11.0, title: true, page_numbers: true, embeds: true, plain_tables: false, column: None, background: Background::White, fill_page: true }
     }
     pub fn for_drawing(scene: &Scene) -> Self {
         let wide = scene.bounds().map(|b| b.width() > b.height()).unwrap_or(true);
-        ExportOptions { paper: Paper::FitDrawing, landscape: wide, margin_mm: 10.0, font_pt: 11.0, title: false, page_numbers: false, embeds: true, plain_tables: false, background: Background::White, fill_page: true }
+        ExportOptions { paper: Paper::FitDrawing, landscape: wide, margin_mm: 10.0, font_pt: 11.0, title: false, page_numbers: false, embeds: true, plain_tables: false, column: None, background: Background::White, fill_page: true }
+    }
+    /// The editor's text column the sizes of the embeds are worked out for.
+    fn column(&self) -> f32 {
+        self.column.unwrap_or(crate::embed_size::DEFAULT_COLUMN)
     }
     fn page_size(&self) -> [f32; 2] {
         let [w, h] = self.paper.size().unwrap_or([595.0, 842.0]);
@@ -415,7 +423,7 @@ impl<'a> Writer<'a> {
 
     /// What an embed that is `editor_size` big in the editor is in the PDF (PDF-005).
     fn page_size(&self, editor_size: Vec2) -> Vec2 {
-        crate::embed_size::to_page(editor_size, self.cw(), (self.h - 2.0 * self.m) * 0.8)
+        crate::embed_size::to_page(editor_size, self.opts.column(), self.cw(), (self.h - 2.0 * self.m) * 0.8)
     }
 
     /// A picture `size` big (PDF points) at the left margin, with its caption below it (PDF-004).
@@ -435,7 +443,7 @@ impl<'a> Writer<'a> {
         use crate::media::widget;
         let video = crate::media::is_video(abs);
         let look = if video { crate::media::video::look(abs, crate::media::ffmpeg::locate).look } else { crate::media::cover::look(abs) };
-        let card = widget::card_size(abs, crate::embed_size::REF_COLUMN, asked);
+        let card = widget::card_size(abs, self.opts.column(), asked);
         let size = self.page_size(card);
         let k = size.x / card.x;
         let geo = widget::geometry(abs, card.x);
@@ -597,7 +605,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                 // the link under the thumbnail (PDF-004); the size the editor gives it (PDF-005)
                 let caption = crate::caption::text(&line_links[0]);
                 let asked = line_links[0].embed_width();
-                let ref_w = crate::embed_size::REF_COLUMN;
+                let ref_w = opts.column();
                 if kind == FileKind::Drawing {
                     if let Ok(scene) = Scene::read_file(&abs) {
                         if let Some(b) = scene.bounds() {
@@ -890,7 +898,7 @@ pub fn export_drawing(scene: &Scene, title: &str, opts: &ExportOptions, pictures
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::pdf::write::inflate;
 
@@ -906,7 +914,7 @@ mod tests {
             .collect()
     }
 
-    fn contents(bytes: &[u8]) -> String {
+    pub(crate) fn contents(bytes: &[u8]) -> String {
         // inflate every FlateDecode stream and join them (enough to look for text)
         let mut out = String::new();
         let mut i = 0;
@@ -1003,7 +1011,7 @@ mod tests {
     }
 
     /// The size (width, height) of every image drawn on the pages of `bytes`, in points.
-    fn image_sizes(bytes: &[u8]) -> Vec<(f32, f32)> {
+    pub(crate) fn image_sizes(bytes: &[u8]) -> Vec<(f32, f32)> {
         let c = contents(bytes);
         c.lines()
             .filter(|l| l.starts_with("q ") && l.contains(" cm /Im"))
@@ -1033,7 +1041,7 @@ mod tests {
     #[test]
     fn a_picture_has_the_share_of_the_text_width_it_has_in_the_editor() {
         let (v, d) = media_vault();
-        let col = crate::embed_size::REF_COLUMN;
+        let col = crate::embed_size::DEFAULT_COLUMN;
         let cw = text_width();
         image::RgbaImage::from_pixel(400, 200, image::Rgba([10, 120, 10, 255])).save(d.join("wide.png")).unwrap();
         image::RgbaImage::from_pixel(1600, 800, image::Rgba([10, 120, 10, 255])).save(d.join("huge.png")).unwrap();
@@ -1065,9 +1073,33 @@ mod tests {
 
     // spec: PDF-005
     #[test]
+    fn the_editors_column_is_what_the_share_is_taken_of_and_720_is_the_fallback() {
+        let (v, d) = media_vault();
+        image::RgbaImage::from_pixel(400, 200, image::Rgba([10, 120, 10, 255])).save(d.join("wide.png")).unwrap();
+        let mut v = v;
+        v.rescan();
+        let cw = text_width();
+        let width_in = |column: Option<f32>| {
+            let o = ExportOptions { column, ..ExportOptions::for_note() };
+            image_sizes(&export_note(&v, Path::new("Welcome.md"), "![[wide.png|300]]\n", &o).unwrap())[0].0
+        };
+        // 300 points in a column of 600 are half the text, in a column of 1200 a quarter
+        near(width_in(Some(600.0)), cw * 0.5, "half");
+        near(width_in(Some(1200.0)), cw * 0.25, "a quarter");
+        near(width_in(Some(300.0)), cw, "all of it");
+        near(width_in(Some(100.0)), cw, "never wider than the text");
+        // nothing recorded: the column of 720
+        assert_eq!(crate::embed_size::DEFAULT_COLUMN, 720.0);
+        near(width_in(None), cw * 300.0 / 720.0, "the fallback column");
+        near(width_in(None), width_in(Some(720.0)), "the same as 720 recorded");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-005
+    #[test]
     fn a_sound_and_a_video_are_drawn_as_big_as_their_players_in_proportion() {
         let (v, d) = media_vault();
-        let k = text_width() / crate::embed_size::REF_COLUMN;
+        let k = text_width() / crate::embed_size::DEFAULT_COLUMN;
         // the cover (64x48) fills the 96-point artwork square of the player
         let s = sized(&v, "![[tone-cover.mp3]]");
         assert_eq!(s.len(), 1, "one cover");
@@ -1080,7 +1112,7 @@ mod tests {
         if crate::media::ffmpeg::locate().is_some() {
             near(sized(&v, "![[clip.mp4]]")[0].0, 624.0 * k, "the first frame in a 640 card");
             near(sized(&v, "![[clip.mp4|320]]")[0].0, 304.0 * k, "a video card as wide as its link says");
-            near(sized(&v, "![[clip.mp4|5000]]")[0].0, (crate::embed_size::REF_COLUMN - 16.0) * k, "up to the column");
+            near(sized(&v, "![[clip.mp4|5000]]")[0].0, (crate::embed_size::DEFAULT_COLUMN - 16.0) * k, "up to the column");
         } else {
             println!("skipping the video: ffmpeg is not installed");
         }

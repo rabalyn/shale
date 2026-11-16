@@ -1,13 +1,14 @@
 //! How big an embed is drawn (EDIT-024, MEDIA-012, PDF-005): one rule for the editor and the PDF
 //! export, so a picture made smaller in the note, or the player of a sound, is as big in the PDF
-//! in proportion to the text. The editor asks for a place `max_w` wide; the export asks for the
-//! reference column (`REF_COLUMN`) and scales the result to its own text width (`to_page`).
+//! in proportion to the text. The editor asks for a place `max_w` wide (its text column); the
+//! export asks for the column the editor had (`ExportOptions::column`) and scales the result to
+//! its own text width (`to_page`).
 
 use eframe::egui::Vec2;
 
-/// The width of the text column the export assumes the editor had: sizes are worked out for it
-/// and then scaled by the PDF's text width over this.
-pub const REF_COLUMN: f32 = 720.0;
+/// The text column the export assumes when no editor has shown the note (nothing recorded):
+/// sizes are worked out for it and then scaled by the PDF's text width over it.
+pub const DEFAULT_COLUMN: f32 = 720.0;
 /// The tallest a picture or drawing is shown without a width in the link.
 const PICTURE_MAX_H: f32 = 420.0;
 /// The tallest the first page of an embedded PDF is shown.
@@ -42,10 +43,10 @@ pub fn not_downloaded(max_w: f32) -> Vec2 {
     Vec2::new(max_w.min(520.0), 28.0)
 }
 
-/// An editor size as it is in the PDF: in proportion to the text width (`page_w`), but never
-/// wider than it or taller than `max_h`.
-pub fn to_page(size: Vec2, page_w: f32, max_h: f32) -> Vec2 {
-    let scaled = size * (page_w / REF_COLUMN);
+/// An editor size as it is in the PDF: in proportion to the text width (`page_w` over the
+/// editor's text `column`), but never wider than the text or taller than `max_h`.
+pub fn to_page(size: Vec2, column: f32, page_w: f32, max_h: f32) -> Vec2 {
+    let scaled = size * (page_w / column);
     scaled * (page_w / scaled.x).min(max_h / scaled.y).min(1.0)
 }
 
@@ -71,12 +72,14 @@ mod tests {
     #[test]
     fn the_page_gets_the_same_share_of_the_text_width() {
         // half of the column in the editor is half of the text in the PDF, on any page
-        let half = Vec2::new(REF_COLUMN / 2.0, REF_COLUMN / 4.0);
+        let half = Vec2::new(DEFAULT_COLUMN / 2.0, DEFAULT_COLUMN / 4.0);
         for page_w in [400.0, 483.0, 700.0] {
-            let s = to_page(half, page_w, 10_000.0);
+            let s = to_page(half, DEFAULT_COLUMN, page_w, 10_000.0);
             assert!((s.x / page_w - 0.5).abs() < 1e-4 && (s.y / s.x - 0.5).abs() < 1e-4, "{page_w}: {s:?}");
         }
-        assert_eq!(to_page(Vec2::new(REF_COLUMN * 2.0, REF_COLUMN), 400.0, 10_000.0), Vec2::new(400.0, 200.0), "never wider than the text");
-        assert_eq!(to_page(Vec2::new(REF_COLUMN, REF_COLUMN), 400.0, 100.0), Vec2::new(100.0, 100.0), "nor taller than the page area");
+        assert_eq!(to_page(Vec2::new(DEFAULT_COLUMN * 2.0, DEFAULT_COLUMN), DEFAULT_COLUMN, 400.0, 10_000.0), Vec2::new(400.0, 200.0), "never wider than the text");
+        assert_eq!(to_page(Vec2::new(DEFAULT_COLUMN, DEFAULT_COLUMN), DEFAULT_COLUMN, 400.0, 100.0), Vec2::new(100.0, 100.0), "nor taller than the page area");
+        // a column of 500 in the editor: 250 points are half of it
+        assert_eq!(to_page(Vec2::new(250.0, 125.0), 500.0, 400.0, 10_000.0), Vec2::new(200.0, 100.0));
     }
 }

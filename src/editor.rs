@@ -413,6 +413,9 @@ pub struct Note<'a> {
 
 pub struct NoteEditor {
     pub id: egui::Id,
+    /// The width of the text column (points) of the last frame the editor laid out: the PDF export
+    /// sizes embeds in proportion to it (PDF-005).
+    pub column: Option<f32>,
     cache: Cache,
     /// `[[`, `[[p ` and `[!` helpers of the text box
     pub assist: crate::link_assist::LinkAssist,
@@ -460,6 +463,7 @@ impl NoteEditor {
     pub fn new(id: egui::Id) -> Self {
         NoteEditor {
             id,
+            column: None,
             cache: Cache::default(),
             assist: crate::link_assist::LinkAssist::new(id),
             pending_cursor: None,
@@ -878,8 +882,6 @@ impl NoteEditor {
         let mut images: Vec<(Range<usize>, f32, Art, Vec2)> = Vec::new();
         // the caption under each shown embed (EDIT-025) is part of its row
         let caption_h = crate::caption::height(base_size);
-        // the widest a shown embed can be (where the text can go)
-        let mut max_w = 80.0;
         // line numbers (EDIT-018): a gutter wide enough for the last number, left of the text
         let number_font = egui::FontId::monospace((base_size * 0.8).round());
         let gutter = if self.line_numbers {
@@ -888,6 +890,9 @@ impl NoteEditor {
         } else {
             0.0
         };
+        // the widest a shown embed can be (where the text can go)
+        let max_w = (ui.available_width() - gutter - 8.0).max(80.0);
+        self.column = Some(max_w);
         // the raw lines of the markdown preview (EDIT-016, EDIT-017); embeds on them are raw too
         let preview = self.live_preview.then(|| self.preview_lines(ui, text));
         // the tables away from the cursor are drawn as grids (EDIT-024); their text is hidden
@@ -911,7 +916,6 @@ impl NoteEditor {
                 let b = markdown::char_to_byte(text, r.secondary.index.0);
                 a.min(b)..a.max(b)
             });
-            max_w = (ui.available_width() - gutter - 8.0).max(80.0);
             for (l, ok) in &self.cache.links {
                 if !l.embed || !*ok {
                     continue;
