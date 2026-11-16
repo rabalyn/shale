@@ -454,6 +454,9 @@ pub struct NoteEditor {
     vim_scroll: Option<usize>,
     /// `gt` was typed this frame: follow the link under vim's cursor (EDIT-023)
     vim_follow: bool,
+    /// a button of a table grid was clicked: the table (by its number in the note) and the change
+    /// to make at the start of the next frame (EDIT-025)
+    table_edit: Option<(usize, crate::table::Edit)>,
 }
 
 impl NoteEditor {
@@ -481,6 +484,7 @@ impl NoteEditor {
             vim_lost_at: None,
             vim_expected: None,
             vim_scroll: None,
+            table_edit: None,
             vim_follow: false,
         }
     }
@@ -763,11 +767,112 @@ impl NoteEditor {
         }
     }
 
+    /// Change the table with this number in the note as one undoable step (EDIT-025). The cursor
+    /// stays where it was in the text: what moved is the text behind the table.
+    fn apply_table_edit(&mut self, ui: &Ui, text: &mut String, hist: &mut crate::undo::History, n: usize, edit: crate::table::Edit) -> bool {
+        let Some(b) = crate::table::find_tables(text).into_iter().nth(n) else { return false };
+        let r = crate::table::byte_range(text, &b.lines);
+        let Some(new) = crate::table::edit_source(&text[r.clone()], edit) else { return false };
+        hist.checkpoint(text);
+        let (end, old_chars) = (markdown::byte_to_char(text, r.end), text[r.clone()].chars().count());
+        let grown = new.chars().count() as isize - old_chars as isize;
+        text.replace_range(r, &new);
+        hist.checkpoint(text);
+        if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), self.id) {
+            if let Some(range) = state.cursor.char_range() {
+                let shift = |c: CCursor| if c.index.0 >= end { CCursor::new((c.index.0 as isize + grown).max(0) as usize) } else { c };
+                state.cursor.set_char_range(Some(CCursorRange::two(shift(range.primary), shift(range.secondary))));
+                state.store(ui.ctx(), self.id);
+            }
+        }
+        self.last_cursor = None;
+        true
+    }
+
+    /// The buttons of a table grid while the pointer is over it (EDIT-025): add a column after the
+    /// last one (right of the header) and a row after the last (under the grid); for the hovered
+    /// column (above the grid) and row (right of the grid) insert after it and delete it. A click
+    /// only sets `table_edit`; the cursor does not enter the table.
+    fn table_buttons(&mut self, ui: &mut Ui, origin: Pos2, laid: &crate::table::Laid, ordinal: usize) {
+        use crate::table::Edit;
+        let size = laid.size();
+        let key = self.id.with("table-buttons");
+        let grid = Rect::from_min_size(origin, size);
+        let zone = Rect::from_min_max(grid.min - Vec2::new(0.0, TABLE_BTN + 4.0), grid.max + Vec2::new(TABLE_SIDE, TABLE_BTN + 6.0));
+        let Some(p) = ui.input(|i| i.pointer.hover_pos()).filter(|p| zone.contains(*p)) else {
+            ui.ctx().data_mut(|d| d.insert_temp(key, Vec::<(String, Rect)>::new()));
+            return;
+        };
+        let at = |sizes: &[f32], v: f32| {
+            let mut sum = 0.0;
+            sizes
+                .iter()
+                .position(|s| {
+                    sum += s;
+                    v < sum
+                })
+                .unwrap_or(sizes.len() - 1)
+        };
+        let (row, col) = (at(&laid.heights, p.y - origin.y), at(&laid.widths, p.x - origin.x));
+        let (ncols, data) = (laid.widths.len(), laid.heights.len() - 1);
+        let row_top = origin.y + laid.heights[..row].iter().sum::<f32>();
+        let col_mid = origin.x + laid.widths[..col].iter().sum::<f32>() + laid.widths[col] / 2.0;
+        let side = grid.right() + 4.0;
+        let centre = |top: f32, h: f32| top + (h - TABLE_BTN) / 2.0;
+        let button = |x: f32, y: f32| Rect::from_min_size(Pos2::new(x, y), Vec2::splat(TABLE_BTN));
+        let last_row = if data == 0 { Edit::InsertRow(None) } else { Edit::InsertRow(Some(data - 1)) };
+        let after_row = if row == 0 { Edit::InsertRow(None) } else { Edit::InsertRow(Some(row - 1)) };
+        // (name, where, glyph, tooltip, the change; none: not possible)
+        let buttons: [(&str, Rect, &str, &str, Option<Edit>); 6] = [
+            ("add-column", button(side, centre(origin.y, laid.heights[0])), "+", "Add a column at the end", Some(Edit::InsertColumn(ncols - 1))),
+            ("add-row", Rect::from_min_size(Pos2::new(grid.left(), grid.bottom() + 2.0), Vec2::new(size.x, TABLE_BTN)), "+", "Add a row at the end", Some(last_row)),
+            ("insert-row", button(side + TABLE_BTN + 4.0, centre(row_top, laid.heights[row])), "+", "Add a row below this one", Some(after_row)),
+            (
+                "delete-row",
+                button(side + 2.0 * TABLE_BTN + 6.0, centre(row_top, laid.heights[row])),
+                "\u{d7}",
+                if row == 0 {
+                    "The header row cannot be deleted"
+                } else if data <= 1 {
+                    "The last row cannot be deleted"
+                } else {
+                    "Delete this row"
+                },
+                (row > 0 && data > 1).then(|| Edit::DeleteRow(row - 1)),
+            ),
+            ("insert-column", button(col_mid - TABLE_BTN - 1.0, grid.top() - TABLE_BTN - 2.0), "+", "Add a column after this one", Some(Edit::InsertColumn(col))),
+            ("delete-column", button(col_mid + 1.0, grid.top() - TABLE_BTN - 2.0), "\u{d7}", if ncols <= 1 { "The last column cannot be deleted" } else { "Delete this column" }, (ncols > 1).then_some(Edit::DeleteColumn(col))),
+        ];
+        let mut placed = Vec::new();
+        for (name, rect, glyph, tip, edit) in buttons {
+            let resp = ui.interact(rect, self.id.with(("table-button", ordinal, name)), if edit.is_some() { egui::Sense::click() } else { egui::Sense::hover() });
+            let fill = if edit.is_some() && resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY };
+            let colour = match (edit.is_some(), glyph == "+") {
+                (false, _) => theme::FAINT,
+                (true, true) => theme::TEXT,
+                (true, false) => theme::LINK_MISSING,
+            };
+            let painter = ui.painter();
+            painter.rect(rect, 3.0, fill, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(13.0), colour);
+            resp.clone().on_hover_text(tip);
+            if let (true, Some(e)) = (resp.clicked(), edit) {
+                self.table_edit = Some((ordinal, e));
+                ui.ctx().request_repaint();
+            }
+            placed.push((name.to_string(), rect));
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(key, placed));
+    }
+
     /// Show the editor. Returns (text changed, action).
     pub fn show(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault, note: Note, base_size: f32, ctrl_to_follow: bool) -> (bool, Option<EditorAction>) {
         let Note { rel, undo } = note;
         let mut action = None;
         let mut changed = false;
+        if let Some((n, edit)) = self.table_edit.take() {
+            changed |= self.apply_table_edit(ui, text, undo.of(rel), n, edit);
+        }
         self.refresh_links(text, vault, rel);
 
         // Keys for the `[[` list and the `[!` picker must be taken before the text box sees them.
@@ -870,7 +975,7 @@ impl NoteEditor {
         // the tables away from the cursor are drawn as grids (EDIT-024); their text is hidden
         let mut tables: Vec<(String, f32, crate::table::Laid)> = Vec::new();
         if let Some(raw) = &preview {
-            let width = (ui.available_width() - gutter - 8.0).max(120.0);
+            let width = (ui.available_width() - gutter - 8.0 - TABLE_SIDE).max(120.0);
             for b in crate::table::find_tables(text) {
                 if lines_overlap(&b.lines, raw) {
                     continue;
@@ -970,7 +1075,7 @@ impl NoteEditor {
             };
             let mut ranges: Vec<(Range<usize>, f32)> = remap_images(s, &image_keys).into_iter().map(|(r, h, _)| (r, h)).collect();
             if let Some(raw) = &preview {
-                ranges.extend(table_rows(s, &table_keys, raw).into_iter().flat_map(|(_, rows)| rows));
+                ranges.extend(table_rows(s, &table_keys, raw).into_iter().flat_map(|g| g.rows));
             }
             let mut job = highlight_preview(s, use_links, base_size, &ranges, preview.clone());
             job.wrap.max_width = wrap_width;
@@ -1078,9 +1183,11 @@ impl NoteEditor {
         if let Some(raw) = preview.as_ref().filter(|_| !tables.is_empty()) {
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
             let now_text = output.galley.job.text.clone();
-            for (idx, rows) in table_rows(&now_text, &table_keys, raw) {
-                let c = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(&now_text, rows[0].0.start)));
-                crate::table::paint(&painter, output.galley_pos + Vec2::new(c.min.x, c.min.y + 1.0), &tables[idx].2);
+            for g in table_rows(&now_text, &table_keys, raw) {
+                let c = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(&now_text, g.rows[0].0.start)));
+                let origin = output.galley_pos + Vec2::new(c.min.x, c.min.y + 1.0);
+                crate::table::paint(&painter, origin, &tables[g.key].2);
+                self.table_buttons(ui, origin, &tables[g.key].2, g.ordinal);
             }
         }
         self.embeds.show_full(self.id, ui.ctx(), &self.media, rel);
@@ -1207,6 +1314,11 @@ impl NoteEditor {
     }
 }
 
+/// Room right of a grid for its buttons (EDIT-025).
+const TABLE_SIDE: f32 = 3.0 * TABLE_BTN + 14.0;
+/// Side of a button of a grid.
+const TABLE_BTN: f32 = 16.0;
+
 /// Space below a table drawn as a grid (EDIT-024).
 const TABLE_GAP: f32 = 8.0;
 
@@ -1218,19 +1330,27 @@ fn lines_overlap(a: &Range<usize>, b: &Range<usize>) -> bool {
 /// A line of a table drawn as a grid: its byte range and the height of its row.
 type TableRow = (Range<usize>, f32);
 
+/// A table drawn as a grid: which of the keys it is, its number among the tables of the note and
+/// the rows of its lines.
+struct GridTable {
+    key: usize,
+    ordinal: usize,
+    rows: Vec<TableRow>,
+}
+
 /// The tables of `text` that are drawn as grids: those away from the raw lines whose text is one
 /// of `keys` (the source text of a table and the height reserved for its grid). For each: the
 /// index into `keys` and the byte range and row height of each of its lines. The first line gets
 /// the whole height (less one point for every other line, which are one point tall), so the
 /// grid fits where the hidden text is; the line breaks belong to their lines, so no row is
 /// taller than that (EDIT-024).
-fn table_rows(text: &str, keys: &[(String, f32)], raw: &Range<usize>) -> Vec<(usize, Vec<TableRow>)> {
+fn table_rows(text: &str, keys: &[(String, f32)], raw: &Range<usize>) -> Vec<GridTable> {
     if keys.is_empty() {
         return vec![];
     }
     let all = markdown::lines_with_offsets(text);
     let mut out = Vec::new();
-    for b in crate::table::find_tables(text) {
+    for (ordinal, b) in crate::table::find_tables(text).into_iter().enumerate() {
         if lines_overlap(&b.lines, raw) {
             continue;
         }
@@ -1246,7 +1366,7 @@ fn table_rows(text: &str, keys: &[(String, f32)], raw: &Range<usize>) -> Vec<(us
                 (start..end, if l == b.lines.start { (keys[idx].1 - (n - 1) as f32).max(1.0) } else { 1.0 })
             })
             .collect();
-        out.push((idx, rows));
+        out.push(GridTable { key: idx, ordinal, rows });
     }
     out
 }
@@ -2665,6 +2785,81 @@ mod tests {
         let (galley, _) = ed.last_layout.clone().unwrap();
         let numbers: Vec<usize> = gutter_numbers(&galley).iter().map(|(n, _)| *n).collect();
         assert_eq!(numbers, [1, 2, 3, 6, 7], "the delimiter row and the data row are one point tall: no number");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-025
+    #[test]
+    fn the_buttons_of_a_grid_edit_the_table_as_one_undoable_step_and_keep_the_grid() {
+        let (v, d) = vault_for_tests("table-buttons");
+        let rel = Path::new("Welcome.md");
+        let table = "| A | B |\n|:--|--:|\n| 1 | 2 |\n| 3 | 4 |\n";
+        let original = format!("before\n\n{table}\nafter");
+        let mut text = original.clone();
+        let mut ed = NoteEditor::new(egui::Id::unique("table-buttons"));
+        ed.live_preview = true;
+        ed.pending_cursor = Some(0);
+        let mut undo = crate::undo::Histories::default();
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut frame = |ed: &mut NoteEditor, text: &mut String, undo: &mut crate::undo::Histories, events: Vec<Event>| {
+            t += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(t), events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ed.show(ui, text, &v, Note { rel, undo }, 15.0, false);
+                });
+            });
+            out.textures_delta.clear();
+            (painted_rects(&out.shapes), ctx.data(|d| d.get_temp::<Vec<(String, Rect)>>(ed.id.with("table-buttons"))).unwrap_or_default())
+        };
+        for _ in 0..4 {
+            frame(&mut ed, &mut text, &mut undo, vec![]);
+        }
+        let (painted, buttons) = frame(&mut ed, &mut text, &mut undo, vec![]);
+        assert!(buttons.is_empty(), "no buttons while the pointer is elsewhere");
+        let cell = painted.iter().find(|(t, _)| t == "3").unwrap().1.center();
+        // hovering the grid shows the buttons (two frames: the pointer, then the registered buttons)
+        frame(&mut ed, &mut text, &mut undo, vec![Event::PointerMoved(cell)]);
+        let (_, buttons) = frame(&mut ed, &mut text, &mut undo, vec![]);
+        let names: Vec<&str> = buttons.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["add-column", "add-row", "insert-row", "delete-row", "insert-column", "delete-column"]);
+        let mut press = |ed: &mut NoteEditor, text: &mut String, undo: &mut crate::undo::Histories, name: &str| {
+            let (_, bs) = frame(ed, text, undo, vec![Event::PointerMoved(cell)]);
+            let at = bs.iter().find(|(n, _)| n == name).unwrap().1.center();
+            frame(ed, text, undo, vec![Event::PointerMoved(at)]);
+            frame(ed, text, undo, click_events(at, true));
+            frame(ed, text, undo, click_events(at, false));
+            // the edit is made at the start of the next frame; the pointer goes back over the grid
+            frame(ed, text, undo, vec![Event::PointerMoved(cell)]);
+            frame(ed, text, undo, vec![]);
+        };
+        let hidden = |ed: &NoteEditor, text: &str| {
+            let (g, _) = ed.last_layout.clone().unwrap();
+            let at = text.find("|--").unwrap();
+            g.job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format.color == Color32::TRANSPARENT
+        };
+        // the pointer is on the second data row ("3")
+        press(&mut ed, &mut text, &mut undo, "add-column");
+        assert_eq!(text, original.replace(table, "| A | B |  |\n|:--|--:| --- |\n| 1 | 2 |  |\n| 3 | 4 |  |\n"));
+        assert!(hidden(&ed, &text), "the grid stays a grid: the cursor did not enter the table");
+        press(&mut ed, &mut text, &mut undo, "delete-column");
+        assert_eq!(text, "before\n\n| B |  |\n|--:| --- |\n| 2 |  |\n| 4 |  |\n\nafter", "the hovered column (the first one) is gone, the rest as written");
+        press(&mut ed, &mut text, &mut undo, "insert-row");
+        assert!(text.contains("| 4 |  |\n|   |   |\n"), "a row below the hovered one: {text}");
+        press(&mut ed, &mut text, &mut undo, "add-row");
+        assert!(text.contains("|   |   |\n|   |   |\n"), "and one at the end: {text}");
+        press(&mut ed, &mut text, &mut undo, "delete-row");
+        assert!(!text.contains("| 4 |  |"), "the hovered row is gone: {text}");
+        assert!(hidden(&ed, &text) && text.starts_with("before\n\n| B |") && text.ends_with("\nafter"), "text outside the table is untouched");
+        // each button is one step in the note's history: undoing them all gives the original
+        let h = undo.of(rel);
+        let mut steps = 0;
+        while h.undo(&mut text).is_some() {
+            steps += 1;
+        }
+        assert_eq!(steps, 5, "one step for each click");
+        assert_eq!(text, original);
         let _ = std::fs::remove_dir_all(&d);
     }
 

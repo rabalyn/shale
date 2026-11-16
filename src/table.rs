@@ -32,45 +32,77 @@ pub struct Block {
     pub table: Table,
 }
 
-/// Split one table line into its cells: the outer pipes are optional, `\|` is a pipe inside a
-/// cell, and a pipe inside a code span does not split. Cells are trimmed.
-pub fn split_cells(line: &str) -> Vec<String> {
-    let line = line.trim();
-    let line = line.strip_prefix('|').unwrap_or(line);
-    let chars: Vec<char> = line.chars().collect();
+/// The cells of one table line as they are written: byte ranges between the separating pipes
+/// (spaces included), and whether the line has an outer pipe at the start and at the end. The
+/// ranges are in `line`; `end` is where the line's text ends (before trailing blanks and `\r`).
+/// `\|` and pipes inside code spans do not separate.
+struct RawLine {
+    cells: Vec<Range<usize>>,
+    trailing: bool,
+    end: usize,
+}
+
+fn raw_line(line: &str) -> RawLine {
+    let end = line.trim_end().len();
+    let start = (line.len() - line.trim_start().len()).min(end);
+    let leading = line[start..end].starts_with('|');
+    let begin = start + usize::from(leading);
+    let body = &line[begin..end];
+    let chars: Vec<(usize, char)> = body.char_indices().collect();
     let mut cells = Vec::new();
-    let mut cur = String::new();
+    let mut from = begin;
     let mut i = 0;
     while i < chars.len() {
-        let c = chars[i];
-        if c == '\\' && chars.get(i + 1) == Some(&'|') {
-            cur.push('|');
+        let (at, c) = chars[i];
+        if c == '\\' && chars.get(i + 1).is_some_and(|x| x.1 == '|') {
             i += 2;
         } else if c == '`' {
             // a code span runs to the next backtick on the line; without one it is a plain character
-            match chars[i + 1..].iter().position(|&x| x == '`') {
-                Some(e) => {
-                    cur.extend(&chars[i..i + e + 2]);
-                    i += e + 2;
-                }
-                None => {
-                    cur.push(c);
-                    i += 1;
-                }
+            match chars[i + 1..].iter().position(|x| x.1 == '`') {
+                Some(e) => i += e + 2,
+                None => i += 1,
             }
         } else if c == '|' {
-            cells.push(std::mem::take(&mut cur).trim().to_string());
+            cells.push(from..begin + at);
+            from = begin + at + 1;
             i += 1;
         } else {
-            cur.push(c);
             i += 1;
         }
     }
     // text after the last pipe is a cell; nothing after it means the line ended with a pipe
-    if !cur.is_empty() {
-        cells.push(cur.trim().to_string());
+    let trailing = from == end;
+    if !trailing {
+        cells.push(from..end);
     }
-    cells
+    RawLine { cells, trailing, end }
+}
+
+/// The text of a cell as it is shown: `\|` is a pipe (but not inside a code span), trimmed.
+fn cell_text(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && chars.get(i + 1) == Some(&'|') {
+            out.push('|');
+            i += 2;
+        } else if chars[i] == '`' {
+            let n = chars[i + 1..].iter().position(|&x| x == '`').map_or(1, |e| e + 2);
+            out.extend(&chars[i..i + n]);
+            i += n;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Split one table line into its cells: the outer pipes are optional, `\|` is a pipe inside a
+/// cell, and a pipe inside a code span does not split. Cells are trimmed.
+pub fn split_cells(line: &str) -> Vec<String> {
+    raw_line(line).cells.iter().map(|r| cell_text(&line[r.clone()])).collect()
 }
 
 /// The alignments of a delimiter row (`|---|:---:|--:|`), or none when the line is not one.
@@ -140,6 +172,102 @@ pub fn byte_range(text: &str, lines: &Range<usize>) -> Range<usize> {
     let start = all.get(lines.start).map_or(text.len(), |(o, _)| *o);
     let end = all.get(lines.end).map_or(text.len(), |(o, _)| *o);
     start..end
+}
+
+/// A change of a table's source text made by the buttons of the editor's grid (EDIT-025).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Edit {
+    /// a new empty column after column `n` (from 0), with `---` in the delimiter row
+    InsertColumn(usize),
+    DeleteColumn(usize),
+    /// a new empty row after data row `n` (from 0), or `None`: right below the header
+    InsertRow(Option<usize>),
+    /// delete data row `n` (from 0); the header cannot be deleted
+    DeleteRow(usize),
+}
+
+/// A cell to put after cell `col` of a line: the pipe and the text, written like its neighbours.
+fn with_cell_after(line: &str, col: usize, text: &str) -> String {
+    let raw = raw_line(line);
+    let mut out = line.to_string();
+    // a short row is filled up to the cell first
+    if col + 1 > raw.cells.len() {
+        let mut fill = String::new();
+        if !raw.trailing {
+            fill.push_str(" |");
+        }
+        fill.push_str(&"  |".repeat(col + 1 - raw.cells.len()));
+        fill.push_str(&format!(" {text} |"));
+        out.insert_str(raw.end, &fill);
+        return out;
+    }
+    let cell = &raw.cells[col];
+    if cell.end < raw.end || raw.trailing {
+        // a pipe follows the cell: the new cell goes behind it
+        out.insert_str(cell.end + 1, &format!(" {text} |"));
+    } else {
+        // the last cell has no pipe behind it: a pipe, the new cell and a closing pipe
+        out.insert_str(raw.end, &format!(" | {text} |"));
+    }
+    out
+}
+
+/// `line` without cell `col`, the rest as written.
+fn without_cell(line: &str, col: usize) -> String {
+    let raw = raw_line(line);
+    let Some(cell) = raw.cells.get(col) else { return line.to_string() };
+    let last_unclosed = col + 1 == raw.cells.len() && !raw.trailing;
+    let range = if last_unclosed { cell.start.saturating_sub(1)..cell.end } else { cell.start..cell.end + 1 };
+    let mut out = line.to_string();
+    out.replace_range(range, "");
+    out
+}
+
+/// An empty row of `n` cells, written like `like` (its indentation and line end are kept).
+fn empty_row(like: &str, n: usize) -> String {
+    let indent = &like[..like.len() - like.trim_start().len()];
+    format!("{indent}|{}{}", "   |".repeat(n), if like.ends_with('\r') { "\r" } else { "" })
+}
+
+/// The table in `src` (the text of its lines, the last with or without its line break) after
+/// `edit`: only the cells or lines concerned change, everything else stays as written. `None`
+/// when the edit is not allowed or does not fit the table: the header row, the last column and
+/// the last data row cannot be deleted, a column or row that is not there.
+pub fn edit_source(src: &str, edit: Edit) -> Option<String> {
+    let (body, tail) = src.strip_suffix('\n').map_or((src, ""), |b| (b, "\n"));
+    let mut lines: Vec<String> = body.split('\n').map(str::to_string).collect();
+    if lines.len() < 2 {
+        return None;
+    }
+    let ncols = split_cells(&lines[0]).len();
+    let data = lines.len() - 2;
+    match edit {
+        Edit::InsertColumn(after) if after < ncols => {
+            for (i, l) in lines.iter_mut().enumerate() {
+                let text = match i {
+                    0 => "",
+                    1 => "---",
+                    _ => "",
+                };
+                *l = with_cell_after(l, after, text);
+            }
+        }
+        Edit::DeleteColumn(col) if col < ncols && ncols > 1 => {
+            for l in &mut lines {
+                *l = without_cell(l, col);
+            }
+        }
+        Edit::InsertRow(after) if after.is_none_or(|r| r < data) => {
+            let at = after.map_or(2, |r| r + 3);
+            let new = empty_row(&lines[at - 1], ncols);
+            lines.insert(at, new);
+        }
+        Edit::DeleteRow(row) if row < data && data > 1 => {
+            lines.remove(row + 2);
+        }
+        _ => return None,
+    }
+    Some(lines.join("\n") + tail)
 }
 
 /// Column widths for the text of the columns: the natural width (the text on one line) of each
@@ -351,6 +479,7 @@ mod tests {
         assert_eq!(cells("| a | | c |"), ["a", "", "c"], "an empty cell stays");
         assert_eq!(cells("| a | b"), ["a", "b"], "no closing pipe");
         assert_eq!(cells("| a | b |  "), ["a", "b"], "trailing blanks after the last pipe");
+        assert!(cells("   ").is_empty() && cells("").is_empty(), "a blank line has no cells");
     }
 
     // spec: EDIT-024
@@ -468,5 +597,69 @@ mod tests {
         assert!(l.cell_at(o, Pos2::new(-1.0, 0.0)).is_none() && l.cell_at(o, Pos2::new(1.0, l.size().y + 1.0)).is_none());
         let (r, c, _) = l.cell_at(o, Pos2::new(l.size().x - 1.0, l.heights[0] + 1.0)).unwrap();
         assert_eq!((r, c), (1, 2));
+    }
+
+    const SRC: &str = "| A | B |\n|:--|--:|\n| 1 | 2 |\n| 3 | 4 |\n";
+
+    // spec: EDIT-025
+    #[test]
+    fn a_column_is_inserted_after_a_column_with_an_empty_header_and_a_delimiter_cell() {
+        assert_eq!(edit_source(SRC, Edit::InsertColumn(0)).unwrap(), "| A |  | B |\n|:--| --- |--:|\n| 1 |  | 2 |\n| 3 |  | 4 |\n");
+        let last = edit_source(SRC, Edit::InsertColumn(1)).unwrap();
+        assert_eq!(last, "| A | B |  |\n|:--|--:| --- |\n| 1 | 2 |  |\n| 3 | 4 |  |\n");
+        let blocks = find_tables(&last);
+        assert_eq!(blocks[0].table.header, ["A", "B", ""]);
+        assert_eq!(blocks[0].table.aligns, [Col::Left, Col::Right, Col::Left]);
+        assert_eq!(edit_source(SRC, Edit::InsertColumn(2)), None, "no such column");
+    }
+
+    // spec: EDIT-025
+    #[test]
+    fn deleting_a_column_leaves_the_other_cells_as_written() {
+        assert_eq!(edit_source(SRC, Edit::DeleteColumn(0)).unwrap(), "| B |\n|--:|\n| 2 |\n| 4 |\n");
+        assert_eq!(edit_source(SRC, Edit::DeleteColumn(1)).unwrap(), "| A |\n|:--|\n| 1 |\n| 3 |\n");
+        let three = "|  a  |b|  c  |\n|---|:-:|---:|\n| x | y | z |\n";
+        assert_eq!(edit_source(three, Edit::DeleteColumn(1)).unwrap(), "|  a  |  c  |\n|---|---:|\n| x | z |\n", "spacing and alignment of the rest untouched");
+        assert_eq!(edit_source("| A |\n|---|\n| 1 |", Edit::DeleteColumn(0)), None, "the last column stays");
+        assert_eq!(edit_source(SRC, Edit::DeleteColumn(5)), None);
+    }
+
+    // spec: EDIT-025
+    #[test]
+    fn rows_are_inserted_and_deleted_but_the_header_and_the_last_row_stay() {
+        assert_eq!(edit_source(SRC, Edit::InsertRow(None)).unwrap(), "| A | B |\n|:--|--:|\n|   |   |\n| 1 | 2 |\n| 3 | 4 |\n");
+        assert_eq!(edit_source(SRC, Edit::InsertRow(Some(0))).unwrap(), "| A | B |\n|:--|--:|\n| 1 | 2 |\n|   |   |\n| 3 | 4 |\n");
+        let end = edit_source(SRC, Edit::InsertRow(Some(1))).unwrap();
+        assert_eq!(end, "| A | B |\n|:--|--:|\n| 1 | 2 |\n| 3 | 4 |\n|   |   |\n");
+        assert_eq!(find_tables(&end)[0].table.rows.len(), 3, "the empty row is a row of the table");
+        assert_eq!(edit_source(SRC, Edit::DeleteRow(0)).unwrap(), "| A | B |\n|:--|--:|\n| 3 | 4 |\n");
+        assert_eq!(edit_source("| A |\n|---|\n| 1 |\n", Edit::DeleteRow(0)), None, "the last row stays");
+        assert_eq!(edit_source(SRC, Edit::DeleteRow(2)), None);
+        assert_eq!(edit_source(SRC, Edit::InsertRow(Some(2))), None);
+    }
+
+    // spec: EDIT-025
+    #[test]
+    fn missing_outer_pipes_uneven_rows_escapes_and_line_ends_are_handled() {
+        // no outer pipes, no final line break
+        let bare = "A | B\n--|--\n1 | 2";
+        assert_eq!(edit_source(bare, Edit::InsertColumn(1)).unwrap(), "A | B |  |\n--|-- | --- |\n1 | 2 |  |");
+        assert_eq!(edit_source(bare, Edit::DeleteColumn(1)).unwrap(), "A \n--\n1 ");
+        assert_eq!(edit_source(bare, Edit::DeleteColumn(0)).unwrap(), " B\n--\n 2");
+        // a short row is filled up to the new column; an extra cell is kept as written
+        let uneven = "| A | B | C |\n|---|---|---|\n| 1 |\n| 1 | 2 | 3 | 4 |\n";
+        let ins = edit_source(uneven, Edit::InsertColumn(2)).unwrap();
+        let t = &find_tables(&ins)[0].table;
+        assert_eq!(t.header, ["A", "B", "C", ""]);
+        assert_eq!(t.rows, [["1", "", "", ""], ["1", "2", "3", ""]]);
+        assert_eq!(edit_source(uneven, Edit::DeleteColumn(1)).unwrap(), "| A | C |\n|---|---|\n| 1 |\n| 1 | 3 | 4 |\n");
+        // an escaped pipe and a pipe in a code span stay inside their cell
+        let esc = "| a \\| b | `x | y` | c |\n|---|---|---|\n| [[N\\|n]] | 2 | 3 |\n";
+        assert_eq!(edit_source(esc, Edit::DeleteColumn(0)).unwrap(), "| `x | y` | c |\n|---|---|\n| 2 | 3 |\n");
+        assert_eq!(edit_source(esc, Edit::DeleteColumn(1)).unwrap(), "| a \\| b | c |\n|---|---|\n| [[N\\|n]] | 3 |\n");
+        // Windows line ends and an indented table
+        let crlf = "  | A |\r\n  |---|\r\n  | 1 |\r\n";
+        assert_eq!(edit_source(crlf, Edit::InsertRow(Some(0))).unwrap(), "  | A |\r\n  |---|\r\n  | 1 |\r\n  |   |\r\n");
+        assert_eq!(edit_source("| A |\n|---|", Edit::InsertColumn(0)), Some("| A |  |\n|---| --- |".to_string()));
     }
 }

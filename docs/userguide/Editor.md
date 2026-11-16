@@ -32,6 +32,12 @@ a real grid: borders, a bold header row, columns aligned as `:---`, `:---:` or `
 bold and links inside the cells, and long text wrapping inside its own column. Click the table,
 or move the cursor into it, and its raw rows come back to edit.
 
+While the pointer is over the grid, small buttons appear: a **+** right of the header adds a
+column at the end, a **+** bar under the table adds a row at the end, and for the row and the
+column under the pointer a **+** adds one after it and a **×** deletes it (the header row, the
+last row and the last column stay). Each click changes only the table's lines, as one step you
+can undo, and the table stays a grid.
+
 ## Sound players
 
 ![[sound-player.png]]
