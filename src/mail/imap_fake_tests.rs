@@ -10,7 +10,7 @@
 
 use crate::calendar::time::{civil_from_days, days_from_civil};
 use crate::config::MailSecurity;
-use crate::imap_client::{ConnectSettings, Limits};
+use crate::mail::imap_client::{ConnectSettings, Limits};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -451,7 +451,7 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                         write!(out, "{tag} OK authenticated\r\n")?;
                     } else {
                         // the specifications: the reason as a challenge, the client answers, then NO
-                        write!(out, "+ {}\r\n", crate::imap_client::base64_encode(b"{\"status\":\"401\",\"schemes\":\"Bearer\",\"scope\":\"mail\"}"))?;
+                        write!(out, "+ {}\r\n", crate::mail::imap_client::base64_encode(b"{\"status\":\"401\",\"schemes\":\"Bearer\",\"scope\":\"mail\"}"))?;
                         out.flush()?;
                         let mut l = String::new();
                         r.read_line(&mut l)?;
@@ -739,7 +739,7 @@ fn write_command<W: Write>(out: &mut W, st: &Arc<Mutex<FakeState>>, selected: &O
                 to.push(uid);
             }
             let uv = g.folders[di].uidvalidity;
-            let codes = if uidplus && !no_copyuid && !from.is_empty() { Some(format!("[COPYUID {uv} {} {}]", crate::imap_client::uid_set(&from), crate::imap_client::uid_set(&to))) } else { None };
+            let codes = if uidplus && !no_copyuid && !from.is_empty() { Some(format!("[COPYUID {uv} {} {}]", crate::mail::imap_client::uid_set(&from), crate::mail::imap_client::uid_set(&to))) } else { None };
             if sub == "MOVE" {
                 let before: Vec<u32> = g.folders[fi].msgs.iter().map(|m| m.uid).collect();
                 g.folders[fi].msgs.retain(|m| !from.contains(&m.uid));
@@ -808,7 +808,7 @@ pub fn message(subject: &str, from: &str, body: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imap_client::*;
+    use crate::mail::imap_client::*;
 
     fn account(server: &FakeServer) -> PlainAuth {
         let s = server.state();
@@ -1058,7 +1058,7 @@ mod tests {
     }
 
     fn oauth_connect(server: &FakeServer, token: &str) -> Result<Client> {
-        let mut auth = crate::oauth::OAuthAuth::new("ada", token, "localhost", server.port);
+        let mut auth = crate::mail::oauth::OAuthAuth::new("ada", token, "localhost", server.port);
         Client::connect_test(&server.settings(), server_cert(), &mut auth)
     }
 
@@ -1101,9 +1101,9 @@ mod tests {
     // spec: MAIL-083
     #[test]
     fn a_server_that_refuses_the_token_gets_one_retry_with_a_new_one_and_a_revoked_login_says_so() {
-        use crate::imap_sync::{connect_with_retry, AuthFactory};
-        use crate::oauth::{OAuthConfig, OAuthFactory, TokenSource};
-        use crate::oauth_fake_tests::FakeOAuth;
+        use crate::mail::imap_sync::{connect_with_retry, AuthFactory};
+        use crate::mail::oauth::{OAuthConfig, OAuthFactory, TokenSource};
+        use crate::mail::oauth_fake_tests::FakeOAuth;
         if std::process::Command::new("curl").arg("--version").output().is_err() {
             return;
         }
@@ -1121,7 +1121,7 @@ mod tests {
             ..Default::default()
         };
         struct Mem(Mutex<Option<crate::secret::Secret>>);
-        impl crate::oauth::RefreshStore for Mem {
+        impl crate::mail::oauth::RefreshStore for Mem {
             fn load(&self) -> Option<crate::secret::Secret> {
                 self.0.lock().unwrap().clone()
             }
@@ -1149,7 +1149,7 @@ mod tests {
         provider.state.lock().unwrap().revoked = true;
         provider.expire_access_tokens();
         let err = go(&factory).err().expect("must fail");
-        assert!(matches!(&err, ImapError::Auth(t) if crate::oauth::needs_sign_in(t)), "{err}");
+        assert!(matches!(&err, ImapError::Auth(t) if crate::mail::oauth::needs_sign_in(t)), "{err}");
         // a password factory is never retried
         struct Pw;
         impl AuthFactory for Pw {
@@ -1214,7 +1214,7 @@ mod tests {
             WriteCmd::Append { folder: "Sent".into(), flags: vec![], bytes: b"a\0b".to_vec() },
             WriteCmd::Append { folder: String::new(), flags: vec![], bytes: b"x".to_vec() },
             WriteCmd::Append { folder: "a\nb".into(), flags: vec![], bytes: b"x".to_vec() },
-            WriteCmd::Append { folder: "Sent".into(), flags: vec![], bytes: vec![b'x'; crate::imap_client::MAX_APPEND + 1] },
+            WriteCmd::Append { folder: "Sent".into(), flags: vec![], bytes: vec![b'x'; crate::mail::imap_client::MAX_APPEND + 1] },
         ] {
             assert!(matches!(bad.to_command(), Err(ImapError::Refused(_))), "{bad:?}");
         }

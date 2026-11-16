@@ -1,6 +1,6 @@
 //! The mail index (SQLite): schema and migrations, writing a batch, and the read queries
 //! (list a folder, search). The index is a cache of the `.eml` files and the server state:
-//! `mail_store.rs` can rebuild it from the files at any time.
+//! `mail/store.rs` can rebuild it from the files at any time.
 //!
 //! Search text from the user never reaches the FTS5 query language raw: [`fts_query`] turns it
 //! into quoted phrases, so `"`, `*`, `NEAR`, `-` or `:` in what someone types is only text.

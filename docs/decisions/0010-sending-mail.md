@@ -26,9 +26,9 @@ program sees it) and locally at once, without making a second mail on the server
 - **`lettre` 0.11 with only the `builder` feature** builds the MIME message (header encoding of
   non-ASCII names and subjects, address parsing and IDNA, multipart/mixed with attachments,
   transfer encodings). It adds six small crates and no network code, no TLS, no `native-tls`/OpenSSL.
-- **The SMTP conversation is Shale's own small blocking client** (`smtp_client.rs`, the same shape as
-  `imap_client.rs`), on the same `rustls` (ring) and `rustls-platform-verifier` set-up as IMAP
-  (`imap_client::platform_tls_config`, one place that decides how certificates are checked).
+- **The SMTP conversation is Shale's own small blocking client** (`mail/smtp_client.rs`, the same shape as
+  `mail/imap_client.rs`), on the same `rustls` (ring) and `rustls-platform-verifier` set-up as IMAP
+  (`mail::imap_client::platform_tls_config`, one place that decides how certificates are checked).
   `lettre` *can* use the platform verifier (feature `rustls-platform-verifier`), so that is not the
   reason. The reasons are safety:
   - **The phase of a failure is known.** "Never send twice" needs to tell "the server cannot have
@@ -173,7 +173,7 @@ window: `Ctrl+Enter` send, `Esc` close (with the draft rule).
 - The compose window uses a plain multi-line text field, not the note editor (which is bound to notes and a vault), and has no
   vim-style editing. Attachments are added by path, from a list of the vault's files, or as a note; dropping files onto the
   window is not done.
-- The local Sent copy is kept under UIDVALIDITY 0 (`mail_db::LOCAL_UIDVALIDITY`, which RFC 3501 forbids a server to use) with a UID of
+- The local Sent copy is kept under UIDVALIDITY 0 (`mail::db::LOCAL_UIDVALIDITY`, which RFC 3501 forbids a server to use) with a UID of
   4,000,000,000 and up (`SYNTHETIC_UID_BASE`) and its own file `<account>/<folder>/0/<uid>.eml`, until the server's UID is known. The index key is
   (folder, UIDVALIDITY, UID), so a real server message can never overwrite or merge with it (changed in ADR-0011 step 0; before, it shared the
   server's UIDVALIDITY and relied on the range). The folder list shows rows of UIDVALIDITY 0 next to the current ones. The next sync replaces a

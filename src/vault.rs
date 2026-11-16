@@ -1052,7 +1052,7 @@ impl Vault {
     /// ` (3)` … before the extension. Returns where it went, relative to the vault.
     pub fn trash(&mut self, rel: &Path) -> io::Result<PathBuf> {
         self.abs_checked(rel)?;
-        let day = Path::new(TRASH_DIR).join(crate::mail_store::today_string());
+        let day = Path::new(TRASH_DIR).join(crate::mail::store::today_string());
         let is_dir = fs::symlink_metadata(self.abs(rel)).map(|m| m.is_dir()).unwrap_or(false);
         for n in 1..=1000 {
             let dest = day.join(numbered(rel, n, is_dir));
@@ -1384,7 +1384,7 @@ mod tests {
         let gone = v.trash(Path::new("Reading list.md")).unwrap();
         assert!(!v.exists("Reading list", None));
         assert!(d.join(&gone).exists());
-        assert_eq!(gone, Path::new(".trash").join(crate::mail_store::today_string()).join("Reading list.md"));
+        assert_eq!(gone, Path::new(".trash").join(crate::mail::store::today_string()).join("Reading list.md"));
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -1643,7 +1643,7 @@ mod tests {
     }
 
     fn day() -> PathBuf {
-        Path::new(".trash").join(crate::mail_store::today_string())
+        Path::new(".trash").join(crate::mail::store::today_string())
     }
 
     fn put(d: &Path, rel: &str, text: &str) {

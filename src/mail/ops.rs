@@ -21,10 +21,10 @@
 //! - A message file is never deleted: it is copied to the new place when the new UID is known, and
 //!   the old file goes to `.trash/<date>/` ([`MailStore::archive_file`]).
 
-use crate::imap_client::{Client, CopyUid, Fetched, ImapError, MailFlag, WriteCmd};
-use crate::imap_sync::{kind_of, Connector, FolderKind};
-use crate::mail_db::{self, change_flags, has_flag, FolderRow, MessageSummary, Op, PendingRow, STATE_FULL};
-use crate::mail_store::{today_string, MailStore};
+use crate::mail::db::{self, change_flags, has_flag, FolderRow, MessageSummary, Op, PendingRow, STATE_FULL};
+use crate::mail::imap_client::{Client, CopyUid, Fetched, ImapError, MailFlag, WriteCmd};
+use crate::mail::imap_sync::{kind_of, Connector, FolderKind};
+use crate::mail::store::{today_string, MailStore};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
@@ -176,7 +176,7 @@ pub fn enqueue(store: &MailStore, msgs: &[MessageSummary], action: &Action, now:
         match action {
             Action::SetFlags { add, remove } => {
                 let new = change_flags(&cur.flags, &flag_text(add), &flag_text(remove));
-                if new == mail_db::canonical_flags(cur.flags.split(' ').map(String::from)) {
+                if new == db::canonical_flags(cur.flags.split(' ').map(String::from)) {
                     continue; // nothing to change
                 }
                 row.kind = "flags".into();
@@ -379,12 +379,12 @@ fn groups(all: &[PendingRow]) -> Vec<Vec<PendingRow>> {
 }
 
 /// Open the group's folder for writing and check it is still the folder the index knows.
-fn open_for_write(client: &mut Client, folder: &FolderRow, uidvalidity: u32) -> Result<crate::imap_client::Selected, Fail> {
+fn open_for_write(client: &mut Client, folder: &FolderRow, uidvalidity: u32) -> Result<crate::mail::imap_client::Selected, Fail> {
     let sel = client.write(&WriteCmd::Select { folder: folder.name.clone() }).map_err(classify)?.selected.ok_or_else(|| Fail::Retry("the server did not describe the folder".into()))?;
     if sel.uidvalidity != uidvalidity {
         return Err(Fail::Refused(format!(
             "The folder “{}” was renumbered on the server, so the stored message numbers no longer mean the same mails. Nothing was changed; the next sync fetches the folder again.",
-            crate::mail_ui::folder_label_of(&folder.name)
+            crate::mail::ui::folder_label_of(&folder.name)
         )));
     }
     Ok(sel)
@@ -694,7 +694,7 @@ fn exec_expunge(store: &MailStore, client: &mut Client, folder: &FolderRow, grou
 // ---------------------------------------------------------------- the copy of a sent mail (ADR-0010)
 
 /// Local copies of sent mail that the server has not got yet are kept under UIDVALIDITY 0
-/// ([`mail_db::LOCAL_UIDVALIDITY`], which a server may not use), with their own file path
+/// ([`db::LOCAL_UIDVALIDITY`], which a server may not use), with their own file path
 /// `<uidvalidity 0>/<uid>.eml`, so no real message can overwrite or merge with one (the index key is
 /// folder, UIDVALIDITY, UID). Their UIDs start here, so a list lookup by UID alone finds them apart from
 /// real ones in practice too. The sync leaves them alone while the append waits, and replaces them by
@@ -706,7 +706,7 @@ pub fn sent_folder(folders: &[FolderRow]) -> Option<&FolderRow> {
     let special = folders.iter().find(|f| f.special_use.as_deref().unwrap_or("").to_ascii_lowercase().split(' ').any(|a| a == "\\sent"));
     special.or_else(|| {
         folders.iter().find(|f| {
-            let shown = crate::imap_client::decode_mutf7(&f.name);
+            let shown = crate::mail::imap_client::decode_mutf7(&f.name);
             let last = shown.rsplit(['/', '.']).next().unwrap_or(&shown).trim().to_lowercase();
             matches!(last.as_str(), "sent" | "sent items" | "sent messages" | "sent mail" | "gesendet" | "gesendete objekte" | "gesendete elemente" | "gesendete nachrichten")
         })
@@ -721,12 +721,12 @@ pub fn record_sent_copy(store: &MailStore, account: &str, raw: &[u8], now: i64) 
     let reader = store.reader().map_err(err)?;
     let folders = reader.folders(Some(account)).map_err(err)?;
     let Some(sent) = sent_folder(&folders) else { return Ok(None) };
-    let mid = crate::mail_store::index_fields(raw, Some(now)).0.message_id;
-    if !mid.is_empty() && mail_db::has_message_id(reader.conn(), sent.id, &mid).map_err(err)? {
+    let mid = crate::mail::store::index_fields(raw, Some(now)).0.message_id;
+    if !mid.is_empty() && db::has_message_id(reader.conn(), sent.id, &mid).map_err(err)? {
         return Ok(Some(sent.name.clone()));
     }
-    let uv = mail_db::LOCAL_UIDVALIDITY;
-    let uid = mail_db::max_uid_from(reader.conn(), sent.id, uv, SYNTHETIC_UID_BASE).map_err(err)?.map_or(SYNTHETIC_UID_BASE, |m| m + 1);
+    let uv = db::LOCAL_UIDVALIDITY;
+    let uid = db::max_uid_from(reader.conn(), sent.id, uv, SYNTHETIC_UID_BASE).map_err(err)?.map_or(SYNTHETIC_UID_BASE, |m| m + 1);
     let nm = store.save_new_local_copy(sent, uid, raw, "\\Seen", Some(now)).map_err(err)?;
     let uid = nm.uid;
     let row = PendingRow {
@@ -753,11 +753,11 @@ pub fn record_sent_copy(store: &MailStore, account: &str, raw: &[u8], now: i64) 
 /// Returns how many were replaced.
 pub fn drop_local_copies_seen_on_server(store: &MailStore, folder: i64, uidvalidity: u32) -> Result<usize, String> {
     let reader = store.reader().map_err(err)?;
-    let seen = mail_db::local_copies_seen_on_server(reader.conn(), folder, uidvalidity).map_err(err)?;
+    let seen = db::local_copies_seen_on_server(reader.conn(), folder, uidvalidity).map_err(err)?;
     if seen.is_empty() {
         return Ok(0);
     }
-    store.commit(seen.iter().map(|(uid, _)| Op::Remove { folder, uidvalidity: mail_db::LOCAL_UIDVALIDITY, uid: *uid }).collect()).map_err(err)?;
+    store.commit(seen.iter().map(|(uid, _)| Op::Remove { folder, uidvalidity: db::LOCAL_UIDVALIDITY, uid: *uid }).collect()).map_err(err)?;
     let date = today_string();
     for (_, rel) in &seen {
         if !rel.is_empty() {
@@ -775,7 +775,7 @@ fn exec_append(store: &MailStore, client: &mut Client, folder: &FolderRow, group
     let mut d = Done::default();
     for p in group {
         let target = p.target.clone().unwrap_or_else(|| folder.name.clone());
-        let label = crate::mail_ui::folder_label_of(&target);
+        let label = crate::mail::ui::folder_label_of(&target);
         let Some(msg) = reader.message_at(p.folder, p.uidvalidity, p.uid).map_err(|e| Fail::Refused(err(e)))? else {
             d.ops.push(Op::PendingDone { id: p.id });
             continue; // the local copy is gone: nothing to append
@@ -822,9 +822,9 @@ fn exec_append(store: &MailStore, client: &mut Client, folder: &FolderRow, group
 pub(crate) mod tests {
     use super::*;
     use crate::config::MailSecurity;
-    use crate::imap_client::{ConnectSettings, PlainAuth};
-    use crate::imap_fake_tests::{message, server_cert, FakeServer};
-    use crate::imap_sync::{sync_account, SyncOptions};
+    use crate::mail::imap_client::{ConnectSettings, PlainAuth};
+    use crate::mail::imap_fake_tests::{message, server_cert, FakeServer};
+    use crate::mail::imap_sync::{sync_account, SyncOptions};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::channel;
@@ -1076,7 +1076,7 @@ pub(crate) mod tests {
         let e = env("move-decrypted");
         let m = e.by_uid("INBOX", 2);
         let plain = b"From: Bob <bob@x.de>\r\nTo: ada@example.com\r\nSubject: mail 2\r\nMessage-ID: <mail-2@fake>\r\nContent-Type: text/plain\r\n\r\nthe zebrafish plan\r\n";
-        e.store.save_decrypted(&m, plain, &crate::mail_crypto::Security::new(), "2026-11-14").unwrap();
+        e.store.save_decrypted(&m, plain, &crate::mail::crypto::Security::new(), "2026-11-14").unwrap();
         assert_eq!(e.store.reader().unwrap().search("zebrafish", None, 5, 0).unwrap().len(), 1);
         assert_eq!(enqueue(&e.store, std::slice::from_ref(&m), &Action::MoveTo { folder: "Archive".into() }, NOW).unwrap().queued, 1);
         let r = e.run();
@@ -1239,7 +1239,7 @@ pub(crate) mod tests {
             s.set_flags("Trash", 2, &["\\Deleted"]);
             s.uidplus = false;
         }
-        crate::imap_sync::fetch_folder_listing(&e.store, &e.conn, "acct1", "Trash", 100, &SyncOptions { now: Some(NOW), ..SyncOptions::default() }).unwrap();
+        crate::mail::imap_sync::fetch_folder_listing(&e.store, &e.conn, "acct1", "Trash", 100, &SyncOptions { now: Some(NOW), ..SyncOptions::default() }).unwrap();
         let bin1 = e.by_uid("Trash", 1);
         enqueue(&e.store, &[bin1], &Action::DeleteForever(Confirmed::after_dialog(1)), NOW).unwrap();
         let r = e.run();
@@ -1299,7 +1299,7 @@ pub(crate) mod tests {
         assert!(err.contains("Trash"), "{err}");
         assert!(e.pending().is_empty());
         // list Trash into the index (as opening the folder does)
-        crate::imap_sync::fetch_folder_listing(&e.store, &e.conn, "acct1", "Trash", 100, &SyncOptions { now: Some(NOW), ..SyncOptions::default() }).unwrap();
+        crate::mail::imap_sync::fetch_folder_listing(&e.store, &e.conn, "acct1", "Trash", 100, &SyncOptions { now: Some(NOW), ..SyncOptions::default() }).unwrap();
         let bin1 = e.by_uid("Trash", 1);
         // a confirmation for another count is refused
         let err = enqueue(&e.store, std::slice::from_ref(&bin1), &Action::DeleteForever(Confirmed::after_dialog(2)), NOW).unwrap_err();
@@ -1576,7 +1576,7 @@ pub(crate) mod tests {
                 }
                 7 => {
                     // browse Trash, then delete forever one or two (sometimes with a wrong count: must be refused)
-                    let _ = crate::imap_sync::fetch_folder_listing(&e.store, &e.conn, "acct1", "Trash", 100, &opts);
+                    let _ = crate::mail::imap_sync::fetch_folder_listing(&e.store, &e.conn, "acct1", "Trash", 100, &opts);
                     let list = e.list("Trash");
                     if !list.is_empty() {
                         let picked: Vec<MessageSummary> = list.iter().take(1 + rng.below(2)).cloned().collect();

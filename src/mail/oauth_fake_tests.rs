@@ -244,7 +244,7 @@ fn serve(mut s: TcpStream, st: &Arc<Mutex<FakeOAuthState>>) {
                 "authorization_code" => {
                     let Some((challenge, redirect)) = g.codes.remove(&get(&f, "code")) else { return err(&mut s, "invalid_grant") };
                     let verifier = get(&f, "code_verifier");
-                    if redirect != get(&f, "redirect_uri") || crate::oauth::pkce_challenge(&verifier) != challenge {
+                    if redirect != get(&f, "redirect_uri") || crate::mail::oauth::pkce_challenge(&verifier) != challenge {
                         return err(&mut s, "invalid_grant");
                     }
                     g.counter += 1;
@@ -275,7 +275,7 @@ fn serve(mut s: TcpStream, st: &Arc<Mutex<FakeOAuthState>>) {
                 json.push_str(&format!(r#","refresh_token":"{rt}""#));
             }
             if let Some(email) = &g.email {
-                let payload = crate::oauth::base64url(format!(r#"{{"email":"{email}"}}"#).as_bytes());
+                let payload = crate::mail::oauth::base64url(format!(r#"{{"email":"{email}"}}"#).as_bytes());
                 json.push_str(&format!(r#","id_token":"e30.{payload}.sig""#));
             }
             json.push('}');

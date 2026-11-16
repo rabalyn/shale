@@ -17,7 +17,7 @@ case "${1:-}" in
   wanted)
     if [ "${2:-}" != pull_request ]; then echo yes; exit 0; fi
     files=$(git diff --name-only "$3" "$4")
-    if printf '%s\n' "$files" | grep -Eq '^(src/(calendar/|imap|mail|smtp)|tests/(caldav|mail)-env/|\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh))'; then
+    if printf '%s\n' "$files" | grep -Eq '^(src/(calendar/|mail)|tests/(caldav|mail)-env/|\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh))'; then
       echo yes
     else
       echo no

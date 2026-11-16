@@ -1,16 +1,16 @@
 //! The compose window and the lists of drafts and outbox (ADR-0010, MAIL-126 to MAIL-136, MAIL-150,
 //! MAIL-151): what is typed, how it is drawn, and the questions that are asked before a mail goes out
-//! or a window is closed. The state changes that touch disk and the network are in `mail_ui.rs`.
+//! or a window is closed. The state changes that touch disk and the network are in `mail/ui.rs`.
 //!
 //! The compose view replaces the three panes of the mail view while a mail is being written. The body
 //! is a plain multi-line text field (a mail is plain text; the note editor belongs to notes and a vault).
 
 use crate::app::muted;
-use crate::compose::{Confirm, Draft};
 use crate::config::Config;
 use crate::keys::Action as KeyAction;
-use crate::mail_ui::MailView;
-use crate::outbox::{DraftInfo, Item, State};
+use crate::mail::compose::{Confirm, Draft};
+use crate::mail::outbox::{DraftInfo, Item, State};
+use crate::mail::ui::MailView;
 use crate::theme;
 use eframe::egui::{self, Key, Modifiers, Pos2, Rect, RichText, Ui, UiBuilder, Vec2};
 use std::path::PathBuf;
@@ -73,7 +73,7 @@ pub struct Picker {
 
 /// A missing-attachment alert and whether the person hid it (it still stops sending).
 pub struct AttAlertState {
-    pub alert: crate::outbox::AttAlert,
+    pub alert: crate::mail::outbox::AttAlert,
     pub dismissed: bool,
 }
 
@@ -105,7 +105,7 @@ pub struct Compose {
     /// Signing or encrypting is going on in a job (ADR-0011); setting this flag cancels it. Nothing is editable meanwhile.
     pub crypting: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// The keys found for the recipients in the local keyrings, and what they were looked up for (MAIL-192).
-    pub keys: Vec<crate::mail_crypto::KeyLookup>,
+    pub keys: Vec<crate::mail::crypto::KeyLookup>,
     pub keys_for: Option<String>,
     /// What a lookup is waiting to start for (debounce) and since when; and whether one is running.
     pub keys_wanted: Option<(String, Instant)>,
@@ -142,7 +142,7 @@ impl Compose {
 
     /// What the key lookup is about: the standard and the addresses.
     pub fn keys_signature(&self) -> String {
-        let addrs: Vec<String> = crate::mail_crypto::recipients_of(&self.draft).into_iter().map(|a| a.0).collect();
+        let addrs: Vec<String> = crate::mail::crypto::recipients_of(&self.draft).into_iter().map(|a| a.0).collect();
         format!("{:?}|{}", self.draft.standard, addrs.join(","))
     }
 
@@ -172,9 +172,9 @@ impl Compose {
         self.saved_rev != Some(self.rev) && (self.rev > 0 || self.saved_rev.is_some())
     }
 
-    pub fn add_attachment(&mut self, a: crate::compose::Att) -> Result<(), String> {
-        if self.draft.attachment_bytes() + a.data.len() > crate::compose::MAX_ATTACHMENTS_TOTAL {
-            return Err(format!("The attachments together may not be bigger than {} MB", crate::compose::MAX_ATTACHMENTS_TOTAL >> 20));
+    pub fn add_attachment(&mut self, a: crate::mail::compose::Att) -> Result<(), String> {
+        if self.draft.attachment_bytes() + a.data.len() > crate::mail::compose::MAX_ATTACHMENTS_TOTAL {
+            return Err(format!("The attachments together may not be bigger than {} MB", crate::mail::compose::MAX_ATTACHMENTS_TOTAL >> 20));
         }
         self.draft.attachments.push(a);
         self.touch();
@@ -223,7 +223,7 @@ pub fn suggestions(contacts: &[(String, String)], typed: &str, already: &str, li
         return vec![];
     }
     let words: Vec<&str> = q.split_whitespace().collect();
-    let have: Vec<String> = crate::compose::split_list(already).iter().filter_map(|p| crate::compose::bare_address(p)).collect();
+    let have: Vec<String> = crate::mail::compose::split_list(already).iter().filter_map(|p| crate::mail::compose::bare_address(p)).collect();
     let mut scored: Vec<(u8, usize, &(String, String))> = contacts
         .iter()
         .enumerate()
@@ -319,12 +319,12 @@ fn security_row(ui: &mut Ui, c: &mut Compose, acct: Option<&crate::config::MailA
     if c.draft.encrypt && !standards.is_empty() {
         let now_sig = c.keys_signature();
         let fresh = c.keys_for.as_ref() == Some(&now_sig);
-        for (i, (addr, _bcc)) in crate::mail_crypto::recipients_of(&c.draft).into_iter().enumerate() {
+        for (i, (addr, _bcc)) in crate::mail::crypto::recipients_of(&c.draft).into_iter().enumerate() {
             let found = c.keys.iter().find(|k| k.address == addr);
             let (text, color) = match (fresh, found) {
                 (_, Some(k)) if k.error.is_some() => (format!("{addr}: {}", k.error.clone().unwrap_or_default()), theme::LINK_MISSING),
                 (true, Some(k)) => match &k.key {
-                    Some(key) => (format!("{addr}: key found ({}; {}; {})", key.label(), key.trust_words(), crate::mail_ui::short_fingerprint(&key.fingerprint)), theme::TAG),
+                    Some(key) => (format!("{addr}: key found ({}; {}; {})", key.label(), key.trust_words(), crate::mail::ui::short_fingerprint(&key.fingerprint)), theme::TAG),
                     None => (format!("{addr}: no key: this mail cannot be encrypted for them (import their key)"), theme::LINK_MISSING),
                 },
                 _ => (format!("{addr}: looking for a key…"), theme::MUTED),
@@ -412,7 +412,7 @@ impl MailView {
                 let status = if c.unsaved() {
                     "Not saved yet".to_string()
                 } else if let Some(t) = c.saved_at {
-                    format!("Draft saved {}", crate::mail_ui::full_date(t).split(' ').nth(1).unwrap_or(""))
+                    format!("Draft saved {}", crate::mail::ui::full_date(t).split(' ').nth(1).unwrap_or(""))
                 } else {
                     String::new()
                 };
@@ -532,7 +532,7 @@ impl MailView {
                             ui.horizontal(|ui| {
                                 ui.add_space(label_w + 4.0);
                                 ui.label(RichText::new(format!("📎 {}", a.name)).color(theme::TEXT));
-                                ui.label(muted(crate::mail_ui::size_text(a.data.len() as u64)).size(12.0));
+                                ui.label(muted(crate::mail::ui::size_text(a.data.len() as u64)).size(12.0));
                                 let r = ui.small_button("Remove");
                                 rec(rects, format!("mail:compose:att-remove:{i}"), &r);
                                 if r.clicked() {
@@ -571,7 +571,7 @@ impl MailView {
                         r.request_focus();
                         // the cursor goes to the top: a new mail starts above its signature, an answer is typed above or below the quote
                         if let Some(mut st) = egui::text_edit::TextEditState::load(ui.ctx(), field_id(Field::Body)) {
-                            let end = if c.draft.kind == crate::compose::Kind::New { 0 } else { c.draft.body.find("\n-- \n").map(|i| c.draft.body[..i].chars().count()).unwrap_or_else(|| c.draft.body.chars().count()) };
+                            let end = if c.draft.kind == crate::mail::compose::Kind::New { 0 } else { c.draft.body.find("\n-- \n").map(|i| c.draft.body[..i].chars().count()).unwrap_or_else(|| c.draft.body.chars().count()) };
                             st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(end))));
                             st.store(ui.ctx(), field_id(Field::Body));
                         }
@@ -816,7 +816,7 @@ impl MailView {
                                 "{}\n{}  ·  saved {}",
                                 if d.subject.trim().is_empty() { "(no subject)" } else { d.subject.as_str() },
                                 if d.to.trim().is_empty() { "(no recipient)" } else { d.to.as_str() },
-                                crate::mail_ui::full_date(d.saved)
+                                crate::mail::ui::full_date(d.saved)
                             ))
                             .size(13.0),
                         )
@@ -832,7 +832,7 @@ impl MailView {
                         out.open_draft = Some((d.account.clone(), d.id.clone()));
                     }
                     if r.secondary_clicked() {
-                        self.open_menu_at(crate::mail_keys::MenuTarget::Draft(i), ui.input(|i| i.pointer.interact_pos()).unwrap_or(r.rect.center()));
+                        self.open_menu_at(crate::mail::keys::MenuTarget::Draft(i), ui.input(|i| i.pointer.interact_pos()).unwrap_or(r.rect.center()));
                     }
                 }
             }
@@ -1011,7 +1011,7 @@ mod tests {
 
     #[test]
     fn a_compose_window_knows_what_is_unsaved_and_whether_there_is_anything_to_lose() {
-        let mut c = Compose::new(crate::compose::new_draft("a", "Ada", "ada@example.com", "Ada"));
+        let mut c = Compose::new(crate::mail::compose::new_draft("a", "Ada", "ada@example.com", "Ada"));
         assert!(!c.unsaved() && !c.has_content(), "a new mail with only a signature is untouched");
         c.draft.body = "Hello".into();
         c.touch();

@@ -4,28 +4,28 @@
 //! page cache of the message list, the open message, the search, the syncs that run and the
 //! jobs behind the buttons. Everything slow (opening the store, reading and parsing a message,
 //! searching, talking to a server) runs as a job through `jobs` and reports back over one
-//! channel, so a frame never waits for it. The drawing is in `mail_view.rs`, the account
-//! settings in `mail_dialog.rs`.
+//! channel, so a frame never waits for it. The drawing is in `mail/view.rs`, the account
+//! settings in `mail/dialog.rs`.
 //!
 //! Syncing never changes a server: it uses only the read-only commands of `imap_sync`. What the
 //! person does (mark read, flag, move, delete) is recorded and sent by `mail_ops` (ADR-0009): the
 //! view enqueues, starts a job per account, shows the optimistic state and the waiting marker, and
 //! tells the person when the server refused something.
 
-use crate::compose::{self, Kind};
 use crate::config::{Config, MailAccount};
-use crate::gpg::Gnupg;
-use crate::imap_client::decode_mutf7;
-use crate::imap_client::MailFlag;
-use crate::imap_sync::{self, ConnectorFactory, FolderKind, LazyConnector, Progress, SyncOptions, SyncSummary, NO_PASSWORD};
+use crate::mail::compose::{self, Kind};
+use crate::mail::compose_ui::{Ask, Compose, ComposeOut, Field, LocalOut, LocalView, VaultInfo};
+use crate::mail::crypto::{self, Encryption, Security, Structure};
+use crate::mail::db::{FolderRow, MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
+use crate::mail::gpg::Gnupg;
+use crate::mail::imap_client::decode_mutf7;
+use crate::mail::imap_client::MailFlag;
+use crate::mail::imap_sync::{self, ConnectorFactory, FolderKind, LazyConnector, Progress, SyncOptions, SyncSummary, NO_PASSWORD};
+use crate::mail::ops::{self, Action, Confirmed, OpsReport};
+use crate::mail::outbox::{DraftInfo, Item, Outbox, Recovery, State};
+use crate::mail::send::{self, SendReport, SmtpConnector};
+use crate::mail::store::{MailStore, Reader};
 use crate::mail::Mail;
-use crate::mail_compose::{Ask, Compose, ComposeOut, Field, LocalOut, LocalView, VaultInfo};
-use crate::mail_crypto::{self, Encryption, Security, Structure};
-use crate::mail_db::{FolderRow, MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
-use crate::mail_ops::{self, Action, Confirmed, OpsReport};
-use crate::mail_send::{self, SendReport, SmtpConnector};
-use crate::mail_store::{MailStore, Reader};
-use crate::outbox::{DraftInfo, Item, Outbox, Recovery, State};
 use eframe::egui;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -73,8 +73,8 @@ pub struct GnupgInfo {
     /// Per standard: the version line, or why the program cannot be used.
     pub pgp: Option<Result<String, String>>,
     pub smime: Option<Result<String, String>>,
-    pub pgp_keys: Vec<crate::gpg::KeyInfo>,
-    pub smime_keys: Vec<crate::gpg::KeyInfo>,
+    pub pgp_keys: Vec<crate::mail::gpg::KeyInfo>,
+    pub smime_keys: Vec<crate::mail::gpg::KeyInfo>,
 }
 
 impl GnupgInfo {
@@ -84,7 +84,7 @@ impl GnupgInfo {
             crate::config::CryptoStandard::Smime => self.smime.as_ref(),
         }
     }
-    pub fn keys(&self, s: crate::config::CryptoStandard) -> &[crate::gpg::KeyInfo] {
+    pub fn keys(&self, s: crate::config::CryptoStandard) -> &[crate::mail::gpg::KeyInfo] {
         match s {
             crate::config::CryptoStandard::OpenPgp => &self.pgp_keys,
             crate::config::CryptoStandard::Smime => &self.smime_keys,
@@ -253,21 +253,21 @@ enum Event {
     },
     SignedIn {
         account: String,
-        result: Result<crate::oauth::SignedIn, String>,
+        result: Result<crate::mail::oauth::SignedIn, String>,
     },
     /// Does the account have a refresh token? (read from the keyring in a job)
     Probed {
         account: String,
         signed_in: bool,
     },
-    /// A run of `mail_ops::run_pending` ended.
+    /// A run of `ops::run_pending` ended.
     Ops {
         account: String,
         result: Result<OpsReport, String>,
     },
     /// The start-up check of drafts and outbox is done (MAIL-130, MAIL-133).
     Recovered(Result<Recovery, String>),
-    /// A run of `mail_send::send_due` ended.
+    /// A run of `send::send_due` ended.
     Sent {
         account: String,
         result: Result<SendReport, String>,
@@ -282,7 +282,7 @@ enum Event {
     /// The keys found for the recipients of the mail being written (MAIL-192).
     Keys {
         sig: String,
-        result: Result<Vec<mail_crypto::KeyLookup>, String>,
+        result: Result<Vec<crypto::KeyLookup>, String>,
     },
     /// A mail that is signed or encrypted has been put into the outbox, or could not be (MAIL-195).
     Queued {
@@ -301,7 +301,7 @@ enum Event {
 pub type SmtpFactory = Arc<dyn Fn(&MailAccount, Option<crate::secret::Secret>) -> Result<Arc<dyn SmtpConnector>, String> + Send + Sync>;
 
 pub fn real_smtp_factory() -> SmtpFactory {
-    Arc::new(mail_send::connector_for_account)
+    Arc::new(send::connector_for_account)
 }
 
 /// Builds its connector when the first connection is made (inside the job: the keyring may be slow).
@@ -312,8 +312,8 @@ struct LazySmtp {
 }
 
 impl SmtpConnector for LazySmtp {
-    fn connect(&self) -> Result<crate::smtp_client::Smtp, crate::smtp_client::SmtpError> {
-        let c = (self.factory)(&self.account, self.session.clone()).map_err(crate::smtp_client::SmtpError::Auth)?;
+    fn connect(&self) -> Result<crate::mail::smtp_client::Smtp, crate::mail::smtp_client::SmtpError> {
+        let c = (self.factory)(&self.account, self.session.clone()).map_err(crate::mail::smtp_client::SmtpError::Auth)?;
         c.connect()
     }
 }
@@ -423,10 +423,10 @@ pub struct MailView {
     /// Drafts and outbox entries were announced once at start.
     announced_local: bool,
     /// Local sent copies that the server does not have and nothing uploads (MAIL-210).
-    pub unsent: Vec<crate::mail_db::UnsentCopy>,
+    pub unsent: Vec<crate::mail::db::UnsentCopy>,
     pub unsent_open: bool,
     /// The keyboard of the drafts and outbox lists, the menu of a row and the unsent window (MAIL-067…069).
-    pub(crate) kbd: crate::mail_keys::Kbd,
+    pub(crate) kbd: crate::mail::keys::Kbd,
     // the keyboard (MAIL-062…065)
     /// The pane that has the keyboard.
     pub pane: Pane,
@@ -665,7 +665,7 @@ impl MailView {
             self.handle(ev, cfg);
         }
         self.poll_syncs();
-        for id in crate::oauth::take_unsaved_notices() {
+        for id in crate::mail::oauth::take_unsaved_notices() {
             let name = cfg.mail_accounts.iter().find(|a| a.id == id).map_or(id.as_str(), |a| a.name.as_str());
             self.notices.push(format!("The sign-in of “{name}” was renewed but could not be saved in the keyring; you may have to sign in again after a restart."));
         }
@@ -906,7 +906,7 @@ impl MailView {
                                 self.ask_password(&account, Retry::Ops);
                             }
                             Some(o) => {
-                                if crate::oauth::needs_sign_in(o) {
+                                if crate::mail::oauth::needs_sign_in(o) {
                                     self.signed_in.insert(account.clone(), false);
                                     self.notices.push("A mail account needs you to sign in again: open the account settings.".into());
                                 }
@@ -1038,7 +1038,7 @@ impl MailView {
             if no_pw {
                 self.ask_password(&id, Retry::Sync);
             }
-            let signin_needed = self.syncs.get(&id).is_some_and(|r| r.errors.iter().any(|e| crate::oauth::needs_sign_in(e)) || r.finished.as_ref().is_some_and(|s| s.errors.iter().any(|e| crate::oauth::needs_sign_in(e))));
+            let signin_needed = self.syncs.get(&id).is_some_and(|r| r.errors.iter().any(|e| crate::mail::oauth::needs_sign_in(e)) || r.finished.as_ref().is_some_and(|s| s.errors.iter().any(|e| crate::mail::oauth::needs_sign_in(e))));
             if signin_needed {
                 self.signed_in.insert(id.clone(), false);
                 self.notices.push("A mail account needs you to sign in again: open the account settings.".into());
@@ -1537,7 +1537,7 @@ impl MailView {
             move || -> Result<(usize, Option<Result<(), String>>), String> {
                 let n = imap_sync::discover_folders(&store, &connector, &id, &display).map(|f| f.len())?;
                 // sending: connect and sign in, never send (MAIL-121)
-                let s = smtp.map(|c| mail_send::test_connection(&c).map(|_| ()));
+                let s = smtp.map(|c| send::test_connection(&c).map(|_| ()));
                 Ok((n, s))
             },
             move |r| Event::Tested { account: id2, result: flatten(r) },
@@ -1563,7 +1563,7 @@ impl MailView {
                         c.request_repaint();
                     }
                 };
-                crate::oauth::sign_in(&acct, secret, &cancel, crate::oauth::SIGN_IN_TIMEOUT, &shown).map_err(|e| e.to_string())
+                crate::mail::oauth::sign_in(&acct, secret, &cancel, crate::mail::oauth::SIGN_IN_TIMEOUT, &shown).map_err(|e| e.to_string())
             },
             move |r| Event::SignedIn { account: id2, result: flatten(r) },
         );
@@ -1583,7 +1583,7 @@ impl MailView {
         }
         let acct = account.clone();
         let id = account.id.clone();
-        self.spawn(move || crate::oauth::is_signed_in(&acct), move |r| Event::Probed { account: id, signed_in: r.unwrap_or(false) });
+        self.spawn(move || crate::mail::oauth::is_signed_in(&acct), move |r| Event::Probed { account: id, signed_in: r.unwrap_or(false) });
     }
 
     /// Keep a typed client secret in the keyring (never in the settings file).
@@ -1596,7 +1596,7 @@ impl MailView {
     /// A folder's checkbox: sync it or not (MAIL-042).
     pub fn set_folder_sync(&mut self, folder: i64, enabled: bool) -> Result<(), String> {
         let store = self.ready_store().ok_or("the local mail copy is not open yet")?;
-        store.commit(vec![crate::mail_db::Op::SyncEnabled { folder, enabled }]).map_err(|e| e.0)?;
+        store.commit(vec![crate::mail::db::Op::SyncEnabled { folder, enabled }]).map_err(|e| e.0)?;
         self.dirty = true;
         self.refresh();
         Ok(())
@@ -1616,7 +1616,7 @@ impl MailView {
         self.session_pw.remove(account);
         self.signins.remove(account);
         self.signed_in.remove(account);
-        crate::oauth::forget_source(account);
+        crate::mail::oauth::forget_source(account);
         if let Some(r) = self.syncs.remove(account) {
             r.cancel.store(true, Ordering::SeqCst);
         }
@@ -1682,7 +1682,7 @@ impl MailView {
     /// Returns how many were recorded.
     pub fn apply(&mut self, cfg: &Config, msgs: Vec<MessageSummary>, action: Action) -> usize {
         let Some(store) = self.ready_store() else { return 0 };
-        match mail_ops::enqueue(&store, &msgs, &action, crate::calendar::time::now()) {
+        match ops::enqueue(&store, &msgs, &action, crate::calendar::time::now()) {
             Ok(q) => {
                 self.notices.extend(q.notes);
                 self.dirty = true;
@@ -1827,7 +1827,7 @@ impl MailView {
         let connector = self.lazy_connector(&acct, None);
         let id = account.to_string();
         let id2 = id.clone();
-        self.spawn(move || mail_ops::run_pending(&store, &connector, &id), move |r| Event::Ops { account: id2, result: r });
+        self.spawn(move || ops::run_pending(&store, &connector, &id), move |r| Event::Ops { account: id2, result: r });
     }
 
     /// Every frame: the open message becomes read after the delay, and what waits for the server
@@ -1900,7 +1900,7 @@ impl MailView {
         let ob = Arc::new(Outbox::new(&self.root));
         self.outbox = Some(ob.clone());
         self.recovered = false;
-        self.spawn(move || ob.recover(crate::calendar::time::now(), &crate::mail_store::today_string()), |r| Event::Recovered(flatten(r)));
+        self.spawn(move || ob.recover(crate::calendar::time::now(), &crate::mail::store::today_string()), |r| Event::Recovered(flatten(r)));
     }
 
     /// Read the lists of drafts and outbox entries from disk (small files; done when something changed).
@@ -1934,7 +1934,7 @@ impl MailView {
         }
         // the draft is saved after a pause in typing (MAIL-130)
         if let Some(c) = &self.compose {
-            if c.unsaved() && c.ask.is_none() && c.last_edit.is_some_and(|t| t.elapsed() >= crate::mail_compose::AUTOSAVE_AFTER) {
+            if c.unsaved() && c.ask.is_none() && c.last_edit.is_some_and(|t| t.elapsed() >= crate::mail::compose_ui::AUTOSAVE_AFTER) {
                 self.compose_save();
             }
         }
@@ -1960,7 +1960,7 @@ impl MailView {
         let connector = LazySmtp { factory: self.smtp_factory.clone(), account: account.clone(), session: self.session_pw.get(&account.id).cloned() };
         let acct = account.clone();
         let id = account.id.clone();
-        self.spawn(move || mail_send::send_due(&ob, &store, &acct, &connector, crate::calendar::time::now()), move |r| Event::Sent { account: id, result: r });
+        self.spawn(move || send::send_due(&ob, &store, &acct, &connector, crate::calendar::time::now()), move |r| Event::Sent { account: id, result: r });
     }
 
     /// The addresses to complete from: the people notes of the vault, then the addresses in the mail index (newest first).
@@ -2018,7 +2018,7 @@ impl MailView {
             self.notices.push("Add a mail account first.".into());
             return;
         };
-        self.open_compose(Compose::new(mail_send::new_draft(&a)), Field::To);
+        self.open_compose(Compose::new(send::new_draft(&a)), Field::To);
     }
 
     /// `r`, `Shift+R`, `Shift+F`: answer or forward the open message, or the one under the cursor.
@@ -2039,8 +2039,8 @@ impl MailView {
 
     fn open_answer(&mut self, cfg: &Config, kind: Kind, msg: &MessageSummary, mail: &Mail) {
         let Some(a) = cfg.mail_accounts.iter().find(|a| a.id == msg.account) else { return };
-        let (name, addr) = mail_send::sender_of(a);
-        let d = mail_send::with_crypto_defaults(compose::answer(kind, mail, &a.id, &name, &addr, &a.signature), a);
+        let (name, addr) = send::sender_of(a);
+        let d = send::with_crypto_defaults(compose::answer(kind, mail, &a.id, &name, &addr, &a.signature), a);
         self.open_compose(Compose::new(d), if kind == Kind::Forward { Field::To } else { Field::Body });
     }
 
@@ -2053,7 +2053,7 @@ impl MailView {
                 let mut c = Compose::from_saved(d, crate::calendar::time::now());
                 // an attachment with an alert is told by the alert, not twice
                 c.notes = problems.into_iter().filter(|p| !alerts.iter().any(|a| p.contains(&format!("“{}”", a.name)))).collect();
-                c.att_alerts = alerts.into_iter().map(|alert| crate::mail_compose::AttAlertState { alert, dismissed: false }).collect();
+                c.att_alerts = alerts.into_iter().map(|alert| crate::mail::compose_ui::AttAlertState { alert, dismissed: false }).collect();
                 self.open_compose(c, Field::Body);
             }
             Err(e) => self.problems.push(format!("The draft could not be opened: {e}")),
@@ -2071,7 +2071,7 @@ impl MailView {
             Ok(()) => {
                 // the sender changed: the draft is in the new account's folder, the old files are put away after that
                 if let Some(old) = c.saved_account.clone().filter(|o| o != &c.draft.account) {
-                    let _ = ob.discard_draft(&old, &c.draft.id, &crate::mail_store::today_string());
+                    let _ = ob.discard_draft(&old, &c.draft.id, &crate::mail::store::today_string());
                 }
                 c.saved_account = Some(c.draft.account.clone());
                 c.saved_rev = Some(c.rev);
@@ -2143,7 +2143,7 @@ impl MailView {
             self.compose_save();
         }
         let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_ref()) else { return };
-        let date = crate::mail_store::today_string();
+        let date = crate::mail::store::today_string();
         // every account folder the draft may be in
         let mut failed = None;
         for acct in [c.saved_account.clone(), Some(c.draft.account.clone())].into_iter().flatten().collect::<HashSet<_>>() {
@@ -2214,13 +2214,10 @@ impl MailView {
             c.error = None;
             let (g, a, draft, undo, id) = (self.gnupg.clone(), a.clone(), c.draft.clone(), cfg.mail_undo_secs, c.draft.id.clone());
             let draft_id = id.clone();
-            self.spawn(
-                move || mail_send::queue_with(&ob, &g, &a, &draft, mail_send::SendTiming { undo_secs: undo, now, date: &crate::mail_store::today_string() }, &cancel).map(Box::new),
-                move |r| Event::Queued { draft_id, result: flatten(r) },
-            );
+            self.spawn(move || send::queue_with(&ob, &g, &a, &draft, send::SendTiming { undo_secs: undo, now, date: &crate::mail::store::today_string() }, &cancel).map(Box::new), move |r| Event::Queued { draft_id, result: flatten(r) });
             return;
         }
-        match mail_send::queue_draft(&ob, a, &c.draft, cfg.mail_undo_secs, now, &crate::mail_store::today_string()) {
+        match send::queue_draft(&ob, a, &c.draft, cfg.mail_undo_secs, now, &crate::mail::store::today_string()) {
             Ok(item) => self.finish_queued(item),
             Err(e) => c.error = Some(format!("The mail could not be put in the outbox: {e}")),
         }
@@ -2230,7 +2227,7 @@ impl MailView {
     fn finish_queued(&mut self, item: Item) {
         if let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_ref()) {
             if let Some(old) = c.saved_account.clone().filter(|o| o != &item.account) {
-                let _ = ob.discard_draft(&old, &item.id, &crate::mail_store::today_string());
+                let _ = ob.discard_draft(&old, &item.id, &crate::mail::store::today_string());
             }
         }
         self.compose = None;
@@ -2263,8 +2260,8 @@ impl MailView {
         c.keys_wanted = None;
         c.keys_running = true;
         let (g, std) = (self.gnupg.clone(), c.draft.standard);
-        let addresses: Vec<String> = mail_crypto::recipients_of(&c.draft).into_iter().map(|a| a.0).collect();
-        self.spawn(move || Ok::<_, String>(mail_crypto::lookup_keys(&g, std, &addresses, &AtomicBool::new(false))), move |r| Event::Keys { sig, result: flatten(r) });
+        let addresses: Vec<String> = crypto::recipients_of(&c.draft).into_iter().map(|a| a.0).collect();
+        self.spawn(move || Ok::<_, String>(crypto::lookup_keys(&g, std, &addresses, &AtomicBool::new(false))), move |r| Event::Keys { sig, result: flatten(r) });
     }
 
     /// What the compose view asked for in this frame.
@@ -2281,11 +2278,11 @@ impl MailView {
         }
         if let Some(id) = out.account {
             if let (Some(c), Some(a)) = (self.compose.as_mut(), cfg.mail_accounts.iter().find(|a| a.id == id)) {
-                let (name, addr) = mail_send::sender_of(a);
+                let (name, addr) = send::sender_of(a);
                 (c.draft.account, c.draft.from_name, c.draft.from_addr) = (id, name, addr);
                 if a.key_for(c.draft.standard).is_empty() {
                     // the other account has no key for this standard: back to what it has
-                    let d = mail_send::with_crypto_defaults(c.draft.clone(), a);
+                    let d = send::with_crypto_defaults(c.draft.clone(), a);
                     (c.draft.standard, c.draft.sign, c.draft.encrypt) = (d.standard, d.sign, false);
                 }
                 c.touch();
@@ -2382,7 +2379,7 @@ impl MailView {
     pub fn apply_local_out(&mut self, out: LocalOut) {
         let Some(ob) = self.outbox.clone() else { return };
         let now = crate::calendar::time::now();
-        let date = crate::mail_store::today_string();
+        let date = crate::mail::store::today_string();
         if let Some(k) = out.select {
             self.outbox_sel = Some(k);
         }
@@ -2394,7 +2391,7 @@ impl MailView {
                 self.problems.push(format!("The draft could not be discarded: {e}"));
             }
         }
-        let mut back_to_editor: Option<Result<crate::compose::Draft, String>> = None;
+        let mut back_to_editor: Option<Result<crate::mail::compose::Draft, String>> = None;
         if let Some((a, i)) = out.undo {
             back_to_editor = Some(ob.undo(&a, &i, now, &date));
         }
@@ -2433,7 +2430,7 @@ impl MailView {
 
     /// Undo send for the newest waiting mail (the strip's button).
     pub fn undo_newest(&mut self) {
-        if let Some((a, i, _)) = crate::mail_compose::queued_text(&self.local_items, crate::calendar::time::now()) {
+        if let Some((a, i, _)) = crate::mail::compose_ui::queued_text(&self.local_items, crate::calendar::time::now()) {
             self.apply_local_out(LocalOut { undo: Some((a, i)), ..Default::default() });
         }
     }
@@ -2478,7 +2475,7 @@ fn read_for_attachment(path: &std::path::Path) -> Result<compose::Att, String> {
 /// handed to GnuPG afterwards; an encrypted mail without the consent never is (MAIL-181).
 fn read_for_pane(store: &MailStore, msg: &MessageSummary, consent: bool) -> Result<Loaded, String> {
     let raw = store.read_raw(msg).map_err(|e| e.0)?;
-    let structure = mail_crypto::classify(&raw);
+    let structure = crypto::classify(&raw);
     if let Some((bytes, info)) = store.read_decrypted(msg) {
         let std = match &structure {
             Structure::Encrypted { standard, .. } => *standard,
@@ -2529,10 +2526,10 @@ fn loaded(mail: Mail, security: Security) -> Loaded {
 fn crypto_job(store: &MailStore, g: &Gnupg, msg: &MessageSummary, consent: bool, cancel: &AtomicBool) -> Result<Loaded, String> {
     let raw = store.read_raw(msg).map_err(|e| e.0)?;
     let now = crate::calendar::time::now();
-    let mut out = mail_crypto::process(g, &raw, consent, cancel, now);
+    let mut out = crypto::process(g, &raw, consent, cancel, now);
     if out.decrypted && consent {
         if let Some(d) = &out.display {
-            if let Err(e) = store.save_decrypted(msg, d, &out.security, &crate::mail_store::today_string()) {
+            if let Err(e) = store.save_decrypted(msg, d, &out.security, &crate::mail::store::today_string()) {
                 out.security.notes.push(format!("The decrypted copy could not be stored (search will not find this mail's text): {e}"));
             }
         }
@@ -2543,7 +2540,7 @@ fn crypto_job(store: &MailStore, g: &Gnupg, msg: &MessageSummary, consent: bool,
     };
     if out.display.is_none()
         && matches!(out.security.encryption, Encryption::NeedsConsent | Encryption::Failed(_) | Encryption::NotDecrypted(_))
-        && matches!(mail_crypto::classify(&raw), Structure::Encrypted { .. } | Structure::InlineEncrypted { .. })
+        && matches!(crypto::classify(&raw), Structure::Encrypted { .. } | Structure::InlineEncrypted { .. })
     {
         hide_content(&mut mail);
     }

@@ -299,7 +299,7 @@ fn caldav_env_moves_an_event_to_another_calendar_and_deletes_it() {
     let there = find_one("moves", &e.uid);
     assert_eq!(there.summary, "Moving test (moved)");
     assert!(store.find("moves", &e.uid).is_some() && store.find("work", &e.uid).is_none());
-    let kept = std::fs::read_dir(store.trash_dir.join(crate::mail_store::today_string())).expect("the trash copy").count();
+    let kept = std::fs::read_dir(store.trash_dir.join(crate::mail::store::today_string())).expect("the trash copy").count();
     assert!(kept >= 1);
 
     // delete through the store

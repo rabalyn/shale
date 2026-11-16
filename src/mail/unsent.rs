@@ -7,8 +7,8 @@
 use crate::app::muted;
 use crate::config::Config;
 use crate::keys::Action as KeyAction;
-use crate::mail_db::{Op, UnsentCopy};
-use crate::mail_ui::*;
+use crate::mail::db::{Op, UnsentCopy};
+use crate::mail::ui::*;
 use crate::theme;
 use eframe::egui::{self, Align, Layout, Rect, RichText, Ui, UiBuilder, Vec2};
 

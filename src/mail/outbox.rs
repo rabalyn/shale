@@ -20,8 +20,8 @@
 //! `Queued → Undone` (Undo send, then the draft is written back and the outbox files go to the trash).
 //! `Sending` is written before the first byte goes to the network, from `Queued` only, under a lock.
 
-use crate::compose::{Att, BuildOptions, Built, Draft};
 use crate::fsutil;
+use crate::mail::compose::{Att, BuildOptions, Built, Draft};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -181,7 +181,7 @@ impl Outbox {
     }
 
     fn dir(&self, kind: &str, account: &str) -> Result<PathBuf> {
-        if !crate::mail_store::valid_account_id(account) {
+        if !crate::mail::store::valid_account_id(account) {
             return Err(format!("not a valid account id: {account:?}"));
         }
         Ok(self.root.join(kind).join(account))
@@ -227,7 +227,7 @@ impl Outbox {
     /// the caller removes the record after the new file is written.
     fn put_away_att(&self, kind: &str, account: &str, id: &str, file: &str, name: &str) -> Result<()> {
         let src = self.path(kind, account, id, ".att")?.join(file);
-        let rel_dir = Path::new(".trash").join(crate::mail_store::today_string()).join(kind).join(account).join(format!("{id}.att"));
+        let rel_dir = Path::new(".trash").join(crate::mail::store::today_string()).join(kind).join(account).join(format!("{id}.att"));
         fsutil::ensure_private_dir(&self.root.join(&rel_dir)).map_err(err)?;
         let mut rel = rel_dir.join(file);
         for n in 2..1000 {
@@ -336,7 +336,7 @@ impl Outbox {
     fn write_atts(&self, kind: &str, account: &str, id: &str, atts: &mut [Att]) -> Result<()> {
         let dir = self.path(kind, account, id, ".att")?;
         for (i, a) in atts.iter_mut().enumerate() {
-            let file = format!("{i}-{}-{}", a.data.len(), crate::compose::safe_file_name(&a.name));
+            let file = format!("{i}-{}-{}", a.data.len(), crate::mail::compose::safe_file_name(&a.name));
             let p = dir.join(&file);
             // a saved attachment whose file is gone and whose bytes were not read back is kept as it is: an empty file
             // written in its place would become an empty attachment (MAIL-216)
@@ -420,7 +420,7 @@ impl Outbox {
         if let Some(a) = only {
             return vec![a.to_string()];
         }
-        let mut v: Vec<String> = std::fs::read_dir(self.root.join(kind)).map(|rd| rd.flatten().filter_map(|e| e.file_name().to_str().map(String::from)).filter(|n| crate::mail_store::valid_account_id(n)).collect()).unwrap_or_default();
+        let mut v: Vec<String> = std::fs::read_dir(self.root.join(kind)).map(|rd| rd.flatten().filter_map(|e| e.file_name().to_str().map(String::from)).filter(|n| crate::mail::store::valid_account_id(n)).collect()).unwrap_or_default();
         v.sort();
         v
     }
@@ -636,7 +636,7 @@ impl Outbox {
         let mut d = draft.clone();
         self.write_atts("drafts", &d.account, &d.id, &mut d.attachments)?;
         // the message file is for other programs: built leniently, and left out if it cannot be built (the JSON is the draft)
-        if let Ok(b) = crate::compose::build(&d, &BuildOptions { now, lenient: true, ..BuildOptions::default() }) {
+        if let Ok(b) = crate::mail::compose::build(&d, &BuildOptions { now, lenient: true, ..BuildOptions::default() }) {
             self.write(&self.path("drafts", &d.account, &d.id, ".eml")?, &b.bytes)?;
         }
         let json = serde_json::to_vec_pretty(&DraftFile { version: 1, saved: now, draft: d }).map_err(err)?;
@@ -707,7 +707,7 @@ pub enum Outcome {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::compose::{build, new_draft};
+    use crate::mail::compose::{build, new_draft};
     use std::sync::Arc;
 
     pub const NOW: i64 = 1_794_657_600;

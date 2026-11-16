@@ -12,7 +12,6 @@
 
 mod app;
 mod calendar;
-mod compose;
 mod config;
 mod data_usage;
 mod dialog;
@@ -20,12 +19,7 @@ mod drawing;
 mod editor;
 mod fsutil;
 mod gitsync;
-mod gpg;
 mod graph;
-mod imap_client;
-#[cfg(test)]
-mod imap_fake_tests;
-mod imap_sync;
 mod import;
 mod instance;
 mod jobs;
@@ -35,33 +29,11 @@ mod layout;
 mod link_assist;
 mod lists;
 mod mail;
-mod mail_compose;
-mod mail_crypto;
-mod mail_db;
-mod mail_demo;
-mod mail_dialog;
-#[cfg(test)]
-mod mail_env_tests;
-mod mail_keys;
-mod mail_ops;
-mod mail_send;
-#[cfg(test)]
-mod mail_send_fuzz_tests;
-mod mail_store;
-mod mail_ui;
-#[cfg(test)]
-mod mail_ui_tests;
-mod mail_unsent;
-mod mail_view;
 mod markdown;
 mod media;
 #[cfg(test)]
 mod notes_vault_tests;
-mod oauth;
-#[cfg(test)]
-mod oauth_fake_tests;
 mod opener;
-mod outbox;
 mod panels;
 mod pdf;
 mod picker;
@@ -75,9 +47,6 @@ mod sidebar;
 #[cfg(test)]
 mod sidebar_tests;
 mod sidebar_ui;
-mod smtp_client;
-#[cfg(test)]
-mod smtp_fake_tests;
 mod social;
 #[cfg(test)]
 mod start_dialog_tests;

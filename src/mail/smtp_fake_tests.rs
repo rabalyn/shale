@@ -1,14 +1,14 @@
 //! A pretend SMTP server for tests (ADR-0010): real TCP and real TLS (the throw-away certificate
-//! of `imap_fake_tests.rs`), `EHLO`, `STARTTLS`, `AUTH` with `PLAIN`, `LOGIN`, `XOAUTH2` and
+//! of `mail/imap_fake_tests.rs`), `EHLO`, `STARTTLS`, `AUTH` with `PLAIN`, `LOGIN`, `XOAUTH2` and
 //! `OAUTHBEARER`, `MAIL FROM`, `RCPT TO`, `DATA`. It records everything it receives: every command,
 //! every sign-in, every message with its envelope. Modes: refuse a recipient, hang up after the end of
 //! the data without answering (the mail *is* kept: it arrived), answer the end of the data with an
 //! error, be slow, limit the size.
 
 use crate::config::MailSecurity;
-use crate::imap_client::{ConnectSettings, Limits, PlainAuth};
-use crate::imap_fake_tests::{server_cert, server_config};
-use crate::smtp_client::{Smtp, SmtpError};
+use crate::mail::imap_client::{ConnectSettings, Limits, PlainAuth};
+use crate::mail::imap_fake_tests::{server_cert, server_config};
+use crate::mail::smtp_client::{Smtp, SmtpError};
 use rustls::{ServerConnection, StreamOwned};
 use std::collections::HashSet;
 use std::io::{Read, Write};
@@ -360,7 +360,7 @@ fn auth(s: &mut Stream, st: &Arc<Mutex<SmtpState>>, mech: &str, ir: Option<Strin
                 return verdict(s, true);
             }
             // the error as a challenge; the client answers (empty / \x01) and then the final refusal
-            let err = crate::imap_client::base64_encode(br#"{"status":"401","schemes":"Bearer","scope":"mail"}"#);
+            let err = crate::mail::imap_client::base64_encode(br#"{"status":"401","schemes":"Bearer","scope":"mail"}"#);
             say(s, &format!("334 {err}"));
             if let Some(l) = read_line(s) {
                 st.lock().unwrap_or_else(|e| e.into_inner()).oauth_error_answers.push(b64(&String::from_utf8_lossy(&l)));
@@ -459,7 +459,7 @@ fn passwords_sign_in_with_plain_or_login_and_a_wrong_password_is_an_auth_error()
 // spec: MAIL-122
 #[test]
 fn oauth_signs_in_with_the_best_mechanism_and_answers_the_error_challenge_as_specified() {
-    use crate::oauth::OAuthAuth;
+    use crate::mail::oauth::OAuthAuth;
     let srv = FakeSmtp::start(MailSecurity::ImplicitTls);
     srv.state().valid_tokens.insert("tok-1".into());
     srv.state().mechs = vec!["XOAUTH2"];

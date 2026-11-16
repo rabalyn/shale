@@ -1,9 +1,9 @@
 //! The mail view in the app: opening it, the account settings dialog, and what the view asks
-//! for (Import to vault, saving an attachment). See `mail_ui.rs` and `mail_view.rs`.
+//! for (Import to vault, saving an attachment). See `mail/ui.rs` and `mail/view.rs`.
 
 use super::{Modal, ShaleApp, View};
-use crate::mail_dialog::{MailDialog, MailDialogAction};
-use crate::mail_ui::MailAction;
+use crate::mail::dialog::{MailDialog, MailDialogAction};
+use crate::mail::ui::MailAction;
 use crate::secrets;
 use crate::vault::rel_to_string;
 use eframe::egui;
@@ -21,7 +21,7 @@ impl ShaleApp {
             Some(v) if self.mail.vault.as_ref().is_none_or(|i| i.generation != v.generation || i.root != v.root) => {
                 let files = v.files.iter().take(50_000).map(|f| (crate::vault::rel_to_string(&f.rel), f.kind == crate::vault::FileKind::Note)).collect();
                 let people = crate::import::people::addresses(v, &self.vdata.settings.people_dir);
-                self.mail.vault = Some(crate::mail_compose::VaultInfo { root: v.root.clone(), generation: v.generation, files, people });
+                self.mail.vault = Some(crate::mail::compose_ui::VaultInfo { root: v.root.clone(), generation: v.generation, files, people });
             }
             None => self.mail.vault = None,
             _ => {}
@@ -32,7 +32,7 @@ impl ShaleApp {
     }
 
     /// Open a mail the picker found (NAV-025): the mail view, its folder, the message.
-    pub fn open_mail_hit(&mut self, msg: crate::mail_db::MessageSummary) {
+    pub fn open_mail_hit(&mut self, msg: crate::mail::db::MessageSummary) {
         self.show_view(View::Mail, false);
         self.mail.show_hit(&self.cfg, msg);
     }
@@ -170,7 +170,7 @@ impl ShaleApp {
 
     /// Hand the stored `.eml` files to the Import dialog, as a dropped `.eml` would arrive
     /// (MAIL-070). Reading happens in a job; nothing is written to the vault here.
-    pub fn import_mails(&mut self, msgs: Vec<crate::mail_db::MessageSummary>) {
+    pub fn import_mails(&mut self, msgs: Vec<crate::mail::db::MessageSummary>) {
         let Some(store) = self.mail.ready_store() else { return };
         if self.vault.is_none() {
             self.toast("Open a vault first to import into it.");
@@ -183,7 +183,7 @@ impl ShaleApp {
                 let mut notes = Vec::new();
                 let mut skipped = 0;
                 for m in &msgs {
-                    if m.state != crate::mail_db::STATE_FULL || m.path.is_empty() {
+                    if m.state != crate::mail::db::STATE_FULL || m.path.is_empty() {
                         skipped += 1;
                         continue;
                     }

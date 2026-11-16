@@ -147,7 +147,7 @@ fn keep_copy(trash: &std::path::Path, parts: &[Event]) -> Result<PathBuf, String
     let uid = parts.first().map(|e| e.uid.as_str()).unwrap_or("");
     let safe: String = uid.chars().take(80).map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     let safe = if safe.trim_matches('_').is_empty() { "event".to_string() } else { safe };
-    let dir = trash.join(crate::mail_store::today_string());
+    let dir = trash.join(crate::mail::store::today_string());
     let fail = |e: std::io::Error| format!("a copy of the event could not be kept in {} ({e}), so nothing was deleted", dir.display());
     crate::fsutil::ensure_private_dir(trash).map_err(fail)?;
     crate::fsutil::ensure_private_dir(&dir).map_err(fail)?;

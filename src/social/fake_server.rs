@@ -207,7 +207,7 @@ pub fn pretend_browser(port: u16, person: Person) -> (crate::opener::BrowserGuar
                     l.problems.lock().unwrap().push(format!("not the server's sign-in page: {url}"));
                 }
                 if person == Person::Allows {
-                    let (status, _, body) = crate::oauth_fake_tests::http_get(&url);
+                    let (status, _, body) = crate::mail::oauth_fake_tests::http_get(&url);
                     match body.split_once("<code>").and_then(|(_, r)| r.split_once("</code>")) {
                         Some((code, _)) if status == 200 => *l.code.lock().unwrap() = Some(code.to_string()),
                         _ => l.problems.lock().unwrap().push(format!("the sign-in page answered {status}: {body}")),

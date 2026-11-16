@@ -48,7 +48,7 @@ const SOCIAL: &str = "shale-social";
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MailSecret {
     Password,
-    /// The OAuth2 refresh token (`oauth.rs`).
+    /// The OAuth2 refresh token (`mail/oauth.rs`).
     RefreshToken,
     /// The OAuth2 client secret, for providers that want one from desktop apps.
     ClientSecret,

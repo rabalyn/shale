@@ -5,15 +5,15 @@
 //! index, so a steady frame costs no query. The reading pane shows plain text only.
 
 use crate::app::muted;
-use crate::compose::Kind;
 use crate::config::Config;
-use crate::imap_sync::{FolderKind, NO_PASSWORD};
 use crate::keys::{Action as KeyAction, Keymap, Scope};
+use crate::mail::compose::Kind;
+use crate::mail::compose_ui::{LocalOut, LocalView};
+use crate::mail::db::{MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
 use crate::mail::display_name;
-use crate::mail_compose::{LocalOut, LocalView};
-use crate::mail_db::{MessageSummary, STATE_FULL, STATE_HEADER, STATE_TOO_LARGE};
-use crate::mail_keys::MenuTarget;
-use crate::mail_ui::*;
+use crate::mail::imap_sync::{FolderKind, NO_PASSWORD};
+use crate::mail::keys::MenuTarget;
+use crate::mail::ui::*;
 use crate::theme;
 use eframe::egui::{self, Align, Color32, CornerRadius, FontId, Key, Layout, Modifiers, Pos2, Rect, RichText, Sense, Stroke, Ui, UiBuilder, Vec2};
 
@@ -82,7 +82,7 @@ impl MailView {
             body.min.y = strip.max.y;
         }
         // a mail that waits in the outbox can still be taken back (MAIL-134)
-        if let Some((_, _, text)) = crate::mail_compose::queued_text(&self.local_items, crate::calendar::time::now()) {
+        if let Some((_, _, text)) = crate::mail::compose_ui::queued_text(&self.local_items, crate::calendar::time::now()) {
             let strip = Rect::from_min_size(body.min, Vec2::new(body.width(), 30.0));
             let mut undo = false;
             let undo_tip = self.tip("Take the mail back into the editor", KeyAction::MailUndoSend);
@@ -424,7 +424,7 @@ impl MailView {
             let first = errs.first().cloned().unwrap_or_default();
             let short = if first.contains(NO_PASSWORD) {
                 "No password for the account".to_string()
-            } else if crate::oauth::needs_sign_in(&first) {
+            } else if crate::mail::oauth::needs_sign_in(&first) {
                 "sign-in expired: open the account settings and sign in again".to_string()
             } else {
                 first.chars().take(90).collect()
@@ -527,7 +527,7 @@ impl MailView {
                             ui.add_space(depth as f32 * 12.0);
                             let r = ui.selectable_label(self.local_view.is_none() && self.folder == Some(f.id), text);
                             rec(rects, format!("mail:folder:{}", f.id), &r);
-                            let kind = crate::imap_sync::kind_of(f);
+                            let kind = crate::mail::imap_sync::kind_of(f);
                             let tip = match kind {
                                 FolderKind::Trash | FolderKind::Junk => "Never synced automatically: the list is loaded when you open it, and a message when you open that.",
                                 FolderKind::All if !f.sync_enabled => "Never synced automatically (it would copy every message again): loaded when you open it.",
@@ -544,7 +544,7 @@ impl MailView {
                     // what is being written and what waits to be sent (MAIL-151)
                     let drafts = self.local_drafts.iter().filter(|d| d.account == a.id).count();
                     let out = self.outbox_count(&a.id);
-                    let attention = crate::mail_compose::attention(&self.local_items, &a.id);
+                    let attention = crate::mail::compose_ui::attention(&self.local_items, &a.id);
                     for (key, label, view, n, warn) in [("drafts", "Drafts", LocalView::Drafts(a.id.clone()), drafts, false), ("outbox", "Outbox", LocalView::Outbox(a.id.clone()), out, attention)] {
                         let text = if n > 0 { format!("{label}  ({n})") } else { label.to_string() };
                         let rt = if warn {
@@ -627,7 +627,7 @@ impl MailView {
                     });
                 }
                 None => {
-                    if row.as_ref().is_some_and(|f| !f.sync_enabled && crate::imap_sync::kind_of(f) == FolderKind::Normal) {
+                    if row.as_ref().is_some_and(|f| !f.sync_enabled && crate::mail::imap_sync::kind_of(f) == FolderKind::Normal) {
                         ui.horizontal(|ui| {
                             ui.add_space(10.0);
                             ui.label(muted("This folder is not synced; tick it in the account settings to fetch it.").size(12.0));
@@ -797,7 +797,7 @@ impl MailView {
         }
         let mut subject = if m.subject.trim().is_empty() { "(no subject)".to_string() } else { m.subject.clone() };
         if self.results.is_some() && self.search_all {
-            subject = format!("[{}] {subject}", crate::mail_ui::folder_label_of(&m.folder));
+            subject = format!("[{}] {subject}", crate::mail::ui::folder_label_of(&m.folder));
         }
         let mut right_edge = rect.max.x - 10.0;
         if m.has_attachments {
@@ -961,7 +961,7 @@ impl MailView {
                     ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
                     if e.contains(NO_PASSWORD) {
                         ui.label(muted("Type the password above, or save one in the account settings."));
-                    } else if crate::oauth::needs_sign_in(e) {
+                    } else if crate::mail::oauth::needs_sign_in(e) {
                         ui.label(muted("Open the account settings and sign in again."));
                     }
                 }
@@ -1116,7 +1116,7 @@ impl MailView {
                     ui.label(muted("No folder of that name."));
                 }
                 for (k, f) in cands.iter().enumerate() {
-                    let label = crate::imap_client::decode_mutf7(&f.name);
+                    let label = crate::mail::imap_client::decode_mutf7(&f.name);
                     let r = ui.selectable_label(k == at, label);
                     rec(rects, format!("mail:mover-item:{k}"), &r);
                     if r.clicked() {
@@ -1191,8 +1191,8 @@ struct StripOut {
 
 /// The status strip above a signed or encrypted mail (MAIL-174): built from GnuPG's verdicts only, in its own widget and colours,
 /// never from anything in the mail. Each line is a framed label; a body text can not be drawn in here.
-fn security_strip(ui: &mut Ui, sec: &crate::mail_crypto::Security, rects: &mut Vec<(String, Rect)>, out: &mut StripOut) {
-    use crate::mail_crypto::{Encryption, Level};
+fn security_strip(ui: &mut Ui, sec: &crate::mail::crypto::Security, rects: &mut Vec<(String, Rect)>, out: &mut StripOut) {
+    use crate::mail::crypto::{Encryption, Level};
     if sec.is_empty() {
         return;
     }
