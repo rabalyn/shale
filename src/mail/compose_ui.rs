@@ -895,82 +895,84 @@ impl MailView {
             ui.label(muted("That mail is not in the outbox any more."));
             return;
         };
-        let key = (it.account.clone(), it.id.clone());
-        ui.label(RichText::new(if it.subject.trim().is_empty() { "(no subject)" } else { it.subject.as_str() }).size(19.0).color(theme::TEXT_STRONG));
-        ui.label(muted(format!("From {}  ·  to {}", it.from, it.recipients.join(", "))));
-        ui.add_space(6.0);
-        match it.state {
-            State::Queued => {
-                ui.label(RichText::new(format!("Waiting: {}.", wait_text(it.send_after, now))).color(theme::TEXT));
-                let r = self.key_button(ui, "Undo send", KeyAction::MailUndoSend);
-                rec(rects, "mail:outbox:undo", &r);
-                if r.on_hover_text(self.tip("Take the mail back into the editor", KeyAction::MailUndoSend)).clicked() {
-                    out.undo = Some(key.clone());
+        egui::ScrollArea::vertical().id_salt("mail-outbox-detail").auto_shrink([false, false]).show(ui, |ui| {
+            let key = (it.account.clone(), it.id.clone());
+            ui.label(RichText::new(if it.subject.trim().is_empty() { "(no subject)" } else { it.subject.as_str() }).size(19.0).color(theme::TEXT_STRONG));
+            ui.label(muted(format!("From {}  ·  to {}", it.from, it.recipients.join(", "))));
+            ui.add_space(6.0);
+            match it.state {
+                State::Queued => {
+                    ui.label(RichText::new(format!("Waiting: {}.", wait_text(it.send_after, now))).color(theme::TEXT));
+                    let r = self.key_button(ui, "Undo send", KeyAction::MailUndoSend);
+                    rec(rects, "mail:outbox:undo", &r);
+                    if r.on_hover_text(self.tip("Take the mail back into the editor", KeyAction::MailUndoSend)).clicked() {
+                        out.undo = Some(key.clone());
+                    }
                 }
-            }
-            State::Sending => {
-                ui.label(RichText::new("Sending…").color(theme::TEXT));
-            }
-            State::Sent => {
-                ui.label(RichText::new("Sent.").color(theme::TEXT));
-                let r = self.key_button(ui, "Dismiss", KeyAction::MailDelete);
-                rec(rects, "mail:outbox:discard", &r);
-                if r.on_hover_text(self.tip("Move this record to the mail trash folder; the mail itself is in Sent", KeyAction::MailDelete)).clicked() {
-                    out.discard = Some(key.clone());
+                State::Sending => {
+                    ui.label(RichText::new("Sending…").color(theme::TEXT));
                 }
-            }
-            State::Failed => {
-                ui.label(RichText::new("This mail was not sent.").size(15.0).color(theme::LINK_MISSING));
-                ui.label(muted(it.error.clone().unwrap_or_default()));
-                ui.horizontal(|ui| {
-                    for (k, label, slot, action, tip) in [
-                        ("mail:outbox:retry", "Retry", 0, KeyAction::MailRetry, self.tip("Send the mail again", KeyAction::MailRetry)),
-                        ("mail:outbox:edit", "Edit", 1, KeyAction::MailEdit, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
-                        ("mail:outbox:discard", "Discard", 2, KeyAction::MailDelete, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
-                    ] {
-                        let r = self.key_button(ui, label, action);
-                        rec(rects, k, &r);
-                        if r.on_hover_text(tip).clicked() {
-                            match slot {
-                                0 => out.retry = Some(key.clone()),
-                                1 => out.edit = Some(key.clone()),
-                                _ => out.discard = Some(key.clone()),
+                State::Sent => {
+                    ui.label(RichText::new("Sent.").color(theme::TEXT));
+                    let r = self.key_button(ui, "Dismiss", KeyAction::MailDelete);
+                    rec(rects, "mail:outbox:discard", &r);
+                    if r.on_hover_text(self.tip("Move this record to the mail trash folder; the mail itself is in Sent", KeyAction::MailDelete)).clicked() {
+                        out.discard = Some(key.clone());
+                    }
+                }
+                State::Failed => {
+                    ui.label(RichText::new("This mail was not sent.").size(15.0).color(theme::LINK_MISSING));
+                    ui.label(muted(it.error.clone().unwrap_or_default()));
+                    ui.horizontal_wrapped(|ui| {
+                        for (k, label, slot, action, tip) in [
+                            ("mail:outbox:retry", "Retry", 0, KeyAction::MailRetry, self.tip("Send the mail again", KeyAction::MailRetry)),
+                            ("mail:outbox:edit", "Edit", 1, KeyAction::MailEdit, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
+                            ("mail:outbox:discard", "Discard", 2, KeyAction::MailDelete, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
+                        ] {
+                            let r = self.key_button(ui, label, action);
+                            rec(rects, k, &r);
+                            if r.on_hover_text(tip).clicked() {
+                                match slot {
+                                    0 => out.retry = Some(key.clone()),
+                                    1 => out.edit = Some(key.clone()),
+                                    _ => out.discard = Some(key.clone()),
+                                }
                             }
                         }
-                    }
-                });
-            }
-            State::Unsure => {
-                ui.label(RichText::new("This mail may have been sent.").size(15.0).color(theme::LINK_MISSING));
-                ui.label(RichText::new("Shale does not know whether the server received it: the connection ended before the server answered. Check your Sent folder (on the server or in another program). If it is there, discard this entry; if it is not, send it again.").color(theme::TEXT));
-                if let Some(e) = &it.error {
-                    ui.label(muted(e.clone()).size(12.0));
+                    });
                 }
-                ui.horizontal(|ui| {
-                    for (k, label, slot, action, tip) in [
-                        ("mail:outbox:send-again", "Send again", 0, KeyAction::MailRetry, self.tip("Send the mail again, after you looked in Sent", KeyAction::MailRetry)),
-                        ("mail:outbox:edit", "Edit", 1, KeyAction::MailEdit, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
-                        ("mail:outbox:discard", "Discard", 2, KeyAction::MailDelete, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
-                    ] {
-                        let r = self.key_button(ui, label, action);
-                        rec(rects, k, &r);
-                        if r.on_hover_text(tip).clicked() {
-                            match slot {
-                                0 => out.send_again = Some(key.clone()),
-                                1 => out.edit = Some(key.clone()),
-                                _ => out.discard = Some(key.clone()),
+                State::Unsure => {
+                    ui.label(RichText::new("This mail may have been sent.").size(15.0).color(theme::LINK_MISSING));
+                    ui.label(RichText::new("Shale does not know whether the server received it: the connection ended before the server answered. Check your Sent folder (on the server or in another program). If it is there, discard this entry; if it is not, send it again.").color(theme::TEXT));
+                    if let Some(e) = &it.error {
+                        ui.label(muted(e.clone()).size(12.0));
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        for (k, label, slot, action, tip) in [
+                            ("mail:outbox:send-again", "Send again", 0, KeyAction::MailRetry, self.tip("Send the mail again, after you looked in Sent", KeyAction::MailRetry)),
+                            ("mail:outbox:edit", "Edit", 1, KeyAction::MailEdit, self.tip("Take the mail back into the editor", KeyAction::MailEdit)),
+                            ("mail:outbox:discard", "Discard", 2, KeyAction::MailDelete, self.tip("Remove this mail from the outbox", KeyAction::MailDelete)),
+                        ] {
+                            let r = self.key_button(ui, label, action);
+                            rec(rects, k, &r);
+                            if r.on_hover_text(tip).clicked() {
+                                match slot {
+                                    0 => out.send_again = Some(key.clone()),
+                                    1 => out.edit = Some(key.clone()),
+                                    _ => out.discard = Some(key.clone()),
+                                }
                             }
                         }
-                    }
-                });
+                    });
+                }
+                State::Undone => {
+                    ui.label(muted("Taken back."));
+                }
             }
-            State::Undone => {
-                ui.label(muted("Taken back."));
-            }
-        }
-        ui.add_space(6.0);
-        ui.separator();
-        ui.label(muted(it.draft.body.clone()).size(13.0));
+            ui.add_space(6.0);
+            ui.separator();
+            ui.label(muted(it.draft.body.clone()).size(13.0));
+        });
     }
 
     fn account_title(&self, id: &str) -> String {

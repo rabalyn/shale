@@ -42,6 +42,13 @@ fn rec(rects: &mut Vec<(String, Rect)>, key: impl Into<String>, r: &egui::Respon
     rects.push((key.into(), r.rect));
 }
 
+/// The least width of the folder pane, the message list and the message (MAIL-225).
+const FOLDERS_MIN_W: f32 = 170.0;
+const LIST_MIN_W: f32 = 220.0;
+const DETAIL_MIN_W: f32 = 280.0;
+/// Below this width of the view the panes scroll sideways.
+const PANES_MIN_W: f32 = FOLDERS_MIN_W + LIST_MIN_W + DETAIL_MIN_W;
+
 impl MailView {
     /// Draw the view into the free space of `ui`. `modal_open`: a dialog has the keyboard.
     pub fn show(&mut self, ui: &mut Ui, cfg: &Config, keys: &mut Keymap, modal_open: bool) -> Vec<MailAction> {
@@ -470,22 +477,48 @@ impl MailView {
     // ------------------------------------------------------------ the panes
 
     fn panes(&mut self, ui: &mut Ui, cfg: &Config, body: Rect, actions: &mut Vec<MailAction>, rects: &mut Vec<(String, Rect)>) {
-        let w = body.width();
-        let left_w = (w * 0.19).clamp(170.0, 260.0);
-        let mid_w = (w * 0.36).clamp(300.0, 540.0).min(w - left_w - 200.0).max(220.0);
-        let left = Rect::from_min_size(body.min, Vec2::new(left_w, body.height()));
-        let mid = Rect::from_min_size(Pos2::new(left.max.x, body.min.y), Vec2::new(mid_w, body.height()));
-        let right = Rect::from_min_max(Pos2::new(mid.max.x, body.min.y), body.max);
+        rects.push(("mail:body".into(), body));
+        if body.width() >= PANES_MIN_W {
+            self.kbd.scrolled_to = None;
+            self.pane_strip(ui, cfg, body, body, actions, rects);
+        } else {
+            // narrower than the three minimums: no pane gives way, the strip of panes scrolls sideways (MAIL-225)
+            ui.scope_builder(UiBuilder::new().max_rect(body), |ui| {
+                egui::ScrollArea::horizontal().id_salt("mail-panes").auto_shrink([false, false]).show(ui, |ui| {
+                    let (strip, _) = ui.allocate_exact_size(Vec2::new(PANES_MIN_W, ui.available_height()), Sense::hover());
+                    self.pane_strip(ui, cfg, body, strip, actions, rects);
+                });
+            });
+        }
+        ui.painter().line_segment([body.left_top(), body.right_top()], Stroke::new(1.0, theme::BORDER));
+    }
+
+    /// The three panes side by side in `strip` (as wide as the body, or `PANES_MIN_W` when that is
+    /// wider); `body` is the part of it that is on screen.
+    fn pane_strip(&mut self, ui: &mut Ui, cfg: &Config, body: Rect, strip: Rect, actions: &mut Vec<MailAction>, rects: &mut Vec<(String, Rect)>) {
+        let w = strip.width();
+        let left_w = (w * 0.19).clamp(FOLDERS_MIN_W, 260.0);
+        let mid_w = (w * 0.36).clamp(300.0, 540.0).min(w - left_w - DETAIL_MIN_W).max(LIST_MIN_W);
+        let left = Rect::from_min_size(strip.min, Vec2::new(left_w, strip.height()));
+        let mid = Rect::from_min_size(Pos2::new(left.max.x, strip.min.y), Vec2::new(mid_w, strip.height()));
+        let right = Rect::from_min_max(Pos2::new(mid.max.x, strip.min.y), strip.max);
+        let panes = [("folders", Pane::Folders, left), ("list", Pane::List, mid), ("message", Pane::Message, right)];
         ui.painter().rect_filled(left, 0, theme::BG_SECONDARY);
         ui.painter().line_segment([Pos2::new(left.max.x, left.min.y), Pos2::new(left.max.x, left.max.y)], Stroke::new(1.0, theme::BORDER));
         ui.painter().line_segment([Pos2::new(mid.max.x, mid.min.y), Pos2::new(mid.max.x, mid.max.y)], Stroke::new(1.0, theme::BORDER));
-        ui.painter().line_segment([body.left_top(), body.right_top()], Stroke::new(1.0, theme::BORDER));
         // a click into a pane gives it the keyboard (choosing a folder then hands it on to the list)
-        if let Some(at) = ui.input(|i| i.pointer.primary_pressed().then(|| i.pointer.press_origin()).flatten()).filter(|_| !self.dialog) {
-            for (pane, r) in [(Pane::Folders, left), (Pane::List, mid), (Pane::Message, right)] {
+        if let Some(at) = ui.input(|i| i.pointer.primary_pressed().then(|| i.pointer.press_origin()).flatten()).filter(|at| !self.dialog && body.contains(*at)) {
+            for (_, pane, r) in panes {
                 if r.contains(at) {
                     self.pane = pane;
                 }
+            }
+        }
+        // the pane that has the keyboard is brought into view when the keyboard moves (MAIL-225)
+        if strip.width() > body.width() && self.kbd.scrolled_to != Some(self.pane) {
+            self.kbd.scrolled_to = Some(self.pane);
+            if let Some((_, _, r)) = panes.iter().find(|p| p.1 == self.pane) {
+                ui.scroll_to_rect(*r, None);
             }
         }
         ui.scope_builder(UiBuilder::new().max_rect(left.shrink2(Vec2::new(8.0, 6.0))), |ui| {
@@ -500,7 +533,7 @@ impl MailView {
             ui.set_clip_rect(right.intersect(ui.clip_rect()));
             self.reading_pane(ui, cfg, actions, rects);
         });
-        for (key, pane, r) in [("folders", Pane::Folders, left), ("list", Pane::List, mid), ("message", Pane::Message, right)] {
+        for (key, pane, r) in panes {
             rects.push((format!("mail:pane:{key}"), r));
             // the pane that has the keyboard is framed in the accent colour (MAIL-062)
             if self.pane == pane && !self.away {

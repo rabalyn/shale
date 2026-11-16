@@ -209,8 +209,9 @@ Text editing keys and vim keys are fixed.
 
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
 keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
-the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). Letters work
-only while no text field has the keyboard. Every key can be changed in Settings → Keybindings
+the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). In a window
+too narrow for the three panes they scroll sideways, and the pane with the keyboard is brought into
+view. Letters work only while no text field has the keyboard. Every key can be changed in Settings → Keybindings
 (scope Mail view); Enter and Esc are fixed.
 
 | Keys | Action |
