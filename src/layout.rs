@@ -718,7 +718,7 @@ impl ShaleApp {
         // the formatting toolbar sits above the text and stays when the note scrolls (EDIT-026)
         if self.cfg.format_toolbar && !self.tabbar.tabs[active].reading {
             if let Some(doc) = self.notes.get(&rel).filter(|d| d.unreadable.is_none()) {
-                let palettes = crate::format_bar::Palettes { highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours };
+                let palettes = crate::format_bar::Palettes { highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours, scale: self.cfg.toolbar_size.clamp(80, 200) as f32 / 100.0 };
                 ui.add_space(4.0);
                 self.tabbar.tabs[active].editor.toolbar(ui, &doc.text, &palettes);
                 ui.add_space(2.0);
