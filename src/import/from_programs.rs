@@ -22,37 +22,13 @@ pub fn text_of(data: &[u8]) -> String {
     }
 }
 
-fn file_uri_path(uri: &str) -> Option<PathBuf> {
-    let rest = uri.trim().strip_prefix("file://")?;
-    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
-    if !rest.starts_with('/') {
-        return None;
-    }
-    let mut bytes = Vec::new();
-    let b = rest.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            let h = |c: u8| (c as char).to_digit(16);
-            if let (Some(x), Some(y)) = (h(b[i + 1]), h(b[i + 2])) {
-                bytes.push((x * 16 + y) as u8);
-                i += 3;
-                continue;
-            }
-        }
-        bytes.push(b[i]);
-        i += 1;
-    }
-    Some(PathBuf::from(String::from_utf8_lossy(&bytes).into_owned()))
-}
-
 /// The files of a `text/uri-list` and what could not be taken: one URI per line (CRLF or LF),
 /// empty lines and `#` comments skipped.
 fn uri_list(text: &str) -> (Vec<PathBuf>, Vec<String>) {
     let mut paths = Vec::new();
     let mut notes = Vec::new();
     for l in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
-        match file_uri_path(l) {
+        match media::file_uri_path(l) {
             Some(p) => paths.push(p),
             None if is_mail_link(l) => notes.push(MAIL_LINK_HELP.to_string()),
             None => notes.push(format!("“{l}” is not a file on this computer.")),
@@ -102,10 +78,66 @@ fn preview(d: &[u8]) -> String {
 /// for each. Uses the best one that holds something: files, a whole message, calendar data, a
 /// link to a message in Thunderbird (looked up in Thunderbird's copy on this computer), text.
 pub fn items_from_parts(parts: &[(String, Vec<u8>)]) -> (Vec<Item>, Vec<String>) {
-    items_from_parts_in(parts, &crate::import::tb_store::default_roots())
+    items_from_parts_in(parts, &crate::import::tb_store::default_roots(), &crate::social::download)
 }
 
-fn items_from_parts_in(parts: &[(String, Vec<u8>)], tb_roots: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
+/// Fetches a web address: the bytes and the content type, if the server named one.
+type Download<'a> = &'a dyn Fn(&str) -> Result<(Vec<u8>, Option<String>), String>;
+
+/// The file name an address ends in (`https://x.org/a/b%20c.png?s=1` → `b c.png`), if it has one.
+fn url_file_name(url: &str) -> Option<String> {
+    let path = url.split(['?', '#']).next()?;
+    let (_, path) = path.split_once("://")?.1.split_once('/')?;
+    let name = media::percent_decode(path.trim_end_matches('/').rsplit('/').next()?);
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// The first http(s) address of text, one per line.
+fn web_urls(text: &str) -> Vec<String> {
+    text.lines().map(str::trim).filter(|l| l.starts_with("http://") || l.starts_with("https://")).map(String::from).collect()
+}
+
+/// A media item for a drag out of a web browser (IMP-032): a picture it handed over, else a picture,
+/// PDF or audio file downloaded from the address it offered. None if there is no such thing; an
+/// Err if the download failed.
+fn media_from_parts(parts: &[(String, Vec<u8>)], download: Download) -> Option<Result<Item, String>> {
+    let text_of_kind = |want: &str| parts.iter().find(|(m, _)| norm(m) == want).map(|(_, d)| text_of(d)).unwrap_or_default();
+    let promised = text_of_kind("application/x-moz-file-promise-dest-filename").trim().trim_end_matches('\0').to_string();
+    let promised = (!promised.is_empty()).then_some(promised);
+    let promise_url = web_urls(&text_of_kind("application/x-moz-file-promise-url"));
+    let mut urls = promise_url.clone();
+    urls.extend(web_urls(&text_of_kind("text/uri-list")));
+    urls.extend(web_urls(text_of_kind("text/x-moz-url").lines().next().unwrap_or("")));
+    let first_url = urls.first().cloned();
+    let named = |url: Option<&str>| promised.clone().or_else(|| url.and_then(url_file_name));
+    // a picture the browser handed over
+    if let Some((mime, data)) = parts.iter().find(|(m, d)| (norm(m).starts_with("image/") || norm(m).starts_with("video/")) && !d.is_empty()) {
+        let video = norm(mime).starts_with("video/");
+        let ext = media::ext_for_mime(mime).unwrap_or(if video { "mp4" } else { "png" });
+        let name = named(first_url.as_deref()).filter(|n| media::media_kind(Path::new(n)).is_some()).unwrap_or_else(|| format!("{}.{ext}", if video { "video" } else { "image" }));
+        let kind = media::media_kind(Path::new(&name))?;
+        return Some(Ok(media_item(kind, name, MediaData::Bytes(data.clone()))));
+    }
+    // an address of a file
+    let offered_image = parts.iter().any(|(m, _)| norm(m).starts_with("image/") || norm(m).starts_with("video/"));
+    let url = urls.iter().find(|u| url_file_name(u).is_some_and(|n| media::media_kind(Path::new(&n)).is_some()) || offered_image || promise_url.contains(u))?;
+    let (data, content_type) = match download(url) {
+        Ok(r) => r,
+        Err(e) => return Some(Err(format!("Could not download “{url}”: {e}"))),
+    };
+    let mut name = named(Some(url)).unwrap_or_else(|| "image".to_string());
+    if media::media_kind(Path::new(&name)).is_none() {
+        let Some(ext) = content_type.as_deref().and_then(media::ext_for_mime) else {
+            return Some(Err(format!("“{url}” is not a picture, PDF, audio or video file{}.", content_type.map(|c| format!(" (the server says {c})")).unwrap_or_default())));
+        };
+        name = format!("{name}.{ext}");
+    }
+    let kind = media::media_kind(Path::new(&name))?;
+    Some(Ok(media_item(kind, name, MediaData::Bytes(data))))
+}
+
+fn items_from_parts_in(parts: &[(String, Vec<u8>)], tb_roots: &[PathBuf], download: Download) -> (Vec<Item>, Vec<String>) {
     let get = |want: &str| parts.iter().find(|(m, d)| norm(m) == want && !text_of(d).trim().is_empty()).map(|(_, d)| d.as_slice());
     let mut notes: Vec<String> = Vec::new();
     // real files, a whole message, calendar data
@@ -163,15 +195,23 @@ fn items_from_parts_in(parts: &[(String, Vec<u8>)], tb_roots: &[PathBuf]) -> (Ve
             Err(why) => (vec![], vec![format!("Thunderbird handed over only a link to the message, and {why}. You can also drag the message to a folder first (or use “Save As…”) and drop the .eml file.")]),
         };
     }
+    // a picture, PDF, audio or video file out of a web browser
+    let mut download_error = None;
+    match media_from_parts(parts, download) {
+        Some(Ok(item)) => return (vec![item], vec![]),
+        Some(Err(e)) => download_error = Some(e),
+        None => {}
+    }
     // plain text
     for k in ["text/plain;charset=utf-8", "utf8_string", "text/plain", "string"] {
         if let Some(d) = get(k) {
             let (items, n) = items_from_drop("text/plain", d);
             if !items.is_empty() {
-                return (items, n);
+                return (items, n.into_iter().chain(download_error).collect());
             }
         }
     }
+    notes.extend(download_error);
     notes.push("Nothing usable came with the drop. What the other program sent:".into());
     for (m, d) in parts {
         notes.push(format!("  {m}: {}", preview(d)));
@@ -230,6 +270,10 @@ fn looks_like_mail(s: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn no_download(_: &str) -> Result<(Vec<u8>, Option<String>), String> {
+        panic!("no download expected")
+    }
+
     // spec: IMP-003
     #[test]
     fn dropped_text_becomes_a_note() {
@@ -240,7 +284,7 @@ mod tests {
         let (items, _) = items_from_drop("text/plain", "Beamer tauschen\nim Hörsaal".as_bytes());
         assert_eq!(items.len(), 1);
         let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, people_dir: "Adressbuch".into() };
-        let (made, errs) = import(&mut v, &items, &o);
+        let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 1);
         let s = std::fs::read_to_string(v.abs(&made[0])).unwrap();
@@ -270,7 +314,7 @@ mod tests {
             ("application/x-moz-file-promise-dest-filename".to_string(), b"Neubau Hoersaal B.eml".to_vec()),
             ("text/plain".to_string(), link.clone().into_bytes()),
         ];
-        let (items, notes) = items_from_parts_in(&parts, std::slice::from_ref(&root));
+        let (items, notes) = items_from_parts_in(&parts, std::slice::from_ref(&root), &no_download);
         assert_eq!(items.len(), 1, "{notes:?}");
         assert!(items[0].title.ends_with("Stand 3"), "{}", items[0].title);
         match &items[0].source {
@@ -283,13 +327,13 @@ mod tests {
         }
         // not found: explained, no text note made of the link
         let parts = vec![("text/plain".to_string(), b"imap-message://ada@imap.x/INBOX#5".to_vec())];
-        let (items, notes) = items_from_parts_in(&parts, std::slice::from_ref(&root));
+        let (items, notes) = items_from_parts_in(&parts, std::slice::from_ref(&root), &no_download);
         assert!(items.is_empty() && notes[0].contains("only a link"), "{notes:?}");
         // nothing at all: shows what was sent
-        let (items, notes) = items_from_parts_in(&[("text/uri-list".into(), vec![]), ("STRING".into(), vec![])], &[]);
+        let (items, notes) = items_from_parts_in(&[("text/uri-list".into(), vec![]), ("STRING".into(), vec![])], &[], &no_download);
         assert!(items.is_empty() && notes.iter().any(|n| n.contains("text/uri-list: (empty)")), "{notes:?}");
         // the normal cases still work
-        let (items, _) = items_from_parts_in(&[("text/uri-list".into(), vec![]), ("text/plain;charset=utf-8".into(), b"Notiz".to_vec())], &[]);
+        let (items, _) = items_from_parts_in(&[("text/uri-list".into(), vec![]), ("text/plain;charset=utf-8".into(), b"Notiz".to_vec())], &[], &no_download);
         assert_eq!(items[0].kind(), "Text");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -345,8 +389,94 @@ mod tests {
         for p in ["/tmp/plain.md", "/tmp/a b/ü ö#1%.md", "/tmp/colon:semi;amp&.md", "/tmp/日本語.md"] {
             let uri = file_uri(Path::new(p));
             assert!(uri.is_ascii() && !uri.contains(' ') && uri.starts_with("file:///"), "{uri}");
-            assert_eq!(file_uri_path(&uri), Some(PathBuf::from(p)), "{uri}");
+            assert_eq!(media::file_uri_path(&uri), Some(PathBuf::from(p)), "{uri}");
         }
         assert_eq!(file_uri(Path::new("/a b")), "file:///a%20b");
+    }
+
+    fn media_of(item: &Item) -> (String, Vec<u8>) {
+        match &item.source {
+            Source::Media { name, data: MediaData::Bytes(b), .. } => (name.clone(), b.clone()),
+            _ => panic!("not a media item: {:?}", item.source),
+        }
+    }
+
+    // spec: IMP-032
+    #[test]
+    fn a_picture_dragged_out_of_a_browser_is_a_media_item() {
+        let utf16 = |s: &str| s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect::<Vec<u8>>();
+        // the browser hands over the picture itself: used as it is, named by the offered file name
+        let parts = vec![
+            ("text/uri-list".to_string(), b"https://example.org/img/cat%20photo.jpg?w=1\r\n".to_vec()),
+            ("application/x-moz-file-promise-dest-filename".to_string(), b"cat.jpg".to_vec()),
+            ("text/plain".to_string(), b"https://example.org/img/cat%20photo.jpg".to_vec()),
+            ("image/png".to_string(), b"PNGDATA".to_vec()),
+        ];
+        let (items, notes) = items_from_parts_in(&parts, &[], &no_download);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!((items[0].kind().to_string(), media_of(&items[0])), ("Image".into(), ("cat.jpg".into(), b"PNGDATA".to_vec())));
+        // no file name offered: the last part of the address, else image.<ext>
+        let parts = vec![("text/uri-list".to_string(), b"https://example.org/img/cat%20photo.jpg?w=1".to_vec()), ("image/jpeg".to_string(), b"J".to_vec())];
+        assert_eq!(media_of(&items_from_parts_in(&parts, &[], &no_download).0[0]).0, "cat photo.jpg");
+        let parts = vec![("image/webp".to_string(), b"W".to_vec()), ("text/plain".to_string(), b"hello".to_vec())];
+        assert_eq!(media_of(&items_from_parts_in(&parts, &[], &no_download).0[0]).0, "image.webp");
+        // only the address: downloaded (the file promise of Firefox, the address of text/uri-list, the first line of text/x-moz-url)
+        let fetched = std::cell::RefCell::new(Vec::new());
+        let download = |u: &str| -> Result<(Vec<u8>, Option<String>), String> {
+            fetched.borrow_mut().push(u.to_string());
+            Ok((b"BYTES".to_vec(), Some("image/gif".into())))
+        };
+        let parts = vec![("application/x-moz-file-promise-url".to_string(), b"https://cdn.example.org/get?id=7".to_vec()), ("text/plain".to_string(), b"https://cdn.example.org/get?id=7".to_vec())];
+        let (items, notes) = items_from_parts_in(&parts, &[], &download);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(media_of(&items[0]), ("get.gif".into(), b"BYTES".to_vec()), "the content type gives the extension");
+        let parts = vec![("text/uri-list".to_string(), b"https://example.org/files/plan.pdf\r\n".to_vec())];
+        let (items, _) = items_from_parts_in(&parts, &[], &download);
+        assert_eq!((items[0].kind().to_string(), media_of(&items[0]).0), ("PDF".into(), "plan.pdf".into()), "a PDF address needs no image kind");
+        let parts = vec![("text/x-moz-url".to_string(), utf16("https://example.org/a/song.mp3\nA song"))];
+        assert_eq!(items_from_parts_in(&parts, &[], &download).0[0].kind(), "Audio");
+        let parts = vec![("video/webm".to_string(), b"V".to_vec())];
+        let (items, _) = items_from_parts_in(&parts, &[], &no_download);
+        assert_eq!((items[0].kind().to_string(), media_of(&items[0]).0), ("Video".into(), "video.webm".into()));
+        let parts = vec![("text/uri-list".to_string(), b"https://example.org/clips/a.MP4".to_vec())];
+        assert_eq!(items_from_parts_in(&parts, &[], &download).0[0].kind(), "Video");
+        assert_eq!(*fetched.borrow(), vec!["https://cdn.example.org/get?id=7", "https://example.org/files/plan.pdf", "https://example.org/a/song.mp3", "https://example.org/clips/a.MP4"]);
+        // a link to an ordinary page is no download: a text note as before
+        let parts = vec![("text/uri-list".to_string(), b"https://example.org/page\r\n".to_vec()), ("text/plain".to_string(), b"https://example.org/page".to_vec())];
+        let (items, _) = items_from_parts_in(&parts, &[], &no_download);
+        assert_eq!(items[0].kind(), "Text");
+    }
+
+    // spec: IMP-032
+    #[test]
+    fn a_failed_download_is_reported_and_the_drop_falls_back_to_text() {
+        let parts = vec![("text/uri-list".to_string(), b"https://example.org/a/cat.png\r\n".to_vec()), ("text/plain".to_string(), b"https://example.org/a/cat.png".to_vec())];
+        let (items, notes) = items_from_parts_in(&parts, &[], &|_| Err("the server answered with status 404".into()));
+        assert_eq!(items[0].kind(), "Text", "the address as a text note, like before");
+        assert!(notes.iter().any(|n| n.contains("Could not download “https://example.org/a/cat.png”") && n.contains("404")), "{notes:?}");
+        // an address that is no picture although a picture was offered
+        let parts = vec![("text/uri-list".to_string(), b"https://example.org/view".to_vec()), ("image/png".to_string(), vec![])];
+        let (items, notes) = items_from_parts_in(&parts, &[], &|_| Ok((b"<html>".to_vec(), Some("text/html".into()))));
+        assert!(items.is_empty() && notes.iter().any(|n| n.contains("is not a picture, PDF, audio or video file") && n.contains("text/html")), "{notes:?}");
+    }
+
+    // spec: IMP-032
+    #[test]
+    fn a_picture_comes_from_a_real_address() {
+        // the real downloader against a tiny local server
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let (mut c, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 2048];
+            let _ = c.read(&mut buf);
+            c.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 4\r\nConnection: close\r\n\r\nPNG!").unwrap();
+        });
+        let url = format!("http://127.0.0.1:{port}/pics/dot");
+        let parts = vec![("application/x-moz-file-promise-url".to_string(), url.clone().into_bytes())];
+        let (items, notes) = items_from_parts_in(&parts, &[], &crate::social::download);
+        server.join().unwrap();
+        assert_eq!(media_of(&items[0]), ("dot.png".into(), b"PNG!".to_vec()), "{notes:?}");
     }
 }

@@ -255,6 +255,8 @@ pub enum Action {
     OpenVault(PathBuf),
     /// Look at the vault folder again (e.g. after a file was copied in).
     Rescan,
+    /// show a message (the app's toast)
+    Toast(String),
     /// open a web or mail address (checked, see `opener`)
     OpenUrl(String),
     /// make a contact note in the people folder (from `[[p Name`)
@@ -1750,6 +1752,7 @@ impl ShaleApp {
                 Action::OpenVault(p) => self.open_vault(&p),
                 Action::Export(rel) => self.open_export_dialog(&rel),
                 Action::Rescan => self.rescan(),
+                Action::Toast(m) => self.toast(m),
                 Action::OpenUrl(url) => {
                     if let Err(e) = crate::opener::open_url(&url) {
                         self.toast(e);
@@ -2253,6 +2256,10 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
         EditorAction::OpenLink { target, heading, new_tab } => app_actions.push(Action::OpenLink { target, heading, from: Some(from.to_path_buf()), new_tab }),
         EditorAction::OpenUrl(url) => app_actions.push(Action::OpenUrl(url)),
         EditorAction::FilesChanged => app_actions.push(Action::Rescan),
+        EditorAction::Pasted(msg) => {
+            app_actions.push(Action::Rescan);
+            app_actions.push(Action::Toast(msg));
+        }
         EditorAction::CreatePerson(name) => app_actions.push(Action::CreatePerson(name)),
     }
 }

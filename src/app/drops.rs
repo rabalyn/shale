@@ -203,14 +203,14 @@ impl ShaleApp {
                 let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
                 let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.vdata.settings.people_dir.clone() };
                 let Some(v) = &mut self.vault else { return true };
-                let (made, errors) = import::import(v, &d.items, &opts);
-                if made.is_empty() {
+                let import::Imported { notes: made, files, errors } = import::import(v, &d.items, &opts);
+                if made.is_empty() && files.is_empty() {
                     d.error = Some(if errors.is_empty() { "Nothing was imported.".into() } else { errors.join("\n") });
                     return false;
                 }
                 if d.link_on {
                     if let Some(note) = d.link_into.clone() {
-                        self.add_links(&note, &made);
+                        self.add_links(&note, &made, &files);
                     }
                 }
                 // remember the folder and tags for next time
@@ -229,22 +229,34 @@ impl ShaleApp {
                 }
                 if social_only {
                     self.vdata.state.last_social_folder = rel_to_string(&folder);
-                } else {
+                } else if !made.is_empty() {
                     self.vdata.state.last_import_folder = rel_to_string(&folder);
                 }
-                for t in tags.iter().rev() {
+                for t in tags.iter().rev().filter(|_| !made.is_empty()) {
                     self.vdata.state.recent_tags.retain(|o| !o.eq_ignore_ascii_case(t));
                     self.vdata.state.recent_tags.insert(0, t.clone());
                 }
                 self.vdata.state.recent_tags.truncate(30);
                 self.save_config();
                 let place = if folder.as_os_str().is_empty() { "the vault".to_string() } else { format!("“{}”", rel_to_string(&folder)) };
-                self.toast(if made.len() == 1 { format!("Imported 1 note into {place}") } else { format!("Imported {} notes into {place}", made.len()) });
+                let note_text = match made.len() {
+                    0 => String::new(),
+                    1 => format!("Imported 1 note into {place}"),
+                    n => format!("Imported {n} notes into {place}"),
+                };
+                let file_text = match files.len() {
+                    0 => String::new(),
+                    1 => "Saved 1 file to the media folder".to_string(),
+                    n => format!("Saved {n} files to the media folder"),
+                };
+                self.toast([note_text, file_text].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(". "));
                 for e in errors {
                     self.toast(e);
                 }
-                self.tree.expanded.insert(folder.clone());
-                let mut p = folder.parent();
+                // the folder of the notes, or the folder of the first file
+                let shown = if made.is_empty() { files[0].parent().unwrap_or(Path::new("")).to_path_buf() } else { folder.clone() };
+                self.tree.expanded.insert(shown.clone());
+                let mut p = shown.parent();
                 while let Some(x) = p {
                     if !x.as_os_str().is_empty() {
                         self.tree.expanded.insert(x.to_path_buf());
@@ -252,15 +264,17 @@ impl ShaleApp {
                     p = x.parent();
                 }
                 self.actions.push(Action::Rescan);
-                self.actions.push(Action::Open { rel: made[0].clone(), new_tab: false });
+                self.actions.push(Action::Open { rel: made.first().or(files.first()).cloned().unwrap_or_default(), new_tab: false });
                 true
             }
         }
     }
 
-    /// Add "- [[note]]" lines for the new notes at the end of `note` (also when it is open).
-    fn add_links(&mut self, note: &Path, made: &[PathBuf]) {
-        let lines: String = made.iter().map(|m| format!("- [[{}]]\n", crate::markdown::strip_md_ext(&m.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))).collect();
+    /// Add "- [[note]]" lines for the new notes and "- ![[file]]" / "- [[file]]" lines for the saved
+    /// media files at the end of `note` (also when it is open).
+    fn add_links(&mut self, note: &Path, made: &[PathBuf], files: &[PathBuf]) {
+        let mut lines: String = made.iter().map(|m| format!("- [[{}]]\n", crate::markdown::strip_md_ext(&m.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))).collect();
+        lines.extend(files.iter().map(|f| format!("- {}\n", crate::media::link_for(f))));
         let join = |text: &str| -> String {
             let mut t = text.to_string();
             if !t.is_empty() && !t.ends_with('\n') {

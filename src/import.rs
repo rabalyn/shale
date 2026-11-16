@@ -43,6 +43,13 @@ pub enum Source {
         original: Option<(String, Vec<u8>)>,
     },
     Files(Vec<PathBuf>),
+    /// an image, PDF or audio file, saved as a file in the media folder, no note (IMP-031);
+    /// `name`: its file name as it came
+    Media {
+        kind: media::Kind,
+        name: String,
+        data: MediaData,
+    },
     /// text dropped from another program (Wayland, IMP-011)
     #[cfg(target_os = "linux")]
     Text(String),
@@ -52,6 +59,15 @@ pub enum Source {
         network: &'static str,
         replies: bool,
     },
+}
+
+/// Where the bytes of a media item come from.
+#[derive(Clone, Debug)]
+pub enum MediaData {
+    /// a file on this computer
+    Path(PathBuf),
+    /// bytes a program handed over or that were downloaded
+    Bytes(Vec<u8>),
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +90,7 @@ impl Item {
             Source::Email { .. } => "E-mail".into(),
             Source::Event { .. } => "Event".into(),
             Source::Files(_) => "Files".into(),
+            Source::Media { kind, .. } => kind.label().into(),
             #[cfg(target_os = "linux")]
             Source::Text(_) => "Text".into(),
             Source::Social { saved, .. } if saved.thread.len() > 1 => format!("Thread ({} posts)", saved.thread.len()).into(),
@@ -88,6 +105,7 @@ impl Item {
             Source::Email { mail, .. } => format!("{}\n{}\n{}", mail.subject, mail.text, mail.attachments.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(" ")),
             Source::Event { event, .. } => format!("{}\n{}\n{}", event.summary, event.location, event.description),
             Source::Files(p) => p.iter().map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(" "),
+            Source::Media { name, .. } => name.clone(),
             #[cfg(target_os = "linux")]
             Source::Text(t) => t.clone(),
             Source::Social { saved, .. } => {
@@ -108,6 +126,10 @@ impl Item {
                 format!("{} · {calendar}", crate::calendar::ui::when_text(&occ_of(event)))
             }
             Source::Files(p) => p.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(", "),
+            Source::Media { name, data, .. } => match data {
+                MediaData::Path(p) => format!("{name} · from {}", p.parent().map(|d| d.display().to_string()).unwrap_or_default()),
+                MediaData::Bytes(b) => format!("{name} · {}", dialog::size_text(b.len())),
+            },
             #[cfg(target_os = "linux")]
             Source::Text(s) => format!("{} characters of text", s.chars().count()),
             Source::Social { saved, network, .. } => {
@@ -233,6 +255,11 @@ fn files_item(paths: Vec<PathBuf>) -> Item {
     Item { source: Source::Files(paths), include: true, title: safe_title(&title), att_on: vec![], already: None, people: vec![] }
 }
 
+/// An item for a picture, PDF or audio file; its title is the file name the file is saved under.
+pub fn media_item(kind: media::Kind, name: String, data: MediaData) -> Item {
+    Item { source: Source::Media { kind, name: name.clone(), data }, include: true, title: name, att_on: vec![], already: None, people: vec![] }
+}
+
 fn calendar_items(ics: &[u8], calendar: &str, file_name: &str) -> Vec<Item> {
     let text = String::from_utf8_lossy(ics);
     let events = ics::parse_ics(&text);
@@ -275,7 +302,10 @@ pub fn items_from_paths(paths: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
                 }
                 Err(e) => notes.push(format!("Could not read “{name}”: {e}")),
             },
-            _ if p.is_file() => plain.push(p.clone()),
+            _ if p.is_file() => match media::media_kind(p) {
+                Some(kind) => items.push(media_item(kind, name, MediaData::Path(p.clone()))),
+                None => plain.push(p.clone()),
+            },
             _ => notes.push(format!("“{name}” was not found.")),
         }
     }
@@ -459,13 +489,54 @@ pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&
     s
 }
 
-/// Make the notes (and copy attachments / files into the media folder). Returns the new notes
-/// and messages about anything that failed.
-pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> (Vec<PathBuf>, Vec<String>) {
+/// What an import made.
+#[derive(Debug, Default)]
+pub struct Imported {
+    /// the new notes
+    pub notes: Vec<PathBuf>,
+    /// the files that were saved as they are in the media folder (IMP-031)
+    pub files: Vec<PathBuf>,
+    /// messages about anything that failed
+    pub errors: Vec<String>,
+}
+
+/// The file name a media item is saved under: the title, with the extension of the original name.
+fn media_file_name(title: &str, name: &str) -> String {
+    let title = title.trim();
+    if title.is_empty() {
+        return name.to_string();
+    }
+    let ext = Path::new(name).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    let has = Path::new(title).extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case(&ext));
+    if ext.is_empty() || has {
+        title.to_string()
+    } else {
+        format!("{title}.{ext}")
+    }
+}
+
+/// Make the notes (and copy attachments / files into the media folder); pictures, PDFs and audio
+/// files become files there and no note.
+pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
     let mut made = Vec::new();
+    let mut files = Vec::new();
     let mut errors = Vec::new();
     let root = vault.root.clone();
     for it in items.iter().filter(|i| i.include) {
+        if let Source::Media { name, data, .. } = &it.source {
+            let file = media_file_name(&it.title, name);
+            let date = today_ymd();
+            let saved = match data {
+                MediaData::Path(p) if file == *name => media::import_file(&root, p, date),
+                MediaData::Path(p) => crate::fsutil::read(p).and_then(|b| media::save_bytes(&root, &file, &b, date)),
+                MediaData::Bytes(b) => media::save_bytes(&root, &file, b, date),
+            };
+            match saved {
+                Ok(rel) => files.push(rel),
+                Err(e) => errors.push(format!("could not save “{file}”: {e}")),
+            }
+            continue;
+        }
         let title = if safe_title(&it.title).is_empty() { "Imported".to_string() } else { safe_title(&it.title) };
         // contact notes (made when needed) and links to them
         let mut people: Vec<String> = Vec::new();
@@ -517,6 +588,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> (Vec<PathBuf>, 
                     s.push_str(&format!("\n# {title}\n\n{}\n", text.trim()));
                     s
                 }
+                Source::Media { .. } => unreachable!("media items are saved above"),
                 Source::Social { saved, replies, .. } => {
                     // only the ticked files are saved; the others stay links to their web address
                     let date = crate::social::note::media_date(saved);
@@ -543,7 +615,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> (Vec<PathBuf>, 
             Err(e) => errors.push(format!("“{title}”: {e}")),
         }
     }
-    (made, errors)
+    Imported { notes: made, files, errors }
 }
 
 #[cfg(test)]
@@ -580,7 +652,7 @@ mod tests {
         assert_eq!(items[0].title, "2026-11-13 Neubau Hörsaal B – Pläne Stand 3");
         assert_eq!(items[0].att_on, vec![false, true, true], "the tiny inline logo is left out");
         let o = Options { folder: PathBuf::from("Projekte/Neubau B"), tags: parse_tags("neubau-b, plaene"), keep_original: true, people_dir: "Adressbuch".into() };
-        let (made, errs) = import(&mut v, &items, &o);
+        let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made, vec![PathBuf::from("Projekte/Neubau B/2026-11-13 Neubau Hörsaal B – Pläne Stand 3.md")]);
         let text = std::fs::read_to_string(v.abs(&made[0])).unwrap();
@@ -599,7 +671,7 @@ mod tests {
         again[0].title = "second".into();
         find_people(&v, "Adressbuch", &mut again);
         assert_eq!(again[0].people.iter().map(|p| (p.name.as_str(), p.on)).collect::<Vec<_>>(), vec![("Hans Müller", true), ("Medientechnik", false), ("Bauamt", false)]);
-        let (made2, errs) = import(&mut v, &again, &o);
+        let Imported { notes: made2, errors: errs, .. } = import(&mut v, &again, &o);
         assert!(errs.is_empty(), "{errs:?}");
         let text2 = std::fs::read_to_string(v.abs(&made2[0])).unwrap();
         assert!(text2.contains("- **People:** [[Hans Müller]]\n"), "{text2}");
@@ -635,10 +707,14 @@ mod tests {
         // a file next to it
         let src = v.root.join("..").join(format!("shale-import-plan-{}.pdf", std::process::id()));
         std::fs::write(&src, b"%PDF-1.4").unwrap();
-        let (more, _) = items_from_paths(std::slice::from_ref(&src));
+        let (pdf, _) = items_from_paths(std::slice::from_ref(&src));
+        assert_eq!(pdf[0].kind(), "PDF", "a PDF is a file of its own (IMP-031), not part of a Files note");
+        let txt = v.root.join("..").join(format!("shale-import-plan-{}.txt", std::process::id()));
+        std::fs::write(&txt, b"plan").unwrap();
+        let (more, _) = items_from_paths(std::slice::from_ref(&txt));
         items.extend(more);
         let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, people_dir: "Adressbuch".into() };
-        let (made, errs) = import(&mut v, &items, &o);
+        let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 2);
         let ev = std::fs::read_to_string(v.abs(&made[0])).unwrap();
@@ -646,8 +722,9 @@ mod tests {
         assert!(ev.contains("- **Where:** Raum 1.12\n") && ev.contains("- **Attendees:** A, B\n") && ev.contains("## Notes\n\nAgenda: Medientechnik"));
         assert!(ev.contains("- Calendar file: [[z_media/2026/12/261202_x.ics]]"), "{ev}");
         let f = std::fs::read_to_string(v.abs(&made[1])).unwrap();
-        assert!(f.contains("type: files") && f.contains(".pdf]]"), "{f}");
+        assert!(f.contains("type: files") && f.contains(".txt]]"), "{f}");
         let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&txt);
     }
 
     // spec: SOC-011, SOC-012
@@ -670,7 +747,7 @@ mod tests {
         let w = social_item(broken, "Mastodon", false).warning().unwrap();
         assert!(w.contains("offline") && w.contains("1 picture or video could not be downloaded"), "{w}");
         let o = Options { folder: PathBuf::from("Social"), tags: parse_tags("social, reading"), keep_original: false, people_dir: "Adressbuch".into() };
-        let (made, errs) = import(&mut v, &items, &o);
+        let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 2);
         let thread = std::fs::read_to_string(v.abs(&made[0])).unwrap();
@@ -691,7 +768,7 @@ mod tests {
             *replies = true;
         }
         with.title = "with replies".into();
-        let (m3, errs) = import(&mut v, &[with], &o);
+        let Imported { notes: m3, errors: errs, .. } = import(&mut v, &[with], &o);
         assert!(errs.is_empty(), "{errs:?}");
         let t3 = std::fs::read_to_string(v.abs(&m3[0])).unwrap();
         assert!(t3.contains("replies: 3\n") && t3.contains("## Replies") && t3.contains("Plain files, yes") && t3.contains(">> **[Grace Hopper"), "{t3}");
@@ -703,5 +780,55 @@ mod tests {
         assert_eq!(again[1].already.as_deref(), Some(made[0].as_path()), "a post that is part of a saved thread");
         assert!(!again[0].include && !again[1].include);
         assert!(again[2].already.is_none() && again[2].include);
+    }
+
+    // spec: IMP-031
+    #[test]
+    fn pictures_pdfs_and_audio_are_items_of_their_own_and_saved_as_files_without_a_note() {
+        let mut v = temp_vault("media");
+        let src = v.root.join("..").join(format!("shale-import-mediasrc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&src);
+        std::fs::create_dir_all(&src).unwrap();
+        for (n, d) in [("Cat.PNG", &b"png"[..]), ("anim.gif", b"gif"), ("plan.pdf", b"%PDF"), ("song.flac", b"fl"), ("clip.MKV", b"mk"), ("notes.txt", b"t1"), ("more.dat", b"t2")] {
+            std::fs::write(src.join(n), d).unwrap();
+        }
+        let paths: Vec<PathBuf> = ["Cat.PNG", "anim.gif", "plan.pdf", "song.flac", "clip.MKV", "notes.txt", "more.dat"].iter().map(|n| src.join(n)).collect();
+        let (mut items, notes) = items_from_paths(&paths);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(items.iter().map(|i| i.kind().to_string()).collect::<Vec<_>>(), vec!["Image", "Image", "PDF", "Audio", "Video", "Files"], "the other files stay one note");
+        assert_eq!(items[0].title, "Cat.PNG", "the file name is the title");
+        assert_eq!(media::media_kind(Path::new("x.MP3")), Some(media::Kind::Audio));
+        assert_eq!(media::media_kind(Path::new("x.txt")), None);
+        // a renamed title keeps the extension; a file of the vault is linked where it is
+        items[0].title = "A cat".into();
+        items[1].title = "anim.gif".into();
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["x".into()], keep_original: false, people_dir: "Adressbuch".into() };
+        items.truncate(5);
+        let Imported { notes, files, errors } = import(&mut v, &items, &o);
+        assert!(errors.is_empty() && notes.is_empty(), "no note for media: {errors:?} {notes:?}");
+        let names: Vec<String> = files.iter().map(|f| rel_to_string(f)).collect();
+        let (y, m, d) = media::local_date();
+        let stamp = format!("z_media/{y:04}/{m:02}/{:02}{m:02}{d:02}_", y.rem_euclid(100));
+        assert_eq!(names, vec![format!("{stamp}A cat.PNG"), format!("{stamp}anim.gif"), format!("{stamp}plan.pdf"), format!("{stamp}song.flac"), format!("{stamp}clip.MKV")]);
+        assert_eq!(std::fs::read(v.abs(&files[0])).unwrap(), b"png");
+        assert!(!v.root.join("Projekte").exists(), "the notes folder is not made for files");
+        // bytes (a download) are saved under their name; unticked items are left out
+        let mut bytes = media_item(media::Kind::Image, "web.jpg".into(), MediaData::Bytes(b"jpg".to_vec()));
+        let mut off = media_item(media::Kind::Audio, "off.mp3".into(), MediaData::Bytes(b"x".to_vec()));
+        off.include = false;
+        let Imported { files, .. } = import(&mut v, &[bytes.clone(), off], &o);
+        assert_eq!(files.len(), 1);
+        assert_eq!(std::fs::read(v.abs(&files[0])).unwrap(), b"jpg");
+        assert_eq!(bytes.kind(), "Image");
+        assert!(bytes.detail().contains("web.jpg") && bytes.detail().contains("KB"));
+        // a name typed without the extension gets it
+        bytes.title = "holiday".into();
+        let Imported { files, .. } = import(&mut v, &[bytes], &o);
+        assert!(rel_to_string(&files[0]).ends_with("_holiday.jpg"), "{files:?}");
+        // media next to a note item: the note is made, the file saved
+        let mixed = vec![event_item(Event { uid: "u".into(), summary: "Termin".into(), start: 0, end: 3600, ..Default::default() }, "Work".into(), None), media_item(media::Kind::Pdf, "a.pdf".into(), MediaData::Bytes(b"%PDF".to_vec()))];
+        let r = import(&mut v, &mixed, &o);
+        assert_eq!((r.notes.len(), r.files.len()), (1, 1));
+        let _ = std::fs::remove_dir_all(&src);
     }
 }

@@ -88,7 +88,8 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
   (<https://git-lfs.com>; `apt install git-lfs`, `brew install git-lfs`; Git for Windows brings it). Without it Shale
   says so in the settings and everything else works; a vault that already stores media with LFS is not synced on a
   computer without git-lfs, so no media file lands in the history as a plain file.
-- **Drag and drop**: files dropped on the window are imported everywhere; mail messages, links and
+- **Drag and drop**: files dropped on the window are imported everywhere (pictures, PDFs, audio and
+  video as files in the media folder, pasting a picture into the editor does the same); mail messages, links and
   text dragged out of Thunderbird need Wayland.
 - **Time zones**: calendar events in a named zone (`Europe/Berlin`) use the system's zoneinfo
   files; Windows has none, so Shale brings its own time zone database there.
