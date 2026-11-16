@@ -75,7 +75,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Export notes and drawings to PDF (paper size, margins, fonts and more in a dialog; tables become
   real grids with the header repeated across pages, or raw text lines with "Export plain text";
   embedded pictures, drawings, PDFs, the first frame of a video and the cover of a sound are
-  drawn as thumbnails with their link as the caption below), insert a
+  drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
+  the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
+  player card), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put

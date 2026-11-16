@@ -413,16 +413,75 @@ impl<'a> Writer<'a> {
         out
     }
 
-    /// A picture at the left margin, with its caption below it (PDF-004) when there is one.
-    fn image(&mut self, img: image::RgbaImage, max_h: f32, caption: Option<&str>) {
-        let (w, h) = (img.width() as f32, img.height() as f32);
-        let k = (self.cw() / (w * 0.75)).min(max_h / (h * 0.75)).min(1.0) * 0.75;
-        let (dw, dh) = (w * k, h * k);
-        let idx = self.doc.add_image(pdf_image(&img));
-        self.need(dh + 6.0 + self.caption_room(caption));
+    /// What an embed that is `editor_size` big in the editor is in the PDF (PDF-005).
+    fn page_size(&self, editor_size: Vec2) -> Vec2 {
+        crate::embed_size::to_page(editor_size, self.cw(), (self.h - 2.0 * self.m) * 0.8)
+    }
+
+    /// A picture `size` big (PDF points) at the left margin, with its caption below it (PDF-004).
+    fn image(&mut self, img: &image::RgbaImage, size: Vec2, caption: Option<&str>) {
+        let idx = self.doc.add_image(pdf_image(img));
+        self.need(size.y + 6.0 + self.caption_room(caption));
         let (x, y) = (self.m, self.y);
-        self.p().image(idx, x, y, dw, dh);
-        self.y += dh;
+        self.p().image(idx, x, y, size.x, size.y);
+        self.y += size.y;
+        self.picture_end(caption);
+    }
+
+    /// The card of a sound or video (MEDIA-001) as the editor shows it: the same parts at the same
+    /// places (`media::widget::geometry`), as big in proportion to the text, with the cover or
+    /// first frame as the artwork, the name, the empty progress bar and the length.
+    fn player_card(&mut self, abs: &Path, asked: Option<f32>, caption: Option<&str>) {
+        use crate::media::widget;
+        let video = crate::media::is_video(abs);
+        let look = if video { crate::media::video::look(abs, crate::media::ffmpeg::locate).look } else { crate::media::cover::look(abs) };
+        let card = widget::card_size(abs, crate::embed_size::REF_COLUMN, asked);
+        let size = self.page_size(card);
+        let k = size.x / card.x;
+        let geo = widget::geometry(abs, card.x);
+        self.need(size.y + 6.0 + self.caption_room(caption));
+        let (ox, oy) = (self.m, self.y);
+        let at = |r: egui::Rect| [ox + r.left() * k, oy + r.top() * k, r.width() * k, r.height() * k];
+        let name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let ink = Rgba(30, 30, 30, 255);
+        let grey = Rgba(105, 105, 110, 255);
+        let page = self.page;
+        let cover = look.cover.as_ref().and_then(rgba_of).map(|img| (self.doc.add_image(pdf_image(&img)), img.width() as f32, img.height() as f32));
+        let p = self.doc.page(page);
+        p.rect(ox, oy, size.x, size.y, Some(Rgba(246, 246, 248, 255)), Some((Rgba(200, 200, 205, 255), 0.8)));
+        let [ax, ay, aw, ah] = at(geo.art);
+        match cover {
+            Some((idx, iw, ih)) => {
+                p.rect(ax, ay, aw, ah, Some(Rgba(20, 20, 20, 255)), None);
+                let f = (aw / iw).min(ah / ih);
+                p.image(idx, ax + (aw - iw * f) / 2.0, ay + (ah - ih * f) / 2.0, iw * f, ih * f);
+            }
+            None => {
+                p.rect(ax, ay, aw, ah, Some(Rgba(226, 226, 230, 255)), None);
+                let size = 11.0 * k;
+                let shown = crate::caption::fit(&name, aw - 12.0 * k, |t| crate::pdf::write::text_width(FontKind::Sans, size, t));
+                p.text(TextStyle::plain(FontKind::Sans, size, grey), ax + 6.0 * k, ay + ah - 8.0 * k, &shown);
+            }
+        }
+        // the round play button over the artwork
+        let (cx, cy, r) = (ax + aw / 2.0, ay + ah / 2.0, widget::BUTTON_RADIUS * k);
+        p.circle(cx, cy, r, Some(Rgba(50, 50, 55, 255)), None);
+        p.path(&[[cx - 0.35 * r, cy - 0.5 * r], [cx - 0.35 * r, cy + 0.5 * r], [cx + 0.55 * r, cy]], true, Some(Rgba(255, 255, 255, 255)), None);
+        // name, progress bar with its times, volume
+        let x0 = ox + geo.text_x * k;
+        let width = size.x - (geo.text_x + 12.0) * k;
+        let top = oy + geo.top * k;
+        let name_size = 14.0 * k;
+        let shown = crate::caption::fit(&name, width, |t| crate::pdf::write::text_width(FontKind::Sans, name_size, t));
+        p.text(TextStyle::plain(FontKind::Sans, name_size, ink), x0, top + 10.0 * k + name_size, &shown);
+        p.rect(x0, top + 54.0 * k, width, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
+        let time = 11.0 * k;
+        let total = look.duration.map(crate::media::player::clock).unwrap_or_else(|| "–:––".into());
+        p.text(TextStyle::plain(FontKind::Sans, time, grey), x0, top + 66.0 * k + time, "0:00");
+        let tw = crate::pdf::write::text_width(FontKind::Sans, time, &total);
+        p.text(TextStyle::plain(FontKind::Sans, time, grey), x0 + width - tw, top + 66.0 * k + time, &total);
+        p.rect(x0, top + 90.0 * k, (width / k * 0.4).clamp(60.0, 120.0) * k, 4.0 * k, Some(Rgba(205, 205, 210, 255)), None);
+        self.y += size.y;
         self.picture_end(caption);
     }
 
@@ -450,11 +509,10 @@ fn rgba_of(img: &egui::ColorImage) -> Option<image::RgbaImage> {
     image::RgbaImage::from_raw(img.size[0] as u32, img.size[1] as u32, bytes)
 }
 
-/// The thumbnail of a video (its first frame, MEDIA-009) or sound (its cover, MEDIA-003), if it
-/// has one: without ffmpeg or a cover the link stays text.
-fn media_thumbnail(abs: &Path) -> Option<image::RgbaImage> {
-    let look = if crate::media::is_video(abs) { crate::media::video::look(abs, crate::media::ffmpeg::locate).look } else { crate::media::cover::look(abs) };
-    look.cover.as_ref().and_then(rgba_of)
+/// A picture's size as the editor takes it: pictures over 2048 points are scaled down to it.
+fn natural_size(w: u32, h: u32) -> Vec2 {
+    let k = (2048.0 / w.max(h) as f32).min(1.0);
+    Vec2::new(w as f32 * k, h as f32 * k)
 }
 
 /// Export a note (its current text) to PDF bytes.
@@ -536,20 +594,20 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
             if let (Some(t), true) = (target, opts.embeds) {
                 let abs = vault.abs(&t);
                 let kind = vault.file(&t).map(|f| f.kind).unwrap_or(FileKind::Other);
-                let max_h = (w.h - 2.0 * w.m) * 0.8;
-                // the link under the thumbnail (PDF-004)
+                // the link under the thumbnail (PDF-004); the size the editor gives it (PDF-005)
                 let caption = crate::caption::text(&line_links[0]);
+                let asked = line_links[0].embed_width();
+                let ref_w = crate::embed_size::REF_COLUMN;
                 if kind == FileKind::Drawing {
                     if let Ok(scene) = Scene::read_file(&abs) {
                         if let Some(b) = scene.bounds() {
                             let b = b.expand(20.0);
-                            let k = (cw / b.width()).min(max_h / b.height()).min(0.75);
-                            let dh = b.height() * k;
-                            w.need(dh + 6.0 + w.caption_room(Some(&caption)));
-                            let (x, y) = (x0 + (cw - b.width() * k) / 2.0, w.y);
+                            let size = w.page_size(crate::embed_size::drawing(Vec2::new(b.width(), b.height()), ref_w));
+                            w.need(size.y + 6.0 + w.caption_room(Some(&caption)));
+                            let (x, y) = (x0, w.y);
                             let pics = add_pictures(&mut w.doc, &crate::drawing::pictures::images(&scene, vault, &t));
-                            draw_scene(w.p(), &scene, [x, y, b.width() * k, dh], false, None, &pics);
-                            w.y += dh;
+                            draw_scene(w.p(), &scene, [x, y, size.x, size.y], false, None, &pics);
+                            w.y += size.y;
                             w.picture_end(Some(&caption));
                         }
                     }
@@ -557,26 +615,24 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                     continue;
                 } else if crate::media::is_image(&t) {
                     if let Ok(img) = image::open(&abs) {
-                        w.image(img.to_rgba8(), max_h, Some(&caption));
+                        let img = img.to_rgba8();
+                        let size = w.page_size(crate::embed_size::picture(natural_size(img.width(), img.height()), asked, ref_w));
+                        w.image(&img, size, Some(&caption));
                         i += 1;
                         continue;
                     }
-                } else if crate::media::is_media(&t) {
-                    if let Some(img) = media_thumbnail(&abs) {
-                        w.image(img, max_h, Some(&caption));
-                        i += 1;
-                        continue;
-                    }
+                } else if crate::media::is_media(&t) && abs.is_file() {
+                    w.player_card(&abs, asked, Some(&caption));
+                    i += 1;
+                    continue;
                 } else if crate::pdf::view::is_pdf(&t) {
                     if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdf::view::render_pages(d, 40, 2.0)) {
                         let last = r.images.len().saturating_sub(1);
-                        for (n, img) in r.images.into_iter().enumerate() {
-                            let [iw, ih] = img.size;
-                            let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-                            if let Some(rgba) = image::RgbaImage::from_raw(iw as u32, ih as u32, bytes) {
-                                // PDF pages were rendered at 2× — show them at their real size
-                                let scaled = image::imageops::resize(&rgba, (iw / 2).max(1) as u32 * 4 / 3, (ih / 2).max(1) as u32 * 4 / 3, image::imageops::FilterType::Triangle);
-                                w.image(scaled, max_h, (n == last).then_some(caption.as_str()));
+                        for (n, img) in r.images.iter().enumerate() {
+                            if let Some(rgba) = rgba_of(img) {
+                                // the editor shows its pages rendered at 1.5; these are at 2.0
+                                let size = w.page_size(crate::embed_size::pdf_page(Vec2::new(img.size[0] as f32, img.size[1] as f32) * 0.75, ref_w));
+                                w.image(&rgba, size, (n == last).then_some(caption.as_str()));
                             }
                         }
                         i += 1;
@@ -946,16 +1002,101 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// The size (width, height) of every image drawn on the pages of `bytes`, in points.
+    fn image_sizes(bytes: &[u8]) -> Vec<(f32, f32)> {
+        let c = contents(bytes);
+        c.lines()
+            .filter(|l| l.starts_with("q ") && l.contains(" cm /Im"))
+            .map(|l| {
+                let n: Vec<f32> = l.split_whitespace().skip(1).take(2).filter_map(|v| v.parse().ok()).collect();
+                let h: f32 = l.split_whitespace().nth(4).unwrap().parse().unwrap();
+                (n[0], h)
+            })
+            .collect()
+    }
+
+    /// The text width of the pages of a default note export.
+    fn text_width() -> f32 {
+        let o = ExportOptions::for_note();
+        o.page_size()[0] - 2.0 * o.margin_mm * MM
+    }
+
+    fn sized(v: &Vault, link: &str) -> Vec<(f32, f32)> {
+        image_sizes(&export_text(v, &format!("{link}\n")).0)
+    }
+
+    fn near(got: f32, want: f32, what: &str) {
+        assert!((got - want).abs() <= want * 0.02 + 0.6, "{what}: {got} should be {want}");
+    }
+
+    // spec: PDF-005
+    #[test]
+    fn a_picture_has_the_share_of_the_text_width_it_has_in_the_editor() {
+        let (v, d) = media_vault();
+        let col = crate::embed_size::REF_COLUMN;
+        let cw = text_width();
+        image::RgbaImage::from_pixel(400, 200, image::Rgba([10, 120, 10, 255])).save(d.join("wide.png")).unwrap();
+        image::RgbaImage::from_pixel(1600, 800, image::Rgba([10, 120, 10, 255])).save(d.join("huge.png")).unwrap();
+        image::RgbaImage::from_pixel(100, 1000, image::Rgba([10, 120, 10, 255])).save(d.join("tall.png")).unwrap();
+        let mut v = v;
+        v.rescan();
+        // a width in the link: half the column is half the text, and the picture keeps its shape
+        let s = sized(&v, "![[wide.png|360]]")[0];
+        near(s.0, cw * 0.5, "half the column");
+        near(s.1, s.0 / 2.0, "the shape");
+        near(sized(&v, "![[wide.png|180]]")[0].0, cw * 0.25, "a quarter");
+        // no width: its own size in the editor (400 points of 720)
+        near(sized(&v, "![[wide.png]]")[0].0, cw * 400.0 / col, "natural size");
+        // too big for the column: as wide as the text, as the editor fits it to the column
+        let s = sized(&v, "![[huge.png]]")[0];
+        near(s.0, cw, "fits the text");
+        near(s.1, cw / 2.0, "fit shape");
+        near(sized(&v, "![[wide.png|5000]]")[0].0, cw, "a width beyond the column is the column");
+        // too tall: the editor stops at 420 points (of a 720 column)
+        let s = sized(&v, "![[tall.png]]")[0];
+        near(s.1, 420.0 * cw / col, "the height limit of the editor");
+        near(s.0, s.1 / 10.0, "tall shape");
+        // a narrower page keeps the share: landscape A5 with small margins
+        let o = ExportOptions { paper: Paper::A5, margin_mm: 10.0, ..ExportOptions::for_note() };
+        let bytes = export_note(&v, Path::new("Welcome.md"), "![[wide.png|360]]\n", &o).unwrap();
+        near(image_sizes(&bytes)[0].0, (o.page_size()[0] - 2.0 * o.margin_mm * MM) * 0.5, "half of a smaller page");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-005
+    #[test]
+    fn a_sound_and_a_video_are_drawn_as_big_as_their_players_in_proportion() {
+        let (v, d) = media_vault();
+        let k = text_width() / crate::embed_size::REF_COLUMN;
+        // the cover (64x48) fills the 96-point artwork square of the player
+        let s = sized(&v, "![[tone-cover.mp3]]");
+        assert_eq!(s.len(), 1, "one cover");
+        near(s[0].0, 96.0 * k, "the cover's width in the player");
+        near(s[0].1, 72.0 * k, "and its height");
+        // without a cover the card has no picture, the file's name stays as text
+        let (b, c) = export_text(&v, "![[tone.wav]]\n");
+        assert!(image_sizes(&b).is_empty() && c.contains(&hex("tone.wav")) && c.contains(&hex("0:00")), "a card with the name and the times");
+        // the video: the card is 640 points wide in a roomy editor, the picture 16 points less
+        if crate::media::ffmpeg::locate().is_some() {
+            near(sized(&v, "![[clip.mp4]]")[0].0, 624.0 * k, "the first frame in a 640 card");
+            near(sized(&v, "![[clip.mp4|320]]")[0].0, 304.0 * k, "a video card as wide as its link says");
+            near(sized(&v, "![[clip.mp4|5000]]")[0].0, (crate::embed_size::REF_COLUMN - 16.0) * k, "up to the column");
+        } else {
+            println!("skipping the video: ffmpeg is not installed");
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: PDF-004
     #[test]
-    fn a_sound_with_a_cover_and_a_video_show_their_thumbnail_and_others_keep_their_link_text() {
+    fn a_sound_with_a_cover_and_a_video_show_their_thumbnail_and_a_missing_file_keeps_its_link_text() {
         let (v, d) = media_vault();
         let (_, c) = export_text(&v, "![[tone-cover.mp3]]\n");
         assert!(c.contains("/Im") && c.contains(&hex("tone-cover.mp3")), "the cover is the thumbnail");
-        // a sound without a cover has nothing to show: the link text stays, as before
+        // a sound without a cover is its player card, as in the editor (PDF-005)
         let (_, c) = export_text(&v, "![[tone.wav]]\n");
-        assert!(!c.contains("/Im"), "no thumbnail");
-        assert!(c.contains(&hex("tone.wav")), "the raw link stays");
+        assert!(!c.contains("/Im") && c.contains(&hex("tone.wav")), "a card without a picture");
+        assert!(!c.contains(&hex("![[")), "not the raw link");
         // a picture that cannot be read and a link to a file that is not there stay text too
         std::fs::write(v.abs(Path::new("broken.png")), b"no picture").unwrap();
         let mut v = v;
