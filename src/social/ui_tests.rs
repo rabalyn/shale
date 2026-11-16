@@ -606,7 +606,7 @@ fn check_now_never_jumps_and_reload_from_the_top_does_replace_the_list() {
     w.scroll(700.0);
     let (anchor, y0) = w.top_post();
     w.click("check-now");
-    // the check has come back (its spinner pushes the menu button to the right while it runs)
+    // the check has come back
     w.wait_for("the check did not come back", |w| {
         let t = &w.app.social.timelines[&(home().account, home().feed)];
         t.last_checked.is_some() && !t.checking
@@ -629,6 +629,26 @@ fn check_now_never_jumps_and_reload_from_the_top_does_replace_the_list() {
     assert_eq!(w.posts(&home()).len(), 12);
     let top = w.post_y(&key_of_h("r0"));
     assert!(top > 0.0 && top < 200.0, "back at the top: {top}");
+}
+
+// spec: SOC-041
+#[test]
+fn a_running_check_shows_its_spinner_in_the_check_now_button_and_nothing_moves() {
+    let mut w = W::new("spinner");
+    w.frames(60);
+    let (menu, button) = (w.rect("feed-menu"), w.rect("check-now"));
+    assert!(!w.rects_has("check-now-spinner"));
+    let key = (home().account, home().feed);
+    w.app.social.timelines.get_mut(&key).unwrap().checking = true;
+    w.frames(5);
+    assert!(w.rects_has("check-now-spinner"), "the spinner shows");
+    assert!(button.contains_rect(w.rect("check-now-spinner")), "inside the button");
+    assert_eq!(w.rect("feed-menu"), menu, "the menu button stays put");
+    assert_eq!(w.rect("check-now"), button, "the button keeps its size");
+    w.app.social.timelines.get_mut(&key).unwrap().checking = false;
+    w.frames(5);
+    assert!(!w.rects_has("check-now-spinner"));
+    assert_eq!(w.rect("feed-menu"), menu);
 }
 
 fn key_of_h(id: &str) -> String {

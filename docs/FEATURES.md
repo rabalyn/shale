@@ -422,7 +422,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   appear as a button "12 new posts — show" in a row above the list (or press `.`); the row is
   always there ("Up to date · checked 2 min ago" when nothing waits), so the list never moves
   and nothing is covered, and it does not change until you click. Then the new posts go above and the post you were reading stays
-  exactly where it is, so you can scroll up slowly. **Check now** looks right away;
+  exactly where it is, so you can scroll up slowly. **Check now** looks right away (a spinner shows inside the button while it runs);
   **⋯ → Reload from the top** replaces the list. If more than 200 posts came in on Bluesky,
   **Load more in between** fills the gap.
 - **Search the posts you loaded**: every post a feed brings in is kept in a search index
