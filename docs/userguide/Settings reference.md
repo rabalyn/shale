@@ -33,7 +33,9 @@ You normally never edit these files; the "Where" column says which window change
 | `font_size` | 15.5 (range 12 to 24) | Settings → General → Appearance, "Text size" |
 | `readable_width` | on | Appearance, "Readable line length" |
 | `dark_canvas` | on | Appearance, "Dark drawing canvas" |
-| `inline_images` | on | Appearance, "Show embedded images inside the editor" |
+| `inline_images` | on | Appearance, "Show embedded images and players inside the editor" |
+| `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → General → Appearance, "Play button over the artwork of a sound or video"; global config |
+| `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
 | `line_numbers` | on | Appearance, "Show line numbers in the editor" |
 | `live_preview` | off | Appearance, "Markdown preview in the editor"; the eye icon of the editor |
 | `preview_raw_lines` | 0 (range 0 to 20) | Appearance, "Raw lines around the cursor" |
@@ -123,6 +125,7 @@ system keyring, never in this file):
 | `caches.mail_backups` | 3 (newest mail index backups kept) | same |
 | `caches.broken_days` | forever (damaged mail index copies) | same |
 | `caches.debug_log_mb` | 10 | same |
+| `caches.undo_days` | 30 (undo steps of notes, days) | same |
 
 ## Vault settings (`<vault>/.shale/settings.json`)
 

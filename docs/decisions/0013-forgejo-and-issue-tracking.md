@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (owner decision, 2026-11-15)
 - **Date**: 2026-11-15
-- **Specs**: FORGE-001…FORGE-009, DEV-001…DEV-008, BUILD-013
+- **Specs**: FORGE-001…FORGE-011, DEV-001…DEV-008, BUILD-013
 - **Issue**: Forgejo raba/shale#1
 
 ## Context
@@ -25,6 +25,9 @@
 2. **Forgejo runs the day-to-day CI.** Every push, PR and `v*` tag runs the checks (fmt, clippy
    `-D warnings`, build, tests, packaging, audit) on the Forgejo runner; nothing is published
    from there.
+   *Amended 2026-11-16 ([ADR-0016](0016-local-landing.md), raba/shale#215):* changes land
+   locally (`scripts/land.sh` merges, checks and pushes `main`); the runner checks `main`, tags
+   and the weekly schedule only, no branches or pull requests.
 3. **GitHub builds and distributes releases, and only releases.** Releases are cut in larger,
    timed gaps than the day-to-day work. For a `v*` tag, a separate GitHub workflow builds and
    tests the tagged commit again, writes the checksums and publishes the release (tarball,

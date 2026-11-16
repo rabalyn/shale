@@ -36,6 +36,7 @@ video stays in the history and every clone downloads all of it.
 4. **One player widget** for both, in the reading view, the inline editor embeds (EDIT-006) and
    the markdown preview (EDIT-016). One playback at a time. Settings in the global config:
    `media_volume`, `media_play_button_opacity` (default 0.6), `media_autoplay` (default off).
+   *Note, 2026-11-16, owner: no autoplay, ever; the setting `media_autoplay` was dropped (MEDIA-007).*
 5. Code lives in a feature folder `src/media/` (DEV-008); `ShaleApp` gets one `MediaPlayer`
    sub-state.
 

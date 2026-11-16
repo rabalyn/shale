@@ -18,12 +18,28 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 
 ![[editor-preview.png]]
 
+![[preview-toggle.webm]]
+
 Turn it on with Settings → General → Appearance, or the eye icon in the top right of the
 editor (off by default). Every line is drawn rendered: headings at their size, bold, italic,
 strike and code without their markers, links as just their text. Only the line the cursor is in
 shows the raw markdown; with "Raw lines around the cursor" that many lines before and after do
 too (or all the lines of a selection). The note stays editable: links still open with a click
 and task boxes still tick.
+
+## Sound players
+
+![[sound-player.png]]
+
+A sound embedded with `![[song.mp3]]` (mp3, ogg, oga, flac, m4a, aac and wav; opus files are
+recognised but cannot be played yet) shows a player in the editor, the markdown preview and the
+reading view. It shows the cover from the file's tags, or a tile with the file name. The round
+button over it plays and pauses (so does Space once you have clicked the player); click the bar
+to jump, or drag it and let go to seek. The speaker button mutes, the slider sets the volume for
+all players. Only one sound plays at a time; it goes on while you scroll or switch between the
+editor, the preview and the reading view, and stops when the note's tab is closed or another
+vault is opened. Nothing ever starts by itself. How opaque the play button is (60 % by
+default) is set in Settings → General → Appearance, see [[Settings reference]].
 
 ## Vim-style editing
 

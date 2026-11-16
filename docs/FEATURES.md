@@ -36,6 +36,19 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `Pasted image.png` with a link at the cursor; paste files copied in a file manager (pictures, PDFs,
   audio, video) and they are copied there and linked, one link per line. Other text pastes as usual.
 
+- **Sound players.** `![[song.mp3]]` shows a small player instead of a link, in the editor, the
+  markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play; opus files
+  are recognised but cannot be played yet). It shows the cover from the file's tags (or a tile
+  with the file name), a round play/pause button over it (Space too, while the player has the
+  keyboard), a progress bar (click to jump, drag to choose and seek on release) with the time,
+  and a mute button and volume slider. Only one file plays at a time; it keeps playing while
+  you scroll or switch between the editor, the preview and the reading view, and stops when
+  the note's tab is closed or another vault is opened. Nothing ever starts by itself. In Settings →
+  Appearance: how opaque the play button is (60 % by default). The volume is one setting for
+  all players.
+
+![A sound player in a note](userguide/z_media/screenshots/sound-player.png)
+
 ![Reading view](userguide/z_media/screenshots/reading.png)
 
 - Ctrl+E switches between editing and the reading view.
@@ -84,8 +97,12 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
-  start typing, Esc stops; x deletes a character; v and V select with the same motions, d cuts
-  and y copies to the clipboard, p pastes. The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
+  start typing, Esc stops; x deletes a character; `dd` deletes the line (onto the clipboard,
+  `p` puts it back below); v and V select with the same motions, d cuts and y copies to the
+  clipboard, p pastes. `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
+  from i to Esc is one step; the history is shared by all tabs of the note and kept in the vault
+  for 30 days by default (a setting of the undo histories cache, see Data usage), so `u` works
+  after a restart too). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
 - In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
   this tab showed just before, and again to come back, like vim's alternate file. Space is the
   leader key of its own list in the Keybindings tab; **Space f f** opens a window to find a file by its
@@ -151,6 +168,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ## The ribbon and the sidebars
 
+- **App icon**: three slate plates stacked on a dark square. The window shows it in the title
+  bar, taskbar or Dock; the Linux download has `shale.desktop` and `shale.svg` for the app menu
+  and the Wayland taskbar (see the README).
 - The icons of the ribbon (the narrow bar on the left) can be dragged into any order. A line
   between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
   sidebar toggles at the top and bottom and the settings button stay where they are.
@@ -503,7 +523,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 - Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
-  behaves the same on every computer. Settings of the program itself (appearance, calendars,
+  behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
+  are kept for 30 days (a setting) in `.shale/undo/`, one file per note; that folder stays on the computer
+  and is not committed by git sync. Settings of the program itself (appearance, calendars,
   recent vaults) stay in `~/.config/shale/config.json`.
 - The files carry a format version and are upgraded on load. A settings file that can't be read
   is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
@@ -521,14 +543,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   folder), and your data outside the vault: mail per account, drafts, outbox, mail trash, local
   calendars, calendar trash and recovered notes. Nothing in this part can be deleted here.
 - **Caches** are what Shale can build or fetch again: social pictures, the social post index,
-  the mail index, its daily backups, damaged copies of the mail index, the learned tag words and
-  the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
+  the mail index, its daily backups, damaged copies of the mail index, the learned tag words, the
+  undo histories of the notes of the open vault and the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
   has a **Clear** button. The mail index is **rebuilt** from the message files instead (it asks
   first; not while mail syncs or a change waits for the server), and damaged copies are only
-  deleted after you confirm.
+  deleted after you confirm; Clear on the undo histories asks first too (every `u` history of the
+  vault goes, damaged copies included) and empties the histories of the open notes.
 - How long each cache is kept is a setting (on its row, and in Settings under "How long caches
   are kept"): social pictures 30 days and 500 MB, social posts 365 days and 10 000 per account,
-  the newest 3 mail index backups, damaged copies forever, the debug log 10 MB. Every value can
+  the newest 3 mail index backups, damaged copies forever, undo histories 30 days, the debug log 10 MB. Every value can
   also be "forever" / "no limit".
 - A cleanup runs in the background a minute after the start (when the last one is more than a
   day ago) and then daily, and 2 seconds after you change a setting. It never touches your notes,
@@ -540,7 +563,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use a credential helper or an SSH key), or run
   `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
   every few minutes (default 5, changeable) and on "Sync now".
-- A sync commits every change (the `.shale/` files too, so settings and open notes follow you),
+- A sync commits every change (the `.shale/` files too, so settings and open notes follow you;
+  only the undo histories in `.shale/undo/` stay on the computer),
   fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an
   optional prefix and suffix from the settings. Without a remote, Shale only keeps a local
   history.

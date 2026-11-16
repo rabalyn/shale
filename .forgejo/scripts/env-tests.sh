@@ -1,9 +1,9 @@
 #!/bin/sh
 # The CI job "env-tests" (DEV-005, CALENV-004): runs the real-server suites of the CalDAV and mail
 # test environments. Usage:
-#   env-tests.sh wanted <event> <base-sha> <head-sha>
-#       prints "yes" or "no": a pull request only runs the job when it touches the code or the
-#       environments (a push to main and the weekly run always do)
+#   env-tests.sh wanted <base> <head>
+#       prints "yes" or "no": whether the change from <base> to <head> touches the CalDAV or mail
+#       code or the environments; scripts/land.sh runs the suites locally then (FORGE-011)
 #   env-tests.sh detect
 #       prints "podman", "docker" or "none": which container engine the job container can use
 #   env-tests.sh run [podman|docker]
@@ -15,8 +15,7 @@ cd "$(dirname "$0")/../.."
 
 case "${1:-}" in
   wanted)
-    if [ "${2:-}" != pull_request ]; then echo yes; exit 0; fi
-    files=$(git diff --name-only "$3" "$4")
+    files=$(git diff --name-only "$2" "$3")
     if printf '%s\n' "$files" | grep -Eq '^(src/(calendar/|mail)|tests/(caldav|mail)-env/|\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh))'; then
       echo yes
     else
@@ -87,7 +86,7 @@ case "${1:-}" in
     ;;
 
   *)
-    echo "usage: $0 wanted <event> <base> <head> | detect | run [podman|docker]" >&2
+    echo "usage: $0 wanted <base> <head> | detect | run [podman|docker]" >&2
     exit 2
     ;;
 esac

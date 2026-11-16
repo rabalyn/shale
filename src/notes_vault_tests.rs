@@ -124,6 +124,7 @@ fn notes_every_note_parses_renders_and_exports() {
     with_vault("render", |_, v| {
         let ctx = egui::Context::default();
         let mut scenes = reader::SceneCache::default();
+        let media = crate::media::MediaPlayer::default();
         let opts = crate::pdf::export::ExportOptions::for_note();
         let mut problems = Vec::new();
         for rel in notes(v) {
@@ -145,7 +146,7 @@ fn notes_every_note_parses_renders_and_exports() {
             let _ = editor::highlight(&text, &links, 15.0);
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(700.0, 900.0))), ..Default::default() };
             let mut out = ctx.run_ui(raw, |ui| {
-                reader::show(ui, &text, v, &rel, &mut scenes, 15.0, true);
+                reader::show(ui, &text, v, &rel, &mut reader::Caches { scenes: &mut scenes, media: &media }, 15.0, true);
             });
             out.textures_delta.clear();
             match crate::pdf::export::export_note(v, &rel, &text, &opts) {

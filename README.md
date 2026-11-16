@@ -101,7 +101,15 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
 
 Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
 with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`,
-unpack it and run `./shale/shale`. Releases are built by GitHub Actions
+unpack it and run `./shale/shale`. To start Shale from the app menu with its icon (on Wayland the
+taskbar needs this to show the icon), install the desktop file and the icon from the unpacked folder:
+
+```sh
+install -Dm644 shale/shale.svg ~/.local/share/icons/hicolor/scalable/apps/shale.svg
+sed "s|^Exec=shale|Exec=$PWD/shale/shale|" shale/shale.desktop > ~/.local/share/applications/shale.desktop
+```
+
+Releases are built by GitHub Actions
 (`.github/workflows/build.yml`); there are no builds between releases. To try an unreleased
 version, build it from source (below).
 
@@ -136,7 +144,7 @@ built; it does not show that a person checked the build.
    closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
-formats, lints, builds, tests, packages and audits every pull request and `main`; GitHub gets the
+formats, lints, builds, tests, packages and audits every push to `main`; GitHub gets the
 released versions, and builds and tests macOS and Windows for every push to `main` (the Linux
 job of GitHub only runs for release tags).
 
@@ -145,8 +153,10 @@ job of GitHub only runs for release tags).
 Shale is developed on Forgejo: <https://git.home.rabalyn.de/raba/shale>. Branches, pull requests
 and the **issues, which are the one list of open work**, live there; GitHub only builds and hosts the
 releases ([ADR-0013](docs/decisions/0013-forgejo-and-issue-tracking.md), FORGE rules in
-[engineering.md](docs/spec/engineering.md)). Checks run on the Forgejo runner
-(`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012) and tests macOS and
+[engineering.md](docs/spec/engineering.md)). Changes land locally: `scripts/land.sh <branch>`
+merges a branch into `main`, runs fmt, clippy and the tests, and pushes only when they pass
+([ADR-0016](docs/decisions/0016-local-landing.md)). The Forgejo runner checks `main` again
+afterwards (`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012) and tests macOS and
 Windows (BUILD-017); a red run there is reported back as a Forgejo issue (BUILD-020).
 
 ## Build and run
@@ -159,7 +169,8 @@ cargo build --release
 
 You need a Rust toolchain (1.89 or newer; CI uses the version in `rust-toolchain.toml`). On Linux also
 the usual desktop libraries (Wayland or X11, plus OpenGL/Vulkan drivers, and a C compiler for the
-bundled SQLite). On macOS the Xcode command line tools (`xcode-select --install`) are enough. On Windows
+bundled SQLite) and the ALSA headers for sound (`libasound2-dev` on Debian and Ubuntu, `alsa-lib` on
+Arch, `alsa-lib-devel` on Fedora). On macOS the Xcode command line tools (`xcode-select --install`) are enough. On Windows
 install Rust with the MSVC toolchain (the Visual Studio Build Tools with "Desktop development with C++");
 the same three commands work in PowerShell, with `.\target\release\shale.exe` as the program.
 
@@ -179,6 +190,11 @@ Other options:
 - The pictures of the user guide (`docs/userguide/z_media/screenshots/`) are made by
   `docs/screenshots/regen.sh` (all, or the names given) from `docs/screenshots/recipes.conf`; it runs each picture in a private X display
   (`xvfb-run`) and needs a built `shale` that is not older than the sources (`SHALE=…` to choose it).
+- `shale --record clip.webm` runs a `--keys` script like `--screenshot` does, but records every frame
+  as a short VP9 video (30 frames per second of app time, so the clip does not depend on the speed of the
+  machine); it needs `ffmpeg` and says so when it is missing. The clips of the user guide
+  (`docs/userguide/z_media/clips/`) are made by `docs/screenshots/regen-clips.sh` (all, or the names given)
+  from `docs/screenshots/clips.conf`.
 
 ## Keyboard
 
@@ -252,8 +268,9 @@ view. Letters work only while no text field has the keyboard. Every key can be c
 
 With **Vim-style editing** turned on in Settings, a note you go to is in normal mode:
 h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / N go to the next /
-previous hit; i a I A o O start typing and Esc stops; x deletes a character; v / V select (the
-motions extend the selection), then d cuts and y copies to the clipboard; p pastes it. The
+previous hit; i a I A o O start typing and Esc stops; x deletes a character; `dd` deletes the line;
+v / V select (the motions extend the selection), then d cuts and y copies to the clipboard; p pastes it;
+`u` undoes and Ctrl+R redoes (an insert session is one step, per note; the history is kept in the vault for 30 days). The
 status bar shows the mode. **Space Tab** goes back to the view this tab showed just before
 (a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name and **Space f g** searches notes, mail and posts.
 

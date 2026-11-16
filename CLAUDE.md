@@ -28,6 +28,14 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
   comment naming the commit); comment on an issue when you make partial progress or the plan
   changes. A SHOULD BE row names its issue; flipping it to IS NOW closes the issue.
 - **Your final report** lists the issues you opened, commented on or closed.
+- **Landing changes** (FORGE-010, FORGE-011, [ADR-0016](docs/decisions/0016-local-landing.md)):
+  `main` changes only through `scripts/land.sh <branch>…`, which merges each branch into the
+  current `origin/main`, runs fmt, clippy, `cargo test` (and the podman suites when CalDAV or mail
+  code changed) and pushes `main` when all pass; one landing at a time. Push your branch (or keep
+  it local), then land it; do not wait for CI, which runs only on `main` afterwards. A conflict:
+  merge `origin/main` into your branch, resolve it there (keep both sides; renumber a clashing
+  spec ID on your side) and land again. A change near `cfg!(debug_assertions)` or build profiles:
+  `land.sh --release`. A red `main` is fixed first. Pull requests are optional.
 
 ## Specs first (ADR-0001)
 

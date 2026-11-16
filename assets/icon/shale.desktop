@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Shale
+Comment=Notes, mail, calendar and feeds in one native app
+Exec=shale
+Icon=shale
+Terminal=false
+Categories=Office;
+StartupWMClass=shale
