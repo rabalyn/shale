@@ -354,6 +354,30 @@ mod tests {
         }
     }
 
+    // spec: NAV-013
+    #[test]
+    fn nav_013_a_dialog_opens_centred_in_a_window_of_any_height_and_a_tall_one_fills_it() {
+        for height in [300.0, 700.0, 900.0, 1100.0, 1300.0, 2400.0] {
+            for rows in [5, 400] {
+                let ctx = Context::default();
+                for i in 0..8 {
+                    let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, height))), time: Some(f64::from(i) * 0.05), ..Default::default() };
+                    let mut out = ctx.run_ui(raw, |ui| {
+                        Dialog::new("centred", "Centred").width(400.0).show(ui.ctx(), |ui| {
+                            for i in 0..rows {
+                                ui.label(format!("line {i}"));
+                            }
+                        });
+                    });
+                    out.textures_delta.clear();
+                }
+                let r = ctx.memory(|m| m.area_rect(Id::unique(("dialog", "centred")))).expect("dialog shown");
+                assert!((r.center().y - height / 2.0).abs() < 2.0 && (r.center().x - 750.0).abs() < 2.0, "window {height} high, {rows} rows: {r:?}");
+                assert!(r.top() >= 0.0 && r.bottom() <= height, "window {height} high, {rows} rows: {r:?}");
+            }
+        }
+    }
+
     #[test]
     fn a_tall_dialog_fits_on_the_screen() {
         let w = W::new(200, true);

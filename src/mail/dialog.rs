@@ -688,10 +688,10 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
                 *out = Some(MailDialogAction::DetectGnupg);
             }
         });
-        // the lines of the answer take room before it is there, so the dialog does not grow (and the controls and the footer do
-        // not move) when it arrives (MAIL-191)
-        ui.scope(|ui| {
-            ui.set_min_height(GNUPG_RESULT_LINES * (ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y));
+        // the answer has a fixed height, whether it is still on its way, short or long: nothing around it moves when it arrives or
+        // changes, and a long list scrolls inside (MAIL-191)
+        let room = GNUPG_RESULT_LINES * (ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y);
+        egui::ScrollArea::vertical().id_salt("gnupg-answer").max_height(room).min_scrolled_height(room).auto_shrink([false, false]).show(ui, |ui| {
             match &mail.gnupg_info {
                 None => {
                     ui.label(muted("Looking…"));
@@ -739,7 +739,7 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
     }
 }
 
-/// Lines of room kept for GnuPG's answer in the Encryption section: the two versions and a few keys.
+/// Lines of height of GnuPG's answer in the Encryption section: the two versions and a few keys; more scroll.
 const GNUPG_RESULT_LINES: f32 = 5.0;
 
 /// The key pickers of an account (MAIL-190): the OpenPGP key and the S/MIME certificate, sign by default, the preferred standard.

@@ -291,6 +291,8 @@ pub struct ShaleApp {
     /// the open tabs, the active one and what the tab bar drew last frame
     pub tabbar: tabs::TabBar,
     pub notes: HashMap<PathBuf, NoteDoc>,
+    /// The undo history of every note that vim-lite edited, by vault path (EDIT-021).
+    pub undo: crate::undo::Histories,
     pub drawings: HashMap<PathBuf, DrawingDoc>,
     /// The icons of the ribbon and the right sidebar, and a drag of one of them (LAY-001).
     pub side: crate::sidebar_ui::SideState,
@@ -482,6 +484,7 @@ impl ShaleApp {
             vault: None,
             tabbar: tabs::TabBar::new(),
             notes: HashMap::new(),
+            undo: crate::undo::Histories::default(),
             drawings: HashMap::new(),
             side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
             tree: FileTree::default(),
@@ -646,6 +649,7 @@ impl ShaleApp {
             d.adopt_legacy(&legacy);
         }
         self.vdata = d;
+        self.undo.open_vault(root, unix_now());
     }
 
     pub fn open_vault(&mut self, path: &Path) {
@@ -1293,6 +1297,7 @@ impl ShaleApp {
                 None
             }
         };
+        self.undo.moved(remap);
         let keys: Vec<PathBuf> = self.notes.keys().cloned().collect();
         for k in keys {
             if let Some(nk) = remap(&k) {
@@ -1617,6 +1622,7 @@ impl ShaleApp {
     pub fn close_tab(&mut self, i: usize) {
         if i < self.tabbar.tabs.len() {
             self.flush_all();
+            self.undo.flush_all();
             self.tabbar.tabs.remove(i);
             if self.tabbar.active >= self.tabbar.tabs.len() && self.tabbar.active > 0 {
                 self.tabbar.active = self.tabbar.tabs.len() - 1;
@@ -1875,6 +1881,11 @@ impl ShaleApp {
         let Some(path) = self.shot.path.clone() else { return };
         ui.ctx().request_repaint();
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+        if self.shot.recording() {
+            self.record_tick(ui, path);
+            self.send_close_when_done(ui);
+            return;
+        }
         if self.frames >= 120 && self.script.steps.is_empty() && self.frames >= self.script.last_frame + 12 && !self.shot.requested {
             self.shot.requested = true;
             let done = self.shot.done.clone();
@@ -2144,6 +2155,7 @@ impl eframe::App for ShaleApp {
     fn on_exit(&mut self) {
         // flush_all waits for a running sync's merge step first
         self.flush_all();
+        self.undo.flush_all();
         self.rescue_unsaved();
         self.save_mail_draft_at_exit();
         self.remember_open_files();
@@ -2160,6 +2172,13 @@ impl ShaleApp {
         self.screenshot_tick(ui);
         self.shortcuts(ui);
         self.autosave();
+        self.undo.tick(unix_now());
+        for p in self.undo.take_problems() {
+            self.toast(p);
+        }
+        if self.undo.has_pending() {
+            ui.ctx().request_repaint_after(Duration::from_secs(crate::undo::DEBOUNCE));
+        }
         // secrets the keyring refused to keep (SEC-011)
         for m in crate::secrets::take_notices() {
             self.toast(m);
@@ -2224,6 +2243,11 @@ impl ShaleApp {
 
 /// After a rename or move that could not update the links in every note (VAULT-016): exactly
 /// which notes were updated and which were not. `None` when all went well.
+/// The clock the undo histories use: unix seconds.
+fn unix_now() -> u64 {
+    crate::calendar::time::now().max(0) as u64
+}
+
 fn rewrite_problems(what: &str, changed: &[PathBuf], failed: &[(PathBuf, String)]) -> Option<String> {
     if failed.is_empty() {
         return None;
@@ -2341,6 +2365,30 @@ pub(crate) mod tests {
         assert!(!crate::import::tagwords::file_in(&d).exists() || app.tag_learner.running());
         assert_eq!(app.tag_learner.generation, u64::MAX, "learning starts again");
         assert!(app.toasts.iter().any(|(t, _)| t.starts_with("Tag words cleared")), "{:?}", app.toasts);
+        // undo histories (USE-017): counted, and a clear empties the files and the loaded histories
+        app.undo.open_vault(&d, unix_now());
+        app.undo.of(Path::new("Ideas.md")).checkpoint("one");
+        app.undo.of(Path::new("Ideas.md")).checkpoint("one two");
+        app.undo.flush_all();
+        app.usage.refresh(|| {});
+        let mut n = 0;
+        while app.usage.any_running() && n < 300 {
+            app.usage_tick();
+            std::thread::sleep(Duration::from_millis(10));
+            n += 1;
+        }
+        assert_eq!(app.usage.stats[&CacheId::UndoHistories].as_ref().unwrap().entries, 1);
+        app.usage_ask(Ask::Clear(CacheId::UndoHistories));
+        let mut n = 0;
+        while app.usage.running(CacheId::UndoHistories) && n < 300 {
+            app.usage_tick();
+            std::thread::sleep(Duration::from_millis(10));
+            n += 1;
+        }
+        assert!(app.toasts.iter().any(|(t, _)| t.starts_with("Undo histories cleared")), "{:?}", app.toasts);
+        assert_eq!(crate::undo::stats_of_files(&d).entries, 0, "the files are deleted");
+        let mut text = "one two".to_string();
+        assert_eq!(app.undo.of(Path::new("Ideas.md")).undo(&mut text), None, "u has nothing to undo after a clear");
         assert!(app.usage_ask(Ask::Open(PathBuf::from("Ideas.md"))), "opening a file closes the dialog");
         assert_eq!(app.current_path(), Some(PathBuf::from("Ideas.md")));
         app.usage_ask(Ask::ShowFolder(PathBuf::from("Projects")));

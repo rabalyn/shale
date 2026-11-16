@@ -28,6 +28,10 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
   comment naming the commit); comment on an issue when you make partial progress or the plan
   changes. A SHOULD BE row names its issue; flipping it to IS NOW closes the issue.
 - **Your final report** lists the issues you opened, commented on or closed.
+- **Docs-only merge conflicts** (FORGE-010): if a PR's CI passed and only `*.md` docs, specs or
+  ADRs conflict with `main`, resolve them (keep both sides), run the docs tests locally
+  (`cargo test --test spec_refs --test userguide`, `cargo test --bin shale -- the_docs_list the_definable dev_007_ dev_019_`)
+  and merge without waiting for another CI run. Code, renumbered spec IDs or screenshots: CI as usual.
 
 ## Specs first (ADR-0001)
 
@@ -51,5 +55,8 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
 - **Docs and screenshots**: every change checks README, `docs/FEATURES.md`, the specs,
   `CHANGELOG.md` (or `docs/changelog-pending/`) and the screenshots in `docs/screenshots/`, and
   updates what it made stale.
+- **User guide**: the user guide is a Shale vault (DEV-018, raba/shale#182). Every change that
+  adds, changes or removes a feature or a setting updates the guide's notes, its settings
+  reference, and the screenshots and videos that show it, in the same change.
 - **Releases**: a tag bumps the version correctly (semver, `Cargo.toml` and `Cargo.lock`) and has
   release notes in `CHANGELOG.md` for everything since the previous tag; use `make-release.sh`.

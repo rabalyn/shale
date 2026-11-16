@@ -49,6 +49,7 @@ FORGE-004, [ADR-0013](../decisions/0013-forgejo-and-issue-tracking.md)). The tab
 | ~~OPEN-018~~ | ~~Release signing: which tool, where the key lives, who signs?~~ | Decided 2026-11-15 by the owner (raba/shale#24): keyless GitHub artifact attestations through Sigstore, made by the release workflow; no key (BUILD-014). |
 | ~~OPEN-019~~ | ~~Wipe secrets from memory: passwords, OAuth2 refresh/access tokens and client secrets are plain `String`s that stay in freed memory and can end up in swap or core dumps. Use `zeroize`/`secrecy` (or own wrappers) for secrets from the dialog to the keyring call, and see which copies egui text fields keep.~~ | Decided 2026-11-15: `Secret` type, mlock, zeroize, release builds not dumpable (SEC-014 to SEC-020, raba/shale#25). |
 | OPEN-020 | A system keyring on macOS (Keychain) and Windows (Credential Manager). | Decided and done (raba/shale#26): SEC-024 (Keychain), SEC-025 (Credential Manager); SEC-003, SEC-011, SEC-021 reworded. |
+| OPEN-021 | Should pictures and PDFs go into Git LFS too (ADR-0015 starts with audio and video only)? | Pictures are often small and diffed by nobody; big scans and PDFs grow the history like videos. A size threshold is not possible with `.gitattributes` (patterns only). |
 
 ## Backlog carried over from IMPLEMENTATION.md (still open after checking)
 
