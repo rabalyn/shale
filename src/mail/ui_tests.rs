@@ -1005,7 +1005,7 @@ fn dates_in_the_list_are_short() {
 // spec: MAIL-083, MAIL-084, MAIL-086
 #[test]
 fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks_to_sign_in_again_when_revoked() {
-    use crate::mail::oauth_fake_tests::{http_get, FakeOAuth};
+    use crate::mail::oauth_fake_tests::{http_get, try_http_get, FakeOAuth};
     use std::sync::atomic::{AtomicBool, Ordering};
     if std::process::Command::new("curl").arg("--version").output().is_err() {
         return;
@@ -1029,7 +1029,8 @@ fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks
             }
             let (_, head, _) = http_get(&url);
             if let Some(loc) = head.lines().find_map(|l| l.strip_prefix("Location: ")) {
-                let _ = http_get(loc.trim());
+                // the sign-in of an old browser is over and its listener closed: nobody answers, and that is fine
+                let _ = try_http_get(loc.trim());
             }
         });
     }));
@@ -1148,6 +1149,8 @@ fn an_oauth2_account_signs_in_through_the_dialog_syncs_renews_its_token_and_asks
     // sign in again
     provider.state.lock().unwrap().revoked = false;
     go.store(true, Ordering::SeqCst);
+    // the state of the first sign-in is still `Done`: only the new one may end the wait
+    w.app.mail.signins.remove(&id);
     w.click("md:signin");
     let id6 = id.clone();
     w.until("signed in again", move |a| matches!(a.mail.signins.get(&id6), Some(crate::mail::ui::SignInState::Done { .. })));

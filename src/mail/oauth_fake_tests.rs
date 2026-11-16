@@ -71,9 +71,15 @@ fn get(v: &[(String, String)], k: &str) -> String {
 /// A plain HTTP GET that does not follow redirects: (status, headers, body). For tests that
 /// play the browser.
 pub fn http_get(url: &str) -> (u16, String, String) {
+    try_http_get(url).expect("connect")
+}
+
+/// Like [`http_get`], but `None` when nobody listens at the address (a browser that answers
+/// after its sign-in was given up meets that).
+pub fn try_http_get(url: &str) -> Option<(u16, String, String)> {
     let rest = url.strip_prefix("http://").expect("an http address");
     let (authority, path) = rest.split_once('/').map(|(a, p)| (a, format!("/{p}"))).unwrap_or((rest, "/".into()));
-    let mut s = TcpStream::connect(authority).expect("connect");
+    let mut s = TcpStream::connect(authority).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
     write!(s, "GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n").unwrap();
     let mut raw = Vec::new();
@@ -81,7 +87,7 @@ pub fn http_get(url: &str) -> (u16, String, String) {
     let text = String::from_utf8_lossy(&raw).into_owned();
     let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
     let status = head.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
-    (status, head.to_string(), body.to_string())
+    Some((status, head.to_string(), body.to_string()))
 }
 
 /// A plain HTTP POST of a form, without following redirects: (status, headers, body).
