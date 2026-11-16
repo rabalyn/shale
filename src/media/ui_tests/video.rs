@@ -158,7 +158,7 @@ fn a_video_that_is_an_lfs_pointer_is_downloaded_first_even_without_ffmpeg() {
     let (_guard, opened) = pretend_player();
     let mut fx = Fx::new_with("v-pointer", VIDEO_NOTE, &[], |a| a.media.use_ffmpeg(|| None));
     let clip = fx.dir.join("clip.mp4");
-    std::fs::write(&clip, super::pointer_text(2_000_000)).unwrap();
+    super::write_pointer(&clip, 2_000_000);
     fx.app.vault.as_mut().unwrap().rescan();
     fx.reading(true);
     fx.hl.frames(&mut fx.app, 3);

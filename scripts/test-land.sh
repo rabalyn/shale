@@ -67,6 +67,10 @@ branch broken d.txt d
 export LAND_CHECK_CMD=false
 expect "a failing check pushes nothing" 1 "a check failed for broken" broken
 check "main is unchanged after a failing check" "main_is $before"
+# a failing step stops the checks even when a later one passes (the bug that landed a red tree)
+export LAND_CHECK_CMD=$'false\ntrue'
+expect "a failing step is not hidden by a passing one after it" 1 "check failed: false" broken
+check "main is unchanged after a failing step" "main_is $before"
 export LAND_CHECK_CMD='test -f d.txt'
 expect "the checks run in the merged tree" 0 "landed broken" broken
 
