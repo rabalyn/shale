@@ -300,10 +300,10 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 if let Some(target) = vault.resolve(&l.target, Some(rel)) {
                     if crate::media::is_media(&target) {
                         // a sound is a player of its own, without the frame (MEDIA-001)
-                        crate::media::widget::show(ui, caches.media, &vault.abs(&target), rel);
+                        crate::media::widget::show(ui, caches.media, &vault.abs(&target), rel, l.embed_width());
                         ui.add_space(6.0);
                     } else {
-                        embed(ui, vault, &target, caches, base, dark_canvas, &mut out);
+                        embed(ui, vault, &target, l.embed_width(), caches, (base, dark_canvas), &mut out);
                     }
                     i += 1;
                     continue;
@@ -389,7 +389,10 @@ fn list_marker(line: &str) -> Option<(String, usize)> {
     None
 }
 
-fn embed(ui: &mut Ui, vault: &Vault, target: &Path, caches: &mut Caches, base: f32, dark: bool, out: &mut Option<ReaderAction>) {
+/// `width` is what the link asks for (`![[pic.png|300]]`, EDIT-024); `text` is the text size and
+/// whether drawings get a dark canvas.
+fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: &mut Caches, text: (f32, bool), out: &mut Option<ReaderAction>) {
+    let (base, dark) = text;
     let kind = vault.file(target).map(|f| f.kind).unwrap_or(FileKind::Other);
     let name = vault.file(target).map(|f| f.display_name()).unwrap_or_default();
     let frame = egui::Frame::new().fill(theme::BG_SECONDARY).stroke(Stroke::new(1.0, theme::BORDER)).corner_radius(CornerRadius::same(8)).inner_margin(8);
@@ -458,7 +461,11 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, caches: &mut Caches, base: f
                     ui.add_space(6.0);
                     return;
                 }
-                match crate::media::image_widget(ui.ctx(), &vault.abs(target), w, 520.0) {
+                let shown = match width {
+                    Some(asked) => crate::media::image_widget(ui.ctx(), &vault.abs(target), asked.min(w), f32::INFINITY),
+                    None => crate::media::image_widget(ui.ctx(), &vault.abs(target), w, 520.0),
+                };
+                match shown {
                     Some(img) => {
                         let resp = ui.add(img.corner_radius(CornerRadius::same(4)).sense(Sense::click()));
                         if resp.on_hover_text("Open with your image viewer").clicked() {

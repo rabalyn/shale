@@ -34,6 +34,31 @@ impl LinkSpan {
     }
 }
 
+impl LinkSpan {
+    /// The width an embed asks for (`![[pic.png|300]]`, `|300x200` too: the width counts), if its
+    /// last `|` part is a number (EDIT-024).
+    pub fn embed_width(&self) -> Option<f32> {
+        if !self.embed || self.markdown_style {
+            return None;
+        }
+        let a = self.alias.as_deref()?.rsplit('|').next()?.trim();
+        let w = a.split(['x', 'X']).next()?;
+        w.parse::<u32>().ok().filter(|w| *w > 0).map(|w| w as f32)
+    }
+}
+
+/// The text of a `![[…]]` embed with its width set to `width` points (`|300`): an existing
+/// numeric last `|` part is replaced, otherwise one is added (EDIT-024).
+pub fn embed_with_width(link: &str, width: u32) -> String {
+    let Some(inner) = link.strip_suffix("]]") else { return link.to_string() };
+    let (head, last) = inner.rsplit_once('|').map(|(h, l)| (Some(h), l)).unwrap_or((None, inner));
+    let numeric = !last.is_empty() && last.split(['x', 'X']).all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    match head {
+        Some(h) if numeric => format!("{h}|{width}]]"),
+        _ => format!("{inner}|{width}]]"),
+    }
+}
+
 /// A `- [ ] task` line.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Task {
@@ -561,6 +586,24 @@ pub fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    // spec: EDIT-024
+    #[test]
+    fn an_embeds_width_is_its_last_numeric_alias_part() {
+        let w = |t: &str| find_links(t).into_iter().next().and_then(|l| l.embed_width());
+        assert_eq!(w("![[a.png|300]]"), Some(300.0));
+        assert_eq!(w("![[a.png|300x200]]"), Some(300.0));
+        assert_eq!(w("![[a.png|a caption|120]]"), Some(120.0));
+        assert_eq!(w("![[a.png|a caption]]"), None);
+        assert_eq!(w("![[a.png]]"), None);
+        assert_eq!(w("![[a.png|0]]"), None);
+        assert_eq!(w("[[a|300]]"), None, "only an embed has a width");
+        assert_eq!(embed_with_width("![[a.png]]", 300), "![[a.png|300]]");
+        assert_eq!(embed_with_width("![[a.png|100]]", 300), "![[a.png|300]]");
+        assert_eq!(embed_with_width("![[a.png|100x50]]", 300), "![[a.png|300]]");
+        assert_eq!(embed_with_width("![[a.png|a caption]]", 300), "![[a.png|a caption|300]]");
+        assert_eq!(embed_with_width("![[2024]]", 300), "![[2024|300]]");
+    }
+
     use super::*;
 
     // spec: LINK-001
