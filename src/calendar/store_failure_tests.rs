@@ -270,11 +270,9 @@ fn a_refresh_that_fails_shows_the_reason_and_keeps_what_was_loaded() {
 // spec: CAL-022
 #[test]
 fn a_server_that_cannot_be_reached_is_shown_and_tried_again_on_the_next_timer() {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = l.local_addr().unwrap().port();
-    drop(l);
+    let down = crate::calendar::dav::tests::closed_port();
     let mut store = CalendarStore::new(vec![], tmp("poll-down"));
-    store.set_sources(vec![dav_source("w", format!("http://127.0.0.1:{port}/w/"))]);
+    store.set_sources(vec![dav_source("w", format!("http://127.0.0.1:{}/w/", down.port))]);
     assert!(store.is_loading());
     assert!(settle(&mut store));
     assert!(!store.status["w"].is_empty() && !store.status["w"].contains("synced"), "{:?}", store.status);
