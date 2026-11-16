@@ -149,43 +149,13 @@ impl ShaleApp {
             }
         }
         d.tags = tags.join(", ");
-        d.suggested = self.tag_words.as_ref().map(|tw| crate::import::tagwords::suggest(tw, &text, &d.auto_tags)).unwrap_or_default();
+        d.suggested = self.tag_learner.words.as_ref().map(|tw| crate::import::tagwords::suggest(tw, &text, &d.auto_tags)).unwrap_or_default();
     }
 
-    /// Learn the tag words again now and then (in the background), and keep them in the vault.
+    /// Let the tag learner work a step; what it reports is shown as toasts.
     pub fn learn_tags_tick(&mut self) {
-        if let Some(rx) = &self.tag_job {
-            match rx.try_recv() {
-                Ok(Err(e)) => {
-                    self.tag_job = None;
-                    self.toast(format!("Learning tag words failed: {e}"));
-                }
-                Ok(Ok(tw)) => {
-                    let saved = self.vault.as_ref().map(|v| crate::import::tagwords::save(&v.root, &tw));
-                    if let Some(Err(e)) = saved {
-                        self.toast(format!("Could not save the tag words: {e}"));
-                    }
-                    self.tag_words = Some(tw);
-                    self.tag_job = None;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.tag_job = None,
-                Err(_) => {}
-            }
-        }
-        let Some(v) = &self.vault else { return };
-        if self.tag_root.as_deref() != Some(v.root.as_path()) {
-            // another vault: start with what was learned there before
-            self.tag_root = Some(v.root.clone());
-            self.tag_words = crate::import::tagwords::load(&v.root);
-            self.tag_gen = u64::MAX;
-            self.tag_at = None;
-        }
-        let due = self.tag_job.is_none() && v.generation != self.tag_gen && self.tag_at.map(|t| t.elapsed() > std::time::Duration::from_secs(120)).unwrap_or(true);
-        if due {
-            self.tag_gen = v.generation;
-            self.tag_at = Some(std::time::Instant::now());
-            let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
-            self.tag_job = Some(crate::jobs::spawn(move || crate::import::tagwords::learn_from_vault(&notes), || {}));
+        for m in self.tag_learner.tick(self.vault.as_ref()) {
+            self.toast(m);
         }
     }
 

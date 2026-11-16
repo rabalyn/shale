@@ -318,12 +318,8 @@ pub struct ShaleApp {
     pub(crate) tab_rects: Vec<(egui::Rect, egui::Rect)>,
     /// what the tab bar showed last frame besides the tabs (for tests)
     pub(crate) tab_marks: TabMarks,
-    /// words typical for each tag (learned from the vault, see tagwords)
-    pub tag_words: Option<crate::import::tagwords::TagWords>,
-    tag_job: Option<std::sync::mpsc::Receiver<Result<crate::import::tagwords::TagWords, String>>>,
-    tag_root: Option<PathBuf>,
-    tag_gen: u64,
-    tag_at: Option<Instant>,
+    /// the tag words learned from the vault, and the job that learns them (see tagwords)
+    pub tag_learner: crate::import::tagwords::TagLearner,
     pub scenes: SceneCache,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
@@ -496,11 +492,7 @@ impl ShaleApp {
             drag: drops::DragState::default(),
             tab_rects: vec![],
             tab_marks: TabMarks::default(),
-            tag_words: None,
-            tag_job: None,
-            tag_root: None,
-            tag_gen: u64::MAX,
-            tag_at: None,
+            tag_learner: crate::import::tagwords::TagLearner::new(),
             scenes: SceneCache::default(),
             modal: None,
             actions: vec![],
@@ -2372,7 +2364,7 @@ pub(crate) mod tests {
         assert!(app.toasts.iter().any(|(t, _)| t.contains("not now")), "{:?}", app.toasts);
         assert!(app.usage.record.caches[&CacheId::MailIndex].error.is_some());
         // tag words: cleared, and learned again at once
-        app.tag_gen = 0;
+        app.tag_learner.generation = 0;
         app.usage_ask(Ask::Clear(CacheId::TagWords));
         let mut n = 0;
         while app.usage.running(CacheId::TagWords) && n < 300 {
@@ -2380,8 +2372,8 @@ pub(crate) mod tests {
             std::thread::sleep(Duration::from_millis(10));
             n += 1;
         }
-        assert!(!crate::import::tagwords::file_in(&d).exists() || app.tag_job.is_some());
-        assert_eq!(app.tag_gen, u64::MAX, "learning starts again");
+        assert!(!crate::import::tagwords::file_in(&d).exists() || app.tag_learner.running());
+        assert_eq!(app.tag_learner.generation, u64::MAX, "learning starts again");
         assert!(app.toasts.iter().any(|(t, _)| t.starts_with("Tag words cleared")), "{:?}", app.toasts);
         assert!(app.usage_ask(Ask::Open(PathBuf::from("Ideas.md"))), "opening a file closes the dialog");
         assert_eq!(app.current_path(), Some(PathBuf::from("Ideas.md")));
