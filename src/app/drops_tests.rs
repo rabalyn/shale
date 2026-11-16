@@ -199,7 +199,7 @@ fn imp_016_files_dropped_through_the_window_system_open_the_import_dialog() {
     // the same through the script step `drop:/path`, and at a place (`drop:T:/path`)
     w.close_dialog();
     let steps = crate::script::parse(&format!("drop:{}", w.file("second.md").display())).unwrap();
-    w.app.script = steps.into();
+    w.app.script.steps = steps.into();
     w.app.frames = 36;
     w.hl.frame_with(&mut w.app, vec![], |app, raw| app.feed_script(raw));
     w.until("the dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
@@ -207,7 +207,7 @@ fn imp_016_files_dropped_through_the_window_system_open_the_import_dialog() {
     w.close_dialog();
     let place = w.zone("Sub", None, true).center();
     let steps = crate::script::parse(&format!("drop:{},{}:{}", place.x, place.y, w.file("second.md").display())).unwrap();
-    w.app.script = steps.into();
+    w.app.script.steps = steps.into();
     w.app.frames = 42;
     w.hl.frame_with(&mut w.app, vec![], |app, raw| app.feed_script(raw));
     w.until("the dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
