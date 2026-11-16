@@ -316,7 +316,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ### Writing and sending (phase 3)
 
 - **Compose** with `c` (or the Compose button), **Reply** `r`, **Reply all** `Shift+R`, **Forward**
-  `Shift+F` (also buttons under the message; `f` is still the flag key). Mail is plain text. To, Cc
+  `Shift+F` (also buttons under the message, which also answer to Alt+R, Alt+A, Alt+F and, for the others, Alt+I, Alt+C, Alt+U, Alt+G, Alt+M, Alt+D; hold Alt to see the letter underlined; `f` is still the flag key). Mail is plain text. To, Cc
   and Bcc complete from the addresses in your people notes and in the mail you already have (↑ ↓,
   Tab or a click); the subject, the text and the attachments are below. Attach a file by its path,
   a file of the vault (also from the media folder) or a **note** (its markdown, as a `.md`
@@ -605,6 +605,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |
+| Alt+I, Alt+C, Alt+R, Alt+A, Alt+F, Alt+U, Alt+G, Alt+M, Alt+D | The buttons of the open mail: Import to vault, Close, Reply, Reply all, Forward, Mark read / unread, Flag, Move…, Delete (the letter is underlined on the button while Alt is held) |
 | Ctrl+R | Sync, or cancel the sync |
 | a | Account settings |
 | Shift+L | Load the open message (or the list of a folder that is not synced) from the server |
