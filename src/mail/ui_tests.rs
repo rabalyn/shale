@@ -2282,7 +2282,7 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     assert_eq!(w.app.mail.results.as_ref().unwrap().len(), 1, "search finds text that was only in the encrypted part");
     w.app.mail.clear_search();
     // reopening shows the stored copy without asking GnuPG again (no GnuPG home at all)
-    w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), home: None };
+    w.app.mail.gnupg = crate::mail::gpg::Gnupg::default();
     open_by_subject(&mut w, "Okapi plans");
     assert!(matches!(security_of(&w).encryption, crate::mail::crypto::Encryption::Failed(_)), "a mail that was not decrypted before needs GnuPG");
     open_by_subject(&mut w, "Zebra plans");
@@ -2474,6 +2474,102 @@ fn a_gnupg_call_that_waits_for_a_dialog_never_blocks_the_window_and_cancel_stops
     w.frame(vec![]);
     assert!(w.shows("Cancelled."), "the strip says what happened");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: DEV-017
+#[test]
+fn dev_017_an_app_built_by_the_harness_holds_a_gnupg_that_cannot_start() {
+    let w = W::new("dev017-app", false);
+    let g = &w.app.mail.gnupg;
+    assert!(g.home.is_none());
+    for s in [crate::config::CryptoStandard::OpenPgp, crate::config::CryptoStandard::Smime] {
+        assert!(!Path::new(g.program(s)).exists(), "{}: the machine's GnuPG must not be reachable from a test", g.program(s));
+        assert_eq!(g.version(s), Err(crate::mail::gpg::GpgError::Missing(s)));
+    }
+}
+
+// spec: DEV-017, MAIL-191
+#[test]
+fn dev_017_opening_the_mail_settings_in_a_plain_harness_runs_no_gnupg() {
+    let mut w = W::new("dev017-settings", true);
+    w.app.open_mail_settings();
+    w.until("GnuPG was looked at", |a| a.mail.gnupg_info.is_some());
+    let info = w.app.mail.gnupg_info.as_ref().unwrap();
+    for s in [crate::config::CryptoStandard::OpenPgp, crate::config::CryptoStandard::Smime] {
+        let e = info.version(s).and_then(|r| r.as_ref().err()).unwrap_or_else(|| panic!("{s:?} was found: a test started the machine's GnuPG"));
+        assert!(e.contains("is not installed"), "{e}");
+        assert!(info.keys(s).is_empty());
+    }
+}
+
+/// A stand-in for `gpg` (or `gpgsm`) that answers after a second, like a slow start of the agent.
+#[cfg(unix)]
+fn slow_gnupg_script(dir: &Path, name: &str, real: &str) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir).unwrap();
+    let script = dir.join(name);
+    std::fs::write(&script, format!("#!/bin/sh\nsleep 1\nexec {real} \"$@\"\n")).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    script.to_string_lossy().into_owned()
+}
+
+/// Where the controls of the open settings dialog are: the Encryption section's, the footer's, and the dialog's own frame.
+fn settings_layout(w: &W) -> Vec<(String, Rect)> {
+    let Some(Modal::MailAccounts(d)) = &w.app.modal else { panic!("no dialog") };
+    let mut v: Vec<(String, Rect)> = d.rects.iter().filter(|r| r.0.starts_with("md:enc-") || r.0 == "md:done" || r.0 == "md:cancel").cloned().collect();
+    v.push(("dialog frame".into(), w.ctx.memory(|m| m.area_rect(egui::Id::unique(("dialog", "mail-accounts")))).expect("the dialog is shown")));
+    v
+}
+
+/// The layout of the settings dialog with the Encryption section open: while GnuPG is still being asked, when the answer
+/// (a key, two versions) is there, and when the person asks again with no GnuPG installed.
+#[cfg(unix)]
+fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
+    let mut w = W::new(&format!("enc-stay-{height}"), true);
+    w.size = Vec2::new(1500.0, height);
+    let dir = std::env::temp_dir().join(format!("shale-encstay-{height}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let bob = TestHome::new();
+    if have_gnupg() {
+        bob.gen_pgp("Bob Test", "bob@example.org", "never", None);
+    }
+    w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: slow_gnupg_script(&dir, "slow-gpg", "gpg"), gpgsm: slow_gnupg_script(&dir, "slow-gpgsm", "gpgsm"), ..bob.g.clone() };
+    w.app.open_mail_settings();
+    w.settle();
+    w.click("md:enc-header");
+    w.settle();
+    assert!(w.app.mail.gnupg_info.is_none() && w.shows("Looking…"), "the result is still on its way");
+    let pending = settings_layout(&w);
+    assert!(pending.iter().any(|r| r.0 == "md:enc-detect") && pending.iter().any(|r| r.0 == "md:done"));
+    w.until("GnuPG was looked at", |a| a.mail.gnupg_info.is_some());
+    w.settle();
+    assert!(!w.shows("Looking…") && w.shows("OpenPGP (gpg)"));
+    let arrived = settings_layout(&w);
+    // the person asks again, now without any GnuPG: the lines change once more
+    w.app.mail.gnupg = crate::mail::gpg::Gnupg::default();
+    w.click("md:enc-detect");
+    w.until("the missing programs were found out", |a| a.mail.gnupg_info.as_ref().is_some_and(|i| i.version(crate::config::CryptoStandard::OpenPgp).is_some_and(|v| v.is_err())));
+    w.settle();
+    assert!(w.shows("is not installed"));
+    let missing = settings_layout(&w);
+    let _ = std::fs::remove_dir_all(&dir);
+    [pending, arrived, missing]
+}
+
+// spec: NAV-028, MAIL-191
+#[cfg(unix)]
+#[test]
+fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_it_fills_when_the_gnupg_result_arrives() {
+    // windows the dialog fills and scrolls in (in a taller one the dialog grows with the lines that arrive)
+    for height in [900.0, 1000.0] {
+        let [pending, arrived, missing] = encryption_layouts(height);
+        for (what, a, b) in [("pending -> arrived", &pending, &arrived), ("arrived -> missing", &arrived, &missing)] {
+            assert_eq!(a.len(), b.len());
+            for ((k, ra), (_, rb)) in a.iter().zip(b.iter()) {
+                assert_eq!(ra, rb, "{k} moved ({what}, window {height} high)");
+            }
+        }
+    }
 }
 
 // spec: MAIL-207, MAIL-208

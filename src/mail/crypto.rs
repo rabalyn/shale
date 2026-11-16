@@ -1760,7 +1760,7 @@ mod tests {
         let (sec, shown, dec) = none(mixed.as_bytes());
         assert!(matches!(sec.encryption, Encryption::NotDecrypted(ref w) if w.contains("mixes encrypted")) && shown.is_none() && !dec, "{sec:?}");
         // GnuPG is not there at all: said in words, for every kind of entity
-        let missing = Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), ..Gnupg::default() };
+        let missing = Gnupg::default();
         for raw in [
             signed_mail("application/pgp-signature", "application/pgp-signature", "SIG"),
             signed_mail("application/pkcs7-signature", "application/pkcs7-signature", "SIG"),
