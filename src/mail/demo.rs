@@ -1,7 +1,9 @@
 //! A small made-up mail store for screenshots (`--screenshot out.png --view mail`), like the
 //! demo vault: no server and no real mail are involved.
 
+use crate::mail::compose::{build, new_draft, BuildOptions};
 use crate::mail::db::{FolderRow, Op};
+use crate::mail::outbox::{Outbox, Outcome};
 use crate::mail::store::MailStore;
 use std::path::Path;
 
@@ -17,7 +19,35 @@ fn eml(from: &str, subject: &str, day: u32, body: &str, attachment: bool) -> Vec
     }
 }
 
-/// Fill the store at `root` with a few mails in an Inbox and a Sent folder.
+/// Put two mails into the outbox of the demo account through the real transitions: one the server refused (Failed) and one
+/// whose answer never came (Unsure), so the Outbox detail can be pictured in both states (MAIL-227, #138).
+fn seed_outbox(root: &Path) -> Result<(), String> {
+    let ob = Outbox::new(root);
+    let now = 1_794_000_000 + 13 * 86_400;
+    let date = "2026-11-13";
+    let mails = [
+        (
+            "Hans Müller <hans@example.com>",
+            "Re: Lecture hall B: projector and floor plan",
+            "Hello Hans,\n\nthe seating in the floor plan is fine for us. Please confirm the room for Thursday.\n\nAda",
+            Outcome::Failed("550 5.1.1 <hans@example.com>: Recipient address rejected: User unknown".into()),
+        ),
+        ("Dora Berg <dora@example.com>", "Re: Lunch on Friday?", "Noon is good, see you at the pizza place.\n\nAda", Outcome::Unsure("Connection reset by peer while waiting for the reply to DATA".into())),
+    ];
+    for (to, subject, body, outcome) in mails {
+        let mut d = new_draft(ACCOUNT, "Ada Example", "ada@example.com", "");
+        d.to = to.into();
+        d.subject = subject.into();
+        d.body = body.into();
+        let built = build(&d, &BuildOptions { now, ..BuildOptions::default() }).map_err(|e| e.0)?;
+        ob.queue(&d, &built, now, now, date)?;
+        ob.begin_send(ACCOUNT, &d.id, now)?;
+        ob.finish(ACCOUNT, &d.id, outcome, now)?;
+    }
+    Ok(())
+}
+
+/// Fill the store at `root` with a few mails in an Inbox and a Sent folder, and two mails in the outbox.
 pub fn seed(root: &Path) -> Result<(), String> {
     let store = MailStore::open(root).map_err(|e| e.0)?;
     let mails: &[(&str, &str, u32, &str, bool, bool)] = &[
@@ -55,12 +85,13 @@ pub fn seed(root: &Path) -> Result<(), String> {
     inbox_items.sort_by_key(|x| x.2);
     fill(&inbox, inbox_items)?;
     fill(&sent, vec![(eml("Ada Example <ada@example.com>", "Re: Schedule for the autumn workshop", 11, "Thursday is fine, see you there.\r\n\r\nAda", false), true, 1_794_000_000 + 11 * 86_400)])?;
-    Ok(())
+    seed_outbox(root)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mail::outbox::State;
 
     // spec: MAIL-050
     #[test]
@@ -76,6 +107,21 @@ mod tests {
         assert_eq!(list.len(), 8);
         assert!(list[0].subject.starts_with("Lecture hall B") || list[0].subject.starts_with("Lunch"), "{:?}", list[0].subject);
         assert!(list.iter().any(|m| m.has_attachments));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: MAIL-227
+    #[test]
+    fn the_demo_outbox_has_one_failed_and_one_unsure_mail() {
+        let root = std::env::temp_dir().join(format!("shale-mail-demo-outbox-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        seed(&root).unwrap();
+        let items = Outbox::new(&root).list(Some(ACCOUNT));
+        let states: Vec<_> = items.iter().map(|i| i.state).collect();
+        assert_eq!(items.len(), 2, "{states:?}");
+        assert_eq!(states.iter().filter(|s| **s == State::Failed).count(), 1, "{states:?}");
+        assert_eq!(states.iter().filter(|s| **s == State::Unsure).count(), 1, "{states:?}");
+        assert!(items.iter().all(|i| i.error.is_some()), "both say why");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
