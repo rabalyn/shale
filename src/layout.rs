@@ -736,6 +736,7 @@ impl ShaleApp {
                         }
                     } else {
                         tab.editor.inline_images = self.cfg.inline_images;
+                        tab.editor.line_numbers = self.cfg.line_numbers;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
                         tab.editor.dark_canvas = self.cfg.dark_canvas;

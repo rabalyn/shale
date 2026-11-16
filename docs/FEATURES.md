@@ -13,6 +13,8 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   link to open the note, or a red one to create it.
 - Pictures (`![[photo.png]]`), drawings (`![[Sketch.excalidraw]]`) and PDFs are shown inside the
   editor.
+- Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
+  line keeps one number.
 - Lists continue when you press Enter (also numbered lists and to-dos `- [ ]` / `1. [ ]`).
   Tab and Shift+Tab indent list items or change heading levels, and Alt+↑/↓ move lines.
 - Web links (`[text](https://…)`) open in your browser.

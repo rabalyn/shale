@@ -275,6 +275,8 @@ pub struct Config {
     pub file_sort: FileSort,
     /// Show embedded images as pictures inside the editor (the link shows when the cursor is on it).
     pub inline_images: bool,
+    /// Show a gutter with line numbers in the editor (EDIT-018).
+    pub line_numbers: bool,
     /// Calendars shown in the calendar panel (local .ics files and CalDAV calendars).
     pub calendars: Vec<crate::calendar::store::CalendarSource>,
     /// Calendar weeks start on Monday (otherwise Sunday).
@@ -348,6 +350,7 @@ impl Default for Config {
             sidebars: SidebarCfg::default(),
             file_sort: FileSort::NameAsc,
             inline_images: true,
+            line_numbers: true,
             calendars: vec![],
             week_starts_monday: true,
             input_log: false,
@@ -524,6 +527,7 @@ mod tests {
         assert!(c.update_links_on_rename);
         assert!(!c.ctrl_to_follow);
         assert!(c.inline_images);
+        assert!(c.line_numbers, "line numbers are on by default (EDIT-018)");
         assert_eq!(c.file_sort, FileSort::NameAsc);
     }
 

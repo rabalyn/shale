@@ -368,6 +368,8 @@ pub struct NoteEditor {
     pub inline_images: bool,
     /// Draw embedded drawings on a dark canvas (set from the app's settings).
     pub dark_canvas: bool,
+    /// Show a gutter with line numbers (set from the app's settings, EDIT-018).
+    pub line_numbers: bool,
     last_cursor: Option<(usize, usize)>,
     /// vim-lite editing is on (set from the app's settings)
     pub vim_enabled: bool,
@@ -393,6 +395,7 @@ impl NoteEditor {
             last_layout: None,
             inline_images: false,
             dark_canvas: true,
+            line_numbers: false,
             last_cursor: None,
             vim_enabled: false,
             vim: crate::vim::Vim::default(),
@@ -669,6 +672,14 @@ impl NoteEditor {
         // Inline embeds: pictures, drawings and PDFs are shown in place of their link unless the
         // cursor is inside the link.
         let mut images: Vec<(Range<usize>, f32, Art, Vec2)> = Vec::new();
+        // line numbers (EDIT-018): a gutter wide enough for the last number, left of the text
+        let number_font = egui::FontId::monospace((base_size * 0.8).round());
+        let gutter = if self.line_numbers {
+            let digits = (text.matches('\n').count() + 1).to_string().len().max(2);
+            ui.painter().layout_no_wrap("0".repeat(digits), number_font.clone(), theme::FAINT).size().x + GUTTER_GAP
+        } else {
+            0.0
+        };
         if self.inline_images {
             let focused = ui.ctx().memory(|m| m.has_focus(self.id));
             let sel = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).map(|r| {
@@ -676,7 +687,7 @@ impl NoteEditor {
                 let b = markdown::char_to_byte(text, r.secondary.index.0);
                 a.min(b)..a.max(b)
             });
-            let max_w = (ui.available_width() - 8.0).max(80.0);
+            let max_w = (ui.available_width() - gutter - 8.0).max(80.0);
             for (l, ok) in &self.cache.links {
                 if !l.embed || !*ok {
                     continue;
@@ -745,14 +756,23 @@ impl NoteEditor {
             ui.ctx().fonts_mut(|f| f.layout_job(job))
         };
 
-        let output = egui::TextEdit::multiline(text)
+        let edit = egui::TextEdit::multiline(text)
             .id(self.id)
             .frame(egui::Frame::NONE)
             .desired_width(f32::INFINITY)
             .desired_rows(20)
             .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
-            .layouter(&mut layouter)
-            .show(ui);
+            .layouter(&mut layouter);
+        let output = if gutter > 0.0 {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.add_space(gutter);
+                edit.show(ui)
+            })
+            .inner
+        } else {
+            edit.show(ui)
+        };
         let resp = &output.response.response;
         if resp.changed() {
             changed = true;
@@ -789,6 +809,25 @@ impl NoteEditor {
                         painter.galley(tag.min + Vec2::new(5.0, 2.0), g, Color32::WHITE);
                     }
                 }
+            }
+        }
+        if gutter > 0.0 {
+            let now_text = &output.galley.job.text;
+            let cursor_line = output.cursor_range.filter(|_| resp.has_focus()).map(|r| {
+                let b = markdown::char_to_byte(now_text, r.primary.index.0);
+                now_text[..b].matches('\n').count() + 1
+            });
+            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            for (n, at) in gutter_numbers(&output.galley) {
+                let colour = if Some(n) == cursor_line { theme::MUTED } else { theme::FAINT };
+                let g = painter.layout_no_wrap(n.to_string(), number_font.clone(), colour);
+                let ascent = g.rows.first().and_then(|r| r.row.glyphs.first()).map(|gl| gl.pos.y).unwrap_or(g.size().y * 0.8);
+                let y = match at {
+                    NumberAt::Baseline(y) => y - ascent,
+                    NumberAt::Top(y) => y + 3.0,
+                };
+                let x = output.galley_pos.x - GUTTER_GAP - g.size().x;
+                painter.galley(Pos2::new(x, output.galley_pos.y + y), g, colour);
             }
         }
         // when the cursor moved into or out of an image link, lay out again next frame
@@ -893,6 +932,40 @@ impl NoteEditor {
     }
 }
 
+/// Space between the line numbers and the text (EDIT-018).
+const GUTTER_GAP: f32 = 14.0;
+
+/// Where a line number sits on its row, relative to the galley.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum NumberAt {
+    /// On the baseline of the row's text.
+    Baseline(f32),
+    /// At the top of a row without visible text (an embed shown as a picture).
+    Top(f32),
+}
+
+/// The line numbers of a laid-out note (EDIT-018): one per line of the file, on the first row of
+/// that line (rows that come from wrapping get none).
+fn gutter_numbers(galley: &Galley) -> Vec<(usize, NumberAt)> {
+    let mut out = Vec::new();
+    let mut starts_line = true;
+    for row in &galley.rows {
+        if starts_line {
+            let top = row.pos.y;
+            // hidden text (embeds, hidden markup) is laid out in a tiny font: not a baseline
+            let baseline = row.row.glyphs.iter().filter(|g| g.font_height > 2.0).map(|g| g.pos.y).reduce(f32::max);
+            let at = match baseline {
+                Some(b) => NumberAt::Baseline(top + b),
+                None if row.row.glyphs.is_empty() => NumberAt::Baseline(top + row.rect().height() * 0.78),
+                None => NumberAt::Top(top),
+            };
+            out.push((out.len() + 1, at));
+        }
+        starts_line = row.ends_with_newline;
+    }
+    out
+}
+
 /// Find the embeds that are shown as pictures again in (possibly edited) text: walks the embed
 /// links of `text` in order and matches them with `keys` (link text, row height) in order.
 /// Returns (byte range in `text`, row height, index into `keys`).
@@ -944,6 +1017,21 @@ mod tests {
     struct Harness {
         ctx: egui::Context,
         time: f64,
+        texts: Vec<String>,
+    }
+
+    /// The texts painted in the last frame (to see whether line numbers were drawn).
+    fn painted_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+        fn walk(s: &egui::Shape, out: &mut Vec<String>) {
+            match s {
+                egui::Shape::Text(t) => out.push(t.galley.job.text.clone()),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+        out
     }
 
     impl Harness {
@@ -967,6 +1055,7 @@ mod tests {
                 });
             });
             out.textures_delta.clear();
+            self.texts = painted_texts(&out.shapes);
             (changed, action)
         }
     }
@@ -1083,7 +1172,7 @@ mod tests {
         let rel = Path::new("Welcome.md");
         let mut text = String::from("Go to [[Ideas]] or make [[Brand new]] now");
         let mut ed = NoteEditor::new(egui::Id::unique("t"));
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         match click_word(&mut h, &mut ed, &mut text, &v, rel, "Ideas") {
@@ -1099,6 +1188,63 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-018
+    #[test]
+    fn edit_018_one_number_per_file_line_on_its_first_row() {
+        let (v, d) = vault_for_tests("gutter");
+        let rel = Path::new("Welcome.md");
+        let long = "a long line that wraps ".repeat(30);
+        let mut text = format!("# Title\n{long}\n\nlast");
+        let mut ed = NoteEditor::new(egui::Id::unique("gutter-rows"));
+        ed.line_numbers = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        let (galley, _) = ed.last_layout.clone().unwrap();
+        assert!(galley.rows.len() > 5, "the long line wraps");
+        let numbers = gutter_numbers(&galley);
+        assert_eq!(numbers.iter().map(|(n, _)| *n).collect::<Vec<_>>(), vec![1, 2, 3, 4], "one number per line of the file");
+        // each number sits on the first row of its line (the empty line too)
+        let starts = [0, "# Title\n".len(), "# Title\n".len() + long.len() + 1, text.chars().count() - 4];
+        for ((n, at), start) in numbers.iter().zip(starts) {
+            let row = galley.pos_from_cursor(CCursor::new(start));
+            let NumberAt::Baseline(y) = at else { panic!("line {n} has text") };
+            assert!(*y > row.min.y && *y <= row.max.y + 0.5, "line {n}: baseline {y} in row {row:?}");
+        }
+        for n in ["1", "2", "3", "4"] {
+            assert!(h.texts.iter().any(|t| t == n), "number {n} is painted: {:?}", h.texts);
+        }
+        assert!(!h.texts.iter().any(|t| t == "5"), "wrapped rows get no number");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-018
+    #[test]
+    fn edit_018_the_gutter_moves_the_text_and_numbers_go_away_when_off() {
+        let (v, d) = vault_for_tests("gutter-off");
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("one\ntwo\nthree");
+        let mut ed = NoteEditor::new(egui::Id::unique("gutter-off"));
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        ed.line_numbers = true;
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        let on_x = ed.last_layout.as_ref().unwrap().1.x;
+        assert!(h.texts.iter().any(|t| t == "3"));
+        ed.line_numbers = false;
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        let off_x = ed.last_layout.as_ref().unwrap().1.x;
+        assert!(on_x > off_x + 10.0, "the gutter is left of the text: {on_x} vs {off_x}");
+        assert!(!h.texts.iter().any(|t| ["1", "2", "3"].contains(&t.as_str())), "no numbers when off: {:?}", h.texts);
+        // typing still goes into the text with the gutter shown
+        ed.line_numbers = true;
+        ed.pending_cursor = Some(text.chars().count());
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("!".into())]);
+        assert_eq!(text, "one\ntwo\nthree!");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: EDIT-007
     #[test]
     fn clicking_a_checkbox_in_the_editor_ticks_it() {
@@ -1106,7 +1252,7 @@ mod tests {
         let rel = Path::new("Welcome.md");
         let mut text = String::from("- [ ] buy milk");
         let mut ed = NoteEditor::new(egui::Id::unique("t2"));
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         let (galley, pos) = ed.last_layout.clone().unwrap();
@@ -1125,7 +1271,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t4"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         let key = |key: Key, modifiers: Modifiers| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("1. [ ] buy milk".into())]);
@@ -1158,7 +1304,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t6"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         let key = |key: Key, modifiers: Modifiers| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("- a\n    - b".into())]);
@@ -1177,7 +1323,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t7"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("pic: [!/Pro".into())]);
@@ -1203,7 +1349,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t8"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[!/".into())]);
@@ -1236,7 +1382,7 @@ mod tests {
         let mut text = String::from("intro\n![[pic.png]]\nafter");
         let mut ed = NoteEditor::new(egui::Id::unique("t9"));
         ed.inline_images = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         let tall = ed.last_layout.as_ref().unwrap().0.size().y;
@@ -1264,7 +1410,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t11"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[!/".into())]);
@@ -1303,7 +1449,7 @@ mod tests {
         let mut text = String::from("start\n");
         let mut ed = NoteEditor::new(egui::Id::unique("t12"));
         ed.pending_cursor = Some(6);
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[!/Pro".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
@@ -1339,7 +1485,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t13"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[[!/".into())]);
@@ -1380,7 +1526,7 @@ mod tests {
         let mut v = v;
         v.rescan();
         let rel = Path::new("Welcome.md");
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         crate::theme::install_fonts(&h.ctx);
         for (text, what) in [("intro\n![[Sketch.excalidraw]]\nafter", "drawing"), ("intro\n![[doc.pdf]]\nafter", "pdf")] {
             let mut text = text.to_string();
@@ -1420,7 +1566,7 @@ mod tests {
         let mut ed = NoteEditor::new(egui::Id::unique("t-noflicker"));
         ed.inline_images = true;
         ed.pending_cursor = Some(text.chars().count()); // cursor at the end, outside the link
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         for _ in 0..3 {
             h.frame(&mut ed, &mut text, &v, rel, vec![]);
         }
@@ -1469,7 +1615,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t-acesc"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("see [[Ide".into())]);
@@ -1500,7 +1646,7 @@ mod tests {
         let rel = Path::new("Welcome.md");
         let mut text = String::from("see [this is google](https://google.com) ok");
         let mut ed = NoteEditor::new(egui::Id::unique("t5"));
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         match click_word(&mut h, &mut ed, &mut text, &v, rel, "google]") {
@@ -1518,7 +1664,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t3"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("See [[Ide".into())]);
         assert_eq!(text, "See [[Ide");
@@ -1543,7 +1689,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("tp"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("Met [[p Mü".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
@@ -1554,7 +1700,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("tp2"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0 };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[[p Jörg Weiß".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
