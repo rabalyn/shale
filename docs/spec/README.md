@@ -20,6 +20,7 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 - A known defect is an `IS NOW ⚠` row (how it behaves) next to the `SHOULD BE` row (the fix).
 - Change the spec **before** the code; flip `SHOULD BE` → `IS NOW` in the same change that
   makes it true, with the test name in the Test column.
-- Tests that check a rule carry its ID in the name or a `// spec: ID` comment.
+- Tests that check a rule carry its ID in the name or a `// spec: ID` comment; a test checks that
+  every such comment names an existing row (DEV-014, `tests/spec_refs.rs`).
 - A `SHOULD BE` row with planned work names its Forgejo issue (`raba/shale#N`); open work is
   tracked in the issues, not in these files (FORGE-004, FORGE-007).
