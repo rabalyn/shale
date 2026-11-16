@@ -228,19 +228,29 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     ui.label(muted(&format!("Only https:// addresses are accepted (http:// only for a server on this computer). {}", crate::secrets::where_stored())));
     ui.separator();
     rec("week-monday".into(), ui.checkbox(&mut d.week_monday, "Weeks start on Monday"));
-    ui.add_space(6.0);
+    d.rects = rects;
+    action
+}
+
+/// The dialog's footer (NAV-028): the buttons, below the scrolling content. Call it after
+/// [`show`] in the same frame.
+pub fn footer(ui: &mut Ui, d: &mut CalendarDialog) -> Option<CalDialogAction> {
+    let mut action = None;
+    let mut rec = |k: &str, r: egui::Response| -> egui::Response {
+        d.rects.push((k.to_string(), r.rect));
+        r
+    };
     ui.horizontal(|ui| {
-        if rec("done".into(), ui.button(egui::RichText::new("Done").strong())).clicked() {
+        if rec("done", ui.button(egui::RichText::new("Done").strong())).clicked() {
             action = Some(CalDialogAction::Done);
         }
-        if rec("refresh".into(), ui.button("Refresh now")).on_hover_text("Load all calendars again").clicked() {
+        if rec("refresh", ui.button("Refresh now")).on_hover_text("Load all calendars again").clicked() {
             action = Some(CalDialogAction::Refresh);
         }
-        if rec("cancel".into(), ui.button("Cancel")).clicked() {
+        if rec("cancel", ui.button("Cancel")).clicked() {
             action = Some(CalDialogAction::Cancel);
         }
     });
-    d.rects = rects;
     action
 }
 
@@ -1145,6 +1155,12 @@ mod tests {
     use super::*;
     use eframe::egui::{Event as Ev, Modifiers, PointerButton, Pos2, RawInput};
 
+    /// The content and the footer, as the dialog window shows them together.
+    fn show_all(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Option<CalDialogAction> {
+        let a = show(ui, d, store);
+        footer(ui, d).or(a)
+    }
+
     struct H {
         ctx: egui::Context,
         t: f64,
@@ -1189,50 +1205,50 @@ mod tests {
         let store = CalendarStore::new(vec![], std::env::temp_dir().join(format!("shale-caldlg-{}", std::process::id())));
         let mut d = CalendarDialog::new(vec![], true);
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
-        h.frame(vec![], |ui| show(ui, &mut d, &store));
-        h.typ(rect(&d.rects, "local-name"), "Home", |ui| show(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        h.typ(rect(&d.rects, "local-name"), "Home", |ui| show_all(ui, &mut d, &store));
         assert_eq!(d.new_local_name, "Home");
-        h.click(rect(&d.rects, "add-local"), |ui| show(ui, &mut d, &store));
+        h.click(rect(&d.rects, "add-local"), |ui| show_all(ui, &mut d, &store));
         assert_eq!(d.sources.len(), 1);
         assert_eq!(d.sources[0].name, "Home");
         assert!(d.sources[0].is_local());
-        let a = h.click(rect(&d.rects, "add-local-sample"), |ui| show(ui, &mut d, &store));
+        let a = h.click(rect(&d.rects, "add-local-sample"), |ui| show_all(ui, &mut d, &store));
         assert_eq!(d.sources.len(), 2);
         assert!(matches!(a, Some(CalDialogAction::FillSample(id)) if id == d.sources[1].id));
-        let a = h.click(rect(&d.rects, "sample:0"), |ui| show(ui, &mut d, &store));
+        let a = h.click(rect(&d.rects, "sample:0"), |ui| show_all(ui, &mut d, &store));
         assert!(matches!(a, Some(CalDialogAction::FillSample(id)) if id == d.sources[0].id));
         let c = d.sources[0].color.clone();
-        h.click(rect(&d.rects, "color:0"), |ui| show(ui, &mut d, &store));
+        h.click(rect(&d.rects, "color:0"), |ui| show_all(ui, &mut d, &store));
         assert_ne!(d.sources[0].color, c, "colour button");
-        h.click(rect(&d.rects, "enabled:0"), |ui| show(ui, &mut d, &store));
+        h.click(rect(&d.rects, "enabled:0"), |ui| show_all(ui, &mut d, &store));
         assert!(!d.sources[0].enabled, "show/hide checkbox");
-        h.click(rect(&d.rects, "remove:1"), |ui| show(ui, &mut d, &store));
+        h.click(rect(&d.rects, "remove:1"), |ui| show_all(ui, &mut d, &store));
         assert_eq!(d.sources.len(), 1, "remove button");
         // CalDAV fields and adding an address
-        h.typ(rect(&d.rects, "dav-url"), "https://dav.example.com/cal/work/", |ui| show(ui, &mut d, &store));
-        h.typ(rect(&d.rects, "dav-user"), "ada", |ui| show(ui, &mut d, &store));
-        h.typ(rect(&d.rects, "dav-pass"), "secret", |ui| show(ui, &mut d, &store));
-        h.click(rect(&d.rects, "dav-add-url"), |ui| show(ui, &mut d, &store));
+        h.typ(rect(&d.rects, "dav-url"), "https://dav.example.com/cal/work/", |ui| show_all(ui, &mut d, &store));
+        h.typ(rect(&d.rects, "dav-user"), "ada", |ui| show_all(ui, &mut d, &store));
+        h.typ(rect(&d.rects, "dav-pass"), "secret", |ui| show_all(ui, &mut d, &store));
+        h.click(rect(&d.rects, "dav-add-url"), |ui| show_all(ui, &mut d, &store));
         assert_eq!(d.sources.len(), 2);
         assert_eq!(d.sources[1].kind, SourceKind::Caldav { url: "https://dav.example.com/cal/work/".into(), username: "ada".into(), password: "secret".into() });
         assert_eq!(d.sources[1].name, "work");
         assert_eq!(d.sources[1].sync_minutes, 15, "auto-sync every 15 minutes by default");
         assert!(!d.rects.iter().any(|r| r.0 == "sync:0"), "local calendars have no sync timer");
-        h.frame(vec![], |ui| show(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
         let r = rect(&d.rects, "sync:1");
-        h.click(r, |ui| show(ui, &mut d, &store));
-        h.frame(vec![Ev::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }], |ui| show(ui, &mut d, &store));
-        h.frame(vec![Ev::Text("5".into())], |ui| show(ui, &mut d, &store));
-        h.frame(vec![Ev::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }], |ui| show(ui, &mut d, &store));
-        h.frame(vec![], |ui| show(ui, &mut d, &store));
+        h.click(r, |ui| show_all(ui, &mut d, &store));
+        h.frame(vec![Ev::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }], |ui| show_all(ui, &mut d, &store));
+        h.frame(vec![Ev::Text("5".into())], |ui| show_all(ui, &mut d, &store));
+        h.frame(vec![Ev::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }], |ui| show_all(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
         assert_eq!(d.sources[1].sync_minutes, 5, "the sync interval can be changed");
         let id = d.sources[1].id.clone();
-        assert_eq!(h.click(rect(&d.rects, "sync-now:1"), |ui| show(ui, &mut d, &store)), Some(CalDialogAction::SyncNow(id)));
-        h.click(rect(&d.rects, "week-monday"), |ui| show(ui, &mut d, &store));
+        assert_eq!(h.click(rect(&d.rects, "sync-now:1"), |ui| show_all(ui, &mut d, &store)), Some(CalDialogAction::SyncNow(id)));
+        h.click(rect(&d.rects, "week-monday"), |ui| show_all(ui, &mut d, &store));
         assert!(!d.week_monday);
-        assert_eq!(h.click(rect(&d.rects, "refresh"), |ui| show(ui, &mut d, &store)), Some(CalDialogAction::Refresh));
-        assert_eq!(h.click(rect(&d.rects, "cancel"), |ui| show(ui, &mut d, &store)), Some(CalDialogAction::Cancel));
-        assert_eq!(h.click(rect(&d.rects, "done"), |ui| show(ui, &mut d, &store)), Some(CalDialogAction::Done));
+        assert_eq!(h.click(rect(&d.rects, "refresh"), |ui| show_all(ui, &mut d, &store)), Some(CalDialogAction::Refresh));
+        assert_eq!(h.click(rect(&d.rects, "cancel"), |ui| show_all(ui, &mut d, &store)), Some(CalDialogAction::Cancel));
+        assert_eq!(h.click(rect(&d.rects, "done"), |ui| show_all(ui, &mut d, &store)), Some(CalDialogAction::Done));
     }
 
     // spec: CAL-010
@@ -1247,18 +1263,18 @@ mod tests {
         d.dav_url = format!("{base}/");
         d.dav_user = "ada".into();
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
-        h.frame(vec![], |ui| show(ui, &mut d, &store));
-        h.click(rect(&d.rects, "dav-find"), |ui| show(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        h.click(rect(&d.rects, "dav-find"), |ui| show_all(ui, &mut d, &store));
         for _ in 0..200 {
-            h.frame(vec![], |ui| show(ui, &mut d, &store));
+            h.frame(vec![], |ui| show_all(ui, &mut d, &store));
             if !d.found.is_empty() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         assert_eq!(d.found.len(), 1, "message: {:?}", d.message);
-        h.frame(vec![], |ui| show(ui, &mut d, &store));
-        h.click(rect(&d.rects, "dav-add-found"), |ui| show(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        h.click(rect(&d.rects, "dav-add-found"), |ui| show_all(ui, &mut d, &store));
         assert_eq!(d.sources.len(), 1);
         assert_eq!(d.sources[0].name, "Work");
         assert_eq!(d.sources[0].color, "#1971c2");

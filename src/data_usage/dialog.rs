@@ -209,20 +209,6 @@ fn cache_ui(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention, now: i64, ou
                 out.push(Ask::Changed(id));
             }
             ui.label(muted(u.record.text(id, now)).size(12.0));
-            if u.confirm == Some(id) {
-                if let Some(t) = id.confirm_text() {
-                    ui.label(RichText::new(t).color(theme::LINK_MISSING));
-                }
-                ui.horizontal(|ui| {
-                    if ui.button(format!("Yes, {}", id.clear_label().to_lowercase())).clicked() {
-                        u.confirm = None;
-                        out.push(Ask::Clear(id));
-                    }
-                    if ui.button("Cancel").clicked() {
-                        u.confirm = None;
-                    }
-                });
-            }
         });
     }
 }
@@ -231,6 +217,32 @@ fn cache_ui(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention, now: i64, ou
 pub fn show(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention) -> Vec<Ask> {
     let mut out = vec![];
     let now = crate::calendar::time::now();
+    saved_ui(ui, u, &mut out);
+    ui.add_space(10.0);
+    ui.separator();
+    cache_ui(ui, u, r, now, &mut out);
+    out
+}
+
+/// The footer (NAV-028), below the scrolling content: the question of a Clear that asks first
+/// (USE-008), so its answer is in reach wherever the content is scrolled to, and Refresh with
+/// the total. Returns what was asked for.
+pub fn footer(ui: &mut Ui, u: &mut DataUsage) -> Vec<Ask> {
+    let mut out = vec![];
+    if let Some(id) = u.confirm {
+        if let Some(t) = id.confirm_text() {
+            ui.label(RichText::new(format!("{}: {t}", id.name())).color(theme::LINK_MISSING));
+        }
+        ui.horizontal(|ui| {
+            if ui.button(format!("Yes, {}", id.clear_label().to_lowercase())).clicked() {
+                u.confirm = None;
+                out.push(Ask::Clear(id));
+            }
+            if ui.button("Cancel").clicked() {
+                u.confirm = None;
+            }
+        });
+    }
     ui.horizontal(|ui| {
         if ui.add_enabled(u.saved.is_some(), egui::Button::new("Refresh")).on_hover_text("Count again").clicked() {
             out.push(Ask::Refresh);
@@ -239,10 +251,5 @@ pub fn show(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention) -> Vec<Ask> 
             ui.label(muted(format!("Caches: {}", human_bytes(t))));
         }
     });
-    ui.add_space(6.0);
-    saved_ui(ui, u, &mut out);
-    ui.add_space(10.0);
-    ui.separator();
-    cache_ui(ui, u, r, now, &mut out);
     out
 }

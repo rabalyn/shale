@@ -15,6 +15,8 @@ pub(super) struct P {
     pub(super) dir: PathBuf,
     /// the text painted in the last frame, and where
     pub(super) painted: Vec<(String, Pos2)>,
+    /// the window size (tall, so that a dialog shows whole; a test of a short window sets it)
+    pub(super) size: Vec2,
 }
 
 fn collect_text(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
@@ -63,7 +65,12 @@ impl P {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         crate::theme::apply(&ctx);
-        P { ctx, t: 0.0, app, dir, painted: vec![] }
+        P { ctx, t: 0.0, app, dir, painted: vec![], size: Vec2::new(900.0, 2600.0) }
+    }
+
+    /// The window rect of the dialog that was made with `Dialog::new(id, …)`.
+    pub(super) fn dialog_area(&self, id: &str) -> Rect {
+        self.ctx.memory(|m| m.area_rect(egui::Id::unique(("dialog", id)))).unwrap_or_else(|| panic!("no dialog {id:?} shown"))
     }
 
     /// The place of a row of the file tree, found by the name painted on it.
@@ -86,7 +93,7 @@ impl P {
 
     pub(super) fn frame(&mut self, show: Show, events: Vec<Event>) -> Seen {
         self.t += 0.05;
-        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 2600.0))), time: Some(self.t), events, ..Default::default() };
+        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), time: Some(self.t), events, ..Default::default() };
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| match show {
