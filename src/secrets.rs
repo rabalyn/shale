@@ -718,7 +718,8 @@ mod tests {
         crate::secret::fail_locks_on_this_thread(false);
         let text = where_stored();
         assert!(text.contains(crate::secret::LOCK_LIMIT) && text.contains("encrypted swap"), "{text}");
-        assert!(text.contains("keyring"), "{text}");
+        // the store of this system is still named (the Keychain and the Credential Manager are not called "keyring")
+        assert!(text.contains(store_name()), "{text}");
     }
 
     // spec: SEC-021
