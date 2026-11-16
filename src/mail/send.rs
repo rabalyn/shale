@@ -791,7 +791,8 @@ pub mod tests {
         // a password typed for this session: no keyring; a refused connection and an untrusted certificate are said as they are
         let server = FakeSmtp::start(MailSecurity::ImplicitTls);
         let at = |port: u16| MailAccount { smtp_host: "localhost".into(), smtp_port: port, smtp_security: MailSecurity::ImplicitTls, ..account() };
-        let c = connector_for_account(&at(crate::mail::imap_fake_tests::closed_port()), Some("pw".into())).unwrap();
+        let down = crate::mail::imap_fake_tests::closed_port();
+        let c = connector_for_account(&at(down.port), Some("pw".into())).unwrap();
         assert!(matches!(c.connect(), Err(SmtpError::Connection(_))));
         assert!(test_connection(c.as_ref()).is_err());
         let c = connector_for_account(&at(server.port), Some("pw".into())).unwrap();

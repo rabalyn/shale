@@ -789,7 +789,8 @@ mod tests {
         };
         // nothing listens: a connection error, the factory asked once even though it would give a new token
         let auth = Arc::new(CountingAuth::new(true, None));
-        let c = ImapConnector { settings: settings(crate::mail::imap_fake_tests::closed_port()), auth: auth.clone() };
+        let down = crate::mail::imap_fake_tests::closed_port();
+        let c = ImapConnector { settings: settings(down.port), auth: auth.clone() };
         assert!(matches!(c.connect(), Err(ImapError::Connection(_))));
         assert_eq!(auth.asked(), 1);
         // the pretend server's certificate is not in the system's store: refused with a TLS error, not a retry
@@ -802,7 +803,7 @@ mod tests {
         let account = MailAccount { id: "t-real".into(), host: "localhost".into(), port: server.port, user: "ada".into(), ..MailAccount::default() };
         let conn = real_factory()(&account, Some("pw".into())).unwrap();
         assert!(matches!(conn.connect(), Err(ImapError::Tls(_))));
-        let account = MailAccount { port: crate::mail::imap_fake_tests::closed_port(), ..account };
+        let account = MailAccount { port: down.port, ..account };
         assert!(matches!(real_factory()(&account, Some("pw".into())).unwrap().connect(), Err(ImapError::Connection(_))));
         // the lazy connector builds once, and a factory that fails is the sign-in error of every connect
         let made = Arc::new(std::sync::atomic::AtomicUsize::new(0));
