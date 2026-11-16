@@ -236,10 +236,47 @@ fn err_text(e: impl std::fmt::Display) -> String {
 
 // ---------------------------------------------------------------- the sync
 
+/// Accounts being synced right now (a full sync or a quick check of a watched folder, MAIL-232):
+/// never two at once for the same account of the same store.
+static ACTIVE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Held while an account is being synced.
+pub struct SyncGuard(String);
+
+impl SyncGuard {
+    /// None: another sync of this account is going on.
+    pub fn try_enter(store: &MailStore, account_id: &str) -> Option<SyncGuard> {
+        let key = format!("{}|{account_id}", store.index_path().display());
+        let mut active = ACTIVE.lock().unwrap_or_else(|e| e.into_inner());
+        if active.contains(&key) {
+            return None;
+        }
+        active.push(key.clone());
+        Some(SyncGuard(key))
+    }
+}
+
+impl Drop for SyncGuard {
+    fn drop(&mut self) {
+        ACTIVE.lock().unwrap_or_else(|e| e.into_inner()).retain(|k| k != &self.0);
+    }
+}
+
 /// Sync all folders of an account that are switched on. Blocks until done: run it through
 /// [`start`] (a background job). Progress goes to `progress`; `cancel` is checked between batches.
 pub fn sync_account(store: &MailStore, account_id: &str, display: &str, connector: &dyn Connector, opts: &SyncOptions, progress: &Sender<Progress>, cancel: &AtomicBool) -> SyncSummary {
     let mut summary = SyncSummary::default();
+    // a quick check of a watched folder (MAIL-232) is short: wait for it rather than run beside it
+    let _guard = loop {
+        if let Some(g) = SyncGuard::try_enter(store, account_id) {
+            break g;
+        }
+        if cancel.load(Ordering::SeqCst) {
+            summary.cancelled = true;
+            return summary;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
     let first = match connector.connect() {
         Ok(c) => c,
         Err(e) => {
@@ -398,7 +435,7 @@ fn worker(store: &MailStore, connector: &dyn Connector, opts: &SyncOptions, shar
         let mut c = c;
         let outcome = crate::jobs::catch(|| sync_folder(store, &mut c, &folder, opts, progress, cancel)).unwrap_or_else(Err);
         match outcome {
-            Ok(added) => {
+            Ok((added, _)) => {
                 client = Some(c); // the connection is still good: next folder
                 let mut r = result.lock().unwrap_or_else(|e| e.into_inner());
                 r.folders_synced += 1;
@@ -467,8 +504,9 @@ fn fetch_full(store: &MailStore, client: &mut Client, row: &FolderRow, uv: u32, 
     Ok(stored)
 }
 
-/// Sync one folder (see the module comment). Returns the number of new messages.
-fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts: &SyncOptions, progress: &Sender<Progress>, cancel: &AtomicBool) -> Result<usize, String> {
+/// Sync one folder (see the module comment). Returns the number of new messages and the number
+/// of messages whose flags or presence on the server changed.
+fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts: &SyncOptions, progress: &Sender<Progress>, cancel: &AtomicBool) -> Result<(usize, usize), String> {
     let shown = decode_mutf7(&folder.name);
     let now = opts.now();
     let sel = client.examine(&folder.name).map_err(err_text)?;
@@ -504,8 +542,9 @@ fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts:
     let cancelled = cancel.load(Ordering::SeqCst);
     let complete = stored == total && !cancelled;
 
+    let mut changed = 0;
     if complete && had_rows {
-        compare_with_server(store, client, &row, &sel, opts)?;
+        changed = compare_with_server(store, client, &row, &sel, opts)?;
     }
     if complete {
         crate::mail::ops::drop_local_copies_seen_on_server(store, row.id, uv)?;
@@ -526,11 +565,12 @@ fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts:
             last_sync: now,
         }])
         .map_err(err_text)?;
-    Ok(stored)
+    Ok((stored, changed))
 }
 
 /// Flags and deletions: what changed on the server since last time. Files are never touched.
-fn compare_with_server(store: &MailStore, client: &mut Client, row: &FolderRow, sel: &Selected, opts: &SyncOptions) -> Result<(), String> {
+/// Returns how many messages changed (flags, or gone from / back on the server).
+fn compare_with_server(store: &MailStore, client: &mut Client, row: &FolderRow, sel: &Selected, opts: &SyncOptions) -> Result<usize, String> {
     let uv = sel.uidvalidity;
     let reader = store.reader().map_err(err_text)?;
     let known = reader.flags_of(row.id, uv).map_err(err_text)?;
@@ -560,11 +600,24 @@ fn compare_with_server(store: &MailStore, client: &mut Client, row: &FolderRow, 
             Ok(())
         })
         .map_err(err_text)?;
+    let changes = ops.len();
     store.commit(ops).map_err(err_text)?;
     // files that went missing locally and still exist on the server are fetched again
     let refetch: Vec<u32> = reader.missing_uids(row.id, uv).map_err(err_text)?.into_iter().filter(|u| on_server.contains(u)).collect();
     fetch_full(store, client, row, uv, &refetch, opts, |_| true)?;
-    Ok(())
+    Ok(changes)
+}
+
+/// A quick look at one folder of an account that is kept open: new mail, changed flags, mail gone
+/// from the server, the same as the sync of that folder does (MAIL-232). `client` is a connection
+/// of the account (it may sit in a folder; the folder is examined again). None: another sync of
+/// the account is going on, nothing was done. Else the number of new messages and of changed ones.
+pub fn check_folder(store: &MailStore, client: &mut Client, account_id: &str, folder_name: &str, opts: &SyncOptions) -> Result<Option<(usize, usize)>, String> {
+    let Some(_guard) = SyncGuard::try_enter(store, account_id) else { return Ok(None) };
+    let row = folder_row(store, account_id, folder_name)?;
+    let (tx, _rx) = channel();
+    let never = AtomicBool::new(false);
+    crate::jobs::catch(|| sync_folder(store, client, &row, opts, &tx, &never)).unwrap_or_else(Err).map(Some)
 }
 
 // ---------------------------------------------------------------- browsing Trash and Junk

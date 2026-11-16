@@ -30,6 +30,15 @@ with your own client ID; the provider setup steps are in the README. Folders to 
 with tick boxes; Trash, Junk and "All Mail" load on demand. New mail is fetched every 10
 minutes (0 = off). "Mark as read when opened" is on, after 2 seconds.
 
+## Changes made in another program
+
+While the mail view is open, Shale keeps the folder you have open and the Inbox of each account
+fresh. It asks the server to say when something changes (IMAP IDLE), so a flag you remove, a
+mail you read or a new mail in Thunderbird or on your phone shows here within a few seconds,
+without pressing Sync. This connection only reads. A server without IDLE is asked once a
+minute instead. When you leave the mail view (or open another folder), the connection of the
+folder you left is closed. The regular sync every 10 minutes still looks at all folders.
+
 ## Reading and keys
 
 Search with `/` (words, `"phrases"`, `from:`, `to:`, `subject:`, `body:`). One of the three

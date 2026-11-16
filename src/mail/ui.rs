@@ -25,6 +25,7 @@ use crate::mail::ops::{self, Action, Confirmed, OpsReport};
 use crate::mail::outbox::{DraftInfo, Item, Outbox, Recovery, State};
 use crate::mail::send::{self, SendReport, SmtpConnector};
 use crate::mail::store::{MailStore, Reader};
+use crate::mail::watch::{Wanted, Watch};
 use crate::mail::Mail;
 use eframe::egui;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -363,6 +364,8 @@ pub struct MailView {
     // sync
     pub syncs: HashMap<String, SyncRun>,
     last_auto: Option<Instant>,
+    /// The open folder and the Inboxes, kept fresh while the mail view is open (MAIL-230).
+    pub watch: Watch,
     pub session_pw: HashMap<String, crate::secret::Secret>,
     pub prompt: Option<PasswordPrompt>,
     pub tests: HashMap<String, TestState>,
@@ -503,6 +506,7 @@ impl MailView {
             listings: HashMap::new(),
             syncs: HashMap::new(),
             last_auto: None,
+            watch: Watch::default(),
             session_pw: HashMap::new(),
             prompt: None,
             tests: HashMap::new(),
@@ -603,6 +607,9 @@ impl MailView {
         if !self.ops_running.is_empty() || !self.send_running.is_empty() {
             return Some("changes or mail are being sent to the server; try again when that is done".into());
         }
+        if self.watch.checking() {
+            return Some("a folder is being checked for changes; try again in a moment".into());
+        }
         None
     }
 
@@ -672,6 +679,7 @@ impl MailView {
         self.tick_compose_keys();
         self.tick_ops(cfg);
         self.tick_local(cfg);
+        self.tick_watch(cfg, wanted);
         // the automatic sync (MAIL-058)
         if let (Some(_), true, minutes) = (self.ready_store(), !cfg.mail_accounts.is_empty(), cfg.mail_sync_minutes) {
             if minutes > 0 && self.last_auto.is_none_or(|t| t.elapsed() >= Duration::from_secs(u64::from(minutes) * 60)) {
@@ -693,6 +701,32 @@ impl MailView {
             self.select_first_folder(cfg);
         }
         self.busy()
+    }
+
+    /// Keep the open folder and the Inboxes fresh while the mail view is shown (MAIL-230, MAIL-233):
+    /// only folders that a sync has finished once, and not while the store is being rebuilt.
+    fn tick_watch(&mut self, cfg: &Config, wanted: bool) {
+        if self.watch.drain() {
+            self.dirty = true;
+        }
+        let Some(store) = self.ready_store().filter(|_| wanted && self.watch.enabled && !cfg.mail_accounts.is_empty()) else {
+            self.watch.stop_all();
+            return;
+        };
+        let open = self.folder.filter(|_| self.local_view.is_none()).and_then(|id| self.folder_row(id)).map(|f| (f.account.clone(), f.name.clone()));
+        let mut targets: Vec<Wanted> = vec![];
+        for a in &cfg.mail_accounts {
+            let session_password = self.session_pw.contains_key(&a.id);
+            for f in self.folders.iter().filter(|f| f.account == a.id && f.sync_enabled && f.uidnext.is_some()) {
+                let is_open = open.as_ref().is_some_and(|(acct, name)| *acct == f.account && *name == f.name);
+                if is_open || f.name.eq_ignore_ascii_case("INBOX") {
+                    targets.push(Wanted { account: a.clone(), folder: f.name.clone(), session_password });
+                }
+            }
+        }
+        let mut watch = std::mem::take(&mut self.watch);
+        watch.update(&targets, &store, &|a| Arc::new(self.lazy_connector(a, None)), &self.opts, self.ctx.as_ref());
+        self.watch = watch;
     }
 
     /// Is a job, a sync or a debounce going on?
@@ -1620,6 +1654,7 @@ impl MailView {
         if let Some(r) = self.syncs.remove(account) {
             r.cancel.store(true, Ordering::SeqCst);
         }
+        self.watch.stop_account(account);
         if self.folder.and_then(|f| self.folder_row(f)).is_some_and(|f| f.account == account) {
             self.folder = None;
             self.total = 0;
