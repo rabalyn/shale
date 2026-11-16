@@ -241,6 +241,7 @@ pub enum Action {
         col: usize,
     },
     ShowView(View),
+    ShowViewInNewTab(View),
     /// open a post found by the search in its feed, in a new tab (SOC-035)
     OpenPost(Box<crate::social::post_index::PostHit>),
     /// open a mail found by the search in the mail view (NAV-025)
@@ -1735,6 +1736,7 @@ impl ShaleApp {
                 Action::GotoLine { rel, line } => self.goto_line(&rel, line),
                 Action::GotoMatch { rel, line, col } => self.goto_match(&rel, line, col),
                 Action::ShowView(v) => self.show_view(v, false),
+                Action::ShowViewInNewTab(v) => self.show_view(v, true),
                 Action::OpenPost(hit) => self.open_post_hit(&hit),
                 Action::OpenMail(msg) => self.open_mail_hit(*msg),
                 Action::CloseTab(i) => self.close_tab(i),
