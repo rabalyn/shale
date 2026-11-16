@@ -3,7 +3,7 @@
 This file keeps track of the work so it can carry on across sessions. Update it whenever a
 feature lands, a gap is found or a test is added.
 
-_Last updated: 2026-11-16 (module split: feature folders and ShaleApp sub-states, raba/shale#5)_
+_Last updated: 2026-11-16 (ShaleApp sub-states for search, file tree, graphs, screenshot mode and recovery, raba/shale#119)_
 
 ## Architecture
 
@@ -11,18 +11,22 @@ _Last updated: 2026-11-16 (module split: feature folders and ShaleApp sub-states
 folder: `src/<feature>.rs` is the parent module (its `mod` list and shared types) and the children
 are `src/<feature>/<child>.rs`, with their tests next to them. The feature folders are `calendar/`,
 `mail/`, `drawing/`, `import/` and `pdf/`; `app/`, `social/`, `data_usage/`, `secrets/` and `gitsync/`
-are folders of the same kind. `ShaleApp` (`src/app.rs`, 44 fields) owns five sub-states, each defined
+are folders of the same kind. `ShaleApp` (`src/app.rs`, 34 fields) owns its sub-states, each defined
 beside its feature: `drag: DragState` (`app/drops.rs`), `cal: CalendarUi` (`calendar/ui.rs`),
-`tag_learner: TagLearner` (`import/tagwords.rs`), `script: ScriptRun` (`script.rs`) and
-`tabbar: TabBar` (`app/tabs.rs`). The other fields (search, file tree, side panels, graphs, screenshot
-mode …) are not grouped yet.
+`tag_learner: TagLearner` (`import/tagwords.rs`), `script: ScriptRun` (`script.rs`),
+`tabbar: TabBar` (`app/tabs.rs`), `search: SearchBox` and `tree: FileTree` (`panels.rs`),
+`graphs: Graphs` (`graph.rs`), `shot: ScreenshotRun` (`app/screenshot.rs`) and
+`recovery: RecoveryState` (`recovery.rs`). The shown left panel is `side.left` (`SideState`,
+`sidebar_ui.rs`). The frame counter `frames` stays a loose field: screenshots and scripted input
+both pace by it.
 
 | File | What it does |
 |---|---|
 | `src/main.rs` | Reads the command-line options (`--vault`, `--screenshot`, `--view`, `--size`, `--keys`) and opens the window. |
 | `src/script.rs` | The `--keys` script of screenshot runs (BUILD-007; `ScriptRun` is the run's state in `ShaleApp`): the step language and its parser (keys, text, pointer steps aimed at coordinates or at drawn texts, waits), and the tests that every picture of `docs/screenshots/` has a recipe shown in the docs (DEV-007). |
-| `src/app.rs` | App state (`ShaleApp`, with the five sub-states above): history, open note buffers, autosave, outside-change detection, actions (open, follow link, create, rename, trash, toggle task), screenshot mode. Includes app-level tests. |
+| `src/app.rs` | App state (`ShaleApp`, with the sub-states above): history, open note buffers, autosave, outside-change detection, actions (open, follow link, create, rename, trash, toggle task), screenshot mode. Includes app-level tests. |
 | `src/app/tabs.rs` | `TabBar`: the open tabs in order, the active one and where the tab bar drew them last frame (for tests). |
+| `src/app/screenshot.rs` | `ScreenshotRun`: where the picture of a `--screenshot` run goes, and whether it was asked for and saved. |
 | `src/app/sync.rs`, `src/app/usage.rs`, `src/app/social.rs` | Git sync in the window (when it runs, open buffers, settings), the Data usage dialog and the daily cleanup, the feed view and its accounts dialog. |
 | `src/layout.rs` | Window layout: ribbon, tab bar, view header, note view (inline title plus editor or reading view), status bar, toasts, painted icons, start screen. |
 | `src/panels.rs` | Left sidebar (file tree, search, tags), right sidebar (backlinks and unlinked mentions, outgoing links, outline, local graph), the vault-wide task list and the dialogs (quick switcher, rename, new folder, trash, settings). |

@@ -370,16 +370,16 @@ impl ShaleApp {
     pub(crate) fn ribbon_click(&mut self, item: Item) {
         match item {
             Item::Files => {
-                self.left = LeftPanel::Files;
+                self.side.left = LeftPanel::Files;
                 self.cfg.show_left = true;
             }
             Item::Search => {
-                self.left = LeftPanel::Search;
+                self.side.left = LeftPanel::Search;
                 self.cfg.show_left = true;
-                self.focus_search = true;
+                self.search.focus = true;
             }
             Item::Tags => {
-                self.left = LeftPanel::Tags;
+                self.side.left = LeftPanel::Tags;
                 self.cfg.show_left = true;
             }
             Item::Switcher => self.modal = Some(Modal::QuickSwitch { query: String::new(), sel: 0 }),
@@ -639,7 +639,7 @@ impl ShaleApp {
             }
             View::Mail => {
                 let modal_open = self.modal.is_some();
-                self.mail.away = self.tree_sel.is_some() || self.search_sel.is_some();
+                self.mail.away = self.tree.sel.is_some() || self.search.sel.is_some();
                 let acts = self.mail.show(ui, &self.cfg, &mut self.keymap, modal_open);
                 for a in acts {
                     self.mail_action(a);
@@ -652,7 +652,7 @@ impl ShaleApp {
                 });
                 if let Some(v) = &self.vault {
                     egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 4)).show(ui, |ui| {
-                        if let Some(c) = self.graph.ui(ui, v, cur.as_deref(), false) {
+                        if let Some(c) = self.graphs.global.ui(ui, v, cur.as_deref(), false) {
                             graph_click(&mut self.actions, c);
                         }
                     });
@@ -817,7 +817,7 @@ impl ShaleApp {
     /// Text from an earlier run that could not be saved and was put aside (DATA-011): stays until
     /// it is dismissed.
     pub fn paint_recovery_notice(&mut self, ui: &mut Ui) {
-        let Some(first) = self.recovery_notice.last().cloned() else { return };
+        let Some(first) = self.recovery.notice.last().cloned() else { return };
         let screen = ui.ctx().content_rect();
         let mut dismissed = false;
         egui::Area::new(egui::Id::unique("recovery-notice")).order(egui::Order::Tooltip).fixed_pos(Pos2::new(screen.min.x + 60.0, screen.max.y - 120.0)).show(ui.ctx(), |ui| {
@@ -826,7 +826,7 @@ impl ShaleApp {
                 ui.label(egui::RichText::new("Some changes could not be saved when Shale was closed last time. They were put aside so nothing is lost.").color(theme::TEXT));
                 ui.horizontal(|ui| {
                     if ui.link("Open the folder").clicked() {
-                        if let Err(e) = crate::opener::open_recovery_folder(&first, &self.recovery_root) {
+                        if let Err(e) = crate::opener::open_recovery_folder(&first, &self.recovery.root) {
                             self.toasts.push((e, std::time::Instant::now()));
                         }
                     }
@@ -837,8 +837,8 @@ impl ShaleApp {
             });
         });
         if dismissed {
-            crate::recovery::dismiss(&self.recovery_notice);
-            self.recovery_notice.clear();
+            crate::recovery::dismiss(&self.recovery.notice);
+            self.recovery.notice.clear();
         }
     }
 

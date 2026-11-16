@@ -12,6 +12,14 @@ use std::path::{Component, Path, PathBuf};
 /// Marker file: this day's folder has been announced and dismissed.
 const SEEN: &str = ".seen";
 
+/// The recovery state of the app: the folder rescued text goes to, and what the person has not seen yet.
+pub struct RecoveryState {
+    /// where text that could not be saved at exit is put (DATA-011)
+    pub root: PathBuf,
+    /// recovery folders from earlier runs the person has not dismissed yet
+    pub notice: Vec<PathBuf>,
+}
+
 /// The default recovery folder.
 pub fn default_root() -> PathBuf {
     dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("recovery")

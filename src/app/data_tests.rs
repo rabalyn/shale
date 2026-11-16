@@ -402,7 +402,7 @@ fn text_that_cannot_be_saved_at_exit_is_put_in_the_recovery_folder_and_announced
         return;
     }
     let rec = d.join("recovery-root");
-    app.recovery_root = rec.clone();
+    app.recovery.root = rec.clone();
     app.open(Path::new("Sub/N.md"), false);
     type_text(&mut app, "Sub/N.md", "precious unsaved words\n");
     locked(&d.join("Sub"), true);
@@ -415,15 +415,15 @@ fn text_that_cannot_be_saved_at_exit_is_put_in_the_recovery_folder_and_announced
 
     // the next start announces it, once dismissed it stays quiet
     let mut next = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
-    next.recovery_root = rec.clone();
-    next.recovery_notice = crate::recovery::unseen(&rec);
-    assert_eq!(next.recovery_notice, vec![rec.join(&day)]);
-    crate::recovery::dismiss(&next.recovery_notice);
+    next.recovery.root = rec.clone();
+    next.recovery.notice = crate::recovery::unseen(&rec);
+    assert_eq!(next.recovery.notice, vec![rec.join(&day)]);
+    crate::recovery::dismiss(&next.recovery.notice);
     assert!(crate::recovery::unseen(&rec).is_empty());
 
     // a clean exit rescues nothing
     let (mut ok, d2) = app_in("exitclean", &[("N.md", b"x\n")]);
-    ok.recovery_root = d2.join("rec");
+    ok.recovery.root = d2.join("rec");
     ok.open(Path::new("N.md"), false);
     eframe::App::on_exit(&mut ok);
     assert!(!d2.join("rec").exists());

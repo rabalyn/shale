@@ -395,7 +395,7 @@ mod tests {
         w.press(Key::H, CTRL_ALT);
         assert_eq!(w.app.tabbar.active, 1);
         w.press(Key::H, CTRL);
-        assert!(w.app.tree_sel.is_some(), "Ctrl+H: the file list has the keyboard");
+        assert!(w.app.tree.sel.is_some(), "Ctrl+H: the file list has the keyboard");
         w.press(Key::L, CTRL_ALT);
         assert_eq!(w.app.tabbar.active, 2, "works from the file list too, and Ctrl+L did not take it");
         // the order is the order the tabs are shown in (pinned and dragged tabs sit in `tabs`)

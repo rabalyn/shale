@@ -56,11 +56,11 @@ impl ShaleApp {
 
     /// Show a folder of the vault in the Files panel, opened.
     fn show_folder(&mut self, rel: &Path) {
-        self.left = LeftPanel::Files;
+        self.side.left = LeftPanel::Files;
         self.cfg.show_left = true;
         let mut p = Some(rel);
         while let Some(d) = p.filter(|d| !d.as_os_str().is_empty()) {
-            self.expanded.insert(d.to_path_buf());
+            self.tree.expanded.insert(d.to_path_buf());
             p = d.parent();
         }
     }

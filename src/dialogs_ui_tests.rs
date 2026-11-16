@@ -439,7 +439,7 @@ fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     assert!(p.app.toasts.iter().any(|(t, _)| t.contains("Imported 2 notes into “Imported/Inbox”")), "{:?}", p.app.toasts);
     assert_eq!(p.app.vdata.state.last_import_folder, "Imported/Inbox");
     assert_eq!(p.app.vdata.state.recent_tags.first().map(String::as_str), Some("from-outside"));
-    assert!(p.app.expanded.contains(Path::new("Imported/Inbox")) && p.app.expanded.contains(Path::new("Imported")));
+    assert!(p.app.tree.expanded.contains(Path::new("Imported/Inbox")) && p.app.tree.expanded.contains(Path::new("Imported")));
     let acts = p.actions();
     assert!(acts.iter().any(|a| matches!(a, Action::Rescan)));
     assert_eq!(opened(&acts).len(), 1);

@@ -15,6 +15,8 @@ const ICON: f32 = 26.0;
 #[derive(Default)]
 pub struct SideState {
     pub layout: Layout,
+    /// the panel the left sidebar shows
+    pub left: LeftPanel,
     /// the icon being dragged with the mouse
     pub drag: Option<Item>,
     /// a panel shown by a click on its shortcut in the ribbon (LAY-011), below the views
@@ -134,9 +136,9 @@ impl ShaleApp {
         let cur = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.view.clone());
         for item in self.side.layout.ribbon.clone() {
             let active = match item {
-                Item::Files => self.cfg.show_left && self.left == LeftPanel::Files,
-                Item::Search => self.cfg.show_left && self.left == LeftPanel::Search,
-                Item::Tags => self.cfg.show_left && self.left == LeftPanel::Tags,
+                Item::Files => self.cfg.show_left && self.side.left == LeftPanel::Files,
+                Item::Search => self.cfg.show_left && self.side.left == LeftPanel::Search,
+                Item::Tags => self.cfg.show_left && self.side.left == LeftPanel::Tags,
                 Item::Graph => cur == Some(View::Graph),
                 Item::Calendar => cur == Some(View::Calendar),
                 Item::Mail => cur == Some(View::Mail),

@@ -8,11 +8,12 @@ use crate::markdown;
 use crate::theme;
 use crate::vault::{rel_to_string, FileKind};
 use eframe::egui::{self, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 impl ShaleApp {
     pub fn left_sidebar(&mut self, ui: &mut Ui) {
-        match self.left {
+        match self.side.left {
             LeftPanel::Files => self.file_explorer(ui),
             LeftPanel::Search => self.search_panel(ui),
             LeftPanel::Tags => self.tags_panel(ui),
@@ -37,7 +38,7 @@ impl ShaleApp {
                 self.actions.push(Action::NewDrawing { folder: folder.clone(), embed_into: None });
             }
             if icon_button(ui, Icon::Collapse, 26.0, false, "Collapse all folders").clicked() {
-                self.expanded.clear();
+                self.tree.expanded.clear();
             }
             let sort_resp = icon_button(ui, Icon::Sort, 26.0, false, &format!("Sort: {}", self.cfg.file_sort.label()));
             egui::Popup::menu(&sort_resp).show(|ui| {
@@ -133,7 +134,7 @@ impl ShaleApp {
         fn walk(app: &ShaleApp, dir: &Path, out: &mut Vec<(PathBuf, bool)>) {
             for f in app.sorted_folders_in(dir) {
                 out.push((f.clone(), true));
-                if app.expanded.contains(&f) {
+                if app.tree.expanded.contains(&f) {
                     walk(app, &f, out);
                 }
             }
@@ -147,15 +148,15 @@ impl ShaleApp {
     /// Keys while the file list has the keyboard: j / k files, Ctrl+J / Ctrl+K folders, Space
     /// opens or closes a folder, Enter opens, Esc back to the editor.
     fn tree_keys(&mut self, ui: &Ui) {
-        let Some(sel) = self.tree_sel.clone() else { return };
+        let Some(sel) = self.tree.sel.clone() else { return };
         if ui.ctx().memory(|m| m.focused().is_some()) {
             // something else took the keyboard (a click into the editor, a dialog)
-            self.tree_sel = None;
+            self.tree.sel = None;
             return;
         }
         let rows = self.visible_tree_rows();
         let Some(cur) = rows.iter().position(|(r, _)| *r == sel).or(if rows.is_empty() { None } else { Some(0) }) else {
-            self.tree_sel = None;
+            self.tree.sel = None;
             return;
         };
         let (action, enter, esc) = ui.input_mut(|i| (self.keymap.poll(i, Scope::FileList), i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
@@ -179,11 +180,11 @@ impl ShaleApp {
             cur
         };
         let (path, is_dir) = rows[new].clone();
-        self.tree_scroll |= new != cur;
-        self.tree_sel = Some(path.clone());
+        self.tree.scroll |= new != cur;
+        self.tree.sel = Some(path.clone());
         if (space || enter) && is_dir {
-            if !self.expanded.remove(&path) {
-                self.expanded.insert(path);
+            if !self.tree.expanded.remove(&path) {
+                self.tree.expanded.insert(path);
             }
         } else if enter {
             self.actions.push(Action::Open { rel: path, new_tab: false });
@@ -195,9 +196,9 @@ impl ShaleApp {
 
     /// Outline the row selected by the keyboard (and scroll to it once after it changed).
     fn mark_tree_sel(&mut self, ui: &Ui, rel: &Path, resp: &egui::Response) {
-        if self.tree_sel.as_deref() == Some(rel) {
+        if self.tree.sel.as_deref() == Some(rel) {
             ui.painter().rect_stroke(resp.rect, CornerRadius::same(4), egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
-            if std::mem::take(&mut self.tree_scroll) {
+            if std::mem::take(&mut self.tree.scroll) {
                 resp.scroll_to_me(Some(egui::Align::Center));
             }
         }
@@ -208,7 +209,7 @@ impl ShaleApp {
         let files = self.sorted_files_in(dir);
         let current = self.current_path();
         for f in folders {
-            let open = self.expanded.contains(&f);
+            let open = self.tree.expanded.contains(&f);
             let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let resp = tree_row(ui, depth, &name, Some(open), false, theme::TEXT, "");
             self.mark_tree_sel(ui, &f, &resp);
@@ -219,9 +220,9 @@ impl ShaleApp {
             }
             if resp.clicked() {
                 if open {
-                    self.expanded.remove(&f);
+                    self.tree.expanded.remove(&f);
                 } else {
-                    self.expanded.insert(f.clone());
+                    self.tree.expanded.insert(f.clone());
                 }
             }
             resp.context_menu(|ui| {
@@ -305,11 +306,11 @@ impl ShaleApp {
     pub(crate) fn search_panel(&mut self, ui: &mut Ui) {
         ui.label(egui::RichText::new("Search").size(13.0).color(theme::MUTED));
         let id = egui::Id::unique("search-input");
-        if std::mem::take(&mut self.focus_search) {
+        if std::mem::take(&mut self.search.focus) {
             // Ctrl+Shift+F: always into the box, with the old search selected (type to replace it,
             // or press an arrow key to change it)
             let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
-            let n = self.search.chars().count();
+            let n = self.search.query.chars().count();
             st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
             st.store(ui.ctx(), id);
             ui.ctx().memory_mut(|m| m.request_focus(id));
@@ -317,32 +318,32 @@ impl ShaleApp {
         // ↓ in the box goes into the result list (checked before the box sees the key)
         let box_focused = ui.ctx().memory(|m| m.has_focus(id));
         let down_from_box = box_focused && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown));
-        let r = ui.add(egui::TextEdit::singleline(&mut self.search).id(id).hint_text("Search all notes…").desired_width(f32::INFINITY));
+        let r = ui.add(egui::TextEdit::singleline(&mut self.search.query).id(id).hint_text("Search all notes…").desired_width(f32::INFINITY));
         if r.changed() || r.has_focus() {
-            self.search_sel = None;
+            self.search.sel = None;
         }
         let enter_from_box = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-        if self.search.is_empty() && !r.has_focus() && self.search_sel.is_none() {
+        if self.search.query.is_empty() && !r.has_focus() && self.search.sel.is_none() {
             r.request_focus();
         }
         ui.add_space(6.0);
         let Some(v) = &self.vault else { return };
-        let results = v.search(&self.search);
+        let results = v.search(&self.search.query);
         // the stops the keyboard moves between: (result, found line or None for a name-only hit)
         let stops: Vec<(usize, Option<usize>)> = results.iter().enumerate().flat_map(|(fi, (_, lines))| if lines.is_empty() { vec![(fi, None)] } else { (0..lines.len()).map(|li| (fi, Some(li))).collect() }).collect();
         let entering = (down_from_box || enter_from_box) && !stops.is_empty();
         if entering {
-            self.search_sel = Some(0);
-            self.search_scroll = true;
+            self.search.sel = Some(0);
+            self.search.scroll = true;
             ui.ctx().memory_mut(|m| m.surrender_focus(id));
         }
         // browsing: only while no text field has the keyboard (so j and k never type)
         let mut open_sel = false;
         // (not in the frame the list was entered: the Enter that got us here must not open it)
-        if let Some(sel) = self.search_sel.filter(|_| !entering) {
+        if let Some(sel) = self.search.sel.filter(|_| !entering) {
             let free = ui.ctx().memory(|m| m.focused().is_none());
             if !free || stops.is_empty() {
-                self.search_sel = None;
+                self.search.sel = None;
             } else {
                 let sel = sel.min(stops.len() - 1);
                 let (action, enter, back) = ui.input_mut(|i| (self.keymap.poll(i, Scope::SearchResults), i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape) | i.consume_key(Modifiers::NONE, Key::Slash)));
@@ -363,18 +364,18 @@ impl ShaleApp {
                 } else {
                     sel
                 };
-                self.search_sel = Some(new);
-                self.search_scroll |= new != sel;
+                self.search.sel = Some(new);
+                self.search.scroll |= new != sel;
                 if back {
-                    self.search_sel = None;
+                    self.search.sel = None;
                     ui.ctx().memory_mut(|m| m.request_focus(id));
                 } else if enter {
                     open_sel = true;
                 }
             }
         }
-        if !self.search.trim().is_empty() {
-            let hint = if self.search_sel.is_some() {
+        if !self.search.query.trim().is_empty() {
+            let hint = if self.search.sel.is_some() {
                 "  ·  j/k, Ctrl+J/K next file, Enter opens, Esc back"
             } else if stops.is_empty() {
                 ""
@@ -383,7 +384,7 @@ impl ShaleApp {
             };
             ui.label(muted(format!("{} result{}{hint}", results.len(), if results.len() == 1 { "" } else { "s" })).size(12.0));
         }
-        let selected = self.search_sel.map(|i| stops[i]);
+        let selected = self.search.sel.map(|i| stops[i]);
         if open_sel {
             if let Some((fi, li)) = selected {
                 let rel = results[fi].0.clone();
@@ -395,10 +396,10 @@ impl ShaleApp {
                     None => Action::Open { rel, new_tab: false },
                 });
             }
-            self.search_sel = None;
+            self.search.sel = None;
         }
-        let scroll = std::mem::take(&mut self.search_scroll);
-        let posts = if self.search.trim().is_empty() { vec![] } else { self.social.index.search(&self.search, 20) };
+        let scroll = std::mem::take(&mut self.search.scroll);
+        let posts = if self.search.query.trim().is_empty() { vec![] } else { self.social.index.search(&self.search.query, 20) };
         let mark = |ui: &Ui, rect: egui::Rect| {
             ui.painter().rect_stroke(rect.expand(1.0), CornerRadius::same(4), egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Outside);
         };
@@ -467,8 +468,8 @@ impl ShaleApp {
             for (tag, n) in tags {
                 ui.horizontal(|ui| {
                     if ui.add(egui::Label::new(egui::RichText::new(format!("#{tag}")).color(theme::TAG)).sense(Sense::click())).on_hover_text("Search for this tag").clicked() {
-                        self.search = format!("#{tag}");
-                        self.left = LeftPanel::Search;
+                        self.search.query = format!("#{tag}");
+                        self.side.left = LeftPanel::Search;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(muted(n.to_string()).size(12.0));
@@ -580,16 +581,16 @@ impl ShaleApp {
             RightPanel::LocalGraph => {
                 ui.horizontal(|ui| {
                     ui.label(muted("Depth"));
-                    let mut d = self.local_graph.depth as i32;
+                    let mut d = self.graphs.local.depth as i32;
                     if ui.add(egui::Slider::new(&mut d, 1..=3)).changed() {
-                        self.local_graph.depth = d as usize;
-                        self.local_graph.focus = None;
+                        self.graphs.local.depth = d as usize;
+                        self.graphs.local.focus = None;
                     }
                 });
-                if self.local_graph.focus.as_deref() != Some(rel.as_path()) {
-                    self.local_graph.focus = Some(rel.clone());
+                if self.graphs.local.focus.as_deref() != Some(rel.as_path()) {
+                    self.graphs.local.focus = Some(rel.clone());
                 }
-                if let Some(c) = self.local_graph.ui(ui, v, Some(&rel), true) {
+                if let Some(c) = self.graphs.local.ui(ui, v, Some(&rel), true) {
                     graph_click(&mut self.actions, c);
                 }
             }
@@ -807,7 +808,7 @@ impl ShaleApp {
                                 Ok(rel) => {
                                     let mut p = Some(rel.as_path());
                                     while let Some(dir) = p.filter(|d| !d.as_os_str().is_empty()) {
-                                        self.expanded.insert(dir.to_path_buf());
+                                        self.tree.expanded.insert(dir.to_path_buf());
                                         p = dir.parent();
                                     }
                                 }
@@ -1162,6 +1163,28 @@ fn section_header(ui: &mut Ui, t: &str) {
     ui.add_space(2.0);
 }
 
+/// The search box of the left sidebar and the keyboard state of its results.
+#[derive(Default)]
+pub struct SearchBox {
+    pub query: String,
+    /// the selected stop in the search results while they are browsed with the keyboard
+    pub sel: Option<usize>,
+    /// scroll the selected search result into view on the next frame
+    pub(crate) scroll: bool,
+    /// focus the search box (and select its text) in the next frame
+    pub focus: bool,
+}
+
+/// The file list of the left sidebar: the open folders and the keyboard selection.
+#[derive(Default)]
+pub struct FileTree {
+    pub expanded: HashSet<PathBuf>,
+    /// the selected row of the file list while it has the keyboard (Ctrl+H, Ctrl+Shift+B)
+    pub sel: Option<PathBuf>,
+    /// scroll the selected file list row into view on the next frame
+    pub(crate) scroll: bool,
+}
+
 /// One row in the file tree. `open` is Some for folders.
 /// A file or folder being dragged in the file list.
 #[derive(Clone, Debug)]
@@ -1328,7 +1351,7 @@ mod move_tests {
                 }
             }
         }
-        assert!(app.expanded.contains(Path::new("Archiv")));
+        assert!(app.tree.expanded.contains(Path::new("Archiv")));
         // back to the top of the vault
         app.move_into(Path::new("Archiv/Ideas.md"), Path::new("")).unwrap();
         assert!(d.join("Ideas.md").exists());
@@ -1362,9 +1385,9 @@ mod tree_key_tests {
             std::fs::write(d.join(f), "x\n").unwrap();
         }
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
-        app.left = LeftPanel::Files;
+        app.side.left = LeftPanel::Files;
         app.open(Path::new("r1.md"), false);
-        app.expanded.clear(); // the start opened a first note (and its folder)
+        app.tree.expanded.clear(); // the start opened a first note (and its folder)
         let ctx = egui::Context::default();
         let mut t = 0.0;
         let mut press = |app: &mut ShaleApp, k: Key, m: Modifiers| {
@@ -1378,12 +1401,12 @@ mod tree_key_tests {
                 egui::CentralPanel::default().show(ui, |ui| app.file_explorer(ui));
             });
             out.textures_delta.clear();
-            app.tree_sel.clone()
+            app.tree.sel.clone()
         };
         let p = |s: &str| Some(PathBuf::from(s));
         // Ctrl+H / Ctrl+Shift+B: the file list gets the keyboard with the open note selected
         app.focus_sidebar(&ctx);
-        assert_eq!(app.tree_sel, p("r1.md"));
+        assert_eq!(app.tree.sel, p("r1.md"));
         // rows: A, B (closed folders), r1, r2. j / k only stop on files
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("r2.md"));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("r2.md"), "stops at the end");
@@ -1396,7 +1419,7 @@ mod tree_key_tests {
         assert_eq!(press(&mut app, Key::K, CTRL), p("A"));
         // Space opens the folder; its files join the rows
         press(&mut app, Key::Space, Modifiers::NONE);
-        assert!(app.expanded.contains(Path::new("A")));
+        assert!(app.tree.expanded.contains(Path::new("A")));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("A/a1.md"));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("A/a2.md"));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("r1.md"), "B is a folder: skipped");
@@ -1407,9 +1430,9 @@ mod tree_key_tests {
         // Space again closes A (select it first); Enter on a file opens it, keyboard to the editor
         press(&mut app, Key::K, CTRL);
         press(&mut app, Key::K, CTRL);
-        assert_eq!(app.tree_sel, p("A"));
+        assert_eq!(app.tree.sel, p("A"));
         press(&mut app, Key::Space, Modifiers::NONE);
-        assert!(!app.expanded.contains(Path::new("A")));
+        assert!(!app.tree.expanded.contains(Path::new("A")));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), p("B/b1.md"));
         app.actions.clear();
         assert_eq!(press(&mut app, Key::Enter, Modifiers::NONE), None, "Enter leaves the file list");
@@ -1417,18 +1440,18 @@ mod tree_key_tests {
         assert!(app.tabbar.tabs[app.tabbar.active].editor.request_focus, "…and the editor gets the keyboard");
         // Esc and Ctrl+L also give the keyboard back; a click elsewhere ends browsing
         app.focus_sidebar(&ctx);
-        assert!(app.tree_sel.is_some());
+        assert!(app.tree.sel.is_some());
         assert_eq!(press(&mut app, Key::Escape, Modifiers::NONE), None);
         app.focus_sidebar(&ctx);
         app.focus_editor();
-        assert_eq!(app.tree_sel, None);
+        assert_eq!(app.tree.sel, None);
         app.focus_sidebar(&ctx);
         ctx.memory_mut(|m| m.request_focus(egui::Id::unique("somewhere else")));
         assert_eq!(press(&mut app, Key::J, Modifiers::NONE), None);
         // in the search panel, Ctrl+H means the search box
-        app.left = LeftPanel::Search;
+        app.side.left = LeftPanel::Search;
         app.focus_sidebar(&ctx);
-        assert!(app.focus_search);
+        assert!(app.search.focus);
         let _ = std::fs::remove_dir_all(&d);
     }
 }
@@ -1446,7 +1469,7 @@ mod search_tests {
     fn press(frame: &mut dyn FnMut(&mut ShaleApp, Vec<Event>), app: &mut ShaleApp, k: Key, m: Modifiers) -> Option<usize> {
         let typed = if m.ctrl || !matches!(k, Key::J | Key::K) { vec![] } else { vec![Event::Text(format!("{k:?}").to_lowercase())] };
         frame(app, [vec![key(k, m)], typed].concat());
-        app.search_sel
+        app.search.sel
     }
     const CTRL: Modifiers = Modifiers { alt: false, ctrl: true, shift: false, mac_cmd: false, command: true };
 
@@ -1478,18 +1501,18 @@ mod search_tests {
         let id = egui::Id::unique("search-input");
         frame(&mut app, vec![]);
         frame(&mut app, vec![Event::Text("apple".into())]);
-        assert_eq!(app.search, "apple");
-        assert_eq!(app.search_sel, None, "typing in the box is not browsing");
+        assert_eq!(app.search.query, "apple");
+        assert_eq!(app.search.sel, None, "typing in the box is not browsing");
         // ↓ goes into the list: stops are A:0, A:2, "apple notes" (name only), B:0
         frame(&mut app, vec![key(Key::ArrowDown, Modifiers::NONE)]);
-        assert_eq!(app.search_sel, Some(0));
+        assert_eq!(app.search.sel, Some(0));
         assert!(!ctx.memory(|m| m.has_focus(id)), "the box gives up the keyboard");
         assert_eq!(press(&mut frame, &mut app, Key::J, Modifiers::NONE), Some(1));
         assert_eq!(press(&mut frame, &mut app, Key::J, Modifiers::NONE), Some(2));
         assert_eq!(press(&mut frame, &mut app, Key::J, Modifiers::NONE), Some(3));
         assert_eq!(press(&mut frame, &mut app, Key::J, Modifiers::NONE), Some(3), "stops at the end");
         assert_eq!(press(&mut frame, &mut app, Key::K, Modifiers::NONE), Some(2));
-        assert_eq!(app.search, "apple", "j and k did not type into the box");
+        assert_eq!(app.search.query, "apple", "j and k did not type into the box");
         // Ctrl+J / Ctrl+K: first stop of the next / previous file
         assert_eq!(press(&mut frame, &mut app, Key::K, CTRL), Some(0), "back to A");
         assert_eq!(press(&mut frame, &mut app, Key::J, CTRL), Some(2), "on to \"apple notes\"");
@@ -1500,7 +1523,7 @@ mod search_tests {
         // Enter opens the second hit in A at "Apple"
         app.actions.clear();
         press(&mut frame, &mut app, Key::Enter, Modifiers::NONE);
-        assert_eq!(app.search_sel, None);
+        assert_eq!(app.search.sel, None);
         let Some(Action::GotoMatch { rel, line, col }) = app.actions.pop() else { panic!("Enter opens the hit") };
         assert_eq!((rel.as_path(), line, col), (Path::new("A.md"), 2, 7));
         app.goto_match(&rel, line, col);
@@ -1538,11 +1561,11 @@ mod search_tests {
         frame(&mut app, vec![]);
         frame(&mut app, vec![Event::Text("äpfel".into())]);
         frame(&mut app, vec![key(Key::Enter, Modifiers::NONE)]);
-        assert_eq!(app.search_sel, Some(0), "Enter in the box selects the first hit");
+        assert_eq!(app.search.sel, Some(0), "Enter in the box selects the first hit");
         assert!(app.actions.is_empty(), "…and does not open it yet");
         frame(&mut app, vec![key(Key::Escape, Modifiers::NONE)]);
         frame(&mut app, vec![]);
-        assert_eq!(app.search_sel, None);
+        assert_eq!(app.search.sel, None);
         assert!(ctx.memory(|m| m.has_focus(id)), "Esc goes back into the box");
         // the match position counts bytes of the original line (Ü, ï are two bytes each)
         let v = app.vault.as_ref().unwrap();
@@ -1570,14 +1593,14 @@ mod search_tests {
             });
             out.textures_delta.clear();
         };
-        app.search = "garden".into();
+        app.search.query = "garden".into();
         frame(&mut app, vec![]);
         // focus elsewhere (as after working in a note), then the shortcut
         ctx.memory_mut(|m| m.surrender_focus(egui::Id::unique("search-input")));
         frame(&mut app, vec![]);
         let id = egui::Id::unique("search-input");
         assert!(!ctx.memory(|m| m.has_focus(id)));
-        app.focus_search = true;
+        app.search.focus = true;
         frame(&mut app, vec![]);
         frame(&mut app, vec![]);
         assert!(ctx.memory(|m| m.has_focus(id)), "the box has focus although it isn't empty");
@@ -1585,13 +1608,13 @@ mod search_tests {
         assert_eq!((range.primary.index.0.min(range.secondary.index.0), range.primary.index.0.max(range.secondary.index.0)), (0, 6), "the old search is selected");
         // typing replaces it
         frame(&mut app, vec![Event::Text("compost".into())]);
-        assert_eq!(app.search, "compost");
+        assert_eq!(app.search.query, "compost");
         // an arrow key keeps it and moves the cursor
-        app.focus_search = true;
+        app.search.focus = true;
         frame(&mut app, vec![]);
         frame(&mut app, vec![Event::Key { key: Key::ArrowRight, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
         frame(&mut app, vec![Event::Text("s".into())]);
-        assert_eq!(app.search, "composts");
+        assert_eq!(app.search.query, "composts");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

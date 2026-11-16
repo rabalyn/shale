@@ -4,9 +4,10 @@ use crate::config::Config;
 use crate::drawing::DrawingDoc;
 use crate::editor::{EditorAction, NoteEditor};
 use crate::fsutil;
-use crate::graph::{GraphClick, GraphView};
+use crate::graph::{GraphClick, Graphs};
 use crate::keys::{Action as KeyAction, Scope};
 use crate::markdown;
+use crate::panels::{FileTree, SearchBox};
 use crate::reader::{ReaderAction, SceneCache};
 use crate::theme;
 use crate::vault::{self, rel_to_string, FileKind, Saved, Vault};
@@ -15,8 +16,7 @@ use eframe::egui::{self, Key, Modifiers, Ui};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 /// Gives each app built without persistence (tests, screenshots) its own mail folder.
@@ -105,8 +105,9 @@ impl NoteDoc {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum LeftPanel {
+    #[default]
     Files,
     Search,
     Tags,
@@ -125,6 +126,7 @@ mod drops;
 #[cfg(all(test, target_os = "linux"))]
 mod drops_tests;
 mod mail;
+mod screenshot;
 mod social;
 mod sync;
 mod tabs;
@@ -285,24 +287,15 @@ pub struct ShaleApp {
     pub tabbar: tabs::TabBar,
     pub notes: HashMap<PathBuf, NoteDoc>,
     pub drawings: HashMap<PathBuf, DrawingDoc>,
-    pub left: LeftPanel,
     /// The icons of the ribbon and the right sidebar, and a drag of one of them (LAY-001).
     pub side: crate::sidebar_ui::SideState,
-    pub expanded: HashSet<PathBuf>,
-    pub search: String,
-    /// the selected stop in the search results while they are browsed with the keyboard
-    pub search_sel: Option<usize>,
-    /// scroll the selected search result into view on the next frame
-    pub(crate) search_scroll: bool,
-    /// the selected row of the file list while it has the keyboard (Ctrl+H, Ctrl+Shift+B)
-    pub tree_sel: Option<PathBuf>,
-    /// scroll the selected file list row into view on the next frame
-    pub(crate) tree_scroll: bool,
-    /// focus the search box (and select its text) in the next frame
-    pub focus_search: bool,
+    /// the file list: the open folders and the row the keyboard is on
+    pub tree: FileTree,
+    /// the search box of the left sidebar and the selected result
+    pub search: SearchBox,
     pub tasks: TasksFilter,
-    pub graph: GraphView,
-    pub local_graph: GraphView,
+    /// the graph of the whole vault and the local one in the side panel
+    pub graphs: Graphs,
     pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
     pub mail: crate::mail::ui::MailView,
@@ -328,19 +321,16 @@ pub struct ShaleApp {
     pub trashed: Vec<PathBuf>,
     last_scan: Instant,
     pub welcome_path: String,
-    // screenshot mode
-    screenshot: Option<PathBuf>,
+    /// screenshot mode: where the picture goes and whether it was saved
+    shot: screenshot::ScreenshotRun,
+    /// the frames drawn so far (paces screenshots and scripted input)
     frames: u32,
-    shot_requested: bool,
-    shot_done: Arc<AtomicBool>,
     /// the last failure to save the global settings (shown once)
     cfg_error: Option<String>,
     /// the scripted input of tests of the real window (BUILD-007)
     script: crate::script::ScriptRun,
-    /// where text that could not be saved at exit is put (DATA-011)
-    pub recovery_root: PathBuf,
-    /// recovery folders from earlier runs the person has not dismissed yet
-    pub recovery_notice: Vec<PathBuf>,
+    /// where unsaved text is rescued to, and the rescues not dismissed yet (DATA-011)
+    pub recovery: crate::recovery::RecoveryState,
 }
 
 impl ShaleApp {
@@ -450,18 +440,11 @@ impl ShaleApp {
             tabbar: tabs::TabBar::new(),
             notes: HashMap::new(),
             drawings: HashMap::new(),
-            left: LeftPanel::Files,
             side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
-            expanded: HashSet::new(),
-            search: String::new(),
-            search_sel: None,
-            search_scroll: false,
-            tree_sel: None,
-            tree_scroll: false,
-            focus_search: false,
+            tree: FileTree::default(),
+            search: SearchBox::default(),
             tasks: TasksFilter::default(),
-            graph: GraphView::new(false),
-            local_graph: GraphView::new(true),
+            graphs: Graphs::new(),
             calendar: {
                 let mut c = crate::calendar::store::CalendarStore::new(cfg.calendars.clone(), calendar_dir);
                 if persist {
@@ -488,27 +471,24 @@ impl ShaleApp {
             trashed: vec![],
             last_scan: Instant::now(),
             welcome_path: default_welcome.to_string_lossy().into_owned(),
-            screenshot,
+            shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
-            shot_requested: false,
-            shot_done: Arc::new(AtomicBool::new(false)),
             cfg_error: None,
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
-            recovery_root,
+            recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             usage: crate::data_usage::DataUsage::new(places),
-            recovery_notice: vec![],
         };
-        app.recovery_notice = crate::recovery::unseen(&app.recovery_root);
+        app.recovery.notice = crate::recovery::unseen(&app.recovery.root);
         if let Some(p) = cfg_problem {
             app.toast(p);
         }
         if let Some(p) = vault_path {
             app.open_vault(&p);
-            if app.screenshot.is_some() && p.join("Welcome.md").is_file() {
+            if app.shot.path.is_some() && p.join("Welcome.md").is_file() {
                 app.open(Path::new("Welcome.md"), false);
             }
             // screenshots: a demo calendar full of sample events
-            if app.screenshot.is_some() && app.cfg.calendars.is_empty() {
+            if app.shot.path.is_some() && app.cfg.calendars.is_empty() {
                 let src = app.calendar.new_local_source("Demo calendar", &[]);
                 let id = src.id.clone();
                 app.cfg.calendars = vec![src];
@@ -516,7 +496,7 @@ impl ShaleApp {
                 let _ = app.calendar.fill_sample(&id);
             }
             // screenshots: a made-up mail store and account (no server, no real mail)
-            if app.screenshot.is_some() && opts.view.as_deref() == Some("mail") && app.cfg.mail_accounts.is_empty() {
+            if app.shot.path.is_some() && opts.view.as_deref() == Some("mail") && app.cfg.mail_accounts.is_empty() {
                 match crate::mail::demo::seed(&app.mail.root) {
                     Ok(()) => {
                         app.cfg.mail_accounts = vec![crate::config::MailAccount { id: crate::mail::demo::ACCOUNT.into(), name: "Demo mail".into(), host: "imap.example.com".into(), user: "ada@example.com".into(), ..Default::default() }];
@@ -735,7 +715,7 @@ impl ShaleApp {
             if dir.as_os_str().is_empty() {
                 break;
             }
-            self.expanded.insert(dir.to_path_buf());
+            self.tree.expanded.insert(dir.to_path_buf());
             p = dir.parent();
         }
         match f.kind {
@@ -1105,7 +1085,7 @@ impl ShaleApp {
         }
         let mut out = Vec::new();
         for (rel, bytes) in texts {
-            match crate::recovery::rescue(&self.recovery_root, &date, &rel, &bytes) {
+            match crate::recovery::rescue(&self.recovery.root, &date, &rel, &bytes) {
                 Ok(p) => out.push(p),
                 Err(e) => eprintln!("could not save “{}” and could not rescue it either: {e}", rel_to_string(&rel)),
             }
@@ -1117,7 +1097,7 @@ impl ShaleApp {
     fn save_mail_draft_at_exit(&mut self) {
         if let Err(e) = self.mail.flush_draft() {
             match self.mail.draft_rescue_text() {
-                Some((rel, text)) => match crate::recovery::rescue(&self.recovery_root, &crate::mail::store::today_string(), &rel, text.as_bytes()) {
+                Some((rel, text)) => match crate::recovery::rescue(&self.recovery.root, &crate::mail::store::today_string(), &rel, text.as_bytes()) {
                     Ok(_) => eprintln!("the mail draft could not be saved ({e}); its text is in the recovery folder"),
                     Err(e2) => eprintln!("the mail draft could not be saved ({e}) and could not be rescued either: {e2}"),
                 },
@@ -1313,11 +1293,11 @@ impl ShaleApp {
             }
         }
         // open folders in the file list move along
-        let exp: Vec<PathBuf> = self.expanded.iter().cloned().collect();
+        let exp: Vec<PathBuf> = self.tree.expanded.iter().cloned().collect();
         for e in exp {
             if let Ok(rest) = e.strip_prefix(rel) {
-                self.expanded.remove(&e);
-                self.expanded.insert(to.join(rest));
+                self.tree.expanded.remove(&e);
+                self.tree.expanded.insert(to.join(rest));
             }
         }
     }
@@ -1338,7 +1318,7 @@ impl ShaleApp {
             self.toast(m);
         }
         if !into.as_os_str().is_empty() {
-            self.expanded.insert(into.to_path_buf());
+            self.tree.expanded.insert(into.to_path_buf());
         }
         let name = rel.file_name().map(|n| markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
         let place = if into.as_os_str().is_empty() { "the vault".to_string() } else { format!("“{}”", rel_to_string(into)) };
@@ -1413,28 +1393,28 @@ impl ShaleApp {
         if let Some(f) = ctx.memory(|m| m.focused()) {
             ctx.memory_mut(|m| m.surrender_focus(f));
         }
-        match self.left {
+        match self.side.left {
             LeftPanel::Files => {
                 let cur = self.current_path();
                 // the open note's folders open, so it can be selected
                 let mut p = cur.as_deref().and_then(|c| c.parent());
                 while let Some(d) = p.filter(|d| !d.as_os_str().is_empty()) {
-                    self.expanded.insert(d.to_path_buf());
+                    self.tree.expanded.insert(d.to_path_buf());
                     p = d.parent();
                 }
                 let rows = self.visible_tree_rows();
-                self.tree_sel = cur.filter(|c| rows.iter().any(|(r, _)| r == c)).or_else(|| rows.first().map(|(r, _)| r.clone()));
-                self.tree_scroll = true;
+                self.tree.sel = cur.filter(|c| rows.iter().any(|(r, _)| r == c)).or_else(|| rows.first().map(|(r, _)| r.clone()));
+                self.tree.scroll = true;
             }
-            LeftPanel::Search => self.focus_search = true,
+            LeftPanel::Search => self.search.focus = true,
             LeftPanel::Tags => {}
         }
     }
 
     /// Put the keyboard back into the editor of the open note (Ctrl+L).
     pub fn focus_editor(&mut self) {
-        self.tree_sel = None;
-        self.search_sel = None;
+        self.tree.sel = None;
+        self.search.sel = None;
         if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             t.editor.request_focus = true;
         }
@@ -1780,7 +1760,7 @@ impl ShaleApp {
             self.keymap.cancel(Scope::EditorNormal);
         }
         let in_mail = matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Mail));
-        let sidebar_keys = self.tree_sel.is_some() || self.search_sel.is_some();
+        let sidebar_keys = self.tree.sel.is_some() || self.search.sel.is_some();
         if mail_view {
             self.show_view(View::Mail, false);
         }
@@ -1797,7 +1777,7 @@ impl ShaleApp {
             }
         }
         if files {
-            self.left = LeftPanel::Files;
+            self.side.left = LeftPanel::Files;
             self.focus_sidebar(ui.ctx());
         } else if to_sidebar && !(in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, -1, sidebar_keys)) {
             self.focus_sidebar(ui.ctx());
@@ -1805,8 +1785,8 @@ impl ShaleApp {
         if to_editor {
             // in the mail view the keyboard goes to its panes (MAIL-063)
             if in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, 1, sidebar_keys) {
-                self.tree_sel = None;
-                self.search_sel = None;
+                self.tree.sel = None;
+                self.search.sel = None;
             } else {
                 self.focus_editor();
             }
@@ -1822,9 +1802,9 @@ impl ShaleApp {
             self.close_tab(a);
         }
         if search {
-            self.left = LeftPanel::Search;
+            self.side.left = LeftPanel::Search;
             self.cfg.show_left = true;
-            self.focus_search = true;
+            self.search.focus = true;
         }
         if save {
             self.flush_all();
@@ -1846,12 +1826,12 @@ impl ShaleApp {
 
     fn screenshot_tick(&mut self, ui: &Ui) {
         self.frames += 1;
-        let Some(path) = self.screenshot.clone() else { return };
+        let Some(path) = self.shot.path.clone() else { return };
         ui.ctx().request_repaint();
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
-        if self.frames >= 120 && self.script.steps.is_empty() && self.frames >= self.script.last_frame + 12 && !self.shot_requested {
-            self.shot_requested = true;
-            let done = self.shot_done.clone();
+        if self.frames >= 120 && self.script.steps.is_empty() && self.frames >= self.script.last_frame + 12 && !self.shot.requested {
+            self.shot.requested = true;
+            let done = self.shot.done.clone();
             ui.ctx().request_screenshot(move |img| {
                 let [w, h] = img.size;
                 let mut bytes = Vec::with_capacity(w * h * 4);
@@ -1874,7 +1854,7 @@ impl ShaleApp {
                 done.store(true, Ordering::SeqCst);
             });
         }
-        if self.shot_done.load(Ordering::SeqCst) {
+        if self.shot.done.load(Ordering::SeqCst) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if self.frames > 900 {
@@ -2102,7 +2082,7 @@ impl eframe::App for ShaleApp {
         }
         // a window without a window manager (the private X display of the pictures) never gets the
         // focus from the system; the picture shows the window as a person would see it, focused
-        if self.screenshot.is_some() {
+        if self.shot.path.is_some() {
             raw.focused = true;
         }
         self.feed_script(raw);
@@ -2313,7 +2293,7 @@ pub(crate) mod tests {
         assert!(app.usage_ask(Ask::Open(PathBuf::from("Ideas.md"))), "opening a file closes the dialog");
         assert_eq!(app.current_path(), Some(PathBuf::from("Ideas.md")));
         app.usage_ask(Ask::ShowFolder(PathBuf::from("Projects")));
-        assert!(app.expanded.contains(Path::new("Projects")));
+        assert!(app.tree.expanded.contains(Path::new("Projects")));
         let _ = std::fs::remove_dir_all(&d);
     }
 
