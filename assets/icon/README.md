@@ -8,4 +8,5 @@ blue-grey rounded square, each with a light edge where the layers split. The PNG
 for n in 16 32 48 64 128 256 512; do rsvg-convert -w $n -h $n shale.svg -o shale-$n.png; done
 ```
 
-Using the icon for the window and the release packages is raba/shale#213.
+Shale builds `shale-256.png` into the program as its window icon (NAV-031). `shale.desktop` and
+`shale.svg` go into the Linux download for the app menu and the Wayland taskbar (raba/shale#213).
