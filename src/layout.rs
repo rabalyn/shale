@@ -769,6 +769,7 @@ impl ShaleApp {
                         tab.editor.line_numbers = self.cfg.line_numbers;
                         tab.editor.live_preview = self.cfg.live_preview;
                         tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
+                        tab.editor.table_cell_edit = self.cfg.table_cell_edit;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
                         tab.editor.dark_canvas = self.cfg.dark_canvas;

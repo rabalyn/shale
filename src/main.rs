@@ -65,6 +65,7 @@ mod start_dialog_tests;
 #[cfg(test)]
 mod tab_order_tests;
 mod table;
+mod table_grid;
 mod theme;
 #[cfg(test)]
 mod ui_test_support;

@@ -1193,9 +1193,10 @@ pub(crate) mod tests {
     fn a_table_is_a_grid_in_the_pdf_and_plain_text_lines_when_asked() {
         let (v, d) = vault();
         let rel = Path::new("Ideas.md");
-        let text = "Intro\n\n| Where | What |\n|---|--:|\n| `a.json` | **yes** [[Ideas]] |\n\nAfter\n";
+        let text = "Intro\n\n<!-- shale-table edit=raw -->\n| Where | What |\n|---|--:|\n| `a.json` | **yes** [[Ideas]] |\n\nAfter\n";
         let grid = export_note(&v, rel, text, &ExportOptions::for_note()).unwrap();
         let c = contents(&grid);
+        assert!(!c.contains(&hex("shale-table")) && !c.contains(&hex("<!--")), "the table's comment line is not printed (EDIT-030)");
         for w in ["Where", "What", "a.json", "yes", "Ideas"] {
             assert!(c.contains(&hex(w)), "cell text {w} is drawn");
         }

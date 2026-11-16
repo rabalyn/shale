@@ -133,12 +133,19 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   lines of a selection) shows the raw markdown. The note stays editable; links still open with a
   click and task boxes still tick. A **table** away from the cursor is drawn as a real grid (also
   in the reading view): borders, a bold header row, aligned columns, formatted cell text, long
-  text wrapping in its own column; click it, or move the cursor into it, to edit the raw rows. Hover the grid for buttons that add a
-  row or column and delete the hovered row or column.
+  text wrapping in its own column. Click a cell to edit it right in the grid (Tab, Enter and
+  their Shift versions move between cells, Esc leaves; one undo step), or turn that off in
+  Settings ("Edit table cells in the grid") or per table (a button at the grid) to edit the raw
+  rows instead. Drag the borders to resize columns and rows, the edges to resize the whole table;
+  a double click on a border makes all columns (rows) the same size. Hover the grid for buttons
+  that add a row or column and delete the hovered row or column. Toolbar formatting of a
+  selection across cells formats each cell on its own.
 
   ![The Markdown preview](userguide/z_media/screenshots/editor-preview.png)
 
   ![A table as a grid, with its buttons](userguide/z_media/screenshots/table-grid.png)
+
+  ![A table cell edited in the grid](userguide/z_media/screenshots/table-cell-edit.png)
 
   ![A table in the reading view](userguide/z_media/screenshots/table-reading.png)
 

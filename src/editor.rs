@@ -510,8 +510,12 @@ pub struct NoteEditor {
     /// text box drops it in the frame it loses the keyboard, and the keyboard comes back a frame later
     keep_selection: Option<((usize, usize), u8)>,
     /// a button of a table grid was clicked: the table (by its number in the note) and the change
-    /// to make at the start of the next frame (EDIT-025)
-    table_edit: Option<(usize, crate::table::Edit)>,
+    /// to make at the start of the next frame (EDIT-025, EDIT-030)
+    table_edit: Option<(usize, crate::table::Change)>,
+    /// editing cells and resizing in the grids of tables (EDIT-030, EDIT-031)
+    grid: crate::table_grid::TableGrid,
+    /// a click on a table's grid edits a cell, for tables that do not say otherwise (set from the app's settings, EDIT-030)
+    pub table_cell_edit: bool,
     /// the text box had the keyboard before the pointer went down (a click on a table button takes
     /// it away, and it is given back)
     focus_before_press: bool,
@@ -544,6 +548,8 @@ impl NoteEditor {
             vim_expected: None,
             vim_scroll: None,
             table_edit: None,
+            grid: Default::default(),
+            table_cell_edit: true,
             focus_before_press: false,
             vim_follow: false,
             bar: Default::default(),
@@ -898,23 +904,51 @@ impl NoteEditor {
         }
     }
 
-    /// Change the table with this number in the note as one undoable step (EDIT-025). The cursor
-    /// stays where it was in the text: what moved is the text behind the table.
-    fn apply_table_edit(&mut self, ui: &Ui, text: &mut String, hist: &mut crate::undo::History, n: usize, edit: crate::table::Edit) -> bool {
+    /// Change the table with this number in the note (EDIT-025, EDIT-030, EDIT-031). With `step`
+    /// the change is one undoable step of its own; without, it is part of the editing of a cell,
+    /// whose step starts before its first change (and is made when it ends). The cursor stays
+    /// where it was in the text: what moved is the text behind the table.
+    fn apply_table_edit(&mut self, ui: &Ui, text: &mut String, hist: &mut crate::undo::History, n: usize, change: &crate::table::Change, step: bool) -> bool {
         let Some(b) = crate::table::find_tables(text).into_iter().nth(n) else { return false };
         let r = crate::table::byte_range(text, &b.lines);
-        let Some(new) = crate::table::edit_source(&text[r.clone()], edit) else { return false };
-        hist.checkpoint(text);
+        let Some(new) = crate::table::change_block(&text[r.clone()], b.has_meta, &b.meta, change) else { return false };
+        if new == text[r.clone()] {
+            return false;
+        }
+        if step {
+            hist.checkpoint(text);
+        } else if let Some(c) = self.grid.cell.as_mut().filter(|c| c.before.is_none()) {
+            hist.checkpoint(text);
+            c.before = Some(text.clone());
+        }
         let before = text.clone();
         let (end, grown) = (markdown::byte_to_char(text, r.end), new.chars().count() as isize - text[r.clone()].chars().count() as isize);
         text.replace_range(r, &new);
-        hist.checkpoint(text);
         // the cursor stays where it was in the text: what moved is the text behind the table
         let at = |c: CCursor| if c.index.0 >= end { CCursor::new((c.index.0 as isize + grown).max(0) as usize) } else { c };
         let cursor = TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).map_or(CCursorRange::one(CCursor::new(markdown::byte_to_char(&before, before.len()))), |r| CCursorRange::two(at(r.primary), at(r.secondary)));
-        self.record_edit(ui.ctx(), &before, text, cursor);
+        if step {
+            hist.checkpoint(text);
+            self.record_edit(ui.ctx(), &before, text, cursor);
+        } else {
+            let mut state = TextEditState::load(ui.ctx(), self.id).unwrap_or_default();
+            state.cursor.set_char_range(Some(cursor));
+            state.store(ui.ctx(), self.id);
+        }
         self.last_cursor = None;
         true
+    }
+
+    /// The editing of a cell ended (EDIT-030): everything it typed becomes one undo step.
+    fn end_cell_edit(&mut self, ui: &Ui, text: &str, hist: &mut crate::undo::History, before: Option<String>, give_back: bool) {
+        if let Some(b) = before.filter(|b| b != text) {
+            hist.checkpoint(text);
+            let cursor = TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).unwrap_or(CCursorRange::one(CCursor::new(0)));
+            self.record_edit(ui.ctx(), &b, text, cursor);
+        }
+        if give_back {
+            ui.ctx().memory_mut(|m| m.request_focus(self.id));
+        }
     }
 
     /// Make a change that the program made to the text (not the person typing it) a step of its
@@ -936,8 +970,8 @@ impl NoteEditor {
     /// last one (right of the header) and a row after the last (under the grid); for the hovered
     /// column (above the grid) and row (right of the grid) insert after it and delete it. A click
     /// only sets `table_edit`; the cursor does not enter the table.
-    fn table_buttons(&mut self, ui: &mut Ui, origin: Pos2, laid: &crate::table::Laid, ordinal: usize) {
-        use crate::table::Edit;
+    fn table_buttons(&mut self, ui: &mut Ui, origin: Pos2, laid: &crate::table::Laid, ordinal: usize, meta: &crate::table::Meta, cells: bool) {
+        use crate::table::{Change, Edit};
         let size = laid.size();
         let key = self.id.with("table-buttons");
         let grid = Rect::from_min_size(origin, size);
@@ -1005,11 +1039,35 @@ impl NoteEditor {
                 ui.ctx().memory_mut(|m| m.request_focus(self.id));
             }
             if let (true, Some(e)) = (resp.clicked(), edit) {
-                self.table_edit = Some((ordinal, e));
+                self.table_edit = Some((ordinal, Change::Edit(e)));
                 ui.ctx().request_repaint();
             }
             placed.push((name.to_string(), rect));
         }
+        // the table's own mode (EDIT-030): top right, above the button that adds a column
+        let rect = button(side, grid.top() - TABLE_BTN - 2.0);
+        let resp = ui.interact(rect, self.id.with(("table-button", ordinal, "mode")), egui::Sense::CLICK | egui::Sense::DRAG);
+        let painter = ui.painter();
+        painter.rect(rect, 3.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY }, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+        if cells {
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "md", egui::FontId::proportional(9.0), theme::TEXT);
+        } else {
+            // a small grid
+            let r = rect.shrink(4.0);
+            let line = Stroke::new(1.0, theme::TEXT);
+            painter.rect_stroke(r, 0.0, line, egui::StrokeKind::Inside);
+            painter.line_segment([Pos2::new(r.center().x, r.top()), Pos2::new(r.center().x, r.bottom())], line);
+            painter.line_segment([Pos2::new(r.left(), r.center().y), Pos2::new(r.right(), r.center().y)], line);
+        }
+        resp.clone().on_hover_text(if cells { "Edit the table as raw markdown" } else { "Edit the cells in the grid" });
+        if (resp.is_pointer_button_down_on() || resp.clicked()) && self.focus_before_press {
+            ui.ctx().memory_mut(|m| m.request_focus(self.id));
+        }
+        if resp.clicked() {
+            self.table_edit = Some((ordinal, Change::Meta(crate::table::Meta { cells: Some(!cells), sizes: meta.sizes.clone() })));
+            ui.ctx().request_repaint();
+        }
+        placed.push(("mode".to_string(), rect));
         ui.ctx().data_mut(|d| d.insert_temp(key, placed));
     }
 
@@ -1022,8 +1080,14 @@ impl NoteEditor {
         if focused || !ui.input(|i| i.pointer.any_down()) {
             self.focus_before_press = focused;
         }
-        if let Some((n, edit)) = self.table_edit.take() {
-            changed |= self.apply_table_edit(ui, text, undo.of(rel), n, edit);
+        if let Some((n, change)) = self.table_edit.take() {
+            changed |= self.apply_table_edit(ui, text, undo.of(rel), n, &change, true);
+        }
+        for (n, change, step) in std::mem::take(&mut self.grid.pending) {
+            changed |= self.apply_table_edit(ui, text, undo.of(rel), n, &change, step);
+        }
+        if let Some((before, give_back)) = self.grid.ended.take() {
+            self.end_cell_edit(ui, text, undo.of(rel), before, give_back);
         }
         self.refresh_links(text, vault, rel);
         if let Some(cmd) = self.format_request.take() {
@@ -1142,19 +1206,21 @@ impl NoteEditor {
         // the raw lines of the markdown preview (EDIT-016, EDIT-017); embeds on them are raw too
         let preview = self.live_preview.then(|| self.preview_lines(ui, text));
         // the tables away from the cursor are drawn as grids (EDIT-024); their text is hidden
-        let mut tables: Vec<(String, f32, crate::table::Laid)> = Vec::new();
+        let mut tables: Vec<Shown> = Vec::new();
         if let Some(raw) = &preview {
             let width = (ui.available_width() - gutter - 8.0 - TABLE_SIDE).max(120.0);
-            for b in crate::table::find_tables(text) {
+            for (ordinal, b) in crate::table::find_tables(text).into_iter().enumerate() {
                 if lines_overlap(&b.lines, raw) {
                     continue;
                 }
                 let src = text[crate::table::byte_range(text, &b.lines)].to_string();
-                let laid = crate::table::layout(ui.ctx(), &b.table, base_size, width, &|l| vault.exists(&l.target, Some(rel)));
-                tables.push((src, laid.size().y + TABLE_GAP, laid));
+                let sizes = self.grid.sizes(ordinal, &b.meta.sizes);
+                let laid = crate::table::layout(ui.ctx(), &b.table, sizes, base_size, width, &|l| vault.exists(&l.target, Some(rel)));
+                let cells = b.meta.cells.unwrap_or(self.table_cell_edit);
+                tables.push(Shown { height: laid.size().y + TABLE_GAP, src, laid, cells, block: b });
             }
         }
-        let table_keys: Vec<(String, f32)> = tables.iter().map(|(s, h, _)| (s.clone(), *h)).collect();
+        let table_keys: Vec<(String, f32)> = tables.iter().map(|t| (t.src.clone(), t.height)).collect();
         if self.inline_images {
             let focused = ui.ctx().memory(|m| m.has_focus(self.id));
             let sel = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).map(|r| {
@@ -1345,16 +1411,21 @@ impl NoteEditor {
             }
         }
         // paint the tables over their hidden text
+        self.grid.begin_frame();
         if let Some(raw) = preview.as_ref().filter(|_| !tables.is_empty()) {
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
             let now_text = output.galley.job.text.clone();
             for g in table_rows(&now_text, &table_keys, raw) {
                 let c = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(&now_text, g.rows[0].0.start)));
                 let origin = output.galley_pos + Vec2::new(c.min.x, c.min.y + 1.0);
-                crate::table::paint(&painter, origin, &tables[g.key].2);
-                self.table_buttons(ui, origin, &tables[g.key].2, g.ordinal);
+                let t = &tables[g.key];
+                crate::table::paint(&painter, origin, &t.laid);
+                let shown = crate::table_grid::Shown { id: self.id, ordinal: g.ordinal, origin, laid: &t.laid, table: &t.block.table, meta: &t.block.meta, cells: t.cells };
+                self.grid.show(ui, &shown);
+                self.table_buttons(ui, origin, &t.laid, g.ordinal, &t.block.meta, t.cells);
             }
         }
+        self.grid.end_frame();
         self.embeds.show_full(self.id, ui.ctx(), &self.media, rel);
         if gutter > 0.0 {
             let now_text = &output.galley.job.text;
@@ -1477,6 +1548,16 @@ impl NoteEditor {
         }
         (changed, action)
     }
+}
+
+/// A table drawn as a grid this frame (EDIT-024): its source text, the height reserved for it, its
+/// layout, whether a click edits a cell (EDIT-030) and the table.
+struct Shown {
+    src: String,
+    height: f32,
+    laid: crate::table::Laid,
+    cells: bool,
+    block: crate::table::Block,
 }
 
 /// Room right of a grid for its buttons (EDIT-025).
@@ -2934,6 +3015,8 @@ mod tests {
         let mut text = format!("before\n\n| Where | What |\n|:--|--:|\n| `a.json` | {long}|\n| [[Ideas]] | **b** |\n\nafter");
         let mut ed = NoteEditor::new(egui::Id::unique("preview-table"));
         ed.live_preview = true;
+        // the raw mode of EDIT-030: a click shows the markdown
+        ed.table_cell_edit = false;
         ed.pending_cursor = Some(0);
         let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         for _ in 0..4 {
@@ -3134,7 +3217,7 @@ mod tests {
         let cell = g.centre_of("3");
         g.hover(cell);
         let names: Vec<&str> = g.buttons.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(names, ["add-column", "add-row", "insert-row", "delete-row", "insert-column", "delete-column"]);
+        assert_eq!(names, ["add-column", "add-row", "insert-row", "delete-row", "insert-column", "delete-column", "mode"]);
         // the pointer is on the second data row ("3"), in the first column
         g.press_at(cell, "add-column");
         assert_eq!(g.text, original.replace(TABLE, "| A | B |  |\n|:--|--:| --- |\n| 1 | 2 |  |\n| 3 | 4 |  |\n"));
@@ -3277,6 +3360,186 @@ mod tests {
         }
     }
 
+    impl Grid {
+        /// Click at `p` (the pointer moves there first, so the grid's strips are hit-tested).
+        fn click(&mut self, p: Pos2) {
+            self.hover(p);
+            self.frame(click_events(p, true));
+            self.frame(click_events(p, false));
+            self.frames(2);
+        }
+
+        /// The resize strips of the first grid (EDIT-031).
+        fn border(&self, name: &str) -> Rect {
+            let all = self.ctx.data(|d| d.get_temp::<Vec<(String, Rect)>>(self.ed.id.with(("table-borders", 0usize)))).unwrap_or_default();
+            all.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("no border {name}: {all:?}")).1
+        }
+
+        /// Drag from `from` by `by`, in a few steps.
+        fn drag(&mut self, from: Pos2, by: Vec2) {
+            self.hover(from);
+            self.frame(click_events(from, true));
+            for k in 1..=4 {
+                self.frame(vec![Event::PointerMoved(from + by * (k as f32 / 4.0))]);
+            }
+            self.frame(click_events(from + by, false));
+            self.frames(2);
+        }
+
+        fn meta(&self) -> crate::table::Meta {
+            crate::table::find_tables(&self.text)[0].meta.clone()
+        }
+
+        fn editing(&self) -> Option<(usize, usize)> {
+            self.ed.grid.cell.as_ref().map(|c| (c.row, c.col))
+        }
+    }
+
+    // spec: EDIT-030
+    #[test]
+    fn a_click_on_a_cell_edits_it_in_the_grid_and_the_keys_move_between_cells() {
+        let original = note_with(TABLE);
+        let mut g = Grid::new("cell-edit", &original, false);
+        let three = g.centre_of("3");
+        g.click(three);
+        assert_eq!(g.editing(), Some((2, 0)), "the cell of 3 is being edited");
+        assert!(g.is_grid(), "the table stays a grid");
+        g.type_text("x|");
+        g.frames(1);
+        assert!(g.text.contains("| 3x\\| |"), "what is typed is in the note at once, the pipe escaped: {}", g.text);
+        assert!(g.is_grid());
+        g.key(Key::Tab, Modifiers::NONE);
+        assert_eq!(g.editing(), Some((2, 1)));
+        g.type_text("y");
+        g.key(Key::Enter, Modifiers::SHIFT);
+        assert_eq!(g.editing(), Some((1, 1)), "Shift+Enter: the cell above");
+        g.key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(g.editing(), Some((1, 0)));
+        g.key(Key::Enter, Modifiers::NONE);
+        assert_eq!(g.editing(), Some((2, 0)), "Enter: the cell below");
+        g.key(Key::Escape, Modifiers::NONE);
+        g.frames(2);
+        assert_eq!(g.editing(), None, "Esc leaves");
+        assert!(g.ctx.memory(|m| m.has_focus(g.ed.id)), "and the note has the keyboard again");
+        assert!(g.is_grid(), "still a grid: the cursor did not enter the table");
+        assert_eq!(g.text, note_with("| A | B |\n|:--|--:|\n| 1 | 2 |\n| 3x\\| | 4y |\n"));
+        assert_eq!(g.history_steps(), 1, "the whole editing is one step");
+        assert_eq!(g.text, original);
+    }
+
+    // spec: EDIT-030
+    #[test]
+    fn the_editing_ends_past_the_last_cell_and_with_a_click_elsewhere_and_ctrl_z_takes_it_back() {
+        let original = note_with(TABLE);
+        let mut g = Grid::new("cell-edit-end", &original, false);
+        let four = g.centre_of("4");
+        g.click(four);
+        assert_eq!(g.editing(), Some((2, 1)));
+        g.type_text("!\n?");
+        g.key(Key::Tab, Modifiers::NONE);
+        assert_eq!(g.editing(), None, "Tab in the last cell ends the editing");
+        assert!(g.text.contains("| 4! ? |"), "a pasted line break is a blank: {}", g.text);
+        // the text box's own Ctrl+Z takes the whole editing back (EDIT-025's undo)
+        g.key(Key::Z, Modifiers::COMMAND);
+        assert_eq!(g.text, original);
+        // a click into the text outside the table ends an editing as well
+        let one = g.centre_of("1");
+        g.click(one);
+        assert_eq!(g.editing(), Some((1, 0)));
+        let (_, pos) = g.ed.last_layout.clone().unwrap();
+        g.click(pos + Vec2::new(10.0, 6.0));
+        assert_eq!(g.editing(), None);
+        assert!(g.ctx.memory(|m| m.has_focus(g.ed.id)));
+    }
+
+    // spec: EDIT-030
+    #[test]
+    fn the_setting_and_the_button_of_a_table_choose_between_cells_and_raw() {
+        let original = note_with(TABLE);
+        let mut g = Grid::new("cell-mode", &original, false);
+        let three = g.centre_of("3");
+        g.press_at(three, "mode");
+        assert_eq!(g.meta().cells, Some(false), "the button stores raw for this table");
+        assert!(g.text.starts_with("before\n\n<!-- shale-table edit=raw -->\n| A |"), "{}", g.text);
+        assert!(g.is_grid(), "the comment line is hidden with the table, which stays a grid");
+        assert_eq!(g.history_steps(), 1, "one step");
+        assert_eq!(g.text, original);
+        // the setting off: a click shows the raw markdown, as before EDIT-030
+        g.ed.table_cell_edit = false;
+        g.frames(2);
+        g.click(three);
+        assert_eq!(g.editing(), None);
+        assert!(!g.is_grid(), "the click put the cursor into the table");
+        // a table that says cells is edited in the grid whatever the setting
+        g.text = note_with(&format!("<!-- shale-table edit=cells -->\n{TABLE}"));
+        g.ed.pending_cursor = Some(0);
+        g.frames(3);
+        let three = g.centre_of("3");
+        g.click(three);
+        assert_eq!(g.editing(), Some((2, 0)));
+        // and its button turns it back to raw (the comment line stays in sync)
+        g.key(Key::Escape, Modifiers::NONE);
+        g.press_at(three, "mode");
+        assert_eq!(g.meta().cells, Some(false));
+    }
+
+    // spec: EDIT-031
+    #[test]
+    fn dragging_a_border_resizes_and_a_double_click_shares_the_room_equally() {
+        let original = note_with(TABLE);
+        let mut g = Grid::new("table-resize", &original, false);
+        let border = g.border("Col(0)");
+        g.drag(border.center(), Vec2::new(60.0, 0.0));
+        let m = g.meta();
+        assert_eq!(m.sizes.cols.len(), 2, "{}", g.text);
+        assert!(m.sizes.rows.len() == 3 && m.cells.is_none());
+        let (a, b) = (m.sizes.cols[0], m.sizes.cols[1]);
+        assert!(a > b + 40.0, "the first column got wider: {:?}", m.sizes.cols);
+        assert!(g.is_grid() && g.editing().is_none(), "a drag does not edit a cell");
+        assert_eq!(g.history_steps(), 1, "one step for the drag");
+        assert_eq!(g.text, original);
+        // the right edge: the whole table, in proportion
+        g.frames(2);
+        let right = g.border("Right");
+        g.drag(right.center(), Vec2::new(100.0, 0.0));
+        let wide = g.meta().sizes.cols;
+        g.frames(2);
+        let col = g.border("Col(0)");
+        g.hover(col.center());
+        for down in [true, false, true, false] {
+            g.frame(click_events(col.center(), down));
+        }
+        g.frames(2);
+        let even = g.meta().sizes.cols;
+        assert!((even[0] - even[1]).abs() < 1.0, "a double click shares the width equally: {even:?}");
+        assert!((even.iter().sum::<f32>() - wide.iter().sum::<f32>()).abs() < 2.0, "of the whole width: {wide:?} {even:?}");
+        // a row: the bottom edge makes the rows taller, a double click on a row border evens them
+        let bottom = g.border("Bottom");
+        g.drag(bottom.center(), Vec2::new(0.0, 60.0));
+        let rows = g.meta().sizes.rows;
+        let row = g.border("Row(0)");
+        g.hover(row.center());
+        for down in [true, false, true, false] {
+            g.frame(click_events(row.center(), down));
+        }
+        g.frames(2);
+        let even_rows = g.meta().sizes.rows;
+        assert!(even_rows.windows(2).all(|w| (w[0] - w[1]).abs() < 1.0), "{rows:?} -> {even_rows:?}");
+        assert!((even_rows.iter().sum::<f32>() - rows.iter().sum::<f32>()).abs() < 2.0);
+    }
+
+    // spec: EDIT-031
+    #[test]
+    fn the_buttons_keep_the_sizes_with_their_columns_and_rows() {
+        let mut g = Grid::new("table-resize-buttons", &note_with(&format!("<!-- shale-table cols=100,50 rows=30,30,30 -->\n{TABLE}")), false);
+        let three = g.centre_of("3");
+        g.press_at(three, "insert-column");
+        assert_eq!(g.meta().sizes.cols, [100.0, 100.0, 50.0]);
+        let three = g.centre_of("3");
+        g.press_at(three, "delete-row");
+        assert_eq!(g.meta().sizes.rows, [30.0, 30.0]);
+    }
+
     // spec: EDIT-025
     #[test]
     fn a_change_that_no_longer_fits_the_note_is_dropped_without_a_step() {
@@ -3284,7 +3547,7 @@ mod tests {
         let mut g = Grid::new("stale-edit", &original, false);
         use crate::table::Edit;
         for stale in [(5, Edit::InsertColumn(0)), (0, Edit::DeleteRow(9)), (0, Edit::InsertColumn(7)), (0, Edit::DeleteColumn(7))] {
-            g.ed.table_edit = Some(stale);
+            g.ed.table_edit = Some((stale.0, crate::table::Change::Edit(stale.1)));
             g.frame(vec![]);
             assert_eq!(g.text, original, "{stale:?} is dropped");
             assert!(!g.changed && g.ed.table_edit.is_none());

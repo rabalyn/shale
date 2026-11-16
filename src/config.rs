@@ -297,6 +297,8 @@ pub struct Config {
     pub live_preview: bool,
     /// Lines before and after the cursor line that stay raw in the preview (EDIT-017).
     pub preview_raw_lines: u32,
+    /// A click on a table's grid edits the cell in place, for tables that do not say otherwise (EDIT-030).
+    pub table_cell_edit: bool,
     /// The volume of the media players, 0.0–1.0 (MEDIA-006).
     pub media_volume: f32,
     /// How opaque the round play button over the artwork is, 0.0–1.0 (MEDIA-004).
@@ -381,6 +383,7 @@ impl Default for Config {
             highlight_colours: DEFAULT_HIGHLIGHT_COLOURS.to_vec(),
             live_preview: false,
             preview_raw_lines: 0,
+            table_cell_edit: true,
             media_volume: 0.8,
             media_play_button_opacity: 0.6,
             calendars: vec![],
@@ -566,6 +569,10 @@ mod tests {
         let c: Config = serde_json::from_str(r#"{"live_preview": true, "preview_raw_lines": 2}"#).unwrap();
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.live_preview, back.preview_raw_lines), (true, 2));
+        // spec: EDIT-030
+        assert!(c.table_cell_edit, "cells are edited in the grid by default");
+        let c: Config = serde_json::from_str(r#"{"table_cell_edit": false}"#).unwrap();
+        assert!(!c.table_cell_edit);
         assert_eq!(c.file_sort, FileSort::NameAsc);
     }
 

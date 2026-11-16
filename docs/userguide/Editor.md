@@ -67,8 +67,29 @@ and task boxes still tick.
 
 A table (`| a | b |` rows with a `|---|---|` line below the header) away from the cursor is drawn as
 a real grid: borders, a bold header row, columns aligned as `:---`, `:---:` or `---:` say, code,
-bold and links inside the cells, and long text wrapping inside its own column. Click the table,
-or move the cursor into it, and its raw rows come back to edit.
+bold and links inside the cells, and long text wrapping inside its own column.
+
+Click a cell to edit it right in the grid: the cell shows its own markdown in a small box, and
+what you type goes into the note at once (a `|` you type is written as `\|`). **Tab** and
+**Shift+Tab** go to the next and previous cell, **Enter** and **Shift+Enter** to the cell below
+and above, **Esc** (or a click elsewhere) leaves. Everything from the click to leaving is one
+step you can undo. Moving the cursor into the table with the keyboard still shows its raw rows.
+
+![[table-cell-edit.png]]
+
+If you prefer the raw markdown, turn off "Edit table cells in the grid" in Settings → General →
+Appearance: a click on a table then shows its raw rows to edit. A single table can be switched
+either way by the small button above the top right corner of its grid (**md**: edit this table
+as raw markdown; the grid icon: edit its cells in the grid).
+
+Drag a border between two columns to make the left one wider or narrower, the border under a
+row to make it taller, and the right edge, the bottom edge or the bottom right corner to resize
+the whole table. Double-click a column border to give all columns the same width (sharing the
+table's current width), or a row border to give all rows the same height.
+
+The switch and the sizes are kept in the note, in a comment line right above the table, e.g.
+`<!-- shale-table edit=raw cols=160,90 rows=30,30,44 -->`. It is hidden with the grid, in the
+reading view and in the PDF; other apps such as Obsidian ignore HTML comments.
 
 While the pointer is over the grid, small buttons appear: a **+** right of the header adds a
 column at the end, a **+** bar under the table adds a row at the end, and for the row and the
