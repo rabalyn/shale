@@ -413,19 +413,12 @@ mod tests {
     use crate::app::{Options, View};
     use std::ffi::OsString;
 
-    /// A hermetic git; `git lfs` is an alias that fails, so these tests are the same with and
+    /// A hermetic git that finds no git-lfs (`hide_lfs`), so these tests are the same with and
     /// without git-lfs on the machine.
     fn hermetic() -> Git {
-        let env = [
-            ("GIT_CONFIG_GLOBAL", "/dev/null"),
-            ("GIT_CONFIG_NOSYSTEM", "1"),
-            ("GIT_CONFIG_COUNT", "2"),
-            ("GIT_CONFIG_KEY_0", "init.defaultBranch"),
-            ("GIT_CONFIG_VALUE_0", "main"),
-            ("GIT_CONFIG_KEY_1", "alias.lfs"),
-            ("GIT_CONFIG_VALUE_1", "!exit 1"),
-        ];
-        Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() }
+        let mut git = hermetic_with_lfs();
+        crate::gitsync::hide_lfs(&mut git);
+        git
     }
 
     /// The same with the real git-lfs: None (and a printed note) when it is not installed.
@@ -434,15 +427,19 @@ mod tests {
             eprintln!("skipping: git-lfs is not installed here (CI installs it)");
             return None;
         }
-        let mut git = hermetic();
-        git.env.retain(|(k, _)| k != "GIT_CONFIG_KEY_1" && k != "GIT_CONFIG_VALUE_1" && k != "GIT_CONFIG_COUNT");
-        git.env.push(("GIT_CONFIG_COUNT".into(), "1".into()));
-        Some(git)
+        Some(hermetic_with_lfs())
+    }
+
+    fn hermetic_with_lfs() -> Git {
+        let env = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "init.defaultBranch"), ("GIT_CONFIG_VALUE_0", "main")];
+        Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() }
     }
 
     fn app_on(vault: &Path) -> ShaleApp {
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(vault.to_path_buf()), view: None, keys: None }, false);
         app.sync.git = hermetic();
+        // the vault was opened with the computer's git: look again with the test's (SYNC-016)
+        app.refresh_lfs();
         app
     }
 
