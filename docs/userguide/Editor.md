@@ -38,6 +38,8 @@ column under the pointer a **+** adds one after it and a **×** deletes it (the 
 last row and the last column stay). Each click changes only the table's lines, as one step you
 can undo, and the table stays a grid.
 
+![[table-grid.png]]
+
 ## Sound players
 
 ![[sound-player.png]]

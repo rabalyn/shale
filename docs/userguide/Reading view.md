@@ -9,4 +9,6 @@ editor), embedded pictures, drawings and PDFs, and task boxes you can tick (the 
 in the note). Tables are drawn as grids, with a bold header row and aligned columns. If you only want to read, this is the quiet way to do it. The always-rendered
 alternative while you edit is the Markdown preview in [[Editor]].
 
+![[table-reading.png]]
+
 #userguide #reading

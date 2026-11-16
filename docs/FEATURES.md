@@ -82,6 +82,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
   the last item you trashed back.
+
+  ![The PDF export dialog](userguide/z_media/screenshots/pdf-export-dialog.png)
+
 - Every dialog is a window you can move by its title bar and resize from any edge or corner.
 
 ## Tabs
@@ -119,6 +122,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   row or column and delete the hovered row or column.
 
   ![The Markdown preview](userguide/z_media/screenshots/editor-preview.png)
+
+  ![A table as a grid, with its buttons](userguide/z_media/screenshots/table-grid.png)
+
+  ![A table in the reading view](userguide/z_media/screenshots/table-reading.png)
 
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
