@@ -59,6 +59,7 @@ impl Scope {
                 Key::P,
                 Key::D,
                 Key::Y,
+                Key::U,
                 Key::Num0,
                 Key::Num4,
                 Key::Colon,
@@ -380,7 +381,9 @@ impl Keymap {
             return Err(format!("{} is reserved for text editing", b.display()));
         }
         // a fixed key cannot start a binding (also not a sequence, which it would never complete)
-        if !first.ctrl && !first.alt && scope.reserved().contains(&first.key) {
+        // Ctrl+R redoes in vim normal mode (EDIT-021)
+        let vim_redo = scope == Scope::EditorNormal && first.ctrl && !first.alt && !first.shift && first.key == Key::R;
+        if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key)) || vim_redo {
             return Err(format!("{} has a fixed meaning here", b.display()));
         }
         for d in DEFS.iter().filter(|d| d.action != a && d.scope.overlaps(scope)) {
@@ -589,7 +592,7 @@ mod tests {
     fn the_keys_of_vim_normal_mode_cannot_be_bound() {
         let k = Keymap::default();
         let a = Action::NormalAlternate;
-        for text in ["H", "Shift+W", "G", "0", "4", "Slash", "Colon", "Escape", "Enter", "Backspace", "ArrowDown", "G X", "Shift+O Tab"] {
+        for text in ["H", "Shift+W", "G", "0", "4", "Slash", "Colon", "Escape", "Enter", "Backspace", "ArrowDown", "G X", "Shift+O Tab", "U", "Shift+U", "Ctrl+R", "Ctrl+R X"] {
             assert!(k.check(a, &b(text)).unwrap_err().contains("fixed meaning"), "{text}");
         }
         // after the leader any key is free, and Ctrl chords are no vim keys
