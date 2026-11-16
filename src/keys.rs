@@ -260,6 +260,16 @@ actions! {
     MailAttNext => "mail.attachment_next", "Select the next attachment", MailView, ["CloseBracket"];
     MailAttOpen => "mail.attachment_open", "Open the selected attachment", MailView, ["O"];
     MailEdit => "mail.edit", "Edit the draft, or take a mail of the outbox back into the editor", MailView, ["E"];
+    // The Alt shortcuts of the buttons of the open mail (MAIL-229): the letter is underlined on the button while Alt is held
+    MailBtnImport => "mail.button_import", "Open mail: Import to vault button", MailView, ["Alt+I"];
+    MailBtnClose => "mail.button_close", "Open mail: Close button", MailView, ["Alt+C"];
+    MailBtnReply => "mail.button_reply", "Open mail: Reply button", MailView, ["Alt+R"];
+    MailBtnReplyAll => "mail.button_reply_all", "Open mail: Reply all button", MailView, ["Alt+A"];
+    MailBtnForward => "mail.button_forward", "Open mail: Forward button", MailView, ["Alt+F"];
+    MailBtnRead => "mail.button_read", "Open mail: Mark read / unread button", MailView, ["Alt+U"];
+    MailBtnFlag => "mail.button_flag", "Open mail: Flag / Unflag button", MailView, ["Alt+G"];
+    MailBtnMove => "mail.button_move", "Open mail: Move button", MailView, ["Alt+M"];
+    MailBtnDelete => "mail.button_delete", "Open mail: Delete button", MailView, ["Alt+D"];
     MailMenu => "mail.menu", "Open the menu of the message or draft under the cursor", MailView, ["Menu", "Shift+F10"];
 }
 
@@ -515,7 +525,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 24 + 27 + 5);
+        assert_eq!(DEFS.len(), 24 + 36 + 5);
     }
 
     // spec: KEY-003
@@ -713,12 +723,16 @@ mod tests {
     fn a_bare_key_does_not_fire_with_shift_or_alt() {
         let mut k = Keymap::default();
         let sc = Scope::MailView;
-        for (key, bare, shift) in
-            [(Key::S, Some(Action::MailFlag), Some(Action::MailRetry)), (Key::R, Some(Action::MailReply), Some(Action::MailReplyAll)), (Key::F, Some(Action::MailFlag), Some(Action::MailForward)), (Key::D, Some(Action::MailDelete), None)]
-        {
+        // the Alt key of a letter is the action of the button of the open mail (MAIL-229), never the bare key's
+        for (key, bare, shift, alt) in [
+            (Key::S, Some(Action::MailFlag), Some(Action::MailRetry), None),
+            (Key::R, Some(Action::MailReply), Some(Action::MailReplyAll), Some(Action::MailBtnReply)),
+            (Key::F, Some(Action::MailFlag), Some(Action::MailForward), Some(Action::MailBtnForward)),
+            (Key::D, Some(Action::MailDelete), None, Some(Action::MailBtnDelete)),
+        ] {
             assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::NONE)]), bare, "{key:?}");
             assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::SHIFT)]), shift, "Shift+{key:?}");
-            assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::ALT)]), None, "Alt+{key:?}");
+            assert_eq!(frame(&mut k, sc, vec![key_event(key, Modifiers::ALT)]), alt, "Alt+{key:?}");
         }
         // in a sequence too: a later chord needs its exact modifiers
         k.set(Action::MailMove, b("G X")).unwrap();
