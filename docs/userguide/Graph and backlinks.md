@@ -6,6 +6,8 @@ features:
 
 ![[graph.png]]
 
+![[graph-drag.webm]]
+
 The right sidebar shows, for the open note: **backlinks** (who links here), **unlinked
 mentions** (the note's name in plain text), **outgoing links**, the **outline** and a **local
 graph**. The **vault graph** (ribbon) shows every note: red dots are missing notes (links

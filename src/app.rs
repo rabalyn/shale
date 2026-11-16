@@ -1875,6 +1875,11 @@ impl ShaleApp {
         let Some(path) = self.shot.path.clone() else { return };
         ui.ctx().request_repaint();
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+        if self.shot.recording() {
+            self.record_tick(ui, path);
+            self.send_close_when_done(ui);
+            return;
+        }
         if self.frames >= 120 && self.script.steps.is_empty() && self.frames >= self.script.last_frame + 12 && !self.shot.requested {
             self.shot.requested = true;
             let done = self.shot.done.clone();

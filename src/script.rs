@@ -311,16 +311,25 @@ mod tests {
     }
 
     fn recipes() -> Vec<Recipe> {
-        let text = std::fs::read_to_string(root().join("docs/screenshots/recipes.conf")).unwrap();
+        recipes_of("recipes.conf", &["size", "view", "steps", "vault", "env", "docs"])
+    }
+
+    /// The recipes of the clips (`clips.conf`, DEV-019): the same keys, but a guide note instead of docs.
+    fn clips() -> Vec<Recipe> {
+        recipes_of("clips.conf", &["size", "view", "steps", "vault", "env", "note"])
+    }
+
+    fn recipes_of(file: &str, allowed: &[&str]) -> Vec<Recipe> {
+        let text = std::fs::read_to_string(root().join("docs/screenshots").join(file)).unwrap();
         let mut out: Vec<Recipe> = vec![];
         for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
             if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
                 out.push(Recipe { name: name.to_string(), keys: Default::default() });
             } else {
-                let (k, v) = line.split_once('=').unwrap_or_else(|| panic!("recipes.conf: `{line}` is neither [name] nor key = value"));
-                let r = out.last_mut().expect("recipes.conf: a key before the first [name]");
-                assert!(["size", "view", "steps", "vault", "env", "docs"].contains(&k.trim()), "recipes.conf: unknown key `{}` in [{}]", k.trim(), r.name);
-                assert!(r.keys.insert(k.trim().to_string(), v.trim().to_string()).is_none(), "recipes.conf: `{}` twice in [{}]", k.trim(), r.name);
+                let (k, v) = line.split_once('=').unwrap_or_else(|| panic!("{file}: `{line}` is neither [name] nor key = value"));
+                let r = out.last_mut().expect("a key before the first [name]");
+                assert!(allowed.contains(&k.trim()), "{file}: unknown key `{}` in [{}]", k.trim(), r.name);
+                assert!(r.keys.insert(k.trim().to_string(), v.trim().to_string()).is_none(), "{file}: `{}` twice in [{}]", k.trim(), r.name);
             }
         }
         out
@@ -415,5 +424,67 @@ mod tests {
         assert_eq!(parse("drop:10,20.5:/tmp/a b.md").unwrap(), vec![Step::Drop(Some(Target::At(10.0, 20.5)), one("/tmp/a b.md"))]);
         assert_eq!(parse("drop:@Welcome#2:/a;;/b c").unwrap(), vec![Step::Drop(Some(Target::Label("Welcome".into(), 2)), vec![PathBuf::from("/a"), PathBuf::from("/b c")])]);
         assert!(parse("drop:").is_err() && parse("drop:1,2:").is_err());
+    }
+
+    // spec: DEV-019
+    #[test]
+    fn dev_019_every_clip_has_a_recipe_and_every_recipe_a_clip_that_its_guide_note_embeds() {
+        let clips = clips();
+        let mut names: Vec<&str> = clips.iter().map(|r| r.name.as_str()).collect();
+        names.sort_unstable();
+        let mut unique = names.clone();
+        unique.dedup();
+        assert_eq!(names, unique, "a clip name twice");
+        assert!(clips.len() >= 3, "the guide shows at least three clips");
+
+        let files: std::collections::BTreeSet<String> = std::fs::read_dir(root().join("docs/userguide/z_media/clips")).unwrap().filter_map(|e| e.ok()?.file_name().to_str().map(str::to_string)).collect();
+        let wanted: std::collections::BTreeSet<String> = clips.iter().map(|r| format!("{}.webm", r.name)).collect();
+        assert_eq!(files.difference(&wanted).collect::<Vec<_>>(), Vec::<&String>::new(), "a clip without a recipe");
+        assert_eq!(wanted.difference(&files).collect::<Vec<_>>(), Vec::<&String>::new(), "a recipe whose clip is missing (run docs/screenshots/regen-clips.sh <name>)");
+
+        for r in &clips {
+            let note = r.keys.get("note").unwrap_or_else(|| panic!("[{}] says no guide note that embeds it", r.name));
+            let text = std::fs::read_to_string(root().join("docs/userguide").join(format!("{note}.md"))).unwrap_or_else(|e| panic!("[{}]: guide note {note}: {e}", r.name));
+            assert!(text.contains(&format!("![[{}.webm]]", r.name)), "[{}]: the guide note {note} does not embed ![[{}.webm]]", r.name, r.name);
+            let size = std::fs::metadata(root().join("docs/userguide/z_media/clips").join(format!("{}.webm", r.name))).unwrap().len();
+            assert!(size < 1_000_000, "[{}] is {size} bytes: a clip is short and small", r.name);
+        }
+    }
+
+    // spec: DEV-019
+    #[test]
+    fn dev_019_every_clip_recipe_parses_and_its_script_ends() {
+        for r in clips() {
+            let k = |key: &str| r.keys.get(key).map(String::as_str);
+            if let Some(size) = k("size") {
+                assert!(crate::parse_size(size).is_some(), "[{}] size {size}", r.name);
+            }
+            if let Some(v) = k("vault") {
+                assert!(root().join("docs/screenshots").join(v).is_dir(), "[{}] vault {v}", r.name);
+            }
+            let steps = parse(k("steps").unwrap_or("")).unwrap_or_else(|e| panic!("[{}] steps: {e}", r.name));
+            assert!(!steps.is_empty(), "[{}] has no steps: a clip shows something happening", r.name);
+            // a clip is at most a minute of 30 frames per second, a step every 6 frames
+            let frames: u32 = 30 + steps.iter().map(|s| if let Step::Wait(n) = s { 6 * (n + 1) } else { 6 }).sum::<u32>();
+            assert!(frames < 20 * crate::recorder::FPS, "[{}] is {frames} frames long: a clip is a few seconds", r.name);
+        }
+    }
+
+    // spec: DEV-019
+    #[test]
+    fn dev_019_the_regen_scripts_name_the_clips_and_the_recorder() {
+        let regen = std::fs::read_to_string(root().join("docs/screenshots/regen.sh")).unwrap();
+        assert!(regen.contains("--clips") && regen.contains("--record") && regen.contains("clips.conf"));
+        let wrapper = std::fs::read_to_string(root().join("docs/screenshots/regen-clips.sh")).unwrap();
+        assert!(wrapper.contains("regen.sh\" --clips"), "{wrapper}");
+        // the command lists the recipe names without a display (needs bash and ffmpeg, which regen.sh checks for)
+        if cfg!(unix) && crate::recorder::probe(crate::recorder::FFMPEG).is_ok() {
+            let out = std::process::Command::new("bash").arg(root().join("docs/screenshots/regen-clips.sh")).arg("--list").output().unwrap();
+            let listed: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect();
+            let names: Vec<String> = clips().into_iter().map(|r| r.name).collect();
+            assert_eq!(listed, names, "{}", String::from_utf8_lossy(&out.stderr));
+        } else {
+            eprintln!("skipping: bash or ffmpeg is missing");
+        }
     }
 }
