@@ -22,4 +22,3 @@ gitsync::tests::without_git_the_sync_reports_it  # checks that the real git is t
 # Wine's own versions of Windows services behave differently.
 secrets::wincred::tests::credential_manager_refuses_what_it_cannot_hold  # Wine's credential manager takes blobs over CRED_MAX_CREDENTIAL_BLOB_SIZE
 fsutil::tests::concurrent_writers_never_produce_a_torn_file  # under Wine an atomic replace can fail while another thread replaces the same file
-panels::dialogs_ui_tests::dialogs_the_sort_menu_orders_the_rows_and_names_the_choice  # setting a file's modified time is "Access denied" under Wine
