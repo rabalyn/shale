@@ -610,5 +610,24 @@ pub fn host_name() -> String {
 
 pub mod lfs;
 
+/// Makes a test's git find no git-lfs, also on a computer that has one: a `git-lfs` that fails
+/// comes first on its PATH. (An alias cannot hide it: git runs an installed `git-lfs` program
+/// and ignores an alias of the same name.)
+#[cfg(test)]
+pub fn hide_lfs(git: &mut Git) {
+    static PATH: std::sync::OnceLock<OsString> = std::sync::OnceLock::new();
+    let path = PATH.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("shale-no-git-lfs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stub = dir.join("git-lfs");
+        std::fs::write(&stub, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let rest = std::env::var_os("PATH").unwrap_or_default();
+        std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(&rest))).unwrap()
+    });
+    git.env.push(("PATH".into(), path.clone()));
+}
+
 #[cfg(test)]
 mod tests;

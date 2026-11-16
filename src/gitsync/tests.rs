@@ -12,8 +12,8 @@ struct Env {
 }
 
 impl Env {
-    /// A hermetic git without Git LFS: `git lfs` is an alias that fails, so the tests behave the
-    /// same on machines with and without git-lfs (SYNC-016).
+    /// A hermetic git without Git LFS (`hide_lfs`), so the tests behave the same on machines with
+    /// and without git-lfs (SYNC-016).
     fn new(tag: &str) -> Env {
         Env::build(tag, false)
     }
@@ -31,10 +31,10 @@ impl Env {
         let root = std::env::temp_dir().join(format!("shale-gitsync-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
-        let mut env = vec![
+        let env = [
             ("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" }),
             ("GIT_CONFIG_NOSYSTEM", "1"),
-            ("GIT_CONFIG_COUNT", if lfs { "3" } else { "4" }),
+            ("GIT_CONFIG_COUNT", "3"),
             ("GIT_CONFIG_KEY_0", "init.defaultBranch"),
             ("GIT_CONFIG_VALUE_0", "main"),
             ("GIT_CONFIG_KEY_1", "protocol.file.allow"),
@@ -43,10 +43,10 @@ impl Env {
             ("GIT_CONFIG_KEY_2", "core.autocrlf"),
             ("GIT_CONFIG_VALUE_2", "false"),
         ];
+        let mut git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() };
         if !lfs {
-            env.extend([("GIT_CONFIG_KEY_3", "alias.lfs"), ("GIT_CONFIG_VALUE_3", "!exit 1")]);
+            hide_lfs(&mut git);
         }
-        let git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() };
         Env { root, git }
     }
 
