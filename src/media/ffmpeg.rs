@@ -186,7 +186,7 @@ impl Tools {
 
     /// Length, size, frame rate and sound of a video file.
     pub fn probe(&self, file: &Path) -> Result<Info, String> {
-        let out = Self::capture(&self.ffprobe, &probe_args(file))?;
+        let out = Self::capture(&self.ffprobe, &probe_args(file)).map_err(|e| if e.contains("could not be started") { e } else { "The file is damaged or not a video that ffmpeg can read.".to_string() })?;
         parse_probe(&String::from_utf8_lossy(&out))
     }
 

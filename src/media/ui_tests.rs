@@ -32,7 +32,8 @@ impl Fx {
         for s in sounds {
             if s.starts_with("bad.") {
                 // not a sound at all
-                std::fs::write(dir.join(s), vec![9u8; 3000]).unwrap();
+                // (ffprobe takes bytes of 9 for a raw video)
+                std::fs::write(dir.join(s), vec![if s.ends_with("mp4") { 7u8 } else { 9u8 }; 3000]).unwrap();
             } else {
                 std::fs::copy(fixture(s), dir.join(s)).unwrap();
             }

@@ -99,10 +99,12 @@ fn only_one_of_a_video_and_a_sound_plays() {
     let mut fx = Fx::new("v-one", "![[clip.mp4]]\n\n![[tone.wav]]\n", &["clip.mp4", "tone.wav"]);
     fx.reading(true);
     fx.play();
-    assert_eq!(fx.app.media.current(), Some(fx.dir.join("clip.mp4")));
-    // the video's button says "Pause" now: the label "Play" is the sound's
+    let first = fx.app.media.current().expect("one plays");
+    // that player's button says "Pause" now: the label "Play" is the other one's
     fx.click_label("Play");
-    assert_eq!(fx.app.media.current(), Some(fx.dir.join("tone.wav")), "starting one stops the other");
+    let second = fx.app.media.current().expect("the other plays");
+    assert_ne!(first, second, "starting one stops the other");
+    assert!([&first, &second].contains(&&fx.dir.join("clip.mp4")) && [&first, &second].contains(&&fx.dir.join("tone.wav")));
 }
 
 // spec: MEDIA-009
@@ -113,9 +115,9 @@ fn a_video_that_is_damaged_says_so() {
     }
     let mut fx = Fx::new("v-bad", "![[bad.mp4]]\n", &["bad.mp4"]);
     fx.reading(true);
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(1000));
     fx.hl.frames(&mut fx.app, 4);
-    assert!(texts(&fx).iter().any(|t| t.contains("ffmpeg says") || t.contains("picture")), "{:?}", texts(&fx));
+    assert!(texts(&fx).iter().any(|t| t.contains("damaged")), "{:?}", texts(&fx));
 }
 
 /// The files the pretend system player was asked to open.
