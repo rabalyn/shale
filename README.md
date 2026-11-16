@@ -86,8 +86,8 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
   for Windows is a separate install).
 - **Drag and drop**: files dropped on the window are imported everywhere; mail messages, links and
   text dragged out of Thunderbird need Wayland.
-- **Time zones**: calendar events in a named zone (`Europe/Berlin`) need the system's zoneinfo
-  files, which Windows does not have; there such events are shown in the computer's own zone.
+- **Time zones**: calendar events in a named zone (`Europe/Berlin`) use the system's zoneinfo
+  files; Windows has none, so Shale brings its own time zone database there.
 
 ## Download
 
