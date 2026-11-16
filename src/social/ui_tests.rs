@@ -809,8 +809,8 @@ fn the_settings_clear_and_rebuild_the_post_index() {
     assert_eq!(w.app.social.index.count(None), 1);
     // Rebuild: clears and indexes what the open feeds hold (two lists of 40; a waiting post too)
     w.app.social.timelines.get_mut(&(acct.clone(), "home".into())).unwrap().waiting = vec![post("waiting1", "bob", crate::calendar::time::now() - 5, None)];
-    // the dialog scrolls: bring the section into view
-    while w.rect("index-rebuild").max.y > 850.0 {
+    // the dialog scrolls: bring the section into view (with room below for the confirmation)
+    while w.rect("index-rebuild").max.y > 780.0 {
         w.scroll(150.0);
     }
     w.click("index-rebuild");

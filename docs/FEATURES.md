@@ -13,6 +13,8 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   link to open the note, or a red one to create it.
 - Pictures (`![[photo.png]]`), drawings (`![[Sketch.excalidraw]]`) and PDFs are shown inside the
   editor.
+- Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
+  line keeps one number.
 - Lists continue when you press Enter (also numbered lists and to-dos `- [ ]` / `1. [ ]`).
   Tab and Shift+Tab indent list items or change heading levels, and Alt+↑/↓ move lines.
 - Web links (`[text](https://…)`) open in your browser.
@@ -67,6 +69,15 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
+- **Markdown preview** (Settings → Appearance, or the eye icon in the top right of the editor;
+  off by default): every line is drawn rendered, with headings at their size, bold, italic,
+  strike and code without their markers, links as just their text, and only the line the cursor
+  is in (and, with "Raw lines around the cursor", that many lines before and after, or all the
+  lines of a selection) shows the raw markdown. The note stays editable; links still open with a
+  click and task boxes still tick.
+
+  ![The Markdown preview](screenshots/editor-preview.png)
+
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
   start typing, Esc stops; x deletes a character; v and V select with the same motions, d cuts
@@ -150,6 +161,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   view removes the view. Esc cancels a drag.
 - Drag the border between two views up or down to change their heights (they start equal; a
   view never gets lower than a small minimum).
+- A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.
 - Right-click an icon (in the ribbon or in a view's menubar) for a menu: **Remove from the
   ribbon** / **Remove from this view**, **Restore …** for every icon removed earlier, and
   **Reset layout** (the default icons, order and heights). The last icon of the ribbon cannot
@@ -324,6 +336,10 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   nobody can know whether it went out: the mail shows as "may have been sent", Shale never sends it
   again by itself, and you look in Sent and choose **Send again** or **Discard**. The same if Shale was
   closed in the middle of sending.
+
+  ![An outbox mail that was not sent](screenshots/outbox-failed.png)
+  ![An outbox mail that may have been sent](screenshots/outbox-unsure.png)
+
 - **Questions before sending**: with no subject, with no text, and when the text says "attached" /
   "attachment" / "angehängt" / "anbei" / "Anhang" but nothing is attached. Bcc recipients get the mail
   but are never written into it; no read receipt is requested; the `User-Agent` header is off unless

@@ -103,7 +103,7 @@ struct W {
     offline: Arc<std::sync::atomic::AtomicBool>,
     /// What the last frame painted: text and its colour.
     texts: Vec<(String, Color32)>,
-    /// The letters the last frame underlined (MAIL-227).
+    /// The letters the last frame underlined (MAIL-228).
     underlined: Vec<String>,
     /// What the last frame filled: rectangles and their colour.
     fills: Vec<(Rect, Color32)>,
@@ -3463,7 +3463,7 @@ fn alt(w: &mut W, key: Key, letter: &str) {
     w.press_text(key, Modifiers::ALT, letter);
 }
 
-// spec: MAIL-227, KEY-012
+// spec: MAIL-228, KEY-012
 #[test]
 fn alt_keys_do_what_the_buttons_of_the_open_mail_do() {
     let mut w = inbox_with_cursor("altbuttons");
@@ -3502,7 +3502,7 @@ fn alt_keys_do_what_the_buttons_of_the_open_mail_do() {
     assert_eq!(w.server_uids("INBOX"), vec![1, 3], "Alt+D without an open mail deletes nothing");
 }
 
-// spec: MAIL-227
+// spec: MAIL-228
 #[test]
 fn alt_r_a_and_f_answer_and_forward_the_open_mail() {
     let (mut w, _smtp) = compose_world("altanswer", 10);
@@ -3521,7 +3521,7 @@ fn alt_r_a_and_f_answer_and_forward_the_open_mail() {
     assert!(!w.server.state().messages("INBOX").iter().any(|m| m.1.contains(&"\\Flagged".to_string())), "Alt+F forwards, it does not flag");
 }
 
-// spec: MAIL-227
+// spec: MAIL-228
 #[test]
 fn holding_alt_underlines_the_letter_of_each_button_and_it_follows_a_rebound_key() {
     use crate::keys::{Action as KeyAction, Binding};
@@ -3553,7 +3553,7 @@ fn holding_alt_underlines_the_letter_of_each_button_and_it_follows_a_rebound_key
     assert!(w.underlined.is_empty());
 }
 
-// spec: MAIL-227
+// spec: MAIL-228
 #[test]
 fn alt_keys_do_nothing_while_the_search_field_has_the_keyboard() {
     let mut w = inbox_with_cursor("altsearch");

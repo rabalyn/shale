@@ -26,6 +26,7 @@ pub enum Icon {
     Forward,
     Book,
     Pencil,
+    Preview,
     Close,
     Pin,
     Plus,
@@ -152,6 +153,18 @@ pub fn paint_icon(p: &egui::Painter, r: Rect, icon: Icon, c: Color32) {
             p.rect_stroke(l, CornerRadius::same(1), s, StrokeKind::Middle);
             p.rect_stroke(rr, CornerRadius::same(1), s, StrokeKind::Middle);
         }
+        Icon::Preview => {
+            // an eye: the markdown preview
+            let pts = |sign: f32| {
+                (0..=8).map(move |k| {
+                    let t = k as f32 / 8.0 * 2.0 - 1.0;
+                    cx + Vec2::new(t * w * 0.4, sign * (1.0 - t * t) * w * 0.24)
+                })
+            };
+            p.add(Shape::line(pts(-1.0).collect(), s));
+            p.add(Shape::line(pts(1.0).collect(), s));
+            p.circle_filled(cx, w * 0.11, c);
+        }
         Icon::Close => {
             p.line_segment([cx - Vec2::splat(w * 0.22), cx + Vec2::splat(w * 0.22)], s);
             p.line_segment([cx + Vec2::new(-w * 0.22, w * 0.22), cx + Vec2::new(w * 0.22, -w * 0.22)], s);
@@ -259,6 +272,7 @@ pub fn icon_button_sense(ui: &mut Ui, icon: Icon, size: f32, active: bool, tip: 
     };
     paint_icon(ui.painter(), r.shrink(size * 0.22), icon, c);
     crate::script::hint(tip, r);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     resp.on_hover_text(tip)
 }
 
@@ -548,6 +562,13 @@ impl ShaleApp {
                             t.reading = !t.reading;
                         }
                     }
+                    if !reading {
+                        let on = self.cfg.live_preview;
+                        if icon_button(ui, Icon::Preview, 26.0, on, if on { "Raw markdown" } else { "Markdown preview" }).clicked() {
+                            self.cfg.live_preview = !on;
+                            self.save_config();
+                        }
+                    }
                     let p2 = p.clone();
                     ui.menu_button(egui::RichText::new("⋯").size(16.0).color(theme::MUTED), |ui| {
                         if ui.button("Export to PDF…").clicked() {
@@ -736,6 +757,9 @@ impl ShaleApp {
                         }
                     } else {
                         tab.editor.inline_images = self.cfg.inline_images;
+                        tab.editor.line_numbers = self.cfg.line_numbers;
+                        tab.editor.live_preview = self.cfg.live_preview;
+                        tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
                         tab.editor.dark_canvas = self.cfg.dark_canvas;
