@@ -46,6 +46,29 @@ impl ScreenshotRun {
     }
 }
 
+/// The PNG of a `--screenshot` picture from its `w`×`h` sRGB RGBA pixels: lossless and small, because
+/// every version of a guide picture stays in the history (DEV-007): RGB when every pixel is opaque,
+/// and the encoder's default compression instead of the image crate's fast default.
+pub(super) fn encode_png(w: u32, h: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::{ExtendedColorType, ImageEncoder};
+    if rgba.len() as u64 != u64::from(w) * u64::from(h) * 4 {
+        return Err(format!("{} bytes are not {w}x{h} RGBA pixels", rgba.len()));
+    }
+    let (pixels4, _) = rgba.as_chunks::<4>();
+    let opaque = pixels4.iter().all(|p| p[3] == 255);
+    let rgb: Vec<u8>;
+    let (pixels, kind) = if opaque {
+        rgb = pixels4.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
+        (&rgb[..], ExtendedColorType::Rgb8)
+    } else {
+        (rgba, ExtendedColorType::Rgba8)
+    };
+    let mut png = Vec::new();
+    PngEncoder::new_with_quality(&mut png, CompressionType::Default, FilterType::Adaptive).write_image(pixels, w, h, kind).map_err(|e| e.to_string())?;
+    Ok(png)
+}
+
 /// A recording that cannot go on ends the run with exit code 1.
 fn failed(message: &str) -> ! {
     eprintln!("record: {message}");
@@ -115,5 +138,60 @@ impl ShaleApp {
         if self.shot.done.load(std::sync::atomic::Ordering::SeqCst) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_png;
+
+    /// A made-up screen: flat panels, a gradient and a few lines of "text" (sharp, many colours).
+    fn screen(w: u32, h: u32, alpha: impl Fn(u32, u32) -> u8) -> Vec<u8> {
+        let mut px = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let text = y % 16 < 10 && (x * 7 + y * 3) % 11 < 4 && x > w / 4;
+                let rgb = if text {
+                    [20, 20, 30]
+                } else if x < w / 4 {
+                    [40, 44, 52]
+                } else {
+                    [250, 250, (200 + y % 50) as u8]
+                };
+                px.extend_from_slice(&[rgb[0], rgb[1], rgb[2], alpha(x, y)]);
+            }
+        }
+        px
+    }
+
+    fn fast_png(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_raw(w, h, rgba.to_vec()).unwrap().write_to(&mut png, image::ImageFormat::Png).unwrap();
+        png.into_inner()
+    }
+
+    // spec: DEV-007
+    #[test]
+    fn dev_007_an_opaque_screenshot_is_a_small_lossless_rgb_png() {
+        let (w, h) = (320, 200);
+        let rgba = screen(w, h, |_, _| 255);
+        let png = encode_png(w, h, &rgba).unwrap();
+        let back = image::load_from_memory_with_format(&png, image::ImageFormat::Png).unwrap();
+        assert_eq!(back.color(), image::ColorType::Rgb8, "an opaque picture needs no alpha channel");
+        assert_eq!(back.to_rgba8().into_raw(), rgba, "the pixels come back unchanged");
+        let fast = fast_png(w, h, &rgba);
+        assert!(png.len() * 10 < fast.len() * 9, "at least 10% smaller than the fast RGBA encoding: {} vs {}", png.len(), fast.len());
+        assert_eq!(encode_png(w, h, &rgba).unwrap(), png, "two runs give the same bytes");
+    }
+
+    // spec: DEV-007
+    #[test]
+    fn dev_007_a_translucent_screenshot_keeps_its_alpha() {
+        let (w, h) = (64, 40);
+        let rgba = screen(w, h, |x, _| if x == 3 { 128 } else { 255 });
+        let back = image::load_from_memory(&encode_png(w, h, &rgba).unwrap()).unwrap();
+        assert_eq!(back.color(), image::ColorType::Rgba8);
+        assert_eq!(back.to_rgba8().into_raw(), rgba);
+        assert!(encode_png(w, h, &rgba[4..]).is_err(), "too few pixels for the size is an error, not a broken file");
     }
 }
