@@ -331,7 +331,7 @@ fn the_toolbar_button_size_setting_scales_the_buttons() {
 fn the_app_draws_the_toolbar_at_the_size_of_the_setting() {
     let mut fx = Fx::new("size", "one two");
     let base = fx.hl.find_label(&mut fx.app, "Bold: **text**");
-    assert!((base.height() - 26.0 * 1.2).abs() < 0.5, "120 % by default: {base:?}");
+    assert!((base.height() - 26.0 * 1.1).abs() < 0.5, "110 % by default: {base:?}");
     fx.app.cfg.toolbar_size = 200;
     fx.hl.frames(&mut fx.app, 3);
     assert!((fx.hl.find_label(&mut fx.app, "Bold: **text**").height() - 52.0).abs() < 0.5);

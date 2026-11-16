@@ -38,7 +38,7 @@ You normally never edit these files; the "Where" column says which window change
 | `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
 | `line_numbers` | on | Appearance, "Show line numbers in the editor" |
 | `format_toolbar` | on | Settings → General → Editing, "Show formatting toolbar above the text of a note" |
-| `toolbar_size` | 120 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
+| `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
 | `font_colours` | red, orange, blue, green, purple (`[[229,62,62], …]`, RGB, up to 8) | Editing, "Font colours": the swatches of the toolbar's font colour palette |
 | `highlight_colours` | neon yellow, green, cyan, magenta (RGB, up to 8) | Editing, "Highlight colours": the swatches of the toolbar's highlight palette |
 | `live_preview` | off | Appearance, "Markdown preview in the editor"; the eye icon of the editor |
