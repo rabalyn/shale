@@ -937,11 +937,15 @@ mod tests {
         let contents: Arc<Vec<Vec<u8>>> = Arc::new((0..6u8).map(|i| vec![i + 1; 1 + (rng.next() % 400_000) as usize]).collect());
         write_atomic(&p, &contents[0]).unwrap();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // all seven threads start together, so the reader runs while the writers write
+        let start = Arc::new(std::sync::Barrier::new(7));
         let reader = {
-            let (p, c, stop) = (p.clone(), contents.clone(), stop.clone());
+            let (p, c, stop, start) = (p.clone(), contents.clone(), stop.clone(), start.clone());
             std::thread::spawn(move || {
+                start.wait();
                 let mut seen = 0;
-                while !stop.load(Ordering::Relaxed) {
+                // at least one read even if the writers were done first on a busy machine
+                while seen == 0 || !stop.load(Ordering::Relaxed) {
                     let data = read(&*p).unwrap();
                     assert!(c.contains(&data), "torn read of {} bytes", data.len());
                     seen += 1;
@@ -951,8 +955,9 @@ mod tests {
         };
         let writers: Vec<_> = (0..6)
             .map(|i| {
-                let (p, c) = (p.clone(), contents.clone());
+                let (p, c, start) = (p.clone(), contents.clone(), start.clone());
                 std::thread::spawn(move || {
+                    start.wait();
                     for _ in 0..25 {
                         write_atomic(&p, &c[i]).unwrap();
                     }

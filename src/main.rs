@@ -20,6 +20,7 @@ mod dialog;
 mod drawing;
 mod editor;
 mod editor_preview;
+mod embed_size;
 mod fsutil;
 mod gitsync;
 mod graph;

@@ -45,13 +45,7 @@ link (`z_media/photo.png`), or the words you give it after a `|`: `![[photo.png|
 (and `![[photo.png|Sea at dusk|300]]` with a width). Click the caption to open the file. The
 [[PDF]] export draws the same thumbnails with the same captions.
 
-**Resizing.** Move the mouse over a picture or a video in the editor: its edges and corners
-become handles, and a drag changes the size (the proportions stay). The width is written into
-the link when you let go: `![[photo.png|300]]` (points; this is also what Obsidian writes), and
-the reading view shows the embed at that width. Two round buttons sit in the corner of the
-picture, looking like the play button of the sound player: **100%** sets the natural size, and the
-fullscreen button shows the picture (or the video, with its controls) over the whole window; Esc,
-the cross or a click beside it closes it.
+**Resizing.** Pictures and videos can be resized by dragging; see [[Editor]].
 
 ## Moving and renaming
 

@@ -269,7 +269,9 @@ impl Gnupg {
         if let Some(h) = &self.home {
             cmd.env("GNUPGHOME", home_text(h));
         }
-        let out = cmd.arg("--version").stdin(Stdio::null()).output().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GpgError::Missing(s) } else { GpgError::Io(e.to_string()) })?;
+        cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        let failed = |e: std::io::Error| if e.kind() == std::io::ErrorKind::NotFound { GpgError::Missing(s) } else { GpgError::Io(e.to_string()) };
+        let out = spawn_retrying(&mut cmd).map_err(failed)?.wait_with_output().map_err(|e| GpgError::Io(e.to_string()))?;
         let text = String::from_utf8_lossy(&out.stdout);
         Ok(text.lines().next().unwrap_or("").trim().to_string())
     }

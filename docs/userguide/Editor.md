@@ -32,6 +32,12 @@ a real grid: borders, a bold header row, columns aligned as `:---`, `:---:` or `
 bold and links inside the cells, and long text wrapping inside its own column. Click the table,
 or move the cursor into it, and its raw rows come back to edit.
 
+While the pointer is over the grid, small buttons appear: a **+** right of the header adds a
+column at the end, a **+** bar under the table adds a row at the end, and for the row and the
+column under the pointer a **+** adds one after it and a **×** deletes it (the header row, the
+last row and the last column stay). Each click changes only the table's lines, as one step you
+can undo, and the table stays a grid.
+
 ## Sound players
 
 ![[sound-player.png]]
@@ -45,6 +51,24 @@ all players. Only one sound plays at a time; it goes on while you scroll or swit
 editor, the preview and the reading view, and stops when the note's tab is closed or another
 vault is opened. Nothing ever starts by itself. How opaque the play button is (60 % by
 default) is set in Settings → General → Appearance, see [[Settings reference]].
+
+## Resizing pictures and videos
+
+Move the mouse over a picture or a video in the editor: its edges and corners
+become handles, and a drag changes the size (the proportions stay). The width is written into
+the link when you let go: `![[photo.png|300]]` (points; this is also what Obsidian writes), and
+the reading view shows the embed at that width. Two round buttons sit in the corner of the
+picture, looking like the play button of the sound player: **100%** sets the natural size, and the
+fullscreen button shows the picture (or the video, with its controls) over the whole window; Esc,
+the cross or a click beside it closes it.
+
+![[image-resize.png]]
+
+![[image-resize.webm]]
+
+Videos resize the same way (the controls stay below the picture; **100%** is the video's own size, and fullscreen keeps the controls):
+
+![[video-resize.webm]]
 
 ## Vim-style editing
 
