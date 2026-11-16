@@ -15,7 +15,7 @@ impl ShaleApp {
     /// The Feeds tab on screen: `feed` is what its view says.
     pub fn social_view(&mut self, ui: &mut Ui, feed: Option<FeedRef>) {
         let accounts = self.cfg.social_accounts.clone();
-        let tab = TabCtx { id: self.tabs.get(self.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone(), keys: self.modal.is_none() };
+        let tab = TabCtx { id: self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone(), keys: self.modal.is_none() };
         for a in feed_ui::show(ui, &mut self.social, &accounts, &tab) {
             match a {
                 Ask::Accounts => self.open_social_accounts(),
@@ -40,7 +40,7 @@ impl ShaleApp {
             return;
         }
         self.open_feed(FeedRef { account: hit.account.clone(), feed: hit.feed.clone() }, true);
-        let tab = self.tabs[self.active].id;
+        let tab = self.tabbar.tabs[self.tabbar.active].id;
         // a post that neither the index nor the list holds any more is fetched first (SOC-039)
         let (key, feed) = (crate::social::state::post_key(&hit.post), (hit.account.clone(), hit.feed.clone()));
         let in_list = self.social.timelines.get(&feed).is_some_and(|t| t.posts.iter().chain(&t.waiting).any(|p| crate::social::state::post_key(p) == key));
@@ -90,7 +90,7 @@ impl ShaleApp {
     /// The tab named no feed (or one that is gone): this is the one it shows. No history step.
     fn set_tab_feed(&mut self, feed: FeedRef) {
         self.note_feed(&feed);
-        if let Some(t) = self.tabs.get_mut(self.active).filter(|t| matches!(t.view, View::Social(_))) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active).filter(|t| matches!(t.view, View::Social(_))) {
             t.view = View::Social(Some(feed));
         }
         self.remember_open_files();
@@ -126,7 +126,7 @@ impl ShaleApp {
 
     /// The feeds of the open Feeds tabs, in tab order (for the state file).
     pub fn open_feed_refs(&self) -> Vec<FeedRef> {
-        self.tabs.iter().filter_map(|t| if let View::Social(Some(f)) = &t.view { Some(f.clone()) } else { None }).filter(|f| !f.feed.is_empty()).collect()
+        self.tabbar.tabs.iter().filter_map(|t| if let View::Social(Some(f)) = &t.view { Some(f.clone()) } else { None }).filter(|f| !f.feed.is_empty()).collect()
     }
 
     pub fn open_social_accounts(&mut self) {
@@ -170,7 +170,7 @@ impl ShaleApp {
                 self.cfg.social_accounts.push(e);
                 self.social.forget(&id);
                 // the tab that is open shows the new account
-                if matches!(self.tabs.get(self.active).map(|t| &t.view), Some(View::Social(_))) {
+                if matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Social(_))) {
                     self.open_feed(FeedRef { account: id, feed: String::new() }, false);
                 }
                 self.save_config();

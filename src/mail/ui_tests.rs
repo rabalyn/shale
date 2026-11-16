@@ -816,7 +816,7 @@ fn import_hands_the_stored_mail_to_the_import_dialog_and_writes_nothing_until_im
     assert!(after.iter().any(|f| f.ends_with(".eml")), "{after:?}");
     // the same mail again is recognised as imported (IMP-005)
     // the import opened the new note; go back to the mail
-    assert!(!matches!(w.app.tabs[w.app.active].view, View::Mail), "the new note is shown");
+    assert!(!matches!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Mail), "the new note is shown");
     w.app.show_view(View::Mail, false);
     w.settle();
     w.press(Key::I, Modifiers::NONE);

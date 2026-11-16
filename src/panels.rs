@@ -932,7 +932,7 @@ impl ShaleApp {
                         self.save_config();
                         self.vdata = crate::vault_state::VaultData::default();
                         self.vault = None;
-                        self.tabs.clear();
+                        self.tabbar.tabs.clear();
                         self.cfg.vault = None;
                         keep = false;
                     }
@@ -1414,7 +1414,7 @@ mod tree_key_tests {
         app.actions.clear();
         assert_eq!(press(&mut app, Key::Enter, Modifiers::NONE), None, "Enter leaves the file list");
         assert!(matches!(app.actions.first(), Some(Action::Open { rel, .. }) if rel == Path::new("B/b1.md")));
-        assert!(app.tabs[app.active].editor.request_focus, "…and the editor gets the keyboard");
+        assert!(app.tabbar.tabs[app.tabbar.active].editor.request_focus, "…and the editor gets the keyboard");
         // Esc and Ctrl+L also give the keyboard back; a click elsewhere ends browsing
         app.focus_sidebar(&ctx);
         assert!(app.tree_sel.is_some());
@@ -1506,7 +1506,7 @@ mod search_tests {
         app.goto_match(&rel, line, col);
         assert_eq!(app.current_path(), Some(PathBuf::from("A.md")));
         let text = &app.notes[Path::new("A.md")].text;
-        let cursor = app.tabs[app.active].editor.pending_cursor.expect("cursor placed (and the editor focused)");
+        let cursor = app.tabbar.tabs[app.tabbar.active].editor.pending_cursor.expect("cursor placed (and the editor focused)");
         assert!(text.chars().skip(cursor).collect::<String>().starts_with("Apple here"));
         // a name-only stop opens the file; non-ASCII text before the match is counted right
         frame(&mut app, vec![]);

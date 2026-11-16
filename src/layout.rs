@@ -420,19 +420,19 @@ impl ShaleApp {
         ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, theme::BORDER));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(6.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Max)));
         child.spacing_mut().item_spacing.x = 2.0;
-        let n = self.tabs.len().max(1);
+        let n = self.tabbar.tabs.len().max(1);
         let tab_w = ((bar.width() - 50.0) / n as f32).clamp(60.0, 220.0);
         let mut close = None;
-        self.tab_rects.clear();
-        self.tab_marks = TabMarks::default();
+        self.tabbar.tab_rects.clear();
+        self.tabbar.tab_marks = TabMarks::default();
         let mut dragging = None;
         let mut dropped = None;
         let mut pin_toggle = None;
-        for i in 0..self.tabs.len() {
-            let title = self.tab_title(&self.tabs[i].view);
-            let dirty = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.dirty).unwrap_or(false) || self.drawings.get(p).map(|d| d.dirty).unwrap_or(false)).unwrap_or(false);
+        for i in 0..self.tabbar.tabs.len() {
+            let title = self.tab_title(&self.tabbar.tabs[i].view);
+            let dirty = self.tabbar.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.dirty).unwrap_or(false) || self.drawings.get(p).map(|d| d.dirty).unwrap_or(false)).unwrap_or(false);
             let (r, resp) = child.allocate_exact_size(Vec2::new(tab_w, h - 6.0), Sense::click_and_drag());
-            let active = i == self.active;
+            let active = i == self.tabbar.active;
             let fill = if active {
                 theme::BG_PRIMARY
             } else if resp.hovered() {
@@ -442,19 +442,19 @@ impl ShaleApp {
             };
             child.painter().rect_filled(r, CornerRadius { nw: 7, ne: 7, sw: 0, se: 0 }, fill);
             let mut text_rect = r.shrink2(Vec2::new(10.0, 0.0));
-            if self.tabs[i].pinned {
+            if self.tabbar.tabs[i].pinned {
                 let pin = Rect::from_center_size(Pos2::new(text_rect.min.x + 5.0, r.center().y), Vec2::splat(12.0));
                 paint_icon(child.painter(), pin, Icon::Pin, if active { theme::TEXT_STRONG } else { theme::MUTED });
                 text_rect.min.x += 14.0;
-                self.tab_marks.pinned.push(i);
+                self.tabbar.tab_marks.pinned.push(i);
             }
             let galley = child.painter().layout_no_wrap(title.clone(), FontId::proportional(13.0), if active { theme::TEXT_STRONG } else { theme::MUTED });
             child.painter().with_clip_rect(Rect::from_min_max(text_rect.min, Pos2::new(text_rect.max.x - 18.0, text_rect.max.y))).galley(Pos2::new(text_rect.min.x, r.center().y - galley.size().y / 2.0), galley, theme::TEXT);
             let cr = Rect::from_center_size(Pos2::new(r.max.x - 14.0, r.center().y), Vec2::splat(16.0));
-            let close_resp = child.interact(cr, child.scope_id().with(("tab-close", self.tabs[i].id)), Sense::click());
-            self.tab_rects.push((r, cr));
+            let close_resp = child.interact(cr, child.scope_id().with(("tab-close", self.tabbar.tabs[i].id)), Sense::click());
+            self.tabbar.tab_rects.push((r, cr));
             crate::script::hint(&format!("Tab {}", i + 1), r);
-            let failed = self.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.save_error.is_some()).unwrap_or(false) || self.drawings.get(p).map(|d| d.save_error.is_some()).unwrap_or(false)).unwrap_or(false);
+            let failed = self.tabbar.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.save_error.is_some()).unwrap_or(false) || self.drawings.get(p).map(|d| d.save_error.is_some()).unwrap_or(false)).unwrap_or(false);
             if failed && dirty && !close_resp.hovered() {
                 // not saved, and the save failed: a red mark instead of the grey dot (DATA-009)
                 child.painter().circle_filled(cr.center(), 4.5, theme::LINK_MISSING);
@@ -469,7 +469,7 @@ impl ShaleApp {
             if close_resp.clicked() || resp.middle_clicked() {
                 close = Some(i);
             } else if resp.clicked() || resp.drag_started() {
-                self.active = i;
+                self.tabbar.active = i;
             }
             if resp.dragged() {
                 dragging = Some(i);
@@ -477,10 +477,10 @@ impl ShaleApp {
             if resp.drag_stopped() {
                 dropped = Some(i);
             }
-            let pinned = self.tabs[i].pinned;
+            let pinned = self.tabbar.tabs[i].pinned;
             resp.context_menu(|ui| {
                 let entry = ui.button(if pinned { "Unpin tab" } else { "Pin tab" });
-                self.tab_marks.menu_pin = Some(entry.rect);
+                self.tabbar.tab_marks.menu_pin = Some(entry.rect);
                 if entry.clicked() {
                     pin_toggle = Some((i, !pinned));
                     ui.close();
@@ -490,16 +490,16 @@ impl ShaleApp {
         }
         // the marker of the drag: where the tab lands (NAV-014, NAV-017)
         if let Some(from) = dragging.or(dropped) {
-            let mids: Vec<f32> = self.tab_rects.iter().map(|t| t.0.center().x).collect();
+            let mids: Vec<f32> = self.tabbar.tab_rects.iter().map(|t| t.0.center().x).collect();
             if let Some(x) = child.ctx().pointer_interact_pos().map(|p| p.x) {
                 let slot = self.tab_slot(from, x, &mids);
                 if dropped.is_some() {
                     self.move_tab(from, slot);
                 } else {
-                    let at = if slot < mids.len() { self.tab_rects[slot].0.min.x - 1.0 } else { self.tab_rects.last().map_or(bar.min.x, |t| t.0.max.x + 1.0) };
+                    let at = if slot < mids.len() { self.tabbar.tab_rects[slot].0.min.x - 1.0 } else { self.tabbar.tab_rects.last().map_or(bar.min.x, |t| t.0.max.x + 1.0) };
                     let marker = Rect::from_min_max(Pos2::new(at - 1.0, bar.min.y + 6.0), Pos2::new(at + 1.0, bar.max.y - 2.0));
                     child.painter().rect_filled(marker, CornerRadius::same(1), theme::ACCENT);
-                    self.tab_marks.drop_marker = Some(marker);
+                    self.tabbar.tab_marks.drop_marker = Some(marker);
                 }
             }
         }
@@ -507,7 +507,7 @@ impl ShaleApp {
             self.set_tab_pinned(i, pinned);
         }
         if icon_button(&mut child, Icon::Plus, 26.0, false, "New tab").clicked() {
-            self.new_tab(View::Empty);
+            self.tabbar.new_tab(View::Empty);
         }
         if let Some(i) = close {
             self.actions.push(Action::CloseTab(i));
@@ -515,7 +515,7 @@ impl ShaleApp {
     }
 
     fn view_header(&mut self, ui: &mut Ui) {
-        let Some(tab) = self.tabs.get(self.active) else { return };
+        let Some(tab) = self.tabbar.tabs.get(self.tabbar.active) else { return };
         let view = tab.view.clone();
         let can_back = !tab.back.is_empty();
         let can_fwd = !tab.fwd.is_empty();
@@ -544,7 +544,7 @@ impl ShaleApp {
                 if let View::Note(p) = &view {
                     let (icon, tip) = if reading { (Icon::Pencil, "Edit (Ctrl+E)") } else { (Icon::Book, "Reading view (Ctrl+E)") };
                     if icon_button(ui, icon, 26.0, false, tip).clicked() {
-                        if let Some(t) = self.tabs.get_mut(self.active) {
+                        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
                             t.reading = !t.reading;
                         }
                     }
@@ -601,7 +601,7 @@ impl ShaleApp {
     }
 
     fn content(&mut self, ui: &mut Ui) {
-        let Some(view) = self.tabs.get(self.active).map(|t| t.view.clone()) else {
+        let Some(view) = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.view.clone()) else {
             self.empty_view(ui);
             return;
         };
@@ -646,7 +646,7 @@ impl ShaleApp {
                 }
             }
             View::Graph => {
-                let cur = self.tabs.iter().rev().find_map(|t| match &t.view {
+                let cur = self.tabbar.tabs.iter().rev().find_map(|t| match &t.view {
                     View::Note(p) => Some(p.clone()),
                     _ => None,
                 });
@@ -691,10 +691,10 @@ impl ShaleApp {
         let readable = self.cfg.readable_width;
         let ctrl = self.cfg.ctrl_to_follow;
         let dark = self.cfg.dark_canvas;
-        let active = self.active;
+        let active = self.tabbar.active;
         let display_name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_default();
         let mut rename_to: Option<String> = None;
-        egui::ScrollArea::vertical().id_salt(("note-scroll", self.tabs[active].id)).auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt(("note-scroll", self.tabbar.tabs[active].id)).auto_shrink([false, false]).show(ui, |ui| {
             let full = ui.available_width();
             let col = if readable { full.min(760.0) } else { full - 40.0 };
             let pad = ((full - col) / 2.0).max(20.0);
@@ -704,7 +704,7 @@ impl ShaleApp {
                 ui.vertical(|ui| {
                     ui.set_width(col.min(full - pad - 10.0).max(200.0));
                     // inline title (rename by editing)
-                    let tab = &mut self.tabs[active];
+                    let tab = &mut self.tabbar.tabs[active];
                     if tab.title_for.as_deref() != Some(rel.as_path()) {
                         tab.title_for = Some(rel.clone());
                         tab.title_buf = display_name.clone();
@@ -756,7 +756,7 @@ impl ShaleApp {
         if let Some(name) = rename_to {
             if let Err(e) = self.rename(&rel, &name) {
                 self.toast(e);
-                if let Some(t) = self.tabs.get_mut(active) {
+                if let Some(t) = self.tabbar.tabs.get_mut(active) {
                     t.title_for = None;
                 }
             }
@@ -773,7 +773,7 @@ impl ShaleApp {
                 ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
             }
             // vim-lite mode (or the command being typed) of the open note
-            if let Some(status) = self.tabs.get(self.active).and_then(|t| t.editor.vim_status()) {
+            if let Some(status) = self.tabbar.tabs.get(self.tabbar.active).and_then(|t| t.editor.vim_status()) {
                 ui.label(egui::RichText::new(status).size(11.5).monospace().color(theme::ACCENT));
             }
             if let (Some(rel), Some(v)) = (self.current_path(), &self.vault) {

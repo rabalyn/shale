@@ -251,7 +251,7 @@ mod tests {
         }
 
         fn reading(&self) -> bool {
-            self.app.tabs[self.app.active].reading
+            self.app.tabbar.tabs[self.app.tabbar.active].reading
         }
     }
 
@@ -359,6 +359,7 @@ mod tests {
 
     fn views(w: &W) -> Vec<String> {
         w.app
+            .tabbar
             .tabs
             .iter()
             .map(|t| match &t.view {
@@ -377,49 +378,49 @@ mod tests {
         // a single tab: nothing happens
         w.press(Key::L, CTRL_ALT);
         w.press(Key::H, CTRL_ALT);
-        assert_eq!((w.app.tabs.len(), w.app.active), (1, 0));
+        assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (1, 0));
         w.app.open(Path::new("B.md"), true);
         w.app.show_view(View::Calendar, true);
-        assert_eq!((views(&w), w.app.active), (vec!["A.md".into(), "B.md".into(), "calendar".into()], 2));
+        assert_eq!((views(&w), w.app.tabbar.active), (vec!["A.md".into(), "B.md".into(), "calendar".into()], 2));
         // Next from the last tab wraps to the first, Previous from the first to the last
         w.press(Key::L, CTRL_ALT);
-        assert_eq!(w.app.active, 0);
+        assert_eq!(w.app.tabbar.active, 0);
         w.press(Key::L, CTRL_ALT);
-        assert_eq!(w.app.active, 1);
+        assert_eq!(w.app.tabbar.active, 1);
         w.press(Key::H, CTRL_ALT);
-        assert_eq!(w.app.active, 0);
+        assert_eq!(w.app.tabbar.active, 0);
         w.press(Key::H, CTRL_ALT);
-        assert_eq!(w.app.active, 2, "wraps to the last tab, a sub-app");
+        assert_eq!(w.app.tabbar.active, 2, "wraps to the last tab, a sub-app");
         // from a sub-app (calendar is open now) and with the keyboard in the file list
         w.press(Key::H, CTRL_ALT);
-        assert_eq!(w.app.active, 1);
+        assert_eq!(w.app.tabbar.active, 1);
         w.press(Key::H, CTRL);
         assert!(w.app.tree_sel.is_some(), "Ctrl+H: the file list has the keyboard");
         w.press(Key::L, CTRL_ALT);
-        assert_eq!(w.app.active, 2, "works from the file list too, and Ctrl+L did not take it");
+        assert_eq!(w.app.tabbar.active, 2, "works from the file list too, and Ctrl+L did not take it");
         // the order is the order the tabs are shown in (pinned and dragged tabs sit in `tabs`)
-        w.app.tabs.swap(0, 2);
-        w.app.active = 0;
+        w.app.tabbar.tabs.swap(0, 2);
+        w.app.tabbar.active = 0;
         assert_eq!(views(&w)[0], "calendar");
         w.press(Key::L, CTRL_ALT);
-        assert_eq!(views(&w)[w.app.active], "B.md");
+        assert_eq!(views(&w)[w.app.tabbar.active], "B.md");
         // a pinned tab sits first, and so it comes first in the order
-        let a = w.app.tabs.iter().position(|t| t.view == View::Note("A.md".into())).unwrap();
+        let a = w.app.tabbar.tabs.iter().position(|t| t.view == View::Note("A.md".into())).unwrap();
         w.app.set_tab_pinned(a, true);
         assert_eq!(views(&w), ["A.md", "calendar", "B.md"]);
-        w.app.active = 0;
+        w.app.tabbar.active = 0;
         w.press(Key::H, CTRL_ALT);
-        assert_eq!(views(&w)[w.app.active], "B.md", "Previous from the pinned first tab wraps to the last");
+        assert_eq!(views(&w)[w.app.tabbar.active], "B.md", "Previous from the pinned first tab wraps to the last");
         w.press(Key::L, CTRL_ALT);
         w.press(Key::L, CTRL_ALT);
-        assert_eq!(views(&w)[w.app.active], "calendar");
-        w.app.active = views(&w).iter().position(|v| v == "B.md").unwrap();
+        assert_eq!(views(&w)[w.app.tabbar.active], "calendar");
+        w.app.tabbar.active = views(&w).iter().position(|v| v == "B.md").unwrap();
         // another binding: the old key does nothing
         w.app.keymap.set(Action::NextTab, Binding::parse("Ctrl+Alt+N").unwrap()).unwrap();
         w.press(Key::L, CTRL_ALT);
-        assert_eq!(views(&w)[w.app.active], "B.md", "the old key is gone");
+        assert_eq!(views(&w)[w.app.tabbar.active], "B.md", "the old key is gone");
         w.press(Key::N, CTRL_ALT);
-        assert_eq!(views(&w)[w.app.active], "A.md", "the new one works");
+        assert_eq!(views(&w)[w.app.tabbar.active], "A.md", "the new one works");
     }
 
     /// A key that types a character: the key event and the text event, as the window sends them.
@@ -449,7 +450,7 @@ mod tests {
         w.app.cfg.vim_mode = true;
         w.app.focus_editor();
         settle(&mut w);
-        assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the editor has the keyboard in normal mode");
+        assert!(w.app.tabbar.tabs[0].editor.vim_normal_keys(&w.ctx), "the editor has the keyboard in normal mode");
         w
     }
 
@@ -512,7 +513,7 @@ mod tests {
         assert_eq!(note_text(&w), "# A\n", "z is no vim key either");
         typed(&mut w, Key::Space, " ");
         typed(&mut w, Key::I, "i");
-        assert!(w.app.tabs[0].editor.vim.mode == crate::vim::Mode::Insert, "i after a cancelled Space starts insert mode");
+        assert!(w.app.tabbar.tabs[0].editor.vim.mode == crate::vim::Mode::Insert, "i after a cancelled Space starts insert mode");
         // insert mode: Space is typing again
         typed(&mut w, Key::Space, " ");
         typed(&mut w, Key::X, "x");
@@ -521,8 +522,8 @@ mod tests {
         w.press(Key::Escape, Modifiers::NONE);
         typed(&mut w, Key::Colon, ":");
         typed(&mut w, Key::Space, " ");
-        assert!(w.app.tabs[0].editor.vim.typing_command());
-        assert!(!w.app.tabs[0].editor.vim_normal_keys(&w.ctx));
+        assert!(w.app.tabbar.tabs[0].editor.vim.typing_command());
+        assert!(!w.app.tabbar.tabs[0].editor.vim_normal_keys(&w.ctx));
         // with Vim-style editing off the scope is not read at all
         w.press(Key::Escape, Modifiers::NONE);
         w.app.cfg.vim_mode = false;
@@ -618,7 +619,7 @@ mod tests {
     }
 
     fn kind(w: &W) -> &'static str {
-        match w.app.tabs[w.app.active].view {
+        match w.app.tabbar.tabs[w.app.tabbar.active].view {
             View::Note(_) => "note",
             View::Mail => "mail",
             View::Drawing(_) => "drawing",
@@ -734,8 +735,8 @@ mod tests {
         w.press(Key::Enter, Modifiers::NONE);
         settle(&mut w);
         assert!(w.app.modal.is_none());
-        assert_eq!((views(&w), w.app.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in the current tab");
-        assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor, in normal mode");
+        assert_eq!((views(&w), w.app.tabbar.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in the current tab");
+        assert!(w.app.tabbar.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor, in normal mode");
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
     }
 
@@ -847,9 +848,9 @@ mod tests {
         w.press(Key::Enter, Modifiers::NONE);
         settle(&mut w);
         assert!(w.app.modal.is_none());
-        assert_eq!((views(&w), w.app.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in this tab");
-        assert!(w.app.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor");
-        let cursor = egui::text_edit::TextEditState::load(&w.ctx, w.app.tabs[0].editor.id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0);
+        assert_eq!((views(&w), w.app.tabbar.tabs.len()), (vec!["projects/Roadmap.md".to_string()], 1), "opened in this tab");
+        assert!(w.app.tabbar.tabs[0].editor.vim_normal_keys(&w.ctx), "the keyboard is in the editor");
+        let cursor = egui::text_edit::TextEditState::load(&w.ctx, w.app.tabbar.tabs[0].editor.id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0);
         let text = &w.app.notes[Path::new("projects/Roadmap.md")].text;
         let at = text.find("banana").unwrap();
         assert_eq!(cursor, Some(text[..at].chars().count()), "the cursor is at the match on line 2");
@@ -870,16 +871,16 @@ mod tests {
         w.app.open(Path::new("A.md"), false);
         w.app.focus_editor();
         settle(&mut w);
-        let tabs = w.app.tabs.len();
+        let tabs = w.app.tabbar.tabs.len();
         space_f_g(&mut w);
         search_for(&mut w, "republic");
         assert_eq!(picker_rows(&w), [("Posts", "banana republic".to_string())]);
         w.press(Key::Enter, Modifiers::NONE);
         settle(&mut w);
         assert!(w.app.modal.is_none());
-        assert_eq!(w.app.tabs.len(), tabs + 1, "a new tab");
+        assert_eq!(w.app.tabbar.tabs.len(), tabs + 1, "a new tab");
         let feed = crate::social::FeedRef { account: crate::social::demo::account().account.id, feed: "home".into() };
-        assert_eq!(w.app.tabs[w.app.active].view, View::Social(Some(feed)));
+        assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::Social(Some(feed)));
         assert_eq!(w.app.notes[Path::new("A.md")].text, "# A\n");
     }
 

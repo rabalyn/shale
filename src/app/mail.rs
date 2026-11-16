@@ -12,7 +12,7 @@ impl ShaleApp {
     /// Every frame: let the mail work go on (store, syncs, timers) and wake the window for it.
     pub fn mail_tick(&mut self, ctx: &egui::Context) {
         self.mail.set_context(ctx);
-        let wanted = self.tabs.get(self.active).is_some_and(|t| t.view == View::Mail) || matches!(self.modal, Some(Modal::MailAccounts(_)));
+        let wanted = self.tabbar.tabs.get(self.tabbar.active).is_some_and(|t| t.view == View::Mail) || matches!(self.modal, Some(Modal::MailAccounts(_)));
         if self.mail.tick(&self.cfg, wanted) {
             ctx.request_repaint_after(std::time::Duration::from_millis(120));
         }

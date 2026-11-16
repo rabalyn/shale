@@ -131,7 +131,7 @@ impl ShaleApp {
     /// The icons of the ribbon between the two sidebar toggles and Settings (LAY-001).
     pub(crate) fn ribbon_items(&mut self, ui: &mut Ui) {
         self.side.ribbon_rect = Some(ui.max_rect().expand2(Vec2::new(6.0, 8.0)));
-        let cur = self.tabs.get(self.active).map(|t| t.view.clone());
+        let cur = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.view.clone());
         for item in self.side.layout.ribbon.clone() {
             let active = match item {
                 Item::Files => self.cfg.show_left && self.left == LeftPanel::Files,

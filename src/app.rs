@@ -127,6 +127,7 @@ mod drops_tests;
 mod mail;
 mod social;
 mod sync;
+mod tabs;
 #[cfg(all(test, target_os = "linux"))]
 mod tree_ui_tests;
 mod usage;
@@ -280,9 +281,8 @@ pub struct ShaleApp {
     /// Git sync of the open vault (ADR-0008).
     pub sync: sync::SyncState,
     pub vault: Option<Vault>,
-    pub tabs: Vec<Tab>,
-    pub active: usize,
-    next_tab_id: u64,
+    /// the open tabs, the active one and what the tab bar drew last frame
+    pub tabbar: tabs::TabBar,
     pub notes: HashMap<PathBuf, NoteDoc>,
     pub drawings: HashMap<PathBuf, DrawingDoc>,
     pub left: LeftPanel,
@@ -314,10 +314,6 @@ pub struct ShaleApp {
     ctx: Option<egui::Context>,
     /// drag and drop: where things can be dropped, what is dragged over the window, drops being read
     pub(crate) drag: drops::DragState,
-    /// where the tabs of the tab bar are, and their close marks (for tests)
-    pub(crate) tab_rects: Vec<(egui::Rect, egui::Rect)>,
-    /// what the tab bar showed last frame besides the tabs (for tests)
-    pub(crate) tab_marks: TabMarks,
     /// the tag words learned from the vault, and the job that learns them (see tagwords)
     pub tag_learner: crate::import::tagwords::TagLearner,
     pub scenes: SceneCache,
@@ -451,9 +447,7 @@ impl ShaleApp {
             vdata: crate::vault_state::VaultData::default(),
             sync: sync::SyncState::default(),
             vault: None,
-            tabs: vec![],
-            active: 0,
-            next_tab_id: 1,
+            tabbar: tabs::TabBar::new(),
             notes: HashMap::new(),
             drawings: HashMap::new(),
             left: LeftPanel::Files,
@@ -486,8 +480,6 @@ impl ShaleApp {
             },
             ctx: None,
             drag: drops::DragState::default(),
-            tab_rects: vec![],
-            tab_marks: TabMarks::default(),
             tag_learner: crate::import::tagwords::TagLearner::new(),
             scenes: SceneCache::default(),
             modal: None,
@@ -571,7 +563,7 @@ impl ShaleApp {
                     app.convert_canvas(Path::new(&v["convert:".len()..]), false);
                 }
                 Some("reading") => {
-                    if let Some(t) = app.tabs.get_mut(app.active) {
+                    if let Some(t) = app.tabbar.tabs.get_mut(app.tabbar.active) {
                         t.reading = true;
                     }
                 }
@@ -652,16 +644,16 @@ impl ShaleApp {
                 }
                 self.load_vault_data(&v.root);
                 self.vault = Some(v);
-                self.tabs.clear();
+                self.tabbar.tabs.clear();
                 self.notes.clear();
                 self.drawings.clear();
-                self.active = 0;
+                self.tabbar.active = 0;
                 self.cfg.remember_vault(path.to_path_buf());
                 // (opening a note rewrites the saved list, so read it first)
                 let saved: Vec<crate::vault_state::SavedTab> = self.vdata.state.tabs.clone();
                 for st in &saved {
-                    let before = self.tabs.len();
-                    let new_tab = !self.tabs.is_empty();
+                    let before = self.tabbar.tabs.len();
+                    let new_tab = !self.tabbar.tabs.is_empty();
                     if let Some(f) = &st.file {
                         let rel = PathBuf::from(f);
                         if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
@@ -679,19 +671,19 @@ impl ShaleApp {
                             self.show_view(View::Social(Some(f.clone())), new_tab);
                         }
                     }
-                    if self.tabs.len() > before {
-                        self.tabs[self.active].pinned = st.pinned;
+                    if self.tabbar.tabs.len() > before {
+                        self.tabbar.tabs[self.tabbar.active].pinned = st.pinned;
                     }
                 }
                 // pinned tabs are left-most (a hand-edited file may say otherwise)
-                let open_id = self.tabs.get(self.active).map(|t| t.id);
-                self.tabs.sort_by_key(|t| !t.pinned);
-                self.active = open_id.and_then(|id| self.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
-                if self.tabs.is_empty() {
+                let open_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
+                self.tabbar.tabs.sort_by_key(|t| !t.pinned);
+                self.tabbar.active = open_id.and_then(|id| self.tabbar.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
+                if self.tabbar.tabs.is_empty() {
                     let first = self.vault.as_ref().and_then(|v| v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone()));
                     match first {
                         Some(r) => self.open(&r, false),
-                        None => self.new_tab(View::Empty),
+                        None => self.tabbar.new_tab(View::Empty),
                     }
                 }
                 if !had_files {
@@ -704,31 +696,24 @@ impl ShaleApp {
         }
     }
 
-    pub fn new_tab(&mut self, view: View) {
-        let id = self.next_tab_id;
-        self.next_tab_id += 1;
-        self.tabs.push(Tab { id, view, back: vec![], fwd: vec![], reading: false, pinned: false, editor: NoteEditor::new(egui::Id::unique(("note-editor", id))), title_buf: String::new(), title_for: None });
-        self.active = self.tabs.len() - 1;
-    }
-
     pub fn show_view(&mut self, view: View, new_tab: bool) {
-        if self.tabs.is_empty() || new_tab {
-            self.new_tab(view);
+        if self.tabbar.tabs.is_empty() || new_tab {
+            self.tabbar.new_tab(view);
             return;
         }
         // the Feeds button always opens a new Feeds tab (to add a feed to the workflow); the same
         // feed may be open in several tabs, so a feed is never "found" by equality. A new tab that
         // is still empty becomes the Feeds tab instead of leaving an empty one behind.
-        if view == View::Social(None) && self.tabs[self.active].view != View::Empty {
-            self.new_tab(view);
+        if view == View::Social(None) && self.tabbar.tabs[self.tabbar.active].view != View::Empty {
+            self.tabbar.new_tab(view);
             return;
         }
         // reuse a tab already showing it
-        if let Some(i) = self.tabs.iter().position(|t| t.view == view && !matches!(t.view, View::Social(_))) {
-            self.active = i;
+        if let Some(i) = self.tabbar.tabs.iter().position(|t| t.view == view && !matches!(t.view, View::Social(_))) {
+            self.tabbar.active = i;
             return;
         }
-        let tab = &mut self.tabs[self.active];
+        let tab = &mut self.tabbar.tabs[self.tabbar.active];
         if tab.view != view {
             let old = std::mem::replace(&mut tab.view, view);
             if old != View::Empty {
@@ -834,8 +819,8 @@ impl ShaleApp {
             Ok(to) => {
                 self.toast(format!("Converted to “{}” (the canvas is unchanged)", rel_to_string(&to)));
                 // the canvas's read-only tab (if open) shows the new drawing instead
-                if let Some(i) = self.tabs.iter().position(|t| t.view.path() == Some(rel)) {
-                    self.active = i;
+                if let Some(i) = self.tabbar.tabs.iter().position(|t| t.view.path() == Some(rel)) {
+                    self.tabbar.active = i;
                     self.open(&to, false);
                 } else {
                     self.open(&to, new_tab);
@@ -854,6 +839,7 @@ impl ShaleApp {
             return;
         }
         self.vdata.state.tabs = self
+            .tabbar
             .tabs
             .iter()
             .filter_map(|t| match &t.view {
@@ -864,7 +850,7 @@ impl ShaleApp {
     }
 
     pub fn current_path(&self) -> Option<PathBuf> {
-        self.tabs.get(self.active).and_then(|t| t.view.path().map(|p| p.to_path_buf()))
+        self.tabbar.tabs.get(self.tabbar.active).and_then(|t| t.view.path().map(|p| p.to_path_buf()))
     }
 
     pub fn current_folder(&self) -> PathBuf {
@@ -917,7 +903,7 @@ impl ShaleApp {
                 let shown = v.file(&rel).map(|f| f.display_name()).unwrap_or_default();
                 self.toast(format!("Created “{shown}”"));
                 self.open(&rel, new_tab);
-                if let Some(t) = self.tabs.get_mut(self.active) {
+                if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
                     t.editor.request_focus = true;
                 }
                 Some(rel)
@@ -966,7 +952,7 @@ impl ShaleApp {
     /// in the editor.
     pub fn goto_match(&mut self, rel: &Path, line: usize, col: usize) {
         self.open(rel, false);
-        if let (Some(doc), Some(tab)) = (self.notes.get(rel), self.tabs.get_mut(self.active)) {
+        if let (Some(doc), Some(tab)) = (self.notes.get(rel), self.tabbar.tabs.get_mut(self.tabbar.active)) {
             let start = markdown::line_start_byte(&doc.text, line);
             let line_len = doc.text[start..].find('\n').unwrap_or(doc.text.len() - start);
             let mut byte = start + col.min(line_len);
@@ -1191,7 +1177,7 @@ impl ShaleApp {
         }
         // tabs pointing at files that vanished
         let files: HashSet<PathBuf> = v.files.iter().map(|f| f.rel.clone()).collect();
-        for t in &mut self.tabs {
+        for t in &mut self.tabbar.tabs {
             if let Some(p) = t.view.path() {
                 if !files.contains(p) {
                     t.view = View::Empty;
@@ -1300,7 +1286,7 @@ impl ShaleApp {
                 }
             }
         }
-        for t in &mut self.tabs {
+        for t in &mut self.tabbar.tabs {
             for view in std::iter::once(&mut t.view).chain(t.back.iter_mut()).chain(t.fwd.iter_mut()) {
                 match view {
                     View::Note(p) | View::Drawing(p) => {
@@ -1375,7 +1361,7 @@ impl ShaleApp {
                 self.trashed.push(in_trash);
                 self.notes.retain(|k, _| !k.starts_with(rel));
                 self.drawings.retain(|k, _| !k.starts_with(rel));
-                for t in &mut self.tabs {
+                for t in &mut self.tabbar.tabs {
                     if t.view.path().map(|p| p.starts_with(rel)).unwrap_or(false) {
                         t.view = t.back.pop().unwrap_or(View::Empty);
                     }
@@ -1449,7 +1435,7 @@ impl ShaleApp {
     pub fn focus_editor(&mut self) {
         self.tree_sel = None;
         self.search_sel = None;
-        if let Some(t) = self.tabs.get_mut(self.active) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             t.editor.request_focus = true;
         }
     }
@@ -1605,13 +1591,13 @@ impl ShaleApp {
     }
 
     pub fn close_tab(&mut self, i: usize) {
-        if i < self.tabs.len() {
+        if i < self.tabbar.tabs.len() {
             self.flush_all();
-            self.tabs.remove(i);
-            if self.active >= self.tabs.len() && self.active > 0 {
-                self.active = self.tabs.len() - 1;
-            } else if i < self.active {
-                self.active -= 1;
+            self.tabbar.tabs.remove(i);
+            if self.tabbar.active >= self.tabbar.tabs.len() && self.tabbar.active > 0 {
+                self.tabbar.active = self.tabbar.tabs.len() - 1;
+            } else if i < self.tabbar.active {
+                self.tabbar.active -= 1;
             }
             self.remember_open_files();
         }
@@ -1620,9 +1606,9 @@ impl ShaleApp {
     /// Make the previous (-1) or next (1) tab the open one, wrapping around at the ends
     /// (NAV-018). `tabs` is the order the tab bar shows.
     pub fn step_tab(&mut self, delta: isize) {
-        let n = self.tabs.len() as isize;
+        let n = self.tabbar.tabs.len() as isize;
         if n > 1 {
-            self.active = (self.active as isize + delta).rem_euclid(n) as usize;
+            self.tabbar.active = (self.tabbar.active as isize + delta).rem_euclid(n) as usize;
         }
     }
 
@@ -1635,7 +1621,7 @@ impl ShaleApp {
         if !self.cfg.vim_mode || self.modal.is_some() {
             return false;
         }
-        let Some(tab) = self.tabs.get(self.active) else { return false };
+        let Some(tab) = self.tabbar.tabs.get(self.tabbar.active) else { return false };
         match tab.view {
             View::Note(_) if !tab.reading => tab.editor.vim_normal_keys(ctx),
             View::Mail | View::Drawing(_) => false,
@@ -1646,7 +1632,7 @@ impl ShaleApp {
     /// Swap the view of this tab with the one before it in its history, so that doing it again
     /// swaps back (NAV-019). A note gets the keyboard.
     pub fn swap_alternate(&mut self) {
-        let Some(t) = self.tabs.get_mut(self.active) else { return };
+        let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) else { return };
         let Some(prev) = t.back.last_mut() else { return };
         std::mem::swap(&mut t.view, prev);
         if matches!(t.view, View::Note(_)) {
@@ -1658,8 +1644,8 @@ impl ShaleApp {
     /// Where a tab dragged to the pointer at `x` would land: the gap index in `0..=tabs.len()`,
     /// kept inside the tab's own group, pinned tabs first (NAV-017). `mids` are the tabs' centres.
     pub(crate) fn tab_slot(&self, from: usize, x: f32, mids: &[f32]) -> usize {
-        let pinned = self.tabs.iter().take_while(|t| t.pinned).count();
-        let (lo, hi) = if self.tabs[from].pinned { (0, pinned) } else { (pinned, self.tabs.len()) };
+        let pinned = self.tabbar.tabs.iter().take_while(|t| t.pinned).count();
+        let (lo, hi) = if self.tabbar.tabs[from].pinned { (0, pinned) } else { (pinned, self.tabbar.tabs.len()) };
         mids.iter().filter(|m| **m < x).count().clamp(lo, hi)
     }
 
@@ -1669,33 +1655,33 @@ impl ShaleApp {
     }
 
     fn move_tab_to(&mut self, from: usize, to: usize) {
-        if from >= self.tabs.len() || to == from {
+        if from >= self.tabbar.tabs.len() || to == from {
             return;
         }
-        let active_id = self.tabs.get(self.active).map(|t| t.id);
-        let t = self.tabs.remove(from);
-        self.tabs.insert(to, t);
+        let active_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
+        let t = self.tabbar.tabs.remove(from);
+        self.tabbar.tabs.insert(to, t);
         if let Some(id) = active_id {
-            self.active = self.tabs.iter().position(|t| t.id == id).unwrap_or(0);
+            self.tabbar.active = self.tabbar.tabs.iter().position(|t| t.id == id).unwrap_or(0);
         }
         self.remember_open_files();
     }
 
     /// Pin or unpin a tab: it moves to the end of the pinned tabs (NAV-016).
     pub(crate) fn set_tab_pinned(&mut self, i: usize, pinned: bool) {
-        let Some(t) = self.tabs.get_mut(i) else { return };
+        let Some(t) = self.tabbar.tabs.get_mut(i) else { return };
         if t.pinned == pinned {
             return;
         }
         t.pinned = pinned;
-        let count = self.tabs.iter().filter(|t| t.pinned).count();
+        let count = self.tabbar.tabs.iter().filter(|t| t.pinned).count();
         // the end of the pinned group (the unpinned tab is not counted: it is the first outside)
         self.move_tab_to(i, if pinned { count - 1 } else { count });
         self.remember_open_files();
     }
 
     pub fn go_back(&mut self) {
-        if let Some(t) = self.tabs.get_mut(self.active) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             if let Some(prev) = t.back.pop() {
                 let cur = std::mem::replace(&mut t.view, prev);
                 t.fwd.push(cur);
@@ -1705,7 +1691,7 @@ impl ShaleApp {
     }
 
     pub fn go_forward(&mut self) {
-        if let Some(t) = self.tabs.get_mut(self.active) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             if let Some(next) = t.fwd.pop() {
                 let cur = std::mem::replace(&mut t.view, next);
                 t.back.push(cur);
@@ -1793,7 +1779,7 @@ impl ShaleApp {
         } else {
             self.keymap.cancel(Scope::EditorNormal);
         }
-        let in_mail = matches!(self.tabs.get(self.active).map(|t| &t.view), Some(View::Mail));
+        let in_mail = matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Mail));
         let sidebar_keys = self.tree_sel.is_some() || self.search_sel.is_some();
         if mail_view {
             self.show_view(View::Mail, false);
@@ -1806,7 +1792,7 @@ impl ShaleApp {
             self.new_untitled(&f);
         }
         if toggle {
-            if let Some(t) = self.tabs.get_mut(self.active) {
+            if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
                 t.reading = !t.reading;
             }
         }
@@ -1832,7 +1818,7 @@ impl ShaleApp {
             self.go_forward();
         }
         if close {
-            let a = self.active;
+            let a = self.tabbar.active;
             self.close_tab(a);
         }
         if search {
@@ -2013,10 +1999,10 @@ impl ShaleApp {
                 }
             }
             Step::FocusEnd => {
-                if let (Some(t), Some(p)) = (self.tabs.get(self.active), self.current_path()) {
+                if let (Some(t), Some(p)) = (self.tabbar.tabs.get(self.tabbar.active), self.current_path()) {
                     let n = self.notes.get(&p).map(|d| d.text.chars().count()).unwrap_or(0);
                     let id = t.id;
-                    if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+                    if let Some(t) = self.tabbar.tabs.iter_mut().find(|t| t.id == id) {
                         t.editor.pending_cursor = Some(n);
                     }
                 }
@@ -2027,9 +2013,9 @@ impl ShaleApp {
             if let Some(d) = self.current_path().and_then(|p| self.drawings.get(&p)) {
                 eprintln!("step {step:?}: drawing {}", d.debug_state());
             }
-            if let (Some(t), Some(p)) = (self.tabs.get(self.active), self.current_path()) {
+            if let (Some(t), Some(p)) = (self.tabbar.tabs.get(self.tabbar.active), self.current_path()) {
                 let tail: String = self.notes.get(&p).map(|d| d.text.chars().rev().take(40).collect::<Vec<_>>().into_iter().rev().collect()).unwrap_or_default();
-                eprintln!("step {step:?}: tabs={} active={} tab_id={} editor={:?} picker_visible={} {} tail={tail:?}", self.tabs.len(), self.active, t.id, t.editor.id, t.editor.picker_visible(), t.editor.debug_state());
+                eprintln!("step {step:?}: tabs={} active={} tab_id={} editor={:?} picker_visible={} {} tail={tail:?}", self.tabbar.tabs.len(), self.tabbar.active, t.id, t.editor.id, t.editor.picker_visible(), t.editor.debug_state());
             }
         }
     }
@@ -2092,7 +2078,7 @@ impl ShaleApp {
         if lines.is_empty() {
             return;
         }
-        let state = match (self.tabs.get(self.active), self.current_path()) {
+        let state = match (self.tabbar.tabs.get(self.tabbar.active), self.current_path()) {
             (Some(t), Some(p)) => {
                 let line = self.notes.get(&p).map(|d| d.text.lines().last().unwrap_or("").chars().rev().take(50).collect::<Vec<_>>().into_iter().rev().collect::<String>()).unwrap_or_default();
                 format!("{} | last line: {line:?}", t.editor.debug_state())
@@ -2592,7 +2578,7 @@ pub(crate) mod tests {
         let to = app.convert_canvas(canvas, false).unwrap();
         assert_eq!(to, Path::new("Maps/Map.excalidraw.md"));
         assert_eq!(app.current_path(), Some(to.clone()));
-        assert_eq!(app.tabs.iter().filter(|t| t.view.path() == Some(canvas)).count(), 0, "the canvas tab now shows the drawing");
+        assert_eq!(app.tabbar.tabs.iter().filter(|t| t.view.path() == Some(canvas)).count(), 0, "the canvas tab now shows the drawing");
         let made = std::fs::read_to_string(d.join(&to)).unwrap();
         assert!(crate::drawing::canvas::is_converted_from(&made, canvas));
         assert!(app.drawings[&to].read_only.is_none() && app.drawings[&to].error.is_none());
