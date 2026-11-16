@@ -413,19 +413,13 @@ mod tests {
     use crate::app::{Options, View};
     use std::ffi::OsString;
 
-    /// A hermetic git; `git lfs` is an alias that fails, so these tests are the same with and
-    /// without git-lfs on the machine.
+    /// A hermetic git with a failing `git-lfs` first on the `PATH`, so these tests are the same
+    /// with and without git-lfs on the machine (not on Windows).
     fn hermetic() -> Git {
-        let env = [
-            ("GIT_CONFIG_GLOBAL", "/dev/null"),
-            ("GIT_CONFIG_NOSYSTEM", "1"),
-            ("GIT_CONFIG_COUNT", "2"),
-            ("GIT_CONFIG_KEY_0", "init.defaultBranch"),
-            ("GIT_CONFIG_VALUE_0", "main"),
-            ("GIT_CONFIG_KEY_1", "alias.lfs"),
-            ("GIT_CONFIG_VALUE_1", "!exit 1"),
-        ];
-        Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() }
+        let env = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "init.defaultBranch"), ("GIT_CONFIG_VALUE_0", "main")];
+        let mut env: Vec<(OsString, OsString)> = env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect();
+        env.push(("PATH".into(), lfs::path_without_lfs(&std::env::temp_dir().join(format!("shale-no-lfs-bin-{}", std::process::id())))));
+        Git { program: "git".into(), env }
     }
 
     /// The same with the real git-lfs: None (and a printed note) when it is not installed.
@@ -435,8 +429,7 @@ mod tests {
             return None;
         }
         let mut git = hermetic();
-        git.env.retain(|(k, _)| k != "GIT_CONFIG_KEY_1" && k != "GIT_CONFIG_VALUE_1" && k != "GIT_CONFIG_COUNT");
-        git.env.push(("GIT_CONFIG_COUNT".into(), "1".into()));
+        git.env.retain(|(k, _)| k != "PATH");
         Some(git)
     }
 
@@ -729,6 +722,7 @@ mod tests {
 
     // spec: SYNC-016
     #[test]
+    #[cfg(unix)]
     fn the_settings_say_that_git_lfs_is_missing_and_offer_nothing() {
         let root = std::env::temp_dir().join(format!("shale-app-lfs-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);

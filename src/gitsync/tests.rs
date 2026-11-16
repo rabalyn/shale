@@ -12,8 +12,8 @@ struct Env {
 }
 
 impl Env {
-    /// A hermetic git without Git LFS: `git lfs` is an alias that fails, so the tests behave the
-    /// same on machines with and without git-lfs (SYNC-016).
+    /// A hermetic git without Git LFS: a `git-lfs` that fails is first on the `PATH`, so the tests
+    /// behave the same on machines with and without git-lfs (SYNC-016; not on Windows).
     fn new(tag: &str) -> Env {
         Env::build(tag, false)
     }
@@ -31,10 +31,10 @@ impl Env {
         let root = std::env::temp_dir().join(format!("shale-gitsync-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
-        let mut env = vec![
+        let env = [
             ("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" }),
             ("GIT_CONFIG_NOSYSTEM", "1"),
-            ("GIT_CONFIG_COUNT", if lfs { "3" } else { "4" }),
+            ("GIT_CONFIG_COUNT", "3"),
             ("GIT_CONFIG_KEY_0", "init.defaultBranch"),
             ("GIT_CONFIG_VALUE_0", "main"),
             ("GIT_CONFIG_KEY_1", "protocol.file.allow"),
@@ -43,10 +43,11 @@ impl Env {
             ("GIT_CONFIG_KEY_2", "core.autocrlf"),
             ("GIT_CONFIG_VALUE_2", "false"),
         ];
+        let mut env: Vec<(OsString, OsString)> = env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect();
         if !lfs {
-            env.extend([("GIT_CONFIG_KEY_3", "alias.lfs"), ("GIT_CONFIG_VALUE_3", "!exit 1")]);
+            env.push(("PATH".into(), lfs::path_without_lfs(&root.join("no-lfs-bin"))));
         }
-        let git = Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() };
+        let git = Git { program: "git".into(), env };
         Env { root, git }
     }
 
@@ -575,6 +576,7 @@ fn pointer_files_are_recognised_and_other_files_are_not() {
 
 // spec: SYNC-016
 #[test]
+#[cfg(unix)]
 fn a_missing_git_lfs_is_reported_and_nothing_changes() {
     let env = Env::new("lfs-missing");
     assert_eq!(env.git.lfs_version(), None);
@@ -594,6 +596,7 @@ fn a_missing_git_lfs_is_reported_and_nothing_changes() {
 
 // spec: SYNC-019
 #[test]
+#[cfg(unix)]
 fn without_git_lfs_a_repository_that_uses_it_commits_nothing() {
     let env = Env::new("lfs-guard");
     let v = env.folder("v");
