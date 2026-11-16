@@ -268,7 +268,9 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   Ctrl+click) to import them together.
 - **Keyboard first.** One of the three panes has the keyboard and is framed in the accent
   colour; Ctrl+H / Ctrl+L (the keys that go between the file list and the editor) move it between
-  folders, list and message, and from the folders on into the left sidebar. j / k act in that pane
+  folders, list and message, and from the folders on into the left sidebar. The three panes keep
+  a least width (170, 220 and 280 points): in a window too narrow for them the panes scroll
+  sideways and the pane that has the keyboard is scrolled into view. j / k act in that pane
   only: folder, message or scroll. `/` goes to the search field (↓ or Enter there go into the
   results), Esc steps back. Everything has a key (see the Keyboard section), also syncing, the
   attachments, loading a message that is not here and switching the search scope, and all of them

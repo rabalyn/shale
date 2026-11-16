@@ -105,6 +105,8 @@ struct W {
     texts: Vec<(String, Color32)>,
     /// What the last frame filled: rectangles and their colour.
     fills: Vec<(Rect, Color32)>,
+    /// The size of the window the frames are run in.
+    size: Vec2,
 }
 
 impl W {
@@ -134,14 +136,14 @@ impl W {
         app.show_view(View::Mail, false);
         let ctx = egui::Context::default();
         crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, server, dir, account, offline, texts: vec![], fills: vec![] };
+        let mut w = W { app, ctx, t: 0.0, server, dir, account, offline, texts: vec![], fills: vec![], size: Vec2::new(1500.0, 900.0) };
         w.until("the mail store opens", |a| a.mail.ready_store().is_some());
         w
     }
 
     fn frame(&mut self, events: Vec<Event>) {
         self.t += 0.05;
-        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))), time: Some(self.t), events, ..Default::default() };
+        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), time: Some(self.t), events, ..Default::default() };
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
         out.textures_delta.clear();
@@ -915,6 +917,7 @@ fn fifty_thousand_messages_draw_quickly_and_a_steady_frame_runs_no_query() {
         offline: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         texts: vec![],
         fills: vec![],
+        size: Vec2::new(1500.0, 900.0),
     };
     crate::theme::apply(&w.ctx);
     w.until("the store and the first page", |a| a.mail.total == 50_000);
@@ -2701,14 +2704,19 @@ impl W {
 
     /// Put mails into the outbox files: `kind` 0 waits (for an hour), 1 failed, 2 may have been sent.
     fn put_in_outbox(&mut self, subject: &str, kind: u8) {
+        self.put_in_outbox_with(subject, kind, "the text", "550 no such user");
+    }
+
+    /// The same with the text of the mail and the words of the server (or of the connection) given.
+    fn put_in_outbox_with(&mut self, subject: &str, kind: u8, body: &str, error: &str) {
         let ob = Outbox::new(&self.app.mail.root);
         let real = crate::calendar::time::now();
-        let d = crate::mail::outbox::tests::draft(&self.account.id, subject, "the text");
+        let d = crate::mail::outbox::tests::draft(&self.account.id, subject, body);
         let b = crate::mail::compose::build(&d, &crate::mail::compose::BuildOptions { now: real, ..Default::default() }).unwrap();
         ob.queue(&d, &b, real, real + 3600, "2026-11-14").unwrap();
         if kind > 0 {
             ob.begin_send(&d.account, &d.id, real + 4000).unwrap();
-            let out = if kind == 1 { Outcome::Failed("550 no such user".into()) } else { Outcome::Unsure("the connection ended".into()) };
+            let out = if kind == 1 { Outcome::Failed(error.into()) } else { Outcome::Unsure(error.into()) };
             ob.finish(&d.account, &d.id, out, real).unwrap();
         }
         self.app.mail.refresh_local();
@@ -3150,4 +3158,185 @@ fn a_key_typed_in_a_text_field_stays_with_the_field_and_triggers_no_mail_action(
     w.press_text(Key::C, Modifiers::NONE, "c");
     assert!(w.app.mail.compose.is_none(), "c is typed, it does not start a new mail");
     assert_eq!(w.app.mail.query, "c");
+}
+
+// ------------------------------------------------------------ narrow windows (MAIL-225, MAIL-226)
+
+/// The sizes of the window the narrow-window tests run in: (width, height, both sidebars open).
+const SMALL: (f32, f32, bool) = (720.0, 480.0, false);
+const MEDIUM: (f32, f32, bool) = (960.0, 600.0, true);
+const SMALL_WITH_SIDEBARS: (f32, f32, bool) = (720.0, 480.0, true);
+
+impl W {
+    /// Run the frames in a window of this size, with both sidebars of the app open or hidden.
+    fn resize(&mut self, (w, h, sidebars): (f32, f32, bool)) {
+        self.size = Vec2::new(w, h);
+        self.app.cfg.show_left = sidebars;
+        self.app.cfg.show_right = sidebars;
+        for _ in 0..6 {
+            self.frame(vec![]);
+        }
+    }
+
+    /// Is the whole control inside the window, inside the view and inside the message pane?
+    fn in_view(&self, key: &str) -> bool {
+        let r = self.rect(key);
+        Rect::from_min_size(Pos2::ZERO, self.size).contains_rect(r) && self.rect("mail:body").contains_rect(r) && self.rect("mail:pane:message").contains_rect(r)
+    }
+
+    /// Turn the wheel over the message pane until the control is in view (it takes a few frames to scroll).
+    fn reach(&mut self, key: &str) {
+        for _ in 0..40 {
+            if self.in_view(key) {
+                // the scrolling takes a few frames to come to rest
+                let mut r = self.rect(key);
+                for _ in 0..60 {
+                    self.frame(vec![]);
+                    let now = self.rect(key);
+                    if now == r {
+                        break;
+                    }
+                    r = now;
+                }
+                if self.in_view(key) {
+                    return;
+                }
+            }
+            let at = self.rect("mail:pane:message").intersect(self.rect("mail:body")).center();
+            self.frame(vec![Event::PointerMoved(at)]);
+            self.frame(vec![Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, -80.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }]);
+            self.frame(vec![]);
+        }
+        panic!("{key} is not reachable: {:?} in a window of {:?}, view {:?}, message pane {:?}", self.rect(key), self.size, self.rect("mail:body"), self.rect("mail:pane:message"));
+    }
+
+    /// Run frames until the panes stand still (scrolling takes a few of them).
+    fn rest(&mut self) {
+        let mut at = self.rect("mail:pane:message");
+        let mut same = 0;
+        for _ in 0..120 {
+            self.frame(vec![]);
+            let now = self.rect("mail:pane:message");
+            same = if now == at { same + 1 } else { 0 };
+            at = now;
+            if same >= 6 {
+                break;
+            }
+        }
+    }
+
+    /// Show the outbox of the account, with the keyboard in the list.
+    fn open_outbox(&mut self) {
+        let acct = self.account.id.clone();
+        self.app.mail.select_local(crate::mail::compose_ui::LocalView::Outbox(acct));
+        self.app.mail.pane = Pane::List;
+        self.frame(vec![]);
+    }
+}
+
+// spec: MAIL-225, MAIL-226
+#[test]
+fn the_buttons_of_the_outbox_detail_are_reachable_and_work_in_narrow_windows() {
+    for (n, size) in [SMALL, MEDIUM].into_iter().enumerate() {
+        let (mut w, _smtp) = compose_world(&format!("narrow-outbox-{n}"), 30);
+        w.put_in_outbox("Failed one", 1);
+        w.put_in_outbox("Unsure one", 2);
+        w.resize(size);
+        w.open_outbox();
+        for (subject, buttons) in [("Failed one", ["retry", "edit", "discard"]), ("Unsure one", ["send-again", "edit", "discard"])] {
+            w.app.mail.pane = Pane::List;
+            w.outbox_go(subject);
+            w.press(Key::L, Modifiers::COMMAND);
+            assert_eq!(w.app.mail.pane, Pane::Message);
+            for _ in 0..4 {
+                w.frame(vec![]);
+            }
+            for b in buttons {
+                w.reach(&format!("mail:outbox:{b}"));
+            }
+            // reachable means it can be clicked: Discard takes the mail out of the outbox
+            let before = w.app.mail.local_items.len();
+            w.click("mail:outbox:discard");
+            w.until("the mail is out of the outbox", move |a| a.mail.local_items.len() == before - 1);
+            assert!(!w.app.mail.local_items.iter().any(|i| i.subject == subject), "{subject} was discarded at {size:?}");
+        }
+    }
+}
+
+// spec: MAIL-226
+#[test]
+fn a_long_outbox_detail_scrolls_so_that_its_buttons_stay_reachable_in_a_short_window() {
+    let (mut w, _smtp) = compose_world("narrow-long", 30);
+    let words = "The server answered that it will not take this mail because of the size, the sender, the weather and a lot of other things. ".repeat(6);
+    w.put_in_outbox_with("A long story", 2, &"the text of the mail\n".repeat(60), &words);
+    w.resize((720.0, 400.0, false));
+    w.open_outbox();
+    w.outbox_go("A long story");
+    w.press(Key::L, Modifiers::COMMAND);
+    for _ in 0..4 {
+        w.frame(vec![]);
+    }
+    assert!(!w.in_view("mail:outbox:discard"), "the buttons are below the end of the pane before it is scrolled: {:?} {:?}", w.rect("mail:outbox:discard"), w.rect("mail:pane:message"));
+    let y = w.rect("mail:outbox:discard").min.y;
+    w.reach("mail:outbox:discard");
+    assert!(w.rect("mail:outbox:discard").min.y < y, "the content moved up");
+    w.click("mail:outbox:discard");
+    w.until("the mail is out of the outbox", |a| !a.mail.local_items.iter().any(|i| i.subject == "A long story"));
+}
+
+// spec: MAIL-225
+#[test]
+fn the_panes_keep_their_minimum_widths_and_the_one_with_the_keyboard_is_scrolled_into_view() {
+    let mut w = W::new("narrow-panes", true);
+    let window = |w: &W| Rect::from_min_size(Pos2::ZERO, w.size);
+    // all three fit at the smallest window with the sidebars hidden: nothing scrolls
+    w.resize(SMALL);
+    for (pane, min) in [("folders", 170.0), ("list", 220.0), ("message", 280.0)] {
+        let r = w.rect(&format!("mail:pane:{pane}"));
+        assert!(r.width() >= min, "{pane} is {} wide", r.width());
+        assert!(w.rect("mail:body").contains_rect(r) && window(&w).contains_rect(r), "{pane} {r:?} is inside the view without scrolling");
+    }
+    // narrower than the three minimums: no pane gives way, and the keyboard pane is in view
+    for size in [MEDIUM, SMALL_WITH_SIDEBARS] {
+        w.resize(size);
+        let body = w.rect("mail:body");
+        assert!(body.width() < 670.0, "{size:?} is a narrow view: {body:?}");
+        for (pane, min) in [("folders", 170.0), ("list", 220.0), ("message", 280.0)] {
+            assert!(w.rect(&format!("mail:pane:{pane}")).width() >= min, "{pane} keeps its minimum at {size:?}");
+        }
+        let in_view = |w: &W, pane: &str| {
+            let r = w.rect(&format!("mail:pane:{pane}"));
+            let shown = r.intersect(w.rect("mail:body")).width();
+            assert!(shown >= r.width().min(body.width()) - 8.0, "{pane} at {size:?}: {shown} of {} points are in view ({r:?} in {body:?})", r.width());
+        };
+        w.app.mail.pane = Pane::List;
+        w.rest();
+        in_view(&w, "list");
+        for (key, pane, name) in [(Key::L, Pane::Message, "message"), (Key::H, Pane::List, "list"), (Key::H, Pane::Folders, "folders"), (Key::L, Pane::List, "list"), (Key::L, Pane::Message, "message")] {
+            w.press(key, Modifiers::COMMAND);
+            w.rest();
+            assert_eq!(w.app.mail.pane, pane);
+            in_view(&w, name);
+        }
+    }
+}
+
+// spec: MAIL-225
+#[test]
+fn the_buttons_of_an_open_message_are_reachable_in_narrow_windows() {
+    let mut w = W::new("narrow-read", true);
+    w.sync_and_wait();
+    w.until("the Inbox is open", |a| a.mail.total == 3);
+    for (n, size) in [SMALL, MEDIUM].into_iter().enumerate() {
+        w.resize(size);
+        w.app.mail.pane = Pane::List;
+        w.open_mail(if n == 0 { "Invoice 2026" } else { "Lunch plans" });
+        w.press(Key::L, Modifiers::COMMAND);
+        w.rest();
+        for b in ["reply", "reply-all", "forward", "import", "read-toggle", "flag-toggle", "move", "delete"] {
+            w.reach(&format!("mail:{b}"));
+        }
+        let message = w.rect("mail:pane:message");
+        assert!(message.width() >= 280.0 && w.rect("mail:body").contains_rect(message), "the message pane is whole in the view at {size:?}: {message:?}");
+    }
 }

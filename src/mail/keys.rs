@@ -39,6 +39,8 @@ pub struct Kbd {
     pub row_focus: Option<eframe::egui::Id>,
     /// The marked entry of the window of the unsent copies.
     pub unsent_sel: usize,
+    /// The pane that was last scrolled into view while the panes scroll sideways; `None` while they fit (MAIL-225).
+    pub scrolled_to: Option<crate::mail::ui::Pane>,
     /// The current key of every action of the mail view, for the hints (MAIL-072); refreshed each frame.
     pub hints: std::collections::HashMap<KeyAction, String>,
 }
