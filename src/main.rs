@@ -13,6 +13,7 @@
 
 mod app;
 mod calendar;
+mod caption;
 mod config;
 mod data_usage;
 mod dialog;
