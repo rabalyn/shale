@@ -265,7 +265,7 @@ impl Vim {
 
     /// Handle one key. `self.cursor` is the cursor before and after. `hist` is the history of the
     /// note: every command starts with a checkpoint, so what happened since the last one (an
-    /// insert session, a change from outside) is one step (EDIT-020).
+    /// insert session, a change from outside) is one step (EDIT-021).
     pub fn key(&mut self, k: VimKey, text: &mut String, hist: &mut History, fx: &mut Effects) {
         if self.cmdline.is_some() {
             self.command_key(k, text, fx);
@@ -725,7 +725,7 @@ mod tests {
         assert_eq!(t, "x");
     }
 
-    // spec: EDIT-019
+    // spec: EDIT-020
     #[test]
     fn dd_deletes_the_line_and_copies_it() {
         // middle line: the cursor goes to the first non-blank of the line that took its place
@@ -749,7 +749,7 @@ mod tests {
         assert_eq!(run("a\nb", 0, "d").0.status(), "NORMAL  d", "a d waits");
     }
 
-    // spec: EDIT-019
+    // spec: EDIT-020
     #[test]
     fn a_d_waits_for_the_second_d_and_other_keys_cancel_it() {
         let (v, t, fx) = run("ab\ncd", 0, "dl");
@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(t, "cd", "g is cancelled by d, which then waits");
     }
 
-    // spec: EDIT-019
+    // spec: EDIT-020
     #[test]
     fn dd_then_p_puts_the_line_back_below() {
         let mut v = Vim::default();
@@ -779,7 +779,7 @@ mod tests {
         assert_eq!(t, "b\na\nc");
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn u_and_ctrl_r_undo_and_redo_commands() {
         let (v, t, _) = run("abc", 1, "xu");
@@ -802,7 +802,7 @@ mod tests {
         assert_eq!(t, "é ü", "multibyte");
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn an_insert_session_is_one_step() {
         let (v, t, _) = run("abc\nd", 0, "oHi<esc>ju");
@@ -816,7 +816,7 @@ mod tests {
         assert_eq!(t, "XYabcZ");
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn a_new_change_after_undo_drops_redo_and_nothing_to_do_says_so() {
         let (v, t, _) = run("abc", 0, "xux<c-r>");
@@ -826,7 +826,7 @@ mod tests {
         assert_eq!(v.status(), "Already at oldest change");
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn paste_and_outside_changes_are_steps() {
         let mut v = Vim::default();

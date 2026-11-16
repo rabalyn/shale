@@ -61,6 +61,8 @@ pub fn open_web(url: &str) {
 
 /// The height of the row above the list that holds the button for new posts.
 const NEW_ROW_HEIGHT: f32 = 28.0;
+/// Side of the spinner inside the "Check now" button.
+const CHECK_SPINNER: f32 = 12.0;
 
 /// "just now", "2 min ago", "3 h ago".
 fn checked_ago(secs: u64) -> String {
@@ -550,12 +552,17 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
                 }
             }
             let checking = feed.as_ref().and_then(|f| st.timelines.get(&(aid.clone(), f.id.clone()))).map(|t| t.checking).unwrap_or(false);
-            let r = ui.add_enabled(feed.is_some() && !checking, egui::Button::new("Check now"));
+            // the spinner sits inside the button, in room that is always there, so nothing next to it moves
+            let label_w = ui.fonts_mut(|f| f.layout_no_wrap("Check now".into(), egui::TextStyle::Button.resolve(ui.style()), Color32::WHITE).size().x);
+            let room = CHECK_SPINNER + ui.spacing().button_padding.x;
+            let r = ui.add_enabled(feed.is_some() && !checking, egui::Button::new("Check now").min_size(egui::vec2(label_w + 2.0 * room + 2.0 * ui.spacing().button_padding.x, 0.0)));
             seen_rects.push(("check-now".into(), r.rect));
-            check_now = r.on_hover_text("Look for new posts now. They wait behind the button at the top of the list.").clicked();
             if checking {
-                ui.spinner();
+                let at = Rect::from_center_size(egui::pos2(r.rect.left() + ui.spacing().button_padding.x + CHECK_SPINNER / 2.0, r.rect.center().y), egui::Vec2::splat(CHECK_SPINNER));
+                egui::Spinner::new().size(CHECK_SPINNER).paint_at(ui, at);
+                seen_rects.push(("check-now-spinner".into(), at));
             }
+            check_now = r.on_hover_text("Look for new posts now. They wait behind the button at the top of the list.").clicked();
             let menu = ui.menu_button("⋯", |ui| {
                 let r = ui.add_enabled(feed.is_some(), egui::Button::new("Reload from the top"));
                 seen_rects.push(("reload".into(), r.rect));

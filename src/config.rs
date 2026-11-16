@@ -239,7 +239,7 @@ pub struct CacheRetention {
     pub broken_days: Option<u32>,
     /// Input debug log: its size in MB.
     pub debug_log_mb: Option<u32>,
-    /// Undo histories: days since a step was made (EDIT-021).
+    /// Undo histories: days since a step was made (EDIT-022).
     pub undo_days: Option<u32>,
 }
 

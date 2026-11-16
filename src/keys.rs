@@ -371,7 +371,7 @@ impl Keymap {
             return Err(format!("{} is reserved for text editing", b.display()));
         }
         // a fixed key cannot start a binding (also not a sequence, which it would never complete)
-        // Ctrl+R redoes in vim normal mode (EDIT-020)
+        // Ctrl+R redoes in vim normal mode (EDIT-021)
         let vim_redo = scope == Scope::EditorNormal && first.ctrl && !first.alt && !first.shift && first.key == Key::R;
         if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key)) || vim_redo {
             return Err(format!("{} has a fixed meaning here", b.display()));

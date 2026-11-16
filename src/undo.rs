@@ -1,4 +1,4 @@
-//! Undo history of the notes for vim-lite (EDIT-020) and its files in the vault (EDIT-021), with
+//! Undo history of the notes for vim-lite (EDIT-021) and its files in the vault (EDIT-022), with
 //! no UI.
 //!
 //! A history belongs to a note (its vault path), not to a tab, so tabs of the same note share it.
@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 /// How many steps a note keeps.
 pub const MAX_STEPS: usize = 200;
 
-/// How long after a change the history is written (EDIT-021), in seconds.
+/// How long after a change the history is written (EDIT-022), in seconds.
 pub const DEBOUNCE: u64 = 3;
 
 /// One step: at char index `at`, `removed` was replaced by `inserted`; `time` is when it was made
@@ -89,7 +89,7 @@ pub struct History {
     known: Option<String>,
     /// the time of the frame (unix seconds), set by `Histories::of`; stamps new steps
     now: u64,
-    /// since when the history differs from its file (EDIT-021); `None`: nothing to write
+    /// since when the history differs from its file (EDIT-022); `None`: nothing to write
     dirty: Option<u64>,
     /// the file is from a newer Shale or could not be read: never written
     locked: bool,
@@ -102,7 +102,7 @@ impl History {
         self.dirty.get_or_insert(self.now);
     }
 
-    /// Drop the steps older than `keep_days` (`None`: forever, EDIT-021); true when some went.
+    /// Drop the steps older than `keep_days` (`None`: forever, EDIT-022); true when some went.
     fn prune(&mut self, now: u64, keep_days: Option<u32>) -> bool {
         let Some(oldest) = disk::oldest_kept(now, keep_days) else { return false };
         let before = self.undo.len() + self.redo.len();
@@ -323,7 +323,7 @@ mod tests {
         (h, texts.last().unwrap().to_string())
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn a_step_is_the_difference_between_two_checkpoints() {
         let e = Edit::between("one two three", "one 2 three", 7);
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(t, "é ü ß");
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn undo_and_redo_walk_the_steps() {
         let (mut h, mut t) = after(&["a", "ab", "abc"]);
@@ -356,7 +356,7 @@ mod tests {
         assert_eq!(h.redo(&mut t), None, "nothing newer");
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn a_new_change_drops_the_redo_steps() {
         let (mut h, mut t) = after(&["a", "ab", "abc"]);
@@ -368,7 +368,7 @@ mod tests {
         assert_eq!(t, "ab", "the new change is one step");
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn a_change_from_outside_is_a_step_of_its_own() {
         let (mut h, _) = after(&["one", "one two"]);
@@ -379,7 +379,7 @@ mod tests {
         assert_eq!(t, "one");
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn only_the_last_200_steps_are_kept() {
         let mut h = History::default();
@@ -396,7 +396,7 @@ mod tests {
         assert_eq!((n, t.len()), (MAX_STEPS, 20));
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn the_cursor_lands_on_a_restored_last_line() {
         let (mut h, mut t) = after(&["a\nb", "a"]);
@@ -410,7 +410,7 @@ mod tests {
         assert_eq!(t, "a\nc");
     }
 
-    // spec: EDIT-020
+    // spec: EDIT-021
     #[test]
     fn histories_belong_to_the_path_and_follow_a_move() {
         let mut all = Histories::default();
@@ -424,7 +424,7 @@ mod tests {
         assert_eq!(all.of(Path::new("a.md")).undo.len(), 0);
     }
 
-    // --- the history in the vault (EDIT-021) ---
+    // --- the history in the vault (EDIT-022) ---
 
     const T0: u64 = 1_800_000_000;
     const DAY: u64 = 24 * 3600;
@@ -456,7 +456,7 @@ mod tests {
         v
     }
 
-    // spec: EDIT-021
+    // spec: EDIT-022
     #[test]
     fn the_history_is_written_and_read_back_after_a_restart() {
         let root = vault("roundtrip");
@@ -481,14 +481,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: EDIT-021
+    // spec: EDIT-022
     #[test]
     fn the_hash_of_a_path_is_the_same_on_every_system() {
         assert_eq!(disk::fnv1a(""), 0xcbf2_9ce4_8422_2325, "the FNV-1a offset basis");
         assert_eq!(disk::fnv1a("a"), 0xaf63_dc4c_8601_ec8c, "a known FNV-1a value");
     }
 
-    // spec: EDIT-021
+    // spec: EDIT-022
     #[test]
     fn a_note_changed_while_shale_was_closed_gets_that_change_as_a_step() {
         let root = vault("outside");
@@ -505,7 +505,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: EDIT-021
+    // spec: EDIT-022
     #[test]
     fn steps_older_than_30_days_by_default_are_dropped_when_read_and_when_written() {
         let root = vault("retention-steps");
@@ -533,7 +533,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: EDIT-021, USE-017
+    // spec: EDIT-022, USE-017
     #[test]
     fn opening_a_vault_deletes_no_file_and_forever_keeps_every_step() {
         let root = vault("retention-forever");
@@ -553,7 +553,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: EDIT-021, USE-020
+    // spec: EDIT-022, USE-020
     #[test]
     fn the_loaded_histories_follow_a_changed_keep_for_setting() {
         let root = vault("retention-setting");
@@ -598,7 +598,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: EDIT-021
+    // spec: EDIT-022
     #[test]
     fn a_renamed_note_takes_its_file_along_loaded_or_not() {
         let root = vault("rename");
@@ -627,7 +627,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: EDIT-021
+    // spec: EDIT-022
     #[test]
     fn a_broken_file_is_set_aside_and_a_newer_one_is_never_overwritten() {
         let root = vault("broken");
@@ -656,7 +656,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: EDIT-021
+    // spec: EDIT-022
     #[test]
     fn a_change_is_written_after_the_delay_and_when_flushed() {
         let root = vault("debounce");
@@ -680,7 +680,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // spec: EDIT-021, USE-023
+    // spec: EDIT-022, USE-023
     #[test]
     fn a_running_cleanup_never_makes_the_window_wait_for_a_write() {
         let root = vault("busy");
@@ -704,7 +704,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&other);
     }
 
-    // spec: EDIT-021
+    // spec: EDIT-022
     #[test]
     fn a_failed_write_keeps_the_history_in_memory_and_says_so_once() {
         let root = vault("failed");

@@ -249,7 +249,7 @@ impl Versioned for VaultState {
     }
 }
 
-/// `<vault>/.shale/undo/<hash>.json`: the undo history of one note (EDIT-021).
+/// `<vault>/.shale/undo/<hash>.json`: the undo history of one note (EDIT-022).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct UndoFile {

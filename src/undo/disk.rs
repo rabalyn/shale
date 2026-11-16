@@ -1,4 +1,4 @@
-//! The undo histories in the vault (EDIT-021): one versioned file per note in
+//! The undo histories in the vault (EDIT-022): one versioned file per note in
 //! `<vault>/.shale/undo/`, named by a hash of the note's vault path.
 
 use super::History;
