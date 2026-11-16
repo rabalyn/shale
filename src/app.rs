@@ -182,7 +182,7 @@ pub enum Modal {
     },
     /// the Data usage dialog (USE-001)
     DataUsage,
-    Export(Box<crate::export_dialog::ExportDialog>),
+    Export(Box<crate::pdf::export_dialog::ExportDialog>),
     Calendars(Box<crate::calendar::dialog::CalendarDialog>),
     Event(Box<crate::calendar::dialog::EventDialog>),
     Import(Box<crate::import::dialog::ImportDialog>),
@@ -1623,16 +1623,16 @@ impl ShaleApp {
         let name = f.display_name();
         let opts = if drawing {
             let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| crate::drawing::Scene::read_file(&v.abs(rel)).ok()).unwrap_or_default();
-            crate::pdfexport::ExportOptions::for_drawing(&scene)
+            crate::pdf::export::ExportOptions::for_drawing(&scene)
         } else {
-            crate::pdfexport::ExportOptions::for_note()
+            crate::pdf::export::ExportOptions::for_note()
         };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
-        self.modal = Some(Modal::Export(Box::new(crate::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path))));
+        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path))));
     }
 
     /// Write the PDF for the dialog's file and options. Returns where it was saved.
-    pub fn run_export(&mut self, d: &crate::export_dialog::ExportDialog) -> Result<PathBuf, String> {
+    pub fn run_export(&mut self, d: &crate::pdf::export_dialog::ExportDialog) -> Result<PathBuf, String> {
         self.flush_all();
         let v = self.vault.as_ref().ok_or("No vault is open")?;
         let bytes = if d.drawing {
@@ -1640,10 +1640,10 @@ impl ShaleApp {
                 Some(doc) => doc.scene.clone(),
                 None => crate::drawing::Scene::read_file(&v.abs(&d.rel))?,
             };
-            crate::pdfexport::export_drawing(&scene, &d.name, &d.opts, &crate::drawing::pictures::images(&scene, v, &d.rel))?
+            crate::pdf::export::export_drawing(&scene, &d.name, &d.opts, &crate::drawing::pictures::images(&scene, v, &d.rel))?
         } else {
             let text = self.notes.get(&d.rel).map(|n| n.text.clone()).or_else(|| v.notes.get(&d.rel).map(|n| n.text.clone())).unwrap_or_default();
-            crate::pdfexport::export_note(v, &d.rel, &text, &d.opts)?
+            crate::pdf::export::export_note(v, &d.rel, &text, &d.opts)?
         };
         let out = PathBuf::from(crate::layout::shellexpand(&d.path));
         if out.as_os_str().is_empty() {

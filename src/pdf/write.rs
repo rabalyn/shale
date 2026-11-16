@@ -31,7 +31,7 @@ fn font(kind: FontKind) -> &'static LoadedFont {
     let (cell, data): (&OnceLock<LoadedFont>, &'static [u8]) = match kind {
         FontKind::Sans => (&SANS, epaint_default_fonts::UBUNTU_LIGHT),
         FontKind::Mono => (&MONO, epaint_default_fonts::HACK_REGULAR),
-        FontKind::Hand => (&HAND, include_bytes!("../assets/fonts/Virgil.otf")),
+        FontKind::Hand => (&HAND, include_bytes!("../../assets/fonts/Virgil.otf")),
     };
     cell.get_or_init(|| LoadedFont { data, face: TtfFace::parse(data, 0).expect("bundled font") })
 }

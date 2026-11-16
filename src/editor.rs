@@ -702,14 +702,14 @@ impl NoteEditor {
                     let b = b.expand(20.0);
                     let size = fit(b.width().max(40.0), b.height().max(40.0), 420.0);
                     images.push((l.range.clone(), size.y + 6.0, Art::Scene(scene, p.clone()), size));
-                } else if crate::pdfview::is_pdf(&p) {
-                    match crate::pdfview::pdf_pages(ui.ctx(), &abs, 1) {
-                        crate::pdfview::PdfState::Ready { pages, total } if !pages.is_empty() => {
+                } else if crate::pdf::view::is_pdf(&p) {
+                    match crate::pdf::view::pdf_pages(ui.ctx(), &abs, 1) {
+                        crate::pdf::view::PdfState::Ready { pages, total } if !pages.is_empty() => {
                             let [tw, th] = pages[0].size_vec2().into();
                             let size = fit(tw, th, 520.0);
                             images.push((l.range.clone(), size.y + 6.0, Art::Pdf(pages[0].clone(), total), size));
                         }
-                        crate::pdfview::PdfState::Loading => ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)),
+                        crate::pdf::view::PdfState::Loading => ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)),
                         _ => {}
                     }
                 }
@@ -1376,7 +1376,7 @@ mod tests {
     #[test]
     fn drawings_and_pdfs_show_inline_like_pictures() {
         let (v, d) = vault_for_tests("inline-art");
-        std::fs::write(d.join("doc.pdf"), crate::pdfview::sample_pdf()).unwrap();
+        std::fs::write(d.join("doc.pdf"), crate::pdf::view::sample_pdf()).unwrap();
         let mut v = v;
         v.rescan();
         let rel = Path::new("Welcome.md");

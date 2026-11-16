@@ -410,10 +410,10 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, scenes: &mut SceneCache, bas
                 let preview: String = text.lines().take(12).collect::<Vec<_>>().join("\n");
                 ui.label(egui::RichText::new(preview).size(base * 0.95).color(theme::TEXT));
             }
-            FileKind::Other if crate::pdfview::is_pdf(target) => {
+            FileKind::Other if crate::pdf::view::is_pdf(target) => {
                 let w = ui.available_width();
-                match crate::pdfview::pdf_pages(ui.ctx(), &vault.abs(target), 50) {
-                    crate::pdfview::PdfState::Ready { pages, total } => {
+                match crate::pdf::view::pdf_pages(ui.ctx(), &vault.abs(target), 50) {
+                    crate::pdf::view::PdfState::Ready { pages, total } => {
                         for (i, tex) in pages.iter().enumerate() {
                             let [tw, th] = tex.size_vec2().into();
                             let k = (w / tw).min(1.0);
@@ -427,14 +427,14 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, scenes: &mut SceneCache, bas
                             ui.label(egui::RichText::new(format!("{} more pages — open the PDF to see them all", total - pages.len())).color(theme::MUTED));
                         }
                     }
-                    crate::pdfview::PdfState::Loading => {
+                    crate::pdf::view::PdfState::Loading => {
                         ui.horizontal(|ui| {
                             ui.spinner();
                             ui.label(egui::RichText::new("Rendering PDF…").color(theme::MUTED));
                         });
                         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
                     }
-                    crate::pdfview::PdfState::Failed(e) => {
+                    crate::pdf::view::PdfState::Failed(e) => {
                         ui.label(egui::RichText::new(format!("This PDF can't be shown: {e}")).color(theme::MUTED));
                     }
                 }

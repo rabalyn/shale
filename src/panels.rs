@@ -1129,10 +1129,10 @@ impl ShaleApp {
         }
         if let Modal::Export(d) = &mut modal {
             let title = format!("Export “{}” to PDF", d.name);
-            let resp = crate::dialog::Dialog::new("export-pdf", title).width(460.0).show(&ctx, |ui| crate::export_dialog::show(ui, d));
+            let resp = crate::dialog::Dialog::new("export-pdf", title).width(460.0).show(&ctx, |ui| crate::pdf::export_dialog::show(ui, d));
             let close_asked = resp.should_close();
-            match resp.inner.unwrap_or(crate::export_dialog::DialogResult::Open) {
-                crate::export_dialog::DialogResult::Export => match self.run_export(d) {
+            match resp.inner.unwrap_or(crate::pdf::export_dialog::DialogResult::Open) {
+                crate::pdf::export_dialog::DialogResult::Export => match self.run_export(d) {
                     Ok(out) => {
                         self.toast(format!("Exported to {}", out.display()));
                         if d.open_after {
@@ -1144,8 +1144,8 @@ impl ShaleApp {
                     }
                     Err(e) => d.error = Some(e),
                 },
-                crate::export_dialog::DialogResult::Cancel => keep = false,
-                crate::export_dialog::DialogResult::Open => {}
+                crate::pdf::export_dialog::DialogResult::Cancel => keep = false,
+                crate::pdf::export_dialog::DialogResult::Open => {}
             }
             if close_asked {
                 keep = false;
