@@ -55,30 +55,41 @@ remove_worktree() {
 }
 trap remove_worktree EXIT
 
-checks() {
-  if [ -n "${LAND_CHECK_CMD:-}" ]; then
-    sh -c "$LAND_CHECK_CMD"
-    return
+# One check: its name, then the command. A failing one ends the checks with its name. Every
+# step returns its own status, so this holds without `set -e`, which bash ignores in a function
+# called from `if` (a failing `cargo test` once let a branch land).
+step() {
+  local name=$1
+  shift
+  echo "-- $name"
+  if ! "$@"; then
+    echo "land.sh: check failed: $name" >&2
+    return 1
   fi
-  local base=$1
-  echo "-- commits name an issue (FORGE-008)"
-  sh .forgejo/scripts/check-commit-issues.sh "$base" HEAD
-  echo "-- cargo fmt --check"
-  cargo fmt --check
-  echo "-- cargo clippy"
-  cargo clippy -q --all-targets --locked -- -D warnings
-  echo "-- cargo test"
-  cargo test -q --locked
+}
+
+# The checks of FORGE-011 on the merged tree in the current folder. LAND_CHECK_CMD replaces them
+# with its lines, each one a step run by `sh -c` (the test of this script).
+checks() {
+  local base=$1 line
+  if [ -n "${LAND_CHECK_CMD:-}" ]; then
+    while IFS= read -r line; do
+      step "$line" sh -c "$line" || return 1
+    done <<< "$LAND_CHECK_CMD"
+    return 0
+  fi
+  step "commits name an issue (FORGE-008)" sh .forgejo/scripts/check-commit-issues.sh "$base" HEAD || return 1
+  step "cargo fmt --check" cargo fmt --check || return 1
+  step "cargo clippy" cargo clippy -q --all-targets --locked -- -D warnings || return 1
+  step "cargo test" cargo test -q --locked || return 1
   if [ "$RELEASE" = yes ]; then
-    echo "-- cargo test --release"
-    cargo test -q --release --locked
+    step "cargo test --release" cargo test -q --release --locked || return 1
   fi
   if [ "$(sh .forgejo/scripts/env-tests.sh wanted "$base" HEAD)" = yes ]; then
     if [ "$ENV_TESTS" = no ]; then
       echo "-- SKIPPED (--no-env-tests): the change touches CalDAV or mail, the real-server suites did not run"
     else
-      echo "-- real-server suites (podman)"
-      sh .forgejo/scripts/env-tests.sh run
+      step "real-server suites (podman)" sh .forgejo/scripts/env-tests.sh run || return 1
     fi
   fi
 }

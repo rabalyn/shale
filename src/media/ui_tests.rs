@@ -340,6 +340,11 @@ fn pointer_text(size: u64) -> String {
     format!("version https://git-lfs.github.com/spec/v1\noid sha256:{}\nsize {size}\n", "b".repeat(64))
 }
 
+/// Puts a Git LFS pointer of a file of `size` bytes at `at`, as a clone without the download has it.
+fn write_pointer(at: &Path, size: u64) {
+    std::fs::write(at, pointer_text(size)).unwrap();
+}
+
 // spec: SYNC-020
 #[test]
 fn a_sound_that_is_an_lfs_pointer_says_not_downloaded_and_the_download_link_asks_for_it() {
