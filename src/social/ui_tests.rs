@@ -606,6 +606,11 @@ fn check_now_never_jumps_and_reload_from_the_top_does_replace_the_list() {
     w.scroll(700.0);
     let (anchor, y0) = w.top_post();
     w.click("check-now");
+    // the check has come back (its spinner pushes the menu button to the right while it runs)
+    w.wait_for("the check did not come back", |w| {
+        let t = &w.app.social.timelines[&(home().account, home().feed)];
+        t.last_checked.is_some() && !t.checking
+    });
     w.frames(10);
     assert_eq!(w.posts(&home()).len(), 40);
     assert!((w.post_y(&anchor) - y0).abs() < 1.0, "no jump to the top");
