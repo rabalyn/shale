@@ -315,7 +315,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
     let tables = crate::table::find_tables(text);
     while i < lines.len() {
         if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
-            table_block(ui, &b.table, vault, rel, base, &hint, &mut out);
+            table_block(ui, b, vault, rel, base, &hint, &mut out);
             i = b.lines.end;
             continue;
         }
@@ -424,8 +424,9 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
 }
 
 /// A table drawn as a grid (EDIT-024); links in its cells work as everywhere in the reading view.
-fn table_block(ui: &mut Ui, table: &crate::table::Table, vault: &Vault, rel: &Path, base: f32, hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) {
-    let laid = crate::table::layout(ui.ctx(), table, base, ui.available_width(), &|l| vault.exists(&l.target, Some(rel)));
+/// The table's comment line (EDIT-030) is not shown; its sizes (EDIT-031) are used.
+fn table_block(ui: &mut Ui, b: &crate::table::Block, vault: &Vault, rel: &Path, base: f32, hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) {
+    let laid = crate::table::layout(ui.ctx(), &b.table, &b.meta.sizes, base, ui.available_width(), &|l| vault.exists(&l.target, Some(rel)));
     let (rect, resp) = ui.allocate_exact_size(laid.size(), Sense::click());
     crate::table::paint(ui.painter(), rect.min, &laid);
     if let Some(hp) = ui.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p)) {
@@ -578,14 +579,15 @@ mod tests {
         out
     }
 
-    // spec: EDIT-024
+    // spec: EDIT-024, EDIT-030, EDIT-031
     #[test]
     fn the_reading_view_draws_a_table_as_a_grid_and_its_links_work() {
         let d = std::env::temp_dir().join(format!("shale-reader-table-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         crate::vault::write_sample_vault(&d).unwrap();
         let v = Vault::open(&d).unwrap();
-        let text = "before\n\n| Name | Note |\n|---|:-:|\n| `a|b` | [[Ideas]] |\n\nafter";
+        // the table's comment line (EDIT-030) is not shown
+        let text = "before\n\n<!-- shale-table edit=raw cols=200,90 -->\n| Name | Note |\n|---|:-:|\n| `a|b` | [[Ideas]] |\n\nafter";
         let (mut scenes, media) = (SceneCache::default(), crate::media::MediaPlayer::default());
         let ctx = egui::Context::default();
         let mut time = 0.0;
@@ -606,6 +608,10 @@ mod tests {
             assert!(names.contains(&cell), "{cell} is painted on its own: {names:?}");
         }
         assert!(!names.iter().any(|t| t.contains('|') && t.len() > 3), "no raw table text: {names:?}");
+        assert!(!names.iter().any(|t| t.contains("shale-table")), "no comment line: {names:?}");
+        // its sizes are used (EDIT-031): the first column is 200 points wide
+        let (name, note) = (painted.iter().find(|(t, _)| t == "Name").unwrap().1, painted.iter().find(|(t, _)| t == "Note").unwrap().1);
+        assert!(note.center().x - name.left() > 200.0, "{name:?} {note:?}");
         let at = painted.iter().find(|(t, _)| t == "Ideas").unwrap().1.center();
         let click = |pressed| vec![Event::PointerMoved(at), Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }];
         frame(click(true));

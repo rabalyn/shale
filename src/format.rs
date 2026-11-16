@@ -598,26 +598,67 @@ fn strip_markers(s: &str) -> String {
     b.iter().zip(&drop).filter(|(_, d)| !**d).map(|(c, _)| *c).collect()
 }
 
-/// Run an inline command over the selection, line by line (the markers do not span lines).
+/// The table lines of `text` by line number: `true` for a delimiter row (EDIT-024).
+fn table_lines(text: &str) -> std::collections::HashMap<usize, bool> {
+    let mut out = std::collections::HashMap::new();
+    for b in crate::table::find_tables(text) {
+        let t = b.table_lines();
+        for l in t.clone() {
+            out.insert(l, l == t.start + 1);
+        }
+    }
+    out
+}
+
+/// The pieces of `a..b` in a table line: one per cell it covers, without the pipes and the blanks
+/// around the cell text, so that markers never span a `|` (raba/shale#234).
+fn cell_pieces(line: &str, a: usize, b: usize) -> Vec<Range<usize>> {
+    let mut out = Vec::new();
+    for c in crate::table::cell_ranges(line) {
+        let (mut x, mut y) = (a.max(c.start), b.min(c.end));
+        while x < y && line[x..].starts_with(char::is_whitespace) {
+            x += line[x..].chars().next().map_or(1, char::len_utf8);
+        }
+        while y > x && line[..y].ends_with(char::is_whitespace) {
+            y -= line[..y].chars().next_back().map_or(1, char::len_utf8);
+        }
+        if x < y {
+            out.push(x..y);
+        }
+    }
+    out
+}
+
+/// Run an inline command over the selection, line by line (the markers do not span lines), and in
+/// a table cell by cell (the delimiter row is left alone).
 fn inline(text: &str, sel: Range<usize>, style: &Style) -> Option<Out> {
     let touched = touched(text, &sel);
     let fenced = crate::markdown::fenced_code_lines(text);
+    let tables = table_lines(text);
     let first_line = text[..touched[0].start].matches('\n').count();
     // the segments: the part of each line the selection covers, without the line's own markers and blanks
-    let mut segs: Vec<(Range<usize>, Range<usize>)> = Vec::new();
+    let mut segs: Vec<(Range<usize>, Vec<Range<usize>>)> = Vec::new();
     for (k, r) in touched.iter().enumerate() {
-        if fenced.get(first_line + k).copied().unwrap_or(false) {
+        let n = first_line + k;
+        if fenced.get(n).copied().unwrap_or(false) || tables.get(&n) == Some(&true) {
             continue;
         }
         let line = &text[r.clone()];
         let from = (sel.start.max(r.start) - r.start).min(line.len());
         let to = sel.end.min(r.end) - r.start;
         if sel.is_empty() {
-            segs.push((r.clone(), from..from));
+            segs.push((r.clone(), std::iter::once(from..from).collect()));
             continue;
         }
         let (mut a, mut b) = (from.max(parse(line).content), to);
         if a >= b {
+            continue;
+        }
+        if tables.contains_key(&n) {
+            let pieces = cell_pieces(line, a, b);
+            if !pieces.is_empty() {
+                segs.push((r.clone(), pieces));
+            }
             continue;
         }
         while a < b && line[a..].starts_with(char::is_whitespace) {
@@ -627,25 +668,37 @@ fn inline(text: &str, sel: Range<usize>, style: &Style) -> Option<Out> {
             b -= line[..b].chars().next_back().map_or(1, char::len_utf8);
         }
         if a < b {
-            segs.push((r.clone(), a..b));
+            segs.push((r.clone(), std::iter::once(a..b).collect()));
         }
     }
     if segs.is_empty() {
         return None;
     }
     let toggle = matches!(style, Style::Wrap { .. });
-    let all_on = toggle && segs.iter().all(|(r, s)| style.is_on(&text[r.clone()], s));
+    let all_on = toggle && segs.iter().all(|(r, ps)| ps.iter().all(|s| style.is_on(&text[r.clone()], s)));
     let mut out = String::from(&text[..segs[0].0.start]);
     let mut at = segs[0].0.start;
     let mut sel_out: Option<Range<usize>> = None;
     let mut last = 0..0;
-    for (r, s) in &segs {
+    for (r, pieces) in &segs {
         out.push_str(&text[at..r.start]);
-        let line = &text[r.clone()];
+        let orig = &text[r.clone()];
+        // the pieces of a line from the last to the first, so that the earlier offsets stay valid
+        let mut line = orig.to_string();
+        let (mut first_in, mut last_in): (Option<usize>, Option<(usize, usize)>) = (None, None);
+        for s in pieces.iter().rev() {
+            let (new, inner) = if toggle && !all_on && style.is_on(orig, s) { (line.clone(), s.clone()) } else { style.apply(&line, s, all_on) };
+            line = new;
+            if last_in.is_none() {
+                last_in = Some((inner.end, line.len()));
+            }
+            first_in = Some(inner.start);
+        }
         let base = out.len();
-        let (new, inner) = if toggle && !all_on && style.is_on(line, s) { (line.to_string(), s.clone()) } else { style.apply(line, s, all_on) };
-        out.push_str(&new);
-        let abs = base + inner.start..base + inner.end;
+        out.push_str(&line);
+        let (end, len_then) = last_in.unwrap_or((0, line.len()));
+        // what the earlier pieces added moves the end of the last one
+        let abs = base + first_in.unwrap_or(0)..(base + end + line.len()).saturating_sub(len_then);
         sel_out.get_or_insert(abs.clone());
         last = abs;
         at = r.end;
@@ -1092,5 +1145,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    // spec: EDIT-027, EDIT-029
+    #[test]
+    fn in_a_table_the_markers_go_round_each_cell_and_never_across_a_pipe() {
+        let text = "| A | B |\n|---|---|\n| bar | baz |\n";
+        let from = text.find("bar").unwrap();
+        let to = text.find("baz").unwrap() + 3;
+        let (t, sel) = apply(Cmd::FontColour(Some([240, 138, 28])), text, from..to).unwrap();
+        assert_eq!(t, "| A | B |\n|---|---|\n| <span style=\"color: #F08A1C;\">bar</span> | <span style=\"color: #F08A1C;\">baz</span> |\n");
+        assert_eq!(&t[sel], "bar</span> | <span style=\"color: #F08A1C;\">baz");
+        let tables = crate::table::find_tables(&t);
+        assert_eq!(tables[0].table.rows[0].len(), 2, "still two cells");
+        // the whole table: the delimiter row is left alone, every cell gets its own markers
+        let (t, _) = apply(Cmd::Bold, text, 0..text.len()).unwrap();
+        assert_eq!(t, "| **A** | **B** |\n|---|---|\n| **bar** | **baz** |\n");
+        // and a second press takes them off again
+        let (back, _) = apply(Cmd::Bold, &t, 0..t.len()).unwrap();
+        assert_eq!(back, text);
+        // part of a cell
+        let at = text.find("az").unwrap();
+        assert_eq!(apply(Cmd::Italic, text, at..at + 2).unwrap().0, "| A | B |\n|---|---|\n| bar | b*az* |\n");
     }
 }

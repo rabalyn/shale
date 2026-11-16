@@ -42,6 +42,7 @@ You normally never edit these files; the "Where" column says which window change
 | `highlight_colours` | neon yellow, green, cyan, magenta (RGB, up to 8) | Editing, "Highlight colours": the swatches of the toolbar's highlight palette |
 | `live_preview` | off | Appearance, "Markdown preview in the editor"; the eye icon of the editor |
 | `preview_raw_lines` | 0 (range 0 to 20) | Appearance, "Raw lines around the cursor" |
+| `table_cell_edit` | on | Appearance, "Edit table cells in the grid"; a single table is switched by the button above the top right corner of its grid |
 | `vim_mode` | off | Appearance, "Vim-style editing" |
 | `keybindings` | empty (the defaults of [[Keyboard shortcuts]]) | Settings → Keybindings; only the actions you changed are stored |
 

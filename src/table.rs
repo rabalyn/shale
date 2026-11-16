@@ -25,11 +25,84 @@ pub struct Table {
     pub rows: Vec<Vec<String>>,
 }
 
-/// A table in a note: the lines it occupies (numbers from 0, end excluded) and its content.
+/// A table in a note: the lines it occupies (numbers from 0, end excluded; its comment line
+/// included), its content and what its comment line says (EDIT-030).
 #[derive(Clone, PartialEq, Debug)]
 pub struct Block {
     pub lines: Range<usize>,
     pub table: Table,
+    /// the first of `lines` is the table's comment line
+    pub has_meta: bool,
+    pub meta: Meta,
+}
+
+impl Block {
+    /// The lines of the table itself: the header, the delimiter row and the data rows.
+    pub fn table_lines(&self) -> Range<usize> {
+        self.lines.start + usize::from(self.has_meta)..self.lines.end
+    }
+}
+
+/// The sizes a person gave a table's grid (EDIT-031), in points with the padding: the width of
+/// each column and the least height of each row (the header first). Empty: worked out.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Sizes {
+    pub cols: Vec<f32>,
+    pub rows: Vec<f32>,
+}
+
+/// What a table keeps in the comment line above it (EDIT-030): `Some(true)` edit the cells in the
+/// grid, `Some(false)` edit the raw markdown, `None` as the setting says; and its sizes.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Meta {
+    pub cells: Option<bool>,
+    pub sizes: Sizes,
+}
+
+const META_TAG: &str = "shale-table";
+
+/// The comment line of a table, `<!-- shale-table edit=cells cols=120,80 rows=30,30 -->`, read;
+/// unknown words and broken numbers are ignored. `None` when the line is no such comment.
+pub fn parse_meta(line: &str) -> Option<Meta> {
+    let inner = line.trim().strip_prefix("<!--")?.strip_suffix("-->")?.trim();
+    let rest = inner.strip_prefix(META_TAG)?;
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let mut m = Meta::default();
+    for word in rest.split_whitespace() {
+        let Some((k, v)) = word.split_once('=') else { continue };
+        let nums = || v.split(',').map(|x| x.trim().parse::<f32>().ok().filter(|f| f.is_finite() && *f >= 0.0)).collect::<Option<Vec<f32>>>().unwrap_or_default();
+        match k {
+            "edit" => {
+                m.cells = match v {
+                    "cells" => Some(true),
+                    "raw" => Some(false),
+                    _ => None,
+                }
+            }
+            "cols" => m.sizes.cols = nums(),
+            "rows" => m.sizes.rows = nums(),
+            _ => {}
+        }
+    }
+    Some(m)
+}
+
+/// The comment line for `m` (without a line break); `None` when there is nothing to keep.
+pub fn meta_line(m: &Meta) -> Option<String> {
+    let list = |v: &[f32]| v.iter().map(|f| (f.round() as i64).to_string()).collect::<Vec<_>>().join(",");
+    let mut parts = Vec::new();
+    if let Some(c) = m.cells {
+        parts.push(format!("edit={}", if c { "cells" } else { "raw" }));
+    }
+    if !m.sizes.cols.is_empty() {
+        parts.push(format!("cols={}", list(&m.sizes.cols)));
+    }
+    if !m.sizes.rows.is_empty() {
+        parts.push(format!("rows={}", list(&m.sizes.rows)));
+    }
+    (!parts.is_empty()).then(|| format!("<!-- {META_TAG} {} -->", parts.join(" ")))
 }
 
 /// The cells of one table line as they are written: byte ranges between the separating pipes
@@ -76,6 +149,11 @@ fn raw_line(line: &str) -> RawLine {
         cells.push(from..end);
     }
     RawLine { cells, trailing, end }
+}
+
+/// The byte ranges of the cells of one table line, between its pipes (blanks included).
+pub fn cell_ranges(line: &str) -> Vec<Range<usize>> {
+    raw_line(line).cells
 }
 
 /// The text of a cell as it is shown: `\|` is a pipe (but not inside a code span), trimmed.
@@ -141,7 +219,8 @@ pub fn find_tables(text: &str) -> Vec<Block> {
             i = end + 2;
         }
     }
-    let mut out = Vec::new();
+    let body = i;
+    let mut out: Vec<Block> = Vec::new();
     while i < lines.len() {
         let header = lines[i].1;
         let is_table = !fenced[i] && header.contains('|') && i + 1 < lines.len() && !fenced[i + 1];
@@ -159,7 +238,11 @@ pub fn find_tables(text: &str) -> Vec<Block> {
             rows.push(cells);
             j += 1;
         }
-        out.push(Block { lines: i..j, table: Table { aligns, header: head, rows } });
+        // the comment line right above it belongs to the table (EDIT-030)
+        let free = i > body && !fenced[i - 1] && out.last().is_none_or(|b| b.lines.end < i);
+        let meta = free.then(|| parse_meta(lines[i - 1].1)).flatten();
+        let has_meta = meta.is_some();
+        out.push(Block { lines: i - usize::from(has_meta)..j, table: Table { aligns, header: head, rows }, has_meta, meta: meta.unwrap_or_default() });
         i = j;
     }
     out
@@ -270,6 +353,123 @@ pub fn edit_source(src: &str, edit: Edit) -> Option<String> {
     Some(lines.join("\n") + tail)
 }
 
+/// A cell's text as it is written between its pipes: a pipe outside a code span becomes `\\|`, a
+/// line break a blank (EDIT-030).
+fn escape_cell(text: &str) -> String {
+    let chars: Vec<char> = text.chars().map(|c| if c == '\n' || c == '\r' { ' ' } else { c }).collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '`' => {
+                let n = chars[i + 1..].iter().position(|&x| x == '`').map_or(1, |e| e + 2);
+                out.extend(&chars[i..i + n]);
+                i += n;
+            }
+            '|' => {
+                out.push_str("\\|");
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    out.trim().to_string()
+}
+
+/// The table in `src` (its lines as in `edit_source`) with the cell in `row` (0 is the header, the
+/// delimiter row is not counted) and column `col` set to `text`; the other cells stay as written,
+/// a short row is filled up. `None` when there is no such cell.
+pub fn set_cell(src: &str, row: usize, col: usize, text: &str) -> Option<String> {
+    let (body, tail) = src.strip_suffix('\n').map_or((src, ""), |b| (b, "\n"));
+    let mut lines: Vec<String> = body.split('\n').map(str::to_string).collect();
+    if lines.len() < 2 || col >= split_cells(&lines[0]).len() {
+        return None;
+    }
+    let at = if row == 0 { 0 } else { row + 1 };
+    let line = lines.get(at)?.clone();
+    let raw = raw_line(&line);
+    let text = escape_cell(text);
+    lines[at] = match raw.cells.get(col) {
+        Some(cell) => {
+            let mut l = line.clone();
+            l.replace_range(cell.clone(), &format!(" {text} "));
+            l
+        }
+        None if col == 0 => format!("{}| {text} |{}", &line[..line.len() - line.trim_start().len()], if line.ends_with('\r') { "\r" } else { "" }),
+        None => with_cell_after(&line, col - 1, &text),
+    };
+    Some(lines.join("\n") + tail)
+}
+
+/// A change of a table made in the editor's grid: a button (EDIT-025), its comment line (the mode
+/// and the sizes, EDIT-030, EDIT-031) or the text of a cell (EDIT-030).
+#[derive(Clone, PartialEq, Debug)]
+pub enum Change {
+    Edit(Edit),
+    Meta(Meta),
+    Cell { row: usize, col: usize, text: String },
+}
+
+/// The sizes after a button's change: a new column or row gets a size, a deleted one loses its
+/// own. Sizes that did not match the table stay as they were (they are ignored anyway).
+fn sizes_after(sizes: &Sizes, ncols: usize, nrows: usize, edit: Edit) -> Sizes {
+    let mut s = sizes.clone();
+    let cols_fit = s.cols.len() == ncols;
+    let rows_fit = s.rows.len() == nrows;
+    match edit {
+        Edit::InsertColumn(after) if cols_fit => {
+            let w = s.cols[after];
+            s.cols.insert(after + 1, w);
+        }
+        Edit::DeleteColumn(col) if cols_fit => {
+            s.cols.remove(col);
+        }
+        // a new row is as tall as its text
+        Edit::InsertRow(after) if rows_fit => s.rows.insert(after.map_or(1, |r| r + 2), 0.0),
+        Edit::DeleteRow(row) if rows_fit => {
+            s.rows.remove(row + 1);
+        }
+        _ => {}
+    }
+    s
+}
+
+/// The text of a block (its comment line, if it has one, and its table lines, as `byte_range`
+/// gives them) after `change`; the comment line is written, changed or removed as its content
+/// asks. `None` when the change does not fit the table.
+pub fn change_block(src: &str, has_meta: bool, meta: &Meta, change: &Change) -> Option<String> {
+    let (old_meta, table) = if has_meta {
+        let cut = src.find('\n').map_or(src.len(), |p| p + 1);
+        (Some(&src[..cut]), &src[cut..])
+    } else {
+        (None, src)
+    };
+    let (new_table, new_meta) = match change {
+        Change::Edit(e) => {
+            let t = edit_source(table, *e)?;
+            let ncols = split_cells(table.lines().next()?).len();
+            let nrows = table.lines().count().saturating_sub(1);
+            (t, Meta { cells: meta.cells, sizes: sizes_after(&meta.sizes, ncols, nrows, *e) })
+        }
+        Change::Meta(m) => (table.to_string(), m.clone()),
+        Change::Cell { row, col, text } => (set_cell(table, *row, *col, text)?, meta.clone()),
+    };
+    let crlf = old_meta.map_or(table.split('\n').next().is_some_and(|l| l.ends_with('\r')), |m| m.ends_with("\r\n"));
+    let mut out = String::new();
+    if let Some(line) = meta_line(&new_meta) {
+        out.push_str(&line);
+        out.push_str(if crlf { "\r\n" } else { "\n" });
+    }
+    out.push_str(&new_table);
+    Some(out)
+}
+
+/// The narrowest a column can be made (EDIT-031).
+pub const MIN_COL: f32 = 24.0;
+
 /// Column widths for the text of the columns: the natural width (the text on one line) of each
 /// column when it all fits into `avail`; otherwise every column keeps at least its `min` (its
 /// longest word, never more than the natural width) and the rest is shared in proportion to how
@@ -327,6 +527,12 @@ impl Laid {
             Col::Right => x + w - PAD_X,
         };
         Pos2::new(x, y)
+    }
+
+    /// The rectangle of a cell of a table whose top left corner is `origin`.
+    pub fn cell_rect(&self, origin: Pos2, row: usize, col: usize) -> Rect {
+        let min = origin + Vec2::new(self.widths[..col].iter().sum(), self.heights[..row].iter().sum());
+        Rect::from_min_size(min, Vec2::new(self.widths[col], self.heights[row]))
     }
 
     /// The cell under `p` for a table whose top left corner is `origin`: (row, column, the
@@ -393,7 +599,10 @@ fn words(job: &LayoutJob) -> Vec<LayoutJob> {
 }
 
 /// Lay a table out for `avail` points of width. `exists` says whether a link target is a note.
-pub fn layout(ctx: &egui::Context, table: &Table, base: f32, avail: f32, exists: &dyn Fn(&LinkSpan) -> bool) -> Laid {
+/// Sizes that match the table's columns (rows) are used (EDIT-031): the widths scaled down
+/// together when they do not fit, every column at least `MIN_COL`, a row never shorter than its
+/// text.
+pub fn layout(ctx: &egui::Context, table: &Table, sizes: &Sizes, base: f32, avail: f32, exists: &dyn Fn(&LinkSpan) -> bool) -> Laid {
     let ncols = table.header.len();
     let mut jobs: Vec<Vec<(LayoutJob, Spans)>> = Vec::new();
     for (r, row) in std::iter::once(&table.header).chain(&table.rows).enumerate() {
@@ -416,10 +625,20 @@ pub fn layout(ctx: &egui::Context, table: &Table, base: f32, avail: f32, exists:
         }
     }
     let text_avail = avail - 2.0 * PAD_X * ncols as f32 - 1.0;
-    let text_w = column_widths(&natural, &min, text_avail);
+    let text_w = if sizes.cols.len() == ncols && ncols > 0 {
+        let mut w: Vec<f32> = sizes.cols.iter().map(|c| c.max(MIN_COL)).collect();
+        let (sum, room) = (w.iter().sum::<f32>(), avail - 1.0);
+        if sum > room {
+            w.iter_mut().for_each(|x| *x *= room.max(0.0) / sum);
+        }
+        w.iter().map(|x| (x - 2.0 * PAD_X).max(1.0)).collect()
+    } else {
+        column_widths(&natural, &min, text_avail)
+    };
+    let rows_fit = sizes.rows.len() == jobs.len();
     let mut cells = Vec::new();
     let mut heights = Vec::new();
-    for row in jobs {
+    for (r, row) in jobs.into_iter().enumerate() {
         let mut laid_row = Vec::new();
         let mut h = base * 1.5;
         for (c, (mut job, spans)) in row.into_iter().enumerate() {
@@ -429,7 +648,8 @@ pub fn layout(ctx: &egui::Context, table: &Table, base: f32, avail: f32, exists:
             h = h.max(galley.size().y);
             laid_row.push(LaidCell { galley, spans });
         }
-        heights.push(h + 2.0 * PAD_Y);
+        let least = if rows_fit { sizes.rows[r] } else { 0.0 };
+        heights.push((h + 2.0 * PAD_Y).max(least));
         cells.push(laid_row);
     }
     Laid { aligns: table.aligns.clone(), widths: text_w.iter().map(|w| w + 2.0 * PAD_X).collect(), heights, cells }
@@ -554,7 +774,7 @@ mod tests {
         let ctx = egui::Context::default();
         let t = Table { aligns, header: header.iter().map(|s| s.to_string()).collect(), rows: rows.iter().map(|r| r.iter().map(|s| s.to_string()).collect()).collect() };
         let mut out = None;
-        let mut full = ctx.run_ui(egui::RawInput::default(), |ui| out = Some(layout(ui.ctx(), &t, 15.0, width, &|_| true)));
+        let mut full = ctx.run_ui(egui::RawInput::default(), |ui| out = Some(layout(ui.ctx(), &t, &Sizes::default(), 15.0, width, &|_| true)));
         full.textures_delta.clear();
         out.unwrap()
     }
@@ -689,5 +909,85 @@ mod tests {
         // and a column behind its end is just not there
         assert_eq!(edit_source(short, Edit::DeleteColumn(2)).unwrap(), "A | B \n--|--\n1\n");
         assert_eq!(edit_source("| A | B |\n|---|---|\n| 1 |\n", Edit::DeleteColumn(1)).unwrap(), "| A |\n|---|\n| 1 |\n", "a short row without that cell stays");
+    }
+
+    // spec: EDIT-030
+    #[test]
+    fn the_comment_line_above_a_table_is_read_written_and_belongs_to_it() {
+        let m = parse_meta("<!-- shale-table edit=raw cols=120,80 rows=30,0,44 future=1 -->").unwrap();
+        assert_eq!(m, Meta { cells: Some(false), sizes: Sizes { cols: vec![120.0, 80.0], rows: vec![30.0, 0.0, 44.0] } });
+        assert_eq!(meta_line(&m).unwrap(), "<!-- shale-table edit=raw cols=120,80 rows=30,0,44 -->");
+        assert_eq!(parse_meta("<!--shale-table edit=cells-->").unwrap().cells, Some(true));
+        assert_eq!(parse_meta("<!-- shale-table cols=1,x -->").unwrap().sizes.cols, Vec::<f32>::new(), "broken numbers are ignored");
+        assert_eq!(parse_meta("<!-- shale-tables -->"), None);
+        assert_eq!(parse_meta("<!-- a comment -->"), None);
+        assert_eq!(meta_line(&Meta::default()), None, "nothing to keep: no line");
+        let text = "x\n<!-- shale-table edit=cells -->\n| A |\n|---|\n| 1 |\n\n<!-- shale-table edit=raw -->\n\n| B |\n|---|\n";
+        let t = find_tables(text);
+        assert_eq!((t[0].lines.clone(), t[0].table_lines(), t[0].has_meta, t[0].meta.cells), (1..5, 2..5, true, Some(true)));
+        assert_eq!((t[1].lines.clone(), t[1].has_meta), (8..10, false), "a comment with a blank line under it is not the table's");
+        // in fenced code it is not the table's either
+        let t = find_tables("```\n<!-- shale-table edit=raw -->\n```\n| A |\n|---|\n");
+        assert_eq!((t[0].lines.clone(), t[0].has_meta), (3..5, false));
+    }
+
+    // spec: EDIT-030
+    #[test]
+    fn a_cell_is_written_with_its_pipes_escaped_and_the_rest_as_it_was() {
+        let src = "| A |  B |\n|:--|--:|\n|1|2|\n| 3 |\n";
+        assert_eq!(set_cell(src, 0, 1, "Be").unwrap(), "| A | Be |\n|:--|--:|\n|1|2|\n| 3 |\n");
+        assert_eq!(set_cell(src, 1, 0, "a|b `c|d` e\nf").unwrap(), "| A |  B |\n|:--|--:|\n| a\\|b `c|d` e f |2|\n| 3 |\n");
+        assert_eq!(set_cell(src, 2, 1, "4").unwrap(), "| A |  B |\n|:--|--:|\n|1|2|\n| 3 | 4 |\n", "a short row is filled up");
+        assert_eq!(set_cell(src, 3, 0, "x"), None, "no such row");
+        assert_eq!(set_cell(src, 0, 2, "x"), None, "no such column");
+        assert_eq!(set_cell("A | B\r\n--|--\r\n1 | 2\r\n", 1, 1, ""), Some("A | B\r\n--|--\r\n1 |  \r\n".to_string()), "no outer pipes, Windows line ends");
+        let back = find_tables(&set_cell(src, 1, 0, "a|b `c|d`").unwrap())[0].table.rows[0][0].clone();
+        assert_eq!(back, "a|b `c|d`", "what was typed is what the cell shows");
+    }
+
+    // spec: EDIT-030, EDIT-031
+    #[test]
+    fn changes_rewrite_the_comment_line_and_keep_the_sizes_with_their_columns() {
+        let table = "| A | B |\n|---|---|\n| 1 | 2 |\n";
+        let on = Meta { cells: Some(false), sizes: Sizes::default() };
+        let with = change_block(table, false, &Meta::default(), &Change::Meta(on.clone())).unwrap();
+        assert_eq!(with, format!("<!-- shale-table edit=raw -->\n{table}"));
+        // and away again when nothing is left in it
+        assert_eq!(change_block(&with, true, &on, &Change::Meta(Meta::default())).unwrap(), table);
+        let sized = Meta { cells: None, sizes: Sizes { cols: vec![100.0, 60.0], rows: vec![30.0, 40.0] } };
+        let src = format!("<!-- shale-table cols=100,60 rows=30,40 -->\n{table}");
+        let out = change_block(&src, true, &sized, &Change::Edit(Edit::InsertColumn(0))).unwrap();
+        assert!(out.starts_with("<!-- shale-table cols=100,100,60 rows=30,40 -->\n| A |  | B |"), "{out}");
+        let out = change_block(&src, true, &sized, &Change::Edit(Edit::DeleteColumn(0))).unwrap();
+        assert!(out.starts_with("<!-- shale-table cols=60 rows=30,40 -->\n"), "{out}");
+        let out = change_block(&src, true, &sized, &Change::Edit(Edit::InsertRow(Some(0)))).unwrap();
+        assert!(out.starts_with("<!-- shale-table cols=100,60 rows=30,40,0 -->\n"), "a new row is as tall as its text: {out}");
+        let out = change_block(&src, true, &sized, &Change::Cell { row: 1, col: 1, text: "two".into() }).unwrap();
+        assert_eq!(out, "<!-- shale-table cols=100,60 rows=30,40 -->\n| A | B |\n|---|---|\n| 1 | two |\n");
+        assert_eq!(change_block(&src, true, &sized, &Change::Cell { row: 5, col: 0, text: "x".into() }), None);
+        // a Windows note gets a Windows line end
+        let crlf = "| A |\r\n|---|\r\n";
+        assert_eq!(change_block(crlf, false, &Meta::default(), &Change::Meta(on)).unwrap(), format!("<!-- shale-table edit=raw -->\r\n{crlf}"));
+    }
+
+    // spec: EDIT-031
+    #[test]
+    fn stored_sizes_set_the_columns_and_the_least_row_heights() {
+        let ctx = egui::Context::default();
+        let t = Table { aligns: vec![Col::Left; 2], header: vec!["A".into(), "B".into()], rows: vec![vec!["1".into(), "2".into()]] };
+        let run = |sizes: Sizes, width: f32| {
+            let mut out = None;
+            let mut full = ctx.run_ui(egui::RawInput::default(), |ui| out = Some(layout(ui.ctx(), &t, &sizes, 15.0, width, &|_| true)));
+            full.textures_delta.clear();
+            out.unwrap()
+        };
+        let auto = run(Sizes::default(), 800.0);
+        let l = run(Sizes { cols: vec![200.0, 10.0], rows: vec![0.0, 90.0] }, 800.0);
+        assert_eq!(l.widths, [200.0, MIN_COL], "a column is at least MIN_COL wide");
+        assert_eq!(l.heights[0], auto.heights[0], "a row is never shorter than its text");
+        assert_eq!(l.heights[1], 90.0);
+        let narrow = run(Sizes { cols: vec![600.0, 200.0], rows: vec![] }, 401.0);
+        assert!((narrow.widths[0] - 300.0).abs() < 0.01 && (narrow.widths[1] - 100.0).abs() < 0.01, "too wide: scaled down together {:?}", narrow.widths);
+        assert_eq!(run(Sizes { cols: vec![100.0], rows: vec![1.0] }, 800.0).widths, auto.widths, "sizes that do not match are ignored");
     }
 }

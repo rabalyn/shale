@@ -975,6 +975,10 @@ impl ShaleApp {
                             ui.label("Raw lines around the cursor");
                             changed |= ui.add(egui::DragValue::new(&mut self.cfg.preview_raw_lines).range(0..=20)).changed();
                         });
+                        changed |= ui
+                            .checkbox(&mut self.cfg.table_cell_edit, "Edit table cells in the grid")
+                            .on_hover_text("Off: a click on a table shows its raw markdown. A single table can be switched by the button above its top right corner.")
+                            .changed();
                     });
                     ui.horizontal(|ui| {
                         ui.label("Play button over the artwork of a sound or video");
