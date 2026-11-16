@@ -90,7 +90,8 @@ over a file the sync just changed.
 - Credentials are git's job (credential helper, SSH agent). A remote that needs a password
   prompt fails with git's message instead of hanging.
 - Large binary attachments go into git history. Git LFS is the user's choice and works because
-  git does it.
+  git does it. *Amended by [ADR-0015](0015-media-playback-and-storage.md): Shale sets up Git LFS
+  for media files itself.*
 
 ## Alternatives considered
 

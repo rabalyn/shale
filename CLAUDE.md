@@ -51,5 +51,8 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
 - **Docs and screenshots**: every change checks README, `docs/FEATURES.md`, the specs,
   `CHANGELOG.md` (or `docs/changelog-pending/`) and the screenshots in `docs/screenshots/`, and
   updates what it made stale.
+- **User guide**: the user guide is a Shale vault (DEV-018, raba/shale#182). Every change that
+  adds, changes or removes a feature or a setting updates the guide's notes, its settings
+  reference, and the screenshots and videos that show it, in the same change.
 - **Releases**: a tag bumps the version correctly (semver, `Cargo.toml` and `Cargo.lock`) and has
   release notes in `CHANGELOG.md` for everything since the previous tag; use `make-release.sh`.
