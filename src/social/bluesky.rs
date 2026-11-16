@@ -30,8 +30,8 @@ impl std::fmt::Debug for Session {
             .field("pds", &self.pds)
             .field("did", &self.did)
             .field("handle", &self.handle)
-            .field("access_jwt", &cal_dav::redacted(self.access_jwt.expose()))
-            .field("refresh_jwt", &cal_dav::redacted(self.refresh_jwt.expose()))
+            .field("access_jwt", &dav::redacted(self.access_jwt.expose()))
+            .field("refresh_jwt", &dav::redacted(self.refresh_jwt.expose()))
             .finish()
     }
 }
@@ -47,7 +47,7 @@ pub struct Api {
 
 impl std::fmt::Debug for Api {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Api").field("server", &self.server).field("handle", &self.handle).field("password", &cal_dav::redacted(self.password.expose())).field("session", &self.session).finish()
+        f.debug_struct("Api").field("server", &self.server).field("handle", &self.handle).field("password", &dav::redacted(self.password.expose())).field("session", &self.session).finish()
     }
 }
 
@@ -495,7 +495,7 @@ pub fn download_blob(did: &str, cid: &str) -> Result<(Vec<u8>, Option<String>), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cal_dav::tests::mock_http;
+    use crate::calendar::dav::tests::mock_http;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 

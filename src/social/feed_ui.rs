@@ -411,7 +411,7 @@ fn post_card(ui: &mut Ui, cx: &mut Cx, p: &Post, idx: usize, width: f32) -> (boo
                     if !c.description.trim().is_empty() {
                         ui.add(egui::Label::new(RichText::new(short(&c.description, 200)).size(12.5).color(theme::MUTED)).wrap());
                     }
-                    ui.label(RichText::new(crate::cal_dav::host_of(&c.url)).size(11.5).color(theme::FAINT));
+                    ui.label(RichText::new(crate::calendar::dav::host_of(&c.url)).size(11.5).color(theme::FAINT));
                 });
                 if r.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(&c.url).clicked() {
                     open_web(&c.url);
@@ -656,7 +656,7 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let out = {
         let SocialState { images, revealed, saving, rects, .. } = st;
         let Some(images) = images.as_ref() else { return asks };
-        let mut cx = Cx { images, revealed, saving, rects, now: crate::cal_time::now() };
+        let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now() };
         let mut area = egui::ScrollArea::vertical().id_salt(("social-scroll", tab.id, &aid, &feed.id)).auto_shrink([false, false]);
         if let Some(off) = applied {
             area = area.vertical_scroll_offset(off);

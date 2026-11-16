@@ -137,8 +137,8 @@ impl ShaleApp {
     /// Bring buffers in line with what the sync changed (SYNC-013) and tell the user (SYNC-014).
     pub(crate) fn after_sync(&mut self, root: &Path, r: Result<Report, String>) {
         let when = {
-            let (_, sod) = crate::cal_time::utc_to_local(crate::cal_time::now());
-            crate::cal_time::hhmm(sod)
+            let (_, sod) = crate::calendar::time::utc_to_local(crate::calendar::time::now());
+            crate::calendar::time::hhmm(sod)
         };
         let report = match r {
             Ok(rep) => rep,

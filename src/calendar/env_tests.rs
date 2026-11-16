@@ -8,17 +8,17 @@
 //! ```
 //!
 //! Trust: the server's certificate is made by `setup-certs.sh`; here it is trusted as an extra
-//! authority by test code only (`cal_dav::TEST_CA`, handed to curl as `--cacert`). The production
+//! authority by test code only (`dav::TEST_CA`, handed to curl as `--cacert`). The production
 //! client has no such switch (CALENV-002).
 //!
 //! The tests share one server, so they take turns (`TURN`). Every event they make has a unique
 //! UID starting with `caldav-env-`; each test removes what it made, and the next test first
 //! removes what a failed earlier run left. The seeded events are only read.
 
-use crate::cal_dav::{self, Account, TEST_CA};
-use crate::cal_ics::Event;
-use crate::cal_store::{CalendarSource, CalendarStore, SourceKind, DEFAULT_SYNC_MINUTES};
-use crate::cal_time as t;
+use crate::calendar::dav::{self, Account, TEST_CA};
+use crate::calendar::ics::Event;
+use crate::calendar::store::{CalendarSource, CalendarStore, SourceKind, DEFAULT_SYNC_MINUTES};
+use crate::calendar::time as t;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -49,7 +49,7 @@ fn ca_path() -> PathBuf {
 
 /// Everything in a calendar, whatever its date.
 fn all(name: &str) -> Vec<Event> {
-    cal_dav::fetch_events(&cal(name), &acct(name), 0, 4_000_000_000).unwrap_or_else(|e| panic!("could not load {name}: {e}. Start the environment first: tests/caldav-env/caldav-env.sh up"))
+    dav::fetch_events(&cal(name), &acct(name), 0, 4_000_000_000).unwrap_or_else(|e| panic!("could not load {name}: {e}. Start the environment first: tests/caldav-env/caldav-env.sh up"))
 }
 
 fn scratch_in(name: &str) -> Vec<Event> {
@@ -60,7 +60,7 @@ fn remove_scratch() {
     for name in CALENDARS {
         for e in scratch_in(name) {
             if let Some(h) = &e.href {
-                let _ = cal_dav::request_with("DELETE", h, &[], "", &acct(name));
+                let _ = dav::request_with("DELETE", h, &[], "", &acct(name));
             }
         }
     }
@@ -136,8 +136,8 @@ fn load(store: &mut CalendarStore) {
     panic!("the calendars did not load: {:?}", store.status);
 }
 
-fn finish(store: &mut CalendarStore, job: &crate::cal_store::Job, ids: &[&str]) -> Result<String, String> {
-    let r = crate::cal_store::tests::wait(job);
+fn finish(store: &mut CalendarStore, job: &crate::calendar::store::Job, ids: &[&str]) -> Result<String, String> {
+    let r = crate::calendar::store::tests::wait(job);
     let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
     store.after_write(&ids);
     load(store);
@@ -150,7 +150,7 @@ fn finish(store: &mut CalendarStore, job: &crate::cal_store::Job, ids: &[&str]) 
 fn caldav_env_discovers_and_loads_the_seeded_calendars() {
     let _env = Env::start();
     // discovery from the bare server address (it goes through /.well-known/caldav and its redirect)
-    let mut found = cal_dav::discover(&acct_for(SERVER, PASSWORD)).expect("discovery");
+    let mut found = dav::discover(&acct_for(SERVER, PASSWORD)).expect("discovery");
     found.sort_by(|a, b| a.name.cmp(&b.name));
     let names: Vec<&str> = found.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, ["Moves", "Private", "Work"], "{found:?}");
@@ -184,7 +184,7 @@ fn caldav_env_discovers_and_loads_the_seeded_calendars() {
     assert!(all("moves").iter().all(|e| !e.uid.starts_with("seed-")), "the calendar for moves starts empty");
 
     // the version tag and write permission
-    let st = cal_dav::calendar_state(&cal("work"), &acct("work")).unwrap();
+    let st = dav::calendar_state(&cal("work"), &acct("work")).unwrap();
     assert!(st.tag.is_some() && st.read_only == Some(false), "{st:?}");
 
     // the same through the calendar store: the repeat is expanded with its skipped and changed date
@@ -207,8 +207,8 @@ fn caldav_env_creates_edits_and_deletes_an_event() {
     let (a, name) = (acct("private"), "private");
     let mut e = new_event("crud", "Created by the test");
     e.description = "first".into();
-    e.alarms = vec![crate::cal_ics::Alarm::before_start(600)];
-    let (href, etag) = cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
+    e.alarms = vec![crate::calendar::ics::Alarm::before_start(600)];
+    let (href, etag) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
     assert!(href.starts_with(&cal(name)) && etag.is_some(), "{href} {etag:?}");
 
     let on_server = find_one(name, &e.uid);
@@ -217,14 +217,14 @@ fn caldav_env_creates_edits_and_deletes_an_event() {
     assert_eq!((on_server.href.as_deref(), on_server.etag.as_deref()), (Some(href.as_str()), etag.as_deref()));
 
     // the same UID can't be created twice
-    let err = cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).unwrap_err();
+    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).unwrap_err();
     assert!(err.contains("already exists"), "{err}");
 
     // edit in place: same UID, same address, a new version tag
     let mut edited = on_server.clone();
     edited.summary = "Edited by the test".into();
     edited.description = "second".into();
-    let (href2, etag2) = cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&edited), Some((&href, etag.as_deref())), std::slice::from_ref(&on_server)).expect("edit");
+    let (href2, etag2) = dav::put_event(&cal(name), &a, std::slice::from_ref(&edited), Some((&href, etag.as_deref())), std::slice::from_ref(&on_server)).expect("edit");
     assert_eq!(href2, href);
     assert!(etag2.is_some() && etag2 != etag, "{etag:?} {etag2:?}");
     let after = find_one(name, &e.uid);
@@ -232,10 +232,10 @@ fn caldav_env_creates_edits_and_deletes_an_event() {
     assert_eq!(after.alarms.len(), 1, "the reminder was kept");
 
     // delete with the current version tag
-    cal_dav::delete_event(&href, &a, etag2.as_deref(), std::slice::from_ref(&after)).expect("delete");
+    dav::delete_event(&href, &a, etag2.as_deref(), std::slice::from_ref(&after)).expect("delete");
     assert!(find(name, &e.uid).is_empty());
     // an event that is already gone counts as removed
-    cal_dav::delete_event(&href, &a, None, std::slice::from_ref(&after)).expect("delete again");
+    dav::delete_event(&href, &a, None, std::slice::from_ref(&after)).expect("delete again");
 }
 
 // spec: CALENV-002
@@ -246,7 +246,7 @@ fn caldav_env_edits_and_removes_one_date_of_a_repeating_event() {
     let (a, name) = (acct("work"), "work");
     let mut series = new_event("series", "Daily test");
     series.rrule = Some("FREQ=DAILY;COUNT=5".into());
-    cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&series), None, &[]).expect("create the series");
+    dav::put_event(&cal(name), &a, std::slice::from_ref(&series), None, &[]).expect("create the series");
     let master = find_one(name, &series.uid);
 
     // change the third date only: stored as its own copy beside the series, in the same file
@@ -254,7 +254,7 @@ fn caldav_env_edits_and_removes_one_date_of_a_repeating_event() {
     let mut changed = master.override_at(third + 1800, third + 1800 + 3600);
     changed.recurrence_id = Some(third);
     changed.summary = "Daily test (third, later)".into();
-    cal_dav::put_event(&cal(name), &a, &[changed, master.clone()], Some((master.href.as_deref().unwrap(), master.etag.as_deref())), std::slice::from_ref(&master)).expect("edit one date");
+    dav::put_event(&cal(name), &a, &[changed, master.clone()], Some((master.href.as_deref().unwrap(), master.etag.as_deref())), std::slice::from_ref(&master)).expect("edit one date");
     let parts = find(name, &series.uid);
     assert_eq!(parts.len(), 2, "{parts:?}");
     let over = parts.iter().find(|p| p.recurrence_id.is_some()).unwrap();
@@ -284,7 +284,7 @@ fn caldav_env_edits_and_removes_one_date_of_a_repeating_event() {
 fn caldav_env_moves_an_event_to_another_calendar_and_deletes_it() {
     let _env = Env::start();
     let e = new_event("move", "Moving test");
-    cal_dav::put_event(&cal("work"), &acct("work"), std::slice::from_ref(&e), None, &[]).expect("create");
+    dav::put_event(&cal("work"), &acct("work"), std::slice::from_ref(&e), None, &[]).expect("create");
     let (dir, mut store) = store("move");
     load(&mut store);
     let original = store.find("work", &e.uid).expect("loaded");
@@ -317,47 +317,47 @@ fn caldav_env_a_change_on_the_server_meanwhile_is_not_overwritten() {
     let _env = Env::start();
     let (a, name) = (acct("work"), "work");
     let e = new_event("conflict", "Original");
-    let (href, _) = cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
+    let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
     let read = find_one(name, &e.uid);
 
     // somebody else changes the event after it was read
     let mut theirs = read.clone();
     theirs.summary = "Changed by somebody else".into();
-    let (_, their_tag) = cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&theirs), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).expect("their edit");
+    let (_, their_tag) = dav::put_event(&cal(name), &a, std::slice::from_ref(&theirs), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).expect("their edit");
     assert_ne!(their_tag, read.etag);
 
     // our save with the old version tag is refused (HTTP 412) and the server keeps their version
     let mut mine = read.clone();
     mine.summary = "Changed by me".into();
-    let err = cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
+    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
     assert!(err.contains("changed on the server meanwhile"), "{err}");
     assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
     // so is a delete with the old tag
-    let err = cal_dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).unwrap_err();
+    let err = dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).unwrap_err();
     assert!(err.contains("changed on the server meanwhile"), "{err}");
     assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
 
     // without any version tag (a server that sends none): the event is compared with what was read (CAL-016)
-    let err = cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&read)).unwrap_err();
+    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&read)).unwrap_err();
     assert!(err.contains("changed on the server meanwhile"), "{err}");
-    let err = cal_dav::delete_event(&href, &a, None, std::slice::from_ref(&read)).unwrap_err();
+    let err = dav::delete_event(&href, &a, None, std::slice::from_ref(&read)).unwrap_err();
     assert!(err.contains("changed on the server meanwhile"), "{err}");
     assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
     // …and goes through when the server still has what was read
     let current = find_one(name, &e.uid);
     let mut mine = current.clone();
     mine.summary = "Changed by me, knowing theirs".into();
-    cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&current)).expect("save without a tag");
+    dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&current)).expect("save without a tag");
     assert_eq!(find_one(name, &e.uid).summary, "Changed by me, knowing theirs");
     let current = find_one(name, &e.uid);
-    cal_dav::delete_event(&href, &a, None, std::slice::from_ref(&current)).expect("delete without a tag");
+    dav::delete_event(&href, &a, None, std::slice::from_ref(&current)).expect("delete without a tag");
     assert!(find(name, &e.uid).is_empty());
 
     // an event somebody deleted meanwhile is not brought back by a save
-    let (href, _) = cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create again");
+    let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create again");
     let read = find_one(name, &e.uid);
-    cal_dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).expect("their delete");
-    let err = cal_dav::put_event(&cal(name), &a, std::slice::from_ref(&read), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
+    dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).expect("their delete");
+    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&read), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
     assert!(!err.is_empty());
     assert!(find(name, &e.uid).is_empty());
 }
@@ -369,18 +369,18 @@ fn caldav_env_a_wrong_password_is_an_error_and_changes_nothing() {
     let _env = Env::start();
     let bad = acct_for(&cal("work"), "not-the-password");
     let refused = "the server refused the user name or password";
-    assert_eq!(cal_dav::discover(&acct_for(SERVER, "not-the-password")).unwrap_err(), refused);
-    assert_eq!(cal_dav::calendar_state(&cal("work"), &bad).unwrap_err(), refused);
-    assert_eq!(cal_dav::fetch_events(&cal("work"), &bad, 0, 4_000_000_000).unwrap_err(), refused);
+    assert_eq!(dav::discover(&acct_for(SERVER, "not-the-password")).unwrap_err(), refused);
+    assert_eq!(dav::calendar_state(&cal("work"), &bad).unwrap_err(), refused);
+    assert_eq!(dav::fetch_events(&cal("work"), &bad, 0, 4_000_000_000).unwrap_err(), refused);
     let e = new_event("badpw", "Must not appear");
-    assert_eq!(cal_dav::put_event(&cal("work"), &bad, std::slice::from_ref(&e), None, &[]).unwrap_err(), refused);
+    assert_eq!(dav::put_event(&cal("work"), &bad, std::slice::from_ref(&e), None, &[]).unwrap_err(), refused);
     assert!(find("work", &e.uid).is_empty());
     let seeded = all("work").into_iter().find(|x| x.uid == "seed-standup@shale.test").unwrap();
-    assert!(cal_dav::delete_event(seeded.href.as_deref().unwrap(), &bad, seeded.etag.as_deref(), std::slice::from_ref(&seeded)).is_err());
+    assert!(dav::delete_event(seeded.href.as_deref().unwrap(), &bad, seeded.etag.as_deref(), std::slice::from_ref(&seeded)).is_err());
     assert!(find("work", "seed-standup@shale.test").len() == 1, "the seeded event is still there");
     // another user name with the right password is refused as well
     let other = Account { username: "somebody".into(), ..acct("work") };
-    assert_eq!(cal_dav::calendar_state(&cal("work"), &other).unwrap_err(), refused);
+    assert_eq!(dav::calendar_state(&cal("work"), &other).unwrap_err(), refused);
 }
 
 // spec: CALENV-002, SEC-001
@@ -390,25 +390,25 @@ fn caldav_env_certificate_and_address_rules() {
     let _env = Env::start();
     let a = acct("work");
     // with the test CA trusted (as the other tests do) the server answers
-    assert!(cal_dav::calendar_state(&cal("work"), &a).is_ok());
+    assert!(dav::calendar_state(&cal("work"), &a).is_ok());
     // a redirect on the same server is followed (and the answer says where it ended)
-    let r = cal_dav::request_with("GET", &format!("{SERVER}.well-known/caldav"), &[], "", &a).expect("redirect");
+    let r = dav::request_with("GET", &format!("{SERVER}.well-known/caldav"), &[], "", &a).expect("redirect");
     assert!(r.url.starts_with(SERVER) && !r.url.contains("well-known"), "the redirect of /.well-known/caldav was followed: {}", r.url);
 
     // production trust: without the test CA the certificate is refused and nothing is sent
     *TEST_CA.lock().unwrap() = None;
-    let err = cal_dav::calendar_state(&cal("work"), &a).unwrap_err();
+    let err = dav::calendar_state(&cal("work"), &a).unwrap_err();
     assert!(err.to_lowercase().contains("certificate"), "{err}");
-    let err = cal_dav::discover(&acct_for(SERVER, PASSWORD)).unwrap_err();
+    let err = dav::discover(&acct_for(SERVER, PASSWORD)).unwrap_err();
     assert!(err.to_lowercase().contains("certificate"), "{err}");
     *TEST_CA.lock().unwrap() = Some(ca_path());
 
     // plain http to this computer is allowed by the address rules, but this server speaks TLS only: an error, not an answer
-    let err = cal_dav::request_with("GET", "http://localhost:15232/shale/work/", &[], "", &a).map(|r| r.status);
+    let err = dav::request_with("GET", "http://localhost:15232/shale/work/", &[], "", &a).map(|r| r.status);
     assert!(!matches!(err, Ok(200..=299)), "{err:?}");
     // http to another server is refused before anything is sent
-    let err = cal_dav::request_with("GET", "http://dav.example.com/", &[], "", &a).unwrap_err();
+    let err = dav::request_with("GET", "http://dav.example.com/", &[], "", &a).unwrap_err();
     assert!(err.contains("https"), "{err}");
     // no user name or password inside an address
-    assert!(cal_dav::request_with("GET", &format!("https://{USER}:{PASSWORD}@localhost:15232/"), &[], "", &Account { username: String::new(), ..a.clone() }).is_err());
+    assert!(dav::request_with("GET", &format!("https://{USER}:{PASSWORD}@localhost:15232/"), &[], "", &Account { username: String::new(), ..a.clone() }).is_err());
 }

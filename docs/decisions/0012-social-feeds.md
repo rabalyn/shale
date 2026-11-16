@@ -15,7 +15,7 @@ no TLS or OAuth crates.
 
 ## Decision
 
-1. **Transport**: the same `curl` helper as CalDAV (`cal_dav::request_bytes`), with a size cap
+1. **Transport**: the same `curl` helper as CalDAV (`calendar::dav::request_bytes`), with a size cap
    and binary bodies. Only `https://` servers (`http://` for this computer). Tokens are sent in
    `curl`'s standard input, never on a command line (SEC-002).
 2. **Sign-in, read only**:

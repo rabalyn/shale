@@ -3,9 +3,9 @@
 //! Each e-mail / event becomes one note named "<date> <subject>", in a chosen folder, with
 //! the tags in the note's properties so the tag list finds it.
 
-use crate::cal_ics::{self, Event};
-use crate::cal_store::Occ;
-use crate::cal_time as t;
+use crate::calendar::ics::{self, Event};
+use crate::calendar::store::Occ;
+use crate::calendar::time as t;
 use crate::mail::{self, Mail};
 use crate::media;
 use crate::vault::{rel_to_string, Vault};
@@ -95,7 +95,7 @@ impl Item {
                 format!("from {} · {when}{}", mail::display_name(&mail.from), if n > 0 { format!(" · {n} attachment{}", if n == 1 { "" } else { "s" }) } else { String::new() })
             }
             Source::Event { event, calendar, .. } => {
-                format!("{} · {calendar}", crate::cal_ui::when_text(&occ_of(event)))
+                format!("{} · {calendar}", crate::calendar::ui::when_text(&occ_of(event)))
             }
             Source::Files(p) => p.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(", "),
             #[cfg(target_os = "linux")]
@@ -225,14 +225,14 @@ fn files_item(paths: Vec<PathBuf>) -> Item {
 
 fn calendar_items(ics: &[u8], calendar: &str, file_name: &str) -> Vec<Item> {
     let text = String::from_utf8_lossy(ics);
-    let events = cal_ics::parse_ics(&text);
+    let events = ics::parse_ics(&text);
     let single = events.iter().filter(|e| e.recurrence_id.is_none()).count() <= 1;
     events
         .into_iter()
         .filter(|e| e.recurrence_id.is_none())
         .map(|e| {
             // the calendar file is kept with the note only when it holds just this event
-            let original = if single { Some((file_name.to_string(), ics.to_vec())) } else { Some((format!("{}.ics", safe_title(&e.summary)), cal_ics::to_ics("", std::slice::from_ref(&e)).into_bytes())) };
+            let original = if single { Some((file_name.to_string(), ics.to_vec())) } else { Some((format!("{}.ics", safe_title(&e.summary)), ics::to_ics("", std::slice::from_ref(&e)).into_bytes())) };
             event_item(e, calendar.to_string(), original)
         })
         .collect()
@@ -420,12 +420,12 @@ pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&
         tags,
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(if e.summary.is_empty() { "Event" } else { &e.summary })));
-    s.push_str(&format!("- **When:** {}\n", crate::cal_ui::when_text(&occ_of(e))));
+    s.push_str(&format!("- **When:** {}\n", crate::calendar::ui::when_text(&occ_of(e))));
     if !people.is_empty() {
         s.push_str(&format!("- **People:** {}\n", people.join(", ")));
     }
     if let Some(r) = &e.rrule {
-        s.push_str(&format!("- **Repeats:** {}\n", crate::cal_ui::rrule_text(r)));
+        s.push_str(&format!("- **Repeats:** {}\n", crate::calendar::ui::rrule_text(r)));
     }
     for (k, v) in [("Where", &e.location), ("Calendar", &calendar.to_string()), ("Organizer", &e.organizer), ("Status", &e.status.to_lowercase())] {
         if !v.is_empty() {
@@ -620,7 +620,7 @@ mod tests {
             attendees: vec!["A".into(), "B".into()],
             ..Default::default()
         };
-        let mut items = vec![event_item(e.clone(), "Work".into(), Some(("x.ics".into(), cal_ics::to_ics("", std::slice::from_ref(&e)).into_bytes())))];
+        let mut items = vec![event_item(e.clone(), "Work".into(), Some(("x.ics".into(), ics::to_ics("", std::slice::from_ref(&e)).into_bytes())))];
         assert_eq!(items[0].title, "2026-12-02 Baubesprechung");
         // a file next to it
         let src = v.root.join("..").join(format!("shale-import-plan-{}.pdf", std::process::id()));

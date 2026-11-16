@@ -6,7 +6,7 @@ use super::{Author, LinkCard, Media, MediaKind, Post};
 
 /// A moment `days` days ago.
 fn ago(days: i64) -> i64 {
-    crate::cal_time::now() - days * 86_400
+    crate::calendar::time::now() - days * 86_400
 }
 
 fn ids(h: &[PostHit]) -> Vec<&str> {
@@ -180,11 +180,11 @@ fn the_data_usage_dialog_counts_empties_and_prunes_the_index_file_next_to_the_op
     let s = stats_file(&path).unwrap();
     assert_eq!((s.entries, s.oldest.map(|o| o <= ago(399))), (4, Some(true)));
     assert!(s.bytes > 0);
-    let pruned = prune_file(&path, Some(365), Some(1), crate::cal_time::now()).unwrap();
+    let pruned = prune_file(&path, Some(365), Some(1), crate::calendar::time::now()).unwrap();
     assert_eq!(pruned.entries, 2, "the post of 400 days, then the oldest over one per account");
     assert_eq!(ids(&ix.search("new", 5)), ["3"], "the window's own connection sees the change");
     assert_eq!(ix.count(None), 2);
-    assert_eq!(prune_file(&path, None, None, crate::cal_time::now()).unwrap().entries, 0, "no limits remove nothing");
+    assert_eq!(prune_file(&path, None, None, crate::calendar::time::now()).unwrap().entries, 0, "no limits remove nothing");
     assert_eq!(clear_file(&path).unwrap().entries, 2);
     assert!(ix.search("other", 5).is_empty() && ix.count(None) == 0, "empty for every account");
     ix.add("a", "home", &[with_text("5", "x", ago(1), "after the clear")]);

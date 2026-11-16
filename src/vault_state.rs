@@ -105,9 +105,9 @@ pub fn save<T: Serialize>(path: &Path, value: &T, writable: bool) -> std::io::Re
 
 /// `name.broken-YYYY-MM-DD-HHMMSS` next to the file (a number is added if that is taken).
 pub fn broken_name(path: &Path) -> PathBuf {
-    let secs = crate::cal_time::now();
-    let (days, sod) = crate::cal_time::utc_to_local(secs);
-    let (y, m, d) = crate::cal_time::civil_from_days(days);
+    let secs = crate::calendar::time::now();
+    let (days, sod) = crate::calendar::time::utc_to_local(secs);
+    let (y, m, d) = crate::calendar::time::civil_from_days(days);
     let stamp = format!("{y:04}-{m:02}-{d:02}-{:02}{:02}{:02}", sod / 3600, sod % 3600 / 60, sod % 60);
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut out = path.with_file_name(format!("{name}.broken-{stamp}"));

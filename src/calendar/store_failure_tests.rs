@@ -6,10 +6,10 @@
 //! where the file should be, a file where the folder should be), not with permission bits, which
 //! root ignores (the CI container runs as root).
 
-use crate::cal_ics::{self, Event};
-use crate::cal_store::tests::wait;
-use crate::cal_store::{file_of, CalendarSource, CalendarStore, SourceKind, DEFAULT_SYNC_MINUTES};
-use crate::cal_time as t;
+use crate::calendar::ics::{self, Event};
+use crate::calendar::store::tests::wait;
+use crate::calendar::store::{file_of, CalendarSource, CalendarStore, SourceKind, DEFAULT_SYNC_MINUTES};
+use crate::calendar::time as t;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -182,7 +182,7 @@ fn deleting_one_date_when_the_file_cannot_be_written_or_has_vanished() {
     let master = store.find(&src.id, "daily").unwrap();
     std::fs::remove_file(&file).unwrap();
     wait(&store.delete_occurrence(&src.id, &master, master.start + DAY, None).unwrap()).unwrap();
-    let evs = cal_ics::parse_ics(&std::fs::read_to_string(&file).unwrap());
+    let evs = ics::parse_ics(&std::fs::read_to_string(&file).unwrap());
     assert_eq!((evs.len(), evs[0].exdates.clone()), (1, vec![master.start + DAY]));
     // refused before a job starts
     let (mut store, src, _) = local_with("date-ro", DAILY);
@@ -232,7 +232,7 @@ fn a_refresh_that_fails_shows_the_reason_and_keeps_what_was_loaded() {
     // the server answers the first load and then fails in different ways
     let mode = Arc::new(Mutex::new(0usize));
     let m2 = mode.clone();
-    let (base, _h) = crate::cal_dav::tests::mock_http_with(60, move |method, _, _, _| {
+    let (base, _h) = crate::calendar::dav::tests::mock_http_with(60, move |method, _, _, _| {
         let mode = *m2.lock().unwrap();
         match (method, mode) {
             ("PROPFIND", _) => (404, String::new(), String::new()),
@@ -293,7 +293,7 @@ fn a_changed_version_tag_downloads_again_and_a_changed_permission_is_taken_over(
     let state = Arc::new(Mutex::new(("1".to_string(), false)));
     let reports = Arc::new(AtomicUsize::new(0));
     let (s2, r2) = (state.clone(), reports.clone());
-    let (base, _h) = crate::cal_dav::tests::mock_http_with(60, move |method, _, _, _| {
+    let (base, _h) = crate::calendar::dav::tests::mock_http_with(60, move |method, _, _, _| {
         if method == "PROPFIND" {
             let (tag, writable) = s2.lock().unwrap().clone();
             let privilege = if writable { "<d:write/>" } else { "<d:read/>" };
@@ -334,7 +334,7 @@ fn without_a_version_tag_every_refresh_downloads() {
     }
     let reports = Arc::new(AtomicUsize::new(0));
     let r2 = reports.clone();
-    let (base, _h) = crate::cal_dav::tests::mock_http_with(60, move |method, _, _, _| {
+    let (base, _h) = crate::calendar::dav::tests::mock_http_with(60, move |method, _, _, _| {
         if method == "PROPFIND" {
             return (207, String::new(), r#"<d:multistatus xmlns:d="DAV:"/>"#.into());
         }

@@ -421,7 +421,7 @@ impl ShaleApp {
             }
         }
         // an event dragged out of the calendar
-        let cal = egui::DragAndDrop::payload::<crate::cal_ui::CalDrag>(&ctx);
+        let cal = egui::DragAndDrop::payload::<crate::calendar::ui::CalDrag>(&ctx);
         let pointer = ctx.input(|i| i.pointer.latest_pos());
         if let (Some(drag), Some(p)) = (&cal, pointer) {
             let over_calendar = self.calendar_areas.iter().any(|r| r.contains(p));
@@ -430,7 +430,7 @@ impl ShaleApp {
                 egui::DragAndDrop::clear_payload(&ctx);
                 if !over_calendar {
                     let file = format!("{}.ics", if drag.event.summary.trim().is_empty() { "event".to_string() } else { drag.event.summary.replace(['/', '\\'], "-") });
-                    let item = import::event_item(drag.event.clone(), drag.calendar.clone(), Some((file, crate::cal_ics::to_ics("", std::slice::from_ref(&drag.event)).into_bytes())));
+                    let item = import::event_item(drag.event.clone(), drag.calendar.clone(), Some((file, crate::calendar::ics::to_ics("", std::slice::from_ref(&drag.event)).into_bytes())));
                     self.open_import(vec![item], vec![], zone.map(|z| (z.folder, z.note)));
                 }
             } else if over_calendar {

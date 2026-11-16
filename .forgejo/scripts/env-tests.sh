@@ -8,7 +8,7 @@
 #       prints "podman", "docker" or "none": which container engine the job container can use
 #   env-tests.sh run [podman|docker]
 #       uses the given engine (the one the detect step found; detected again when left out),
-#       starts both stacks, runs `cargo test -- --ignored caldav_env` and `… mail_env`, and always
+#       starts both stacks, runs `cargo test -- --ignored calendar::env_tests` and `… mail_env`, and always
 #       takes the stacks down again; exits 1 if a stack or a test fails or no test ran
 set -eu
 cd "$(dirname "$0")/../.."
@@ -17,7 +17,7 @@ case "${1:-}" in
   wanted)
     if [ "${2:-}" != pull_request ]; then echo yes; exit 0; fi
     files=$(git diff --name-only "$3" "$4")
-    if printf '%s\n' "$files" | grep -Eq '^(src/(cal_|caldav_|imap|mail|smtp)|tests/(caldav|mail)-env/|\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh))'; then
+    if printf '%s\n' "$files" | grep -Eq '^(src/(calendar/|imap|mail|smtp)|tests/(caldav|mail)-env/|\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh))'; then
       echo yes
     else
       echo no
@@ -73,7 +73,7 @@ case "${1:-}" in
       exit 1
     fi
 
-    for suite in caldav_env mail_env; do
+    for suite in calendar::env_tests mail_env; do
       log=$(mktemp)
       cargo test --locked -- --ignored "$suite" --test-threads=1 2>&1 | tee "$log" || status=1
       # a filter that matches nothing "passes": make sure the suite really ran

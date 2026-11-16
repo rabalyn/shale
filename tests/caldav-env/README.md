@@ -59,24 +59,24 @@ Then Settings, Calendars, CalDAV: server `https://localhost:15232/`, user `shale
 
 ```sh
 tests/caldav-env/caldav-env.sh up
-cargo test -- --ignored caldav_env
+cargo test -- --ignored calendar::env_tests
 ```
 
-Seven tests in `src/caldav_env_tests.rs` (ignored by default, so `cargo test` never needs
+Seven tests in `src/calendar/env_tests.rs` (ignored by default, so `cargo test` never needs
 containers): discovery and loading of the seeded calendars; create, edit and delete; changing and
 removing one date of a repeating event; moving between calendars; a change made on the server
 meanwhile (the save and the delete are refused, with and without a version tag); a wrong
 password; and the https, redirect and certificate rules (without the test CA the certificate is
 refused). They take turns, give every event they make a unique UID starting with `caldav-env-` and
 remove what they made (also what a failed earlier run left), so they can be run again at once; the
-seeded events are only read. The tests trust the CA through `cal_dav::TEST_CA`, which exists only
+seeded events are only read. The tests trust the CA through `calendar::dav::TEST_CA`, which exists only
 in test builds. Use `SHALE_CALDAV_ENV_COMPOSE` as above for Docker.
 
 ## In CI
 
 The `env-tests` job of `.forgejo/workflows/ci.yml` (DEV-011, CALENV-004, MAIL-093) runs both this
 suite and the mail suite (`tests/mail-env/`) with `.forgejo/scripts/env-tests.sh run`: on pushes to
-`main`, on pull requests that touch `src/cal_*`, `src/caldav_*`, `src/imap*`, `src/mail*`,
+`main`, on pull requests that touch `src/calendar/`, `src/imap*`, `src/mail*`,
 `src/smtp*` or `tests/{caldav,mail}-env/`, and weekly. It starts both stacks, runs both ignored
 suites (`--test-threads=1`, and fails if a suite ran no test) and always takes the stacks down.
 

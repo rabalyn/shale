@@ -7,7 +7,7 @@
 
 use super::ui_tests::{opened, Show, P};
 use super::*;
-use crate::cal_dialog::EventDialog;
+use crate::calendar::dialog::EventDialog;
 use eframe::egui::PointerButton;
 use std::time::{Duration, Instant};
 
@@ -163,8 +163,8 @@ fn dialogs_calendars_sample_events_are_written_and_a_bad_address_is_refused() {
     // saved right away, with events in the calendar's file
     assert_eq!(p.app.cfg.calendars.len(), 1);
     let src = p.app.cfg.calendars[0].clone();
-    let file = crate::cal_store::file_of(&src).unwrap().to_path_buf();
-    let in_file = crate::cal_ics::parse_ics(&std::fs::read_to_string(&file).unwrap());
+    let file = crate::calendar::store::file_of(&src).unwrap().to_path_buf();
+    let in_file = crate::calendar::ics::parse_ics(&std::fs::read_to_string(&file).unwrap());
     assert!(!in_file.is_empty());
     assert_eq!(p.app.calendar.events.get(&src.id).map(Vec::len), Some(in_file.len()));
     let said = format!("Added {} sample events around today.", in_file.len());
@@ -180,7 +180,7 @@ fn dialogs_calendars_sample_events_are_written_and_a_bad_address_is_refused() {
     assert!(p.shows(Show::Modals, "Added. Press Done to save."));
     p.click(Show::Modals, "Done");
     assert!(p.app.modal.is_none());
-    let dav: Vec<_> = p.app.cfg.calendars.iter().filter(|s| matches!(&s.kind, crate::cal_store::SourceKind::Caldav { url, .. } if url == "https://127.0.0.1:9/dav/work/")).collect();
+    let dav: Vec<_> = p.app.cfg.calendars.iter().filter(|s| matches!(&s.kind, crate::calendar::store::SourceKind::Caldav { url, .. } if url == "https://127.0.0.1:9/dav/work/")).collect();
     assert_eq!(dav.len(), 1);
     assert_eq!(dav[0].name, "work");
     let _ = std::fs::remove_dir_all(dir);
@@ -209,19 +209,19 @@ fn with_calendar(tag: &str) -> (P, CalendarSource, PathBuf) {
     (p, src, dir)
 }
 
-use crate::cal_store::CalendarSource;
+use crate::calendar::store::CalendarSource;
 
 const START: i64 = 1_800_000_000;
 
-fn stored(src: &CalendarSource) -> Vec<crate::cal_ics::Event> {
-    std::fs::read_to_string(crate::cal_store::file_of(src).unwrap()).map(|t| crate::cal_ics::parse_ics(&t)).unwrap_or_default()
+fn stored(src: &CalendarSource) -> Vec<crate::calendar::ics::Event> {
+    std::fs::read_to_string(crate::calendar::store::file_of(src).unwrap()).map(|t| crate::calendar::ics::parse_ics(&t)).unwrap_or_default()
 }
 
 // spec: CAL-005
 #[test]
 fn dialogs_event_new_event_is_typed_saved_and_changed() {
     let (mut p, src, dir) = with_calendar("evt-new");
-    p.app.calendar_action(crate::cal_ui::CalAction::NewEventAt(START));
+    p.app.calendar_action(crate::calendar::ui::CalAction::NewEventAt(START));
     p.look(Show::Modals);
     assert!(matches!(&p.app.modal, Some(Modal::Event(d)) if d.calendar == src.id));
     // the title box has the keyboard from the start
@@ -254,14 +254,14 @@ fn dialogs_event_new_event_is_typed_saved_and_changed() {
 #[test]
 fn dialogs_event_cancel_and_a_wrong_date_store_nothing() {
     let (mut p, src, dir) = with_calendar("evt-bad");
-    p.app.calendar_action(crate::cal_ui::CalAction::NewEventAt(START));
+    p.app.calendar_action(crate::calendar::ui::CalAction::NewEventAt(START));
     p.look(Show::Modals);
     p.type_text(Show::Modals, "Never saved");
     p.click(Show::Modals, "Cancel");
     assert!(p.app.modal.is_none());
     assert!(stored(&src).is_empty());
     // a date that does not exist: the dialog stays and says what is wrong
-    p.app.calendar_action(crate::cal_ui::CalAction::NewEventAt(START));
+    p.app.calendar_action(crate::calendar::ui::CalAction::NewEventAt(START));
     p.look(Show::Modals);
     p.type_text(Show::Modals, "Wrong day");
     fill(&mut p, "start-date", "2027-02-31");
@@ -288,14 +288,14 @@ fn dialogs_event_cancel_and_a_wrong_date_store_nothing() {
     // with no calendar at all, "new event" opens the calendar settings instead
     p.app.cfg.calendars.clear();
     p.app.calendar.set_sources(vec![]);
-    p.app.calendar_action(crate::cal_ui::CalAction::NewEventAt(START));
+    p.app.calendar_action(crate::calendar::ui::CalAction::NewEventAt(START));
     assert!(matches!(&p.app.modal, Some(Modal::Calendars(d)) if d.sources.is_empty()));
     let _ = std::fs::remove_dir_all(dir);
 }
 
 /// The event dialog for a new event at `START`, with the title typed.
 fn new_event_dialog(p: &mut P) {
-    p.app.calendar_action(crate::cal_ui::CalAction::NewEventAt(START));
+    p.app.calendar_action(crate::calendar::ui::CalAction::NewEventAt(START));
     p.look(Show::Modals);
     p.type_text(Show::Modals, "Moves");
 }
@@ -331,8 +331,8 @@ fn dialogs_event_the_end_follows_a_typed_start_date_and_time_and_is_saved_so() {
     until(&mut p, Show::Modals, "the event is saved", |p| p.app.modal.is_none());
     let evs = stored(&src);
     assert_eq!(evs.len(), 1);
-    let day = |y, m, d| crate::cal_time::days_from_civil(y, m, d);
-    assert_eq!((evs[0].start, evs[0].end), (crate::cal_time::local_to_utc(day(2030, 6, 1), 36_000), crate::cal_time::local_to_utc(day(2030, 6, 2), 39_600)));
+    let day = |y, m, d| crate::calendar::time::days_from_civil(y, m, d);
+    assert_eq!((evs[0].start, evs[0].end), (crate::calendar::time::local_to_utc(day(2030, 6, 1), 36_000), crate::calendar::time::local_to_utc(day(2030, 6, 2), 39_600)));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -351,7 +351,7 @@ fn dialogs_event_an_all_day_event_keeps_its_days_when_the_start_moves() {
     until(&mut p, Show::Modals, "the event is saved", |p| p.app.modal.is_none());
     let evs = stored(&src);
     assert_eq!(evs.len(), 1);
-    let day = crate::cal_time::days_from_civil(2030, 5, 20);
+    let day = crate::calendar::time::days_from_civil(2030, 5, 20);
     assert!(evs[0].all_day);
     assert_eq!((evs[0].start, evs[0].end), (day * 86_400, (day + 3) * 86_400));
     let _ = std::fs::remove_dir_all(dir);

@@ -80,7 +80,7 @@ fn the_mail_index_is_rebuilt_through_the_open_store() {
 #[test]
 fn each_prune_follows_its_retention_settings() {
     let (p, d) = places_with_caches("prune");
-    let now = crate::cal_time::now();
+    let now = crate::calendar::time::now();
     age(&p.pictures.join("0123456789abcdef.png"), 40);
     let r = CacheRetention::default();
     assert_eq!(prune(CacheId::SocialPictures, &p, &r, now), Ok(Freed { bytes: 100, entries: 1 }), "older than 30 days");
@@ -88,7 +88,7 @@ fn each_prune_follows_its_retention_settings() {
     assert_eq!(prune(CacheId::SocialPictures, &p, &tiny, now).map(|f| f.entries), Ok(1), "over the size: the oldest go");
     assert_eq!(prune(CacheId::MailBackups, &p, &tiny, now).map(|f| f.entries), Ok(1));
     assert!(p.mail_root.join("index.backup-2026-11-02.sqlite").exists(), "the newest stays");
-    let late = crate::cal_time::days_from_civil(2026, 11, 15) * 86_400;
+    let late = crate::calendar::time::days_from_civil(2026, 11, 15) * 86_400;
     assert_eq!(prune(CacheId::MailBroken, &p, &r, late).map(|f| f.entries), Ok(0), "damaged copies are kept forever by default");
     assert_eq!(prune(CacheId::MailBroken, &p, &tiny, late).map(|f| f.entries), Ok(1), "older than 30 days by the date in the name");
     assert_eq!(prune(CacheId::DebugLog, &p, &r, now).map(|f| f.entries), Ok(0), "under 10 MB");

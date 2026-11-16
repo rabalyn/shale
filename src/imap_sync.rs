@@ -14,7 +14,7 @@
 //! `UIDNEXT` of a folder is stored only when its sync completed without errors, so an
 //! interrupted or partly failed sync starts again from what is already in the index.
 
-use crate::cal_time;
+use crate::calendar::time;
 use crate::config::{MailAccount, MailAuth};
 use crate::imap_client::{decode_mutf7, Authenticator, Body, Client, ConnectSettings, Fetched, FolderEntry, ImapError, Limits, Part, PlainAuth, SearchKey, Selected};
 use crate::mail_db::{FolderRow, MailError, MessageSummary, Op};
@@ -46,7 +46,7 @@ impl Default for SyncOptions {
 
 impl SyncOptions {
     fn now(&self) -> i64 {
-        self.now.unwrap_or_else(cal_time::now)
+        self.now.unwrap_or_else(time::now)
     }
 }
 
@@ -225,9 +225,9 @@ fn special_use_of(e: &FolderEntry) -> Option<String> {
 
 /// The first day of the window: `years` before `now`, as (year, month, day).
 pub fn window_start(now: i64, years: i32) -> (i32, u32, u32) {
-    let (y, m, d) = cal_time::civil_from_days(now.div_euclid(86_400));
+    let (y, m, d) = time::civil_from_days(now.div_euclid(86_400));
     let y = y - years;
-    (y, m, d.min(cal_time::days_in_month(y, m)))
+    (y, m, d.min(time::days_in_month(y, m)))
 }
 
 fn err_text(e: impl std::fmt::Display) -> String {

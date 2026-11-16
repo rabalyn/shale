@@ -30,7 +30,7 @@ impl MailView {
     /// Queue an `append` for each of the copies, through the normal queue (MAIL-211). Returns how many were asked for.
     pub fn unsent_upload(&mut self, cfg: &Config, which: &[UnsentCopy]) -> usize {
         let Some(store) = self.ready_store() else { return 0 };
-        let now = crate::cal_time::now();
+        let now = crate::calendar::time::now();
         let ok: Vec<&UnsentCopy> = which.iter().filter(|c| Self::unsent_can_upload(cfg, c)).collect();
         // the check "nothing is queued for it" is part of the operation itself: a second click queues nothing
         if let Err(e) = store.commit(ok.iter().map(|c| Op::QueueAppend { folder: c.folder, uid: c.uid, created: now }).collect()) {

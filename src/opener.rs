@@ -25,7 +25,7 @@ pub fn open_url(url: &str) -> Result<(), String> {
 /// In tests the address goes to the installed "browser" (`set_test_browser`) instead.
 pub fn open_signin_url(url: &str, allow_local_http: bool) -> Result<(), String> {
     let url = url.trim();
-    let origin = crate::cal_dav::Origin::parse(url)?;
+    let origin = crate::calendar::dav::Origin::parse(url)?;
     #[cfg(test)]
     let allow_local_http = allow_local_http || (origin.is_local() && *trusted_local_port().lock().unwrap_or_else(|e| e.into_inner()) == Some(origin.port));
     if origin.scheme != "https" && !(allow_local_http && origin.is_local()) {

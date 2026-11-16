@@ -8,7 +8,7 @@
 //! `APPEND` (phase 3, the Sent copy) stores the message and answers with `APPENDUID`. Other things it
 //! should never see (`DELETE` …) are answered `NO`.
 
-use crate::cal_time::{civil_from_days, days_from_civil};
+use crate::calendar::time::{civil_from_days, days_from_civil};
 use crate::config::MailSecurity;
 use crate::imap_client::{ConnectSettings, Limits};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};

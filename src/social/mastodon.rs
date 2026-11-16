@@ -22,7 +22,7 @@ pub struct AppCredentials {
 
 impl std::fmt::Debug for AppCredentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AppCredentials").field("client_id", &self.client_id).field("client_secret", &cal_dav::redacted(self.client_secret.expose())).finish()
+        f.debug_struct("AppCredentials").field("client_id", &self.client_id).field("client_secret", &dav::redacted(self.client_secret.expose())).finish()
     }
 }
 
@@ -91,7 +91,7 @@ fn full_acct(acct: &str, server: &str) -> String {
     if acct.contains('@') {
         acct.to_string()
     } else {
-        format!("{acct}@{}", cal_dav::host_of(server))
+        format!("{acct}@{}", dav::host_of(server))
     }
 }
 
@@ -289,7 +289,7 @@ fn parse_media(m: &Value, post_id: &str) -> Option<Media> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cal_dav::tests::mock_http;
+    use crate::calendar::dav::tests::mock_http;
 
     pub(crate) fn status(id: &str, acct_id: &str, acct: &str, at: &str, reply_to: Option<&str>, html: &str) -> Value {
         json!({"id": id, "uri": format!("https://m.test/users/{acct}/statuses/{id}"), "url": format!("https://m.test/@{acct}/{id}"), "created_at": at, "in_reply_to_id": reply_to, "spoiler_text": "", "content": html,

@@ -404,7 +404,7 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
         store.reader().unwrap().folders(Some("alice")).unwrap()
     }
     let _ = rows;
-    let now = crate::cal_time::now();
+    let now = crate::calendar::time::now();
     let flags = |add: &[MailFlag], remove: &[MailFlag]| Action::SetFlags { add: add.to_vec(), remove: remove.to_vec() };
 
     // read, flagged, and back
@@ -523,7 +523,7 @@ fn clean_sent(user: &str, tag: &str) {
 /// sink, the Sent copy by APPEND, and what arrived checked byte for byte.
 fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &str) {
     let (dir, store) = temp_store(&format!("send-{tag}"));
-    let now = crate::cal_time::now();
+    let now = crate::calendar::time::now();
     let subject = format!("Shale send test ✓ Grüße {tag}");
     clean_sent(&acct.user, "Shale send test");
     clear_sink();
@@ -708,7 +708,7 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
     let smtp = EnvSmtp { port: SUBMISSION_PORT, security: MailSecurity::StartTls, auth: auth.clone() };
     let imap = EnvConnector { auth: auth.clone() };
     let (dir, store) = temp_store(&format!("crypto-{tag}"));
-    let now = crate::cal_time::now();
+    let now = crate::calendar::time::now();
     let subject = format!("Shale crypto test ✓ {tag}");
     clean_sent(&acct.user, "Shale crypto test");
     clear_sink();

@@ -276,7 +276,7 @@ pub struct Config {
     /// Show embedded images as pictures inside the editor (the link shows when the cursor is on it).
     pub inline_images: bool,
     /// Calendars shown in the calendar panel (local .ics files and CalDAV calendars).
-    pub calendars: Vec<crate::cal_store::CalendarSource>,
+    pub calendars: Vec<crate::calendar::store::CalendarSource>,
     /// Calendar weeks start on Monday (otherwise Sunday).
     pub week_starts_monday: bool,
     /// Troubleshooting: record every key, typed text and input-method event to a file.
@@ -407,7 +407,7 @@ pub fn input_log_path() -> PathBuf {
 /// In screenshot mode with a frozen clock (DEV-007) it shows that time instead, so that the
 /// pictures do not change with every build.
 pub fn build_stamp() -> String {
-    stamp_of(crate::cal_time::frozen().unwrap_or_else(|| env!("SHALE_BUILD_SECS").parse().unwrap_or(0)))
+    stamp_of(crate::calendar::time::frozen().unwrap_or_else(|| env!("SHALE_BUILD_SECS").parse().unwrap_or(0)))
 }
 
 fn stamp_of(secs: i64) -> String {
@@ -509,8 +509,8 @@ mod tests {
     // spec: DEV-007
     #[test]
     fn dev_007_the_build_stamp_is_the_build_time_unless_the_clock_is_frozen() {
-        assert_eq!(stamp_of(crate::cal_time::days_from_civil(2026, 11, 15) * 86_400 + 36_000), "2026-11-15 10:00 UTC");
-        assert_eq!(crate::cal_time::frozen(), None);
+        assert_eq!(stamp_of(crate::calendar::time::days_from_civil(2026, 11, 15) * 86_400 + 36_000), "2026-11-15 10:00 UTC");
+        assert_eq!(crate::calendar::time::frozen(), None);
         assert_eq!(build_stamp(), stamp_of(env!("SHALE_BUILD_SECS").parse().unwrap()));
     }
 

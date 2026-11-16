@@ -271,21 +271,30 @@ fn imp_017_dragging_in_the_file_list_hints_and_moves_onto_a_folder() {
 }
 
 /// An event as the calendar hands it to a drag: a repeating one, with a slash in the title.
-fn dragged_event(summary: &str) -> crate::cal_ics::Event {
-    crate::cal_ics::Event { uid: "drag-1".into(), summary: summary.into(), location: "Room 4".into(), start: 1_800_000_000, end: 1_800_003_600, rrule: Some("FREQ=DAILY".into()), recurrence_id: Some(1_800_000_000), ..Default::default() }
+fn dragged_event(summary: &str) -> crate::calendar::ics::Event {
+    crate::calendar::ics::Event {
+        uid: "drag-1".into(),
+        summary: summary.into(),
+        location: "Room 4".into(),
+        start: 1_800_000_000,
+        end: 1_800_003_600,
+        rrule: Some("FREQ=DAILY".into()),
+        recurrence_id: Some(1_800_000_000),
+        ..Default::default()
+    }
 }
 
 impl W {
     /// Start dragging a calendar event at `from` and move the pointer to `to`, button down.
-    pub(super) fn drag_event(&mut self, ev: crate::cal_ics::Event, from: Pos2, to: Pos2) {
-        eframe::egui::DragAndDrop::set_payload(self.hl.ctx(), crate::cal_ui::CalDrag { event: ev, calendar: "Work".into() });
+    pub(super) fn drag_event(&mut self, ev: crate::calendar::ics::Event, from: Pos2, to: Pos2) {
+        eframe::egui::DragAndDrop::set_payload(self.hl.ctx(), crate::calendar::ui::CalDrag { event: ev, calendar: "Work".into() });
         self.hl.frame(&mut self.app, vec![eframe::egui::Event::PointerMoved(from)]);
         self.hl.frame(&mut self.app, vec![eframe::egui::Event::PointerMoved(to)]);
         self.frames(2);
     }
 
     pub(super) fn dragging(&self) -> bool {
-        eframe::egui::DragAndDrop::payload::<crate::cal_ui::CalDrag>(self.hl.ctx()).is_some()
+        eframe::egui::DragAndDrop::payload::<crate::calendar::ui::CalDrag>(self.hl.ctx()).is_some()
     }
 
     /// A point outside every drop zone.
@@ -294,7 +303,7 @@ impl W {
     }
 
     /// The imported event of the only item of the open Import dialog and its calendar file.
-    pub(super) fn dialog_event(&self) -> (crate::cal_ics::Event, String, Option<(String, Vec<u8>)>) {
+    pub(super) fn dialog_event(&self) -> (crate::calendar::ics::Event, String, Option<(String, Vec<u8>)>) {
         let d = self.dialog();
         assert_eq!(d.items.len(), 1);
         match &d.items[0].source {
@@ -324,7 +333,7 @@ fn imp_002_an_event_dragged_onto_a_folder_or_a_note_opens_the_import_dialog_ther
     assert_eq!(calendar, "Work");
     let (name, data) = original.expect("the calendar file");
     assert_eq!(name, "Team-Plan.ics", "a slash in the title can't be in a file name");
-    let parsed = crate::cal_ics::parse_ics(&String::from_utf8(data).unwrap());
+    let parsed = crate::calendar::ics::parse_ics(&String::from_utf8(data).unwrap());
     assert_eq!((parsed.len(), parsed[0].uid.as_str(), parsed[0].summary.as_str(), parsed[0].location.as_str()), (1, "drag-1", "Team/Plan", "Room 4"));
     assert_eq!((parsed[0].start, parsed[0].end, parsed[0].rrule.as_deref()), (1_800_000_000, 1_800_003_600, Some("FREQ=DAILY")));
     w.close_dialog();
@@ -420,7 +429,7 @@ fn imp_002_a_second_event_goes_into_the_open_dialog_and_importing_makes_the_note
 fn imp_002_an_event_drop_without_a_vault_says_so_and_without_a_pointer_does_nothing() {
     let mut w = W::new("cal-novault");
     // no pointer seen yet: the drag is not looked at
-    eframe::egui::DragAndDrop::set_payload(w.hl.ctx(), crate::cal_ui::CalDrag { event: dragged_event("Review"), calendar: "Work".into() });
+    eframe::egui::DragAndDrop::set_payload(w.hl.ctx(), crate::calendar::ui::CalDrag { event: dragged_event("Review"), calendar: "Work".into() });
     w.frames(2);
     assert!(w.dragging() && !w.dialog_open() && !w.painted("Event: Review"));
     eframe::egui::DragAndDrop::clear_payload(w.hl.ctx());

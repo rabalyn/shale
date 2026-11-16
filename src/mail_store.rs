@@ -46,7 +46,7 @@ pub fn default_root() -> PathBuf {
 
 /// Today as `YYYY-MM-DD` (local time), for names of backups and quarantined files.
 pub fn today_string() -> String {
-    let (y, m, d) = crate::cal_time::civil_from_days(crate::cal_time::today());
+    let (y, m, d) = crate::calendar::time::civil_from_days(crate::calendar::time::today());
     format!("{y:04}-{m:02}-{d:02}")
 }
 
@@ -585,7 +585,7 @@ fn date_in_name(s: &str) -> Option<i64> {
     let d = s.get(..10)?;
     let mut it = d.split('-');
     let (y, m, dd) = (it.next()?.parse().ok()?, it.next()?.parse().ok()?, it.next()?.parse().ok()?);
-    Some(crate::cal_time::days_from_civil(y, m, dd) * 86_400)
+    Some(crate::calendar::time::days_from_civil(y, m, dd) * 86_400)
 }
 
 /// See [`MailStore::rebuild_index`].
@@ -1399,7 +1399,7 @@ mod tests {
         }
         let listed = backup_files(&root);
         assert_eq!(listed.len(), 5, "no limit keeps them all");
-        assert_eq!(listed[0].at, crate::cal_time::days_from_civil(2026, 11, 2) * 86_400, "oldest first, by the date in the name");
+        assert_eq!(listed[0].at, crate::calendar::time::days_from_civil(2026, 11, 2) * 86_400, "oldest first, by the date in the name");
         drop(store);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1415,7 +1415,7 @@ mod tests {
         let v = broken_files(&root);
         let names: Vec<String> = v.iter().map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["index.sqlite-wal.broken-2026-10-01", "index.sqlite.broken-2026-10-01", "index.sqlite.broken-2026-11-02-2"]);
-        assert_eq!(v[2].at, crate::cal_time::days_from_civil(2026, 11, 2) * 86_400);
+        assert_eq!(v[2].at, crate::calendar::time::days_from_civil(2026, 11, 2) * 86_400);
         assert_eq!(date_in_name("garbage"), None);
         let _ = std::fs::remove_dir_all(&root);
     }

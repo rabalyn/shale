@@ -82,7 +82,7 @@ impl MailView {
             body.min.y = strip.max.y;
         }
         // a mail that waits in the outbox can still be taken back (MAIL-134)
-        if let Some((_, _, text)) = crate::mail_compose::queued_text(&self.local_items, crate::cal_time::now()) {
+        if let Some((_, _, text)) = crate::mail_compose::queued_text(&self.local_items, crate::calendar::time::now()) {
             let strip = Rect::from_min_size(body.min, Vec2::new(body.width(), 30.0));
             let mut undo = false;
             let undo_tip = self.tip("Take the mail back into the editor", KeyAction::MailUndoSend);
@@ -578,7 +578,7 @@ impl MailView {
     fn list_pane(&mut self, ui: &mut Ui, cfg: &Config, actions: &mut Vec<MailAction>, rects: &mut Vec<(String, Rect)>) {
         if self.local_view.is_some() {
             let mut out = LocalOut::default();
-            self.local_list(ui, crate::cal_time::now(), rects, &mut out);
+            self.local_list(ui, crate::calendar::time::now(), rects, &mut out);
             self.apply_local_out(out);
             return;
         }
@@ -703,7 +703,7 @@ impl MailView {
         }
         let mut clicked: Option<(usize, bool)> = None;
         let mut menu_at: Option<(usize, Pos2)> = None;
-        let now = crate::cal_time::now();
+        let now = crate::calendar::time::now();
         ui.spacing_mut().item_spacing.y = 0.0;
         let out = area.show_rows(ui, ROW_H, n, |ui, range| {
             self.ensure_rows(range.clone());
@@ -831,7 +831,7 @@ impl MailView {
         match &self.local_view {
             Some(LocalView::Outbox(_)) => {
                 let mut out = LocalOut::default();
-                self.outbox_detail(ui, crate::cal_time::now(), rects, &mut out);
+                self.outbox_detail(ui, crate::calendar::time::now(), rects, &mut out);
                 self.apply_local_out(out);
                 return;
             }

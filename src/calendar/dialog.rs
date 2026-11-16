@@ -1,10 +1,10 @@
 //! Calendar settings dialog (local calendars, CalDAV accounts and their sync intervals) and
 //! the event dialog (new events and changes, saved to any configured calendar).
 
-use crate::cal_dav::{self, Account, FoundCalendar};
-use crate::cal_ics::{self, Alarm, Event, Freq, Repeat, RepeatEnd};
-use crate::cal_store::{job_result, CalendarSource, CalendarStore, Job, SourceKind, DEFAULT_SYNC_MINUTES, PALETTE};
-use crate::cal_time as t;
+use crate::calendar::dav::{self, Account, FoundCalendar};
+use crate::calendar::ics::{self, Alarm, Event, Freq, Repeat, RepeatEnd};
+use crate::calendar::store::{job_result, CalendarSource, CalendarStore, Job, SourceKind, DEFAULT_SYNC_MINUTES, PALETTE};
+use crate::calendar::time as t;
 use crate::theme;
 use eframe::egui::{self, Rect, Sense, Ui, Vec2};
 use std::sync::{Arc, Mutex};
@@ -43,14 +43,14 @@ impl CalendarDialog {
     }
 
     fn start_discovery(&mut self) {
-        if let Err(e) = cal_dav::check_url(self.dav_url.trim()) {
+        if let Err(e) = dav::check_url(self.dav_url.trim()) {
             self.message = Some(format!("Can't use this address: {e}"));
             return;
         }
         let acct = Account { url: self.dav_url.trim().to_string(), username: self.dav_user.clone(), password: self.dav_pass.clone() };
         let slot: Discovery = Arc::new(Mutex::new(None));
         let s2 = slot.clone();
-        crate::jobs::run(move || cal_dav::discover(&acct), move |r| *s2.lock().unwrap() = Some(r.and_then(|r| r)));
+        crate::jobs::run(move || dav::discover(&acct), move |r| *s2.lock().unwrap() = Some(r.and_then(|r| r)));
         self.discovering = Some(slot);
         self.message = Some("Looking for calendars…".into());
     }
@@ -182,7 +182,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         }
         if rec("dav-add-url".into(), ui.add_enabled(!busy && !d.dav_url.trim().is_empty(), egui::Button::new("Add this address as one calendar"))).clicked() {
             let url = d.dav_url.trim().to_string();
-            match cal_dav::check_url(&url) {
+            match dav::check_url(&url) {
                 Ok(_) => {
                     let name = url.trim_end_matches('/').rsplit('/').next().unwrap_or("Calendar").to_string();
                     d.add_caldav(url, name, None);
@@ -202,8 +202,8 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
             ui.horizontal(|ui| {
                 rec(format!("found:{i}"), ui.checkbox(on, &c.name)).on_hover_text(&c.url);
                 // the password goes wherever the calendar is: say so when that's another server
-                if !cal_dav::same_server(&c.url, &entered) {
-                    ui.label(egui::RichText::new(format!("on {}", cal_dav::host_of(&c.url))).size(12.0).color(theme::LINK_MISSING))
+                if !dav::same_server(&c.url, &entered) {
+                    ui.label(egui::RichText::new(format!("on {}", dav::host_of(&c.url))).size(12.0).color(theme::LINK_MISSING))
                         .on_hover_text("This calendar is on another server than the address you entered; your user name and password will be sent there.");
                 }
                 if c.read_only {
@@ -550,7 +550,7 @@ impl EventDialog {
         d.location = e.location.clone();
         d.description = e.description.clone();
         d.set_times(e.start, e.end, e.all_day);
-        d.repeat = match (&e.rrule, cal_ics::parse_repeat(&e)) {
+        d.repeat = match (&e.rrule, ics::parse_repeat(&e)) {
             (None, _) => RepeatMode::Never,
             (Some(_), Some(r)) => {
                 d.interval = r.interval.to_string();
@@ -676,8 +676,8 @@ impl EventDialog {
         let start_day = if self.all_day { start.div_euclid(86_400) } else { t::utc_to_local(start).0 };
         match self.repeat_of(start_day)? {
             Some(r) => {
-                if orig.and_then(cal_ics::parse_repeat).as_ref() != Some(&r) {
-                    e.rrule = Some(cal_ics::repeat_rule(&r, &e));
+                if orig.and_then(ics::parse_repeat).as_ref() != Some(&r) {
+                    e.rrule = Some(ics::repeat_rule(&r, &e));
                 }
             }
             None if self.repeat == RepeatMode::Never => e.rrule = None,
@@ -699,7 +699,7 @@ impl EventDialog {
                     }
                     _ => {
                         let (from, to) = if e.all_day { (row.day * 86_400, (row.day + 1) * 86_400) } else { (t::local_to_utc(row.day, 0), t::local_to_utc(row.day + 1, 0)) };
-                        let found = cal_ics::occurrences(&all, from, to).into_iter().find(|o| o.start >= from);
+                        let found = ics::occurrences(&all, from, to).into_iter().find(|o| o.start >= from);
                         found.ok_or_else(|| format!("The event does not happen on {}, so that date cannot be skipped", date_text(row.day)))?.start
                     }
                 });
@@ -943,7 +943,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             } else {
                 ui.horizontal(|ui| {
                     let combo = egui::ComboBox::from_id_salt("event-repeat").width(150.0).selected_text(d.repeat.label()).show_ui(ui, |ui| {
-                        let was_custom = d.original.as_ref().is_some_and(|(_, e)| e.rrule.is_some() && cal_ics::parse_repeat(e).is_none());
+                        let was_custom = d.original.as_ref().is_some_and(|(_, e)| e.rrule.is_some() && ics::parse_repeat(e).is_none());
                         let mut modes = vec![RepeatMode::Never];
                         modes.extend(Freq::ALL.map(RepeatMode::Every));
                         if was_custom {
@@ -1241,7 +1241,7 @@ mod tests {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
             return;
         }
-        let (base, _h) = crate::cal_dav::tests::mock_server(String::new());
+        let (base, _h) = crate::calendar::dav::tests::mock_server(String::new());
         let store = CalendarStore::new(vec![], std::env::temp_dir().join("shale-caldlg-find"));
         let mut d = CalendarDialog::new(vec![], true);
         d.dav_url = format!("{base}/");
@@ -1351,7 +1351,7 @@ mod tests {
             return;
         }
         // "Shared" refuses writes, "Work" accepts them
-        let (base, _h) = crate::cal_dav::tests::mock_http(40, |method, path, _, _| match (method, path) {
+        let (base, _h) = crate::calendar::dav::tests::mock_http(40, |method, path, _, _| match (method, path) {
             ("PUT", p) if p.starts_with("/shared/") => (403, String::new()),
             ("PUT", _) => (201, String::new()),
             ("DELETE", _) => (204, String::new()),
@@ -1395,7 +1395,7 @@ mod tests {
         let mut fixed = d.event().unwrap();
         fixed.uid = "loc1".into();
         d.original = None;
-        crate::cal_store::tests::wait(&store.save_event(&local.id, fixed.clone(), None, None).unwrap()).unwrap();
+        crate::calendar::store::tests::wait(&store.save_event(&local.id, fixed.clone(), None, None).unwrap()).unwrap();
         store.reload_local();
         let mut d = EventDialog::edit(local.id.clone(), store.find(&local.id, "loc1").unwrap());
         d.calendar = "work".into();
@@ -1511,7 +1511,7 @@ mod tests {
         let e = d.event().unwrap();
         assert_eq!((e.rrule.as_deref(), e.exdates.clone()), (Some("FREQ=MONTHLY;BYDAY=2TU"), other.exdates.clone()));
         // one date of the series: no repeat fields, the calendar and "all day" are fixed, and the save adds it to the series
-        let occ = cal_ics::occurrences(&saved, 0, i64::MAX / 2)[0].clone();
+        let occ = ics::occurrences(&saved, 0, i64::MAX / 2)[0].clone();
         let mut d = EventDialog::edit(src.id.clone(), saved.override_at(occ.start, occ.end));
         assert!(d.is_occurrence());
         d.title = "Standup (short)".into();

@@ -13,7 +13,7 @@
 //! know and all), and only a changed field is written anew. A time keeps its form: a time in a
 //! named zone stays in that zone, so a repeating event keeps its clock time over summer time.
 
-use crate::cal_time::{self as t, civil_from_days, days_from_civil};
+use crate::calendar::time::{self as t, civil_from_days, days_from_civil};
 
 /// A reminder of an event (VALARM).
 #[derive(Clone, Debug, PartialEq, Eq, Default)]

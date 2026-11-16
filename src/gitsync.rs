@@ -561,8 +561,8 @@ pub fn conflict_name(path: &Path, stamp: &str, taken: impl Fn(&Path) -> bool) ->
 
 /// "YYYY-MM-DD HHMM" in local time, for conflict copies.
 pub fn stamp_now() -> String {
-    let (days, sod) = crate::cal_time::utc_to_local(crate::cal_time::now());
-    let (y, m, d) = crate::cal_time::civil_from_days(days);
+    let (days, sod) = crate::calendar::time::utc_to_local(crate::calendar::time::now());
+    let (y, m, d) = crate::calendar::time::civil_from_days(days);
     format!("{y:04}-{m:02}-{d:02} {:02}{:02}", sod / 3600, sod % 3600 / 60)
 }
 
