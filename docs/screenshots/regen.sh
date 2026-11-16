@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Regenerates the screenshots of docs/screenshots/ from the recipes in recipes.conf (DEV-007).
+# Regenerates the screenshots of the user guide (docs/userguide/z_media/screenshots/) from the recipes
+# in recipes.conf (DEV-007). The recipes and their fixtures live here, the pictures in the guide vault.
 #
 #   docs/screenshots/regen.sh              all pictures
 #   docs/screenshots/regen.sh mail-view    only these (by recipe name)
@@ -7,7 +8,7 @@
 #
 # Environment:
 #   SHALE      the program (default: target/release/shale, else target/debug/shale)
-#   OUT        where the pictures go (default: this folder)
+#   OUT        where the pictures go (default: docs/userguide/z_media/screenshots)
 #   SHALE_FAKE_NOW  the frozen clock of the pictures (default 2026-11-15T10:00:00, UTC): the status
 #                   bar, the build stamp, the calendar's today and the ages in lists do not change
 #                   between runs, so only real changes show in a diff (a recipe's env may override it)
@@ -21,7 +22,7 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(cd "$here/../.." && pwd)
 recipes="$here/recipes.conf"
-out=${OUT:-$here}
+out=${OUT:-$root/docs/userguide/z_media/screenshots}
 
 shale=${SHALE:-}
 if [ -z "$shale" ]; then

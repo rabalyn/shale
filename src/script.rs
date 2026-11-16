@@ -336,7 +336,7 @@ mod tests {
         unique.dedup();
         assert_eq!(names, unique, "a recipe name twice");
 
-        let pictures: std::collections::BTreeSet<String> = std::fs::read_dir(root().join("docs/screenshots")).unwrap().filter_map(|e| e.ok()?.file_name().to_str()?.strip_suffix(".png").map(str::to_string)).collect();
+        let pictures: std::collections::BTreeSet<String> = std::fs::read_dir(root().join("docs/userguide/z_media/screenshots")).unwrap().filter_map(|e| e.ok()?.file_name().to_str()?.strip_suffix(".png").map(str::to_string)).collect();
         let recipe_names: std::collections::BTreeSet<String> = recipes.iter().map(|r| r.name.clone()).collect();
         assert_eq!(pictures.difference(&recipe_names).collect::<Vec<_>>(), Vec::<&String>::new(), "a picture without a recipe");
         assert_eq!(recipe_names.difference(&pictures).collect::<Vec<_>>(), Vec::<&String>::new(), "a recipe whose picture is missing (run docs/screenshots/regen.sh <name>)");

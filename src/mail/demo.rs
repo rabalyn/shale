@@ -34,7 +34,9 @@ fn seed_outbox(root: &Path) -> Result<(), String> {
         ),
         ("Dora Berg <dora@example.com>", "Re: Lunch on Friday?", "Noon is good, see you at the pizza place.\n\nAda", Outcome::Unsure("Connection reset by peer while waiting for the reply to DATA".into())),
     ];
-    for (to, subject, body, outcome) in mails {
+    // a minute apart, so the list (oldest first) has the same order in every picture
+    for (i, (to, subject, body, outcome)) in mails.into_iter().enumerate() {
+        let now = now + 60 * i as i64;
         let mut d = new_draft(ACCOUNT, "Ada Example", "ada@example.com", "");
         d.to = to.into();
         d.subject = subject.into();
@@ -122,6 +124,7 @@ mod tests {
         assert_eq!(states.iter().filter(|s| **s == State::Failed).count(), 1, "{states:?}");
         assert_eq!(states.iter().filter(|s| **s == State::Unsure).count(), 1, "{states:?}");
         assert!(items.iter().all(|i| i.error.is_some()), "both say why");
+        assert_eq!(states, [State::Failed, State::Unsure], "the same order in every run");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
