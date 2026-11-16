@@ -2404,7 +2404,7 @@ mod tests {
         paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
         let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(list.clone())]);
         assert_eq!(pasted_toast(a), "Saved 3 files to the media folder");
-        assert_eq!(text, format!("[[{stamp}a b.pdf]]\n[[{stamp}clip.mp4]]\n![[{stamp}p.png]]"));
+        assert_eq!(text, format!("[[{stamp}a b.pdf]]\n![[{stamp}clip.mp4]]\n![[{stamp}p.png]]"));
         assert_eq!(std::fs::read(d.join(format!("{stamp}clip.mp4"))).unwrap(), b"clip.mp4");
         // any other text pastes as it is, a missing file too
         let mut text = String::new();
