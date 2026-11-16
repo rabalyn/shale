@@ -662,4 +662,21 @@ mod tests {
         assert_eq!(edit_source(crlf, Edit::InsertRow(Some(0))).unwrap(), "  | A |\r\n  |---|\r\n  | 1 |\r\n  |   |\r\n");
         assert_eq!(edit_source("| A |\n|---|", Edit::InsertColumn(0)), Some("| A |  |\n|---| --- |".to_string()));
     }
+
+    // spec: EDIT-025
+    #[test]
+    fn edits_of_short_rows_header_only_tables_and_non_tables() {
+        assert_eq!(edit_source("| A |", Edit::InsertRow(None)), None, "a single line is no table");
+        assert_eq!(edit_source("", Edit::InsertColumn(0)), None);
+        assert_eq!(edit_source("| A |\n|---|", Edit::InsertRow(None)).unwrap(), "| A |\n|---|\n|   |", "the first row of a header-only table");
+        assert_eq!(edit_source("| A |\n|---|", Edit::DeleteRow(0)), None, "there is no row to delete");
+        // a short row without outer pipes is closed and filled up to the new column
+        let short = "A | B | C\n--|--|--\n1\n";
+        let t = &find_tables(&edit_source(short, Edit::InsertColumn(2)).unwrap())[0].table;
+        assert_eq!(t.header, ["A", "B", "C", ""]);
+        assert_eq!(t.rows, [["1", "", "", ""]]);
+        // and a column behind its end is just not there
+        assert_eq!(edit_source(short, Edit::DeleteColumn(2)).unwrap(), "A | B \n--|--\n1\n");
+        assert_eq!(edit_source("| A | B |\n|---|---|\n| 1 |\n", Edit::DeleteColumn(1)).unwrap(), "| A |\n|---|\n| 1 |\n", "a short row without that cell stays");
+    }
 }
