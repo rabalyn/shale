@@ -254,7 +254,7 @@ impl ShaleApp {
         for (rel, name, kind) in files {
             let active = current.as_deref() == Some(rel.as_path());
             let badge = match kind {
-                FileKind::Drawing if crate::canvas::is_canvas_path(&rel) => "canvas",
+                FileKind::Drawing if crate::drawing::canvas::is_canvas_path(&rel) => "canvas",
                 FileKind::Drawing => "drawing",
                 FileKind::Other => rel.extension().and_then(|e| e.to_str()).unwrap_or(""),
                 FileKind::Note => "",
@@ -850,7 +850,7 @@ impl ShaleApp {
                     ui.label(format!("“{name}” is an Obsidian Canvas. Shale shows canvases read-only."));
                     match existing.as_ref() {
                         Some(copy) => ui.label(format!("It was converted before: “{}”.", rel_to_string(copy))),
-                        None => ui.label(format!("Converting makes the drawing “{}” next to it (Obsidian opens it with the Excalidraw plugin). The canvas file is not changed.", crate::canvas::drawing_name_for(rel))),
+                        None => ui.label(format!("Converting makes the drawing “{}” next to it (Obsidian opens it with the Excalidraw plugin). The canvas file is not changed.", crate::drawing::canvas::drawing_name_for(rel))),
                     };
                     ui.add_space(6.0);
                     ui.checkbox(always, "Always convert canvases when opening them").on_hover_text("Also in Settings → Drawings");

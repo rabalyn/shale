@@ -90,7 +90,7 @@ pub fn link_lines(scene: &Scene) -> String {
 /// text, `link` field). Returns the new file text in the file's own format, or None if nothing
 /// changed. Canvases are never rewritten (an error).
 pub fn rewrite_link_texts(rel: &std::path::Path, file_text: &str, edit: &dyn Fn(&str) -> String) -> Result<Option<String>, String> {
-    if crate::canvas::is_canvas_path(rel) {
+    if crate::drawing::canvas::is_canvas_path(rel) {
         return Err("canvases are never written".into());
     }
     let mut scene = Scene::from_file_text(rel, file_text)?;
@@ -116,8 +116,8 @@ pub fn rewrite_link_texts(rel: &std::path::Path, file_text: &str, edit: &dyn Fn(
     if !any {
         return Ok(None);
     }
-    if crate::excalidraw_md::is_plugin_file(rel) {
-        crate::excalidraw_md::write(file_text, &scene).map(Some)
+    if crate::drawing::excalidraw_md::is_plugin_file(rel) {
+        crate::drawing::excalidraw_md::write(file_text, &scene).map(Some)
     } else {
         Ok(Some(scene.to_json()))
     }
@@ -203,7 +203,7 @@ impl DrawingDoc {
         // tidy labels and connections in memory only: the file is never written
         self.sync_labels(ui.ctx());
         self.update_bindings();
-        let pics = crate::drawing_pictures::textures(ui.ctx(), &self.scene, vault, &self.rel);
+        let pics = crate::drawing::pictures::textures(ui.ctx(), &self.scene, vault, &self.rel);
         paint_scene(&painter, &self.scene, &view, dark, None, &pics);
         let on_mark = self.paint_links(ui, &painter, &view, &resp, vault);
         let tol = 6.0 / self.zoom;

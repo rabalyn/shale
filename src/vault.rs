@@ -32,7 +32,7 @@ impl FileEntry {
     pub fn display_name(&self) -> String {
         match self.kind {
             FileKind::Note => self.link_name.clone(),
-            FileKind::Drawing => crate::excalidraw_md::drawing_stem(&self.link_name).to_string(),
+            FileKind::Drawing => crate::drawing::excalidraw_md::drawing_stem(&self.link_name).to_string(),
             FileKind::Other => self.link_name.clone(),
         }
     }
@@ -277,7 +277,7 @@ fn apply_edits(text: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> 
 
 pub fn kind_of(path: &Path) -> FileKind {
     let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-    if crate::excalidraw_md::is_drawing_path(path) {
+    if crate::drawing::excalidraw_md::is_drawing_path(path) {
         FileKind::Drawing
     } else if name.ends_with(".md") {
         FileKind::Note
@@ -291,7 +291,7 @@ fn link_name_of(path: &Path, kind: FileKind) -> String {
     match kind {
         FileKind::Note => markdown::strip_md_ext(&name).to_string(),
         // Obsidian links to `Plan.excalidraw.md` as `[[Plan.excalidraw]]`
-        FileKind::Drawing => crate::excalidraw_md::strip_suffix_ci(&name, ".md").unwrap_or(&name).to_string(),
+        FileKind::Drawing => crate::drawing::excalidraw_md::strip_suffix_ci(&name, ".md").unwrap_or(&name).to_string(),
         _ => name,
     }
 }
@@ -412,7 +412,7 @@ impl Vault {
                 self.name_index.entry(full).or_default().push(f.rel.clone());
             }
             let path = rel_to_string(&f.rel).to_lowercase();
-            if let Some(short) = crate::excalidraw_md::strip_suffix_ci(&path, ".md") {
+            if let Some(short) = crate::drawing::excalidraw_md::strip_suffix_ci(&path, ".md") {
                 // an exact file name wins over `X.md` written without its `.md`
                 self.path_index.entry(short.to_string()).or_insert_with(|| f.rel.clone());
             }
@@ -714,9 +714,9 @@ impl Vault {
         for p in parts {
             dir.push(p);
         }
-        let (stem, ext) = if let Some(s) = crate::excalidraw_md::strip_suffix_ci(&file, ".excalidraw.md") {
+        let (stem, ext) = if let Some(s) = crate::drawing::excalidraw_md::strip_suffix_ci(&file, ".excalidraw.md") {
             (s.to_string(), "excalidraw.md")
-        } else if let Some(s) = crate::excalidraw_md::strip_suffix_ci(&file, ".excalidraw") {
+        } else if let Some(s) = crate::drawing::excalidraw_md::strip_suffix_ci(&file, ".excalidraw") {
             (s.to_string(), "excalidraw")
         } else {
             (markdown::strip_md_ext(&file).to_string(), "md")
@@ -941,7 +941,7 @@ impl Vault {
     /// Rewrite the link texts of the drawing at `rel` with `edit` (canvases are only noted, never
     /// written).
     fn rewrite_drawing(&mut self, rel: &Path, done: &mut LinkUpdate, edit: &dyn Fn(&str) -> String) -> io::Result<()> {
-        if crate::canvas::is_canvas_path(rel) {
+        if crate::drawing::canvas::is_canvas_path(rel) {
             done.canvases.push(rel.to_path_buf());
             return Ok(());
         }
@@ -1258,7 +1258,7 @@ mod tests {
         let mut scene = crate::drawing::Scene::parse(&crate::drawing::SAMPLE_SCENE.replace("\"Idea\"", "\"see [[Ideas]]\"")).unwrap();
         scene.elements[3].extra.insert("link".into(), serde_json::json!("[[Projects/Garden plan]]"));
         fs::write(d.join("Plain.excalidraw"), scene.to_json()).unwrap();
-        fs::write(d.join("Plugin.excalidraw.md"), crate::excalidraw_md::new_file(&scene)).unwrap();
+        fs::write(d.join("Plugin.excalidraw.md"), crate::drawing::excalidraw_md::new_file(&scene)).unwrap();
         let v = Vault::open(&d).unwrap();
         (d, v)
     }

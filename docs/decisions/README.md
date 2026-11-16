@@ -37,7 +37,7 @@ basis for the specs and ADRs.
 - **Plain data, no lock-in**: `.md` notes, Excalidraw JSON with unknown fields kept, iCalendar.
   No database.
 - **Pure, well-tested core modules**: `markdown`, `lists`, `calendar::ics`, `calendar::time`, `mail` and
-  `drawing_layout`.
+  `drawing::layout`.
 - **Strong testing culture**: 179 tests.
   - Headless egui UI tests click the real controls.
   - Real-window runs use `--screenshot --keys`.

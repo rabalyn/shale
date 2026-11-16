@@ -398,7 +398,7 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, scenes: &mut SceneCache, bas
                 let bg = if dark { Color32::from_rgb(18, 18, 18) } else { Color32::WHITE };
                 ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
                 if let Some(scene) = scenes.get(vault, target) {
-                    let pics = crate::drawing_pictures::textures(ui.ctx(), scene, vault, target);
+                    let pics = crate::drawing::pictures::textures(ui.ctx(), scene, vault, target);
                     drawing::paint_thumbnail(ui.painter(), scene, rect.shrink(6.0), dark, &pics);
                 }
                 if resp.on_hover_text("Open drawing").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {

@@ -5,8 +5,8 @@
 //! - line endings (arrowheads), extra dash patterns and fonts,
 //! - the style panel and the arrange / spread buttons.
 
+use super::layout::{self as lay, anchor_point, anchor_ratios, nearest_anchor};
 use super::*;
-use crate::drawing_layout::{self as lay, anchor_point, anchor_ratios, nearest_anchor};
 use eframe::egui::text::LayoutJob;
 use eframe::egui::{Align, FontFamily};
 use std::collections::HashMap;
@@ -983,7 +983,3 @@ mod tests {
         assert!(d.scene.elements.iter().find(|e| e.id == l).unwrap().extra["endArrowhead"].is_null());
     }
 }
-
-#[cfg(test)]
-#[path = "drawing_ui_tests.rs"]
-mod ui_tests;

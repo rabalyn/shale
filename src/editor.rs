@@ -696,7 +696,7 @@ impl NoteEditor {
                     let [tw, th] = tex.size_vec2().into();
                     let size = fit(tw, th, 420.0);
                     images.push((l.range.clone(), size.y + 6.0, Art::Tex(tex), size));
-                } else if crate::excalidraw_md::is_drawing_path(&p) {
+                } else if crate::drawing::excalidraw_md::is_drawing_path(&p) {
                     let Some(scene) = crate::reader::scene_cached(ui.ctx(), &abs) else { continue };
                     let Some(b) = scene.bounds() else { continue };
                     let b = b.expand(20.0);
@@ -776,7 +776,7 @@ impl NoteEditor {
                     Art::Scene(scene, at) => {
                         let bg = if self.dark_canvas { Color32::from_rgb(18, 18, 18) } else { Color32::WHITE };
                         painter.rect_filled(rect, 6.0, bg);
-                        let pics = crate::drawing_pictures::textures(ui.ctx(), scene, vault, at);
+                        let pics = crate::drawing::pictures::textures(ui.ctx(), scene, vault, at);
                         crate::drawing::paint_thumbnail(&painter, scene, rect.shrink(4.0), self.dark_canvas, &pics);
                     }
                     Art::Pdf(tex, total) => {

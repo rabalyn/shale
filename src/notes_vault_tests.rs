@@ -97,7 +97,7 @@ fn notes_every_file_is_listed_and_every_note_is_readable() {
         let mut problems = Vec::new();
         for f in &v.files {
             let lower = rel_to_string(&f.rel).to_lowercase();
-            let want = if crate::excalidraw_md::is_drawing_path(&f.rel) {
+            let want = if crate::drawing::excalidraw_md::is_drawing_path(&f.rel) {
                 FileKind::Drawing
             } else if lower.ends_with(".md") {
                 FileKind::Note
@@ -243,7 +243,7 @@ fn notes_every_drawing_opens_and_saves_without_loss() {
                 Ok(_) => problems.push(format!("{name}: shapes or texts changed when saved")),
                 Err(e) => problems.push(format!("{name}: unreadable after saving: {e}")),
             }
-            if crate::excalidraw_md::is_plugin_file(rel) {
+            if crate::drawing::excalidraw_md::is_plugin_file(rel) {
                 // the plugin's layout stays: front matter, compression, the other sections
                 let head = |t: &str| t.split("# Excalidraw Data").next().unwrap_or_default().to_string();
                 if head(&text) != head(&original) {

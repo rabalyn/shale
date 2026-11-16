@@ -21,7 +21,7 @@ const PLAIN_STROKE: &str = "#868e96";
 /// An Obsidian Canvas file (`*.canvas`).
 pub fn is_canvas_path(p: &Path) -> bool {
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    crate::excalidraw_md::strip_suffix_ci(&name, ".canvas").is_some_and(|stem| !stem.is_empty())
+    crate::drawing::excalidraw_md::strip_suffix_ci(&name, ".canvas").is_some_and(|stem| !stem.is_empty())
 }
 
 /// Canvas colour (`"1"`–`"6"` preset or `#rrggbb`) → (outline, fill) in Excalidraw's palette.
@@ -246,7 +246,7 @@ fn marker(canvas_rel: &Path) -> String {
 /// A new `.excalidraw.md` file (Obsidian Excalidraw plugin) for the canvas, marked as converted.
 pub fn converted_file(canvas_rel: &Path, canvas_text: &str) -> Result<String, String> {
     let scene = to_scene(canvas_text)?;
-    let file = crate::excalidraw_md::new_file(&scene);
+    let file = crate::drawing::excalidraw_md::new_file(&scene);
     let at = "excalidraw-plugin: parsed\n";
     Ok(file.replacen(at, &format!("{at}{}\n", marker(canvas_rel)), 1))
 }
@@ -262,13 +262,13 @@ pub fn is_converted_from(drawing_text: &str, canvas_rel: &Path) -> bool {
 /// The name of the drawing a canvas converts into: `Name.canvas` → `Name.excalidraw.md`.
 pub fn drawing_name_for(canvas_rel: &Path) -> String {
     let name = canvas_rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let stem = crate::excalidraw_md::strip_suffix_ci(&name, ".canvas").unwrap_or(&name);
+    let stem = crate::drawing::excalidraw_md::strip_suffix_ci(&name, ".canvas").unwrap_or(&name);
     format!("{stem}.excalidraw.md")
 }
 
 /// A drawing in the vault made from this canvas earlier, if there is one.
 pub fn find_converted(vault: &crate::vault::Vault, canvas_rel: &Path) -> Option<PathBuf> {
-    let mut candidates: Vec<&crate::vault::FileEntry> = vault.files.iter().filter(|f| crate::excalidraw_md::is_plugin_file(&f.rel)).collect();
+    let mut candidates: Vec<&crate::vault::FileEntry> = vault.files.iter().filter(|f| crate::drawing::excalidraw_md::is_plugin_file(&f.rel)).collect();
     // the usual place first: next to the canvas
     candidates.sort_by_key(|f| f.rel.parent() != canvas_rel.parent());
     candidates.into_iter().map(|f| f.rel.clone()).find(|rel| crate::fsutil::read_to_string(vault.abs(rel)).is_ok_and(|t| is_converted_from(&t, canvas_rel)))
@@ -375,7 +375,7 @@ mod tests {
         assert!(!is_converted_from(&text, Path::new("Other.canvas")));
         assert!(!is_converted_from("no front matter", rel));
         // the plugin file reads back as the same drawing
-        let back = crate::excalidraw_md::read(&text).unwrap();
+        let back = crate::drawing::excalidraw_md::read(&text).unwrap();
         let shown = |s: &Scene| s.live().filter_map(|e| e.text.clone()).collect::<Vec<_>>();
         assert_eq!(shown(&back), shown(&to_scene(SAMPLE).unwrap()));
         assert_eq!(drawing_name_for(rel), "lending system.excalidraw.md");
