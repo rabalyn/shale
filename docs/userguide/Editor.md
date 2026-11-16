@@ -60,6 +60,10 @@ the cross or a click beside it closes it.
 
 ![[image-resize.webm]]
 
+Videos resize the same way (the controls stay below the picture; **100%** is the video's own size, and fullscreen keeps the controls):
+
+![[video-resize.webm]]
+
 ## Vim-style editing
 
 Settings → General → Appearance, off by default. Notes open in normal mode.
