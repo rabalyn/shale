@@ -2,7 +2,7 @@
 //! redirects and error statuses of discovery, saving and deleting, and answers that are not HTTP
 //! at all. No container is needed; the real-server suite is `env_tests.rs`.
 
-use crate::calendar::dav::tests::mock_http_with;
+use crate::calendar::dav::tests::{closed_port, mock_http_with};
 use crate::calendar::dav::{self, Account};
 use crate::calendar::ics::{self, Event};
 use std::io::{Read, Write};
@@ -317,10 +317,8 @@ fn an_answer_that_is_not_http_is_an_error() {
         h.join().unwrap();
     }
     // nobody listens at all
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = l.local_addr().unwrap().port();
-    drop(l);
-    let err = dav::discover(&acct(&format!("http://127.0.0.1:{port}/"))).unwrap_err();
+    let down = closed_port();
+    let err = dav::discover(&acct(&format!("http://127.0.0.1:{}/", down.port))).unwrap_err();
     assert!(!err.is_empty());
 }
 
@@ -382,10 +380,8 @@ fn an_empty_reply_a_refused_connection_and_a_cut_short_answer_are_named() {
     h.join().unwrap();
 
     // nobody listens at this port
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = l.local_addr().unwrap().port();
-    drop(l);
-    let base = format!("http://127.0.0.1:{port}");
+    let down = closed_port();
+    let base = format!("http://127.0.0.1:{}", down.port);
     let err = dav::request_bytes("GET", &format!("{base}/"), &[], "", &acct(&base), 10_000).unwrap_err();
     assert!(err.contains("could not connect"), "{err}");
 

@@ -113,10 +113,8 @@ pub fn server_cert() -> CertificateDer<'static> {
     certified().0.clone()
 }
 
-/// A loopback port that nothing listens on (a refused connection).
-pub fn closed_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
-}
+/// A loopback port that nothing listens on (a refused connection), held while the value lives (DEV-016).
+pub(crate) use crate::calendar::dav::tests::closed_port;
 
 pub(crate) fn server_config() -> Arc<ServerConfig> {
     let (cert, key) = certified();

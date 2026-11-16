@@ -929,6 +929,39 @@ pub(crate) mod tests {
         assert!(!event_file("..").starts_with(".."));
     }
 
+    /// A loopback port that nothing listens on and that stays this test's own while the value
+    /// lives, for a test of an unreachable server (a refused connection).
+    ///
+    /// Never make such a port by binding `127.0.0.1:0`, reading the port and dropping the
+    /// listener: the kernel hands a released port out again at once (about 3 in 100 binds in a
+    /// row get a port of the last 50), so under load another test's pretend server, or a
+    /// process of the machine, is given the port between the drop and the connect, and the
+    /// "unreachable" server answers (or takes one of the connections a `mock_http_with` counts).
+    /// Here the port is the local port of a connected socket: it is in use, so no bind gets it
+    /// (not even by `bind` to the port itself), and no socket listens on it, so a connect to it
+    /// is refused. Hold the value until the connection attempt is over. DEV-016.
+    pub(crate) struct ClosedPort {
+        pub(crate) port: u16,
+        _client: std::net::TcpStream,
+        _listener: TcpListener,
+    }
+
+    pub(crate) fn closed_port() -> ClosedPort {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        ClosedPort { port: client.local_addr().unwrap().port(), _client: client, _listener: listener }
+    }
+
+    // spec: DEV-016
+    #[test]
+    fn a_closed_port_refuses_connections_and_is_not_handed_to_anybody_while_it_is_held() {
+        let held = closed_port();
+        let addr = ("127.0.0.1", held.port);
+        let err = std::net::TcpStream::connect(addr).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::ConnectionRefused, "{err}");
+        assert!(TcpListener::bind(addr).is_err(), "no pretend server can be given the port");
+    }
+
     /// A pretend HTTP server on localhost: `handler(method, path, headers, body) -> (status, body)`.
     /// Serves `n` requests. Returns the base URL and, when joined, "METHOD PATH" of every request.
     pub(crate) fn mock_http(n: usize, handler: impl Fn(&str, &str, &str, &str) -> (u16, String) + Send + 'static) -> (String, std::thread::JoinHandle<Vec<String>>) {

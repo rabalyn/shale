@@ -7,7 +7,7 @@
 
 use crate::config::MailSecurity;
 use crate::mail::imap_client::{ConnectSettings, Limits, PlainAuth};
-use crate::mail::imap_fake_tests::{server_cert, server_config};
+use crate::mail::imap_fake_tests::{closed_port, server_cert, server_config};
 use crate::mail::smtp_client::{Smtp, SmtpError};
 use rustls::{ServerConnection, StreamOwned};
 use std::collections::HashSet;
@@ -552,11 +552,8 @@ fn a_greeting_that_refuses_and_a_closed_port_are_errors_in_words() {
     srv.state().refuse_greeting = true;
     let e = srv.connect().err().unwrap();
     assert!(matches!(&e, SmtpError::Refused(t) if t.contains("554")), "{e:?}");
-    let port = {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
-    let s = ConnectSettings { host: "127.0.0.1".into(), port, security: MailSecurity::ImplicitTls, limits: Limits::default() };
+    let down = closed_port();
+    let s = ConnectSettings { host: "127.0.0.1".into(), port: down.port, security: MailSecurity::ImplicitTls, limits: Limits::default() };
     let e = Smtp::connect_test(&s, server_cert(), &mut PlainAuth::new("a", "b")).err().unwrap();
     assert!(matches!(e, SmtpError::Connection(_)), "{e:?}");
 }
