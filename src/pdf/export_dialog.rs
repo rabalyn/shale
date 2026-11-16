@@ -100,7 +100,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
             ui.vertical(|ui| {
                 rec("title", ui.checkbox(&mut d.opts.title, "The note's name as a title"));
                 rec("pagenumbers", ui.checkbox(&mut d.opts.page_numbers, "Page numbers"));
-                rec("embeds", ui.checkbox(&mut d.opts.embeds, "Embedded pictures, drawings and PDFs"));
+                rec("embeds", ui.checkbox(&mut d.opts.embeds, "Embedded pictures, drawings, PDFs, videos and sounds"));
                 rec("plain-tables", ui.checkbox(&mut d.opts.plain_tables, "Export plain text (tables as raw text lines)"));
             });
             ui.end_row();

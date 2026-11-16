@@ -9,6 +9,12 @@ selectable (fonts are embedded), web links stay clickable and drawings are vecto
 sets paper size, margins, fonts and more. The default path is `<vault>/exports/<name>.pdf`, so
 the export shows up in the vault.
 
+Pictures, drawings and PDFs embedded with `![[…]]` on a line of their own are drawn as
+thumbnails with their link as a small caption below (the same caption as in the editor, see
+[[Notes and links]]); so are the first frame of a video (needs ffmpeg) and the cover of a sound.
+An embed with nothing to show keeps its link text. The checkbox "Embedded pictures, drawings,
+PDFs, videos and sounds" in the dialog switches all of this off.
+
 Tables are exported as real tables: a bordered grid with a filled bold header row, aligned
 columns and long cell text wrapping inside its column. A table that runs over a page break goes
 on at the top of the next page with its header row again. Tick "Export plain text (tables as raw

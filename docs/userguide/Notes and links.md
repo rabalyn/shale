@@ -40,6 +40,11 @@ inside the editor; the link text comes back while the cursor is in the link. The
 this guide are embedded exactly like this. Switch it off in Settings → General → Appearance
 ("Show embedded images inside the editor").
 
+**Captions.** Every embed that is shown has its link as a small caption below it: the file's
+link (`z_media/photo.png`), or the words you give it after a `|`: `![[photo.png|Sea at dusk]]`
+(and `![[photo.png|Sea at dusk|300]]` with a width). Click the caption to open the file. The
+[[PDF]] export draws the same thumbnails with the same captions.
+
 **Resizing.** Move the mouse over a picture or a video in the editor: its edges and corners
 become handles, and a drag changes the size (the proportions stay). The width is written into
 the link when you let go: `![[photo.png|300]]` (points; this is also what Obsidian writes), and
