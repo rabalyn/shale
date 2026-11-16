@@ -103,6 +103,8 @@ struct W {
     offline: Arc<std::sync::atomic::AtomicBool>,
     /// What the last frame painted: text and its colour.
     texts: Vec<(String, Color32)>,
+    /// Where the last frame painted each text.
+    text_rects: Vec<(String, Rect)>,
     /// What the last frame filled: rectangles and their colour.
     fills: Vec<(Rect, Color32)>,
     /// The size of the window the frames are run in.
@@ -136,7 +138,7 @@ impl W {
         app.show_view(View::Mail, false);
         let ctx = egui::Context::default();
         crate::theme::apply(&ctx);
-        let mut w = W { app, ctx, t: 0.0, server, dir, account, offline, texts: vec![], fills: vec![], size: Vec2::new(1500.0, 900.0) };
+        let mut w = W { app, ctx, t: 0.0, server, dir, account, offline, texts: vec![], text_rects: vec![], fills: vec![], size: Vec2::new(1500.0, 900.0) };
         w.until("the mail store opens", |a| a.mail.ready_store().is_some());
         w
     }
@@ -148,19 +150,24 @@ impl W {
         let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
         out.textures_delta.clear();
         let mut texts = vec![];
+        let mut text_rects = vec![];
         let mut fills = vec![];
-        fn walk(s: &Shape, out: &mut Vec<(String, Color32)>, fills: &mut Vec<(Rect, Color32)>) {
+        fn walk(s: &Shape, out: &mut Vec<(String, Color32)>, at: &mut Vec<(String, Rect)>, fills: &mut Vec<(Rect, Color32)>) {
             match s {
-                Shape::Vec(v) => v.iter().for_each(|s| walk(s, out, fills)),
-                Shape::Text(t) => out.push((t.galley.job.text.clone(), t.galley.job.sections.first().map(|s| s.format.color).unwrap_or(Color32::WHITE))),
+                Shape::Vec(v) => v.iter().for_each(|s| walk(s, out, at, fills)),
+                Shape::Text(t) => {
+                    out.push((t.galley.job.text.clone(), t.galley.job.sections.first().map(|s| s.format.color).unwrap_or(Color32::WHITE)));
+                    at.push((t.galley.job.text.clone(), t.visual_bounding_rect()));
+                }
                 Shape::Rect(r) => fills.push((r.rect, r.fill)),
                 _ => {}
             }
         }
         for c in &out.shapes {
-            walk(&c.shape, &mut texts, &mut fills);
+            walk(&c.shape, &mut texts, &mut text_rects, &mut fills);
         }
         self.texts = texts;
+        self.text_rects = text_rects;
         self.fills = fills;
     }
 
@@ -916,6 +923,7 @@ fn fifty_thousand_messages_draw_quickly_and_a_steady_frame_runs_no_query() {
         account: MailAccount { id: "perf".into(), ..MailAccount::default() },
         offline: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         texts: vec![],
+        text_rects: vec![],
         fills: vec![],
         size: Vec2::new(1500.0, 900.0),
     };
@@ -3208,6 +3216,43 @@ fn tab_focus_is_drawn_on_the_rows_of_drafts_and_outbox() {
         }
         assert!(found, "Tab reaches the row and {mark} is drawn");
         assert!(w.rect(mark).width() > 100.0, "it frames the whole row");
+    }
+}
+
+// spec: MAIL-228
+#[test]
+fn the_rows_of_drafts_and_outbox_keep_their_margin_whether_selected_or_not() {
+    let (mut w, _smtp) = compose_world("row-margin", 30);
+    let acct = w.account.id.clone();
+    let ob = Outbox::new(&w.app.mail.root);
+    for (i, subject) in ["Margin draft A", "Margin draft B"].iter().enumerate() {
+        ob.save_draft(&crate::mail::outbox::tests::draft(&acct, subject, "words"), NOW + i as i64).unwrap();
+    }
+    w.put_in_outbox("Margin failed", 1);
+    w.put_in_outbox("Margin unsure", 2);
+    // where the text of each row starts, measured from the left edge of its row (the rows are
+    // found by their key, the order of mails queued in the same second is not fixed)
+    let insets = |w: &W, rows: &[&str]| -> Vec<f32> {
+        rows.iter()
+            .map(|key| {
+                let row = w.rect(key);
+                let text = w.text_rects.iter().find(|(t, r)| t.starts_with("Margin ") && row.contains_rect(*r)).unwrap_or_else(|| panic!("a subject is painted inside the row {key} {row:?}: {:?}", w.text_rects)).1;
+                text.min.x - row.min.x
+            })
+            .collect()
+    };
+    w.click(&format!("mail:drafts:{acct}"));
+    w.settle();
+    let drafts = insets(&w, &["mail:draft:0", "mail:draft:1"]);
+    assert!(drafts.iter().all(|x| *x >= 4.0), "the draft texts keep a margin: {drafts:?}");
+    w.open_outbox();
+    for subject in ["Margin failed", "Margin unsure"] {
+        w.outbox_go(subject);
+        w.settle();
+        let x = insets(&w, &["mail:outbox:0", "mail:outbox:1"]);
+        assert!(x.iter().all(|x| *x >= 4.0), "with {subject} selected every outbox text keeps a margin: {x:?}");
+        assert!((x[0] - x[1]).abs() < 0.5, "with {subject} selected the selected and the other row start at the same place: {x:?}");
+        assert!((x[0] - drafts[0]).abs() < 0.5, "drafts and outbox rows start at the same place: {x:?} {drafts:?}");
     }
 }
 
