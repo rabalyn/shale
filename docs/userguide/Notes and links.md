@@ -31,6 +31,7 @@ Back to [[Start here]].
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab
   completes like a shell. Files from outside the vault are copied to `z_media/<year>/<month>/`.
 - Type `[[p ` and a name to link a person ([[Tags and people]]).
+- In these lists ↓ / ↑ or Ctrl+J / Ctrl+K move the highlight; Enter, Tab or a click picks the entry.
 
 ## Embeds
 
