@@ -1931,18 +1931,12 @@ impl ShaleApp {
                 for p in &img.pixels {
                     bytes.extend_from_slice(&p.to_srgba_unmultiplied());
                 }
-                match image::RgbaImage::from_raw(w as u32, h as u32, bytes) {
-                    Some(buf) => {
-                        if let Some(dir) = path.parent() {
-                            let _ = std::fs::create_dir_all(dir);
-                        }
-                        let mut png = std::io::Cursor::new(Vec::new());
-                        let saved = buf.write_to(&mut png, image::ImageFormat::Png).map_err(|e| e.to_string()).and_then(|_| crate::fsutil::write_atomic(&path, png.get_ref()).map_err(|e| e.to_string()));
-                        if let Err(e) = saved {
-                            eprintln!("could not save screenshot: {e}");
-                        }
-                    }
-                    None => eprintln!("screenshot had an unexpected size"),
+                if let Some(dir) = path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                let saved = screenshot::encode_png(w as u32, h as u32, &bytes).and_then(|png| crate::fsutil::write_atomic(&path, &png).map_err(|e| e.to_string()));
+                if let Err(e) = saved {
+                    eprintln!("could not save screenshot: {e}");
                 }
                 done.store(true, Ordering::SeqCst);
             });
