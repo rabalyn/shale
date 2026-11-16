@@ -28,6 +28,10 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
   comment naming the commit); comment on an issue when you make partial progress or the plan
   changes. A SHOULD BE row names its issue; flipping it to IS NOW closes the issue.
 - **Your final report** lists the issues you opened, commented on or closed.
+- **Docs-only merge conflicts** (FORGE-010): if a PR's CI passed and only `*.md` docs, specs or
+  ADRs conflict with `main`, resolve them (keep both sides), run the docs tests locally
+  (`cargo test --test spec_refs`, `cargo test --bin shale -- the_docs_list the_definable dev_007_ dev_019_`)
+  and merge without waiting for another CI run. Code, renumbered spec IDs or screenshots: CI as usual.
 
 ## Specs first (ADR-0001)
 
