@@ -165,7 +165,8 @@ cargo build --release
 
 You need a Rust toolchain (1.89 or newer; CI uses the version in `rust-toolchain.toml`). On Linux also
 the usual desktop libraries (Wayland or X11, plus OpenGL/Vulkan drivers, and a C compiler for the
-bundled SQLite). On macOS the Xcode command line tools (`xcode-select --install`) are enough. On Windows
+bundled SQLite) and the ALSA headers for sound (`libasound2-dev` on Debian and Ubuntu, `alsa-lib` on
+Arch, `alsa-lib-devel` on Fedora). On macOS the Xcode command line tools (`xcode-select --install`) are enough. On Windows
 install Rust with the MSVC toolchain (the Visual Studio Build Tools with "Desktop development with C++");
 the same three commands work in PowerShell, with `.\target\release\shale.exe` as the program.
 
