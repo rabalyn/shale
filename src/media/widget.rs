@@ -18,18 +18,40 @@ const PAD: f32 = 8.0;
 pub const BUTTON_RADIUS: f32 = 22.0;
 
 /// A video card is wider and has its picture (16:9) above the controls (MEDIA-009).
-const VIDEO_MAX_WIDTH: f32 = 640.0;
+pub const VIDEO_MAX_WIDTH: f32 = 640.0;
+pub const VIDEO_MIN_WIDTH: f32 = 260.0;
 /// Below a video's picture: name, progress bar and volume.
 const VIDEO_CONTROLS: f32 = 108.0;
 
-/// The size of the card of `abs` in a place `avail_w` wide.
-pub fn card_size(abs: &Path, avail_w: f32) -> Vec2 {
+/// The size of the card of `abs` in a place `avail_w` wide; `width` is the width the link asks
+/// for (`![[clip.mp4|480]]`, EDIT-024), which a video takes up to the place's width. A sound's
+/// card keeps its own size.
+pub fn card_size(abs: &Path, avail_w: f32, width: Option<f32>) -> Vec2 {
     if super::is_video(abs) {
-        let w = avail_w.clamp(260.0, VIDEO_MAX_WIDTH);
+        let w = match width {
+            Some(w) => w.min(avail_w).max(VIDEO_MIN_WIDTH),
+            None => avail_w.clamp(VIDEO_MIN_WIDTH, VIDEO_MAX_WIDTH),
+        };
         Vec2::new(w, PAD + video_art_height(w) + VIDEO_CONTROLS)
     } else {
         Vec2::new(avail_w.clamp(260.0, CARD_MAX_WIDTH), CARD_HEIGHT)
     }
+}
+
+/// The video card that fills `room` as far as its shape lets it (the fullscreen view).
+pub fn video_card_fit(room: Vec2) -> Vec2 {
+    let w = room.x.min((room.y - PAD - VIDEO_CONTROLS) * 16.0 / 9.0 + 2.0 * PAD).max(VIDEO_MIN_WIDTH);
+    Vec2::new(w, PAD + video_art_height(w) + VIDEO_CONTROLS)
+}
+
+/// The card width at which the video's picture is shown pixel for pixel ("100%").
+pub fn video_natural_width(picture_w: u32) -> f32 {
+    picture_w as f32 + 2.0 * PAD
+}
+
+/// The rectangle of a video card's picture, where its corner buttons go.
+pub fn video_art_rect(card: Rect) -> Rect {
+    Rect::from_min_size(card.min + Vec2::splat(PAD), Vec2::new(card.width() - 2.0 * PAD, video_art_height(card.width())))
 }
 
 fn video_art_height(card_w: f32) -> f32 {
@@ -37,9 +59,9 @@ fn video_art_height(card_w: f32) -> f32 {
 }
 
 /// Lay out a card in the flow of `ui` and draw it.
-pub fn show(ui: &mut Ui, media: &MediaPlayer, abs: &Path, owner: &Path) -> Response {
+pub fn show(ui: &mut Ui, media: &MediaPlayer, abs: &Path, owner: &Path, width: Option<f32>) -> Response {
     let id = ui.auto_id_with(("media-card", abs));
-    let (rect, resp) = ui.allocate_exact_size(card_size(abs, ui.available_width()), Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(card_size(abs, ui.available_width(), width), Sense::hover());
     paint(ui, rect, media, abs, owner, id);
     resp
 }
@@ -272,5 +294,29 @@ fn paint_speaker(painter: &Painter, r: Rect, muted: bool, colour: Color32) {
     } else {
         painter.add(Shape::line(vec![at(0.64, 0.36), at(0.7, 0.5), at(0.64, 0.64)], stroke));
         painter.add(Shape::line(vec![at(0.75, 0.24), at(0.86, 0.5), at(0.75, 0.76)], stroke));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: MEDIA-012
+    #[test]
+    fn a_videos_card_takes_the_width_of_its_link_and_fits_the_fullscreen_view() {
+        let clip = Path::new("clip.mp4");
+        assert_eq!(card_size(clip, 900.0, None).x, 640.0);
+        assert_eq!(card_size(clip, 900.0, Some(800.0)).x, 800.0, "a link can ask for more than the usual width");
+        assert_eq!(card_size(clip, 500.0, Some(800.0)).x, 500.0, "but never more than the place has");
+        assert_eq!(card_size(clip, 900.0, Some(10.0)).x, 260.0);
+        let s = card_size(clip, 900.0, Some(480.0));
+        assert_eq!(s.y, PAD + video_art_height(480.0) + VIDEO_CONTROLS);
+        assert_eq!(card_size(Path::new("a.mp3"), 900.0, Some(100.0)), Vec2::new(520.0, CARD_HEIGHT), "a sound keeps its card");
+        // wide room: the height decides; tall room: the width
+        let wide = video_card_fit(Vec2::new(1800.0, 700.0));
+        assert!((wide.y - 700.0).abs() < 1.0, "{wide:?}");
+        let tall = video_card_fit(Vec2::new(500.0, 1000.0));
+        assert_eq!(tall.x, 500.0);
+        assert_eq!(video_natural_width(1280), 1296.0);
     }
 }

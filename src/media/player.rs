@@ -115,6 +115,8 @@ pub struct View {
     pub volume: f32,
     pub muted: bool,
     pub opacity: f32,
+    /// the picture size of a video, once ffprobe has looked (the "100%" size, MEDIA-012)
+    pub video_size: Option<(u32, u32)>,
     /// the file is a Git LFS pointer: not downloaded, or downloading (SYNC-020)
     pub download: Option<Notice>,
 }
@@ -136,6 +138,11 @@ impl MediaPlayer {
         }
         s.opacity = opacity.clamp(0.0, 1.0);
         s.apply_state();
+    }
+
+    /// The opacity of the round buttons (MEDIA-004), which the buttons over pictures share (MEDIA-012).
+    pub fn opacity(&self) -> f32 {
+        self.lock().opacity
     }
 
     /// The volume a player's slider set since the last call, to be saved in the config.
@@ -240,6 +247,7 @@ impl MediaPlayer {
                 volume: s.volume,
                 muted: s.muted,
                 opacity: s.opacity,
+                video_size: None,
                 download: Some(n),
             };
         }
@@ -285,6 +293,10 @@ impl MediaPlayer {
             volume: s.volume,
             muted: s.muted,
             opacity: s.opacity,
+            video_size: match s.looks.get(&slot_key) {
+                Some(LookSlot::Ready { info: Some(i), .. }) => Some((i.width, i.height)),
+                _ => None,
+            },
             download: None,
         };
         if let Some(c) = s.current.as_mut().filter(|c| c.path == abs) {

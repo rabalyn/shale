@@ -430,6 +430,8 @@ pub struct NoteEditor {
     pub dark_canvas: bool,
     /// The app's media player, which the players of sound embeds draw from (MEDIA-001).
     pub media: crate::media::MediaPlayer,
+    /// Resizing and fullscreen of shown pictures and videos (EDIT-024, MEDIA-012).
+    pub embeds: crate::media::embed::Embeds,
     /// Show a gutter with line numbers (set from the app's settings, EDIT-018).
     pub line_numbers: bool,
     /// Draw the markdown rendered except around the cursor (EDIT-016, set from the app's settings).
@@ -467,6 +469,7 @@ impl NoteEditor {
             inline_images: false,
             dark_canvas: true,
             media: crate::media::MediaPlayer::default(),
+            embeds: Default::default(),
             line_numbers: false,
             live_preview: false,
             preview_raw_lines: 0,
@@ -852,6 +855,8 @@ impl NoteEditor {
         // Inline embeds: pictures, drawings and PDFs are shown in place of their link unless the
         // cursor is inside the link.
         let mut images: Vec<(Range<usize>, f32, Art, Vec2)> = Vec::new();
+        // the widest a shown embed can be (where the text can go)
+        let mut max_w = 80.0;
         // line numbers (EDIT-018): a gutter wide enough for the last number, left of the text
         let number_font = egui::FontId::monospace((base_size * 0.8).round());
         let gutter = if self.line_numbers {
@@ -883,7 +888,7 @@ impl NoteEditor {
                 let b = markdown::char_to_byte(text, r.secondary.index.0);
                 a.min(b)..a.max(b)
             });
-            let max_w = (ui.available_width() - gutter - 8.0).max(80.0);
+            max_w = (ui.available_width() - gutter - 8.0).max(80.0);
             for (l, ok) in &self.cache.links {
                 if !l.embed || !*ok {
                     continue;
@@ -895,6 +900,8 @@ impl NoteEditor {
                 }
                 let Some(p) = vault.resolve(&l.target, Some(rel)) else { continue };
                 let abs = vault.abs(&p);
+                // the width the link asks for, or the one a drag is giving it right now
+                let asked = self.embeds.dragging(l.range.start).or(l.embed_width());
                 let fit = |w: f32, h: f32, max_h: f32| {
                     let k = (max_w / w).min(max_h / h).min(1.0);
                     Vec2::new(w * k, h * k)
@@ -907,7 +914,13 @@ impl NoteEditor {
                     }
                     let Some(tex) = crate::media::texture(ui.ctx(), &abs) else { continue };
                     let [tw, th] = tex.size_vec2().into();
-                    let size = fit(tw, th, 420.0);
+                    let size = match asked {
+                        Some(a) => {
+                            let k = a.min(max_w) / tw;
+                            Vec2::new(tw * k, th * k)
+                        }
+                        None => fit(tw, th, 420.0),
+                    };
                     images.push((l.range.clone(), size.y + 6.0, Art::Tex(tex), size));
                 } else if crate::drawing::excalidraw_md::is_drawing_path(&p) {
                     let Some(scene) = crate::reader::scene_cached(ui.ctx(), &abs) else { continue };
@@ -916,7 +929,7 @@ impl NoteEditor {
                     let size = fit(b.width().max(40.0), b.height().max(40.0), 420.0);
                     images.push((l.range.clone(), size.y + 6.0, Art::Scene(scene, p.clone()), size));
                 } else if crate::media::is_media(&p) {
-                    let size = crate::media::widget::card_size(&abs, max_w);
+                    let size = crate::media::widget::card_size(&abs, max_w, asked);
                     images.push((l.range.clone(), size.y + 6.0, Art::Audio(abs.clone()), size));
                 } else if crate::pdf::view::is_pdf(&p) {
                     match crate::pdf::view::pdf_pages(ui.ctx(), &abs, 1) {
@@ -992,6 +1005,8 @@ impl NoteEditor {
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
             let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
             let now_text = output.galley.job.text.clone();
+            // sizes the user chose this frame: (link range, width in points)
+            let mut resized: Vec<(Range<usize>, u32)> = Vec::new();
             for (r, _, idx) in remap_images(&now_text, &image_keys) {
                 let (_, _, art, size) = &images[idx];
                 let id = self.id.with(("media-card", idx));
@@ -1001,6 +1016,17 @@ impl NoteEditor {
                 match art {
                     Art::Tex(tex) => {
                         painter.image(tex.id(), rect, uv, Color32::WHITE);
+                        let shown = crate::media::embed::Shown { rect, at: r.start, aspect: size.y / size.x, min_w: crate::media::embed::MIN_WIDTH, max_w, buttons: rect };
+                        let did = self.embeds.controls(ui, id, self.media.opacity(), &shown);
+                        if let Some(w) = did.resized {
+                            resized.push((r.clone(), w.round() as u32));
+                        }
+                        if did.natural {
+                            resized.push((r.clone(), tex.size_vec2().x.round() as u32));
+                        }
+                        if did.fullscreen {
+                            self.embeds.full = Some(crate::media::embed::Full::Image(tex.clone()));
+                        }
                     }
                     Art::Scene(scene, at) => {
                         let bg = if self.dark_canvas { Color32::from_rgb(18, 18, 18) } else { Color32::WHITE };
@@ -1008,7 +1034,23 @@ impl NoteEditor {
                         let pics = crate::drawing::pictures::textures(ui.ctx(), scene, vault, at);
                         crate::drawing::paint_thumbnail(&painter, scene, rect.shrink(4.0), self.dark_canvas, &pics);
                     }
-                    Art::Audio(abs) => crate::media::widget::paint(ui, rect, &self.media, abs, rel, id),
+                    Art::Audio(abs) => {
+                        crate::media::widget::paint(ui, rect, &self.media, abs, rel, id);
+                        if crate::media::is_video(abs) {
+                            let shown = crate::media::embed::Shown { rect, at: r.start, aspect: size.y / size.x, min_w: crate::media::widget::VIDEO_MIN_WIDTH, max_w, buttons: crate::media::widget::video_art_rect(rect) };
+                            let did = self.embeds.controls(ui, id.with("embed"), self.media.opacity(), &shown);
+                            if let Some(w) = did.resized {
+                                resized.push((r.clone(), w.round() as u32));
+                            }
+                            if did.natural {
+                                let natural = self.media.view(ui.ctx(), abs).video_size.map_or(crate::media::widget::VIDEO_MAX_WIDTH, |(w, _)| crate::media::widget::video_natural_width(w));
+                                resized.push((r.clone(), natural.round() as u32));
+                            }
+                            if did.fullscreen {
+                                self.embeds.full = Some(crate::media::embed::Full::Video(abs.clone()));
+                            }
+                        }
+                    }
                     Art::Download(abs) => {
                         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| crate::media::widget::show_not_downloaded(ui, &self.media, abs));
                     }
@@ -1023,6 +1065,14 @@ impl NoteEditor {
                     }
                 }
             }
+            // the size goes into the link (`![[pic.png|300]]`, EDIT-024)
+            for (range, w) in resized.into_iter().rev() {
+                if text.get(range.clone()) == now_text.get(range.clone()) {
+                    let link = markdown::embed_with_width(&text[range.clone()], w);
+                    text.replace_range(range, &link);
+                    changed = true;
+                }
+            }
         }
         // paint the tables over their hidden text
         if let Some(raw) = preview.as_ref().filter(|_| !tables.is_empty()) {
@@ -1033,6 +1083,7 @@ impl NoteEditor {
                 crate::table::paint(&painter, output.galley_pos + Vec2::new(c.min.x, c.min.y + 1.0), &tables[idx].2);
             }
         }
+        self.embeds.show_full(self.id, ui.ctx(), &self.media, rel);
         if gutter > 0.0 {
             let now_text = &output.galley.job.text;
             let cursor_line = output.cursor_range.filter(|_| resp.has_focus()).map(|r| {
@@ -1862,6 +1913,118 @@ mod tests {
         h.click_text(&mut ed, &mut text, &v, rel, &format!("▸ {folder}/"));
         assert_eq!(text, format!("[!/{folder}/"));
         assert!(h.ctx.memory(|m| m.has_focus(ed.id)), "the editor keeps the keyboard");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Where the first embed of "intro\n![[…]]" is drawn.
+    fn embed_rect(ed: &NoteEditor, size: Vec2) -> Rect {
+        let (galley, pos) = ed.last_layout.clone().unwrap();
+        let c = galley.pos_from_cursor(CCursor::new(6));
+        Rect::from_min_size(pos + Vec2::new(c.min.x, c.min.y + 3.0), size)
+    }
+
+    fn press(pos: Pos2, pressed: bool) -> Event {
+        Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+    }
+
+    // spec: EDIT-024
+    #[test]
+    fn dragging_a_corner_sets_the_width_in_the_link_and_the_buttons_do_their_work() {
+        let (v, d) = vault_for_tests("resize");
+        image::RgbaImage::from_pixel(200, 120, image::Rgba([200, 30, 30, 255])).save(d.join("pic.png")).unwrap();
+        let mut v = v;
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("intro\n![[pic.png]]\nafter");
+        let mut ed = NoteEditor::new(egui::Id::unique("resize"));
+        ed.inline_images = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        for _ in 0..3 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        let r = embed_rect(&ed, Vec2::new(200.0, 120.0));
+        // the bottom right corner, dragged 100 points to the right
+        let corner = r.max - Vec2::splat(3.0);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(corner)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(corner, true)]);
+        for i in 1..=5 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(corner + Vec2::new(20.0 * i as f32, 0.0))]);
+        }
+        assert_eq!(text, "intro\n![[pic.png]]\nafter", "the link is written when the mouse is let go");
+        let (changed, _) = h.frame(&mut ed, &mut text, &v, rel, vec![press(corner + Vec2::new(100.0, 0.0), false)]);
+        assert!(changed, "the editor reports the edit");
+        let width: u32 = text.strip_prefix("intro\n![[pic.png|").and_then(|t| t.split_once("]]")).map(|(w, _)| w.parse().unwrap()).expect(&text);
+        assert!((280..=310).contains(&width), "dragged to about 300: {width}");
+        assert!(text.ends_with("]]\nafter"));
+        // a width in the link is the size shown
+        for _ in 0..2 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(Pos2::new(800.0, 650.0))]);
+        }
+        let shown = ed.last_layout.as_ref().unwrap().0.size().y;
+        assert!(shown > 120.0 * 1.4, "the row is taller for the bigger picture: {shown}");
+        // the 100 % button: natural size
+        let r = embed_rect(&ed, Vec2::new(width as f32, width as f32 * 0.6));
+        let fullscreen = Pos2::new(r.right() - 27.0, r.top() + 27.0);
+        let hundred = fullscreen - Vec2::new(42.0, 0.0);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(hundred)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(hundred, true)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(hundred, false)]);
+        assert_eq!(text, "intro\n![[pic.png|200]]\nafter");
+        // fullscreen: opens, and Escape closes it
+        for _ in 0..2 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(Pos2::new(800.0, 650.0))]);
+        }
+        let r = embed_rect(&ed, Vec2::new(200.0, 120.0));
+        let fullscreen = Pos2::new(r.right() - 27.0, r.top() + 27.0);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(fullscreen)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(fullscreen, true)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(fullscreen, false)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.embeds.full.is_some(), "the fullscreen button opened the view");
+        let esc = Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        h.frame(&mut ed, &mut text, &v, rel, vec![esc]);
+        assert!(ed.embeds.full.is_none(), "Escape closes it");
+        assert_eq!(text, "intro\n![[pic.png|200]]\nafter");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: MEDIA-012
+    #[test]
+    fn a_video_is_resized_by_its_corner_and_has_the_buttons_too() {
+        let (v, d) = vault_for_tests("resize-video");
+        std::fs::write(d.join("clip.mp4"), b"not really a video").unwrap();
+        let mut v = v;
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("intro\n![[clip.mp4]]\nafter");
+        let mut ed = NoteEditor::new(egui::Id::unique("resize-video"));
+        ed.inline_images = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        for _ in 0..3 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        }
+        let card = crate::media::widget::card_size(&d.join("clip.mp4"), 880.0, None);
+        let r = embed_rect(&ed, card);
+        let corner = r.max - Vec2::splat(3.0);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(corner)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(corner, true)]);
+        for i in 1..=5 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(corner - Vec2::new(20.0 * i as f32, 0.0))]);
+        }
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(corner - Vec2::new(100.0, 0.0), false)]);
+        let width: u32 = text.strip_prefix("intro\n![[clip.mp4|").and_then(|t| t.split_once("]]")).map(|(w, _)| w.parse().unwrap()).expect(&text);
+        assert!((520..=560).contains(&width), "narrowed from 640 by about 100: {width}");
+        // fullscreen: the view opens over the whole window
+        for _ in 0..2 {
+            h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(Pos2::new(800.0, 650.0))]);
+        }
+        let r = embed_rect(&ed, crate::media::widget::card_size(&d.join("clip.mp4"), 880.0, Some(width as f32)));
+        let art = crate::media::widget::video_art_rect(r);
+        let fullscreen = Pos2::new(art.right() - 27.0, art.top() + 27.0);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::PointerMoved(fullscreen)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(fullscreen, true)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![press(fullscreen, false)]);
+        assert!(matches!(ed.embeds.full, Some(crate::media::embed::Full::Video(_))));
         let _ = std::fs::remove_dir_all(&d);
     }
 
