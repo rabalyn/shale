@@ -168,6 +168,10 @@ mod tests {
         dir: std::path::PathBuf,
         /// What the last frame painted.
         texts: Vec<String>,
+        /// The same with the top-left corner of each text.
+        text_pos: Vec<(String, Pos2)>,
+        /// The size of the window.
+        size: Vec2,
     }
 
     impl W {
@@ -183,28 +187,29 @@ mod tests {
             std::fs::write(dir.join("projects/Roadmap.md"), "# Roadmap\nbanana\n").unwrap();
             let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
             app.open(Path::new("A.md"), false);
-            let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir, texts: vec![] };
+            let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir, texts: vec![], text_pos: vec![], size: Vec2::new(900.0, 1600.0) };
             w.frame(vec![]);
             w
         }
 
         fn frame(&mut self, events: Vec<Event>) {
             self.t += 0.05;
-            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 1600.0))), time: Some(self.t), events, ..Default::default() };
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)), time: Some(self.t), events, ..Default::default() };
             let app = &mut self.app;
             let mut out = self.ctx.run_ui(raw, |ui| app.run_frame(ui));
             out.textures_delta.clear();
-            fn walk(s: &egui::Shape, out: &mut Vec<String>) {
+            fn walk(s: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
                 match s {
                     egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
-                    egui::Shape::Text(t) => out.push(t.galley.job.text.clone()),
+                    egui::Shape::Text(t) => out.push((t.galley.job.text.clone(), t.pos)),
                     _ => {}
                 }
             }
-            self.texts.clear();
+            self.text_pos.clear();
             for c in &out.shapes {
-                walk(&c.shape, &mut self.texts);
+                walk(&c.shape, &mut self.text_pos);
             }
+            self.texts = self.text_pos.iter().map(|t| t.0.clone()).collect();
         }
 
         fn press(&mut self, key: Key, modifiers: Modifiers) {
@@ -234,6 +239,15 @@ mod tests {
             self.frame(vec![b(true)]);
             self.frame(vec![b(false)]);
             self.frame(vec![]);
+        }
+
+        /// The window rect of the Settings dialog.
+        fn dialog_rect(&self) -> Rect {
+            self.ctx.memory(|m| m.area_rect(egui::Id::unique(("dialog", "settings")))).expect("settings dialog shown")
+        }
+
+        fn done_at(&self) -> Pos2 {
+            self.text_pos.iter().find(|t| t.0 == "Done").expect("a Done button").1
         }
 
         fn reading(&self) -> bool {
@@ -896,5 +910,69 @@ mod tests {
         typed(&mut w, Key::P, "p");
         assert!(matches!(w.app.modal, Some(Modal::Picker(_))), "the new ones open the picker");
         assert_eq!(note_text(&w), "# A\n");
+    }
+
+    /// A real click on a point.
+    fn click_at(w: &mut W, p: Pos2) {
+        let b = |pressed| Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        w.frame(vec![Event::PointerMoved(p)]);
+        w.frame(vec![b(true)]);
+        w.frame(vec![b(false)]);
+        w.frame(vec![]);
+    }
+
+    // spec: NAV-027
+    #[test]
+    fn nav_027_the_done_button_stays_in_view_on_every_tab_of_a_short_window() {
+        for size in [Vec2::new(1000.0, 600.0), Vec2::new(800.0, 500.0)] {
+            for tab in [SettingsTab::Keybindings, SettingsTab::General] {
+                let mut w = W::new("short");
+                w.size = size;
+                w.app.open_settings(tab);
+                for _ in 0..8 {
+                    w.frame(vec![]);
+                }
+                let screen = Rect::from_min_size(Pos2::ZERO, size);
+                let dialog = w.dialog_rect();
+                assert!(screen.contains_rect(dialog), "{size:?} {tab:?}: {dialog:?}");
+                let done = w.done_at();
+                assert!(dialog.contains(done + Vec2::new(10.0, 8.0)), "{size:?} {tab:?}: Done at {done:?} is outside the dialog {dialog:?}");
+                // a real click on it closes the dialog
+                click_at(&mut w, done + Vec2::new(10.0, 8.0));
+                assert!(w.app.modal.is_none(), "{size:?} {tab:?}: Done did not close the settings");
+            }
+        }
+    }
+
+    // spec: NAV-027
+    #[test]
+    fn nav_027_the_key_list_scrolls_to_its_last_row_and_rebinding_still_works() {
+        let mut w = W::new("short-scroll");
+        w.size = Vec2::new(1000.0, 600.0);
+        w.open_dialog();
+        let last = DEFS.last().expect("actions").id;
+        let key = format!("key:{last}");
+        let shown = |w: &W| {
+            let r = w.dialog().rects.iter().find(|r| r.0 == key).expect("control").1;
+            w.dialog_rect().contains_rect(r)
+        };
+        assert!(!shown(&w), "the last row is below the short window at first");
+        // the mouse wheel over the list scrolls it to the end
+        let over = w.dialog_rect().center();
+        w.frame(vec![Event::PointerMoved(over)]);
+        for _ in 0..40 {
+            w.frame(vec![Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, -400.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }]);
+        }
+        assert!(shown(&w), "the last row came into view");
+        // its button works with a real click, and the key is recorded
+        w.click(&key);
+        assert!(w.dialog().recording.is_some());
+        w.press(Key::Y, CTRL_ALT);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert_eq!(w.dialog().error, None);
+        assert_eq!(w.app.cfg.keybindings.get(last), Some(&vec!["Ctrl+Alt+Y".to_string()]));
+        // the Done button is still in view after scrolling
+        let done = w.done_at() + Vec2::new(10.0, 8.0);
+        assert!(w.dialog_rect().contains(done));
     }
 }

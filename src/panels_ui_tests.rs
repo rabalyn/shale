@@ -8,13 +8,13 @@ use crate::app::Options;
 use eframe::egui::{Event, PointerButton, RawInput};
 use egui::accesskit::Role;
 
-struct P {
+pub(super) struct P {
     ctx: egui::Context,
     t: f64,
-    app: ShaleApp,
-    dir: PathBuf,
+    pub(super) app: ShaleApp,
+    pub(super) dir: PathBuf,
     /// the text painted in the last frame, and where
-    painted: Vec<(String, Pos2)>,
+    pub(super) painted: Vec<(String, Pos2)>,
 }
 
 fn collect_text(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
@@ -26,10 +26,10 @@ fn collect_text(shape: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
 }
 
 /// What is on screen: role, label and place of every widget.
-type Seen = Vec<(Role, String, Rect)>;
+pub(super) type Seen = Vec<(Role, String, Rect)>;
 
 #[derive(Clone, Copy)]
-enum Show {
+pub(super) enum Show {
     Modals,
     Tasks,
     Files,
@@ -37,16 +37,16 @@ enum Show {
 
 impl P {
     /// The sample vault plus these files.
-    fn new(tag: &str, extra: &[(&str, &str)]) -> P {
+    pub(super) fn new(tag: &str, extra: &[(&str, &str)]) -> P {
         Self::build(tag, extra, true)
     }
 
     /// A vault with only these files.
-    fn with_files(tag: &str, files: &[(&str, &str)]) -> P {
+    pub(super) fn with_files(tag: &str, files: &[(&str, &str)]) -> P {
         Self::build(tag, files, false)
     }
 
-    fn build(tag: &str, extra: &[(&str, &str)], sample: bool) -> P {
+    pub(super) fn build(tag: &str, extra: &[(&str, &str)], sample: bool) -> P {
         let dir = std::env::temp_dir().join(format!("shale-panels-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -67,24 +67,24 @@ impl P {
     }
 
     /// The place of a row of the file tree, found by the name painted on it.
-    fn row(&mut self, name: &str) -> Rect {
+    pub(super) fn row(&mut self, name: &str) -> Rect {
         self.look(Show::Files);
         self.painted_rect(name)
     }
 
     /// A small place on the text painted as `text` in the last frame.
-    fn painted_rect(&self, text: &str) -> Rect {
+    pub(super) fn painted_rect(&self, text: &str) -> Rect {
         let at = self.painted.iter().find(|(t, _)| t.contains(text)).unwrap_or_else(|| panic!("no {text:?} painted: {:?}", self.painted.iter().map(|x| &x.0).collect::<Vec<_>>())).1;
         Rect::from_center_size(at + Vec2::new(10.0, 6.0), Vec2::new(8.0, 4.0))
     }
 
     /// Whether this text is on screen once the layout is still, painted or as a widget's label.
-    fn shows(&mut self, show: Show, text: &str) -> bool {
+    pub(super) fn shows(&mut self, show: Show, text: &str) -> bool {
         let seen = self.look(show);
         seen.iter().any(|(_, l, _)| l.contains(text)) || self.painted.iter().any(|(t, _)| t.contains(text))
     }
 
-    fn frame(&mut self, show: Show, events: Vec<Event>) -> Seen {
+    pub(super) fn frame(&mut self, show: Show, events: Vec<Event>) -> Seen {
         self.t += 0.05;
         let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 2600.0))), time: Some(self.t), events, ..Default::default() };
         let app = &mut self.app;
@@ -109,14 +109,14 @@ impl P {
     }
 
     /// Frames until the layout stands still, then what is on screen.
-    fn look(&mut self, show: Show) -> Seen {
+    pub(super) fn look(&mut self, show: Show) -> Seen {
         for _ in 0..5 {
             self.frame(show, vec![]);
         }
         self.frame(show, vec![])
     }
 
-    fn find(&mut self, show: Show, role: Option<Role>, label: &str) -> Rect {
+    pub(super) fn find(&mut self, show: Show, role: Option<Role>, label: &str) -> Rect {
         let seen = self.look(show);
         // buttons first (a dialog's title can have the name of its button), text boxes only when asked for
         let boxes = |r: &Role| matches!(r, Role::TextInput | Role::MultilineTextInput);
@@ -128,7 +128,7 @@ impl P {
             .2
     }
 
-    fn click_rect(&mut self, show: Show, r: Rect, b: PointerButton) {
+    pub(super) fn click_rect(&mut self, show: Show, r: Rect, b: PointerButton) {
         let p = r.center();
         let ev = |pressed| Event::PointerButton { pos: p, button: b, pressed, modifiers: Modifiers::NONE };
         self.frame(show, vec![Event::PointerMoved(p)]);
@@ -137,31 +137,31 @@ impl P {
         self.frame(show, vec![]);
     }
 
-    fn click(&mut self, show: Show, label: &str) {
+    pub(super) fn click(&mut self, show: Show, label: &str) {
         let r = self.find(show, None, label);
         self.click_rect(show, r, PointerButton::Primary);
     }
 
-    fn key(&mut self, show: Show, key: Key) {
+    pub(super) fn key(&mut self, show: Show, key: Key) {
         let ev = |pressed| Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
         self.frame(show, vec![ev(true)]);
         self.frame(show, vec![ev(false)]);
         self.frame(show, vec![]);
     }
 
-    fn type_text(&mut self, show: Show, text: &str) {
+    pub(super) fn type_text(&mut self, show: Show, text: &str) {
         self.frame(show, vec![Event::Text(text.into())]);
         self.frame(show, vec![]);
     }
 
     /// Select what the focused text box holds, so the next typing replaces it.
-    fn select_all(&mut self, show: Show) {
+    pub(super) fn select_all(&mut self, show: Show) {
         let ev = |pressed| Event::Key { key: Key::A, physical_key: None, pressed, repeat: false, modifiers: Modifiers::COMMAND };
         self.frame(show, vec![ev(true)]);
         self.frame(show, vec![ev(false)]);
     }
 
-    fn actions(&mut self) -> Vec<Action> {
+    pub(super) fn actions(&mut self) -> Vec<Action> {
         std::mem::take(&mut self.app.actions)
     }
 }
@@ -172,7 +172,7 @@ impl Drop for P {
     }
 }
 
-fn opened(a: &[Action]) -> Vec<String> {
+pub(super) fn opened(a: &[Action]) -> Vec<String> {
     a.iter()
         .filter_map(|a| match a {
             Action::Open { rel, .. } => Some(rel_to_string(rel)),

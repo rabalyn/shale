@@ -201,15 +201,28 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    for good, bad, unknown, expired-key, expired-signature and revoked signatures and for
    encrypting to or signing with an expired or revoked key (the test kit's `pgp_sign_expiring`),
    `classify_entity` for odd and nested mails, and `best_key`.
-9. **`app/drops.rs` `handle_drops` (291 to 447, 46 % covered) and `wl_drop.rs` `event` (264 to 397,
+9. **`app/drops.rs` `handle_drops` (291 to 447, 46 % covered before) and `wl_drop.rs` `event` (264 to 397,
    45 %)**: dropping files, folders and mails from other programs (Wayland data offers, MIME kinds,
    the import dialog). Done in #61 (DEV-012): `wl_drop.rs` is split into a protocol-free part
    (`Drag`, `Landing`, `is_repeat`) with unit tests and a thin Wayland glue; `app/drops_tests.rs` feeds
    `DropEvent`s and window-system files to `handle_drops` in the headless window (drop on a folder, a
    note, the editor, nowhere; into an open dialog; hover, refusal and busy hints; unusable drops; no
-   vault; a drag inside the file list); the `--keys` step `drop:T:/a;;/b` drops files at a place. What
-   stays outside the tests is the Wayland glue itself (the calls on a real data offer) and the drag
-   out of the calendar. The line figures above are from before; measure again with the next report.
+   vault; a drag inside the file list); the `--keys` step `drop:T:/a;;/b` drops files at a place.
+   Done in #75: the drag of a calendar event (`CalDrag`) is fed the same way (payload plus pointer
+   in the headless window): onto a folder, a note, the editor and nowhere, with and without a
+   title, dropped back on the calendar (nothing imported), into an open Import dialog, with no vault
+   and with no pointer; the tests check the event, calendar name and `.ics` the dialog holds and the
+   note that Import writes. There is no write to the calendar in this branch (a dragged event is
+   only imported), so there is no failure path of that kind. Done in #89: dragging in the file list
+   (`app/tree_ui_tests.rs`: into a folder, next to a note, to the top, into itself or its child,
+   where it already is, a name that is taken, off the list, a closed folder opening). What stays
+   outside the tests is the Wayland glue itself (the calls on a real data offer). Measured on
+   2026-11-15 on `99e8a6e` plus the tests of #75 and #89 (`cargo llvm-cov --locked --lcov`, 988
+   tests): `app/drops.rs` 403 lines, 42 missed, **89.58 %** (before: 216 missed, 46.40 %); the total
+   is 52,421 lines, 48,408 covered, **92.34 %** (functions 7,171 of 7,812, 91.79 %; regions 87,332
+   of 94,673, 92.25 %). The total includes the other waves merged into `99e8a6e`, not only these
+   tests. Measured again on 2026-11-16 with main (#90, #92) merged, 1020 tests: **92.39 %**.
+   `.forgejo/coverage-baseline` is raised from 88.75 to 92.0, a little below the measured figure.
 10. **`drawing.rs` `continue_drag`, `begin_drag`, `end_drag`, `click` (1450 to 1815), 270 lines, and
     `panels.rs` `modals`, `tasks_view`, `tree` (218 to 1110), 330 lines**: moving, resizing and
     rotating elements, the modal dialogs, the task list view and the folder tree. Test: headless UI
@@ -222,10 +235,20 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
     snapping, 45-degree lock, pencil, eraser, hand and Space pan, double-click editing) and found a
     bug (an arrow end dragged off its shape sprang back). `panels_ui_tests.rs` (8 tests,
     VAULT-023, VAULT-024, TASK-005) drives the quick switcher, Rename, New folder, Move to trash
-    and Settings dialogs, the task list and the file tree. Left open: the dialogs of other modules
-    (`Export`, `Import`, `Event`, mail and feed accounts, `Calendars` content) belong to their own
-    modules; the linear branch of the resize code is reached only by scribbles; Convert-again of
-    the canvas question; the sort menu and drag-and-drop in the tree.
+    and Settings dialogs, the task list and the file tree. Done in #89: `dialogs_ui_tests.rs` (9
+    tests) drives the file list's sort menu (name, modified, created; both directions), the
+    Calendars dialog (add a local calendar, sample events, a bad and a good CalDAV address, Done,
+    Cancel, Esc), the Event dialog (new event typed and saved, changed in place, Cancel, a date
+    that does not exist, an end before the start), Export (the PDF on disk, an unwritable place, no
+    place, Cancel), Import (a wrong folder, adding a file by path, the notes and the remembered
+    folder and tags, Cancel), the mail accounts dialog (each wrong entry explained, a good
+    account and the read settings saved, Cancel, Remove) and "Convert again" of the canvas
+    question; `app/tree_ui_tests.rs` (5 tests) drives drag-and-drop in the file tree. Not done:
+    the feed accounts dialog (already driven against pretend servers in `social/ui_tests.rs`, #63),
+    the keyring and the real sign-in parts of the mail dialog (`mail_ui_tests.rs`), saving the sort
+    choice to the settings file (the tests run without one), and the linear branch of the resize
+    code, which only scribbles reach. Measured: `panels.rs` 1,553 lines, 137 missed, 91.18 %
+    (before: 469 missed, 68.88 %).
 
 More, in the order of the table:
 

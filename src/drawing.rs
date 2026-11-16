@@ -1640,6 +1640,8 @@ impl DrawingDoc {
                 let flip_x = (wp.x < anchor.x) == ((anchor.x - ob.min.x).abs() < 0.01);
                 let flip_y = (wp.y < anchor.y) == ((anchor.y - ob.min.y).abs() < 0.01);
                 if let Some(e) = self.scene.elements.iter_mut().find(|e| e.id == id) {
+                    // Only a scribble gets here with points: a single line or arrow has end
+                    // handles instead, and a selection of several has no resize box (#88).
                     if e.is_linear() {
                         e.points = orig
                             .points

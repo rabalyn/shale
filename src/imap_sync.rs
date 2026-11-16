@@ -839,6 +839,30 @@ mod tests {
         }
     }
 
+    // spec: MAIL-059
+    #[test]
+    fn a_password_account_without_a_stored_password_is_told_so_and_the_real_factory_maps_it_to_no_password() {
+        // The pretend keyring is shared by all tests and keyed by account id: ids of its own that nothing
+        // ever stores a password for (and no global switch such as `pretend_no_keyring`) keep this parallel-safe.
+        let account = MailAccount { id: "t-imap-no-password".into(), host: "localhost".into(), user: "ada".into(), ..MailAccount::default() };
+        assert!(crate::secrets::mail_secret(&account.id, crate::secrets::MailSecret::Password).is_none());
+        assert_eq!(auth_factory(&account, None, "localhost", 993).err().unwrap(), "no password for this account in the keyring");
+        // a client secret typed for this session is no password
+        assert_eq!(auth_factory(&account, Some("typed".into()), "localhost", 993).err().unwrap(), "no password for this account in the keyring");
+        // through the production factory: the window looks for exactly NO_PASSWORD
+        assert_eq!(real_factory()(&account, None).err().unwrap(), NO_PASSWORD);
+        // a lazy connector over it gives that sign-in error on every connect
+        let factory = real_factory();
+        let acct = account.clone();
+        let lazy = LazyConnector::new(move || factory(&acct, None));
+        assert!(matches!(lazy.connect(), Err(ImapError::Auth(t)) if t == NO_PASSWORD));
+        // a password in the keyring (an id of its own again) is found
+        let stored = MailAccount { id: "t-imap-stored-password".into(), ..account };
+        assert!(crate::secrets::set_mail_secret(&stored.id, crate::secrets::MailSecret::Password, "pw"));
+        assert!(auth_factory(&stored, None, "localhost", 993).is_ok());
+        assert!(real_factory()(&stored, None).is_ok());
+    }
+
     fn opts() -> SyncOptions {
         SyncOptions { now: Some(NOW), batch_size: 2, ..SyncOptions::default() }
     }

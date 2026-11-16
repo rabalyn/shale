@@ -311,10 +311,12 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
     child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| e.to_string())?;
     drop(cfg);
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    // curl stops at the size limit (exit code 63) when the server announces a bigger answer: that is
-    // an error, not an empty answer with status 200
-    if out.status.code() == Some(63) {
-        return Err(too_big(max_bytes));
+    // curl failed: whatever status line was parsed (the last 302 of a redirect loop, the 200 of an answer
+    // cut short) is not an answer, so the person gets the reason in words (CAL-030)
+    match out.status.code() {
+        Some(0) => {}
+        Some(code) => return Err(curl_failure(code, max_bytes)),
+        None => return Err("curl was stopped before it got an answer".into()),
     }
     // the answer can hold a token (the OAuth2 endpoint): wiped when this function is done
     let raw = Zeroizing::new(out.stdout);
@@ -349,6 +351,23 @@ fn request_bytes_opts(method: &str, url: &str, headers: &[&str], body: &str, acc
         }
     }
     Ok(BytesResponse { status, body, url: effective, etag: clean_etag(&etag), content_type })
+}
+
+/// The words for a curl exit code other than 0 (CAL-030). Unknown codes say the number, so a report can name it.
+fn curl_failure(code: i32, max_bytes: u64) -> String {
+    match code {
+        1 => "the server sent the request on to a kind of address that is not allowed (for example from https to plain http)".into(),
+        6 => "the server's name could not be found — check the address and your network".into(),
+        7 => "could not connect to the server — it is down, the address or port is wrong, or a firewall is in the way".into(),
+        18 => "the answer was cut short — the server stopped sending before it was complete".into(),
+        28 => "the server took too long to answer".into(),
+        35 | 60 => "the secure connection failed — the server's certificate is not trusted or does not match the address".into(),
+        47 => "the server sent the request on too many times (a redirect loop) — check the address".into(),
+        52 => "the server closed the connection without an answer".into(),
+        56 => "the connection broke while the answer was coming in".into(),
+        63 => too_big(max_bytes),
+        c => format!("the connection to the server failed (curl error {c})"),
+    }
 }
 
 /// The address without a `user:password@` part in its authority.
@@ -764,6 +783,30 @@ pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>, before: &[Ev
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    // spec: CAL-030
+    #[test]
+    fn curl_exit_codes_have_words() {
+        for (code, words) in [
+            (1, "kind of address that is not allowed"),
+            (6, "name could not be found"),
+            (7, "could not connect"),
+            (18, "cut short"),
+            (28, "took too long"),
+            (35, "certificate is not trusted"),
+            (60, "certificate is not trusted"),
+            (47, "redirect loop"),
+            (52, "closed the connection without an answer"),
+            (56, "connection broke"),
+            (63, "bigger than 1000 bytes"),
+            (99, "curl error 99"),
+        ] {
+            let text = curl_failure(code, 1000);
+            assert!(text.contains(words), "{code}: {text}");
+            assert!(!text.contains("status"), "{code}: {text}");
+        }
+        assert!(curl_failure(63, 20_000_000).contains("20 MB"));
+    }
 
     // spec: CAL-019
     #[test]

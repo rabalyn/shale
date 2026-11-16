@@ -889,7 +889,8 @@ impl ShaleApp {
                 }
             }
             Modal::Settings { vault_path, tab, keys } => {
-                let resp = crate::dialog::Dialog::new("settings", "Settings").width(640.0).show(&ctx, |ui| {
+                let mut done = false;
+                let body = |ui: &mut egui::Ui| {
                     ui.horizontal(|ui| {
                         ui.selectable_value(tab, SettingsTab::General, "General");
                         ui.selectable_value(tab, SettingsTab::Keybindings, "Keybindings");
@@ -899,10 +900,6 @@ impl ShaleApp {
                         if crate::keys_ui::show(ui, keys, &mut self.keymap) {
                             self.cfg.keybindings = self.keymap.overrides();
                             self.save_config();
-                        }
-                        ui.add_space(10.0);
-                        if ui.button("Done").clicked() {
-                            keep = false;
                         }
                         return;
                     }
@@ -1015,11 +1012,15 @@ impl ShaleApp {
                     if changed {
                         self.save_config();
                     }
-                    ui.add_space(10.0);
+                };
+                let resp = crate::dialog::Dialog::new("settings", "Settings").width(640.0).show_with_footer(&ctx, body, |ui| {
                     if ui.button("Done").clicked() {
-                        keep = false;
+                        done = true;
                     }
                 });
+                if done {
+                    keep = false;
+                }
                 if resp.should_close() {
                     self.keymap.recording = false;
                     keep = false;
@@ -1670,6 +1671,9 @@ mod canvas_dialog_tests {
     }
 }
 
+#[cfg(test)]
+#[path = "dialogs_ui_tests.rs"]
+mod dialogs_ui_tests;
 #[cfg(test)]
 #[path = "panels_ui_tests.rs"]
 mod ui_tests;

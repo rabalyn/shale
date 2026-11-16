@@ -178,6 +178,8 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - A repeating event asks what you mean: **Edit this date** or **Edit all repeats**, **Delete this
   date** or **Delete all repeats**. A date you change becomes its own entry next to the series; a
   date you delete is left out of the series.
+- Moving an event's start in the event dialog (typed or picked) moves its end along, so the
+  event keeps its length; changing the end never moves the start.
 - The event dialog sets how an event **repeats** (daily, weekly on the days you pick, monthly,
   yearly; every N; ending never, on a date or after N times), the dates it **skips**,
   **reminders** (minutes, hours or days before), its status, whether it shows as busy or free,
@@ -270,7 +272,9 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   only: folder, message or scroll. `/` goes to the search field (↓ or Enter there go into the
   results), Esc steps back. Everything has a key (see the Keyboard section), also syncing, the
   attachments, loading a message that is not here and switching the search scope, and all of them
-  can be changed in Settings → Keybindings (Mail view). Keys do not act while you type.
+  can be changed in Settings → Keybindings (Mail view). Keys do not act while you type. The row
+  menu shows the key of each entry, and the tooltip of a button names its key (the buttons of an outbox mail show it on the button too); all follow what you
+  set in Keybindings.
 - **Read, flag, move, delete** (also with the buttons above the message, a right click on a row,
   and the buttons that appear when mails are marked). The keys work on the marked mails, else on
   the open one, else on the one under the cursor, and need no Ctrl or Shift:

@@ -18,6 +18,8 @@ const MARGIN: f32 = 24.0;
 const TITLE_ROOM: f32 = 40.0;
 /// The smallest a dialog can be made.
 const MIN_SIZE: Vec2 = Vec2::new(220.0, 90.0);
+/// Room kept below the scrolling content for a footer (its separator and one row of buttons).
+const FOOTER_ROOM: f32 = 40.0;
 /// Frames a new dialog takes to measure its content: egui's invisible sizing pass, one frame
 /// to measure, one in which the window takes that size.
 const FIT_FRAMES: u8 = 3;
@@ -73,6 +75,16 @@ impl Dialog {
     }
 
     pub fn show<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T) -> DialogResponse<T> {
+        self.show_inner(ctx, content, None::<fn(&mut Ui)>)
+    }
+
+    /// Like [`Dialog::show`], with a footer (the buttons) below the content. Only the content
+    /// scrolls; the footer stays in view, also in a window shorter than the content.
+    pub fn show_with_footer<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T, footer: impl FnOnce(&mut Ui)) -> DialogResponse<T> {
+        self.show_inner(ctx, content, Some(footer))
+    }
+
+    fn show_inner<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T, footer: Option<impl FnOnce(&mut Ui)>) -> DialogResponse<T> {
         let Self { id, title, width, modal } = self;
         let screen = ctx.content_rect();
         let max = (screen.size() - Vec2::splat(2.0 * MARGIN)).max(MIN_SIZE);
@@ -124,13 +136,26 @@ impl Dialog {
             // While measuring, the scroll area may be as tall as the screen allows and shrinks to
             // the content (an inner scroll area takes what it is given), so the window takes the
             // content's height; otherwise it fills the window and scrolls.
-            let (room, shrink) = if measuring { (Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), (max.y - TITLE_ROOM).max(MIN_SIZE.y))), [false, true]) } else { (ui.available_rect_before_wrap(), [false, false]) };
-            ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
-                let out = ScrollArea::vertical().id_salt("dialog-body").auto_shrink(shrink).show(ui, content);
-                overflow = out.content_size.y > out.inner_rect.height() + 1.0;
-                out.inner
-            })
-            .inner
+            let reserve = if footer.is_some() { FOOTER_ROOM } else { 0.0 };
+            let (room, shrink) = if measuring {
+                (Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), (max.y - TITLE_ROOM - reserve).max(MIN_SIZE.y))), [false, true])
+            } else {
+                let mut room = ui.available_rect_before_wrap();
+                room.max.y = (room.max.y - reserve).max(room.min.y);
+                (room, [false, false])
+            };
+            let inner = ui
+                .scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
+                    let out = ScrollArea::vertical().id_salt("dialog-body").auto_shrink(shrink).show(ui, content);
+                    overflow = out.content_size.y > out.inner_rect.height() + 1.0;
+                    out.inner
+                })
+                .inner;
+            if let Some(footer) = footer {
+                ui.separator();
+                footer(ui);
+            }
+            inner
         });
 
         let Some(shown) = shown else {
