@@ -82,6 +82,9 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
   prompt, Shale says so: they are then kept in the settings file, which only you can read, or for this run only.
 - **Signed and encrypted mail** needs GnuPG on your computer (`brew install gnupg` on macOS,
   [Gpg4win](https://www.gpg4win.org) on Windows); without it Shale says so and everything else works.
+- **Videos** in notes are played with `ffmpeg` and `ffprobe` on your computer (`brew install ffmpeg` on macOS,
+  `winget install ffmpeg` on Windows, your package manager on Linux). Without them a video opens in your
+  system's video player and Settings says so; everything else works.
 - **CalDAV** and **git sync** need `curl` and `git` on the path (both come with macOS and Windows 10 and later; Git
   for Windows is a separate install).
 - **Drag and drop**: files dropped on the window are imported everywhere; mail messages, links and

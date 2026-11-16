@@ -210,7 +210,7 @@ impl Convert {
 
 /// Push to the queue; waits while it is full. False when the data is out of date (a seek came)
 /// or playing was stopped.
-fn push_all(shared: &Shared, epoch: u64, data: &[f32], stop: &AtomicBool) -> bool {
+pub(super) fn push_all(shared: &Shared, epoch: u64, data: &[f32], stop: &AtomicBool) -> bool {
     loop {
         match shared.push(epoch, data) {
             Pushed::Accepted => return true,

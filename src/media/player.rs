@@ -4,9 +4,10 @@
 //! only one file plays at a time. The handle is cheap to clone; all work that can be slow (opening
 //! the file, decoding the cover, opening the sound card) happens on threads.
 
-use super::cover::Look;
 use super::engine::Shared;
+use super::ffmpeg::{self, Info, Tools};
 use super::output::Output;
+use super::video::{self, FrameSlot, Looked};
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -40,6 +41,9 @@ struct Playback {
     want_play: bool,
     /// a jump asked for before the output was ready
     start_at: Option<f64>,
+    /// a video: the newest picture from ffmpeg, and the texture it is shown in
+    frames: Arc<FrameSlot>,
+    frame_tex: Option<egui::TextureHandle>,
 }
 
 impl Drop for Playback {
@@ -49,8 +53,8 @@ impl Drop for Playback {
 }
 
 enum LookSlot {
-    Loading(Arc<Mutex<Option<Look>>>),
-    Ready { duration: Option<f64>, error: Option<String>, cover: Option<egui::TextureHandle> },
+    Loading(Arc<Mutex<Option<Looked>>>),
+    Ready { duration: Option<f64>, error: Option<String>, cover: Option<egui::TextureHandle>, info: Option<Info>, external: bool },
 }
 
 struct State {
@@ -64,6 +68,10 @@ struct State {
     autoplay: bool,
     /// frames left in which the first player of a newly opened note starts
     autoplay_frames: u32,
+    /// where ffmpeg is (MEDIA-009); tests put their own
+    locate: fn() -> Option<Tools>,
+    /// videos the person asked to open in the system's player, for the app to open (MEDIA-010)
+    open_requests: Vec<PathBuf>,
     /// tests: what opens the output instead of the sound card
     #[cfg(test)]
     open_output: Option<fn() -> Result<Output, String>>,
@@ -84,6 +92,8 @@ impl Default for MediaPlayer {
             opacity: 0.6,
             autoplay: false,
             autoplay_frames: 0,
+            locate: ffmpeg::locate,
+            open_requests: Vec::new(),
             #[cfg(test)]
             open_output: None,
         })))
@@ -103,6 +113,8 @@ pub struct View {
     pub message: Option<String>,
     /// a file that cannot play at all: the button is dimmed
     pub unplayable: bool,
+    /// a video and no ffmpeg (MEDIA-010): a click opens the system's player
+    pub external: bool,
     pub volume: f32,
     pub muted: bool,
     pub opacity: f32,
@@ -160,6 +172,16 @@ impl MediaPlayer {
         }
     }
 
+    /// The videos that were asked to open in the system's player since the last call (MEDIA-010).
+    pub fn take_open_requests(&self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.lock().open_requests)
+    }
+
+    /// Where ffmpeg is on this machine, if it is (MEDIA-010: the settings say so).
+    pub fn ffmpeg(&self) -> Option<PathBuf> {
+        (self.lock().locate)().map(|t| t.ffmpeg)
+    }
+
     /// Tests: the file that is loaded in the output, if any.
     #[cfg(test)]
     pub fn current(&self) -> Option<PathBuf> {
@@ -183,6 +205,11 @@ impl MediaPlayer {
     /// Play or pause `abs`; another file that plays is stopped first (MEDIA-007).
     pub fn toggle(&self, ctx: &egui::Context, abs: &Path, owner: &Path) {
         let mut s = self.lock();
+        if s.is_external(abs) {
+            // no ffmpeg: the system's player gets the file (MEDIA-010)
+            s.open_requests.push(abs.to_path_buf());
+            return;
+        }
         let play = !s.current.as_ref().is_some_and(|c| c.path == abs && c.want_play);
         s.begin(ctx, abs, owner).want_play = play;
         s.apply_state();
@@ -211,8 +238,9 @@ impl MediaPlayer {
             }
             let cell = Arc::new(Mutex::new(None));
             let (path, out, ctx2) = (abs.to_path_buf(), cell.clone(), ctx.clone());
+            let locate = s.locate;
             std::thread::spawn(move || {
-                let look = super::cover::look(&path);
+                let look = if super::is_video(&path) { video::look(&path, locate) } else { Looked { look: super::cover::look(&path), info: None, missing: false } };
                 *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(look);
                 ctx2.request_repaint();
             });
@@ -221,13 +249,15 @@ impl MediaPlayer {
         if let Some(LookSlot::Loading(cell)) = s.looks.get(&slot_key) {
             let done = cell.lock().unwrap_or_else(|e| e.into_inner()).take();
             if let Some(look) = done {
+                let (external, info) = (look.missing, look.info);
+                let look = look.look;
                 let cover = look.cover.map(|img| ctx.load_texture(abs.to_string_lossy(), img, egui::TextureOptions::LINEAR));
-                s.looks.insert(slot_key.clone(), LookSlot::Ready { duration: look.duration, error: look.error, cover });
+                s.looks.insert(slot_key.clone(), LookSlot::Ready { duration: look.duration, error: look.error, cover, info, external });
             }
         }
-        let (duration, look_error, cover, loading) = match s.looks.get(&slot_key) {
-            Some(LookSlot::Ready { duration, error, cover }) => (*duration, error.clone(), cover.clone(), false),
-            _ => (None, None, None, true),
+        let (duration, look_error, cover, loading, external) = match s.looks.get(&slot_key) {
+            Some(LookSlot::Ready { duration, error, cover, external, .. }) => (*duration, error.clone(), cover.clone(), false, *external),
+            _ => (None, None, None, true, false),
         };
 
         if s.autoplay && s.autoplay_frames > 0 && s.current.is_none() && look_error.is_none() && !loading {
@@ -243,8 +273,9 @@ impl MediaPlayer {
             position: 0.0,
             playing: false,
             busy: loading,
-            message: look_error.clone(),
+            message: look_error.clone().or_else(|| external.then(|| "ffmpeg is not installed: a click opens the video in your system's player".to_string())),
             unplayable: look_error.is_some(),
+            external,
             volume: s.volume,
             muted: s.muted,
             opacity: s.opacity,
@@ -277,6 +308,16 @@ impl MediaPlayer {
             if let Some(at) = c.start_at {
                 view.position = at;
             }
+            // a video shows its newest picture instead of the first frame
+            if let Some(img) = c.frames.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                match &mut c.frame_tex {
+                    Some(t) => t.set(img, egui::TextureOptions::LINEAR),
+                    None => c.frame_tex = Some(ctx.load_texture(format!("{}-frames", abs.to_string_lossy()), img, egui::TextureOptions::LINEAR)),
+                }
+            }
+            if c.frame_tex.is_some() {
+                view.cover = c.frame_tex.clone();
+            }
             if view.playing || view.busy {
                 ctx.request_repaint_after(if view.busy { Duration::from_millis(40) } else { REPAINT });
             }
@@ -291,6 +332,27 @@ impl MediaPlayer {
     #[cfg(test)]
     pub fn use_silent_output(&self) {
         self.lock().open_output = Some(|| Ok(Output::silent()));
+    }
+
+    /// Tests: the size of the first-frame (or cover) picture that was read for `abs`.
+    #[cfg(test)]
+    pub fn thumbnail_size(&self, abs: &Path) -> Option<[usize; 2]> {
+        match self.lock().looks.get(&key(abs)) {
+            Some(LookSlot::Ready { cover: Some(t), .. }) => Some(t.size()),
+            _ => None,
+        }
+    }
+
+    /// Tests: the size of the newest picture of the playing video, once one was shown.
+    #[cfg(test)]
+    pub fn picture_size(&self) -> Option<[usize; 2]> {
+        self.lock().current.as_ref()?.frame_tex.as_ref().map(|t| t.size())
+    }
+
+    /// Tests: ffmpeg is where `locate` says (nowhere: it returns None).
+    #[cfg(test)]
+    pub fn use_ffmpeg(&self, locate: fn() -> Option<Tools>) {
+        self.lock().locate = locate;
     }
 
     /// Tests: a machine without a sound card.
@@ -313,6 +375,11 @@ impl MediaPlayer {
 }
 
 impl State {
+    /// A video that cannot be played here because ffmpeg is missing (MEDIA-010).
+    fn is_external(&self, abs: &Path) -> bool {
+        matches!(self.looks.get(&key(abs)), Some(LookSlot::Ready { external: true, .. }))
+    }
+
     fn gain(&self) -> f32 {
         if self.muted {
             0.0
@@ -347,25 +414,56 @@ impl State {
             let open: fn() -> Result<Output, String> = super::output::open;
             #[cfg(test)]
             let open = self.open_output.unwrap_or(open);
+            let frames = Arc::new(FrameSlot::default());
+            let video = super::is_video(abs).then(|| {
+                let info = match self.looks.get(&key(abs)) {
+                    Some(LookSlot::Ready { info, .. }) => info.clone(),
+                    _ => None,
+                };
+                VideoJob { info, locate: self.locate, frames: frames.clone(), ctx: ctx.clone() }
+            });
             std::thread::spawn(move || {
-                run_output(&path, &st, &stp, open);
+                run_output(&path, &st, &stp, open, video);
                 ctx2.request_repaint();
             });
-            self.current = Some(Playback { path: abs.to_path_buf(), owner: owner.to_path_buf(), status, stop, want_play: false, start_at: None });
+            self.current = Some(Playback { path: abs.to_path_buf(), owner: owner.to_path_buf(), status, stop, want_play: false, start_at: None, frames, frame_tex: None });
         }
         self.current.as_mut().expect("just set")
     }
 }
 
+/// What the output thread of a video needs besides the file.
+struct VideoJob {
+    /// from the look, if it was done already
+    info: Option<Info>,
+    locate: fn() -> Option<Tools>,
+    frames: Arc<FrameSlot>,
+    ctx: egui::Context,
+}
+
+/// Play a video through ffmpeg (MEDIA-009).
+fn play_video(path: &Path, shared: &Shared, stop: &AtomicBool, job: VideoJob) -> Result<(), String> {
+    let tools = (job.locate)().ok_or("ffmpeg is not installed.")?;
+    let info = match job.info {
+        Some(i) => i,
+        None => tools.probe(path)?,
+    };
+    video::run(&tools, path, &info, shared, stop, &job.frames, &job.ctx)
+}
+
 /// The output thread: opens the sound card, reports, decodes into it until stopped.
-fn run_output(path: &Path, status: &Mutex<Status>, stop: &AtomicBool, open: fn() -> Result<Output, String>) {
+fn run_output(path: &Path, status: &Mutex<Status>, stop: &AtomicBool, open: fn() -> Result<Output, String>, video: Option<VideoJob>) {
     let set = |s: Status| *status.lock().unwrap_or_else(|e| e.into_inner()) = s;
     let output = match open() {
         Ok(o) => o,
         Err(_) => return set(Status::NoOutput),
     };
     set(Status::Ready(output.shared.clone()));
-    if let Err(e) = super::decode::run(path, &output.shared, stop) {
+    let played = match video {
+        Some(job) => play_video(path, &output.shared, stop, job),
+        None => super::decode::run(path, &output.shared, stop),
+    };
+    if let Err(e) = played {
         set(Status::Failed(e));
     }
 }

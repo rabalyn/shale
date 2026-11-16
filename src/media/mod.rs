@@ -7,12 +7,14 @@
 pub mod cover;
 pub mod decode;
 pub mod engine;
+pub mod ffmpeg;
 pub mod output;
 pub mod player;
 #[cfg(test)]
 pub mod testdata;
 #[cfg(test)]
 mod ui_tests;
+pub mod video;
 pub mod widget;
 
 pub use player::MediaPlayer;
@@ -29,6 +31,18 @@ const AUDIO_EXTS: [&str; 8] = ["mp3", "ogg", "oga", "opus", "flac", "m4a", "aac"
 
 pub fn is_audio(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).map(|e| AUDIO_EXTS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)
+}
+
+/// The video files that get a player when they are embedded (MEDIA-001, MEDIA-009).
+const VIDEO_EXTS: [&str; 5] = ["mp4", "m4v", "mov", "webm", "mkv"];
+
+pub fn is_video(p: &Path) -> bool {
+    p.extension().and_then(|e| e.to_str()).map(|e| VIDEO_EXTS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)
+}
+
+/// A sound or a video: what the media player shows.
+pub fn is_media(p: &Path) -> bool {
+    is_audio(p) || is_video(p)
 }
 
 pub fn is_image(p: &Path) -> bool {

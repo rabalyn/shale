@@ -5,7 +5,7 @@
 #
 #   sh scripts/make-media-fixtures.sh
 #
-# Needs ffmpeg (with libmp3lame, libvorbis, libopus) and python3 (for the Vorbis picture tag,
+# Needs ffmpeg (with libmp3lame, libvorbis, libopus, libx264) and python3 (for the Vorbis picture tag,
 # which ffmpeg cannot write itself). The files stay under 30 KB each.
 set -eu
 cd "$(dirname "$0")/.." || exit 1
@@ -48,4 +48,10 @@ ff $tone $cover $attach -c:a aac -b:a 48k -ac 1 "$out/tone-cover.m4a"
 # aac (ADTS) and wav have no cover
 ff $tone -c:a aac -b:a 48k -ac 1 -f adts "$out/tone.aac"
 ff -f lavfi -i sine=frequency=440:duration=1:sample_rate=8000 -c:a pcm_s16le -ac 1 "$out/tone.wav"
+# video (MEDIA-009): 160 x 90, 15 frames a second, one second: red for the first half, blue for the
+# second; clip.mp4 has a 440 Hz sound track, clip-silent.mp4 has none
+pics="-f lavfi -i color=c=red:s=160x90:r=15:d=0.5 -f lavfi -i color=c=blue:s=160x90:r=15:d=0.5"
+vid="-filter_complex concat=n=2:v=1:a=0[v] -map [v] -c:v libx264 -preset veryfast -crf 35 -pix_fmt yuv420p"
+ff $pics $tone $vid -map 2:a -c:a aac -b:a 32k -ac 1 -shortest "$out/clip.mp4"
+ff $pics $vid "$out/clip-silent.mp4"
 ls -l "$out"
