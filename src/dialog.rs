@@ -81,7 +81,7 @@ impl Dialog {
         self
     }
 
-    pub fn show<T>(self, ctx: &Context, content: impl FnOnce(&mut Ui) -> T) -> DialogResponse {
+    pub fn show(self, ctx: &Context, content: impl FnOnce(&mut Ui)) -> DialogResponse {
         self.show_inner(ctx, &mut (), |ui, _| content(ui), None::<fn(&mut Ui, &mut ())>)
     }
 
@@ -89,11 +89,11 @@ impl Dialog {
     /// scrolls; the footer stays in view, also in a window shorter than the content. The content
     /// and the footer are closures over the same `state` (they could not both borrow what the
     /// dialog edits); the footer runs right after the content, in the same frame.
-    pub fn show_with_footer<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse {
+    pub fn show_with_footer<S>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S), footer: impl FnOnce(&mut Ui, &mut S)) -> DialogResponse {
         self.show_inner(ctx, state, content, Some(footer))
     }
 
-    fn show_inner<S, T>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S) -> T, footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse {
+    fn show_inner<S>(self, ctx: &Context, state: &mut S, content: impl FnOnce(&mut Ui, &mut S), footer: Option<impl FnOnce(&mut Ui, &mut S)>) -> DialogResponse {
         let Self { id, title, width, modal } = self;
         let has_footer = footer.is_some();
         let screen = ctx.content_rect();
@@ -162,7 +162,6 @@ impl Dialog {
             let scope = ui.scope_builder(egui::UiBuilder::new().max_rect(room), |ui| {
                 let out = ScrollArea::vertical().id_salt("dialog-body").auto_shrink(shrink).show(ui, |ui| content(ui, &mut *state));
                 overflow = out.content_size.y > out.inner_rect.height() + 1.0;
-                out.inner
             });
             if let Some(footer) = footer {
                 ui.separator();
@@ -175,7 +174,6 @@ impl Dialog {
                     ctx.request_repaint();
                 }
             }
-            scope.inner
         });
 
         let Some(shown) = shown else {
