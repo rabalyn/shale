@@ -607,8 +607,8 @@ impl ShaleApp {
         };
         let area = ui.available_rect_before_wrap();
         match &view {
-            View::Note(rel) => self.add_drop_zone(area, rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), Some(rel.clone())),
-            View::Calendar => self.add_calendar_area(area),
+            View::Note(rel) => self.drag.add_drop_zone(area, rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), Some(rel.clone())),
+            View::Calendar => self.drag.add_calendar_area(area),
             _ => {}
         }
         match view {

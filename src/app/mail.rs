@@ -204,6 +204,6 @@ impl ShaleApp {
                 }
             },
         );
-        self.pending_drops.push((rx, None));
+        self.drag.pending_drops.push((rx, None));
     }
 }

@@ -23,7 +23,7 @@ impl ShaleApp {
         self.tree_keys(ui);
         // dropping anywhere on the file list (outside a folder) moves to the top of the vault
         let panel = ui.available_rect_before_wrap();
-        self.tree_targets.push((panel, PathBuf::new(), false));
+        self.drag.tree_targets.push((panel, PathBuf::new(), false));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let folder = self.current_folder();
@@ -212,8 +212,8 @@ impl ShaleApp {
             let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let resp = tree_row(ui, depth, &name, Some(open), false, theme::TEXT, "");
             self.mark_tree_sel(ui, &f, &resp);
-            self.add_drop_zone(resp.rect.intersect(ui.clip_rect()), f.clone(), None);
-            self.tree_targets.push((resp.rect.intersect(ui.clip_rect()), f.clone(), !open));
+            self.drag.add_drop_zone(resp.rect.intersect(ui.clip_rect()), f.clone(), None);
+            self.drag.tree_targets.push((resp.rect.intersect(ui.clip_rect()), f.clone(), !open));
             if resp.drag_started() {
                 egui::DragAndDrop::set_payload(ui.ctx(), TreeDrag(f.clone()));
             }
@@ -263,11 +263,11 @@ impl ShaleApp {
             let resp = tree_row(ui, depth, &name, None, active, color, badge);
             self.mark_tree_sel(ui, &rel, &resp);
             // dropping on a file puts the dragged thing next to it
-            self.tree_targets.push((resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), false));
+            self.drag.tree_targets.push((resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), false));
             if resp.drag_started() {
                 egui::DragAndDrop::set_payload(ui.ctx(), TreeDrag(rel.clone()));
             }
-            self.add_drop_zone(resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), (kind == FileKind::Note).then(|| rel.clone()));
+            self.drag.add_drop_zone(resp.rect.intersect(ui.clip_rect()), rel.parent().map(|p| p.to_path_buf()).unwrap_or_default(), (kind == FileKind::Note).then(|| rel.clone()));
             if resp.clicked() {
                 let new_tab = ui.input(|i| i.modifiers.command);
                 self.actions.push(Action::Open { rel: rel.clone(), new_tab });
@@ -484,7 +484,7 @@ impl ShaleApp {
             let monday = self.cfg.week_starts_monday;
             let mut act = None;
             let area = ui.available_rect_before_wrap();
-            self.add_calendar_area(area);
+            self.drag.add_calendar_area(area);
             egui::ScrollArea::vertical().id_salt("side-calendar").auto_shrink([false, false]).show(ui, |ui| {
                 act = self.cal_side.show(ui, &self.calendar, monday, false);
             });

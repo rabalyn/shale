@@ -131,10 +131,6 @@ mod sync;
 mod tree_ui_tests;
 mod usage;
 
-/// A running import of dropped things: where its items arrive, and the folder zone it was dropped on
-/// (the folder, and the note inside it if any).
-type PendingDrop = (std::sync::mpsc::Receiver<Result<(Vec<crate::import::Item>, Vec<String>), String>>, Option<(PathBuf, Option<PathBuf>)>);
-
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
 struct ScriptDrop(PathBuf);
@@ -320,37 +316,18 @@ pub struct ShaleApp {
     pub last_event_calendar: Option<String>,
     /// for background jobs to wake the window up when they finish
     ctx: Option<egui::Context>,
-    /// where things can be dropped this frame
-    drop_zones: Vec<drops::DropZone>,
-    /// file list drop targets this frame: (row, folder to move into, a closed folder row)
-    pub(crate) tree_targets: Vec<(egui::Rect, PathBuf, bool)>,
+    /// drag and drop: where things can be dropped, what is dragged over the window, drops being read
+    pub(crate) drag: drops::DragState,
     /// where the tabs of the tab bar are, and their close marks (for tests)
     pub(crate) tab_rects: Vec<(egui::Rect, egui::Rect)>,
     /// what the tab bar showed last frame besides the tabs (for tests)
     pub(crate) tab_marks: TabMarks,
-    /// a closed folder hovered while dragging, since when (it opens after a moment)
-    tree_hover: Option<(PathBuf, Instant)>,
-    calendar_areas: Vec<egui::Rect>,
-    /// something from another program is dragged over the window (Wayland)
-    ext_hover: Option<egui::Pos2>,
-    /// the kinds the last drag from another program offered
-    last_offered: Vec<String>,
-    /// something Shale can't take is dragged over the window: where, and what it offers
-    #[cfg(target_os = "linux")]
-    ext_refused: Option<(egui::Pos2, Vec<String>)>,
-    /// test drops from `--keys` (handled like drops from other programs)
-    #[cfg(target_os = "linux")]
-    fake_drops: Vec<crate::import::wl_drop::DropEvent>,
-    /// drops being read in the background, and where they were dropped
-    /// a drop from another program is being read
-    drop_busy: bool,
     /// words typical for each tag (learned from the vault, see tagwords)
     pub tag_words: Option<crate::import::tagwords::TagWords>,
     tag_job: Option<std::sync::mpsc::Receiver<Result<crate::import::tagwords::TagWords, String>>>,
     tag_root: Option<PathBuf>,
     tag_gen: u64,
     tag_at: Option<Instant>,
-    pending_drops: Vec<PendingDrop>,
     pub scenes: SceneCache,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
@@ -523,20 +500,9 @@ impl ShaleApp {
             cal_jobs: vec![],
             last_event_calendar: None,
             ctx: None,
-            drop_zones: vec![],
-            tree_targets: vec![],
+            drag: drops::DragState::default(),
             tab_rects: vec![],
             tab_marks: TabMarks::default(),
-            tree_hover: None,
-            calendar_areas: vec![],
-            ext_hover: None,
-            last_offered: vec![],
-            #[cfg(target_os = "linux")]
-            ext_refused: None,
-            #[cfg(target_os = "linux")]
-            fake_drops: vec![],
-            pending_drops: vec![],
-            drop_busy: false,
             tag_words: None,
             tag_job: None,
             tag_root: None,
@@ -2046,7 +2012,7 @@ impl ShaleApp {
                     let pos = self.script_point(t);
                     raw.events.push(egui::Event::PointerMoved(pos));
                     let list: String = paths.iter().map(|p| format!("{}\r\n", crate::import::file_uri(p))).collect();
-                    self.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: pos.x, y: pos.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
+                    self.drag.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: pos.x, y: pos.y, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
                 }
                 _ => paths.iter().for_each(|p| raw.dropped_files.push(std::sync::Arc::new(ScriptDrop(p.clone())))),
             },
@@ -2069,7 +2035,7 @@ impl ShaleApp {
                         }
                     }
                     let offered = parts.iter().map(|p| p.0.clone()).collect();
-                    self.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: at.x, y: at.y, parts, offered, report: vec![] });
+                    self.drag.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: at.x, y: at.y, parts, offered, report: vec![] });
                 }
                 #[cfg(not(target_os = "linux"))]
                 let _ = rest;
@@ -2242,9 +2208,9 @@ impl eframe::App for ShaleApp {
 impl ShaleApp {
     /// One frame of the window (the body of `eframe::App::ui`; tests call it directly).
     pub(crate) fn run_frame(&mut self, ui: &mut Ui) {
-        self.drop_zones.clear();
-        self.calendar_areas.clear();
-        self.tree_targets.clear();
+        self.drag.drop_zones.clear();
+        self.drag.calendar_areas.clear();
+        self.drag.tree_targets.clear();
         self.screenshot_tick(ui);
         self.shortcuts(ui);
         self.autosave();
