@@ -34,7 +34,7 @@ pub fn show(ui: &mut Ui, media: &MediaPlayer, abs: &Path, owner: &Path) -> Respo
 /// cards of a frame; `owner` is the note that shows it (closing its tab stops the sound).
 pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path, id: Id) {
     let ctx = ui.ctx().clone();
-    let v = media.view(&ctx, abs, owner);
+    let v = media.view(&ctx, abs);
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     painter.rect(rect, CornerRadius::same(8), theme::BG_SECONDARY, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
     let card = ui.interact(rect, id, Sense::click());
@@ -96,7 +96,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     let shown = preview.zip(v.duration).map(|(f, d)| f * d).unwrap_or(v.position);
     let frac = v.duration.map(|d| (shown / d).clamp(0.0, 1.0) as f32).unwrap_or(0.0);
     let track = Rect::from_center_size(bar_hit.center(), Vec2::new(width, 4.0));
-    painter.rect_filled(track, CornerRadius::same(2), theme::BG_HOVER);
+    painter.rect_filled(track, CornerRadius::same(2), theme::FAINT.gamma_multiply(0.6));
     let mut filled = track;
     filled.set_right(track.left() + track.width() * frac);
     painter.rect_filled(filled, CornerRadius::same(2), theme::ACCENT);
@@ -127,7 +127,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
         }
     }
     let vtrack = Rect::from_center_size(vol_hit.center(), Vec2::new(vol_hit.width(), 4.0));
-    painter.rect_filled(vtrack, CornerRadius::same(2), theme::BG_HOVER);
+    painter.rect_filled(vtrack, CornerRadius::same(2), theme::FAINT.gamma_multiply(0.6));
     let mut vfill = vtrack;
     vfill.set_right(vtrack.left() + vtrack.width() * if v.muted { 0.0 } else { v.volume });
     painter.rect_filled(vfill, CornerRadius::same(2), theme::MUTED);

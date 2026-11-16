@@ -16,8 +16,6 @@ use std::time::{Duration, SystemTime};
 
 /// How often the window repaints while something plays (the progress bar).
 const REPAINT: Duration = Duration::from_millis(100);
-/// Frames after a note was opened in which its first player may start by itself (`media_autoplay`).
-const AUTOPLAY_FRAMES: u32 = 4;
 /// How many files' covers are kept.
 const LOOKS_KEPT: usize = 48;
 
@@ -61,9 +59,6 @@ struct State {
     /// the volume the person changed in a player, for the app to save
     volume_changed: bool,
     opacity: f32,
-    autoplay: bool,
-    /// frames left in which the first player of a newly opened note starts
-    autoplay_frames: u32,
     /// tests: what opens the output instead of the sound card
     #[cfg(test)]
     open_output: Option<fn() -> Result<Output, String>>,
@@ -82,8 +77,6 @@ impl Default for MediaPlayer {
             muted: false,
             volume_changed: false,
             opacity: 0.6,
-            autoplay: false,
-            autoplay_frames: 0,
             #[cfg(test)]
             open_output: None,
         })))
@@ -117,14 +110,13 @@ impl MediaPlayer {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The settings (MEDIA-004, MEDIA-006, MEDIA-007), from the global config each frame.
-    pub fn configure(&self, volume: f32, opacity: f32, autoplay: bool) {
+    /// The settings (MEDIA-004, MEDIA-006), from the global config each frame.
+    pub fn configure(&self, volume: f32, opacity: f32) {
         let mut s = self.lock();
         if !s.volume_changed {
             s.volume = volume.clamp(0.0, 1.0);
         }
         s.opacity = opacity.clamp(0.0, 1.0);
-        s.autoplay = autoplay;
         s.apply_state();
     }
 
@@ -134,22 +126,9 @@ impl MediaPlayer {
         std::mem::take(&mut s.volume_changed).then_some(s.volume)
     }
 
-    /// A note was opened: its first player may start by itself (MEDIA-007).
-    pub fn arm_autoplay(&self) {
-        self.lock().autoplay_frames = AUTOPLAY_FRAMES;
-    }
-
-    /// Called once per frame by the app.
-    pub fn end_frame(&self) {
-        let mut s = self.lock();
-        s.autoplay_frames = s.autoplay_frames.saturating_sub(1);
-    }
-
     /// Stop whatever plays (the vault was closed, MEDIA-007).
     pub fn stop(&self) {
-        let mut s = self.lock();
-        s.current = None;
-        s.autoplay_frames = 0;
+        self.lock().current = None;
     }
 
     /// The tab of this note was closed: stop its sound (MEDIA-007).
@@ -202,7 +181,7 @@ impl MediaPlayer {
 
     /// What to draw for `abs` now, and housekeeping: looks at the file in the background, starts
     /// the first player of a new note when asked to, asks for a repaint while something moves.
-    pub fn view(&self, ctx: &egui::Context, abs: &Path, owner: &Path) -> View {
+    pub fn view(&self, ctx: &egui::Context, abs: &Path) -> View {
         let mut s = self.lock();
         let slot_key = key(abs);
         if !s.looks.contains_key(&slot_key) {
@@ -229,12 +208,6 @@ impl MediaPlayer {
             Some(LookSlot::Ready { duration, error, cover }) => (*duration, error.clone(), cover.clone(), false),
             _ => (None, None, None, true),
         };
-
-        if s.autoplay && s.autoplay_frames > 0 && s.current.is_none() && look_error.is_none() && !loading {
-            s.autoplay_frames = 0;
-            s.begin(ctx, abs, owner).want_play = true;
-            s.apply_state();
-        }
 
         let mut view = View {
             file_name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -416,14 +389,14 @@ mod tests {
     #[test]
     fn the_volume_setting_is_kept_until_a_player_changes_it_and_the_app_takes_the_change() {
         let m = MediaPlayer::default();
-        m.configure(0.3, 0.6, false);
+        m.configure(0.3, 0.6);
         assert_eq!(m.take_volume_change(), None);
         m.set_volume(0.9);
         assert_eq!(m.take_volume_change(), Some(0.9));
         assert_eq!(m.take_volume_change(), None, "taken once");
-        m.configure(0.5, 0.6, false);
+        m.configure(0.5, 0.6);
         assert_eq!(m.lock().volume, 0.5, "the config is the truth again");
-        m.configure(7.0, 2.0, false);
+        m.configure(7.0, 2.0);
         let s = m.lock();
         assert_eq!((s.volume, s.opacity), (1.0, 1.0), "out of range values are brought into range");
     }

@@ -39,9 +39,11 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   keyboard), a progress bar (click to jump, drag to choose and seek on release) with the time,
   and a mute button and volume slider. Only one file plays at a time; it keeps playing while
   you scroll or switch between the editor, the preview and the reading view, and stops when
-  the note's tab is closed or another vault is opened. In Settings → Appearance: how opaque the
-  play button is (60 % by default) and "start the first sound of a note when the note is opened"
-  (off). The volume is one setting for all players.
+  the note's tab is closed or another vault is opened. Nothing ever starts by itself. In Settings →
+  Appearance: how opaque the play button is (60 % by default). The volume is one setting for
+  all players.
+
+![A sound player in a note](screenshots/sound-player.png)
 
 ![Reading view](screenshots/reading.png)
 
