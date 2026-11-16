@@ -1152,6 +1152,22 @@ mod tests {
         assert!(seen.contains("stdin:cipher; rm -rf / $(evil)"), "data goes on stdin, never into a shell: {seen}");
     }
 
+    // spec: DEV-017
+    #[cfg(unix)]
+    #[test]
+    fn dev_017_the_version_is_asked_with_the_home_of_the_gnupg_too() {
+        let dir = TempDir::new().unwrap();
+        // a stand-in that says which home it was given
+        let script = dir.write("fake-gpg", b"#!/bin/sh\necho \"home:${GNUPGHOME:-UNSET}\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let program = script.to_string_lossy().into_owned();
+        let g = Gnupg { gpg: program.clone(), gpgsm: program, home: Some(dir.path.clone()) };
+        for s in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
+            assert_eq!(g.version(s).unwrap(), format!("home:{}", dir.path.display()));
+        }
+    }
+
     // spec: MAIL-194, MAIL-197
     #[test]
     fn signing_and_encrypting_round_trip_for_openpgp_and_a_hidden_recipient_has_no_key_id_in_the_message() {

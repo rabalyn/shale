@@ -2530,9 +2530,7 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
     let dir = std::env::temp_dir().join(format!("shale-encstay-{height}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let bob = TestHome::new();
-    if have_gnupg() {
-        bob.gen_pgp("Bob Test", "bob@example.org", "never", None);
-    }
+    bob.gen_pgp("Bob Test", "bob@example.org", "never", None);
     w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: slow_gnupg_script(&dir, "slow-gpg", "gpg"), gpgsm: slow_gnupg_script(&dir, "slow-gpgsm", "gpgsm"), ..bob.g.clone() };
     w.app.open_mail_settings();
     w.settle();
@@ -2556,11 +2554,14 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
     [pending, arrived, missing]
 }
 
-// spec: NAV-028, MAIL-191
+// spec: MAIL-191
 #[cfg(unix)]
 #[test]
 fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_it_fills_when_the_gnupg_result_arrives() {
-    // windows the dialog fills and scrolls in (in a taller one the dialog grows with the lines that arrive)
+    if !have_gnupg() {
+        return;
+    }
+    // windows the dialog fills and scrolls in (in a taller one the dialog grows with the lines that arrive: raba/shale#151)
     for height in [900.0, 1000.0] {
         let [pending, arrived, missing] = encryption_layouts(height);
         for (what, a, b) in [("pending -> arrived", &pending, &arrived), ("arrived -> missing", &arrived, &missing)] {
