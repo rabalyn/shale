@@ -54,7 +54,7 @@ fn post(id: &str, who: Author, ago_minutes: i64, text: &str) -> Post {
         cid: String::new(),
         url: format!("https://demo.social/@{}/{id}", who.handle.split('@').next().unwrap_or("")),
         author: who,
-        created_at: crate::cal_time::now() - ago_minutes * 60,
+        created_at: crate::calendar::time::now() - ago_minutes * 60,
         text_markdown: text.into(),
         content_warning: None,
         media: vec![],

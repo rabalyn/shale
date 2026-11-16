@@ -671,7 +671,7 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
                 let r = ui.add_enabled(ok, egui::Button::new("Enable encryption"));
                 rects.push(("md:enc-enable".into(), r.rect));
                 if r.clicked() {
-                    d.give_consent(crate::cal_time::now());
+                    d.give_consent(crate::calendar::time::now());
                 }
             });
             ui.label(muted("Without it, encrypted mail shows “Encrypted — enable encryption in the settings” and nothing is decrypted or stored. Click Done to save.").size(12.0));

@@ -1,9 +1,9 @@
 //! Calendar sources (local .ics files and CalDAV calendars), their loaded events, background
 //! refresh of remote calendars, and sample events for trying the views out.
 
-use crate::cal_dav::{self, Account};
-use crate::cal_ics::{self, Event};
-use crate::cal_time::{self as t, days_from_civil};
+use crate::calendar::dav::{self, Account};
+use crate::calendar::ics::{self, Event};
+use crate::calendar::time::{self as t, days_from_civil};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -24,7 +24,7 @@ impl std::fmt::Debug for SourceKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SourceKind::Local { file } => f.debug_struct("Local").field("file", file).finish(),
-            SourceKind::Caldav { url, username, password } => f.debug_struct("Caldav").field("url", url).field("username", username).field("password", &cal_dav::redacted(password.expose())).finish(),
+            SourceKind::Caldav { url, username, password } => f.debug_struct("Caldav").field("url", url).field("username", username).field("password", &dav::redacted(password.expose())).finish(),
         }
     }
 }
@@ -91,7 +91,7 @@ enum Target {
 
 fn local_read(file: &std::path::Path) -> Result<Vec<Event>, String> {
     match crate::fsutil::read_to_string(file) {
-        Ok(t) => Ok(cal_ics::parse_ics(&t)),
+        Ok(t) => Ok(ics::parse_ics(&t)),
         Err(_) if !file.exists() => Ok(vec![]),
         Err(e) => Err(format!("could not read {}: {e}", file.display())),
     }
@@ -103,11 +103,11 @@ fn local_write(file: &std::path::Path, name: &str, events: &[Event]) -> Result<(
     }
     // what else the file holds (tasks, properties of another program) is written back as it is (CAL-012)
     let other = match crate::fsutil::read_to_string(file) {
-        Ok(t) => cal_ics::parse_calendar(&t).other,
+        Ok(t) => ics::parse_calendar(&t).other,
         Err(_) if !file.exists() => vec![],
         Err(e) => return Err(format!("could not read {}: {e}", file.display())),
     };
-    crate::fsutil::write_atomic(file, cal_ics::to_ics_with(name, events, &other).as_bytes()).map_err(|e| format!("could not save {}: {e}", file.display()))
+    crate::fsutil::write_atomic(file, ics::to_ics_with(name, events, &other).as_bytes()).map_err(|e| format!("could not save {}: {e}", file.display()))
 }
 
 /// Write an event into a calendar. `parts`: the event first, then the other parts of the same
@@ -130,7 +130,7 @@ fn write_to(target: &Target, parts: &[Event], in_place: bool, before: &[Event]) 
                 (true, None) => return Err("the event's address on the server is unknown; refresh the calendar and try again".into()),
                 (false, _) => None,
             };
-            cal_dav::put_event(url, acct, parts, existing, before).map(Some)
+            dav::put_event(url, acct, parts, existing, before).map(Some)
         }
     }
 }
@@ -151,7 +151,7 @@ fn keep_copy(trash: &std::path::Path, parts: &[Event]) -> Result<PathBuf, String
     let fail = |e: std::io::Error| format!("a copy of the event could not be kept in {} ({e}), so nothing was deleted", dir.display());
     crate::fsutil::ensure_private_dir(trash).map_err(fail)?;
     crate::fsutil::ensure_private_dir(&dir).map_err(fail)?;
-    let text = cal_ics::to_ics("", parts);
+    let text = ics::to_ics("", parts);
     for n in 1.. {
         let file = dir.join(if n == 1 { format!("{safe}.ics") } else { format!("{safe}-{n}.ics") });
         match crate::fsutil::create_new(&file, text.as_bytes()) {
@@ -176,7 +176,7 @@ fn remove_from(target: &Target, e: &Event, trash: &std::path::Path, series: &[Ev
             local_write(file, name, &evs)
         }
         Target::Dav { acct, .. } => match &e.href {
-            Some(h) => cal_dav::delete_event(h, acct, e.etag.as_deref(), &series),
+            Some(h) => dav::delete_event(h, acct, e.etag.as_deref(), &series),
             None => Err("the event's address on the server is unknown; refresh the calendar and try again".into()),
         },
     }
@@ -291,7 +291,7 @@ impl CalendarStore {
             if let SourceKind::Local { file } = &s.kind {
                 match crate::fsutil::read_to_string(file) {
                     Ok(text) => {
-                        self.events.insert(s.id.clone(), cal_ics::parse_ics(&text));
+                        self.events.insert(s.id.clone(), ics::parse_ics(&text));
                         self.status.remove(&s.id);
                     }
                     Err(_) if !file.exists() => {
@@ -336,11 +336,11 @@ impl CalendarStore {
         crate::jobs::run(
             move || {
                 // a failing state request (old servers) just means: load everything
-                let st = cal_dav::calendar_state(&url, &acct).unwrap_or_default();
+                let st = dav::calendar_state(&url, &acct).unwrap_or_default();
                 if st.tag.is_some() && st.tag == known {
                     Ok(Loaded { events: None, tag: st.tag, read_only: st.read_only })
                 } else {
-                    cal_dav::fetch_events(&url, &acct, from, to).map(|ev| Loaded { events: Some(ev), tag: st.tag, read_only: st.read_only })
+                    dav::fetch_events(&url, &acct, from, to).map(|ev| Loaded { events: Some(ev), tag: st.tag, read_only: st.read_only })
                 }
             },
             move |r| pending.lock().unwrap().push((id, r.and_then(|r| r))),
@@ -445,7 +445,7 @@ impl CalendarStore {
             let overrides: HashSet<(String, i64)> = evs.iter().filter_map(|e| e.recurrence_id.map(|r| (e.uid.clone(), r))).collect();
             for (ei, e) in evs.iter().enumerate() {
                 let (from, to) = if e.all_day { (from_day * 86_400, (to_day + 1) * 86_400) } else { (t::local_to_utc(from_day, 0), t::local_to_utc(to_day + 1, 0)) };
-                for o in cal_ics::occurrences(e, from, to) {
+                for o in ics::occurrences(e, from, to) {
                     if e.recurrence_id.is_none() && e.rrule.is_some() && overrides.contains(&(e.uid.clone(), o.start)) {
                         continue;
                     }
@@ -807,7 +807,7 @@ pub(crate) mod tests {
         // calendar "rw" accepts writes and removals; "ro" refuses writes
         let log = Arc::new(Mutex::new(Vec::<String>::new()));
         let l2 = log.clone();
-        let (base, _h) = crate::cal_dav::tests::mock_http(40, move |method, path, _, _| {
+        let (base, _h) = crate::calendar::dav::tests::mock_http(40, move |method, path, _, _| {
             l2.lock().unwrap().push(format!("{method} {path}"));
             match (method, path) {
                 ("PUT", p) if p.starts_with("/ro/") => (403, String::new()),
@@ -852,7 +852,7 @@ pub(crate) mod tests {
         }
         let count = Arc::new(Mutex::new(0usize));
         let c2 = count.clone();
-        let (base, _h) = crate::cal_dav::tests::mock_http(10, move |m, _, _, _| {
+        let (base, _h) = crate::calendar::dav::tests::mock_http(10, move |m, _, _, _| {
             if m == "REPORT" {
                 *c2.lock().unwrap() += 1;
                 std::thread::sleep(Duration::from_millis(150));
@@ -887,7 +887,7 @@ pub(crate) mod tests {
         let today = t::today();
         let (y, m, d) = t::civil_from_days(today);
         let ics = format!("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:r1\r\nDTSTART;VALUE=DATE:{y:04}{m:02}{d:02}\r\nSUMMARY:Remote day\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
-        let (base, _h) = crate::cal_dav::tests::mock_server(ics);
+        let (base, _h) = crate::calendar::dav::tests::mock_server(ics);
         let src = CalendarSource {
             id: "dav1".into(),
             name: "Work".into(),
@@ -917,7 +917,7 @@ pub(crate) mod tests {
         }
         let reports = Arc::new(Mutex::new(0usize));
         let r2 = reports.clone();
-        let (base, _h) = crate::cal_dav::tests::mock_http(10, move |m, _, _, _| {
+        let (base, _h) = crate::calendar::dav::tests::mock_http(10, move |m, _, _, _| {
             match m {
             "PROPFIND" => (207, r#"<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:response><d:href>/ro/</d:href><d:propstat><d:prop><cs:getctag>7</cs:getctag><d:current-user-privilege-set><d:privilege><d:read/></d:privilege></d:current-user-privilege-set></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#.into()),
             _ => {
@@ -958,7 +958,7 @@ pub(crate) mod tests {
         if std::process::Command::new("curl").arg("--version").output().is_err() {
             return;
         }
-        let (base, _h) = crate::cal_dav::tests::mock_http_with(3, |m, _, _, _| match m {
+        let (base, _h) = crate::calendar::dav::tests::mock_http_with(3, |m, _, _, _| match m {
             "PUT" => (204, "ETag: \"v2\"\r\n".into(), String::new()),
             _ => (404, String::new(), String::new()),
         });
@@ -1001,7 +1001,7 @@ pub(crate) mod tests {
         let src = store.new_local_source("Home", &[]);
         let file = file_of(&src).unwrap().to_path_buf();
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        crate::fsutil::write_atomic(&file, cal_ics::tests::RICH.as_bytes()).unwrap();
+        crate::fsutil::write_atomic(&file, ics::tests::RICH.as_bytes()).unwrap();
         store.set_sources(vec![src.clone()]);
         let series = store.events[&src.id].iter().find(|e| e.rrule.is_some()).unwrap().clone();
         let changed = store.events[&src.id].iter().find(|e| e.recurrence_id.is_some()).unwrap().clone();
@@ -1046,7 +1046,7 @@ pub(crate) mod tests {
         }
         let bodies = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
         let b2 = bodies.clone();
-        let (base, _h) = crate::cal_dav::tests::mock_http(40, move |method, _, headers, body| {
+        let (base, _h) = crate::calendar::dav::tests::mock_http(40, move |method, _, headers, body| {
             if method == "PUT" {
                 b2.lock().unwrap().push((headers.to_string(), body.to_string()));
                 return (204, String::new());
@@ -1055,7 +1055,7 @@ pub(crate) mod tests {
         });
         let mut store = CalendarStore::new(vec![], tmp("dav-lossless"));
         store.set_sources(vec![dav_source("work", format!("{base}/work/"))]);
-        let mut evs = cal_ics::parse_ics(cal_ics::tests::RICH);
+        let mut evs = ics::parse_ics(ics::tests::RICH);
         for e in &mut evs {
             e.href = Some(format!("{base}/work/rich-1.ics"));
             e.etag = Some("\"v1\"".into());
@@ -1161,7 +1161,7 @@ pub(crate) mod tests {
         let src = store.new_local_source("Home", &[]);
         let file = file_of(&src).unwrap().to_path_buf();
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        crate::fsutil::write_atomic(&file, cal_ics::tests::RICH.as_bytes()).unwrap();
+        crate::fsutil::write_atomic(&file, ics::tests::RICH.as_bytes()).unwrap();
         store.set_sources(vec![src.clone()]);
         let series = store.events[&src.id].iter().find(|e| e.rrule.is_some()).unwrap().clone();
         wait(&store.delete_occurrence(&src.id, &series, series.at_wall(days_from_civil(2026, 1, 19), 9 * 3600), None).unwrap()).unwrap();

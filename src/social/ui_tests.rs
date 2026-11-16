@@ -255,7 +255,7 @@ fn wait_for(w: &mut W, until: impl Fn(&W) -> bool) {
 }
 
 fn recent(prefix: &str, n: usize) -> Vec<Post> {
-    let now = crate::cal_time::now();
+    let now = crate::calendar::time::now();
     (0..n).map(|i| post(&format!("{prefix}{i}"), "bob", now - 3600 * (i as i64 + 1), None)).collect()
 }
 
@@ -303,7 +303,7 @@ fn removing_the_account_in_the_dialog_drops_its_posts_from_the_search_but_adding
 fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
     let mut w = W::new("hit");
     let (acct, list_key) = (home().account, (home().account, "list:1".to_string()));
-    let now = crate::cal_time::now();
+    let now = crate::calendar::time::now();
     for (f, p) in [("home", "h"), ("list:1", "l")] {
         w.app.social.timelines.get_mut(&(acct.clone(), f.to_string())).unwrap().posts = recent(p, 40);
     }
@@ -387,7 +387,7 @@ fn a_hit_waits_for_the_feed_to_load_and_is_dropped_when_that_fails() {
     let mut w = W::new("hit-wait");
     let acct = home().account;
     let key = (acct.clone(), "home".to_string());
-    let hit_post = post("late", "bob", crate::cal_time::now() - 60, None);
+    let hit_post = post("late", "bob", crate::calendar::time::now() - 60, None);
     w.app.social.timelines.get_mut(&key).unwrap().loaded = false;
     w.app.social.focus = Some(crate::social::state::Focus { tab: 7, account: acct.clone(), post: hit_post.clone() });
     assert_eq!(w.app.social.take_focus(8, &key), None, "another tab is not asked");
@@ -756,7 +756,7 @@ fn saving_a_thread_puts_its_posts_and_replies_into_the_index() {
 fn a_hit_whose_post_is_gone_is_fetched_from_the_network_and_an_error_is_shown() {
     let mut w = W::new("fetchhit");
     let (acct, list_key) = (home().account, (home().account, "list:1".to_string()));
-    let mut gone = post("gone1", "bob", crate::cal_time::now() - 3600 * 11 - 1800, None);
+    let mut gone = post("gone1", "bob", crate::calendar::time::now() - 3600 * 11 - 1800, None);
     gone.text_markdown = "an unusual walrus".into();
     // a hit of the search, then the index is cleared (Settings) before the click: the index is empty and the feed has no such post
     w.app.social.index.add(&acct, "list:1", std::slice::from_ref(&gone));
@@ -797,13 +797,13 @@ fn the_settings_clear_and_rebuild_the_post_index() {
     for (f, p) in [("home", "h"), ("list:1", "l")] {
         w.app.social.timelines.get_mut(&(acct.clone(), f.to_string())).unwrap().posts = recent(p, 40);
     }
-    let old = post("old1", "bob", crate::cal_time::now() - 3600, None);
+    let old = post("old1", "bob", crate::calendar::time::now() - 3600, None);
     w.app.social.index.add(&acct, "home", std::slice::from_ref(&old));
     w.app.open_settings(crate::app::SettingsTab::General);
     w.frames(3);
     assert_eq!(w.app.social.index.count(None), 1);
     // Rebuild: clears and indexes what the open feeds hold (two lists of 40; a waiting post too)
-    w.app.social.timelines.get_mut(&(acct.clone(), "home".into())).unwrap().waiting = vec![post("waiting1", "bob", crate::cal_time::now() - 5, None)];
+    w.app.social.timelines.get_mut(&(acct.clone(), "home".into())).unwrap().waiting = vec![post("waiting1", "bob", crate::calendar::time::now() - 5, None)];
     // the dialog scrolls: bring the section into view
     while w.rect("index-rebuild").max.y > 850.0 {
         w.scroll(150.0);

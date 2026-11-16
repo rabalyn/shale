@@ -230,7 +230,7 @@ fn cache_ui(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention, now: i64, ou
 /// The dialog's content; returns what was asked for.
 pub fn show(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention) -> Vec<Ask> {
     let mut out = vec![];
-    let now = crate::cal_time::now();
+    let now = crate::calendar::time::now();
     ui.horizontal(|ui| {
         if ui.add_enabled(u.saved.is_some(), egui::Button::new("Refresh")).on_hover_text("Count again").clicked() {
             out.push(Ask::Refresh);

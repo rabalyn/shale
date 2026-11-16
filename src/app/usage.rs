@@ -76,7 +76,7 @@ impl ShaleApp {
                 Ok(s) => Some(s),
                 Err(why) => {
                     let f = Finished { id, kind, result: Err(format!("not now: {why}")) };
-                    self.usage.record.note(&f, crate::cal_time::now());
+                    self.usage.record.note(&f, crate::calendar::time::now());
                     self.toast(finished_text(&f));
                     return;
                 }
@@ -110,7 +110,7 @@ impl ShaleApp {
         if let Some(p) = self.usage.problem.take() {
             self.toast(p);
         }
-        for id in self.usage.due(Instant::now(), crate::cal_time::now()) {
+        for id in self.usage.due(Instant::now(), crate::calendar::time::now()) {
             self.usage_start(id, Kind::Prune);
         }
         if self.usage.any_running() {

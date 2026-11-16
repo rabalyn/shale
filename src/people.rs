@@ -196,7 +196,7 @@ pub fn of_mail(m: &crate::mail::Mail, contacts: &Contacts) -> Vec<Person> {
 }
 
 /// The people of an event: organizer and attendees.
-pub fn of_event(e: &crate::cal_ics::Event, contacts: &Contacts) -> Vec<Person> {
+pub fn of_event(e: &crate::calendar::ics::Event, contacts: &Contacts) -> Vec<Person> {
     let mut out: Vec<Person> = Vec::new();
     for (name, email) in parse_addresses(&e.organizer) {
         push(&mut out, name, email, Role::Organizer, contacts);
@@ -340,7 +340,7 @@ mod tests {
         let free = Person { email: "x@gmail.com".into(), ..new.clone() };
         assert!(!note_for(&free).contains("organization:"));
         // events: organizer and attendees as the calendar stores them
-        let e = crate::cal_ics::Event { organizer: "Hans Müller <h.mueller@arch.example>".into(), attendees: vec!["Anna Schmidt <anna@lindner.example>".into(), "Raum 2.04".into()], ..Default::default() };
+        let e = crate::calendar::ics::Event { organizer: "Hans Müller <h.mueller@arch.example>".into(), attendees: vec!["Anna Schmidt <anna@lindner.example>".into(), "Raum 2.04".into()], ..Default::default() };
         v.rescan();
         let p = of_event(&e, &Contacts::index(&v, "Adressbuch"));
         assert_eq!(p.iter().map(|p| (p.name.as_str(), p.existing.is_some(), p.on)).collect::<Vec<_>>(), vec![("Hans Müller", true, true), ("Anna Schmidt", true, true), ("Raum 2.04", false, false)]);

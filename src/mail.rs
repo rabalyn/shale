@@ -2,7 +2,7 @@
 //! encoded words, multipart bodies, base64 / quoted-printable, charsets, attachment names
 //! (also RFC 2231), and turning HTML-only mails into plain text.
 
-use crate::cal_time as t;
+use crate::calendar::time as t;
 
 #[derive(Clone, Debug, Default)]
 pub struct Attachment {

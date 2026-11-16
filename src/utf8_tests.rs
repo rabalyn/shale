@@ -1,7 +1,8 @@
 //! Every text function gets text with umlauts, ß, € and emoji at every position (and every
 //! cursor position): none of them may cut a character in half (which would crash the app).
 
-use crate::{cal_ics, editor, import, lists, mail, markdown, media, pdfexport, reader};
+use crate::calendar::ics;
+use crate::{editor, import, lists, mail, markdown, media, pdfexport, reader};
 use eframe::egui::{self, Pos2, RawInput, Rect, Vec2};
 use std::path::{Path, PathBuf};
 
@@ -67,8 +68,8 @@ fn text_functions_never_cut_a_character() {
         let _ = mail::parse(s.as_bytes());
         let _ = mail::parse_date(&s);
         let _ = mail::display_name(&s);
-        let _ = cal_ics::parse_ics(&s);
-        let _ = crate::cal_dialog::parse_time_text(&s);
+        let _ = ics::parse_ics(&s);
+        let _ = crate::calendar::dialog::parse_time_text(&s);
         let _ = media::split_typed(&s, Path::new("/v"), Path::new("/h"));
         for (k, b) in boundaries(&s).into_iter().enumerate() {
             let _ = lists::continue_list(&s, b);

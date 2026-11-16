@@ -139,9 +139,9 @@ pub fn tab_complete(typed: &str, vault_root: &Path, home: &Path) -> Option<Strin
     }
 }
 
-/// Today's local date (year, month, day), in the computer's time zone (`cal_time::local_offset`).
+/// Today's local date (year, month, day), in the computer's time zone (`time::local_offset`).
 pub fn local_date() -> (i32, u32, u32) {
-    crate::cal_time::civil_from_days(crate::cal_time::today())
+    crate::calendar::time::civil_from_days(crate::calendar::time::today())
 }
 
 /// `z_media/2026/11/261112_photo.png` for a file called `photo.png` on 2026-11-12.

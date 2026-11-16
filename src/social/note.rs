@@ -8,7 +8,7 @@
 
 use super::markup::{md_link, md_url, plain_text};
 use super::*;
-use crate::cal_time as t;
+use crate::calendar::time as t;
 use crate::import::{front, local_stamp, safe_title, yaml};
 use crate::media;
 use std::path::{Path, PathBuf};

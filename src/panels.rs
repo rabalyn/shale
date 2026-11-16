@@ -437,7 +437,7 @@ impl ShaleApp {
             if !posts.is_empty() {
                 ui.label(muted(format!("Posts  {}", posts.len())).size(12.0));
             }
-            let now = crate::cal_time::now();
+            let now = crate::calendar::time::now();
             self.social.hit_rects.clear();
             for (i, h) in posts.iter().enumerate() {
                 let resp = egui::Frame::new().fill(theme::BG_PRIMARY).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
@@ -1053,7 +1053,7 @@ impl ShaleApp {
         if let Modal::Calendars(d) = &mut modal {
             let mut out = None;
             let resp = crate::dialog::Dialog::new("calendars", "Calendars").width(560.0).show(&ctx, |ui| {
-                out = crate::cal_dialog::show(ui, d, &self.calendar);
+                out = crate::calendar::dialog::show(ui, d, &self.calendar);
             });
             if let Some(a) = out {
                 if self.calendar_dialog_action(d, a) {
@@ -1111,15 +1111,15 @@ impl ShaleApp {
         if let Modal::Event(d) = &mut modal {
             let store = &mut self.calendar;
             let title = if d.original.is_some() { "Edit event" } else { "New event" };
-            let resp = crate::dialog::Dialog::new("event", title).width(460.0).show(&ctx, |ui| crate::cal_dialog::show_event(ui, d, store));
+            let resp = crate::dialog::Dialog::new("event", title).width(460.0).show(&ctx, |ui| crate::calendar::dialog::show_event(ui, d, store));
             let close_asked = resp.should_close();
             match resp.inner.flatten() {
-                Some(crate::cal_dialog::EventResult::Saved(msg)) => {
+                Some(crate::calendar::dialog::EventResult::Saved(msg)) => {
                     self.last_event_calendar = Some(d.calendar.clone());
                     self.toast(msg);
                     keep = false;
                 }
-                Some(crate::cal_dialog::EventResult::Cancel) => keep = false,
+                Some(crate::calendar::dialog::EventResult::Cancel) => keep = false,
                 None => {}
             }
             // Esc / clicking outside closes it, but not while a save is still running
@@ -1237,7 +1237,7 @@ pub fn strip_due(text: &str) -> String {
 
 /// Today's date as YYYY-MM-DD (UTC), without a date library.
 pub fn today() -> Option<String> {
-    let secs = crate::cal_time::now();
+    let secs = crate::calendar::time::now();
     let days = secs.div_euclid(86_400);
     // civil-from-days (Howard Hinnant)
     let z = days + 719_468;

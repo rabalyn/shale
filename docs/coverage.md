@@ -28,8 +28,8 @@ test vault.
   ```
 
 - The numbers are the unit and UI tests only. The ignored suites against real servers
-  (`caldav_env`, `mail_env`) are not in them; they reach more of the network code (see "Biggest
-  gaps"). `cargo llvm-cov --locked -- --ignored caldav_env` with the stacks up measures them.
+  (`calendar::env_tests`, `mail_env`) are not in them; they reach more of the network code (see "Biggest
+  gaps"). `cargo llvm-cov --locked -- --ignored calendar::env_tests` with the stacks up measures them.
 
 ## The ratchet (DEV-010)
 
@@ -100,16 +100,16 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/mail_crypto.rs` | 1112 | 76 | 93.17 % |
 | `src/media.rs` | 235 | 16 | 93.19 % |
 | `src/fsutil.rs` | 522 | 35 | 93.30 % |
-| `src/cal_dav.rs` | 875 | 58 | 93.37 % |
+| `src/calendar/dav.rs` | 875 | 58 | 93.37 % |
 | `src/oauth.rs` | 856 | 56 | 93.46 % |
-| `src/cal_ui.rs` | 969 | 58 | 94.01 % |
+| `src/calendar/ui.rs` | 969 | 58 | 94.01 % |
 | `src/compose.rs` | 587 | 35 | 94.04 % |
-| `src/cal_time.rs` | 194 | 11 | 94.33 % |
+| `src/calendar/time.rs` | 194 | 11 | 94.33 % |
 | `src/mail_dialog.rs` | 707 | 39 | 94.48 % |
 | `src/mail_unsent.rs` | 129 | 7 | 94.57 % |
 | `src/pdfwrite.rs` | 355 | 19 | 94.65 % |
 | `src/script.rs` | 190 | 10 | 94.74 % |
-| `src/cal_store.rs` | 884 | 46 | 94.80 % |
+| `src/calendar/store.rs` | 884 | 46 | 94.80 % |
 | `src/secrets.rs` | 289 | 15 | 94.81 % |
 | `src/social/post_index.rs` | 197 | 10 | 94.92 % |
 | `src/excalidraw_md.rs` | 474 | 24 | 94.94 % |
@@ -119,9 +119,9 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/people.rs` | 258 | 10 | 96.12 % |
 | `src/canvas.rs` | 285 | 11 | 96.14 % |
 | `src/lists.rs` | 446 | 17 | 96.19 % |
-| `src/cal_dialog.rs` | 1391 | 50 | 96.41 % |
+| `src/calendar/dialog.rs` | 1391 | 50 | 96.41 % |
 | `src/vault.rs` | 1302 | 43 | 96.70 % |
-| `src/cal_ics.rs` | 1010 | 33 | 96.73 % |
+| `src/calendar/ics.rs` | 1010 | 33 | 96.73 % |
 | `src/drawing_layout.rs` | 397 | 13 | 96.73 % |
 | `src/sidebar_ui.rs` | 184 | 6 | 96.74 % |
 | `src/vault_path.rs` | 92 | 3 | 96.74 % |
@@ -179,15 +179,15 @@ proposed to the owner first; **test** means a plain unit or UI test is enough.
    the settings mapping is checked. Not tested: `auth_factory` for a password account without a
    session password (it asks the real keyring; a fake keyring seam in `secrets.rs` would be
    needed) and the OAuth2 token fetch itself (covered in `oauth.rs`).
-6. **`cal_dav.rs` `discover` (469 to 513), `request_bytes_opts` (245 to 315), `write_error`,
+6. **`calendar/dav.rs` `discover` (469 to 513), `request_bytes_opts` (245 to 315), `write_error`,
    `delete_event` (585 to 709)**: closed (#59, CAL-019, CAL-020).
-   `cal_dav_status_tests.rs` runs the client against the scripted loopback server
-   `cal_dav::tests::mock_http_with` (and a raw socket that is not HTTP). Originally: well-known and principal discovery with redirects and the words
-   for 401, 403, 412 and 5xx are reached mainly by the ignored `caldav_env` suite. Test: a scripted
+   `calendar/dav_status_tests.rs` runs the client against the scripted loopback server
+   `calendar::dav::tests::mock_http_with` (and a raw socket that is not HTTP). Originally: well-known and principal discovery with redirects and the words
+   for 401, 403, 412 and 5xx are reached mainly by the ignored `calendar::env_tests` suite. Test: a scripted
    HTTP server for the status and redirect cases (the "redirect and certificate rules" test of
    CALENV-002 shows the shape). Kind: test.
-7. **`cal_store.rs` `delete_occurrence`, `save_event`, `poll`, `default_trash_dir` (139 to 638)**:
-   closed (#59, CAL-021, CAL-022): `cal_store_failure_tests.rs`, with write failures made by a folder
+7. **`calendar/store.rs` `delete_occurrence`, `save_event`, `poll`, `default_trash_dir` (139 to 638)**:
+   closed (#59, CAL-021, CAL-022): `calendar/store_failure_tests.rs`, with write failures made by a folder
    where the file should be (also holds for root, so no seam was needed). Originally: removing one date of a repeating event in a local calendar, saving to a read-only or missing
    directory, and the polling refresh. Test: a local calendar in a temp dir, delete one occurrence,
    save with the folder made read-only, poll after an outside change. Kind: test.

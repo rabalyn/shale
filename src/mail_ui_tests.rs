@@ -2699,7 +2699,7 @@ impl W {
     /// Put mails into the outbox files: `kind` 0 waits (for an hour), 1 failed, 2 may have been sent.
     fn put_in_outbox(&mut self, subject: &str, kind: u8) {
         let ob = Outbox::new(&self.app.mail.root);
-        let real = crate::cal_time::now();
+        let real = crate::calendar::time::now();
         let d = crate::outbox::tests::draft(&self.account.id, subject, "the text");
         let b = crate::compose::build(&d, &crate::compose::BuildOptions { now: real, ..Default::default() }).unwrap();
         ob.queue(&d, &b, real, real + 3600, "2026-11-14").unwrap();

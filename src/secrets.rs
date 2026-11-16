@@ -20,8 +20,8 @@
 //! go to `secret-tool` and come back from it are zeroed after use (SEC-017); the pipes and the
 //! keyring process itself are out of reach (SEC-020).
 
-use crate::cal_dav;
-use crate::cal_store::{CalendarSource, SourceKind};
+use crate::calendar::dav;
+use crate::calendar::store::{CalendarSource, SourceKind};
 use crate::secret::Secret;
 use eframe::egui;
 use std::collections::HashMap;
@@ -33,7 +33,7 @@ fn account_of(s: &CalendarSource) -> Option<(String, String)> {
     if username.is_empty() {
         return None;
     }
-    let o = cal_dav::Origin::parse(url).ok()?;
+    let o = dav::Origin::parse(url).ok()?;
     Some((format!("{}://{}:{}", o.scheme, o.host, o.port), username.clone()))
 }
 

@@ -183,8 +183,8 @@ pub enum Modal {
     /// the Data usage dialog (USE-001)
     DataUsage,
     Export(Box<crate::export_dialog::ExportDialog>),
-    Calendars(Box<crate::cal_dialog::CalendarDialog>),
-    Event(Box<crate::cal_dialog::EventDialog>),
+    Calendars(Box<crate::calendar::dialog::CalendarDialog>),
+    Event(Box<crate::calendar::dialog::EventDialog>),
     Import(Box<crate::import_dialog::ImportDialog>),
     MailAccounts(Box<crate::mail_dialog::MailDialog>),
     Social(Box<crate::social::accounts_ui::SocialDialog>),
@@ -307,15 +307,15 @@ pub struct ShaleApp {
     pub tasks: TasksFilter,
     pub graph: GraphView,
     pub local_graph: GraphView,
-    pub calendar: crate::cal_store::CalendarStore,
+    pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
     pub mail: crate::mail_ui::MailView,
-    pub cal_side: crate::cal_ui::CalendarView,
-    pub cal_main: crate::cal_ui::CalendarView,
+    pub cal_side: crate::calendar::ui::CalendarView,
+    pub cal_main: crate::calendar::ui::CalendarView,
     /// the feed view (Mastodon / Bluesky)
     pub social: crate::social::state::SocialState,
     /// deletes started from the event popup: (job, calendar)
-    pub cal_jobs: Vec<(crate::cal_store::Job, String)>,
+    pub cal_jobs: Vec<(crate::calendar::store::Job, String)>,
     /// the calendar the last event was saved to (the default for the next new one)
     pub last_event_calendar: Option<String>,
     /// for background jobs to wake the window up when they finish
@@ -410,8 +410,8 @@ impl ShaleApp {
         // screenshots only: SHALE_FAKE_NOW=2026-11-15T10:00:00 freezes the clock and the build stamp
         if screenshot.is_some() {
             if let Ok(v) = std::env::var("SHALE_FAKE_NOW") {
-                match crate::cal_time::parse_fake_now(&v) {
-                    Some(secs) => crate::cal_time::freeze(secs),
+                match crate::calendar::time::parse_fake_now(&v) {
+                    Some(secs) => crate::calendar::time::freeze(secs),
                     None => eprintln!("SHALE_FAKE_NOW={v}: not a date-time like 2026-11-15T10:00:00, the real clock is used"),
                 }
             }
@@ -449,7 +449,7 @@ impl ShaleApp {
             std::env::temp_dir().join(format!("shale-mail-{tag}-{n}"))
         };
         let social_dir = if persist { dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("shale").join("social") } else { std::env::temp_dir().join(format!("shale-social-{tag}")) };
-        let calendar_dir = if persist { crate::cal_store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{tag}")) };
+        let calendar_dir = if persist { crate::calendar::store::default_local_dir() } else { std::env::temp_dir().join(format!("shale-calendars-{tag}")) };
         let recovery_root = if persist { crate::recovery::default_root() } else { std::env::temp_dir().join(format!("shale-recovery-{tag}")) };
         if screenshot.is_some() {
             for d in [&mail_root, &social_dir, &calendar_dir, &recovery_root] {
@@ -463,7 +463,7 @@ impl ShaleApp {
                 mail_root: mail_root.clone(),
                 debug_log: crate::config::input_log_path(),
                 calendars: calendar_dir.clone(),
-                calendar_trash: crate::cal_store::default_trash_dir(),
+                calendar_trash: crate::calendar::store::default_trash_dir(),
                 recovery: recovery_root.clone(),
                 cleanup_file: crate::data_usage::cleanup::default_path(),
                 vault: None,
@@ -504,15 +504,15 @@ impl ShaleApp {
             graph: GraphView::new(false),
             local_graph: GraphView::new(true),
             calendar: {
-                let mut c = crate::cal_store::CalendarStore::new(cfg.calendars.clone(), calendar_dir);
+                let mut c = crate::calendar::store::CalendarStore::new(cfg.calendars.clone(), calendar_dir);
                 if persist {
-                    c.trash_dir = crate::cal_store::default_trash_dir();
+                    c.trash_dir = crate::calendar::store::default_trash_dir();
                 }
                 c
             },
             mail: crate::mail_ui::MailView::new(mail_root),
-            cal_side: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Small),
-            cal_main: crate::cal_ui::CalendarView::new(crate::cal_ui::Size::Medium),
+            cal_side: crate::calendar::ui::CalendarView::new(crate::calendar::ui::Size::Small),
+            cal_main: crate::calendar::ui::CalendarView::new(crate::calendar::ui::Size::Medium),
             social: {
                 let mut s = crate::social::state::SocialState::new(social_dir);
                 if persist {
@@ -1510,8 +1510,8 @@ impl ShaleApp {
     }
 
     /// Do what the calendar panel asked for.
-    pub fn calendar_action(&mut self, a: crate::cal_ui::CalAction) {
-        use crate::cal_ui::CalAction;
+    pub fn calendar_action(&mut self, a: crate::calendar::ui::CalAction) {
+        use crate::calendar::ui::CalAction;
         match a {
             CalAction::Settings => self.open_calendar_settings(),
             CalAction::OpenUrl(url) => {
@@ -1525,7 +1525,7 @@ impl ShaleApp {
                 let target = self.last_event_calendar.as_ref().and_then(|id| srcs.iter().find(|s| s.id == *id)).or_else(|| srcs.iter().find(|s| s.enabled)).or_else(|| srcs.first()).map(|s| s.id.clone());
                 match target {
                     Some(id) => {
-                        let mut d = crate::cal_dialog::EventDialog::new_at(id, start);
+                        let mut d = crate::calendar::dialog::EventDialog::new_at(id, start);
                         d.week_monday = self.cfg.week_starts_monday;
                         self.modal = Some(Modal::Event(Box::new(d)));
                     }
@@ -1538,7 +1538,7 @@ impl ShaleApp {
                     // "all repeats" asked on a changed single date: the series itself is edited
                     let series = self.calendar.events.get(&sid).and_then(|v| v.iter().find(|x| x.uid == ev.uid && x.recurrence_id.is_none())).cloned();
                     let ev = if ev.recurrence_id.is_some() { series.unwrap_or(ev) } else { ev };
-                    let mut d = crate::cal_dialog::EventDialog::edit(sid, ev);
+                    let mut d = crate::calendar::dialog::EventDialog::edit(sid, ev);
                     d.week_monday = self.cfg.week_starts_monday;
                     self.modal = Some(Modal::Event(Box::new(d)));
                 }
@@ -1548,7 +1548,7 @@ impl ShaleApp {
                 if let Some((sid, ev)) = found {
                     // a date that was changed before is edited as it is; else it becomes a copy of the series for that date
                     let one = if ev.recurrence_id.is_some() { ev } else { ev.override_at(occ.start, occ.end) };
-                    let mut d = crate::cal_dialog::EventDialog::edit(sid, one);
+                    let mut d = crate::calendar::dialog::EventDialog::edit(sid, one);
                     d.week_monday = self.cfg.week_starts_monday;
                     self.modal = Some(Modal::Event(Box::new(d)));
                 }
@@ -1575,12 +1575,12 @@ impl ShaleApp {
     }
 
     pub fn open_calendar_settings(&mut self) {
-        self.modal = Some(Modal::Calendars(Box::new(crate::cal_dialog::CalendarDialog::new(self.cfg.calendars.clone(), self.cfg.week_starts_monday))));
+        self.modal = Some(Modal::Calendars(Box::new(crate::calendar::dialog::CalendarDialog::new(self.cfg.calendars.clone(), self.cfg.week_starts_monday))));
     }
 
     /// Apply a calendar settings dialog action. Returns true when the dialog should close.
-    pub fn calendar_dialog_action(&mut self, d: &mut crate::cal_dialog::CalendarDialog, a: crate::cal_dialog::CalDialogAction) -> bool {
-        use crate::cal_dialog::CalDialogAction;
+    pub fn calendar_dialog_action(&mut self, d: &mut crate::calendar::dialog::CalendarDialog, a: crate::calendar::dialog::CalDialogAction) -> bool {
+        use crate::calendar::dialog::CalDialogAction;
         match a {
             CalDialogAction::Done => {
                 self.cfg.calendars = d.sources.clone();
@@ -2262,7 +2262,7 @@ impl ShaleApp {
             self.ctx = Some(ui.ctx().clone());
         }
         let mut finished = Vec::new();
-        self.cal_jobs.retain(|(job, sid)| match crate::cal_store::job_result(job) {
+        self.cal_jobs.retain(|(job, sid)| match crate::calendar::store::job_result(job) {
             Some(r) => {
                 finished.push((r, sid.clone()));
                 false

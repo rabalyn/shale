@@ -776,7 +776,7 @@ mod tests {
         let entry = crate::social::demo::account();
         w.app.cfg.social_accounts = vec![entry.clone()];
         w.app.social.load_demo(&entry);
-        let mut p = crate::social::tests::post("b1", "bob", crate::cal_time::now() - 600, None);
+        let mut p = crate::social::tests::post("b1", "bob", crate::calendar::time::now() - 600, None);
         p.text_markdown = "banana republic".into();
         w.app.social.index.add(&entry.account.id, "home", &[p]);
     }

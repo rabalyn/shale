@@ -11,18 +11,7 @@
 //! An unknown option or a missing value is an error (exit code 2), never a vault folder.
 
 mod app;
-mod cal_dav;
-#[cfg(test)]
-mod cal_dav_status_tests;
-mod cal_dialog;
-mod cal_ics;
-mod cal_store;
-#[cfg(test)]
-mod cal_store_failure_tests;
-mod cal_time;
-mod cal_ui;
-#[cfg(test)]
-mod caldav_env_tests;
+mod calendar;
 mod canvas;
 mod compose;
 mod config;

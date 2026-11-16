@@ -73,7 +73,7 @@ The index of posts is a small SQLite file with an FTS5 table (`social/post_index
 
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
-| SOC-015 | Servers are reached only over `https://` (`http://` only on this computer) through `curl` with the secret on standard input; the token goes only to the account's own server, never to a picture server; downloads are limited to 64 MB, answers to 20 MB. | IS NOW | `social/mod.rs`, `cal_dav::request_bytes` | `social/mod.rs::urls_and_names`, `images.rs::local_files_are_used_as_they_are_and_names_are_stable` (refuses plain http) |
+| SOC-015 | Servers are reached only over `https://` (`http://` only on this computer) through `curl` with the secret on standard input; the token goes only to the account's own server, never to a picture server; downloads are limited to 64 MB, answers to 20 MB. | IS NOW | `social/mod.rs`, `calendar::dav::request_bytes` | `social/mod.rs::urls_and_names`, `images.rs::local_files_are_used_as_they_are_and_names_are_stable` (refuses plain http) |
 | SOC-016 | Mastodon and Bluesky are tried by hand against real servers before a release. | SHOULD BE | — | manual |
 | SOC-017 | *Retired* (replaced by USE-010, USE-020, USE-022): the picture cache folder was to be pruned by size; it is now pruned by age and size with settings. | Retired | — | — |
 | SOC-018 | The author's contact note is linked in the saved note when there is one (as for e-mails). | SHOULD BE | `import::find_people` | — |

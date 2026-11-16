@@ -153,7 +153,7 @@ pub(super) fn date_text(at: i64) -> String {
     if at <= 0 {
         return String::new();
     }
-    let (y, m, d) = crate::cal_time::civil_from_days(at.div_euclid(86_400));
+    let (y, m, d) = crate::calendar::time::civil_from_days(at.div_euclid(86_400));
     format!("{y:04}-{m:02}-{d:02}")
 }
 
@@ -293,7 +293,7 @@ impl PostIndex {
     }
 
     fn try_add(&mut self, account: &str, feed: &str, posts: &[Post]) -> rusqlite::Result<()> {
-        let now = crate::cal_time::now();
+        let now = crate::calendar::time::now();
         let cutoff = self.keep_days.map(|d| now - d * 86_400).unwrap_or(i64::MIN);
         let tx = self.conn.transaction()?;
         // oldest first: the post a reply answers is in the index before the reply, so its text is context

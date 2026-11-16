@@ -8,7 +8,7 @@
 //! - `note`: `fetch_saved` (thread + media downloads) and `post_note` (the Markdown of the note).
 //!
 //! All functions that use the network are BLOCKING (they run the system `curl` program, see
-//! `cal_dav::request_bytes`): call them from a background thread. Secrets (Mastodon access token,
+//! `dav::request_bytes`): call them from a background thread. Secrets (Mastodon access token,
 //! Bluesky app password) are never part of `Account`, never printed in `Debug` output, never put
 //! on a command line or in an address; the keyring functions are in `secrets.rs`
 //! (`social_lookup` / `social_store` / `social_clear`). The login of a Bluesky account lives in
@@ -31,8 +31,8 @@ pub mod state;
 #[cfg(test)]
 mod ui_tests;
 
-use crate::cal_dav::{self, check_url, Origin};
-use crate::cal_time as t;
+use crate::calendar::dav::{self, check_url, Origin};
+use crate::calendar::time as t;
 use crate::secret::Secret;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -92,7 +92,7 @@ pub struct SocialAccountEntry {
 
 impl std::fmt::Debug for SocialAccountEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SocialAccountEntry").field("account", &self.account).field("secret", &cal_dav::redacted(self.secret.expose())).finish()
+        f.debug_struct("SocialAccountEntry").field("account", &self.account).field("secret", &dav::redacted(self.secret.expose())).finish()
     }
 }
 
@@ -286,8 +286,8 @@ impl ApiError {
 const MAX_JSON: u64 = 20_000_000;
 pub const MAX_MEDIA_BYTES: u64 = 64_000_000;
 
-fn no_login() -> cal_dav::Account {
-    cal_dav::Account { url: String::new(), username: String::new(), password: Secret::default() }
+fn no_login() -> dav::Account {
+    dav::Account { url: String::new(), username: String::new(), password: Secret::default() }
 }
 
 /// Overwrite every string in a JSON answer or request that held a secret (the tree would
@@ -344,7 +344,7 @@ pub(crate) fn api(method: &str, url: &str, token: Option<&str>, body: Option<&Va
         auth = crate::secret::concat(&["Authorization: Bearer ", tok]);
         hs.push(&auth);
     }
-    let r = cal_dav::request_bytes(method, url, &hs, &text, &no_login(), MAX_JSON).map_err(ApiError::plain)?;
+    let r = dav::request_bytes(method, url, &hs, &text, &no_login(), MAX_JSON).map_err(ApiError::plain)?;
     let (status, answer) = (r.status, Zeroizing::new(r.body));
     let json: Value = serde_json::from_slice(&answer).unwrap_or(Value::Null);
     if (200..300).contains(&status) {
@@ -366,7 +366,7 @@ pub(crate) fn api(method: &str, url: &str, token: Option<&str>, body: Option<&Va
 /// the content type, if the server named one.
 pub fn download(url: &str) -> Result<(Vec<u8>, Option<String>), String> {
     check_url(url)?;
-    let r = cal_dav::request_bytes("GET", url, &[], "", &no_login(), MAX_MEDIA_BYTES)?;
+    let r = dav::request_bytes("GET", url, &[], "", &no_login(), MAX_MEDIA_BYTES)?;
     if !(200..300).contains(&r.status) {
         return Err(format!("the server answered with status {}", r.status));
     }
@@ -572,7 +572,7 @@ enum Backend {
 
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Client").field("account", &self.account).field("secret", &cal_dav::redacted("x")).finish()
+        f.debug_struct("Client").field("account", &self.account).field("secret", &dav::redacted("x")).finish()
     }
 }
 

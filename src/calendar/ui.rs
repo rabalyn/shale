@@ -1,7 +1,7 @@
 //! The calendar panel: month, week and day views in three sizes, and an event details popup.
 
-use crate::cal_store::{CalendarStore, Occ};
-use crate::cal_time::{self as t, civil_from_days, days_from_civil, MONTHS, WEEKDAYS};
+use crate::calendar::store::{CalendarStore, Occ};
+use crate::calendar::time::{self as t, civil_from_days, days_from_civil, MONTHS, WEEKDAYS};
 use crate::theme;
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
@@ -70,7 +70,7 @@ pub fn new_event_start(day: i64) -> i64 {
 #[derive(Clone, Debug)]
 pub struct CalDrag {
     /// the event, with the dragged occurrence's start and end
-    pub event: crate::cal_ics::Event,
+    pub event: crate::calendar::ics::Event,
     pub calendar: String,
 }
 
@@ -109,7 +109,7 @@ fn parse_hex(c: &str) -> Color32 {
 }
 
 /// "15 minutes before" for a reminder.
-pub fn reminder_text(a: &crate::cal_ics::Alarm) -> String {
+pub fn reminder_text(a: &crate::calendar::ics::Alarm) -> String {
     let say = |n: i64, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
     match a.before {
         Some(0) => "at the start".into(),
@@ -849,7 +849,7 @@ impl CalendarView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cal_store::{CalendarSource, SourceKind};
+    use crate::calendar::store::{CalendarSource, SourceKind};
     use eframe::egui::{Event, Modifiers, PointerButton, RawInput};
 
     struct H {
@@ -1077,9 +1077,9 @@ mod tests {
         // an event that does not repeat has the two plain buttons only
         h.click(&mut v, &store, true, "event:Gym");
         assert!(!v.rects.iter().any(|r| r.0 == "popup-edit-one" || r.0 == "popup-delete-one"));
-        assert_eq!(reminder_text(&crate::cal_ics::Alarm::before_start(900)), "15 minutes before");
-        assert_eq!(reminder_text(&crate::cal_ics::Alarm::before_start(86_400)), "1 day before");
-        assert_eq!(reminder_text(&crate::cal_ics::Alarm::before_start(0)), "at the start");
+        assert_eq!(reminder_text(&crate::calendar::ics::Alarm::before_start(900)), "15 minutes before");
+        assert_eq!(reminder_text(&crate::calendar::ics::Alarm::before_start(86_400)), "1 day before");
+        assert_eq!(reminder_text(&crate::calendar::ics::Alarm::before_start(0)), "at the start");
     }
 
     // spec: CAL-008

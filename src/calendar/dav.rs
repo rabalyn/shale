@@ -19,7 +19,7 @@
 //! are on the same server as the calendar, so a server can't make Shale send the password to
 //! somewhere else.
 
-use crate::cal_ics::{self, Event};
+use crate::calendar::ics::{self, Event};
 use roxmltree::{Document, Node};
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -604,7 +604,7 @@ pub fn calendar_state(cal_url: &str, acct: &Account) -> Result<CalState, String>
 }
 
 fn utc_stamp(t: i64) -> String {
-    let (y, m, d) = crate::cal_time::civil_from_days(t.div_euclid(86_400));
+    let (y, m, d) = crate::calendar::time::civil_from_days(t.div_euclid(86_400));
     let s = t.rem_euclid(86_400);
     format!("{y:04}{m:02}{d:02}T{:02}{:02}{:02}Z", s / 3600, s % 3600 / 60, s % 60)
 }
@@ -625,7 +625,7 @@ pub fn fetch_events(cal_url: &str, acct: &Account, from: i64, to: i64) -> Result
         let href = Some(resolve(&r.url, &resp.href)).filter(|h| !resp.href.is_empty() && same_server(h, cal_url));
         let etag = href.as_ref().and_then(|_| resp.prop_text(DAV, "getetag")).and_then(|e| clean_etag(&e));
         if let Some(data) = resp.prop(CALDAV, "calendar-data") {
-            for mut e in cal_ics::parse_ics(&text_of(data)) {
+            for mut e in ics::parse_ics(&text_of(data)) {
                 e.href = href.clone();
                 e.etag = etag.clone();
                 out.push(e);
@@ -693,7 +693,7 @@ fn src_key(events: &[Event]) -> Vec<Vec<String>> {
 fn unchanged_on_server(href: &str, acct: &Account, before: &[Event]) -> Result<bool, String> {
     let r = request_with("GET", href, &[], "", acct)?;
     match r.status {
-        200..=299 => Ok(src_key(&cal_ics::parse_ics(&r.body)) == src_key(before)),
+        200..=299 => Ok(src_key(&ics::parse_ics(&r.body)) == src_key(before)),
         404 | 410 => Ok(false),
         401 => Err(check(&r, href).unwrap_err()),
         s => Err(format!("could not check the event on the server first: it answered with status {s}")),
@@ -711,7 +711,7 @@ const CHANGED_MEANWHILE: &str = "the event was changed on the server meanwhile; 
 pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Option<(&str, Option<&str>)>, before: &[Event]) -> Result<(String, Option<String>), String> {
     let e = parts.first().ok_or("nothing to save")?;
     let clean: Vec<Event> = parts.iter().map(|p| Event { href: None, etag: None, ..p.clone() }).collect();
-    let body = cal_ics::to_ics("", &clean);
+    let body = ics::to_ics("", &clean);
     let creating = existing.is_none();
     let (url, tag) = match existing {
         Some((href, tag)) => {
@@ -764,7 +764,7 @@ pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>, before: &[Ev
         let r = request_with("GET", href, &[], "", acct)?;
         match r.status {
             404 | 410 => return Ok(()),
-            200..=299 if src_key(&cal_ics::parse_ics(&r.body)) != src_key(before) => return Err(CHANGED_MEANWHILE.into()),
+            200..=299 if src_key(&ics::parse_ics(&r.body)) != src_key(before) => return Err(CHANGED_MEANWHILE.into()),
             200..=299 => {}
             401 => return Err(check(&r, href).unwrap_err()),
             s => return Err(format!("could not check the event on the server first: it answered with status {s}")),
@@ -1081,7 +1081,7 @@ pub(crate) mod tests {
         assert!(err.contains("permission"), "{err}");
         let err = put_event(&cal, &acct, std::slice::from_ref(&e), Some((&href, Some("\"v1\""))), &[]).unwrap_err();
         assert!(err.contains("changed on the server"), "{err}");
-        let before = cal_ics::parse_ics(SERVER_ICS);
+        let before = ics::parse_ics(SERVER_ICS);
         delete_event(&href, &acct, None, &before).unwrap();
         delete_event(&format!("{base}/cal/rw/gone.ics"), &acct, None, &before).unwrap();
         // an event address on another server is never contacted
@@ -1099,7 +1099,7 @@ pub(crate) mod tests {
             _ => (500, String::new()),
         });
         let acct2 = Account { url: format!("{b2}/c/"), ..acct.clone() };
-        let before = cal_ics::parse_ics(SERVER_ICS);
+        let before = ics::parse_ics(SERVER_ICS);
         put_event(&acct2.url, &acct2, std::slice::from_ref(&e), Some((&format!("{b2}/c/a.ics"), None)), &before).unwrap();
         assert_eq!(h2.join().unwrap(), vec!["PROPFIND /c/a.ics".to_string(), "GET /c/a.ics".into(), "PUT /c/a.ics".into()]);
         assert_eq!(h.join().unwrap().len(), 6);
@@ -1113,7 +1113,7 @@ pub(crate) mod tests {
         if !has_curl() {
             return;
         }
-        let before = cal_ics::parse_ics(SERVER_ICS);
+        let before = ics::parse_ics(SERVER_ICS);
         let e = Event { summary: "Lunch at noon".into(), ..before[0].clone() };
         // the server still has what was read: saved
         let (b, h) = mock_http(3, |m, _, _, _| match m {

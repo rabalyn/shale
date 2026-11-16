@@ -9,7 +9,7 @@
 //!    and gives up after a timeout or when cancelled;
 //! 4. [`exchange_code`] / [`refresh`] talk to the token endpoint with the system `curl`
 //!    (the form goes to curl on its standard input, redirects are not followed), the same way
-//!    `cal_dav.rs` does HTTPS, so no HTTP library is needed.
+//!    `calendar/dav.rs` does HTTPS, so no HTTP library is needed.
 //!
 //! The refresh token is kept in the keyring ([`KeyringStore`]); the access token only in memory
 //! ([`TokenSource`]), renewed shortly before it expires and when the server refuses it.
@@ -20,7 +20,7 @@
 //! are never used. The client ID (and a client secret, where a provider wants one) is a setting
 //! of the account.
 
-use crate::cal_dav::{self, Origin};
+use crate::calendar::dav::{self, Origin};
 use crate::config::{MailAccount, OAuthProvider};
 use crate::imap_client::{base64_encode, Authenticator};
 use crate::secret::Secret;
@@ -527,8 +527,8 @@ pub fn parse_token_response(status: u16, body: &str, refreshing: bool) -> Result
 fn post_form(cfg: &OAuthConfig, params: &[(&str, &str)], refreshing: bool) -> Result<Tokens, OAuthError> {
     check_endpoint(&cfg.token_url, cfg.allow_local_http()).map_err(OAuthError::Config)?;
     let body = form_body(params);
-    let nobody = cal_dav::Account { url: String::new(), username: String::new(), password: Secret::default() };
-    let r = cal_dav::request_opts("POST", &cfg.token_url, &["Content-Type: application/x-www-form-urlencoded", "Accept: application/json"], &body, &nobody, false).map_err(OAuthError::Network)?;
+    let nobody = dav::Account { url: String::new(), username: String::new(), password: Secret::default() };
+    let r = dav::request_opts("POST", &cfg.token_url, &["Content-Type: application/x-www-form-urlencoded", "Accept: application/json"], &body, &nobody, false).map_err(OAuthError::Network)?;
     // the answer holds the tokens: its text is wiped once read
     let answer = Zeroizing::new(r.body);
     parse_token_response(r.status, &answer, refreshing)

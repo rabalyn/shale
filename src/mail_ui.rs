@@ -1680,7 +1680,7 @@ impl MailView {
     /// Returns how many were recorded.
     pub fn apply(&mut self, cfg: &Config, msgs: Vec<MessageSummary>, action: Action) -> usize {
         let Some(store) = self.ready_store() else { return 0 };
-        match mail_ops::enqueue(&store, &msgs, &action, crate::cal_time::now()) {
+        match mail_ops::enqueue(&store, &msgs, &action, crate::calendar::time::now()) {
             Ok(q) => {
                 self.notices.extend(q.notes);
                 self.dirty = true;
@@ -1898,7 +1898,7 @@ impl MailView {
         let ob = Arc::new(Outbox::new(&self.root));
         self.outbox = Some(ob.clone());
         self.recovered = false;
-        self.spawn(move || ob.recover(crate::cal_time::now(), &crate::mail_store::today_string()), |r| Event::Recovered(flatten(r)));
+        self.spawn(move || ob.recover(crate::calendar::time::now(), &crate::mail_store::today_string()), |r| Event::Recovered(flatten(r)));
     }
 
     /// Read the lists of drafts and outbox entries from disk (small files; done when something changed).
@@ -1939,7 +1939,7 @@ impl MailView {
         if !self.recovered {
             return;
         }
-        let now = crate::cal_time::now();
+        let now = crate::calendar::time::now();
         for a in &cfg.mail_accounts {
             let due = self.local_items.iter().any(|i| i.account == a.id && ((i.state == State::Queued && i.send_after <= now) || (i.state == State::Sent && !i.copy_done)));
             if due {
@@ -1958,7 +1958,7 @@ impl MailView {
         let connector = LazySmtp { factory: self.smtp_factory.clone(), account: account.clone(), session: self.session_pw.get(&account.id).cloned() };
         let acct = account.clone();
         let id = account.id.clone();
-        self.spawn(move || mail_send::send_due(&ob, &store, &acct, &connector, crate::cal_time::now()), move |r| Event::Sent { account: id, result: r });
+        self.spawn(move || mail_send::send_due(&ob, &store, &acct, &connector, crate::calendar::time::now()), move |r| Event::Sent { account: id, result: r });
     }
 
     /// The addresses to complete from: the people notes of the vault, then the addresses in the mail index (newest first).
@@ -2048,7 +2048,7 @@ impl MailView {
         match ob.load_draft(account, id) {
             Ok((d, problems)) => {
                 let alerts = ob.att_alerts("drafts", account, id, &d.attachments);
-                let mut c = Compose::from_saved(d, crate::cal_time::now());
+                let mut c = Compose::from_saved(d, crate::calendar::time::now());
                 // an attachment with an alert is told by the alert, not twice
                 c.notes = problems.into_iter().filter(|p| !alerts.iter().any(|a| p.contains(&format!("“{}”", a.name)))).collect();
                 c.att_alerts = alerts.into_iter().map(|alert| crate::mail_compose::AttAlertState { alert, dismissed: false }).collect();
@@ -2064,7 +2064,7 @@ impl MailView {
         if !c.has_content() && c.saved_rev.is_none() {
             return true; // nothing typed that anyone would miss: no draft file
         }
-        let now = crate::cal_time::now();
+        let now = crate::calendar::time::now();
         match ob.save_draft(&c.draft, now) {
             Ok(()) => {
                 // the sender changed: the draft is in the new account's folder, the old files are put away after that
@@ -2188,7 +2188,7 @@ impl MailView {
             return;
         }
         // build it once to find out what is wrong with it
-        if let Err(e) = compose::finalize_plain(&c.draft, &compose::BuildOptions { now: crate::cal_time::now(), user_agent: a.user_agent_header, ..Default::default() }) {
+        if let Err(e) = compose::finalize_plain(&c.draft, &compose::BuildOptions { now: crate::calendar::time::now(), user_agent: a.user_agent_header, ..Default::default() }) {
             c.error = Some(e.0);
             return;
         }
@@ -2204,7 +2204,7 @@ impl MailView {
         let (Some(ob), Some(c)) = (self.outbox.clone(), self.compose.as_mut()) else { return };
         let Some(a) = cfg.mail_accounts.iter().find(|a| a.id == c.draft.account) else { return };
         c.ask = None;
-        let now = crate::cal_time::now();
+        let now = crate::calendar::time::now();
         if c.draft.sign || c.draft.encrypt {
             // signing and encrypting are GnuPG's, and may wait for a passphrase dialog: a job, the window stays as it is
             let cancel = Arc::new(AtomicBool::new(false));
@@ -2379,7 +2379,7 @@ impl MailView {
     /// Actions of the drafts and outbox lists.
     pub fn apply_local_out(&mut self, out: LocalOut) {
         let Some(ob) = self.outbox.clone() else { return };
-        let now = crate::cal_time::now();
+        let now = crate::calendar::time::now();
         let date = crate::mail_store::today_string();
         if let Some(k) = out.select {
             self.outbox_sel = Some(k);
@@ -2431,7 +2431,7 @@ impl MailView {
 
     /// Undo send for the newest waiting mail (the strip's button).
     pub fn undo_newest(&mut self) {
-        if let Some((a, i, _)) = crate::mail_compose::queued_text(&self.local_items, crate::cal_time::now()) {
+        if let Some((a, i, _)) = crate::mail_compose::queued_text(&self.local_items, crate::calendar::time::now()) {
             self.apply_local_out(LocalOut { undo: Some((a, i)), ..Default::default() });
         }
     }
@@ -2526,7 +2526,7 @@ fn loaded(mail: Mail, security: Security) -> Loaded {
 /// The job behind the status strip: GnuPG over the message, and with the consent the decrypted copy stored.
 fn crypto_job(store: &MailStore, g: &Gnupg, msg: &MessageSummary, consent: bool, cancel: &AtomicBool) -> Result<Loaded, String> {
     let raw = store.read_raw(msg).map_err(|e| e.0)?;
-    let now = crate::cal_time::now();
+    let now = crate::calendar::time::now();
     let mut out = mail_crypto::process(g, &raw, consent, cancel, now);
     if out.decrypted && consent {
         if let Some(d) = &out.display {
@@ -2582,7 +2582,7 @@ pub fn cut_text(t: &str) -> (String, bool) {
 
 /// "14:05" today, "13 Nov" this year, "2024-03-02" before (local time).
 pub fn list_date(ts: Option<i64>, now: i64) -> String {
-    use crate::cal_time as t;
+    use crate::calendar::time as t;
     let Some(ts) = ts else { return String::new() };
     let (day, secs) = t::utc_to_local(ts);
     let (today, _) = t::utc_to_local(now);
@@ -2600,7 +2600,7 @@ pub fn list_date(ts: Option<i64>, now: i64) -> String {
 
 /// "2026-11-13 10:22" (local time).
 pub fn full_date(ts: i64) -> String {
-    use crate::cal_time as t;
+    use crate::calendar::time as t;
     let (day, secs) = t::utc_to_local(ts);
     let (y, m, d) = t::civil_from_days(day);
     format!("{y:04}-{m:02}-{d:02} {}", t::hhmm(secs))

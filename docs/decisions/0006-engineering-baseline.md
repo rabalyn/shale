@@ -26,9 +26,9 @@ The review found these gaps:
   sandbox lacked them. They get no upstream security fixes.
 - **Background jobs**: `thread::spawn` and an mpsc channel, with no `catch_unwind`. If a job
   panics, for example hayro on a malformed PDF attachment, its result never arrives and the
-  spinner runs forever (`pdfview.rs:77-80`, `cal_store.rs:64-67`).
+  spinner runs forever (`pdfview.rs:77-80`, `calendar/store.rs:64-67`).
 - **External programs**: `xdg-open` gets calendar event URLs from a remote server without a
-  scheme check (`cal_ui.rs:671` → `lists.rs:345`), and any non-note file, including untrusted
+  scheme check (`calendar/ui.rs:671` → `lists.rs:345`), and any non-note file, including untrusted
   mail attachments (`app.rs:438`). Every command is started with an argument list, never a
   shell, which is good.
 - **Performance**:

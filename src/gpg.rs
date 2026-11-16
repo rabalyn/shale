@@ -344,7 +344,7 @@ pub fn parse_gpg_time(s: &str) -> Option<i64> {
     }
     if s.len() == 15 && s.as_bytes()[8] == b'T' {
         let n = |a: usize, b: usize| s.get(a..b)?.parse::<i64>().ok();
-        let days = crate::cal_time::days_from_civil(n(0, 4)? as i32, n(4, 6)? as u32, n(6, 8)? as u32);
+        let days = crate::calendar::time::days_from_civil(n(0, 4)? as i32, n(4, 6)? as u32, n(6, 8)? as u32);
         return Some(days * 86_400 + n(9, 11)? * 3600 + n(11, 13)? * 60 + n(13, 15)?);
     }
     s.parse().ok()

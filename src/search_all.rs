@@ -118,7 +118,7 @@ pub fn mail_hits(db: &Connection, query: &str) -> Vec<Hit> {
 }
 
 pub fn post_hits(index: &PostIndex, query: &str) -> Vec<Hit> {
-    let now = crate::cal_time::now();
+    let now = crate::calendar::time::now();
     index
         .search_wild(query, GROUP_LIMIT)
         .into_iter()
@@ -217,7 +217,7 @@ mod tests {
         let (v, dir) = fixture();
         let db = mail_db_with(&[("Banana order".into(), 10), ("Bananas again".into(), 20), ("Unrelated".into(), 30)]);
         let mut posts = PostIndex::in_memory();
-        let mut p = post("p1", "ada", crate::cal_time::now() - 3600, None);
+        let mut p = post("p1", "ada", crate::calendar::time::now() - 3600, None);
         p.text_markdown = "banana republic".into();
         posts.add("acct", "home", &[p]);
         let ctx = Ctx { vault: &v, mail: Some(&db), posts: &posts };

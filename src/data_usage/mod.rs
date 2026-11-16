@@ -377,7 +377,7 @@ impl DataUsage {
         }
         let places = self.places.clone();
         let r = retention.clone();
-        let now = crate::cal_time::now();
+        let now = crate::calendar::time::now();
         let rx = crate::jobs::spawn(
             move || match kind {
                 Kind::Clear => clear(id, &places, mail.as_deref()),
@@ -440,7 +440,7 @@ impl DataUsage {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
         });
         if !done.is_empty() {
-            let wall = crate::cal_time::now();
+            let wall = crate::calendar::time::now();
             for f in &done {
                 self.record.note(f, wall);
             }
