@@ -139,6 +139,23 @@ fn the_player_is_in_the_editor_and_in_the_markdown_preview_as_well() {
 
 // spec: MEDIA-001
 #[test]
+fn clicking_the_button_in_the_editor_plays_and_leaves_the_cursor_alone() {
+    let mut fx = Fx::new("editor-click", NOTE, &["tone-cover.mp3"]);
+    fx.reading(false);
+    fx.label("Play");
+    fx.click_label("Play");
+    fx.hl.frames(&mut fx.app, 3);
+    // a cursor put into the link would show the link's text instead of the player
+    assert_eq!(fx.app.media.current(), Some(fx.dir.join("tone-cover.mp3")));
+    fx.label("Pause");
+    let a = fx.app.tabbar.active;
+    let id = fx.app.tabbar.tabs[a].editor.id;
+    let at = egui::text_edit::TextEditState::load(fx.hl.ctx(), id).and_then(|st| st.cursor.char_range()).map(|r| r.primary.index.0);
+    assert!(at.is_none_or(|c| c == 0), "the click did not put the cursor into the text: {at:?}");
+}
+
+// spec: MEDIA-001
+#[test]
 fn the_extension_decides_in_any_case_and_a_link_without_the_bang_is_no_player() {
     for name in ["a.MP3", "b.Ogg", "c.oga", "d.OPUS", "e.flac", "f.m4a", "g.aac", "h.wav"] {
         assert!(super::is_audio(Path::new(name)), "{name}");
