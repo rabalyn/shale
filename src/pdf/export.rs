@@ -8,7 +8,7 @@
 
 use crate::drawing::{self, Element, Scene, View};
 use crate::markdown;
-use crate::pdfwrite::{Doc, FontKind, Image, Page, Rgba, TextStyle};
+use crate::pdf::write::{Doc, FontKind, Image, Page, Rgba, TextStyle};
 use crate::theme;
 use crate::vault::{FileKind, Vault};
 use eframe::egui::{self, Color32, Pos2, Shape, Vec2};
@@ -216,7 +216,7 @@ impl<'a> Writer<'a> {
                 words.push(Piece { text: cur, ..p.clone() });
             }
         }
-        let width = |p: &Piece| crate::pdfwrite::text_width(p.kind, p.size, &p.text);
+        let width = |p: &Piece| crate::pdf::write::text_width(p.kind, p.size, &p.text);
         let mut lines: Vec<Vec<Piece>> = vec![vec![]];
         let mut line_w = 0.0;
         for wd in words {
@@ -232,7 +232,7 @@ impl<'a> Writer<'a> {
                 // a very long word: break it by characters
                 let mut part = String::new();
                 for c in wd.text.chars() {
-                    let cw = crate::pdfwrite::char_width(wd.kind, wd.size, c);
+                    let cw = crate::pdf::write::char_width(wd.kind, wd.size, c);
                     if line_w + cw > avail && !(lines.last().unwrap().is_empty() && part.is_empty()) {
                         if !part.is_empty() {
                             lines.last_mut().unwrap().push(Piece { text: std::mem::take(&mut part), ..wd.clone() });
@@ -267,7 +267,7 @@ impl<'a> Writer<'a> {
                 let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) {
                     pw
                 } else {
-                    crate::pdfwrite::text_width(p.kind, p.size, p.text.trim_end())
+                    crate::pdf::write::text_width(p.kind, p.size, p.text.trim_end())
                 };
                 if p.underline {
                     self.p().line([x, base + p.size * 0.15], [x + tw, base + p.size * 0.15], p.color, p.size * 0.06);
@@ -372,7 +372,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                     let mut cut = rest.len();
                     let mut acc = 0.0;
                     for (bi, c) in rest.char_indices() {
-                        acc += crate::pdfwrite::char_width(FontKind::Mono, size, c);
+                        acc += crate::pdf::write::char_width(FontKind::Mono, size, c);
                         if acc > cw - 12.0 {
                             cut = bi;
                             break;
@@ -422,8 +422,8 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                         i += 1;
                         continue;
                     }
-                } else if crate::pdfview::is_pdf(&t) {
-                    if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdfview::render_pages(d, 40, 2.0)) {
+                } else if crate::pdf::view::is_pdf(&t) {
+                    if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdf::view::render_pages(d, 40, 2.0)) {
                         for img in r.images {
                             let [iw, ih] = img.size;
                             let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
@@ -518,7 +518,7 @@ fn finish(mut doc: Doc, opts: &ExportOptions) -> Result<Vec<u8>, String> {
         for i in 0..n {
             let (pw, ph) = (doc.pages[i].width, doc.pages[i].height);
             let label = format!("{} / {n}", i + 1);
-            let tw = crate::pdfwrite::text_width(FontKind::Sans, 9.0, &label);
+            let tw = crate::pdf::write::text_width(FontKind::Sans, 9.0, &label);
             doc.page(i).text(TextStyle::plain(FontKind::Sans, 9.0, Rgba(120, 120, 120, 255)), (pw - tw) / 2.0, ph - opts.margin_mm * MM * 0.5, &label);
         }
     }
@@ -625,7 +625,7 @@ fn draw_text_element(page: &mut Page, e: &Element, view: &View, dark: bool) {
             Some(max) => {
                 let mut cur = String::new();
                 for word in para.split_inclusive(' ') {
-                    if !cur.is_empty() && crate::pdfwrite::text_width(kind, size, &(cur.clone() + word.trim_end())) > max {
+                    if !cur.is_empty() && crate::pdf::write::text_width(kind, size, &(cur.clone() + word.trim_end())) > max {
                         lines.push(std::mem::take(&mut cur));
                     }
                     cur.push_str(word);
@@ -643,13 +643,13 @@ fn draw_text_element(page: &mut Page, e: &Element, view: &View, dark: bool) {
     let align = crate::drawing::text_align_pub(e);
     for (i, l) in lines.iter().enumerate() {
         let l = l.trim_end();
-        let tw = crate::pdfwrite::text_width(kind, size, l);
+        let tw = crate::pdf::write::text_width(kind, size, l);
         let x = match align {
             1 => left.x + (box_w - tw) / 2.0,
             2 => left.x + box_w - tw,
             _ => left.x,
         };
-        let base = left.y + i as f32 * lh + size * (0.25 * 0.5) + size * crate::pdfwrite::ascent(kind).min(1.0);
+        let base = left.y + i as f32 * lh + size * (0.25 * 0.5) + size * crate::pdf::write::ascent(kind).min(1.0);
         page.text(TextStyle::plain(kind, size, color), x, base, l);
     }
 }
@@ -690,7 +690,7 @@ pub fn export_drawing(scene: &Scene, title: &str, opts: &ExportOptions, pictures
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pdfwrite::inflate;
+    use crate::pdf::write::inflate;
 
     fn render(bytes: &[u8]) -> Vec<(u32, u32, Vec<u8>)> {
         let pdf = hayro::hayro_syntax::Pdf::new(bytes.to_vec()).expect("valid PDF");
@@ -722,14 +722,14 @@ mod tests {
     }
 
     fn hex(s: &str) -> String {
-        s.chars().filter_map(crate::pdfwrite::win_ansi).map(|b| format!("{b:02x}")).collect()
+        s.chars().filter_map(crate::pdf::write::win_ansi).map(|b| format!("{b:02x}")).collect()
     }
 
     fn vault() -> (Vault, std::path::PathBuf) {
         let d = std::env::temp_dir().join(format!("shale-export-{}-{}", std::process::id(), rand_suffix()));
         let _ = std::fs::remove_dir_all(&d);
         crate::vault::write_sample_vault(&d).unwrap();
-        std::fs::write(d.join("doc.pdf"), crate::pdfview::sample_pdf()).unwrap();
+        std::fs::write(d.join("doc.pdf"), crate::pdf::view::sample_pdf()).unwrap();
         (Vault::open(&d).unwrap(), d)
     }
 
@@ -835,7 +835,7 @@ mod preview {
         let drawing = export_drawing(&scene, "Sketch", &ExportOptions::for_drawing(&scene), &HashMap::new()).unwrap();
         for (name, bytes) in [("note", note), ("drawing", drawing)] {
             std::fs::write(d.join(format!("{name}.pdf")), &bytes).unwrap();
-            let r = crate::pdfview::render_pages(bytes, 3, 1.2).unwrap();
+            let r = crate::pdf::view::render_pages(bytes, 3, 1.2).unwrap();
             for (i, img) in r.images.iter().enumerate() {
                 let raw: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
                 image::RgbaImage::from_raw(img.size[0] as u32, img.size[1] as u32, raw).unwrap().save(d.join(format!("{name}-{i}.png"))).unwrap();

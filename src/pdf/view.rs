@@ -115,11 +115,11 @@ pub fn is_pdf(p: &Path) -> bool {
 
 #[cfg(test)]
 pub(crate) fn sample_pdf() -> Vec<u8> {
-    let mut d = crate::pdfwrite::Doc::new("sample");
+    let mut d = crate::pdf::write::Doc::new("sample");
     for i in 0..3 {
         let p = d.add_page(300.0, 200.0);
-        d.page(p).rect(20.0, 20.0, 260.0, 160.0, Some(crate::pdfwrite::Rgba(40, 90, 200, 255)), None);
-        d.page(p).text(crate::pdfwrite::TextStyle::plain(crate::pdfwrite::FontKind::Sans, 24.0, crate::pdfwrite::Rgba(255, 255, 255, 255)), 40.0, 110.0, &format!("Page {}", i + 1));
+        d.page(p).rect(20.0, 20.0, 260.0, 160.0, Some(crate::pdf::write::Rgba(40, 90, 200, 255)), None);
+        d.page(p).text(crate::pdf::write::TextStyle::plain(crate::pdf::write::FontKind::Sans, 24.0, crate::pdf::write::Rgba(255, 255, 255, 255)), 40.0, 110.0, &format!("Page {}", i + 1));
     }
     d.finish()
 }

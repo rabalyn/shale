@@ -10,7 +10,7 @@
 use crate::drawing::{DrawingDoc, Scene};
 use crate::markdown;
 use crate::vault::{rel_to_string, FileKind, Vault};
-use crate::{editor, lists, pdfexport, reader};
+use crate::{editor, lists, reader};
 use eframe::egui::{self, Pos2, RawInput, Rect, Vec2};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -124,7 +124,7 @@ fn notes_every_note_parses_renders_and_exports() {
     with_vault("render", |_, v| {
         let ctx = egui::Context::default();
         let mut scenes = reader::SceneCache::default();
-        let opts = pdfexport::ExportOptions::for_note();
+        let opts = crate::pdf::export::ExportOptions::for_note();
         let mut problems = Vec::new();
         for rel in notes(v) {
             let text = v.notes.get(&rel).map(|n| n.text.clone()).unwrap_or_default();
@@ -148,7 +148,7 @@ fn notes_every_note_parses_renders_and_exports() {
                 reader::show(ui, &text, v, &rel, &mut scenes, 15.0, true);
             });
             out.textures_delta.clear();
-            match pdfexport::export_note(v, &rel, &text, &opts) {
+            match crate::pdf::export::export_note(v, &rel, &text, &opts) {
                 Ok(pdf) if pdf.starts_with(b"%PDF") => {}
                 Ok(_) => problems.push(format!("{}: PDF export wrote no PDF", rel_to_string(&rel))),
                 Err(e) => problems.push(format!("{}: PDF export failed: {e}", rel_to_string(&rel))),

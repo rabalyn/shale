@@ -68,8 +68,8 @@ From the owner's notes of 2026-11-15 ([ADR-0013](../decisions/0013-forgejo-and-i
 
 | ID | Rule | Status | Code | Test |
 |---|---|---|---|---|
-| JOB-001 | Slow work (PDF rendering, CalDAV, reading drops, tag learning) runs on background threads and never blocks the window. | IS NOW | `jobs` (threads) in `pdfview`, `calendar::store`, `calendar::dialog`, `app/drops`, `social/state`, `social/images`, `social/accounts_ui` | `pdfview.rs::background_rendering_becomes_ready`, `calendar/store.rs::caldav_source_loads_in_the_background` |
-| JOB-002 | Every background job ends with a result or an error shown to the user, even if it panics: all jobs start through `jobs::run` / `jobs::spawn`, which catch the panic and deliver it as an error message. | IS NOW | `jobs.rs`; used by `pdfview`, `calendar::store`, `calendar::dialog`, `app/drops`, `social/*` | `jobs.rs::a_panicking_job_arrives_as_an_error`, `jobs.rs::a_normal_job_returns_its_value_and_notifies`, `jobs.rs::deliver_is_called_once_after_a_panic`, `calendar/store.rs::a_panicking_save_job_ends_with_an_error` |
+| JOB-001 | Slow work (PDF rendering, CalDAV, reading drops, tag learning) runs on background threads and never blocks the window. | IS NOW | `jobs` (threads) in `pdf/view`, `cal_store`, `cal_dialog`, `app/drops`, `social/state`, `social/images`, `social/accounts_ui` | `pdf/view.rs::background_rendering_becomes_ready`, `calendar/store.rs::caldav_source_loads_in_the_background` |
+| JOB-002 | Every background job ends with a result or an error shown to the user, even if it panics: all jobs start through `jobs::run` / `jobs::spawn`, which catch the panic and deliver it as an error message. | IS NOW | `jobs.rs`; used by `pdf/view`, `cal_store`, `cal_dialog`, `app/drops`, `social/*` | `jobs.rs::a_panicking_job_arrives_as_an_error`, `jobs.rs::a_normal_job_returns_its_value_and_notifies`, `jobs.rs::deliver_is_called_once_after_a_panic`, `calendar/store.rs::a_panicking_save_job_ends_with_an_error` |
 
 ## Performance (PERF)
 

@@ -70,7 +70,7 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/import/tb_store.rs` | 524 | 73 | 86.07 % |
 | `src/opener.rs` | 309 | 42 | 86.41 % |
 | `src/mail_compose.rs` | 782 | 106 | 86.45 % |
-| `src/pdfexport.rs` | 655 | 84 | 87.18 % |
+| `src/pdf/export.rs` | 655 | 84 | 87.18 % |
 | `src/social/markup.rs` | 252 | 32 | 87.30 % |
 | `src/drawing/connect.rs` | 877 | 109 | 87.57 % |
 | `src/mail.rs` | 686 | 83 | 87.90 % |
@@ -96,7 +96,7 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/mail_ops.rs` | 1204 | 90 | 92.52 % |
 | `src/gitsync.rs` | 411 | 30 | 92.70 % |
 | `src/social/mastodon.rs` | 362 | 26 | 92.82 % |
-| `src/pdfview.rs` | 101 | 7 | 93.07 % |
+| `src/pdf/view.rs` | 101 | 7 | 93.07 % |
 | `src/mail_crypto.rs` | 1112 | 76 | 93.17 % |
 | `src/media.rs` | 235 | 16 | 93.19 % |
 | `src/fsutil.rs` | 522 | 35 | 93.30 % |
@@ -107,7 +107,7 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/calendar/time.rs` | 194 | 11 | 94.33 % |
 | `src/mail_dialog.rs` | 707 | 39 | 94.48 % |
 | `src/mail_unsent.rs` | 129 | 7 | 94.57 % |
-| `src/pdfwrite.rs` | 355 | 19 | 94.65 % |
+| `src/pdf/write.rs` | 355 | 19 | 94.65 % |
 | `src/script.rs` | 190 | 10 | 94.74 % |
 | `src/calendar/store.rs` | 884 | 46 | 94.80 % |
 | `src/secrets.rs` | 289 | 15 | 94.81 % |
@@ -133,7 +133,7 @@ Lowest first. `sidebar.rs` and `theme.rs` are at 100 %; `keys.rs` and `keys_ui.r
 | `src/drawing/pictures.rs` | 169 | 4 | 97.63 % |
 | `src/markdown.rs` | 531 | 11 | 97.93 % |
 | `src/jobs.rs` | 52 | 1 | 98.08 % |
-| `src/export_dialog.rs` | 191 | 3 | 98.43 % |
+| `src/pdf/export_dialog.rs` | 191 | 3 | 98.43 % |
 | `src/picker.rs` | 186 | 2 | 98.92 % |
 | `src/dialog.rs` | 217 | 2 | 99.08 % |
 | `src/keys_ui.rs` | 721 | 6 | 99.17 % |

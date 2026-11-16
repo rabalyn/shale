@@ -1,7 +1,7 @@
 //! The "Export to PDF" dialog: paper size, orientation, margins, text size, what to include,
 //! background and scale for drawings, where to save, and whether to open the PDF afterwards.
 
-use crate::pdfexport::{Background, ExportOptions, Paper};
+use crate::pdf::export::{Background, ExportOptions, Paper};
 use crate::theme;
 use eframe::egui::{self, Rect, Ui};
 use std::path::PathBuf;
