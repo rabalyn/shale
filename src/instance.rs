@@ -3,11 +3,28 @@
 
 use std::fs::File;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
-/// Take the lock in `dir`. `Ok(Some(_))`: keep the value until the process ends. `Ok(None)`:
-/// another Shale is running.
-pub fn acquire(dir: &Path) -> std::io::Result<Option<File>> {
-    crate::fsutil::try_lock_file(&dir.join("instance.lock"))
+/// How long a start that finds the lock taken keeps trying before it says "already running". A
+/// program started just before (git, gpg, the opener) holds a copy of the locked file from its
+/// creation until it starts, a few milliseconds (5 ms at most in a test that started programs
+/// without pause), so the lock can outlive the Shale that took it by that long.
+pub const GRACE: Duration = Duration::from_millis(200);
+
+/// Take the lock in `dir`, trying again for up to `grace` while it is taken. `Ok(Some(_))`: keep
+/// the value until the process ends. `Ok(None)`: another Shale is running.
+pub fn acquire(dir: &Path, grace: Duration) -> std::io::Result<Option<File>> {
+    let path = dir.join("instance.lock");
+    let start = Instant::now();
+    loop {
+        if let Some(lock) = crate::fsutil::try_lock_file(&path)? {
+            return Ok(Some(lock));
+        }
+        if start.elapsed() >= grace {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 /// What a start finds out about other running Shales.
@@ -22,7 +39,7 @@ pub enum Claim {
 
 /// `acquire` as `main` uses it: every outcome is a way to go on.
 pub fn claim(dir: &Path) -> Claim {
-    match acquire(dir) {
+    match acquire(dir, GRACE) {
         Ok(Some(lock)) => Claim::Owner(lock),
         Ok(None) => Claim::AlreadyRunning,
         Err(e) => Claim::Unchecked(e),
@@ -77,11 +94,12 @@ mod tests {
     #[test]
     fn a_second_instance_is_refused_until_the_first_has_ended() {
         let dir = Dir::new();
-        let first = acquire(&dir.0).unwrap();
+        let first = acquire(&dir.0, Duration::ZERO).unwrap();
         assert!(first.is_some());
-        assert!(acquire(&dir.0).unwrap().is_none());
+        assert!(acquire(&dir.0, Duration::ZERO).unwrap().is_none());
         drop(first);
-        assert!(acquire(&dir.0).unwrap().is_some());
+        // a program that another test started at this moment may still hold a copy for a few ms
+        assert!(acquire(&dir.0, GRACE).unwrap().is_some());
     }
 
     // spec: DATA-012
@@ -97,6 +115,29 @@ mod tests {
         assert!(matches!(claim(&other.0), Claim::Owner(_)));
         drop(first);
         assert!(matches!(claim(&dir.0), Claim::Owner(_)), "the lock is free when the owner has ended");
+    }
+
+    // spec: DATA-012
+    #[test]
+    fn a_lock_that_is_still_held_after_the_grace_time_means_already_running() {
+        let dir = Dir::new();
+        let Claim::Owner(_first) = claim(&dir.0) else { panic!("the first start must be the owner") };
+        let t = Instant::now();
+        assert!(matches!(claim(&dir.0), Claim::AlreadyRunning));
+        assert!(t.elapsed() >= GRACE, "the second start tried for the whole grace time");
+    }
+
+    // spec: DATA-012
+    #[test]
+    fn a_lock_given_back_within_the_grace_time_is_taken() {
+        let dir = Dir::new();
+        let Claim::Owner(first) = claim(&dir.0) else { panic!("the first start must be the owner") };
+        let ender = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            drop(first);
+        });
+        assert!(matches!(claim(&dir.0), Claim::Owner(_)), "the second start waited for the end of the first");
+        ender.join().unwrap();
     }
 
     // spec: DATA-012
@@ -120,7 +161,7 @@ mod tests {
     #[test]
     fn helper_that_takes_the_lock_and_dies() {
         if let Some(dir) = std::env::var_os("SHALE_TEST_LOCK_DIR") {
-            let lock = acquire(std::path::Path::new(&dir)).unwrap();
+            let lock = acquire(std::path::Path::new(&dir), Duration::ZERO).unwrap();
             assert!(lock.is_some());
             std::mem::forget(lock);
         }
