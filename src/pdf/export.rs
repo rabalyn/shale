@@ -139,6 +139,12 @@ fn print_color(c: Color32) -> Rgba {
     }
 }
 
+/// A colour with transparency laid over white paper.
+fn over_white([r, g, b, a]: [u8; 4]) -> Rgba {
+    let mix = |c: u8| ((c as u32 * a as u32 + 255 * (255 - a as u32)) / 255) as u8;
+    Rgba(mix(r), mix(g), mix(b), 255)
+}
+
 fn print_bg(c: Color32) -> Option<Rgba> {
     if c == Color32::TRANSPARENT {
         None
@@ -399,18 +405,23 @@ impl<'a> Writer<'a> {
                 (l, ok)
             })
             .collect();
-        let (job, spans) = crate::reader::inline_job(text, &links, size, color, strike);
+        let (job, spans, paints) = crate::reader::inline_painted(text, &links, size, color, strike);
         let mut out = Vec::new();
         for s in &job.sections {
             let r = s.byte_range.start.0..s.byte_range.end.0;
             let f = &s.format;
+            // colours the note asks for are printed as written (EDIT-028), not mapped for paper
+            let paint = paints.iter().find(|(pr, ..)| pr.start <= r.start && r.end <= pr.end);
             let link = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)).map(|(_, l, _)| l.target.clone());
             out.push(Piece {
                 text: job.text[r].to_string(),
                 kind: font_kind(&f.font_id.family),
                 size: f.font_id.size,
-                color: print_color(f.color),
-                bg: print_bg(f.background),
+                color: if paint.is_some() { rgba(f.color) } else { print_color(f.color) },
+                bg: match paint.and_then(|p| p.1) {
+                    Some([r, g, b, a]) => Some(over_white([r, g, b, a])),
+                    None => print_bg(f.background),
+                },
                 italic: f.italics,
                 bold: f.extra_letter_spacing > 0.0,
                 underline: f.underline.width > 0.0,
@@ -1277,6 +1288,29 @@ pub(crate) mod tests {
         assert!(p[0].2[0] < 40, "dark background");
         assert!(String::from_utf8_lossy(&dark).contains("/MediaBox"));
         assert!(export_drawing(&Scene::default(), "x", &ExportOptions::for_drawing(&Scene::default()), &HashMap::new()).is_err());
+    }
+
+    // spec: PDF-006, EDIT-029
+    #[test]
+    fn colours_are_printed_as_a_filled_rectangle_and_a_text_colour_without_their_tags() {
+        let (v, d) = vault();
+        let rel = Path::new("Ideas.md");
+        let text =
+            "Plain <mark style=\"background: #39FF14;\">neon</mark> and <span style=\"color: #FF0000;\">redtext</span> and ==soft== and <mark style=\"background: #000080;\">navy</mark> end <mark style=\"background: #FFFF00;\">unclosed";
+        let bytes = export_note(&v, rel, text, &ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() }).unwrap();
+        let c = contents(&bytes);
+        for w in ["neon", "redtext", "soft", "navy"] {
+            assert!(c.contains(&hex(w)), "{w} is real text");
+        }
+        assert!(!c.contains(&hex("</mark>")) && !c.contains(&hex("</span>")) && !c.contains(&hex("#39FF14")) && !c.contains(&hex("#FF0000")), "the tags are not printed");
+        assert!(c.contains(&hex("unclosed")), "text after an unclosed tag stays");
+        // the neon fill, as a rectangle before the text: 0.224 1.000 0.078 rg ... f
+        assert!(c.contains("0.224 1.000 0.078 rg"), "the highlight colour fills a rectangle: {c}");
+        assert!(c.contains("1.000 0.000 0.000 rg"), "the text is red");
+        assert!(c.contains("1.000 0.945 0.659 rg"), "==soft== is filled too");
+        // black text on neon (dark text on a bright background), white on navy
+        assert!(c.contains("0.000 0.000 0.502 rg"), "navy fill");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
 

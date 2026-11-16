@@ -599,6 +599,17 @@ mod tests {
         assert_eq!((r, c), (1, 2));
     }
 
+    // spec: EDIT-029
+    #[test]
+    fn a_cell_shows_colours_without_their_tags() {
+        let l = laid(600.0, vec![Col::Left], &["Head"], &[&["<mark style=\"background: #39FF14;\">neon</mark> and <span style=\"color: #FF0000;\">**red**</span>"]]);
+        let job = &l.cells[1][0].galley.job;
+        assert_eq!(job.text, "neon and red");
+        assert_eq!(job.sections[0].format.background, Color32::from_rgb(0x39, 0xff, 0x14));
+        let red = job.sections.iter().find(|s| job.text[s.byte_range.start.0..].starts_with("red")).unwrap();
+        assert_eq!(red.format.color, Color32::from_rgb(255, 0, 0));
+    }
+
     const SRC: &str = "| A | B |\n|:--|--:|\n| 1 | 2 |\n| 3 | 4 |\n";
 
     // spec: EDIT-025

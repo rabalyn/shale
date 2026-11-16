@@ -2,6 +2,7 @@
 //! blue (note exists) or red (note missing), follows links on click and suggests note
 //! names after `[[`.
 
+use crate::colour_tags;
 #[cfg(test)]
 use crate::link_assist::link_query;
 use crate::markdown::{self, LinkSpan};
@@ -37,6 +38,12 @@ struct Fmt {
     hidden: bool,
     /// > 0: this text is an image link shown as a picture; the row is this many points tall
     image_h: u16,
+    /// the background of `<mark style="background: …">` text (EDIT-028)
+    bg: Option<[u8; 4]>,
+    /// the colour of `<span style="color: …">` text
+    fg: Option<[u8; 4]>,
+    /// a `<mark …>` or `<span …>` tag, long markup that the preview folds up to almost nothing
+    ctag: bool,
 }
 
 pub fn heading_scale(level: u8) -> f32 {
@@ -126,6 +133,27 @@ fn inline_pairs(line: &str, off: usize, fmts: &mut [Fmt], code: &[Range<usize>])
                 }
             }
             i += 1;
+        }
+    }
+}
+
+/// The tags of coloured highlights and font colours (EDIT-028): the tags are dimmed markup, the text
+/// between them gets the colour. Outer runs come first so that inner ones win.
+fn colour_pairs(line: &str, off: usize, fmts: &mut [Fmt]) {
+    let mut runs = colour_tags::find(line);
+    runs.sort_by_key(|r| std::cmp::Reverse(r.inner().len()));
+    for r in runs {
+        for t in [r.open.clone(), r.close.clone()] {
+            set(fmts, off + t.start..off + t.end, |f| {
+                f.dim = true;
+                f.syn = true;
+                f.ctag = true
+            });
+        }
+        let inner = off + r.inner().start..off + r.inner().end;
+        match r.kind {
+            colour_tags::Kind::Mark => set(fmts, inner, |f| f.bg = Some(r.rgba)),
+            colour_tags::Kind::Font => set(fmts, inner, |f| f.fg = Some(r.rgba)),
         }
     }
 }
@@ -221,6 +249,7 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, imag
             i += 1;
         }
         inline_pairs(line, off, &mut fmts, &local_code);
+        colour_pairs(line, off, &mut fmts);
         code_ranges.extend(local_code);
     }
     for (l, exists) in links {
@@ -311,7 +340,9 @@ fn to_format(f: Fmt, base: f32) -> TextFormat {
     }
     let size = base * heading_scale(f.heading);
     if f.hidden {
-        return TextFormat { font_id: FontId::new(1.0, FontFamily::Proportional), color: Color32::TRANSPARENT, line_height: Some(size * 1.5), ..Default::default() };
+        // the colour tags are far longer than the other markup: folded up smaller, so no gap shows
+        let tiny = if f.ctag { 0.12 } else { 1.0 };
+        return TextFormat { font_id: FontId::new(tiny, FontFamily::Proportional), color: Color32::TRANSPARENT, line_height: Some(size * 1.5), ..Default::default() };
     }
     let mono = f.code || f.fence;
     let font_id = if mono { FontId::new(base * 0.92 * heading_scale(f.heading), FontFamily::Monospace) } else { FontId::new(size, FontFamily::Proportional) };
@@ -334,6 +365,13 @@ fn to_format(f: Fmt, base: f32) -> TextFormat {
     if f.strike {
         color = theme::DONE;
     }
+    // a font colour, or readable text on a coloured highlight (EDIT-029)
+    if let Some(bg) = f.bg {
+        color = if colour_tags::dark_text_on(bg) { Color32::BLACK } else { Color32::WHITE };
+    }
+    if let Some([r, g, b, a]) = f.fg {
+        color = Color32::from_rgba_unmultiplied(r, g, b, a);
+    }
     match f.link {
         1 | 3 => color = theme::LINK,
         2 => color = theme::LINK_MISSING,
@@ -354,6 +392,9 @@ fn to_format(f: Fmt, base: f32) -> TextFormat {
     }
     if f.highlight {
         tf.background = Color32::from_rgba_unmultiplied(200, 170, 40, 60);
+    }
+    if let Some([r, g, b, a]) = f.bg {
+        tf.background = Color32::from_rgba_unmultiplied(r, g, b, a);
     }
     if f.tag {
         tf.background = theme::TAG_BG;
@@ -458,6 +499,16 @@ pub struct NoteEditor {
     vim_scroll: Option<usize>,
     /// `gt` was typed this frame: follow the link under vim's cursor (EDIT-023)
     vim_follow: bool,
+    /// The formatting toolbar above the text (EDIT-026)
+    bar: crate::format_bar::FormatBar,
+    /// A toolbar command to do to the text at the start of the next frame of the editor (EDIT-027)
+    format_request: Option<crate::format::Cmd>,
+    /// The selection (char indices, as the text box has them) when the editor last had the keyboard:
+    /// a press on the toolbar takes the keyboard away, and the text box then drops its selection
+    last_selection: Option<(usize, usize)>,
+    /// The selection a toolbar command left and the frames it is still put into the text box for: the
+    /// text box drops it in the frame it loses the keyboard, and the keyboard comes back a frame later
+    keep_selection: Option<((usize, usize), u8)>,
     /// a button of a table grid was clicked: the table (by its number in the note) and the change
     /// to make at the start of the next frame (EDIT-025)
     table_edit: Option<(usize, crate::table::Edit)>,
@@ -495,7 +546,57 @@ impl NoteEditor {
             table_edit: None,
             focus_before_press: false,
             vim_follow: false,
+            bar: Default::default(),
+            format_request: None,
+            last_selection: None,
+            keep_selection: None,
         }
+    }
+
+    /// The selection of the text box as bytes (a cursor is an empty range); the whole text's end when it has none yet.
+    pub fn selection_bytes(&self, ctx: &egui::Context, text: &str) -> Range<usize> {
+        let focused = ctx.memory(|m| m.has_focus(self.id));
+        let in_box = egui::text_edit::TextEditState::load(ctx, self.id).and_then(|st| st.cursor.char_range()).map(|r| (r.primary.index.0, r.secondary.index.0));
+        match if focused { in_box } else { self.last_selection.or(in_box) } {
+            Some((p, s)) => {
+                let (a, b) = (markdown::char_to_byte(text, p), markdown::char_to_byte(text, s));
+                a.min(b)..a.max(b)
+            }
+            None => text.len()..text.len(),
+        }
+    }
+
+    /// Draw the formatting toolbar (EDIT-026); a click is done to the text by the next `show`.
+    pub fn toolbar(&mut self, ui: &mut Ui, text: &str, palettes: &crate::format_bar::Palettes) {
+        let sel = self.selection_bytes(ui.ctx(), text);
+        if let Some(cmd) = self.bar.show(ui, text, sel, palettes) {
+            self.format_request = Some(cmd);
+            // the click took the keyboard from the text box: give it back
+            self.request_focus = true;
+            ui.ctx().request_repaint();
+        }
+    }
+
+    /// Do a toolbar command to the text: one undo step (EDIT-021), the result selected, the keyboard
+    /// back in the text box, and vim-lite in a mode that takes keys (EDIT-027). True when the text changed.
+    fn apply_format(&mut self, ui: &Ui, text: &mut String, cmd: crate::format::Cmd, hist: &mut crate::undo::History) -> bool {
+        self.request_focus = true;
+        let sel = self.selection_bytes(ui.ctx(), text);
+        let Some((new, r)) = crate::format::apply(cmd, text, sel) else { return false };
+        hist.checkpoint(text);
+        *text = new;
+        hist.checkpoint(text);
+        let (cs, ce) = (markdown::byte_to_char(text, r.start), markdown::byte_to_char(text, r.end));
+        let normal = self.vim_enabled && self.vim.mode != crate::vim::Mode::Insert;
+        // normal mode has a cursor, not a selection
+        let sel = if normal { (cs, cs) } else { (cs, ce) };
+        self.last_selection = Some(sel);
+        self.keep_selection = Some((sel, 3));
+        if normal {
+            self.vim.reset(text, cs);
+            self.vim_apply_cursor(ui, text);
+        }
+        true
     }
 
     /// Is the `[!` file picker popup on screen?
@@ -925,6 +1026,21 @@ impl NoteEditor {
             changed |= self.apply_table_edit(ui, text, undo.of(rel), n, edit);
         }
         self.refresh_links(text, vault, rel);
+        if let Some(cmd) = self.format_request.take() {
+            if self.apply_format(ui, text, cmd, undo.of(rel)) {
+                changed = true;
+                self.refresh_links(text, vault, rel);
+            }
+        }
+
+        // the selection a toolbar command left: the text box drops it while it has no keyboard
+        if let Some(((a, b), left)) = self.keep_selection {
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), self.id).unwrap_or_default();
+            state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(a), CCursor::new(b))));
+            state.store(ui.ctx(), self.id);
+            let focused = ui.ctx().memory(|m| m.has_focus(self.id));
+            self.keep_selection = (left > 1 && !(focused && left < 3)).then_some(((a, b), left - 1));
+        }
 
         // Keys for the `[[` list and the `[!` picker must be taken before the text box sees them.
         self.assist.id = self.id;
@@ -1145,6 +1261,9 @@ impl NoteEditor {
         }
 
         self.last_layout = Some((output.galley.clone(), output.galley_pos));
+        if let Some(r) = output.cursor_range.filter(|_| resp.has_focus() && self.keep_selection.is_none()) {
+            self.last_selection = Some((r.primary.index.0, r.secondary.index.0));
+        }
         // paint the inline pictures over their (invisible) link text
         if !images.is_empty() {
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
@@ -3390,5 +3509,68 @@ mod tests {
         assert!(a.is_none() && text.contains("ZZ"), "{text}");
         let _ = std::fs::remove_file(&f);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The format of the section holding the first `needle` of `text`.
+    fn format_of<'a>(job: &'a LayoutJob, text: &str, needle: &str) -> &'a TextFormat {
+        let at = text.find(needle).unwrap_or_else(|| panic!("{needle} is not in the text"));
+        &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format
+    }
+
+    // spec: EDIT-029
+    #[test]
+    fn marks_and_spans_colour_the_text_between_their_dimmed_tags() {
+        let text = "a <mark style=\"background: #FFFF00;\">hi <span style=\"color: #FF0000;\">there</span></mark> b";
+        let job = highlight(text, &[], 15.0);
+        let yellow = Color32::from_rgb(255, 255, 0);
+        let hi = format_of(&job, text, "hi");
+        assert_eq!((hi.background, hi.color), (yellow, Color32::BLACK), "the highlight, with dark text on a bright background");
+        let there = format_of(&job, text, "there");
+        assert_eq!((there.background, there.color), (yellow, Color32::from_rgb(255, 0, 0)), "a span inside a mark: both, the font colour wins");
+        for tag in ["<mark", "</span>", "</mark>", "<span"] {
+            assert_eq!(format_of(&job, text, tag).color, theme::FAINT, "{tag} is dimmed markup");
+        }
+        assert_eq!(format_of(&job, text, "<mark").background, Color32::TRANSPARENT, "the tag is not highlighted itself");
+        let a = format_of(&job, text, "a ");
+        assert_eq!(a.background, Color32::TRANSPARENT, "text outside has no colour");
+        // the colour in the tag is no #tag
+        assert!(job.sections.iter().all(|s| s.format.background != theme::TAG_BG), "#FFFF00 is not a tag");
+        // a dark highlight gets light text; a font colour with an alpha channel keeps it
+        let text = "<mark style=\"background: #000080;\">Q</mark> <span style='color:#00FF0080'>G</span>";
+        let job = highlight(text, &[], 15.0);
+        assert_eq!(format_of(&job, text, "Q").color, Color32::WHITE);
+        assert_eq!(format_of(&job, text, "G").color, Color32::from_rgba_unmultiplied(0, 255, 0, 128));
+    }
+
+    // spec: EDIT-029
+    #[test]
+    fn colours_nest_with_bold_and_italic_and_garbled_tags_are_plain_text() {
+        let text = "<mark style=\"background: #39FF14;\">**bold** and *it*</mark>";
+        let job = highlight(text, &[], 15.0);
+        let bold = format_of(&job, text, "bold");
+        assert_eq!(bold.background, Color32::from_rgb(0x39, 0xff, 0x14));
+        assert!(bold.extra_letter_spacing > 0.0, "still bold inside the mark");
+        assert!(format_of(&job, text, "it").italics);
+        for text in ["<mark style=\"background: #FFFF00;\">never closed", "</mark> alone", "<span style=\"color: red\">x</span>", "<mark style=\"background: #FFFF0\">y</mark>", "`<mark style=\"background: #FFFF00;\">`x</mark>"] {
+            let job = highlight(text, &[], 15.0);
+            assert!(job.sections.iter().all(|s| s.format.background != Color32::from_rgb(255, 255, 0) && s.format.color != Color32::from_rgb(255, 0, 0)), "{text} is drawn as text");
+            assert_eq!(job.text, text, "and nothing is lost");
+        }
+    }
+
+    // spec: EDIT-029, EDIT-016
+    #[test]
+    fn the_preview_hides_the_colour_tags_away_from_the_cursor_and_shows_them_raw_at_it() {
+        let text = "a <mark style=\"background: #FFFF00;\">hi</mark> <span style=\"color: #F00\">x</span>\nraw";
+        let m = hidden_map(text, Some(1..2));
+        let first = m.split('\n').next().unwrap();
+        let hidden: usize = ["<mark style=\"background: #FFFF00;\">", "</mark>", "<span style=\"color: #F00\">", "</span>"].iter().map(|t| t.len()).sum();
+        assert_eq!(first.matches('_').count(), hidden, "all four tags are hidden and nothing else: {first}");
+        // the line of the cursor is raw
+        assert!(!hidden_map(text, Some(0..1)).contains('_'));
+        // hidden or not, the colour stays on the text
+        let links = vec![];
+        let job = highlight_preview(text, &links, 15.0, &[], Some(1..2));
+        assert_eq!(format_of(&job, text, "hi").background, Color32::from_rgb(255, 255, 0));
     }
 }

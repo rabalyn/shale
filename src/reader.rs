@@ -1,6 +1,7 @@
 //! Reading view: renders a note without markdown syntax. Links are clickable (blue = exists,
 //! red = missing), checkboxes toggle, and `![[drawing.excalidraw]]` embeds show the drawing.
 
+use crate::colour_tags;
 use crate::drawing::{self, Scene};
 use crate::editor::{char_under, heading_scale};
 use crate::markdown::{self, LinkSpan};
@@ -70,11 +71,29 @@ struct Inline {
     strike: bool,
     code: bool,
     highlight: bool,
+    /// the innermost `<mark style="background: …">` and `<span style="color: …">` here (EDIT-028)
+    bg: Option<[u8; 4]>,
+    fg: Option<[u8; 4]>,
 }
+
+/// Where a line's text got its own colours (EDIT-029): its bytes in the job's text, the background
+/// and the text colour as written. The PDF export draws these exactly as written.
+pub(crate) type Paint = (Range<usize>, Option<[u8; 4]>, Option<[u8; 4]>);
+
+/// A line as a layout job, the links in it and its coloured text.
+pub(crate) type Painted = (LayoutJob, Vec<(Range<usize>, LinkSpan, bool)>, Vec<Paint>);
 
 /// Turn one line of markdown into display text with formats and link positions.
 pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color32, strike_all: bool) -> (LayoutJob, Vec<(Range<usize>, LinkSpan, bool)>) {
+    let (job, spans, _) = inline_painted(line, links, size, base_color, strike_all);
+    (job, spans)
+}
+
+/// `inline_job`, and the text that has colours of its own.
+pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color32, strike_all: bool) -> Painted {
     let mut job = LayoutJob::default();
+    let mut paints: Vec<Paint> = Vec::new();
+    let runs = colour_tags::find(line);
     let mut link_spans = Vec::new();
     let tags = markdown::find_tags(line);
     let mut st = Inline { strike: strike_all, ..Default::default() };
@@ -105,6 +124,14 @@ pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base
         if st.bold {
             f.extra_letter_spacing = 0.3;
         }
+        // a coloured highlight with readable text on it, and a font colour (EDIT-029)
+        if let Some(bg) = st.bg {
+            f.background = Color32::from_rgba_unmultiplied(bg[0], bg[1], bg[2], bg[3]);
+            f.color = if colour_tags::dark_text_on(bg) { Color32::BLACK } else { Color32::WHITE };
+        }
+        if let Some(fg) = st.fg {
+            f.color = Color32::from_rgba_unmultiplied(fg[0], fg[1], fg[2], fg[3]);
+        }
         f
     };
     // web links ride along as link spans whose target is the URL
@@ -112,7 +139,27 @@ pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base
         crate::lists::find_web_links(line).into_iter().map(|w| (LinkSpan { range: w.range, target_range: w.label_range, target: w.url, heading: None, alias: Some(w.label), embed: false, markdown_style: true }, true)).collect();
     let b = line.as_bytes();
     let mut i = 0;
+    // the text appended since the last look and the colours it was given
+    let mut prev: (usize, Option<[u8; 4]>, Option<[u8; 4]>) = (0, None, None);
+    let flush = |job: &LayoutJob, paints: &mut Vec<Paint>, prev: &mut (usize, Option<[u8; 4]>, Option<[u8; 4]>)| {
+        let end = job.text.len();
+        if (prev.1.is_some() || prev.2.is_some()) && end > prev.0 {
+            match paints.last_mut() {
+                Some(last) if last.0.end == prev.0 && last.1 == prev.1 && last.2 == prev.2 => last.0.end = end,
+                _ => paints.push((prev.0..end, prev.1, prev.2)),
+            }
+        }
+        *prev = (end, None, None);
+    };
     while i < line.len() {
+        flush(&job, &mut paints, &mut prev);
+        // the tags of colours are not shown; the text between them gets the colour
+        if let Some(r) = runs.iter().find(|r| r.open.start == i).map(|r| r.open.clone()).or_else(|| runs.iter().find(|r| r.close.start == i).map(|r| r.close.clone())) {
+            i = r.end;
+            continue;
+        }
+        (st.bg, st.fg) = colour_tags::colours_at(&runs, i);
+        prev = (job.text.len(), st.bg, st.fg);
         if let Some((l, ok)) = links.iter().chain(web.iter()).find(|(l, _)| l.range.start == i) {
             let shown = l.display();
             let start = job.text.len();
@@ -169,10 +216,11 @@ pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base
         job.append(&ch.to_string(), 0.0, fmt(&st, base_color));
         i += ch.len_utf8();
     }
+    flush(&job, &mut paints, &mut prev);
     if job.text.is_empty() {
         job.append(" ", 0.0, fmt(&st, base_color));
     }
-    (job, link_spans)
+    (job, link_spans, paints)
 }
 
 /// Paint an inline job as a wrapped block and handle link clicks.
@@ -566,5 +614,26 @@ mod tests {
             _ => panic!("clicking the link in the table did nothing"),
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-029
+    #[test]
+    fn the_reading_view_colours_the_text_and_hides_the_tags() {
+        let line = "a <mark style=\"background: #FFFF00;\">hi <span style=\"color: #FF0000;\">there</span></mark> **b** <mark style=\"background: #FFFF00\">open";
+        let (job, _, paints) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        assert_eq!(job.text, "a hi there b <mark style=\"background: #FFFF00\">open", "the tags are gone; an unclosed one is text");
+        let at = |w: &str| {
+            let b = job.text.find(w).unwrap();
+            job.sections.iter().find(|s| s.byte_range.start.0 <= b && b < s.byte_range.end.0).unwrap().format.clone()
+        };
+        let yellow = Color32::from_rgb(255, 255, 0);
+        assert_eq!((at("hi").background, at("hi").color), (yellow, Color32::BLACK));
+        assert_eq!((at("there").background, at("there").color), (yellow, Color32::from_rgb(255, 0, 0)));
+        assert_eq!(at("b ").background, Color32::TRANSPARENT);
+        assert!(at("b ").extra_letter_spacing > 0.0, "bold after the mark is still bold");
+        // the paints say where the colours are, for the PDF
+        let hi = job.text.find("hi ").unwrap();
+        let there = job.text.find("there").unwrap();
+        assert_eq!(paints, vec![(hi..there, Some([255, 255, 0, 255]), None), (there..there + 5, Some([255, 255, 0, 255]), Some([255, 0, 0, 255]))]);
     }
 }

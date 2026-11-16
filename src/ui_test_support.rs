@@ -29,9 +29,7 @@ impl Headless {
         Headless { ctx, t: 0.0, text: vec![], cursor: egui::CursorIcon::Default }
     }
 
-    /// The egui context the frames run in (to set a drag-and-drop payload the way a view does).
-    /// Only the drop tests use it, and they run on Linux only (#123).
-    #[cfg(target_os = "linux")]
+    /// The egui context the frames run in (to set a drag-and-drop payload or a text selection the way a view does).
     pub fn ctx(&self) -> &egui::Context {
         &self.ctx
     }
@@ -55,17 +53,17 @@ impl Headless {
         out
     }
 
-    /// The place of a widget with this accessibility label (an icon button: its tooltip).
-    pub fn find_label(&mut self, app: &mut ShaleApp, label: &str) -> Rect {
+    /// The place of a widget with this accessibility label (an icon button: its tooltip), if it is on screen.
+    pub fn try_label(&mut self, app: &mut ShaleApp, label: &str) -> Option<Rect> {
         self.ctx.enable_accesskit();
         let mut out = self.frame(app, vec![]);
         let tree = out.platform_output.accesskit_update.take().expect("accessibility is on");
-        tree.nodes
-            .iter()
-            .find(|(_, n)| n.label() == Some(label))
-            .and_then(|(_, n)| n.bounds())
-            .map(|b| Rect::from_min_max(Pos2::new(b.x0 as f32, b.y0 as f32), Pos2::new(b.x1 as f32, b.y1 as f32)))
-            .unwrap_or_else(|| panic!("no {label:?} on screen"))
+        tree.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.bounds()).map(|b| Rect::from_min_max(Pos2::new(b.x0 as f32, b.y0 as f32), Pos2::new(b.x1 as f32, b.y1 as f32)))
+    }
+
+    /// The place of a widget with this accessibility label (an icon button: its tooltip).
+    pub fn find_label(&mut self, app: &mut ShaleApp, label: &str) -> Rect {
+        self.try_label(app, label).unwrap_or_else(|| panic!("no {label:?} on screen"))
     }
 
     pub fn frames(&mut self, app: &mut ShaleApp, n: usize) {

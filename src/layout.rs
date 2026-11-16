@@ -715,6 +715,15 @@ impl ShaleApp {
         let active = self.tabbar.active;
         let display_name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_default();
         let mut rename_to: Option<String> = None;
+        // the formatting toolbar sits above the text and stays when the note scrolls (EDIT-026)
+        if self.cfg.format_toolbar && !self.tabbar.tabs[active].reading {
+            if let Some(doc) = self.notes.get(&rel).filter(|d| d.unreadable.is_none()) {
+                let palettes = crate::format_bar::Palettes { highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours };
+                ui.add_space(4.0);
+                self.tabbar.tabs[active].editor.toolbar(ui, &doc.text, &palettes);
+                ui.add_space(2.0);
+            }
+        }
         egui::ScrollArea::vertical().id_salt(("note-scroll", self.tabbar.tabs[active].id)).auto_shrink([false, false]).show(ui, |ui| {
             let full = ui.available_width();
             let col = if readable { full.min(760.0) } else { full - 40.0 };

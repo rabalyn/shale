@@ -309,6 +309,37 @@ fn panel_trash_dialog_moves_to_trash_or_cancels() {
     assert!(p.app.modal.is_none() && p.dir.join("Welcome.md").exists());
 }
 
+// spec: EDIT-026, EDIT-028
+#[test]
+fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {
+    let mut p = P::new("editing-settings", &[]);
+    p.app.open_settings(SettingsTab::General);
+    for want in ["Editing", "Font colours", "Highlight colours"] {
+        assert!(p.shows(Show::Modals, want), "{want:?} missing");
+    }
+    assert!(p.app.cfg.format_toolbar, "on by default");
+    p.click(Show::Modals, "Show formatting toolbar above the text of a note");
+    assert!(!p.app.cfg.format_toolbar);
+    p.click(Show::Modals, "Show formatting toolbar above the text of a note");
+    assert!(p.app.cfg.format_toolbar);
+    // a colour more in the font palette (the first row), a colour less, and back to the defaults
+    let defaults = p.app.cfg.font_colours.clone();
+    let top = |p: &mut P, label: &str| {
+        let seen = p.look(Show::Modals);
+        let r = seen.iter().filter(|(_, l, _)| l == label).map(|x| x.2).min_by(|a, b| a.top().total_cmp(&b.top())).unwrap_or_else(|| panic!("no {label:?}"));
+        p.click_rect(Show::Modals, r, PointerButton::Primary);
+    };
+    top(&mut p, "+");
+    assert_eq!(p.app.cfg.font_colours.len(), defaults.len() + 1);
+    top(&mut p, "−");
+    assert_eq!(p.app.cfg.font_colours.len(), defaults.len());
+    top(&mut p, "−");
+    assert_eq!(p.app.cfg.font_colours.len(), defaults.len() - 1);
+    top(&mut p, "Defaults");
+    assert_eq!(p.app.cfg.font_colours, defaults);
+    assert_eq!(p.app.cfg.highlight_colours.len(), 4, "the other palette is untouched");
+}
+
 // spec: VAULT-023
 #[test]
 fn panel_settings_dialog_changes_settings_and_closes() {
