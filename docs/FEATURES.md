@@ -17,6 +17,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `![[photo.png|300]]`), a round **100%** button for the natural size and a round fullscreen button.
   Every shown embed has its link as a one-line caption below it (the words of an alias,
   `![[photo.png|Sea at dusk]]`, else the file's link); a click on the caption opens the file.
+
+![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
+
 - Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
   line keeps one number.
 - Lists continue when you press Enter (also numbered lists and to-dos `- [ ]` / `1. [ ]`).
