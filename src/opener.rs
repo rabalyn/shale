@@ -338,6 +338,16 @@ fn strip_verbatim(path: &[u16]) -> Vec<u16> {
     path.to_vec()
 }
 
+/// What the Windows shell is asked: the verb `open` and the file or address, both as
+/// NUL-terminated UTF-16 text, the verbatim prefix removed (SEC-022). Everything but the call
+/// itself, so tests on every system can check it.
+#[cfg(any(windows, test))]
+fn shell_request(target: &[u16]) -> (Vec<u16>, Vec<u16>) {
+    let file = strip_verbatim(target).into_iter().chain(std::iter::once(0)).collect();
+    let verb = "open".encode_utf16().chain(std::iter::once(0)).collect();
+    (verb, file)
+}
+
 /// Windows: hand the address or file to the shell's "open" verb. No command line is built, so
 /// nothing in `target` can be taken for a switch or a second command (SEC-005).
 #[cfg(windows)]
@@ -347,8 +357,12 @@ fn launch_windows(target: &std::ffi::OsStr) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let raw: Vec<u16> = target.encode_wide().collect();
-    let file: Vec<u16> = strip_verbatim(&raw).into_iter().chain(std::iter::once(0)).collect();
-    let verb: Vec<u16> = "open".encode_utf16().chain(std::iter::once(0)).collect();
+    let (verb, file) = shell_request(&raw);
+    // tests: a recording fake on this thread only (`FakeXdgOpen`) gets the verb and file instead of the shell
+    #[cfg(test)]
+    if record_shell_open(&verb, &file) {
+        return Ok(());
+    }
     // a thread of its own: the shell wants COM set up on the calling thread, and it may take a moment
     let code = std::thread::spawn(move || {
         // SAFETY: the strings are NUL-terminated and outlive the call; the other arguments are null.
@@ -421,10 +435,16 @@ fn launch_program(target: &std::ffi::OsStr) -> Result<(), String> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 thread_local! {
     /// The script of the fake opener of this test thread.
     static FAKE_OPENER: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(all(test, windows))]
+thread_local! {
+    /// The calls (one file each) the fake shell of this test thread has got.
+    static FAKE_OPENER: std::cell::RefCell<Option<Vec<Vec<String>>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
@@ -445,17 +465,37 @@ fn fake_opener_command() -> Option<std::process::Command> {
     })
 }
 
-/// Tests only: a recording fake `xdg-open` for the calling thread. Everything the opener starts
-/// on this thread goes to a small shell script that writes the arguments it got to a file; the
-/// real chokepoint (checks, temp copies, the argument list, starting a child) is exercised.
-/// Needs a Unix shell.
-#[cfg(all(test, unix))]
+/// Windows tests: what the shell would have got (verb and file, NUL-terminated) goes to the
+/// fake of this thread, if there is one. Answers whether it did.
+#[cfg(all(test, windows))]
+fn record_shell_open(verb: &[u16], file: &[u16]) -> bool {
+    let text = |w: &[u16]| String::from_utf16_lossy(w.strip_suffix(&[0]).unwrap_or(w));
+    assert_eq!(text(verb), "open", "the shell is always asked for the open verb");
+    FAKE_OPENER.with(|f| match f.borrow_mut().as_mut() {
+        Some(calls) => {
+            calls.push(vec![text(file)]);
+            true
+        }
+        None => false,
+    })
+}
+
+/// Tests only: a recording fake opener for the calling thread, whatever the system. On Linux
+/// and macOS (`xdg-open` / `open`) everything the opener starts on this thread goes to a small
+/// shell script that writes the arguments it got to a file; the real chokepoint (checks, temp
+/// copies, the argument list, starting a child) is exercised. It needs a Unix shell. On Windows
+/// the fake takes the place of the `ShellExecuteW` call only: it records the file the shell
+/// would have been given (verbatim prefix already removed), after the verb was checked to be
+/// `open`.
+#[cfg(test)]
 pub struct FakeXdgOpen {
+    #[cfg(unix)]
     dir: PathBuf,
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 impl FakeXdgOpen {
+    #[cfg(unix)]
     pub fn install() -> FakeXdgOpen {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!("shale-fake-xdg-open-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
@@ -467,6 +507,12 @@ impl FakeXdgOpen {
         std::fs::write(&script, text).unwrap();
         FAKE_OPENER.with(|f| *f.borrow_mut() = Some(script));
         FakeXdgOpen { dir }
+    }
+
+    #[cfg(windows)]
+    pub fn install() -> FakeXdgOpen {
+        FAKE_OPENER.with(|f| *f.borrow_mut() = Some(Vec::new()));
+        FakeXdgOpen {}
     }
 
     /// Wait until `n` calls have come in (at most 10 s) and return the argument lists, oldest
@@ -484,6 +530,7 @@ impl FakeXdgOpen {
     }
 
     /// The calls so far (nothing is waited for): one argument list each, oldest first.
+    #[cfg(unix)]
     pub fn recorded(&self) -> Vec<Vec<String>> {
         let mut v: Vec<_> = std::fs::read_dir(self.dir.join("calls"))
             .unwrap()
@@ -494,12 +541,18 @@ impl FakeXdgOpen {
         v.sort_by_key(|(t, _)| *t);
         v.into_iter().map(|(_, a)| a).collect()
     }
+
+    #[cfg(windows)]
+    pub fn recorded(&self) -> Vec<Vec<String>> {
+        FAKE_OPENER.with(|f| f.borrow().clone().unwrap_or_default())
+    }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 impl Drop for FakeXdgOpen {
     fn drop(&mut self) {
         FAKE_OPENER.with(|f| *f.borrow_mut() = None);
+        #[cfg(unix)]
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
@@ -691,6 +744,16 @@ mod tests {
 
     // spec: SEC-022
     #[test]
+    fn the_windows_shell_is_asked_for_the_open_verb_and_a_file_without_the_verbatim_prefix() {
+        let w = |t: &str| t.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        for (given, file) in [(r"\\?\C:\Users\me\a b.pdf", r"C:\Users\me\a b.pdf"), (r"\\?\UNC\host\share\a.pdf", r"\\host\share\a.pdf"), (r"C:\a.pdf", r"C:\a.pdf"), ("https://example.com/a?b=c&d", "https://example.com/a?b=c&d")] {
+            let raw: Vec<u16> = given.encode_utf16().collect();
+            assert_eq!(shell_request(&raw), (w("open"), w(file)), "{given}");
+        }
+    }
+
+    // spec: SEC-022
+    #[test]
     fn program_types_of_every_system_are_refused_on_every_system() {
         let root = tmp("types");
         for name in ["a.exe", "a.BAT", "a.cmd", "a.ps1", "a.msi", "a.lnk", "a.hta", "a.app", "a.command", "a.desktop", "a.sh", "a.jar", "a.vbs", "a.scr", "a.pif", "a.chm"] {
@@ -740,13 +803,22 @@ mod tests {
     }
 }
 
-/// SEC-006 end to end: the real opener starts a (fake, recording) `xdg-open`, so the checks, the
-/// argument list and the start of the child are all exercised, not only `check_url` and friends.
-#[cfg(all(test, unix))]
+/// SEC-006 end to end: the real opener starts a (fake, recording) `xdg-open` (on Windows: asks a
+/// recording fake shell), so the checks, the argument list and the start of the child are all
+/// exercised, not only `check_url` and friends. SEC-022: runs on every system.
+#[cfg(test)]
 mod real_opener_tests {
     use super::*;
     use std::fs;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    /// What the opener hands over for a real path: on Windows the shell gets it without the
+    /// verbatim prefix that `canonicalize` adds, elsewhere as it is.
+    fn handed(path: &Path) -> PathBuf {
+        let wide: Vec<u16> = path.to_string_lossy().encode_utf16().collect();
+        PathBuf::from(String::from_utf16_lossy(&strip_verbatim(&wide)))
+    }
 
     /// A fresh folder of this test (counter, not only the process id).
     fn folder(tag: &str) -> PathBuf {
@@ -818,38 +890,45 @@ mod real_opener_tests {
         fs::write(outside.join("secret.txt"), "x").unwrap();
         fs::write(root.join("run.sh"), "#!/bin/sh").unwrap();
         fs::write(root.join("evil.desktop"), "[Desktop Entry]\nExec=sh").unwrap();
-        fs::write(root.join("tool"), "x").unwrap();
-        fs::set_permissions(root.join("tool"), fs::Permissions::from_mode(0o755)).unwrap();
         fs::write(root.join("scan.pdf"), "x").unwrap();
-        fs::set_permissions(root.join("scan.pdf"), fs::Permissions::from_mode(0o755)).unwrap();
-        std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("link.txt")).unwrap();
-        // the vault is reached through a link: the argument is the real path
-        let via = folder("via-link").join("v");
-        std::os::unix::fs::symlink(&root, &via).unwrap();
+        let refused = vec![
+            ("a file outside the vault", outside.join("secret.txt")),
+            ("a path that climbs out of the vault", root.join("..").join(outside.file_name().unwrap()).join("secret.txt")),
+            ("a script", root.join("run.sh")),
+            ("a .desktop file", root.join("evil.desktop")),
+            ("a folder", root.clone()),
+            ("a missing file", root.join("missing.pdf")),
+        ];
+        // Unix only: the executable bit and links. The vault is then reached through a link: the argument is the real path
+        #[cfg(unix)]
+        let (via, unix_only) = {
+            fs::write(root.join("tool"), "x").unwrap();
+            fs::set_permissions(root.join("tool"), fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(root.join("scan.pdf"), fs::Permissions::from_mode(0o755)).unwrap();
+            std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("link.txt")).unwrap();
+            let via = folder("via-link").join("v");
+            std::os::unix::fs::symlink(&root, &via).unwrap();
+            (via, vec![("a link out of the vault", root.join("link.txt")), ("an executable file", root.join("tool"))])
+        };
+        #[cfg(not(unix))]
+        let (via, unix_only): (PathBuf, Vec<(&str, PathBuf)>) = (root.clone(), vec![]);
 
         open_vault_file(&via.join("my doc.pdf"), &via).unwrap();
-        let real = fs::canonicalize(root.join("my doc.pdf")).unwrap();
+        let real = handed(&fs::canonicalize(root.join("my doc.pdf")).unwrap());
         assert_eq!(fake.calls(1), vec![vec![real.to_string_lossy().into_owned()]], "one argument, with the space in it");
         // a document that a mounted disk marks executable is still a document
         open_vault_file(&root.join("scan.pdf"), &root).unwrap();
         assert_eq!(fake.calls(2).len(), 2);
 
-        for (what, path) in [
-            ("a file outside the vault", outside.join("secret.txt")),
-            ("a path that climbs out of the vault", root.join("..").join(outside.file_name().unwrap()).join("secret.txt")),
-            ("a link out of the vault", root.join("link.txt")),
-            ("a script", root.join("run.sh")),
-            ("a .desktop file", root.join("evil.desktop")),
-            ("an executable file", root.join("tool")),
-            ("a folder", root.clone()),
-            ("a missing file", root.join("missing.pdf")),
-        ] {
+        for (what, path) in refused.into_iter().chain(unix_only) {
             assert!(open_vault_file(&path, &root).is_err(), "{what} must be refused");
         }
         assert_eq!(fake.recorded().len(), 2, "the refused files never reached xdg-open: {:?}", fake.recorded());
-        for d in [&root, &outside, via.parent().unwrap()] {
+        for d in [&root, &outside] {
             let _ = fs::remove_dir_all(d);
         }
+        #[cfg(unix)]
+        let _ = fs::remove_dir_all(via.parent().unwrap());
     }
 
     // spec: SEC-006, MAIL-054
@@ -862,7 +941,8 @@ mod real_opener_tests {
         assert_eq!(calls[0].len(), 1);
         assert_eq!(fs::read(&path).unwrap(), b"%PDF-1.4 hello", "the copy has the attachment's bytes");
         assert_eq!(path.file_name().unwrap(), "_.._report 1.pdf", "folders in the name are made harmless");
-        assert!(path.starts_with(fs::canonicalize(temp_root().unwrap()).unwrap()), "{path:?} is in Shale's temp folder");
+        assert!(path.starts_with(handed(&fs::canonicalize(temp_root().unwrap()).unwrap())), "{path:?} is in Shale's temp folder");
+        #[cfg(unix)]
         assert_eq!(fs::metadata(path.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
         // the same name again: a copy of its own
         open_temp_copy("report 1.pdf", b"other").unwrap();
@@ -894,7 +974,7 @@ mod real_opener_tests {
         fs::write(d.join("a.pdf"), "x").unwrap();
         fs::write(d.join("a.txt"), "x").unwrap();
         open_exported_pdf(&d.join("a.pdf")).unwrap();
-        assert_eq!(fake.calls(1), vec![vec![fs::canonicalize(d.join("a.pdf")).unwrap().to_string_lossy().into_owned()]]);
+        assert_eq!(fake.calls(1), vec![vec![handed(&fs::canonicalize(d.join("a.pdf")).unwrap()).to_string_lossy().into_owned()]]);
         assert!(open_exported_pdf(&d.join("a.txt")).is_err());
         open_recovery_folder(&rescued, &recovery).unwrap();
         assert!(open_recovery_folder(&d, &recovery).is_err(), "a folder outside the recovery folder");
