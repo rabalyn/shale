@@ -2,7 +2,7 @@
 //! (`ShaleApp::run_frame`) and the mouse is real pointer events at the places the window reports
 //! in `ShaleApp::side`.
 
-use crate::app::{Options, RightPanel, ShaleApp};
+use crate::app::{Options, RightPanel, ShaleApp, View};
 use crate::config::Config;
 use crate::sidebar::{Item, Layout};
 use crate::sidebar_ui::Cue;
@@ -484,4 +484,25 @@ fn lay_016_the_right_sidebar_keeps_the_width_it_is_dragged_to() {
     w.frames(3);
     let n = w.app.side.right_rect.unwrap();
     assert!((n.width() - (r.width() + 80.0)).abs() < 12.0, "{} -> {}", r.width(), n.width());
+}
+
+// spec: LAY-017
+#[test]
+fn lay_016_a_middle_click_on_mail_feeds_or_calendar_opens_a_new_tab() {
+    let mut w = W::new("middle");
+    for (item, view) in [(Item::Mail, View::Mail), (Item::Social, View::Social(None)), (Item::Calendar, View::Calendar)] {
+        let before = w.app.tabbar.tabs.len();
+        let first = w.app.tabbar.active;
+        let p = w.ribbon_icon(item).center();
+        w.hl.click(&mut w.app, p, PointerButton::Middle);
+        w.frames(2);
+        assert_eq!(w.app.tabbar.tabs.len(), before + 1, "{item:?}: a new tab");
+        assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, view);
+        assert_ne!(w.app.tabbar.active, first);
+    }
+    // a middle click on an icon that opens no view does nothing
+    let n = w.app.tabbar.tabs.len();
+    let p = w.ribbon_icon(Item::Files).center();
+    w.hl.click(&mut w.app, p, PointerButton::Middle);
+    assert_eq!(w.app.tabbar.tabs.len(), n);
 }

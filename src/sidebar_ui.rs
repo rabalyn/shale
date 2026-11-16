@@ -1,7 +1,7 @@
 //! Drawing and dragging of the menubars (LAY-001…LAY-011). The model is in `sidebar.rs`, the
 //! decision in ADR-0014.
 
-use crate::app::{muted, LeftPanel, Modal, RightPanel, ShaleApp, View};
+use crate::app::{muted, Action, LeftPanel, Modal, RightPanel, ShaleApp, View};
 use crate::layout::{icon_button_sense, paint_icon};
 use crate::sidebar::{drag_border, Dest, Item, Layout, EQUAL};
 use crate::theme;
@@ -154,9 +154,22 @@ impl ShaleApp {
                 self.side.drag = Some(item);
             } else if resp.clicked() {
                 self.ribbon_click(item);
+            } else if resp.middle_clicked() {
+                self.ribbon_middle_click(item);
             }
             resp.context_menu(|ui| self.icon_menu(ui, item, false));
         }
+    }
+
+    /// A middle click on the Mail, Feeds or Calendar icon opens that view in a new tab (LAY-017).
+    fn ribbon_middle_click(&mut self, item: Item) {
+        let view = match item {
+            Item::Mail => View::Mail,
+            Item::Calendar => View::Calendar,
+            Item::Social => View::Social(None),
+            _ => return,
+        };
+        self.actions.push(Action::ShowViewInNewTab(view));
     }
 
     /// The right-click menu of an icon: remove it, restore removed ones, reset the layout

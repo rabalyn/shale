@@ -150,6 +150,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   view removes the view. Esc cancels a drag.
 - Drag the border between two views up or down to change their heights (they start equal; a
   view never gets lower than a small minimum).
+- A middle click on the **Mail**, **Feeds** or **Calendar** icon opens that view in a new tab.
 - Right-click an icon (in the ribbon or in a view's menubar) for a menu: **Remove from the
   ribbon** / **Remove from this view**, **Restore …** for every icon removed earlier, and
   **Reset layout** (the default icons, order and heights). The last icon of the ribbon cannot
