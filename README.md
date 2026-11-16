@@ -281,7 +281,7 @@ With **Vim-style editing** turned on in Settings, a note you go to is in normal 
 h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / N go to the next /
 previous hit; i a I A o O start typing and Esc stops; x deletes a character; `dd` deletes the line;
 v / V select (the motions extend the selection), then d cuts and y copies to the clipboard; p pastes it;
-`u` undoes and Ctrl+R redoes (an insert session is one step, per note; the history is kept in the vault for 30 days). The
+`u` undoes and Ctrl+R redoes (an insert session is one step, per note; the history is kept in the vault for 30 days); `gt` follows the link under the cursor like a click. The
 status bar shows the mode. **Space Tab** goes back to the view this tab showed just before
 (a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name and **Space f g** searches notes, mail and posts.
 

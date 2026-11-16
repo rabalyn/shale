@@ -450,6 +450,8 @@ pub struct NoteEditor {
     vim_expected: Option<(usize, usize)>,
     /// scroll this char into view after the text box was drawn
     vim_scroll: Option<usize>,
+    /// `gt` was typed this frame: follow the link under vim's cursor (EDIT-023)
+    vim_follow: bool,
 }
 
 impl NoteEditor {
@@ -476,6 +478,7 @@ impl NoteEditor {
             vim_lost_at: None,
             vim_expected: None,
             vim_scroll: None,
+            vim_follow: false,
         }
     }
 
@@ -653,6 +656,7 @@ impl NoteEditor {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::RequestPaste);
         }
         self.vim_apply_cursor(ui, text);
+        self.vim_follow = fx.follow_link;
         if !typed_after.is_empty() {
             ui.input_mut(|i| i.events.push(egui::Event::Text(typed_after)));
         }
@@ -723,6 +727,23 @@ impl NoteEditor {
                     (l, ok)
                 })
                 .collect();
+        }
+    }
+
+    /// The wiki link (with whether its note exists) or else the web link at a byte of the text;
+    /// embedded images (`is_image` says which ranges are drawn as one) are not links.
+    fn link_at(&self, text: &str, byte: usize, is_image: &dyn Fn(&Range<usize>) -> bool) -> (Option<(LinkSpan, bool)>, Option<crate::lists::WebLink>) {
+        let link = self.cache.links.iter().find(|(l, _)| l.range.contains(&byte) && !is_image(&l.range)).cloned();
+        let web = if link.is_none() { crate::lists::find_web_links(text).into_iter().find(|w| w.range.contains(&byte)) } else { None };
+        (link, web)
+    }
+
+    /// What following a link does: the one place a click and `gt` (EDIT-023) share.
+    fn follow_action(link: Option<&(LinkSpan, bool)>, web: Option<&crate::lists::WebLink>, new_tab: bool) -> Option<EditorAction> {
+        match (web, link) {
+            (Some(w), _) => Some(EditorAction::OpenUrl(w.url.clone())),
+            (None, Some((l, _))) => Some(EditorAction::OpenLink { target: l.target.clone(), heading: l.heading.clone(), new_tab }),
+            (None, None) => None,
         }
     }
 
@@ -1021,8 +1042,7 @@ impl NoteEditor {
         let follow_ok = !ctrl_to_follow || modifiers.command;
         if let Some(hp) = hover.filter(|p| resp.rect.contains(*p)) {
             if let Some(byte) = char_under(&output.galley, output.galley_pos, hp).map(|c| markdown::char_to_byte(text, c)) {
-                let link = self.cache.links.iter().find(|(l, _)| l.range.contains(&byte) && !images.iter().any(|(r, ..)| *r == l.range)).cloned();
-                let web = if link.is_none() { crate::lists::find_web_links(text).into_iter().find(|w| w.range.contains(&byte)) } else { None };
+                let (link, web) = self.link_at(text, byte, &|r| images.iter().any(|(i, ..)| i == r));
                 if let Some(w) = &web {
                     if follow_ok {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -1054,25 +1074,28 @@ impl NoteEditor {
                         ui.label(egui::RichText::new(hint).small().color(theme::MUTED));
                     });
                 }
-                if let (true, Some(web)) = (resp.clicked(), web.as_ref()) {
+                if resp.clicked() && (link.is_some() || web.is_some()) {
+                    // Plain click follows (unless the setting asks for Ctrl); with the default
+                    // setting, Ctrl+click just places the cursor so the link can be edited.
                     let follow = if ctrl_to_follow { modifiers.command } else { !modifiers.command };
                     if follow {
-                        action = Some(EditorAction::OpenUrl(web.url.clone()));
+                        action = Self::follow_action(link.as_ref(), web.as_ref(), modifiers.shift || ui.input(|i| i.pointer.middle_down()));
                     }
                 } else if resp.clicked() {
-                    if let Some((l, _)) = link {
-                        // Plain click follows (unless the setting asks for Ctrl); with the default
-                        // setting, Ctrl+click just places the cursor so the link can be edited.
-                        let follow = if ctrl_to_follow { modifiers.command } else { !modifiers.command };
-                        if follow {
-                            action = Some(EditorAction::OpenLink { target: l.target.clone(), heading: l.heading.clone(), new_tab: modifiers.shift || ui.input(|i| i.pointer.middle_down()) });
-                        }
-                    } else if let Some(t) = markdown::find_tasks(text).into_iter().find(|t| byte + 1 >= t.check_offset && byte <= t.check_offset + 1) {
+                    if let Some(t) = markdown::find_tasks(text).into_iter().find(|t| byte + 1 >= t.check_offset && byte <= t.check_offset + 1) {
                         if markdown::toggle_task_at(text, t.check_offset) {
                             changed = true;
                         }
                     }
                 }
+            }
+        }
+        // `gt` in vim normal mode: the click's action for the link under vim's cursor (EDIT-023)
+        if std::mem::take(&mut self.vim_follow) {
+            let byte = markdown::char_to_byte(text, self.vim.cursor);
+            let (link, web) = self.link_at(text, byte, &|r| images.iter().any(|(i, ..)| i == r));
+            if let Some(a) = Self::follow_action(link.as_ref(), web.as_ref(), false) {
+                action = Some(a);
             }
         }
         if resp.middle_clicked() {
@@ -1325,6 +1348,68 @@ mod tests {
         vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("A"));
         vim_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![]);
         assert!(ed.assist.ac_active, "insert mode: the suggestions open");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// One frame of the editor alone in vim mode; returns the action it asked for.
+    fn vim_action_frame(ctx: &egui::Context, t: &mut f64, ed: &mut NoteEditor, text: &mut String, v: &Vault, undo: &mut crate::undo::Histories, events: Vec<Event>) -> Option<EditorAction> {
+        *t += 0.05;
+        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(*t), events, ..Default::default() };
+        let mut action = None;
+        let mut out = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                action = ed.show(ui, text, v, Note { rel: Path::new("Welcome.md"), undo }, 15.0, false).1;
+            });
+        });
+        out.textures_delta.clear();
+        action
+    }
+
+    // spec: EDIT-023
+    #[test]
+    fn vim_gt_follows_the_link_under_the_cursor_like_a_click() {
+        let (v, d) = vault_for_tests("vim-gt");
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut undo = crate::undo::Histories::default();
+        let mut ed = NoteEditor::new(egui::Id::unique("vim-gt"));
+        ed.vim_enabled = true;
+        let mut text = String::from("plain [[Ideas#Top]] and [site](https://example.org/x) or https://bare.example\n\ngg here");
+        let typed = |s: &str| vec![Event::Text(s.into())];
+        // the text box's cursor, as a click would leave it
+        let put_cursor = |ctx: &egui::Context, ed: &NoteEditor, c: usize| {
+            let mut st = egui::text_edit::TextEditState::load(ctx, ed.id).unwrap_or_default();
+            st.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(c))));
+            st.store(ctx, ed.id);
+        };
+        let at = |text: &str, w: &str| markdown::byte_to_char(text, text.find(w).unwrap()) + 1;
+        ed.pending_cursor = Some(0);
+        vim_action_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![]);
+        vim_action_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, vec![]);
+        // a wiki link: the same action a click gives, heading included
+        put_cursor(&ctx, &ed, at(&text, "Ideas"));
+        match vim_action_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("gt")) {
+            Some(EditorAction::OpenLink { target, heading, new_tab }) => assert_eq!((target.as_str(), heading.as_deref(), new_tab), ("Ideas", Some("Top"), false)),
+            _ => panic!("gt on a wiki link did not open it"),
+        }
+        // the markdown link and the bare URL
+        put_cursor(&ctx, &ed, at(&text, "site"));
+        match vim_action_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("gt")) {
+            Some(EditorAction::OpenUrl(u)) => assert_eq!(u, "https://example.org/x"),
+            _ => panic!("gt on a web link did not open it"),
+        }
+        put_cursor(&ctx, &ed, at(&text, "bare"));
+        match vim_action_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("gt")) {
+            Some(EditorAction::OpenUrl(u)) => assert_eq!(u, "https://bare.example"),
+            _ => panic!("gt on a bare URL did not open it"),
+        }
+        // off a link: nothing happens, no `g` is left waiting, and gg still goes to the top
+        put_cursor(&ctx, &ed, at(&text, "plain"));
+        assert!(vim_action_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("gt")).is_none());
+        assert_eq!(ed.vim_status().as_deref(), Some("NORMAL"));
+        put_cursor(&ctx, &ed, at(&text, "here"));
+        assert!(vim_action_frame(&ctx, &mut t, &mut ed, &mut text, &v, &mut undo, typed("gg")).is_none());
+        assert_eq!(ed.vim.cursor, 0, "gg still goes to the first line");
         let _ = std::fs::remove_dir_all(&d);
     }
 

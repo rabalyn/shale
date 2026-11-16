@@ -108,7 +108,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
   start typing, Esc stops; x deletes a character; `dd` deletes the line (onto the clipboard,
   `p` puts it back below); v and V select with the same motions, d cuts and y copies to the
-  clipboard, p pastes. `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
+  clipboard, p pastes; `gt` follows the link under the cursor like a click (a note link or a web
+  address). `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
   from i to Esc is one step; the history is shared by all tabs of the note and kept in the vault
   for 30 days by default (a setting of the undo histories cache, see Data usage), so `u` works
   after a restart too). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.

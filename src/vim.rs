@@ -46,6 +46,8 @@ pub struct Effects {
     pub request_paste: bool,
     /// the cursor moved: scroll it into view
     pub moved: bool,
+    /// `gt`: follow the link under the cursor, as a click on it would
+    pub follow_link: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -325,6 +327,7 @@ impl Vim {
             '0' => new = line_start(&c, pos),
             '$' => new = last_on_line(&c, pos),
             'g' if g => new = 0,
+            't' if g && !self.visual() => fx.follow_link = true,
             'g' => self.pending_g = true,
             'G' => new = line_start(&c, c.len()),
             'n' | 'N' => new = self.search_step(text, pos, ch == 'n'),
@@ -633,6 +636,21 @@ mod tests {
         assert_eq!(at(T, 0, "G"), 37);
         assert_eq!(at(T, 30, "gg"), 0);
         assert_eq!(at("é ü ß", 0, "ll$"), 4, "characters, not bytes");
+    }
+
+    // spec: EDIT-023
+    #[test]
+    fn gt_asks_to_follow_the_link_and_gg_still_goes_to_the_top() {
+        let (v, _, fx) = run(T, 5, "gt");
+        assert!(fx.follow_link);
+        assert_eq!((v.cursor, v.status().as_str()), (5, "NORMAL"), "gt does not move and leaves no pending g");
+        assert!(!run(T, 5, "t").2.follow_link, "t alone does nothing");
+        assert!(!run(T, 5, "g<esc>t").2.follow_link, "a cancelled g does not make a gt");
+        assert!(!run(T, 5, "gvt").2.follow_link);
+        assert!(!run(T, 5, "vgt").2.follow_link, "not in visual mode");
+        assert!(!run(T, 5, "gg").2.follow_link);
+        assert_eq!(at(T, 30, "gg"), 0);
+        assert_eq!(at(T, 30, "gtgg"), 0, "gt then gg");
     }
 
     // spec: EDIT-012

@@ -53,6 +53,9 @@ Settings → General → Appearance, off by default. Notes open in normal mode.
 | i a I A o O | start typing; Esc stops |
 | x | delete a character |
 | v, V | select with the same motions; d cuts, y copies, p pastes |
+| dd | delete the line (onto the clipboard; p puts it back below) |
+| u, Ctrl+R | undo, redo: up to 200 steps per note, an insert session is one step; kept in the vault for 30 days, so it works after a restart ([[Data usage and caches]]) |
+| gt | follow the link under the cursor like a click (a note link or a web address) |
 
 The status bar shows NORMAL, INSERT, VISUAL or V-LINE. The vim keys themselves cannot be
 rebound. In normal mode **Space Tab** goes back to the view this tab showed just before, and
