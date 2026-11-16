@@ -30,6 +30,10 @@ struct Fmt {
     quote: bool,
     marker: bool,
     highlight: bool,
+    /// markup (`#`, `**`, `[[`, …) that the markdown preview hides; cleared again in the layout
+    syn: bool,
+    /// markup hidden by the markdown preview (EDIT-016)
+    hidden: bool,
     /// > 0: this text is an image link shown as a picture; the row is this many points tall
     image_h: u16,
 }
@@ -67,8 +71,14 @@ fn inline_pairs(line: &str, off: usize, fmts: &mut [Fmt], code: &[Range<usize>])
             if let Some(q) = line[s + 2..].find(marker) {
                 let e = s + 2 + q;
                 if q > 0 && !in_code(e) {
-                    set(fmts, off + s..off + s + 2, |f| f.dim = true);
-                    set(fmts, off + e..off + e + 2, |f| f.dim = true);
+                    set(fmts, off + s..off + s + 2, |f| {
+                        f.dim = true;
+                        f.syn = true
+                    });
+                    set(fmts, off + e..off + e + 2, |f| {
+                        f.dim = true;
+                        f.syn = true
+                    });
                     set(fmts, off + s + 2..off + e, |f| match kind {
                         0 => f.bold = true,
                         1 => f.strike = true,
@@ -101,8 +111,14 @@ fn inline_pairs(line: &str, off: usize, fmts: &mut [Fmt], code: &[Range<usize>])
                     j += 1;
                 }
                 if let Some(j) = found {
-                    set(fmts, off + i..off + i + 1, |f| f.dim = true);
-                    set(fmts, off + j..off + j + 1, |f| f.dim = true);
+                    set(fmts, off + i..off + i + 1, |f| {
+                        f.dim = true;
+                        f.syn = true
+                    });
+                    set(fmts, off + j..off + j + 1, |f| {
+                        f.dim = true;
+                        f.syn = true
+                    });
                     set(fmts, off + i + 1..off + j, |f| f.italic = true);
                     i = j + 1;
                     continue;
@@ -116,12 +132,15 @@ fn inline_pairs(line: &str, off: usize, fmts: &mut [Fmt], code: &[Range<usize>])
 /// Build the coloured layout for the editor (without inline pictures).
 #[cfg(test)]
 pub fn highlight(text: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob {
-    highlight_with_images(text, links, base, &[])
+    highlight_preview(text, links, base, &[], None)
 }
 
-/// Like [`highlight`], but the given byte ranges (image links) are shrunk to invisible text on a
-/// row tall enough for the picture that is painted there afterwards.
-pub fn highlight_with_images(text: &str, links: &[(LinkSpan, bool)], base: f32, images: &[(Range<usize>, f32)]) -> LayoutJob {
+/// The coloured layout for the editor: the given byte ranges (image links) are shrunk to
+/// invisible text on a row tall enough for the picture that is painted there afterwards. With
+/// `raw_lines` (line numbers) the markdown preview is on (EDIT-016): the markup of every line
+/// outside that range is hidden (invisible, about one point wide); the text itself stays the
+/// same so that cursor, clicks and vim keep their indices.
+pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> LayoutJob {
     let mut fmts = vec![Fmt::default(); text.len()];
     let fenced = markdown::fenced_code_lines(text);
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
@@ -150,13 +169,21 @@ pub fn highlight_with_images(text: &str, links: &[(LinkSpan, bool)], base: f32, 
         }
         if let Some(level) = markdown::heading_level(line) {
             set(&mut fmts, lr.clone(), |f| f.heading = level as u8);
-            set(&mut fmts, off..off + level, |f| f.dim = true);
+            let gap = usize::from(line.as_bytes().get(level) == Some(&b' '));
+            set(&mut fmts, off..off + level + gap, |f| {
+                f.dim = true;
+                f.syn = true
+            });
         }
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
         if trimmed.starts_with('>') {
             set(&mut fmts, lr.clone(), |f| f.quote = true);
-            set(&mut fmts, off + indent..off + indent + 1, |f| f.dim = true);
+            let gap = usize::from(trimmed.as_bytes().get(1) == Some(&b' '));
+            set(&mut fmts, off + indent..off + indent + 1 + gap, |f| {
+                f.dim = true;
+                f.syn = true
+            });
         }
         if trimmed == "---" || trimmed == "***" || trimmed == "___" {
             set(&mut fmts, lr.clone(), |f| f.dim = true);
@@ -183,6 +210,8 @@ pub fn highlight_with_images(text: &str, links: &[(LinkSpan, bool)], base: f32, 
                 if let Some(e) = line[i + 1..].find('`') {
                     let r = off + i..off + i + e + 2;
                     set(&mut fmts, r.clone(), |f| f.code = true);
+                    set(&mut fmts, r.start..r.start + 1, |f| f.syn = true);
+                    set(&mut fmts, r.end - 1..r.end, |f| f.syn = true);
                     local_code.push(r);
                     i += e + 2;
                     continue;
@@ -196,6 +225,7 @@ pub fn highlight_with_images(text: &str, links: &[(LinkSpan, bool)], base: f32, 
     for (l, exists) in links {
         set(&mut fmts, l.range.clone(), |f| {
             f.dim = true;
+            f.syn = true;
             f.italic = false;
         });
         let kind = if *exists { 1 } else { 2 };
@@ -215,7 +245,10 @@ pub fn highlight_with_images(text: &str, links: &[(LinkSpan, bool)], base: f32, 
             }
         };
         set(&mut fmts, l.range.clone(), |f| f.link = kind);
-        set(&mut fmts, shown, |f| f.dim = false);
+        set(&mut fmts, shown, |f| {
+            f.dim = false;
+            f.syn = false
+        });
     }
     for w in crate::lists::find_web_links(text) {
         if code_ranges.iter().any(|c| c.contains(&w.range.start)) {
@@ -223,9 +256,13 @@ pub fn highlight_with_images(text: &str, links: &[(LinkSpan, bool)], base: f32, 
         }
         set(&mut fmts, w.range.clone(), |f| {
             f.dim = true;
+            f.syn = true;
             f.link = 3;
         });
-        set(&mut fmts, w.label_range.clone(), |f| f.dim = false);
+        set(&mut fmts, w.label_range.clone(), |f| {
+            f.dim = false;
+            f.syn = false
+        });
     }
     for (r, _) in markdown::find_tags(text) {
         if !code_ranges.iter().any(|c| c.contains(&r.start)) {
@@ -233,6 +270,14 @@ pub fn highlight_with_images(text: &str, links: &[(LinkSpan, bool)], base: f32, 
         }
     }
 
+    // the preview: hide the markup of the lines that are not raw; the flag goes either way
+    for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
+        let raw = raw_lines.as_ref().is_none_or(|r| r.contains(&li));
+        set(&mut fmts, off..off + line.len(), |f| {
+            f.hidden = f.syn && !raw;
+            f.syn = false
+        });
+    }
     for (r, h) in images {
         if r.end <= text.len() && text.is_char_boundary(r.start) && text.is_char_boundary(r.end) {
             set(&mut fmts, r.clone(), |f| f.image_h = h.round().clamp(1.0, 4000.0) as u16);
@@ -264,6 +309,9 @@ fn to_format(f: Fmt, base: f32) -> TextFormat {
         return TextFormat { font_id: FontId::new(1.0, FontFamily::Proportional), color: Color32::TRANSPARENT, line_height: Some(f.image_h as f32), ..Default::default() };
     }
     let size = base * heading_scale(f.heading);
+    if f.hidden {
+        return TextFormat { font_id: FontId::new(1.0, FontFamily::Proportional), color: Color32::TRANSPARENT, line_height: Some(size * 1.5), ..Default::default() };
+    }
     let mono = f.code || f.fence;
     let font_id = if mono { FontId::new(base * 0.92 * heading_scale(f.heading), FontFamily::Monospace) } else { FontId::new(size, FontFamily::Proportional) };
     let mut color = if f.heading > 0 { theme::HEADING } else { theme::TEXT };
@@ -370,6 +418,13 @@ pub struct NoteEditor {
     pub dark_canvas: bool,
     /// Show a gutter with line numbers (set from the app's settings, EDIT-018).
     pub line_numbers: bool,
+    /// Draw the markdown rendered except around the cursor (EDIT-016, set from the app's settings).
+    pub live_preview: bool,
+    /// Lines before and after the cursor line that stay raw in the preview (EDIT-017).
+    pub preview_raw_lines: u32,
+    /// The raw lines of the last frame (kept while the mouse button is down, so a click lands on
+    /// the text it was aimed at).
+    preview_raw: Range<usize>,
     last_cursor: Option<(usize, usize)>,
     /// vim-lite editing is on (set from the app's settings)
     pub vim_enabled: bool,
@@ -396,6 +451,9 @@ impl NoteEditor {
             inline_images: false,
             dark_canvas: true,
             line_numbers: false,
+            live_preview: false,
+            preview_raw_lines: 0,
+            preview_raw: 0..0,
             last_cursor: None,
             vim_enabled: false,
             vim: crate::vim::Vim::default(),
@@ -414,6 +472,24 @@ impl NoteEditor {
     /// Short description of the picker state (testing aid).
     pub fn debug_state(&self) -> String {
         self.assist.debug_state()
+    }
+
+    /// The raw lines of the markdown preview for this frame.
+    fn preview_lines(&mut self, ui: &Ui, text: &str) -> Range<usize> {
+        let focused = ui.ctx().memory(|m| m.has_focus(self.id));
+        let sel = focused.then(|| egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range())).flatten().map(|r| {
+            let a = markdown::char_to_byte(text, r.primary.index.0);
+            let b = markdown::char_to_byte(text, r.secondary.index.0);
+            a.min(b)..a.max(b)
+        });
+        let want = crate::editor_preview::raw_lines(text, sel, self.preview_raw_lines as usize);
+        if want != self.preview_raw && ui.input(|i| i.pointer.primary_down() || i.pointer.primary_released()) {
+            // a click or drag must not move the text under the pointer; catch up afterwards
+            ui.ctx().request_repaint();
+        } else {
+            self.preview_raw = want;
+        }
+        self.preview_raw.clone()
     }
 
     /// Typing goes into the text (vim-lite off, or in insert mode).
@@ -730,6 +806,7 @@ impl NoteEditor {
         // text in the middle of a frame, the pictures are found again in the new text, so they
         // stay pictures instead of flashing back to link text for a frame.
         let image_keys: Vec<(String, f32)> = images.iter().map(|(r, h, _, _)| (text[r.clone()].to_string(), *h)).collect();
+        let preview = self.live_preview.then(|| self.preview_lines(ui, text));
         let links = self.cache.links.clone();
         let links_text = text.clone();
         self.assist.arm(text, media_handled);
@@ -751,7 +828,7 @@ impl NoteEditor {
                 &fresh
             };
             let ranges: Vec<(Range<usize>, f32)> = remap_images(s, &image_keys).into_iter().map(|(r, h, _)| (r, h)).collect();
-            let mut job = highlight_with_images(s, use_links, base_size, &ranges);
+            let mut job = highlight_preview(s, use_links, base_size, &ranges, preview.clone());
             job.wrap.max_width = wrap_width;
             ui.ctx().fonts_mut(|f| f.layout_job(job))
         };
@@ -831,7 +908,7 @@ impl NoteEditor {
             }
         }
         // when the cursor moved into or out of an image link, lay out again next frame
-        if self.inline_images {
+        if self.inline_images || self.live_preview {
             let now = output.cursor_range.map(|r| (r.primary.index.0, r.secondary.index.0));
             if now != self.last_cursor {
                 self.last_cursor = now;
@@ -1762,5 +1839,98 @@ mod tests {
             assert!(text.is_char_boundary(s.byte_range.end.0));
             pos = s.byte_range.end.0;
         }
+    }
+
+    /// The bytes of `text` that the layout makes invisible, as a string of the same length
+    /// (`_` hidden, `.` shown).
+    fn hidden_map(text: &str, raw: Option<Range<usize>>) -> String {
+        let links: Vec<(LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| (l, true)).collect();
+        let job = highlight_preview(text, &links, 15.0, &[], raw);
+        assert_eq!(job.text, text, "the galley text is the buffer");
+        text.char_indices()
+            .map(|(i, c)| {
+                let f = &job.sections.iter().find(|s| s.byte_range.start.0 <= i && i < s.byte_range.end.0).unwrap().format;
+                let hidden = f.color == Color32::TRANSPARENT;
+                if c == '\n' {
+                    return "\n".to_string();
+                }
+                std::iter::repeat_n(if hidden { '_' } else { '.' }, c.len_utf8()).collect::<String>()
+            })
+            .collect()
+    }
+
+    // spec: EDIT-016
+    #[test]
+    fn preview_hides_the_markup_of_lines_away_from_the_cursor() {
+        let text = "# Title\n**bold** and *it* and ~~gone~~ and `code`\nsee [[Ideas|my idea]] or [[Plain]] or [web](http://x.org)\nplain";
+        // the cursor is in the last line: the rest is rendered
+        let m = hidden_map(text, Some(3..4));
+        let lines: Vec<&str> = m.split('\n').collect();
+        assert_eq!(lines[0], "__.....", "heading without its # and the space");
+        let (it, rest) = ("_.._", ".....");
+        assert_eq!(lines[1], format!("__....__{rest}{it}{rest}__....__{rest}_...._"), "bold, italic, strike and code without their markers");
+        let (h, v) = (|n: usize| "_".repeat(n), |n: usize| ".".repeat(n));
+        let expected = [v(4), h(8), v(7), h(2), v(4), h(2), v(5), h(2), v(4), h(1), v(3), h(15)].concat();
+        assert_eq!(lines[2], expected, "links show only their text");
+        assert_eq!(lines[3], ".....", "an ordinary line has nothing to hide");
+        // no preview: nothing is hidden; the raw lines look exactly like the raw layout
+        assert!(!hidden_map(text, None).contains('_'));
+        let raw_all = hidden_map(text, Some(0..4));
+        assert!(!raw_all.contains('_'));
+        let links: Vec<(LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| (l, true)).collect();
+        let a = highlight_preview(text, &links, 15.0, &[], None);
+        let b = highlight_preview(text, &links, 15.0, &[], Some(0..4));
+        assert_eq!(a.sections.len(), b.sections.len());
+        assert!(a.sections.iter().zip(&b.sections).all(|(x, y)| x.byte_range == y.byte_range && x.format == y.format));
+    }
+
+    // spec: EDIT-016, EDIT-017
+    #[test]
+    fn preview_keeps_the_cursor_lines_and_the_ones_around_them_raw() {
+        let text = "# a\n# b\n# c\n# d\n# e";
+        let shown = |raw: Range<usize>| -> Vec<bool> { hidden_map(text, Some(raw)).split('\n').map(|l| !l.contains('_')).collect() };
+        assert_eq!(shown(crate::editor_preview::raw_lines(text, Some(8..8), 0)), [false, false, true, false, false]);
+        assert_eq!(shown(crate::editor_preview::raw_lines(text, Some(8..8), 1)), [false, true, true, true, false]);
+        // a selection from the second to the fourth line
+        assert_eq!(shown(crate::editor_preview::raw_lines(text, Some(4..14), 0)), [false, true, true, true, false]);
+        // no keyboard: everything rendered
+        assert_eq!(shown(crate::editor_preview::raw_lines(text, None, 2)), [false; 5]);
+    }
+
+    // spec: EDIT-016
+    #[test]
+    fn preview_leaves_code_blocks_and_front_matter_alone() {
+        let text = "---\ntitle: x\n---\n```\n**not bold** [[x]]\n```\n---";
+        assert!(!hidden_map(text, Some(100..100)).contains('_'));
+    }
+
+    // spec: EDIT-016
+    #[test]
+    fn preview_links_still_work_and_typing_edits_the_text() {
+        let (v, d) = vault_for_tests("preview");
+        let rel = Path::new("Welcome.md");
+        let mut text = String::from("first line\nGo to [[Ideas|my idea]] now\nlast");
+        let mut ed = NoteEditor::new(egui::Id::unique("preview-ed"));
+        ed.live_preview = true;
+        ed.pending_cursor = Some(0);
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        // line 2 is rendered: "[[Ideas|" has no width, the alias is where the link starts
+        let (galley, _) = ed.last_layout.clone().unwrap();
+        let start = markdown::byte_to_char(&text, text.find("my idea").unwrap());
+        let (a, b) = (galley.pos_from_cursor(CCursor::new(start - 8)), galley.pos_from_cursor(CCursor::new(start)));
+        assert!(b.min.x - a.min.x < 12.0, "the hidden markup is narrow: {}", b.min.x - a.min.x);
+        match click_word(&mut h, &mut ed, &mut text, &v, rel, "my idea") {
+            Some(EditorAction::OpenLink { target, .. }) => assert_eq!(target, "Ideas"),
+            _ => panic!("clicking the rendered link did nothing"),
+        }
+        // typing goes into the buffer, markup and all
+        ed.pending_cursor = Some(markdown::byte_to_char(&text, text.len()));
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text(" **x**".into())]);
+        assert_eq!(text, "first line\nGo to [[Ideas|my idea]] now\nlast **x**");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

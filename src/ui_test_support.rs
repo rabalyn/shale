@@ -55,6 +55,19 @@ impl Headless {
         out
     }
 
+    /// The place of a widget with this accessibility label (an icon button: its tooltip).
+    pub fn find_label(&mut self, app: &mut ShaleApp, label: &str) -> Rect {
+        self.ctx.enable_accesskit();
+        let mut out = self.frame(app, vec![]);
+        let tree = out.platform_output.accesskit_update.take().expect("accessibility is on");
+        tree.nodes
+            .iter()
+            .find(|(_, n)| n.label() == Some(label))
+            .and_then(|(_, n)| n.bounds())
+            .map(|b| Rect::from_min_max(Pos2::new(b.x0 as f32, b.y0 as f32), Pos2::new(b.x1 as f32, b.y1 as f32)))
+            .unwrap_or_else(|| panic!("no {label:?} on screen"))
+    }
+
     pub fn frames(&mut self, app: &mut ShaleApp, n: usize) {
         for _ in 0..n {
             self.frame(app, vec![]);

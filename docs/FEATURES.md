@@ -69,6 +69,15 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
+- **Markdown preview** (Settings → Appearance, or the eye icon in the top right of the editor;
+  off by default): every line is drawn rendered, with headings at their size, bold, italic,
+  strike and code without their markers, links as just their text, and only the line the cursor
+  is in (and, with "Raw lines around the cursor", that many lines before and after, or all the
+  lines of a selection) shows the raw markdown. The note stays editable; links still open with a
+  click and task boxes still tick.
+
+  ![The Markdown preview](screenshots/editor-preview.png)
+
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
   start typing, Esc stops; x deletes a character; v and V select with the same motions, d cuts
