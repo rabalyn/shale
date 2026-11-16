@@ -289,9 +289,12 @@ pub struct ShaleApp {
     pub drawings: HashMap<PathBuf, DrawingDoc>,
     /// The icons of the ribbon and the right sidebar, and a drag of one of them (LAY-001).
     pub side: crate::sidebar_ui::SideState,
+    /// the file list: the open folders and the row the keyboard is on
     pub tree: FileTree,
+    /// the search box of the left sidebar and the selected result
     pub search: SearchBox,
     pub tasks: TasksFilter,
+    /// the graph of the whole vault and the local one in the side panel
     pub graphs: Graphs,
     pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
@@ -318,13 +321,15 @@ pub struct ShaleApp {
     pub trashed: Vec<PathBuf>,
     last_scan: Instant,
     pub welcome_path: String,
-    // screenshot mode
+    /// screenshot mode: where the picture goes and whether it was saved
     shot: screenshot::ScreenshotRun,
+    /// the frames drawn so far (paces screenshots and scripted input)
     frames: u32,
     /// the last failure to save the global settings (shown once)
     cfg_error: Option<String>,
     /// the scripted input of tests of the real window (BUILD-007)
     script: crate::script::ScriptRun,
+    /// where unsaved text is rescued to, and the rescues not dismissed yet (DATA-011)
     pub recovery: crate::recovery::RecoveryState,
 }
 
