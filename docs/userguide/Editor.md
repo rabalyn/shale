@@ -31,7 +31,7 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
 - Every click is one undo step, and the keyboard stays in the note, with the Markdown preview on
   or off and with vim-style editing (insert mode stays, otherwise you are in normal mode).
 - Settings → General → Editing, "Show formatting toolbar" turns the toolbar off; "Toolbar button size"
-  makes its buttons bigger or smaller (80 % to 200 %, 120 % by default).
+  makes its buttons bigger or smaller (80 % to 200 %, 110 % by default).
 
 ## Colours
 
