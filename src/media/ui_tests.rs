@@ -269,21 +269,6 @@ fn closing_the_tab_stops_the_sound_and_so_does_switching_the_vault() {
     let _ = std::fs::remove_dir_all(&other);
 }
 
-// spec: MEDIA-007
-#[test]
-fn autoplay_starts_the_first_player_of_a_note_when_it_opens_and_only_when_asked_to() {
-    let note = "![[tone.wav]]\n\n![[tone-cover.mp3]]\n";
-    let mut fx = Fx::new("auto-off", note, &["tone.wav", "tone-cover.mp3"]);
-    fx.reading(true);
-    fx.hl.frames(&mut fx.app, 10);
-    assert_eq!(fx.app.media.current(), None, "off by default");
-    fx.app.cfg.media_autoplay = true;
-    fx.app.open(Path::new("Player.md"), true);
-    fx.until("the first sound starts", |a| a.media.current().is_some());
-    assert_eq!(fx.app.media.current(), Some(fx.dir.join("tone.wav")), "the first embed, not the second");
-    fx.label("Pause");
-}
-
 // spec: MEDIA-008
 #[test]
 fn the_state_stays_when_the_view_switches_and_the_window_repaints_only_while_playing() {
@@ -340,13 +325,12 @@ fn a_damaged_file_says_so_and_a_machine_without_sound_output_keeps_the_player_wo
 
 // spec: MEDIA-004, MEDIA-007
 #[test]
-fn the_settings_dialog_has_the_button_opacity_and_autoplay_and_they_are_saved_in_the_config() {
+fn the_settings_dialog_has_the_button_opacity_and_nothing_to_autoplay() {
     let mut fx = Fx::new("settings", NOTE, &["tone-cover.mp3"]);
     fx.app.open_settings(SettingsTab::General);
     fx.hl.frames(&mut fx.app, 3);
-    fx.click_label("Start the first sound or video of a note when the note is opened");
-    assert!(fx.app.cfg.media_autoplay);
     let json = serde_json::to_string(&fx.app.cfg).unwrap();
-    assert!(json.contains("\"media_autoplay\":true") && json.contains("\"media_play_button_opacity\":0.6"), "{json}");
+    assert!(json.contains("\"media_play_button_opacity\":0.6"), "{json}");
+    assert!(!fx.hl.text.iter().any(|(t, _)| t.to_lowercase().contains("autoplay") || t.contains("when the note is opened")), "nothing starts by itself, so there is no such setting");
     assert!(fx.hl.text.iter().any(|(t, _)| t.contains("Play button over the artwork")), "the opacity slider is in Appearance");
 }

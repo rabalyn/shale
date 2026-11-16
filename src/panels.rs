@@ -986,7 +986,6 @@ impl ShaleApp {
                             .on_hover_text("How opaque the round button is; it is fully opaque while the mouse is over it")
                             .changed();
                     });
-                    changed |= ui.checkbox(&mut self.cfg.media_autoplay, "Start the first sound or video of a note when the note is opened").changed();
                     // videos are decoded by the system's ffmpeg (MEDIA-010)
                     match self.media.ffmpeg() {
                         Some(p) => ui.label(egui::RichText::new(format!("Videos are played with ffmpeg ({})", p.display())).small().color(theme::MUTED)),
