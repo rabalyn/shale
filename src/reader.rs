@@ -185,35 +185,40 @@ fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, b
     ui.painter().galley(rect.min, galley.clone(), theme::TEXT);
     if let Some(hp) = ui.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p)) {
         if let Some(c) = char_under(&galley, rect.min, hp) {
-            let byte = markdown::char_to_byte(&galley.job.text, c);
-            if let Some((_, l, _)) = spans.iter().find(|(r, l, _)| r.contains(&byte) && crate::lists::is_web_url(&l.target)) {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                resp.clone().on_hover_ui_at_pointer(|ui| {
-                    ui.label(egui::RichText::new(&l.target).color(theme::LINK));
-                    ui.label(egui::RichText::new("Opens in your browser").small().color(theme::MUTED));
-                });
-                if resp.clicked() || resp.middle_clicked() {
-                    *out = Some(ReaderAction::OpenUrl(l.target.clone()));
-                }
-            } else if let Some((_, l, ok)) = spans.iter().find(|(r, _, _)| r.contains(&byte)) {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                let tip = if *ok { format!("Open “{}”", l.target) } else { format!("Create note “{}”", l.target) };
-                let colour = if *ok { theme::LINK } else { theme::LINK_MISSING };
-                let note = hint(&l.target);
-                resp.clone().on_hover_ui_at_pointer(|ui| {
-                    ui.label(egui::RichText::new(tip).color(colour));
-                    if let Some(n) = &note {
-                        ui.label(egui::RichText::new(n).small().color(theme::TEXT));
-                    }
-                });
-                if resp.clicked() || resp.middle_clicked() {
-                    let new_tab = resp.middle_clicked() || ui.input(|i| i.modifiers.command);
-                    *out = Some(ReaderAction::OpenLink { target: l.target.clone(), new_tab });
-                }
-            }
+            follow_span(ui, &resp, markdown::char_to_byte(&galley.job.text, c), spans, hint, out);
         }
     }
     resp
+}
+
+/// Hover and click on the link at byte `byte` of a block's text (if there is one): the pointer,
+/// the tooltip and the action (web links open the browser, notes open or are created).
+fn follow_span(ui: &Ui, resp: &egui::Response, byte: usize, spans: &[(Range<usize>, LinkSpan, bool)], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) {
+    if let Some((_, l, _)) = spans.iter().find(|(r, l, _)| r.contains(&byte) && crate::lists::is_web_url(&l.target)) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        resp.clone().on_hover_ui_at_pointer(|ui| {
+            ui.label(egui::RichText::new(&l.target).color(theme::LINK));
+            ui.label(egui::RichText::new("Opens in your browser").small().color(theme::MUTED));
+        });
+        if resp.clicked() || resp.middle_clicked() {
+            *out = Some(ReaderAction::OpenUrl(l.target.clone()));
+        }
+    } else if let Some((_, l, ok)) = spans.iter().find(|(r, _, _)| r.contains(&byte)) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        let tip = if *ok { format!("Open “{}”", l.target) } else { format!("Create note “{}”", l.target) };
+        let colour = if *ok { theme::LINK } else { theme::LINK_MISSING };
+        let note = hint(&l.target);
+        resp.clone().on_hover_ui_at_pointer(|ui| {
+            ui.label(egui::RichText::new(tip).color(colour));
+            if let Some(n) = &note {
+                ui.label(egui::RichText::new(n).small().color(theme::TEXT));
+            }
+        });
+        if resp.clicked() || resp.middle_clicked() {
+            let new_tab = resp.middle_clicked() || ui.input(|i| i.modifiers.command);
+            *out = Some(ReaderAction::OpenLink { target: l.target.clone(), new_tab });
+        }
+    }
 }
 
 /// One line of markdown with clickable links (used by the task list).
@@ -259,7 +264,13 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             i = end + 2;
         }
     }
+    let tables = crate::table::find_tables(text);
     while i < lines.len() {
+        if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
+            table_block(ui, &b.table, vault, rel, base, &hint, &mut out);
+            i = b.lines.end;
+            continue;
+        }
         let (off, line) = lines[i];
         let line_links: Vec<(LinkSpan, bool)> = all_links
             .iter()
@@ -362,6 +373,22 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         i += 1;
     }
     out
+}
+
+/// A table drawn as a grid (EDIT-024); links in its cells work as everywhere in the reading view.
+fn table_block(ui: &mut Ui, table: &crate::table::Table, vault: &Vault, rel: &Path, base: f32, hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) {
+    let laid = crate::table::layout(ui.ctx(), table, base, ui.available_width(), &|l| vault.exists(&l.target, Some(rel)));
+    let (rect, resp) = ui.allocate_exact_size(laid.size(), Sense::click());
+    crate::table::paint(ui.painter(), rect.min, &laid);
+    if let Some(hp) = ui.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p)) {
+        if let Some((r, c, anchor)) = laid.cell_at(rect.min, hp) {
+            let cell = &laid.cells[r][c];
+            if let Some(ch) = char_under(&cell.galley, anchor, hp) {
+                follow_span(ui, &resp, markdown::char_to_byte(&cell.galley.job.text, ch), &cell.spans, hint, out);
+            }
+        }
+    }
+    ui.add_space(base * 0.4);
 }
 
 fn shift(links: &[(LinkSpan, bool)], by: usize) -> Vec<(LinkSpan, bool)> {
@@ -483,4 +510,61 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
         }
     });
     ui.add_space(6.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
+
+    fn shapes_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
+        fn walk(s: &egui::Shape, out: &mut Vec<(String, Rect)>) {
+            match s {
+                egui::Shape::Text(t) => out.push((t.galley.job.text.clone(), t.visual_bounding_rect())),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+        out
+    }
+
+    // spec: EDIT-024
+    #[test]
+    fn the_reading_view_draws_a_table_as_a_grid_and_its_links_work() {
+        let d = std::env::temp_dir().join(format!("shale-reader-table-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        crate::vault::write_sample_vault(&d).unwrap();
+        let v = Vault::open(&d).unwrap();
+        let text = "before\n\n| Name | Note |\n|---|:-:|\n| `a|b` | [[Ideas]] |\n\nafter";
+        let (mut scenes, media) = (SceneCache::default(), crate::media::MediaPlayer::default());
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut frame = |events: Vec<Event>| {
+            time += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(700.0, 500.0))), time: Some(time), events, ..Default::default() };
+            let mut action = None;
+            let mut out = ctx.run_ui(raw, |ui| {
+                action = show(ui, text, &v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, 15.0, true);
+            });
+            out.textures_delta.clear();
+            (action, shapes_text(&out.shapes))
+        };
+        frame(vec![]);
+        let (_, painted) = frame(vec![]);
+        let names: Vec<&str> = painted.iter().map(|(t, _)| t.as_str()).collect();
+        for cell in ["Name", "Note", "a|b", "Ideas", "before", "after"] {
+            assert!(names.contains(&cell), "{cell} is painted on its own: {names:?}");
+        }
+        assert!(!names.iter().any(|t| t.contains('|') && t.len() > 3), "no raw table text: {names:?}");
+        let at = painted.iter().find(|(t, _)| t == "Ideas").unwrap().1.center();
+        let click = |pressed| vec![Event::PointerMoved(at), Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }];
+        frame(click(true));
+        match frame(click(false)).0 {
+            Some(ReaderAction::OpenLink { target, .. }) => assert_eq!(target, "Ideas"),
+            _ => panic!("clicking the link in the table did nothing"),
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

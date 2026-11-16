@@ -73,7 +73,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     let v = media.view(&ctx, abs);
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     painter.rect(rect, CornerRadius::same(8), theme::BG_SECONDARY, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
-    let card = ui.interact(rect, id, Sense::click());
+    let card = ui.interact(rect, id, Sense::click_and_drag());
 
     // --- artwork and the round button
     let video = super::is_video(abs);
@@ -83,12 +83,12 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     paint_art(&painter, art, &v);
     if v.external {
         // no ffmpeg: the whole tile opens the video in the system's player (MEDIA-010)
-        let tile = ui.interact(art, id.with("tile"), Sense::click());
+        let tile = ui.interact(art, id.with("tile"), Sense::click_and_drag());
         if tile.clicked() {
             media.toggle(&ctx, abs, owner);
         }
     }
-    let button = ui.interact(Rect::from_center_size(art.center(), Vec2::splat(BUTTON_RADIUS * 2.0)), id.with("play"), Sense::click());
+    let button = ui.interact(Rect::from_center_size(art.center(), Vec2::splat(BUTTON_RADIUS * 2.0)), id.with("play"), Sense::click_and_drag());
     let mut alpha = button_alpha(v.opacity, button.hovered());
     if v.unplayable {
         alpha /= 2;
@@ -169,7 +169,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
 
     // volume: mute toggle and slider
     let mute_rect = Rect::from_min_size(Pos2::new(x0, top + 82.0), Vec2::splat(20.0));
-    let mute = ui.interact(mute_rect, id.with("mute"), Sense::click());
+    let mute = ui.interact(mute_rect, id.with("mute"), Sense::click_and_drag());
     let mute_label = if v.muted { "Unmute" } else { "Mute" };
     mute.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, mute_label));
     if mute.clicked() {
@@ -214,7 +214,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
 fn paint_download_link(ui: &Ui, painter: &Painter, at: Pos2, right: f32, id: Id) -> Response {
     let galley = painter.layout_no_wrap("— Download".into(), egui::FontId::proportional(12.0), theme::ACCENT);
     let rect = Rect::from_min_size(at, galley.size()).intersect(Rect::everything_left_of(right.max(at.x + 1.0)));
-    let link = ui.interact(rect, id.with("download"), Sense::click());
+    let link = ui.interact(rect, id.with("download"), Sense::click_and_drag());
     link.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Download"));
     painter.galley(at, galley, theme::ACCENT);
     if link.hovered() {
