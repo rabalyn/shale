@@ -1203,6 +1203,8 @@ mod tests {
         ctx: egui::Context,
         time: f64,
         texts: Vec<String>,
+        /// where each text of the last frame was painted (to click on it)
+        rects: Vec<(String, Rect)>,
     }
 
     /// The texts painted in the last frame (to see whether line numbers were drawn).
@@ -1210,6 +1212,20 @@ mod tests {
         fn walk(s: &egui::Shape, out: &mut Vec<String>) {
             match s {
                 egui::Shape::Text(t) => out.push(t.galley.job.text.clone()),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+        out
+    }
+
+    /// The painted texts of the last frame with their screen rectangles.
+    fn painted_rects(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
+        fn walk(s: &egui::Shape, out: &mut Vec<(String, Rect)>) {
+            match s {
+                egui::Shape::Text(t) => out.push((t.galley.job.text.clone(), t.visual_bounding_rect())),
                 egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
                 _ => {}
             }
@@ -1241,7 +1257,15 @@ mod tests {
             });
             out.textures_delta.clear();
             self.texts = painted_texts(&out.shapes);
+            self.rects = painted_rects(&out.shapes);
             (changed, action)
+        }
+
+        /// Press and release the mouse on the text painted last frame as `label` (two frames).
+        fn click_text(&mut self, ed: &mut NoteEditor, text: &mut String, vault: &Vault, rel: &Path, label: &str) -> (bool, Option<EditorAction>) {
+            let p = self.rects.iter().find(|(t, _)| t == label).unwrap_or_else(|| panic!("“{label}” is not on screen: {:?}", self.texts)).1.center();
+            self.frame(ed, text, vault, rel, click_events(p, true));
+            self.frame(ed, text, vault, rel, click_events(p, false))
         }
     }
 
@@ -1523,7 +1547,7 @@ mod tests {
         let rel = Path::new("Welcome.md");
         let mut text = String::from("Go to [[Ideas]] or make [[Brand new]] now");
         let mut ed = NoteEditor::new(egui::Id::unique("t"));
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         match click_word(&mut h, &mut ed, &mut text, &v, rel, "Ideas") {
@@ -1548,7 +1572,7 @@ mod tests {
         let mut text = format!("# Title\n{long}\n\nlast");
         let mut ed = NoteEditor::new(egui::Id::unique("gutter-rows"));
         ed.line_numbers = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         let (galley, _) = ed.last_layout.clone().unwrap();
@@ -1576,7 +1600,7 @@ mod tests {
         let rel = Path::new("Welcome.md");
         let mut text = String::from("one\ntwo\nthree");
         let mut ed = NoteEditor::new(egui::Id::unique("gutter-off"));
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         ed.line_numbers = true;
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
@@ -1603,7 +1627,7 @@ mod tests {
         let rel = Path::new("Welcome.md");
         let mut text = String::from("- [ ] buy milk");
         let mut ed = NoteEditor::new(egui::Id::unique("t2"));
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         let (galley, pos) = ed.last_layout.clone().unwrap();
@@ -1622,7 +1646,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t4"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         let key = |key: Key, modifiers: Modifiers| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("1. [ ] buy milk".into())]);
@@ -1655,7 +1679,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t6"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         let key = |key: Key, modifiers: Modifiers| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("- a\n    - b".into())]);
@@ -1674,7 +1698,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t7"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("pic: [!/Pro".into())]);
@@ -1700,7 +1724,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t8"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[!/".into())]);
@@ -1722,6 +1746,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: EDIT-002
+    #[test]
+    fn file_picker_ctrl_j_k_and_click() {
+        let (v, d) = vault_for_tests("picker-ctrl");
+        let rel = Path::new("Welcome.md");
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("picker-ctrl"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        let ctrl = |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::CTRL };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[!/".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(ed.assist.media.items.len() > 2, "items: {:?}", ed.assist.media.items);
+        h.frame(&mut ed, &mut text, &v, rel, vec![ctrl(Key::J)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![ctrl(Key::J)]);
+        assert_eq!(ed.assist.media.sel, 2, "Ctrl+J moves down");
+        h.frame(&mut ed, &mut text, &v, rel, vec![ctrl(Key::K)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert_eq!(ed.assist.media.sel, 1, "Ctrl+K moves up");
+        assert_eq!(text, "[!/");
+        // a click on a folder opens it in the path, like Enter
+        let folder = ed.assist.media.items.iter().find(|e| e.is_dir).expect("a folder in the vault").name.clone();
+        h.click_text(&mut ed, &mut text, &v, rel, &format!("▸ {folder}/"));
+        assert_eq!(text, format!("[!/{folder}/"));
+        assert!(h.ctx.memory(|m| m.has_focus(ed.id)), "the editor keeps the keyboard");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: EDIT-006
     #[test]
     fn inline_images_show_until_the_cursor_enters_the_link() {
@@ -1733,7 +1786,7 @@ mod tests {
         let mut text = String::from("intro\n![[pic.png]]\nafter");
         let mut ed = NoteEditor::new(egui::Id::unique("t9"));
         ed.inline_images = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         let tall = ed.last_layout.as_ref().unwrap().0.size().y;
@@ -1766,7 +1819,7 @@ mod tests {
         ed.inline_images = true;
         ed.live_preview = true;
         ed.preview_raw_lines = 1;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         let height = |ed: &NoteEditor| ed.last_layout.as_ref().unwrap().0.size().y;
         let mut settle = |ed: &mut NoteEditor, text: &mut String, cursor: usize| {
             ed.pending_cursor = Some(cursor);
@@ -1800,7 +1853,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t11"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[!/".into())]);
@@ -1839,7 +1892,7 @@ mod tests {
         let mut text = String::from("start\n");
         let mut ed = NoteEditor::new(egui::Id::unique("t12"));
         ed.pending_cursor = Some(6);
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[!/Pro".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
@@ -1875,7 +1928,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t13"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[[!/".into())]);
@@ -1916,7 +1969,7 @@ mod tests {
         let mut v = v;
         v.rescan();
         let rel = Path::new("Welcome.md");
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         crate::theme::install_fonts(&h.ctx);
         for (text, what) in [("intro\n![[Sketch.excalidraw]]\nafter", "drawing"), ("intro\n![[doc.pdf]]\nafter", "pdf")] {
             let mut text = text.to_string();
@@ -1956,7 +2009,7 @@ mod tests {
         let mut ed = NoteEditor::new(egui::Id::unique("t-noflicker"));
         ed.inline_images = true;
         ed.pending_cursor = Some(text.chars().count()); // cursor at the end, outside the link
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         for _ in 0..3 {
             h.frame(&mut ed, &mut text, &v, rel, vec![]);
         }
@@ -2005,7 +2058,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t-acesc"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         let key = |key: Key| Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("see [[Ide".into())]);
@@ -2036,7 +2089,7 @@ mod tests {
         let rel = Path::new("Welcome.md");
         let mut text = String::from("see [this is google](https://google.com) ok");
         let mut ed = NoteEditor::new(egui::Id::unique("t5"));
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         match click_word(&mut h, &mut ed, &mut text, &v, rel, "google]") {
@@ -2054,7 +2107,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("t3"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("See [[Ide".into())]);
         assert_eq!(text, "See [[Ide");
@@ -2062,6 +2115,44 @@ mod tests {
         let enter = Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         h.frame(&mut ed, &mut text, &v, rel, vec![enter]);
         assert_eq!(text, "See [[Ideas]]");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-001
+    #[test]
+    fn clicking_or_ctrl_j_k_in_the_note_suggestions() {
+        let (v, d) = vault_for_tests("ac-click");
+        let rel = Path::new("Welcome.md");
+        let ctrl = |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::CTRL };
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("ac-click"));
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("See [[".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        let n = ed.assist.ac_labels.len();
+        assert!(n > 2, "several entries: {:?}", ed.assist.ac_labels);
+        // Ctrl+J / Ctrl+K move the highlight like ↓ / ↑ and type nothing
+        h.frame(&mut ed, &mut text, &v, rel, vec![ctrl(Key::J)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![ctrl(Key::J)]);
+        assert_eq!(ed.assist.ac_sel, 2);
+        h.frame(&mut ed, &mut text, &v, rel, vec![ctrl(Key::K)]);
+        assert_eq!(ed.assist.ac_sel, 1);
+        h.frame(&mut ed, &mut text, &v, rel, vec![ctrl(Key::K)]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![ctrl(Key::K)]);
+        assert_eq!(ed.assist.ac_sel, n - 1, "Ctrl+K wraps round like ↑");
+        assert_eq!(text, "See [[");
+        // a click on an entry picks it like Enter, and the editor keeps the keyboard
+        let label = ed.assist.ac_labels[1].clone();
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.click_text(&mut ed, &mut text, &v, rel, &label);
+        assert_eq!(text, format!("See [[{label}]]"));
+        assert!(!ed.assist.ac_active, "the list closes after the pick");
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert!(h.ctx.memory(|m| m.has_focus(ed.id)), "the editor keeps the keyboard");
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("!".into())]);
+        assert_eq!(text, format!("See [[{label}]]!"), "typing goes on after the link");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -2079,7 +2170,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("tp"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("Met [[p Mü".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
@@ -2090,7 +2181,7 @@ mod tests {
         let mut text = String::new();
         let mut ed = NoteEditor::new(egui::Id::unique("tp2"));
         ed.request_focus = true;
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[[p Jörg Weiß".into())]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
@@ -2226,7 +2317,7 @@ mod tests {
         let mut ed = NoteEditor::new(egui::Id::unique("preview-ed"));
         ed.live_preview = true;
         ed.pending_cursor = Some(0);
-        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![] };
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);
         h.frame(&mut ed, &mut text, &v, rel, vec![]);

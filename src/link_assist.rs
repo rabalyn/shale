@@ -58,7 +58,7 @@ pub struct LinkAssist {
     ac_start: Option<usize>,
     /// Esc was pressed for the suggestions starting at this byte
     ac_dismissed: Option<usize>,
-    ac_sel: usize,
+    pub(crate) ac_sel: usize,
     ac_items: Vec<(String, bool)>,
     /// what the list shows for each item (the people list shows names, not link texts)
     pub(crate) ac_labels: Vec<String>,
@@ -140,10 +140,10 @@ impl LinkAssist {
         if self.ac_active && !self.ac_items.is_empty() {
             let n = self.ac_items.len();
             ui.input_mut(|i| {
-                if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
+                if down_key(i) {
                     self.ac_sel = (self.ac_sel + 1) % n;
                 }
-                if i.consume_key(Modifiers::NONE, Key::ArrowUp) {
+                if up_key(i) {
                     self.ac_sel = (self.ac_sel + n - 1) % n;
                 }
                 if i.consume_key(Modifiers::NONE, Key::Enter) || i.consume_key(Modifiers::NONE, Key::Tab) {
@@ -170,15 +170,8 @@ impl LinkAssist {
             let cur = egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).filter(|r| r.is_empty()).map(|r| markdown::char_to_byte(text, r.primary.index.0)).or(self.media.cursor);
             if let Some((cb, (start, typed))) = cur.and_then(|cb| crate::media::media_query(text, cb).map(|q| (cb, q))) {
                 let n = self.media.items.len();
-                let (down, up, tab, enter, esc) = ui.input_mut(|i| {
-                    (
-                        n > 0 && i.consume_key(Modifiers::NONE, Key::ArrowDown),
-                        n > 0 && i.consume_key(Modifiers::NONE, Key::ArrowUp),
-                        i.consume_key(Modifiers::NONE, Key::Tab),
-                        n > 0 && i.consume_key(Modifiers::NONE, Key::Enter),
-                        i.consume_key(Modifiers::NONE, Key::Escape),
-                    )
-                });
+                let (down, up, tab, enter, esc) =
+                    ui.input_mut(|i| (n > 0 && down_key(i), n > 0 && up_key(i), i.consume_key(Modifiers::NONE, Key::Tab), n > 0 && i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
                 if down {
                     self.media.sel = (self.media.sel + 1) % n;
                 }
@@ -232,8 +225,20 @@ impl LinkAssist {
         }
 
         // --- [[ suggestions
-        let cursor = output.cursor_range.filter(|r| r.is_empty()).map(|r| r.primary.index.0);
-        let query = if resp.has_focus() && typing { cursor.and_then(|c| link_query(text, c)) } else { None };
+        // A press on the open list takes the keyboard from the text box (egui gives up the focus
+        // on a press elsewhere) and the list is only shown while the text box has it: keep the
+        // list (at the cursor the text box had) and give the keyboard back, so the click can pick.
+        let on_list = self.ac_active && ui.input(|i| i.pointer.interact_pos()).zip(ui.ctx().memory(|m| m.area_rect(self.id.with("ac")))).is_some_and(|(p, r)| r.contains(p));
+        if on_list && !resp.has_focus() {
+            ui.ctx().memory_mut(|m| m.request_focus(self.id));
+            ui.ctx().request_repaint();
+        }
+        let cursor = output
+            .cursor_range
+            .filter(|r| r.is_empty())
+            .map(|r| r.primary.index.0)
+            .or_else(|| on_list.then(|| egui::text_edit::TextEditState::load(ui.ctx(), self.id).and_then(|st| st.cursor.char_range()).filter(|r| r.is_empty()).map(|r| r.primary.index.0)).flatten());
+        let query = if (resp.has_focus() || on_list) && typing { cursor.and_then(|c| link_query(text, c)) } else { None };
         // a dismissed `[[` stays closed until that `[[` is gone from the text
         if let Some(d) = self.ac_dismissed {
             if !text.get(d.saturating_sub(2)..).map(|t| t.starts_with("[[")).unwrap_or(false) {
@@ -463,7 +468,7 @@ impl LinkAssist {
                         clicked = Some(i);
                     }
                 }
-                ui.label(egui::RichText::new("↑↓ to move · Enter to pick · Esc to close").small().color(theme::FAINT));
+                ui.label(egui::RichText::new("↑↓ or Ctrl+J/K to move · Enter or click to pick · Esc to close").small().color(theme::FAINT));
             });
         });
         clicked
@@ -510,7 +515,7 @@ impl LinkAssist {
                 if let Some(err) = &self.media.error {
                     ui.colored_label(theme::LINK_MISSING, err);
                 }
-                ui.label(egui::RichText::new("Tab completes the path · ↑↓ choose · Enter picks · Esc closes").small().color(theme::FAINT));
+                ui.label(egui::RichText::new("Tab completes the path · ↑↓ or Ctrl+J/K choose · Enter picks · Esc closes").small().color(theme::FAINT));
                 ui.label(egui::RichText::new("Files from outside the vault are copied to z_media/").small().color(theme::FAINT));
             });
         });
@@ -578,6 +583,16 @@ impl LinkAssist {
             }
         }
     }
+}
+
+/// ↓ or Ctrl+J in an open list: take the key, say whether it was pressed (EDIT-001, EDIT-002).
+fn down_key(i: &mut egui::InputState) -> bool {
+    i.consume_key(Modifiers::NONE, Key::ArrowDown) || i.consume_key(Modifiers::CTRL, Key::J)
+}
+
+/// ↑ or Ctrl+K in an open list.
+fn up_key(i: &mut egui::InputState) -> bool {
+    i.consume_key(Modifiers::NONE, Key::ArrowUp) || i.consume_key(Modifiers::CTRL, Key::K)
 }
 
 /// If the cursor sits right after an unfinished `[[query`, returns (byte where the query starts, query).

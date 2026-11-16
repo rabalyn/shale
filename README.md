@@ -17,7 +17,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 
 - **Links you can see**: `[[Note]]` is **blue** when the note exists and **red** when it doesn't.
   Click a blue link to open the note. Click a red link to create the note and open it.
-- **Suggestions while you type**: type `[[` to get matching note names. Enter picks one, and the
+- **Suggestions while you type**: type `[[` to get matching note names. Enter or a click picks one, and the
   last entry creates a new note.
 - **Drawings**: hand-drawn style sketches stored as standard `.excalidraw` JSON files.
   Put `![[Sketch.excalidraw]]` in a note to show the drawing there.

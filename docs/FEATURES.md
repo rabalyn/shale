@@ -29,9 +29,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![Suggestions while typing](userguide/z_media/screenshots/link-suggestions.png)
 
-- Type `[[` to get matching notes; the last entry creates a new note. Esc closes the list.
+- Type `[[` to get matching notes; ↑/↓ or Ctrl+J/Ctrl+K move through the list, Enter, Tab or a
+  click picks an entry, and the last entry creates a new note. Esc closes the list.
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab completes
-  like a shell. Files from outside the vault are copied to `z_media/<year>/<month>/`.
+  like a shell; ↑/↓ or Ctrl+J/Ctrl+K choose, Enter or a click picks. Files from outside the vault
+  are copied to `z_media/<year>/<month>/`.
 - Paste a picture (Ctrl+V, or `p` in vim mode) and it is saved in the media folder as
   `Pasted image.png` with a link at the cursor; paste files copied in a file manager (pictures, PDFs,
   audio, video) and they are copied there and linked, one link per line. Other text pastes as usual.
