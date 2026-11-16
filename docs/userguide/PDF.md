@@ -28,6 +28,8 @@ on at the top of the next page with its header row again. Tick "Export plain tex
 text lines)" in the dialog to get the raw `| a | b |` lines instead; the box is off each time
 the dialog opens, so nothing is stored in the settings.
 
+![[pdf-export-dialog.png]]
+
 ## Read
 
 A PDF embedded with `![[Paper.pdf]]` is drawn inside the editor and the reading view (up to 50
