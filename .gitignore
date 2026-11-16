@@ -1,9 +1,7 @@
 /target
 /shots
+# the cargo home of the sandbox this was first made in
 /.cargo-home
-# build helpers for the sandbox this was made in (a normal cargo build doesn't need them)
-/.toolshim
-/.cargo
 notes/
 /tests/mail-env/certs/
 /tests/caldav-env/certs/
