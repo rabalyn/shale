@@ -84,7 +84,8 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
   [Gpg4win](https://www.gpg4win.org) on Windows); without it Shale says so and everything else works.
 - **CalDAV** and **git sync** need `curl` and `git` on the path (both come with macOS and Windows 10 and later; Git
   for Windows is a separate install).
-- **Drag and drop**: files dropped on the window are imported everywhere; mail messages, links and
+- **Drag and drop**: files dropped on the window are imported everywhere (pictures, PDFs, audio and
+  video as files in the media folder, pasting a picture into the editor does the same); mail messages, links and
   text dragged out of Thunderbird need Wayland.
 - **Time zones**: calendar events in a named zone (`Europe/Berlin`) use the system's zoneinfo
   files; Windows has none, so Shale brings its own time zone database there.

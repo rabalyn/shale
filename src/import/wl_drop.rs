@@ -47,12 +47,31 @@ pub enum DropEvent {
 }
 
 /// The kinds Shale takes, best first.
-pub const ACCEPTED: [&str; 7] = ["text/uri-list", "message/rfc822", "text/calendar", "text/x-moz-url", "text/plain;charset=utf-8", "UTF8_STRING", "text/plain"];
+pub const ACCEPTED: [&str; 15] =
+    ["text/uri-list", "message/rfc822", "text/calendar", "text/x-moz-url", "text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp", "video/mp4", "video/webm", "video/ogg"];
 
-/// Kinds read on a drop (a mail program may send an empty file list but a link to the
+/// Kinds read on a drop (pictures from a web browser, IMP-032; a mail program may send an empty file list but a link to the
 /// message and its file name).
-const WANTED: [&str; 10] =
-    ["text/uri-list", "message/rfc822", "text/calendar", "text/x-moz-url", "application/x-moz-file-promise-url", "application/x-moz-file-promise-dest-filename", "text/plain;charset=utf-8", "utf8_string", "text/plain", "string"];
+const WANTED: [&str; 18] = [
+    "text/uri-list",
+    "message/rfc822",
+    "text/calendar",
+    "text/x-moz-url",
+    "application/x-moz-file-promise-url",
+    "application/x-moz-file-promise-dest-filename",
+    "text/plain;charset=utf-8",
+    "utf8_string",
+    "text/plain",
+    "string",
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
+    "video/mp4",
+    "video/webm",
+    "video/ogg",
+];
 
 /// "text/plain; charset=UTF-8" → "text/plain;charset=utf-8"
 pub fn norm(m: &str) -> String {
@@ -506,6 +525,12 @@ mod tests {
         assert_eq!(pick_mime(&tb).as_deref(), Some("text/uri-list"));
         assert_eq!(wanted_kinds(&tb), o(&["text/uri-list", "text/x-moz-url", "application/x-moz-file-promise-url", "application/x-moz-file-promise-dest-filename", "text/plain; charset=utf-8", "UTF8_STRING", "text/plain", "STRING"]));
         assert_eq!(unique(&tb).len(), 11);
+        // a browser dragging a picture (IMP-032): the picture kinds are accepted and read
+        let img = o(&["text/plain", "image/png", "image/jpeg", "application/x-moz-file-promise-url"]);
+        assert_eq!(pick_mime(&img).as_deref(), Some("text/plain"));
+        assert_eq!(pick_mime(&o(&["image/webp"])).as_deref(), Some("image/webp"), "a drag of only a picture is taken");
+        assert_eq!(pick_mime(&o(&["video/webm"])).as_deref(), Some("video/webm"));
+        assert_eq!(wanted_kinds(&img), o(&["application/x-moz-file-promise-url", "text/plain", "image/png", "image/jpeg"]));
         assert!(early("text/uri-list") && early("text/x-moz-url"), "everything is asked for while dragging");
     }
 
