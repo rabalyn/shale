@@ -239,11 +239,13 @@ pub struct CacheRetention {
     pub broken_days: Option<u32>,
     /// Input debug log: its size in MB.
     pub debug_log_mb: Option<u32>,
+    /// Undo histories: days since a step was made (EDIT-021).
+    pub undo_days: Option<u32>,
 }
 
 impl Default for CacheRetention {
     fn default() -> Self {
-        CacheRetention { picture_days: Some(30), picture_mb: Some(500), post_days: Some(365), posts_per_account: Some(10_000), mail_backups: Some(3), broken_days: None, debug_log_mb: Some(10) }
+        CacheRetention { picture_days: Some(30), picture_mb: Some(500), post_days: Some(365), posts_per_account: Some(10_000), mail_backups: Some(3), broken_days: None, debug_log_mb: Some(10), undo_days: Some(30) }
     }
 }
 

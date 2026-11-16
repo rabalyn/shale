@@ -10,6 +10,7 @@
 //! an empty line.
 
 use crate::markdown;
+use crate::undo::History;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -26,6 +27,8 @@ pub enum VimKey {
     Esc,
     Enter,
     Backspace,
+    /// Ctrl+R
+    Redo,
     Left,
     Right,
     Up,
@@ -56,6 +59,8 @@ pub struct Vim {
     want_col: Option<usize>,
     /// a `g` waiting for the second `g`
     pending_g: bool,
+    /// a `d` waiting for the second `d`
+    pending_d: bool,
     /// a command being typed: `:` or `/`, and its text
     cmdline: Option<(char, String)>,
     last_search: Option<String>,
@@ -67,7 +72,7 @@ pub struct Vim {
 
 impl Default for Vim {
     fn default() -> Self {
-        Vim { mode: Mode::Normal, cursor: 0, anchor: 0, want_col: None, pending_g: false, cmdline: None, last_search: None, message: None, paste_pending: false }
+        Vim { mode: Mode::Normal, cursor: 0, anchor: 0, want_col: None, pending_g: false, pending_d: false, cmdline: None, last_search: None, message: None, paste_pending: false }
     }
 }
 
@@ -205,6 +210,8 @@ impl Vim {
         };
         if self.pending_g {
             format!("{mode}  g")
+        } else if self.pending_d {
+            format!("{mode}  d")
         } else {
             mode.to_string()
         }
@@ -256,17 +263,21 @@ impl Vim {
         self.cursor = clamp_normal(&c, back);
     }
 
-    /// Handle one key. `self.cursor` is the cursor before and after.
-    pub fn key(&mut self, k: VimKey, text: &mut String, fx: &mut Effects) {
+    /// Handle one key. `self.cursor` is the cursor before and after. `hist` is the history of the
+    /// note: every command starts with a checkpoint, so what happened since the last one (an
+    /// insert session, a change from outside) is one step (EDIT-020).
+    pub fn key(&mut self, k: VimKey, text: &mut String, hist: &mut History, fx: &mut Effects) {
         if self.cmdline.is_some() {
             self.command_key(k, text, fx);
             return;
         }
+        hist.checkpoint(text);
         self.message = None;
         let c: Vec<char> = text.chars().collect();
         let pos = self.cursor.min(c.len());
         let before = pos;
         let g = std::mem::take(&mut self.pending_g);
+        let d = std::mem::take(&mut self.pending_d);
         let mut keep_col = false;
         let ch = match k {
             VimKey::Char(ch) => ch,
@@ -283,6 +294,12 @@ impl Vim {
             }
             VimKey::Enter => 'j',
             VimKey::Backspace => 'h',
+            VimKey::Redo => {
+                if !self.visual() {
+                    self.step(hist.redo(text), "Already at newest change", text, fx);
+                }
+                return;
+            }
         };
         let mut new = pos;
         match ch {
@@ -312,6 +329,12 @@ impl Vim {
             'G' => new = line_start(&c, c.len()),
             'n' | 'N' => new = self.search_step(text, pos, ch == 'n'),
             ':' | '/' => self.cmdline = Some((ch, String::new())),
+            'd' if d && !self.visual() => self.delete_line(text, &c, fx),
+            'd' if !self.visual() => self.pending_d = true,
+            'u' if !self.visual() => {
+                self.step(hist.undo(text), "Already at oldest change", text, fx);
+                return;
+            }
             _ if self.visual() => self.visual_key(ch, text, &c, fx),
             _ => self.normal_key(ch, text, &c, fx),
         }
@@ -322,6 +345,33 @@ impl Vim {
             self.cursor = if self.visual() { new.min(c.len().saturating_sub(1)) } else { clamp_normal(&c, new) };
         }
         fx.moved |= self.cursor != before;
+    }
+
+    /// The result of an undo or redo: the cursor goes where the text changed, or the status bar
+    /// says there was nothing to do.
+    fn step(&mut self, landed: Option<usize>, nothing: &str, text: &str, fx: &mut Effects) {
+        let Some(at) = landed else {
+            self.message = Some(nothing.to_string());
+            return;
+        };
+        let c: Vec<char> = text.chars().collect();
+        self.cursor = clamp_normal(&c, at);
+        self.want_col = None;
+        fx.changed = true;
+        fx.moved = true;
+    }
+
+    /// `dd`: delete the cursor's line with its line break and put it on the clipboard.
+    fn delete_line(&mut self, text: &mut String, c: &[char], fx: &mut Effects) {
+        let pos = self.cursor.min(c.len());
+        let (s, e) = (line_start(c, pos), line_end(c, pos));
+        fx.copy = Some(format!("{}\n", char_range_text(text, s, e)));
+        // the last line takes the break before it; the only line is just emptied
+        let (da, db) = if e < c.len() { (s, e + 1) } else { (s.saturating_sub(1), e) };
+        replace_chars(text, da, db, "");
+        let c2: Vec<char> = text.chars().collect();
+        self.cursor = clamp_normal(&c2, first_non_blank(&c2, da.min(c2.len())));
+        fx.changed = true;
     }
 
     /// Keys that change the text or the mode in normal mode.
@@ -514,18 +564,21 @@ impl Vim {
 mod tests {
     use super::*;
 
-    /// Run keys (typed characters; `<esc>`, `<cr>`, `<bs>` for the others) from `cursor`.
+    /// Run keys (typed characters; `<esc>`, `<cr>`, `<bs>`, `<c-r>` for the others) from `cursor`.
     fn run(text: &str, cursor: usize, keys: &str) -> (Vim, String, Effects) {
         let mut v = Vim::default();
         let mut t = text.to_string();
         v.reset(&t, cursor);
         let mut fx = Effects::default();
+        let mut hist = History::default();
         let mut rest = keys;
         while !rest.is_empty() {
             let (k, n) = if let Some(r) = rest.strip_prefix("<esc>") {
                 (VimKey::Esc, rest.len() - r.len())
             } else if let Some(r) = rest.strip_prefix("<cr>") {
                 (VimKey::Enter, rest.len() - r.len())
+            } else if let Some(r) = rest.strip_prefix("<c-r>") {
+                (VimKey::Redo, rest.len() - r.len())
             } else if let Some(r) = rest.strip_prefix("<bs>") {
                 (VimKey::Backspace, rest.len() - r.len())
             } else {
@@ -542,7 +595,7 @@ mod tests {
                     v.cursor += 1;
                 }
             } else {
-                v.key(k, &mut t, &mut fx);
+                v.key(k, &mut t, &mut hist, &mut fx);
             }
             rest = &rest[n..];
         }
@@ -653,7 +706,7 @@ mod tests {
         let mut t = "abc\ndef".to_string();
         v.reset(&t, 1);
         let mut fx = Effects::default();
-        v.key(VimKey::Char('p'), &mut t, &mut fx);
+        v.key(VimKey::Char('p'), &mut t, &mut History::default(), &mut fx);
         assert!(fx.request_paste && v.paste_pending, "p asks the window for the clipboard");
         v.paste("XY", &mut t, &mut fx);
         assert_eq!((t.as_str(), v.cursor), ("abXYc\ndef", 3), "after the cursor, on the last pasted character");
@@ -670,6 +723,128 @@ mod tests {
         v.reset(&t, 0);
         v.paste("x", &mut t, &mut fx);
         assert_eq!(t, "x");
+    }
+
+    // spec: EDIT-019
+    #[test]
+    fn dd_deletes_the_line_and_copies_it() {
+        // middle line: the cursor goes to the first non-blank of the line that took its place
+        let (v, t, fx) = run("a\nb\n  c\nd", 2, "dd");
+        assert_eq!((t.as_str(), fx.copy.as_deref(), v.cursor), ("a\n  c\nd", Some("b\n"), 4));
+        assert!(fx.changed);
+        // first line
+        let (v, t, fx) = run("one\ntwo", 1, "dd");
+        assert_eq!((t.as_str(), fx.copy.as_deref(), v.cursor), ("two", Some("one\n"), 0));
+        // last line takes the break before it; the cursor stands on the line before
+        let (v, t, fx) = run("a\n  b\nc", 6, "dd");
+        assert_eq!((t.as_str(), fx.copy.as_deref(), v.cursor), ("a\n  b", Some("c\n"), 4));
+        // the only line is emptied; an empty line is a line
+        let (v, t, fx) = run("only", 2, "dd");
+        assert_eq!((t.as_str(), fx.copy.as_deref(), v.cursor), ("", Some("only\n"), 0));
+        let (_, t, fx) = run("a\n\nb", 2, "dd");
+        assert_eq!((t.as_str(), fx.copy.as_deref()), ("a\nb", Some("\n")));
+        // multibyte text
+        let (v, t, _) = run("é\nüß\nx", 2, "dd");
+        assert_eq!((t.as_str(), v.cursor), ("é\nx", 2));
+        assert_eq!(run("a\nb", 0, "d").0.status(), "NORMAL  d", "a d waits");
+    }
+
+    // spec: EDIT-019
+    #[test]
+    fn a_d_waits_for_the_second_d_and_other_keys_cancel_it() {
+        let (v, t, fx) = run("ab\ncd", 0, "dl");
+        assert_eq!((t.as_str(), v.cursor, v.status().as_str(), fx.copy.as_deref()), ("ab\ncd", 1, "NORMAL", None), "d then l: l moves as usual");
+        let (_, t, _) = run("ab\ncd", 0, "dxd");
+        assert_eq!(t, "b\ncd", "d then x: x deletes; the last d starts a new wait");
+        let (_, t, _) = run("ab\ncd", 0, "d<esc>d");
+        assert_eq!(t, "ab\ncd", "Esc cancels; the next d starts again");
+        let (_, t, _) = run("ab\ncd", 0, "d<esc>dd");
+        assert_eq!(t, "cd");
+        let (_, t, _) = run("ab\ncd", 0, "gdd");
+        assert_eq!(t, "cd", "g is cancelled by d, which then waits");
+    }
+
+    // spec: EDIT-019
+    #[test]
+    fn dd_then_p_puts_the_line_back_below() {
+        let mut v = Vim::default();
+        let mut t = "a\nb\nc".to_string();
+        v.reset(&t, 0);
+        let mut fx = Effects::default();
+        let mut hist = History::default();
+        v.key(VimKey::Char('d'), &mut t, &mut hist, &mut fx);
+        v.key(VimKey::Char('d'), &mut t, &mut hist, &mut fx);
+        let clip = fx.copy.take().unwrap();
+        v.paste(&clip, &mut t, &mut fx);
+        assert_eq!(t, "b\na\nc");
+    }
+
+    // spec: EDIT-020
+    #[test]
+    fn u_and_ctrl_r_undo_and_redo_commands() {
+        let (v, t, _) = run("abc", 1, "xu");
+        assert_eq!((t.as_str(), v.cursor), ("abc", 1), "x undone");
+        let (v, t, _) = run("abc", 1, "xu<c-r>");
+        assert_eq!((t.as_str(), v.cursor), ("ac", 1));
+        let (_, t, _) = run("a\nb\nc", 2, "ddu");
+        assert_eq!(t, "a\nb\nc", "dd undone");
+        let (v, t, _) = run("a\nb\nc", 4, "ddu");
+        assert_eq!((t.as_str(), v.cursor), ("a\nb\nc", 4), "the last line comes back with the cursor on it");
+        let (_, t, _) = run("a\nb\nc", 2, "ddu<c-r>");
+        assert_eq!(t, "a\nc");
+        let (_, t, _) = run("one two three", 4, "vwdu");
+        assert_eq!(t, "one two three", "visual d undone");
+        let (_, t, _) = run("abc", 0, "xxu");
+        assert_eq!(t, "bc", "each x is a step");
+        let (_, t, _) = run("ab", 0, "xu<c-r>u");
+        assert_eq!(t, "ab", "undo, redo, undo");
+        let (_, t, _) = run("é ü", 0, "xuu");
+        assert_eq!(t, "é ü", "multibyte");
+    }
+
+    // spec: EDIT-020
+    #[test]
+    fn an_insert_session_is_one_step() {
+        let (v, t, _) = run("abc\nd", 0, "oHi<esc>ju");
+        assert_eq!(t, "abc\nd", "o, the typing and Esc undone together");
+        assert_eq!(v.cursor, 2, "on the line above, where the o was typed");
+        let (_, t, _) = run("abc", 0, "iXY<esc>AZ<esc>u");
+        assert_eq!(t, "XYabc", "only the second session");
+        let (_, t, _) = run("abc", 0, "iXY<esc>AZ<esc>uu");
+        assert_eq!(t, "abc");
+        let (_, t, _) = run("abc", 0, "iXY<esc>AZ<esc>uu<c-r><c-r>");
+        assert_eq!(t, "XYabcZ");
+    }
+
+    // spec: EDIT-020
+    #[test]
+    fn a_new_change_after_undo_drops_redo_and_nothing_to_do_says_so() {
+        let (v, t, _) = run("abc", 0, "xux<c-r>");
+        assert_eq!((t.as_str(), v.message.as_deref()), ("bc", Some("Already at newest change")));
+        let (v, _, _) = run("abc", 0, "u");
+        assert_eq!(v.message.as_deref(), Some("Already at oldest change"));
+        assert_eq!(v.status(), "Already at oldest change");
+    }
+
+    // spec: EDIT-020
+    #[test]
+    fn paste_and_outside_changes_are_steps() {
+        let mut v = Vim::default();
+        let mut t = "abc".to_string();
+        v.reset(&t, 0);
+        let (mut fx, mut hist) = (Effects::default(), History::default());
+        v.key(VimKey::Char('l'), &mut t, &mut hist, &mut fx);
+        v.paste("XY", &mut t, &mut fx);
+        assert_eq!(t, "abXYc");
+        v.key(VimKey::Char('h'), &mut t, &mut hist, &mut fx);
+        // a change from outside vim-lite (Alt+Up, another tab) comes before the next command
+        t = "ABXYc".to_string();
+        v.key(VimKey::Char('u'), &mut t, &mut hist, &mut fx);
+        assert_eq!(t, "abXYc", "the outside change is undone first");
+        v.key(VimKey::Char('u'), &mut t, &mut hist, &mut fx);
+        assert_eq!(t, "abc", "then the paste");
+        v.key(VimKey::Char('u'), &mut t, &mut hist, &mut fx);
+        assert_eq!(v.message.as_deref(), Some("Already at oldest change"));
     }
 
     // spec: EDIT-010

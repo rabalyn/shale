@@ -118,6 +118,8 @@ fn commits_everything_with_prefix_and_suffix_but_not_temp_files() {
     write(&v, ".shale/settings.json", "{}\n");
     write(&v, "sub/.shale-tmp-1-2-3", "half written");
     write(&v, ".shale-tmp-4-5-6", "half written");
+    // the undo histories stay on the device (EDIT-021)
+    write(&v, ".shale/undo/0123456789abcdef.json", "{}\n");
     let opts = Options { commit_prefix: "[notes] ".into(), commit_suffix: " #auto".into(), host: "laptop".into(), stamp: STAMP.into() };
     let r = sync(&env.git, &v, &opts, &TreeLock::default()).unwrap();
     assert_eq!(r.committed, 2);

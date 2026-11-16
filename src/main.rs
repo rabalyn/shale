@@ -58,6 +58,7 @@ mod tab_order_tests;
 mod theme;
 #[cfg(test)]
 mod ui_test_support;
+mod undo;
 #[cfg(test)]
 mod utf8_tests;
 mod vault;
