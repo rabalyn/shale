@@ -386,10 +386,11 @@ pub fn save_bytes(vault_root: &Path, name: &str, data: &[u8], date: (i32, u32, u
     }
 }
 
-/// The markdown to insert: images are embedded `![[…]]`, other files linked `[[…]]`.
+/// The markdown to insert: images, sounds and videos are embedded `![[…]]` (so they show a picture or
+/// a player, MEDIA-001), other files linked `[[…]]`.
 pub fn link_for(rel: &Path) -> String {
     let s = crate::vault::rel_to_string(rel);
-    if is_image(rel) {
+    if is_image(rel) || is_media(rel) {
         format!("![[{s}]]")
     } else {
         format!("[[{s}]]")
@@ -487,6 +488,9 @@ mod tests {
         assert_eq!(import_file(&vault, &vault.join("in.pdf"), date).unwrap(), PathBuf::from("in.pdf"));
         assert_eq!(link_for(&rel), "![[z_media/2026/11/261112_cat.png]]");
         assert_eq!(link_for(Path::new("in.pdf")), "[[in.pdf]]");
+        // spec: MEDIA-001
+        assert_eq!(link_for(Path::new("z_media/a b.MP3")), "![[z_media/a b.MP3]]");
+        assert_eq!(link_for(Path::new("clip.mp4")), "![[clip.mp4]]");
         let _ = fs::remove_dir_all(&home);
         let _ = fs::remove_dir_all(&vault);
     }

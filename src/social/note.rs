@@ -397,7 +397,7 @@ mod tests {
             "> CW: food",
             "Lunch [#yum](https://m.test/tags/yum)\n\nsecond paragraph",
             "![[z_media/2024/05/240517_ada-1.png]]\n*a bowl of soup*",
-            "[[z_media/2024/05/240517_ada-2.mp4]]",
+            "![[z_media/2024/05/240517_ada-2.mp4]]",
             "[image](https://f.test/gone.jpg)",
             "> **Quote:** [BOB (@bob@m.test)](https://m.test/@bob) · [original](https://m.test/@bob/7)\n> orig\n>\n> more\n> [image](https://f.test/q.png) — q alt",
             "[Recipe](https://example.com/r) — Soup",
