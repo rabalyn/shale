@@ -309,7 +309,7 @@ fn a_post_found_in_the_sidebar_search_opens_in_its_feed_scrolled_to_the_post() {
     }
     w.app.left = crate::app::LeftPanel::Search;
     let search = |w: &mut W, q: &str| {
-        w.app.search = q.into();
+        w.app.search.query = q.into();
         w.frames(3);
     };
     // 1: a post the feed holds (in the middle of its list)

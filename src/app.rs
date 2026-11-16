@@ -7,6 +7,7 @@ use crate::fsutil;
 use crate::graph::{GraphClick, GraphView};
 use crate::keys::{Action as KeyAction, Scope};
 use crate::markdown;
+use crate::panels::SearchBox;
 use crate::reader::{ReaderAction, SceneCache};
 use crate::theme;
 use crate::vault::{self, rel_to_string, FileKind, Saved, Vault};
@@ -289,17 +290,11 @@ pub struct ShaleApp {
     /// The icons of the ribbon and the right sidebar, and a drag of one of them (LAY-001).
     pub side: crate::sidebar_ui::SideState,
     pub expanded: HashSet<PathBuf>,
-    pub search: String,
-    /// the selected stop in the search results while they are browsed with the keyboard
-    pub search_sel: Option<usize>,
-    /// scroll the selected search result into view on the next frame
-    pub(crate) search_scroll: bool,
     /// the selected row of the file list while it has the keyboard (Ctrl+H, Ctrl+Shift+B)
     pub tree_sel: Option<PathBuf>,
     /// scroll the selected file list row into view on the next frame
     pub(crate) tree_scroll: bool,
-    /// focus the search box (and select its text) in the next frame
-    pub focus_search: bool,
+    pub search: SearchBox,
     pub tasks: TasksFilter,
     pub graph: GraphView,
     pub local_graph: GraphView,
@@ -453,12 +448,9 @@ impl ShaleApp {
             left: LeftPanel::Files,
             side: crate::sidebar_ui::SideState::new(crate::sidebar::Layout::from_config(&cfg)),
             expanded: HashSet::new(),
-            search: String::new(),
-            search_sel: None,
-            search_scroll: false,
             tree_sel: None,
             tree_scroll: false,
-            focus_search: false,
+            search: SearchBox::default(),
             tasks: TasksFilter::default(),
             graph: GraphView::new(false),
             local_graph: GraphView::new(true),
@@ -1426,7 +1418,7 @@ impl ShaleApp {
                 self.tree_sel = cur.filter(|c| rows.iter().any(|(r, _)| r == c)).or_else(|| rows.first().map(|(r, _)| r.clone()));
                 self.tree_scroll = true;
             }
-            LeftPanel::Search => self.focus_search = true,
+            LeftPanel::Search => self.search.focus = true,
             LeftPanel::Tags => {}
         }
     }
@@ -1434,7 +1426,7 @@ impl ShaleApp {
     /// Put the keyboard back into the editor of the open note (Ctrl+L).
     pub fn focus_editor(&mut self) {
         self.tree_sel = None;
-        self.search_sel = None;
+        self.search.sel = None;
         if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
             t.editor.request_focus = true;
         }
@@ -1780,7 +1772,7 @@ impl ShaleApp {
             self.keymap.cancel(Scope::EditorNormal);
         }
         let in_mail = matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Mail));
-        let sidebar_keys = self.tree_sel.is_some() || self.search_sel.is_some();
+        let sidebar_keys = self.tree_sel.is_some() || self.search.sel.is_some();
         if mail_view {
             self.show_view(View::Mail, false);
         }
@@ -1806,7 +1798,7 @@ impl ShaleApp {
             // in the mail view the keyboard goes to its panes (MAIL-063)
             if in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, 1, sidebar_keys) {
                 self.tree_sel = None;
-                self.search_sel = None;
+                self.search.sel = None;
             } else {
                 self.focus_editor();
             }
@@ -1824,7 +1816,7 @@ impl ShaleApp {
         if search {
             self.left = LeftPanel::Search;
             self.cfg.show_left = true;
-            self.focus_search = true;
+            self.search.focus = true;
         }
         if save {
             self.flush_all();

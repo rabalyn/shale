@@ -376,7 +376,7 @@ impl ShaleApp {
             Item::Search => {
                 self.left = LeftPanel::Search;
                 self.cfg.show_left = true;
-                self.focus_search = true;
+                self.search.focus = true;
             }
             Item::Tags => {
                 self.left = LeftPanel::Tags;
@@ -639,7 +639,7 @@ impl ShaleApp {
             }
             View::Mail => {
                 let modal_open = self.modal.is_some();
-                self.mail.away = self.tree_sel.is_some() || self.search_sel.is_some();
+                self.mail.away = self.tree_sel.is_some() || self.search.sel.is_some();
                 let acts = self.mail.show(ui, &self.cfg, &mut self.keymap, modal_open);
                 for a in acts {
                     self.mail_action(a);
