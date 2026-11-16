@@ -164,7 +164,7 @@ pub struct VaultSettings {
 
 impl Default for VaultSettings {
     fn default() -> Self {
-        VaultSettings { version: Self::CURRENT, people_dir: crate::people::DEFAULT_DIR.into(), sync: SyncSettings::default(), other: Map::new() }
+        VaultSettings { version: Self::CURRENT, people_dir: crate::import::people::DEFAULT_DIR.into(), sync: SyncSettings::default(), other: Map::new() }
     }
 }
 

@@ -1,8 +1,8 @@
 //! Drag and drop into the app (e-mails, calendar events, files, text) and the Import dialog.
 
 use super::{Action, Modal, ShaleApp};
+use crate::import::dialog::{ImportAction, ImportDialog};
 use crate::import::{self, Item};
-use crate::import_dialog::{ImportAction, ImportDialog};
 use crate::theme;
 use crate::vault::rel_to_string;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Ui, Vec2};
@@ -107,7 +107,7 @@ impl ShaleApp {
         let text: String = d.items.iter().filter(|i| i.include).map(|i| i.tag_text()).collect::<Vec<_>>().join("\n");
         let known: Vec<String> = v.all_tags().into_iter().map(|t| t.0).filter(|t| !t.eq_ignore_ascii_case("person")).collect();
         let mut tags = import::parse_tags(&d.tags);
-        for t in crate::tagwords::direct(&known, &text) {
+        for t in crate::import::tagwords::direct(&known, &text) {
             if !d.auto_tags.contains(&t) {
                 d.auto_tags.push(t.clone());
                 if !tags.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
@@ -116,7 +116,7 @@ impl ShaleApp {
             }
         }
         d.tags = tags.join(", ");
-        d.suggested = self.tag_words.as_ref().map(|tw| crate::tagwords::suggest(tw, &text, &d.auto_tags)).unwrap_or_default();
+        d.suggested = self.tag_words.as_ref().map(|tw| crate::import::tagwords::suggest(tw, &text, &d.auto_tags)).unwrap_or_default();
     }
 
     /// Learn the tag words again now and then (in the background), and keep them in the vault.
@@ -128,7 +128,7 @@ impl ShaleApp {
                     self.toast(format!("Learning tag words failed: {e}"));
                 }
                 Ok(Ok(tw)) => {
-                    let saved = self.vault.as_ref().map(|v| crate::tagwords::save(&v.root, &tw));
+                    let saved = self.vault.as_ref().map(|v| crate::import::tagwords::save(&v.root, &tw));
                     if let Some(Err(e)) = saved {
                         self.toast(format!("Could not save the tag words: {e}"));
                     }
@@ -143,7 +143,7 @@ impl ShaleApp {
         if self.tag_root.as_deref() != Some(v.root.as_path()) {
             // another vault: start with what was learned there before
             self.tag_root = Some(v.root.clone());
-            self.tag_words = crate::tagwords::load(&v.root);
+            self.tag_words = crate::import::tagwords::load(&v.root);
             self.tag_gen = u64::MAX;
             self.tag_at = None;
         }
@@ -152,7 +152,7 @@ impl ShaleApp {
             self.tag_gen = v.generation;
             self.tag_at = Some(std::time::Instant::now());
             let notes: Vec<(String, Vec<String>)> = v.notes.values().map(|n| (n.text.clone(), n.tags.clone())).collect();
-            self.tag_job = Some(crate::jobs::spawn(move || crate::tagwords::learn_from_vault(&notes), || {}));
+            self.tag_job = Some(crate::jobs::spawn(move || crate::import::tagwords::learn_from_vault(&notes), || {}));
         }
     }
 
@@ -160,8 +160,8 @@ impl ShaleApp {
     pub fn create_person(&mut self, name: &str) {
         let dir = self.vdata.settings.people_dir.clone();
         let Some(v) = &mut self.vault else { return };
-        let p = crate::people::Person { name: name.trim().to_string(), email: String::new(), role: crate::people::Role::From, existing: None, on: true };
-        match crate::people::ensure_note(v, &dir, &p) {
+        let p = crate::import::people::Person { name: name.trim().to_string(), email: String::new(), role: crate::import::people::Role::From, existing: None, on: true };
+        match crate::import::people::ensure_note(v, &dir, &p) {
             Ok(rel) => self.toast(format!("Contact note “{}” made", rel_to_string(&rel))),
             Err(e) => self.toast(e),
         }
@@ -294,26 +294,26 @@ impl ShaleApp {
         #[cfg(target_os = "linux")]
         {
             let zoom = ctx.zoom_factor();
-            let mut events = crate::wl_drop::take_events();
+            let mut events = crate::import::wl_drop::take_events();
             events.append(&mut self.fake_drops);
             for e in events {
                 match e {
-                    crate::wl_drop::DropEvent::Hover { x, y } => self.ext_hover = Some(Pos2::new(x / zoom, y / zoom)),
-                    crate::wl_drop::DropEvent::Leave => {
+                    crate::import::wl_drop::DropEvent::Hover { x, y } => self.ext_hover = Some(Pos2::new(x / zoom, y / zoom)),
+                    crate::import::wl_drop::DropEvent::Leave => {
                         self.ext_hover = None;
                         self.ext_refused = None;
                     }
-                    crate::wl_drop::DropEvent::Busy => {
+                    crate::import::wl_drop::DropEvent::Busy => {
                         self.ext_hover = None;
                         self.drop_busy = true;
                     }
-                    crate::wl_drop::DropEvent::Refused { x, y, offered } => {
+                    crate::import::wl_drop::DropEvent::Refused { x, y, offered } => {
                         // only a hint at the pointer while it is over the window: passing over
                         // the window with a browser tab is not worth a message
                         self.ext_hover = None;
                         self.ext_refused = Some((Pos2::new(x / zoom, y / zoom), offered));
                     }
-                    crate::wl_drop::DropEvent::Drop { x, y, parts, offered, report } => {
+                    crate::import::wl_drop::DropEvent::Drop { x, y, parts, offered, report } => {
                         self.ext_hover = None;
                         self.drop_busy = false;
                         self.last_offered = offered;

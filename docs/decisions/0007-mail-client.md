@@ -16,7 +16,7 @@ What Shale already has:
   HTML into plain text, so no web engine, remote images or scripts are ever involved.
 - `import.rs` turns a mail into a note with its attachments and people (IMP-003…IMP-005, PPL-002).
 - `secrets.rs` keeps CalDAV passwords in the system keyring (Secret Service via `secret-tool`).
-- `tb_store.rs` already reads Thunderbird's local folders and `.msf` indexes.
+- `import/tb_store.rs` already reads Thunderbird's local folders and `.msf` indexes.
 
 What it does not have: TLS sockets of its own (CalDAV goes through `curl`), a database, or a
 panic-safe job runner (JOB-002).
@@ -195,7 +195,7 @@ in "Testing" status expire after 7 days; Microsoft may insist on `http://localho
 
 ## Alternatives considered
 
-- **Read Thunderbird's local copy instead of the server** (extend `tb_store.rs`): no network, no
+- **Read Thunderbird's local copy instead of the server** (extend `import/tb_store.rs`): no network, no
   password, no sync code. Rejected as the main path because it only works while Thunderbird runs
   and keeps offline copies, and mbox + Mork are fragile to read. It stays as the drag-and-drop
   fallback.

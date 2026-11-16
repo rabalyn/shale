@@ -28,7 +28,6 @@ mod imap_client;
 mod imap_fake_tests;
 mod imap_sync;
 mod import;
-mod import_dialog;
 mod instance;
 mod jobs;
 mod keys;
@@ -68,7 +67,6 @@ mod panels;
 mod pdfexport;
 mod pdfview;
 mod pdfwrite;
-mod people;
 mod picker;
 mod reader;
 mod recovery;
@@ -88,12 +86,6 @@ mod social;
 mod start_dialog_tests;
 #[cfg(test)]
 mod tab_order_tests;
-mod tagwords;
-#[cfg(all(test, target_os = "linux"))]
-mod tb_fixture_tests;
-// Thunderbird's own mail folders, looked up for dropped messages (Wayland, IMP-008)
-#[cfg(target_os = "linux")]
-mod tb_store;
 mod theme;
 #[cfg(test)]
 mod ui_test_support;
@@ -103,8 +95,6 @@ mod vault;
 mod vault_path;
 mod vault_state;
 mod vim;
-#[cfg(target_os = "linux")]
-mod wl_drop;
 
 use eframe::egui;
 use std::path::PathBuf;
@@ -235,7 +225,7 @@ fn main() -> eframe::Result {
         // Our own event loop, so drops from other programs can be listened for on Wayland
         // before the clipboard helper starts (see wl_drop).
         let event_loop = winit::event_loop::EventLoop::<eframe::UserEvent>::with_user_event().build().map_err(eframe::Error::WinitEventLoop)?;
-        wl_drop::attach(&event_loop);
+        import::wl_drop::attach(&event_loop);
         let mut app = eframe::create_native("Shale", options, Box::new(move |cc| Ok(Box::new(app::ShaleApp::new(cc, opts)))), &event_loop);
         event_loop.run_app(&mut app).map_err(eframe::Error::WinitEventLoop)
     }

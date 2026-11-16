@@ -31,7 +31,7 @@ fn places_with_caches(tag: &str) -> (Places, PathBuf) {
     let mut p = Places::in_folder(&d);
     let vault = d.join("vault");
     write(&vault.join("Note.md"), b"# hi");
-    write(&crate::tagwords::file_in(&vault), b"{}");
+    write(&crate::import::tagwords::file_in(&vault), b"{}");
     p.vault = Some(vault);
     write(&p.pictures.join("0123456789abcdef.png"), &[1; 100]);
     write(&p.pictures.join("fedcba9876543210.jpg"), &[1; 50]);

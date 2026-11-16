@@ -20,7 +20,7 @@ impl ShaleApp {
         match &self.vault {
             Some(v) if self.mail.vault.as_ref().is_none_or(|i| i.generation != v.generation || i.root != v.root) => {
                 let files = v.files.iter().take(50_000).map(|f| (crate::vault::rel_to_string(&f.rel), f.kind == crate::vault::FileKind::Note)).collect();
-                let people = crate::people::addresses(v, &self.vdata.settings.people_dir);
+                let people = crate::import::people::addresses(v, &self.vdata.settings.people_dir);
                 self.mail.vault = Some(crate::mail_compose::VaultInfo { root: v.root.clone(), generation: v.generation, files, people });
             }
             None => self.mail.vault = None,

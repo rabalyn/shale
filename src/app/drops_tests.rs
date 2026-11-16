@@ -3,8 +3,8 @@
 //! `handle_drops` without a compositor.
 
 use super::{Modal, Options, ShaleApp};
+use crate::import::wl_drop::DropEvent;
 use crate::ui_test_support::Headless;
-use crate::wl_drop::DropEvent;
 use eframe::egui::{Pos2, Rect};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -75,7 +75,7 @@ impl W {
         *z.unwrap_or_else(|| panic!("no drop zone for {folder:?} {note:?}"))
     }
 
-    pub(super) fn dialog(&self) -> &crate::import_dialog::ImportDialog {
+    pub(super) fn dialog(&self) -> &crate::import::dialog::ImportDialog {
         match &self.app.modal {
             Some(Modal::Import(d)) => d,
             _ => panic!("the Import dialog is not open"),
@@ -412,7 +412,7 @@ fn imp_002_a_second_event_goes_into_the_open_dialog_and_importing_makes_the_note
     assert_eq!((d.folder.as_str(), d.link_on, d.link_into.as_deref()), ("", true, Some(Path::new("Welcome.md"))));
     // Import writes a note per event and links them from the note
     let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
-    assert!(w.app.import_action(&mut d, crate::import_dialog::ImportAction::Import));
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
     let root = w.app.vault.as_ref().unwrap().root.clone();
     let mut notes: Vec<String> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with("First.md") || n.ends_with("Second.md")).collect();
     notes.sort();

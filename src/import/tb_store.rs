@@ -720,5 +720,4 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "tb_store_tests.rs"]
 mod fixture_tests;

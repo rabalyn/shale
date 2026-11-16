@@ -11,10 +11,20 @@ use crate::media;
 use crate::vault::{rel_to_string, Vault};
 use std::path::{Path, PathBuf};
 
+pub mod dialog;
 /// What another program hands over in a drop (a whole message, calendar data, links, text,
 /// Thunderbird lookups): only Wayland delivers those kinds (IMP-011); `wl_drop.rs` is their one source.
 #[cfg(target_os = "linux")]
 mod from_programs;
+pub mod people;
+pub mod tagwords;
+#[cfg(all(test, target_os = "linux"))]
+mod tb_fixture_tests;
+// Thunderbird's own mail folders, looked up for dropped messages (Wayland, IMP-008)
+#[cfg(target_os = "linux")]
+pub mod tb_store;
+#[cfg(target_os = "linux")]
+pub mod wl_drop;
 #[cfg(target_os = "linux")]
 pub use from_programs::{file_uri, items_from_parts};
 #[cfg(all(target_os = "linux", test))]
@@ -55,7 +65,7 @@ pub struct Item {
     /// imported before, as this note
     pub already: Option<PathBuf>,
     /// the people of an e-mail or event (linked to their contact notes)
-    pub people: Vec<crate::people::Person>,
+    pub people: Vec<crate::import::people::Person>,
 }
 
 impl Item {
@@ -277,14 +287,14 @@ pub fn items_from_paths(paths: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
 
 /// Find the people of e-mails and events and their contact notes in the people folder `dir`.
 pub fn find_people(vault: &Vault, dir: &str, items: &mut [Item]) {
-    let contacts = crate::people::Contacts::index(vault, dir);
+    let contacts = crate::import::people::Contacts::index(vault, dir);
     for it in items.iter_mut() {
         if !it.people.is_empty() {
             continue;
         }
         it.people = match &it.source {
-            Source::Email { mail, .. } => crate::people::of_mail(mail, &contacts),
-            Source::Event { event, .. } => crate::people::of_event(event, &contacts),
+            Source::Email { mail, .. } => crate::import::people::of_mail(mail, &contacts),
+            Source::Event { event, .. } => crate::import::people::of_event(event, &contacts),
             _ => vec![],
         };
     }
@@ -460,9 +470,9 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> (Vec<PathBuf>, 
         // contact notes (made when needed) and links to them
         let mut people: Vec<String> = Vec::new();
         for p in it.people.iter().filter(|p| p.on) {
-            match crate::people::ensure_note(vault, &o.people_dir, p) {
+            match crate::import::people::ensure_note(vault, &o.people_dir, p) {
                 Ok(rel) => {
-                    let link = crate::people::link_to(vault, &rel);
+                    let link = crate::import::people::link_to(vault, &rel);
                     if !people.contains(&link) {
                         people.push(link);
                     }

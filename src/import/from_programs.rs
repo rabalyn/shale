@@ -102,7 +102,7 @@ fn preview(d: &[u8]) -> String {
 /// for each. Uses the best one that holds something: files, a whole message, calendar data, a
 /// link to a message in Thunderbird (looked up in Thunderbird's copy on this computer), text.
 pub fn items_from_parts(parts: &[(String, Vec<u8>)]) -> (Vec<Item>, Vec<String>) {
-    items_from_parts_in(parts, &crate::tb_store::default_roots())
+    items_from_parts_in(parts, &crate::import::tb_store::default_roots())
 }
 
 fn items_from_parts_in(parts: &[(String, Vec<u8>)], tb_roots: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
@@ -131,7 +131,7 @@ fn items_from_parts_in(parts: &[(String, Vec<u8>)], tb_roots: &[PathBuf]) -> (Ve
     }
     let file_name = get("application/x-moz-file-promise-dest-filename").map(|d| text_of(d).trim().trim_end_matches('\0').to_string());
     if !links.is_empty() {
-        return match crate::tb_store::find_in(tb_roots, &links, file_name.as_deref()) {
+        return match crate::import::tb_store::find_in(tb_roots, &links, file_name.as_deref()) {
             Ok(found) => {
                 let n = found.len();
                 let mut items: Vec<Item> = found
