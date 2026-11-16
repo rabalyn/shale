@@ -560,11 +560,14 @@ impl Wire {
 
     /// One line without its CRLF. Longer than the limit is an error (and the connection is not used again).
     pub(crate) fn read_line(&mut self) -> Result<Vec<u8>> {
-        let mut scanned = 0;
+        let mut scanned: usize = 0;
         loop {
             let avail = &self.buf[self.pos..self.len];
-            if let Some(i) = avail[scanned.min(avail.len().saturating_sub(1))..].windows(2).position(|w| w == b"\r\n") {
-                let end = scanned.min(avail.len().saturating_sub(1)) + i;
+            // look again from the last byte already seen: a CRLF can be split between two reads
+            // ("…{123}\r" | "\n…"); starting after it would run the line on into the literal
+            let from = scanned.saturating_sub(1);
+            if let Some(i) = avail[from..].windows(2).position(|w| w == b"\r\n") {
+                let end = from + i;
                 if end > self.max_line {
                     return Err(ImapError::Protocol("a line of the answer is too long".into()));
                 }
@@ -1611,6 +1614,40 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A line end split over two reads ("…{5}\r" | "\nhello)"): the literal must still be found.
+    /// Before the fix the line ran on into the message, and the sync stopped with "a message
+    /// body that is not a string" (raba/shale#108).
+    // spec: MAIL-221
+    #[test]
+    fn a_crlf_split_between_two_reads_still_ends_the_line() {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            s.set_nodelay(true).unwrap();
+            for part in [&b"* 1 FETCH (UID 5 BODY[] {5}\r"[..], b"\nhello)\r", b"\n* 2 FETCH (UID 6 FLAGS ())\r", b"\n"] {
+                s.write_all(part).unwrap();
+                s.flush().unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(80));
+            }
+        });
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut w = Wire::new(Io::Plain(stream), 1 << 20);
+        // as the client does: the leading "* " goes before the answer is understood
+        let mut next = || {
+            let r = w.read_response(1 << 20).unwrap();
+            assert!(r.text.starts_with(b"* "), "{:?}", String::from_utf8_lossy(&r.text));
+            parse_untagged(&RawResponse { text: r.text[2..].to_vec(), lits: r.lits }).unwrap()
+        };
+        let Untagged::Fetch(f) = next() else { panic!("not a fetch") };
+        assert_eq!(f.uid, 5);
+        assert!(matches!(f.body, Some(Body::Data(ref d)) if d == b"hello"), "{:?}", f.body);
+        let Untagged::Fetch(f) = next() else { panic!("not a fetch") };
+        assert_eq!(f.uid, 6);
+        server.join().unwrap();
+    }
 
     // spec: SEC-017
     #[test]
