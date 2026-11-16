@@ -24,7 +24,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// One cache (USE-010…USE-016), in the order the dialog lists them.
+/// One cache (USE-010…USE-017), in the order the dialog lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheId {
@@ -34,11 +34,12 @@ pub enum CacheId {
     MailBackups,
     MailBroken,
     TagWords,
+    UndoHistories,
     DebugLog,
 }
 
 impl CacheId {
-    pub const ALL: [CacheId; 7] = [CacheId::SocialPictures, CacheId::PostIndex, CacheId::MailIndex, CacheId::MailBackups, CacheId::MailBroken, CacheId::TagWords, CacheId::DebugLog];
+    pub const ALL: [CacheId; 8] = [CacheId::SocialPictures, CacheId::PostIndex, CacheId::MailIndex, CacheId::MailBackups, CacheId::MailBroken, CacheId::TagWords, CacheId::UndoHistories, CacheId::DebugLog];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -48,6 +49,7 @@ impl CacheId {
             CacheId::MailBackups => "Mail index backups",
             CacheId::MailBroken => "Damaged mail index copies",
             CacheId::TagWords => "Tag words",
+            CacheId::UndoHistories => "Undo histories",
             CacheId::DebugLog => "Input debug log",
         }
     }
@@ -68,6 +70,7 @@ impl CacheId {
                 "The mail index is built again from the message files. This can take a while for a big mailbox; meanwhile mail does not sync. No message file is touched. Read and flagged marks come back with the next sync; local sent copies you chose to keep here may be listed again.",
             ),
             CacheId::MailBroken => Some("The damaged copies of the mail index are deleted. They cannot be made again; Shale never needs them, they were kept in case you want to look into them."),
+            CacheId::UndoHistories => Some("The undo history of every note of this vault is deleted, with the damaged copies of history files. u has nothing to undo afterwards, in the open notes too. They cannot be made again."),
             _ => None,
         }
     }
@@ -138,6 +141,7 @@ impl Places {
             CacheId::MailBackups => self.mail_root.join("index.backup-<date>.sqlite"),
             CacheId::MailBroken => self.mail_root.join("index.sqlite.broken-<date>"),
             CacheId::TagWords => self.vault.as_ref().map(|v| crate::import::tagwords::file_in(v)).unwrap_or_else(|| PathBuf::from("(no vault open)")),
+            CacheId::UndoHistories => self.vault.as_ref().map(|v| v.join(".shale").join("undo")).unwrap_or_else(|| PathBuf::from("(no vault open)")),
             CacheId::DebugLog => self.debug_log.clone(),
         };
         p.display().to_string()
@@ -169,11 +173,15 @@ pub fn stats(id: CacheId, places: &Places) -> Result<CacheStats, String> {
             Some(v) => files::stats(&file_entry(&crate::import::tagwords::file_in(v))),
             None => CacheStats::default(),
         },
+        CacheId::UndoHistories => match &places.vault {
+            Some(v) => crate::undo::stats_of_files(v),
+            None => CacheStats::default(),
+        },
         CacheId::DebugLog => files::stats(&file_entry(&places.debug_log)),
     })
 }
 
-/// Empty a cache (USE-010…USE-016). The mail index needs its open store (it is rebuilt by
+/// Empty a cache (USE-010…USE-017). The mail index needs its open store (it is rebuilt by
 /// the store's writer); the window resets what it holds in memory when the result arrives.
 pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<Freed, String> {
     match id {
@@ -193,6 +201,10 @@ pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<F
         CacheId::MailBroken => files::remove(&crate::mail::store::broken_files(&places.mail_root)),
         CacheId::TagWords => match &places.vault {
             Some(v) => files::remove(&file_entry(&crate::import::tagwords::file_in(v))),
+            None => Ok(Freed::default()),
+        },
+        CacheId::UndoHistories => match &places.vault {
+            Some(v) => crate::undo::clear_files(v),
             None => Ok(Freed::default()),
         },
         CacheId::DebugLog => empty_log(&places.debug_log),
@@ -229,6 +241,10 @@ pub fn prune(id: CacheId, places: &Places, r: &CacheRetention, now: i64) -> Resu
             let all = crate::mail::store::broken_files(&places.mail_root);
             files::remove(&files::over_limits(&all, now, r.broken_days, None, None))
         }
+        CacheId::UndoHistories => match &places.vault {
+            Some(v) => crate::undo::prune_files(v, now.max(0) as u64, r.undo_days),
+            None => Ok(Freed::default()),
+        },
         CacheId::DebugLog => match (file_entry(&places.debug_log).first(), mb(r.debug_log_mb)) {
             (Some(f), Some(limit)) if f.bytes > limit => empty_log(&places.debug_log),
             _ => Ok(Freed::default()),

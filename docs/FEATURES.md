@@ -3,11 +3,12 @@
 Shale is a notes app for the Linux, macOS and Windows desktop (what differs per system: the README, "Supported systems"). Your vault is a plain folder of markdown files,
 and notes link to each other with `[[wiki links]]`. The screenshots below come from the app's
 built-in demo vault (`shale --screenshot out.png`); `docs/screenshots/regen.sh` makes them all
-again from the recipes in `docs/screenshots/recipes.conf`.
+again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in the media folder of the
+[user guide](userguide/Start%20here.md), a vault you can open in Shale (`docs/userguide`), which explains every feature too.
 
 ## Notes and links
 
-![The editor](screenshots/editor.png)
+![The editor](userguide/z_media/screenshots/editor.png)
 
 - `[[Note]]` links are **blue** when the note exists and **red** when it doesn't. Click a blue
   link to open the note, or a red one to create it.
@@ -21,16 +22,19 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - Drag notes, drawings, files and folders in the file list to move them into another folder.
   Links that point to them by path are updated.
 
-![Moving a note into a folder](screenshots/tree-drag.png)
+![Moving a note into a folder](userguide/z_media/screenshots/tree-drag.png)
 
 - Back and forward with the mouse side buttons or Alt+←/→. You can sort the file list by name,
   date modified or date created.
 
-![Suggestions while typing](screenshots/link-suggestions.png)
+![Suggestions while typing](userguide/z_media/screenshots/link-suggestions.png)
 
 - Type `[[` to get matching notes; the last entry creates a new note. Esc closes the list.
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab completes
   like a shell. Files from outside the vault are copied to `z_media/<year>/<month>/`.
+- Paste a picture (Ctrl+V, or `p` in vim mode) and it is saved in the media folder as
+  `Pasted image.png` with a link at the cursor; paste files copied in a file manager (pictures, PDFs,
+  audio, video) and they are copied there and linked, one link per line. Other text pastes as usual.
 
 - **Sound players.** `![[song.mp3]]` shows a small player instead of a link, in the editor, the
   markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play; opus files
@@ -43,13 +47,13 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   Appearance: how opaque the play button is (60 % by default). The volume is one setting for
   all players.
 
-![A sound player in a note](screenshots/sound-player.png)
+![A sound player in a note](userguide/z_media/screenshots/sound-player.png)
 
-![Reading view](screenshots/reading.png)
+![Reading view](userguide/z_media/screenshots/reading.png)
 
 - Ctrl+E switches between editing and the reading view.
 
-![The note menu](screenshots/more-menu.png)
+![The note menu](userguide/z_media/screenshots/more-menu.png)
 
 - Export notes and drawings to PDF (paper size, margins, fonts and more in a dialog), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
@@ -68,11 +72,11 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - The order of all open tabs (notes, drawings and Feeds tabs) and which of them are pinned come
   back at the next start.
 
-![A pinned tab and its context menu](screenshots/tab-pinned-menu.png)
+![A pinned tab and its context menu](userguide/z_media/screenshots/tab-pinned-menu.png)
 
 ## Keyboard only: sidebar, file list and vim-style editing
 
-![The Keybindings tab of the settings](screenshots/keybindings.png)
+![The Keybindings tab of the settings](userguide/z_media/screenshots/keybindings.png)
 
 - Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back into the note. Ctrl+Shift+B opens
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
@@ -89,12 +93,16 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   lines of a selection) shows the raw markdown. The note stays editable; links still open with a
   click and task boxes still tick.
 
-  ![The Markdown preview](screenshots/editor-preview.png)
+  ![The Markdown preview](userguide/z_media/screenshots/editor-preview.png)
 
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
-  start typing, Esc stops; x deletes a character; v and V select with the same motions, d cuts
-  and y copies to the clipboard, p pastes. The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
+  start typing, Esc stops; x deletes a character; `dd` deletes the line (onto the clipboard,
+  `p` puts it back below); v and V select with the same motions, d cuts and y copies to the
+  clipboard, p pastes. `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
+  from i to Esc is one step; the history is shared by all tabs of the note and kept in the vault
+  for 30 days by default (a setting of the undo histories cache, see Data usage), so `u` works
+  after a restart too). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
 - In normal mode (and in a calendar, Feeds, … tab) **Space Tab** goes back to the note or sub-app
   this tab showed just before, and again to come back, like vim's alternate file. Space is the
   leader key of its own list in the Keybindings tab; **Space f f** opens a window to find a file by its
@@ -103,7 +111,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 
 ## Drawings
 
-![A drawing with the style panel](screenshots/drawing.png)
+![A drawing with the style panel](userguide/z_media/screenshots/drawing.png)
 
 - Hand-drawn style sketches, saved as standard `.excalidraw` files.
 - Drawings of the Obsidian Excalidraw plugin (`.excalidraw.md`, compressed or not) open in the
@@ -129,7 +137,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 
 ### Obsidian canvases
 
-![A canvas shown read-only](screenshots/canvas.png)
+![A canvas shown read-only](userguide/z_media/screenshots/canvas.png)
 
 - Obsidian Canvas files (`.canvas`) open in the drawing view: cards with their colours, groups,
   file and web cards (click them to follow), and the arrows between cards with their labels.
@@ -140,11 +148,11 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 - Tick "Always convert canvases when opening them" (also in Settings → Drawings) to skip the
   question.
 
-![The question when a canvas is opened](screenshots/canvas-convert.png)
+![The question when a canvas is opened](userguide/z_media/screenshots/canvas-convert.png)
 
 ## To-do list across all notes
 
-![Tasks](screenshots/tasks.png)
+![Tasks](userguide/z_media/screenshots/tasks.png)
 
 - Every `- [ ] task` from every note in one list. Ticking a task off saves it in its note.
 - Filter by text or `#tag`, show done tasks, or only tasks with a due date
@@ -152,7 +160,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 
 ## Linked notes and the graph
 
-![Graph](screenshots/graph.png)
+![Graph](userguide/z_media/screenshots/graph.png)
 
 - The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline and a local
   graph of the open note.
@@ -182,11 +190,11 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   Calendar buttons.
 - The layout (icons, heights, removed icons) is kept in the settings.
 
-![The right sidebar split into two views: Backlinks above, Calendar below](screenshots/sidebar-split.png)
+![The right sidebar split into two views: Backlinks above, Calendar below](userguide/z_media/screenshots/sidebar-split.png)
 
 ## Calendar
 
-![Month view](screenshots/calendar-month.png)
+![Month view](userguide/z_media/screenshots/calendar-month.png)
 
 - A calendar in the right sidebar (small month) and as a big tab, with Month, Week and Day views
   in three sizes.
@@ -194,7 +202,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   (for example Nextcloud). Each CalDAV calendar has its own automatic sync interval (15 minutes
   by default).
 
-![Week view and event details](screenshots/calendar-week.png)
+![Week view and event details](userguide/z_media/screenshots/calendar-week.png)
 
 - Click an event to see its details: when, how it repeats, where, organizer, attendees,
   categories, reminders and notes. **Edit** and **Delete** work for local and CalDAV calendars. Delete asks first ("Delete
@@ -216,7 +224,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   invitation, time zones, and fields Shale has never heard of. A repeating event keeps its
   clock time over summer time in every program.
 
-![New event](screenshots/event-dialog.png)
+![New event](userguide/z_media/screenshots/event-dialog.png)
 
 - Double-click a day or time to create an event. It starts at the next full or half hour and is
   30 minutes long.
@@ -225,16 +233,16 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   Moving an event writes it to the new calendar first and removes it from the old one only after
   that worked, so nothing is lost.
 
-![Calendar settings](screenshots/calendar-settings.png)
+![Calendar settings](userguide/z_media/screenshots/calendar-settings.png)
 
 - Settings → Calendars: add local calendars or CalDAV accounts ("Find calendars" asks the
   server), choose colours, show or hide calendars, and set the sync interval per calendar.
 
-![Calendar in the sidebar](screenshots/calendar-sidebar.png)
+![Calendar in the sidebar](userguide/z_media/screenshots/calendar-sidebar.png)
 
 ## Mail
 
-![The mail view](screenshots/mail-view.png)
+![The mail view](userguide/z_media/screenshots/mail-view.png)
 
 - The **Mail** button in the ribbon (or Ctrl+Shift+M) opens a three-pane view: accounts and
   folders with their unread counts, the list of messages (newest first) and the message itself
@@ -251,7 +259,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   script), or saved into the vault's media folder.
 - **The local copy is not encrypted** (like Thunderbird's). Use full-disk encryption.
 
-![Mail accounts](screenshots/mail-accounts.png)
+![Mail accounts](userguide/z_media/screenshots/mail-accounts.png)
 
 - **Accounts…** adds an account: server, port (993 with TLS, 143 with STARTTLS), user name and
   password. The password goes into the system keyring (the Keychain on macOS, the Credential Manager on Windows). Without a keyring Shale says so and asks
@@ -325,7 +333,7 @@ again from the recipes in `docs/screenshots/recipes.conf`.
 ### Writing and sending (phase 3)
 
 - **Compose** with `c` (or the Compose button), **Reply** `r`, **Reply all** `Shift+R`, **Forward**
-  `Shift+F` (also buttons under the message; `f` is still the flag key). Mail is plain text. To, Cc
+  `Shift+F` (also buttons under the message, which also answer to Alt+R, Alt+A, Alt+F and, for the others, Alt+I, Alt+C, Alt+U, Alt+G, Alt+M, Alt+D; hold Alt to see the letter underlined; `f` is still the flag key). Mail is plain text. To, Cc
   and Bcc complete from the addresses in your people notes and in the mail you already have (↑ ↓,
   Tab or a click); the subject, the text and the attachments are below. Attach a file by its path,
   a file of the vault (also from the media folder) or a **note** (its markdown, as a `.md`
@@ -350,8 +358,8 @@ again from the recipes in `docs/screenshots/recipes.conf`.
   again by itself, and you look in Sent and choose **Send again** or **Discard**. The same if Shale was
   closed in the middle of sending.
 
-  ![An outbox mail that was not sent](screenshots/outbox-failed.png)
-  ![An outbox mail that may have been sent](screenshots/outbox-unsure.png)
+  ![An outbox mail that was not sent](userguide/z_media/screenshots/outbox-failed.png)
+  ![An outbox mail that may have been sent](userguide/z_media/screenshots/outbox-unsure.png)
 
 - **Questions before sending**: with no subject, with no text, and when the text says "attached" /
   "attachment" / "angehängt" / "anbei" / "Anhang" but nothing is attached. Bcc recipients get the mail
@@ -405,11 +413,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Importing e-mails, events and files (for project tracking)
 
-![Import dialog](screenshots/import-dialog.png)
+![Import dialog](userguide/z_media/screenshots/import-dialog.png)
 
 - Drag e-mails from Thunderbird, events from a calendar (Shale's own or another program), `.eml`
   or `.ics` files, or any other files (plans, PDFs…) onto the window. The ribbon's Import button
   opens the same dialog.
+- Pictures, PDFs, audio and video files are not made into notes: each is its own item (Image, PDF,
+  Audio, Video) and is saved as a file in the media folder (`z_media/YYYY/MM/YYMMDD_name`). Dropped
+  on a note, the note gets a link line for each. An image dragged out of a web browser (Wayland) is
+  saved the same way, from the picture the browser hands over or downloaded from its address.
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
@@ -419,9 +431,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   Shale finds the message in Thunderbird's local copy (for IMAP accounts this needs "Keep
   messages for this account on this computer").
 
-![Dragging an event onto a folder](screenshots/drag-event.png)
+![Dragging an event onto a folder](userguide/z_media/screenshots/drag-event.png)
 
-![An imported e-mail](screenshots/imported-note.png)
+![An imported e-mail](userguide/z_media/screenshots/imported-note.png)
 
 - Each e-mail becomes a note named "date subject" with the sender, recipients and date, the tags
   in its properties, links to the attachments and the original message, and the text of the
@@ -429,7 +441,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Feeds: read Mastodon and Bluesky, save posts to the vault
 
-![The feed view](screenshots/social-feed.png)
+![The feed view](userguide/z_media/screenshots/social-feed.png)
 
 - The ribbon's speech-bubble button opens **Feeds** in a **new tab** every time (pick the account
   and feed there, so a new feed can join the tabs you have). **Accounts…** adds a Mastodon account (type
@@ -468,7 +480,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
   bring along. **Open in browser** and **Copy link** are next to it.
 
-![Saving two posts](screenshots/social-import.png)
+![Saving two posts](userguide/z_media/screenshots/social-import.png)
 
 - Tick **Include replies from others (N)** to add a "Replies" section with other people's
   answers, nested like a conversation (off by default; Shale remembers your choice). Their
@@ -480,7 +492,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## People (contact notes)
 
-![People list](screenshots/people-picker.png)
+![People list](userguide/z_media/screenshots/people-picker.png)
 
 - Contact notes live in the **people folder** (default `Adressbuch`, changeable in Settings).
 - Type `[[p ` and a name to pick a person from that folder. The link that is written is a normal
@@ -492,7 +504,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   made. The imported note gets a "People" line with links, so each contact note's backlinks show
   every mail and meeting with that person. Automatic senders like "noreply" are left out.
 
-![Import with people and tags](screenshots/people-import.png)
+![Import with people and tags](userguide/z_media/screenshots/people-import.png)
 
 ## Tags found automatically (no server, no AI)
 
@@ -508,7 +520,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 - Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
-  behaves the same on every computer. Settings of the program itself (appearance, calendars,
+  behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
+  are kept for 30 days (a setting) in `.shale/undo/`, one file per note; that folder stays on the computer
+  and is not committed by git sync. Settings of the program itself (appearance, calendars,
   recent vaults) stay in `~/.config/shale/config.json`.
 - The files carry a format version and are upgraded on load. A settings file that can't be read
   is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
@@ -518,7 +532,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Data usage and caches
 
-![The Data usage dialog](screenshots/data-usage.png)
+![The Data usage dialog](userguide/z_media/screenshots/data-usage.png)
 
 - Settings → Data and caches → **Data usage…** (or Ctrl+Shift+D) shows what Shale keeps on disk.
   **Saved**: the vault by kind (notes, drawings, pictures, PDFs, other attachments, `.shale/`,
@@ -526,14 +540,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   folder), and your data outside the vault: mail per account, drafts, outbox, mail trash, local
   calendars, calendar trash and recovered notes. Nothing in this part can be deleted here.
 - **Caches** are what Shale can build or fetch again: social pictures, the social post index,
-  the mail index, its daily backups, damaged copies of the mail index, the learned tag words and
-  the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
+  the mail index, its daily backups, damaged copies of the mail index, the learned tag words, the
+  undo histories of the notes of the open vault and the keyboard debug log. Each row shows its size, entries, oldest entry and last cleanup, and
   has a **Clear** button. The mail index is **rebuilt** from the message files instead (it asks
   first; not while mail syncs or a change waits for the server), and damaged copies are only
-  deleted after you confirm.
+  deleted after you confirm; Clear on the undo histories asks first too (every `u` history of the
+  vault goes, damaged copies included) and empties the histories of the open notes.
 - How long each cache is kept is a setting (on its row, and in Settings under "How long caches
   are kept"): social pictures 30 days and 500 MB, social posts 365 days and 10 000 per account,
-  the newest 3 mail index backups, damaged copies forever, the debug log 10 MB. Every value can
+  the newest 3 mail index backups, damaged copies forever, undo histories 30 days, the debug log 10 MB. Every value can
   also be "forever" / "no limit".
 - A cleanup runs in the background a minute after the start (when the last one is more than a
   day ago) and then daily, and 2 seconds after you change a setting. It never touches your notes,
@@ -545,7 +560,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use a credential helper or an SSH key), or run
   `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
   every few minutes (default 5, changeable) and on "Sync now".
-- A sync commits every change (the `.shale/` files too, so settings and open notes follow you),
+- A sync commits every change (the `.shale/` files too, so settings and open notes follow you;
+  only the undo histories in `.shale/undo/` stay on the computer),
   fetches, merges and pushes. Commit messages read `Sync from <computer>: 3 file(s)`, with an
   optional prefix and suffix from the settings. Without a remote, Shale only keeps a local
   history.
@@ -626,6 +642,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |
+| Alt+I, Alt+C, Alt+R, Alt+A, Alt+F, Alt+U, Alt+G, Alt+M, Alt+D | The buttons of the open mail: Import to vault, Close, Reply, Reply all, Forward, Mark read / unread, Flag, Move…, Delete (the letter is underlined on the button while Alt is held) |
 | Ctrl+R | Sync, or cancel the sync |
 | a | Account settings |
 | Shift+L | Load the open message (or the list of a folder that is not synced) from the server |

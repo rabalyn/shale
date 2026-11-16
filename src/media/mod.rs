@@ -23,11 +23,159 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub const MEDIA_DIR: &str = "z_media";
-const IMAGE_EXTS: [&str; 5] = ["png", "jpg", "jpeg", "webp", "bmp"];
+const IMAGE_EXTS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
+const AUDIO_EXTS: [&str; 8] = ["mp3", "ogg", "oga", "opus", "m4a", "aac", "wav", "flac"];
+const VIDEO_EXTS: [&str; 7] = ["mp4", "m4v", "webm", "mkv", "mov", "avi", "ogv"];
 
-/// The sound files that get a player when they are embedded (MEDIA-001).
-const AUDIO_EXTS: [&str; 8] = ["mp3", "ogg", "oga", "opus", "flac", "m4a", "aac", "wav"];
+/// What a media file is (imports and pastes bring these in as files, IMP-031, EDIT-019).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Kind {
+    Image,
+    Pdf,
+    Audio,
+    Video,
+}
 
+impl Kind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::Image => "Image",
+            Kind::Pdf => "PDF",
+            Kind::Audio => "Audio",
+            Kind::Video => "Video",
+        }
+    }
+}
+
+/// The media kind of a file name (by its extension, any case), None for anything else.
+pub fn media_kind(p: &Path) -> Option<Kind> {
+    let ext = p.extension()?.to_str()?.to_ascii_lowercase();
+    if IMAGE_EXTS.contains(&ext.as_str()) {
+        Some(Kind::Image)
+    } else if ext == "pdf" {
+        Some(Kind::Pdf)
+    } else if AUDIO_EXTS.contains(&ext.as_str()) {
+        Some(Kind::Audio)
+    } else if VIDEO_EXTS.contains(&ext.as_str()) {
+        Some(Kind::Video)
+    } else {
+        None
+    }
+}
+
+/// The file extension for a content type of a media file ("image/jpeg" → "jpg"), None if it is none.
+pub fn ext_for_mime(mime: &str) -> Option<&'static str> {
+    let m = mime.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    Some(match m.as_str() {
+        "image/png" => "png",
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/bmp" => "bmp",
+        "application/pdf" => "pdf",
+        "audio/mpeg" | "audio/mp3" => "mp3",
+        "audio/ogg" => "ogg",
+        "audio/opus" => "opus",
+        "audio/mp4" | "audio/x-m4a" => "m4a",
+        "audio/aac" => "aac",
+        "audio/wav" | "audio/x-wav" | "audio/wave" => "wav",
+        "audio/flac" | "audio/x-flac" => "flac",
+        "video/mp4" => "mp4",
+        "video/x-m4v" => "m4v",
+        "video/webm" => "webm",
+        "video/x-matroska" => "mkv",
+        "video/quicktime" => "mov",
+        "video/x-msvideo" => "avi",
+        "video/ogg" => "ogv",
+        _ => return None,
+    })
+}
+
+/// `%XX` decoded (a `%` not followed by two hex digits stays as it is).
+pub fn percent_decode(s: &str) -> String {
+    let mut bytes = Vec::new();
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let h = |c: u8| (c as char).to_digit(16);
+            if let (Some(x), Some(y)) = (h(b[i + 1]), h(b[i + 2])) {
+                bytes.push((x * 16 + y) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        bytes.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// The path of a `file://` address (`file://localhost/…` too), `%XX` decoded; None for any other address.
+pub fn file_uri_path(uri: &str) -> Option<PathBuf> {
+    let rest = uri.trim().strip_prefix("file://")?;
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    rest.starts_with('/').then(|| PathBuf::from(percent_decode(rest)))
+}
+
+/// The media files of pasted text: every non-empty line is a `file://` address or an absolute
+/// path of an existing image, PDF, audio or video file (what a file manager copies). None for any other text.
+fn pasted_files(text: &str) -> Option<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    for l in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let p = if l.starts_with("file://") { file_uri_path(l)? } else { PathBuf::from(l) };
+        if !p.is_absolute() || media_kind(&p).is_none() || !p.is_file() {
+            return None;
+        }
+        out.push(p);
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// A picture as PNG bytes (RGBA, from the clipboard).
+fn png_bytes(img: &eframe::egui::ColorImage) -> Result<Vec<u8>, String> {
+    let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+    let buf = image::RgbaImage::from_raw(img.width() as u32, img.height() as u32, rgba).ok_or("the picture has a wrong size")?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    buf.write_to(&mut out, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    Ok(out.into_inner())
+}
+
+/// What pasting text or a picture into a note does (EDIT-019): saves the media into the vault.
+/// `Some((text to insert, message))` if the paste was media (the message names what was saved,
+/// or what failed); None for a paste that is just text.
+pub fn paste_text_to_links(vault_root: &Path, text: &str, date: (i32, u32, u32)) -> Option<(String, String)> {
+    let files = pasted_files(text)?;
+    let mut links = Vec::new();
+    let mut failed = Vec::new();
+    for f in &files {
+        match import_file(vault_root, f, date) {
+            Ok(rel) => links.push(link_for(&rel)),
+            Err(e) => failed.push(format!("“{}”: {e}", f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
+        }
+    }
+    let mut msg = match links.len() {
+        0 => String::new(),
+        1 => "Saved 1 file to the media folder".to_string(),
+        n => format!("Saved {n} files to the media folder"),
+    };
+    if !failed.is_empty() {
+        if !msg.is_empty() {
+            msg.push_str("; ");
+        }
+        msg.push_str(&format!("could not copy {}", failed.join(", ")));
+    }
+    Some((links.join("\n"), msg))
+}
+
+/// Saves a pasted picture as PNG in the media folder; returns the link to insert.
+pub fn paste_image_to_link(vault_root: &Path, img: &eframe::egui::ColorImage, date: (i32, u32, u32)) -> Result<String, String> {
+    let png = png_bytes(img)?;
+    let rel = save_bytes(vault_root, "Pasted image.png", &png, date).map_err(|e| format!("could not save the picture: {e}"))?;
+    Ok(link_for(&rel))
+}
+
+/// A sound file, which gets a player when it is embedded (MEDIA-001); the list is the import list.
 pub fn is_audio(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).map(|e| AUDIO_EXTS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)
 }

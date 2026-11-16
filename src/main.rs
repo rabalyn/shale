@@ -6,6 +6,7 @@
 //!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
 //!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
 //!   shale --screenshot out.png --keys 'click:@Sync|waitfor:@Compose'   (scripted input, see script.rs)
+//!   shale --record out.webm --keys '…'   (the same run as a short video, encoded by ffmpeg; docs/screenshots/regen-clips.sh)
 //!   shale --screenshot out.png --size 1400x900   (window size; docs/screenshots/regen.sh makes all pictures)
 //!
 //! An unknown option or a missing value is an error (exit code 2), never a vault folder.
@@ -41,6 +42,7 @@ mod picker;
 #[cfg(test)]
 mod preview_ui_tests;
 mod reader;
+mod recorder;
 mod recovery;
 mod script;
 mod search_all;
@@ -58,6 +60,7 @@ mod tab_order_tests;
 mod theme;
 #[cfg(test)]
 mod ui_test_support;
+mod undo;
 #[cfg(test)]
 mod utf8_tests;
 mod vault;
@@ -84,12 +87,14 @@ fn window(size: [f32; 2]) -> egui::ViewportBuilder {
     egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_inner_size(size).with_min_inner_size(MIN_WINDOW)
 }
 
-const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [--screenshot <file.png> [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]";
+const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [(--screenshot <file.png> | --record <file.webm>) [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]";
 
 /// What the command line asked for.
 #[derive(Debug, PartialEq)]
 struct Cli {
     screenshot: Option<PathBuf>,
+    /// testing aid: the same run as a video, `<file>.webm` (needs ffmpeg, DEV-019)
+    record: Option<PathBuf>,
     vault: Option<PathBuf>,
     /// testing aid for screenshots: tasks | graph | drawing | reading | …
     view: Option<String>,
@@ -117,12 +122,19 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Parsed {
 }
 
 fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
-    let mut cli = Cli { screenshot: None, vault: None, view: None, keys: None, size: [1360.0, 840.0] };
+    let mut cli = Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0] };
     let mut args = args.into_iter();
     while let Some(opt) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{opt} needs a value"));
         match opt.as_str() {
             "--screenshot" => cli.screenshot = Some(PathBuf::from(value()?)),
+            "--record" => {
+                let v = value()?;
+                if !recorder::is_clip(std::path::Path::new(&v)) {
+                    return Err(format!("--record needs a file name ending in .webm, not {v}"));
+                }
+                cli.record = Some(PathBuf::from(v));
+            }
             "--vault" => cli.vault = Some(PathBuf::from(value()?)),
             "--view" => cli.view = Some(value()?),
             "--keys" => cli.keys = Some(value()?),
@@ -138,6 +150,9 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
             },
         }
     }
+    if cli.screenshot.is_some() && cli.record.is_some() {
+        return Err("--screenshot and --record are two modes; use one of them".into());
+    }
     script::parse(cli.keys.as_deref().unwrap_or("")).map_err(|e| format!("--keys: {e}"))?;
     Ok(Parsed::Run(cli))
 }
@@ -147,7 +162,7 @@ fn main() -> eframe::Result {
     if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {
         eprintln!("shale: could not make the process undumpable: {e}");
     }
-    let Cli { screenshot, vault, view, keys, size } = match parse_args(std::env::args().skip(1)) {
+    let Cli { screenshot, record, vault, view, keys, size } = match parse_args(std::env::args().skip(1)) {
         Parsed::Run(cli) => cli,
         Parsed::Help => {
             println!("{USAGE}");
@@ -158,6 +173,15 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
+
+    // a recording is a screenshot run that ends in a clip; ffmpeg must be there before a window opens (BUILD-018)
+    if record.is_some() {
+        if let Err(e) = recorder::probe(recorder::FFMPEG) {
+            eprintln!("shale: {e}");
+            std::process::exit(1);
+        }
+    }
+    let screenshot = screenshot.or(record);
 
     // Not for screenshots: they use their own temporary folders and may run beside the real app.
     let mut handover = None;
@@ -260,7 +284,7 @@ mod tests {
     // spec: BUILD-019
     #[test]
     fn an_option_needs_its_value() {
-        for o in ["--screenshot", "--vault", "--view", "--keys", "--size"] {
+        for o in ["--screenshot", "--record", "--vault", "--view", "--keys", "--size"] {
             assert_eq!(bad(&[o]), format!("{o} needs a value"));
         }
     }
@@ -277,14 +301,14 @@ mod tests {
     // spec: DEV-013
     #[test]
     fn no_arguments_start_with_the_defaults() {
-        assert_eq!(cli(parse(&[])), Cli { screenshot: None, vault: None, view: None, keys: None, size: [1360.0, 840.0] });
+        assert_eq!(cli(parse(&[])), Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0] });
     }
 
     // spec: DEV-013
     #[test]
     fn every_option_is_read() {
         let c = cli(parse(&["--vault", "/v", "--screenshot", "out.png", "--view", "tasks", "--keys", "key:Down|key:Tab", "--size", "1400x900"]));
-        assert_eq!(c, Cli { screenshot: Some("out.png".into()), vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1400.0, 900.0] });
+        assert_eq!(c, Cli { screenshot: Some("out.png".into()), record: None, vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1400.0, 900.0] });
     }
 
     // spec: DEV-013, BUILD-019
@@ -333,6 +357,17 @@ mod tests {
     }
 
     // spec: DEV-013
+    // spec: DEV-019, DEV-013
+    #[test]
+    fn dev_019_record_takes_a_webm_name_and_excludes_screenshot() {
+        let c = cli(parse(&["--record", "c.webm", "--keys", "key:Down", "--size", "1400x900"]));
+        assert_eq!((c.record, c.screenshot, c.size), (Some("c.webm".into()), None, [1400.0, 900.0]));
+        assert!(bad(&["--record", "c.png"]).contains("ending in .webm"));
+        assert_eq!(bad(&["--record"]), "--record needs a value");
+        assert!(bad(&["--record", "c.webm", "--screenshot", "o.png"]).contains("two modes"));
+        assert!(bad(&["--record", "c.webm", "--keys", "nonsense:x"]).starts_with("--keys: "));
+    }
+
     #[test]
     fn bad_keys_are_an_error_for_exit_code_2() {
         match parse(&["--screenshot", "o.png", "--keys", "nonsense:thing"]) {

@@ -284,6 +284,39 @@ impl Versioned for VaultState {
     }
 }
 
+/// `<vault>/.shale/undo/<hash>.json`: the undo history of one note (EDIT-022).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct UndoFile {
+    pub version: u64,
+    /// The note, vault-relative, '/' separated.
+    pub path: String,
+    pub undo: Vec<crate::undo::Edit>,
+    pub redo: Vec<crate::undo::Edit>,
+    /// The note text after the last step.
+    pub known: Option<String>,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+impl Default for UndoFile {
+    fn default() -> Self {
+        UndoFile { version: Self::CURRENT, path: String::new(), undo: vec![], redo: vec![], known: None, other: Map::new() }
+    }
+}
+
+impl Versioned for UndoFile {
+    const CURRENT: u64 = 1;
+    const WHAT: &'static str = "undo history";
+    fn step(_json: &mut Map<String, Value>, from: u64) {
+        match from {
+            // 0 → 1: the first versioned format; the fields are unchanged.
+            0 => {}
+            _ => unreachable!("no migration from version {from}"),
+        }
+    }
+}
+
 /// Per-vault fields that older versions kept in the global config (moved by CFG-008).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LegacyVaultFields {
