@@ -140,7 +140,7 @@ built; it does not show that a person checked the build.
    closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
-formats, lints, builds, tests, packages and audits every pull request and `main`; GitHub gets the
+formats, lints, builds, tests, packages and audits every push to `main`; GitHub gets the
 released versions, and builds and tests macOS and Windows for every push to `main` (the Linux
 job of GitHub only runs for release tags).
 
@@ -149,8 +149,10 @@ job of GitHub only runs for release tags).
 Shale is developed on Forgejo: <https://git.home.rabalyn.de/raba/shale>. Branches, pull requests
 and the **issues, which are the one list of open work**, live there; GitHub only builds and hosts the
 releases ([ADR-0013](docs/decisions/0013-forgejo-and-issue-tracking.md), FORGE rules in
-[engineering.md](docs/spec/engineering.md)). Checks run on the Forgejo runner
-(`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012) and tests macOS and
+[engineering.md](docs/spec/engineering.md)). Changes land locally: `scripts/land.sh <branch>`
+merges a branch into `main`, runs fmt, clippy and the tests, and pushes only when they pass
+([ADR-0016](docs/decisions/0016-local-landing.md)). The Forgejo runner checks `main` again
+afterwards (`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012) and tests macOS and
 Windows (BUILD-017); a red run there is reported back as a Forgejo issue (BUILD-020).
 
 ## Build and run

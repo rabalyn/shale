@@ -45,7 +45,9 @@ The review found these gaps:
 ## Decision (proposed)
 
 1. **CI gates**: run on `push` **and** `pull_request` (since 2026-11-15 on the homelab Forgejo,
-   `.forgejo/workflows/ci.yml`; GitHub builds only the `v*` release tags, BUILD-012):
+   `.forgejo/workflows/ci.yml`; GitHub builds only the `v*` release tags, BUILD-012; since
+   2026-11-16 the same checks run locally before a change lands and CI runs on `main` only,
+   [ADR-0016](0016-local-landing.md)):
    - `cargo fmt --check`
    - `cargo clippy --all-targets -- -D warnings`
    - `cargo test`
