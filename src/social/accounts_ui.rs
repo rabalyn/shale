@@ -279,23 +279,37 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
             );
         }
     }
+    d.rects = rects;
+    action
+}
+
+/// The dialog's footer (NAV-028): the error of the last try, Sign in with the spinner while a
+/// step runs, and Close. Call it after [`show`] in the same frame.
+pub fn footer(ui: &mut Ui, d: &mut SocialDialog) -> Option<DialogAction> {
+    let mut action = None;
+    let busy = d.busy();
+    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     if let Some(e) = &d.error {
         ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING)).wrap());
     }
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
-        if rec("sign-in".into(), ui.add_enabled(!busy, egui::Button::new(egui::RichText::new("Sign in").strong()))).clicked() {
-            d.sign_in(ui.ctx());
-        }
+        let mut rec = |k: &str, r: egui::Response| -> egui::Response {
+            d.rects.push((k.to_string(), r.rect));
+            r
+        };
+        let sign_in = rec("sign-in", ui.add_enabled(!busy, egui::Button::new(egui::RichText::new("Sign in").strong()))).clicked();
         if busy {
             ui.spinner();
             ui.label(muted("Talking to the server…"));
         }
-        if rec("close".into(), ui.button("Close")).clicked() {
+        if rec("close", ui.button("Close")).clicked() {
             action = Some(DialogAction::Close);
         }
+        if sign_in {
+            d.sign_in(ui.ctx());
+        }
     });
-    d.rects = rects;
     action
 }
 
@@ -310,7 +324,9 @@ mod tests {
         let mut res = None;
         let mut out = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                res = show(ui, d, accounts, 5);
+                // the content and the footer, as the dialog window shows them together
+                let a = show(ui, d, accounts, 5);
+                res = footer(ui, d).or(a);
             });
         });
         out.textures_delta.clear();

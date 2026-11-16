@@ -639,3 +639,154 @@ fn nav_028_data_usage_keeps_refresh_and_the_clear_question_in_view_in_a_short_wi
     assert!(p.app.usage.confirm.is_none() && matches!(p.app.modal, Some(Modal::DataUsage)));
     assert!(!p.shows(Show::Modals, &yes));
 }
+
+// spec: NAV-028
+#[test]
+fn nav_028_event_dialog_keeps_save_and_cancel_in_view_in_a_short_window() {
+    let (mut p, src, dir) = with_calendar("footer-evt");
+    new_event_dialog(&mut p);
+    footer_in_a_short_window(&mut p, 320.0, "event", "Time zone", &["Save", "Cancel"]);
+    // a real click on the footer's Save saves the event typed above, and closes the dialog
+    assert!(stored(&src).is_empty());
+    p.click(Show::Modals, "Save");
+    until(&mut p, Show::Modals, "the event is saved", |p| p.app.modal.is_none());
+    let evs = stored(&src);
+    assert_eq!((evs.len(), evs[0].summary.as_str()), (1, "Moves"));
+    // and Cancel closes it without saving
+    new_event_dialog(&mut p);
+    footer_in_a_short_window(&mut p, 320.0, "event", "Time zone", &["Save", "Cancel"]);
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.modal.is_none());
+    assert_eq!(stored(&src).len(), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: NAV-028
+#[test]
+fn nav_028_event_dialog_saves_with_ctrl_enter_and_a_date_picker_in_a_short_window() {
+    let (mut p, src, dir) = with_calendar("footer-evt-keys");
+    new_event_dialog(&mut p);
+    p.size = Vec2::new(900.0, 320.0);
+    // a date picker of the content still works in the short dialog, and moves the end with it
+    click_control(&mut p, "pick:start-date");
+    let month = event_fields(&p).0[..7].to_string();
+    click_control(&mut p, &format!("pick-day:{month}-20"));
+    let (start, start_time, end, _) = event_fields(&p);
+    assert_eq!((start, end), (format!("{month}-20"), format!("{month}-20")));
+    // Ctrl+Enter saves, wherever the keyboard is
+    assert!(stored(&src).is_empty());
+    let key = |pressed| Event::Key { key: Key::Enter, physical_key: None, pressed, repeat: false, modifiers: Modifiers::COMMAND };
+    p.look(Show::Modals);
+    p.frame(Show::Modals, vec![Event::ModifiersChanged(Modifiers::COMMAND), key(true)]);
+    p.frame(Show::Modals, vec![key(false), Event::ModifiersChanged(Modifiers::NONE)]);
+    until(&mut p, Show::Modals, "the event is saved", |p| p.app.modal.is_none());
+    let evs = stored(&src);
+    assert_eq!(evs.len(), 1);
+    assert_eq!(evs[0].summary, "Moves");
+    let day = crate::calendar::time::days_from_civil(month[..4].parse().unwrap(), month[5..].parse().unwrap(), 20);
+    let (hh, mm): (i64, i64) = (start_time[..2].parse().unwrap(), start_time[3..].parse().unwrap());
+    assert_eq!(evs[0].start, crate::calendar::time::local_to_utc(day, hh * 3600 + mm * 60), "saved on the day that was picked");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: NAV-028
+#[test]
+fn nav_028_event_dialog_shows_a_running_save_in_the_footer_and_stays_open_until_it_is_done() {
+    let (mut p, src, dir) = with_calendar("footer-evt-saving");
+    new_event_dialog(&mut p);
+    // a save that has not finished: the dialog holds it, like the one `Save` starts
+    let job: crate::calendar::store::Job = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let Some(Modal::Event(d)) = &mut p.app.modal else { panic!("no dialog") };
+    d.job = Some(job.clone());
+    p.size = Vec2::new(900.0, 320.0);
+    p.look(Show::Modals);
+    let dialog = p.dialog_area("event");
+    let saving = p.find(Show::Modals, None, &format!("Saving to “{}”…", src.name));
+    let save = p.find(Show::Modals, Some(Role::Button), "Save");
+    assert!(dialog.contains_rect(saving) && dialog.contains_rect(save), "the line {saving:?} and Save {save:?} are in the footer of the short dialog {dialog:?}");
+    // Esc and a click outside do not close it while the save runs; the buttons do not answer
+    p.key(Show::Modals, Key::Escape);
+    p.click_rect(Show::Modals, Rect::from_center_size(Pos2::new(5.0, 5.0), Vec2::splat(4.0)), PointerButton::Primary);
+    p.click_rect(Show::Modals, save, PointerButton::Primary);
+    assert!(matches!(&p.app.modal, Some(Modal::Event(d)) if d.is_saving()));
+    assert!(stored(&src).is_empty());
+    // the save is done: the dialog closes and says so
+    *job.lock().unwrap() = Some(Ok("Saved “Moves”".into()));
+    until(&mut p, Show::Modals, "the dialog closes", |p| p.app.modal.is_none());
+    assert!(p.app.toasts.iter().any(|(t, _)| t == "Saved “Moves”"), "{:?}", p.app.toasts);
+    assert_eq!(p.app.cal.last_event_calendar.as_deref(), Some(src.id.as_str()));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// spec: NAV-028
+#[test]
+fn nav_028_feed_accounts_keep_sign_in_and_close_in_view_in_a_short_window() {
+    let mut p = P::new("footer-social", &[]);
+    p.app.open_social_accounts();
+    footer_in_a_short_window(&mut p, 300.0, "social-accounts", "Shale only asks for permission to read. The code or token is not kept; the access token goes to your system keyring.", &["Sign in", "Close"]);
+    // a real click on the footer's Sign in checks the input and says what is missing, in the footer
+    p.click(Show::Modals, "Sign in");
+    let Some(Modal::Social(d)) = &p.app.modal else { panic!("the dialog closed") };
+    let error = d.error.clone().expect("an error");
+    assert!(error.contains("server"), "{error}");
+    assert!(p.shows(Show::Modals, &error));
+    // the error took a line of the footer: the buttons are still inside the dialog
+    let dialog = p.dialog_area("social-accounts");
+    for b in ["Sign in", "Close"] {
+        let r = p.find(Show::Modals, Some(Role::Button), b);
+        assert!(dialog.contains_rect(r), "{b:?} at {r:?} is outside the dialog {dialog:?}");
+    }
+    // Close closes it
+    p.click(Show::Modals, "Close");
+    assert!(p.app.modal.is_none());
+}
+
+// spec: NAV-028
+#[test]
+fn nav_028_export_to_pdf_keeps_export_and_cancel_in_view_in_a_short_window() {
+    let mut p = P::new("footer-export", &[]);
+    p.app.open_export_dialog(Path::new("Welcome.md"));
+    footer_in_a_short_window(&mut p, 300.0, "export-pdf", "Open the PDF after exporting", &["Export", "Cancel"]);
+    // a real click on the footer's Export writes the PDF and closes the dialog
+    let target = p.dir.join("exports/Welcome.pdf");
+    assert!(!target.exists());
+    p.click(Show::Modals, "Export");
+    assert!(p.app.modal.is_none());
+    assert!(std::fs::read(&target).unwrap().starts_with(b"%PDF"));
+    // Cancel closes it without writing
+    p.app.open_export_dialog(Path::new("Ideas.md"));
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.modal.is_none() && !p.dir.join("exports/Ideas.pdf").exists());
+}
+
+// spec: NAV-028
+#[test]
+fn nav_028_import_has_no_empty_band_between_its_content_and_its_footer() {
+    let mut p = P::new("band-import", &[]);
+    let outside = p.dir.with_extension("band-outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("One.md"), "# One\n").unwrap();
+    let (items, notes) = crate::import::items_from_paths(&[outside.join("One.md")]);
+    p.app.open_import(items, notes, None);
+    // the dialog fits the window: from the first frames on, the last line of the content is
+    // followed by the footer's separator and the buttons, nothing more (the content is measured
+    // taller in the first frames, and the window must not keep that size)
+    for n in 0..12 {
+        p.look(Show::Modals);
+        let last = p.find(Show::Modals, None, "Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more.");
+        let import = p.find(Show::Modals, Some(Role::Button), "Import 1 item");
+        let gap = import.top() - last.bottom();
+        assert!(gap < 20.0, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?}");
+    }
+    // and the content is not a pixel taller than the room it has, so it does not scroll (and
+    // shows no scroll bar): a turn of the wheel moves nothing
+    let top = p.find(Show::Modals, None, "Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more.").top();
+    let over = p.dialog_area("import").center();
+    p.frame(Show::Modals, vec![Event::PointerMoved(over)]);
+    for _ in 0..5 {
+        p.frame(Show::Modals, vec![Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: Vec2::new(0.0, -50.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }]);
+    }
+    let after = p.find(Show::Modals, None, "Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more.").top();
+    assert_eq!(top, after, "the content scrolled");
+    let _ = std::fs::remove_dir_all(&outside);
+}

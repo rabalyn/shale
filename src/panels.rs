@@ -1102,9 +1102,15 @@ impl ShaleApp {
         if let Modal::Social(d) = &mut modal {
             let accounts = self.cfg.social_accounts.clone();
             let check_minutes = self.cfg.social_check_minutes;
-            let resp = crate::dialog::Dialog::new("social-accounts", "Feed accounts").width(560.0).show(&ctx, |ui| crate::social::accounts_ui::show(ui, d, &accounts, check_minutes));
+            let mut st = (&mut **d, None);
+            let resp = crate::dialog::Dialog::new("social-accounts", "Feed accounts").width(560.0).show_with_footer(
+                &ctx,
+                &mut st,
+                |ui, (d, out)| *out = crate::social::accounts_ui::show(ui, d, &accounts, check_minutes),
+                |ui, (d, out)| *out = crate::social::accounts_ui::footer(ui, d).or(out.take()),
+            );
             let close_asked = resp.should_close();
-            if let Some(a) = resp.inner.flatten() {
+            if let Some(a) = st.1 {
                 if self.social_dialog_action(a) {
                     keep = false;
                 }
@@ -1135,11 +1141,22 @@ impl ShaleApp {
             }
         }
         if let Modal::Event(d) = &mut modal {
-            let store = &mut self.calendar;
             let title = if d.original.is_some() { "Edit event" } else { "New event" };
-            let resp = crate::dialog::Dialog::new("event", title).width(460.0).show(&ctx, |ui| crate::calendar::dialog::show_event(ui, d, store));
+            // the dialog, the calendars, and what the content or the footer ended with
+            let mut st = (&mut **d, &mut self.calendar, None);
+            let resp = crate::dialog::Dialog::new("event", title).width(460.0).show_with_footer(
+                &ctx,
+                &mut st,
+                |ui, (d, store, out)| *out = crate::calendar::dialog::show_event(ui, d, store),
+                |ui, (d, store, out)| {
+                    // a finished save closes the dialog: its footer has nothing left to do
+                    if out.is_none() {
+                        *out = crate::calendar::dialog::event_footer(ui, d, store);
+                    }
+                },
+            );
             let close_asked = resp.should_close();
-            match resp.inner.flatten() {
+            match st.2 {
                 Some(crate::calendar::dialog::EventResult::Saved(msg)) => {
                     self.cal.last_event_calendar = Some(d.calendar.clone());
                     self.toast(msg);
@@ -1155,9 +1172,10 @@ impl ShaleApp {
         }
         if let Modal::Export(d) = &mut modal {
             let title = format!("Export “{}” to PDF", d.name);
-            let resp = crate::dialog::Dialog::new("export-pdf", title).width(460.0).show(&ctx, |ui| crate::pdf::export_dialog::show(ui, d));
+            let mut st = (&mut **d, crate::pdf::export_dialog::DialogResult::Open);
+            let resp = crate::dialog::Dialog::new("export-pdf", title).width(460.0).show_with_footer(&ctx, &mut st, |ui, (d, _)| crate::pdf::export_dialog::show(ui, d), |ui, (d, out)| *out = crate::pdf::export_dialog::footer(ui, d));
             let close_asked = resp.should_close();
-            match resp.inner.unwrap_or(crate::pdf::export_dialog::DialogResult::Open) {
+            match st.1 {
                 crate::pdf::export_dialog::DialogResult::Export => match self.run_export(d) {
                     Ok(out) => {
                         self.toast(format!("Exported to {}", out.display()));

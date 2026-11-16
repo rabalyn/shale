@@ -868,7 +868,8 @@ fn date_picker(ui: &mut Ui, key: &str, text: &mut String, monday_first: bool, re
     picked
 }
 
-/// Show the event dialog and run its save. `store` is changed only after a finished save.
+/// Show the event dialog's content and take the result of a finished save (the buttons and the
+/// start of a save are in [`event_footer`]). `store` is changed only after a finished save.
 pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -> Option<EventResult> {
     if let Some(msg) = d.finish(store) {
         return Some(EventResult::Saved(msg));
@@ -881,8 +882,6 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
         rects.push((k.to_string(), r.rect));
         r
     };
-    let mut res = None;
-    let mut save = false;
     let saving = d.is_saving();
     if saving {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -1123,12 +1122,29 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
             ui.label(muted("This event repeats: changes apply to every repeat. To change one date only, close this and choose “Edit this date”."));
         }
     }
+    rects.extend(picks);
+    d.rects = rects;
+    None
+}
+
+/// The event dialog's footer (NAV-028): the error of the last try, Save (or Move here) and
+/// Cancel, the spinner while a save runs, and the save itself (also on Ctrl+Enter). Call it
+/// after [`show_event`] in the same frame, and not when that returned a result.
+pub fn event_footer(ui: &mut Ui, d: &mut EventDialog, store: &CalendarStore) -> Option<EventResult> {
+    let saving = d.is_saving();
+    let mut res = None;
+    let mut save = false;
+    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     if let Some(e) = &d.error {
         ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING)).wrap());
     }
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         let label = if d.original.as_ref().map(|(s, _)| *s != d.calendar).unwrap_or(false) { "Move here" } else { "Save" };
+        let mut rec = |k: &str, r: egui::Response| -> egui::Response {
+            d.rects.push((k.to_string(), r.rect));
+            r
+        };
         if rec("save", ui.add_enabled(!saving, egui::Button::new(egui::RichText::new(label).strong()))).clicked() {
             save = true;
         }
@@ -1142,8 +1158,6 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
         }
     });
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
-    rects.extend(picks);
-    d.rects = rects;
     if (save || enter) && !saving {
         d.save(store, Some(ui.ctx().clone()));
     }
@@ -1159,6 +1173,11 @@ mod tests {
     fn show_all(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Option<CalDialogAction> {
         let a = show(ui, d, store);
         footer(ui, d).or(a)
+    }
+
+    /// The event dialog's content and footer, as the dialog window shows them together.
+    fn show_event_all(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -> Option<EventResult> {
+        show_event(ui, d, store).or_else(|| event_footer(ui, d, store))
     }
 
     struct H {
@@ -1282,7 +1301,7 @@ mod tests {
 
     fn wait_saved(h: &mut H, d: &mut EventDialog, store: &mut CalendarStore) -> Option<EventResult> {
         for _ in 0..300 {
-            if let Some(r) = h.frame(vec![], |ui| show_event(ui, d, store)) {
+            if let Some(r) = h.frame(vec![], |ui| show_event_all(ui, d, store)) {
                 return Some(r);
             }
             if !d.is_saving() {
@@ -1306,17 +1325,17 @@ mod tests {
         let mut d = EventDialog::new_at(src.id.clone(), start);
         assert_eq!((d.start_date.as_str(), d.start_time.as_str(), d.end_date.as_str(), d.end_time.as_str()), ("2026-11-13", "09:30", "2026-11-13", "10:00"), "30 minutes by default");
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.frame(vec![Ev::Text("Dentist".into())], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
+        h.frame(vec![Ev::Text("Dentist".into())], |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.title, "Dentist", "the title field has focus first");
-        h.typ(rect(&d.rects, "location"), "Main street 4", |ui| show_event(ui, &mut d, &mut store));
+        h.typ(rect(&d.rects, "location"), "Main street 4", |ui| show_event_all(ui, &mut d, &mut store));
         let e = d.event().unwrap();
         assert_eq!((e.summary.as_str(), e.location.as_str(), e.end - e.start), ("Dentist", "Main street 4", 1800));
         assert_eq!(t::utc_to_local(e.start), (day, 9 * 3600 + 1800));
         // a later start moves the end along (same length)
-        h.click(rect(&d.rects, "start-time"), |ui| show_event(ui, &mut d, &mut store));
-        h.frame(vec![Ev::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }], |ui| show_event(ui, &mut d, &mut store));
-        h.frame(vec![Ev::Text("14:00".into())], |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "start-time"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.frame(vec![Ev::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }], |ui| show_event_all(ui, &mut d, &mut store));
+        h.frame(vec![Ev::Text("14:00".into())], |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!((d.start_time.as_str(), d.end_time.as_str()), ("14:00", "14:30"));
         // the end can be set freely, also on another day
         d.end_date = "2026-11-14".into();
@@ -1326,7 +1345,7 @@ mod tests {
         d.end_time = "13:00".into();
         assert!(d.event().unwrap_err().contains("end after"), "an end before the start is refused");
         d.end_time = "15:00".into();
-        h.click(rect(&d.rects, "all-day"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "all-day"), |ui| show_event_all(ui, &mut d, &mut store));
         let e = d.event().unwrap();
         assert!(e.all_day);
         assert_eq!((e.start, e.end), (day * 86_400, (day + 1) * 86_400));
@@ -1338,9 +1357,9 @@ mod tests {
         assert!(d.event().is_err(), "a bad time is reported");
         d.start_time = "14:00".into();
         // Save writes it, then the dialog closes
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         // a fast job can finish during the click: its result comes back from the click
-        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event_all(ui, &mut d, &mut store));
         let r = clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store));
         assert!(matches!(&r, Some(EventResult::Saved(m)) if m.starts_with("Saved")), "{r:?} {:?}", d.error);
         let saved = store.find(&src.id, &e.uid).expect("the event is in the calendar");
@@ -1349,15 +1368,15 @@ mod tests {
         let mut d = EventDialog::edit(src.id.clone(), saved.clone());
         assert_eq!((d.title.as_str(), d.start_time.as_str(), d.end_time.as_str()), ("Dentist", "14:00", "15:00"));
         d.title = "Dentist (moved)".into();
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         // a fast job can finish during the click: its result comes back from the click
-        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event_all(ui, &mut d, &mut store));
         clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store)).unwrap();
         assert_eq!(store.find(&src.id, &saved.uid).unwrap().summary, "Dentist (moved)");
         assert_eq!(store.events[&src.id].iter().filter(|x| x.uid == saved.uid).count(), 1, "replaced, not copied");
         let mut d = EventDialog::new_at(src.id.clone(), start);
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        assert_eq!(h.click(rect(&d.rects, "cancel"), |ui| show_event(ui, &mut d, &mut store)), Some(EventResult::Cancel));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
+        assert_eq!(h.click(rect(&d.rects, "cancel"), |ui| show_event_all(ui, &mut d, &mut store)), Some(EventResult::Cancel));
     }
 
     // spec: CAL-004
@@ -1389,18 +1408,18 @@ mod tests {
         let mut d = EventDialog::new_at("shared".into(), 1_800_000_000);
         d.title = "Kickoff".into();
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         // a fast job can finish during the click: its result comes back from the click
-        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event_all(ui, &mut d, &mut store));
         assert!(clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store)).is_none(), "the dialog stays open");
         assert!(d.error.as_deref().unwrap_or("").contains("permission"), "{:?}", d.error);
         // pick another calendar and save again
-        h.click(rect(&d.rects, "calendar"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "cal:Work"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "calendar"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "cal:Work"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.calendar, "work");
         assert!(d.error.is_none());
         // a fast job can finish during the click: its result comes back from the click
-        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event_all(ui, &mut d, &mut store));
         let r = clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store));
         assert!(matches!(&r, Some(EventResult::Saved(m)) if m.contains("Work")), "{r:?} {:?}", d.error);
         // editing a local event and changing "Save to": written to the server, then removed here
@@ -1415,9 +1434,9 @@ mod tests {
         store.reload_local();
         let mut d = EventDialog::edit(local.id.clone(), store.find(&local.id, "loc1").unwrap());
         d.calendar = "work".into();
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         // a fast job can finish during the click: its result comes back from the click
-        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event_all(ui, &mut d, &mut store));
         let r = clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store));
         assert!(matches!(&r, Some(EventResult::Saved(m)) if m.starts_with("Moved")), "{r:?} {:?}", d.error);
         assert!(store.find(&local.id, "loc1").is_none(), "removed from the old calendar after the new one accepted it");
@@ -1435,51 +1454,51 @@ mod tests {
         let mut d = EventDialog::new_at(src.id.clone(), t::local_to_utc(day, 9 * 3600));
         d.title = "Standup".into();
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         assert!(!d.rects.iter().any(|r| r.0 == "interval" || r.0 == "end" || r.0 == "skip-add"), "no repeat fields while it does not repeat");
         // weekly on Monday and Wednesday, 10 times
-        h.click(rect(&d.rects, "repeat"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "repeat:Weekly"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "repeat"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "repeat:Weekly"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.repeat, RepeatMode::Every(Freq::Weekly));
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "day:0"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "day:2"), |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "day:0"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "day:2"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.days, [true, false, true, false, false, false, false]);
-        h.click(rect(&d.rects, "end"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "end:After"), |ui| show_event(ui, &mut d, &mut store));
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "end"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "end:After"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         assert!(d.rects.iter().any(|r| r.0 == "count"));
         // a reminder (15 minutes by default), changed to 2 hours; a second one removed again
-        h.click(rect(&d.rects, "rem-add"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "rem-add"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "rem-add"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "rem-add"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.reminders.len(), 2);
-        h.click(rect(&d.rects, "rem-del:1"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "rem-del:1"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.reminders, vec![ReminderRow::new(15, Unit::Minutes)]);
-        h.click(rect(&d.rects, "rem-unit:0"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "rem-unit:0:hours"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "rem-unit:0"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "rem-unit:0:hours"), |ui| show_event_all(ui, &mut d, &mut store));
         d.reminders[0].amount = "2".into();
         // status, free or busy, categories
-        h.click(rect(&d.rects, "status"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "status:Tentative"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "show-as"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "show-as:Free"), |ui| show_event(ui, &mut d, &mut store));
-        h.typ(rect(&d.rects, "categories"), "Work, Team", |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "status"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "status:Tentative"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "show-as"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "show-as:Free"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.typ(rect(&d.rects, "categories"), "Work, Team", |ui| show_event_all(ui, &mut d, &mut store));
         let e = d.event().unwrap();
         assert_eq!(e.rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO,WE;COUNT=10"));
         assert_eq!((e.status.as_str(), e.transparent, e.categories.clone()), ("TENTATIVE", true, vec!["Work".to_string(), "Team".to_string()]));
         assert_eq!(e.alarms, vec![Alarm::before_start(7200)]);
         assert_eq!(e.tzid, t::local_zone_name(), "a repeating event is stored in this computer's zone, so it keeps its clock time");
         // skip a date: only a date the event happens on
-        h.typ(rect(&d.rects, "skip-date"), "2026-11-18", |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "skip-add"), |ui| show_event(ui, &mut d, &mut store));
+        h.typ(rect(&d.rects, "skip-date"), "2026-11-18", |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "skip-add"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.skipped.iter().map(|r| r.day).collect::<Vec<_>>(), vec![day + 5]);
         let e = d.event().unwrap();
         assert_eq!(e.exdates, vec![t::local_to_utc(day + 5, 9 * 3600)], "the Wednesday at 09:00");
         d.skip_date = "2026-11-17".into();
         d.skip();
         assert!(d.event().unwrap_err().contains("does not happen on 2026-11-17"));
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "unskip:0"), |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "unskip:0"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.skipped.len(), 1, "the wrong date is taken out again");
         d.skip_date = "17.11.".into();
         d.skip();
@@ -1499,9 +1518,9 @@ mod tests {
         assert!(d.event().unwrap_err().contains("ends before"));
         d.end = EndMode::Count;
         // saved, loaded again: the dialog shows the same, and saving without a change changes nothing
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         // a fast job can finish during the click: its result comes back from the click
-        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event_all(ui, &mut d, &mut store));
         assert!(clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store)).is_some(), "{:?}", d.error);
         let saved = store.find(&src.id, &e.uid).unwrap();
         let mut d = EventDialog::edit(src.id.clone(), saved.clone());
@@ -1522,7 +1541,7 @@ mod tests {
         let mut d = EventDialog::edit(src.id.clone(), other.clone());
         assert_eq!(d.repeat, RepeatMode::Custom);
         d.title = "Renamed".into();
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         assert!(!d.rects.iter().any(|r| r.0 == "interval"));
         let e = d.event().unwrap();
         assert_eq!((e.rrule.as_deref(), e.exdates.clone()), (Some("FREQ=MONTHLY;BYDAY=2TU"), other.exdates.clone()));
@@ -1531,12 +1550,12 @@ mod tests {
         let mut d = EventDialog::edit(src.id.clone(), saved.override_at(occ.start, occ.end));
         assert!(d.is_occurrence());
         d.title = "Standup (short)".into();
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         assert!(!d.rects.iter().any(|r| r.0 == "repeat" || r.0 == "skip-add"), "one date has no repeat of its own");
         let one = d.event().unwrap();
         assert_eq!((one.recurrence_id, one.rrule.clone(), one.alarms.len()), (Some(occ.start), None, 1));
         // a fast job can finish during the click: its result comes back from the click
-        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event(ui, &mut d, &mut store));
+        let clicked = h.click(rect(&d.rects, "save"), |ui| show_event_all(ui, &mut d, &mut store));
         assert!(clicked.or_else(|| wait_saved(&mut h, &mut d, &mut store)).is_some(), "{:?}", d.error);
         let parts: Vec<&Event> = store.events[&src.id].iter().filter(|x| x.uid == saved.uid).collect();
         assert_eq!(parts.len(), 2, "the series and its changed date");
@@ -1574,46 +1593,46 @@ mod tests {
         let mut d = EventDialog::new_at(src.id.clone(), t::local_to_utc(day, 9 * 3600));
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
         let has_days = |d: &EventDialog| d.rects.iter().any(|r| r.0.starts_with("pick-day:"));
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
         assert!(!has_days(&d), "closed at first");
         // start: a month on, a day; the end moves along
-        h.click(rect(&d.rects, "pick:start-date"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick:start-date"), |ui| show_event_all(ui, &mut d, &mut store));
         assert!(rect(&d.rects, "pick-day:2026-11-13").width() > 0.0, "opens on the month of the field");
-        h.click(rect(&d.rects, "pick-prev"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick-prev"), |ui| show_event_all(ui, &mut d, &mut store));
         assert!(has_days(&d), "going back keeps it open");
         assert!(d.rects.iter().any(|r| r.0 == "pick-day:2026-10-15"));
-        h.click(rect(&d.rects, "pick-next"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "pick-next"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "pick-day:2026-12-20"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick-next"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick-next"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick-day:2026-12-20"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!((d.start_date.as_str(), d.start_time.as_str(), d.end_date.as_str(), d.end_time.as_str()), ("2026-12-20", "09:00", "2026-12-20", "09:30"), "same length");
         assert!(!has_days(&d), "a pick closes it");
         // end
-        h.click(rect(&d.rects, "pick:end-date"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "pick-day:2026-12-22"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick:end-date"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick-day:2026-12-22"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.end_date, "2026-12-22");
         // skip, with a weekly repeat
         d.repeat = RepeatMode::Every(Freq::Weekly);
         d.days[6] = true;
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "pick:skip-date"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "pick-next"), |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "pick-day:2026-12-27"), |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick:skip-date"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick-next"), |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick-day:2026-12-27"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.skipped.iter().map(|r| date_text(r.day)).collect::<Vec<_>>(), vec!["2026-12-27"], "{:?}", d.error);
         // last day of the repeat
         d.end = EndMode::Until;
         d.until = "2027-02-01".into();
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "pick:until"), |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick:until"), |ui| show_event_all(ui, &mut d, &mut store));
         assert!(d.rects.iter().any(|r| r.0 == "pick-day:2027-02-10"), "opens on the month of the field");
-        h.click(rect(&d.rects, "pick-day:2027-02-10"), |ui| show_event(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick-day:2027-02-10"), |ui| show_event_all(ui, &mut d, &mut store));
         assert_eq!(d.until, "2027-02-10");
         // weeks start on Monday or on Sunday
         assert_eq!(t::weekday(grid_start(2026, 11, true)), 0);
         assert_eq!(t::weekday(grid_start(2026, 11, false)), 6);
         assert_eq!(t::civil_from_days(grid_start(2026, 11, true)), (2026, 10, 26), "1 November 2026 is a Sunday: a Monday grid starts a week earlier");
         d.week_monday = false;
-        h.frame(vec![], |ui| show_event(ui, &mut d, &mut store));
-        h.click(rect(&d.rects, "pick:start-date"), |ui| show_event(ui, &mut d, &mut store));
+        h.frame(vec![], |ui| show_event_all(ui, &mut d, &mut store));
+        h.click(rect(&d.rects, "pick:start-date"), |ui| show_event_all(ui, &mut d, &mut store));
         let first = rect(&d.rects, "pick-day:2026-11-29").min.x;
         assert!(d.rects.iter().filter(|r| r.0.starts_with("pick-day:")).all(|r| r.1.min.x >= first - 0.5), "Sunday is the first column");
     }
