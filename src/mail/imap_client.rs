@@ -33,7 +33,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 /// Limits that keep a broken or hostile server from using up memory or time.
@@ -183,7 +183,7 @@ pub(crate) fn base64_encode(data: &[u8]) -> String {
 // ---------------------------------------------------------------- read-only guard
 
 /// The one gate every command passes before it is sent (MAIL-023). Allowed: sign-in,
-/// `CAPABILITY`, `STARTTLS`, `LIST`, `EXAMINE`, `NOOP`, `LOGOUT`, `UID SEARCH`, and `UID FETCH`
+/// `CAPABILITY`, `STARTTLS`, `LIST`, `EXAMINE`, `NOOP`, `IDLE` (MAIL-230), `LOGOUT`, `UID SEARCH`, and `UID FETCH`
 /// that does not ask for anything that marks a mail as read.
 pub fn check_read_only(cmd: &str) -> Result<()> {
     let refuse = |why: &str| Err(ImapError::Refused(format!("{why}: {}", cmd.split_whitespace().take(2).collect::<Vec<_>>().join(" "))));
@@ -193,7 +193,7 @@ pub fn check_read_only(cmd: &str) -> Result<()> {
     let up = cmd.to_ascii_uppercase();
     let mut words = up.split_whitespace();
     match words.next() {
-        Some("CAPABILITY" | "LOGIN" | "AUTHENTICATE" | "STARTTLS" | "LOGOUT" | "NOOP" | "LIST" | "EXAMINE") => Ok(()),
+        Some("CAPABILITY" | "LOGIN" | "AUTHENTICATE" | "STARTTLS" | "LOGOUT" | "NOOP" | "LIST" | "EXAMINE" | "IDLE") => Ok(()),
         Some("UID") => match words.next() {
             Some("SEARCH") => Ok(()),
             Some("FETCH") => {
@@ -494,6 +494,18 @@ pub(crate) enum Io {
     Gone,
 }
 
+impl Io {
+    /// How long a read waits for data (None: for ever). The connection stays good after a read that timed out.
+    fn set_read_timeout(&self, t: Option<Duration>) -> Result<()> {
+        match self {
+            Io::Plain(s) => s.set_read_timeout(t),
+            Io::Tls(s) => s.sock.set_read_timeout(t),
+            Io::Gone => Ok(()),
+        }
+        .map_err(io_error)
+    }
+}
+
 impl Read for Io {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
@@ -536,6 +548,26 @@ impl Wire {
     }
 
     fn fill(&mut self) -> Result<()> {
+        self.fill_io().map(|_| ()).map_err(io_error)
+    }
+
+    /// Wait up to `wait` for data to arrive (or be there already). False: nothing came. A closed
+    /// connection is an error. The read timeout is set back to `normal` before returning.
+    fn wait_for_data(&mut self, wait: Duration, normal: Duration) -> Result<bool> {
+        if self.has_buffered() {
+            return Ok(true);
+        }
+        self.io.set_read_timeout(Some(wait))?;
+        let r = self.fill_io();
+        self.io.set_read_timeout(Some(normal))?;
+        match r {
+            Ok(_) => Ok(true),
+            Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => Ok(false),
+            Err(e) => Err(io_error(e)),
+        }
+    }
+
+    fn fill_io(&mut self) -> io::Result<usize> {
         if self.pos == self.len {
             self.pos = 0;
             self.len = 0;
@@ -550,12 +582,12 @@ impl Wire {
                 self.buf.resize(n, 0);
             }
         }
-        let n = self.io.read(&mut self.buf[self.len..]).map_err(io_error)?;
+        let n = self.io.read(&mut self.buf[self.len..])?;
         if n == 0 {
-            return Err(ImapError::Connection("the server closed the connection".into()));
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the server closed the connection"));
         }
         self.len += n;
-        Ok(())
+        Ok(n)
     }
 
     /// One line without its CRLF. Longer than the limit is an error (and the connection is not used again).
@@ -818,6 +850,7 @@ enum Untagged {
     Capability(Vec<String>),
     List(FolderEntry),
     Exists(u32),
+    Expunge,
     Status { kind: String, code: Option<(String, String)>, text: String },
     Search(Vec<u32>),
     Fetch(Fetched),
@@ -832,6 +865,7 @@ fn parse_untagged(r: &RawResponse) -> Result<Untagged> {
         let Tok::Atom(w) = t.next() else { return Ok(Untagged::Other) };
         return Ok(match w.to_ascii_uppercase().as_str() {
             "EXISTS" => Untagged::Exists(n),
+            "EXPUNGE" => Untagged::Expunge,
             "FETCH" => Untagged::Fetch(parse_fetch(&mut t)?),
             _ => Untagged::Other,
         });
@@ -1123,6 +1157,20 @@ pub(crate) fn tls_stream(cfg: Arc<ClientConfig>, host: &str, tcp: TcpStream) -> 
 }
 
 // ---------------------------------------------------------------- the client
+
+/// How often `idle` looks at its stop flag.
+const IDLE_SLICE: Duration = Duration::from_millis(250);
+
+/// How an `IDLE` ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IdleEnd {
+    /// The server reported a new, deleted or changed message.
+    Changed,
+    /// The time given was up (or the server ended it): nothing is known to have changed.
+    Elapsed,
+    /// The caller asked to stop.
+    Stopped,
+}
 
 /// One IMAP connection. Everything it can do is read-only.
 pub struct Client {
@@ -1605,6 +1653,73 @@ impl Client {
         self.has_capability("CONDSTORE")
     }
 
+    pub fn has_idle(&self) -> bool {
+        self.has_capability("IDLE")
+    }
+
+    /// Wait for the server to say that the examined folder changed (`IDLE`, RFC 2177), for at most
+    /// `max` (servers drop an IDLE after 30 minutes). `stop` is looked at several times a second.
+    /// The answer: something changed (a new or deleted message, new flags), the time was up, or
+    /// `stop` said so. The connection is out of IDLE again when this returns, ready for the next
+    /// command. Nothing is changed on the server (MAIL-230).
+    pub fn idle(&mut self, max: Duration, stop: &dyn Fn() -> bool) -> Result<IdleEnd> {
+        let tag = self.next_tag();
+        self.send(&tag, "IDLE", Gate::ReadOnly)?;
+        let tagged = |r: &RawResponse| r.text.strip_prefix(tag.as_bytes()).and_then(|x| x.strip_prefix(b" ")).map(|x| String::from_utf8_lossy(x).into_owned());
+        loop {
+            let r = self.wire.read_response(self.limits.max_small_literal)?;
+            if r.text.starts_with(b"+") {
+                break;
+            }
+            if let Some(text) = tagged(&r) {
+                return Err(ImapError::Server(text)); // the server does not want to IDLE here
+            }
+        }
+        let started = Instant::now();
+        let mut end = IdleEnd::Elapsed;
+        // what the server says in between: a change ends the wait, a goodbye is an error
+        let hear = |r: RawResponse, end: &mut IdleEnd, waiting: bool| -> Result<bool> {
+            let Some(rest) = r.text.strip_prefix(b"* ") else { return Ok(false) };
+            match parse_untagged(&RawResponse { text: rest.to_vec(), lits: r.lits })? {
+                Untagged::Exists(_) | Untagged::Expunge | Untagged::Fetch(_) => {
+                    if waiting || *end == IdleEnd::Elapsed {
+                        *end = IdleEnd::Changed;
+                    }
+                    Ok(true)
+                }
+                Untagged::Status { kind, text, .. } if kind == "BYE" => Err(ImapError::Connection(format!("the server ended the connection: {text}"))),
+                _ => Ok(false),
+            }
+        };
+        loop {
+            if stop() {
+                end = IdleEnd::Stopped;
+                break;
+            }
+            if started.elapsed() >= max {
+                break;
+            }
+            if !self.wire.wait_for_data(IDLE_SLICE, self.limits.io_timeout)? {
+                continue;
+            }
+            let r = self.wire.read_response(self.limits.max_small_literal)?;
+            if tagged(&r).is_some() {
+                return Ok(IdleEnd::Elapsed); // the server ended the IDLE by itself
+            }
+            if hear(r, &mut end, true)? {
+                break;
+            }
+        }
+        self.wire.io.write_all(b"DONE\r\n").and_then(|_| self.wire.io.flush()).map_err(io_error)?;
+        loop {
+            let r = self.wire.read_response(self.limits.max_small_literal)?;
+            if let Some(text) = tagged(&r) {
+                return if text.get(..2).is_some_and(|w| w.eq_ignore_ascii_case("OK")) { Ok(end) } else { Err(ImapError::Server(text)) };
+            }
+            hear(r, &mut end, false)?;
+        }
+    }
+
     /// Say goodbye (errors do not matter any more).
     pub fn logout(mut self) {
         let _ = self.run("LOGOUT", 0, |_| Ok(()));
@@ -1812,7 +1927,8 @@ mod tests {
         let Untagged::Capability(c) = parse_untagged(&resp("capability IMAP4rev1 move UIDPLUS", &[])).unwrap() else { panic!() };
         assert_eq!(c, ["IMAP4REV1", "MOVE", "UIDPLUS"]);
         assert!(matches!(parse_untagged(&resp("4 EXISTS", &[])).unwrap(), Untagged::Exists(4)));
-        assert!(matches!(parse_untagged(&resp("4 EXPUNGE", &[])).unwrap(), Untagged::Other));
+        assert!(matches!(parse_untagged(&resp("4 EXPUNGE", &[])).unwrap(), Untagged::Expunge));
+        assert!(matches!(parse_untagged(&resp("4 RECENT", &[])).unwrap(), Untagged::Other));
         assert!(matches!(parse_untagged(&resp("4", &[])).unwrap(), Untagged::Other));
         assert!(matches!(parse_untagged(&resp("XSOMETHING (a b)", &[])).unwrap(), Untagged::Other));
     }

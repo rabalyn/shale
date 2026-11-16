@@ -321,6 +321,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   and can be stopped and resumed. **Sync** and the status bar show the progress; new mail is also
   fetched every 10 minutes (changeable, 0 = off) while Shale runs. A mail deleted on the server
   stays here, dimmed, with a note.
+- **Changes in another mail program show up within seconds.** While the mail view is open, the
+  folder you have open and each account's Inbox are watched over a read-only connection with IMAP
+  IDLE: a flag removed, mail read, new or deleted mail in Thunderbird or on your phone appears here
+  without pressing Sync (a server without IDLE is asked once a minute). Leaving the mail view
+  closes the connections; a wrong password is not tried over and over.
 - Choose which folders are synced with the tick boxes. **Trash, Junk and Gmail's "All Mail" are
   not synced automatically**: when you open one, its list is loaded from the server, and a
   message is downloaded when you press **Load this message**. The same button appears for a

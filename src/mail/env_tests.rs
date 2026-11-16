@@ -800,3 +800,52 @@ fn mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_
     crypto_end_to_end(crate::config::CryptoStandard::OpenPgp, &format!("pgp{}", std::process::id()));
     crypto_end_to_end(crate::config::CryptoStandard::Smime, &format!("smime{}", std::process::id()));
 }
+
+// ------------------------------------------------------------ watching a folder (MAIL-231)
+
+// spec: MAIL-231
+#[test]
+#[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
+fn mail_env_a_flag_that_another_connection_sets_and_removes_shows_in_the_store_within_seconds_through_idle() {
+    use crate::mail::watch::{Timing, Wanted, Watch};
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    clean_scratch();
+    let (dir, store) = temp_store("watch");
+    let store = Arc::new(store);
+    let connector = Arc::new(EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) });
+    doveadm(&["mailbox", "create", "-u", USER, "Scratch"], None).unwrap();
+    for s in ["Scratch one", "Scratch two"] {
+        put_message("Scratch", s);
+    }
+    only_scratch_is_synced(&store, connector.as_ref());
+    let sum = sync(&store, "alice", connector.as_ref());
+    assert!(sum.errors.is_empty() && sum.messages_added == 2, "{sum:?}");
+    let flagged = |subject: &str| -> bool {
+        let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
+        messages(&store, &rows, "Scratch").into_iter().find(|m| m.subject == subject).is_some_and(|m| m.is_flagged())
+    };
+    let wait = |what: &str, mut ok: Box<dyn FnMut() -> bool + '_>| {
+        let end = std::time::Instant::now() + Duration::from_secs(8);
+        while std::time::Instant::now() < end {
+            if ok() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!("within 8 seconds: {what}");
+    };
+    let mut watch = Watch::default();
+    watch.timing = Timing { idle_max: Duration::from_secs(60), ..Timing::default() };
+    let account = MailAccount { id: "alice".into(), name: "Alice".into(), host: "localhost".into(), port: IMAPS_PORT, user: USER.into(), ..MailAccount::default() };
+    let conn = connector.clone();
+    watch.update(&[Wanted { account, folder: "Scratch".into(), session_password: false }], &store, &move |_| conn.clone(), &SyncOptions::default(), None);
+    std::thread::sleep(Duration::from_secs(1)); // connected and idling
+                                                // another connection (doveadm, like Thunderbird) flags a mail and takes the flag off again
+    doveadm(&["flags", "add", "-u", USER, "\\Flagged", "mailbox", "Scratch", "header", "Subject", "Scratch one"], None).unwrap();
+    wait("the flag arrives", Box::new(|| flagged("Scratch one")));
+    doveadm(&["flags", "remove", "-u", USER, "\\Flagged", "mailbox", "Scratch", "header", "Subject", "Scratch one"], None).unwrap();
+    wait("the flag is gone again", Box::new(|| !flagged("Scratch one")));
+    watch.stop_all();
+    clean_scratch();
+    let _ = std::fs::remove_dir_all(dir);
+}

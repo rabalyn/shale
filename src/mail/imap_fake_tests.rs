@@ -65,6 +65,10 @@ pub struct FakeState {
     pub oauth_error_answers: Vec<Vec<u8>>,
     /// The mechanism of every `AUTHENTICATE` received.
     pub auth_mechs: Vec<String>,
+    /// Offer `IDLE` (RFC 2177). While a client idles, the server tells it about changes that a test makes.
+    pub idle: bool,
+    /// `IDLE` is offered but answered `NO` (a server that has it switched off for this user).
+    pub idle_refused: bool,
     /// Offer `MOVE` (RFC 6851).
     pub move_cap: bool,
     /// Offer `UIDPLUS` (`UID EXPUNGE`, `COPYUID`).
@@ -231,6 +235,8 @@ impl FakeServer {
             oauth_mechs: vec!["XOAUTH2", "OAUTHBEARER"],
             oauth_error_answers: vec![],
             auth_mechs: vec![],
+            idle: true,
+            idle_refused: false,
             move_cap: true,
             uidplus: true,
             fail_next_write: None,
@@ -338,6 +344,83 @@ fn unquote(s: &str) -> String {
     }
 }
 
+/// What the pretend server needs of a connection to wait for the client's next line only for a while.
+trait ReadTimeout {
+    fn read_timeout(&self, t: Option<Duration>);
+}
+
+impl ReadTimeout for TcpStream {
+    fn read_timeout(&self, t: Option<Duration>) {
+        let _ = self.set_read_timeout(t);
+    }
+}
+
+impl ReadTimeout for StreamOwned<ServerConnection, TcpStream> {
+    fn read_timeout(&self, t: Option<Duration>) {
+        let _ = self.sock.set_read_timeout(t);
+    }
+}
+
+/// What a folder holds, to find out what changed while a client idles: (uid, flags) per message.
+fn snapshot(st: &Arc<Mutex<FakeState>>, name: &str) -> Vec<(u32, Vec<String>)> {
+    st.lock().unwrap().folders.iter().find(|f| f.name == name).map(|f| f.msgs.iter().map(|m| (m.uid, m.flags.clone())).collect()).unwrap_or_default()
+}
+
+/// `IDLE`: answer `+`, then every 30 ms tell what changed in the selected folder (`EXISTS` for new
+/// mail, `EXPUNGE` for mail gone, `FETCH` with the flags for changed ones) until the client says `DONE`.
+fn idle_session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, selected: &Option<String>, tag: &str) -> std::io::Result<bool> {
+    if st.lock().unwrap().idle_refused {
+        write!(r.get_mut(), "{tag} NO IDLE is not allowed for you\r\n")?;
+        return Ok(true);
+    }
+    let Some(name) = selected.clone() else {
+        write!(r.get_mut(), "{tag} BAD no folder selected\r\n")?;
+        return Ok(true);
+    };
+    write!(r.get_mut(), "+ idling\r\n")?;
+    r.get_mut().flush()?;
+    r.get_ref().read_timeout(Some(Duration::from_millis(30)));
+    let mut before = snapshot(st, &name);
+    let mut line = String::new();
+    let done = loop {
+        match r.read_line(&mut line) {
+            Ok(0) => return Ok(false),
+            Ok(_) => {
+                st.lock().unwrap().commands.push(line.trim_end().to_string());
+                break line.trim().eq_ignore_ascii_case("DONE");
+            }
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                let now = snapshot(st, &name);
+                if now != before {
+                    let out = r.get_mut();
+                    for (i, (uid, _)) in before.iter().enumerate().rev() {
+                        if !now.iter().any(|(u, _)| u == uid) {
+                            write!(out, "* {} EXPUNGE\r\n", i + 1)?;
+                        }
+                    }
+                    for (i, (uid, flags)) in now.iter().enumerate() {
+                        match before.iter().find(|(u, _)| u == uid) {
+                            None => write!(out, "* {} EXISTS\r\n", i + 1)?,
+                            Some((_, old)) if old != flags => write!(out, "* {} FETCH (UID {uid} FLAGS ({}))\r\n", i + 1, flags.join(" "))?,
+                            _ => {}
+                        }
+                    }
+                    out.flush()?;
+                    before = now;
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    };
+    r.get_ref().read_timeout(Some(Duration::from_secs(20)));
+    if done {
+        write!(r.get_mut(), "{tag} OK IDLE terminated\r\n")?;
+    } else {
+        write!(r.get_mut(), "{tag} BAD expected DONE\r\n")?;
+    }
+    Ok(true)
+}
+
 /// UIDs in an IMAP set such as `1:3,7,9:*` given the UIDs that exist.
 fn in_set(set: &str, uid: u32, max: u32) -> bool {
     set.split(',').any(|part| {
@@ -352,7 +435,7 @@ fn in_set(set: &str, uid: u32, max: u32) -> bool {
     })
 }
 
-fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tls: bool) -> std::io::Result<Next> {
+fn session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tls: bool) -> std::io::Result<Next> {
     let mut selected: Option<String> = None;
     let mut rw = false;
     let mut line = String::new();
@@ -389,6 +472,9 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                 if g.condstore {
                     caps.push("CONDSTORE");
                 }
+                if g.idle {
+                    caps.push("IDLE");
+                }
                 if g.move_cap {
                     caps.push("MOVE");
                 }
@@ -407,6 +493,11 @@ fn session<S: Read + Write>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tl
                 return Ok(Next::Upgrade);
             }
             "NOOP" => write!(out, "{tag} OK\r\n")?,
+            "IDLE" if st.lock().unwrap().idle => {
+                if !idle_session(r, st, &selected, tag)? {
+                    return Ok(Next::Done);
+                }
+            }
             "LOGOUT" => {
                 write!(out, "* BYE bye\r\n{tag} OK logged out\r\n")?;
                 return Ok(Next::Done);
@@ -965,7 +1056,7 @@ mod tests {
     // spec: MAIL-023
     #[test]
     fn the_guard_refuses_what_could_change_a_mailbox() {
-        for ok in ["CAPABILITY", "LIST \"\" \"*\"", "EXAMINE \"INBOX\"", "UID SEARCH ALL", "UID FETCH 1:* (UID FLAGS)", "UID FETCH 5 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])", "uid fetch 5 (BODY.PEEK[HEADER])", "LOGOUT"] {
+        for ok in ["CAPABILITY", "LIST \"\" \"*\"", "EXAMINE \"INBOX\"", "UID SEARCH ALL", "UID FETCH 1:* (UID FLAGS)", "UID FETCH 5 (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])", "uid fetch 5 (BODY.PEEK[HEADER])", "IDLE", "LOGOUT"] {
             assert!(check_read_only(ok).is_ok(), "{ok}");
         }
         for bad in [
@@ -984,7 +1075,6 @@ mod tests {
             "RENAME a b",
             "CLOSE",
             "UNSELECT",
-            "IDLE",
             "UID FETCH 1 (BODY[])",
             "UID FETCH 1 (BODY[HEADER])",
             "UID FETCH 1 (RFC822)",
@@ -1292,7 +1382,8 @@ mod tests {
                 assert_eq!(code.matches("Gate::Write").count(), 3, "Gate::Write: the check in `send`, the call in `write` and the one in `append` (called only from `write`)");
                 assert_eq!(code.matches("self.append(").count(), 1, "`append` is reached from `write` only");
                 assert_eq!(code.matches("fn run_gated").count(), 1);
-                assert!(!code.contains("\"EXPUNGE\"") && !code.contains("format!(\"EXPUNGE"), "plain EXPUNGE is not a thing here");
+                // (the answer `* n EXPUNGE` that a server sends is understood, so the word itself is in the file)
+                assert!(!code.contains("run(\"EXPUNGE") && !code.contains("format!(\"EXPUNGE"), "plain EXPUNGE is not a thing here");
                 continue;
             }
             for (i, l) in code.lines().enumerate() {
