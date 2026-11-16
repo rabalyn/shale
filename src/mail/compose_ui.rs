@@ -817,7 +817,8 @@ impl MailView {
                 }
                 for (i, d) in list.iter().enumerate() {
                     let r = ui.add(
-                        egui::Button::new(
+                        egui::Button::selectable(
+                            false,
                             RichText::new(format!(
                                 "{}\n{}  ·  saved {}",
                                 if d.subject.trim().is_empty() { "(no subject)" } else { d.subject.as_str() },
@@ -826,7 +827,6 @@ impl MailView {
                             ))
                             .size(13.0),
                         )
-                        .frame(false)
                         .min_size(Vec2::new(ui.available_width(), 44.0)),
                     );
                     rec(rects, format!("mail:draft:{i}"), &r);
@@ -865,9 +865,7 @@ impl MailView {
                         _ => theme::TEXT,
                     };
                     let r = ui.add(
-                        egui::Button::new(RichText::new(format!("{}\n{}  ·  {state}", if it.subject.trim().is_empty() { "(no subject)" } else { it.subject.as_str() }, it.recipients.join(", "))).size(13.0).color(color))
-                            .selected(selected)
-                            .frame(selected)
+                        egui::Button::selectable(selected, RichText::new(format!("{}\n{}  ·  {state}", if it.subject.trim().is_empty() { "(no subject)" } else { it.subject.as_str() }, it.recipients.join(", "))).size(13.0).color(color))
                             .min_size(Vec2::new(ui.available_width(), 44.0)),
                     );
                     rec(rects, format!("mail:outbox:{i}"), &r);
