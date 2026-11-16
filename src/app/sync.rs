@@ -1,9 +1,9 @@
 //! Git sync in the app: when it runs, what happens to open buffers, and its settings
-//! (ADR-0008; SYNC-002, SYNC-013…SYNC-015).
+//! (ADR-0008, ADR-0015; SYNC-002, SYNC-013…SYNC-017).
 
 use super::{muted, ShaleApp};
 use crate::drawing::DrawingDoc;
-use crate::gitsync::{self, Git, Report, TreeGuard, TreeLock};
+use crate::gitsync::{self, lfs, Git, Report, TreeGuard, TreeLock};
 use crate::theme;
 use crate::vault::rel_to_string;
 use eframe::egui::{self, Ui};
@@ -13,6 +13,9 @@ use std::time::{Duration, Instant};
 
 /// What a sync job sends back: its report, or why it failed (the outer error: the job itself died).
 type SyncResult = Result<Result<Report, String>, String>;
+
+/// What a Git LFS setup job sends back: the number of files it converted, or why it failed.
+type LfsResult = Result<Result<usize, String>, String>;
 
 /// The sync's state in the app.
 #[derive(Default)]
@@ -29,6 +32,10 @@ pub struct SyncState {
     last_start: Option<Instant>,
     /// The last result: (local time, summary or error).
     pub last: Option<(String, Result<String, String>)>,
+    /// Is git-lfs installed, does this vault store media with it (SYNC-016).
+    pub lfs: lfs::Status,
+    /// A running "Store media with Git LFS": its vault and where its result arrives (SYNC-017).
+    lfs_job: Option<(PathBuf, Receiver<LfsResult>)>,
     /// `git --version`, looked up once (None inside = git is missing).
     git_version: Option<Option<String>>,
     /// The URL field in the settings.
@@ -52,6 +59,68 @@ impl ShaleApp {
         self.sync.last = None;
         self.sync.remote = self.vault.as_ref().and_then(|v| gitsync::remote_url(&self.sync.git, &v.root)).map(|u| gitsync::hide_passwords(&u));
         self.sync.url = self.sync.remote.clone().unwrap_or_default();
+        self.refresh_lfs();
+    }
+
+    /// Look up again whether git-lfs is installed and whether this vault uses it (SYNC-016).
+    pub(crate) fn refresh_lfs(&mut self) {
+        let root = self.vault.as_ref().map(|v| v.root.clone());
+        self.sync.lfs = match root {
+            Some(root) if self.git_version().is_some() => lfs::status(&self.sync.git, &root),
+            _ => lfs::Status::default(),
+        };
+    }
+
+    fn sync_options(&self) -> gitsync::Options {
+        let s = &self.vdata.settings.sync;
+        gitsync::Options { commit_prefix: s.commit_prefix.clone(), commit_suffix: s.commit_suffix.clone(), host: gitsync::host_name(), stamp: gitsync::stamp_now() }
+    }
+
+    /// "Store media with Git LFS": set the repository up in the background, then sync (SYNC-017).
+    pub(crate) fn start_lfs_setup(&mut self) {
+        if self.sync.running() || self.sync.lfs_job.is_some() {
+            return;
+        }
+        let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
+        self.flush_all();
+        let (git, tree, opts, ctx, job_root) = (self.sync.git.clone(), self.sync.tree.clone(), self.sync_options(), self.ctx.clone(), root.clone());
+        let rx = crate::jobs::spawn(
+            move || lfs::setup(&git, &job_root, &opts, &tree),
+            move || {
+                if let Some(c) = ctx {
+                    c.request_repaint();
+                }
+            },
+        );
+        self.sync.lfs_job = Some((root, rx));
+    }
+
+    /// Collect a finished LFS setup: say what happened and sync, which uploads the files.
+    fn lfs_job_done(&mut self, ctx: &egui::Context) -> bool {
+        let Some((root, rx)) = &self.sync.lfs_job else { return false };
+        let r = match rx.try_recv() {
+            Ok(r) => r.unwrap_or_else(|_| Err("Git LFS setup stopped with an internal error".into())),
+            Err(TryRecvError::Empty) => {
+                ctx.request_repaint_after(Duration::from_millis(200));
+                return true;
+            }
+            Err(TryRecvError::Disconnected) => Err("Git LFS setup stopped unexpectedly".into()),
+        };
+        let root = root.clone();
+        self.sync.lfs_job = None;
+        if self.vault.as_ref().map(|v| v.root.as_path()) != Some(root.as_path()) {
+            return true; // another vault was opened meanwhile
+        }
+        self.refresh_lfs();
+        match r {
+            Ok(n) => {
+                self.toast(if n > 0 { format!("Media files are stored with Git LFS from now on ({n} file(s) converted); syncing now") } else { "Media files are stored with Git LFS from now on".to_string() });
+                self.sync.last_start = None;
+                self.start_sync();
+            }
+            Err(e) => self.toast(format!("Could not set up Git LFS: {e}")),
+        }
+        true
     }
 
     fn git_version(&mut self) -> Option<String> {
@@ -77,6 +146,9 @@ impl ShaleApp {
 
     /// Every frame: collect a finished sync, start one when it is due (SYNC-002).
     pub(crate) fn sync_tick(&mut self, ctx: &egui::Context) {
+        if self.lfs_job_done(ctx) {
+            return;
+        }
         if let Some((root, rx)) = &self.sync.job {
             let r = match rx.try_recv() {
                 Ok(r) => r.unwrap_or_else(|_| Err("the sync stopped with an internal error".into())),
@@ -109,7 +181,7 @@ impl ShaleApp {
 
     /// Save everything, then sync in the background.
     pub(crate) fn start_sync(&mut self) {
-        if self.sync.running() {
+        if self.sync.running() || self.sync.lfs_job.is_some() {
             return;
         }
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return };
@@ -117,8 +189,7 @@ impl ShaleApp {
         self.flush_all();
         self.remember_open_files();
         self.save_config();
-        let s = &self.vdata.settings.sync;
-        let opts = gitsync::Options { commit_prefix: s.commit_prefix.clone(), commit_suffix: s.commit_suffix.clone(), host: gitsync::host_name(), stamp: gitsync::stamp_now() };
+        let opts = self.sync_options();
         let git = self.sync.git.clone();
         let tree = self.sync.tree.clone();
         let ctx = self.ctx.clone();
@@ -152,6 +223,7 @@ impl ShaleApp {
             }
         };
         self.sync.last = Some((when, Ok(report.summary())));
+        self.refresh_lfs();
         if self.vault.as_ref().map(|v| v.root.as_path()) != Some(root) {
             return; // another vault was opened meanwhile
         }
@@ -268,6 +340,7 @@ impl ShaleApp {
         if !repo {
             return false;
         }
+        self.lfs_settings_ui(ui);
         let writable = self.vdata.settings_writable();
         let rects = ui.add_enabled_ui(writable, |ui| {
             let s = &mut self.vdata.settings.sync;
@@ -311,6 +384,27 @@ impl ShaleApp {
         });
         changed
     }
+
+    /// Git LFS: installed or not, and the button that stores media with it (SYNC-016, SYNC-017).
+    fn lfs_settings_ui(&mut self, ui: &mut Ui) {
+        let Some(version) = self.sync.lfs.version.clone() else {
+            ui.label(muted(format!("Git LFS is not installed, so media files (audio, video) are stored like any other file. {}", lfs::INSTALL_HINT)).size(12.0));
+            return;
+        };
+        if self.sync.lfs.stores_media {
+            ui.label(muted(format!("Media files (audio, video) of this repository are stored with Git LFS ({version}).")).size(12.0));
+            return;
+        }
+        ui.horizontal(|ui| {
+            let busy = self.sync.running() || self.sync.lfs_job.is_some();
+            let b = ui.add_enabled(!busy, egui::Button::new("Store media with Git LFS"));
+            self.sync.rects.push(("lfs-setup", b.rect));
+            if b.clicked() {
+                self.start_lfs_setup();
+            }
+            ui.label(muted(if self.sync.lfs_job.is_some() { "Setting up…".to_string() } else { format!("Audio and video go to the LFS store of the remote instead of the history ({version}).") }).size(12.0));
+        });
+    }
 }
 
 #[cfg(test)]
@@ -319,9 +413,31 @@ mod tests {
     use crate::app::{Options, View};
     use std::ffi::OsString;
 
+    /// A hermetic git; `git lfs` is an alias that fails, so these tests are the same with and
+    /// without git-lfs on the machine.
     fn hermetic() -> Git {
-        let env = [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "init.defaultBranch"), ("GIT_CONFIG_VALUE_0", "main")];
+        let env = [
+            ("GIT_CONFIG_GLOBAL", "/dev/null"),
+            ("GIT_CONFIG_NOSYSTEM", "1"),
+            ("GIT_CONFIG_COUNT", "2"),
+            ("GIT_CONFIG_KEY_0", "init.defaultBranch"),
+            ("GIT_CONFIG_VALUE_0", "main"),
+            ("GIT_CONFIG_KEY_1", "alias.lfs"),
+            ("GIT_CONFIG_VALUE_1", "!exit 1"),
+        ];
         Git { program: "git".into(), env: env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect() }
+    }
+
+    /// The same with the real git-lfs: None (and a printed note) when it is not installed.
+    fn hermetic_lfs() -> Option<Git> {
+        if Git::default().lfs_version().is_none() {
+            eprintln!("skipping: git-lfs is not installed here (CI installs it)");
+            return None;
+        }
+        let mut git = hermetic();
+        git.env.retain(|(k, _)| k != "GIT_CONFIG_KEY_1" && k != "GIT_CONFIG_VALUE_1" && k != "GIT_CONFIG_COUNT");
+        git.env.push(("GIT_CONFIG_COUNT".into(), "1".into()));
+        Some(git)
     }
 
     fn app_on(vault: &Path) -> ShaleApp {
@@ -333,7 +449,7 @@ mod tests {
     fn wait(app: &mut ShaleApp) {
         let ctx = egui::Context::default();
         let t = Instant::now();
-        while app.sync.running() {
+        while app.sync.running() || app.sync.lfs_job.is_some() {
             assert!(t.elapsed() < Duration::from_secs(30), "sync did not finish");
             std::thread::sleep(Duration::from_millis(10));
             app.sync_tick(&ctx);
@@ -608,6 +724,60 @@ mod tests {
         app.vdata.save().unwrap();
         let text = crate::fsutil::read_to_string(root.join(".shale/state.json")).unwrap();
         assert!(text.contains("\"t\""), "{text}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: SYNC-016
+    #[test]
+    fn the_settings_say_that_git_lfs_is_missing_and_offer_nothing() {
+        let root = std::env::temp_dir().join(format!("shale-app-lfs-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        crate::fsutil::write_atomic(&root.join("Note.md"), b"hi\n").unwrap();
+        let git = hermetic();
+        assert!(std::process::Command::new("git").arg("-C").arg(&root).args(["init", "--quiet"]).envs(git.env.iter().cloned()).status().unwrap().success());
+        let mut app = app_on(&root);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(&mut app, vec![]);
+        assert_eq!(app.sync.lfs, lfs::Status::default());
+        assert!(app.sync.rects.iter().any(|r| r.0 == "enabled"), "the other sync settings are there");
+        assert!(!app.sync.rects.iter().any(|r| r.0 == "lfs-setup"), "{:?}", app.sync.rects);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: SYNC-016, SYNC-017, SYNC-018
+    #[test]
+    fn the_button_stores_media_with_git_lfs_and_the_sync_uploads_it() {
+        let Some(git) = hermetic_lfs() else { return };
+        let root = std::env::temp_dir().join(format!("shale-app-lfs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let remote = root.join("remote.git");
+        std::fs::create_dir_all(&remote).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet", "--bare"]).arg(&remote).envs(git.env.iter().cloned()).status().unwrap().success());
+        let v = root.join("vault");
+        std::fs::create_dir_all(&v).unwrap();
+        // a vault that was a repository before Shale knew about LFS, with a song in its history
+        assert!(std::process::Command::new("git").arg("-C").arg(&v).args(["init", "--quiet"]).envs(git.env.iter().cloned()).status().unwrap().success());
+        crate::fsutil::write_atomic(&v.join("Song.mp3"), &[200u8; 50]).unwrap();
+        gitsync::connect(&git, &v, remote.to_str().unwrap()).unwrap();
+        let mut app = app_on(&v);
+        app.sync.git = git.clone();
+        app.start_sync();
+        wait(&mut app);
+        app.refresh_lfs();
+        assert!(app.sync.lfs.version.is_some() && !app.sync.lfs.stores_media);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(&mut app, vec![]);
+        h.click(&mut app, "lfs-setup");
+        wait(&mut app);
+        assert!(app.sync.lfs.stores_media, "{:?}", app.toasts);
+        assert!(app.toasts.iter().any(|(t, _)| t.contains("stored with Git LFS")), "{:?}", app.toasts);
+        assert!(matches!(&app.sync.last, Some((_, Ok(s))) if s.contains("up to date")), "{:?}", app.sync.last);
+        h.frame(&mut app, vec![]);
+        assert!(!app.sync.rects.iter().any(|r| r.0 == "lfs-setup"), "the button is gone once it is done");
+        let o = std::process::Command::new("git").arg("-C").arg(&remote).args(["show", "main:Song.mp3"]).envs(git.env.iter().cloned()).output().unwrap();
+        assert!(String::from_utf8_lossy(&o.stdout).starts_with("version https://git-lfs"), "the remote holds a pointer");
+        assert_eq!(std::fs::read(v.join("Song.mp3")).unwrap(), vec![200u8; 50]);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

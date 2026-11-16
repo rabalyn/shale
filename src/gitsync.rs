@@ -183,6 +183,8 @@ pub fn connect(git: &Git, vault: &Path, url: &str) -> Result<(), String> {
     let url = url.trim();
     if !is_repo(vault) {
         git.ok(vault, args!["init", "--quiet"])?;
+        // media files go to LFS from the first commit on (SYNC-017)
+        lfs::prepare_new(git, vault)?;
     }
     let has_origin = git.run(vault, args!["remote", "get-url", REMOTE])?.ok;
     if has_origin {
@@ -316,20 +318,12 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
     if !is_repo(vault) {
         return Err("The vault is not a git repository".into());
     }
-    // SYNC-005: never step into someone else's unfinished operation
-    for (marker, what) in [("MERGE_HEAD", "a merge"), ("rebase-merge", "a rebase"), ("rebase-apply", "a rebase"), ("CHERRY_PICK_HEAD", "a cherry-pick"), ("REVERT_HEAD", "a revert")] {
-        let p = git.ok(vault, args!["rev-parse", "--git-path", marker])?.text();
-        if vault.join(&p).exists() {
-            return Err(format!("git is in the middle of {what}; finish or abort it in the vault first (sync paused)"));
-        }
-    }
-    let head = git.run(vault, args!["symbolic-ref", "--quiet", "--short", "HEAD"])?;
-    if !head.ok {
-        return Err("HEAD is detached; check out a branch in the vault first (sync paused)".into());
-    }
-    let mut branch = head.text();
+    let mut branch = ensure_idle(git, vault)?;
     let ident = identity(git, vault)?;
     let mut report = Report::default();
+
+    // 0. media in LFS: set up, or stop before a media file lands in the history (SYNC-019)
+    lfs::guard(git, vault)?;
 
     // 1. commit everything (SYNC-006)
     git.ok(vault, args!["add", "-A", "--", ".", ":(exclude,glob)**/.shale-tmp-*"])?;
@@ -355,11 +349,17 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
         if let Some(theirs) = rev(git, vault, &remote_ref)? {
             if local.as_deref() != Some(theirs.as_str()) {
                 integrate(git, vault, opts, &ident, Heads { local: local.as_deref(), theirs: &theirs }, tree, &mut report)?;
+                // another machine may have set LFS up (SYNC-019)
+                lfs::guard(git, vault)?;
             }
         }
         if rev(git, vault, "HEAD")?.is_none() {
             // an empty repository and an empty remote: nothing to push yet
             return Ok(report);
+        }
+        // SYNC-021: the files first, so the pointers never reach the remote without them
+        if lfs::in_use(vault) {
+            lfs::push(git, vault, &branch)?;
         }
         let spec = format!("refs/heads/{branch}:refs/heads/{branch}");
         // SYNC-012: never forced
@@ -374,6 +374,21 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
         }
     }
     Ok(report)
+}
+
+/// SYNC-005: never step into someone else's unfinished operation. The current branch's name.
+fn ensure_idle(git: &Git, vault: &Path) -> Result<String, String> {
+    for (marker, what) in [("MERGE_HEAD", "a merge"), ("rebase-merge", "a rebase"), ("rebase-apply", "a rebase"), ("CHERRY_PICK_HEAD", "a cherry-pick"), ("REVERT_HEAD", "a revert")] {
+        let p = git.ok(vault, args!["rev-parse", "--git-path", marker])?.text();
+        if vault.join(&p).exists() {
+            return Err(format!("git is in the middle of {what}; finish or abort it in the vault first (sync paused)"));
+        }
+    }
+    let head = git.run(vault, args!["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    if !head.ok {
+        return Err("HEAD is detached; check out a branch in the vault first (sync paused)".into());
+    }
+    Ok(head.text())
 }
 
 /// `-c user.name=… -c user.email=…` when git has no identity configured.
@@ -504,10 +519,12 @@ fn resolve(git: &Git, vault: &Path, opts: &Options, ident: &[String], report: &m
                 if path == STATE_PATH {
                     crate::fsutil::write_atomic(&abs, &o).map_err(|e| e.to_string())?;
                 } else {
-                    crate::fsutil::write_atomic(&abs, &t).map_err(|e| e.to_string())?;
+                    // a pointer whose file this repository holds is written as the file, so a
+                    // copy of an LFS file is playable and goes back into LFS (SYNC-022)
+                    crate::fsutil::write_atomic(&abs, &lfs::expand(git, vault, t.clone())).map_err(|e| e.to_string())?;
                     if o != t {
                         let copy = conflict_name(Path::new(path), &opts.stamp, |p| vault.join(p).exists() || taken.iter().any(|x| x == p));
-                        crate::fsutil::write_atomic(&vault.join(&copy), &o).map_err(|e| e.to_string())?;
+                        crate::fsutil::write_atomic(&vault.join(&copy), &lfs::expand(git, vault, o)).map_err(|e| e.to_string())?;
                         add.push(copy.to_string_lossy().into_owned());
                         report.conflicts.push((PathBuf::from(path), copy.clone()));
                         taken.push(copy);
@@ -590,6 +607,8 @@ pub fn host_name() -> String {
     }
     "this computer".into()
 }
+
+pub mod lfs;
 
 #[cfg(test)]
 mod tests;
