@@ -2006,12 +2006,15 @@ fn a_mail_that_may_have_been_sent_waits_for_the_person_and_a_failed_one_can_be_r
 fn the_account_settings_have_the_sending_section_with_presets_and_test_connection_signs_in_to_smtp() {
     let mut w = W::new("smtp-dialog", false);
     let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
-    let (settings, user, password) = {
+    let (settings, user) = {
         let g = smtp.state();
-        (smtp.settings(), g.user.clone(), g.password.clone())
+        (smtp.settings(), g.user.clone())
     };
-    w.app.mail.smtp_factory = Arc::new(move |_, _| {
-        Ok(Arc::new(crate::mail_send::tests::TestSmtp { settings: settings.clone(), user: user.clone(), password: password.clone(), connects: std::sync::atomic::AtomicUsize::new(0) }) as Arc<dyn crate::mail_send::SmtpConnector>)
+    // like the real factory: the password is the one handed over (typed in the dialog), else
+    // the keyring's, which the unsaved account does not have yet (MAIL-121)
+    w.app.mail.smtp_factory = Arc::new(move |_, session| {
+        let password = session.ok_or_else(|| crate::imap_sync::NO_PASSWORD.to_string())?.expose().to_string();
+        Ok(Arc::new(crate::mail_send::tests::TestSmtp { settings: settings.clone(), user: user.clone(), password, connects: std::sync::atomic::AtomicUsize::new(0) }) as Arc<dyn crate::mail_send::SmtpConnector>)
     });
     w.app.open_mail_settings();
     w.settle();

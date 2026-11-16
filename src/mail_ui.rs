@@ -1526,11 +1526,13 @@ impl MailView {
             return;
         };
         self.tests.insert(account.id.clone(), TestState::Running);
+        // the password (or client secret) typed in the dialog, not saved yet, is tried for sending too (MAIL-121)
+        let smtp_session = typed.clone().or_else(|| self.session_pw.get(&account.id).cloned());
         let connector = self.lazy_connector(account, typed);
         let id = account.id.clone();
         let display = if account.name.is_empty() { account.host.clone() } else { account.name.clone() };
         let id2 = id.clone();
-        let smtp = (!account.smtp_host.trim().is_empty()).then(|| LazySmtp { factory: self.smtp_factory.clone(), account: account.clone(), session: self.session_pw.get(&account.id).cloned() });
+        let smtp = (!account.smtp_host.trim().is_empty()).then(|| LazySmtp { factory: self.smtp_factory.clone(), account: account.clone(), session: smtp_session });
         self.spawn(
             move || -> Result<(usize, Option<Result<(), String>>), String> {
                 let n = imap_sync::discover_folders(&store, &connector, &id, &display).map(|f| f.len())?;
