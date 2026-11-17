@@ -8,7 +8,9 @@
 # Without a version it takes the next `rc` of the pre-release in Cargo.toml of `origin/main`
 # (0.4.0-rc.1 → 0.4.0-rc.2); `patch`, `minor` or `major` raise the last release (0.3.0 → minor →
 # 0.4.0-rc.1, or the next rc when Cargo.toml has a pre-release of that version already).
-# It bumps Cargo.toml and Cargo.lock on a branch `release/vX.Y.Z-rc.N`, commits naming the issue
+# It stops with "the changelog needs an update first" when CHANGELOG.md and docs/changelog-pending/
+# did not change since the previous tag. It bumps Cargo.toml and Cargo.lock on a branch
+# `release/vX.Y.Z-rc.N`, merges docs/changelog-pending/ into [Unreleased], commits naming the issue
 # "Release X.Y.Z" (made with gh when there is none; --issue N names another), lands it with
 # `scripts/land.sh --release`, tags the landed merge and pushes only the tag to `origin`.
 # --dry-run prints the tag and stops. A release is scripts/make-release.sh.
@@ -22,7 +24,7 @@ while [ $# -gt 0 ]; do
   case $1 in
     --dry-run) DRY=yes ;;
     --issue) shift; ISSUE=${1:-} ;;
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,/^set -euo/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) die "unknown option $1" ;;
     *) [ -z "$WANT" ] || die "one version only"; WANT=$1 ;;
   esac

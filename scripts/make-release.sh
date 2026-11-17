@@ -12,7 +12,8 @@
 # `## [X.Y.Z] - <date>`, runs the release check (BUILD-013), commits naming the issue
 # "Release X.Y.Z" (made with gh when there is none; --issue N names another), lands it with
 # `scripts/land.sh --release`, tags the landed merge and pushes the tag to `origin`.
-# --dry-run prints the tag and stops.
+# --dry-run prints the tag and stops. Without entries in [Unreleased] or docs/changelog-pending/
+# it stops with "the changelog needs an update first".
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/release-lib.sh"
 
@@ -23,7 +24,7 @@ while [ $# -gt 0 ]; do
   case $1 in
     --dry-run) DRY=yes ;;
     --issue) shift; ISSUE=${1:-} ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,/^set -euo/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) die "unknown option $1" ;;
     *) [ -z "$WANT" ] || die "one version only"; WANT=$1 ;;
   esac
