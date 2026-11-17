@@ -483,7 +483,7 @@ fn shown_labels(p: &mut P) -> Vec<String> {
 #[test]
 fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     let mut p = P::new("settings-tabs", &[]);
-    let wants: [(SettingsTab, &[&str]); 11] = [
+    let wants: [(SettingsTab, &[&str]); 12] = [
         (SettingsTab::Vault, &["Vault folder", "People folder"]),
         (SettingsTab::Editor, &["Show line numbers in the editor", "Update links in other notes when renaming", "Font colours"]),
         (SettingsTab::Appearance, &["Readable line length", "Dark drawing canvas"]),
@@ -492,6 +492,7 @@ fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
         (SettingsTab::Calendar, &["Calendars…", "Calendar weeks start on Monday (otherwise Sunday)"]),
         (SettingsTab::Mail, &["Mail accounts…", "Fetch new mail every"]),
         (SettingsTab::Social, &["Feed accounts…", "Look for new posts every", "Post search index"]),
+        (SettingsTab::Import, &["Import Word files as notes (needs pandoc)", "pandoc program", "Check again"]),
         (SettingsTab::Data, &["Data usage…"]),
         (SettingsTab::Latex, &["Which TeX is used", "Check again"]),
         (SettingsTab::Help, &["Open user guide (F1)", "Troubleshooting"]),
@@ -509,6 +510,52 @@ fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     // a setting is on its own tab only
     p.app.open_settings(SettingsTab::Appearance);
     assert!(!shown_labels(&mut p).iter().any(|s| s.starts_with("Show line numbers")));
+}
+
+/// The labels of Settings until one starts with `text` (a background job answers after a moment).
+fn labels_until(p: &mut P, text: &str) -> Vec<String> {
+    for _ in 0..300 {
+        let shown = shown_labels(p);
+        if shown.iter().any(|s| s.starts_with(text)) {
+            return shown;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("no label starting with {text:?} in {:?}", shown_labels(p));
+}
+
+// spec: IMP-036
+#[test]
+fn imp_036_the_import_tab_has_the_word_setting_and_says_where_pandoc_is_or_how_to_install_it() {
+    let mut p = P::new("settings-import", &[]);
+    assert!(!p.app.cfg.docx_import && p.app.cfg.pandoc_path.is_empty(), "off and searching by default");
+    // a pandoc that is not there: said in words, with the way to install it on each system
+    p.app.cfg.pandoc_path = p.dir.join("no-such-pandoc").to_string_lossy().into_owned();
+    p.app.open_settings(SettingsTab::Import);
+    let shown = labels_until(&mut p, "pandoc was not found");
+    for how in ["Linux: sudo pacman -S pandoc-cli   or   sudo apt install pandoc", "macOS: brew install pandoc", "Windows: winget install JohnMacFarlane.Pandoc", "or see https://pandoc.org/installing.html"] {
+        assert!(shown.iter().any(|s| s == how), "{how:?} missing in {shown:?}");
+    }
+    // the box can be ticked while pandoc is missing
+    p.click(Show::Modals, "Import Word files as notes (needs pandoc)");
+    assert!(p.app.cfg.docx_import);
+    p.click(Show::Modals, "Import Word files as notes (needs pandoc)");
+    assert!(!p.app.cfg.docx_import);
+    // a pandoc that is there: its version and place, no install help
+    #[cfg(unix)]
+    {
+        let fake = crate::import::docx_tests::fake_pandoc(&p.dir, "pandoc", "echo 'pandoc 9.9.1'");
+        p.app.cfg.pandoc_path = fake.to_string_lossy().into_owned();
+        p.click(Show::Modals, "Check again");
+        let shown = labels_until(&mut p, "pandoc 9.9.1, found at");
+        assert!(shown.iter().any(|s| *s == format!("pandoc 9.9.1, found at {}", fake.display())), "{shown:?}");
+        assert!(!shown.iter().any(|s| s.starts_with("macOS:")), "no install help when it is found");
+        // one that does not run: its words
+        let bad = crate::import::docx_tests::fake_pandoc(&p.dir, "pandoc-bad", "echo 'Illegal instruction' >&2; exit 4");
+        p.app.cfg.pandoc_path = bad.to_string_lossy().into_owned();
+        p.click(Show::Modals, "Check again");
+        labels_until(&mut p, &format!("{} does not work: Illegal instruction", bad.display()));
+    }
 }
 
 // spec: CFG-021

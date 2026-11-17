@@ -475,3 +475,46 @@ fn imp_031_pictures_and_pdfs_dropped_on_a_note_are_saved_as_files_and_linked_fro
     assert!(w.app.toasts.iter().any(|(t, _)| t == "Saved 2 files to the media folder"), "{:?}", w.app.toasts);
     assert!(!root.join("cat.md").exists() && std::fs::read_dir(&root).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().contains("Files")));
 }
+
+// spec: IMP-035, IMP-036
+#[cfg(unix)]
+#[test]
+fn imp_035_a_word_file_is_converted_in_a_job_while_the_dialog_waits_and_then_becomes_a_note() {
+    let mut w = W::new("docx");
+    let fake = crate::import::docx_tests::fake_pandoc(&w.out, "pandoc", "while [ $# -gt 0 ]; do case \"$1\" in -o) out=\"$2\"; shift;; esac; shift; done; sleep 0.3; printf '# From Word\\n' > \"$out\"");
+    let docx = w.file("Quarterly Plan.docx");
+    std::fs::write(&docx, b"PK").unwrap();
+    // off: an attachment, as before
+    let nowhere = w.nowhere();
+    w.drop_files(nowhere, std::slice::from_ref(&docx));
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    assert_eq!(w.dialog().items.iter().map(|i| i.kind().to_string()).collect::<Vec<_>>(), vec!["Files"]);
+    w.close_dialog();
+    // on, with the pandoc of the settings
+    w.app.cfg.docx_import = true;
+    w.app.cfg.pandoc_path = fake.to_string_lossy().into_owned();
+    w.drop_files(nowhere, std::slice::from_ref(&docx));
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    assert_eq!(w.dialog().items.iter().map(|i| i.kind().to_string()).collect::<Vec<_>>(), vec!["Word document"]);
+    let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
+    d.folder = "Sub".into();
+    assert!(!w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import), "the dialog stays while pandoc works");
+    assert!(d.converting.is_some());
+    w.app.modal = Some(Modal::Import(d));
+    w.frames(2);
+    assert!(w.dialog_open() && w.painted("Converting the Word files with pandoc"), "the window is not blocked: it says what is going on");
+    w.until("the note", |a| a.modal.is_none());
+    let root = w.app.vault.as_ref().unwrap().root.clone();
+    let note = std::fs::read_to_string(root.join("Sub/Quarterly Plan.md")).unwrap();
+    let (y, m, _) = crate::media::local_date();
+    assert_eq!(note, format!("---\nsource: \"[[z_media/{y:04}/{m:02}/import_docx_Quarterly-Plan/Quarterly Plan.docx]]\"\n---\n\n# From Word\n"));
+    assert!(root.join(format!("z_media/{y:04}/{m:02}/import_docx_Quarterly-Plan/Quarterly Plan.docx")).is_file());
+    assert!(w.app.toasts.iter().any(|(t, _)| t.contains("Imported 1 note into “Sub”")), "{:?}", w.app.toasts);
+    // pandoc missing while the box is ticked: the item says so and the file is an attachment
+    w.app.cfg.pandoc_path = w.out.join("gone").to_string_lossy().into_owned();
+    w.drop_files(nowhere, std::slice::from_ref(&docx));
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    assert_eq!(w.dialog().items[0].warning().as_deref(), Some("pandoc was not found (Settings → Import). The file is saved as an attachment."));
+    w.frames(2);
+    assert!(w.painted("pandoc was not found (Settings → Import)"));
+}

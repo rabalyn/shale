@@ -356,6 +356,10 @@ pub struct Config {
     pub mail_encryption_consent: Option<String>,
     /// Opening an Obsidian canvas converts it to an editable drawing without asking.
     pub auto_convert_canvas: bool,
+    /// Import Word files (.docx) as notes through pandoc (IMP-036).
+    pub docx_import: bool,
+    /// The pandoc program for the Word import; empty: search `PATH` and the usual places.
+    pub pandoc_path: String,
     /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
     pub social_accounts: Vec<crate::social::SocialAccountEntry>,
     /// The account and feed shown last in the feed view.
@@ -437,6 +441,8 @@ impl Default for Config {
             mail_undo_secs: 10,
             mail_encryption_consent: None,
             auto_convert_canvas: false,
+            docx_import: false,
+            pandoc_path: String::new(),
             social_accounts: vec![],
             social_last: None,
             social_replies: false,
@@ -802,6 +808,20 @@ mod tests {
         assert!(text.contains("settings_tab_width = 140"), "{text}");
         let (back, _) = Config::parse_text(&text).unwrap();
         assert_eq!(back.settings_tab_width, Some(140));
+    }
+
+    // spec: IMP-036, CFG-001
+    #[test]
+    fn the_word_import_settings_are_off_and_empty_by_default_load_from_old_files_and_round_trip() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert!(!c.docx_import && c.pandoc_path.is_empty(), "an old file: off, searching");
+        assert_eq!(c.version, 2, "new fields with defaults need no migration (CFG-001)");
+        let c = Config { docx_import: true, pandoc_path: "/opt/pandoc/bin/pandoc".into(), ..Config::default() };
+        let text = text::to_toml(&c);
+        assert!(text.contains("docx_import = true") && text.contains("pandoc_path = \"/opt/pandoc/bin/pandoc\""), "{text}");
+        let (back, _) = Config::parse_text(&text).unwrap();
+        assert!(back.docx_import);
+        assert_eq!(back.pandoc_path, "/opt/pandoc/bin/pandoc");
     }
 
     // spec: MEDIA-004, MEDIA-006, CFG-001

@@ -1,6 +1,5 @@
 -- Shale's docx import filter (IMP-037): turns pandoc's document into the Markdown Shale shows.
 local function raw(s) return pandoc.RawInline('gfm', s) end
-local function rawb(s) return pandoc.RawBlock('gfm', s) end
 
 -- the vault-relative folder the pictures are extracted to (metadata `shale-media`, '/' separated)
 local media = ''
@@ -50,14 +49,28 @@ local function flat(blocks)
 end
 local function tbl(t)
   local function fix(rows)
+    -- how many more rows a cell from above still covers, by column
+    local covered = {}
     for _, row in ipairs(rows) do
       local cells = pandoc.List({})
+      local col = 1
+      local function fill()
+        while (covered[col] or 0) > 0 do
+          cells:insert(pandoc.Cell({})); covered[col] = covered[col] - 1; col = col + 1
+        end
+      end
       for _, c in ipairs(row.cells) do
-        local span = c.col_span
+        fill()
+        local cols, rows_covered = c.col_span, c.row_span
         c.contents = {pandoc.Plain(flat(c.contents))}; c.col_span = 1; c.row_span = 1
         cells:insert(c)
-        for _ = 2, span do cells:insert(pandoc.Cell({})) end
+        for k = 0, cols - 1 do
+          if rows_covered > 1 then covered[col + k] = rows_covered - 1 end
+        end
+        col = col + 1
+        for _ = 2, cols do cells:insert(pandoc.Cell({})); col = col + 1 end
       end
+      fill()
       row.cells = cells
     end
   end

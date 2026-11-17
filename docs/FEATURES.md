@@ -579,6 +579,19 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   "Markdown note"), not an attachment (IMP-033). When it has headings but no `#`, a box "Lift headings
   (## → #, ### → ##, …)" is ticked: all headings move up so that the highest becomes `#`; code and front
   matter stay as they are (IMP-034).
+- **Word files** (`.docx`) become notes through **pandoc** when you turn that on in Settings →
+  Import and pandoc is installed (`sudo pacman -S pandoc-cli` / `sudo apt install pandoc`, `brew
+  install pandoc`, `winget install JohnMacFarlane.Pandoc`); Shale finds it in `PATH` and the usual
+  places, or you give its path (IMP-035, IMP-036). Headings, bold, italic, underline, strike-through,
+  sub- and superscript, links, lists, tables (also with merged cells), quotes, footnotes, math,
+  highlights and pictures with their captions come through (IMP-037). Everything one file brings
+  goes into one folder, `z_media/YYYY/MM/import_docx_<name>/`: the pictures in `media/` and, when
+  "Keep the original .docx" is ticked, the original, which the note names in its properties
+  (IMP-038). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
+  without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
+
+  ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)
+
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add

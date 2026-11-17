@@ -1064,7 +1064,9 @@ impl ShaleApp {
                 |ui, (d, out)| *out = crate::import::dialog::footer(ui, d).or(out.take()),
             );
             let close_asked = resp.should_close();
-            if let Some(a) = st.1 {
+            // the Word files are converted: go on with the import (IMP-035)
+            let action = st.1.or_else(|| d.poll_conversion().then_some(crate::import::dialog::ImportAction::Import));
+            if let Some(a) = action {
                 if self.import_action(d, a) {
                     keep = false;
                 }

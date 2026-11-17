@@ -94,6 +94,9 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
 - **Videos** in notes are played with `ffmpeg` and `ffprobe` on your computer (`brew install ffmpeg` on macOS,
   `winget install ffmpeg` on Windows, your package manager on Linux). Without them a video opens in your
   system's video player and Settings says so; everything else works.
+- **Word files** (`.docx`) are imported as notes by `pandoc` on your computer, once you turn it on in Settings →
+  Import (`brew install pandoc` on macOS, `winget install JohnMacFarlane.Pandoc` on Windows, your package
+  manager on Linux). Without it a `.docx` is saved as an attachment and the Import dialog says so.
 - **CalDAV** and **git sync** need `curl` and `git` on the path (both come with macOS and Windows 10 and later; Git
   for Windows is a separate install).
 - **Media files in git sync** (audio and video, stored with Git LFS) need `git-lfs` as well
