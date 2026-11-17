@@ -1,7 +1,7 @@
 //! The managed TeX Live (TEX-002, TEX-003): the profile, the progress lines, the guard of the
 //! removal, and the whole install against a pretend repository (a local web server that serves a
 //! pretend `install-tl`, Unix only); and one ignored test that really installs TeX Live from the
-//! frozen repository (`cargo test -- --ignored tex_install`, needs the network, takes minutes).
+//! default repository (`cargo test -- --ignored tex_install`, needs the network, takes minutes).
 
 use super::engine::{managed_root, partial_root};
 use super::install::*;
@@ -104,22 +104,6 @@ fn the_progress_bar_runs_from_nothing_to_all_through_the_stages() {
     assert_eq!(Progress { stage: Stage::Download, ..Progress::default() }.text(), "Downloading the installer");
     assert!(Progress { stage: Stage::Fonts, ..Progress::default() }.text().contains("font cache"));
     assert_eq!(Progress { stage: Stage::Base, done: 2, total: 9, package: String::new() }.text(), "Installing the base of TeX Live (2 of 9)");
-}
-
-// spec: TEX-002
-#[test]
-fn packages_a_newer_repository_does_not_have_are_skipped_but_other_errors_are_not() {
-    // what tlmgr printed against TL2026 (l3backend is part of l3kernel now, pdfmanagement-testphase became pdfmanagement)
-    let lines = |t: &str| t.lines().map(String::from).collect::<Vec<_>>();
-    let real = lines("tlmgr install: package l3backend not present in repository.\ntlmgr install: package pdfmanagement-testphase not present in repository.\ntlmgr: package repository https://ftp.rrze.uni-erlangen.de/ctan/systems/texlive/tlnet (verified)\n[1/129, ??:??/??:??] install: adjustbox [14k]\ntlmgr: action install returned an error; continuing.\nrunning mktexlsr ...\ntlmgr: An error has occurred. See above messages. Exiting.");
-    assert_eq!(missing_in_repository(&real), (vec!["l3backend".to_string(), "pdfmanagement-testphase".to_string()], true));
-    let mut worse = real.clone();
-    worse.push("tlmgr: unexpected return value from verify: 5; failed to download".into());
-    assert!(!missing_in_repository(&worse).1, "another failure is not explained by the missing packages");
-    let mut worse = real;
-    worse.push("tlmgr: cannot write to the package database".into());
-    assert!(!missing_in_repository(&worse).1);
-    assert_eq!(missing_in_repository(&lines("tlmgr: action install returned an error; continuing.")), (vec![], true), "no package named: nothing to skip");
 }
 
 // spec: TEX-002
@@ -290,7 +274,7 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
             notified.fetch_add(1, Ordering::SeqCst);
         })
         .unwrap();
-        assert_eq!(done, Done { warning: None, skipped: vec![] }, "the pretend TeX compiles the test document");
+        assert_eq!(done, Done { warning: None }, "the pretend TeX compiles the test document");
         assert_eq!(asked.lock().unwrap().as_slice(), [format!("/tlnet/{}", installer_archive())], "the installer was downloaded from the repository, nothing else");
         let root = managed_root(&data);
         assert!(root.join("bin").is_dir() && !partial_root(&data).exists(), "moved into place, no partial folder left");
@@ -390,18 +374,6 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
 
     // spec: TEX-002
     #[test]
-    fn a_package_the_repository_no_longer_has_is_skipped_and_named_but_the_install_goes_on() {
-        let data = temp("skipped");
-        let tlmgr = "echo 'tlmgr install: package l3backend not present in repository.' >&2\necho '[1/2, ??:??/??:??] install: koma-script [1k]'\necho 'tlmgr: action install returned an error; continuing.' >&2\nexit 1";
-        let (repo, _) = serve(installer("skipped", &install_tl("", tlmgr)));
-        let done = install(&env(&data, &repo), &Handle::default(), &|| {}).unwrap();
-        assert_eq!(done, Done { warning: None, skipped: vec!["l3backend".to_string()] });
-        assert!(managed_root(&data).join("bin").is_dir(), "installed");
-        let _ = std::fs::remove_dir_all(&data);
-    }
-
-    // spec: TEX-002
-    #[test]
     fn an_install_whose_test_document_fails_is_installed_with_a_warning() {
         let data = temp("warning");
         let broken = install_tl("", GOOD_TLMGR).replace("echo ok > \\$stem.log\\necho '%PDF-1.5 pretend' > \\$stem.pdf\\n", "exit 1\\n");
@@ -438,24 +410,20 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
 
 // ---------------------------------------------------------------- the real install
 
-/// The frozen TL2025 repository the image of `tests/tex-env/` is made from.
-const FROZEN_REPOSITORY: &str = "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final";
-
 // spec: TEX-002, TEX-003, TEX-004
 #[test]
-#[ignore = "needs the network and takes minutes: installs TeX Live from the frozen repository"]
+#[ignore = "needs the network and takes minutes: installs the current TeX Live from the default repository"]
 fn tex_install_the_managed_tex_live_installs_is_found_compiles_and_is_removed() {
     // a space in the path: the default on macOS (~/Library/Application Support)
     let data = temp("real tex test");
-    // SHALE_TEX_INSTALL_REPOSITORY: another repository, to see whether the default one (CTAN's newest TeX Live) still works
-    let repository = std::env::var("SHALE_TEX_INSTALL_REPOSITORY").unwrap_or_else(|_| FROZEN_REPOSITORY.to_string());
+    // the default repository, what a person gets; SHALE_TEX_INSTALL_REPOSITORY tries another one
+    let repository = std::env::var("SHALE_TEX_INSTALL_REPOSITORY").unwrap_or_else(|_| super::engine::DEFAULT_REPOSITORY.to_string());
     let env = Env { data: data.clone(), repository };
     let handle = Handle::default();
     let started = std::time::Instant::now();
     let h = handle.clone();
     let done = install(&env, &h, &|| {}).unwrap_or_else(|e| panic!("the install failed: {e}"));
     eprintln!("tex_install: installed in {:.0} s", started.elapsed().as_secs_f32());
-    eprintln!("tex_install: packages the repository does not have: {:?}", done.skipped);
     assert_eq!(done.warning, None, "the test document compiled right after the install");
     let root = managed_root(&data);
     let size: u64 = {

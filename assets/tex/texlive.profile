@@ -14,7 +14,7 @@ TEXMFVAR /opt/texlive/home/texmf-var
 binary_x86_64-linux 1
 # nothing is added to the system: no symlinks into /usr/local, no change of PATH files
 instopt_adjustpath 0
-# keep the repository the installer was started with (the frozen one for the tests)
+# keep the repository the installer was started with (the current one at build time for the tests)
 instopt_adjustrepo 0
 instopt_letter 0
 instopt_portable 0

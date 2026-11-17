@@ -123,7 +123,7 @@ pub fn path_with(dir: &Path) -> OsString {
 /// the ones the templates and the fonts stand on.
 pub const CHECKED: &[(&str, &str)] = &[
     ("koma-script", "scrartcl.cls"),
-    ("pdfmanagement-testphase", "pdfmanagement-testphase.sty"),
+    ("pdfmanagement", "pdfmanagement-testphase.sty"),
     ("roboto", "Roboto-Regular.otf"),
     ("xcharter", "XCharter-Roman.otf"),
     ("fontspec", "fontspec.sty"),

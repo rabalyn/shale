@@ -131,8 +131,7 @@ impl TexState {
 fn done_notice(r: Result<install::Done, String>, what: &str) -> Notice {
     match r {
         Ok(d) => match d.warning {
-            None if d.skipped.is_empty() => Notice::new(format!("{what} is done."), true),
-            None => Notice::new(format!("{what} is done. This TeX Live no longer has these packages of the list (newer ones include them): {}.", d.skipped.join(", ")), true),
+            None => Notice::new(format!("{what} is done."), true),
             Some(w) => Notice::new(w, false),
         },
         Err(e) if e == "cancelled" => Notice::new(format!("{what} was cancelled; nothing of it is left."), false),

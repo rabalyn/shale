@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// The download of an install in megabytes, and what it takes on disk. Measured on 2026-11-17
-/// with the TL2025 repository: 94 MB of packages and 5.5 MB for the installer; 330 MB installed
-/// (ADR-0019, "Consequences").
+/// with the TL2026 repository: 326 MB installed, about 100 MB downloaded (ADR-0020; the download is
+/// 94 MB of packages and 5.5 MB for the installer in ADR-0019's measurement).
 pub const DOWNLOAD_MB: u64 = 100;
 pub const DISK_MB: u64 = 330;
 
@@ -218,29 +218,10 @@ pub struct Env {
 pub struct Done {
     /// The install works, but the first test compile did not (what it said).
     pub warning: Option<String>,
-    /// Packages of the list that this repository does not have (a newer TeX Live renamed or merged
-    /// them: `l3backend` is part of `l3kernel` now); the test compile shows whether anything is missing.
-    pub skipped: Vec<String>,
-}
-
-/// A step that did not succeed.
-struct Failure {
-    /// What to tell the person.
-    message: String,
-    /// The program's last output lines.
-    tail: Vec<String>,
-    /// The program ran and ended with an exit code other than 0.
-    exited: bool,
-}
-
-impl Failure {
-    fn plain(message: String) -> Failure {
-        Failure { message, tail: vec![], exited: false }
-    }
 }
 
 /// Run `cmd`, feeding its progress lines to the handle.
-fn step(handle: &Handle, notify: &dyn Fn(), stage: Stage, what: &str, cmd: Command) -> Result<(), Failure> {
+fn step(handle: &Handle, notify: &dyn Fn(), stage: Stage, what: &str, cmd: Command) -> Result<(), String> {
     handle.stage(stage);
     notify();
     let run = proc::run(cmd, STEP_TIMEOUT, Some(&handle.cancel), |line| {
@@ -249,29 +230,16 @@ fn step(handle: &Handle, notify: &dyn Fn(), stage: Stage, what: &str, cmd: Comma
             notify();
         }
     })
-    .map_err(|e| Failure::plain(format!("{what} could not be started ({e})")))?;
+    .map_err(|e| format!("{what} could not be started ({e})"))?;
     match run.ending {
-        Ending::Cancelled => Err(Failure::plain("cancelled".into())),
-        Ending::TimedOut => Err(Failure::plain(format!("{what} took more than {} minutes and was stopped", STEP_TIMEOUT.as_secs() / 60))),
+        Ending::Cancelled => Err("cancelled".into()),
+        Ending::TimedOut => Err(format!("{what} took more than {} minutes and was stopped", STEP_TIMEOUT.as_secs() / 60)),
         Ending::Exited(Some(0)) => Ok(()),
         Ending::Exited(code) => {
             let lines = run.tail.len().saturating_sub(8);
-            Err(Failure { message: format!("{what} failed (exit code {}):\n{}", code.map_or_else(|| "none".to_string(), |c| c.to_string()), run.tail[lines..].join("\n")), tail: run.tail, exited: true })
+            Err(format!("{what} failed (exit code {}):\n{}", code.map_or_else(|| "none".to_string(), |c| c.to_string()), run.tail[lines..].join("\n")))
         }
     }
-}
-
-/// The packages `tlmgr install` said are "not present in repository", and whether that is all that
-/// went wrong: it installs the others and ends with an error (a newer TeX Live has merged or renamed
-/// some packages of the list, for example `l3backend` and `pdfmanagement-testphase`).
-pub(super) fn missing_in_repository(tail: &[String]) -> (Vec<String>, bool) {
-    let skipped: Vec<String> = tail.iter().filter_map(|l| l.strip_prefix("tlmgr install: package ")?.trim_end().trim_end_matches('.').strip_suffix(" not present in repository")).map(str::to_string).collect();
-    let explained = |l: &str| l.contains("not present in repository") || l.contains("action install returned an error") || l.contains("An error has occurred. See above messages");
-    let other_trouble = tail.iter().any(|l| {
-        let low = l.to_lowercase();
-        l.starts_with("tlmgr") && (low.contains("error") || low.contains("fail") || low.contains("cannot")) && !explained(l)
-    });
-    (skipped, !other_trouble)
 }
 
 /// Download a file with `curl` (the way the CalDAV client does its HTTP): https only, no
@@ -333,7 +301,7 @@ pub fn install(env: &Env, handle: &Handle, notify: &dyn Fn()) -> Result<Done, St
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&partial);
     }
-    let skipped = result?;
+    result?;
     crate::fsutil::rename_noreplace(&partial, &root).map_err(|e| {
         let _ = std::fs::remove_dir_all(&partial);
         format!("the installed TeX Live could not be moved to {} ({e})", root.display())
@@ -345,11 +313,11 @@ pub fn install(env: &Env, handle: &Handle, notify: &dyn Fn()) -> Result<Done, St
         Ok(()) => None,
         Err(e) => Some(format!("TeX Live is installed, but the test document did not compile: {e}")),
     };
-    Ok(Done { warning, skipped })
+    Ok(Done { warning })
 }
 
-/// Everything up to a complete tree in `partial`; the packages of the list the repository does not have.
-fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -> Result<Vec<String>, String> {
+/// Everything up to a complete tree in `partial`.
+fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -> Result<(), String> {
     let repo = check_repository(&env.repository)?;
     let platform = platform().ok_or_else(|| format!("TeX Live has no installer for {} {}: install a TeX yourself and choose it in this page", std::env::consts::OS, std::env::consts::ARCH))?;
     check_perl()?;
@@ -365,7 +333,7 @@ fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -
     // the system's tar: bsdtar on Windows 10 and later reads the zip as well
     let mut tar = Command::new("tar");
     tar.arg("-xf").arg(&archive).arg("-C").arg(&inst).arg("--strip-components=1");
-    step(handle, notify, Stage::Unpack, "tar", tar).map_err(|f| format!("the installer could not be unpacked: {}", f.message))?;
+    step(handle, notify, Stage::Unpack, "tar", tar).map_err(|e| format!("the installer could not be unpacked: {e}"))?;
     let profile_file = work.path().join("texlive.profile");
     crate::fsutil::create_new(&profile_file, profile(partial, platform).as_bytes()).map_err(|e| format!("the install profile could not be written ({e})"))?;
     let mut install_tl = if cfg!(windows) {
@@ -378,24 +346,15 @@ fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -
         c
     };
     install_tl.args(["-no-interaction", "-profile"]).arg(&profile_file).args(["-repository", repo]).current_dir(&inst);
-    step(handle, notify, Stage::Base, "install-tl", install_tl).map_err(|f| f.message)?;
+    step(handle, notify, Stage::Base, "install-tl", install_tl)?;
     let bin = bin_dir_with(partial, tlmgr_name()).ok_or("install-tl made no tlmgr")?;
     let mut tlmgr = Command::new(bin.join(tlmgr_name()));
     tlmgr.env("PATH", engine::path_with(&bin)).args(["--repository", repo, "install"]).args(packages());
-    let skipped = match step(handle, notify, Stage::Packages, "tlmgr", tlmgr) {
-        Ok(()) => vec![],
-        Err(f) => {
-            let (skipped, only_that) = missing_in_repository(&f.tail);
-            if !(f.exited && only_that && !skipped.is_empty()) {
-                return Err(f.message);
-            }
-            skipped
-        }
-    };
+    step(handle, notify, Stage::Packages, "tlmgr", tlmgr)?;
     if !bin.join(exe_name("lualatex")).is_file() || !bin.join(exe_name("biber")).is_file() {
         return Err("the install finished but lualatex or biber is missing".into());
     }
-    Ok(skipped)
+    Ok(())
 }
 
 /// Update the managed TeX Live (TEX-003): `tlmgr update --self --all`.
@@ -406,12 +365,12 @@ pub fn update(env: &Env, handle: &Handle, notify: &dyn Fn()) -> Result<Done, Str
     check_perl()?;
     let mut tlmgr = engine.command(tlmgr_name());
     tlmgr.args(["--repository", repo, "update", "--self", "--all"]);
-    step(handle, notify, Stage::Update, "tlmgr", tlmgr).map_err(|f| f.message)?;
+    step(handle, notify, Stage::Update, "tlmgr", tlmgr)?;
     // a new TeX Live may have new fonts and a new kernel: try it
     handle.stage(Stage::Fonts);
     notify();
     let warning = compile_test_document(&engine).err().map(|e| format!("TeX Live is updated, but the test document did not compile: {e}"));
-    Ok(Done { warning, skipped: vec![] })
+    Ok(Done { warning })
 }
 
 // ---------------------------------------------------------------- remove

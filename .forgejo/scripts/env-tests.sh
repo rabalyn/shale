@@ -7,14 +7,14 @@
 #   env-tests.sh install-wanted <base> <head>
 #       prints "yes" or "no": whether the change touches the managed TeX Live install (`assets/tex/`,
 #       `src/pdf/tex/install*`); only then scripts/land.sh sets SHALE_ENV_TESTS_TEX_INSTALL=yes, which
-#       makes `run` also do the real install of TeX Live (about 100 MB from the frozen repository,
-#       several minutes, `tex_install`); the weekly schedule of the CI job sets it too
+#       makes `run` also do the real install of TeX Live (about 100 MB from the default
+#       repository, minutes, `tex_install`); the weekly schedule of the CI job sets it too
 #   env-tests.sh detect
 #       prints "podman", "docker" or "none": which container engine the job container can use
 #   env-tests.sh run [podman|docker]
 #       uses the given engine (the one the detect step found; detected again when left out),
 #       starts both stacks, builds the TeX image, runs `cargo test -- --ignored calendar::env_tests`,
-#       `… mail_env` and `… tex_env` (and `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
+#       `… mail_env` and `… tex_env` (the TeX image is built with --refresh when SHALE_ENV_TESTS_TEX_REFRESH=yes, as the CI job does, so a change of the current TeX Live shows up; and `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
 set -eu
 cd "$(dirname "$0")/../.."
 
@@ -87,8 +87,11 @@ case "${1:-}" in
       exit 1
     fi
 
-    # the TeX image is no running stack: only built (the frozen TeX Live and the tuda-ci sources)
-    sh tests/tex-env/tex-env.sh build || { echo "the TeX image could not be built" >&2; exit 1; }
+    # the TeX image is no running stack: only built (the current TeX Live, ADR-0020, and the pinned tuda-ci sources);
+    # land.sh uses the cached image, CI rebuilds it without the cache
+    refresh=""
+    if [ "${SHALE_ENV_TESTS_TEX_REFRESH:-no}" = yes ]; then refresh="--refresh"; fi
+    sh tests/tex-env/tex-env.sh build $refresh || { echo "the TeX image could not be built" >&2; exit 1; }
 
     suites="calendar::env_tests mail_env tex_env"
     # the real install of TeX Live downloads about 100 MB and takes minutes: only when asked for

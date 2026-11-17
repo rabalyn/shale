@@ -1,8 +1,9 @@
 #!/bin/sh
-# Helper for Shale's TeX test environment. Usage: ./tex-env.sh build | status | compile <dir> <file.tex> | exec <dir> -- <cmd>… | reset
-#   build    fetch the tuda-ci sources (checked by sha256), build the TeX Live image, and generate the
+# Helper for Shale's TeX test environment. Usage: ./tex-env.sh build [--refresh] | status | compile <dir> <file.tex> | exec <dir> -- <cmd>… | reset
+#   build    (--refresh: without the image cache, so the current TeX Live is fetched again) fetch the tuda-ci sources (checked by sha256), build the TeX Live image, and generate the
 #            .cls/.sty files from the .dtx with docstrip (first time; later runs reuse all three)
-#   status   say whether the image and the tuda-ci files are there
+#   status   say whether the image and the tuda-ci files are there, and which TeX Live (year, repository,
+#            build date) the image was built from: it follows the current TeX Live (ADR-0020)
 #   compile  run latexmk (LuaLaTeX, biber) on <dir>/<file.tex> inside the container, <dir> mounted
 #            as /work. TEXINPUTS is /work/tex// and BIBINPUTS /work; SHALE_TEX_PRE is TeX code put
 #            before the file (the tuda-ci demos get graphicx' `demo` option this way)
@@ -41,7 +42,10 @@ case "${1:-}" in
     rm -rf "$ctx"; mkdir -p "$ctx"
     cp Containerfile "$ctx/"
     cp ../../assets/tex/texlive.profile ../../assets/tex/packages.txt "$ctx/"
-    "$ENGINE" build -t "$IMAGE" -f "$ctx/Containerfile" "$ctx"
+    nocache=""
+    [ "${2:-}" = "--refresh" ] && nocache="--no-cache"
+    # shellcheck disable=SC2086
+    "$ENGINE" build $nocache -t "$IMAGE" -f "$ctx/Containerfile" "$ctx"
     if [ ! -f "$cache/tuda-ci/tex/tudapub.cls" ]; then
       rm -rf "$cache/tuda-ci"; mkdir -p "$cache/tuda-ci"
       tar xzf "$cache/tuda-ci.tar.gz" -C "$cache/tuda-ci" --strip-components=1
@@ -57,7 +61,7 @@ case "${1:-}" in
     echo "TeX test environment is ready. See tests/tex-env/README.md."
     ;;
   status)
-    if image_there; then echo "image $IMAGE: there"; else echo "image $IMAGE: missing (run: $0 build)"; fi
+    if image_there; then echo "image $IMAGE: there ($("$ENGINE" run --rm "$IMAGE" cat /etc/shale-tex-build 2>/dev/null || echo 'built before the build date was recorded'))"; else echo "image $IMAGE: missing (run: $0 build)"; fi
     if [ -f "$cache/tuda-ci/tex/tudapub.cls" ]; then echo "tuda-ci $TUDA_COMMIT: generated"; else echo "tuda-ci: missing (run: $0 build)"; fi
     ;;
   compile)
@@ -77,7 +81,7 @@ case "${1:-}" in
     rm -rf "$cache"
     ;;
   *)
-    echo "usage: $0 build | status | compile <dir> <file.tex> | exec <dir> -- <cmd>… | reset" >&2
+    echo "usage: $0 build [--refresh] | status | compile <dir> <file.tex> | exec <dir> -- <cmd>… | reset" >&2
     exit 2
     ;;
 esac
