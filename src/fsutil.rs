@@ -482,6 +482,55 @@ fn create_new_with(path: &Path, fill: impl FnOnce(&mut File) -> io::Result<()>) 
     Ok(())
 }
 
+/// A file or folder name that works on Linux, macOS and Windows (VAULT-026): the characters that
+/// Windows forbids (`< > : " / \ | ? *`) and control characters become `-`, trailing dots and
+/// spaces are trimmed, a Windows device name (`CON`, `NUL`, `COM1`, …, any case, with or without
+/// an extension) gets `_` added after its stem, and the name is cut at a character boundary to
+/// `max_bytes` bytes (UTF-8) with its extension kept. A name with nothing left stays empty: the
+/// caller chooses what to call it.
+pub fn portable_name(name: &str, max_bytes: usize) -> String {
+    let clean: String = name.chars().map(|c| if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') { '-' } else { c }).collect();
+    let clean = clean.trim_end_matches(['.', ' ']);
+    let mut budget = max_bytes;
+    loop {
+        let cut = cut_keeping_extension(clean, budget);
+        let fixed = avoid_device_name(&cut);
+        if fixed.len() <= max_bytes || budget == 0 {
+            return fixed;
+        }
+        budget -= 1;
+    }
+}
+
+/// `name` cut to `max` bytes at a character boundary, the extension (from the last dot) kept when
+/// it is shorter than `max`.
+fn cut_keeping_extension(name: &str, max: usize) -> String {
+    if name.len() <= max {
+        return name.to_string();
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 && name.len() - i < max => name.split_at(i),
+        _ => (name, ""),
+    };
+    let mut end = max - ext.len();
+    while !stem.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{ext}", stem[..end].trim_end_matches(['.', ' ']))
+}
+
+/// `NUL` → `NUL_`, `con.txt` → `con_.txt`: Windows treats the part before the first dot as a device.
+fn avoid_device_name(name: &str) -> String {
+    let base = name.split('.').next().unwrap_or("");
+    let upper = base.trim_end().to_ascii_uppercase();
+    let device = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL") || (upper.len() == 4 && (upper.starts_with("COM") || upper.starts_with("LPT")) && matches!(upper.as_bytes()[3], b'1'..=b'9'));
+    if device {
+        format!("{base}_{}", &name[base.len()..])
+    } else {
+        name.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1020,5 +1069,70 @@ mod tests {
             }
         }
         assert!(bad.is_empty(), "write user data through fsutil instead:\n{}", bad.join("\n"));
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn portable_names_have_no_forbidden_or_control_characters() {
+        assert_eq!(portable_name("a<b>c:d\"e/f\\g|h?i*j", 127), "a-b-c-d-e-f-g-h-i-j");
+        assert_eq!(portable_name("tab\there\nnew\u{7f}del\u{85}x", 127), "tab-here-new-del-x");
+        assert_eq!(portable_name("Bericht 2026 – Übersicht.docx", 127), "Bericht 2026 – Übersicht.docx", "everything else stays");
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn portable_names_lose_trailing_dots_and_spaces() {
+        assert_eq!(portable_name("name. . ", 127), "name");
+        assert_eq!(portable_name("a.txt.", 127), "a.txt");
+        assert_eq!(portable_name(".hidden", 127), ".hidden", "a leading dot stays");
+        assert_eq!(portable_name("...", 127), "");
+        assert_eq!(portable_name("  ", 127), "");
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn portable_names_avoid_windows_device_names_in_any_case_with_or_without_an_extension() {
+        for d in ["CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9", "con", "Nul", "cOm5", "lpt3"] {
+            assert_eq!(portable_name(d, 127), format!("{d}_"), "{d}");
+            assert_eq!(portable_name(&format!("{d}.txt"), 127), format!("{d}_.txt"), "{d}.txt");
+        }
+        assert_eq!(portable_name("aux.tar.gz", 127), "aux_.tar.gz", "the part before the first dot decides");
+        for ok in ["COM0", "COM10", "COMX", "CONSOLE", "LPT", "console.txt", "xcon", "a.con"] {
+            assert_eq!(portable_name(ok, 127), ok, "{ok} is no device name");
+        }
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn portable_names_are_cut_at_a_character_boundary_and_keep_their_extension() {
+        let long = "a".repeat(300);
+        assert_eq!(portable_name(&long, 127).len(), 127);
+        let with_ext = format!("{long}.docx");
+        let cut = portable_name(&with_ext, 127);
+        assert_eq!(cut.len(), 127);
+        assert!(cut.ends_with(".docx") && cut.starts_with("aaa"), "{cut}");
+        // two-byte letters: never cut in the middle of one
+        let umlauts = "ä".repeat(100);
+        let cut = portable_name(&format!("{umlauts}.md"), 127);
+        assert_eq!(cut, format!("{}.md", "ä".repeat(62)), "62 letters = 124 bytes + 3");
+        assert!(cut.len() <= 127);
+        let cut = portable_name(&"€".repeat(100), 10);
+        assert_eq!(cut, "€€€", "three bytes each");
+        // the stem does not end in a dot or space after the cut
+        assert_eq!(portable_name("ab c.txt", 6), "ab.txt", "'ab ' loses its space before the extension");
+        // an extension as long as the limit is not kept
+        assert_eq!(portable_name("a.0123456789", 5), "a.012");
+        // a name that is short enough is not touched
+        assert_eq!(portable_name("short.md", 127), "short.md");
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn a_cut_that_makes_a_device_name_or_the_added_underscore_still_fits() {
+        assert_eq!(portable_name("CONSOLE.txt", 7), "CO.txt", "cut to CON.txt, then CON_.txt is one byte over: cut again");
+        assert_eq!(portable_name("CONSOLE", 3), "CO");
+        assert!(portable_name("NULL.txt", 7).len() <= 7);
+        assert_eq!(portable_name("x", 0), "");
+        assert_eq!(portable_name("", 127), "");
     }
 }

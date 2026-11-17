@@ -19,9 +19,6 @@ pub const MAX_HEIGHT: u32 = 720;
 pub const MAX_FPS: f64 = 30.0;
 /// How much of ffmpeg's last words are kept for messages.
 const TAIL_BYTES: usize = 2000;
-/// Where programs of the user's are often installed but a window program's `PATH` lacks them
-/// (macOS apps do not get the shell's `PATH`).
-const EXTRA_DIRS: [&str; 3] = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
 
 /// What the user is told when the programs are missing.
 pub const MISSING_HELP: &str = "ffmpeg is not installed, so videos open in your system's video player. Install it (Linux: your package manager, `apt install ffmpeg`; macOS: `brew install ffmpeg`; Windows: `winget install ffmpeg`; or https://ffmpeg.org/download.html) and open the note again.";
@@ -67,26 +64,13 @@ pub fn fit_size(w: u32, h: u32) -> (u32, u32) {
     (even(w), even(h))
 }
 
-/// The folders searched for the programs: `PATH`, then the usual places.
-pub fn search_dirs() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    dirs.extend(EXTRA_DIRS.iter().map(PathBuf::from));
-    dirs
-}
-
-/// The first file called `name` (with `.exe` on Windows) in `dirs`.
-pub fn find_in(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
-    let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
-    dirs.iter().map(|d| d.join(&file)).find(|p| p.is_file())
-}
-
 /// `ffmpeg` and `ffprobe` of this machine, if both are there.
 pub fn locate() -> Option<Tools> {
-    locate_in(&search_dirs())
+    locate_in(&crate::program::search_dirs(&[]))
 }
 
 pub fn locate_in(dirs: &[PathBuf]) -> Option<Tools> {
-    Some(Tools { ffmpeg: find_in("ffmpeg", dirs)?, ffprobe: find_in("ffprobe", dirs)? })
+    Some(Tools { ffmpeg: crate::program::find_in("ffmpeg", dirs)?, ffprobe: crate::program::find_in("ffprobe", dirs)? })
 }
 
 fn os(args: &[&str]) -> Vec<OsString> {

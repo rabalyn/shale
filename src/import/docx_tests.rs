@@ -1,0 +1,400 @@
+//! Tests of the Word import (IMP-035 to IMP-039). The ones that run the real pandoc skip with a
+//! printed note when it is not installed (BUILD-018); the name rules, the argument list, the search,
+//! the failures and the files written are tested with stand-ins for pandoc and need no pandoc.
+
+use super::docx;
+#[cfg(unix)]
+use super::docx::Convert;
+use super::*;
+use std::collections::HashSet;
+#[cfg(unix)]
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
+
+fn temp_dir(tag: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("shale-docx-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn temp_vault(tag: &str) -> Vault {
+    Vault::open(&temp_dir(tag)).unwrap()
+}
+
+fn fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/testdata/docx").join(name)
+}
+
+/// The pandoc of this computer, or None with a printed note: the tests that need it skip (BUILD-018).
+fn real_pandoc() -> Option<PathBuf> {
+    let found = docx::locate("");
+    if found.is_none() {
+        eprintln!("skipping: pandoc is not installed here");
+    }
+    found
+}
+
+fn options(keep_docx: bool) -> Options {
+    Options { folder: PathBuf::from("In"), tags: vec![], keep_original: false, keep_docx, people_dir: "Adressbuch".into() }
+}
+
+fn month_dir() -> String {
+    let (y, m, _) = media::local_date();
+    format!("z_media/{y:04}/{m:02}")
+}
+
+/// Imports the fixture `name` with the real pandoc into a new vault.
+fn import_fixture(tag: &str, name: &str, keep: bool) -> Option<(Vault, Imported)> {
+    let pandoc = real_pandoc()?;
+    let mut v = temp_vault(tag);
+    let mut items = vec![docx::docx_item(fixture(name), Some(pandoc))];
+    // ahead of time, as the dialog does it in its job
+    let mut d = dialog::ImportDialog::new(std::mem::take(&mut items), vec![], "In".into(), String::new(), None, false);
+    d.keep_docx = keep;
+    assert!(d.start_conversion(v.root.clone()));
+    let end = std::time::Instant::now() + Duration::from_secs(120);
+    while !d.poll_conversion() {
+        assert!(std::time::Instant::now() < end, "pandoc did not finish");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let done = import(&mut v, &d.items, &options(keep));
+    Some((v, done))
+}
+
+// spec: IMP-035, IMP-037, IMP-039
+#[test]
+fn a_word_file_with_text_becomes_a_note_with_the_markdown_of_the_filter() {
+    let Some((v, done)) = import_fixture("text", "text.docx", false) else { return };
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    assert_eq!(done.notes, vec![PathBuf::from("In/text.md")]);
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let expected = "# Heading one\n\n## Bold heading\n\n\
+Plain text with **bold**, *italic*, <u>under</u>, ~~gone~~, H<sub>2</sub>O, x<sup>2</sup> and `code`.\n\n\
+A line\nbreak, small caps and ==marked== text.\n\n\
+A [web link](https://example.com), a link to the heading and a footnote.[^1]\n\n\
+> A block quote over two lines.\n\n\
+- first\n  - nested\n  - nested too\n- second\n\n\
+1.  one\n2.  two\n\n\
+| Left | Right |\n|:-----|------:|\n| a    |     1 |\n| b    |     2 |\n\n\
+**Term**\n\nIts definition.\n\n\
+Math inline $E = mc^{2}$ and display:\n\n$$\\int_{0}^{1}x^{2}\\, dx$$\n\n\
+[^1]: The footnote text.\n";
+    assert_eq!(text, expected);
+    assert!(!v.root.join("z_media").exists(), "nothing but the note: no pictures, the original is not kept");
+}
+
+// spec: IMP-037, IMP-039
+#[test]
+fn a_table_with_merged_cells_and_a_list_in_a_cell_is_a_pipe_table() {
+    let Some((v, done)) = import_fixture("tables", "tables.docx", false) else { return };
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let expected = "# Tables\n\n\
+| Merged across both |                                |\n\
+|--------------------|--------------------------------|\n\
+| Top                | Item list<br>• apple<br>• pear |\n\
+| Tall               | Plain                          |\n\
+|                    | Last                           |\n";
+    assert_eq!(text, expected, "no HTML table: the merged cell is followed by an empty one, the row span by one in the next row");
+}
+
+// spec: IMP-035, IMP-037, IMP-038, IMP-039
+#[test]
+fn a_picture_is_saved_in_the_import_folder_and_embedded_with_its_vault_path_and_caption() {
+    let Some((v, done)) = import_fixture("picture", "picture.docx", true) else { return };
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    let folder = format!("{}/import_docx_picture", month_dir());
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let embed = text.lines().find(|l| l.starts_with("![[")).unwrap_or_else(|| panic!("no picture in {text}"));
+    let inner = embed.trim_start_matches("![[").trim_end_matches("]]");
+    assert!(inner.starts_with(&format!("{folder}/media/")) && inner.ends_with(".png"), "{embed}");
+    let bytes = std::fs::read(v.root.join(inner)).expect("the embedded file is there, where the link says");
+    assert_eq!(&bytes[..4], b"\x89PNG");
+    assert!(text.contains("\n*A red square*\n"), "the caption follows in italics: {text}");
+    assert!(text.starts_with(&format!("---\nsource: \"[[{folder}/picture.docx]]\"\n---\n\n# Picture\n")), "{text}");
+    assert_eq!(std::fs::read(v.root.join(format!("{folder}/picture.docx"))).unwrap(), std::fs::read(fixture("picture.docx")).unwrap(), "the original is kept");
+    // nothing else is in the month folder: the hidden temp folder is gone
+    let names: Vec<String> = std::fs::read_dir(v.root.join(month_dir())).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, vec!["import_docx_picture"], "{names:?}");
+}
+
+// spec: IMP-035, IMP-038, IMP-039
+#[test]
+fn a_name_with_spaces_and_letters_beyond_ascii_gives_a_safe_folder_and_note_name() {
+    let Some((v, done)) = import_fixture("unicode", "Bericht Übersicht (Entwurf) 2026.docx", true) else { return };
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    assert_eq!(done.notes, vec![PathBuf::from("In/Bericht Übersicht (Entwurf) 2026.md")]);
+    let folder = format!("{}/import_docx_Bericht-Übersicht-(Entwurf)-2026", month_dir());
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    assert!(text.starts_with(&format!("---\nsource: \"[[{folder}/Bericht Übersicht (Entwurf) 2026.docx]]\"\n---\n")), "{text}");
+    assert!(v.root.join(&folder).join("Bericht Übersicht (Entwurf) 2026.docx").is_file());
+}
+
+// spec: IMP-038
+#[test]
+fn the_folder_name_follows_the_rules_for_names() {
+    let free = |_: &str| false;
+    assert_eq!(docx::import_folder_name("My Report 2026", free), "import_docx_My-Report-2026");
+    assert_eq!(docx::import_folder_name("  a   b  ", free), "import_docx_a-b", "runs of - become one, - is trimmed");
+    assert_eq!(docx::import_folder_name("a - b -- c", free), "import_docx_a-b-c");
+    assert_eq!(docx::import_folder_name("Plan #1 [final] a|b^c", free), "import_docx_Plan-1-(final)-a-b-c", "link-safe");
+    assert_eq!(docx::import_folder_name("what? a:b *x*", free), "import_docx_what-a-b-x", "portable");
+    assert_eq!(docx::import_folder_name("CON", free), "import_docx_CON_", "a device name gets an underscore");
+    assert_eq!(docx::import_folder_name("name.", free), "import_docx_name");
+    assert_eq!(docx::import_folder_name("", free), "import_docx_document");
+    assert_eq!(docx::import_folder_name(" - ", free), "import_docx_document", "nothing is left");
+    assert_eq!(docx::import_folder_name("???", free), "import_docx_document");
+    // a taken name gets -2, -3
+    let taken: HashSet<&str> = ["import_docx_a", "import_docx_a-2"].into();
+    assert_eq!(docx::import_folder_name("a", |n| taken.contains(n)), "import_docx_a-3");
+}
+
+// spec: IMP-038
+#[test]
+fn the_whole_folder_name_is_at_most_127_bytes_also_with_a_number_and_never_cut_in_a_letter() {
+    let long = "x".repeat(300);
+    let name = docx::import_folder_name(&long, |_| false);
+    assert_eq!(name.len(), 127);
+    let umlauts = "ü".repeat(100);
+    let name = docx::import_folder_name(&umlauts, |_| false);
+    assert!(name.len() <= 127 && name.starts_with("import_docx_ü") && name.is_char_boundary(name.len()), "{} bytes", name.len());
+    assert_eq!(name, format!("import_docx_{}", "ü".repeat(57)), "57 letters of 2 bytes after 12 bytes");
+    let first = docx::import_folder_name(&long, |_| false);
+    let second = docx::import_folder_name(&long, |n| n == first);
+    assert_eq!(second.len(), 127, "the number is inside the limit");
+    assert!(second.ends_with("-2") && second != first);
+    let spaced = docx::import_folder_name(&format!("{}-", "a ".repeat(100)), |_| false);
+    assert!(!spaced.ends_with('-') && spaced.len() <= 127, "{spaced}");
+}
+
+// spec: IMP-035
+#[test]
+fn pandoc_is_started_with_an_argument_list_for_the_file_the_filter_and_the_folder() {
+    let a = docx::args(Path::new("/in/My Doc.docx"), Path::new("/tmp/t/filter.lua"), "z_media/2026/11/import_docx_My-Doc", Path::new("/tmp/t/note.md"));
+    let a: Vec<String> = a.iter().map(|s| s.to_string_lossy().into_owned()).collect();
+    assert_eq!(a, ["/in/My Doc.docx", "-f", "docx", "-t", "gfm", "--wrap=preserve", "--extract-media=.", "-M", "shale-media=z_media/2026/11/import_docx_My-Doc", "--lua-filter=/tmp/t/filter.lua", "-o", "/tmp/t/note.md"]);
+}
+
+// spec: IMP-035, IMP-036
+#[test]
+fn word_files_are_attachments_while_the_setting_is_off_items_with_pandoc_and_attachments_with_a_reason_without() {
+    let src = temp_dir("items");
+    let paths: Vec<PathBuf> = ["Plan.docx", "Big.DOCX", "notes.txt"].iter().map(|n| src.join(n)).collect();
+    for p in &paths {
+        crate::fsutil::create_new(p, b"x").unwrap();
+    }
+    let kinds = |word: &Word| -> Vec<(String, String)> {
+        let (mut items, notes) = items_from_paths(&paths);
+        assert!(notes.is_empty());
+        word_items(&mut items, word);
+        items.iter().map(|i| (i.kind().to_string(), i.title.clone())).collect()
+    };
+    let one = |k: &str, t: &str| (k.to_string(), t.to_string());
+    let off = kinds(&Word::Off);
+    assert_eq!(off.iter().map(|k| k.0.as_str()).collect::<Vec<_>>(), vec!["Files"], "off: all in one Files note as before");
+    let on = kinds(&Word::On(Some(PathBuf::from("/usr/bin/pandoc"))));
+    assert_eq!(on, vec![one("Word document", "Plan"), one("Word document", "Big"), one("Files", "notes")], "any case of the extension; the other files stay attachments");
+    let missing = kinds(&Word::On(None));
+    assert_eq!(missing.iter().map(|k| k.0.as_str()).collect::<Vec<_>>(), vec!["Files", "Files", "Files"]);
+    let (mut items, _) = items_from_paths(&paths[..1]);
+    word_items(&mut items, &Word::On(None));
+    assert_eq!(items[0].warning().unwrap(), "pandoc was not found (Settings → Import). The file is saved as an attachment.");
+    assert_eq!(items[0].detail().split(" · ").next().unwrap(), "Plan.docx");
+    // it is saved as an attachment
+    let mut v = temp_vault("missing");
+    let done = import(&mut v, &items, &options(true));
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    assert!(text.contains("type: files") && text.contains("- [[z_media/") && text.contains("Plan.docx]]"), "{text}");
+    let _ = std::fs::remove_dir_all(&src);
+}
+
+/// A stand-in for pandoc, a shell script with this `body`, for the tests of the settings (unix only).
+#[cfg(unix)]
+pub(crate) fn fake_pandoc(dir: &Path, name: &str, body: &str) -> PathBuf {
+    fake::script(dir, name, body)
+}
+
+/// Stand-ins for pandoc: shell scripts that follow its contract. Unix only.
+#[cfg(unix)]
+mod fake {
+    use super::*;
+
+    pub fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join(name);
+        crate::fsutil::write_atomic(&p, format!("#!/bin/sh\n{body}\n").as_bytes()).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    /// Writes one picture next to where it runs and the note to the file after `-o`.
+    pub const WRITES_A_PICTURE: &str = r#"
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; --lua-filter=*) cat "${1#--lua-filter=}" > /dev/null;; -M) meta="$2"; shift;; esac; shift; done
+mkdir -p media; printf 'PNG' > media/image1.png
+printf '## Fake\n\n![[%s/media/image1.png]]\n' "${meta#shale-media=}" > "$out""#;
+
+    pub fn word_file(dir: &Path, name: &str) -> PathBuf {
+        let p = dir.join(name);
+        crate::fsutil::create_new(&p, b"PK fake docx").unwrap();
+        p
+    }
+}
+
+#[cfg(unix)]
+fn convert<'a>(pandoc: &'a Path, docx: &'a Path, root: &'a Path, keep: bool, timeout: Duration, cancel: &'a AtomicBool) -> Convert<'a> {
+    Convert { pandoc, docx, root, date: (2026, 11, 17), keep_original: keep, timeout, cancel }
+}
+
+// spec: IMP-035, IMP-038
+#[cfg(unix)]
+#[test]
+fn pandoc_runs_in_the_folder_of_the_pictures_and_the_folder_is_renamed_into_place_on_success() {
+    let dir = temp_dir("fake-ok");
+    let root = temp_dir("fake-ok-vault");
+    let pandoc = fake::script(&dir, "pandoc", fake::WRITES_A_PICTURE);
+    let docx = fake::word_file(&dir, "My Report.docx");
+    let cancel = AtomicBool::new(false);
+    let mut reserved = HashSet::new();
+    let p = docx::prepare(&convert(&pandoc, &docx, &root, true, docx::TIMEOUT, &cancel), &mut reserved).unwrap();
+    assert_eq!(p.folder.as_deref(), Some(Path::new("z_media/2026/11/import_docx_My-Report")));
+    assert_eq!(p.original.as_deref(), Some(Path::new("z_media/2026/11/import_docx_My-Report/My Report.docx")));
+    assert_eq!(p.text, "## Fake\n\n![[z_media/2026/11/import_docx_My-Report/media/image1.png]]\n", "the filter gets the vault path of the final folder");
+    assert!(!root.join("z_media/2026/11/import_docx_My-Report").exists(), "nothing in its place before the commit");
+    p.commit(&root).unwrap();
+    assert_eq!(std::fs::read(root.join("z_media/2026/11/import_docx_My-Report/media/image1.png")).unwrap(), b"PNG");
+    assert_eq!(std::fs::read(root.join("z_media/2026/11/import_docx_My-Report/My Report.docx")).unwrap(), b"PK fake docx");
+    let left: Vec<String> = std::fs::read_dir(root.join("z_media/2026/11")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(left, vec!["import_docx_My-Report"], "no hidden folder is left");
+    // a second file with the same name in the same import, and one in the vault already: -2, -3
+    let p2 = docx::prepare(&convert(&pandoc, &docx, &root, false, docx::TIMEOUT, &cancel), &mut reserved).unwrap();
+    assert_eq!(p2.folder.as_deref(), Some(Path::new("z_media/2026/11/import_docx_My-Report-2")));
+    assert_eq!(p2.original, None, "not kept");
+    let p3 = docx::prepare(&convert(&pandoc, &docx, &root, false, docx::TIMEOUT, &cancel), &mut reserved).unwrap();
+    assert_eq!(p3.folder.as_deref(), Some(Path::new("z_media/2026/11/import_docx_My-Report-3")), "two runs of one import do not choose the same folder");
+    // a result that is let go without a commit leaves nothing
+    drop((p2, p3));
+    let left: Vec<String> = std::fs::read_dir(root.join("z_media/2026/11")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(left, vec!["import_docx_My-Report"], "{left:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// spec: IMP-035, IMP-038
+#[cfg(unix)]
+#[test]
+fn without_pictures_and_without_the_original_there_is_no_folder() {
+    let dir = temp_dir("fake-nofolder");
+    let mut v = temp_vault("fake-nofolder-vault");
+    let pandoc = fake::script(&dir, "pandoc", r#"while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; esac; shift; done; printf '### Only text\n' > "$out""#);
+    let docx = fake::word_file(&dir, "plain.docx");
+    let mut it = docx::docx_item(docx.clone(), Some(pandoc.clone()));
+    let done = import(&mut v, std::slice::from_ref(&it), &options(false));
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    assert_eq!(std::fs::read_to_string(v.abs(&done.notes[0])).unwrap(), "# Only text\n", "the lift box is ticked: ### becomes #");
+    assert!(!v.root.join("z_media").exists(), "no import folder and no empty folders of the media tree: {:?}", walk_names(&v.root));
+    // with the original kept there is a folder, and the note names the original and the tags
+    let mut o = options(true);
+    o.tags = vec!["work".into()];
+    it.title = "kept".into();
+    if let Source::Docx { lift, .. } = &mut it.source {
+        *lift = false;
+    }
+    let done = import(&mut v, &[it], &o);
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let folder = format!("{}/import_docx_plain", month_dir());
+    assert_eq!(text, format!("---\nsource: \"[[{folder}/plain.docx]]\"\ntags: [work]\n---\n\n### Only text\n"));
+    assert!(v.root.join(&folder).join("plain.docx").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: IMP-035
+#[cfg(unix)]
+#[test]
+fn a_failure_leaves_nothing_in_the_vault_and_names_the_file_and_the_first_line_of_pandoc() {
+    let dir = temp_dir("fake-fail");
+    let mut v = temp_vault("fake-fail-vault");
+    let pandoc = fake::script(&dir, "pandoc", "mkdir -p media; echo x > media/a.png; echo 'Error: the file is damaged' >&2; echo 'second line' >&2; exit 64");
+    let docx = fake::word_file(&dir, "Broken one.docx");
+    let it = docx::docx_item(docx, Some(pandoc));
+    let done = import(&mut v, &[it], &options(true));
+    assert!(done.notes.is_empty() && done.files.is_empty());
+    assert_eq!(done.errors, vec!["pandoc could not read “Broken one.docx”: Error: the file is damaged"]);
+    let all: Vec<_> = walk_names(&v.root);
+    assert!(all.is_empty(), "nothing is left in the vault, not even a folder: {all:?}");
+    // a program that cannot be started
+    let gone = docx::docx_item(fake::word_file(&dir, "b.docx"), Some(dir.join("no-such-pandoc")));
+    let done = import(&mut v, &[gone], &options(true));
+    assert!(done.errors[0].starts_with("pandoc could not be started"), "{:?}", done.errors);
+    assert!(walk_names(&v.root).is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+fn walk_names(root: &Path) -> Vec<String> {
+    let mut out = vec![];
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            out.push(e.path().strip_prefix(root).unwrap().to_string_lossy().into_owned());
+            if e.path().is_dir() {
+                stack.push(e.path());
+            }
+        }
+    }
+    out
+}
+
+// spec: IMP-035
+#[cfg(unix)]
+#[test]
+fn a_run_that_takes_too_long_is_killed_and_so_is_one_that_is_cancelled() {
+    let dir = temp_dir("fake-slow");
+    let root = temp_dir("fake-slow-vault");
+    let pandoc = fake::script(&dir, "pandoc", "sleep 30");
+    let docx = fake::word_file(&dir, "slow.docx");
+    let cancel = AtomicBool::new(false);
+    let started = std::time::Instant::now();
+    let e = docx::prepare(&convert(&pandoc, &docx, &root, true, Duration::from_millis(300), &cancel), &mut HashSet::new()).unwrap_err();
+    assert_eq!(e, "pandoc needed more than 0.3 seconds for “slow.docx” and was stopped");
+    assert!(started.elapsed() < Duration::from_secs(10), "killed, not waited for");
+    let stop = AtomicBool::new(true);
+    let e = docx::prepare(&convert(&pandoc, &docx, &root, true, docx::TIMEOUT, &stop), &mut HashSet::new()).unwrap_err();
+    assert_eq!(e, "stopped");
+    assert!(!root.join("z_media").exists(), "no hidden folder is left, and no empty folders");
+    assert_eq!(docx::TIMEOUT, Duration::from_secs(120), "the limit of IMP-035");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// spec: IMP-035, IMP-036
+#[cfg(unix)]
+#[test]
+fn the_version_and_the_search_use_the_program_that_is_chosen() {
+    let dir = temp_dir("fake-version");
+    let ok = fake::script(&dir, "pandoc-ok", "echo 'pandoc 9.9.1'; echo 'Features: +lua'");
+    let bad = fake::script(&dir, "pandoc-bad", "echo 'cannot start' >&2; exit 2");
+    assert_eq!(docx::version(&ok).unwrap(), "pandoc 9.9.1");
+    assert_eq!(docx::version(&bad).unwrap_err(), "cannot start");
+    assert!(docx::version(&dir.join("none")).unwrap_err().starts_with("could not start"));
+    assert_eq!(docx::locate(&ok.to_string_lossy()), Some(ok.clone()));
+    assert_eq!(docx::locate(&dir.join("none").to_string_lossy()), None, "a chosen path that is no file is not replaced by another pandoc");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: IMP-035
+#[cfg(unix)]
+#[test]
+fn a_note_that_cannot_be_written_takes_the_import_folder_out_again() {
+    let dir = temp_dir("fake-nonote");
+    let mut v = temp_vault("fake-nonote-vault");
+    let pandoc = fake::script(&dir, "pandoc", fake::WRITES_A_PICTURE);
+    let docx = fake::word_file(&dir, "a.docx");
+    // the note's folder is a file: the note cannot be made
+    crate::fsutil::create_new(&v.root.join("In"), b"in the way").unwrap();
+    let done = import(&mut v, &[docx::docx_item(docx, Some(pandoc))], &options(true));
+    assert!(done.notes.is_empty() && done.errors.len() == 1 && done.errors[0].starts_with("could not write the note for “a.docx”"), "{:?}", done.errors);
+    assert!(!v.root.join(format!("{}/import_docx_a", month_dir())).exists(), "the folder was taken out again");
+    let _ = std::fs::remove_dir_all(&dir);
+}

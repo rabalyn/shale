@@ -209,6 +209,10 @@ struct Piece {
     underline: bool,
     strike: bool,
     link: Option<String>,
+    /// 1 raised and 2 lowered, the text being smaller (EDIT-044, EDIT-043); 0 on the line
+    script: i8,
+    /// the label of the footnote whose definition this is a link to (EDIT-043)
+    jump: Option<String>,
 }
 
 fn piece_width(p: &Piece) -> f32 {
@@ -222,6 +226,14 @@ fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
     for p in pieces {
         let mut cur = String::new();
         for c in p.text.chars() {
+            if c == '\n' {
+                // a line break (`<br>` in a table cell, EDIT-045): a word of its own
+                if !cur.is_empty() {
+                    words.push(Piece { text: std::mem::take(&mut cur), ..p.clone() });
+                }
+                words.push(Piece { text: "\n".into(), ..p.clone() });
+                continue;
+            }
             cur.push(c);
             if c == ' ' {
                 words.push(Piece { text: std::mem::take(&mut cur), ..p.clone() });
@@ -235,6 +247,11 @@ fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
     let mut lines: Vec<Vec<Piece>> = vec![vec![]];
     let mut line_w = 0.0;
     for wd in words {
+        if wd.text == "\n" {
+            lines.push(vec![]);
+            line_w = 0.0;
+            continue;
+        }
         let ww = width(&wd);
         if line_w + ww > avail && !lines.last().unwrap().is_empty() {
             lines.push(vec![]);
@@ -303,6 +320,8 @@ struct Writer<'a> {
     m: f32,
     page: usize,
     y: f32,
+    /// the links to footnote definitions drawn so far: page, the box and the label (PDF-009)
+    jumps: Vec<(usize, [f32; 4], String)>,
 }
 
 impl<'a> Writer<'a> {
@@ -311,7 +330,7 @@ impl<'a> Writer<'a> {
         let mut doc = Doc::new(title);
         let page = doc.add_page(w, h);
         let m = opts.margin_mm * MM;
-        Writer { doc, opts, w, h, m, page, y: m }
+        Writer { doc, opts, w, h, m, page, y: m, jumps: Vec::new() }
     }
     fn cw(&self) -> f32 {
         self.w - 2.0 * self.m
@@ -340,7 +359,7 @@ impl<'a> Writer<'a> {
         if self.y > self.m + 0.5 {
             self.y += base * 0.8;
         }
-        let head = vec![Piece { text: "Contents".into(), kind: FontKind::Sans, size: base * 1.5, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None }];
+        let head = vec![Piece { text: "Contents".into(), kind: FontKind::Sans, size: base * 1.5, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None }];
         let (x, cw) = (self.m, self.cw());
         self.paragraph(&head, x, cw);
         self.y += base * 0.6;
@@ -413,7 +432,7 @@ impl<'a> Writer<'a> {
             .map(|(r, row)| {
                 row.iter()
                     .map(|cell| {
-                        let mut ps = self.pieces(vault, rel, cell, base, ink, false);
+                        let mut ps = self.cell_pieces(vault, rel, cell, base, ink);
                         ps.iter_mut().for_each(|p| p.bold |= r == 0);
                         ps
                     })
@@ -424,7 +443,7 @@ impl<'a> Writer<'a> {
         let mut least = vec![0.0f32; ncols];
         for row in &rows {
             for (c, ps) in row.iter().enumerate() {
-                natural[c] = natural[c].max(ps.iter().map(piece_width).sum::<f32>());
+                natural[c] = natural[c].max(wrap_pieces(ps, f32::INFINITY).iter().map(|l| l.iter().map(piece_width).sum::<f32>()).fold(0.0, f32::max));
                 for p in ps {
                     for word in p.text.split_whitespace() {
                         least[c] = least[c].max(crate::pdf::write::text_width(p.kind, p.size, word));
@@ -499,6 +518,13 @@ impl<'a> Writer<'a> {
         let mut x = x;
         for p in line {
             let pw = piece_width(p);
+            // sub and superscript: the smaller text is moved off the baseline
+            let unit = p.size / crate::editor::SCRIPT_SCALE;
+            let base = match p.script {
+                1 => base - unit * 0.33,
+                2 => base + unit * 0.12,
+                _ => base,
+            };
             if let Some(bg) = p.bg {
                 let pad = p.size * 0.15;
                 self.p().rect(x - pad * 0.5, base - p.size * 0.95, pw + pad, p.size * 1.25, Some(bg), None);
@@ -518,20 +544,40 @@ impl<'a> Writer<'a> {
             if let Some(uri) = &p.link {
                 self.p().link(x, base - p.size, tw, p.size * 1.3, uri);
             }
+            if let Some(label) = &p.jump {
+                let page = self.page;
+                self.jumps.push((page, [x, base - p.size, tw, p.size * 1.3], label.clone()));
+            }
             x += pw;
         }
     }
 
-    /// Markdown inline text → styled pieces (using the reading view's parser).
-    fn pieces(&self, vault: &Vault, rel: &Path, text: &str, size: f32, color: Color32, strike: bool) -> Vec<Piece> {
-        let links: Vec<(markdown::LinkSpan, bool)> = markdown::find_links(text)
+    /// The links of a text: its `[[links]]` and whether their notes exist.
+    fn links_of(vault: &Vault, rel: &Path, text: &str) -> Vec<(markdown::LinkSpan, bool)> {
+        markdown::find_links(text)
             .into_iter()
             .map(|l| {
                 let ok = vault.exists(&l.target, Some(rel));
                 (l, ok)
             })
-            .collect();
-        let (job, spans, paints) = crate::reader::inline_painted(text, &links, size, color, strike);
+            .collect()
+    }
+
+    /// Markdown inline text → styled pieces (using the reading view's parser).
+    fn pieces(&self, vault: &Vault, rel: &Path, text: &str, size: f32, color: Color32, strike: bool) -> Vec<Piece> {
+        let links = Self::links_of(vault, rel, text);
+        self.pieces_from(crate::reader::inline_painted(text, &links, size, color, strike), size)
+    }
+
+    /// The text of a table cell: `<br>` is a line break (EDIT-045).
+    fn cell_pieces(&self, vault: &Vault, rel: &Path, text: &str, size: f32, color: Color32) -> Vec<Piece> {
+        let links = Self::links_of(vault, rel, text);
+        self.pieces_from(crate::reader::cell_painted(text, &links, size, color), size)
+    }
+
+    /// The pieces of a laid-out line of the reading view; `size` is the size of its text.
+    fn pieces_from(&self, painted: crate::reader::Painted, size: f32) -> Vec<Piece> {
+        let (job, spans, paints) = painted;
         let mut out = Vec::new();
         for s in &job.sections {
             let r = s.byte_range.start.0..s.byte_range.end.0;
@@ -544,7 +590,7 @@ impl<'a> Writer<'a> {
             // a bold or italic face of a chosen font has no imitation that says so (CFG-039)
             let (face_bold, face_italic) = crate::fonts::bold_italic_of(&f.font_id.family);
             out.push(Piece {
-                text: job.text[r].to_string(),
+                text: job.text[r.clone()].to_string(),
                 kind: font_kind(&f.font_id.family),
                 size: f.font_id.size,
                 color: if paint.is_some() || on_code { rgba(f.color) } else { print_color(f.color) },
@@ -558,6 +604,15 @@ impl<'a> Writer<'a> {
                 underline: f.underline.width > 0.0,
                 strike: f.strikethrough.width > 0.0,
                 link,
+                script: match (f.valign, f.font_id.size < size * 0.8) {
+                    (egui::Align::TOP, true) => 1,
+                    (_, true) => 2,
+                    _ => 0,
+                },
+                jump: spans.iter().find(|(sr, ..)| sr.start <= r.start && r.end <= sr.end).and_then(|(_, l, _)| match crate::reader::footnote_of(l) {
+                    Some((crate::reader::Foot::Reference, label)) => Some(label.to_string()),
+                    _ => None,
+                }),
             });
         }
         out
@@ -724,12 +779,16 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
     let mut w = Writer::new(&name, opts);
     let base = opts.font_pt;
+    // the footnotes (PDF-009): a reference with a definition is a mark that links to it
+    let notes = markdown::find_footnotes(text);
+    let _defined = markdown::DefinedFootnotes::set(notes.defined());
+    let mut footnote_places: HashMap<String, Dest> = HashMap::new();
     let ink = Color32::from_rgb(30, 30, 30);
     let heads = markdown::heading_numbers(text);
     // a first heading `# Title` that says the same as the title makes the title a second print of it (PDF-008)
     let said_by_heading = heads.first().is_some_and(|(_, level, title, _)| *level == 1 && markdown::heading_plain(title).to_lowercase() == markdown::heading_plain(&name).to_lowercase());
     if opts.title && !said_by_heading {
-        let pieces = vec![Piece { text: name.clone(), kind: FontKind::Sans, size: base * 2.0, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None }];
+        let pieces = vec![Piece { text: name.clone(), kind: FontKind::Sans, size: base * 2.0, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None }];
         let x = w.m;
         let cw = w.cw();
         w.paragraph(&pieces, x, cw);
@@ -835,6 +894,17 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
             let y = w.y + base * 0.5;
             w.p().line([x0, y], [x0 + cw, y], Rgba(180, 180, 180, 255), 0.8);
             w.y += base;
+        } else if let Some(def) = notes.def_at(i) {
+            // a footnote definition where it stands: its label raised, its text a little smaller
+            let links = Writer::links_of(vault, rel, line);
+            let ps = w.pieces_from(crate::reader::footnote_def_painted(line, &def.label, &def.marker, &links, base, ink), base);
+            w.need(base * 1.45);
+            footnote_places.entry(def.label.clone()).or_insert(Dest { page: w.page, y: w.y });
+            w.paragraph(&ps, x0, cw);
+        } else if notes.is_continuation(i) {
+            let links = Writer::links_of(vault, rel, line);
+            let ps = w.pieces_from(crate::reader::footnote_text_painted(line, &links, base, ink), base);
+            w.paragraph(&ps, x0 + base * 1.2, cw - base * 1.2);
         } else if let Some(level) = markdown::heading_level(line) {
             w.y += base * 0.5;
             let scale = crate::editor::heading_scale(level as u8);
@@ -844,7 +914,10 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                 p.color = Rgba(0, 0, 0, 255);
             }
             if let Some(n) = numbers.get(&i) {
-                ps.insert(0, Piece { text: format!("{n} "), kind: FontKind::Sans, size: base * scale, color: Rgba(130, 130, 130, 255), bg: None, italic: false, bold: false, underline: false, strike: false, link: None });
+                ps.insert(
+                    0,
+                    Piece { text: format!("{n} "), kind: FontKind::Sans, size: base * scale, color: Rgba(130, 130, 130, 255), bg: None, italic: false, bold: false, underline: false, strike: false, link: None, script: 0, jump: None },
+                );
             }
             w.need(base * scale * 2.0);
             places.insert(i, Dest { page: w.page, y: w.y });
@@ -895,6 +968,12 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     };
     let entries: Vec<Entry> = contents.iter().map(|(line, level, title, _)| Entry { level: *level, label: label(*line, title), dest: places.get(line).copied() }).collect();
     w.draw_contents(&entries, &slots);
+    // the references of footnotes link to their definitions
+    for (page, [x, y, width, height], label) in std::mem::take(&mut w.jumps) {
+        if let Some(to) = footnote_places.get(&label) {
+            w.doc.page(page).jump(x, y, width, height, *to);
+        }
+    }
     // the bookmarks of PDF readers: every # to ###### heading, nested by level
     for (line, level, title, _) in &heads {
         if let Some(to) = places.get(line) {
@@ -1540,6 +1619,70 @@ pub(crate) mod tests {
         let at = content.find(&format!("<{}> Tj", hex(word))).unwrap_or_else(|| panic!("{word} is not drawn"));
         let toks: Vec<&str> = content[..at].split_whitespace().collect();
         toks[toks.len() - 2].parse().unwrap()
+    }
+
+    // spec: PDF-009, EDIT-044
+    #[test]
+    fn underline_sub_and_superscript_are_drawn_in_the_pdf_and_their_tags_are_not_printed() {
+        let (v, d) = vault();
+        let page = |text: &str| {
+            let bytes = export_note(&v, Path::new("Welcome.md"), text, &ExportOptions::for_note()).unwrap();
+            page_streams(&bytes).remove(0)
+        };
+        let c = page("x<sup>7</sup> and a<sub>3</sub>b and <u>word</u> end\n");
+        assert!(!c.contains(&hex("<u>")) && !c.contains(&hex("sup>")) && !c.contains(&hex("</")), "the tags are not printed");
+        let (x, a, seven, three) = (y_of(&c, "x"), y_of(&c, "a"), y_of(&c, "7"), y_of(&c, "3"));
+        assert!(seven > x + 2.0, "the superscript is raised: {seven} over {x}");
+        assert!(three < a - 0.5, "the subscript is lowered: {three} under {a}");
+        let small = format!("{:.2} Tf", 11.0 * crate::editor::SCRIPT_SCALE);
+        assert!(c.contains(&small), "both are smaller: {small}");
+        // the underline is a line under the word
+        let plain = page("x and word end\n");
+        let lines = |s: &str| s.matches(" l S Q").count();
+        assert_eq!(lines(&c), lines(&plain) + 1, "one line under <u>word</u>");
+        // an unclosed tag stays text
+        assert!(page("a <u>b\n").contains(&hex("<u>")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-009, EDIT-043
+    #[test]
+    fn a_footnote_reference_in_the_pdf_is_a_raised_link_to_its_definition_which_is_printed_where_it_stands() {
+        let (v, d) = vault();
+        let text = "Claim[^1] and[^2] here\n\n".to_string() + &"filler line\n\n".repeat(60) + "[^1]: The body[^1]\n    and more\n\nlast\n";
+        let bytes = export_note(&v, Path::new("Welcome.md"), &text, &ExportOptions::for_note()).unwrap();
+        let pages = page_streams(&bytes);
+        assert!(pages.len() >= 2, "the definition is on a later page");
+        let all = pages.join("\n");
+        assert!(!all.contains(&hex("[^1")) && !all.contains(&hex("]:")), "no raw footnote markup");
+        assert!(all.contains(&hex("[^2]")), "a reference without a definition is printed as written");
+        let (body_page, _) = pages.iter().enumerate().find(|(_, p)| p.contains(&hex("body"))).unwrap();
+        assert!(body_page > 0 && all.contains(&hex("more")), "the definition and its continuation line are where they stand: page {body_page}");
+        // the mark is smaller and raised, the text of the definition a little smaller
+        assert!(pages[0].contains(&format!("{:.2} Tf", 11.0 * crate::editor::SCRIPT_SCALE)), "the mark of the reference is small");
+        assert!(pages[body_page].contains(&format!("{:.2} Tf", 11.0 * crate::editor::FOOTNOTE_TEXT)), "the text of the definition is a little smaller");
+        assert!(y_of(&pages[0], "1") > y_of(&pages[0], "Claim"), "the mark is raised");
+        // the references (one in the text, one in the definition) link to the page of the definition
+        let (ids, links) = page_ids_and_link_targets(&bytes);
+        assert_eq!(links.len(), 2, "a link per reference to a defined footnote");
+        assert!(links.iter().all(|l| *l == ids[body_page]), "they go to the page of the definition: {links:?} / {ids:?}");
+        assert_eq!(render(&bytes).len(), pages.len());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-009, EDIT-045
+    #[test]
+    fn br_in_a_table_cell_is_a_new_line_in_the_pdf() {
+        let (v, d) = vault();
+        let rel = Path::new("Ideas.md");
+        let text = "| A | B |\n|---|---|\n| first<br>second<br/>third | one |\n";
+        let bytes = export_note(&v, rel, text, &ExportOptions::for_note()).unwrap();
+        let c = page_streams(&bytes).remove(0);
+        assert!(!c.contains(&hex("<br")), "the tag is not printed");
+        let (f, s, t, one) = (y_of(&c, "first"), y_of(&c, "second"), y_of(&c, "third"), y_of(&c, "one"));
+        assert!(f > s && s > t, "one line under the other: {f} {s} {t}");
+        assert_eq!(f, one, "the other cell starts at the top");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: EDIT-024, PDF-001

@@ -91,6 +91,15 @@ impl ShaleApp {
         out
     }
 
+    /// What the Import does with Word files: nothing special while the setting is off (IMP-036).
+    pub fn word_import(&self) -> import::Word {
+        if self.cfg.docx_import {
+            import::Word::On(import::docx::locate(&self.cfg.pandoc_path))
+        } else {
+            import::Word::Off
+        }
+    }
+
     /// Show the Import dialog with these items (or add them to the open one).
     /// `zone`: where they were dropped (folder, and a note to link them from).
     pub fn open_import(&mut self, mut items: Vec<Item>, notes: Vec<String>, zone: Option<(PathBuf, Option<PathBuf>)>) {
@@ -98,6 +107,7 @@ impl ShaleApp {
             self.toast("Open a vault first to import into it.");
             return;
         };
+        import::word_items(&mut items, &self.word_import());
         import::mark_duplicates(v, &mut items);
         import::find_people(v, &self.vdata.settings.people_dir, &mut items);
         if let Some(Modal::Import(mut d)) = self.modal.take() {
@@ -177,6 +187,7 @@ impl ShaleApp {
             ImportAction::AddPath => {
                 let p = PathBuf::from(crate::layout::shellexpand(&d.add_path));
                 let (mut items, notes) = import::items_from_paths(&[p]);
+                import::word_items(&mut items, &self.word_import());
                 if let Some(v) = &self.vault {
                     import::mark_duplicates(v, &mut items);
                 }
@@ -201,11 +212,17 @@ impl ShaleApp {
                 };
                 let tags = import::parse_tags(&d.tags);
                 let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
-                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, people_dir: self.vdata.settings.people_dir.clone() };
+                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, keep_docx: d.keep_docx, people_dir: self.vdata.settings.people_dir.clone() };
                 let Some(v) = &mut self.vault else { return true };
+                // pandoc takes its time: the Word files are converted in a job first (IMP-035), and
+                // the dialog calls this again when it is done
+                if d.converting.is_none() && d.start_conversion(v.root.clone()) {
+                    return false;
+                }
                 let import::Imported { notes: made, files, errors } = import::import(v, &d.items, &opts);
                 if made.is_empty() && files.is_empty() {
                     d.error = Some(if errors.is_empty() { "Nothing was imported.".into() } else { errors.join("\n") });
+                    d.forget_conversions();
                     return false;
                 }
                 if d.link_on {

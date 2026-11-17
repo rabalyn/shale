@@ -1,7 +1,8 @@
 //! Coloured highlight and font colour as inline HTML (EDIT-028): `<mark style="background: #FFFF00;">`
 //! and `<span style="color: #FF0000;">`, the convention of Obsidian's colour plugins. Reading is
 //! tolerant, writing is always the canonical form. No UI; the editor, the reading view, tables and
-//! the PDF export find the colours here (EDIT-029).
+//! the PDF export find the colours here (EDIT-029). The tags `<u>`, `<sub>` and `<sup>` (EDIT-044)
+//! are read with the same rules, as runs without a colour.
 
 use std::ops::Range;
 
@@ -12,9 +13,23 @@ pub enum Kind {
     Mark,
     /// `<span style="color: …">`: the colour of the text
     Font,
+    /// `<u>`: underlined text (EDIT-044)
+    Underline,
+    /// `<sub>`: lowered, smaller text
+    Sub,
+    /// `<sup>`: raised, smaller text
+    Sup,
 }
 
-/// A coloured piece of a line: the opening tag, the closing tag, and the colour (RGBA).
+impl Kind {
+    /// Whether the tag carries a colour (`<mark>` and `<span>`), as opposed to `<u>`, `<sub>`, `<sup>`.
+    pub fn is_colour(self) -> bool {
+        matches!(self, Kind::Mark | Kind::Font)
+    }
+}
+
+/// A tagged piece of a line: the opening tag, the closing tag, and the colour (RGBA; all zero for
+/// `<u>`, `<sub>` and `<sup>`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Run {
     pub kind: Kind,
@@ -83,24 +98,43 @@ fn style_colour(style: &str, props: &[&str]) -> Option<[u8; 4]> {
     })
 }
 
-/// The opening tag `<mark …>` or `<span …>` at the start of `s`.
-fn parse_open(s: &str) -> Option<Open> {
-    let b = s.as_bytes();
-    if b.first() != Some(&b'<') || b.len() < 6 {
-        return None;
-    }
-    let name = s.get(1..5).unwrap_or("");
-    let (kind, props): (Kind, &[&str]) = if name.eq_ignore_ascii_case("mark") {
-        (Kind::Mark, &["background", "background-color"])
+/// The name of the tag that starts at `s` (after the `<` or the `</`): the kind it makes and the
+/// length of the name. The name ends at a character that is no ASCII letter.
+fn tag_name(s: &str) -> Option<(Kind, usize)> {
+    let len = s.bytes().take_while(u8::is_ascii_alphabetic).count();
+    let name = &s[..len];
+    let kind = if name.eq_ignore_ascii_case("mark") {
+        Kind::Mark
     } else if name.eq_ignore_ascii_case("span") {
-        (Kind::Font, &["color"])
+        Kind::Font
+    } else if name.eq_ignore_ascii_case("u") {
+        Kind::Underline
+    } else if name.eq_ignore_ascii_case("sub") {
+        Kind::Sub
+    } else if name.eq_ignore_ascii_case("sup") {
+        Kind::Sup
     } else {
         return None;
     };
+    Some((kind, len))
+}
+
+/// The opening tag `<mark …>`, `<span …>`, `<u>`, `<sub>` or `<sup>` at the start of `s`.
+fn parse_open(s: &str) -> Option<Open> {
+    if !s.starts_with('<') {
+        return None;
+    }
+    let (kind, name_len) = tag_name(&s[1..])?;
+    let props: &[&str] = match kind {
+        Kind::Mark => &["background", "background-color"],
+        Kind::Font => &["color"],
+        _ => &[],
+    };
+    let from = 1 + name_len;
     // the end of the tag: the first `>` outside quotes
     let mut quote = None;
     let mut end = None;
-    for (i, c) in s.char_indices().skip(5) {
+    for (i, c) in s.char_indices().skip(from) {
         match (quote, c) {
             (Some(q), c) if c == q => quote = None,
             (Some(_), _) => {}
@@ -114,9 +148,12 @@ fn parse_open(s: &str) -> Option<Open> {
         }
     }
     let end = end?;
-    let attrs = &s[5..end];
+    let attrs = &s[from..end];
     if !attrs.is_empty() && !attrs.starts_with(char::is_whitespace) {
         return None;
+    }
+    if !kind.is_colour() {
+        return Some(Open { kind, len: end + 1, rgba: Some([0; 4]) });
     }
     let mut rgba = None;
     let lower = attrs.to_ascii_lowercase();
@@ -139,28 +176,20 @@ fn parse_open(s: &str) -> Option<Open> {
     Some(Open { kind, len: end + 1, rgba })
 }
 
-/// The closing tag `</mark>` or `</span>` at the start of `s`: its kind and length.
+/// The closing tag (`</mark>`, `</span>`, `</u>`, `</sub>`, `</sup>`) at the start of `s`: its kind and length.
 fn parse_close(s: &str) -> Option<(Kind, usize)> {
-    let b = s.as_bytes();
-    if b.len() < 7 || b[0] != b'<' || b[1] != b'/' {
+    if !s.starts_with("</") {
         return None;
     }
-    let name = s.get(2..6).unwrap_or("");
-    let kind = if name.eq_ignore_ascii_case("mark") {
-        Kind::Mark
-    } else if name.eq_ignore_ascii_case("span") {
-        Kind::Font
-    } else {
-        return None;
-    };
-    let rest = &s[6..];
+    let (kind, name_len) = tag_name(&s[2..])?;
+    let rest = &s[2 + name_len..];
     let blanks = rest.len() - rest.trim_start().len();
-    (rest[blanks..].starts_with('>')).then_some((kind, 6 + blanks + 1))
+    (rest[blanks..].starts_with('>')).then_some((kind, 2 + name_len + blanks + 1))
 }
 
-/// The coloured runs of one line, in the order their closing tags come (so inner ones come before the
-/// ones around them). Tags in inline code, a tag without its partner and a tag with a style that
-/// has no colour are left alone.
+/// The runs of one line, in the order their closing tags come (so inner ones come before the
+/// ones around them). Tags in inline code, a tag without its partner and a `<mark>` or `<span>`
+/// with a style that has no colour are left alone.
 pub fn find(line: &str) -> Vec<Run> {
     if !line.contains('<') {
         return Vec::new();
@@ -201,6 +230,15 @@ pub fn open_tags(line: &str) -> Vec<Range<usize>> {
     }
     let code = crate::markdown::inline_code_ranges(line);
     line.match_indices('<').filter(|(at, _)| !code.iter().any(|r| r.contains(at))).filter_map(|(at, _)| parse_open(&line[at..]).map(|o| at..at + o.len)).collect()
+}
+
+/// The style that applies at byte `at` of a line from `<u>`, `<sub>` and `<sup>` (EDIT-044): whether
+/// the text is underlined, and the innermost of `Sub` and `Sup` around it.
+pub fn style_at(runs: &[Run], at: usize) -> (bool, Option<Kind>) {
+    let inside = |r: &&Run| r.inner().contains(&at);
+    let under = runs.iter().filter(|r| r.kind == Kind::Underline).any(|r| r.inner().contains(&at));
+    let script = runs.iter().filter(|r| matches!(r.kind, Kind::Sub | Kind::Sup)).filter(inside).min_by_key(|r| r.inner().len()).map(|r| r.kind);
+    (under, script)
 }
 
 /// The colour (background, font) that applies at byte `at` of a line: the innermost run of each kind.
@@ -314,5 +352,40 @@ mod tests {
         assert!(dark_text_on([0, 255, 255, 255]));
         assert!(!dark_text_on([0, 0, 128, 255]));
         assert!(!dark_text_on([255, 0, 255, 255]));
+    }
+
+    // spec: EDIT-044
+    #[test]
+    fn underline_sub_and_sup_are_read_with_the_rules_of_the_colour_tags() {
+        for (tag, kind) in [("u", Kind::Underline), ("sub", Kind::Sub), ("sup", Kind::Sup)] {
+            for line in [format!("a <{tag}>x</{tag}> b"), format!("a <{}>x</{}> b", tag.to_uppercase(), tag.to_uppercase()), format!("a <{tag} >x</{tag} > b")] {
+                let runs = find(&line);
+                assert_eq!(runs.len(), 1, "{line}");
+                assert_eq!(runs[0].kind, kind, "{line}");
+                assert_eq!(&line[runs[0].inner()], "x", "{line}");
+            }
+        }
+        // nested with each other and with mark and span: every pair is found
+        let line = "<mark style=\"background: #FFFF00;\"><u>a <sup>b<sub>c</sub></sup></u></mark>";
+        let kinds: Vec<Kind> = find(line).iter().map(|r| r.kind).collect();
+        assert_eq!(kinds, [Kind::Sub, Kind::Sup, Kind::Underline, Kind::Mark]);
+        let runs = find(line);
+        let at = |needle: &str| line.find(needle).unwrap();
+        assert_eq!(style_at(&runs, at("a <sup>")), (true, None));
+        assert_eq!(style_at(&runs, at("b<sub>")), (true, Some(Kind::Sup)));
+        assert_eq!(style_at(&runs, at("c</sub>")), (true, Some(Kind::Sub)), "the innermost of sub and sup counts");
+        assert_eq!(style_at(&runs, 0), (false, None));
+    }
+
+    // spec: EDIT-044
+    #[test]
+    fn unclosed_stray_code_and_look_alike_tags_stay_plain_text() {
+        for line in ["<u>never closed", "closed never</u>", "`<u>`x</u>", "<ul>x</ul>", "<sub", "<sup>x</sub>", "<u x</u>", "<b>x</b>", "<sup<u>x</sup>", "<subx>y</subx>", "<u>é</sub>"] {
+            assert!(find(line).is_empty(), "{line}");
+        }
+        // a stray opening tag does not take the pair after it along
+        let runs = find("<u>a <u>b</u>");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].open.start, 5);
     }
 }

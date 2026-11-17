@@ -1,6 +1,6 @@
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
-button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, LaTeX, Help) and **Keybindings**, and the button
+button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Import, Data, LaTeX, Help) and **Keybindings**, and the button
 **Open settings file** at the top right (see below). The tab list is as wide as its longest name at any font size; drag its border to change the width, double-click the border to make it automatic again.
 
 Two files hold settings:
@@ -167,6 +167,16 @@ system keyring, never in this file):
 | `social_last` | none; the account and feed shown last | set by Shale |
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
 | `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
+
+### Import ([[Import]])
+
+| Key | Default | Where |
+|---|---|---|
+| `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
+| `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" |
+
+To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,
+Windows `winget install JohnMacFarlane.Pandoc`), tick the box and press Check again.
 
 ### LaTeX ([[PDF]])
 

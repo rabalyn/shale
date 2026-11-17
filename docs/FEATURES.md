@@ -46,6 +46,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
   `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
   the Markdown preview), the reading view, table cells and the PDF export, and nest with bold and italic.
+- **Footnotes, underline, sub and superscript.** A footnote reference `[^1]` with a definition
+  `[^1]: text` (continuation lines indented by four spaces or a tab) is a small raised label in the
+  link colour, the definition shows its label raised and its text a little smaller; in the reading
+  view a click on a reference jumps to its definition and back. `<u>text</u>` underlines,
+  `<sub>…</sub>` lowers and `<sup>…</sup>` raises, and `<br>` in a table cell starts a new line.
+  All of it shows in the Markdown preview, the reading view, the outline, table cells and the PDF
+  export (a reference links to its definition) and is what pandoc writes for a Word document.
 
   ![Colours and the toolbar](userguide/z_media/screenshots/editor-colours.png)
 
@@ -104,7 +111,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   embedded pictures, drawings, PDFs, the first frame of a video and the cover of a sound are
   drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
   the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
-  player card; highlights and font colours are printed as written; a **Contents** page after the title lists the
+  player card; highlights and font colours are printed as written, as are footnotes (a reference links to
+  its definition), underline, sub and superscript and `<br>` in table cells; a **Contents** page after the title lists the
   `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008), insert a
@@ -597,6 +605,19 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   "Markdown note"), not an attachment (IMP-033). When it has headings but no `#`, a box "Lift headings
   (## → #, ### → ##, …)" is ticked: all headings move up so that the highest becomes `#`; code and front
   matter stay as they are (IMP-034).
+- **Word files** (`.docx`) become notes through **pandoc** when you turn that on in Settings →
+  Import and pandoc is installed (`sudo pacman -S pandoc-cli` / `sudo apt install pandoc`, `brew
+  install pandoc`, `winget install JohnMacFarlane.Pandoc`); Shale finds it in `PATH` and the usual
+  places, or you give its path (IMP-035, IMP-036). Headings, bold, italic, underline, strike-through,
+  sub- and superscript, links, lists, tables (also with merged cells), quotes, footnotes, math,
+  highlights and pictures with their captions come through (IMP-037). Everything one file brings
+  goes into one folder, `z_media/YYYY/MM/import_docx_<name>/`: the pictures in `media/` and, when
+  "Keep the original .docx" is ticked, the original, which the note names in its properties
+  (IMP-038). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
+  without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
+
+  ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)
+
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add

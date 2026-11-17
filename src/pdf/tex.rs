@@ -8,7 +8,7 @@ pub mod compile;
 pub mod engine;
 pub mod import;
 pub mod install;
-mod proc;
+pub(crate) mod proc;
 pub mod sets;
 pub mod sets_ui;
 pub mod settings_ui;
