@@ -84,17 +84,18 @@ size of the two editor areas when you updated.
 | `numbered_headings` | on | Editor, "Number headings": `#` and deeper show 1, 1.1, 1.2 before their text; a note's front matter `numbered-headings: true` or `false` overrides it for that note (see [[Notes and links]]) |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
-| `link_preview_width` | 640 (at least 240, at most the window) | Editor, "Link preview size (Shift+K)", the first number; also set by dragging the preview's edges |
+| `link_preview_width` | 640 (at least 240, at most the window) | Vim, "Link preview size", the first number; also set by dragging the preview's edges |
 | `link_preview_height` | 480 (at least 160, at most the window) | Editor, "Link preview size (Shift+K)", the second number; "Reset size" brings back 640 x 480 |
 | `font_colours` | red, orange, blue, green, purple (`[[229,62,62], …]`, RGB, up to 8) | Editing, "Font colours": the swatches of the toolbar's font colour palette |
 | `highlight_colours` | neon yellow, green, cyan, magenta (RGB, up to 8) | Editing, "Highlight colours": the swatches of the toolbar's highlight palette |
 | `live_preview` | off | Editor, "Markdown preview in the editor"; the eye icon of the editor |
 | `preview_raw_lines` | 0 (range 0 to 20) | Editor, "Raw lines around the cursor" |
 | `table_cell_edit` | on | Editor, "Edit table cells in the grid"; a single table is switched by the button above the top right corner of its grid |
-| `vim_mode` | off | Editor, "Vim-style editing" |
+| `vim_mode` | off | Vim, "Vim-style editing" |
 | `cursor_shape` | `bar` (`bar`, `bar_after`, `block` or `underline`; another word is `bar`) | Editor, "Cursor while typing": also vim's insert and visual mode |
-| `normal_cursor_shape` | `block` (the same four words) | Editor, "Cursor in normal mode"; used only with Vim-style editing |
+| `normal_cursor_shape` | `block` (the same four words) | Vim, "Cursor in normal mode"; used only with Vim-style editing |
 | `cursor_blink` | on | Editor, "Blinking cursor"; off keeps the cursor steady |
+| `esc_cursor` | `stay` (`stay` or `step_back`; another word is `stay`) | Vim, "Esc from insert mode": where the cursor lands when Esc leaves insert mode, on the character after the typing or one back like Vim; used only with Vim-style editing |
 | `keybindings` | empty (the defaults of [[Keyboard shortcuts]]) | Settings → Keybindings; only the actions you changed are stored |
 
 ### Window and vault

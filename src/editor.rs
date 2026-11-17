@@ -611,6 +611,8 @@ pub struct NoteEditor {
     pub vim_cursor_rect: Option<Rect>,
     /// the shapes and the blinking of the text cursor (EDIT-039…EDIT-041)
     pub cursor_style: crate::cursor_style::CursorStyle,
+    /// where Esc from insert mode puts the cursor (EDIT-043)
+    pub esc_cursor: crate::vim::EscCursor,
     /// where the cursor was drawn last frame (char, normal mode) and when it moved there (seconds)
     cursor_seen: Option<((usize, bool), f64)>,
     /// The formatting toolbar above the text (EDIT-026)
@@ -671,6 +673,7 @@ impl NoteEditor {
             vim_follow: false,
             vim_cursor_rect: None,
             cursor_style: crate::cursor_style::CursorStyle::default(),
+            esc_cursor: crate::vim::EscCursor::default(),
             cursor_seen: None,
             bar: Default::default(),
             format_request: None,
@@ -888,7 +891,7 @@ impl NoteEditor {
             // Esc back to normal mode (an open popup took its Esc already, above)
             if !self.assist.is_open() && !self.assist.picker_visible() && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
                 let cur = self.text_cursor(ui).map(|c| c.0).unwrap_or(0);
-                self.vim.leave_insert(text, cur);
+                self.vim.leave_insert(text, cur, self.esc_cursor);
                 self.vim_apply_cursor(ui, text);
             }
             return false;
@@ -2080,6 +2083,7 @@ mod tests {
         let mut undo = crate::undo::Histories::default();
         let mut ed = NoteEditor::new(egui::Id::unique("vim-ed"));
         ed.vim_enabled = true;
+        ed.esc_cursor = crate::vim::EscCursor::StepBack;
         let mut text = String::from("alpha beta\ngamma delta\nsee [[Ide");
         let cursor = |ctx: &egui::Context, ed: &NoteEditor| egui::text_edit::TextEditState::load(ctx, ed.id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0).unwrap();
         let typed = |s: &str| vec![Event::Text(s.into())];
