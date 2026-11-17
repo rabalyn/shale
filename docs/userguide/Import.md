@@ -44,7 +44,7 @@ properties, links to the attachments and the original message, and the text.
 
 The note is made in the folder of the dialog. It keeps headings, bold, italic, underline, strike-through,
 sub- and superscript, links, lists, tables (tables with merged cells become plain tables, a cell with
-several lines is shown with line breaks), quotes, footnotes, math and highlights (`==text==`). A picture
+several lines is shown with line breaks), quotes, footnotes, math (written as `$…$` and `$$…$$`, typeset as [[Editor]] says) and highlights (`==text==`). A picture
 becomes an embed with its caption in italics below it. A box "Lift headings" does what it does for a Markdown
 file, for a document without a `#` heading.
 

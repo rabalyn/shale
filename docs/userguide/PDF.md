@@ -19,6 +19,8 @@ Highlights (`==text==`) and the colours of [[Editor]] (`<mark style="background:
 
 Footnotes are printed as on screen: a reference is a small raised label that links to its definition, which is printed where it stands in the note with its label raised and its text a little smaller. `<u>` is underlined, `<sub>` and `<sup>` are lowered and raised in a smaller size, and `<br>` in a table cell starts a new line in the cell (see [[Editor]]).
 
+Math is typeset as on screen (see [[Editor]]): inline formulas sit on the baseline of their line, which is as tall as they need, display formulas are centred, and a formula in a table cell is drawn in its cell. The formulas are vector outlines of the glyphs of the math font and filled rules for bars and roots, so they stay sharp at any zoom; they are drawings, not text, so they cannot be selected or searched. A formula Shale cannot typeset is printed as code.
+
 Code looks as on screen: fenced code blocks and inline code are printed in their syntax colours on the same dark code background as in the reading view (see [[Editor]]), the text still selectable.
 
 Pictures, drawings and PDFs embedded with `![[…]]` on a line of their own are drawn as

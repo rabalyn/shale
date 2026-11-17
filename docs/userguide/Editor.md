@@ -102,6 +102,26 @@ All of this also shows in the heading titles of the outline, in table cells, and
 export, where a footnote reference links to its definition. Word notes imported with pandoc use
 exactly these forms (see [[Import]]).
 
+## Math
+
+A formula between dollar signs is set in the text, `$E = mc^2$`, and two dollar signs make a display formula, centred in a row of its own:
+
+```
+The roots of a quadratic are $x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$.
+
+$$
+\sum_{k=1}^{n} k^2 = \frac{n(n+1)(2n+1)}{6}
+$$
+```
+
+![[math-editor.png]]
+
+The opening `$` is not followed by a space, the closing one is not preceded by a space and not followed by a digit, and both are on one line, so `costs $5 and $10` is no formula; `\$` is a plain dollar sign. A display formula is `$$…$$` on one line, or `$$` on lines of their own around one or more lines, or a ```` ```math ```` block. Nothing in code or in the front matter is a formula.
+
+Shale typesets formulas itself, with the bundled font STIX Two Math (SIL Open Font License, its licence is beside it in the program's sources) and no TeX installed. It knows letters in math italic, digits and operators upright, `{}` groups, `^` and `_` (also both, and nested), `\frac`, `\dfrac`, `\tfrac`, `\binom`, `\sqrt` and `\sqrt[n]`, Greek letters, the usual relations, binary operators, arrows and symbols, big operators with limits (`\sum`, `\prod`, `\int`, `\iint`, `\oint`, `\lim`; the limits stand below and above in display style and beside the symbol in the text; `\limits` and `\nolimits` change that), function names (`\sin`, `\log`, `\max`, `\operatorname{…}`), `\left…\right` delimiters that grow with their content, accents (`\hat`, `\bar`, `\vec`, `\dot`, `\tilde`, `\overline`, `\underline`), `\text{…}`, `\mathrm`, `\mathbf`, `\mathit`, `\mathbb`, `\mathcal`, the spaces `\,` `\:` `\;` `\quad` `\qquad` `\!`, and the environments `matrix`, `pmatrix`, `bmatrix`, `vmatrix`, `cases` and `aligned` (rows `\\`, columns `&`).
+
+With the Markdown preview on, a formula takes the place of its TeX; the line with the cursor shows the TeX, as with every other markup (the TeX stays in the note, so the cursor, selection and search work on it). The same formulas are drawn in the [[Reading view]], in table cells, in the headings of the outline and in the [[PDF]] export. A formula Shale cannot typeset (an unknown command, braces that do not match, `\left` without `\right`, more than 64 levels of nesting or more than 10 000 characters) stays as its TeX in the code style, and the reason shows when you point at it. Word files imported with pandoc bring their formulas as `$…$` and `$$…$$` (see [[Import]]).
+
 ## Code
 
 Code is coloured: write the language after the opening fence, as in ```` ```js ````

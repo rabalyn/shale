@@ -19,6 +19,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   Click a blue link to open the note. Click a red link to create the note and open it.
 - **A formatting toolbar and colours**: a row of buttons above the text for bold, headings, lists, links,
   tables and more, and coloured highlights and font colours stored as plain `<mark>` / `<span>` HTML.
+- **Math**: `$E = mc^2$` and `$$…$$` are typeset in the text, the reading view, tables and the PDF export,
+  by Shale itself with the bundled font STIX Two Math (no TeX needed).
 - **Suggestions while you type**: type `[[` to get matching note names. Enter or a click picks one, and the
   last entry creates a new note.
 - **Drawings**: hand-drawn style sketches stored as standard `.excalidraw` JSON files.

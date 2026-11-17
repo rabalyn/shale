@@ -56,6 +56,16 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![Colours and the toolbar](userguide/z_media/screenshots/editor-colours.png)
 
+- **Math.** `$E = mc^2$` is set in the text, and `$$…$$` on lines of its own (or a ```` ```math ```` block) is
+  set centred in display style: fractions, roots, scripts, sums and integrals with limits, matrices,
+  cases, delimiters that grow and the usual symbols, typeset by Shale itself (pure Rust, no TeX needed)
+  with the bundled font STIX Two Math. It shows in the reading view, the editor's Markdown preview (the
+  cursor line shows its TeX), table cells, the outline and the PDF export, where it is drawn as sharp
+  vector outlines; a formula Shale cannot typeset stays as code, and says why when you point at it.
+
+  ![Math in the reading view](userguide/z_media/screenshots/math-reading.png)
+  ![Math in the Markdown preview](userguide/z_media/screenshots/math-editor.png)
+
 - Lists continue when you press Enter (also numbered lists and to-dos `- [ ]` / `1. [ ]`).
   Tab and Shift+Tab indent list items or change heading levels, and Alt+↑/↓ move lines.
 - Web links (`[text](https://…)`) open in your browser.
@@ -112,7 +122,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
   the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
   player card; highlights and font colours are printed as written, as are footnotes (a reference links to
-  its definition), underline, sub and superscript and `<br>` in table cells; a **Contents** page after the title lists the
+  its definition), underline, sub and superscript, `<br>` in table cells and math (vector outlines); a **Contents** page after the title lists the
   `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008), insert a
