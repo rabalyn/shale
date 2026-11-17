@@ -5,7 +5,7 @@ use crate::pdf::book::{self, natural_cmp, Item, Plan};
 use crate::pdf::book_export::{export_book, export_folder, Progress};
 use crate::pdf::export::tests::{contents, hex, page_ids_and_link_targets, page_streams};
 use crate::pdf::export::ExportOptions;
-use crate::vault::Vault;
+use crate::vault::{rel_to_string, Vault};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
@@ -171,7 +171,9 @@ fn the_folder_note_is_index_then_readme_then_the_note_named_like_the_folder_then
             })
             .unwrap_or_else(|| panic!("no part {name}"))
     };
-    let note = |name: &str| part(name).note.map(|n| n.to_string_lossy().into_owned());
+    // the vault's paths are OS paths (`T\A\Index.md` on Windows): compare them as vault paths with `/` (#322)
+    assert_eq!(part("A").note, Some(Path::new("T").join("A").join("Index.md")), "the folder note is the vault's own path");
+    let note = |name: &str| part(name).note.map(|n| rel_to_string(&n));
     assert_eq!(note("A").as_deref(), Some("T/A/Index.md"), "index.md before README.md and A.md");
     assert_eq!(note("B").as_deref(), Some("T/B/readme.md"), "README.md before B.md, any case");
     assert_eq!(note("C").as_deref(), Some("T/C/c.MD"), "the note named like the folder, any case");
@@ -515,4 +517,13 @@ fn footnotes_link_within_their_own_chapter_and_math_is_drawn_in_a_book() {
     assert!(!c.contains(&hex("[^1")) && !c.contains(&hex("frac")), "no raw footnote or TeX text");
     assert!(c.matches(" f Q").count() >= 3, "the formula is drawn as outlines: {}", c.matches(" f Q").count());
     clean(&d);
+}
+
+// spec: BOOK-002
+#[test]
+fn a_folder_note_path_joined_with_the_os_separator_reads_as_a_vault_path_with_slashes() {
+    // the vault scan joins a note's path with the OS separator; shown or compared as text it has `/` (#322)
+    assert_eq!(rel_to_string(&Path::new("T").join("A").join("Index.md")), "T/A/Index.md");
+    #[cfg(windows)]
+    assert_eq!(rel_to_string(Path::new(r"T\A\Index.md")), "T/A/Index.md");
 }
