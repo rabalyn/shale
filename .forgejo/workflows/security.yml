@@ -3,8 +3,8 @@
 # GitHub issue labelled `security`, which an agent picks up like any other work;
 # scripts/report-advisories.sh has the rules (one issue per advisory, closed when it is gone).
 #
-# Daily, because advisories are published for code that did not change; for every push to `main`
-# and every `v*` tag, because a change of Cargo.lock can bring one in. It takes seconds and runs
+# Daily, because advisories are published for code that did not change; for every `v*` tag,
+# because a change of Cargo.lock can bring one in (a push to `main` runs nothing, ADR-0018). It takes seconds and runs
 # here, never on GitHub. A vulnerability fails the job (never the build or the release); warnings
 # do not.
 #
@@ -14,7 +14,6 @@ name: security
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
   schedule:
     - cron: '41 4 * * *'

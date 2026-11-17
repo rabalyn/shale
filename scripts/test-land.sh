@@ -84,6 +84,30 @@ expect "of a local branch and its remote copy the newer one lands" 0 "landed mov
 check "the local commit that was not pushed is on main" '[ "$(git show origin/main:e.txt)" = e2 ]'
 expect "a branch that differs locally and remotely is refused" 1 "have both moved" diverged
 expect "an unknown name is refused" 1 "no branch or commit named nope" nope
+# the local main follows a landing (ADR-0018): its checkout is fast-forwarded when clean
+git worktree add -q "$TMP/main-wt" main 2>/dev/null || git worktree add -q "$TMP/main-wt" -b main origin/main
+git -C "$TMP/main-wt" reset -q --hard origin/main
+git -C "$TMP/main-wt" reset -q --hard HEAD~1
+branch follow f.txt f
+expect "a landing fast-forwards the clean checkout of local main" 0 "local main is now" follow
+check "the checkout of main has the landed file" '[ "$(cat "$TMP/main-wt/f.txt")" = f ] && [ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ]'
+branch dirty g.txt g
+printf 'changed\n' > "$TMP/main-wt/a.txt"
+mainwas=$(git rev-parse main)
+expect "a checkout of main with changes is left and named" 0 "has uncommitted changes" dirty
+check "local main did not move, the change is kept" '[ "$(git rev-parse main)" = "$mainwas" ] && [ "$(cat "$TMP/main-wt/a.txt")" = changed ]'
+git -C "$TMP/main-wt" checkout -q -- a.txt
+git -C "$TMP/main-wt" merge -q --ff-only origin/main
+printf 'own\n' > "$TMP/main-wt/own.txt" && git -C "$TMP/main-wt" add own.txt && git -C "$TMP/main-wt" commit -qm "own (Refs #1)"
+branch other h.txt h
+mainwas=$(git rev-parse main)
+expect "a local main with commits of its own is left and named" 0 "has commits that are not on origin/main" other
+check "local main keeps its own commit" '[ "$(git rev-parse main)" = "$mainwas" ]'
+git worktree remove --force "$TMP/main-wt"
+git branch -q -f main origin/main~1
+branch nocheckout i.txt i
+expect "a local main that is not checked out anywhere moves as a ref" 0 "local main is now" nocheckout
+check "the ref of local main is the landed commit" '[ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ]'
 check "no landing worktree is left behind" '! git worktree list | grep -Fq land/worktree'
 
 exit "$FAILED"

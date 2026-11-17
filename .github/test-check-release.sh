@@ -74,16 +74,16 @@ git tag -a v0.3.0 -m x
 git tag -a v0.2.0 -m x
 changelog 0.1.0 "- x"
 git commit -q -am "notes"
-expect "a lower version fails" fail "not greater than the previous release v0.3.0" 0.1.0
+expect "a lower version fails" fail "not greater than the previous tag v0.3.0" 0.1.0
 new_repo equal 0.3.0 0.3.0
 git tag -a v0.3.0 -m x
 git tag -a v0.10.0-rc.1 -m x
 git commit -q --allow-empty -m "later"
 changelog 0.3.0 "- x"
 git commit -q -am "notes"
-expect "an equal version fails (and 0.10.0-rc.1 outranks 0.3.0)" fail "not greater than the previous release v0.10.0-rc.1" 0.3.0
+expect "an equal version fails (and 0.10.0-rc.1 outranks 0.3.0)" fail "not greater than the previous tag v0.10.0-rc.1" 0.3.0
 git tag -d v0.10.0-rc.1 >/dev/null
-expect "an equal version fails" fail "not greater than the previous release v0.3.0" 0.3.0
+expect "an equal version fails" fail "not greater than the previous tag v0.3.0" 0.3.0
 expect "not semver fails" fail "not valid semver" 1.0
 
 # Cargo.lock and Cargo.toml mismatches
@@ -118,6 +118,30 @@ git tag -a v0.1.0 -m x
 changelog 0.2.0 "- nothing about it"
 git commit -q -am "notes"
 expect "issues closed before the previous tag are ignored" pass "" 0.2.0
+
+# pre-releases (check tags, FORGE-013): no changelog section needed, still greater and matching
+new_repo pre 0.4.0-rc.1 0.4.0-rc.1
+git tag -a v0.3.0 -m x
+git commit -q --allow-empty -m "A" -m "Closes #40"
+expect "a pre-release needs no changelog section" pass "" 0.4.0-rc.1
+expect "a pre-release must match Cargo.toml" fail "Cargo.toml has version \"0.4.0-rc.1\", not 0.4.0-rc.2" 0.4.0-rc.2
+git tag -a v0.4.0-rc.1 -m x
+git commit -q --allow-empty -m "later"
+expect "a pre-release is not greater than the previous one" fail "not greater than the previous tag v0.4.0-rc.1" 0.4.0-rc.1
+sed -i 's/0.4.0-rc.1/0.4.0-rc.2/' Cargo.toml Cargo.lock
+git commit -q -am "rc.2"
+expect "the next pre-release passes" pass "" 0.4.0-rc.2
+git tag -a v0.4.0-rc.2 -m x
+git commit -q --allow-empty -m "B" -m "Closes #41"
+
+# a release after pre-releases: its section covers everything since the previous release
+sed -i 's/0.4.0-rc.2/0.4.0/' Cargo.toml Cargo.lock
+changelog 0.4.0 "- only #41"
+git commit -q -am "release"
+expect "a release counts issues since the previous release, not the pre-release" fail "since v0.3.0: #40" 0.4.0
+changelog 0.4.0 "- #40 and #41"
+git commit -q -am "notes"
+expect "a release after its pre-releases passes" pass "" 0.4.0
 
 [ "$FAILED" = 0 ] && echo "all $N checks passed"
 exit "$FAILED"
