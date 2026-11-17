@@ -1,4 +1,4 @@
-//! Fonts and text sizes (CFG-030 to CFG-039): one font and size for each area of the window,
+//! Fonts and text sizes (CFG-030 to CFG-040): one font and size for each area of the window,
 //! the system fonts to choose from, and the egui fonts and text styles that follow from the
 //! settings.
 //!
@@ -10,7 +10,7 @@
 use crate::theme;
 use eframe::egui::{self, FontFamily, FontId, Ui};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
@@ -458,12 +458,32 @@ struct Loaded {
     data: Vec<(Variant, egui::FontData)>,
 }
 
+/// How many fonts that are only shown as a sample stay loaded (CFG-040).
+pub const PREVIEWS: usize = 8;
+
+/// The font a sample text can be drawn in (CFG-040).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Preview {
+    Ready(AreaFont),
+    /// it is being loaded, or the installed fonts are still being searched for
+    Loading,
+    /// no such font is installed
+    Missing,
+}
+
 /// What is in use, and what the settings ask for (CFG-036).
 pub struct FontState {
     pub system: SystemFonts,
     resolved: Resolved,
-    /// Fonts handed to egui in this pass are used from the next one on.
-    pending: Option<(Resolved, u64)>,
+    /// Fonts handed to egui in this pass are used from the next one on: what the areas use then,
+    /// and the faces of every family that can be drawn in.
+    pending: Option<(Resolved, BTreeMap<String, Faces>, u64)>,
+    /// The system families egui can draw in now, and their faces.
+    usable: BTreeMap<String, Faces>,
+    /// Fonts loaded only for a sample text (CFG-040), the one asked for last at the end.
+    previews: Vec<String>,
+    /// A font for a sample was asked for that is not loaded.
+    previews_changed: bool,
     /// The settings `resolved` (or `pending`) was made from.
     seen: Option<FontsCfg>,
     /// A chosen family waits for the search for the installed fonts to end.
@@ -476,7 +496,48 @@ pub struct FontState {
 
 impl FontState {
     pub fn new() -> FontState {
-        FontState { system: SystemFonts::default(), resolved: Resolved::default(), pending: None, seen: None, waiting: false, installed: BTreeSet::new(), told: BTreeSet::new() }
+        FontState {
+            system: SystemFonts::default(),
+            resolved: Resolved::default(),
+            pending: None,
+            usable: BTreeMap::new(),
+            previews: Vec::new(),
+            previews_changed: false,
+            seen: None,
+            waiting: false,
+            installed: BTreeSet::new(),
+            told: BTreeSet::new(),
+        }
+    }
+
+    /// The font of a sample text of the system font `name` at `size` (CFG-040); `None` is
+    /// Shale's own font. A font that is installed but not loaded is loaded by the next `sync`s,
+    /// besides the ones the areas use and without changing them; the last `PREVIEWS` of them
+    /// stay loaded.
+    pub fn preview(&mut self, name: Option<&str>, size: f32) -> Preview {
+        let Some(name) = name else { return Preview::Ready(AreaFont::shale(size)) };
+        if let Some(i) = self.previews.iter().position(|p| p == name) {
+            let p = self.previews.remove(i);
+            self.previews.push(p);
+        }
+        if let Some(faces) = self.usable.get(name) {
+            return Preview::Ready(AreaFont { family: family_of(name), size, faces: *faces });
+        }
+        if !self.system.ready() {
+            self.system.start();
+            return Preview::Loading;
+        }
+        if !self.system.families().iter().any(|f| f == name) {
+            return Preview::Missing;
+        }
+        if !self.previews.iter().any(|p| p == name) {
+            self.previews.push(name.to_string());
+            if self.previews.len() > PREVIEWS {
+                self.previews.remove(0);
+            }
+            self.previews_changed = true;
+        }
+        Preview::Loading
     }
 
     /// The font an area is drawn in.
@@ -491,24 +552,26 @@ impl FontState {
     /// Make what is in use follow the settings. Comes back with something to tell the user when
     /// a chosen font is not installed (CFG-035).
     pub fn sync(&mut self, ctx: &egui::Context, cfg: &FontsCfg) -> Option<String> {
-        if let Some((r, pass)) = self.pending.take() {
+        if let Some((r, usable, pass)) = self.pending.take() {
             if ctx.cumulative_pass_nr() > pass {
                 self.use_resolved(ctx, r);
+                self.usable = usable;
             } else {
-                self.pending = Some((r, pass));
+                self.pending = Some((r, usable, pass));
             }
         }
         let was_ready = self.system.ready();
         self.system.poll();
         let arrived = self.system.ready() && !was_ready;
         let wanted = cfg.families();
-        if self.seen.as_ref() == Some(cfg) && !(self.waiting && arrived) {
+        if self.seen.as_ref() == Some(cfg) && !(self.waiting && arrived) && !self.previews_changed {
             if self.waiting {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
             return None;
         }
         self.seen = Some(cfg.clone());
+        self.previews_changed = false;
         if !wanted.is_empty() {
             self.system.start();
         }
@@ -535,16 +598,27 @@ impl FontState {
                 missing.insert(name);
             }
         }
+        // the fonts of the sample texts (CFG-040), which no area uses
+        if self.system.ready() {
+            for name in &self.previews {
+                if !loaded.iter().any(|l| l.name == *name) {
+                    loaded.extend(self.load_family(name));
+                }
+            }
+        }
         let now: BTreeSet<String> = loaded.iter().map(|l| l.name.clone()).collect();
+        let usable: BTreeMap<String, Faces> = loaded.iter().map(|l| (l.name.clone(), l.faces)).collect();
         if self.waiting {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         if now != self.installed {
             ctx.set_fonts(theme::font_definitions(families_for_egui(loaded)));
             self.installed = now;
-            self.pending = Some((resolved, ctx.cumulative_pass_nr()));
+            self.pending = Some((resolved, usable, ctx.cumulative_pass_nr()));
+            ctx.request_repaint();
         } else {
             self.use_resolved(ctx, resolved);
+            self.usable = usable;
         }
         let fresh: Vec<String> = missing.difference(&self.told).cloned().collect();
         self.told = missing;
@@ -1026,5 +1100,69 @@ pub(crate) mod tests {
         pass(&ctx);
         st.sync(&ctx, &cfg);
         assert_eq!(st.area(Area::Ui).faces, Faces::default());
+    }
+
+    // spec: CFG-040
+    #[test]
+    fn cfg_040_a_font_for_a_sample_is_loaded_besides_the_chosen_ones_and_changes_no_area() {
+        let ctx = egui::Context::default();
+        theme::apply(&ctx);
+        let (mut db, virgil) = virgil_db();
+        db.load_font_data(epaint_default_fonts::HACK_REGULAR.to_vec());
+        let hack = db.faces().filter_map(|f| f.families.first().map(|(n, _)| n.clone())).find(|n| *n != virgil).expect("a second family");
+        let mut st = FontState::new();
+        st.system.set(db);
+        let cfg = FontsCfg { all: FontChoice { family: Some(virgil.clone()), size: 16.0 }, ..FontsCfg::default() };
+        st.sync(&ctx, &cfg);
+        pass(&ctx);
+        st.sync(&ctx, &cfg);
+        // Shale's own font and a chosen font are there at once, at the size asked for
+        assert_eq!(st.preview(None, 20.0), Preview::Ready(AreaFont::shale(20.0)));
+        assert_eq!(st.preview(Some(&virgil), 12.0), Preview::Ready(AreaFont { family: family_of(&virgil), size: 12.0, faces: Faces::default() }));
+        assert_eq!(st.preview(Some("No Such Font"), 12.0), Preview::Missing);
+        // another installed font is loaded by the next syncs, and no area takes it
+        assert_eq!(st.preview(Some(&hack), 12.0), Preview::Loading);
+        assert_eq!(st.preview(Some(&hack), 12.0), Preview::Loading, "asked for once");
+        assert_eq!(st.previews, std::slice::from_ref(&hack));
+        st.sync(&ctx, &cfg);
+        assert_eq!(st.preview(Some(&hack), 12.0), Preview::Loading, "egui has it from the next pass on");
+        pass(&ctx);
+        st.sync(&ctx, &cfg);
+        assert_eq!(st.preview(Some(&hack), 12.0), Preview::Ready(AreaFont { family: family_of(&hack), size: 12.0, faces: Faces::default() }));
+        assert!(Area::ALL.iter().all(|a| st.area(*a).family == family_of(&virgil)), "the areas keep the chosen font");
+        assert_eq!(st.installed, BTreeSet::from([virgil.clone(), hack.clone()]));
+        // the text can be laid out in it
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| {
+            ui.label(egui::RichText::new("sample").family(family_of(&hack)));
+        });
+        out.textures_delta.clear();
+        assert_eq!(st.sync(&ctx, &cfg), None, "nothing to tell about a sample");
+    }
+
+    // spec: CFG-040
+    #[test]
+    fn cfg_040_only_the_last_fonts_of_samples_stay_and_a_sample_waits_for_the_search() {
+        let mut st = FontState::new();
+        // the search is still running: wait, and do not start a second one
+        let (tx, rx) = mpsc::channel();
+        st.system.rx = Some(rx);
+        st.system.started = true;
+        assert_eq!(st.preview(Some("A"), 14.0), Preview::Loading);
+        assert!(st.previews.is_empty());
+        // many installed fonts (names only: none of them loads, which is not the point here)
+        st.system.db = Some(Arc::new(fontdb::Database::new()));
+        st.system.families = (0..12).map(|i| format!("F{i}")).collect();
+        drop(tx);
+        for i in 0..12 {
+            assert_eq!(st.preview(Some(&format!("F{i}")), 14.0), Preview::Loading);
+        }
+        assert_eq!(st.previews.len(), PREVIEWS);
+        assert_eq!(st.previews.first().map(String::as_str), Some("F4"), "the oldest are dropped");
+        // asking again for one that is kept moves it to the end, so it is dropped last
+        st.preview(Some("F5"), 14.0);
+        assert_eq!(st.previews.last().map(String::as_str), Some("F5"));
+        st.preview(Some("F0"), 14.0);
+        assert!(st.previews.contains(&"F5".to_string()) && !st.previews.contains(&"F4".to_string()));
     }
 }

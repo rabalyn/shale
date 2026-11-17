@@ -1,4 +1,4 @@
-//! The fonts of the areas (CFG-030 to CFG-036), driven through the whole window (headless).
+//! The fonts of the areas (CFG-030 to CFG-040), driven through the whole window (headless).
 //! The installed fonts are a list of our own (the bundled Virgil), never what is on the machine.
 
 use crate::app::{Options, SettingsTab, ShaleApp, View};
@@ -164,10 +164,10 @@ fn cfg_032_the_picker_filters_and_picks_by_keyboard() {
     // used at once, and not just in the picker
     assert_eq!(f.app.fonts.area(Area::Ui).family, FontFamily::Name(format!("system:{}", f.virgil).into()));
     assert!(f.texts().iter().any(|(t, _, fam)| t == "Use the same font and size everywhere" && *fam == FontFamily::Name(format!("system:{}", f.virgil).into())), "the dialog is drawn in the font");
-    // arrow keys move (and wrap around), Enter picks: down twice from Default is Default again
+    // the list opens on the chosen font (CFG-040); arrow keys move and wrap around, Enter picks:
+    // down from the last font is Default
     f.click(&format!("{}  ⏷", f.virgil));
     f.frames(3);
-    f.key(Key::ArrowDown);
     f.key(Key::ArrowDown);
     f.key(Key::Enter);
     assert_eq!(f.app.cfg.fonts.all.family, None);
@@ -233,5 +233,49 @@ fn cfg_037_the_editor_draws_raw_text_and_the_reading_view_rendered_text_at_their
     f.app.tabbar.tabs[f.app.tabbar.active].reading = true;
     f.frames(4);
     assert_eq!(size_of(&mut f), Some(26.0), "the reading view shows rendered text at the rendered size");
+    let _ = std::fs::remove_dir_all(&f.dir);
+}
+
+// spec: CFG-040
+#[test]
+fn cfg_040_every_row_has_a_sample_that_follows_the_highlighted_font_until_one_is_picked() {
+    let mut f = F::new("sample");
+    f.app.open_settings(SettingsTab::Fonts);
+    f.frames(3);
+    let virgil = FontFamily::Name(format!("system:{}", f.virgil).into());
+    let samples = |f: &mut F| -> Vec<(f32, FontFamily)> { f.texts().into_iter().filter(|(t, _, _)| t.starts_with(crate::settings::fonts::SAMPLE[0].trim_end())).map(|(_, s, fam)| (s, fam)).collect() };
+    assert_eq!(samples(&mut f), [(14.0, FontFamily::Proportional)], "one row, Shale's own font at the row's size");
+    // the list open: the mouse over an entry shows it in the sample, without picking it
+    f.click("Default  ⏷");
+    f.frames(3);
+    let at = f.hl.find_label(&mut f.app, &f.virgil.clone()).center();
+    f.hl.frame(&mut f.app, vec![Event::PointerMoved(at)]);
+    assert!(f.texts().iter().any(|(t, _, _)| t == "Loading the font…"), "the font is loaded for the sample first");
+    f.frames(3);
+    assert_eq!(samples(&mut f), [(14.0, virgil.clone())]);
+    assert!(f.app.cfg.fonts.all.family.is_none(), "nothing is picked");
+    assert_eq!(f.app.fonts.area(Area::Ui).family, FontFamily::Proportional, "the areas keep their font");
+    // the keyboard moves the highlight too; Esc goes back to the chosen font
+    f.key(Key::ArrowUp);
+    assert_eq!(samples(&mut f), [(14.0, FontFamily::Proportional)], "up to Default");
+    f.key(Key::ArrowDown);
+    assert_eq!(samples(&mut f), [(14.0, virgil.clone())]);
+    f.key(Key::Escape);
+    assert_eq!(samples(&mut f), [(14.0, FontFamily::Proportional)], "closed: the chosen font again");
+    assert!(f.app.cfg.fonts.all.family.is_none());
+    // a row for every area: each sample in its own font and size, all at once; a large size is capped
+    f.app.cfg.fonts.separate();
+    f.app.cfg.fonts.mail.family = Some(f.virgil.clone());
+    f.app.cfg.fonts.editor_raw.size = 40.0;
+    f.frames(4);
+    let s = samples(&mut f);
+    assert_eq!(s.len(), Area::ALL.len(), "{s:?}");
+    assert_eq!(s.iter().filter(|(_, fam)| *fam == virgil).count(), 1, "the mail row: {s:?}");
+    assert!(s.contains(&(28.0, FontFamily::Proportional)), "the raw editor's 40 points are drawn at 28: {s:?}");
+    // a chosen font that is not installed has no sample, only the hint
+    f.app.cfg.fonts.calendar.family = Some("No Such Font".into());
+    f.frames(4);
+    assert_eq!(samples(&mut f).len(), Area::ALL.len() - 1);
+    assert!(f.texts().iter().any(|(t, _, _)| t == "not installed"));
     let _ = std::fs::remove_dir_all(&f.dir);
 }

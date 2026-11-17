@@ -7,7 +7,7 @@ mod appearance;
 mod data;
 mod editor;
 mod font_picker;
-mod fonts;
+pub(crate) mod fonts;
 mod help;
 mod mail_social;
 mod sync_calendar;
