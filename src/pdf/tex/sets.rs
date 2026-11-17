@@ -134,10 +134,13 @@ pub struct SetSettings {
     pub accent: String,
     /// The language of the documents (`{language}` in a kind's options and preamble).
     pub language: Language,
-    /// The department that fills a kind's `department` field when the note does not give one.
+    /// The department that fills a kind's `department` field when the note and the dialog give none.
     pub department: String,
     /// The logo file in `logo/` (`tuda_logo.pdf`), set by "Choose logo…".
     pub logo: Option<String>,
+    /// The name that fills a kind's `author` field when the note and the dialog give none (the
+    /// guided setup asks for it, TEX-017).
+    pub author: String,
 }
 
 impl SetSettings {
@@ -175,7 +178,7 @@ pub fn load_settings(set_dir: &Path) -> Result<SetSettings, String> {
 /// Write `settings.toml` (atomically).
 pub fn save_settings(set_dir: &Path, s: &SetSettings) -> Result<(), String> {
     let text = toml::to_string_pretty(s).map_err(|e| e.to_string())?;
-    let text = format!("# The choices for this template set. Shale keeps this file when the set is updated.\n# accent: the accent colour of the templates (tuda-ci: 0a to 9d); language: en or de;\n# department: used when a note does not name one; logo: set by \"Choose logo…\".\n{text}");
+    let text = format!("# The choices for this template set. Shale keeps this file when the set is updated.\n# accent: the accent colour of the templates (tuda-ci: 0a to 9d); language: en or de;\n# department and author: used when a note does not name one; logo: set by \"Choose logo…\".\n{text}");
     crate::fsutil::write_atomic(&set_dir.join("settings.toml"), text.as_bytes()).map_err(|e| format!("settings.toml could not be written ({e})"))
 }
 
@@ -344,11 +347,14 @@ pub fn tex_escape(text: &str) -> String {
     out
 }
 
-/// The value a field gets in a sample document: its default, the department of the settings, or
-/// a short text that says what it is.
+/// The value a field gets in a sample document: its default, the department or author of the
+/// settings, or a short text that says what it is.
 fn sample_value(f: &Field, s: &SetSettings) -> String {
     if f.key == "department" && !s.department.is_empty() {
         return tex_escape(&s.department);
+    }
+    if f.key == "author" && !s.author.is_empty() {
+        return tex_escape(&s.author);
     }
     if !f.default.is_empty() {
         return f.default.clone();

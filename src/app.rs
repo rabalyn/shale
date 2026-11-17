@@ -142,6 +142,7 @@ mod screenshot;
 mod social;
 mod sync;
 mod tabs;
+mod tex_setup;
 #[cfg(all(test, target_os = "linux"))]
 mod tree_ui_tests;
 mod usage;
@@ -149,7 +150,7 @@ mod userguide;
 
 /// A file "dropped" by a `--keys` script.
 #[derive(Debug)]
-struct ScriptDrop(PathBuf);
+pub(crate) struct ScriptDrop(pub(crate) PathBuf);
 
 impl egui::DroppedFile for ScriptDrop {
     fn path(&self) -> &Path {
@@ -190,6 +191,8 @@ pub enum Modal {
     /// the Data usage dialog (USE-001)
     DataUsage,
     Export(Box<crate::pdf::export_dialog::ExportDialog>),
+    /// the guided setup of the LaTeX export (TEX-017); its state is `ShaleApp::tex.setup`
+    TexSetup,
     Calendars(Box<crate::calendar::dialog::CalendarDialog>),
     Event(Box<crate::calendar::dialog::EventDialog>),
     Import(Box<crate::import::dialog::ImportDialog>),

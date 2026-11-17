@@ -182,9 +182,10 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 
 | Key | Default | Where |
 |---|---|---|
-| `accent` | `9c` for the TU Darmstadt set, empty for others (the accent colour of the templates) | `settings.toml` of the set |
-| `language` | `en` (or `de`) | `settings.toml` of the set |
-| `department` | empty (used when a note gives no department) | `settings.toml` of the set |
+| `accent` | `9c` for the TU Darmstadt set, empty for others (the accent colour of the templates) | `settings.toml` of the set, the guided setup |
+| `language` | `en` (or `de`) | `settings.toml` of the set, the guided setup |
+| `department` | empty (used when a note gives no department) | `settings.toml` of the set, the guided setup (Settings → LaTeX → Set up LaTeX export…) |
+| `author` | empty (used for the author field when a note gives none) | `settings.toml` of the set, the guided setup |
 | `logo` | none, set by Settings → LaTeX → Template sets → Choose logo… | `settings.toml` of the set |
 
 ### Data and troubleshooting ([[Data usage and caches]])
@@ -230,6 +231,6 @@ Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]
 | `last_import_folder` | empty | the folder of the last import |
 | `last_social_folder` | empty (the first save asks for `Social`) | the folder of the last saved post |
 | `recent_tags` | empty | tags used for imports, most recent first |
-| `latex_export` | `latex` false, `set` and `kind` empty | what the note export dialog had last: `latex` (the LaTeX engine was used), `set` (the folder name of the template set) and `kind` (its id) ([[PDF]], "a note through a template") |
+| `latex_export` | `latex` false, `set` and `kind` empty, `setup_seen` false | what the note export dialog had last: `latex` (the LaTeX engine was used), `set` (the folder name of the template set) and `kind` (its id) ([[PDF]], "a note through a template"); `setup_seen` (the guided setup of the LaTeX export has been opened in this vault, so it does not open by itself again: [[PDF]], "the guided setup") |
 
 #userguide #settings

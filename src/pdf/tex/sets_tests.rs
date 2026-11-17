@@ -87,11 +87,11 @@ fn the_settings_have_defaults_are_checked_and_survive_a_save() {
     std::fs::create_dir_all(&d).unwrap();
     assert_eq!(load_settings(&d).unwrap(), SetSettings::default(), "no file: the defaults");
     assert_eq!((SetSettings::default().language, SetSettings::default().accent.as_str(), SetSettings::default().logo), (Language::En, "", None));
-    let s = SetSettings { accent: "9c".into(), language: Language::De, department: "Fachbereich Informatik".into(), logo: Some("tuda_logo.pdf".into()) };
+    let s = SetSettings { accent: "9c".into(), language: Language::De, department: "Fachbereich Informatik".into(), author: "Ada Lovelace".into(), logo: Some("tuda_logo.pdf".into()) };
     save_settings(&d, &s).unwrap();
     assert_eq!(load_settings(&d).unwrap(), s);
     let text = std::fs::read_to_string(d.join("settings.toml")).unwrap();
-    assert!(text.starts_with('#') && text.contains("accent = \"9c\"") && text.contains("language = \"de\""), "{text}");
+    assert!(text.starts_with('#') && text.contains("accent = \"9c\"") && text.contains("language = \"de\"") && text.contains("author = \"Ada Lovelace\""), "{text}");
     std::fs::write(d.join("settings.toml"), "accent = \"9c\"\n").unwrap();
     assert_eq!(load_settings(&d).unwrap().language, Language::En, "a missing key is its default");
     for (bad, why) in [
