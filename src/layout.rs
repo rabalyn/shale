@@ -847,6 +847,7 @@ impl ShaleApp {
                         tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
                         tab.editor.table_cell_edit = self.cfg.table_cell_edit;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
+                        tab.editor.cursor_style = crate::cursor_style::CursorStyle { shape: self.cfg.cursor_shape, normal_shape: self.cfg.normal_cursor_shape, blink: self.cfg.cursor_blink };
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
                         tab.editor.assist.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.dark_canvas = self.cfg.dark_canvas;

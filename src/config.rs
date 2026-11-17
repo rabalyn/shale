@@ -222,6 +222,12 @@ fn lenient<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned + De
     Ok(serde_json::from_value(v).unwrap_or_default())
 }
 
+/// Like `lenient`, for the cursor of vim's normal mode, whose default is the block.
+fn lenient_normal_shape<'de, D: serde::Deserializer<'de>>(d: D) -> Result<crate::cursor_style::CursorShape, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).unwrap_or(crate::cursor_style::CursorShape::Block))
+}
+
 /// The retention settings of the caches (USE-020). `None` means "forever" for an age and "no
 /// limit" for a size or count.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -326,6 +332,14 @@ pub struct Config {
     pub input_log: bool,
     /// Vim-style editing in notes: normal / insert / visual mode (off by default).
     pub vim_mode: bool,
+    /// The cursor while typing (EDIT-039); an unknown word in the file is the default.
+    #[serde(deserialize_with = "lenient")]
+    pub cursor_shape: crate::cursor_style::CursorShape,
+    /// The cursor in vim's normal mode (EDIT-040); an unknown word in the file is the default.
+    #[serde(deserialize_with = "lenient_normal_shape")]
+    pub normal_cursor_shape: crate::cursor_style::CursorShape,
+    /// The cursor blinks (EDIT-041).
+    pub cursor_blink: bool,
     /// IMAP accounts of the mail view.
     pub mail_accounts: Vec<MailAccount>,
     /// The mail view fetches new mail by itself every this many minutes while the app runs
@@ -413,6 +427,9 @@ impl Default for Config {
             week_starts_monday: true,
             input_log: false,
             vim_mode: false,
+            cursor_shape: crate::cursor_style::CursorShape::Bar,
+            normal_cursor_shape: crate::cursor_style::CursorShape::Block,
+            cursor_blink: true,
             mail_accounts: vec![],
             mail_sync_minutes: 10,
             mail_mark_read: true,

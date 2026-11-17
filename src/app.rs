@@ -364,6 +364,8 @@ pub struct ShaleApp {
     pub welcome_path: String,
     /// screenshot mode: where the picture goes and whether it was saved
     shot: screenshot::ScreenshotRun,
+    /// the `cursor_blink` setting that the visuals of egui follow (true at the start; screenshots start steady)
+    blink_applied: bool,
     /// the frames drawn so far (paces screenshots and scripted input)
     frames: u32,
     /// the last failure to save the global settings (shown once)
@@ -559,6 +561,7 @@ impl ShaleApp {
             welcome_path: default_welcome.to_string_lossy().into_owned(),
             shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
+            blink_applied: true,
             cfg_error: None,
             sf: crate::settings_file::SettingsFile::new(),
             fonts: crate::fonts::FontState::new(),
@@ -2387,6 +2390,11 @@ impl ShaleApp {
         self.drag.calendar_areas.clear();
         self.drag.tree_targets.clear();
         self.screenshot_tick(ui);
+        if self.blink_applied != self.cfg.cursor_blink {
+            self.blink_applied = self.cfg.cursor_blink;
+            let blink = self.cfg.cursor_blink && !self.shot.active();
+            ui.ctx().all_styles_mut(|s| s.visuals.text_cursor.blink = blink);
+        }
         self.keyboard_guard(ui.ctx());
         self.shortcuts(ui);
         self.autosave();

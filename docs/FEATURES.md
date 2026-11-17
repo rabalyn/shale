@@ -27,6 +27,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on the same dark code background (PDF-007).
 - Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
+- The **text cursor** (Settings → Editor) is one of four shapes: a bar before the character (default), a bar after it,
+  a block or an underline; with Vim-style editing the cursor of normal mode has its own choice (default: block).
+  "Blinking cursor" (on by default) makes it steady when off. Exactly one cursor is drawn in every mode.
 - A **formatting toolbar** above the text (Settings → Editor, on by default, button size 80–200 %) has a button for
   everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
   Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, tables, `[[note]]`
