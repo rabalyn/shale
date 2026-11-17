@@ -1,0 +1,3 @@
+#!/bin/sh
+# The screenshots open nothing (TEX-034): the test page of the setup would start a PDF viewer.
+exit 0

@@ -1,0 +1,3 @@
+#!/bin/sh
+# A pretend kpsewhich for the screenshots only (TEX-034): every file Shale asks for is "found".
+for a; do echo "/pretend/texmf-dist/$a"; done

@@ -4,17 +4,14 @@
 //! (`writer.rs`): what a heading becomes depends on the kind.
 
 use super::blocks::{Block, Item, ListLine, QuoteLine};
-use super::inline::{cell, inline, lead, one_line, Look};
+use super::inline::{cell, inline, lead, one_line, picture_file, Look};
 use super::sets::tex_escape;
 use crate::drawing::Scene;
 use crate::markdown::LinkSpan;
 use crate::pdf::export::ExportOptions;
 use crate::table::Col;
-use crate::theme;
 use crate::vault::FileKind;
 use eframe::egui::{Color32, Vec2};
-use std::collections::HashMap;
-use std::path::PathBuf;
 
 /// The most pages of an embedded PDF that are included (as in the native export).
 const MAX_PDF_PAGES: usize = 40;
@@ -26,27 +23,23 @@ const LONG_CELL: usize = 28;
 /// The deepest `itemize` or `enumerate` LaTeX allows.
 const MAX_LIST_DEPTH: usize = 4;
 
-/// Turns the blocks of one note into TeX and collects the files that belong to it.
+/// Turns the blocks of one note into TeX; the files that belong to it are collected in the
+/// [`super::inline::Files`] of its [`Look`].
 pub struct Body<'a> {
     pub look: Look<'a>,
     pub opts: &'a ExportOptions,
-    /// Tables may break across pages (`xltabular`): not in slides, boxes or columns.
+    /// Tables and code may break across pages (`xltabular`, a breakable box): not in slides,
+    /// boxes or columns.
     pub long_tables: bool,
-    /// The files for the work folder: name and bytes.
-    pub files: Vec<(String, Vec<u8>)>,
-    /// What went wrong without stopping the export (an embed that is missing).
-    pub warnings: Vec<String>,
-    /// The vault file of an embed → the name it has in the work folder.
-    named: HashMap<PathBuf, String>,
 }
 
 impl<'a> Body<'a> {
     pub fn new(look: Look<'a>, opts: &'a ExportOptions, long_tables: bool) -> Self {
-        Body { look, opts, long_tables, files: vec![], warnings: vec![], named: HashMap::new() }
+        Body { look, opts, long_tables }
     }
 
     /// A block that is not a heading.
-    pub fn block(&mut self, b: &Block) -> String {
+    pub fn block(&self, b: &Block) -> String {
         match b {
             Block::Heading { .. } => String::new(),
             Block::Para(lines) => format!("{}\n\n", self.lines(lines)),
@@ -223,7 +216,7 @@ impl<'a> Body<'a> {
     /// An embed on its own line: a picture, a drawing (as a vector PDF), the pages of a PDF, each
     /// as big in proportion to the text as in the editor (PDF-005) with the caption below
     /// (PDF-004); a file that cannot be used is a line of text that says so.
-    fn embed(&mut self, link: &LinkSpan) -> String {
+    fn embed(&self, link: &LinkSpan) -> String {
         let caption = crate::caption::text(link);
         if !self.opts.embeds {
             return format!("{}\n\n", inline(&self.look, &format!("[[{}]]", link.target)));
@@ -245,8 +238,9 @@ impl<'a> Body<'a> {
             let Some(b) = scene.bounds() else { return self.placeholder(&format!("empty drawing: {}", link.target)) };
             let b = b.expand(20.0);
             let share = crate::embed_size::drawing(Vec2::new(b.width(), b.height()), column).x / column;
-            let name = match self.named.get(&rel) {
-                Some(n) => n.clone(),
+            let named = self.look.files.borrow().named(&rel);
+            let name = match named {
+                Some(n) => n,
                 None => {
                     let opts = ExportOptions { margin_mm: 20.0 * 25.4 / 72.0, background: crate::pdf::export::Background::None, ..ExportOptions::for_drawing(&scene) };
                     let pdf = crate::pdf::export::export_drawing(&scene, &link.target, &opts, &crate::drawing::pictures::images(&scene, vault, &rel));
@@ -259,8 +253,9 @@ impl<'a> Body<'a> {
         if crate::media::is_image(&rel) {
             let Ok((w, h)) = image::image_dimensions(&abs) else { return self.placeholder(&format!("not readable: {}", link.target)) };
             let share = crate::embed_size::picture(Vec2::new(w as f32, h as f32), link.embed_width(), column).x / column;
-            let name = match self.named.get(&rel) {
-                Some(n) => n.clone(),
+            let named = self.look.files.borrow().named(&rel);
+            let name = match named {
+                Some(n) => n,
                 None => {
                     let Some((ext, bytes)) = picture_file(&abs) else { return self.placeholder(&format!("not readable: {}", link.target)) };
                     self.keep(&rel, "picture", ext, bytes)
@@ -271,7 +266,8 @@ impl<'a> Body<'a> {
         if crate::pdf::view::is_pdf(&rel) {
             let Ok(bytes) = crate::fsutil::read(&abs) else { return self.placeholder(&format!("not readable: {}", link.target)) };
             let Some(pages) = pdf_pages(&bytes) else { return self.placeholder(&format!("not readable: {}", link.target)) };
-            let name = self.named.get(&rel).cloned().unwrap_or_else(|| self.keep(&rel, "document", "pdf", bytes));
+            let named = self.look.files.borrow().named(&rel);
+            let name = named.unwrap_or_else(|| self.keep(&rel, "document", "pdf", bytes));
             let pictures = pages.iter().enumerate().map(|(n, (w, h))| frame(&name, &format!("page={},", n + 1), crate::embed_size::pdf_page(Vec2::new(*w, *h) * 1.5, column).x / column)).collect();
             return figure(pictures, &caption);
         }
@@ -280,35 +276,15 @@ impl<'a> Body<'a> {
     }
 
     /// A line of red italic text in place of a file that could not be used.
-    fn placeholder(&mut self, what: &str) -> String {
-        self.warnings.push(what.to_string());
-        let c = theme::LINK_MISSING;
-        format!("\\par\\medskip\\noindent\\textcolor[RGB]{{{},{},{}}}{{\\textit{{[{}]}}}}\\par\\medskip\n\n", c.r(), c.g(), c.b(), tex_escape(what))
+    fn placeholder(&self, what: &str) -> String {
+        let text = self.look.files.borrow_mut().missing(what);
+        format!("\\par\\medskip\\noindent{text}\\par\\medskip\n\n")
     }
 
-    /// Remember a file for the work folder under a name made here (never one from the note).
-    fn keep(&mut self, rel: &std::path::Path, what: &str, ext: &str, bytes: Vec<u8>) -> String {
-        let name = format!("{what}-{}.{ext}", self.files.len() + 1);
-        self.files.push((name.clone(), bytes));
-        self.named.insert(rel.to_path_buf(), name.clone());
-        name
+    /// Remember a file for the work folder.
+    fn keep(&self, rel: &std::path::Path, what: &str, ext: &str, bytes: Vec<u8>) -> String {
+        self.look.files.borrow_mut().keep(rel, what, ext, bytes)
     }
-}
-
-/// A picture as a file LuaLaTeX can include: a PNG or JPEG as it is, any other format converted
-/// to PNG. None when it cannot be read.
-fn picture_file(abs: &std::path::Path) -> Option<(&'static str, Vec<u8>)> {
-    let bytes = crate::fsutil::read(abs).ok()?;
-    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        return Some(("png", bytes));
-    }
-    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Some(("jpg", bytes));
-    }
-    let img = image::load_from_memory(&bytes).ok()?;
-    let mut png = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut png, image::ImageFormat::Png).ok()?;
-    Some(("png", png.into_inner()))
 }
 
 /// The sizes of the pages (up to [`MAX_PDF_PAGES`]) of a PDF in points; None when it cannot be read.
@@ -318,6 +294,10 @@ fn pdf_pages(bytes: &[u8]) -> Option<Vec<(f32, f32)>> {
 }
 
 // ---------------------------------------------------------------- fenced code
+
+/// The light box fenced code is drawn on (TEX-030): the grey of code on paper, under the colours of
+/// [`print_syntax`].
+pub const CODE_PAPER: Color32 = Color32::from_rgb(244, 244, 246);
 
 /// The colour a kind of code has on white paper: the reading view's colours, darkened.
 fn print_syntax(kind: crate::syntax::Kind) -> Color32 {
@@ -338,7 +318,7 @@ fn code_line(line: &str) -> String {
     tex_escape(&line.replace('\t', "    ")).replace(' ', "\\ ")
 }
 
-/// A fenced block in the monospaced font, a line per paragraph, each piece in the colour of its
+/// A fenced block on its light box (TEX-030) in the monospaced font, a line per paragraph, each piece in the colour of its
 /// kind (`syntax::highlight`, plain without a known language; TeX has no listings package here:
 /// the text is escaped like all text, so a line of code can never end the block).
 fn code(lang: &str, lines: &[String]) -> String {

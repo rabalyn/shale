@@ -29,11 +29,11 @@ pub(super) fn temp_vault(tag: &str, files: &[(&str, &[u8])]) -> (Vault, PathBuf)
     (vault_in(&dir, files), dir)
 }
 
-/// The files the rich note embeds: a picture, a drawing and a PDF.
+/// The files the rich note embeds and links to: a picture, a drawing, a PDF and another note.
 pub(super) fn rich_assets() -> Vec<(&'static str, Vec<u8>)> {
     let mut png = std::io::Cursor::new(Vec::new());
     image::RgbaImage::from_pixel(80, 40, image::Rgba([30, 120, 200, 255])).write_to(&mut png, image::ImageFormat::Png).unwrap();
-    vec![("pic.png", png.into_inner()), ("Sketch.excalidraw", crate::drawing::SAMPLE_SCENE.as_bytes().to_vec()), ("doc.pdf", crate::pdf::view::sample_pdf())]
+    vec![("pic.png", png.into_inner()), ("Sketch.excalidraw", crate::drawing::SAMPLE_SCENE.as_bytes().to_vec()), ("doc.pdf", crate::pdf::view::sample_pdf()), ("Another note.md", b"# Another note\n".to_vec())]
 }
 
 /// The set of the shipped tuda-ci kinds, as an imported one would be read (no folder on disk).
@@ -64,8 +64,29 @@ pub(super) fn doc(text: &str, kind_id: &str) -> String {
     doc_with(text, kind_id, &ExportOptions::for_note(), &[("author", "Ada")], &[]).unwrap_or_else(|e| panic!("{e}")).tex
 }
 
-fn body_of(tex: &str) -> &str {
-    tex.split_once("\\begin{document}\n").unwrap().1.trim_end_matches("\\end{document}\n")
+/// The body of a document without the anchors of its headings (TEX-032, which has tests of its own).
+fn body_of(tex: &str) -> String {
+    let body = tex.split_once("\\begin{document}\n").unwrap().1.trim_end_matches("\\end{document}\n");
+    without_anchors(body)
+}
+
+/// A text with every `\shaleanchor{shale-h…}` taken out, and the line end after one that
+/// stands on a line of its own.
+fn without_anchors(tex: &str) -> String {
+    const MARK: &str = "\\shaleanchor{shale-h";
+    let mut out = String::new();
+    let mut rest = tex;
+    while let Some(at) = rest.find(MARK) {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + MARK.len()..];
+        let end = after.find('}').unwrap() + 1;
+        rest = &after[end..];
+        if out.ends_with('\n') {
+            rest = rest.strip_prefix('\n').unwrap_or(rest);
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 // spec: TEX-008
@@ -156,7 +177,7 @@ fn a_table_has_booktabs_rules_a_bold_header_and_the_alignment_of_its_columns() {
     let b = body_of(&t);
     assert!(b.contains("\\begin{xltabular}{1.000\\linewidth}{>{\\raggedright\\arraybackslash}Xcr}"), "the widest column takes the room that is left: {b}");
     assert!(b.contains("\\toprule\n\\textbf{Name} & \\textbf{Value} & \\textbf{Note} \\\\\n\\midrule\n\\endhead\n"), "{b}");
-    assert!(b.contains("a & 1 & b \\& c \\\\\n") && b.contains("Plain & \\textbf{2} & 50\\% \\\\\n") && b.contains("\\bottomrule\n\\end{xltabular}"), "{b}");
+    assert!(b.contains("a & 1 & b \\& c \\\\\n") && b.contains("\\textcolor[RGB]{192,28,40}{Plain} & \\textbf{2} & 50\\% \\\\\n") && b.contains("\\bottomrule\n\\end{xltabular}"), "{b}");
     let slides = doc("## S\n| A | B |\n| --- | --- |\n| 1 | 2 |\n", "beamer");
     assert!(body_of(&slides).contains("\\begin{tabularx}") && !slides.contains("\\begin{xltabular}") && !slides.contains("\\usepackage{xltabular}"), "a slide has no table that breaks across pages");
 }
@@ -298,7 +319,7 @@ fn a_letter_has_its_recipient_subject_and_opening_from_the_properties_and_bold_l
     let note = "---\nrecipient: |\n  Dr. Hopper\n  Navy Street 1\nsubject: Re: Compilers\nsender: Ada\nopening: Dear Grace,\nclosing: Yours\n---\n# A heading\nDear text & more\n";
     let t = doc_with(note, "letter", &ExportOptions::for_note(), &[], &[]).unwrap().tex;
     assert!(t.contains("\\begin{document}\n\\begin{letter}{Dr. Hopper \\\\ Navy Street 1}\n\\setkomavar{subject}{Re: Compilers}\n\\setkomavar{fromname}{Ada}\n\\opening{Dear Grace,}\n"), "{t}");
-    assert!(t.contains("\\textbf{A heading}\\par\\smallskip\n\nDear text \\& more\n\n\\closing{Yours}\n\\end{letter}\n\\end{document}"), "{t}");
+    assert!(without_anchors(&t).contains("\\textbf{A heading}\\par\\smallskip\n\nDear text \\& more\n\n\\closing{Yours}\n\\end{letter}\n\\end{document}"), "{t}");
     assert!(!t.contains("\\maketitle") && !t.contains("\\setkomavar{date}") && !t.contains("\\setkomavar{fromaddress}"), "what has no value is not set: {t}");
     // the manifest's defaults, and the note's name as the subject
     let t = doc_with("text", "letter", &ExportOptions::for_note(), &[("recipient", "Someone")], &[]).unwrap().tex;
@@ -369,11 +390,10 @@ fn a_picture_a_drawing_and_a_pdf_are_files_in_the_work_folder_sized_like_the_edi
 fn an_embed_that_cannot_be_used_is_a_line_of_text_and_a_warning_not_a_failure() {
     let assets = rich_assets();
     let files: Vec<(&str, &[u8])> = assets.iter().map(|(n, b)| (*n, b.as_slice())).collect();
-    let note = "## S\n![[missing.png]]\n![[broken.png]]\n![[nothing.mp3]]\ninline ![[pic.png]] stays text\n";
+    let note = "## S\n![[missing.png]]\n![[broken.png]]\n![[nothing.mp3]]\n";
     let out = doc_with(note, "pub", &ExportOptions::for_note(), &[("author", "A")], &[("broken.png", b"not a png"), ("nothing.mp3", b"x"), files[0]]).unwrap();
     let b = body_of(&out.tex);
     assert!(b.contains("\\textit{[missing: missing.png]}") && b.contains("\\textit{[not readable: broken.png]}") && b.contains("\\textit{[nothing.mp3: not in a PDF]}"), "{b}");
-    assert!(b.contains("inline pic.png stays text"), "an embed inside a paragraph is its text: {b}");
     assert_eq!(out.warnings, ["missing: missing.png", "not readable: broken.png", "nothing.mp3: not in a PDF"]);
     assert!(out.files.is_empty());
     let off = doc_with("## S\n![[pic.png]]\n", "pub", &ExportOptions { embeds: false, ..ExportOptions::for_note() }, &[("author", "A")], &[files[0]]).unwrap();
@@ -394,7 +414,7 @@ fn the_document_has_the_kinds_lines_the_helpers_and_one_main_file() {
     let t = doc("text\n", "thesis");
     assert!(t.starts_with("\\RequirePackage{pdfmanagement}\n\\SetKeys[document/metadata]{pdfstandard=a-2b,pdfversion=1.7,lang=en}\n\\documentclass[english,accentcolor=9c,ruledheaders=section,class=report,"), "{t}");
     let class = t.find("\\documentclass").unwrap();
-    for later in ["\\usepackage[english]{babel}", "\\usepackage{graphicx}", "\\usepackage[normalem]{ulem}", "\\usepackage{xltabular}", "\\newenvironment{shalecode}", "\\title{Plan}", "\\author{Ada}", "\\begin{document}"] {
+    for later in ["\\usepackage[english]{babel}", "\\usepackage{graphicx}", "\\usepackage[normalem]{ulem}", "\\usepackage{xltabular}", "\\newtcolorbox{shalecode}", "\\title{Plan}", "\\author{Ada}", "\\begin{document}"] {
         assert!(t.find(later).is_some_and(|p| p > class), "{later} comes after the class: {t}");
     }
     assert!(t.trim_end().ends_with("\\end{document}") && t.matches("\\begin{document}").count() == 1);
@@ -419,7 +439,7 @@ fn the_dialog_is_prefilled_from_the_properties_and_the_title_is_the_notes_name()
     assert_eq!(letter.iter().find(|(k, _)| k == "recipient").map(|(_, v)| v.as_str()), Some("A \\\\ B"));
 }
 
-// spec: TEX-008
+// spec: TEX-008, TEX-030, TEX-031, TEX-032
 #[test]
 fn every_kind_of_the_tuda_set_writes_the_rich_note() {
     let assets = rich_assets();
@@ -431,6 +451,9 @@ fn every_kind_of_the_tuda_set_writes_the_rich_note() {
             .unwrap_or_else(|e| panic!("{id}: {e}"));
         assert!(out.tex.contains("\\begin{document}") && out.tex.trim_end().ends_with("\\end{document}") && out.warnings == ["missing: missing.png"], "{id}: {:?}", out.warnings);
         assert!(!out.tex.contains("secret") && !out.tex.contains("numbered-headings"), "{id}: the front matter is not printed");
+        // the code box, the picture in a line, the jump to a heading and the other note (TEX-030 to TEX-032)
+        assert!(out.tex.contains("\\begin{shalecode}") && out.tex.contains("\\includegraphics[height=0.9\\baselineskip"), "{id}: {}", out.tex);
+        assert!(out.tex.contains("\\hyperlink{shale-h") && out.tex.contains("\\textcolor[RGB]{26,95,180}{Another note}"), "{id}: {}", out.tex);
         let _ = std::fs::remove_dir_all(d);
     }
 }
@@ -562,4 +585,68 @@ fn a_hostile_formula_can_never_run_tex() {
             assert!(!b.contains(bad), "{hostile}: {bad} would be a command in {b}");
         }
     }
+}
+
+// spec: TEX-030
+#[test]
+fn fenced_code_is_on_a_light_box_that_breaks_across_pages_where_tables_may() {
+    let note = "## S\n```rust\nfn main() {}\n```\n";
+    let t = doc(note, "pub");
+    assert!(t.contains("\\usepackage{tcolorbox}\n\\definecolor{shalecodebg}{RGB}{244,244,246}\n\\tcbuselibrary{breakable}\n\\newtcolorbox{shalecode}{breakable,colback=shalecodebg,colframe=shalecodebg,"), "{t}");
+    let b = body_of(&t);
+    assert!(b.contains("\\begin{shalecode}\n\\mbox{}\\textcolor[RGB]{125,45,170}{fn}") && b.contains("\\end{shalecode}"), "the box keeps the colours of the code: {b}");
+    for k in ["thesis", "letter", "leaflet"] {
+        assert!(doc_with(note, k, &ExportOptions::for_note(), &[("author", "A"), ("recipient", "R")], &[]).unwrap().tex.contains("\\newtcolorbox{shalecode}{breakable,"), "{k}: long code breaks across pages");
+    }
+    // slides, boxes and columns: a box that stays whole
+    for k in ["beamer", "sciposter", "poster"] {
+        let t = doc_with(note, k, &ExportOptions::for_note(), &[("author", "A")], &[]).unwrap().tex;
+        assert!(t.contains("\\newtcolorbox{shalecode}{colback=shalecodebg,") && !t.contains("breakable") && body_of(&t).contains("\\begin{shalecode}"), "{k}: {t}");
+    }
+}
+
+// spec: TEX-031
+#[test]
+fn a_picture_inside_a_line_is_as_high_as_the_line_and_a_missing_one_says_so() {
+    let assets = rich_assets();
+    let files: Vec<(&str, &[u8])> = assets.iter().map(|(n, b)| (*n, b.as_slice())).collect();
+    let note = "## S\nA ![[pic.png]] icon, ![[pic.png|Sea|30]] again, ![[gone.png]] and ![[Sketch.excalidraw]] here.\n\n| A |\n| --- |\n| cell ![[pic.png]] |\n\n![[pic.png]]\n";
+    let out = doc_with(note, "pub", &ExportOptions::for_note(), &[("author", "A")], &files).unwrap();
+    let b = body_of(&out.tex);
+    let pic = "\\raisebox{-0.2\\baselineskip}{\\includegraphics[height=0.9\\baselineskip,width=\\linewidth,keepaspectratio]{picture-1.png}}";
+    assert!(b.contains(&format!("A {pic} icon, {pic} again, ")), "in the line, as high as it: {b}");
+    assert!(b.contains(&format!("cell {pic}")), "in a table cell too: {b}");
+    assert!(b.contains("\\textcolor[RGB]{255,104,104}{\\textit{[missing: gone.png]}} and"), "a missing picture says so, in the line: {b}");
+    assert!(b.contains("{Sketch.excalidraw}") && !b.contains("drawing-"), "a drawing in a line stays its link text: {b}");
+    assert!(b.contains("{picture-1.png}\\par\\nopagebreak"), "the same picture on its own line is the same file: {b}");
+    assert_eq!(out.files.len(), 1, "one file");
+    assert_eq!(out.warnings, ["missing: gone.png"]);
+    let off = doc_with("A ![[pic.png]] icon\n", "pub", &ExportOptions { embeds: false, ..ExportOptions::for_note() }, &[("author", "A")], &files).unwrap();
+    assert!(!off.tex.contains("includegraphics[") && off.files.is_empty() && body_of(&off.tex).contains("{pic.png}"), "with embeds off it is its link text: {}", off.tex);
+    let broken = doc_with("A ![[broken.png]] icon\n", "pub", &ExportOptions::for_note(), &[("author", "A")], &[("broken.png", b"not a png")]).unwrap();
+    assert!(body_of(&broken.tex).contains("\\textit{[not readable: broken.png]}") && broken.warnings == ["not readable: broken.png"], "{}", broken.tex);
+}
+
+// spec: TEX-032
+#[test]
+fn a_link_to_a_heading_of_the_note_goes_there_and_links_to_other_notes_are_link_coloured_text() {
+    let note = "# Plan\n## Goal\nSee [[#Goal]], [[Plan#Method|the method]], [[#Nowhere]], [[#Plan]], [[Other]], [[Other#Goal]] and [[Gone]].\n## Method\nx\n";
+    let files: &[(&str, &[u8])] = &[("Other.md", b"## Goal\n")];
+    let tex = doc_with(note, "pub", &ExportOptions::for_note(), &[("author", "A")], files).unwrap().tex;
+    let blue = |t: &str| format!("\\textcolor[RGB]{{26,95,180}}{{{t}}}");
+    assert!(tex.contains("\\section{Goal}\\shaleanchor{shale-h1}\n") && tex.contains("\\section{Method}\\shaleanchor{shale-h3}\n"), "every heading has an anchor: {tex}");
+    assert!(tex.contains(&format!("See \\hyperlink{{shale-h1}}{{{}}}, \\hyperlink{{shale-h3}}{{{}}}, ", blue("Goal"), blue("the method"))), "a link to a heading of the note goes there: {tex}");
+    assert!(tex.contains(&format!(", {}, {}, ", blue("Nowhere"), blue("Plan"))), "a heading that is not written has no anchor to go to: {tex}");
+    assert!(tex.contains(&format!(", {}, {} and \\textcolor[RGB]{{192,28,40}}{{Gone}}.", blue("Other"), blue("Other \\textgreater{} Goal"))), "another note is link-coloured text, a missing one red: {tex}");
+    assert_eq!(tex.matches("\\hyperlink{").count(), 2, "{tex}");
+    // every family has the anchors where the headings are
+    let go = |k: &str| doc_with(note, k, &ExportOptions::for_note(), &[("author", "A"), ("recipient", "R")], files).unwrap().tex;
+    let beamer = go("beamer");
+    assert!(beamer.contains("\\begin{frame}[allowframebreaks]{Goal}\n\\shaleanchor{shale-h1}\n") && beamer.contains("\\hyperlink{shale-h3}"), "{beamer}");
+    let boxes = go("sciposter");
+    assert!(boxes.contains("[title={Goal}]{name=box1,column=1,row=1}\n\\shaleanchor{shale-h1}\n"), "{boxes}");
+    let letter = go("letter");
+    assert!(letter.contains("\\noindent\\shaleanchor{shale-h1}\\textbf{Goal}") && letter.contains("\\hyperlink{shale-h1}"), "{letter}");
+    let slides = doc("# Part\ntext\n## Slide\n[[#Part]]\n", "beamer");
+    assert!(slides.contains("\\section{Part}\n\n\\begin{frame}[allowframebreaks]{Part}\n\\shaleanchor{shale-h0}\n") && slides.contains("{Slide}\n\\shaleanchor{shale-h2}\n"), "a section's anchor is in its first frame: {slides}");
 }

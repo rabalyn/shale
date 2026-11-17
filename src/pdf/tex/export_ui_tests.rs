@@ -373,10 +373,39 @@ fn a_note_that_names_its_template_is_exported_through_it_whatever_was_chosen_las
     assert_eq!(d.engine, ExportEngine::Latex, "the note's own template picks the engine");
     let tex = d.tex.as_ref().unwrap();
     assert_eq!((tex.current_set().unwrap().id.as_str(), tex.kind.as_str()), ("tuda", "beamer"));
-    // a name the vault does not have falls back to the first set and kind
+    assert!(tex.template_warning.is_none() && !has(&t, "template-warning"), "a template that is there needs no warning");
+}
+
+// spec: TEX-033
+#[test]
+fn a_template_the_vault_does_not_have_is_said_in_the_dialog_with_what_is_used_instead() {
+    let mut t = T::new("dlg-unknown", usable());
+    put_set(&t);
+    // a set the vault does not have: the first set, its publication kind, and the dialog says so
     open_on(&mut t, "Other.md", "---\nlatex-template: nosuch/thing\n---\n# Other\n");
     let tex = dialog(&t).tex.as_ref().unwrap();
     assert_eq!((tex.current_set().unwrap().id.as_str(), tex.kind.as_str()), ("tuda", "pub"));
+    let warning = tex.template_warning.clone().expect("a warning");
+    let pub_name = tex.current_kind().unwrap().name.clone();
+    assert_eq!(warning, format!("The note's latex-template asks for the set “nosuch”, which this vault does not have: using “{pub_name}” of “{}” instead.", tex.current_set().unwrap().meta.name));
+    assert!(has(&t, "template-warning"), "it is shown");
+    // a kind the set does not have
+    open_on(&mut t, "Kind.md", "---\nlatex-template: tuda/nokind\n---\n# Kind\n");
+    let w = dialog(&t).tex.as_ref().unwrap().template_warning.clone().unwrap();
+    assert!(w.starts_with("The set “") && w.contains("has no kind “nokind”") && w.contains(&format!("using “{pub_name}”")), "{w}");
+    // a value that names no kind picks no engine, and the LaTeX choice says why it is not used
+    open_on(&mut t, "Bare.md", "---\nlatex-template: tuda\n---\n# Bare\n");
+    assert_eq!(dialog(&t).engine, ExportEngine::Builtin);
+    click(&mut t, "engine:latex");
+    assert!(has(&t, "template-warning"));
+    let w = dialog(&t).tex.as_ref().unwrap().template_warning.clone().unwrap();
+    assert!(w.starts_with("The note's latex-template “tuda” names no kind (write it as set/kind)"), "{w}");
+    // picking a kind by hand: the warning has done its work
+    click(&mut t, "kind");
+    click(&mut t, "kind:report");
+    let tex = dialog(&t).tex.as_ref().unwrap();
+    assert_eq!(tex.kind, "report");
+    assert!(tex.template_warning.is_none() && !has(&t, "template-warning"));
 }
 
 // spec: TEX-016

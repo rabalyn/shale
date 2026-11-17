@@ -82,6 +82,9 @@ pub struct TexExport {
     /// A "Set up…" button beside a missing TeX, set or logo was pressed: the window opens the
     /// guided setup (TEX-017) at this step.
     pub setup_requested: Option<Step>,
+    /// The note's `latex-template:` names a set or kind the vault does not have: what was not
+    /// found and what is used instead (TEX-033). Gone once the person picks a set or kind.
+    pub template_warning: Option<String>,
 }
 
 /// The choice a note's properties make: `latex-template: tuda/thesis` (a set and a kind).
@@ -97,13 +100,30 @@ impl TexExport {
     pub fn new(vault: &Path, title: String, text: &str, prefer: Option<(String, String)>) -> TexExport {
         let sets: Vec<SetInfo> = sets::scan(vault).into_iter().filter_map(|e| e.info.ok()).filter(|s| !s.kinds.is_empty()).collect();
         let props = crate::markdown::front_matter_values(text);
-        let mut t = TexExport { sets, set: 0, kind: String::new(), title, props, values: BTreeMap::new(), status: TexStatus::default(), job: None, failure: None, save_requested: false, setup_requested: None };
+        let mut t = TexExport { sets, set: 0, kind: String::new(), title, props, values: BTreeMap::new(), status: TexStatus::default(), job: None, failure: None, save_requested: false, setup_requested: None, template_warning: None };
         let (set, kind) = prefer.unzip();
         if let Some(i) = set.and_then(|id| t.sets.iter().position(|s| s.id == id)) {
             t.set = i;
         }
         t.select_set(t.set, kind.as_deref());
+        t.template_warning = t.unknown_template();
         t
+    }
+
+    /// What the note's `latex-template:` asks for that the vault does not have, and what the
+    /// dialog uses instead (TEX-033); None when it names nothing, or a set and kind that are there.
+    fn unknown_template(&self) -> Option<String> {
+        let raw = self.props.iter().find(|(k, _)| k == "latex-template")?.1.first()?.trim().to_string();
+        let set = self.current_set()?;
+        let using = format!("“{}” of “{}”", self.current_kind().map_or(self.kind.as_str(), |k| k.name.as_str()), set.meta.name);
+        let Some((want_set, want_kind)) = note_choice(&self.props) else {
+            return Some(format!("The note's latex-template “{raw}” names no kind (write it as set/kind): using {using} instead."));
+        };
+        match self.sets.iter().find(|s| s.id == want_set) {
+            None => Some(format!("The note's latex-template asks for the set “{want_set}”, which this vault does not have: using {using} instead.")),
+            Some(s) if !s.kinds.iter().any(|(id, _)| *id == want_kind) => Some(format!("The set “{}” has no kind “{want_kind}”, which the note's latex-template asks for: using {using} instead.", s.meta.name)),
+            Some(_) => None,
+        }
     }
 
     pub fn current_set(&self) -> Option<&SetInfo> {
@@ -202,6 +222,9 @@ impl TexExport {
                 }
             });
         }
+        if let Some(w) = &self.template_warning {
+            rec("template-warning", ui.colored_label(theme::LINK_MISSING, w));
+        }
         let busy = self.working();
         egui::Grid::new("export-tex-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
             if busy {
@@ -221,6 +244,7 @@ impl TexExport {
                 rec("set", combo.response);
                 if let Some(i) = picked {
                     self.select_set(i, None);
+                    self.template_warning = None;
                 }
                 ui.end_row();
 
@@ -237,6 +261,7 @@ impl TexExport {
                 rec("kind", combo.response);
                 if let Some(id) = picked {
                     self.select_kind(&id);
+                    self.template_warning = None;
                 }
                 ui.end_row();
 

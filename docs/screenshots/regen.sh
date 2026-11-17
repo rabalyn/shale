@@ -102,7 +102,11 @@ while IFS=$'\001' read -r name size view steps vault env; do
     fi
     echo "== $name"
     runner=(env TZ=UTC "SHALE_FAKE_NOW=${SHALE_FAKE_NOW:-2026-11-15T10:00:00}")
-    [ -n "$env" ] && runner+=($env)
+    # the env words one by one; {fixtures} is this folder's fixtures (a path that may have spaces)
+    read -ra words <<< "$env"
+    for w in "${words[@]}"; do
+        runner+=("${w//\{fixtures\}/$here/fixtures}")
+    done
     if [ "${SHALE_REGEN_DISPLAY:-}" = host ]; then
         launch=("${runner[@]}" "$shale" "${args[@]}")
     else
