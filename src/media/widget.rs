@@ -24,7 +24,7 @@ pub const VIDEO_MIN_WIDTH: f32 = 260.0;
 const VIDEO_CONTROLS: f32 = 108.0;
 
 /// The size of the card of `abs` in a place `avail_w` wide; `width` is the width the link asks
-/// for (`![[clip.mp4|480]]`, EDIT-024), which a video takes up to the place's width. A sound's
+/// for (`![[clip.mp4|480]]`, EDIT-052), which a video takes up to the place's width. A sound's
 /// card keeps its own size.
 pub fn card_size(abs: &Path, avail_w: f32, width: Option<f32>) -> Vec2 {
     if super::is_video(abs) {

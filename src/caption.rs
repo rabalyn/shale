@@ -1,4 +1,4 @@
-//! The caption under an embedded picture, drawing, PDF, video or sound (EDIT-025, PDF-004): the
+//! The caption under an embedded picture, drawing, PDF, video or sound (EDIT-053, PDF-004): the
 //! editor and the PDF export share what the caption says, how big it is and how it is shortened
 //! to the room it has. Each draws it with its own tools (egui, PDF text).
 
@@ -65,7 +65,7 @@ mod tests {
         text(&find_links(t).remove(0))
     }
 
-    // spec: EDIT-025
+    // spec: EDIT-053
     #[test]
     fn the_caption_is_the_alias_words_else_the_link_target() {
         assert_eq!(cap("![[z_media/a.png]]"), "z_media/a.png");
@@ -78,7 +78,7 @@ mod tests {
         assert_eq!(cap("![[a.png|2024]]"), "a.png", "a number is a width");
     }
 
-    // spec: EDIT-025
+    // spec: EDIT-053
     #[test]
     fn a_caption_is_shortened_with_an_ellipsis_to_the_room_it_has() {
         let w = |s: &str| s.chars().count() as f32 * 10.0;
@@ -89,7 +89,7 @@ mod tests {
         assert_eq!(fit("", 0.0, w), "");
     }
 
-    // spec: EDIT-025
+    // spec: EDIT-053
     #[test]
     fn the_caption_is_smaller_than_the_text_and_has_room_for_one_line() {
         assert!(size(15.0) < 15.0 && size(5.0) >= 8.0);
