@@ -296,6 +296,10 @@ pub struct Config {
     pub link_preview_width: u32,
     /// The height of the link preview in points (EDIT-037).
     pub link_preview_height: u32,
+    /// The width of the tab list of the Settings dialog in points (CFG-041); none: as wide as its
+    /// longest name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings_tab_width: Option<u32>,
     /// The preset font colours of the toolbar's palette (EDIT-028), as RGB.
     pub font_colours: Vec<[u8; 3]>,
     /// The preset highlight colours of the toolbar's palette (EDIT-028), as RGB.
@@ -388,6 +392,7 @@ impl Default for Config {
             toolbar_size: 110,
             link_preview_width: crate::link_preview::DEFAULT_WIDTH,
             link_preview_height: crate::link_preview::DEFAULT_HEIGHT,
+            settings_tab_width: None,
             font_colours: DEFAULT_FONT_COLOURS.to_vec(),
             highlight_colours: DEFAULT_HIGHLIGHT_COLOURS.to_vec(),
             live_preview: false,
@@ -747,6 +752,20 @@ mod tests {
         assert!(text.contains("link_preview_width = 700") && text.contains("link_preview_height = 333"), "{text}");
         let (back, _) = Config::parse_text(&text).unwrap();
         assert_eq!((back.link_preview_width, back.link_preview_height), (700, 333));
+    }
+
+    // spec: CFG-041, CFG-001
+    #[test]
+    fn cfg_041_the_tab_width_has_no_value_by_default_loads_from_old_files_and_round_trips() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert_eq!(c.settings_tab_width, None, "an old file has no tab width");
+        assert_eq!(c.version, 2, "a new field with a default needs no migration (CFG-001)");
+        assert!(!text::to_toml(&Config::default()).contains("settings_tab_width ="), "no value: left out of the file");
+        let c = Config { settings_tab_width: Some(140), ..Config::default() };
+        let text = text::to_toml(&c);
+        assert!(text.contains("settings_tab_width = 140"), "{text}");
+        let (back, _) = Config::parse_text(&text).unwrap();
+        assert_eq!(back.settings_tab_width, Some(140));
     }
 
     // spec: MEDIA-004, MEDIA-006, CFG-001

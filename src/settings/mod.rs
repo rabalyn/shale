@@ -87,6 +87,23 @@ impl SettingsTab {
     }
 }
 
+/// How far to either side of the border between the tab list and the page its handle reaches
+/// (points, CFG-041).
+const TAB_GRAB: f32 = 4.0;
+
+/// The width of the tab list when no width is set (CFG-041): the widest tab name laid out on one
+/// line in the font of the tab buttons, plus the padding of a button, rounded up.
+pub(crate) fn auto_tab_width(ui: &Ui) -> f32 {
+    let widest = SettingsTab::ALL.iter().map(|t| egui::WidgetText::from(t.label()).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x).fold(0.0, f32::max);
+    (widest + 2.0 * ui.spacing().button_padding.x).ceil()
+}
+
+/// A tab list width kept between 60 points and half of the dialog (CFG-041); where half of the
+/// dialog is less than 60, 60 wins.
+pub(crate) fn clamp_tab_width(width: f32, dialog_width: f32) -> f32 {
+    width.min(dialog_width / 2.0).max(60.0)
+}
+
 /// What a page asked of the dialog: it closes it, usually to open another one.
 #[derive(Default)]
 pub struct Asks {
@@ -115,16 +132,44 @@ impl ShaleApp {
         ui.ctx().data_mut(|d| d.insert_temp(last_tab_id(), *tab));
         self.settings_header(ui, *tab, &mut asks);
         ui.separator();
+        let dialog_width = ui.available_width();
+        let auto = auto_tab_width(ui);
+        let drag_id = Id::unique("settings-tab-width-drag");
+        let dragged: Option<f32> = ui.ctx().data(|d| d.get_temp(drag_id));
+        let width = dragged.unwrap_or_else(|| self.cfg.settings_tab_width.map_or(auto, |w| clamp_tab_width(w as f32, dialog_width)));
         ui.horizontal_top(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width(100.0);
+            let list = ui.vertical(|ui| {
+                ui.set_width(width);
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                     for t in SettingsTab::ALL {
                         ui.selectable_value(tab, t, t.label());
                     }
                 });
             });
-            ui.separator();
+            // the border between the list and the page: a handle (CFG-041)
+            let (line, _) = ui.allocate_exact_size(egui::vec2(1.0, ui.available_height()), egui::Sense::hover());
+            let grip = ui.interact(line.expand2(egui::vec2(TAB_GRAB, 0.0)), drag_id.with("grip"), egui::Sense::click_and_drag());
+            let stroke = if grip.hovered() || grip.dragged() { ui.visuals().widgets.hovered.bg_stroke } else { ui.visuals().widgets.noninteractive.bg_stroke };
+            ui.painter().vline(line.center().x, line.y_range(), stroke);
+            if grip.hovered() || grip.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+            if grip.dragged() {
+                if let Some(p) = grip.interact_pointer_pos() {
+                    // the border stays under the pointer
+                    let w = clamp_tab_width(p.x - (line.center().x - list.response.rect.right()) - list.response.rect.left(), dialog_width);
+                    ui.ctx().data_mut(|d| d.insert_temp(drag_id, w));
+                }
+            }
+            if grip.drag_stopped() {
+                if let Some(w) = ui.ctx().data_mut(|d| d.remove_temp::<f32>(drag_id)) {
+                    self.cfg.settings_tab_width = Some(w.round() as u32);
+                    self.save_config();
+                }
+            } else if grip.double_clicked() {
+                self.cfg.settings_tab_width = None;
+                self.save_config();
+            }
             ui.vertical(|ui| {
                 if *tab != SettingsTab::Keybindings {
                     self.keymap.recording = false;
@@ -175,4 +220,43 @@ impl ShaleApp {
 pub(crate) fn section(ui: &mut Ui, title: &str) {
     ui.add_space(6.0);
     ui.label(egui::RichText::new(title).color(theme::MUTED));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::{RawInput, TextStyle};
+
+    /// The automatic width with the tab buttons' font at this size, and the widest names' width.
+    fn widths(size: f32) -> (f32, f32, f32) {
+        let ctx = Context::default();
+        ctx.global_style_mut(|s| s.text_styles.get_mut(&TextStyle::Button).unwrap().size = size);
+        let (mut auto, mut keys, mut appearance) = (0.0, 0.0, 0.0);
+        let mut out = ctx.run_ui(RawInput::default(), |ui| {
+            auto = auto_tab_width(ui);
+            let w = |s: &str| egui::WidgetText::from(s).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, TextStyle::Button).size().x;
+            (keys, appearance) = (w("Keybindings"), w("Appearance"));
+        });
+        out.textures_delta.clear();
+        (auto, keys, appearance)
+    }
+
+    // spec: CFG-041
+    #[test]
+    fn cfg_041_the_tab_width_stays_between_60_points_and_half_of_the_dialog() {
+        assert_eq!(clamp_tab_width(100.0, 740.0), 100.0);
+        assert_eq!(clamp_tab_width(10.0, 740.0), 60.0, "not under 60");
+        assert_eq!(clamp_tab_width(500.0, 740.0), 370.0, "not over half of the dialog");
+        assert_eq!(clamp_tab_width(80.0, 100.0), 60.0, "where half of the dialog is under 60, 60 wins");
+    }
+
+    // spec: CFG-041
+    #[test]
+    fn cfg_041_the_automatic_width_fits_the_widest_name_and_follows_the_font() {
+        let (small, keys, appearance) = widths(14.0);
+        assert!(small >= keys && small >= appearance, "{small} fits {keys} and {appearance}");
+        assert_eq!(small, small.ceil(), "a whole number of points");
+        let (big, keys_big, _) = widths(30.0);
+        assert!(big >= keys_big && big > small, "a bigger font: {big} > {small}");
+    }
 }
