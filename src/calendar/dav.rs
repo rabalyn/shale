@@ -937,28 +937,47 @@ pub(crate) mod tests {
     /// row get a port of the last 50), so under load another test's pretend server, or a
     /// process of the machine, is given the port between the drop and the connect, and the
     /// "unreachable" server answers (or takes one of the connections a `mock_http_with` counts).
-    /// A TCP port that refuses connections and that no other bind gets while the value is held.
     /// Hold the value until the connection attempt is over. DEV-016.
     ///
-    /// Elsewhere the port is the local port of a connected socket: it is in use, so no bind gets it
-    /// (not even by `bind` to the port itself), and no socket listens on it, so a connect to it is
-    /// refused. Windows lets a bind take a port that only a connected socket uses, so there it is a
-    /// socket that is bound and does not listen: connects are refused, binds fail.
+    /// The port is held by a socket that is bound to 127.0.0.1 and does not listen. A connect to
+    /// it is refused. No other bind gets the port: not the kernel's hand-out of free ports, and
+    /// not a `bind` to the port itself, even with SO_REUSEADDR, which `TcpListener::bind` sets on
+    /// Unix. The local port of a connected socket is not enough: Windows, and macOS and the BSDs
+    /// when the new socket has SO_REUSEADDR, let a bind take a port that only connected sockets use.
     pub(crate) struct ClosedPort {
         pub(crate) port: u16,
-        #[cfg(not(windows))]
-        _client: std::net::TcpStream,
-        #[cfg(not(windows))]
-        _listener: TcpListener,
+        #[cfg(unix)]
+        _socket: std::os::fd::OwnedFd,
         #[cfg(windows)]
         socket: windows_sys::Win32::Networking::WinSock::SOCKET,
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     pub(crate) fn closed_port() -> ClosedPort {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        ClosedPort { port: client.local_addr().unwrap().port(), _client: client, _listener: listener }
+        use std::os::fd::{FromRawFd, OwnedFd};
+        // SAFETY: a plain socket call; the result is checked below
+        let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        assert!(fd >= 0, "socket");
+        // SAFETY: `fd` is a new, open descriptor that nothing else owns
+        let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+        // SAFETY: an all-zero sockaddr_in is a valid value
+        let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+        addr.sin_family = libc::AF_INET as libc::sa_family_t;
+        addr.sin_port = 0;
+        addr.sin_addr.s_addr = u32::from_ne_bytes([127, 0, 0, 1]);
+        let size = libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_in>()).unwrap();
+        #[cfg(target_os = "macos")]
+        {
+            addr.sin_len = u8::try_from(size).unwrap();
+        }
+        // SAFETY: `addr` is a valid sockaddr_in of the length given
+        let bound = unsafe { libc::bind(fd, std::ptr::addr_of!(addr).cast(), size) };
+        assert_eq!(bound, 0, "bind");
+        let mut len = size;
+        // SAFETY: `addr` and `len` are valid for writing, `len` is the size of `addr`
+        let named = unsafe { libc::getsockname(fd, std::ptr::addr_of_mut!(addr).cast(), &mut len) };
+        assert_eq!(named, 0, "getsockname");
+        ClosedPort { port: u16::from_be(addr.sin_port), _socket: socket }
     }
 
     #[cfg(windows)]
@@ -993,7 +1012,7 @@ pub(crate) mod tests {
         let addr = ("127.0.0.1", held.port);
         let err = std::net::TcpStream::connect(addr).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::ConnectionRefused, "{err}");
-        assert!(TcpListener::bind(addr).is_err(), "no pretend server can be given the port");
+        assert!(TcpListener::bind(addr).is_err(), "no pretend server can be given the port (std sets SO_REUSEADDR on Unix)");
     }
 
     /// A pretend HTTP server on localhost: `handler(method, path, headers, body) -> (status, body)`.
