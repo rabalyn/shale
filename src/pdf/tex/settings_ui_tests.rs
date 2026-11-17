@@ -12,17 +12,17 @@ use eframe::egui::PointerButton;
 use std::path::PathBuf;
 use std::time::Duration;
 
-struct T {
-    app: ShaleApp,
-    hl: Headless,
-    dir: PathBuf,
+pub(super) struct T {
+    pub app: ShaleApp,
+    pub hl: Headless,
+    pub dir: PathBuf,
 }
 
-fn found(system: Result<Engine, &str>, managed: Result<Engine, &str>, bytes: Option<u64>) -> Detection {
+pub(super) fn found(system: Result<Engine, &str>, managed: Result<Engine, &str>, bytes: Option<u64>) -> Detection {
     Detection { system: system.map_err(String::from), managed: managed.map_err(String::from), managed_bytes: bytes }
 }
 
-fn good(kind: Kind, missing: &[&str]) -> Engine {
+pub(super) fn good(kind: Kind, missing: &[&str]) -> Engine {
     let mut e = Engine::new(kind, PathBuf::from(if kind == Kind::System { "/usr/bin" } else { "/data/texlive/bin/x86_64-linux" }));
     e.kernel = "2025-11-01".into();
     e.missing = missing.iter().map(|s| s.to_string()).collect();
@@ -31,7 +31,7 @@ fn good(kind: Kind, missing: &[&str]) -> Engine {
 
 impl T {
     /// The window with Settings on the LaTeX tab and this detection (so no job looks at the machine).
-    fn new(tag: &str, detection: Detection) -> T {
+    pub(super) fn new(tag: &str, detection: Detection) -> T {
         let dir = std::env::temp_dir().join(format!("shale-tex-ui-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         crate::vault::write_sample_vault(&dir).unwrap();
@@ -44,22 +44,22 @@ impl T {
     }
 
     /// Whether this text is painted on screen after the layout has settled.
-    fn shows(&mut self, text: &str) -> bool {
+    pub(super) fn shows(&mut self, text: &str) -> bool {
         self.hl.frames(&mut self.app, 3);
         self.hl.text.iter().any(|(t, _)| t.contains(text))
     }
 
-    fn painted(&self) -> Vec<&str> {
+    pub(super) fn painted(&self) -> Vec<&str> {
         self.hl.text.iter().map(|(t, _)| t.as_str()).collect()
     }
 
-    fn click(&mut self, label: &str) {
+    pub(super) fn click(&mut self, label: &str) {
         let r = self.hl.find_label(&mut self.app, label);
         self.hl.click(&mut self.app, r.center(), PointerButton::Primary);
     }
 
     /// Frames, with a rest between them, until the job of the page has ended.
-    fn wait_for_job(&mut self) {
+    pub(super) fn wait_for_job(&mut self) {
         for _ in 0..300 {
             self.hl.frames(&mut self.app, 1);
             if self.app.tex.task.is_none() {
@@ -72,7 +72,7 @@ impl T {
     }
 
     /// The data folder the managed TeX Live would live in.
-    fn data(&self) -> PathBuf {
+    pub(super) fn data(&self) -> PathBuf {
         self.app.tex.data.clone().unwrap()
     }
 }
@@ -86,7 +86,7 @@ impl Drop for T {
     }
 }
 
-fn nothing_found() -> Detection {
+pub(super) fn nothing_found() -> Detection {
     found(Err("no lualatex in PATH"), Err("not installed"), None)
 }
 
@@ -203,7 +203,7 @@ fn the_progress_of_a_running_install_is_shown_and_cancel_asks_the_job_to_stop() 
     // the end of the job is taken by the window and the page looks again
     let (tx, rx) = std::sync::mpsc::channel();
     t.app.tex.task = Some(Task { kind: TaskKind::Update, handle, rx });
-    tx.send(Ok(Notice { text: "The update is done.".into(), ok: true, details: None })).unwrap();
+    tx.send(Ok(Notice::new("The update is done.", true))).unwrap();
     assert!(t.shows("The update is done."), "{:?}", t.painted());
     assert!(t.app.tex.task.is_none());
 }

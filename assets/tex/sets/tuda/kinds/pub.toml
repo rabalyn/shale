@@ -1,0 +1,32 @@
+# TU Darmstadt, publication: papers and short documents. The writer maps H1 to \title, H2 to
+# \section, H3 to \subsection (mapping "article"). See the README of the set for every key.
+name = "Publication"
+description = "Papers and short documents (class tudapub)"
+mapping = "article"
+class = "tudapub"
+before_class = ["\\RequirePackage{pdfmanagement}", "\\SetKeys[document/metadata]{pdfstandard=a-2b,pdfversion=1.7,lang={lang}}"]
+options = ["{language}", "accentcolor={accent}"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
+logo = true
+
+[[fields]]
+key = "title"
+label = "Title"
+command = "title"
+required = true
+
+[[fields]]
+key = "subtitle"
+label = "Subtitle"
+command = "subtitle"
+
+[[fields]]
+key = "author"
+label = "Author"
+command = "author"
+required = true
+
+[[fields]]
+key = "date"
+label = "Date"
+command = "date"

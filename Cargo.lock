@@ -3915,6 +3915,7 @@ dependencies = [
  "libc",
  "miniz_oxide 0.8.9",
  "rcgen",
+ "ring",
  "roxmltree 0.20.0",
  "rubato",
  "rusqlite",

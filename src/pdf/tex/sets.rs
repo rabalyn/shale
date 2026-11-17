@@ -1,0 +1,587 @@
+//! Template sets in the vault (TEX-005): where a set lives and what is in it, the manifests of its
+//! document kinds, the person's settings of a set, the logo slot (TEX-007), and compiling a
+//! document against a set. A set is a folder `templates/tex/<set>/` of the vault, so the exact
+//! class files an export was written for are in the vault's backups and in its git sync.
+//!
+//! ```text
+//! templates/tex/<set>/set.toml          what the set is and where it came from (`SetMeta`)
+//! templates/tex/<set>/settings.toml     the person's choices (`SetSettings`); kept by a re-import
+//! templates/tex/<set>/tex/              .cls .sty .def .cfg …: what goes on TEXINPUTS
+//! templates/tex/<set>/kinds/<kind>.toml one document kind of the set (`KindManifest`)
+//! templates/tex/<set>/logo/             the logo the person supplies; kept by a re-import
+//! templates/tex/<set>/README.md         a note for people browsing the vault
+//! ```
+
+use super::compile::{compile, CompileError, CompileOutput, Options, WorkDir};
+use super::engine::Engine;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+/// Where the sets are, relative to the vault.
+pub const SETS_DIR: &str = "templates/tex";
+
+/// The most bytes a logo file may have.
+pub const MAX_LOGO: u64 = 5 << 20;
+
+/// `<vault>/templates/tex`.
+pub fn sets_root(vault: &Path) -> PathBuf {
+    vault.join(SETS_DIR)
+}
+
+/// A file or repository name without `.tar.gz`, `.zip` or `.git`.
+pub fn strip_archive_ext(name: &str) -> &str {
+    name.strip_suffix(".tar.gz").or_else(|| name.strip_suffix(".zip")).or_else(|| name.strip_suffix(".git")).unwrap_or(name)
+}
+
+/// A folder name made from a repository or file name (`Tuda_Latex Templates.zip` → `tuda_latex-templates`).
+pub fn id_from(name: &str) -> String {
+    let stem = strip_archive_ext(name);
+    let id: String = stem.to_lowercase().chars().map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c) { c } else { '-' }).collect();
+    let id = id.trim_matches(['.', '-']).chars().take(40).collect::<String>();
+    if id.is_empty() {
+        "templates".into()
+    } else {
+        id
+    }
+}
+
+// ---------------------------------------------------------------- set.toml
+
+/// Where a set came from.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Source {
+    /// A GitHub repository at a commit, tag or branch; `sha256` is the checksum of the archive
+    /// that was checked (the built-in preset is pinned, other imports have none).
+    Github {
+        repo: String,
+        reference: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sha256: Option<String>,
+    },
+    /// The newest version on CTAN (not pinned: whatever CTAN has the day it is imported).
+    Ctan { url: String },
+    /// A zip, a .tar.gz or a folder of this computer.
+    Local { path: String },
+}
+
+impl Source {
+    /// "GitHub tudace/tuda_latex_templates at e933be9, checked sha256" for the list of sets.
+    pub fn describe(&self) -> String {
+        match self {
+            Source::Github { repo, reference, sha256 } => {
+                let short: String = if reference.len() == 40 && reference.chars().all(|c| c.is_ascii_hexdigit()) { reference.chars().take(7).collect() } else { reference.clone() };
+                format!("GitHub {repo} at {short}{}", if sha256.is_some() { ", checksum checked" } else { ", no checksum" })
+            }
+            Source::Ctan { .. } => "CTAN, the newest version (no checksum)".into(),
+            Source::Local { path } => format!("from {path}"),
+        }
+    }
+}
+
+/// `set.toml`: what a set is.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SetMeta {
+    /// The name shown in lists.
+    pub name: String,
+    /// The version of the templates, when they say it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// The day of the import, `2026-11-17`.
+    pub imported_at: String,
+    pub source: Source,
+    /// The name of the logo file without its extension (`tuda_logo`): the set needs a logo the
+    /// person supplies, in `logo/` (TEX-007). None: the set needs none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logo_file: Option<String>,
+}
+
+// ---------------------------------------------------------------- settings.toml
+
+/// The language of a set's documents.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    #[default]
+    En,
+    De,
+}
+
+impl Language {
+    /// The language code of the PDF metadata.
+    pub fn code(self) -> &'static str {
+        match self {
+            Language::En => "en",
+            Language::De => "de",
+        }
+    }
+
+    /// The name the LaTeX class and babel know it by.
+    pub fn babel(self) -> &'static str {
+        match self {
+            Language::En => "english",
+            Language::De => "ngerman",
+        }
+    }
+}
+
+/// `settings.toml`: the person's choices for a set. A re-import keeps this file.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct SetSettings {
+    /// The accent colour of the templates (`{accent}` in a kind's options), a name made of letters,
+    /// digits, `-` and `_`: for tuda-ci `9c` (the colours are `0a` to `9d`).
+    pub accent: String,
+    /// The language of the documents (`{language}` in a kind's options and preamble).
+    pub language: Language,
+    /// The department that fills a kind's `department` field when the note does not give one.
+    pub department: String,
+    /// The logo file in `logo/` (`tuda_logo.pdf`), set by "Choose logo…".
+    pub logo: Option<String>,
+}
+
+impl SetSettings {
+    /// An accent that cannot add an option or end a command.
+    pub fn check(&self) -> Result<(), String> {
+        if self.accent.len() > 20 || !self.accent.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c)) {
+            return Err(format!("the accent colour {:?} may have only letters, digits, - and _", self.accent));
+        }
+        if let Some(l) = &self.logo {
+            if !plain_file_name(l) {
+                return Err(format!("the logo {l:?} must be a plain file name"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A file name with no folders and nothing hidden.
+fn plain_file_name(name: &str) -> bool {
+    !name.is_empty() && !name.starts_with('.') && !name.contains(['/', '\\', '\0', ':']) && name != ".."
+}
+
+/// `settings.toml` of a set folder; a missing file is the defaults.
+pub fn load_settings(set_dir: &Path) -> Result<SetSettings, String> {
+    let path = set_dir.join("settings.toml");
+    let s: SetSettings = match crate::fsutil::read_to_string(&path) {
+        Ok(text) => toml::from_str(&text).map_err(|e| format!("settings.toml: {}", e.message()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => SetSettings::default(),
+        Err(e) => return Err(e.to_string()),
+    };
+    s.check().map_err(|e| format!("settings.toml: {e}"))?;
+    Ok(s)
+}
+
+/// Write `settings.toml` (atomically).
+pub fn save_settings(set_dir: &Path, s: &SetSettings) -> Result<(), String> {
+    let text = toml::to_string_pretty(s).map_err(|e| e.to_string())?;
+    let text = format!("# The choices for this template set. Shale keeps this file when the set is updated.\n# accent: the accent colour of the templates (tuda-ci: 0a to 9d); language: en or de;\n# department: used when a note does not name one; logo: set by \"Choose logo…\".\n{text}");
+    crate::fsutil::write_atomic(&set_dir.join("settings.toml"), text.as_bytes()).map_err(|e| format!("settings.toml could not be written ({e})"))
+}
+
+// ---------------------------------------------------------------- kinds
+
+/// How the writer (TEX-008 to TEX-014) turns a note into the document of a kind.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Mapping {
+    /// H1 is `\title`, H2 `\section`, H3 `\subsection` (TEX-010).
+    Article,
+    /// H1 is `\title`, H2 `\chapter`, H3 `\section` (TEX-011).
+    Book,
+    /// H1 is the title slide, every H2 a frame (TEX-012).
+    Beamer,
+    /// The recipient, subject and date come from the properties (TEX-013).
+    Letter,
+    /// Posters, leaflets, announcements (TEX-014).
+    Poster,
+}
+
+/// One value of a document kind, taken from a front matter key of the note.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Field {
+    /// The key in the note's properties (`title`, `author`, `department` …).
+    pub key: String,
+    /// What the export dialog calls it.
+    #[serde(default)]
+    pub label: String,
+    /// The LaTeX command that gets the value, without the backslash: `\title{value}`.
+    #[serde(default)]
+    pub command: Option<String>,
+    /// A KOMA-Script variable that gets the value: `\setkomavar{name}{value}` (letters).
+    #[serde(default)]
+    pub komavar: Option<String>,
+    /// The export cannot run without a value.
+    #[serde(default)]
+    pub required: bool,
+    /// What is used when the note has no value, as LaTeX code (`\today`).
+    #[serde(default)]
+    pub default: String,
+}
+
+/// `kinds/<kind>.toml`: one document kind of a set. The name of the file (`pub`) is the kind's id.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct KindManifest {
+    /// The name shown in the export dialog.
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// How a note becomes a document of this kind.
+    pub mapping: Mapping,
+    /// The document class (a file `<class>.cls` in `tex/` or in TeX Live).
+    pub class: String,
+    /// Lines of LaTeX before `\documentclass` (for tuda-ci: the PDF/A set-up of the LaTeX kernel,
+    /// which the classes of some kinds need to run without the old `pdfx`). `{lang}` is the
+    /// language code of the settings (`en`, `de`), and `{language}` and `{accent}` as below.
+    #[serde(default)]
+    pub before_class: Vec<String>,
+    /// The class options. `{accent}` and `{language}` are replaced from the settings of the set;
+    /// an option whose value is empty is left out.
+    #[serde(default)]
+    pub options: Vec<String>,
+    /// Lines of LaTeX after `\documentclass` (the same replacements).
+    #[serde(default)]
+    pub preamble: Vec<String>,
+    /// The kind needs the set's logo (TEX-007): without one the placeholder is used and the
+    /// export says it is not conformant.
+    #[serde(default)]
+    pub logo: bool,
+    /// The values of the kind and where they go.
+    #[serde(default)]
+    pub fields: Vec<Field>,
+}
+
+/// The text of a manifest line with `{accent}`, `{language}` and `{lang}` filled in; none when
+/// the line uses a value that is empty.
+fn fill(line: &str, s: &SetSettings) -> Option<String> {
+    if line.contains("{accent}") && s.accent.is_empty() {
+        return None;
+    }
+    Some(line.replace("{accent}", &s.accent).replace("{language}", s.language.babel()).replace("{lang}", s.language.code()))
+}
+
+/// A class name that cannot end a command: letters, digits, `-`, `@` and `*`.
+fn plain_name(n: &str) -> bool {
+    !n.is_empty() && n.len() <= 40 && n.chars().all(|c| c.is_ascii_alphanumeric() || "-@*".contains(c))
+}
+
+impl KindManifest {
+    /// Parse a manifest and check what the text it will be written into depends on.
+    pub fn parse(text: &str) -> Result<KindManifest, String> {
+        let k: KindManifest = toml::from_str(text).map_err(|e| e.message().to_string())?;
+        if !plain_name(&k.class) {
+            return Err(format!("class {:?} is not a class name", k.class));
+        }
+        for f in &k.fields {
+            if f.key.is_empty() {
+                return Err("a field has no key".into());
+            }
+            for n in [&f.command, &f.komavar].into_iter().flatten() {
+                if n.is_empty() || !n.chars().all(|c| c.is_ascii_alphabetic()) {
+                    return Err(format!("field {}: {n:?} is not the name of a command", f.key));
+                }
+            }
+        }
+        Ok(k)
+    }
+
+    /// The options of `\documentclass[…]` with the settings filled in.
+    pub fn class_options(&self, s: &SetSettings) -> Vec<String> {
+        self.options.iter().filter_map(|o| fill(o, s)).collect()
+    }
+
+    /// The lines before `\documentclass` with the settings filled in.
+    pub fn before_class_lines(&self, s: &SetSettings) -> Vec<String> {
+        self.before_class.iter().filter_map(|l| fill(l, s)).collect()
+    }
+
+    /// The preamble lines with the settings filled in.
+    pub fn preamble_lines(&self, s: &SetSettings) -> Vec<String> {
+        self.preamble.iter().filter_map(|l| fill(l, s)).collect()
+    }
+}
+
+/// The lines before the class, `\documentclass[options]{class}` and the preamble of a kind.
+fn class_and_preamble(k: &KindManifest, s: &SetSettings) -> String {
+    let opts = k.class_options(s).join(",");
+    let mut t: String = k.before_class_lines(s).iter().map(|l| format!("{l}\n")).collect();
+    t.push_str(&if opts.is_empty() { format!("\\documentclass{{{}}}\n", k.class) } else { format!("\\documentclass[{opts}]{{{}}}\n", k.class) });
+    for l in k.preamble_lines(s) {
+        t.push_str(&l);
+        t.push('\n');
+    }
+    t
+}
+
+/// Text for TeX: its special characters written as themselves.
+pub fn tex_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\textbackslash{}"),
+            '{' | '}' | '$' | '&' | '#' | '_' | '%' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '^' => out.push_str("\\^{}"),
+            '~' => out.push_str("\\~{}"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The value a field gets in a sample document: its default, the department of the settings, or
+/// a short text that says what it is.
+fn sample_value(f: &Field, s: &SetSettings) -> String {
+    if f.key == "department" && !s.department.is_empty() {
+        return tex_escape(&s.department);
+    }
+    if !f.default.is_empty() {
+        return f.default.clone();
+    }
+    match f.key.as_str() {
+        "title" => "Shale test page".into(),
+        "subtitle" => "A test of the template set".into(),
+        "author" | "sender" => "Shale".into(),
+        "recipient" => "Sample Recipient\\\\Sample Street 1\\\\12345 Sample City".into(),
+        "sender_address" => "Sample Street 2\\\\12345 Sample City".into(),
+        "subject" => "Shale test page".into(),
+        "date" => "2026-01-01".into(),
+        _ => format!("Sample {}", f.key),
+    }
+}
+
+/// A small document of a kind for the test page of a set: every field with a sample value, a few
+/// paragraphs, in the shape of the kind's mapping. The writer of #281 makes the real documents.
+pub fn sample_document(k: &KindManifest, s: &SetSettings) -> String {
+    let mut t = class_and_preamble(k, s);
+    for f in &k.fields {
+        // no \date: the class puts in today's
+        if let Some(c) = f.command.as_ref().filter(|_| f.key != "date") {
+            t.push_str(&format!("\\{c}{{{}}}\n", sample_value(f, s)));
+        }
+    }
+    let para = "A few words so that the page is not empty: the quick brown fox jumps over the lazy dog.";
+    t.push_str("\\begin{document}\n");
+    match k.mapping {
+        Mapping::Article => t.push_str(&format!("\\maketitle\n\\section{{First section}}\n{para}\n\\subsection{{A part}}\n{para}\n")),
+        Mapping::Book => t.push_str(&format!("\\maketitle\n\\chapter{{First chapter}}\n{para}\n\\section{{A section}}\n{para}\n")),
+        Mapping::Beamer => t.push_str(&format!("\\maketitle\n\\begin{{frame}}{{First frame}}\n{para}\n\\end{{frame}}\n")),
+        Mapping::Letter => {
+            let get = |key: &str| k.fields.iter().find(|f| f.key == key).map(|f| sample_value(f, s)).unwrap_or_default();
+            t.push_str(&format!("\\begin{{letter}}{{{}}}\n", get("recipient")));
+            for f in &k.fields {
+                if let Some(v) = &f.komavar {
+                    t.push_str(&format!("\\setkomavar{{{v}}}{{{}}}\n", sample_value(f, s)));
+                }
+            }
+            t.push_str(&format!("\\opening{{{}}}\n{para}\n\\closing{{{}}}\n\\end{{letter}}\n", get("opening"), get("closing")));
+        }
+        Mapping::Poster if k.class.contains("sciposter") => {
+            t.push_str(&format!("\\maketitle\n\\begin{{tcbposter}}[poster={{columns=2,rows=2,spacing=1cm}}]\n\\begin{{posterboxenv}}[title=First box]{{name=a,column=1,row=1}}\n{para}\n\\end{{posterboxenv}}\n\\end{{tcbposter}}\n"));
+        }
+        Mapping::Poster => t.push_str(&format!("\\maketitle\n{para}\n")),
+    }
+    t.push_str("\\end{document}\n");
+    t
+}
+
+// ---------------------------------------------------------------- scanning
+
+/// Whether a set has the logo it asks for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LogoStatus {
+    /// The set needs no logo.
+    NotNeeded,
+    /// The set needs one and the slot is empty: exports use a placeholder.
+    Missing,
+    /// The file in `logo/`.
+    Present(String),
+}
+
+impl LogoStatus {
+    /// For the list of sets.
+    pub fn text(&self) -> String {
+        match self {
+            LogoStatus::NotNeeded => "no logo needed".into(),
+            LogoStatus::Missing => "logo missing: exports are not CI-conformant".into(),
+            LogoStatus::Present(f) => format!("logo: {f}"),
+        }
+    }
+}
+
+/// A set that was read.
+#[derive(Clone, Debug)]
+pub struct SetInfo {
+    /// The folder name below `templates/tex`.
+    pub id: String,
+    /// The folder, absolute.
+    pub dir: PathBuf,
+    pub meta: SetMeta,
+    pub settings: SetSettings,
+    /// The kinds with their ids, by id; the ones that could not be read are in `problems`.
+    pub kinds: Vec<(String, KindManifest)>,
+    pub problems: Vec<String>,
+    pub logo: LogoStatus,
+}
+
+/// A folder of `templates/tex`: the set, or why it could not be read.
+#[derive(Clone, Debug)]
+pub struct SetEntry {
+    pub id: String,
+    pub info: Result<SetInfo, String>,
+}
+
+/// The logo file of a set: the one the settings name, else `<stem>.pdf` or `<stem>.png`.
+fn find_logo(dir: &Path, stem: &str, s: &SetSettings) -> Option<String> {
+    let named = s.logo.iter().cloned();
+    let guessed = ["pdf", "png"].map(|e| format!("{stem}.{e}"));
+    named.chain(guessed).find(|f| plain_file_name(f) && std::fs::symlink_metadata(dir.join("logo").join(f)).is_ok_and(|m| m.is_file()))
+}
+
+/// Read one set folder.
+pub fn read_set(id: &str, dir: &Path) -> Result<SetInfo, String> {
+    let meta_text = crate::fsutil::read_to_string(dir.join("set.toml")).map_err(|e| format!("set.toml cannot be read ({e})"))?;
+    let meta: SetMeta = toml::from_str(&meta_text).map_err(|e| format!("set.toml: {}", e.message()))?;
+    let settings = load_settings(dir)?;
+    let (mut kinds, mut problems) = (Vec::new(), Vec::new());
+    if let Ok(rd) = std::fs::read_dir(dir.join("kinds")) {
+        let mut files: Vec<PathBuf> = rd.filter_map(|e| Some(e.ok()?.path())).filter(|p| p.extension().is_some_and(|e| e == "toml")).collect();
+        files.sort();
+        for f in files {
+            let kind_id = f.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            match crate::fsutil::read_to_string(&f).map_err(|e| e.to_string()).and_then(|t| KindManifest::parse(&t)) {
+                Ok(k) => kinds.push((kind_id, k)),
+                Err(e) => problems.push(format!("kinds/{kind_id}.toml: {e}")),
+            }
+        }
+    }
+    let logo = match &meta.logo_file {
+        None => LogoStatus::NotNeeded,
+        Some(stem) => find_logo(dir, stem, &settings).map_or(LogoStatus::Missing, LogoStatus::Present),
+    };
+    Ok(SetInfo { id: id.to_string(), dir: dir.to_path_buf(), meta, settings, kinds, problems, logo })
+}
+
+/// The sets of a vault, by folder name. A folder with a hidden name (a half-made import) is left out.
+pub fn scan(vault: &Path) -> Vec<SetEntry> {
+    let mut found: Vec<SetEntry> = std::fs::read_dir(sets_root(vault))
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| {
+            let id = e.file_name().to_string_lossy().into_owned();
+            (!id.starts_with('.')).then(|| SetEntry { info: read_set(&id, &e.path()), id })
+        })
+        .collect();
+    found.sort_by(|a, b| a.id.cmp(&b.id));
+    found
+}
+
+// ---------------------------------------------------------------- the logo slot (TEX-007)
+
+/// A grey bar as a one-page PDF, 60 by 20 mm: the logo of a set whose slot is empty, so a class
+/// that needs `tuda_logo.pdf` still compiles. It is made for one compile and never kept.
+pub fn placeholder_logo_pdf() -> Vec<u8> {
+    let content = "0.75 g 0 0 170 57 re f\n";
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 170 57] /Contents 4 0 R /Resources << >> >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{content}endstream", content.len()),
+    ];
+    let mut pdf = String::from("%PDF-1.4\n");
+    let mut offsets = Vec::new();
+    for (i, o) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.push_str(&format!("{} 0 obj\n{o}\nendobj\n", i + 1));
+    }
+    let xref = pdf.len();
+    pdf.push_str(&format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1));
+    for o in offsets {
+        pdf.push_str(&format!("{o:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1));
+    pdf.into_bytes()
+}
+
+/// The extension a logo file may have, from its first bytes: a PDF or a PNG.
+fn logo_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"%PDF-") {
+        Some("pdf")
+    } else if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+        Some("png")
+    } else {
+        None
+    }
+}
+
+/// "Choose logo…": copy a PDF or PNG into `logo/` of the set (named `<logo_file>.pdf` or `.png`, as
+/// the classes look for it) and record it in `settings.toml`. A logo that was there is moved to
+/// the vault's trash, not overwritten. Returns the file name in `logo/`.
+pub fn choose_logo(vault: &Path, set: &SetInfo, from: &Path) -> Result<String, String> {
+    let stem = set.meta.logo_file.as_deref().ok_or("this set has no logo slot")?;
+    let meta = std::fs::metadata(from).map_err(|e| format!("{} cannot be read ({e})", from.display()))?;
+    if !meta.is_file() || meta.len() > MAX_LOGO {
+        return Err(format!("{} is not a file of at most {} MB", from.display(), MAX_LOGO >> 20));
+    }
+    let bytes = crate::fsutil::read(from).map_err(|e| e.to_string())?;
+    let ext = logo_extension(&bytes).ok_or("the logo must be a PDF or a PNG file")?;
+    let name = format!("{stem}.{ext}");
+    let dir = set.dir.join("logo");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("the logo folder could not be made ({e})"))?;
+    // whatever file the classes could pick instead is moved away first, so exactly one logo is there
+    let rel_dir = Path::new(SETS_DIR).join(&set.id).join("logo");
+    for old in ["pdf", "png"].map(|e| format!("{stem}.{e}")) {
+        if std::fs::symlink_metadata(dir.join(&old)).is_ok() && !(old == name && crate::fsutil::read(dir.join(&old)).is_ok_and(|b| b == bytes)) {
+            crate::vault::move_to_trash(vault, &rel_dir.join(&old)).map_err(|e| format!("the logo that is there could not be moved to the trash ({e})"))?;
+        }
+    }
+    crate::fsutil::write_atomic(&dir.join(&name), &bytes).map_err(|e| format!("the logo could not be written ({e})"))?;
+    let mut settings = set.settings.clone();
+    settings.logo = Some(name.clone());
+    save_settings(&set.dir, &settings)?;
+    Ok(name)
+}
+
+// ---------------------------------------------------------------- compiling against a set
+
+/// What a compile against a set made.
+#[derive(Debug)]
+pub struct SetOutput {
+    pub output: CompileOutput,
+    /// The logo slot was empty and the placeholder was used: the PDF is not CI-conformant.
+    pub placeholder_logo: bool,
+}
+
+/// Compile `main_tex` (with its text and the files it needs) against a set: `TEXINPUTS` is the
+/// set's `tex/`, its `logo/` and TeX's own. Without a logo in the slot a placeholder is put into
+/// the compile's work folder (never into the vault) so the class does not fail on the missing file.
+pub fn compile_with_set(engine: &Engine, set: &SetInfo, main_tex: &str, source: &str, files: &[(&str, &[u8])]) -> Result<SetOutput, CompileError> {
+    let fail = |m: String| CompileError { headline: m, problems: vec![], log_tail: String::new() };
+    let work = WorkDir::new().map_err(|e| fail(format!("no temporary folder ({e})")))?;
+    work.write(main_tex, source.as_bytes()).map_err(|e| fail(format!("{main_tex} could not be written ({e})")))?;
+    for (name, bytes) in files {
+        work.write(name, bytes).map_err(|e| fail(format!("{name} could not be written ({e})")))?;
+    }
+    let placeholder_logo = match (&set.logo, &set.meta.logo_file) {
+        (LogoStatus::Missing, Some(stem)) => {
+            work.write(&format!("{stem}.pdf"), &placeholder_logo_pdf()).map_err(|e| fail(format!("the placeholder logo could not be written ({e})")))?;
+            true
+        }
+        _ => false,
+    };
+    let mut tex_inputs = vec![set.dir.join("tex")];
+    if set.dir.join("logo").is_dir() {
+        tex_inputs.push(set.dir.join("logo"));
+    }
+    let output = compile(engine, work, main_tex, &Options { tex_inputs, ..Options::default() })?;
+    Ok(SetOutput { output, placeholder_logo })
+}
+
+/// The kind the test page compiles: `pub`, else the first article-like one.
+pub fn test_kind(set: &SetInfo) -> Option<&(String, KindManifest)> {
+    set.kinds.iter().find(|(id, _)| id == "pub").or_else(|| set.kinds.iter().find(|(_, k)| k.mapping == Mapping::Article))
+}
