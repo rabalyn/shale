@@ -3,7 +3,9 @@
 //! file, so fades, volume and pause work as they do there, and its clock (`Shared::position_secs`)
 //! leads: a frame waits until the clock reaches it and is dropped when the clock is far past it.
 //! A video without sound gets silence from a source of its own, which makes the engine's clock
-//! the frame clock. A seek (the engine tells both sources through its epoch) restarts both
+//! the frame clock. The clock starts with the first picture: the sound (or the silence) waits
+//! until it is shown, so a slow ffmpeg cannot play a short clip to its end before it shows
+//! anything, and the picture does not lag the sound at the start. A seek (the engine tells both sources through its epoch) restarts both
 //! processes at the new place; a process that is let go is killed and reaped.
 //!
 //! Nothing here runs on the window's thread: `look` and `run` are called from threads of the
@@ -16,7 +18,7 @@ use super::ffmpeg::{Info, Tools};
 use eframe::egui;
 use std::io::Read;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -29,6 +31,31 @@ const SILENCE_CHUNK: usize = 2400;
 
 /// The newest frame the video thread has for the window; the window takes it.
 pub type FrameSlot = Mutex<Option<egui::ColorImage>>;
+
+/// The seek epoch in which the pictures are there (the first one was shown, or there are none
+/// more): the sound waits for it, so the clock starts with the first picture.
+struct PictureGate(AtomicU64);
+
+impl PictureGate {
+    fn new() -> PictureGate {
+        PictureGate(AtomicU64::new(u64::MAX))
+    }
+
+    fn open(&self, epoch: u64) {
+        self.0.store(epoch, Ordering::Relaxed);
+    }
+
+    /// Wait until the gate is open for `epoch`; false when a seek came or playing was stopped.
+    fn wait(&self, shared: &Shared, epoch: u64, stop: &AtomicBool) -> bool {
+        while self.0.load(Ordering::Relaxed) != epoch {
+            if stop.load(Ordering::Relaxed) || shared.poll_seek(epoch).is_some() {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        true
+    }
+}
 
 /// What a quick look at a video file found.
 pub struct Looked {
@@ -82,14 +109,14 @@ pub fn frame_time(start: f64, index: u64, fps: f64) -> f64 {
 /// Play `path` into `shared` until `stop` is set: the pictures into `slot`, the sound (or the
 /// silence of a video without sound) into the engine. Seeks come through `shared`.
 pub fn run(tools: &Tools, path: &Path, info: &Info, shared: &Shared, stop: &AtomicBool, slot: &FrameSlot, ctx: &egui::Context) -> Result<(), String> {
-    let session = Session { tools, path, info, shared, stop, slot, ctx, video_ended: AtomicBool::new(false) };
+    let session = Session { tools, path, info, shared, stop, slot, ctx, video_ended: AtomicBool::new(false), gate: PictureGate::new() };
     std::thread::scope(|s| {
         let pictures = s.spawn(|| {
             let r = picture_loop(&session);
             stop.store(true, Ordering::Relaxed);
             r
         });
-        let sound = if info.has_audio { sound_loop(tools, path, shared, stop) } else { silence_loop(info, shared, stop, &session.video_ended) };
+        let sound = if info.has_audio { sound_loop(tools, path, shared, stop, &session.gate) } else { silence_loop(info, shared, stop, &session.video_ended, &session.gate) };
         // whichever ends first (on an error) ends the other
         stop.store(true, Ordering::Relaxed);
         let pictures = pictures.join().unwrap_or_else(|_| Err("The video player stopped unexpectedly.".into()));
@@ -108,11 +135,13 @@ struct Session<'a> {
     ctx: &'a egui::Context,
     /// the pictures are at their end (for a video of unknown length without sound)
     video_ended: AtomicBool,
+    /// opened by the pictures, waited for by the sound
+    gate: PictureGate,
 }
 
 /// The frames: read them from ffmpeg and show each at its time.
 fn picture_loop(session: &Session) -> Result<(), String> {
-    let Session { tools, path, info, shared, stop, slot, ctx, video_ended: ended } = session;
+    let Session { tools, path, info, shared, stop, slot, ctx, video_ended: ended, gate } = session;
     let (w, h) = info.picture_size();
     let fps = info.play_fps();
     let mut buf = vec![0u8; w as usize * h as usize * 4];
@@ -140,6 +169,7 @@ fn picture_loop(session: &Session) -> Result<(), String> {
             }
             eof = true;
             ended.store(true, Ordering::Relaxed);
+            gate.open(epoch);
             continue;
         }
         let pts = frame_time(start, index, fps);
@@ -156,6 +186,7 @@ fn picture_loop(session: &Session) -> Result<(), String> {
                     *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(image);
                     ctx.request_repaint();
                     shown = true;
+                    gate.open(epoch);
                     break;
                 }
             }
@@ -165,7 +196,7 @@ fn picture_loop(session: &Session) -> Result<(), String> {
 }
 
 /// The sound of the file from ffmpeg into the engine's queue.
-fn sound_loop(tools: &Tools, path: &Path, shared: &Shared, stop: &AtomicBool) -> Result<(), String> {
+fn sound_loop(tools: &Tools, path: &Path, shared: &Shared, stop: &AtomicBool, gate: &PictureGate) -> Result<(), String> {
     let mut epoch = shared.epoch();
     let mut proc = Some(tools.sound(path, 0.0, shared.rate, shared.channels)?);
     let (mut bytes, mut samples) = (vec![0u8; 16 * 1024], Vec::<f32>::new());
@@ -198,14 +229,16 @@ fn sound_loop(tools: &Tools, path: &Path, shared: &Shared, stop: &AtomicBool) ->
         samples.extend(carry[..whole].as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)));
         carry.drain(..whole);
         // out of date (a seek came) or stopped: the loop above looks at that
-        push_all(shared, epoch, &samples, stop);
+        if gate.wait(shared, epoch, stop) {
+            push_all(shared, epoch, &samples, stop);
+        }
     }
     Ok(())
 }
 
 /// A video without sound: silence as long as the video, so the engine's clock runs as the
 /// frame clock (pause, seek and the end work as they do for sound).
-fn silence_loop(info: &Info, shared: &Shared, stop: &AtomicBool, video_ended: &AtomicBool) -> Result<(), String> {
+fn silence_loop(info: &Info, shared: &Shared, stop: &AtomicBool, video_ended: &AtomicBool, gate: &PictureGate) -> Result<(), String> {
     let total = info.duration.map(|d| (d * shared.rate as f64) as usize);
     let (mut epoch, mut at, mut eof) = (shared.epoch(), 0usize, false);
     let mut chunk = vec![0.0f32; SILENCE_CHUNK * shared.channels];
@@ -221,6 +254,9 @@ fn silence_loop(info: &Info, shared: &Shared, stop: &AtomicBool, video_ended: &A
                 eof = true;
             }
             std::thread::sleep(Duration::from_millis(10));
+            continue;
+        }
+        if !gate.wait(shared, epoch, stop) {
             continue;
         }
         let frames = SILENCE_CHUNK.min(end - at);
@@ -359,6 +395,11 @@ mod tests {
     /// Play `name` for a while into a silent card; hands the shared state and the slot to `body`.
     fn playing(name: &str, body: impl FnOnce(&Arc<Shared>, &FrameSlot, &AtomicBool)) {
         let Some(tools) = tools_or_skip() else { return };
+        playing_with(&tools, name, body);
+    }
+
+    /// `playing` with these tools.
+    fn playing_with(tools: &Tools, name: &str, body: impl FnOnce(&Arc<Shared>, &FrameSlot, &AtomicBool)) {
         let path = fixture(name);
         let info = tools.probe(&path).unwrap();
         let shared = Shared::new(48_000, 2);
@@ -367,7 +408,7 @@ mod tests {
         let ctx = egui::Context::default();
         let device = card(&shared, &stop);
         std::thread::scope(|s| {
-            let runner = s.spawn(|| run(&tools, &path, &info, &shared, &stop, &slot, &ctx));
+            let runner = s.spawn(|| run(tools, &path, &info, &shared, &stop, &slot, &ctx));
             // a failing assert in `body` must still stop the runner and the card, or the scope waits forever
             let _stops = StopOnDrop(&stop);
             body(&shared, &slot, &stop);
@@ -417,5 +458,33 @@ mod tests {
             assert!(wait_for(5.0, || slot.lock().unwrap().as_ref().is_some_and(|f| f.pixels[45 * 160 + 80].b() > f.pixels[45 * 160 + 80].r())), "a frame of the second half");
             assert!(shared.position_secs() >= 0.6);
         });
+    }
+
+    // spec: MEDIA-009
+    #[cfg(unix)]
+    #[test]
+    fn the_clock_of_a_video_starts_with_its_first_picture_however_slow_ffmpeg_is() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(real) = tools_or_skip() else { return };
+        // an ffmpeg that takes 1.5 s to give pictures (a loaded machine), but not the sound
+        let dir = std::env::temp_dir().join(format!("shale-slow-ffmpeg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let slow = dir.join("ffmpeg");
+        let script = format!("#!/bin/sh\ncase \"$*\" in *rawvideo*) sleep 1.5;; esac\nexec '{}' \"$@\"\n", real.ffmpeg.display());
+        std::fs::write(&slow, script).unwrap();
+        std::fs::set_permissions(&slow, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let tools = Tools { ffmpeg: slow, ffprobe: real.ffprobe };
+        for clip in ["clip-silent.mp4", "clip.mp4"] {
+            playing_with(&tools, clip, |shared, slot, _| {
+                // play at once: the 1 s clip must not run out while there is no picture yet
+                shared.set_playing(true);
+                assert!(wait_for(8.0, || slot.lock().unwrap().is_some()), "{clip}: a frame arrives");
+                assert!(!shared.is_finished(), "{clip}: not over before the first picture");
+                assert!(shared.position_secs() < 0.2, "{clip}: the clock waited for the picture: {}", shared.position_secs());
+                assert!(wait_for(1.0, || shared.position_secs() > 0.3), "{clip}: then it runs");
+                assert!(wait_for(6.0, || shared.is_finished()), "{clip}: and the clip ends");
+            });
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
