@@ -71,7 +71,7 @@ fn sections(vault: &Vault, plan: &Plan, numbered: bool) -> Vec<Section> {
     let text_of = |rel: &Path| vault.notes.get(rel).map(|n| n.text.clone()).unwrap_or_default();
     let mut out = Vec::new();
     if let Some(rel) = &plan.intro {
-        out.push(section(Kind::Intro, Some(rel.clone()), 0, None, plan.title.clone(), text_of(rel)));
+        out.push(section(Kind::Intro, Some(rel.clone()), 1, None, plan.title.clone(), text_of(rel)));
     }
     fn walk(items: &[Item], level: usize, prefix: &str, numbered: bool, text_of: &dyn Fn(&Path) -> String, out: &mut Vec<Section>) {
         let mut n = 0;
@@ -368,7 +368,7 @@ mod tests {
         assert_eq!(by("x").number.as_deref(), Some("2.1"));
         assert_eq!(by("x").heads[0].label, "2.1.1 X");
         let intro = secs.iter().find(|s| s.kind == Kind::Intro).unwrap();
-        assert_eq!((intro.heads[0].label.as_str(), intro.heads[0].level), ("A heading", 1));
+        assert_eq!((intro.heads[0].label.as_str(), intro.heads[0].level), ("A heading", 2), "below the chapters: smaller than a chapter title");
         // numbering off: no numbers anywhere
         let plain = sections(&v, &plan, false);
         assert!(plain.iter().all(|s| s.number.is_none() && s.numbers.is_empty()));

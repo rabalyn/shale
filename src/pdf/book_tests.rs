@@ -477,6 +477,9 @@ fn the_user_guide_is_a_book_with_every_note_once_in_the_order_of_start_here() {
     assert_eq!(marks.iter().filter(|m| m.1 == "1 Notes and links").count(), 1);
     assert!(c.matches(&hex("1 Notes and links")).count() > 2, "the contents and the running header of the chapter's later pages");
     assert!(c.contains(&hex("Contents")) && c.contains(&hex("Shale user guide")));
+    // every character of the guide has a glyph in the PDF fonts (PDF-010): arrows, ellipses, calendars
+    let missing: std::collections::BTreeSet<char> = printed.iter().flat_map(|n| v.notes[n].text.chars()).filter(|c| !crate::pdf::write::has_glyph(*c)).collect();
+    assert!(missing.is_empty(), "no glyph for {missing:?}");
     // no link is printed as its markup: a word of the brackets that code does not have is not in the PDF
     // (words are drawn one by one)
     let mut words = std::collections::BTreeSet::new();

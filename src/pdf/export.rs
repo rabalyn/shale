@@ -560,7 +560,35 @@ impl<'a> Writer<'a> {
             }
         }
         let tables = if opts.plain_tables { vec![] } else { crate::table::find_tables(text) };
+        // a line that goes on the paragraph above it (PDF-009): text, no blank, heading, rule, list or
+        // task marker, quote, table, fence or embed of its own
+        let continues = |j: usize| -> bool {
+            let Some((_, l)) = lines.get(j) else { return false };
+            let t = l.trim();
+            if t.is_empty() || fenced.get(j).copied().unwrap_or(false) || tables.iter().any(|b| b.lines.contains(&j)) {
+                return false;
+            }
+            if matches!(t, "---" | "***" | "___") || markdown::heading_level(l).is_some() || markdown::parse_task_line(l).is_some() || list_marker(l).is_some() || t.starts_with('>') {
+                return false;
+            }
+            let links = markdown::find_links(l);
+            !(links.len() == 1 && links[0].embed && t.len() == links[0].range.len())
+        };
+        // a line that ends in two spaces or a backslash is a hard break: the next line starts a new one
+        let hard = |j: usize| lines[j].1.ends_with("  ") || lines[j].1.ends_with('\\');
+        // the text of line `i` with the lines that go on it joined by a space, and how many they are;
+        // `indented`: only lines that start with a space (the continuation of a list item)
+        let gather = |i: usize, first: &str, indented: bool| -> (String, usize) {
+            let (mut text, mut n) = (first.to_string(), 0);
+            while !hard(i + n) && continues(i + n + 1) && (!indented || lines[i + n + 1].1.starts_with(char::is_whitespace)) {
+                n += 1;
+                text = format!("{} {}", text.trim_end().trim_end_matches('\\'), lines[i + n].1.trim());
+            }
+            (text, n)
+        };
+        let mut extra;
         while i < lines.len() {
+            extra = 0;
             if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
                 self.table(vault, rel, &b.table, &b.meta.sizes, ink);
                 i = b.lines.end;
@@ -675,32 +703,50 @@ impl<'a> Writer<'a> {
                 if done {
                     self.p().path(&[[bx + box_s * 0.2, by + box_s * 0.55], [bx + box_s * 0.42, by + box_s * 0.78], [bx + box_s * 0.82, by + box_s * 0.22]], false, None, Some((Rgba(105, 65, 198, 255), 1.2)));
                 }
-                let ps = self.pieces(vault, rel, rest, size, ink, done);
+                let (rest, n) = gather(i, rest, true);
+                extra = n;
+                let ps = self.pieces(vault, rel, &rest, size, ink, done);
                 self.paragraph(&ps, bx + box_s + size * 0.5, cw - ind - box_s - size * 0.5);
             } else if let Some((marker, rest_off)) = list_marker(line) {
                 let ind = (line.len() - line.trim_start().len()) as f32 * 4.0;
                 self.need(base * 1.45);
                 let y = self.y;
                 self.p().text(TextStyle::plain(FontKind::Sans, base, Rgba(105, 65, 198, 255)), x0 + ind + 2.0, y + base * 1.08, &marker);
-                let ps = self.pieces(vault, rel, &line[rest_off..], base, ink, false);
+                let (rest, n) = gather(i, &line[rest_off..], true);
+                extra = n;
+                let ps = self.pieces(vault, rel, &rest, base, ink, false);
                 let indent = ind + base * 1.6;
                 self.paragraph(&ps, x0 + indent, cw - indent);
             } else if trimmed.starts_with('>') {
-                let content = line[line.find('>').unwrap() + 1..].trim_start();
+                let mut content = line[line.find('>').unwrap() + 1..].trim_start().to_string();
+                // the lines of a quote that go on, with or without their own `>`
+                while !hard(i + extra) {
+                    let next = lines.get(i + extra + 1).map(|(_, l)| l.trim_start());
+                    let more = match next {
+                        Some(n) if n.starts_with('>') => Some(n[1..].trim()).filter(|c| !c.is_empty()),
+                        Some(_) if continues(i + extra + 1) => Some(lines[i + extra + 1].1.trim()),
+                        _ => None,
+                    };
+                    let Some(more) = more else { break };
+                    extra += 1;
+                    content = format!("{} {more}", content.trim_end().trim_end_matches('\\'));
+                }
                 let start_y = self.y;
                 let start_page = self.page;
-                let ps = self.pieces(vault, rel, content, base, theme::QUOTE, false);
+                let ps = self.pieces(vault, rel, &content, base, theme::QUOTE, false);
                 self.paragraph(&ps, x0 + 12.0, cw - 12.0);
                 let end_y = self.y;
                 if self.page == start_page {
                     self.p().line([x0 + 2.0, start_y + 2.0], [x0 + 2.0, end_y - 2.0], Rgba(105, 65, 198, 180), 2.5);
                 }
             } else {
-                let ps = self.pieces(vault, rel, line, base, ink, false);
+                let (text, n) = gather(i, line, false);
+                extra = n;
+                let ps = self.pieces(vault, rel, &text, base, ink, false);
                 self.paragraph(&ps, x0, cw);
             }
             let _ = off;
-            i += 1;
+            i += 1 + extra;
         }
         places
     }
@@ -1303,6 +1349,59 @@ pub(crate) mod tests {
     /// `text` with enough filler lines after each heading that the headings are on different pages.
     fn long_note(headings: &[&str]) -> String {
         headings.iter().map(|h| format!("{h}\n\n") + &"filler line of the section\n\n".repeat(25)).collect()
+    }
+
+    /// The distance from the page's bottom of the first word that starts with `word` in the page text.
+    fn line_of(bytes: &[u8], word: &str) -> String {
+        let c = contents(bytes);
+        let at = c.find(&format!("<{}", hex(word.trim_end()))).unwrap_or_else(|| panic!("no {word:?} in the text: {}", c.lines().filter(|l| l.contains(" Tm")).collect::<Vec<_>>().join("|")));
+        let head = &c[..at];
+        let tm = head.rfind(" Tm").unwrap();
+        head[..tm].split_whitespace().last().unwrap().to_string()
+    }
+
+    // spec: PDF-009
+    #[test]
+    fn lines_of_one_paragraph_are_joined_and_flow_to_the_page_width() {
+        let (v, _) = vault();
+        let export = |t: &str| export_note(&v, Path::new("Welcome.md"), t, &ExportOptions { title: false, toc: false, ..ExportOptions::for_note() }).unwrap();
+        let same = |t: &str, a: &str, b: &str| {
+            let bytes = export(t);
+            line_of(&bytes, a) == line_of(&bytes, b)
+        };
+        // a paragraph wrapped in the source is one paragraph, reflowed
+        assert!(same("alpha beta\ngamma delta epsilon\n", "beta ", "gamma "), "the source line break is a space");
+        let long = format!("{}\n{}\n", "word ".repeat(60).trim(), "tail end of the paragraph");
+        let bytes = export(&long);
+        assert_ne!(line_of(&bytes, "tail "), line_of(&bytes, "word "), "a long paragraph still wraps at the page's width");
+        // a blank line, a hard break (two spaces, a backslash), a heading, a list, a table and an embed stay apart
+        assert!(!same("alpha beta\n\ngamma delta\n", "beta ", "gamma "), "a blank line");
+        assert!(!same("alpha beta  \ngamma delta epsilon\n", "beta ", "gamma "), "two spaces at the end");
+        assert!(!same("alpha beta\\\ngamma delta epsilon\n", "beta", "gamma "), "a backslash at the end");
+        assert!(!same("alpha beta\n## Head\ngamma delta epsilon\n", "beta", "gamma "), "a heading");
+        assert!(!same("alpha beta\n- gamma delta epsilon\n", "beta", "gamma "), "a list item");
+        assert!(!same("alpha beta\n---\ngamma delta epsilon\n", "beta", "gamma "), "a rule");
+        assert!(!same("alpha beta\n![[Sketch.excalidraw]]\ngamma delta epsilon\n", "beta", "gamma "), "an embed on its own line");
+        assert!(!same("alpha beta\n```\ngamma\n```\n", "beta", "gamma"), "a fence");
+    }
+
+    // spec: PDF-009
+    #[test]
+    fn a_continuation_line_joins_its_list_item_task_or_quote() {
+        let (v, _) = vault();
+        let bytes = |t: &str| export_note(&v, Path::new("Welcome.md"), t, &ExportOptions { title: false, toc: false, ..ExportOptions::for_note() }).unwrap();
+        let b = bytes("- first item\n  goes on here\n- second one\n");
+        assert_eq!(line_of(&b, "item "), line_of(&b, "goes "), "an indented line joins its item");
+        assert_ne!(line_of(&b, "goes "), line_of(&b, "second "), "the next item is its own");
+        let b = bytes("- first item\nnot indented\n");
+        assert_ne!(line_of(&b, "item "), line_of(&b, "not "), "a line that is not indented is a paragraph");
+        let b = bytes("- [ ] open task\n  with more text\n");
+        assert_eq!(line_of(&b, "task "), line_of(&b, "with "), "and a task");
+        let b = bytes("> quoted words\n> go on here\n\nafter\n");
+        assert_eq!(line_of(&b, "words "), line_of(&b, "go "), "the lines of a quote");
+        assert_ne!(line_of(&b, "go "), line_of(&b, "after"), "a quote ends at the blank line");
+        let b = bytes("1. numbered item\n   continues\n2. next\n");
+        assert_eq!(line_of(&b, "item "), line_of(&b, "continues"));
     }
 
     // spec: PDF-008, LINK-014, VAULT-025

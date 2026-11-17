@@ -15,6 +15,8 @@ their numbers. A note without such headings gets no contents page. The title (th
 title line without a `YYMMDD_` date prefix; when the note's first heading is a `#` that says the same, the title is
 not printed a second time.
 
+Paragraphs are reflowed as in Markdown: the lines of a paragraph you wrapped by hand in the note are joined and laid out to the page's width. A blank line, a heading, a list, a table, a code block, an embed on its own line and a line that ends in two spaces or a backslash still end a line. Arrows and similar symbols are printed too.
+
 Highlights (`==text==`) and the colours of [[Editor]] (`<mark style="background: …">` behind the text, `<span style="color: …">` as the text colour) are printed as written, with the tags left out and the text still selectable.
 
 Code looks as on screen: fenced code blocks and inline code are printed in their syntax colours on the same dark code background as in the reading view (see [[Editor]]), the text still selectable.
