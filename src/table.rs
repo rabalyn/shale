@@ -598,6 +598,22 @@ fn words(job: &LayoutJob) -> Vec<LayoutJob> {
     out
 }
 
+/// The widths (with padding) of a table's columns from the sizes stored with it (EDIT-031), used
+/// by the grid, the reading view and the PDF export: each at least `MIN_COL`, scaled down
+/// together when they do not fit `avail`, else as stored. `None` when the sizes do not match the
+/// `ncols` columns or are no positive numbers: the widths are then worked out.
+pub fn stored_widths(cols: &[f32], ncols: usize, avail: f32) -> Option<Vec<f32>> {
+    if ncols == 0 || cols.len() != ncols || cols.iter().any(|c| !c.is_finite() || *c <= 0.0) {
+        return None;
+    }
+    let mut w: Vec<f32> = cols.iter().map(|c| c.max(MIN_COL)).collect();
+    let (sum, room) = (w.iter().sum::<f32>(), avail - 1.0);
+    if sum > room {
+        w.iter_mut().for_each(|x| *x *= room.max(0.0) / sum);
+    }
+    Some(w)
+}
+
 /// Lay a table out for `avail` points of width. `exists` says whether a link target is a note.
 /// Sizes that match the table's columns (rows) are used (EDIT-031): the widths scaled down
 /// together when they do not fit, every column at least `MIN_COL`, a row never shorter than its
@@ -625,15 +641,9 @@ pub fn layout(ctx: &egui::Context, table: &Table, sizes: &Sizes, base: f32, avai
         }
     }
     let text_avail = avail - 2.0 * PAD_X * ncols as f32 - 1.0;
-    let text_w = if sizes.cols.len() == ncols && ncols > 0 {
-        let mut w: Vec<f32> = sizes.cols.iter().map(|c| c.max(MIN_COL)).collect();
-        let (sum, room) = (w.iter().sum::<f32>(), avail - 1.0);
-        if sum > room {
-            w.iter_mut().for_each(|x| *x *= room.max(0.0) / sum);
-        }
-        w.iter().map(|x| (x - 2.0 * PAD_X).max(1.0)).collect()
-    } else {
-        column_widths(&natural, &min, text_avail)
+    let text_w = match stored_widths(&sizes.cols, ncols, avail) {
+        Some(w) => w.iter().map(|x| (x - 2.0 * PAD_X).max(1.0)).collect(),
+        None => column_widths(&natural, &min, text_avail),
     };
     let rows_fit = sizes.rows.len() == jobs.len();
     let mut cells = Vec::new();
@@ -691,6 +701,18 @@ mod tests {
     }
 
     // spec: EDIT-024
+    // spec: EDIT-031
+    #[test]
+    fn stored_widths_fit_scale_down_clamp_and_are_checked() {
+        assert_eq!(stored_widths(&[100.0, 200.0], 2, 500.0).unwrap(), [100.0, 200.0], "as stored when they fit");
+        let w = stored_widths(&[1.0, 100.0], 2, 500.0).unwrap();
+        assert_eq!(w, [MIN_COL, 100.0], "at least MIN_COL");
+        let w = stored_widths(&[300.0, 100.0], 2, 201.0).unwrap();
+        assert_eq!(w, [150.0, 50.0], "scaled down together to avail - 1");
+        assert!(stored_widths(&[], 0, 400.0).is_none() && stored_widths(&[1.0], 2, 400.0).is_none());
+        assert!(stored_widths(&[1.0, f32::NAN], 2, 400.0).is_none() && stored_widths(&[1.0, -2.0], 2, 400.0).is_none());
+    }
+
     #[test]
     fn cells_split_on_pipes_with_or_without_the_outer_ones() {
         assert_eq!(cells("| a | b | c |"), ["a", "b", "c"]);
