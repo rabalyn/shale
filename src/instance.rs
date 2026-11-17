@@ -319,7 +319,9 @@ mod tests {
         if got.len() < 2 {
             got.extend(wait_for(&h));
         }
-        assert_eq!(got, vec![vec![PathBuf::from("/vault/a"), PathBuf::from("/vault/a/Note ü.md")], vec![]]);
+        // made absolute by the sender: on Windows `/vault/a` gets the current drive
+        let abs = |p: &str| std::path::absolute(p).unwrap();
+        assert_eq!(got, vec![vec![abs("/vault/a"), abs("/vault/a/Note ü.md")], vec![]]);
     }
 
     // spec: DATA-015

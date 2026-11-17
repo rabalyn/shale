@@ -937,19 +937,53 @@ pub(crate) mod tests {
     /// row get a port of the last 50), so under load another test's pretend server, or a
     /// process of the machine, is given the port between the drop and the connect, and the
     /// "unreachable" server answers (or takes one of the connections a `mock_http_with` counts).
-    /// Here the port is the local port of a connected socket: it is in use, so no bind gets it
-    /// (not even by `bind` to the port itself), and no socket listens on it, so a connect to it
-    /// is refused. Hold the value until the connection attempt is over. DEV-016.
+    /// A TCP port that refuses connections and that no other bind gets while the value is held.
+    /// Hold the value until the connection attempt is over. DEV-016.
+    ///
+    /// Elsewhere the port is the local port of a connected socket: it is in use, so no bind gets it
+    /// (not even by `bind` to the port itself), and no socket listens on it, so a connect to it is
+    /// refused. Windows lets a bind take a port that only a connected socket uses, so there it is a
+    /// socket that is bound and does not listen: connects are refused, binds fail.
     pub(crate) struct ClosedPort {
         pub(crate) port: u16,
+        #[cfg(not(windows))]
         _client: std::net::TcpStream,
+        #[cfg(not(windows))]
         _listener: TcpListener,
+        #[cfg(windows)]
+        socket: windows_sys::Win32::Networking::WinSock::SOCKET,
     }
 
+    #[cfg(not(windows))]
     pub(crate) fn closed_port() -> ClosedPort {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         ClosedPort { port: client.local_addr().unwrap().port(), _client: client, _listener: listener }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn closed_port() -> ClosedPort {
+        use windows_sys::Win32::Networking::WinSock as ws;
+        // a free port; creating a std socket also starts Winsock for the calls below
+        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let mut addr = ws::SOCKADDR_IN { sin_family: ws::AF_INET, sin_port: port.to_be(), ..Default::default() };
+        addr.sin_addr.S_un.S_addr = u32::from_ne_bytes([127, 0, 0, 1]);
+        // SAFETY: plain Winsock calls on a socket made here; `addr` is a valid SOCKADDR_IN of the length given
+        let socket = unsafe { ws::socket(i32::from(ws::AF_INET), ws::SOCK_STREAM, ws::IPPROTO_TCP) };
+        assert_ne!(socket, ws::INVALID_SOCKET, "socket");
+        let size = i32::try_from(std::mem::size_of::<ws::SOCKADDR_IN>()).unwrap();
+        // SAFETY: see above
+        let bound = unsafe { ws::bind(socket, std::ptr::addr_of!(addr).cast(), size) };
+        assert_eq!(bound, 0, "bind");
+        ClosedPort { port, socket }
+    }
+
+    #[cfg(windows)]
+    impl Drop for ClosedPort {
+        fn drop(&mut self) {
+            // SAFETY: the socket is ours and closed once
+            unsafe { windows_sys::Win32::Networking::WinSock::closesocket(self.socket) };
+        }
     }
 
     // spec: DEV-016

@@ -48,7 +48,18 @@ impl Git {
     /// `git -C <dir> args…` with stdin closed, no prompts and no inherited repository variables.
     fn command(&self, dir: &Path, args: &[&OsStr]) -> Command {
         let mut c = Command::new(&self.program);
-        c.arg("-C").arg(dir).args(args);
+        c.arg("-C").arg(dir);
+        // hidden git-lfs (tests): `git lfs …` becomes an unknown git command, which fails everywhere
+        #[cfg(test)]
+        if args.first().is_some_and(|a| *a == "lfs") && self.env.iter().any(|(k, _)| k == NO_LFS) {
+            c.arg("lfs-is-hidden-by-the-test");
+            return self.finish_command(c);
+        }
+        c.args(args);
+        self.finish_command(c)
+    }
+
+    fn finish_command(&self, mut c: Command) -> Command {
         c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         for v in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR", "GIT_NAMESPACE"] {
             c.env_remove(v);
@@ -610,11 +621,17 @@ pub fn host_name() -> String {
 
 pub mod lfs;
 
-/// Makes a test's git find no git-lfs, also on a computer that has one: a `git-lfs` that fails
-/// comes first on its PATH. (An alias cannot hide it: git runs an installed `git-lfs` program
-/// and ignores an alias of the same name.)
+/// Marks a `Git` whose `git lfs …` calls fail (see `hide_lfs`).
+#[cfg(test)]
+const NO_LFS: &str = "SHALE_TEST_NO_GIT_LFS";
+
+/// Makes a test's git find no git-lfs, also on a computer that has one: `git lfs …` calls fail
+/// (on Windows, Git for Windows ships git-lfs in its own folder, which no PATH entry can shadow),
+/// and a `git-lfs` that fails comes first on the PATH for the filters git starts itself. (An alias
+/// cannot hide it: git runs an installed `git-lfs` program and ignores an alias of the same name.)
 #[cfg(test)]
 pub fn hide_lfs(git: &mut Git) {
+    git.env.push((NO_LFS.into(), "1".into()));
     static PATH: std::sync::OnceLock<OsString> = std::sync::OnceLock::new();
     let path = PATH.get_or_init(|| {
         let dir = std::env::temp_dir().join(format!("shale-no-git-lfs-{}", std::process::id()));
