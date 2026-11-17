@@ -89,7 +89,9 @@ container answers `info` but cannot unpack images). If neither works, the job pr
 
 - the job container must be allowed to run containers: for the runner's `container.options` in the
   `act_runner` configuration, `--privileged` (and a rootful or a user-namespace-capable Podman; the
-  image storage inside the job container is not shared, so every run pulls the images again), **or**
+  image storage inside the job container is thrown away after the run unless the runner offers a
+  volume for it: the homelab runner's `cache/shale/containers` is mounted as `/var/lib/containers`,
+  ADR-0022), **or**
 - a Docker socket mounted into the job container (`container.valid_volumes` and
   `container.options: -v /var/run/docker.sock:/var/run/docker.sock`, then install `docker.io` and
   `docker-compose`) **and** host networking for the job container (`container.network: host`), because

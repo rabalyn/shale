@@ -103,7 +103,7 @@ case "${1:-}" in
     fi
 
     # the TeX image is no running stack: only built (the current TeX Live, ADR-0020, and the pinned tuda-ci sources);
-    # land.sh uses the cached image, CI rebuilds it without the cache
+    # land.sh and a tag run use the cached image (CI keeps podman's storage, ADR-0022), the weekly run rebuilds it without the cache
     refresh=""
     if [ "${SHALE_ENV_TESTS_TEX_REFRESH:-no}" = yes ]; then refresh="--refresh"; fi
     sh tests/tex-env/tex-env.sh build $refresh || { echo "the TeX image could not be built" >&2; exit 1; }
