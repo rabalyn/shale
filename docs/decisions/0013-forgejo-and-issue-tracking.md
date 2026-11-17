@@ -1,6 +1,6 @@
 # ADR-0013: Forgejo is the home of development; its issues track all work; GitHub builds and distributes releases
 
-- **Status**: Accepted (owner decision, 2026-11-15)
+- **Status**: Accepted (owner decision, 2026-11-15); §1, §3, §4 and §5 amended by [ADR-0017](0017-github-issues-forgejo-ci.md) (2026-11-17): the issues moved to GitHub with their numbers, and GitHub builds only releases
 - **Date**: 2026-11-15
 - **Specs**: FORGE-001…FORGE-011, DEV-001…DEV-008, BUILD-013
 - **Issue**: Forgejo raba/shale#1

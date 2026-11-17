@@ -1,4 +1,4 @@
-<!-- Forgejo fills this in for every new pull request (DEV-009). Delete what does not apply and say why. -->
+<!-- GitHub fills this in for every new pull request (DEV-009). Delete what does not apply and say why. -->
 
 Closes #
 

@@ -4,8 +4,8 @@ Questions that are not decided yet, and the SHOULD BE rules in the order the 202
 suggests doing them. When a point is decided it becomes an ADR or a spec rule and is struck out
 here.
 
-**Open work is tracked in the Forgejo issues** (<https://git.home.rabalyn.de/raba/shale/issues>,
-FORGE-004, [ADR-0013](../decisions/0013-forgejo-and-issue-tracking.md)). The table below is the
+**Open work is tracked in the GitHub issues** (<https://github.com/rabalyn/shale/issues>,
+FORGE-004, [ADR-0017](../decisions/0017-github-issues-forgejo-ci.md)). The table below is the
 2026-11-14 review order, kept for history; new work goes into issues, not here.
 
 ## Suggested order of SHOULD BE work
