@@ -334,6 +334,24 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, imag
     job
 }
 
+/// A heading title as the outline shows it (LINK-013): the editor's inline styling (bold, italic,
+/// code, strike, highlight, `<mark>` colours, links by their shown text) with the markup left out
+/// of the text altogether, not just hidden.
+pub fn outline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob {
+    let job = highlight_preview(title, links, base, &[], Some(1..1));
+    let mut out = LayoutJob::default();
+    for s in &job.sections {
+        let hidden = s.format.color == Color32::TRANSPARENT && s.format.font_id.size <= 1.0;
+        if hidden {
+            continue;
+        }
+        let start = out.text.len();
+        out.text.push_str(&job.text[s.byte_range.start.0..s.byte_range.end.0]);
+        out.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(out.text.len()), format: s.format.clone() });
+    }
+    out
+}
+
 fn to_format(f: Fmt, base: f32) -> TextFormat {
     if f.image_h > 0 {
         return TextFormat { font_id: FontId::new(1.0, FontFamily::Proportional), color: Color32::TRANSPARENT, line_height: Some(f.image_h as f32), ..Default::default() };
@@ -3852,6 +3870,30 @@ mod tests {
     fn format_of<'a>(job: &'a LayoutJob, text: &str, needle: &str) -> &'a TextFormat {
         let at = text.find(needle).unwrap_or_else(|| panic!("{needle} is not in the text"));
         &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format
+    }
+
+    // spec: LINK-013
+    #[test]
+    fn the_outline_shows_heading_text_formatted_without_markup() {
+        let plain = |t: &str, links: &[(LinkSpan, bool)]| outline_job(t, links, 14.0);
+        let job = plain("<mark style=\"background: #FFFF00;\">Audio</mark>", &[]);
+        assert_eq!(job.text, "Audio");
+        assert_eq!(job.sections[0].format.background, Color32::from_rgb(255, 255, 0));
+        assert_eq!(plain("**B** and *i* ~~s~~ `c` ==h==", &[]).text, "B and i s c h");
+        let job = plain("**B** x", &[]);
+        assert_eq!(job.sections[0].format.color, theme::TEXT_STRONG);
+        let job = plain("~~s~~", &[]);
+        assert_eq!(job.sections[0].format.strikethrough.width, 1.0);
+        let job = plain("`c`", &[]);
+        assert_eq!(job.sections[0].format.font_id.family, FontFamily::Monospace);
+        for t in ["See [[Note|Alias]] now", "See [Alias](Note.md) now"] {
+            let links: Vec<(LinkSpan, bool)> = markdown::find_links(t).into_iter().map(|l| (l, true)).collect();
+            let job = plain(t, &links);
+            assert_eq!(job.text, "See Alias now", "{t}");
+            let at = job.text.find("Alias").unwrap();
+            let f = &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format;
+            assert_eq!(f.color, theme::LINK);
+        }
     }
 
     // spec: EDIT-029
