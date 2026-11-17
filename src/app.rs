@@ -3455,6 +3455,7 @@ mod export_tests {
         let rel = app.create_note(Path::new(""), "aux", false).unwrap();
         assert_eq!(rel, PathBuf::from("aux_.md"));
         assert_eq!(last_toast(&app), "Saved as `aux_.md`: `aux` is a reserved name on Windows");
+        // in the temp folder its path is longer than 260 characters on Windows (DATA-013)
         let rel = app.create_note(Path::new(""), &"x".repeat(250), false).unwrap();
         assert_eq!(rel.file_name().unwrap().len(), 200);
         assert!(last_toast(&app).ends_with("the name is longer than 200 bytes"), "{}", last_toast(&app));
@@ -3499,6 +3500,27 @@ mod export_tests {
         assert!(last_toast(&app).starts_with("Renamed to `Work-`: `*` is not allowed"), "{}", last_toast(&app));
         app.rename(Path::new("Work-"), "Work").unwrap();
         assert!(last_toast(&app).starts_with("Renamed to “Work”"), "{}", last_toast(&app));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-016, DATA-013
+    #[test]
+    fn a_rename_that_only_changes_letter_case_is_done_also_where_letter_case_is_ignored() {
+        let (mut app, d) = test_app("case-rename");
+        std::fs::write(d.join("Linker.md"), "to [[mine]]\n").unwrap();
+        std::fs::write(d.join("mine.md"), "mine\n").unwrap();
+        std::fs::create_dir(d.join("work")).unwrap();
+        app.rescan();
+        app.rename(Path::new("mine.md"), "Mine").unwrap();
+        assert!(last_toast(&app).starts_with("Renamed to “Mine”"), "{}", last_toast(&app));
+        app.rename(Path::new("work"), "Work").unwrap();
+        // the folder lists the new spelling (on macOS and Windows the old one would still open it)
+        let listed: Vec<String> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        for (new, old) in [("Mine.md", "mine.md"), ("Work", "work")] {
+            assert!(listed.iter().any(|n| n == new) && !listed.iter().any(|n| n == old), "{listed:?}");
+        }
+        assert_eq!(std::fs::read_to_string(d.join("Mine.md")).unwrap(), "mine\n");
+        assert!(app.vault.as_ref().unwrap().exists("Mine", None), "the vault knows it by its new name");
         let _ = std::fs::remove_dir_all(&d);
     }
 

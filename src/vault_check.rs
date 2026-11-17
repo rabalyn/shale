@@ -55,14 +55,34 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>) -> io::Result<()> {
         entries.push((name, is_dir));
     }
     entries.sort();
+    let mut found = check_folder(dir, &entries).into_iter().peekable();
+    // each finding, then what is inside the folder it names: the order of a walk
+    for (name, is_dir) in &entries {
+        let rel = dir.join(name);
+        if let Some(f) = found.next_if(|f| f.rel == rel) {
+            out.push(f);
+        }
+        if *is_dir && !fs_is_link(&root.join(&rel)) {
+            walk(root, &rel, out)?;
+        }
+    }
+    Ok(())
+}
+
+/// The findings among the entries of one folder, `dir` relative to the vault, given by name and
+/// whether each is a folder, sorted by name. This is the whole check of a folder without the file
+/// system, so names that the running system cannot hold (`a:b.md` on Windows, `Plan.md` next to
+/// `plan.md` on macOS) are checked the same everywhere.
+pub fn check_folder(dir: &Path, entries: &[(String, bool)]) -> Vec<Finding> {
+    let mut out = Vec::new();
     let mut taken: HashSet<String> = entries.iter().map(|(n, _)| n.to_lowercase()).collect();
     let parent_chars = if dir.as_os_str().is_empty() { 0 } else { rel_to_string(dir).chars().count() + 1 };
     // the first name of a group that differs only in letter case stays as it is
     let mut first_of: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for (name, _) in &entries {
+    for (name, _) in entries {
         first_of.entry(name.to_lowercase()).or_insert_with(|| name.clone());
     }
-    for (name, is_dir) in &entries {
+    for (name, is_dir) in entries {
         let mut reasons = portable_problems(name, TYPED_NAME_MAX);
         if name.ends_with(' ') {
             reasons.push("a name can't end in a space on Windows".into());
@@ -77,25 +97,23 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>) -> io::Result<()> {
         if too_long {
             reasons.push(format!("the path is {path_chars} characters long, more than {MAX_PATH_CHARS}"));
         }
-        if !reasons.is_empty() {
-            let budget = if too_long { MAX_PATH_CHARS.saturating_sub(parent_chars).min(TYPED_NAME_MAX) } else { TYPED_NAME_MAX };
-            let cut = portable_name(name, budget);
-            let fallback = if *is_dir { "folder" } else { "file" };
-            // nothing left of the name: a name for it, unless even that does not fit
-            let portable = if cut.is_empty() { (budget >= fallback.len()).then(|| fallback.to_string()) } else { Some(cut) };
-            // a name that clashes keeps its own letters and only gets a number
-            let wanted = if clash.is_some() { Some(portable.unwrap_or_else(|| name.clone())) } else { portable.filter(|p| p != name) };
-            let proposed = wanted.map(|w| free_name(&w, *is_dir, |n| taken.contains(&n.to_lowercase())));
-            if let Some(p) = &proposed {
-                taken.insert(p.to_lowercase());
-            }
-            out.push(Finding { rel: dir.join(name), is_dir: *is_dir, reasons, proposed });
+        if reasons.is_empty() {
+            continue;
         }
-        if *is_dir && !fs_is_link(&root.join(dir).join(name)) {
-            walk(root, &dir.join(name), out)?;
+        let budget = if too_long { MAX_PATH_CHARS.saturating_sub(parent_chars).min(TYPED_NAME_MAX) } else { TYPED_NAME_MAX };
+        let cut = portable_name(name, budget);
+        let fallback = if *is_dir { "folder" } else { "file" };
+        // nothing left of the name: a name for it, unless even that does not fit
+        let portable = if cut.is_empty() { (budget >= fallback.len()).then(|| fallback.to_string()) } else { Some(cut) };
+        // a name that clashes keeps its own letters and only gets a number
+        let wanted = if clash.is_some() { Some(portable.unwrap_or_else(|| name.clone())) } else { portable.filter(|p| p != name) };
+        let proposed = wanted.map(|w| free_name(&w, *is_dir, |n| taken.contains(&n.to_lowercase())));
+        if let Some(p) = &proposed {
+            taken.insert(p.to_lowercase());
         }
+        out.push(Finding { rel: dir.join(name), is_dir: *is_dir, reasons, proposed });
     }
-    Ok(())
+    out
 }
 
 fn fs_is_link(p: &Path) -> bool {
@@ -103,7 +121,8 @@ fn fs_is_link(p: &Path) -> bool {
 }
 
 /// `name`, or `name 2`, `name 3` … (before the extension; for a folder at the end) until `taken`
-/// no longer says the name is.
+/// no longer says the name is. The stem of a numbered name is cut (at a character boundary) so
+/// that it stays within 200 bytes.
 pub fn free_name(name: &str, is_dir: bool, taken: impl Fn(&str) -> bool) -> String {
     if !taken(name) {
         return name.to_string();
@@ -116,7 +135,18 @@ pub fn free_name(name: &str, is_dir: bool, taken: impl Fn(&str) -> bool) -> Stri
         name.rfind('.').filter(|i| *i > 0)
     };
     let (stem, ext) = name.split_at(split.unwrap_or(name.len()));
-    (2..).map(|n| format!("{stem} {n}{ext}")).find(|c| !taken(c)).expect("a free number exists")
+    (2..)
+        .map(|n| {
+            let number = format!(" {n}");
+            // the stem gives way, so that a name within 200 bytes stays within them
+            let mut keep = stem.len().min(TYPED_NAME_MAX.saturating_sub(number.len() + ext.len()).max(1));
+            while !stem.is_char_boundary(keep) {
+                keep -= 1;
+            }
+            format!("{}{number}{ext}", &stem[..keep])
+        })
+        .find(|c| !taken(c))
+        .expect("a free number exists")
 }
 
 /// The state of the check on the Settings → Vault page.
@@ -232,18 +262,52 @@ mod tests {
         all.iter().find(|f| f.rel == Path::new(rel)).unwrap_or_else(|| panic!("no finding for {rel}: {:?}", all.iter().map(|f| &f.rel).collect::<Vec<_>>()))
     }
 
+    /// The check of one folder `dir` holding these names (`true`: a folder), without files: names
+    /// that the running file system cannot hold are checked the same on every system.
+    fn names(dir: &str, entries: &[(&str, bool)]) -> Vec<Finding> {
+        let mut e: Vec<(String, bool)> = entries.iter().map(|(n, d)| (n.to_string(), *d)).collect();
+        e.sort();
+        check_folder(Path::new(dir), &e)
+    }
+
+    /// Whether the file system of the temp folder holds files of exactly these names side by side.
+    /// Windows refuses `:` and `?` (or makes `a:b` a stream of the file `a`) and drops a trailing
+    /// dot; macOS and Windows keep one file of `Plan.md` and `plan.md`.
+    fn fs_holds(tag: &str, wanted: &[&str]) -> bool {
+        let d = temp(&format!("holds-{tag}"));
+        let made = wanted.iter().all(|n| fs::write(d.join(n), "x").is_ok());
+        let mut listed: Vec<String> = fs::read_dir(&d).map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        listed.sort();
+        let mut want: Vec<String> = wanted.iter().map(|n| n.to_string()).collect();
+        want.sort();
+        let _ = fs::remove_dir_all(&d);
+        made && listed == want
+    }
+
+    fn skipped(test: &str, wanted: &[&str]) {
+        println!("{test}: the part on disk is skipped, this file system cannot hold {wanted:?} (the names are checked without files)");
+    }
+
     // spec: VAULT-028
     #[test]
     fn the_check_names_each_reason_with_the_portable_name_and_leaves_good_names_out() {
-        let d = temp("reasons");
-        for f in ["Fine.md", "Ümlaut – ok.md", "a:b.md", "what?.md", "tab\there.md", "dots...", "NUL.txt", "con.md", "Dir*/in.md", "Dir*/x?.md", "Notes/Good.md"] {
-            touch(&d, f, "x");
-        }
-        touch(&d, "space .md", "x");
-        fs::write(d.join("end "), "x").unwrap();
         let long = format!("{}.md", "n".repeat(205));
-        touch(&d, &long, "x");
-        let all = check(&d).unwrap();
+        let root = [
+            ("Fine.md", false),
+            ("Ümlaut – ok.md", false),
+            ("a:b.md", false),
+            ("what?.md", false),
+            ("tab\there.md", false),
+            ("dots...", false),
+            ("NUL.txt", false),
+            ("con.md", false),
+            ("space .md", false),
+            ("end ", false),
+            (long.as_str(), false),
+            ("Dir*", true),
+            ("Notes", true),
+        ];
+        let all = names("", &root);
         assert_eq!(found(&all, "a:b.md").reasons, vec!["`:` is not allowed on Windows"]);
         assert_eq!(found(&all, "a:b.md").proposed.as_deref(), Some("a-b.md"));
         assert_eq!(found(&all, "what?.md").proposed.as_deref(), Some("what-.md"));
@@ -263,47 +327,72 @@ mod tests {
         // a folder and what is in it, each by its own name
         assert!(found(&all, "Dir*").is_dir);
         assert_eq!(found(&all, "Dir*").proposed.as_deref(), Some("Dir-"));
-        assert_eq!(found(&all, "Dir*/x?.md").proposed.as_deref(), Some("x-.md"));
-        for ok in ["Fine.md", "Ümlaut – ok.md", "Notes", "Notes/Good.md", "Dir*/in.md"] {
+        let inner = names("Dir*", &[("in.md", false), ("x?.md", false)]);
+        assert_eq!(found(&inner, "Dir*/x?.md").proposed.as_deref(), Some("x-.md"));
+        assert_eq!(inner.len(), 1, "Dir*/in.md is fine");
+        assert!(names("Notes", &[("Good.md", false)]).is_empty());
+        for ok in ["Fine.md", "Ümlaut – ok.md", "Notes", "space .md"] {
             assert!(all.iter().all(|f| f.rel != Path::new(ok)), "{ok} is fine");
         }
+        // on disk the walk finds the same, the findings inside a folder right after the folder
+        let odd = ["a:b.md", "what?.md", "tab\there.md", "dots...", "NUL.txt", "con.md", "end ", "Dir*", "x?.md"];
+        if !fs_holds("reasons", &odd) {
+            return skipped("the_check_names_each_reason_with_the_portable_name_and_leaves_good_names_out", &odd);
+        }
+        let d = temp("reasons");
+        for (name, is_dir) in root {
+            if !is_dir {
+                touch(&d, name, "x");
+            }
+        }
+        for f in ["Dir*/in.md", "Dir*/x?.md", "Notes/Good.md"] {
+            touch(&d, f, "x");
+        }
+        let mut walked = Vec::new();
+        for f in all {
+            let is_dir_star = f.rel == Path::new("Dir*");
+            walked.push(f);
+            if is_dir_star {
+                walked.extend(inner.clone());
+            }
+        }
+        assert_eq!(check(&d).unwrap(), walked);
         let _ = fs::remove_dir_all(&d);
     }
 
     // spec: VAULT-028
     #[test]
     fn names_that_differ_only_in_letter_case_are_found_per_folder() {
-        let d = temp("case");
-        for f in ["Plan.md", "plan.md", "PLAN.md", "Other/plan.md", "Other/Notes.md"] {
-            touch(&d, f, "x");
-        }
-        let all = check(&d).unwrap();
+        let root = [("Plan.md", false), ("plan.md", false), ("PLAN.md", false), ("Other", true)];
+        let all = names("", &root);
         // the first of the group (by name) stays, the others get a number
         assert!(all.iter().all(|f| f.rel != Path::new("PLAN.md")), "PLAN.md sorts first and stays: {all:?}");
         let plan = found(&all, "Plan.md");
         assert_eq!(plan.reasons, vec!["differs only in letter case from `PLAN.md`"]);
         assert_eq!(plan.proposed.as_deref(), Some("Plan 2.md"));
         assert_eq!(found(&all, "plan.md").proposed.as_deref(), Some("plan 3.md"));
-        assert!(all.iter().all(|f| !f.rel.starts_with("Other")), "another folder is another namespace");
-        // a folder and a file clash as well, a folder's number goes at its end
-        touch(&d, "Docs.d/x.md", "x");
-        touch(&d, "docs.D", "x");
-        let all = check(&d).unwrap();
+        assert_eq!(all.len(), 2);
+        assert!(names("Other", &[("plan.md", false), ("Notes.md", false)]).is_empty(), "another folder is another namespace");
+        // a folder and a file clash as well
+        let all = names("", &[("Docs.d", true), ("docs.D", false)]);
         assert_eq!(found(&all, "docs.D").reasons, vec!["differs only in letter case from `Docs.d`"]);
+        // on disk, where the file system tells them apart (Linux; not macOS or Windows)
+        let group = ["Plan.md", "plan.md", "PLAN.md"];
+        if !fs_holds("case", &group) {
+            return skipped("names_that_differ_only_in_letter_case_are_found_per_folder", &group);
+        }
+        let d = temp("case");
+        for f in ["Plan.md", "plan.md", "PLAN.md", "Other/plan.md", "Other/Notes.md"] {
+            touch(&d, f, "x");
+        }
+        assert_eq!(check(&d).unwrap(), names("", &root));
         let _ = fs::remove_dir_all(&d);
     }
 
     // spec: VAULT-028
     #[test]
     fn a_taken_name_gets_a_number_also_among_the_proposals() {
-        let d = temp("taken");
-        for f in ["a-b.md", "a:b.md", "a?b.md", "x:y.excalidraw.md"] {
-            touch(&d, f, "x");
-        }
-        touch(&d, "x-y.excalidraw.md", "x");
-        touch(&d, "q*", "x");
-        touch(&d, "q-", "x");
-        let all = check(&d).unwrap();
+        let all = names("", &[("a-b.md", false), ("a:b.md", false), ("a?b.md", false), ("x:y.excalidraw.md", false), ("x-y.excalidraw.md", false), ("q*", false), ("q-", false)]);
         assert_eq!(found(&all, "a:b.md").proposed.as_deref(), Some("a-b 2.md"));
         assert_eq!(found(&all, "a?b.md").proposed.as_deref(), Some("a-b 3.md"));
         assert_eq!(found(&all, "x:y.excalidraw.md").proposed.as_deref(), Some("x-y 2.excalidraw.md"), "the number goes before the double extension");
@@ -311,7 +400,11 @@ mod tests {
         assert_eq!(free_name("n.md", false, |n| n == "n.md" || n == "n 2.md"), "n 3.md");
         assert_eq!(free_name("n.md", false, |_| false), "n.md");
         assert_eq!(free_name("dir.x", true, |n| n == "dir.x"), "dir.x 2", "a folder has no extension");
-        let _ = fs::remove_dir_all(&d);
+        // a name cut to 200 bytes stays within them with its number (two bytes a letter)
+        let cut = format!("{}.md", "λ".repeat(98));
+        let numbered = free_name(&cut, false, |n| n == cut);
+        assert_eq!(numbered, format!("{} 2.md", "λ".repeat(97)));
+        assert!(numbered.len() <= TYPED_NAME_MAX);
     }
 
     // spec: VAULT-028
@@ -351,19 +444,22 @@ mod tests {
     // spec: VAULT-028
     #[test]
     fn the_check_skips_git_shale_and_trash_and_does_not_follow_links() {
+        // a name over 200 bytes: wrong on every system, and every system can hold it
+        let long = format!("{}.md", "n".repeat(205));
         let d = temp("skipped");
-        for f in [".git/a:b", ".shale/c:d.json", ".trash/2026-11-17/e:f.md", "Notes/ok.md"] {
-            touch(&d, f, "x");
+        for f in [".git", ".shale", ".trash/2026-11-17", "Real"] {
+            touch(&d, &format!("{f}/{long}"), "x");
         }
-        touch(&d, "Real/in:side.md", "x");
+        touch(&d, "Notes/ok.md", "x");
         #[cfg(unix)]
         std::os::unix::fs::symlink(d.join("Real"), d.join("Link:dir")).unwrap();
         let all = check(&d).unwrap();
         let rels: Vec<String> = all.iter().map(|f| rel_to_string(&f.rel)).collect();
+        let inside = format!("Real/{long}");
         #[cfg(unix)]
-        assert_eq!(rels, vec!["Link:dir", "Real/in:side.md"], "the link itself is listed, what it points to is listed once");
+        assert_eq!(rels, vec!["Link:dir".to_string(), inside], "the link itself is listed, what it points to is listed once");
         #[cfg(not(unix))]
-        assert_eq!(rels, vec!["Real/in:side.md"]);
+        assert_eq!(rels, vec![inside]);
         assert!(check(&d.join("missing")).is_err());
         let _ = fs::remove_dir_all(&d);
     }
@@ -384,21 +480,26 @@ mod tests {
         app.vault_check.result.clone().unwrap().unwrap()
     }
 
+    // The renames below use names over 200 bytes (two bytes a letter), which every system holds; in
+    // the temp folder their paths are longer than Windows' 260 characters.
+
     // spec: VAULT-028
     #[test]
     fn rename_all_renames_deepest_first_rewrites_links_and_checks_again() {
         let d = temp("rename-all");
-        touch(&d, "x:y.md", "x\n");
-        touch(&d, "Dir*/in?.md", "inside\n");
-        touch(&d, "Linker.md", "[[x:y]] [[in?]] [t](Dir*/in?.md)\n");
+        let (x, dir, inner) = ("λ".repeat(101), "δ".repeat(101), "ι".repeat(99));
+        touch(&d, &format!("{x}.md"), "x\n");
+        touch(&d, &format!("{dir}/{inner}.md"), "inside\n");
+        touch(&d, "Linker.md", &format!("[[{x}]] [[{inner}]]\n"));
         let mut app = app_in(&d);
         let all = run_check(&mut app);
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 3, "{all:?}");
         let which: Vec<usize> = (0..all.len()).collect();
         app.rename_findings(&which);
-        assert!(d.join("x-y.md").exists() && d.join("Dir-/in-.md").exists(), "the folder and what was in it");
-        assert!(!d.join("x:y.md").exists() && !d.join("Dir*").exists());
-        assert_eq!(fs::read_to_string(d.join("Linker.md")).unwrap(), "[[x-y]] [[in-]] [t](Dir-/in-.md)\n", "links follow");
+        let (x2, dir2, inner2) = ("λ".repeat(98), "δ".repeat(100), "ι".repeat(98));
+        assert!(d.join(format!("{x2}.md")).exists() && d.join(format!("{dir2}/{inner2}.md")).exists(), "the folder and what was in it");
+        assert!(!d.join(format!("{x}.md")).exists() && !d.join(&dir).exists());
+        assert_eq!(fs::read_to_string(d.join("Linker.md")).unwrap(), format!("[[{x2}]] [[{inner2}]]\n"), "links follow");
         let report = app.vault_check.report.clone().unwrap();
         assert!(report.starts_with("Renamed 3 files and folders, updated links in "), "{report}");
         assert!(app.toasts.iter().any(|(t, _)| *t == report));
@@ -416,25 +517,30 @@ mod tests {
     #[test]
     fn one_finding_is_renamed_alone_and_a_name_taken_since_the_check_gets_a_number() {
         let d = temp("rename-one");
-        touch(&d, "a:b.md", "A\n");
-        touch(&d, "c:d.md", "C\n");
-        touch(&d, "Linker.md", "[[a:b]] [[c:d]]\n");
+        let (a, c) = ("α".repeat(101), "γ".repeat(101));
+        touch(&d, &format!("{a}.md"), "A\n");
+        touch(&d, &format!("{c}.md"), "C\n");
+        touch(&d, "Linker.md", &format!("[[{a}]] [[{c}]]\n"));
         let mut app = app_in(&d);
         let all = run_check(&mut app);
-        let i = all.iter().position(|f| f.rel == Path::new("a:b.md")).unwrap();
-        // somebody makes a-b.md after the check
-        touch(&d, "A-B.md", "other\n");
+        let i = all.iter().position(|f| f.rel == Path::new(&format!("{a}.md"))).unwrap();
+        assert_eq!(all[i].proposed, Some(format!("{}.md", "α".repeat(98))));
+        // somebody makes that name (in capitals) after the check
+        let other = format!("{}.md", "Α".repeat(98));
+        touch(&d, &other, "other\n");
         app.rename_findings(&[i]);
-        assert_eq!(fs::read_to_string(d.join("a-b 2.md")).unwrap(), "A\n");
-        assert_eq!(fs::read_to_string(d.join("A-B.md")).unwrap(), "other\n", "nothing is replaced");
-        assert!(d.join("c:d.md").exists(), "the other finding stays");
-        assert!(fs::read_to_string(d.join("Linker.md")).unwrap().starts_with("[[a-b 2]] [[c:d]]"));
+        let got = format!("{} 2", "α".repeat(97));
+        assert_eq!(fs::read_to_string(d.join(format!("{got}.md"))).unwrap(), "A\n");
+        assert_eq!(fs::read_to_string(d.join(&other)).unwrap(), "other\n", "nothing is replaced");
+        assert!(d.join(format!("{c}.md")).exists(), "the other finding stays");
+        let linker = fs::read_to_string(d.join("Linker.md")).unwrap();
+        assert!(linker.starts_with(&format!("[[{got}]] [[{c}]]")), "{linker}");
         assert!(app.vault_check.report.clone().unwrap().starts_with("Renamed 1 file or folder"));
         // a finding without a proposal is not renamed
-        let none = Finding { rel: PathBuf::from("c:d.md"), is_dir: false, reasons: vec![], proposed: None };
+        let none = Finding { rel: PathBuf::from(format!("{c}.md")), is_dir: false, reasons: vec![], proposed: None };
         app.vault_check.result = Some(Ok(vec![none]));
         app.rename_findings(&[0]);
-        assert!(d.join("c:d.md").exists());
+        assert!(d.join(format!("{c}.md")).exists());
         assert!(app.vault_check.report.clone().unwrap().starts_with("Renamed 0 files and folders"));
         let _ = fs::remove_dir_all(&d);
     }

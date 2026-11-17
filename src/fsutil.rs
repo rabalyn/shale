@@ -246,12 +246,55 @@ pub fn open_private_log(path: &Path, append: bool) -> io::Result<File> {
 
 /// Move a file or folder to `to`, which must not exist (`AlreadyExists` otherwise). Unlike a
 /// plain rename this can never replace something at the target, even if it appeared a moment
-/// ago. Where the file system can't promise that, it falls back to checking first.
+/// ago. Where the file system can't promise that, it falls back to checking first. A rename that
+/// only changes the letter case of the name on a file system that ignores it (macOS, Windows:
+/// `to` "exists" because it is `from` itself) goes through a temporary name (DATA-013).
 pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+    if is_case_only_rename(from, to) {
+        return rename_through_temp_name(from, to);
+    }
+    rename_noreplace_once(from, to)
+}
+
+fn rename_noreplace_once(from: &Path, to: &Path) -> io::Result<()> {
     match renameat2_noreplace(from, to) {
         Some(r) => r,
         None => rename_noreplace_fallback(from, to),
     }
+}
+
+/// Whether `to` is `from` itself in another letter case on a file system that ignores letter case
+/// (macOS, Windows): the same folder, names that differ only in letter case, `to` is found, and
+/// the folder lists `from` by its own spelling but nothing spelled like `to`. On a file system
+/// that tells `plan.md` from `Plan.md` this is never true: a `to` that is found is listed.
+pub fn is_case_only_rename(from: &Path, to: &Path) -> bool {
+    let (Some(dir), Some(a), Some(b)) = (from.parent(), from.file_name(), to.file_name()) else { return false };
+    if to.parent() != Some(dir) || !differs_only_in_case(&a.to_string_lossy(), &b.to_string_lossy()) || fs::symlink_metadata(to).is_err() {
+        return false;
+    }
+    let dir = if dir.as_os_str().is_empty() { Path::new(".") } else { dir };
+    let Ok(entries) = fs::read_dir(dir) else { return false };
+    let listed: Vec<std::ffi::OsString> = entries.flatten().map(|e| e.file_name()).collect();
+    listed.iter().any(|n| n == a) && !listed.iter().any(|n| n == b)
+}
+
+/// Two names that are not the same but equal when letter case is ignored.
+fn differs_only_in_case(a: &str, b: &str) -> bool {
+    a != b && a.to_lowercase() == b.to_lowercase()
+}
+
+/// `from` → a free temporary name in its folder → `to`. If the second step fails the first is
+/// undone.
+fn rename_through_temp_name(from: &Path, to: &Path) -> io::Result<()> {
+    let dir = from.parent().unwrap_or(Path::new(""));
+    let tmp = (0..100)
+        .map(|_| dir.join(format!(".shale-tmp-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))))
+        .find(|t| fs::symlink_metadata(t).is_err())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::AlreadyExists, "no free temporary name"))?;
+    rename_noreplace_once(from, &tmp)?;
+    rename_noreplace_once(&tmp, to).inspect_err(|_| {
+        let _ = rename_noreplace_once(&tmp, from);
+    })
 }
 
 /// The way without `renameat2`: a hard link fails if the target exists (files only), else check
@@ -314,9 +357,7 @@ fn renameat2_noreplace(from: &Path, to: &Path) -> Option<io::Result<()>> {
 /// (`std::fs::rename` would replace it).
 #[cfg(windows)]
 fn renameat2_noreplace(from: &Path, to: &Path) -> Option<io::Result<()>> {
-    use std::os::windows::ffi::OsStrExt;
-    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(std::iter::once(0)).collect() };
-    let (a, b) = (wide(from), wide(to));
+    let (a, b) = (win32_path(from), win32_path(to));
     // SAFETY: both buffers are NUL-terminated UTF-16 strings that outlive the call.
     let ok = unsafe { windows_sys::Win32::Storage::FileSystem::MoveFileExW(a.as_ptr(), b.as_ptr(), 0) };
     if ok != 0 {
@@ -329,6 +370,41 @@ fn renameat2_noreplace(from: &Path, to: &Path) -> Option<io::Result<()>> {
         return Some(Err(io::Error::new(io::ErrorKind::AlreadyExists, "the target exists")));
     }
     Some(Err(e))
+}
+
+/// A path for a Win32 call, NUL-terminated. A long one (from 248 UTF-16 units, where folder calls
+/// already fail; `std::fs` draws the line there as well) is made absolute and gets the `\\?\`
+/// prefix, without which Windows refuses paths over 260 characters (`MAX_PATH`, DATA-013): a
+/// vault deep in a profile folder with a 200-byte note name is over it.
+#[cfg(windows)]
+fn win32_path(p: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = p.as_os_str().encode_wide().collect();
+    let mut out = if wide.len() < 248 {
+        wide
+    } else {
+        match std::path::absolute(p) {
+            Ok(abs) => verbatim(&abs.as_os_str().encode_wide().collect::<Vec<u16>>()),
+            Err(_) => wide,
+        }
+    };
+    out.push(0);
+    out
+}
+
+/// An absolute Windows path (UTF-16) with the `\\?\` prefix: `C:\x` → `\\?\C:\x`, `\\server\share`
+/// → `\\?\UNC\server\share`; a path that has a `\\?\` or `\\.\` prefix already stays as it is.
+/// Expects what `std::path::absolute` gives on Windows (backslashes, no `.` or `..`).
+#[cfg(any(windows, test))]
+fn verbatim(abs: &[u16]) -> Vec<u16> {
+    let starts = |pre: &str| abs.starts_with(&pre.encode_utf16().collect::<Vec<u16>>());
+    if starts(r"\\?\") || starts(r"\\.\") {
+        abs.to_vec()
+    } else if starts(r"\\") {
+        r"\\?\UNC\".encode_utf16().chain(abs[2..].iter().copied()).collect()
+    } else {
+        r"\\?\".encode_utf16().chain(abs.iter().copied()).collect()
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -921,6 +997,72 @@ mod tests {
         assert!(d.join("dir3").is_dir() && !d.join("dir1").exists());
         assert!(rename_noreplace(&d.join("missing"), &d.join("x")).is_err());
         let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DATA-013
+    #[test]
+    fn a_rename_that_only_changes_letter_case_works_also_where_letter_case_is_ignored() {
+        let d = tmp("case-rename");
+        fs::write(d.join("plan.md"), "P").unwrap();
+        fs::create_dir(d.join("notes")).unwrap();
+        fs::write(d.join("notes").join("x"), "X").unwrap();
+        // on every system: afterwards the folder lists the new spelling, and the content is kept
+        rename_noreplace(&d.join("plan.md"), &d.join("Plan.md")).unwrap();
+        rename_noreplace(&d.join("notes"), &d.join("Notes")).unwrap();
+        assert_eq!(names(&d), vec!["Notes", "Plan.md"]);
+        assert_eq!(fs::read(d.join("Plan.md")).unwrap(), b"P");
+        assert_eq!(fs::read(d.join("Notes").join("x")).unwrap(), b"X");
+        // the two steps on their own (macOS and Windows take them): the temporary name is gone
+        rename_through_temp_name(&d.join("Plan.md"), &d.join("PLAN.md")).unwrap();
+        assert_eq!(names(&d), vec!["Notes", "PLAN.md"]);
+        // a second step that fails is undone: nothing is replaced and nothing is lost
+        fs::write(d.join("other"), "O").unwrap();
+        assert_eq!(rename_through_temp_name(&d.join("PLAN.md"), &d.join("other")).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(names(&d), vec!["Notes", "PLAN.md", "other"]);
+        assert_eq!((fs::read(d.join("PLAN.md")).unwrap(), fs::read(d.join("other")).unwrap()), (b"P".to_vec(), b"O".to_vec()));
+        // another name, another folder, or a target that is not there is no case-only rename
+        assert!(!is_case_only_rename(&d.join("PLAN.md"), &d.join("other")));
+        assert!(!is_case_only_rename(&d.join("PLAN.md"), &d.join("Notes").join("plan.md")));
+        assert!(!is_case_only_rename(&d.join("PLAN.md"), &d.join("plan 2.md")));
+        // where letter case counts, two real files are two names, and one never replaces the other
+        if fs::write(d.join("plan.md"), "Q").is_ok() && names(&d).len() == 4 {
+            assert!(!is_case_only_rename(&d.join("PLAN.md"), &d.join("plan.md")));
+            assert_eq!(rename_noreplace(&d.join("PLAN.md"), &d.join("plan.md")).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+            assert_eq!(fs::read(d.join("plan.md")).unwrap(), b"Q");
+        } else {
+            // where it does not, the other spelling is the same file
+            assert!(is_case_only_rename(&d.join("PLAN.md"), &d.join("plan.md")));
+            println!("this file system ignores letter case: the part with two files that differ in it is skipped");
+        }
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DATA-013
+    #[test]
+    fn rename_noreplace_works_on_paths_longer_than_260_characters() {
+        // Windows refuses a path over 260 characters without the \\?\ prefix
+        let d = tmp("rename-long");
+        let deep = d.join("f".repeat(120)).join("g".repeat(120));
+        fs::create_dir_all(&deep).unwrap();
+        let (a, b) = (deep.join(format!("{}.md", "a".repeat(150))), deep.join(format!("{}.md", "b".repeat(150))));
+        assert!(b.as_os_str().len() > 300);
+        create_new(&a, b"A").unwrap();
+        rename_noreplace(&a, &b).unwrap();
+        assert_eq!(fs::read(&b).unwrap(), b"A");
+        create_new(&a, b"A2").unwrap();
+        assert_eq!(rename_noreplace(&a, &b).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&b).unwrap(), b"A");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DATA-013
+    #[test]
+    fn a_long_windows_path_gets_the_verbatim_prefix_once() {
+        let v = |p: &str| String::from_utf16(&verbatim(&p.encode_utf16().collect::<Vec<u16>>())).unwrap();
+        assert_eq!(v(r"C:\Users\me\vault\note.md"), r"\\?\C:\Users\me\vault\note.md");
+        assert_eq!(v(r"\\server\share\vault\note.md"), r"\\?\UNC\server\share\vault\note.md");
+        assert_eq!(v(r"\\?\C:\already"), r"\\?\C:\already");
+        assert_eq!(v(r"\\.\pipe\x"), r"\\.\pipe\x");
     }
 
     // spec: DATA-004
