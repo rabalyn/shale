@@ -10,6 +10,8 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-17
+
 ### Added
 
 - **Template sets for the LaTeX export.** Settings → LaTeX → Template sets imports the templates a PDF
@@ -205,6 +207,11 @@ its section from this file.
   through `program::spawn`, which tries a program again that the system briefly calls "busy" right
   after it was written (a test stand-in under load). The ffprobe test no longer fails now and then
   with "Text file busy" (#316).
+- **A flaky TeX setup test is steady again.** The TeX setup page tests now wait until no look for
+  TeX is running and the page has settled before they check it, so the missing-TeX test no longer
+  fails under load (#308).
+- **Tests never open real windows.** A test build no longer starts the real `xdg-open` or shell
+  call of the opener, so `cargo test` stops popping up PDF viewers (#313).
 
 ## [0.4.0] - 2026-11-17
 
@@ -1247,7 +1254,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/rabalyn/shale/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rabalyn/shale/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rabalyn/shale/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rabalyn/shale/compare/6851a04...v0.2.0
