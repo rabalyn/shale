@@ -5,6 +5,7 @@ use crate::colour_tags;
 use crate::drawing::{self, Scene};
 use crate::editor::{char_under, heading_scale};
 use crate::markdown::{self, LinkSpan};
+use crate::syntax;
 use crate::theme;
 use crate::vault::{FileKind, Vault};
 use eframe::egui::{self, text::LayoutJob, Color32, CornerRadius, FontFamily, FontId, Sense, Stroke, TextFormat, Ui, Vec2};
@@ -82,6 +83,20 @@ pub(crate) type Paint = (Range<usize>, Option<[u8; 4]>, Option<[u8; 4]>);
 
 /// A line as a layout job, the links in it and its coloured text.
 pub(crate) type Painted = (LayoutJob, Vec<(Range<usize>, LinkSpan, bool)>, Vec<Paint>);
+
+/// The text of a fenced code block, coloured by its language (EDIT-032; plain when there is none).
+fn code_job(word: &str, code: &str, size: f32) -> LayoutJob {
+    let format = |color| TextFormat { font_id: FontId::new(size, FontFamily::Monospace), color, ..Default::default() };
+    let mut job = LayoutJob::default();
+    let mut at = 0;
+    for (r, kind) in syntax::highlight(word, code).iter() {
+        job.append(&code[at..r.start], 0.0, format(theme::CODE));
+        job.append(&code[r.clone()], 0.0, format(theme::syntax_colour(*kind)));
+        at = r.end;
+    }
+    job.append(&code[at..], 0.0, format(theme::CODE));
+    job
+}
 
 /// Turn one line of markdown into display text with formats and link positions.
 pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color32, strike_all: bool) -> (LayoutJob, Vec<(Range<usize>, LinkSpan, bool)>) {
@@ -184,7 +199,15 @@ pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, 
             if let Some(e) = rest[1..].find('`') {
                 let mut s2 = st;
                 s2.code = true;
-                job.append(&rest[1..1 + e], 0.0, fmt(&s2, base_color));
+                let code = &rest[1..1 + e];
+                let plain = fmt(&s2, base_color);
+                let mut at = 0;
+                for (r, kind) in syntax::highlight_inline(code) {
+                    job.append(&code[at..r.start], 0.0, plain.clone());
+                    job.append(&code[r.clone()], 0.0, TextFormat { color: theme::syntax_colour(kind), ..plain.clone() });
+                    at = r.end;
+                }
+                job.append(&code[at..], 0.0, plain);
                 i += e + 2;
                 continue;
             }
@@ -333,6 +356,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         if fenced.get(i).copied().unwrap_or(false) {
             let mut code = String::new();
             let lang = line.trim().trim_start_matches(['`', '~']).to_string();
+            let word = syntax::fence_language(line);
             i += 1;
             while i < lines.len() && !(lines[i].1.trim_start().starts_with("```") || lines[i].1.trim_start().starts_with("~~~")) {
                 code.push_str(lines[i].1);
@@ -345,7 +369,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 if !lang.is_empty() {
                     ui.label(egui::RichText::new(lang).small().color(theme::MUTED));
                 }
-                ui.label(egui::RichText::new(code.trim_end()).monospace().size(base * 0.9).color(theme::CODE));
+                ui.label(code_job(&word, code.trim_end(), base * 0.9));
             });
             ui.add_space(6.0);
             continue;
@@ -565,6 +589,30 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
 mod tests {
     use super::*;
     use eframe::egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
+
+    // spec: EDIT-032
+    #[test]
+    fn the_reading_view_colours_code_blocks_by_language_and_inline_code() {
+        let colours = |job: &LayoutJob, needle: &str| {
+            let at = job.text.find(needle).unwrap();
+            job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format.color
+        };
+        let code = "console.log(\"foooo\")";
+        let job = code_job("js", code, 14.0);
+        assert_eq!(job.text, code, "the text is the code, nothing else");
+        assert_eq!(colours(&job, "\"foooo\""), theme::syntax_colour(syntax::Kind::String));
+        assert_ne!(colours(&job, "\"foooo\""), colours(&job, "console"));
+        let plain = code_job("klingon", code, 14.0);
+        assert_eq!((plain.text.as_str(), colours(&plain, "\"foooo\"")), (code, theme::CODE), "an unknown language is plain monospace");
+        assert_eq!(code_job("", "", 14.0).text, "", "an empty block");
+
+        let line = "see `console.log(\"fooo\")` and `x`";
+        let (job, _) = inline_job(line, &[], 14.0, theme::TEXT, false);
+        assert_eq!(job.text, "see console.log(\"fooo\") and x", "the backticks are gone");
+        assert_eq!(colours(&job, "\"fooo\""), theme::syntax_colour(syntax::Kind::String));
+        assert_eq!(colours(&job, "log"), theme::syntax_colour(syntax::Kind::Function));
+        assert_eq!(colours(&job, "x"), theme::CODE);
+    }
 
     fn shapes_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
         fn walk(s: &egui::Shape, out: &mut Vec<(String, Rect)>) {
