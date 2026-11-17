@@ -45,12 +45,16 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
   `land.sh --release`. A red `main` is fixed first. Pull requests are optional.
 - **Tags and releases are made only by script, and only when the owner asks** (ADR-0018):
   - `scripts/make-tag.sh [patch|minor|major]` makes a **check tag** `vX.Y.Z-rc.N` for "done for
-    now" (FORGE-013): it bumps `Cargo.toml`/`Cargo.lock`, lands the bump, tags the landed commit and
-    pushes the tag to Forgejo, whose CI runs once; when green, `main` goes to GitHub (no build there).
+    now" (FORGE-013): it bumps `Cargo.toml`/`Cargo.lock`, merges `docs/changelog-pending/` into
+    `[Unreleased]`, lands the bump, tags the landed commit and pushes the tag to Forgejo, whose CI
+    runs once; when green, `main` goes to GitHub (no build there).
   - `scripts/make-release.sh [patch|minor|major]` makes a **release** `vX.Y.Z` (FORGE-014): the
     version bump, `[Unreleased]` and `docs/changelog-pending/` merged into the version's
     `CHANGELOG.md` section, the release check (BUILD-013), landing, tag; when Forgejo is green,
     `main` and the tag go to GitHub, which publishes the release.
+  - Both stop with "the changelog needs an update first" when there is nothing new in the
+    changelog (a check tag: no change since the previous tag; a release: no entries), so every
+    change carries its `docs/changelog-pending/` entry.
   - Both name the issue `Release X.Y.Z` (made when missing) and accept `--dry-run`. Never tag by
     hand, never move or delete a pushed tag: a red run is fixed in a branch, landed, then the next
     tag is made.

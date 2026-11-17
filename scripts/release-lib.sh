@@ -82,8 +82,12 @@ release_issue() {
   echo "${url##*/}"
 }
 
-# merge_changelog <folder> <version> <date>: [Unreleased] and docs/changelog-pending/*.md become
-# the section of the version (FORGE-014); the pending files are removed with git rm
+NEEDS_UPDATE="the changelog needs an update first: add entries to docs/changelog-pending/ (or to [Unreleased] in CHANGELOG.md) and land them"
+
+# merge_changelog <folder> <version|""> <date>: [Unreleased] and docs/changelog-pending/*.md are
+# merged by heading; with a version they become its section under a new empty [Unreleased]
+# (a release, FORGE-014), without one they stay [Unreleased] (a check tag, FORGE-013). The
+# pending files are removed with git rm.
 merge_changelog() {
   local dir=$1 v=$2 date=$3 work cat f out
   local order=(Added Changed Deprecated Removed Fixed Security)
@@ -106,13 +110,17 @@ merge_changelog() {
       END { if (!bad) flush() }
     ' "$f" || { rm -rf "$work"; die "fix the changelog entry above; nothing was landed or tagged"; }
   done
-  [ -s "$work/order" ] || { rm -rf "$work"; die "there are no changelog entries to release ([Unreleased] and docs/changelog-pending/ are empty)"; }
+  [ -s "$work/order" ] || { rm -rf "$work"; die "$NEEDS_UPDATE ([Unreleased] and docs/changelog-pending/ are empty)"; }
   local all=("${order[@]}")
   while IFS= read -r cat; do
     case " ${order[*]} " in *" $cat "*) ;; *) all+=("$cat") ;; esac
   done < <(awk '!s[$0]++' "$work/order")
   out="$work/section"
-  printf '## [Unreleased]\n\n## [%s] - %s\n' "$v" "$date" > "$out"
+  if [ -n "$v" ]; then
+    printf '## [Unreleased]\n\n## [%s] - %s\n' "$v" "$date" > "$out"
+  else
+    printf '## [Unreleased]\n' > "$out"
+  fi
   for cat in "${all[@]}"; do
     [ -s "$work/cat-$cat" ] || continue
     printf '\n### %s\n\n' "$cat" >> "$out"
@@ -125,7 +133,7 @@ merge_changelog() {
     skip && /^## \[/ { skip = 0 }
     skip && /^\[[^]]+\]: / { skip = 0 }
     skip { next }
-    /^\[Unreleased\]: .*\/compare\/.*\.\.\.HEAD$/ {
+    v != "" && /^\[Unreleased\]: .*\/compare\/.*\.\.\.HEAD$/ {
       base = $0; sub(/^\[Unreleased\]: /, "", base); sub(/\/compare\/.*/, "", base)
       prev = $0; sub(/.*\/compare\//, "", prev); sub(/\.\.\.HEAD$/, "", prev)
       print "[Unreleased]: " base "/compare/v" v "...HEAD"
@@ -141,6 +149,12 @@ merge_changelog() {
   rm -rf "$work"
 }
 
+# has_entries <commit>: [Unreleased] of CHANGELOG.md or a file of docs/changelog-pending/ has a line
+has_entries() {
+  [ -n "$(git ls-tree --name-only "$1" docs/changelog-pending/ | grep '\.md$' || true)" ] && return 0
+  git show "$1:CHANGELOG.md" 2>/dev/null | awk '/^## \[/ { if (on) exit; if ($0 == "## [Unreleased]") { on = 1; next } } /^\[[^]]+\]: / { if (on) exit } on && /[^[:space:]]/ && !/^### / { found = 1 } END { exit !found }'
+}
+
 # tag_and_push <kind: check|release> <version> <issue|""> <dry-run: yes|no>
 # The whole run of FORGE-013 / FORGE-014 once the version is known.
 tag_and_push() {
@@ -153,6 +167,16 @@ tag_and_push() {
   fi
   git rev-parse -q --verify "refs/tags/$tag" >/dev/null && die "the tag $tag exists already (a pushed tag is never moved: take the next version)"
   [ -z "$(git ls-remote --tags "$REMOTE" "refs/tags/$tag")" ] || die "the tag $tag exists on $REMOTE already"
+  local main prev
+  main=$(git rev-parse "refs/remotes/$REMOTE/main")
+  if [ "$kind" = check ]; then
+    # a check tag needs a changelog change since the previous tag
+    prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$main" 2>/dev/null || true)
+    if [ -n "$prev" ] && git diff --quiet "$prev" "$main" -- CHANGELOG.md docs/changelog-pending; then
+      die "$NEEDS_UPDATE (nothing changed in them since $prev)"
+    fi
+  fi
+  has_entries "$main" || die "$NEEDS_UPDATE ([Unreleased] and docs/changelog-pending/ are empty)"
   echo "$kind tag: $tag"
   if [ "$dry" = yes ]; then
     echo "(--dry-run: nothing was changed)"
@@ -179,6 +203,7 @@ tag_and_push() {
     merge_changelog "$wt" "$v" "${RELEASE_DATE:-$(date +%F)}"
     msg="Release $v (Refs #$issue)"
   else
+    merge_changelog "$wt" "" ""
     msg="Version $v (check tag, Refs #$issue)"
   fi
   git -C "$wt" add -A
