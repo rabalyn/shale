@@ -153,33 +153,33 @@ its section from this file.
 - **Release check**: a version is only tagged and built if it is valid semver and greater than the
   previous `v*` tag, `Cargo.toml` and `Cargo.lock` agree, and its `CHANGELOG.md` section is not
   empty and mentions every issue closed (`Closes #N`) since the previous tag. `make-release.sh`
-  and both CI systems run the same script, `.github/check-release.sh` (BUILD-013).
+  and both CI systems run the same script, `.github/check-release.sh` (BUILD-013) (#3).
 - **Commit check**: CI on Forgejo fails for a commit pushed to `main` or in a pull request that
-  names no issue and does not start with `no-issue:` (merge commits excepted; FORGE-008).
+  names no issue and does not start with `no-issue:` (merge commits excepted; FORGE-008) (#4).
 - **Keybindings in Settings.** Settings → "Keybindings…" lists every shortcut that can be
   changed (everywhere, file list, search results): press Change, then the new keys (several in a
   row make a sequence), Enter saves, Esc cancels; Reset and Reset all put the defaults back. A key
   that another action already uses is refused with a message naming that action. Only your changes
-  are stored in the settings file (KEY-001 … KEY-009).
+  are stored in the settings file (KEY-001 … KEY-009) (#10).
 - The key tables of the README and the feature list are checked against the shortcuts the app
   really has (NAV-006).
 - **Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab**, from the editor, the file list
   and the sub-apps alike. After the last tab comes the first. Both keys can be changed in
-  Settings → Keybindings… (NAV-018).
+  Settings → Keybindings… (NAV-018) (#11).
 - **Space Tab in vim-style normal mode** goes back to the note or sub-app (calendar, Feeds, …)
   this tab showed just before; pressing it again comes back, like vim's alternate file. It is
   the first key of a new "Vim-style editing, normal mode" list in Settings → Keybindings…; the
   vim keys themselves cannot be rebound there (NAV-019, EDIT-015). It does not work in the mail
-  view and in drawings, where Space and f already have a meaning.
+  view and in drawings, where Space and f already have a meaning (#14).
 - **Space f f in vim-style normal mode finds a file by name**: a window with a field and a list;
   typing filters (names only, fuzzy), ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the file in
   this tab with the keyboard in the editor, Esc closes. Unlike Ctrl+O it never creates a note
-  (NAV-020, NAV-021). The quick switcher takes Ctrl+J / Ctrl+K too.
+  (NAV-020, NAV-021). The quick switcher takes Ctrl+J / Ctrl+K too (#15).
 - **Reorder tabs by dragging.** Drag a tab left or right; a marker shows where it lands. The
-  order is kept for the next start (NAV-014, NAV-015).
+  order is kept for the next start (NAV-014, NAV-015) (#12).
 - **Pin tabs.** Right-click a tab and choose "Pin tab" / "Unpin tab". Pinned tabs sit at the left
   with a small pin, can be reordered only among themselves, and are pinned again at the next
-  start (NAV-016, NAV-017).
+  start (NAV-016, NAV-017) (#13).
 - **Search everything from the keyboard: `Space f g`.** In vim-style normal mode a window
   searches the text of your notes, your mail and the posts of your feeds at once. The hits are
   listed under Notes, Mail and Posts with a count each; type to filter, Ctrl+J / Ctrl+K or the
@@ -194,22 +194,22 @@ its section from this file.
   opens a new Feeds tab scrolled to the post, also when the feed does not hold it any more.
   `from:`, `text:`, `in:`, `link:` and `date:` limit a word to one part. The index keeps at most
   10 000 posts per account and nothing older than a year; removing an account removes its posts
-  (SOC-030…SOC-036).
+  (SOC-030…SOC-036) (#17).
 - **Reorder the icons of the ribbon by drag and drop.** Drag an icon of the left menubar to
   another place; a line shows where it lands. The order is kept in the settings and restored at
-  the next start (LAY-001, LAY-002).
+  the next start (LAY-001, LAY-002) (#20).
 - **The right sidebar can be split into stacked views.** Each view has its own menubar of panel
   icons (Backlinks, Outgoing, Outline, Graph, Calendar) and shows one panel, so several are open
   at once. Icons move between menubars by drag and drop, also to and from the ribbon; icons that
   are no panels are refused with a no-drop pointer; the last icon leaving a view removes it. The
-  layout is stored in the settings (LAY-003 to LAY-008, ADR-0014).
+  layout is stored in the settings (LAY-003 to LAY-008, ADR-0014) (#21).
 - **Drop zone for new views.** While a panel icon is dragged over the content of the right
   sidebar the area is highlighted; dropping makes a new view with its own menubar, Esc cancels
-  (LAY-009, LAY-010). A panel icon in the ribbon shows its panel below the views (LAY-011).
+  (LAY-009, LAY-010). A panel icon in the ribbon shows its panel below the views (LAY-011) (#22).
 - **Alternate view from everywhere: Ctrl+6** swaps the tab with the view it showed just before
   and back, also in the mail view and in drawings, where `Space Tab` cannot work because Space
   is the mark key and pans the drawing. It is a normal key action and can be changed (NAV-019,
-  KEY-011).
+  KEY-011) (#38).
 - **Keybindings: Add and Clear.** Besides Change (replaces the keys of an action) there is now Add
   (one more key, the others stay) and Clear (the action has no key and stays so). (KEY-006, KEY-007)
 - **A started key sequence shows in the status bar** (e.g. `Space f`) and is dropped after 1.5
@@ -219,19 +219,19 @@ its section from this file.
   retries, `z` takes the selected mail back. The menu of a row opens with the Menu key or
   Shift+F10 and is driven with the arrows, Enter and Esc. Shift+U shows the sent mails that are
   only on this computer; there j / k, Enter (Upload again), `d` (Dismiss) and Esc work (MAIL-067,
-  MAIL-068, MAIL-069; new Mail view actions, changeable in Settings).
+  MAIL-068, MAIL-069; new Mail view actions, changeable in Settings) (#36).
 - **Post search index: follow-ups.** Posts you save to the vault (the whole thread and the replies of
   other people) are now searchable. A reply is found by the text of the post it answers even when
   that post only arrives later. Opening a search hit whose post is gone from the index and the feed
   fetches it from Mastodon or Bluesky (an error message says when that fails). Settings → Feeds has
   a "Post search index" section with the number of indexed posts, **Rebuild** (indexes again what
-  your open feeds hold) and **Clear…** (asks first) (SOC-037 … SOC-040).
+  your open feeds hold) and **Clear…** (asks first) (SOC-037 … SOC-040) (#37).
 - **Data usage dialog.** Settings → Data and caches → Data usage… (or Ctrl+Shift+D) shows what
   Shale keeps on disk: the vault by kind with its largest files and folders, and your mail,
   drafts, outbox, calendars and recovered notes outside it (read-only). Below it, every cache
   (social pictures, social post index, mail index and its backups, damaged mail index copies,
   tag words, keyboard debug log) with its size, age and last cleanup, and a Clear button; the
-  mail index is rebuilt from the message files instead, after a question (USE-001 … USE-016).
+  mail index is rebuilt from the message files instead, after a question (USE-001 … USE-016) (#51).
 - **Caches are cleaned up by themselves.** How long each cache is kept is a setting (social
   pictures 30 days / 500 MB, social posts 365 days / 10 000 per account, 3 mail index backups,
   debug log 10 MB, or "forever" / "no limit"). A background cleanup runs a minute after the
@@ -402,7 +402,7 @@ its section from this file.
 
 - **Development moves to Forgejo** (`git.home.rabalyn.de/raba/shale`): its issues are now the one
   list of open work and finished work closes its issue; GitHub will only distribute releases
-  (ADR-0013, FORGE and DEV rules in the engineering spec).
+  (ADR-0013, FORGE and DEV rules in the engineering spec) (#1).
 
 - **Every dialog can be moved and resized**: drag the title bar to move it, any edge or corner
   to resize it; the content scrolls when it is made small. Dialogs open centred and as tall as
@@ -432,7 +432,7 @@ its section from this file.
   only for version tags: it builds and tests the tag again and publishes the release with its
   `.sha256` file. The rolling "latest" pre-release of `main` is no longer updated; to try an
   unreleased version, build it from source. `make-release.sh` pushes the commit and the tag to
-  both servers (BUILD-002, BUILD-009 … BUILD-012).
+  both servers (BUILD-002, BUILD-009 … BUILD-012) (#2, #52).
 - **Internal: the code is split into feature folders and `ShaleApp` has sub-states** (#5, DEV-008).
   The calendar, mail, drawing, import and PDF files moved into `src/calendar/`, `src/mail/`,
   `src/drawing/`, `src/import/` and `src/pdf/` (each with a parent file and its tests next to it), so
@@ -451,18 +451,18 @@ its section from this file.
   starts the CalDAV and mail test stacks in podman and runs `cargo test -- --ignored caldav_env`
   and `mail_env` on pushes to `main`, on pull requests that touch the calendar or mail code or the
   test environments, and weekly; on a runner that cannot run containers it says so and is skipped.
-  `docs/coverage.md` lists the coverage per file and the biggest gaps.
+  `docs/coverage.md` lists the coverage per file and the biggest gaps (#33).
 - **CalDAV is now tested against a real server.** `tests/caldav-env/` starts Radicale behind TLS
   with a seeded user and calendars (single, repeating with a skipped and a changed date, reminder,
   all-day, an empty one for moves); `cargo test -- --ignored caldav_env` checks loading, creating,
   editing, moving, deleting, a change made on the server meanwhile and a wrong password against it.
-  For developers only: the app itself is unchanged (CALENV-001 to CALENV-003, DEV-005).
+  For developers only: the app itself is unchanged (CALENV-001 to CALENV-003, DEV-005) (#8).
 - **The screenshots in the docs can be made again with one command.** `docs/screenshots/regen.sh`
   runs the recipes of `docs/screenshots/recipes.conf` (one `--screenshot --view --keys` run per
   picture, on a private X display) and writes all 27 pictures, or only the names given. New
   pictures: the right sidebar split into two views and a pinned tab with its menu; the mail view
   now shows an open message, and the other pictures were made again. For developers only
-  (DEV-007).
+  (DEV-007) (#9).
 - **`--keys` can use the mouse.** New steps: `rclick`, `hover`, `drag:from>to`, `wait`, `waitfor`
   and `dump`; a step can aim at a drawn text (`click:@Sync`) instead of coordinates. A step that
   does not parse, or a text that is not on screen, now stops with an error instead of making a
@@ -475,33 +475,33 @@ its section from this file.
   Ctrl+L, and Shift+J no longer counts as j.
 - **The Feeds button in the left bar always opens a new Feeds tab** where you pick the account and
   the feed, so a new feed can be added to your tabs. It no longer jumps to a Feeds tab that is
-  already open (SOC-022).
+  already open (SOC-022) (#19).
 - **The mail view is keyboard first.** The pane that has the keyboard (folders, message list,
   message) is framed in the accent colour, and Ctrl+H / Ctrl+L move between the panes like they
   move between the file list and the editor (from the folders Ctrl+H goes on into the left
   sidebar). j / k act in the focused pane only. New keys cover what needed the mouse: sync
   (Ctrl+R), accounts (`a`), load from the server (Shift+L), attachments (`]`, `o`, Shift+O),
   search scope (`t`) and undo send (`z`). All mail keys are now in Settings → Keybindings…
-  (scope Mail view) and can be changed (MAIL-061 … MAIL-066, KEY-002).
+  (scope Mail view) and can be changed (MAIL-061 … MAIL-066, KEY-002) (#18).
 - The text tabs of the right sidebar are replaced by icon menubars.
 - **All tabs come back in place, with their pins.** The open tabs (notes, drawings and Feeds
   tabs) are saved as one ordered list, so a restart restores every tab where it was, pinned tabs
   pinned and left-most; before, Feeds tabs came back after the notes and unpinned. Older session
-  files are migrated when loaded (NAV-026).
+  files are migrated when loaded (NAV-026) (#32).
 - **Right sidebar: resizable views.** The border between two views can be dragged to change
-  their heights; the heights are kept (LAY-012).
+  their heights; the heights are kept (LAY-012) (#39).
 - **Right-click menu on menubar icons**: remove an icon from the ribbon or a view, restore
   removed icons, or reset the whole layout to the default. The last ribbon icon stays so the menu
   can always be reached (LAY-013, LAY-014).
 - The panel shortcuts of the ribbon (local graph, calendar) have glyphs of their own instead of
   those of the Graph and Calendar buttons (LAY-015).
 - **Keybindings is a tab of Settings** (General | Keybindings) instead of a separate dialog, and
-  the columns line up across the groups (KEY-006).
+  the columns line up across the groups (KEY-006) (#34).
 - **Documentation screenshots no longer change from run to run.** `docs/screenshots/regen.sh`
   freezes the clock and the build stamp of the pictures (`SHALE_FAKE_NOW`, only with
   `--screenshot`), so diffs show only real changes. In `--keys` scripts an icon button is
   found by its tooltip (`@Outline of the note`) and a tab as `@Tab 1`. The graph now places
-  missing notes in the same order on every start (DEV-007, BUILD-007).
+  missing notes in the same order on every start (DEV-007, BUILD-007) (#93).
 - **A clear notice that Shale is built by AI.** The README now opens with a warning box, and
   every release page starts with the same notice: Shale's code, tests and docs are written by AI
   coding agents (agentic coding), not by hand; the owner sets the goals and specs, reviews and
@@ -515,16 +515,16 @@ its section from this file.
   replacing anything on systems without `renameat2`, link rewrites that cannot finish (a note
   changed or unreadable meanwhile, a drawing that cannot be written), the settings file (save,
   load, broken, newer, not writable) and the reload of the vault settings (DATA-004, VAULT-016,
-  CFG-001, CFG-004, CFG-006, CFG-007, DATA-009).
+  CFG-001, CFG-004, CFG-006, CFG-007, DATA-009) (#56).
 - **Tests: IMAP answer parsing, `APPEND` failures and the production connectors.** The answer
   parser is tested with odd but legal and with broken server output (cut off at every byte, NUL
   bytes, nested literals); `APPEND` refusals after the literal and cut-off connections; the retry
   of a refused OAuth2 token and the settings of the IMAP and SMTP connectors, against a refused
-  loopback port and the pretend servers (MAIL-220 to MAIL-223).
+  loopback port and the pretend servers (MAIL-220 to MAIL-223) (#57).
 - **Tests: the move fallbacks for servers without MOVE or UIDPLUS are covered.** A copy the
   server refuses, a mark or expunge that fails, a copy found only by Message-ID and "delete
   forever" without UIDPLUS are checked: the original is never removed before the copy is
-  verified, and mail the person did not delete is never expunged (MAIL-103, MAIL-105).
+  verified, and mail the person did not delete is never expunged (MAIL-103, MAIL-105) (#58).
 - **More tests for CalDAV and local calendar failures** (#59). A scripted HTTP server checks what
   the CalDAV client says for redirects (301, 302, 307, 308, also to another server) and for 401,
   403, 404, 412, 5xx and answers that are not HTTP, when finding calendars, saving and deleting;
@@ -533,18 +533,18 @@ its section from this file.
 - Tests for the words of the mail status strip and of failed signing, encrypting and decrypting:
   expired, revoked and unknown signers, a tampered signature, expired signatures, refused
   recipients and the structure checks of odd mails, with real keys made by GnuPG (MAIL-172,
-  MAIL-174, MAIL-182, MAIL-193, MAIL-195, MAIL-197).
+  MAIL-174, MAIL-182, MAIL-193, MAIL-195, MAIL-197) (#60).
 - **Drops from other programs can be tested without a compositor.** The part of `wl_drop.rs` that
   does not talk Wayland (which kind to accept, the drag state, turning the read data into a drop,
   ignoring the second copy of a drop) is plain code with unit tests, and the window tests feed
   drops to the window (a folder, a note, the editor, nowhere; hints; unusable drops; moving in the
-  file list). For developers only (DEV-012, IMP-002, IMP-012 to IMP-017).
+  file list). For developers only (DEV-012, IMP-002, IMP-012 to IMP-017) (#76).
 - **`--keys` can drop files at a place.** New form `drop:T:/a;;/b` (T is `x,y` or `@label`) drops
   files there the way another program does, so the folder, note or editor under it decides where
-  the notes go; `drop:/path` works as before (BUILD-007).
+  the notes go; `drop:/path` works as before (BUILD-007) (#61).
 - Tests for the drawing canvas (selecting, moving, resizing, drawing with every tool, panning,
   editing text; DRAW-019) and for the dialogs, the task list and the file tree (VAULT-023,
-  VAULT-024, TASK-005).
+  VAULT-024, TASK-005) (#62).
 - Internal: tests now run the real opener against a recording fake `xdg-open`, and the OAuth2
   and Feeds sign-ins against a pretend browser (approve, deny, wrong state, never answers) and a
   pretend Mastodon and Bluesky server (SEC-006, MAIL-080 … MAIL-083, SOC-001 … SOC-004).
@@ -553,7 +553,7 @@ its section from this file.
   SEC-022).
 - **A second start hands its folder or file to the running Shale.** Opening a note from a file
   manager (or starting `shale <folder>`) while Shale runs now brings the window forward and opens
-  the file in a tab, or the folder as the vault, instead of showing "already running" (DATA-015).
+  the file in a tab, or the folder as the vault, instead of showing "already running" (DATA-015) (#78).
 - **Calendar connection problems are named in words.** A redirect loop, a server that cannot be
   found or reached, a timeout, an untrusted certificate, an empty reply or an answer cut short now
   say so, instead of "status 302" or curl's own text (CAL-030).
@@ -604,7 +604,7 @@ its section from this file.
   changed) and pushes only when all pass, one landing at a time. CI on Forgejo runs for `main`,
   tags and the weekly schedule only, no longer for every pull request, which had made merges wait
   for a queue on the single runner. A merge conflict, in docs or code, is resolved in the branch
-  and landed the same way. For developers only (FORGE-002, FORGE-010, FORGE-011, ADR-0016).
+  and landed the same way. For developers only (FORGE-002, FORGE-010, FORGE-011, ADR-0016) (#210, #215, #217).
 - Embedded pictures, drawings, PDFs, videos and sounds have their link as a caption below them in the editor (a click opens the file; `![[photo.png|Sea at dusk]]` sets the words), and the PDF export draws the same thumbnails with the same captions instead of printing the raw link, now also for the first frame of a video and the cover of a sound (raba/shale#224).
 - The PDF export draws embedded pictures, drawings and PDF pages as big, in proportion to the text, as the editor shows them (a picture made smaller stays smaller), and sounds and videos as their player card instead of the bare cover; the editor and the export share one sizing rule and the export measures against the real width of the editor's text column (raba/shale#229).
 - **The PDF export uses the column widths and row heights stored with a table.** Sizes you set
@@ -756,7 +756,7 @@ its section from this file.
   that the passphrase dialog was cancelled or the passphrase was not accepted (MAIL-171).
 - **Mail: a revoked S/MIME certificate is shown as revoked.** gpgsm reports a signature of a
   revoked certificate as a good one followed by "not trusted, certificate revoked"; the status
-  strip now says the certificate was revoked instead of a valid signature (MAIL-174).
+  strip now says the certificate was revoked instead of a valid signature (MAIL-174) (#83).
 - **The command line no longer guesses.** An unknown option, an option without its value or a
   second folder name stops the start with an error and the usage line (exit code 2). An option an
   older build did not know used to be skipped, and its value was opened as a new vault. That is
@@ -773,7 +773,7 @@ its section from this file.
   Outbox list, the mail keys (`e`, `j`, `k`, Enter, …) did nothing until you pressed Esc or
   clicked. They now work while a row has the focus; text fields still keep their keys. The rows
   of the message list show the same accent frame as the Drafts and Outbox rows when Tab moves
-  there (MAIL-073, MAIL-224).
+  there (MAIL-073, MAIL-224) (#96).
 - CalDAV redirects work with older curl (7.x, e.g. Debian 12), which put the user name and password into the final address; Shale refused its own redirect and would have kept the password in the address (raba/shale#104).
 - Mail sync no longer stops with "a message body that is not a string" when the server's answer arrives in pieces that split a line end between `\r` and `\n` (raba/shale#108).
 - "Test connection" in the mail account settings signs in to SMTP with the password typed in the dialog, so an account that is not saved yet no longer fails with "no password for this account" (raba/shale#108).
@@ -814,10 +814,10 @@ its section from this file.
 - Pasting a picture copied in a browser saves the picture and links it, instead of pasting its `<img src="image.png">` tag (raba/shale#219).
 - **Imported and pasted audio and video now show their player.** Import, drops and pasting wrote a
   plain `[[…]]` link for sound and video files, which stays a link; they now write `![[…]]`.
-  Notes that already have the plain link: add a `!` in front.
+  Notes that already have the plain link: add a `!` in front (#220).
 - **Clicking the play button of a player in the editor no longer moves the text cursor.** The
   button, the mute button and the artwork now take the press like the seek bar and the volume
-  slider did.
+  slider did (#221).
 - **A flag removed in Thunderbird (or any other mail program) shows up in Shale within seconds.**
   Changes made elsewhere only arrived with the next sync, up to ten minutes later. While the mail
   view is open, the folder you have open and each account's Inbox are now watched over a read-only
@@ -864,6 +864,18 @@ its section from this file.
 
 ### Internal
 
+- **Flaky and platform-specific tests fixed**: tests that failed now and then under load, in
+  parallel runs or because of the shared temp folder, and tests that failed only on Windows (#31, #43, #64, #66, #67, #68, #80, #127, #136, #171, #218, #231, #232, #247, #252, #260,
+  #261).
+- **CI and build fixes**: GitHub actions pinned off Node 20, each commit built once with a kept
+  Cargo cache, dead code that only showed in the macOS and Windows clippy removed, and no
+  jobserver warning from the local linker shim (#41, #65, #123, #204, #216, #246).
+- **Code and test tooling**: a dialog's content closure returns nothing unused, dialog placement is
+  tested at any window height, and a setting that was missing from the user guide's settings
+  reference was added (#141, #170, #212).
+- The changelog names every issue closed since 0.3.0, as the release check asks (#276).
+- **Screenshots**: a Markdown table in the editor, the reading view and the PDF export dialog, and
+  smaller lossless PNGs (#222, #230).
 - **Tests for the Thunderbird reader, the start dialog and starting up.** A generator builds
   throwaway Thunderbird profiles (accounts, mbox and maildir folders, nested and non-ASCII folder
   names, indexes, deleted and large messages, broken files) for the tests of the import from
