@@ -4,7 +4,9 @@
 //! (The zip, the archive and the attestation themselves are only made by CI, on a tag.)
 
 use std::fs;
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::path::Path;
+use std::path::PathBuf;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

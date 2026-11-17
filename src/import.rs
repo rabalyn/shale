@@ -67,6 +67,7 @@ pub enum MediaData {
     /// a file on this computer
     Path(PathBuf),
     /// bytes a program handed over or that were downloaded
+    #[cfg(any(target_os = "linux", test))]
     Bytes(Vec<u8>),
 }
 
@@ -128,6 +129,7 @@ impl Item {
             Source::Files(p) => p.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(", "),
             Source::Media { name, data, .. } => match data {
                 MediaData::Path(p) => format!("{name} · from {}", p.parent().map(|d| d.display().to_string()).unwrap_or_default()),
+                #[cfg(any(target_os = "linux", test))]
                 MediaData::Bytes(b) => format!("{name} · {}", dialog::size_text(b.len())),
             },
             #[cfg(target_os = "linux")]
@@ -529,6 +531,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
             let saved = match data {
                 MediaData::Path(p) if file == *name => media::import_file(&root, p, date),
                 MediaData::Path(p) => crate::fsutil::read(p).and_then(|b| media::save_bytes(&root, &file, &b, date)),
+                #[cfg(any(target_os = "linux", test))]
                 MediaData::Bytes(b) => media::save_bytes(&root, &file, b, date),
             };
             match saved {
