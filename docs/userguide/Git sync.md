@@ -29,6 +29,45 @@ Keep a vault on several computers with git. Back to [[Start here]].
 - Edits you type while a sync runs are never overwritten: your text is saved as a conflict copy
   next to the new version.
 
+## Media with Git LFS
+
+Sounds and videos are big and do not merge, so Shale can keep them in Git LFS: the history holds
+a small pointer and the file itself lives in the remote's LFS store. See [[Sounds and videos]].
+
+- **git-lfs on every computer.** It must be installed on each computer that commits media. The
+  settings show whether it is. Without it the sync commits nothing, says why and where to get it
+  (https://git-lfs.com; the package is called `git-lfs`), so that no media file lands in the
+  history as a plain file.
+- **Store media with Git LFS.** The button in Settings → General → Git sync switches it on for
+  this repository: audio and video files (mp3, ogg, oga, opus, flac, m4a, aac, wav, mp4, m4v, mov,
+  webm, mkv) are sent to LFS, and media already tracked are converted in one commit. Repositories
+  Shale creates itself are set up this way from the start. Shale only changes this repository,
+  never your global git configuration, and keeps your own lines in `.gitattributes`.
+- **Old versions stay.** Files committed before that stay in the history as they were; Shale
+  never rewrites history. To remove them, run `git lfs migrate import --include="*.mp3,*.mp4"`
+  (list all the extensions you use) in the vault, then force-push. Shale never does either.
+- **Uploading.** A sync runs `git lfs push` before `git push`, so the files reach the server.
+- **Downloading.** Media from other computers arrive as pointers and are downloaded when you play
+  or open them, or after every sync if you tick "Download media files after every sync"
+  (`sync.lfs_download`, see [[Settings reference]]).
+- **Conflicts.** The conflict copy of a file stored in LFS is stored in LFS too.
+- **SSH and HTTPS** remotes both work with your normal git credentials.
+
+### Forgejo
+
+Forgejo has LFS switched on by default (`[server] LFS_START_SERVER = true`). To keep the LFS files
+on S3 or MinIO instead of the server's disk, put this in `app.ini` (placeholder values):
+
+```ini
+[lfs]
+STORAGE_TYPE = minio
+MINIO_ENDPOINT = minio.example.com:9000
+MINIO_BUCKET = forgejo-lfs
+MINIO_ACCESS_KEY_ID = your-access-key
+MINIO_SECRET_ACCESS_KEY = your-secret-key
+MINIO_USE_SSL = true
+```
+
 This guide's own `.shale/settings.json` has sync switched off, because it lives inside the
 Shale repository.
 

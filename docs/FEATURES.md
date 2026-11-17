@@ -20,6 +20,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
 
+- **Syntax highlighting**: a fenced code block is coloured by the language on its opening fence
+  (```` ```js ````, ```` ```rust ````, `python`, `ts`, `toml`, `sh`, `json`, `yaml`, `c++`, … about 140 languages, with the usual aliases) in the
+  editor and the reading view; a block without a language or with an unknown one stays plain.
+  Inline code colours its strings, numbers and called names. The PDF export draws code the same way,
+  on the same dark code background (PDF-007).
 - Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
   line keeps one number.
 - A **formatting toolbar** above the text (Settings → Editing, on by default, button size 80–200 %) has a button for
@@ -224,7 +229,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![Graph](userguide/z_media/screenshots/graph.png)
 
-- The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline and a local
+- The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline (headings with their formatting, as in the editor) and a local
   graph of the open note.
 - The vault graph shows every note. Red dots are missing notes and green ones are drawings.
 

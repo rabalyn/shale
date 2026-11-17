@@ -2576,6 +2576,7 @@ fn slow_gnupg_script(dir: &Path, name: &str, real: &str) -> String {
 }
 
 /// Where the controls of the open settings dialog are: the Encryption section's, the footer's, and the dialog's own frame.
+#[cfg(unix)]
 fn settings_layout(w: &W) -> Vec<(String, Rect)> {
     let Some(Modal::MailAccounts(d)) = &w.app.modal else { panic!("no dialog") };
     let mut v: Vec<(String, Rect)> = d.rects.iter().filter(|r| r.0.starts_with("md:enc-") || r.0 == "md:done" || r.0 == "md:cancel").cloned().collect();

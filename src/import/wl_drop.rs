@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::os::fd::{BorrowedFd, FromRawFd};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use wayland_client::backend::{Backend, ObjectId};
 use wayland_client::protocol::{wl_data_device, wl_data_device_manager, wl_data_offer, wl_registry, wl_seat};
@@ -297,32 +297,55 @@ fn is_repeat(last: &mut Option<Instant>, now: Instant) -> bool {
     false
 }
 
-struct Shared {
+/// Where the glue sends its events, and what it remembers between drops. The program uses the
+/// one in `shared()`; every test of the glue makes its own (DEV-022).
+#[derive(Clone)]
+struct Sink {
     tx: Sender<DropEvent>,
+    ctx: Arc<Mutex<Option<eframe::egui::Context>>>,
+    last_drop: Arc<Mutex<Option<Instant>>>,
+}
+
+impl Sink {
+    fn new(tx: Sender<DropEvent>) -> Sink {
+        Sink { tx, ctx: Arc::new(Mutex::new(None)), last_drop: Arc::new(Mutex::new(None)) }
+    }
+
+    fn send(&self, e: DropEvent) {
+        let _ = self.tx.send(e);
+        if let Some(c) = self.ctx.lock().unwrap().as_ref() {
+            c.request_repaint();
+        }
+    }
+}
+
+/// How long the glue waits for a program to write each kind.
+#[derive(Clone, Copy)]
+struct Limits {
+    /// kinds read while dragging (up to 6 s: making the message file may need the mail server)
+    dragging: Duration,
+    /// kinds read after the drop
+    dropped: Duration,
+}
+
+const LIMITS: Limits = Limits { dragging: Duration::from_millis(6000), dropped: Duration::from_millis(2500) };
+
+struct Shared {
+    sink: Sink,
     rx: Mutex<Option<Receiver<DropEvent>>>,
-    ctx: Mutex<Option<eframe::egui::Context>>,
-    last_drop: Mutex<Option<Instant>>,
 }
 
 fn shared() -> &'static Shared {
     static S: OnceLock<Shared> = OnceLock::new();
     S.get_or_init(|| {
         let (tx, rx) = channel();
-        Shared { tx, rx: Mutex::new(Some(rx)), ctx: Mutex::new(None), last_drop: Mutex::new(None) }
+        Shared { sink: Sink::new(tx), rx: Mutex::new(Some(rx)) }
     })
-}
-
-fn send(e: DropEvent) {
-    let s = shared();
-    let _ = s.tx.send(e);
-    if let Some(c) = s.ctx.lock().unwrap().as_ref() {
-        c.request_repaint();
-    }
 }
 
 /// Lets a drop wake the window up.
 pub fn set_context(ctx: &eframe::egui::Context) {
-    *shared().ctx.lock().unwrap() = Some(ctx.clone());
+    *shared().sink.ctx.lock().unwrap() = Some(ctx.clone());
 }
 
 /// Drop events that arrived since the last call.
@@ -340,20 +363,22 @@ pub fn attach(handle: &impl winit::raw_window_handle::HasDisplayHandle) -> bool 
     // SAFETY: the display belongs to the window's event loop, which lives as long as the program.
     let backend = unsafe { Backend::from_foreign_display(display.cast()) };
     let conn = Connection::from_backend(backend);
-    std::thread::Builder::new()
-        .name("shale-drop".into())
-        .spawn(move || {
-            let mut queue = conn.new_event_queue::<State>();
-            let qh = queue.handle();
-            conn.display().get_registry(&qh, ());
-            let mut state = State { conn: conn.clone(), manager: None, seats: vec![], devices: vec![], offers: HashMap::new(), current: None, prefetch: None };
-            while queue.blocking_dispatch(&mut state).is_ok() {}
-        })
-        .is_ok()
+    std::thread::Builder::new().name("shale-drop".into()).spawn(move || listen(conn, shared().sink.clone(), LIMITS)).is_ok()
+}
+
+/// Listen for drops on `conn` until it closes.
+fn listen(conn: Connection, sink: Sink, limits: Limits) {
+    let mut queue = conn.new_event_queue::<State>();
+    let qh = queue.handle();
+    conn.display().get_registry(&qh, ());
+    let mut state = State { conn: conn.clone(), sink, limits, manager: None, seats: vec![], devices: vec![], offers: HashMap::new(), current: None, prefetch: None };
+    while queue.blocking_dispatch(&mut state).is_ok() {}
 }
 
 struct State {
     conn: Connection,
+    sink: Sink,
+    limits: Limits,
     manager: Option<wl_data_device_manager::WlDataDeviceManager>,
     seats: Vec<wl_seat::WlSeat>,
     devices: Vec<wl_data_device::WlDataDevice>,
@@ -428,13 +453,13 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
                     // a copy only: never let the other program move (delete) its original
                     offer.set_actions(DndAction::Copy, DndAction::Copy);
                 }
-                send(event);
+                state.sink.send(event);
                 // read what can be read already now (the drop may come too late for some programs)
                 let kinds = drag.prefetch_kinds();
                 if !kinds.is_empty() {
                     let (o2, c2) = (offer.clone(), state.conn.clone());
-                    // up to 6 s: making the message file may need the mail server
-                    let h = std::thread::spawn(move || read_kinds(&o2, &c2, &kinds, Duration::from_millis(6000)));
+                    let limit = state.limits.dragging;
+                    let h = std::thread::spawn(move || read_kinds(&o2, &c2, &kinds, limit));
                     state.prefetch = Some((offer.id(), h));
                 }
                 state.current = Some((offer, drag));
@@ -442,14 +467,14 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
             }
             E::Motion { x, y, .. } => {
                 if let Some((_, drag)) = &mut state.current {
-                    send(drag.motion(x, y));
+                    state.sink.send(drag.motion(x, y));
                 }
             }
             E::Leave => {
                 if let Some((offer, _)) = state.current.take() {
                     offer.destroy();
                 }
-                send(DropEvent::Leave);
+                state.sink.send(DropEvent::Leave);
             }
             E::Drop => {
                 let Some((offer, drag)) = state.current.take() else { return };
@@ -457,28 +482,29 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
                     Ok(l) => l,
                     Err(end) => {
                         offer.destroy();
-                        send(end);
+                        state.sink.send(end);
                         return;
                     }
                 };
-                if is_repeat(&mut shared().last_drop.lock().unwrap(), Instant::now()) {
+                if is_repeat(&mut state.sink.last_drop.lock().unwrap(), Instant::now()) {
                     offer.destroy();
                     return;
                 }
                 let conn2 = state.conn.clone();
                 let _ = conn.flush();
                 let prefetch = state.prefetch.take().filter(|(id, _)| *id == offer.id()).map(|(_, h)| h);
-                send(DropEvent::Busy);
+                let (sink, limit) = (state.sink.clone(), state.limits.dropped);
+                sink.send(DropEvent::Busy);
                 std::thread::spawn(move || {
                     // everything at once, the quick text kinds first, with a short time limit
-                    let late = read_kinds(&offer, &conn2, &landing.read_order(), Duration::from_millis(2500));
+                    let late = read_kinds(&offer, &conn2, &landing.read_order(), limit);
                     let before: Vec<(String, Got)> = prefetch.and_then(|h| h.join().ok()).unwrap_or_default();
                     if offer.version() >= 3 {
                         offer.finish();
                     }
                     offer.destroy();
                     let _ = conn2.flush();
-                    send(landing.finish(&before, &late));
+                    sink.send(landing.finish(&before, &late));
                 });
             }
             E::Selection { id: Some(o) } => {
@@ -496,8 +522,13 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
 }
 
 #[cfg(test)]
+mod fake_compositor;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use fake_compositor::{Answer, Rig, Seen};
+    use wayland_server::protocol::wl_data_device_manager::DndAction;
 
     // spec: IMP-009
     #[test]
@@ -623,5 +654,97 @@ mod tests {
         assert!(is_repeat(&mut last, t0 + Duration::from_millis(799)));
         assert!(!is_repeat(&mut last, t0 + Duration::from_millis(900)), "a new drop later is taken");
         assert!(is_repeat(&mut last, t0 + Duration::from_millis(1000)), "and starts a new window");
+    }
+
+    /// short limits so the "no answer" tests are quick
+    const QUICK: Limits = Limits { dragging: Duration::from_millis(300), dropped: Duration::from_millis(300) };
+
+    // spec: DEV-022
+    // spec: IMP-012
+    #[test]
+    fn dev_022_an_offer_of_a_kind_shale_takes_is_accepted_and_followed_to_the_end() {
+        let rig = Rig::start(QUICK);
+        rig.enter(&["text/plain", "text/uri-list"], 10.0, 20.0);
+        assert!(matches!(rig.event(), DropEvent::Hover { x, y } if (x, y) == (10.0, 20.0)));
+        rig.wait_for("the accept", |l| l.contains(&Seen::Accept(Some("text/uri-list".into()))));
+        rig.motion(30.5, 40.0);
+        assert!(matches!(rig.event(), DropEvent::Hover { x, y } if (x, y) == (30.5, 40.0)));
+        rig.leave();
+        assert!(matches!(rig.event(), DropEvent::Leave));
+        rig.wait_for("the offer destroyed", |l| l.contains(&Seen::Destroy));
+        assert!(!rig.seen().contains(&Seen::Finish), "a left drag is not finished");
+    }
+
+    // spec: DEV-022
+    // spec: IMP-007
+    #[test]
+    fn imp_007_shale_asks_for_a_copy_only() {
+        let rig = Rig::start(QUICK);
+        rig.enter(&["text/uri-list"], 1.0, 2.0);
+        rig.wait_for("the actions", |l| l.iter().any(|s| matches!(s, Seen::SetActions { .. })));
+        assert!(rig.seen().contains(&Seen::SetActions { dnd: DndAction::Copy, preferred: DndAction::Copy }));
+        assert!(!rig.seen().iter().any(|s| matches!(s, Seen::SetActions { dnd, .. } if *dnd != DndAction::Copy)), "never move");
+    }
+
+    // spec: DEV-022
+    // spec: IMP-012
+    #[test]
+    fn dev_022_an_offer_of_unknown_kinds_is_refused_and_a_drop_only_ends_it() {
+        let rig = Rig::start(QUICK);
+        rig.enter(&["application/x-tab", "DELETE"], 5.0, 6.0);
+        assert!(matches!(rig.event(), DropEvent::Refused { x, y, offered } if (x, y) == (5.0, 6.0) && offered == o(&["application/x-tab", "DELETE"])));
+        rig.wait_for("the refusal", |l| l.contains(&Seen::Accept(None)));
+        rig.drop_it();
+        assert!(matches!(rig.event(), DropEvent::Leave));
+        rig.wait_for("the offer destroyed", |l| l.contains(&Seen::Destroy));
+        assert!(rig.quiet(), "no busy and no finished drop");
+        assert!(!rig.seen().iter().any(|s| matches!(s, Seen::Receive(_) | Seen::Finish)), "nothing is read from a refused drag");
+    }
+
+    // spec: DEV-022
+    // spec: IMP-009
+    // spec: IMP-013
+    #[test]
+    fn dev_022_a_drop_is_read_and_finished() {
+        let rig = Rig::start(QUICK);
+        rig.answer("text/uri-list", Answer::Data(b"file:///tmp/x.eml\r\n".to_vec()));
+        rig.enter(&["text/uri-list", "application/x-tab"], 3.0, 4.0);
+        assert!(matches!(rig.event(), DropEvent::Hover { .. }));
+        rig.wait_for("the prefetch", |l| l.contains(&Seen::Receive("text/uri-list".into())));
+        rig.drop_it();
+        assert!(matches!(rig.event(), DropEvent::Busy));
+        let DropEvent::Drop { x, y, parts, offered, report } = rig.event() else { panic!("not a drop") };
+        assert_eq!((x, y), (3.0, 4.0));
+        assert_eq!(parts, vec![("text/uri-list".to_string(), b"file:///tmp/x.eml\r\n".to_vec())]);
+        assert_eq!(offered, o(&["text/uri-list", "application/x-tab"]));
+        assert!(report[0].contains("while dragging 19 bytes, after the drop 19 bytes"), "{report:?}");
+        rig.wait_for("finish and destroy", |l| l.contains(&Seen::Finish) && l.contains(&Seen::Destroy));
+        let seen = rig.seen();
+        let (fin, des) = (seen.iter().position(|s| *s == Seen::Finish), seen.iter().position(|s| *s == Seen::Destroy));
+        assert!(fin < des, "finish before destroy: {seen:?}");
+        // the same drop reaching a second listener at once is ignored (IMP-013)
+        rig.enter(&["text/uri-list"], 3.0, 4.0);
+        assert!(matches!(rig.event(), DropEvent::Hover { .. }));
+        rig.drop_it();
+        assert!(rig.quiet(), "a repeated drop gives no event");
+    }
+
+    // spec: DEV-022
+    // spec: IMP-009
+    #[test]
+    fn dev_022_a_kind_the_other_program_never_writes_is_reported_as_no_answer() {
+        let rig = Rig::start(QUICK);
+        rig.answer("text/plain", Answer::Data(b"hello".to_vec()));
+        rig.answer("text/uri-list", Answer::Silent);
+        rig.enter(&["text/uri-list", "text/plain"], 1.0, 1.0);
+        assert!(matches!(rig.event(), DropEvent::Hover { .. }));
+        rig.drop_it();
+        assert!(matches!(rig.event(), DropEvent::Busy));
+        let started = Instant::now();
+        let DropEvent::Drop { parts, report, .. } = rig.event() else { panic!("not a drop") };
+        assert!(started.elapsed() < Duration::from_secs(3), "gives up on the silent kind");
+        assert_eq!(parts, vec![("text/uri-list".to_string(), vec![]), ("text/plain".to_string(), b"hello".to_vec())]);
+        assert!(report[0].contains("while dragging no answer, after the drop no answer"), "{report:?}");
+        assert!(report[1].contains("5 bytes"), "{report:?}");
     }
 }

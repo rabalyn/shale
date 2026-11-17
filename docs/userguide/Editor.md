@@ -52,6 +52,15 @@ other editors and renderers show them too:
 tag, or inside inline code, is just text. Colours show in the editor (the tags dimmed; the
 Markdown preview hides them), in the [[Reading view]], in table cells and in the [[PDF]] export.
 
+## Code
+
+Code is coloured: write the language after the opening fence, as in ```` ```js ````
+or ```` ```rust ```` (also `python`, `sh`, `json`, `yaml`, `typescript`, `tsx`, `toml` and about 140 more; the usual short names such as `rs`,
+`py` and `yml` work too), and keywords, strings, numbers, comments, functions and types get their
+own colours, in the editor, in the reading view and in the [[PDF]] export. A block with no language, or one Shale does
+not know, stays plain. Inline code (`console.log("hi")`) has no language, so only its strings,
+numbers and called names are coloured.
+
 ## Markdown preview
 
 ![[editor-preview.png]]
@@ -107,7 +116,7 @@ table's current width), or a row border to give all rows the same height.
 
 The switch and the sizes are kept in the note, in a comment line right above the table, e.g.
 `<!-- shale-table edit=raw cols=160,90 rows=30,30,44 -->`. It is hidden with the grid, in the
-reading view and in the PDF; other apps such as Obsidian ignore HTML comments.
+reading view and in the PDF (which uses the sizes); other apps such as Obsidian ignore HTML comments.
 
 While the pointer is over the grid, small buttons appear: a **+** right of the header adds a
 column at the end, a **+** bar under the table adds a row at the end, and for the row and the
@@ -121,15 +130,8 @@ can undo, and the table stays a grid.
 
 ![[sound-player.png]]
 
-A sound embedded with `![[song.mp3]]` (mp3, ogg, oga, flac, m4a, aac and wav; opus files are
-recognised but cannot be played yet) shows a player in the editor, the markdown preview and the
-reading view. It shows the cover from the file's tags, or a tile with the file name. The round
-button over it plays and pauses (so does Space once you have clicked the player); click the bar
-to jump, or drag it and let go to seek. The speaker button mutes, the slider sets the volume for
-all players. Only one sound plays at a time; it goes on while you scroll or switch between the
-editor, the preview and the reading view, and stops when the note's tab is closed or another
-vault is opened. Nothing ever starts by itself. How opaque the play button is (60 % by
-default) is set in Settings → General → Appearance, see [[Settings reference]].
+A sound embedded with `![[song.mp3]]` shows a player in the editor, the markdown preview and the
+reading view; videos work the same way. All about them is in [[Sounds and videos]].
 
 ## Resizing pictures and videos
 

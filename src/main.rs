@@ -62,6 +62,7 @@ mod sidebar_ui;
 mod social;
 #[cfg(test)]
 mod start_dialog_tests;
+mod syntax;
 #[cfg(test)]
 mod tab_order_tests;
 mod table;

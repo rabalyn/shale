@@ -11,6 +11,8 @@ the export shows up in the vault.
 
 Highlights (`==text==`) and the colours of [[Editor]] (`<mark style="background: …">` behind the text, `<span style="color: …">` as the text colour) are printed as written, with the tags left out and the text still selectable.
 
+Code looks as on screen: fenced code blocks and inline code are printed in their syntax colours on the same dark code background as in the reading view (see [[Editor]]), the text still selectable.
+
 Pictures, drawings and PDFs embedded with `![[…]]` on a line of their own are drawn as
 thumbnails with their link as a small caption below (the same caption as in the editor, see
 [[Notes and links]]); so are the first frame of a video (needs ffmpeg) and the cover of a sound.
@@ -26,7 +28,9 @@ PDFs, videos and sounds" in the dialog switches all of this off.
 
 Tables are exported as real tables: a bordered grid with a filled bold header row, aligned
 columns and long cell text wrapping inside its column. A table that runs over a page break goes
-on at the top of the next page with its header row again. Tick "Export plain text (tables as raw
+on at the top of the next page with its header row again. Column widths and row heights you set
+by dragging in the editor are used too: the widths as they are in the editor (scaled down together only when they are wider than the
+page's text), the heights as least heights. Tick "Export plain text (tables as raw
 text lines)" in the dialog to get the raw `| a | b |` lines instead; the box is off each time
 the dialog opens, so nothing is stored in the settings.
 
