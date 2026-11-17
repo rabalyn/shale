@@ -3,7 +3,7 @@
 
 use crate::colour_tags;
 use crate::drawing::{self, Scene};
-use crate::editor::{char_under, heading_scale};
+use crate::editor::{char_under, heading_scale, FOOTNOTE_TEXT, SCRIPT_SCALE};
 use crate::markdown::{self, LinkSpan};
 use crate::syntax;
 use crate::theme;
@@ -96,6 +96,37 @@ struct Inline {
     /// the innermost `<mark style="background: …">` and `<span style="color: …">` here (EDIT-028)
     bg: Option<[u8; 4]>,
     fg: Option<[u8; 4]>,
+    /// inside `<u>` (EDIT-044)
+    under: bool,
+    /// inside `<sub>` or `<sup>`, the innermost of them
+    script: Option<colour_tags::Kind>,
+}
+
+/// What a footnote link span stands for (EDIT-043): spans of the layout of a line that are not
+/// links, but marks that jump to the other end of a footnote.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Foot {
+    /// the mark of a reference: goes to the definition
+    #[default]
+    Reference,
+    /// the label of a definition: goes back to the first reference
+    Definition,
+}
+
+const FOOT_REF: &str = "\u{1}footnote-reference";
+const FOOT_DEF: &str = "\u{1}footnote-definition";
+
+fn footnote_span(range: Range<usize>, label: &str, kind: Foot) -> LinkSpan {
+    LinkSpan { target_range: range.clone(), range, target: label.to_string(), heading: Some(if kind == Foot::Reference { FOOT_REF } else { FOOT_DEF }.to_string()), alias: None, embed: false, markdown_style: false }
+}
+
+/// The footnote a link span of [`inline_painted`] stands for: what it is and its label.
+pub(crate) fn footnote_of(l: &LinkSpan) -> Option<(Foot, &str)> {
+    match l.heading.as_deref() {
+        Some(FOOT_REF) => Some((Foot::Reference, &l.target)),
+        Some(FOOT_DEF) => Some((Foot::Definition, &l.target)),
+        _ => None,
+    }
 }
 
 /// Where a line's text got its own colours (EDIT-029): its bytes in the job's text, the background
@@ -127,11 +158,30 @@ pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base
 
 /// `inline_job`, and the text that has colours of its own.
 pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color32, strike_all: bool) -> Painted {
+    painted(line, links, size, base_color, strike_all, false)
+}
+
+/// The text of a table cell as `inline_painted` lays it out, with `<br>` as a line break (EDIT-045).
+pub(crate) fn cell_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color32) -> Painted {
+    painted(line, links, size, base_color, false, true)
+}
+
+/// The length of the line break tag (`<br>`, `<br/>`, `<br />`, any case) at the start of `s`.
+fn br_len(s: &str) -> Option<usize> {
+    let rest = s.get(..3).filter(|t| t.starts_with('<') && t[1..].eq_ignore_ascii_case("br")).map(|_| &s[3..])?;
+    let blanks = rest.len() - rest.trim_start().len();
+    let rest = &rest[blanks..];
+    let slash = usize::from(rest.starts_with('/'));
+    rest[slash..].starts_with('>').then_some(3 + blanks + slash + 1)
+}
+
+fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color32, strike_all: bool, breaks: bool) -> Painted {
     let mut job = LayoutJob::default();
     let mut paints: Vec<Paint> = Vec::new();
     let runs = colour_tags::find(line);
     let mut link_spans = Vec::new();
     let tags = markdown::find_tags(line);
+    let notes: Vec<(Range<usize>, String)> = markdown::footnote_refs_in_line(line).into_iter().filter(|(_, label)| markdown::footnote_is_defined(label)).collect();
     let mut st = Inline { strike: strike_all, ..Default::default() };
     let fmt = |st: &Inline, color: Color32| {
         // bold and italic in the font's own faces where it has them (CFG-039)
@@ -170,6 +220,12 @@ pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, 
         if let Some(fg) = st.fg {
             f.color = Color32::from_rgba_unmultiplied(fg[0], fg[1], fg[2], fg[3]);
         }
+        if st.under {
+            f.underline = Stroke::new(1.0, f.color);
+        }
+        if let Some(script) = st.script {
+            f = script_format(f, script == colour_tags::Kind::Sup);
+        }
         f
     };
     // web links ride along as link spans whose target is the URL
@@ -197,7 +253,25 @@ pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, 
             continue;
         }
         (st.bg, st.fg) = colour_tags::colours_at(&runs, i);
+        (st.under, st.script) = colour_tags::style_at(&runs, i);
         prev = (job.text.len(), st.bg, st.fg);
+        if let Some((r, label)) = notes.iter().find(|(r, _)| r.start == i) {
+            // the mark of a footnote: its label, raised, in the colour of links
+            let start = job.text.len();
+            let mut f = fmt(&st, theme::LINK);
+            f.color = theme::LINK;
+            job.append(label, 0.0, script_format(f, true));
+            link_spans.push((start..job.text.len(), footnote_span(r.clone(), label, Foot::Reference), true));
+            i = r.end;
+            continue;
+        }
+        if breaks {
+            if let Some(len) = br_len(&line[i..]) {
+                job.append("\n", 0.0, fmt(&st, base_color));
+                i += len;
+                continue;
+            }
+        }
         if let Some((l, ok)) = links.iter().chain(web.iter()).find(|(l, _)| l.range.start == i) {
             let shown = l.display();
             let start = job.text.len();
@@ -269,6 +343,43 @@ pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, 
     (job, link_spans, paints)
 }
 
+/// `f` as sub or superscript (EDIT-044): smaller, placed at the top or the bottom of the row, which
+/// needs the text not to have a line height of its own.
+fn script_format(mut f: TextFormat, raised: bool) -> TextFormat {
+    f.font_id.size *= SCRIPT_SCALE;
+    f.line_height = None;
+    f.valign = if raised { egui::Align::TOP } else { egui::Align::BOTTOM };
+    f
+}
+
+/// The first line of a footnote definition (EDIT-043): its label raised, then the text a little
+/// smaller. `line` is the whole line, `marker` the range of `[^label]:` in it.
+pub(crate) fn footnote_def_painted(line: &str, label: &str, marker: &Range<usize>, links: &[(LinkSpan, bool)], size: f32, color: Color32) -> Painted {
+    let lead = line[marker.end..].len() - line[marker.end..].trim_start().len();
+    let by = marker.end + lead;
+    let (job, spans, paints) = inline_painted(&line[by..], &shift(links, by), size * FOOTNOTE_TEXT, color, false);
+    let mark = TextFormat { font_id: FontId::new(size * FOOTNOTE_TEXT, crate::fonts::styled(false, false).family), color: theme::LINK, ..Default::default() };
+    let gap = mark.clone();
+    let mut out = LayoutJob::default();
+    out.append(label, 0.0, script_format(mark, true));
+    out.append(" ", 0.0, gap);
+    let head = out.text.len();
+    let at = |r: &Range<usize>| r.start + head..r.end + head;
+    out.text.push_str(&job.text);
+    for sec in job.sections {
+        out.sections.push(egui::text::LayoutSection { leading_space: sec.leading_space, byte_range: egui::text::ByteIndex(sec.byte_range.start.0 + head)..egui::text::ByteIndex(sec.byte_range.end.0 + head), format: sec.format });
+    }
+    let mut all = vec![(0..label.len(), footnote_span(0..label.len(), label, Foot::Definition), true)];
+    all.extend(spans.into_iter().map(|(r, l, ok)| (at(&r), l, ok)));
+    (out, all, paints.into_iter().map(|(r, bg, fg)| (at(&r), bg, fg)).collect())
+}
+
+/// An indented line that goes on with a footnote definition: its text a little smaller.
+pub(crate) fn footnote_text_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, color: Color32) -> Painted {
+    let by = line.len() - line.trim_start().len();
+    inline_painted(&line[by..], &shift(links, by), size * FOOTNOTE_TEXT, color, false)
+}
+
 /// Paint an inline job as a wrapped block and handle link clicks.
 /// `hint` gives an extra tooltip line for a link target (LINK-008, LINK-012).
 fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) -> egui::Response {
@@ -288,7 +399,15 @@ fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, b
 /// Hover and click on the link at byte `byte` of a block's text (if there is one): the pointer,
 /// the tooltip and the action (web links open the browser, notes open or are created).
 fn follow_span(ui: &Ui, resp: &egui::Response, byte: usize, spans: &[(Range<usize>, LinkSpan, bool)], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) {
-    if let Some((_, l, _)) = spans.iter().find(|(r, l, _)| r.contains(&byte) && crate::lists::is_web_url(&l.target)) {
+    if let Some((kind, label)) = spans.iter().find(|(r, ..)| r.contains(&byte)).and_then(|(_, l, _)| footnote_of(l)) {
+        // a footnote mark goes to the other end of its footnote, in the next frame (EDIT-043)
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        resp.clone().on_hover_text(if kind == Foot::Reference { "Go to the footnote" } else { "Back to the text" });
+        if resp.clicked() {
+            ui.ctx().data_mut(|d| d.insert_temp(jump_id(), (kind, label.to_string())));
+            ui.ctx().request_repaint();
+        }
+    } else if let Some((_, l, _)) = spans.iter().find(|(r, l, _)| r.contains(&byte) && crate::lists::is_web_url(&l.target)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         resp.clone().on_hover_ui_at_pointer(|ui| {
             ui.label(egui::RichText::new(&l.target).color(theme::LINK));
@@ -332,10 +451,28 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
     (out, plain_click)
 }
 
+/// A click on a footnote mark waiting for the next frame: where it goes and the label.
+fn jump_id() -> egui::Id {
+    egui::Id::unique("shale-footnote-jump")
+}
+
+/// The line a waiting footnote jump goes to (EDIT-043): the definition, or the first reference.
+/// The jump is taken: it is done once.
+fn jump_target(ctx: &egui::Context, notes: &markdown::Footnotes) -> Option<usize> {
+    let (kind, label): (Foot, String) = ctx.data_mut(|d| d.remove_temp(jump_id()))?;
+    match kind {
+        Foot::Reference => notes.def(&label).map(|d| d.lines.start),
+        Foot::Definition => notes.first_ref(&label).map(|r| r.line),
+    }
+}
+
 /// Draw a note. `look` is the text size and whether drawings get a dark canvas.
 pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Caches, look: (f32, bool), extras: &Extras) -> Option<ReaderAction> {
     let (base, dark_canvas) = look;
     let mut out = None;
+    let notes = markdown::find_footnotes(text);
+    let _defined = markdown::DefinedFootnotes::set(notes.defined());
+    let target = jump_target(ui.ctx(), &notes);
     let hint = |t: &str| vault.link_hint(t, Some(rel));
     let all_links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
         .into_iter()
@@ -362,6 +499,11 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
     }
     let tables = crate::table::find_tables(text);
     while i < lines.len() {
+        let span = tables.iter().find(|b| b.lines.start == i).map_or(i + 1, |b| b.lines.end);
+        if target.is_some_and(|t| (i..span).contains(&t)) {
+            // the end of a footnote jump (EDIT-043): this is the line
+            ui.scroll_to_rect(egui::Rect::from_min_size(ui.cursor().min, Vec2::new(1.0, base * 1.5)), Some(egui::Align::TOP));
+        }
         if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
             table_block(ui, b, vault, rel, base, &hint, &mut out);
             i = b.lines.end;
@@ -424,6 +566,16 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             ui.add_space(4.0);
             ui.separator();
             ui.add_space(4.0);
+        } else if let Some(def) = notes.def_at(i) {
+            // a footnote definition: its label raised, its text a little smaller (EDIT-043)
+            let (job, spans, _) = footnote_def_painted(line, &def.label, &def.marker, &line_links, base, theme::TEXT);
+            inline_block(ui, job, &spans, &hint, &mut out);
+        } else if notes.is_continuation(i) {
+            let (job, spans, _) = footnote_text_painted(line, &line_links, base, theme::TEXT);
+            ui.horizontal_top(|ui| {
+                ui.add_space(base * 1.2);
+                inline_block(ui, job, &spans, &hint, &mut out);
+            });
         } else if let Some(level) = markdown::heading_level(line) {
             ui.add_space(base * 0.5);
             let size = base * heading_scale(level as u8);
@@ -795,6 +947,145 @@ mod tests {
         let hi = job.text.find("hi ").unwrap();
         let there = job.text.find("there").unwrap();
         assert_eq!(paints, vec![(hi..there, Some([255, 255, 0, 255]), None), (there..there + 5, Some([255, 255, 0, 255]), Some([255, 0, 0, 255]))]);
+    }
+
+    fn format_at(job: &LayoutJob, word: &str) -> TextFormat {
+        let b = job.text.find(word).unwrap_or_else(|| panic!("{word} is not in {:?}", job.text));
+        job.sections.iter().find(|s| s.byte_range.start.0 <= b && b < s.byte_range.end.0).unwrap().format.clone()
+    }
+
+    // spec: EDIT-044
+    #[test]
+    fn the_reading_view_underlines_lowers_and_raises_and_hides_the_tags() {
+        let line = "Plain <u>under</u> H<sub>2</sub>O x<sup>2</sup> <U>a <SUP>b</SUP></U> <u>open `<sub>x</sub>`";
+        let (job, _, paints) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        assert_eq!(job.text, "Plain under H2O x2 a b <u>open <sub>x</sub>", "the tags are gone; an unclosed one and one in code are text");
+        assert_eq!(format_at(&job, "under").underline.width, 1.0);
+        assert_eq!(format_at(&job, "Plain").underline.width, 0.0);
+        let (sub, sup) = (format_at(&job, "2O"), format_at(&job, "2 a"));
+        assert_eq!((sub.font_id.size, sub.valign, sub.line_height), (15.0 * SCRIPT_SCALE, egui::Align::BOTTOM, None));
+        assert_eq!((sup.font_id.size, sup.valign, sup.line_height), (15.0 * SCRIPT_SCALE, egui::Align::TOP, None));
+        assert_eq!(format_at(&job, "O x").font_id.size, 15.0);
+        let b = format_at(&job, "b <u>");
+        assert_eq!((b.underline.width, b.valign), (1.0, egui::Align::TOP), "nested: underlined and raised");
+        assert_eq!(format_at(&job, "<u>open").underline.width, 0.0);
+        assert!(paints.is_empty(), "they are no colours");
+    }
+
+    // spec: EDIT-043
+    #[test]
+    fn a_reference_with_a_definition_is_a_raised_mark_and_one_without_stays_as_written() {
+        let line = "Note[^1] and[^2] and `[^1]`";
+        let _defined = markdown::DefinedFootnotes::set(["1".to_string()].into());
+        let (job, spans, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        assert_eq!(job.text, "Note1 and[^2] and [^1]");
+        let mark = format_at(&job, "1 and");
+        assert_eq!((mark.valign, mark.font_id.size, mark.color, mark.line_height), (egui::Align::TOP, 15.0 * SCRIPT_SCALE, theme::LINK, None));
+        assert_eq!(spans.len(), 1);
+        assert_eq!((spans[0].0.clone(), footnote_of(&spans[0].1)), (4..5, Some((Foot::Reference, "1"))));
+        assert_eq!(format_at(&job, "[^2]").valign, egui::Align::BOTTOM);
+        // the same line without any definition
+        drop(_defined);
+        let (job, spans, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        assert_eq!(job.text, "Note[^1] and[^2] and [^1]");
+        assert!(spans.is_empty());
+    }
+
+    // spec: EDIT-043
+    #[test]
+    fn a_definition_shows_its_label_raised_and_its_text_smaller_with_its_links_working() {
+        let line = "[^a]:   See **bold** [[Ideas]] and[^a]";
+        let notes = markdown::find_footnotes(line);
+        let _defined = markdown::DefinedFootnotes::set(notes.defined());
+        let links: Vec<(LinkSpan, bool)> = markdown::find_links(line).into_iter().map(|l| (l, true)).collect();
+        let def = &notes.defs[0];
+        let (job, spans, _) = footnote_def_painted(line, &def.label, &def.marker, &links, 15.0, theme::TEXT);
+        assert_eq!(job.text, "a See bold Ideas anda");
+        let label = format_at(&job, "a See");
+        assert_eq!((label.valign, label.color, label.font_id.size), (egui::Align::TOP, theme::LINK, 15.0 * FOOTNOTE_TEXT * SCRIPT_SCALE));
+        assert_eq!(format_at(&job, "See").font_id.size, 15.0 * FOOTNOTE_TEXT);
+        assert_eq!(format_at(&job, "bold").color, theme::TEXT_STRONG);
+        let kinds: Vec<(Range<usize>, Option<Foot>, String)> = spans.iter().map(|(r, l, _)| (r.clone(), footnote_of(l).map(|f| f.0), l.target.clone())).collect();
+        assert_eq!(kinds, [(0..1, Some(Foot::Definition), "a".to_string()), (11..16, None, "Ideas".to_string()), (20..21, Some(Foot::Reference), "a".to_string())]);
+        // an indented line that goes on with it is smaller text
+        let (job, _, _) = footnote_text_painted("    more *text*", &[], 15.0, theme::TEXT);
+        assert_eq!(job.text, "more text");
+        assert_eq!(format_at(&job, "more").font_id.size, 15.0 * FOOTNOTE_TEXT);
+    }
+
+    // spec: EDIT-045
+    #[test]
+    fn br_in_a_table_cell_is_a_line_break_and_elsewhere_it_is_text() {
+        for tag in ["<br>", "<br/>", "<br />", "<BR>", "<Br  / >"] {
+            let line = format!("• a{tag}• b");
+            let (job, _, _) = cell_painted(&line, &[], 15.0, theme::TEXT);
+            let want = if tag == "<Br  / >" { line.clone() } else { "• a\n• b".to_string() };
+            assert_eq!(job.text, want, "{tag}");
+        }
+        let (job, _, _) = cell_painted("a `x<br>y` b<br>", &[], 15.0, theme::TEXT);
+        assert_eq!(job.text, "a x<br>y b\n", "not in code");
+        let (job, _, _) = inline_painted("a<br>b", &[], 15.0, theme::TEXT, false);
+        assert_eq!(job.text, "a<br>b", "outside a table the tag is text");
+        assert_eq!(br_len("<br>x"), Some(4));
+        assert_eq!(br_len("<br />"), Some(6));
+        assert_eq!(br_len("<b>"), None);
+        assert_eq!(br_len("<bro>"), None);
+        assert_eq!(br_len("<br"), None);
+        assert_eq!(br_len("é<br>"), None);
+    }
+
+    // spec: EDIT-043
+    #[test]
+    fn a_click_on_a_footnote_mark_scrolls_to_its_definition_and_back() {
+        let d = std::env::temp_dir().join(format!("shale-reader-footnote-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        crate::vault::write_sample_vault(&d).unwrap();
+        let v = Vault::open(&d).unwrap();
+        let text = "Claim[^1] here.\n\n".to_string() + &"filler\n".repeat(80) + "\n[^1]: The body\n    and more\n\n" + &"after\n".repeat(40);
+        let (mut scenes, media) = (SceneCache::default(), crate::media::MediaPlayer::default());
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut frame = |events: Vec<Event>, n: usize| {
+            let mut last = vec![];
+            for k in 0..n {
+                time += 0.05;
+                let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(700.0, 500.0))), time: Some(time), events: if k == 0 { events.clone() } else { vec![] }, ..Default::default() };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        show(ui, &text, &v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, (15.0, true), &Extras::default());
+                    });
+                });
+                out.textures_delta.clear();
+                last = shapes_text(&out.shapes);
+            }
+            last
+        };
+        let click = |at: egui::Pos2, pressed| vec![Event::PointerMoved(at), Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }];
+        let find = |p: &[(String, Rect)], t: &str| p.iter().find(|(s, _)| s == t).map(|(_, r)| *r);
+        frame(vec![], 3);
+        let before = frame(vec![], 1);
+        assert!(!before.iter().any(|(t, _)| t.contains("[^")), "no raw footnote markup: {before:?}");
+        assert!(find(&before, "1 The body").is_none_or(|r| r.min.y > 1000.0), "the definition is far below the window");
+        // the mark is a part of the text of its paragraph: the middle of its character
+        let claim = find(&before, "Claim1 here.").unwrap_or_else(|| panic!("the paragraph is painted: {before:?}"));
+        let mark = {
+            let _defined = markdown::DefinedFootnotes::set(["1".to_string()].into());
+            let (job, _, _) = inline_painted("Claim[^1] here.", &[], 15.0, theme::TEXT, false);
+            let galley = ctx.fonts_mut(|f| f.layout_job(job));
+            claim.min + galley.pos_from_cursor(egui::text::CCursor::new(5)).center().to_vec2() + egui::Vec2::new(2.0, 0.0)
+        };
+        frame(click(mark, true), 1);
+        let after = frame(click(mark, false), 25);
+        let body = find(&after, "1 The body").unwrap_or_else(|| panic!("the definition is painted after the jump: {after:?}"));
+        assert!((0.0..60.0).contains(&body.min.y), "the definition is at the top of the view: {body:?}");
+        assert!(find(&after, "and more").is_some(), "its continuation line is shown: {after:?}");
+        // the label of the definition goes back to the reference
+        let label = body.min + egui::Vec2::new(2.0, body.height() / 2.0);
+        frame(click(label, true), 1);
+        let back = frame(click(label, false), 25);
+        let claim = find(&back, "Claim1 here.").unwrap_or_else(|| panic!("the reference is painted again: {back:?}"));
+        assert!((0.0..60.0).contains(&claim.min.y), "the reference is at the top of the view again: {claim:?}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: CFG-039

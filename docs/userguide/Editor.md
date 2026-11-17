@@ -72,6 +72,36 @@ other editors and renderers show them too:
 tag, or inside inline code, is just text. Colours show in the editor (the tags dimmed; the
 Markdown preview hides them), in the [[Reading view]], in table cells and in the [[PDF]] export.
 
+## Footnotes, underline, subscript and superscript
+
+A footnote is a reference in the text and a definition anywhere in the note:
+
+```
+The claim[^1] is old, as H<sub>2</sub>O and x<sup>2</sup> are, and <u>this</u> matters.
+
+[^1]: The source of the claim
+    with a second line, indented by four spaces or a tab.
+```
+
+A reference `[^label]` (letters, digits, `-` and `_`) with a definition shows only its label, raised
+and small, in the link colour; the brackets and the `^` are hidden by the Markdown preview. The
+definition `[^label]: text` at the start of a line shows its label raised and its text a little
+smaller; lines after it that start with four spaces or a tab belong to it. With the cursor in a line
+you see its raw text, as with every other markup. A reference without a definition is shown as
+written. In the [[Reading view]] a click on a reference scrolls to its definition, and a click on
+the label of a definition scrolls back to the first reference. Links, `#tags` and formatting work
+inside a definition. Footnotes in inline or fenced code are just text.
+
+`<u>…</u>` underlines, `<sub>…</sub>` lowers and `<sup>…</sup>` raises its text, both at about 70% of
+the size. They follow the rules of the colour tags above: any letter case, they nest with `<mark>`,
+`<span>` and each other, and a tag without its partner or inside inline code is plain text. The tags
+are hidden by the Markdown preview. In a table cell, `<br>` (also `<br/>` and `<br />`) starts a new
+line in the cell, where the table is drawn as a grid; the cell editor keeps the tag as you wrote it.
+
+All of this also shows in the heading titles of the outline, in table cells, and in the [[PDF]]
+export, where a footnote reference links to its definition. Word notes imported with pandoc use
+exactly these forms (see [[Import]]).
+
 ## Code
 
 Code is coloured: write the language after the opening fence, as in ```` ```js ````

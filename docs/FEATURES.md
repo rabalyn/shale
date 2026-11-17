@@ -46,6 +46,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
   `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
   the Markdown preview), the reading view, table cells and the PDF export, and nest with bold and italic.
+- **Footnotes, underline, sub and superscript.** A footnote reference `[^1]` with a definition
+  `[^1]: text` (continuation lines indented by four spaces or a tab) is a small raised label in the
+  link colour, the definition shows its label raised and its text a little smaller; in the reading
+  view a click on a reference jumps to its definition and back. `<u>text</u>` underlines,
+  `<sub>…</sub>` lowers and `<sup>…</sup>` raises, and `<br>` in a table cell starts a new line.
+  All of it shows in the Markdown preview, the reading view, the outline, table cells and the PDF
+  export (a reference links to its definition) and is what pandoc writes for a Word document.
 
   ![Colours and the toolbar](userguide/z_media/screenshots/editor-colours.png)
 
@@ -104,7 +111,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   embedded pictures, drawings, PDFs, the first frame of a video and the cover of a sound are
   drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
   the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
-  player card; highlights and font colours are printed as written; a **Contents** page after the title lists the
+  player card; highlights and font colours are printed as written, as are footnotes (a reference links to
+  its definition), underline, sub and superscript and `<br>` in table cells; a **Contents** page after the title lists the
   `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008), insert a

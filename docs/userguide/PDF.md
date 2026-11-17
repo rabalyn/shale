@@ -17,6 +17,8 @@ not printed a second time.
 
 Highlights (`==text==`) and the colours of [[Editor]] (`<mark style="background: …">` behind the text, `<span style="color: …">` as the text colour) are printed as written, with the tags left out and the text still selectable.
 
+Footnotes are printed as on screen: a reference is a small raised label that links to its definition, which is printed where it stands in the note with its label raised and its text a little smaller. `<u>` is underlined, `<sub>` and `<sup>` are lowered and raised in a smaller size, and `<br>` in a table cell starts a new line in the cell (see [[Editor]]).
+
 Code looks as on screen: fenced code blocks and inline code are printed in their syntax colours on the same dark code background as in the reading view (see [[Editor]]), the text still selectable.
 
 Pictures, drawings and PDFs embedded with `![[…]]` on a line of their own are drawn as
