@@ -9,8 +9,8 @@
 # A branch is a local branch if one has the name, else `origin/<branch>`, else any commit.
 # The checks: every new commit names an issue (FORGE-008), `cargo fmt --check`, clippy with
 # `-D warnings` for Linux, and for macOS and Windows (`scripts/cross-check.sh`), `cargo test` (also `cargo test --release` with --release), and the real-server
-# suites of tests/caldav-env and tests/mail-env when the change touches the CalDAV or mail code
-# or the environments (`.forgejo/scripts/env-tests.sh wanted`); --no-env-tests skips them and
+# suites of tests/caldav-env and tests/mail-env and the LuaLaTeX suite of tests/tex-env when the
+# change touches the CalDAV, mail or TeX export code or the environments (`.forgejo/scripts/env-tests.sh wanted`); --no-env-tests skips them and
 # says so. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
 # it there and run land.sh again. After the push the local branch `main` is fast-forwarded to
 # the landed commit (in the worktree that has it checked out, when that one is clean), so new
@@ -92,7 +92,7 @@ checks() {
   fi
   if [ "$(sh .forgejo/scripts/env-tests.sh wanted "$base" HEAD)" = yes ]; then
     if [ "$ENV_TESTS" = no ]; then
-      echo "-- SKIPPED (--no-env-tests): the change touches CalDAV or mail, the real-server suites did not run"
+      echo "-- SKIPPED (--no-env-tests): the change touches CalDAV, mail or TeX export, the real-server suites did not run"
     else
       step "real-server suites (podman)" sh .forgejo/scripts/env-tests.sh run || return 1
     fi

@@ -286,8 +286,8 @@ jobs:
       - name: Check the coverage against the baseline
         run: sh .forgejo/scripts/check-coverage.sh lcov.info .forgejo/coverage-baseline
 
-  # DEV-011, CALENV-004, MAIL-093: the real-server suites (Radicale, Dovecot, the OAuth2 provider and
-  # Mailpit in containers) of tests/caldav-env and tests/mail-env. Needs a container engine inside the
+  # DEV-011, CALENV-004, MAIL-093, TEX-020: the real-server suites (Radicale, Dovecot, the OAuth2 provider and
+  # Mailpit in containers) of tests/caldav-env and tests/mail-env, and the LuaLaTeX suite of tests/tex-env. Needs a container engine inside the
   # job container; where the runner offers none, the job says so and ends green without running the
   # suites (see tests/caldav-env/README.md, "In CI"). Separate from the build, so it never blocks it.
   env-tests:
@@ -348,7 +348,7 @@ jobs:
           echo "engine=$engine" >> "$GITHUB_OUTPUT"
           if [ "$engine" = none ]; then
             echo "SKIPPED: this runner cannot run containers inside the job container (podman and docker cannot start a container here; the reason is above)."
-            echo "The CalDAV and mail real-server tests did NOT run. What the runner needs: tests/caldav-env/README.md, section 'In CI'."
+            echo "The CalDAV, mail and TeX real-server tests did NOT run. What the runner needs: tests/caldav-env/README.md, section 'In CI'."
           else
             echo "Container engine: $engine"
           fi
@@ -360,7 +360,7 @@ jobs:
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl-dev libegl-dev >/dev/null
 
       # starts both stacks, runs both ignored suites and always takes the stacks down again
-      - name: CalDAV and mail tests against the real servers
+      - name: CalDAV, mail and TeX tests against the real servers
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
         run: sh .forgejo/scripts/env-tests.sh run "${{ steps.engine.outputs.engine }}"
 
