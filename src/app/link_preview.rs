@@ -112,7 +112,8 @@ impl ShaleApp {
             return;
         }
         let Some(vault) = self.vault.as_ref() else { return };
-        let (base, dark) = (self.cfg.font_size, self.cfg.dark_canvas);
+        let fonts = self.fonts.editor();
+        let (base, dark) = (fonts.rendered.size, self.cfg.dark_canvas);
         let Some(open) = self.link_preview.open.as_mut() else { return };
         open.focused |= inside;
         let screen = ctx.content_rect();
@@ -129,7 +130,7 @@ impl ShaleApp {
         let area = egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).pivot(pivot).constrain(true).show(&ctx, |ui| {
             egui::Frame::popup(ui.style()).stroke(stroke).show(ui, |ui| {
                 ui.set_width(width - 24.0);
-                clicked = lp.show(ui, vault, &mut crate::reader::Caches { scenes, media }, base, dark);
+                clicked = crate::fonts::with_area(ui, &fonts.rendered, |ui| lp.show(ui, vault, &mut crate::reader::Caches { scenes, media }, base, dark));
             });
         });
         if let Some(open) = lp.open.as_mut() {

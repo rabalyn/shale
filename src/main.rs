@@ -22,6 +22,9 @@ mod drawing;
 mod editor;
 mod editor_preview;
 mod embed_size;
+mod fonts;
+#[cfg(test)]
+mod fonts_ui_tests;
 mod format;
 mod format_bar;
 #[cfg(test)]
@@ -60,6 +63,10 @@ mod script;
 mod search_all;
 mod secret;
 mod secrets;
+mod settings;
+mod settings_file;
+#[cfg(test)]
+mod settings_file_ui_tests;
 mod sidebar;
 #[cfg(test)]
 mod sidebar_tests;

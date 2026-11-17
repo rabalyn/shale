@@ -39,12 +39,28 @@ pub struct Loaded<T> {
 
 /// Load a versioned file. Never fails: problems come back in `problem`.
 pub fn load<T: Versioned>(path: &Path) -> Loaded<T> {
+    load_with(path, decode_json)
+}
+
+/// Turns the bytes of a settings file into the map of its fields: JSON for the files of a
+/// vault, TOML for the global settings (CFG-009).
+pub type Decode = fn(&[u8]) -> Result<Map<String, Value>, String>;
+
+fn decode_json(bytes: &[u8]) -> Result<Map<String, Value>, String> {
+    match serde_json::from_slice(bytes).map_err(|e| e.to_string())? {
+        Value::Object(map) => Ok(map),
+        _ => Err("not a JSON object".into()),
+    }
+}
+
+/// `load` for a file in another format.
+pub fn load_with<T: Versioned>(path: &Path, decode: Decode) -> Loaded<T> {
     let bytes = match crate::fsutil::read(path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Loaded { value: T::default(), writable: true, existed: false, problem: None },
         Err(e) => return Loaded { value: T::default(), writable: false, existed: true, problem: Some(format!("The {} ({}) could not be read, so defaults are used and the file is left alone: {e}", T::WHAT, path.display())) },
     };
-    match parse::<T>(&bytes) {
+    match parse_with::<T>(&bytes, decode) {
         Ok((value, false)) => Loaded { value, writable: true, existed: true, problem: None },
         Ok((value, true)) => {
             Loaded { value, writable: false, existed: true, problem: Some(format!("The {} ({}) were written by a newer Shale. They are used as far as this version understands them, and not changed.", T::WHAT, path.display())) }
@@ -61,8 +77,12 @@ pub fn load<T: Versioned>(path: &Path) -> Loaded<T> {
 
 /// Parse and migrate. Ok((value, newer)) where `newer` = written by a newer version.
 pub fn parse<T: Versioned>(bytes: &[u8]) -> Result<(T, bool), String> {
-    let v: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-    let Value::Object(mut map) = v else { return Err("not a JSON object".into()) };
+    parse_with(bytes, decode_json)
+}
+
+/// `parse` for a file in another format.
+pub fn parse_with<T: Versioned>(bytes: &[u8], decode: Decode) -> Result<(T, bool), String> {
+    let mut map = decode(bytes)?;
     let version = match map.get("version") {
         None => 0,
         Some(v) => v.as_u64().ok_or("\"version\" is not a number")?,

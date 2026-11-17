@@ -17,7 +17,7 @@ Embed a sound like a picture, with `![[file.mp3]]`. Here is one:
   A link without the `!` stays a plain link.
 - **The card.** It shows the cover from the file's tags, or a tile with the file name.
 - **Play and pause.** The round button over the card. It is half transparent and fully opaque
-  when the mouse is over it; how opaque it is (60 % by default) is set in Settings → General →
+  when the mouse is over it; how opaque it is (60 % by default) is set in Settings →
   Appearance (`media_play_button_opacity`). After you have clicked the card, Space does the same.
 - **Progress.** The bar shows the time. Click it to jump there; drag it to choose a place and
   let go to seek.
@@ -52,7 +52,7 @@ with `apt install ffmpeg` (Linux), `brew install ffmpeg` (macOS) or `winget inst
 the note again after installing.
 
 Without them the video shows a tile with a play mark, and a click opens the file in your
-system's video player. Settings → General → Appearance says where ffmpeg was found, or that it
+system's video player. Settings → Appearance says where ffmpeg was found, or that it
 is missing and where to get it.
 
 ## Media from other computers
@@ -64,7 +64,7 @@ and then plays it. A picture embed does the same. This only works once the other
 synced, so that the file is on the server.
 
 To download every media file after each sync instead, tick "Download media files after every
-sync" in Settings → General → Git sync (`sync.lfs_download`: `on_demand` or `always`, see
+sync" in Settings → Sync (`sync.lfs_download`: `on_demand` or `always`, see
 [[Settings reference]] and [[Vault settings]]). If a download fails, the player says why and
 **Download** asks again.
 

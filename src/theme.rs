@@ -1,5 +1,6 @@
 //! Colours and egui style: a calm dark theme with a violet accent.
 
+use crate::fonts::AreaFont;
 use eframe::egui::{self, Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle};
 
 pub const BG_PRIMARY: Color32 = Color32::from_rgb(30, 30, 30);
@@ -42,29 +43,55 @@ pub const QUOTE: Color32 = Color32::from_rgb(170, 170, 170);
 /// Font family name of the bundled hand-drawn font (Virgil, SIL Open Font License).
 pub const HAND_FONT: &str = "hand";
 
-/// Register the bundled hand-drawn font as `FontFamily::Name("hand")` (with the normal fonts as
-/// fallback for characters it doesn't have).
-pub fn install_fonts(ctx: &egui::Context) {
+/// The fonts of egui: the normal ones, the bundled hand-drawn font as `FontFamily::Name("hand")`
+/// and each system font in `system` as a family of its own (all with the normal fonts as
+/// fallback for characters they don't have).
+pub fn font_definitions(system: Vec<(FontFamily, String, egui::FontData)>) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
+    let normal = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     defs.font_data.insert("virgil".into(), std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/Virgil.otf"))));
     let mut fam = vec!["virgil".to_string()];
-    fam.extend(defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default());
+    fam.extend(normal.clone());
     defs.families.insert(FontFamily::Name(HAND_FONT.into()), fam);
-    ctx.set_fonts(defs);
+    for (family, name, data) in system {
+        let key = format!("system:{name}");
+        defs.font_data.insert(key.clone(), std::sync::Arc::new(data));
+        let mut fam = vec![key];
+        fam.extend(normal.clone());
+        defs.families.insert(family, fam);
+    }
+    defs
+}
+
+/// Register the bundled hand-drawn font.
+pub fn install_fonts(ctx: &egui::Context) {
+    ctx.set_fonts(font_definitions(vec![]));
+}
+
+/// The text styles for a font: the sizes of Small, Heading and Monospace follow the size of
+/// the body text (14 points: 11.5, 20 and 13.5).
+pub fn text_styles(font: &AreaFont) -> std::collections::BTreeMap<TextStyle, FontId> {
+    let k = font.size / crate::fonts::UI_SIZE;
+    [
+        (TextStyle::Small, FontId::new(11.5 * k, font.family.clone())),
+        (TextStyle::Body, FontId::new(14.0 * k, font.family.clone())),
+        (TextStyle::Button, FontId::new(14.0 * k, font.family.clone())),
+        (TextStyle::Heading, FontId::new(20.0 * k, font.family.clone())),
+        (TextStyle::Monospace, FontId::new(13.5 * k, FontFamily::Monospace)),
+    ]
+    .into()
+}
+
+/// Use `font` for the text of the dialogs, menus and everything not in an area of its own.
+pub fn set_text_styles(ctx: &egui::Context, font: &AreaFont) {
+    ctx.global_style_mut(|s| s.text_styles = text_styles(font));
 }
 
 pub fn apply(ctx: &egui::Context) {
     install_fonts(ctx);
     ctx.set_visuals(egui::Visuals::dark());
     let mut style = (*ctx.global_style()).clone();
-    style.text_styles = [
-        (TextStyle::Small, FontId::new(11.5, FontFamily::Proportional)),
-        (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
-        (TextStyle::Button, FontId::new(14.0, FontFamily::Proportional)),
-        (TextStyle::Heading, FontId::new(20.0, FontFamily::Proportional)),
-        (TextStyle::Monospace, FontId::new(13.5, FontFamily::Monospace)),
-    ]
-    .into();
+    style.text_styles = text_styles(&AreaFont { family: FontFamily::Proportional, size: crate::fonts::UI_SIZE });
     style.spacing.item_spacing = egui::vec2(6.0, 4.0);
     style.spacing.button_padding = egui::vec2(8.0, 4.0);
     style.spacing.scroll.bar_width = 8.0;

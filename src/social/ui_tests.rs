@@ -848,7 +848,7 @@ fn the_settings_clear_and_rebuild_the_post_index() {
     }
     let old = post("old1", "bob", crate::calendar::time::now() - 3600, None);
     w.app.social.index.add(&acct, "home", std::slice::from_ref(&old));
-    w.app.open_settings(crate::app::SettingsTab::General);
+    w.app.open_settings(crate::app::SettingsTab::Social);
     w.frames(3);
     assert_eq!(w.app.social.index.count(None), 1);
     // Rebuild: clears and indexes what the open feeds hold (two lists of 40; a waiting post too)

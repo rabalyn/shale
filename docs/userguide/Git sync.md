@@ -6,7 +6,7 @@ features:
 
 Keep a vault on several computers with git. Back to [[Start here]].
 
-- Needs `git` installed. In Settings → General → Git sync, enter the URL of a git repository
+- Needs `git` installed. In Settings → Sync, enter the URL of a git repository
   (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press **Connect**, or run
   `git init` in the vault folder yourself. An address with a password in it, and plain `http://`
   or `git://` (except on this computer), are refused: use a credential helper or an SSH key.
@@ -38,7 +38,7 @@ a small pointer and the file itself lives in the remote's LFS store. See [[Sound
   settings show whether it is. Without it the sync commits nothing, says why and where to get it
   (https://git-lfs.com; the package is called `git-lfs`), so that no media file lands in the
   history as a plain file.
-- **Store media with Git LFS.** The button in Settings → General → Git sync switches it on for
+- **Store media with Git LFS.** The button in Settings → Sync switches it on for
   this repository: audio and video files (mp3, ogg, oga, opus, flac, m4a, aac, wav, mp4, m4v, mov,
   webm, mkv) are sent to LFS, and media already tracked are converted in one commit. Repositories
   Shale creates itself are set up this way from the start. Shale only changes this repository,

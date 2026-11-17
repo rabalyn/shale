@@ -18,7 +18,7 @@ Back to [[Start here]].
 - A link by name (`[[Editor]]`) finds the note wherever it is; a link by path
   (`[[Folder/Note]]`, `./Note`, `../Note`) is exact.
 - Web links `[text](https://…)` open in your browser.
-- Settings → General → Links: follow links only with Ctrl+click, create notes next to the
+- Settings → Editor → Links: follow links only with Ctrl+click, create notes next to the
   current note, update links when renaming (see [[Settings reference]]).
 
 ## Suggestions while you type
@@ -37,7 +37,7 @@ Back to [[Start here]].
 
 Pictures `![[photo.png]]`, drawings `![[Sketch.excalidraw]]` and PDFs `![[Paper.pdf]]` are shown
 inside the editor; the link text comes back while the cursor is in the link. The pictures in
-this guide are embedded exactly like this. Switch it off in Settings → General → Appearance
+this guide are embedded exactly like this. Switch it off in Settings → Appearance
 ("Show embedded images inside the editor").
 
 **Captions.** Every embed that is shown has its link as a small caption below it: the file's

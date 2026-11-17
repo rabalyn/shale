@@ -44,7 +44,7 @@ arrows. Opening one asks whether to convert it:
 ![[canvas-convert.png]]
 
 **Convert** makes an editable `Name.excalidraw.md` next to it; **Open read-only** just shows
-it. The canvas file itself is never changed. Settings → General → Drawings ("Convert Obsidian
+it. The canvas file itself is never changed. Settings → Editor → Drawings ("Convert Obsidian
 canvases … instead of asking") skips the question. "Dark drawing canvas" is in Appearance.
 
 #userguide #drawings

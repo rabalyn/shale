@@ -27,7 +27,7 @@ by `#tag` ([[Tasks]]).
 ![[people-picker.png]]
 
 Contact notes live in the **people folder** (default `Adressbuch`; this guide uses `People`,
-set in its `.shale/settings.json`; change it in Settings → General → People). An example is
+set in its `.shale/settings.json`; change it in Settings → Vault → People). An example is
 [[Ada Example]].
 
 - Type `[[p ` and a name to pick a person. The link that is written is a normal `[[Name]]`
