@@ -322,6 +322,26 @@ impl Page {
         }
     }
 
+    /// A typeset formula (PDF-010) with the left end of its baseline at (x, baseline): the outlines
+    /// of its glyphs from the math font, and its rules.
+    pub fn math(&mut self, layout: &crate::math::layout::Layout, x: f32, baseline: f32, color: Rgba) {
+        use crate::math::layout::Item;
+        let font = crate::math::font::font();
+        for item in &layout.items {
+            match item {
+                Item::Glyph { gid, x: gx, y: gy, size } => {
+                    let mut pen = PathOps { out: String::new(), x: x + gx, y: self.height - baseline + gy, scale: size / font.upem(), skew: 0.0 };
+                    font.draw(*gid, &mut pen);
+                    self.ops.push_str("q ");
+                    self.fill_color(color);
+                    self.ops.push_str(&pen.out);
+                    self.ops.push_str("f Q\n");
+                }
+                Item::Rule { x: rx, y: ry, w, h } => self.rect(x + rx, baseline - ry - h, *w, *h, Some(color), None),
+            }
+        }
+    }
+
     /// Place an image (from `Doc::add_image`) into the rect.
     pub fn image(&mut self, index: usize, x: f32, y: f32, w: f32, h: f32) {
         self.images.insert(index);

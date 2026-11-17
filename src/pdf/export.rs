@@ -213,10 +213,23 @@ struct Piece {
     script: i8,
     /// the label of the footnote whose definition this is a link to (EDIT-043)
     jump: Option<String>,
+    /// a typeset formula that takes the place of the text (PDF-010)
+    math: Option<std::sync::Arc<crate::math::Formula>>,
 }
 
 fn piece_width(p: &Piece) -> f32 {
-    crate::pdf::write::text_width(p.kind, p.size, &p.text)
+    match &p.math {
+        Some(f) => f.layout.width,
+        None => crate::pdf::write::text_width(p.kind, p.size, &p.text),
+    }
+}
+
+/// The width of a piece without the blanks at its end (a formula has none).
+fn trimmed_width(p: &Piece) -> f32 {
+    match &p.math {
+        Some(f) => f.layout.width,
+        None => crate::pdf::write::text_width(p.kind, p.size, p.text.trim_end()),
+    }
 }
 
 /// Break pieces into lines of at most `avail` points (words stay whole unless longer than a line).
@@ -224,6 +237,11 @@ fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
     // split into words (keeping the trailing spaces with each word)
     let mut words: Vec<Piece> = Vec::new();
     for p in pieces {
+        if p.math.is_some() {
+            // a formula is one word
+            words.push(p.clone());
+            continue;
+        }
         let mut cur = String::new();
         for c in p.text.chars() {
             if c == '\n' {
@@ -260,7 +278,7 @@ fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
                 continue;
             }
         }
-        if ww > avail {
+        if ww > avail && wd.math.is_none() {
             // a very long word: break it by characters
             let mut part = String::new();
             for c in wd.text.chars() {
@@ -359,7 +377,8 @@ impl<'a> Writer<'a> {
         if self.y > self.m + 0.5 {
             self.y += base * 0.8;
         }
-        let head = vec![Piece { text: "Contents".into(), kind: FontKind::Sans, size: base * 1.5, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None }];
+        let head =
+            vec![Piece { text: "Contents".into(), kind: FontKind::Sans, size: base * 1.5, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None, math: None }];
         let (x, cw) = (self.m, self.cw());
         self.paragraph(&head, x, cw);
         self.y += base * 0.6;
@@ -412,7 +431,7 @@ impl<'a> Writer<'a> {
         for line in wrap_pieces(pieces, avail) {
             let lh = self.line_height(&line);
             self.need(lh);
-            let base = self.y + self.line_size(&line) * 1.08;
+            let base = self.y + self.line_ascent(&line);
             self.draw_line(&line, x0, base);
             self.y += lh;
         }
@@ -445,6 +464,9 @@ impl<'a> Writer<'a> {
             for (c, ps) in row.iter().enumerate() {
                 natural[c] = natural[c].max(wrap_pieces(ps, f32::INFINITY).iter().map(|l| l.iter().map(piece_width).sum::<f32>()).fold(0.0, f32::max));
                 for p in ps {
+                    if p.math.is_some() {
+                        least[c] = least[c].max(piece_width(p));
+                    }
                     for word in p.text.split_whitespace() {
                         least[c] = least[c].max(crate::pdf::write::text_width(p.kind, p.size, word));
                     }
@@ -490,14 +512,14 @@ impl<'a> Writer<'a> {
             let mut top = y + CELL_PAD_Y;
             for line in cell {
                 let size = self.line_size(line);
-                let used = line.iter().map(piece_width).sum::<f32>() - line.last().map_or(0.0, |p| piece_width(p) - crate::pdf::write::text_width(p.kind, p.size, p.text.trim_end()));
+                let used = line.iter().map(piece_width).sum::<f32>() - line.last().map_or(0.0, |p| piece_width(p) - trimmed_width(p));
                 let room = widths[c] - 2.0 * CELL_PAD_X - used;
                 let dx = match aligns[c] {
                     crate::table::Col::Left => 0.0,
                     crate::table::Col::Center => room / 2.0,
                     crate::table::Col::Right => room,
                 };
-                self.draw_line(line, x + CELL_PAD_X + dx.max(0.0), top + size * 1.08);
+                self.draw_line(line, x + CELL_PAD_X + dx.max(0.0), top + self.line_ascent(line).max(size * 1.08));
                 top += self.line_height(line);
             }
             x += widths[c];
@@ -509,8 +531,15 @@ impl<'a> Writer<'a> {
         line.iter().map(|p| p.size).fold(self.opts.font_pt, f32::max)
     }
 
+    /// How far the baseline of a line is below its top: the text's, or what a formula needs above
+    /// its baseline (PDF-010).
+    fn line_ascent(&self, line: &[Piece]) -> f32 {
+        line.iter().filter_map(|p| p.math.as_ref()).map(|f| f.layout.ascent + 1.0).fold(self.line_size(line) * 1.08, f32::max)
+    }
+
     fn line_height(&self, line: &[Piece]) -> f32 {
-        self.line_size(line) * 1.45
+        let below = line.iter().filter_map(|p| p.math.as_ref()).map(|f| f.layout.descent + 1.0).fold(self.line_size(line) * 0.37, f32::max);
+        self.line_ascent(line) + below
     }
 
     /// One wrapped line with its baseline at `base`, starting at `x`.
@@ -518,6 +547,11 @@ impl<'a> Writer<'a> {
         let mut x = x;
         for p in line {
             let pw = piece_width(p);
+            if let Some(f) = &p.math {
+                self.p().math(&f.layout, x, base, p.color);
+                x += pw;
+                continue;
+            }
             // sub and superscript: the smaller text is moved off the baseline
             let unit = p.size / crate::editor::SCRIPT_SCALE;
             let base = match p.script {
@@ -530,11 +564,7 @@ impl<'a> Writer<'a> {
                 self.p().rect(x - pad * 0.5, base - p.size * 0.95, pw + pad, p.size * 1.25, Some(bg), None);
             }
             self.p().text(TextStyle { kind: p.kind, size: p.size, color: p.color, italic: p.italic, bold: p.bold }, x, base, &p.text);
-            let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) {
-                pw
-            } else {
-                crate::pdf::write::text_width(p.kind, p.size, p.text.trim_end())
-            };
+            let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) { pw } else { trimmed_width(p) };
             if p.underline {
                 self.p().line([x, base + p.size * 0.15], [x + tw, base + p.size * 0.15], p.color, p.size * 0.06);
             }
@@ -577,11 +607,34 @@ impl<'a> Writer<'a> {
 
     /// The pieces of a laid-out line of the reading view; `size` is the size of its text.
     fn pieces_from(&self, painted: crate::reader::Painted, size: f32) -> Vec<Piece> {
-        let (job, spans, paints) = painted;
+        let (job, spans, paints, maths) = painted;
         let mut out = Vec::new();
         for s in &job.sections {
             let r = s.byte_range.start.0..s.byte_range.end.0;
             let f = &s.format;
+            // a formula that was typeset: drawn in place of its TeX (PDF-010)
+            if let Some((m, done)) = maths.iter().find_map(|m| m.formula.as_ref().ok().filter(|_| m.range.start <= r.start && r.end <= m.range.end).map(|d| (m, d))) {
+                // the hidden TeX is two sections: the formula is drawn in place of the first
+                if r.start != m.range.start {
+                    continue;
+                }
+                out.push(Piece {
+                    text: String::new(),
+                    kind: FontKind::Sans,
+                    size: m.size,
+                    color: print_color(m.color),
+                    bg: None,
+                    italic: false,
+                    bold: false,
+                    underline: false,
+                    strike: false,
+                    link: None,
+                    script: 0,
+                    jump: None,
+                    math: Some(done.clone()),
+                });
+                continue;
+            }
             // colours the note asks for are printed as written (EDIT-028), not mapped for paper
             let paint = paints.iter().find(|(pr, ..)| pr.start <= r.start && r.end <= pr.end);
             let link = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)).map(|(_, l, _)| l.target.clone());
@@ -613,9 +666,31 @@ impl<'a> Writer<'a> {
                     Some((crate::reader::Foot::Reference, label)) => Some(label.to_string()),
                     _ => None,
                 }),
+                math: None,
             });
         }
         out
+    }
+
+    /// A formula alone on its lines (PDF-010): centred in display style, or its TeX as a code block
+    /// when it cannot be typeset (EDIT-049).
+    fn display_math(&mut self, tex: &str, base: f32) {
+        match crate::math::typeset(tex, base * crate::math::DISPLAY_SCALE, true) {
+            Ok(f) => {
+                let l = &f.layout;
+                self.need(l.height() + base * 0.8);
+                let x = self.m + ((self.cw() - l.width) / 2.0).max(0.0);
+                let y = self.y + base * 0.4 + l.ascent;
+                let ink = print_color(theme::TEXT);
+                self.p().math(l, x, y, ink);
+                self.y += l.height() + base * 0.8;
+            }
+            Err(_) => {
+                let lines: Vec<&str> = tex.trim_matches('\n').lines().collect();
+                self.code_block("", &lines, base * 0.9);
+                self.y += base * 0.5;
+            }
+        }
     }
 
     /// A fenced code block as the reading view shows it (PDF-007): the lines on the code
@@ -788,7 +863,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     // a first heading `# Title` that says the same as the title makes the title a second print of it (PDF-008)
     let said_by_heading = heads.first().is_some_and(|(_, level, title, _)| *level == 1 && markdown::heading_plain(title).to_lowercase() == markdown::heading_plain(&name).to_lowercase());
     if opts.title && !said_by_heading {
-        let pieces = vec![Piece { text: name.clone(), kind: FontKind::Sans, size: base * 2.0, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None }];
+        let pieces = vec![Piece { text: name.clone(), kind: FontKind::Sans, size: base * 2.0, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None, math: None }];
         let x = w.m;
         let cw = w.cw();
         w.paragraph(&pieces, x, cw);
@@ -809,6 +884,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
         }
     }
     let tables = if opts.plain_tables { vec![] } else { crate::table::find_tables(text) };
+    let formulas = markdown::find_math(text);
     while i < lines.len() {
         if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
             w.table(vault, rel, &b.table, &b.meta.sizes, ink);
@@ -819,6 +895,12 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
         let trimmed = line.trim();
         let x0 = w.m;
         let cw = w.cw();
+        // a formula on lines of its own: centred, or printed as code when it cannot be typeset (PDF-010)
+        if let Some(m) = formulas.iter().find(|m| m.block && m.lines.start == i) {
+            w.display_math(&text[m.tex.clone()], base);
+            i = m.lines.end;
+            continue;
+        }
         if fenced.get(i).copied().unwrap_or(false) {
             // code block: collect, then draw on the code background (PDF-007)
             let word = crate::syntax::fence_language(line);
@@ -916,7 +998,21 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
             if let Some(n) = numbers.get(&i) {
                 ps.insert(
                     0,
-                    Piece { text: format!("{n} "), kind: FontKind::Sans, size: base * scale, color: Rgba(130, 130, 130, 255), bg: None, italic: false, bold: false, underline: false, strike: false, link: None, script: 0, jump: None },
+                    Piece {
+                        text: format!("{n} "),
+                        kind: FontKind::Sans,
+                        size: base * scale,
+                        color: Rgba(130, 130, 130, 255),
+                        bg: None,
+                        italic: false,
+                        bold: false,
+                        underline: false,
+                        strike: false,
+                        link: None,
+                        script: 0,
+                        jump: None,
+                        math: None,
+                    },
                 );
             }
             w.need(base * scale * 2.0);
@@ -1928,6 +2024,110 @@ pub(crate) mod tests {
         assert!(op("strong").contains(" 2 Tr"), "bold: {}", op("strong"));
         assert!(op("slanted").contains("1 0 0.2 1"), "italic: {}", op("slanted"));
         assert!(op("words.").contains(" 0 Tr 1 0 0 1"), "plain: {}", op("words."));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The ink of a rendered page (at the scale of `render`: half a pixel per point) inside a
+    /// rectangle given in PDF points from the top left: how many pixels are not white.
+    fn ink(page: &(u32, u32, Vec<u8>), x: std::ops::Range<f32>, y: std::ops::Range<f32>) -> usize {
+        let (w, h, data) = page;
+        let mut n = 0;
+        for py in (y.start * 0.5).max(0.0) as u32..((y.end * 0.5) as u32).min(*h) {
+            for px in (x.start * 0.5).max(0.0) as u32..((x.end * 0.5) as u32).min(*w) {
+                let i = ((py * w + px) * 4) as usize;
+                if data[i] < 235 {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    /// The columns (in PDF points) between which a page has ink in the rows `y`.
+    fn ink_columns(page: &(u32, u32, Vec<u8>), y: std::ops::Range<f32>) -> Option<(f32, f32)> {
+        let (w, _, _) = page;
+        let cols: Vec<u32> = (0..*w).filter(|c| ink(page, (*c as f32 * 2.0)..(*c as f32 * 2.0 + 2.0), y.clone()) > 0).collect();
+        Some((*cols.first()? as f32 * 2.0, *cols.last()? as f32 * 2.0 + 2.0))
+    }
+
+    // spec: PDF-010, EDIT-047
+    #[test]
+    fn math_in_the_pdf_is_vector_glyphs_and_rules_in_the_line_and_its_tex_is_not_printed() {
+        let (v, d) = vault();
+        let rel = Path::new("Welcome.md");
+        let plain = export_note(&v, rel, "Energy and here.\n", &ExportOptions::for_note()).unwrap();
+        let text = "Energy $E = mc^2$ and here.\n\n$$\\frac{a}{b}$$\n";
+        let bytes = export_note(&v, rel, text, &ExportOptions::for_note()).unwrap();
+        let c = page_streams(&bytes).remove(0);
+        assert!(!c.contains(&hex("$E")) && !c.contains(&hex("mc^2")) && !c.contains(&hex("frac")), "no TeX is printed as text");
+        assert!(c.contains(&hex("Energy ")) && c.contains(&hex("and ")) && c.contains(&hex("here.")), "the text around is text");
+        let outlines = |s: &str| s.matches(" f Q").count();
+        let base = outlines(&page_streams(&plain).remove(0));
+        // E = m c 2 are glyph outlines, and the fraction bar is a filled rectangle
+        assert!(outlines(&c) >= base + 7, "glyph outlines: {} against {base}", outlines(&c));
+        assert!(c.contains(" c "), "curves of glyph outlines");
+        // the formula is on the line of its text: ink between the two pieces of text, on the same baseline
+        let (y_text, x_end, x_next) = (y_of(&c, "Energy "), x_of(&c, "Energy ") + crate::pdf::write::text_width(FontKind::Sans, 11.0, "Energy "), x_of(&c, "and "));
+        let page = render(&bytes).remove(0);
+        let page_h = page.1 as f32 * 2.0;
+        let top = page_h - y_text - 14.0;
+        assert!(x_next - x_end > 30.0, "room for the formula: {x_end} {x_next}");
+        assert!(ink(&page, x_end + 1.0..x_next - 1.0, top..top + 22.0) > 15, "the formula is drawn in the gap");
+        assert_eq!(render(&plain).remove(0).1, page.1, "same paper");
+        // the display formula is centred on the page and under the text
+        let width = page.0 as f32 * 2.0;
+        let (l, r) = ink_columns(&page, top + 40.0..page_h - 100.0).expect("ink of the display formula");
+        assert!(((l + r) / 2.0 - width / 2.0).abs() < 6.0, "centred: {l} {r} of {width}");
+        assert!(r - l > 6.0, "{l} {r}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-010, EDIT-049
+    #[test]
+    fn a_formula_that_cannot_be_typeset_is_printed_as_code_in_the_pdf() {
+        let (v, d) = vault();
+        let rel = Path::new("Welcome.md");
+        let bytes = export_note(&v, rel, "Try $\\unknown{x}$ here.\n\n$$\n\\frac{a}\n$$\n", &ExportOptions::for_note()).unwrap();
+        let c = page_streams(&bytes).remove(0);
+        assert!(c.contains(&hex("$\\unknown{x}$")), "the TeX is printed");
+        let at = c.find(&format!("<{}> Tj", hex("$\\unknown{x}$"))).unwrap();
+        assert!(c[..at].rfind("/F2").is_some_and(|f| c[f..at].contains(" Tf")), "in the code font");
+        assert!(c.contains(&hex("\\frac{a}")), "a display formula as a code block");
+        assert_eq!(render(&bytes).len(), page_streams(&bytes).len());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-010
+    #[test]
+    fn math_wraps_with_its_line_makes_it_taller_and_works_in_table_cells() {
+        let (v, d) = vault();
+        let rel = Path::new("Welcome.md");
+        // a tall formula makes its line taller; the next line is further down
+        let tall = export_note(&v, rel, "first $\\frac{\\frac{a}{b}}{\\frac{c}{d}}$ line\nsecond line\n", &ExportOptions::for_note()).unwrap();
+        let plain = export_note(&v, rel, "first x line\nsecond line\n", &ExportOptions::for_note()).unwrap();
+        let gap = |b: &[u8]| {
+            let c = page_streams(b).remove(0);
+            y_of(&c, "first ") - y_of(&c, "second ")
+        };
+        assert!(gap(&tall) > gap(&plain) + 5.0, "{} {}", gap(&tall), gap(&plain));
+        // a long paragraph with a formula in it wraps and stays within the margins
+        let words = "word ".repeat(60);
+        let bytes = export_note(&v, rel, &format!("{words}$a+b+c+d+e+f+g+h$ {words}\n"), &ExportOptions::for_note()).unwrap();
+        let page = render(&bytes).remove(0);
+        let width = page.0 as f32 * 2.0;
+        let margin = 20.0 * 72.0 / 25.4;
+        let (l, r) = ink_columns(&page, 0.0..page.1 as f32 * 2.0).unwrap();
+        assert!(l >= margin - 3.0 && r <= width - margin + 3.0, "{l} {r} within {margin}..{}", width - margin);
+        // a table cell
+        let bytes = export_note(&v, rel, "| A | B |\n|---|:-:|\n| one | $x^2 + \\sqrt{y}$ |\n", &ExportOptions::for_note()).unwrap();
+        let c = page_streams(&bytes).remove(0);
+        assert!(!c.contains(&hex("$x")) && !c.contains(&hex("sqrt")), "no TeX in the cell");
+        assert!(c.matches(" f Q").count() >= 6, "the glyphs of the cell");
+        let page = render(&bytes).remove(0);
+        let page_h = page.1 as f32 * 2.0;
+        let y = page_h - y_of(&c, "one");
+        let (l, r) = ink_columns(&page, y - 14.0..y + 8.0).unwrap();
+        assert!(ink(&page, (l + (r - l) / 2.0 + 2.0)..r - 2.0, y - 12.0..y + 6.0) > 15, "the formula is drawn in the second cell: {l} {r}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

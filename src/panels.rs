@@ -585,7 +585,7 @@ impl ShaleApp {
                                 })
                                 .collect();
                             let job = crate::editor::outline_job(&title, &links, 14.0);
-                            if ui.add(egui::Label::new(job).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            if crate::editor::outline_label(ui, job, 14.0).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                 self.actions.push(Action::GotoHeading { rel: rel.clone(), line });
                             }
                         });
