@@ -106,8 +106,20 @@ fn the_template_folders_are_searched_with_their_sub_folders_before_the_default()
     let parts: Vec<PathBuf> = std::env::split_paths(&v).collect();
     assert_eq!(parts, [PathBuf::from("/t/one//"), PathBuf::from("/t/two//"), PathBuf::new()], "the empty last entry is TeX's own path");
     assert_eq!(std::env::split_paths(&tex_inputs(&[]).unwrap()).count(), 1);
-    let sep = if cfg!(windows) { ";" } else { ":" };
-    assert!(tex_inputs(&[PathBuf::from(format!("/a{sep}b"))]).is_err(), "a folder with the separator cannot be put in a search path");
+    assert!(tex_inputs(&[PathBuf::from(format!("/a{SEARCH_PATH_SEP}b"))]).is_err(), "a folder with the separator cannot be put in a search path");
+}
+
+// spec: TEX-004
+#[test]
+fn the_search_path_separator_is_the_one_of_the_system_and_a_drive_letter_is_no_separator() {
+    assert_eq!(SEARCH_PATH_SEP, if cfg!(windows) { ';' } else { ':' });
+    // Unix: a colon separates, a semicolon is part of a name
+    assert_eq!(search_path(&[PathBuf::from("/t/one"), PathBuf::from("/t/a;b")], ':').unwrap(), "/t/one//:/t/a;b//:");
+    assert!(search_path(&[PathBuf::from("/t/a:b")], ':').is_err());
+    // Windows: a semicolon separates; the colon after the drive letter is part of the folder
+    assert_eq!(search_path(&[PathBuf::from(r"C:\t\one"), PathBuf::from(r"D:\two")], ';').unwrap(), r"C:\t\one//;D:\two//;");
+    assert!(search_path(&[PathBuf::from(r"C:\t\a;b")], ';').is_err(), "kpathsea knows no quoting");
+    assert_eq!(search_path(&[], ';').unwrap(), "", "only TeX's own path");
 }
 
 // spec: TEX-004
