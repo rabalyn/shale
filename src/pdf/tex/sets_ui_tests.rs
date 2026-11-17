@@ -4,7 +4,7 @@
 
 use super::install::{Handle, Progress, Stage};
 use super::sets::{sets_root, Source};
-use super::sets_tests::{make_set, META};
+use super::sets_tests::{make_set, meta_from_local, META};
 use super::sets_ui::*;
 use super::settings_ui::{Task, TaskKind};
 use super::settings_ui_tests::{nothing_found, T};
@@ -144,7 +144,7 @@ fn a_running_import_shows_its_progress_and_cancel_asks_the_job_to_stop() {
 fn update_imports_again_from_the_place_the_set_came_from() {
     let (mut t, dir) = with_set("sets-update", &[("article", KIND)]);
     let src = source_folder(&t.dir.parent().unwrap().join(format!("shale-sets-upd-{}", std::process::id())), "mine");
-    std::fs::write(dir.join("set.toml"), META.replace("/somewhere/set.zip", &src.to_string_lossy())).unwrap();
+    std::fs::write(dir.join("set.toml"), meta_from_local(&src.to_string_lossy())).unwrap();
     std::fs::write(dir.join("settings.toml"), "accent = \"3b\"\n").unwrap();
     t.app.tex.sets.dirty = true;
     t.click("Update set");
