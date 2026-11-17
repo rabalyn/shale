@@ -538,6 +538,9 @@ pub enum EditorAction {
     CreatePerson(String),
     /// pasted pictures / files were saved in the media folder (EDIT-024): refresh the file list and say what was saved
     Pasted(String),
+    /// the pasted text has headings, all of them `##` or deeper: ask whether to lift them (EDIT-038);
+    /// the text is held back and comes back with [`NoteEditor::pending_paste`]
+    AskLiftHeadings(String),
 }
 
 #[derive(Default)]
@@ -567,6 +570,8 @@ pub struct NoteEditor {
     /// Draw the numbers of the headings (LINK-014, CFG-042): the setting; a note's front matter overrides it.
     pub numbered_headings: bool,
     pub request_focus: bool,
+    /// Text to paste at the cursor in the next frame: the answer to [`EditorAction::AskLiftHeadings`] (EDIT-038).
+    pub pending_paste: Option<String>,
     /// Frames left to ask again when the request was not granted (a dialog that has just closed
     /// still blocks the keyboard for the window behind it for a frame).
     focus_retry: u8,
@@ -637,6 +642,7 @@ impl NoteEditor {
             scroll_to_top: false,
             numbered_headings: false,
             request_focus: false,
+            pending_paste: None,
             focus_retry: 0,
             last_layout: None,
             inline_images: false,
@@ -983,6 +989,25 @@ impl NoteEditor {
         (!messages.is_empty()).then(|| EditorAction::Pasted(messages.join(". ")))
     }
 
+    /// A pasted text with headings, all `##` or deeper, is not pasted yet: the editor asks the app
+    /// whether to lift them (EDIT-038). Text without headings or with a `#` is left alone.
+    fn hold_paste_without_h1(&mut self, ui: &mut Ui) -> Option<EditorAction> {
+        if !ui.ctx().memory(|m| m.has_focus(self.id)) || (self.vim_enabled && self.vim.paste_pending) {
+            return None;
+        }
+        let mut held = None;
+        ui.input_mut(|i| {
+            i.events.retain(|e| match e {
+                egui::Event::Paste(t) if held.is_none() && markdown::lift_headings(t).is_some() => {
+                    held = Some(t.clone());
+                    false
+                }
+                _ => true,
+            })
+        });
+        held.map(EditorAction::AskLiftHeadings)
+    }
+
     fn refresh_links(&mut self, text: &str, vault: &Vault, rel: &Path) {
         let mut h = DefaultHasher::new();
         text.hash(&mut h);
@@ -1259,6 +1284,13 @@ impl NoteEditor {
         let media_handled = keys.handled;
         if let Some(a) = self.paste_media(ui, vault) {
             action = Some(a);
+        }
+        if let Some(a) = self.hold_paste_without_h1(ui) {
+            action = Some(a);
+        }
+        if let Some(t) = self.pending_paste.take() {
+            ui.ctx().memory_mut(|m| m.request_focus(self.id));
+            ui.input_mut(|i| i.events.push(egui::Event::Paste(t)));
         }
 
         if self.vim_enabled && self.vim_frame(ui, text, undo.of(rel)) {
@@ -3032,7 +3064,7 @@ mod tests {
         let mut text = String::new();
         let (ed, _) = list("[[Roadmap#", &mut text);
         let em = "\u{2003}";
-        assert_eq!(ed.assist.ac_labels, vec!["Roadmap".to_string(), format!("{em}1 Plan one"), format!("{em}{em}1.1 Step a"), format!("{em}{em}1.2 Step b"), format!("{em}2 Review")], "in order, by level, numbered");
+        assert_eq!(ed.assist.ac_labels, vec!["1 Roadmap".to_string(), format!("{em}1.1 Plan one"), format!("{em}{em}1.1.1 Step a"), format!("{em}{em}1.1.2 Step b"), format!("{em}1.2 Review")], "in order, by level, numbered");
         let (ed, _) = list("[[Roadmap#ste", &mut text);
         assert_eq!(ed.assist.ac_labels.len(), 2, "filtered by what is typed after the #: {:?}", ed.assist.ac_labels);
         // picking inserts the plain text of the heading, no number and no markup
@@ -3951,6 +3983,52 @@ mod tests {
         }
     }
 
+    // spec: EDIT-038
+    #[test]
+    fn a_pasted_text_with_headings_none_of_them_h1_is_held_back_and_asked_about() {
+        let (v, d) = vault_for_tests("paste-lift");
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let mut ed = NoteEditor::new(egui::Id::unique("paste-lift-ed"));
+        let mut text = String::from("ab cd");
+        ed.pending_cursor = Some(2);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+        // headings, all ## or deeper: nothing is pasted yet, the app is asked with the text
+        let deep = "## A\ntext\n### B\n";
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(deep.into())]);
+        assert!(matches!(&a, Some(EditorAction::AskLiftHeadings(held)) if held == deep), "asked");
+        assert_eq!(text, "ab cd", "held back");
+        // the answer comes back as a paste at the cursor, one step of undo like any paste
+        ed.pending_paste = Some("# A\ntext\n## B\n".into());
+        let mut undo = crate::undo::Histories::default();
+        undo.of(Path::new("Welcome.md")).checkpoint(&text);
+        let raw = |time| RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(time), ..Default::default() };
+        t += 0.05;
+        let mut out = ctx.run_ui(raw(t), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let (changed, action) = ed.show(ui, &mut text, &v, Note { rel: Path::new("Welcome.md"), undo: &mut undo }, &EditorFonts::uniform(15.0), false);
+                assert!(changed && action.is_none(), "pasted without asking again");
+            });
+        });
+        out.textures_delta.clear();
+        assert_eq!(text, "ab# A\ntext\n## B\n cd");
+        assert!(ed.pending_paste.is_none());
+        let mut undone = text.clone();
+        assert!(undo.of(Path::new("Welcome.md")).undo(&mut undone).is_some());
+        assert_eq!(undone, "ab cd", "the paste is one step of undo");
+        // text with a # heading, without headings, or with headings only in code: pasted at once
+        for plain in ["# A\n## B\n", "just text", "```\n## not a heading\n```\n", "## A\n# B\n"] {
+            let mut text = String::from("x");
+            ed.pending_cursor = Some(1);
+            paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
+            let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(plain.into())]);
+            assert!(a.is_none(), "{plain:?} is pasted without asking");
+            assert_eq!(text, format!("x{plain}"));
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: EDIT-024
     #[test]
     fn pasting_a_picture_or_media_files_saves_them_to_the_media_folder() {
@@ -4088,14 +4166,14 @@ mod tests {
             h.frame(&mut ed, &mut text, &v, rel, vec![]);
             h.frame(&mut ed, &mut text, &v, rel, vec![]);
             assert_eq!(text, original, "the numbers are drawn, never written");
-            for n in ["1", "1.1", "2"] {
+            for n in ["1", "1.1", "1.1.1", "1.2"] {
                 assert!(h.texts.iter().any(|t| t == n), "number {n} is painted (preview {preview}): {:?}", h.texts);
             }
-            assert!(!h.texts.iter().any(|t| t == "0" || t == "3"), "the title has none: {:?}", h.texts);
+            assert!(!h.texts.iter().any(|t| t == "0" || t == "2"), "# is numbered like the others: {:?}", h.texts);
             // the number sits left of its heading's text, on its row
             let (galley, pos) = ed.last_layout.clone().unwrap();
             let step = galley.pos_from_cursor(CCursor::new(original.find("Step").unwrap()));
-            let number = h.rects.iter().find(|(t, _)| t == "1.1").unwrap().1;
+            let number = h.rects.iter().find(|(t, _)| t == "1.1.1").unwrap().1;
             assert!(number.max.x <= pos.x + step.min.x && number.max.x > pos.x + step.min.x - 20.0, "{number:?} before {step:?}");
             assert!(number.center().y > pos.y + step.min.y && number.center().y < pos.y + step.max.y, "{number:?} on the row {step:?}");
             // setting off: no numbers; the front matter overrides it both ways
@@ -4125,13 +4203,13 @@ mod tests {
         let mut out = ctx.run_ui(RawInput::default(), |ui| {
             let marks = make_room_for_numbers(ui, &mut job, &fonts, true, Some(&(0..0)));
             let numbers: Vec<&str> = marks.iter().map(|m| m.number.as_str()).collect();
-            assert_eq!(numbers, vec!["1", "1.1"], "an empty heading gets no number");
+            assert_eq!(numbers, vec!["1", "1.1", "1.1.1"], "an empty heading gets no number");
             assert!(make_room_for_numbers(ui, &mut job.clone(), &fonts, false, None).is_empty());
         });
         out.textures_delta.clear();
         assert_eq!(job.text, text);
         let room: Vec<usize> = job.sections.iter().filter(|s| s.leading_space > 0.0).map(|s| s.byte_range.start.0).collect();
-        assert_eq!(room, vec![text.find("**Bold").unwrap(), text.find("Sub").unwrap()]);
+        assert_eq!(room, vec![text.find("T").unwrap(), text.find("**Bold").unwrap(), text.find("Sub").unwrap()]);
         assert!(job.sections.windows(2).all(|w| w[0].byte_range.end == w[1].byte_range.start), "the sections still tile the text");
     }
 

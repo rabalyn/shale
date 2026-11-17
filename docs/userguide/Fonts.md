@@ -2,8 +2,6 @@
 features:
   - "Fonts and text sizes"
 ---
-# Fonts
-
 ![[settings-fonts.png]]
 
 Settings → Fonts sets the font and the text size of six areas of the window:

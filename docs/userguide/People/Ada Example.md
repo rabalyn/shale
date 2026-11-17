@@ -1,8 +1,6 @@
 ---
 tags: [userguide, people]
 ---
-# Ada Example
-
 An example contact note, so that `[[p ` has someone to find. See [[Tags and people]].
 
 - E-mail: ada@example.org

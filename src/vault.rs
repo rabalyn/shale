@@ -38,6 +38,39 @@ impl FileEntry {
     }
 }
 
+impl FileEntry {
+    /// The title line of the file (VAULT-025): its name without `.md` and without a date prefix.
+    pub fn title(&self) -> String {
+        title_of(&self.display_name()).to_string()
+    }
+}
+
+/// The length of a date prefix: `YYMMDD_`.
+const DATE_PREFIX_LEN: usize = 7;
+
+/// The date prefix a name starts with (`261117_` of `261117_Plan`): exactly six ASCII digits and `_`.
+pub fn date_prefix_of(name: &str) -> Option<&str> {
+    let b = name.as_bytes();
+    (b.len() >= DATE_PREFIX_LEN && b[..6].iter().all(u8::is_ascii_digit) && b[6] == b'_').then(|| &name[..DATE_PREFIX_LEN])
+}
+
+/// The title of a note called `name` (VAULT-025): without `.md` and without a leading `YYMMDD_`.
+/// `261117_Plan.md` → `Plan`; `12345_Plan` and `1234567_Plan` have none to strip. A name that is
+/// only a prefix keeps it.
+pub fn title_of(name: &str) -> &str {
+    let name = markdown::strip_md_ext(name);
+    match date_prefix_of(name) {
+        Some(p) if name.len() > p.len() => &name[p.len()..],
+        _ => name,
+    }
+}
+
+/// Today's date prefix for a new note, `YYMMDD_` in local time (CFG-043).
+pub fn date_prefix_today() -> String {
+    let (y, m, d) = crate::media::local_date();
+    format!("{:02}{m:02}{d:02}_", y.rem_euclid(100))
+}
+
 /// What a file looked like on disk when it was last read: modification time, size, and (on
 /// Unix) the inode and the inode change time. The time alone is not enough: two writes inside
 /// one timestamp tick of the file system (coarse on some systems) leave it the same, and an
@@ -1197,13 +1230,13 @@ pub fn write_sample_vault(root: &Path) -> io::Result<()> {
         ),
         (
             "Ideas.md",
-            "# Ideas\n\nA place for loose thoughts. Back to [[Welcome]].\n\n- [ ] Plan the [[Projects/Garden plan|garden]]\n- [ ] Write about [[Rust]] 📅 2026-12-01\n\n> Notes get more useful the more they link to each other.\n\n#ideas\n",
+            "A place for loose thoughts. Back to [[Welcome]].\n\n- [ ] Plan the [[Projects/Garden plan|garden]]\n- [ ] Write about [[Rust]] 📅 2026-12-01\n\n> Notes get more useful the more they link to each other.\n\n#ideas\n",
         ),
         (
             "Projects/Garden plan.md",
-            "# Garden plan\n\nLinked from [[Ideas]].\n\n## Tasks\n- [x] Order seeds\n- [ ] Build raised bed\n- [ ] Ask about [[Compost]]\n\n#project\n",
+            "Linked from [[Ideas]].\n\n## Tasks\n- [x] Order seeds\n- [ ] Build raised bed\n- [ ] Ask about [[Compost]]\n\n#project\n",
         ),
-        ("Daily log.md", "# Daily log\n\n- Met with team, see [[Ideas]]\n- [ ] Follow up on [[Garden plan]]\n"),
+        ("Daily log.md", "- Met with team, see [[Ideas]]\n- [ ] Follow up on [[Garden plan]]\n"),
         ("Sketch.excalidraw", crate::drawing::SAMPLE_SCENE),
         ("Overview.canvas", SAMPLE_CANVAS),
     ];

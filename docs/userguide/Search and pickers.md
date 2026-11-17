@@ -1,5 +1,3 @@
-# Search and pickers
-
 Back to [[Start here]].
 
 ## Quick switcher

@@ -2,8 +2,6 @@
 features:
   - "Calendar"
 ---
-# Calendar
-
 ![[calendar-month.png]]
 
 A calendar in the right sidebar (a small month) and as a big tab, with Month, Week and Day

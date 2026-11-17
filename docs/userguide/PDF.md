@@ -1,5 +1,3 @@
-# PDF
-
 Back to [[Start here]].
 
 ## Export
@@ -10,10 +8,12 @@ sets paper size, margins, fonts and more. The default path is `<vault>/exports/<
 the export shows up in the vault.
 
 A **Table of contents** (a checkbox in the dialog, on by default) puts a *Contents* page after the title: the
-`##`–`####` headings, indented by level, with their numbers (see [[Notes and links]]), a dotted leader and the page
+`#`–`###` headings, indented by level, with their numbers (see [[Notes and links]]), a dotted leader and the page
 they start on; each line is a link to that page, and the text starts on the next page. The PDF also has
-bookmarks for the `##`–`######` headings in your PDF reader's outline, and the headings in the text carry
-their numbers. A note without such headings gets no contents page.
+bookmarks for the `#`–`######` headings in your PDF reader's outline, and the headings in the text carry
+their numbers. A note without such headings gets no contents page. The title (the box "The note's name as a title") is the
+title line without a `YYMMDD_` date prefix; when the note's first heading is a `#` that says the same, the title is
+not printed a second time.
 
 Highlights (`==text==`) and the colours of [[Editor]] (`<mark style="background: …">` behind the text, `<span style="color: …">` as the text colour) are printed as written, with the tags left out and the text still selectable.
 

@@ -425,6 +425,22 @@ pub fn find_headings(text: &str) -> Vec<(usize, usize, String)> {
     out
 }
 
+/// `text` with all its headings moved up by the same number of levels so that the highest becomes
+/// `#` (`### a` / `#### b` → `# a` / `## b`); None when it has a `#` heading already or no heading
+/// at all. Headings in fenced code and front matter, and all other text, stay as they are
+/// (IMP-034, EDIT-038).
+pub fn lift_headings(text: &str) -> Option<String> {
+    let heads = find_headings(text);
+    let by = heads.iter().map(|h| h.1).min()?.checked_sub(1).filter(|by| *by > 0)?;
+    let lines = lines_with_offsets(text);
+    let mut out = text.to_string();
+    for (line, _, _) in heads.into_iter().rev() {
+        let at = lines[line].0;
+        out.replace_range(at..at + by, "");
+    }
+    Some(out)
+}
+
 /// The title of a heading as it reads: no inline markup, links by their shown text.
 pub fn heading_plain(title: &str) -> String {
     let links: Vec<(LinkSpan, bool)> = find_links(title).into_iter().map(|l| (l, true)).collect();
@@ -462,18 +478,16 @@ pub fn headings_numbered(text: &str, vault_default: bool) -> bool {
 }
 
 /// The headings with their numbers (LINK-014): (line, level, title as in [`find_headings`], number
-/// such as `1.2`). `#` is the note's title and has none; `##` and deeper are numbered by nesting,
-/// a heading deeper than the one before it but with nothing shallower above it starts at 1.
+/// such as `1.2`). Every level is numbered by nesting from `#` (the note's title is its title line,
+/// VAULT-025, not a heading); a heading deeper than the one before it but with nothing shallower
+/// above it starts at 1. The number is always `Some` for a real heading; the `Option` stays so the
+/// signature is stable for its callers.
 pub fn heading_numbers(text: &str) -> Vec<(usize, usize, String, Option<String>)> {
     // the open headings: (level, its number); `kids` counts the children of each, `top` those of the root
     let mut open: Vec<(usize, Vec<usize>, usize)> = Vec::new();
     let mut top = 0;
     let mut out = Vec::new();
     for (line, level, title) in find_headings(text) {
-        if level == 1 {
-            out.push((line, level, title, None));
-            continue;
-        }
         while open.last().is_some_and(|(l, _, _)| *l >= level) {
             open.pop();
         }
@@ -560,6 +574,30 @@ pub fn replace_target(text: &str, link: &LinkSpan, new_target: &str) -> String {
     } else {
         format!("{lead}{target}{fragment}{trail}")
     }
+}
+
+/// Point every link of `text` whose target is `target` (as [`LinkSpan::target`]: no `.md`, case
+/// ignored) at the note `new_stem` in the same place (the last part of the path is replaced), so a
+/// red link still reaches the note made for it under a name with a date prefix (CFG-043):
+/// `[[Plan]]` → `[[261117_Plan|Plan]]` (a wiki link keeps its alias, or gets the text it showed as
+/// one; an embed gets none), `[[Plan#H]]` → `[[261117_Plan#H|Plan > H]]`, `[t](Plan.md)` →
+/// `[t](261117_Plan.md)`, `[[./Plan]]` → `[[./261117_Plan|./Plan]]`. None when no link matches.
+pub fn relink_to(text: &str, target: &str, new_stem: &str) -> Option<String> {
+    let want = strip_md_ext(target.trim());
+    let mut out = text.to_string();
+    let mut changed = false;
+    for link in find_links(text).into_iter().rev().filter(|l| l.target.eq_ignore_ascii_case(want)) {
+        let written = written_target(text, &link);
+        let (dir, file) = written.rsplit_once('/').map_or(("", written.as_str()), |(d, f)| (&written[..d.len() + 1], f));
+        let ext = if file.len() > 3 && file.is_char_boundary(file.len() - 3) && file[file.len() - 3..].eq_ignore_ascii_case(".md") { &file[file.len() - 3..] } else { "" };
+        let new_written = format!("{dir}{new_stem}{ext}");
+        if !link.markdown_style && link.alias.is_none() && !link.embed {
+            out.insert_str(link.range.end - 2, &format!("|{}", link.display()));
+        }
+        out.replace_range(link.target_range.clone(), &replace_target(text, &link, &new_written));
+        changed = true;
+    }
+    changed.then_some(out)
 }
 
 /// Byte index of the start of 0-based line `line`.
@@ -842,21 +880,23 @@ mod tests {
 
     // spec: LINK-014
     #[test]
-    fn headings_are_numbered_by_nesting_and_the_title_is_not() {
-        let text = "# Title\n## A\n### B\n### C\n## D\n#### E\n### F\n## G\n";
+    fn headings_are_numbered_by_nesting_from_h1() {
+        let text = "# Title\n## A\n### B\n### C\n## D\n#### E\n### F\n## G\n# Next\n## H\n";
         let n: Vec<Option<String>> = numbers(text).into_iter().map(|(_, n)| n).collect();
         let s = |x: &str| Some(x.to_string());
-        assert_eq!(n, vec![None, s("1"), s("1.1"), s("1.2"), s("2"), s("2.1"), s("2.2"), s("3")], "a #### under a ## is 1.1, a later ### goes on after it");
+        assert_eq!(n, vec![s("1"), s("1.1"), s("1.1.1"), s("1.1.2"), s("1.2"), s("1.2.1"), s("1.2.2"), s("1.3"), s("2"), s("2.1")], "a #### under a ## is 1.2.1, a later ### goes on after it");
         let (line, level, title, num) = &heading_numbers("x\n## Plan v2")[0];
         assert_eq!((*line, *level, title.as_str(), num.as_deref()), (1, 2, "Plan v2", Some("1")));
+        let n: Vec<Option<String>> = numbers("# A\n### C\n## B").into_iter().map(|(_, n)| n).collect();
+        assert_eq!(n, vec![s("1"), s("1.1"), s("1.2")], "a ### directly under a # is 1.1");
     }
 
     // spec: LINK-014
     #[test]
-    fn a_heading_with_nothing_shallower_above_it_starts_at_one_and_every_h1_is_unnumbered() {
+    fn a_heading_with_nothing_shallower_above_it_starts_at_one() {
         let n: Vec<Option<String>> = numbers("### X\n#### Y\n## A\n# Another\n## B").into_iter().map(|(_, n)| n).collect();
         let s = |x: &str| Some(x.to_string());
-        assert_eq!(n, vec![s("1"), s("1.1"), s("2"), None, s("3")]);
+        assert_eq!(n, vec![s("1"), s("1.1"), s("2"), s("3"), s("3.1")]);
     }
 
     // spec: LINK-014
@@ -868,6 +908,51 @@ mod tests {
         assert_eq!(front_matter_lines(text), 4);
         assert_eq!(front_matter_lines("---\nunclosed\n"), 0);
         assert_eq!(front_matter_lines("text"), 0);
+    }
+
+    // spec: IMP-034, EDIT-038
+    #[test]
+    fn lifting_moves_every_heading_up_so_the_highest_becomes_h1_and_leaves_the_rest() {
+        assert_eq!(lift_headings("### a\ntext\n#### b\n").as_deref(), Some("# a\ntext\n## b\n"));
+        assert_eq!(lift_headings("## a\n## b\n### c").as_deref(), Some("# a\n# b\n## c"));
+        assert_eq!(lift_headings("###### deep").as_deref(), Some("# deep"), "also from the deepest level");
+        // code fences, front matter, other lines and the line ends stay
+        let text = "---\n# yaml\n---\n## A\r\n```\n## in code\n```\n#tag and ## not at the start\n### B\n";
+        assert_eq!(lift_headings(text).as_deref(), Some("---\n# yaml\n---\n# A\r\n```\n## in code\n```\n#tag and ## not at the start\n## B\n"));
+        // nothing to do: a # heading, no heading, headings only in code
+        assert_eq!(lift_headings("# A\n## B"), None);
+        assert_eq!(lift_headings("## A\n# B"), None, "a # anywhere");
+        assert_eq!(lift_headings("just text\n#nospace"), None);
+        assert_eq!(lift_headings("```\n## code\n```\n"), None);
+        assert_eq!(lift_headings(""), None);
+    }
+
+    // spec: VAULT-025
+    #[test]
+    fn a_date_prefix_is_exactly_six_digits_and_an_underscore() {
+        use crate::vault::title_of;
+        assert_eq!(title_of("261117_Plan.md"), "Plan");
+        assert_eq!(title_of("261117_Plan"), "Plan");
+        assert_eq!(title_of("Plan.md"), "Plan");
+        assert_eq!(title_of("12345_Plan"), "12345_Plan", "five digits");
+        assert_eq!(title_of("1234567_Plan"), "1234567_Plan", "seven digits");
+        assert_eq!(title_of("26111a_Plan"), "26111a_Plan");
+        assert_eq!(title_of("261117 Plan"), "261117 Plan", "no underscore");
+        assert_eq!(title_of("261117_"), "261117_", "a name that is only the prefix keeps it");
+        assert_eq!(title_of("261117_261118_Plan"), "261118_Plan", "only one prefix goes");
+        assert_eq!(title_of("٢٦١١١٧_Plan"), "٢٦١١١٧_Plan", "ASCII digits only");
+    }
+
+    // spec: CFG-043
+    #[test]
+    fn red_links_are_pointed_at_the_note_made_with_a_date_prefix() {
+        let t = "a [[Plan]] b [[plan|My plan]] c [[Plan#Goals]] d ![[Plan]] e [t](Plan.md) f [u](Plan.md#Goals) g [[Other]] h `[[Plan]]`\n";
+        let want = "a [[261117_Plan|Plan]] b [[261117_Plan|My plan]] c [[261117_Plan#Goals|Plan > Goals]] d ![[261117_Plan]] e [t](261117_Plan.md) f [u](261117_Plan.md#Goals) g [[Other]] h `[[Plan]]`\n";
+        assert_eq!(relink_to(t, "Plan", "261117_Plan").as_deref(), Some(want));
+        assert_eq!(relink_to("[[Other]]", "Plan", "261117_Plan"), None);
+        // a path keeps its folder; the new name may carry a number after a clash
+        assert_eq!(relink_to("[[./Sub]] [[../x/Sub.md]]", "./Sub", "261117_Sub 1").as_deref(), Some("[[./261117_Sub 1|./Sub]] [[../x/Sub.md]]"));
+        assert_eq!(relink_to("[a](../Notes/Fresh)", "../Notes/Fresh", "261117_Fresh").as_deref(), Some("[a](../Notes/261117_Fresh)"));
     }
 
     // spec: CFG-040

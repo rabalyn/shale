@@ -1,5 +1,3 @@
-# Settings reference
-
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
 button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**, and the button
@@ -82,7 +80,8 @@ One table, `fonts` (`[fonts]` in the file), in the settings file. Each area has 
 Inside each of these tables: `family` and `size`. The old `font_size` of earlier versions became the
 size of the two editor areas when you updated.
 | `line_numbers` | on | Editor, "Show line numbers in the editor" |
-| `numbered_headings` | on | Editor, "Number headings": `##` and deeper show 1, 1.1, 1.2 before their text; a note's front matter `numbered-headings: true` or `false` overrides it for that note (see [[Notes and links]]) |
+| `date_prefix_new_notes` | on | Editor, "Date prefix for new notes": a note Shale makes (new note, red link, quick switcher, new drawing) is named `YYMMDD_name.md` with today's date; the title line shows the name without the prefix (see [[Editor]]) |
+| `numbered_headings` | on | Editor, "Number headings": `#` and deeper show 1, 1.1, 1.2 before their text; a note's front matter `numbered-headings: true` or `false` overrides it for that note (see [[Notes and links]]) |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
 | `link_preview_width` | 640 (at least 240, at most the window) | Editor, "Link preview size (Shift+K)", the first number; also set by dragging the preview's edges |

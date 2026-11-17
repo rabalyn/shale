@@ -1,3 +1,1 @@
-# Ideas
-
 Back to [[Sea]].

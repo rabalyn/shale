@@ -112,6 +112,12 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                     }
                 });
             }
+            if let Source::Markdown { text, lift, .. } = &mut it.source {
+                if crate::markdown::lift_headings(text).is_some() {
+                    rec(format!("lift:{i}"), ui.checkbox(lift, egui::RichText::new("Lift headings (## → #, ### → ##, …)").size(12.5)))
+                        .on_hover_text("The text has no # heading: every heading moves up by the same number of levels so that the highest becomes #");
+                }
+            }
             if let Source::Email { mail, .. } = &it.source {
                 for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
                     let label = format!("{}  ({}, {}{})", a.name, a.mime, size_text(a.data.len()), if a.inline { ", in the text" } else { "" });
@@ -340,6 +346,22 @@ mod tests {
         assert_eq!(h.click("add", &mut d, &folders, &tags), Some(ImportAction::AddPath));
         assert_eq!(h.click("import", &mut d, &folders, &tags), Some(ImportAction::Import));
         assert_eq!(h.click("cancel", &mut d, &folders, &tags), Some(ImportAction::Cancel));
+    }
+
+    // spec: IMP-034
+    #[test]
+    fn the_lift_box_is_there_for_a_markdown_note_without_h1_and_ticked() {
+        let items = vec![import::markdown_item("Deep.md".into(), "## A\n### B\n".into()), import::markdown_item("Top.md".into(), "# A\n".into()), import::markdown_item("Plain.md".into(), "text".into())];
+        let mut d = ImportDialog::new(items, vec![], String::new(), String::new(), None, false);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(d.rects.iter().any(|r| r.0 == "lift:0"));
+        assert!(!d.rects.iter().any(|r| r.0 == "lift:1" || r.0 == "lift:2"), "no box without headings or with a #");
+        assert!(matches!(d.items[0].source, Source::Markdown { lift: true, .. }), "ticked");
+        h.click("lift:0", &mut d, &[], &[]);
+        assert!(matches!(d.items[0].source, Source::Markdown { lift: false, .. }), "a click unticks it");
+        h.click("lift:0", &mut d, &[], &[]);
+        assert!(matches!(d.items[0].source, Source::Markdown { lift: true, .. }));
     }
 
     // spec: SOC-020

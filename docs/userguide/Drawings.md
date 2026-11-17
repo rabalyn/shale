@@ -2,8 +2,6 @@
 features:
   - "Drawings"
 ---
-# Drawings
-
 ![[drawing.png]]
 
 Hand-drawn style sketches, saved as standard `.excalidraw` files. The drawing on

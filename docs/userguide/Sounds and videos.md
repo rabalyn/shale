@@ -1,5 +1,3 @@
-# Sounds and videos
-
 Play audio and video files inside your notes. Back to [[Start here]]; embeds in general are in
 [[Notes and links]].
 

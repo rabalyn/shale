@@ -34,6 +34,7 @@ impl W {
         std::fs::write(dir.join("pic.png"), png).unwrap();
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
         app.cfg.vim_mode = true;
+        app.cfg.date_prefix_new_notes = false;
         app.open(Path::new("A.md"), false);
         app.focus_editor();
         let mut w = W { app, hl: Headless::new(), dir };

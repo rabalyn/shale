@@ -2,8 +2,6 @@
 features:
   - "Settings that travel with the vault"
 ---
-# Vault settings
-
 Back to [[Start here]]; the complete list is [[Settings reference]].
 
 Shale keeps settings in two places:
