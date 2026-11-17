@@ -219,7 +219,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+O | Quick switcher (find or create a note) |
 | Ctrl+E | Switch between editing and reading view |
 | Ctrl+Shift+F | Search all notes |
-| Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane |
 | Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | Ctrl+Alt+→ / Ctrl+Alt+← | Focus the next / previous pane |
@@ -249,7 +249,7 @@ Text editing keys and vim keys are fixed.
 
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
 keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
-the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). In a window
+the folder pane Ctrl+H goes on into the pane on the left, or the left sidebar, from there Ctrl+L comes back). In a window
 too narrow for the three panes they scroll sideways, and the pane with the keyboard is brought into
 view. Letters work only while no text field has the keyboard. Every key can be changed in Settings → Keybindings
 (scope Mail view); Enter and Esc are fixed.

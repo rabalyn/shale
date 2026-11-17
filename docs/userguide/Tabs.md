@@ -19,6 +19,10 @@ features:
   Ctrl+Alt+→ / Ctrl+Alt+← to move the focus. Opening a note or link, the quick switcher, new
   notes, closing tabs, previous / next tab, back / forward and the reading view all act on the
   focused pane; renaming or moving a file updates the tabs of every pane.
+- Ctrl+H / Ctrl+L walk through the panes in screen order, like vim's window moves: Ctrl+H goes
+  from a pane into the pane on its left and from the first pane into the left sidebar, Ctrl+L
+  from the sidebar into the first pane and on to the right; at the last pane it stays. The
+  keyboard lands in the editor of the pane's open note.
 - Drag the border between two panes to change their widths (a pane is never narrower than 240
   points). Closing the last tab of a pane, or Ctrl+Alt+W, closes the pane; the last pane stays.
 - The panes and the order of all open tabs (notes, drawings and Feeds tabs) and which are pinned, the open tab of each pane, the focused pane and the widths come back at

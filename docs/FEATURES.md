@@ -153,7 +153,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![The Keybindings tab of the settings](userguide/z_media/screenshots/keybindings.png)
 
-- Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back into the note. Ctrl+Shift+B opens
+- Ctrl+H puts the keyboard one place to the left (with split panes: into the pane on the left,
+  from the first pane into the left sidebar), Ctrl+L one place to the right (from the sidebar into
+  the first pane, then pane by pane; it stays in the last one). Ctrl+Shift+B opens
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
   folder to folder, Space opens or closes a folder, Enter opens a file.
 - Every shortcut of this section can be changed in Settings → Keybindings; a key that another
@@ -724,7 +726,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |
-| Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane |
 | Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | Ctrl+Alt+→ / Ctrl+Alt+← | Focus the next / previous pane |
@@ -747,7 +749,7 @@ Text editing keys and vim keys are fixed.
 
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
 keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
-the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). Letters work
+the folder pane Ctrl+H goes on into the pane on the left, or the left sidebar, from there Ctrl+L comes back). Letters work
 only while no text field has the keyboard. Every key can be changed in Settings → Keybindings
 (scope Mail view); Enter and Esc are fixed.
 

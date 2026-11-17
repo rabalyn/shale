@@ -319,7 +319,7 @@ mod tests {
         w.click("key:global.focus_editor");
         w.press(Key::H, CTRL);
         w.press(Key::Enter, Modifiers::NONE);
-        assert_eq!(w.dialog().error.as_deref(), Some("Ctrl+H is already used by “Keyboard into the left sidebar”"));
+        assert_eq!(w.dialog().error.as_deref(), Some("Ctrl+H is already used by “Keyboard one place to the left (pane, then left sidebar)”"));
         assert!(w.app.keymap.is_default(Action::FocusEditor), "nothing changed");
         assert!(w.app.cfg.keybindings.is_empty());
         // a binding that is taken in the other direction too: a Global key against a list key

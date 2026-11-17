@@ -206,8 +206,8 @@ macro_rules! actions {
 }
 
 actions! {
-    FocusSidebar => "global.focus_sidebar", "Keyboard into the left sidebar", Global, ["Ctrl+H"];
-    FocusEditor => "global.focus_editor", "Keyboard back into the editor", Global, ["Ctrl+L"];
+    FocusSidebar => "global.focus_sidebar", "Keyboard one place to the left (pane, then left sidebar)", Global, ["Ctrl+H"];
+    FocusEditor => "global.focus_editor", "Keyboard one place to the right (sidebar, then panes)", Global, ["Ctrl+L"];
     ShowFiles => "global.show_files", "File list with the keyboard in it", Global, ["Ctrl+Shift+B"];
     Search => "global.search", "Search all notes", Global, ["Ctrl+Shift+F"];
     MailView => "global.mail_view", "Mail view", Global, ["Ctrl+Shift+M"];
@@ -564,9 +564,9 @@ mod tests {
     fn conflicts_are_found_in_a_scope_and_against_global_only() {
         let mut k = Keymap::default();
         // the message names the other action
-        assert_eq!(k.check(Action::FocusEditor, &b("Ctrl+H")), Err("Ctrl+H is already used by “Keyboard into the left sidebar”".to_string()));
+        assert_eq!(k.check(Action::FocusEditor, &b("Ctrl+H")), Err("Ctrl+H is already used by “Keyboard one place to the left (pane, then left sidebar)”".to_string()));
         // a Global key shadows the other scopes ...
-        assert_eq!(k.check(Action::TreeNextFile, &b("Ctrl+H")), Err("Ctrl+H is already used by “Keyboard into the left sidebar”".to_string()));
+        assert_eq!(k.check(Action::TreeNextFile, &b("Ctrl+H")), Err("Ctrl+H is already used by “Keyboard one place to the left (pane, then left sidebar)”".to_string()));
         // ... and a scope key blocks a new Global one
         assert_eq!(k.check(Action::Back, &b("Ctrl+J")), Err("Ctrl+J is already used by “Next folder”".to_string()));
         // within a scope; the same key in unrelated scopes is fine
@@ -668,7 +668,7 @@ mod tests {
             ("global.nonsense", vec!["Ctrl+Q"]),
             ("global.back", vec!["Ctrl+Hyper"]),
             ("global.forward", vec![]),
-            // takes the key of "Keyboard into the left sidebar", which keeps it
+            // takes the key of "Keyboard one place to the left (pane, then left sidebar)", which keeps it
             ("global.close_tab", vec!["Ctrl+H"]),
             ("global.new_note", vec!["Ctrl+Alt+N"]),
         ]
