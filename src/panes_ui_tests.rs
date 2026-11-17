@@ -343,3 +343,115 @@ fn a_state_file_with_a_flat_tab_list_loads_as_one_pane_and_gone_panes_are_skippe
     assert_eq!(again.panes.weights.len(), 2);
     assert_eq!(again.panes.focused, 1, "a focus out of range is the last pane");
 }
+
+impl W {
+    /// The pane whose editor has the keyboard, or None (the sidebar or nowhere).
+    fn keyboard_pane(&self) -> Option<usize> {
+        let id = |i: usize| self.app.pane_bar(i).tabs.get(self.app.pane_bar(i).active).map(|t| t.editor.id);
+        (0..self.app.panes.len()).find(|&i| id(i).is_some_and(|id| self.hl.ctx().memory(|m| m.has_focus(id))))
+    }
+
+    fn in_sidebar(&self) -> bool {
+        self.app.tree.sel.is_some()
+    }
+}
+
+// spec: NAV-011
+#[test]
+fn ctrl_h_walks_left_through_the_panes_into_the_sidebar() {
+    for panes in [2usize, 3] {
+        let mut w = W::new(&format!("ctrlh{panes}"));
+        w.split("Daily log.md");
+        if panes == 3 {
+            w.split("Ideas.md");
+        }
+        w.app.focus_editor();
+        w.frames(2);
+        assert_eq!(w.keyboard_pane(), Some(panes - 1), "the last pane has the keyboard");
+        for want in (0..panes - 1).rev() {
+            w.key(Key::H, CTRL);
+            assert_eq!((w.app.panes.focused, w.keyboard_pane(), w.in_sidebar()), (want, Some(want), false));
+        }
+        w.key(Key::H, CTRL);
+        assert!(w.in_sidebar() && w.keyboard_pane().is_none(), "from the first pane into the left sidebar");
+        assert_eq!(w.app.panes.focused, 0);
+        w.key(Key::H, CTRL);
+        assert!(w.in_sidebar(), "in the sidebar Ctrl+H stays");
+        assert_eq!(w.app.panes.focused, 0);
+    }
+}
+
+// spec: NAV-011
+#[test]
+fn ctrl_l_walks_right_from_the_sidebar_through_the_panes_and_stops_at_the_last() {
+    for panes in [2usize, 3] {
+        let mut w = W::new(&format!("ctrll{panes}"));
+        w.split("Daily log.md");
+        if panes == 3 {
+            w.split("Ideas.md");
+        }
+        // the focused pane is the last one; the sidebar leads back into the first
+        w.app.focus_sidebar(w.hl.ctx());
+        w.frames(2);
+        assert!(w.in_sidebar());
+        for want in 0..panes {
+            w.key(Key::L, CTRL);
+            assert_eq!((w.app.panes.focused, w.keyboard_pane(), w.in_sidebar()), (want, Some(want), false));
+        }
+        w.key(Key::L, CTRL);
+        assert_eq!((w.app.panes.focused, w.keyboard_pane()), (panes - 1, Some(panes - 1)), "no wrap at the right end");
+    }
+}
+
+// spec: NAV-011
+#[test]
+fn ctrl_h_and_ctrl_l_with_one_pane_go_between_the_sidebar_and_the_editor() {
+    let mut w = W::new("onepane");
+    w.app.focus_editor();
+    w.frames(2);
+    assert_eq!(w.keyboard_pane(), Some(0));
+    w.key(Key::H, CTRL);
+    assert!(w.in_sidebar() && w.keyboard_pane().is_none());
+    w.key(Key::L, CTRL);
+    assert!(!w.in_sidebar());
+    assert_eq!((w.app.panes.len(), w.keyboard_pane()), (1, Some(0)));
+    w.key(Key::L, CTRL);
+    assert_eq!(w.keyboard_pane(), Some(0), "Ctrl+L in the only pane stays");
+}
+
+// spec: NAV-011
+#[test]
+fn ctrl_l_from_the_search_box_goes_into_the_first_pane() {
+    let mut w = W::new("searchbox");
+    w.split("Daily log.md");
+    w.app.side.left = crate::app::LeftPanel::Search;
+    w.key(Key::H, CTRL);
+    w.key(Key::H, CTRL);
+    assert_eq!(w.app.panes.focused, 0);
+    w.key(Key::H, CTRL);
+    w.frames(2);
+    assert!(w.keyboard_pane().is_none(), "the search box has the keyboard");
+    w.key(Key::L, CTRL);
+    assert_eq!((w.app.panes.focused, w.keyboard_pane()), (0, Some(0)));
+}
+
+// spec: NAV-011
+#[test]
+fn vim_normal_mode_works_in_the_pane_ctrl_h_and_ctrl_l_reach() {
+    let mut w = W::new("vim");
+    w.split("Daily log.md");
+    w.app.cfg.vim_mode = true;
+    w.frames(3);
+    for (key, to) in [(Key::H, 0usize), (Key::L, 1)] {
+        w.key(key, CTRL);
+        w.frames(2);
+        assert_eq!(w.keyboard_pane(), Some(to));
+        assert!(w.app.tabbar.tabs[w.app.tabbar.active].editor.vim_normal_keys(w.hl.ctx()), "normal mode keys are read in pane {to}");
+        // `i` enters insert mode of that pane's editor
+        w.hl.frame(&mut w.app, vec![Event::Key { key: Key::I, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }, Event::Text("i".into())]);
+        w.frames(2);
+        assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].editor.vim.mode, crate::vim::Mode::Insert, "i worked in pane {to}");
+        // back to normal mode for the next round
+        w.key(Key::Escape, Modifiers::NONE);
+    }
+}

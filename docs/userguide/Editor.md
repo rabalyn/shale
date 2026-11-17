@@ -197,7 +197,9 @@ again to return. **Space f f** and **Space f g** open the pickers of [[Search an
 
 ![[keybindings.png]]
 
-Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back into the note. Ctrl+Shift+B opens
+Ctrl+H puts the keyboard one place to the left (with split panes: into the pane on the left,
+from the first pane into the left sidebar), Ctrl+L one place to the right (from the sidebar into
+the first pane, then pane by pane; it stays in the last one). Ctrl+Shift+B opens
 the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
 folder to folder, Space opens or closes a folder, Enter opens a file. All of this can be
 changed in Settings → Keybindings, see [[Keyboard shortcuts]].
