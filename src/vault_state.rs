@@ -220,8 +220,14 @@ impl Versioned for VaultSettings {
 #[serde(default)]
 pub struct VaultState {
     pub version: u64,
-    /// The tabs open when the app was closed, in tab order, each with its pin (NAV-026).
+    /// The tabs open when the app was closed, in tab order, each with its pin (NAV-026). With
+    /// split panes (NAV-032) these are the tabs of the first pane (what a Shale without panes reads).
     pub tabs: Vec<SavedTab>,
+    /// The panes side by side, left to right, each with its tabs (NAV-026, NAV-032); empty in a
+    /// file from before panes, which loads as one pane made of `tabs`.
+    pub panes: Vec<SavedPane>,
+    /// The index of the pane that had the focus.
+    pub focused_pane: usize,
     /// The folder used for the last import (vault-relative).
     pub last_import_folder: String,
     /// The folder used for the last saved post (vault-relative); empty: "Social".
@@ -234,7 +240,24 @@ pub struct VaultState {
 
 impl Default for VaultState {
     fn default() -> Self {
-        VaultState { version: Self::CURRENT, tabs: vec![], last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
+        VaultState { version: Self::CURRENT, tabs: vec![], panes: vec![], focused_pane: 0, last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
+    }
+}
+
+/// One saved pane: its tabs, the open one (an index into `tabs`) and its width weight.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct SavedPane {
+    pub tabs: Vec<SavedTab>,
+    pub active: usize,
+    pub weight: f32,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+impl Default for SavedPane {
+    fn default() -> Self {
+        SavedPane { tabs: vec![], active: 0, weight: 1.0, other: Map::new() }
     }
 }
 
@@ -531,6 +554,27 @@ mod tests {
         let mixed = VaultState { tabs: vec![file_tab("d.canvas", true), feed_tab("x", "home"), file_tab("a.md", false)], ..VaultState::default() };
         let (back, _) = parse::<VaultState>(&to_bytes(&mixed)).unwrap();
         assert_eq!(back.tabs, mixed.tabs);
+    }
+
+    // spec: NAV-026
+    #[test]
+    fn panes_round_trip_and_a_file_without_panes_has_none_and_needs_no_version_bump() {
+        let (old, newer) = parse::<VaultState>(br#"{"version": 2, "tabs": [{"file": "a.md"}]}"#).unwrap();
+        assert!(!newer);
+        assert_eq!((old.version, old.panes.len(), old.focused_pane), (2, 0, 0));
+        assert_eq!(old.tabs, vec![file_tab("a.md", false)]);
+        let two = VaultState {
+            tabs: vec![file_tab("a.md", false)],
+            panes: vec![SavedPane { tabs: vec![file_tab("a.md", false), file_tab("b.md", true)], active: 1, weight: 0.25, ..Default::default() }, SavedPane { tabs: vec![feed_tab("x", "home")], weight: 0.75, ..Default::default() }],
+            focused_pane: 1,
+            ..VaultState::default()
+        };
+        let (back, _) = parse::<VaultState>(&to_bytes(&two)).unwrap();
+        assert_eq!(back, two);
+        assert_eq!(back.version, 2);
+        // a pane written by a newer Shale keeps its unknown fields
+        let (s, _) = parse::<VaultState>(br#"{"version": 2, "panes": [{"tabs": [], "split": "v"}]}"#).unwrap();
+        assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"split\""));
     }
 
     // spec: CFG-007

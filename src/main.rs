@@ -44,6 +44,8 @@ mod media;
 mod notes_vault_tests;
 mod opener;
 mod panels;
+#[cfg(test)]
+mod panes_ui_tests;
 mod pdf;
 mod picker;
 #[cfg(test)]

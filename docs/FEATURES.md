@@ -119,6 +119,20 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![A pinned tab and its context menu](userguide/z_media/screenshots/tab-pinned-menu.png)
 
+## Panes side by side
+
+- The middle area splits into any number of **panes** side by side, each with its own tab bar,
+  tabs, open tab and back / forward history. **Ctrl+\** (or **Open in split right** in the
+  right-click menu of a tab) opens the tab in a new pane to the right of the focused one.
+- One pane has the focus: click into it (tab bar or content) or press **Ctrl+Alt+→ / Ctrl+Alt+←**.
+  Its tab bar has an accent line. Opening notes and links, the quick switcher, new notes, closing
+  and switching tabs, back / forward and the reading view all work on the focused pane; renaming,
+  moving or deleting a file updates its tabs in every pane.
+- Drag the border between two panes to resize them (neither gets narrower than 240 points).
+  Closing the last tab of a pane (or **Ctrl+Alt+W**) removes the pane; the last pane stays.
+- The panes, their tabs, the open tab of each, the focused pane and the widths come back at the
+  next start. All the keys can be changed in Settings, Keybindings.
+
 ## Keyboard only: sidebar, file list and vim-style editing
 
 ![The Keybindings tab of the settings](userguide/z_media/screenshots/keybindings.png)
@@ -689,6 +703,9 @@ Text editing keys and vim keys are fixed.
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
 | Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
+| Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
+| Ctrl+Alt+→ / Ctrl+Alt+← | Focus the next / previous pane |
+| Ctrl+Alt+W | Close the pane with all its tabs |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
