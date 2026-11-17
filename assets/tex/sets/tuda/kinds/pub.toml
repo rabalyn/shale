@@ -1,5 +1,6 @@
-# TU Darmstadt, publication: papers and short documents. The writer maps H1 to \title, H2 to
-# \section, H3 to \subsection (mapping "article"). See the README of the set for every key.
+# TU Darmstadt, publication: papers and short documents. The title is the note's title; the writer
+# maps the headings by nesting: # to \section, ## to \subsection, ### to \subsubsection (mapping
+# "article"). See the README of the set for every key.
 name = "Publication"
 description = "Papers and short documents (class tudapub)"
 mapping = "article"

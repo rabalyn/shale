@@ -8,7 +8,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsString;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// The most runs of LuaLaTeX for one document.
@@ -72,11 +73,13 @@ pub struct Options {
     pub timeout: Duration,
     /// The most runs of LuaLaTeX.
     pub max_runs: u32,
+    /// Set to stop the compile: the running program and everything it started are killed.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { tex_inputs: vec![], timeout: RUN_TIMEOUT, max_runs: MAX_RUNS }
+        Options { tex_inputs: vec![], timeout: RUN_TIMEOUT, max_runs: MAX_RUNS, cancel: None }
     }
 }
 
@@ -260,6 +263,16 @@ pub fn lualatex_args(main_tex: &str) -> Vec<String> {
     ["-interaction=nonstopmode", "-halt-on-error", "-file-line-error", "-no-shell-escape", main_tex].map(String::from).to_vec()
 }
 
+/// The files of a run that the next run reads without LaTeX saying so: the table of contents, the
+/// lists of figures and tables, the bookmarks of the PDF and the navigation of slides. A run that
+/// changes one of them (or makes it) needs another run, as `latexmk` sees it.
+const WATCHED: [&str; 6] = ["toc", "lof", "lot", "out", "nav", "snm"];
+
+/// What the watched files of `work` hold now, one hash each (none for a file that is not there).
+fn watched_state(work: &Path, stem: &str) -> Vec<Option<u64>> {
+    WATCHED.iter().map(|e| crate::fsutil::read(work.join(format!("{stem}.{e}"))).ok().map(|b| hash_of(&b))).collect()
+}
+
 fn hash_of(bytes: &[u8]) -> u64 {
     let mut h = DefaultHasher::new();
     bytes.hash(&mut h);
@@ -290,7 +303,8 @@ pub fn compile(engine: &Engine, work: WorkDir, main_tex: &str, opts: &Options) -
         let mut cmd = base("lualatex");
         cmd.args(lualatex_args(main_tex));
         runs += 1;
-        let run = proc::run(cmd, opts.timeout, None, |_| {}).map_err(|e| fail(format!("lualatex could not be started ({e}); check Settings → LaTeX"), vec![], String::new()))?;
+        let watched_before = watched_state(work.path(), stem);
+        let run = proc::run(cmd, opts.timeout, opts.cancel.as_deref(), |_| {}).map_err(|e| fail(format!("lualatex could not be started ({e}); check Settings → LaTeX"), vec![], String::new()))?;
         let log = read_log();
         font_cache_built |= built_font_cache(&log);
         let (log_text, tail) = if log.is_empty() { (run.tail_text(), run.tail_text()) } else { (log.clone(), tail_of(&log)) };
@@ -306,14 +320,14 @@ pub fn compile(engine: &Engine, work: WorkDir, main_tex: &str, opts: &Options) -
                 return Err(fail("LuaLaTeX stopped with an error".into(), p, tail));
             }
         }
-        let mut again = asks_rerun(&log);
+        let mut again = asks_rerun(&log) || watched_before != watched_state(work.path(), stem);
         if let Ok(bcf) = crate::fsutil::read(work.path().join(format!("{stem}.bcf"))) {
             let h = hash_of(&bcf);
             if bcf_seen != Some(h) {
                 bcf_seen = Some(h);
                 let mut cmd = base("biber");
                 cmd.arg(stem);
-                let b = proc::run(cmd, opts.timeout, None, |_| {}).map_err(|e| fail(format!("biber could not be started ({e}); check Settings → LaTeX"), vec![], String::new()))?;
+                let b = proc::run(cmd, opts.timeout, opts.cancel.as_deref(), |_| {}).map_err(|e| fail(format!("biber could not be started ({e}); check Settings → LaTeX"), vec![], String::new()))?;
                 match b.ending {
                     Ending::TimedOut => return Err(fail(format!("biber ran for more than {} seconds and was stopped", opts.timeout.as_secs()), vec![], b.tail_text())),
                     Ending::Cancelled => return Err(fail("the compile was cancelled".into(), vec![], b.tail_text())),

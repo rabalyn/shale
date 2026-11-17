@@ -126,7 +126,7 @@ impl ExportOptions {
         }
     }
     /// The editor's text column the sizes of the embeds are worked out for.
-    fn column(&self) -> f32 {
+    pub(crate) fn column(&self) -> f32 {
         self.column.unwrap_or(crate::embed_size::DEFAULT_COLUMN)
     }
     fn page_size(&self) -> [f32; 2] {
@@ -172,12 +172,12 @@ fn print_color(c: Color32) -> Rgba {
 }
 
 /// A colour with transparency laid over white paper.
-fn over_white([r, g, b, a]: [u8; 4]) -> Rgba {
+pub(crate) fn over_white([r, g, b, a]: [u8; 4]) -> Rgba {
     let mix = |c: u8| ((c as u32 * a as u32 + 255 * (255 - a as u32)) / 255) as u8;
     Rgba(mix(r), mix(g), mix(b), 255)
 }
 
-fn print_bg(c: Color32) -> Option<Rgba> {
+pub(crate) fn print_bg(c: Color32) -> Option<Rgba> {
     if c == Color32::TRANSPARENT {
         None
     } else if c == theme::TAG_BG {
@@ -904,7 +904,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     finish(w.doc, opts)
 }
 
-fn list_marker(line: &str) -> Option<(String, usize)> {
+pub(crate) fn list_marker(line: &str) -> Option<(String, usize)> {
     let t = line.trim_start();
     let ind = line.len() - t.len();
     if t.starts_with("- ") || t.starts_with("* ") || t.starts_with("+ ") {

@@ -230,5 +230,6 @@ Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]
 | `last_import_folder` | empty | the folder of the last import |
 | `last_social_folder` | empty (the first save asks for `Social`) | the folder of the last saved post |
 | `recent_tags` | empty | tags used for imports, most recent first |
+| `latex_export` | `latex` false, `set` and `kind` empty | what the note export dialog had last: `latex` (the LaTeX engine was used), `set` (the folder name of the template set) and `kind` (its id) ([[PDF]], "a note through a template") |
 
 #userguide #settings

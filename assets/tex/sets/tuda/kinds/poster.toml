@@ -1,4 +1,5 @@
-# TU Darmstadt, poster (class tudaposter), A0 by default (paper=a1, a2, ... for others).
+# TU Darmstadt, poster (class tudaposter), A0 by default (paper=a1, a2, ... for others). The text of
+# the note is set in two columns (columns); its headings are \section*, \subsection*, ... by nesting.
 name = "Poster"
 description = "Posters (class tudaposter)"
 mapping = "poster"
@@ -6,6 +7,7 @@ class = "tudaposter"
 options = ["{language}", "accentcolor={accent}", "paper=a0", "logo=body", "footer=true"]
 preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}", "\\usepackage{multicol}"]
 logo = true
+columns = 2
 
 [[fields]]
 key = "title"
