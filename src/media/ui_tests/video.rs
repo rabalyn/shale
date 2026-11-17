@@ -75,13 +75,10 @@ fn playing_a_video_shows_its_frames_pauses_and_seeks_with_the_bar() {
         let abs = fx.dir.join(clip);
         // the length must be known, or the bar ignores a click
         fx.until("the look is done", |a| a.media.thumbnail_size(&abs).is_some());
-        // start ffmpeg paused: the silent clip's 1 s clock must not run while a slow ffmpeg
-        // (a loaded machine) has no picture yet, or the clip ends before the test looks
+        // the clock starts with the first picture, however slow ffmpeg is (#259)
         fx.click_label("Play");
-        fx.click_label("Pause");
         fx.until("the output is open", |a| a.media.position().is_some());
         fx.until("a frame of the video is shown", |a| a.media.picture_size().is_some());
-        fx.click_label("Play"); // the clock starts only now
         assert_eq!(fx.app.media.picture_size(), Some([160, 90]), "{clip}");
         fx.until("the video runs", |a| a.media.position().is_some_and(|p| p > 0.15));
         fx.click_label("Pause");
