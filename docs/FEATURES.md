@@ -365,7 +365,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ![Calendar settings](userguide/z_media/screenshots/calendar-settings.png)
 
 - Settings → Calendar: add local calendars or CalDAV accounts ("Find calendars" asks the
-  server), choose colours, show or hide calendars, and set the sync interval per calendar.
+  server), choose colours, show or hide calendars, and set the sync interval per calendar. **Edit**
+  on a CalDAV calendar changes its address, user name or password (empty password = keep the saved
+  one); a new user name or password also goes to the other calendars of the same server and user.
 
 ![Calendar in the sidebar](userguide/z_media/screenshots/calendar-sidebar.png)
 
@@ -585,7 +587,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   and feed there, so a new feed can join the tabs you have). **Accounts…** adds a Mastodon account (type
   the server, open the sign-in page in the browser, paste the code it shows; or paste an access
   token) or a Bluesky account (handle and an **app password** from Settings → Privacy and
-  security → App passwords, never your main password). Secrets go to the system keyring.
+  security → App passwords, never your main password). Secrets go to the system keyring. **Edit** next to an account signs in
+  to it again (new app password or code) and replaces its secret; the account keeps its feeds and posts.
 - Pick the account and the feed (Mastodon: Home and your lists; Bluesky: Following and your
   saved feeds). Posts show the avatar, name, time, "boosted by", pictures (video and GIF
   previews have a play mark), quoted posts and link cards. A content warning stays closed until

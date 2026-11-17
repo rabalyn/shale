@@ -15,6 +15,13 @@ Settings → Calendar → Calendars… adds local calendars (`.ics` files) or Ca
 example Nextcloud; "Find calendars" asks the server), chooses colours, shows or hides calendars
 and sets the sync interval per calendar (15 minutes by default).
 
+**Edit** on a CalDAV calendar changes its address, user name or password without removing it: leave
+the password empty to keep the saved one. A new user name or password also goes to your other
+CalDAV calendars on the same server with the same old user name, and the dialog says how many
+calendars it changed. Name, colour and sync interval stay, and the calendar is loaded again.
+**Save** applies it to the list, **Done** writes it; **Cancel** drops the change. Local calendars
+have no Edit button.
+
 ![[calendar-settings.png]]
 
 ## Events

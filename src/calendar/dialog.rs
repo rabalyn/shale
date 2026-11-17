@@ -22,7 +22,19 @@ pub struct CalendarDialog {
     pub found: Vec<(FoundCalendar, bool)>,
     discovering: Option<Discovery>,
     pub message: Option<String>,
+    /// the CalDAV calendar being edited (CAL-032)
+    edit: Option<EditForm>,
     pub rects: Vec<(String, Rect)>,
+}
+
+/// The form of "Edit" on a CalDAV calendar (CAL-032).
+struct EditForm {
+    /// the calendar's id
+    id: String,
+    url: String,
+    user: String,
+    /// empty: keep the saved one
+    pass: crate::secret::Secret,
 }
 
 #[derive(Debug, PartialEq)]
@@ -39,7 +51,7 @@ pub enum CalDialogAction {
 
 impl CalendarDialog {
     pub fn new(sources: Vec<CalendarSource>, week_monday: bool) -> Self {
-        CalendarDialog { sources, week_monday, new_local_name: String::new(), dav_url: String::new(), dav_user: String::new(), dav_pass: Default::default(), found: vec![], discovering: None, message: None, rects: vec![] }
+        CalendarDialog { sources, week_monday, new_local_name: String::new(), dav_url: String::new(), dav_user: String::new(), dav_pass: Default::default(), found: vec![], discovering: None, message: None, edit: None, rects: vec![] }
     }
 
     fn start_discovery(&mut self) {
@@ -70,6 +82,53 @@ impl CalendarDialog {
         true
     }
 
+    /// Apply the edit form (CAL-032): the calendar gets the address; a changed user name or
+    /// password also goes to the other CalDAV calendars on the same server with the same old
+    /// user name. Says what happened in `message`; a wrong address leaves the form open.
+    fn save_edit(&mut self) {
+        let Some(f) = &self.edit else { return };
+        let url = f.url.trim().to_string();
+        if let Err(e) = dav::check_url(&url) {
+            self.message = Some(format!("Can't use this address: {e}"));
+            return;
+        }
+        let Some((old_url, old_user)) = self.sources.iter().find(|s| s.id == f.id).and_then(|s| match &s.kind {
+            SourceKind::Caldav { url, username, .. } => Some((url.clone(), username.clone())),
+            SourceKind::Local { .. } => None,
+        }) else {
+            self.edit = None;
+            return;
+        };
+        let (new_user, new_pass) = (f.user.clone(), f.pass.clone());
+        let id = f.id.clone();
+        let mut changed = 0;
+        for s in self.sources.iter_mut() {
+            let SourceKind::Caldav { url: u, username, password } = &mut s.kind else { continue };
+            let before = (u.clone(), username.clone(), password.clone());
+            if s.id == id {
+                *u = url.clone();
+                *username = new_user.clone();
+                if !new_pass.is_empty() {
+                    *password = new_pass.clone();
+                }
+            } else if dav::same_server(u, &old_url) && *username == old_user {
+                *username = new_user.clone();
+                if !new_pass.is_empty() {
+                    *password = new_pass.clone();
+                }
+            }
+            if before != (u.clone(), username.clone(), password.clone()) {
+                changed += 1;
+            }
+        }
+        self.edit = None;
+        self.message = Some(match changed {
+            0 => "Nothing was changed.".into(),
+            1 => "Changed 1 calendar. Press Done to save.".into(),
+            n => format!("Changed {n} calendars on the same server and user name. Press Done to save."),
+        });
+    }
+
     fn add_caldav(&mut self, url: String, name: String, color: Option<String>) {
         let id = format!("dav-{}-{}", t::now(), self.sources.len());
         let color = color.unwrap_or_else(|| PALETTE[self.sources.len() % PALETTE.len()].to_string());
@@ -98,6 +157,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     let mut remove = None;
     let mut sample = None;
     let mut sync_now = None;
+    let mut edit = None;
     egui::Grid::new("cal-sources").num_columns(5).spacing([8.0, 6.0]).show(ui, |ui| {
         for (i, s) in d.sources.iter_mut().enumerate() {
             let (r, resp) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
@@ -125,6 +185,11 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
                         sync_now = Some(s.id.clone());
                     }
                 }
+                if let SourceKind::Caldav { url, username, .. } = &s.kind {
+                    if rec(format!("edit:{i}"), ui.small_button("Edit")).on_hover_text("Change the address, user name or password").clicked() {
+                        edit = Some(EditForm { id: s.id.clone(), url: url.clone(), user: username.clone(), pass: Default::default() });
+                    }
+                }
                 if rec(format!("remove:{i}"), ui.small_button("Remove")).clicked() {
                     remove = Some(i);
                 }
@@ -133,7 +198,42 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         }
     });
     if let Some(i) = remove {
+        if d.edit.as_ref().is_some_and(|f| f.id == d.sources[i].id) {
+            d.edit = None;
+        }
         d.sources.remove(i);
+    }
+    if edit.is_some() {
+        d.edit = edit;
+    }
+    let mut save_edit = false;
+    if let Some(f) = &mut d.edit {
+        let name = d.sources.iter().find(|s| s.id == f.id).map(|s| s.name.clone()).unwrap_or_default();
+        ui.separator();
+        ui.label(egui::RichText::new(format!("Edit “{name}”")).strong());
+        egui::Grid::new("cal-edit").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+            ui.label(muted("Address"));
+            rec("edit-url".into(), ui.add(egui::TextEdit::singleline(&mut f.url).desired_width(380.0)));
+            ui.end_row();
+            ui.label(muted("User name"));
+            rec("edit-user".into(), ui.add(egui::TextEdit::singleline(&mut f.user).desired_width(220.0)));
+            ui.end_row();
+            ui.label(muted("Password"));
+            rec("edit-pass".into(), crate::secrets::password_edit(ui, &mut f.pass, "leave empty to keep the saved one", 220.0));
+            ui.end_row();
+        });
+        ui.label(muted("A changed user name or password also goes to the other calendars on the same server with this user name."));
+        ui.horizontal(|ui| {
+            if rec("edit-save".into(), ui.button("Save")).clicked() {
+                save_edit = true;
+            }
+            if rec("edit-cancel".into(), ui.button("Cancel")).clicked() {
+                d.edit = None;
+            }
+        });
+    }
+    if save_edit {
+        d.save_edit();
     }
     if let Some(id) = sample {
         action = Some(CalDialogAction::FillSample(id));
@@ -1268,6 +1368,125 @@ mod tests {
         assert_eq!(h.click(rect(&d.rects, "refresh"), |ui| show_all(ui, &mut d, &store)), Some(CalDialogAction::Refresh));
         assert_eq!(h.click(rect(&d.rects, "cancel"), |ui| show_all(ui, &mut d, &store)), Some(CalDialogAction::Cancel));
         assert_eq!(h.click(rect(&d.rects, "done"), |ui| show_all(ui, &mut d, &store)), Some(CalDialogAction::Done));
+    }
+
+    fn dav_src(id: &str, url: &str, user: &str, pass: &str) -> CalendarSource {
+        CalendarSource { id: id.into(), name: id.into(), color: "#1971c2".into(), enabled: true, sync_minutes: 7, kind: SourceKind::Caldav { url: url.into(), username: user.into(), password: pass.into() } }
+    }
+
+    fn caldav_of(d: &CalendarDialog, i: usize) -> (String, String, String) {
+        match &d.sources[i].kind {
+            SourceKind::Caldav { url, username, password } => (url.clone(), username.clone(), password.expose().to_string()),
+            SourceKind::Local { .. } => panic!("a local calendar"),
+        }
+    }
+
+    /// Replace the text of the field `key` (select all, then type).
+    fn retype(h: &mut H, d: &mut CalendarDialog, store: &CalendarStore, key: &str, text: &str) {
+        h.click(rect(&d.rects, key), |ui| show_all(ui, d, store));
+        h.frame(vec![Ev::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }], |ui| show_all(ui, d, store));
+        h.frame(vec![Ev::Text(text.into())], |ui| show_all(ui, d, store));
+        h.frame(vec![], |ui| show_all(ui, d, store));
+    }
+
+    fn edit_setup(sources: Vec<CalendarSource>) -> (CalendarDialog, CalendarStore, H) {
+        let store = CalendarStore::new(vec![], std::env::temp_dir().join(format!("shale-caledit-{}", std::process::id())));
+        let mut d = CalendarDialog::new(sources, true);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        (d, store, h)
+    }
+
+    // spec: CAL-032
+    #[test]
+    fn cal_032_the_edit_form_opens_and_cancel_changes_nothing_and_local_calendars_have_no_edit_button() {
+        let store0 = CalendarStore::new(vec![], std::env::temp_dir().join(format!("shale-caledit0-{}", std::process::id())));
+        let local = store0.new_local_source("Home", &[]);
+        let (mut d, store, mut h) = edit_setup(vec![local, dav_src("w", "https://dav.example.com/cal/w/", "ada", "old")]);
+        assert!(!d.rects.iter().any(|r| r.0 == "edit:0"), "a local calendar has no Edit button");
+        assert!(!d.rects.iter().any(|r| r.0 == "edit-url"), "no form before Edit");
+        h.click(rect(&d.rects, "edit:1"), |ui| show_all(ui, &mut d, &store));
+        let f = d.edit.as_ref().expect("the form is open");
+        assert_eq!((f.url.as_str(), f.user.as_str(), f.pass.is_empty()), ("https://dav.example.com/cal/w/", "ada", true), "address and user filled in, password empty");
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        for k in ["edit-url", "edit-user", "edit-pass", "edit-save", "edit-cancel"] {
+            rect(&d.rects, k);
+        }
+        retype(&mut h, &mut d, &store, "edit-user", "bob");
+        h.typ(rect(&d.rects, "edit-pass"), "typed", |ui| show_all(ui, &mut d, &store));
+        h.click(rect(&d.rects, "edit-cancel"), |ui| show_all(ui, &mut d, &store));
+        assert!(d.edit.is_none(), "Cancel closes the form");
+        assert_eq!(caldav_of(&d, 1), ("https://dav.example.com/cal/w/".into(), "ada".into(), "old".into()), "unchanged");
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        assert!(!d.rects.iter().any(|r| r.0 == "edit-save"));
+    }
+
+    // spec: CAL-032
+    #[test]
+    fn cal_032_save_changes_address_user_and_password_and_an_empty_password_keeps_the_saved_one() {
+        let (mut d, store, mut h) = edit_setup(vec![dav_src("w", "https://dav.example.com/cal/w/", "ada", "old")]);
+        // empty password: the saved one stays; the address changes
+        h.click(rect(&d.rects, "edit:0"), |ui| show_all(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        retype(&mut h, &mut d, &store, "edit-url", "https://dav.example.com/cal/other/");
+        h.click(rect(&d.rects, "edit-save"), |ui| show_all(ui, &mut d, &store));
+        assert!(d.edit.is_none());
+        assert_eq!(caldav_of(&d, 0), ("https://dav.example.com/cal/other/".into(), "ada".into(), "old".into()));
+        assert_eq!(d.message.as_deref(), Some("Changed 1 calendar. Press Done to save."));
+        assert_eq!((d.sources[0].name.as_str(), d.sources[0].color.as_str(), d.sources[0].enabled, d.sources[0].sync_minutes), ("w", "#1971c2", true, 7), "name, colour, shown and interval stay");
+        // a new password and user
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        h.click(rect(&d.rects, "edit:0"), |ui| show_all(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        retype(&mut h, &mut d, &store, "edit-user", "bob");
+        h.typ(rect(&d.rects, "edit-pass"), "new-pass", |ui| show_all(ui, &mut d, &store));
+        h.click(rect(&d.rects, "edit-save"), |ui| show_all(ui, &mut d, &store));
+        assert_eq!(caldav_of(&d, 0), ("https://dav.example.com/cal/other/".into(), "bob".into(), "new-pass".into()));
+        // saving without a change says so
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        h.click(rect(&d.rects, "edit:0"), |ui| show_all(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        h.click(rect(&d.rects, "edit-save"), |ui| show_all(ui, &mut d, &store));
+        assert_eq!(d.message.as_deref(), Some("Nothing was changed."));
+        assert_eq!(caldav_of(&d, 0).2, "new-pass");
+    }
+
+    // spec: CAL-032
+    #[test]
+    fn cal_032_a_changed_account_goes_to_the_calendars_of_the_same_server_and_user_only() {
+        let (mut d, store, mut h) = edit_setup(vec![
+            dav_src("a", "https://dav.example.com/cal/a/", "ada", "old"),
+            dav_src("b", "https://DAV.example.com:443/cal/b/", "ada", "old"),
+            dav_src("other-server", "https://dav.other.org/cal/c/", "ada", "old"),
+            dav_src("other-user", "https://dav.example.com/cal/d/", "eve", "old"),
+        ]);
+        h.click(rect(&d.rects, "edit:0"), |ui| show_all(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        retype(&mut h, &mut d, &store, "edit-user", "ada2");
+        h.typ(rect(&d.rects, "edit-pass"), "new", |ui| show_all(ui, &mut d, &store));
+        h.click(rect(&d.rects, "edit-save"), |ui| show_all(ui, &mut d, &store));
+        assert_eq!(caldav_of(&d, 0).1.as_str(), "ada2");
+        assert_eq!((caldav_of(&d, 1).1, caldav_of(&d, 1).2), ("ada2".into(), "new".into()), "same server, same user");
+        assert_eq!(caldav_of(&d, 1).0, "https://DAV.example.com:443/cal/b/", "its address stays");
+        assert_eq!((caldav_of(&d, 2).1, caldav_of(&d, 2).2), ("ada".into(), "old".into()), "another server");
+        assert_eq!((caldav_of(&d, 3).1, caldav_of(&d, 3).2), ("eve".into(), "old".into()), "another user");
+        assert_eq!(d.message.as_deref(), Some("Changed 2 calendars on the same server and user name. Press Done to save."));
+    }
+
+    // spec: CAL-032
+    #[test]
+    fn cal_032_a_bad_address_is_refused_and_the_form_stays() {
+        let (mut d, store, mut h) = edit_setup(vec![dav_src("w", "https://dav.example.com/cal/w/", "ada", "old")]);
+        h.click(rect(&d.rects, "edit:0"), |ui| show_all(ui, &mut d, &store));
+        h.frame(vec![], |ui| show_all(ui, &mut d, &store));
+        retype(&mut h, &mut d, &store, "edit-url", "http://dav.example.com/cal/w/");
+        h.click(rect(&d.rects, "edit-save"), |ui| show_all(ui, &mut d, &store));
+        assert!(d.edit.is_some(), "the form stays open");
+        assert!(d.message.as_deref().unwrap_or("").starts_with("Can't use this address"), "{:?}", d.message);
+        assert_eq!(caldav_of(&d, 0).0, "https://dav.example.com/cal/w/", "nothing changed");
+        // removing the calendar closes its form
+        h.click(rect(&d.rects, "remove:0"), |ui| show_all(ui, &mut d, &store));
+        assert!(d.edit.is_none() && d.sources.is_empty());
     }
 
     // spec: CAL-010

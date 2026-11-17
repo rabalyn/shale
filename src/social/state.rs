@@ -334,6 +334,12 @@ impl SocialState {
         self.timelines.retain(|k, _| k.0 != account);
     }
 
+    /// The signed-in client of an account is dropped: the next request signs in with the secret
+    /// the account has now (it was replaced, SOC-043).
+    pub fn forget_client(&mut self, account: &str) {
+        self.clients.remove(account);
+    }
+
     fn client_source(&self, e: &SocialAccountEntry) -> impl FnOnce() -> Client + Send + 'static {
         let (cached, entry) = (self.clients.get(&e.account.id).cloned(), e.clone());
         move || cached.unwrap_or_else(|| Client::new(entry.account.clone(), entry.secret().expose()))

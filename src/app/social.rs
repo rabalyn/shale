@@ -178,6 +178,21 @@ impl ShaleApp {
                 self.toast(format!("Added @{name}"));
                 false
             }
+            DialogAction::Updated(e) => {
+                // SOC-043: only the secret changes; id, name, feeds, posts and tabs stay
+                match self.cfg.social_accounts.iter_mut().find(|x| x.account.id == e.account.id) {
+                    Some(x) => {
+                        x.secret = e.secret;
+                        self.social.forget_client(&x.account.id);
+                        let name = x.account.handle.clone();
+                        self.save_config();
+                        self.toast(format!("Signed in again as @{name}"));
+                    }
+                    // removed meanwhile: the secret the sign-in stored goes again
+                    None => crate::secrets::social_clear(&e.account.server, &e.account.handle),
+                }
+                false
+            }
             DialogAction::CheckMinutes(m) => {
                 self.cfg.social_check_minutes = m;
                 self.save_config();

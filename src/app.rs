@@ -2953,6 +2953,37 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: SOC-043
+    #[test]
+    fn signing_in_again_replaces_only_the_secret_of_the_account() {
+        use crate::social::accounts_ui::DialogAction;
+        let (mut app, d) = test_app("social-resign");
+        let other = crate::social::SocialAccountEntry { account: crate::social::Account::new(crate::social::Network::Bluesky, "https://bsky.soc043.test", "bob.test", "Bob"), secret: Default::default() };
+        let mut entry = crate::social::SocialAccountEntry::new(crate::social::demo::account().account, &crate::secret::Secret::new("old-token"));
+        entry.account.server = "https://demo.soc043.test".into();
+        app.social_dialog_action(DialogAction::Added(entry.clone()));
+        app.social_dialog_action(DialogAction::Added(other.clone()));
+        app.social.load_demo(&entry);
+        let posts = app.social.feeds.len();
+        assert!(posts > 0);
+        // what the dialog's job did: the new secret went to the keyring and the entry is the account as it was
+        let new = crate::social::SocialAccountEntry::new(entry.account.clone(), &crate::secret::Secret::new("new-token"));
+        assert!(!app.social_dialog_action(DialogAction::Updated(new)));
+        assert_eq!(app.cfg.social_accounts.iter().map(|e| e.account.id.as_str()).collect::<Vec<_>>(), [entry.account.id.as_str(), other.account.id.as_str()], "same place, same id");
+        assert_eq!(app.cfg.social_accounts[0].account, entry.account, "name and server stay");
+        assert_eq!(app.cfg.social_accounts[0].secret().expose(), "new-token");
+        assert!(app.social.feeds.len() == posts && app.social.feeds.contains_key(&entry.account.id), "its feeds stay");
+        assert!(app.toasts.iter().any(|t| t.0.contains("Signed in again")), "it says so");
+        // the account was removed while the form ran: the secret that the sign-in stored goes again
+        app.social_dialog_action(DialogAction::Remove(entry.account.id.clone()));
+        let late = crate::social::SocialAccountEntry::new(entry.account.clone(), &crate::secret::Secret::new("late-token"));
+        app.social_dialog_action(DialogAction::Updated(late));
+        assert!(app.cfg.social_accounts.iter().all(|e| e.account.id != entry.account.id), "not added again");
+        assert_eq!(crate::secrets::social_lookup(&entry.account.server, &entry.account.handle), None);
+        crate::secrets::social_clear(&other.account.server, &other.account.handle);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     pub(crate) const CANVAS: &str =
         r#"{"nodes":[{"id":"a","type":"text","text":"devices","x":0,"y":0,"width":250,"height":60},{"id":"b","type":"file","file":"Ideas.md","x":0,"y":200,"width":250,"height":60}],"edges":[{"id":"e","fromNode":"a","toNode":"b"}]}"#;
 
