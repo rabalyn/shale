@@ -269,6 +269,9 @@ pub struct LatexExport {
     /// The template set (its folder name) and the kind (its id).
     pub set: String,
     pub kind: String,
+    /// The guided setup of the LaTeX export has been opened in this vault (finished or cancelled):
+    /// it does not open by itself again (TEX-017).
+    pub setup_seen: bool,
 }
 
 impl Default for VaultState {
@@ -615,8 +618,8 @@ mod tests {
     fn the_last_latex_export_choice_is_saved_and_a_file_without_it_needs_no_version_bump() {
         let (old, _) = parse::<VaultState>(br#"{"version": 2}"#).unwrap();
         assert_eq!((old.version, old.latex_export.clone()), (2, LatexExport::default()));
-        assert!(!old.latex_export.latex && old.latex_export.set.is_empty() && old.latex_export.kind.is_empty());
-        let chosen = VaultState { latex_export: LatexExport { latex: true, set: "tuda".into(), kind: "thesis".into() }, ..VaultState::default() };
+        assert!(!old.latex_export.latex && old.latex_export.set.is_empty() && old.latex_export.kind.is_empty() && !old.latex_export.setup_seen);
+        let chosen = VaultState { latex_export: LatexExport { latex: true, set: "tuda".into(), kind: "thesis".into(), setup_seen: true }, ..VaultState::default() };
         let (back, _) = parse::<VaultState>(&to_bytes(&chosen)).unwrap();
         assert_eq!(back.latex_export, chosen.latex_export);
         assert!(String::from_utf8(to_bytes(&chosen)).unwrap().contains("\"latex_export\""));

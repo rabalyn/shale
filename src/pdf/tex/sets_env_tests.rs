@@ -27,13 +27,13 @@ pub(super) fn mounted_root() -> PathBuf {
     crate::fsutil::private_temp_root("shale-tex").unwrap()
 }
 
-fn cached_archive() -> PathBuf {
+pub(super) fn cached_archive() -> PathBuf {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tex-env/cache/tuda-ci.tar.gz");
     assert!(path.is_file(), "{} is not there: run tests/tex-env/tex-env.sh build", path.display());
     path
 }
 
-fn request(vault: &Path, what: What, engine: Engine) -> Request {
+pub(super) fn request(vault: &Path, what: What, engine: Engine) -> Request {
     Request { vault: vault.to_path_buf(), what, engine: Some(engine), tree: TreeLock::default(), tree_wait: Duration::from_secs(5) }
 }
 
@@ -152,7 +152,7 @@ fn tex_env_every_kind_of_the_imported_tuda_set_compiles_with_a_logo_in_the_slot_
     assert_eq!(choose_logo(&own, &set, &logo).unwrap(), "tuda_logo.pdf");
     let mut set = read_set("tuda", &own.join("templates/tex/tuda")).unwrap();
     assert_eq!(set.logo, LogoStatus::Present("tuda_logo.pdf".into()));
-    set.settings = SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik & Co".into(), logo: set.settings.logo.clone() };
+    set.settings = SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik & Co".into(), author: "Ada & Bob".into(), logo: set.settings.logo.clone() };
     compile_every_kind(&set, false);
     let _ = std::fs::remove_dir_all(&own);
 }

@@ -31,7 +31,11 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
   and a graph of the whole vault. Headings can be numbered (1, 1.1, 1.2), a note's title line hides a `YYMMDD_` date prefix, links to a heading
   scroll to it, and the PDF export has a table of contents and bookmarks; a folder, or the whole vault, exports as one PDF, a book, with a title page, contents, running headers and links between the chapters (`shale --export-pdf <folder> <file.pdf>` does it without a window). A note can also be
-  exported through LaTeX templates (the TU Darmstadt classes, for instance) with your own LuaLaTeX or one Shale installs.
+  exported through LaTeX templates (the TU Darmstadt classes, for instance): a guided setup finds or
+  installs the TeX, imports the templates and asks for your logo and details. The built-in export needs
+  nothing; the LaTeX export needs a TeX, which Shale installs for you only when you agree (about 100 MB to
+  download, 330 MB on disk) unless your computer has one, and the university's logo is not part of the templates
+  and must be supplied by you.
 - **Mail**: read your IMAP mail next to your notes, search it, mark it read, flag, move or delete
   it, write, reply, forward and send mail (plain text, attachments, drafts, an outbox with "undo
   send"), and turn a mail into a note with one key. Shale keeps a local copy of the mail; syncing never

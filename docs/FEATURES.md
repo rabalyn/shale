@@ -155,6 +155,31 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![Template sets in Settings → LaTeX](userguide/z_media/screenshots/settings-latex-sets.png)
 
+- **Guided setup of the LaTeX export** (Settings → LaTeX → **Set up LaTeX export…**, and by itself the first
+  time you choose **LaTeX template** in the export dialog of a vault where something is missing; the dialog's
+  hints for a missing TeX, template set or logo have a **Set up…** button too) is for people who are not firm in
+  TeX but want to use their university's templates. Five steps with a step indicator, Back, Next and Cancel,
+  and a green tick on what is done already: **TeX** (found, or installed after you agree: about 100 MB to
+  download and 330 MB on disk, with progress and Cancel; the built-in export needs nothing of this),
+  **Templates** (TU Darmstadt, the tested version, the newest from CTAN, a file, a folder or GitHub, or a set
+  you have), **Logo** (the university's logo may not be shipped: the step says where members get it; give it
+  by **dropping the file onto the window** or by its path, or choose Later and exports carry a placeholder),
+  **Your details** (the accent colour as swatches `0a` to `11d`, the language, your department and name, kept in
+  the set's `settings.toml`) and a **Test page** that is made with your choices and opened, or, if it fails,
+  explained in words with **Save the .tex**. While the setup or Settings → LaTeX is open, files dropped on the
+  window belong to it (a logo, a `.zip`, a `.tar.gz` or a folder of templates) and are not imported into the
+  vault as notes (TEX-017, TEX-028).
+
+  ![Step 1: TeX](userguide/z_media/screenshots/setup-tex.png)
+
+  ![Step 2: the templates](userguide/z_media/screenshots/setup-templates.png)
+
+  ![Step 3: the logo](userguide/z_media/screenshots/setup-logo.png)
+
+  ![Step 4: your details](userguide/z_media/screenshots/setup-details.png)
+
+  ![Step 5: the test page, when it did not work](userguide/z_media/screenshots/setup-test-failed.png)
+
 - **Export through a LaTeX template**: the PDF dialog of a note has an engine choice, **Built-in** (the
   default) or **LaTeX template**. With the template you pick a set of the vault and a kind (publication,
   report, exercise sheet, thesis, doctoral thesis, slides, letter, poster, scientific poster, leaflet,

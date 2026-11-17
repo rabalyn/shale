@@ -281,6 +281,11 @@ fn check_perl() -> Result<(), String> {
     check_perl_program("perl")
 }
 
+/// What is wrong when there is no `perl` for the install, in words; none when there is one.
+pub fn perl_problem() -> Option<String> {
+    check_perl().err()
+}
+
 /// Whether this program runs as perl does.
 pub(super) fn check_perl_program(program: &str) -> Result<(), String> {
     let mut c = Command::new(program);

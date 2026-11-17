@@ -37,6 +37,8 @@ impl T {
         crate::vault::write_sample_vault(&dir).unwrap();
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
         app.tex.detection = Some(detection);
+        // the guided setup does not open by itself unless a test asks for it (TEX-017)
+        app.vdata.state.latex_export.setup_seen = true;
         app.open_settings(SettingsTab::Latex);
         let mut t = T { app, hl: Headless::new(), dir };
         t.hl.frames(&mut t.app, 4);
