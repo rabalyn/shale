@@ -1,19 +1,21 @@
-//! The Editor tab: how notes are edited.
+//! The Editor tab: how notes are edited. The Vim keys are on the Vim tab (`vim.rs`).
 
-use super::section;
+use super::{section, SettingsTab};
 use crate::app::{muted, ShaleApp};
-use crate::link_preview::{DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH};
 use eframe::egui::{self, Ui};
 
 impl ShaleApp {
-    pub(super) fn editor_tab(&mut self, ui: &mut Ui) -> bool {
+    pub(super) fn editor_tab(&mut self, ui: &mut Ui, tab: &mut SettingsTab) -> bool {
         let mut changed = false;
-        changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing: notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back").changed();
+        section(ui, "Cursor");
         changed |= cursor_combo(ui, "Cursor while typing", "cursor-shape", &mut self.cfg.cursor_shape);
-        ui.add_enabled_ui(self.cfg.vim_mode, |ui| {
-            changed |= cursor_combo(ui, "Cursor in normal mode (Vim-style editing)", "normal-cursor-shape", &mut self.cfg.normal_cursor_shape);
-        });
         changed |= ui.checkbox(&mut self.cfg.cursor_blink, "Blinking cursor").changed();
+        ui.horizontal(|ui| {
+            ui.label(muted(format!("Vim-style editing: {} · set it up in the", if self.cfg.vim_mode { "on" } else { "off" })).size(12.0));
+            if ui.link("Vim tab").clicked() {
+                *tab = SettingsTab::Vim;
+            }
+        });
         changed |= ui.checkbox(&mut self.cfg.line_numbers, "Show line numbers in the editor").changed();
         changed |= ui
             .checkbox(&mut self.cfg.numbered_headings, "Number headings")
@@ -38,16 +40,6 @@ impl ShaleApp {
         changed |= ui.checkbox(&mut self.cfg.ctrl_to_follow, "Follow links only with Ctrl+click (plain click places the cursor)").changed();
         changed |= ui.checkbox(&mut self.cfg.new_notes_next_to_current, "Create notes from red links next to the current note (instead of the vault root)").changed();
         changed |= ui.checkbox(&mut self.cfg.update_links_on_rename, "Update links in other notes when renaming").changed();
-        ui.horizontal(|ui| {
-            ui.label("Link preview size (Shift+K)");
-            changed |= ui.add(egui::DragValue::new(&mut self.cfg.link_preview_width).range(MIN_WIDTH as u32..=4000).suffix(" wide")).changed();
-            changed |= ui.add(egui::DragValue::new(&mut self.cfg.link_preview_height).range(MIN_HEIGHT as u32..=4000).suffix(" high")).changed();
-            if ui.button("Reset size").on_hover_text("The preview is 640 x 480 points; dragging its edges changes the size too").clicked() {
-                self.cfg.link_preview_width = DEFAULT_WIDTH;
-                self.cfg.link_preview_height = DEFAULT_HEIGHT;
-                changed = true;
-            }
-        });
         section(ui, "Drawings");
         changed |= ui
             .checkbox(&mut self.cfg.auto_convert_canvas, "Convert Obsidian canvases to editable drawings when opening them (instead of asking)")
@@ -69,7 +61,7 @@ impl ShaleApp {
 }
 
 /// A choice of cursor shape (EDIT-039, EDIT-040).
-fn cursor_combo(ui: &mut Ui, label: &str, id: &str, shape: &mut crate::cursor_style::CursorShape) -> bool {
+pub(super) fn cursor_combo(ui: &mut Ui, label: &str, id: &str, shape: &mut crate::cursor_style::CursorShape) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
         ui.label(label);

@@ -629,6 +629,11 @@ mod tests {
     use super::*;
     use eframe::egui::{self, Event, RawInput};
 
+    /// The keymap of Linux and Windows, whatever system the tests run on (KEY-015: macOS has no Alt defaults).
+    fn linux() -> Keymap {
+        Keymap::for_os(false)
+    }
+
     fn b(s: &str) -> Binding {
         Binding::parse(s).unwrap()
     }
@@ -636,7 +641,8 @@ mod tests {
     // spec: KEY-001
     #[test]
     fn every_default_parses_and_has_no_conflict() {
-        let k = Keymap::default();
+        // on macOS the Alt defaults are simply not bound, but their strings still parse and check
+        let keymaps = [Keymap::for_os(false), Keymap::for_os(true)];
         let mut ids = std::collections::HashSet::new();
         for d in DEFS {
             assert!(ids.insert(d.id), "double id {}", d.id);
@@ -644,7 +650,9 @@ mod tests {
             for text in d.defaults {
                 let bind = Binding::parse(text).unwrap_or_else(|e| panic!("{}: {e}", d.id));
                 assert_eq!(bind.to_text(), *text, "defaults are written the way they are stored");
-                assert_eq!(k.check(d.action, &bind), Ok(()), "{} {text}", d.id);
+                for k in &keymaps {
+                    assert_eq!(k.check(d.action, &bind), Ok(()), "{} {text}", d.id);
+                }
             }
         }
     }
@@ -654,10 +662,13 @@ mod tests {
     fn the_definable_actions_are_the_listed_ones() {
         let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/spec/links-and-editor.md")).unwrap();
         let row = text.lines().find(|l| l.starts_with("| KEY-002 |")).unwrap();
-        let k = Keymap::default();
+        let (k, mac) = (linux(), Keymap::for_os(true));
         for d in DEFS.iter().filter(|d| d.scope == Scope::Global) {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
+            // macOS shows the same, except that the Alt keys of the ribbon and the sidebars are not set
+            let on_mac = if d.action.is_alt_key() { "not set".to_string() } else { shown };
+            assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
         assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 23);
         assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 23);
@@ -666,7 +677,7 @@ mod tests {
     // spec: KEY-014
     #[test]
     fn the_note_view_overlaps_global_and_vim_normal_mode_both_ways_and_alt_arrows_are_the_editors() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         // the editor's own Alt+Up / Alt+Down (moving rows) cannot start a binding there, also not in a sequence
         for text in ["Alt+Up", "Alt+Down", "Alt+Up X"] {
             assert!(k.check(Action::NoteBold, &b(text)).unwrap_err().contains("fixed meaning"), "{text}");
@@ -691,6 +702,13 @@ mod tests {
                 assert_eq!(a.overlaps(c), c.overlaps(a), "{a:?} {c:?}");
             }
         }
+        // on macOS, where Alt+B is no default, the Alt keys are free, and Alt+Up stays the editor's
+        let mut m = Keymap::for_os(true);
+        assert_eq!(m.check(Action::Save, &b("Alt+B")), Ok(()));
+        assert_eq!(m.check(Action::NormalSearchAll, &b("Alt+I")), Ok(()));
+        assert!(m.check(Action::NoteBold, &b("Alt+Up")).unwrap_err().contains("fixed meaning"));
+        m.set(Action::NoteBold, b("Alt+B")).unwrap();
+        assert_eq!(m.check(Action::Save, &b("Alt+B")), Err("Alt+B is already used by “Note: Bold button”".to_string()));
         // a saved change that clashes is ignored on load (KEY-007)
         let saved: BTreeMap<String, Vec<String>> = [("note.bold".to_string(), vec!["Alt+Left".to_string()]), ("normal.find_file".to_string(), vec!["Alt+I".to_string()])].into_iter().collect();
         assert!(Keymap::from_overrides_for(&saved, false).overrides().is_empty());
@@ -787,7 +805,7 @@ mod tests {
     // spec: KEY-004
     #[test]
     fn conflicts_are_found_in_a_scope_and_against_global_only() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         // the message names the other action
         assert_eq!(k.check(Action::FocusEditor, &b("Ctrl+H")), Err("Ctrl+H is already used by “Keyboard one place to the left (pane, then left sidebar)”".to_string()));
         // a Global key shadows the other scopes ...
@@ -811,7 +829,7 @@ mod tests {
     // spec: KEY-018
     #[test]
     fn clashes_of_finds_equal_and_prefix_clashes_in_scopes_that_are_active_together() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         // equal, in the same scope and against Global
         assert_eq!(k.clashes_of(Action::TreePrevFile, &b("J")), vec![Action::TreeNextFile]);
         assert_eq!(k.clashes_of(Action::TreeNextFile, &b("J")), vec![], "its own key is no clash");
@@ -837,7 +855,7 @@ mod tests {
     // spec: KEY-018, KEY-007
     #[test]
     fn overwrite_takes_only_the_clashing_bindings_and_stores_an_emptied_action_as_cleared() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         let down = k.bindings(Action::TreeNextFile);
         assert!(down.len() > 1, "the action has more than one key by default");
         k.overwrite(Action::TreePrevFile, b("J"), false).unwrap();
@@ -851,7 +869,7 @@ mod tests {
         assert_eq!(k.bindings(Action::NewNote), vec![]);
         assert_eq!(k.overrides().get("global.new_note"), Some(&vec![]));
         assert!(k.bindings(Action::FocusSidebar).contains(&only[0]), "adding keeps the other keys");
-        let k2 = Keymap::from_overrides(&k.overrides());
+        let k2 = Keymap::from_overrides_for(&k.overrides(), false);
         assert_eq!(k2.bindings(Action::NewNote), vec![]);
         assert_eq!(k2.display(Action::NewNote), "not set");
         assert_eq!(k2.overrides(), k.overrides());
@@ -871,7 +889,7 @@ mod tests {
     // spec: KEY-005
     #[test]
     fn reserved_and_plain_global_keys_are_refused() {
-        let k = Keymap::default();
+        let k = linux();
         assert!(k.check(Action::Save, &b("G")).unwrap_err().contains("needs Ctrl or Alt"));
         assert!(k.check(Action::Save, &b("F5")).is_ok(), "a function key does not get in the way of typing");
         assert!(k.check(Action::Save, &b("Space g")).is_err());
@@ -886,7 +904,7 @@ mod tests {
     // spec: EDIT-015, KEY-005
     #[test]
     fn the_keys_of_vim_normal_mode_cannot_be_bound() {
-        let k = Keymap::default();
+        let k = linux();
         let a = Action::NormalAlternate;
         for text in ["H", "Shift+W", "G", "0", "4", "Slash", "Colon", "Escape", "Enter", "Backspace", "ArrowDown", "G X", "Shift+O Tab", "U", "Shift+U", "Ctrl+R", "Ctrl+R X"] {
             assert!(k.check(a, &b(text)).unwrap_err().contains("fixed meaning"), "{text}");
@@ -903,7 +921,7 @@ mod tests {
     #[test]
     fn a_sequence_key_does_not_leave_its_typed_character() {
         let ctx = egui::Context::default();
-        let mut k = Keymap::default();
+        let mut k = linux();
         for (key, text) in [(Key::Space, " "), (Key::Tab, "")] {
             let mut events = vec![key_event(key, Modifiers::NONE)];
             events.push(Event::Text(text.to_string()));
@@ -921,7 +939,7 @@ mod tests {
     // spec: KEY-007
     #[test]
     fn overrides_round_trip_through_the_config_file() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         assert!(k.overrides().is_empty(), "only changes are stored");
         k.set(Action::FocusSidebar, b("Ctrl+Alt+B")).unwrap();
         k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
@@ -936,13 +954,13 @@ mod tests {
         assert!(text.contains("\"global.focus_sidebar\" = [\"Ctrl+Alt+B\"]") && text.contains("version = 2"), "{text}");
         let (loaded, problem) = crate::config::Config::load_from(&path);
         assert_eq!(problem, None);
-        let k2 = Keymap::from_overrides(&loaded.keybindings);
+        let k2 = Keymap::from_overrides_for(&loaded.keybindings, false);
         assert_eq!(k2.bindings(Action::FocusSidebar), vec![b("Ctrl+Alt+B")]);
         assert_eq!(k2.bindings(Action::TreeToggleFolder), vec![b("Space f f")]);
         assert_eq!(k2.bindings(Action::FocusEditor), Action::FocusEditor.defaults_for(false));
         // a file without the field means all defaults
         cfg.keybindings.clear();
-        assert!(Keymap::from_overrides(&cfg.keybindings).overrides().is_empty());
+        assert!(Keymap::from_overrides_for(&cfg.keybindings, false).overrides().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -960,7 +978,7 @@ mod tests {
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.into_iter().map(String::from).collect()))
         .collect();
-        let k = Keymap::from_overrides(&saved);
+        let k = Keymap::from_overrides_for(&saved, false);
         // an empty list is a cleared action (KEY-007), not a bad entry
         assert_eq!(k.overrides().keys().collect::<Vec<_>>(), ["global.forward", "global.new_note"]);
         assert!(k.is_default(Action::Back) && k.is_default(Action::CloseTab));
@@ -969,7 +987,7 @@ mod tests {
     // spec: MAIL-072
     #[test]
     fn a_hint_is_the_bindings_as_shown_and_nothing_for_an_unbound_action() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         assert_eq!(k.hint(Action::MailFlag).as_deref(), Some("s / f"));
         assert_eq!(k.hint(Action::MailRetry).as_deref(), Some("Shift+S"));
         k.set(Action::MailRetry, Binding::parse("G").unwrap()).unwrap();
@@ -981,7 +999,7 @@ mod tests {
     // spec: KEY-007, KEY-006
     #[test]
     fn a_cleared_action_stays_unbound() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         k.clear(Action::MailFlag);
         assert!(k.bindings(Action::MailFlag).is_empty() && !k.is_default(Action::MailFlag));
         assert_eq!(k.display(Action::MailFlag), "not set");
@@ -989,7 +1007,7 @@ mod tests {
         assert_eq!(frame(&mut k, Scope::MailView, vec![key_event(Key::F, Modifiers::NONE)]), None, "nor does f");
         // stored as an empty list, read back as unbound
         assert_eq!(k.overrides().get("mail.flag"), Some(&vec![]));
-        let k2 = Keymap::from_overrides(&k.overrides());
+        let k2 = Keymap::from_overrides_for(&k.overrides(), false);
         assert!(k2.bindings(Action::MailFlag).is_empty());
         // the freed keys can go to another action; reset brings the defaults back
         let mut k2 = k2;
@@ -1003,7 +1021,7 @@ mod tests {
     // spec: KEY-006
     #[test]
     fn add_keeps_the_other_bindings() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         k.add(Action::TreeNextFile, b("Ctrl+Alt+J")).unwrap();
         assert_eq!(k.bindings(Action::TreeNextFile), vec![b("J"), b("Down"), b("Ctrl+Alt+J")]);
         k.add(Action::TreeNextFile, b("Ctrl+Alt+J")).unwrap();
@@ -1020,7 +1038,7 @@ mod tests {
     // spec: KEY-010
     #[test]
     fn a_bare_key_does_not_fire_with_shift_or_alt() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         let sc = Scope::MailView;
         // the Alt key of a letter is the action of the button of the open mail (MAIL-229), never the bare key's
         for (key, bare, shift, alt) in [
@@ -1045,7 +1063,7 @@ mod tests {
     #[test]
     fn a_waiting_sequence_is_shown_and_times_out() {
         let ctx = egui::Context::default();
-        let mut k = Keymap::default();
+        let mut k = linux();
         k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
         let at = |k: &mut Keymap, t: f64, key: Key| {
             let mut out = None;
@@ -1088,7 +1106,7 @@ mod tests {
     // spec: KEY-005, EDIT-033
     #[test]
     fn shift_k_is_the_link_preview_and_space_space_can_replace_it() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         let a = Action::NormalLinkPreview;
         assert_eq!(k.bindings(a), vec![b("Shift+K")], "the default");
         assert_eq!(k.check(a, &b("Shift+K")), Ok(()), "Shift+K is no vim key");
@@ -1117,7 +1135,7 @@ mod tests {
     // spec: KEY-009, KEY-008
     #[test]
     fn a_sequence_fires_on_its_last_chord() {
-        let mut k = Keymap::default();
+        let mut k = linux();
         k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
         let none = Modifiers::NONE;
         let sc = Scope::FileList;
@@ -1141,7 +1159,7 @@ mod tests {
     // spec: NAV-006
     #[test]
     fn the_docs_list_every_default_binding() {
-        let k = Keymap::default();
+        let k = linux();
         for file in ["README.md", "docs/FEATURES.md"] {
             let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file)).unwrap();
             let table = text.split("\n## Keyboard\n").nth(1).unwrap_or_else(|| panic!("{file} has no Keyboard section")).split("\n## ").next().unwrap();

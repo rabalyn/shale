@@ -100,7 +100,16 @@ fn base() -> Vec<OsString> {
 
 /// `ffprobe` asked for the streams' kind, size, rotation and frame rate and the file's length, as JSON.
 pub fn probe_args(file: &Path) -> Vec<OsString> {
-    let mut a = os(&["-v", "error", "-show_entries", "stream=codec_type,width,height,avg_frame_rate,r_frame_rate:stream_side_data=rotation:stream_tags=rotate:format=duration", "-of", "json", "-i"]);
+    probe_args_with(file, PROBE_ENTRIES)
+}
+
+const PROBE_ENTRIES: &str = "stream=codec_type,width,height,avg_frame_rate,r_frame_rate:stream_side_data=rotation:stream_tags=rotate:format=duration";
+/// For an ffprobe that does not know the section `stream_side_data` (4.x, as on Ubuntu 22.04) and
+/// refuses the whole list: those versions give the rotation as the stream tag `rotate` (#299).
+const PROBE_ENTRIES_OLD: &str = "stream=codec_type,width,height,avg_frame_rate,r_frame_rate:stream_tags=rotate:format=duration";
+
+fn probe_args_with(file: &Path, entries: &str) -> Vec<OsString> {
+    let mut a = os(&["-v", "error", "-show_entries", entries, "-of", "json", "-i"]);
     a.push(file.into());
     a
 }
@@ -186,7 +195,12 @@ impl Tools {
 
     /// Length, size, frame rate and sound of a video file.
     pub fn probe(&self, file: &Path) -> Result<Info, String> {
-        let out = Self::capture(&self.ffprobe, &probe_args(file)).map_err(|e| if e.contains("could not be started") { e } else { "The file is damaged or not a video that ffmpeg can read.".to_string() })?;
+        let out = match Self::capture(&self.ffprobe, &probe_args(file)) {
+            // an older ffprobe refuses the entry list itself, before it looks at the file (#299)
+            Err(e) if e.contains("'show_entries'") => Self::capture(&self.ffprobe, &probe_args_with(file, PROBE_ENTRIES_OLD)),
+            r => r,
+        }
+        .map_err(|e| if e.contains("could not be started") { e } else { "The file is damaged or not a video that ffmpeg can read.".to_string() })?;
         parse_probe(&String::from_utf8_lossy(&out))
     }
 
@@ -284,6 +298,35 @@ mod tests {
 
     fn strs(a: &[OsString]) -> Vec<String> {
         a.iter().map(|s| s.to_string_lossy().into_owned()).collect()
+    }
+
+    // spec: MEDIA-009
+    // ffprobe 4.4 (Ubuntu 22.04) refuses the section stream_side_data with these words and exit 1;
+    // the probe asks again without it and reads the video (#299)
+    #[cfg(unix)]
+    #[test]
+    fn an_ffprobe_that_does_not_know_the_side_data_section_still_reads_the_video() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(real) = locate() else {
+            println!("skipping: ffmpeg and ffprobe are not installed");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("shale-old-ffprobe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = dir.join("ffprobe");
+        let script = format!(
+            "#!/bin/sh\ncase \"$*\" in *stream_side_data*) echo \"No match for section 'stream_side_data'\" >&2; echo \"Failed to set value '...' for option 'show_entries': Invalid argument\" >&2; exit 1;; esac\nexec '{}' \"$@\"\n",
+            real.ffprobe.display()
+        );
+        std::fs::write(&old, script).unwrap();
+        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let tools = Tools { ffmpeg: real.ffmpeg.clone(), ffprobe: old };
+        let clip = super::super::testdata::fixture("clip.mp4");
+        let info = tools.probe(&clip).expect("read with the older entry list");
+        assert_eq!(info, real.probe(&clip).unwrap(), "the same as with a newer ffprobe");
+        // a missing file is still named as unreadable, not as a refused entry list
+        assert_eq!(tools.probe(Path::new("/does/not/exist.mp4")).unwrap_err(), "The file is damaged or not a video that ffmpeg can read.");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: MEDIA-009

@@ -353,3 +353,22 @@ fn edit_039_the_cursor_settings_are_in_the_file_and_unknown_words_are_the_defaul
     assert!(w.app.save_settings_file(true));
     assert_eq!((w.app.cfg.cursor_shape, w.app.cfg.normal_cursor_shape, w.app.cfg.toolbar_size), (CursorShape::Bar, CursorShape::Block, 19));
 }
+
+// spec: EDIT-043
+#[test]
+fn edit_043_esc_cursor_is_in_the_file_and_an_unknown_word_is_the_default() {
+    use crate::vim::EscCursor;
+    let mut w = W::new("esc-cursor");
+    w.app.open_settings_file();
+    assert_eq!(w.app.cfg.esc_cursor, EscCursor::Stay);
+    assert!(w.app.sf.text.contains("esc_cursor = \"stay\""), "{}", w.app.sf.text);
+    w.app.sf.text = w.app.sf.text.replace("esc_cursor = \"stay\"", "esc_cursor = \"step_back\"");
+    w.app.sf.dirty = true;
+    assert!(w.app.save_settings_file(true));
+    assert_eq!(w.app.cfg.esc_cursor, EscCursor::StepBack);
+    assert!(w.disk().contains("esc_cursor = \"step_back\""));
+    w.app.sf.text = w.app.sf.text.replace("esc_cursor = \"step_back\"", "esc_cursor = \"sideways\"").replace("toolbar_size = 110", "toolbar_size = 19");
+    w.app.sf.dirty = true;
+    assert!(w.app.save_settings_file(true));
+    assert_eq!((w.app.cfg.esc_cursor, w.app.cfg.toolbar_size), (EscCursor::Stay, 19));
+}

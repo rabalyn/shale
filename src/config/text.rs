@@ -100,6 +100,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("cursor_shape", "The text cursor while typing: bar (before the character), bar_after, block or underline."),
     ("normal_cursor_shape", "The text cursor in vim's normal mode: bar, bar_after, block or underline."),
     ("cursor_blink", "true: the text cursor blinks; false: it stays on."),
+    ("esc_cursor", "Vim-style editing: where Esc from insert mode puts the cursor. stay: on the character right after the typing; step_back: one character back, as in Vim."),
     ("mail_accounts", "The e-mail accounts (IMAP) of the mail view. Passwords are kept in the system keyring, never here."),
     ("mail_accounts.id", "A name that identifies the account (letters, digits, - and _); it is the account's folder in the mail store."),
     ("mail_accounts.name", "What the account is called in the window."),

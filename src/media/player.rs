@@ -21,10 +21,14 @@ const REPAINT: Duration = Duration::from_millis(100);
 /// How many files' covers are kept.
 const LOOKS_KEPT: usize = 48;
 
+/// What a video says when the machine has no sound output (MEDIA-013).
+const NO_SOUND_NOTE: &str = "No sound output: playing without sound";
+
 /// What the output thread tells the window.
 enum Status {
     Opening,
-    Ready(Arc<Shared>),
+    /// the output is open; the flag says that it has no sound card behind it (a video only, MEDIA-013)
+    Ready(Arc<Shared>, bool),
     NoOutput,
     Failed(String),
 }
@@ -220,7 +224,7 @@ impl MediaPlayer {
         let status = p.status.clone();
         let status = status.lock().unwrap_or_else(|e| e.into_inner());
         match &*status {
-            Status::Ready(shared) => shared.seek(secs),
+            Status::Ready(shared, _) => shared.seek(secs),
             _ => p.start_at = Some(secs),
         }
     }
@@ -303,7 +307,10 @@ impl MediaPlayer {
             view.playing = c.want_play;
             match &*c.status.lock().unwrap_or_else(|e| e.into_inner()) {
                 Status::Opening => view.busy = true,
-                Status::Ready(shared) => {
+                Status::Ready(shared, no_sound) => {
+                    if *no_sound {
+                        view.message = Some(NO_SOUND_NOTE.into());
+                    }
                     view.position = shared.position_secs();
                     if shared.is_finished() {
                         // played to the end: back to the start, paused
@@ -375,7 +382,7 @@ impl MediaPlayer {
     /// Tests: play into a thread that only keeps time, never into a sound card.
     #[cfg(test)]
     pub fn use_silent_output(&self) {
-        self.lock().open_output = Some(|| Ok(Output::silent()));
+        self.lock().open_output = Some(|| Ok(Output::without_device()));
     }
 
     /// Tests: the size of the first-frame (or cover) picture that was read for `abs`.
@@ -411,7 +418,7 @@ impl MediaPlayer {
         let s = self.lock();
         let Some(c) = s.current.as_ref() else { return false };
         let status = c.status.lock().unwrap_or_else(|e| e.into_inner());
-        matches!(&*status, Status::Ready(shared) if shared.seek_pending())
+        matches!(&*status, Status::Ready(shared, _) if shared.seek_pending())
     }
 
     /// Tests: how far the current file is, in seconds.
@@ -421,7 +428,7 @@ impl MediaPlayer {
         let c = s.current.as_ref()?;
         let status = c.status.lock().unwrap_or_else(|e| e.into_inner());
         match &*status {
-            Status::Ready(shared) => Some(shared.position_secs()),
+            Status::Ready(shared, _) => Some(shared.position_secs()),
             _ => None,
         }
     }
@@ -445,7 +452,7 @@ impl State {
     fn apply_state(&mut self) {
         let gain = self.gain();
         let Some(c) = self.current.as_mut() else { return };
-        if let Status::Ready(shared) = &*c.status.lock().unwrap_or_else(|e| e.into_inner()) {
+        if let Status::Ready(shared, _) = &*c.status.lock().unwrap_or_else(|e| e.into_inner()) {
             shared.set_volume(gain);
             if let Some(at) = c.start_at.take() {
                 shared.seek(at);
@@ -507,11 +514,13 @@ fn play_video(path: &Path, shared: &Shared, stop: &AtomicBool, job: VideoJob) ->
 /// The output thread: opens the sound card, reports, decodes into it until stopped.
 fn run_output(path: &Path, status: &Mutex<Status>, stop: &AtomicBool, open: fn() -> Result<Output, String>, video: Option<VideoJob>) {
     let set = |s: Status| *status.lock().unwrap_or_else(|e| e.into_inner()) = s;
-    let output = match open() {
-        Ok(o) => o,
+    // a video without a sound card still plays its pictures, timed by the wall clock (MEDIA-013)
+    let (output, no_sound) = match open() {
+        Ok(o) => (o, false),
+        Err(_) if video.is_some() => (Output::without_device(), true),
         Err(_) => return set(Status::NoOutput),
     };
-    set(Status::Ready(output.shared.clone()));
+    set(Status::Ready(output.shared.clone(), no_sound));
     let played = match video {
         Some(job) => play_video(path, &output.shared, stop, job),
         None => super::decode::run(path, &output.shared, stop),
