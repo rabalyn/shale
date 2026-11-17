@@ -173,6 +173,21 @@ Settings → General → Appearance, off by default. Notes open in normal mode.
 | dd | delete the line (onto the clipboard; p puts it back below) |
 | u, Ctrl+R | undo, redo: up to 200 steps per note, an insert session is one step; kept in the vault for 30 days, so it works after a restart ([[Data usage and caches]]) |
 | gt | follow the link under the cursor like a click (a note link or a web address) |
+| Shift+K | preview the link under the cursor (see below) |
+
+**Link preview.** With the cursor on a link, **Shift+K** shows a small floating window below
+the cursor, like neovim's hover. A note link shows the note as the reading view draws it, from the
+heading when the link has one (`[[Note#Heading]]`); a note that does not exist yet says so; a picture
+is shown; a web link shows the page's title, its description and the start of its text. The page is
+loaded in the background (only `https://`, at most 30 seconds and 1.5 MB, remembered for this
+session), so the window never waits: it says "Loading …" first, and says why when the page could not be
+read. The editor keeps the keyboard: moving the cursor, typing or **Esc** closes the preview. Press
+**Shift+K** again and the keyboard moves into the preview: **j / k** or **↓ / ↑** scroll,
+**Ctrl+D / Ctrl+U** or **PageDown / PageUp** scroll a page, **Enter** opens the link exactly as `gt`
+does (a missing note is created), and **Esc** closes the preview and gives the keyboard back to the
+editor, with the cursor where it was and the text unchanged. Off a link, Shift+K only says so in the
+status bar. The key is one of the definable ones (Settings → Keybindings → Vim-style editing, normal
+mode): you can give it, for example, **Space Space**.
 
 The status bar shows NORMAL, INSERT, VISUAL or V-LINE. The vim keys themselves cannot be
 rebound. In normal mode **Space Tab** goes back to the view this tab showed just before, and

@@ -41,7 +41,8 @@ impl Scope {
             Scope::FileList => &[Key::Enter, Key::Escape],
             Scope::SearchResults => &[Key::Enter, Key::Escape, Key::Slash],
             Scope::MailView => &[Key::Enter, Key::Escape],
-            // every key vim-lite uses in normal mode (EDIT-011…014), with or without Shift
+            // every key vim-lite uses in normal mode (EDIT-011…014), with or without Shift; but see
+            // `Keymap::check`: Shift+K is no vim key (the link preview has it, EDIT-033)
             Scope::EditorNormal => &[
                 Key::H,
                 Key::J,
@@ -230,6 +231,7 @@ actions! {
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
     NormalSearchAll => "normal.search_all", "Search notes, mail and posts", EditorNormal, ["Space F G"];
+    NormalLinkPreview => "normal.link_preview", "Preview the link under the cursor (again: into the preview)", EditorNormal, ["Shift+K"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
     TreeNextFolder => "files.next_folder", "Next folder", FileList, ["Ctrl+J"];
@@ -389,7 +391,9 @@ impl Keymap {
         // a fixed key cannot start a binding (also not a sequence, which it would never complete)
         // Ctrl+R redoes in vim normal mode (EDIT-021)
         let vim_redo = scope == Scope::EditorNormal && first.ctrl && !first.alt && !first.shift && first.key == Key::R;
-        if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key)) || vim_redo {
+        // vim-lite has a plain k but no K (EDIT-033)
+        let shift_k_is_free = scope == Scope::EditorNormal && first.shift && first.key == Key::K;
+        if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key) && !shift_k_is_free) || vim_redo {
             return Err(format!("{} has a fixed meaning here", b.display()));
         }
         for d in DEFS.iter().filter(|d| d.action != a && d.scope.overlaps(scope)) {
@@ -534,7 +538,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 29 + 36 + 5);
+        assert_eq!(DEFS.len(), 29 + 36 + 6);
     }
 
     // spec: KEY-003
@@ -794,6 +798,35 @@ mod tests {
         });
         full.textures_delta.clear();
         out
+    }
+
+    // spec: KEY-005, EDIT-033
+    #[test]
+    fn shift_k_is_the_link_preview_and_space_space_can_replace_it() {
+        let mut k = Keymap::default();
+        let a = Action::NormalLinkPreview;
+        assert_eq!(k.bindings(a), vec![b("Shift+K")], "the default");
+        assert_eq!(k.check(a, &b("Shift+K")), Ok(()), "Shift+K is no vim key");
+        // plain k (up) and the other shifted vim keys stay fixed
+        for text in ["K", "Shift+J", "Shift+O"] {
+            assert!(k.check(a, &b(text)).unwrap_err().contains("fixed meaning"), "{text}");
+        }
+        // Space Space is free: no clash with Space Tab, Space f f, Space f g
+        assert_eq!(k.check(a, &b("Space Space")), Ok(()));
+        assert_eq!(k.check(Action::NormalAlternate, &b("Space Tab")), Ok(()));
+        // the default fires on Shift+K, not on k
+        let none = Modifiers::NONE;
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::K, Modifiers::SHIFT)]), Some(a));
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::K, none)]), None, "plain k stays vim's");
+        // rebound: only the new sequence fires, the others still do
+        k.set(a, b("Space Space")).unwrap();
+        assert!(k.check(Action::NormalFindFile, &b("Space Space")).unwrap_err().contains("already used"), "the others cannot take it from the action");
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::K, Modifiers::SHIFT)]), None);
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Space, none)]), None);
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Space, none)]), Some(a));
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Space, none)]), None);
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Tab, none)]), Some(Action::NormalAlternate));
+        assert_eq!(k.overrides().get("normal.link_preview"), Some(&vec!["Space Space".to_string()]), "stored as a change (KEY-007)");
     }
 
     // spec: KEY-009, KEY-008

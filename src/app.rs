@@ -131,6 +131,7 @@ mod drops;
 mod drops_tests;
 #[cfg(test)]
 mod handover_tests;
+mod link_preview;
 mod mail;
 pub mod panes;
 mod screenshot;
@@ -357,6 +358,8 @@ pub struct ShaleApp {
     script: crate::script::ScriptRun,
     /// where unsaved text is rescued to, and the rescues not dismissed yet (DATA-011)
     pub recovery: crate::recovery::RecoveryState,
+    /// The preview of the link under vim's cursor and the web pages it read (EDIT-033).
+    pub link_preview: crate::link_preview::LinkPreview,
 }
 
 impl ShaleApp {
@@ -541,6 +544,7 @@ impl ShaleApp {
             cfg_error: None,
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
+            link_preview: Default::default(),
             usage: crate::data_usage::DataUsage::new(places),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
@@ -1893,6 +1897,8 @@ impl ShaleApp {
         if is(KeyAction::AlternateView) && self.modal.is_none() {
             self.swap_alternate();
         }
+        // the keys of the open link preview come before everything the editor reads (EDIT-035)
+        self.link_preview_keys(ui);
         // Space sequences of vim-style normal mode (EDIT-015); a half typed one is forgotten
         // when the keys are not read any more
         if self.normal_keys_active(ui.ctx()) {
@@ -1900,6 +1906,7 @@ impl ShaleApp {
                 Some(KeyAction::NormalAlternate) => self.swap_alternate(),
                 Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
                 Some(KeyAction::NormalSearchAll) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything))),
+                Some(KeyAction::NormalLinkPreview) => self.link_preview_key(ui.ctx()),
                 _ => {}
             }
         } else {
@@ -2320,6 +2327,7 @@ impl ShaleApp {
             self.layout(ui);
         }
         self.social_tick(ui.ctx());
+        self.link_preview_ui(ui);
         self.modals(ui);
         self.handle_drops(ui);
         self.learn_tags_tick();

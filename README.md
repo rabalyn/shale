@@ -237,6 +237,7 @@ Text editing keys and vim keys are fixed.
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Esc closes). Definable, e.g. as Space Space |
 | Ctrl+, | Settings |
 | Ctrl+Shift+D | Data usage: what Shale keeps on disk, and its caches |
 | F1 | Open the user guide (built into Shale, unpacked into its data folder and opened as a vault) |
@@ -285,7 +286,7 @@ With **Vim-style editing** turned on in Settings, a note you go to is in normal 
 h j k l, w b, W B, 0 $, gg G move; `:12` goes to line 12; `/text` searches, n / N go to the next /
 previous hit; i a I A o O start typing and Esc stops; x deletes a character; `dd` deletes the line;
 v / V select (the motions extend the selection), then d cuts and y copies to the clipboard; p pastes it;
-`u` undoes and Ctrl+R redoes (an insert session is one step, per note; the history is kept in the vault for 30 days); `gt` follows the link under the cursor like a click. The
+`u` undoes and Ctrl+R redoes (an insert session is one step, per note; the history is kept in the vault for 30 days); `gt` follows the link under the cursor like a click; **Shift+K** shows a preview of it (the note, or the title and text of a web page loaded in the background; Shift+K again moves the keyboard into it, Enter opens the link, Esc closes it). The
 status bar shows the mode. **Space Tab** goes back to the view this tab showed just before
 (a note, the calendar, Feeds, …) and again to come back; **Space f f** finds a file by name and **Space f g** searches notes, mail and posts.
 
