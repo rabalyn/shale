@@ -320,9 +320,17 @@ impl ShaleApp {
         let ctx = ui.ctx().clone();
         // files dropped through the window system (X11, macOS, Windows)
         let (dropped, hovering_files) = ctx.input(|i| (i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect::<Vec<_>>(), !i.raw.hovered_files.is_empty()));
+        // the setup of the LaTeX export and Settings → LaTeX take the files first: a logo or a set of
+        // templates is not something to import into the vault (TEX-017)
+        let tex_target = self.tex_drop_target();
         if !dropped.is_empty() {
-            let (items, notes) = import::items_from_paths(&dropped);
-            self.open_import(items, notes, None);
+            match tex_target {
+                Some(t) => self.tex_drop(t, &ctx, &dropped),
+                None => {
+                    let (items, notes) = import::items_from_paths(&dropped);
+                    self.open_import(items, notes, None);
+                }
+            }
         }
         // drops from other programs on Wayland (and scripted test drops)
         #[cfg(target_os = "linux")]
@@ -350,6 +358,11 @@ impl ShaleApp {
                     crate::import::wl_drop::DropEvent::Drop { x, y, parts, offered, report } => {
                         self.drag.ext_hover = None;
                         self.drag.drop_busy = false;
+                        if let Some(t) = tex_target {
+                            let paths = super::tex_setup::dropped_paths(&parts);
+                            self.tex_drop(t, &ctx, &paths);
+                            continue;
+                        }
                         self.drag.last_offered = offered;
                         let zone = self.drag.zone_at(Pos2::new(x / zoom, y / zoom)).map(|z| (z.folder, z.note));
                         // looking a message up in Thunderbird's folders can take a moment
@@ -476,8 +489,12 @@ impl ShaleApp {
         }
         let ext = self.drag.ext_hover.or(if hovering_files { pointer } else { None });
         if let Some(p) = ext {
-            let zone = self.drag.zone_at(p);
-            self.paint_drop_hint(&ctx, p, zone.as_ref(), "Drop to import");
+            if let Some(t) = tex_target {
+                self.paint_hint_text(&ctx, p, self.tex_drop_hint(t));
+            } else {
+                let zone = self.drag.zone_at(p);
+                self.paint_drop_hint(&ctx, p, zone.as_ref(), "Drop to import");
+            }
             ctx.request_repaint();
         }
     }

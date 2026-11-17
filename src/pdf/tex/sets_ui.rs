@@ -67,7 +67,7 @@ impl SetsState {
     }
 
     /// The sets of the vault, read when they are not or a change made them stale.
-    fn refresh(&mut self) {
+    pub fn refresh(&mut self) {
         if self.sets.is_none() || self.dirty {
             self.sets = self.vault.as_ref().map(|v| sets::scan(&v.root));
             self.dirty = false;
@@ -86,6 +86,16 @@ impl SetsState {
     /// Whether the vault must be read again, once.
     pub fn take_rescan(&mut self) -> bool {
         std::mem::take(&mut self.rescan)
+    }
+
+    /// Copy a logo file into a set and read the sets and the vault again (also for a logo that
+    /// was dropped on the window, TEX-007).
+    pub(super) fn copy_logo_to(&mut self, set: &str, from: &Path) -> Notice {
+        let entries = self.sets.clone().unwrap_or_default();
+        let notice = copy_logo(self, &entries, set, from);
+        self.dirty = true;
+        self.rescan = true;
+        notice
     }
 
     /// Mark the end of a job of the sets: the list and the vault's file list are stale.
@@ -133,7 +143,7 @@ fn test_page_notice(engine: &Engine, set: &SetInfo) -> Notice {
 
 impl TexState {
     /// Start importing a set.
-    fn start_import(&mut self, ctx: &Context, cfg: &TexConfig, what: What) {
+    pub(super) fn start_import(&mut self, ctx: &Context, cfg: &TexConfig, what: What) {
         let Some(vault) = self.sets.vault.clone() else { return };
         let engine = self.detection.as_ref().and_then(|d| d.selected(cfg.engine).ok()).cloned();
         let req = Request { vault: vault.root, what, engine, tree: vault.tree, tree_wait: import::TREE_WAIT };
@@ -330,9 +340,7 @@ fn forms(ui: &mut Ui, st: &mut TexState, ctx: &Context, cfg: &TexConfig, entries
                 let (go, cancel) = form_buttons(ui, "Copy logo into the set");
                 if go {
                     st.sets.form = Form::None;
-                    st.notice = Some(copy_logo(&st.sets, entries, &set, &expand_home(&path)));
-                    st.sets.dirty = true;
-                    st.sets.rescan = true;
+                    st.notice = Some(st.sets.copy_logo_to(&set, &expand_home(&path)));
                 } else if cancel {
                     st.sets.form = Form::None;
                 } else {
@@ -364,7 +372,7 @@ fn form_buttons(ui: &mut Ui, go: &str) -> (bool, bool) {
 }
 
 /// `~/x` as the home folder's `x`.
-fn expand_home(text: &str) -> PathBuf {
+pub(super) fn expand_home(text: &str) -> PathBuf {
     let text = text.trim();
     match (text.strip_prefix("~/"), dirs::home_dir()) {
         (Some(rest), Some(home)) => home.join(rest),

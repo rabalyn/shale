@@ -16,6 +16,8 @@ pub(crate) mod proc;
 pub mod sets;
 pub mod sets_ui;
 pub mod settings_ui;
+pub mod setup;
+pub mod setup_ui;
 pub mod writer;
 
 pub use engine::TexConfig;
@@ -44,6 +46,12 @@ mod sets_tests;
 mod sets_ui_tests;
 #[cfg(test)]
 mod settings_ui_tests;
+#[cfg(test)]
+mod setup_env_tests;
+#[cfg(test)]
+mod setup_tests;
+#[cfg(test)]
+mod setup_ui_tests;
 #[cfg(test)]
 mod writer_env_tests;
 #[cfg(test)]

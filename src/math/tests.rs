@@ -213,7 +213,7 @@ fn what_cannot_be_typeset_says_why() {
     assert!(why(r"a \\ b").contains("environment"));
     assert!(why(r"\end{matrix}").contains(r"\end without \begin"));
     assert!(why(r"\text{a \foo}").contains("not supported"));
-    // spec: TEX-028 (what TeX would read as a command in running text is text only behind a backslash)
+    // spec: TEX-029 (what TeX would read as a command in running text is text only behind a backslash)
     for hostile in [r"\text{^^5cinput{x}}", r"\text{50% of}", r"\text{a # b}", r"\text{a $ b}", r"\text{a & b}", r"\text{a_b}", r"\operatorname{a^^5c}", "\\text{a\u{1}b}"] {
         assert!(parse(hostile).is_err(), "{hostile:?} is refused");
     }

@@ -50,7 +50,7 @@ pub enum Block {
         lines: Vec<String>,
     },
     Table(crate::table::Block),
-    /// A formula on lines of its own that Shale can typeset: its TeX (TEX-028). One it cannot
+    /// A formula on lines of its own that Shale can typeset: its TeX (TEX-029). One it cannot
     /// typeset is a [`Block::Code`] of its lines.
     Math(String),
     /// An embed alone on its line.
@@ -99,7 +99,7 @@ pub fn parse(text: &str) -> Vec<Block> {
             i = m.lines.end.max(i + 1);
             continue;
         }
-        // a footnote definition is written where its reference is (TEX-028)
+        // a footnote definition is written where its reference is (TEX-029)
         if let Some(d) = notes.def_at(i) {
             close!();
             i = d.lines.end;
@@ -174,7 +174,7 @@ pub fn parse(text: &str) -> Vec<Block> {
 }
 
 /// The footnotes a note defines: label → the text of the definition, its first line after the label
-/// and the lines that go on with it joined by spaces (TEX-028). The first definition of a label counts.
+/// and the lines that go on with it joined by spaces (TEX-029). The first definition of a label counts.
 pub fn footnote_texts(text: &str) -> std::collections::HashMap<String, String> {
     let lines = markdown::lines_with_offsets(text);
     let mut out = std::collections::HashMap::new();

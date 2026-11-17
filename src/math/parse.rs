@@ -364,7 +364,7 @@ impl Parser {
                     _ => return err(format!("a command inside {of} is not supported")),
                 },
                 // TeX reads these as commands or errors in running text (`%` comments out the rest of the
-                // line, `^^5c` is a backslash): they are text only behind a backslash (TEX-028)
+                // line, `^^5c` is a backslash): they are text only behind a backslash (TEX-029)
                 '%' | '#' | '&' | '^' | '_' | '$' | '~' => return err(format!("{c} inside {of} must be written \\{c}")),
                 c if c.is_control() && !c.is_whitespace() => return err(format!("a control character inside {of}")),
                 c => out.push(c),

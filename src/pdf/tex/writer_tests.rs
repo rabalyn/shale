@@ -477,7 +477,7 @@ fn other_picture_formats_become_png_and_a_broken_drawing_pdf_or_empty_drawing_is
 
 const NEW_FORMATS: &str = "Water H<sub>2</sub>O, x<sup>2</sup>, <u>under</u> and <u><b>x</b></u>[^1] plus [^nope] and <u>a **b** c</u>.\n\n[^1]: The *note* with $x^2$\n    goes on with [^2] here.\n[^2]: Second.\n\nAfter.\n";
 
-// spec: TEX-028
+// spec: TEX-029
 #[test]
 fn underline_sub_and_superscript_are_written_as_commands_around_bold_and_italic() {
     let b = body_of(&doc("<u>under</u> H<sub>2</sub>O x<sup>2</sup> <u>a **b**</u> <sup>*i*</sup>\n", "pub")).to_string();
@@ -487,7 +487,7 @@ fn underline_sub_and_superscript_are_written_as_commands_around_bold_and_italic(
     assert!(!b.contains("<u>") && !b.contains("<sub>") && !b.contains("<sup>"), "{b}");
 }
 
-// spec: TEX-028
+// spec: TEX-029
 #[test]
 fn a_footnote_reference_is_the_definitions_text_and_the_definition_is_not_written_where_it_stands() {
     let b = body_of(&doc(NEW_FORMATS, "pub")).to_string();
@@ -498,7 +498,7 @@ fn a_footnote_reference_is_the_definitions_text_and_the_definition_is_not_writte
     assert!(b.contains("After."), "{b}");
 }
 
-// spec: TEX-028
+// spec: TEX-029
 #[test]
 fn a_footnote_in_a_table_cell_is_a_mark_and_its_text_comes_after_the_table() {
     let b = body_of(&doc("| a | b |\n| --- | --- |\n| x[^1] | y[^2] |\n\n[^1]: One\n[^2]: Two\n", "pub")).to_string();
@@ -507,7 +507,7 @@ fn a_footnote_in_a_table_cell_is_a_mark_and_its_text_comes_after_the_table() {
     assert!(!b.contains("\\footnote{"), "{b}");
 }
 
-// spec: TEX-028
+// spec: TEX-029
 #[test]
 fn br_in_a_table_cell_is_a_line_break_in_a_paragraph_column() {
     let b = body_of(&doc("| a | b |\n| --- | --- |\n| one<br>two | x<BR/>y |\n| three | z |\n", "pub")).to_string();
@@ -516,7 +516,7 @@ fn br_in_a_table_cell_is_a_line_break_in_a_paragraph_column() {
     assert!(!b.to_ascii_lowercase().contains("<br"), "{b}");
 }
 
-// spec: TEX-028
+// spec: TEX-029
 #[test]
 fn math_that_parses_is_written_unchanged_and_math_that_does_not_is_code() {
     let note = "Inline $\\frac{a}{b} + \\text{if } x \\in \\mathbb{R}$ and $$\\sum_{i=1}^n i$$ in text, $\\foo$ and $\\input{/etc/passwd}$.\n\n$$\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\n$$\n\n```math\n\\sqrt[3]{x}\n```\n\n$$\\write18{x}$$\n\n```math\n\\frac{a\n```\n";
@@ -534,7 +534,7 @@ fn math_that_parses_is_written_unchanged_and_math_that_does_not_is_code() {
     assert!(doc(note, "pub").contains("\\usepackage{amsmath}"), "amsmath for matrices and \\dfrac");
 }
 
-// spec: TEX-008, TEX-028
+// spec: TEX-008, TEX-029
 #[test]
 fn a_hostile_formula_can_never_run_tex() {
     // everything TeX could take as a command comes out as text, and what is written as math has only known commands

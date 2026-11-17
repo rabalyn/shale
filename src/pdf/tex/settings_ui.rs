@@ -70,6 +70,10 @@ pub struct TexState {
     pub notice: Option<Notice>,
     /// The template sets of the open vault.
     pub sets: super::sets_ui::SetsState,
+    /// The guided setup (TEX-017).
+    pub setup: super::setup::TexSetup,
+    /// "Set up LaTeX export…" was pressed: the window opens the guided setup.
+    pub setup_requested: bool,
 }
 
 impl TexState {
@@ -80,9 +84,11 @@ impl TexState {
             (dirs::data_dir(), std::env::var_os("PATH"))
         } else {
             static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            (Some(std::env::temp_dir().join(format!("shale-texdata-{tag}-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)))), None)
+            // screenshots name a data folder to show (SHALE_FAKE_DATA_DIR, like SHALE_FAKE_NOW); nothing is written there
+            let fake = std::env::var_os("SHALE_FAKE_DATA_DIR").map(PathBuf::from);
+            (Some(fake.unwrap_or_else(|| std::env::temp_dir().join(format!("shale-texdata-{tag}-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst))))), None)
         };
-        TexState { data, path_var, detection: None, detecting: None, task: None, consent: false, confirm_remove: false, notice: None, sets: Default::default() }
+        TexState { data, path_var, detection: None, detecting: None, task: None, consent: false, confirm_remove: false, notice: None, sets: Default::default(), setup: Default::default(), setup_requested: false }
     }
 
     /// Take what the jobs have finished; call it every frame.
@@ -150,6 +156,14 @@ impl TexState {
     fn env(&self, cfg: &TexConfig) -> Option<Env> {
         Some(Env { data: self.data.clone()?, repository: cfg.repository.clone() })
     }
+
+    /// Start installing the managed TeX Live (TEX-002) once the person has agreed: Settings and
+    /// the guided setup show the sizes and the folder first and call this from their button.
+    pub(super) fn begin_install(&mut self, ctx: &Context, cfg: &TexConfig) {
+        if let Some(env) = self.env(cfg) {
+            self.start(ctx, TaskKind::Install, move |h, n| done_notice(install::install(&env, h, n), "The install"));
+        }
+    }
 }
 
 /// The notice for what an install or update ended with.
@@ -201,6 +215,12 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
         st.check_again(&ctx);
     }
     ui.label(muted("Notes can be exported to PDF through LaTeX templates. That needs LuaLaTeX and biber: Shale uses the ones of this computer when they are new enough, or installs its own TeX Live.").size(12.0));
+    ui.horizontal(|ui| {
+        if ui.button("Set up LaTeX export…").on_hover_text("A guided setup: TeX, the templates, the logo and your details, step by step").clicked() {
+            st.setup_requested = true;
+        }
+        ui.label(muted("Not firm in TeX? This takes you through it.").size(12.0));
+    });
 
     ui.add_space(6.0);
     ui.label(egui::RichText::new("Which TeX is used").color(theme::MUTED));
@@ -337,9 +357,7 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
                 ui.horizontal(|ui| {
                     if ui.button("Download and install").clicked() {
                         st.consent = false;
-                        if let Some(env) = st.env(cfg) {
-                            st.start(ctx, TaskKind::Install, move |h, n| done_notice(install::install(&env, h, n), "The install"));
-                        }
+                        st.begin_install(ctx, cfg);
                     }
                     if ui.button("Not now").clicked() {
                         st.consent = false;

@@ -176,7 +176,7 @@ impl<'a> Body<'a> {
                 ((total / column).clamp(0.05, 1.0), cols)
             }
             None => {
-                // a line break in a cell (`<br>`, TEX-028) needs a column of paragraphs
+                // a line break in a cell (`<br>`, TEX-029) needs a column of paragraphs
                 let breaks = |c: usize| t.rows.iter().map(|r| &r[c]).chain([&t.header[c]]).any(|x| x.to_ascii_lowercase().contains("<br"));
                 let mut wide: Vec<bool> = (0..n).map(|c| longest(c) >= LONG_CELL || breaks(c)).collect();
                 if !wide.contains(&true) {

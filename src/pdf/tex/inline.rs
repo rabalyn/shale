@@ -54,7 +54,7 @@ fn href_url(url: &str) -> String {
 pub struct Look<'a> {
     pub vault: &'a Vault,
     pub rel: &'a Path,
-    /// The footnotes the note defines (TEX-028): label → the Markdown of the definition.
+    /// The footnotes the note defines (TEX-029): label → the Markdown of the definition.
     pub notes: HashMap<String, String>,
     /// Inside a table, where `\footnote` prints no text: the texts of the footnotes of the cells
     /// written so far, set down below the table (`\footnotemark` is written in their place).
@@ -77,7 +77,7 @@ pub fn inline(look: &Look, text: &str) -> String {
     write_line(look, text, false)
 }
 
-/// The text of a table cell: `<br>` is a line break (EDIT-045, TEX-028).
+/// The text of a table cell: `<br>` is a line break (EDIT-045, TEX-029).
 pub fn cell(look: &Look, text: &str) -> String {
     write_line(look, text, true)
 }
@@ -89,7 +89,7 @@ fn note_text(look: &Look, label: &str) -> Option<String> {
 }
 
 /// The TeX of a formula that the layout typeset: `\(…\)`, the formula's own text unchanged (every
-/// command in it is one of the parser's, TEX-028). A `$$…$$` in a line of text keeps the display
+/// command in it is one of the parser's, TEX-029). A `$$…$$` in a line of text keeps the display
 /// style but stays in the line.
 pub fn math_tex(hidden: &str) -> String {
     let (display, inner) = match hidden.strip_prefix("$$") {

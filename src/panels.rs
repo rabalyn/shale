@@ -728,6 +728,7 @@ impl ShaleApp {
         let mut open_guide = false;
         let mut open_mail = false;
         let mut open_social = false;
+        let mut open_tex_setup = false;
         let ctx = ui.ctx().clone();
         match &mut modal {
             Modal::Picker(p) => {
@@ -883,7 +884,7 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage => {}
+            Modal::TexSetup | Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -948,6 +949,7 @@ impl ShaleApp {
                 open_calendars |= asks.calendars;
                 open_usage |= asks.usage;
                 open_guide |= asks.guide;
+                open_tex_setup |= asks.tex_setup;
                 open_mail |= asks.mail;
                 open_social |= asks.social;
                 if resp.should_close() {
@@ -955,6 +957,10 @@ impl ShaleApp {
                     keep = false;
                 }
             }
+        }
+        if open_tex_setup {
+            self.open_tex_setup(None, crate::pdf::tex::setup::Return::Settings);
+            keep = false;
         }
         if open_mail {
             self.open_mail_settings();
@@ -1055,6 +1061,9 @@ impl ShaleApp {
                 keep = false;
             }
         }
+        if let Modal::TexSetup = &modal {
+            keep = self.tex_setup_dialog(&ctx);
+        }
         if let Modal::Import(d) = &mut modal {
             let folders = self.import_folders();
             let tags = self.tag_choices();
@@ -1148,6 +1157,11 @@ impl ShaleApp {
             }
             if d.tex.as_ref().is_some_and(|t| t.save_requested) {
                 self.save_failed_tex(d);
+            }
+            // a hint's "Set up…", or the first LaTeX choice while something is missing (TEX-017)
+            if let Some(step) = self.tex_setup_wanted(d) {
+                self.open_tex_setup(Some(step), crate::pdf::tex::setup::Return::Export(d.rel.clone()));
+                keep = false;
             }
             if close_asked {
                 keep = false;

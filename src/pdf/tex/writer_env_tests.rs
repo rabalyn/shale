@@ -164,7 +164,7 @@ fn tex_env_unnumbered_headings_are_still_in_the_contents_and_the_pdf_has_bookmar
     assert_eq!(outline_entries(&pdf), 4, "the bookmarks of every level\n{}", doc.tex);
 }
 
-// spec: TEX-028, TEX-027
+// spec: TEX-029, TEX-027
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_underline_scripts_footnotes_breaks_in_cells_and_math_compile_in_every_family() {
