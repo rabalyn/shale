@@ -734,7 +734,7 @@ pub enum EditorAction {
     FilesChanged,
     /// `[[p Name` picked "new contact": make a contact note in the people folder
     CreatePerson(String),
-    /// pasted pictures / files were saved in the media folder (EDIT-024): refresh the file list and say what was saved
+    /// pasted pictures / files were saved in the media folder (EDIT-019): refresh the file list and say what was saved
     Pasted(String),
     /// the pasted text has headings, all of them `##` or deeper: ask whether to lift them (EDIT-038);
     /// the text is held back and comes back with [`NoteEditor::pending_paste`]
@@ -781,7 +781,7 @@ pub struct NoteEditor {
     pub dark_canvas: bool,
     /// The app's media player, which the players of sound embeds draw from (MEDIA-001).
     pub media: crate::media::MediaPlayer,
-    /// Resizing and fullscreen of shown pictures and videos (EDIT-024, MEDIA-012).
+    /// Resizing and fullscreen of shown pictures and videos (EDIT-052, MEDIA-012).
     pub embeds: crate::media::embed::Embeds,
     /// Show a gutter with line numbers (set from the app's settings, EDIT-018).
     pub line_numbers: bool,
@@ -1184,7 +1184,7 @@ impl NoteEditor {
     }
 
     /// A pasted picture or list of media files becomes a link to the file saved in the media folder
-    /// (EDIT-024): the paste event is turned into a paste of the link, so the text box (or vim's `p`)
+    /// (EDIT-019): the paste event is turned into a paste of the link, so the text box (or vim's `p`)
     /// puts it in as any other paste. Other pastes are left alone.
     fn paste_media(&mut self, ui: &mut Ui, vault: &Vault) -> Option<EditorAction> {
         self.paste_media_with(ui, vault, crate::media::clipboard_image)
@@ -1283,7 +1283,7 @@ impl NoteEditor {
         (link, web)
     }
 
-    /// The caption of an embed shown inside the editor (EDIT-025), one line of muted text below
+    /// The caption of an embed shown inside the editor (EDIT-053), one line of muted text below
     /// `art` (the picture's rectangle), shortened to the room it has. A click on it opens the
     /// link's target.
     fn paint_caption(ui: &mut Ui, link: &LinkSpan, art: Rect, (base_size, max_w): (f32, f32), id: egui::Id) -> Option<EditorAction> {
@@ -1618,7 +1618,7 @@ impl NoteEditor {
         // Inline embeds: pictures, drawings and PDFs are shown in place of their link unless the
         // cursor is inside the link.
         let mut images: Vec<(Range<usize>, f32, Art, Vec2)> = Vec::new();
-        // the caption under each shown embed (EDIT-025) is part of its row
+        // the caption under each shown embed (EDIT-053) is part of its row
         let caption_h = crate::caption::height(base_size);
         // line numbers (EDIT-018): a gutter wide enough for the last number, left of the text
         let number_font = egui::FontId::monospace((base_size * 0.8).round());
@@ -1832,14 +1832,14 @@ impl NoteEditor {
                         painter.galley(tag.min + Vec2::new(5.0, 2.0), g, Color32::WHITE);
                     }
                 }
-                // the link as the caption below the picture; a click on it follows the link (EDIT-025)
+                // the link as the caption below the picture; a click on it follows the link (EDIT-053)
                 if let Some(link) = markdown::find_links(&now_text[r.clone()]).into_iter().next() {
                     if let Some(a) = Self::paint_caption(ui, &link, rect, (base_size, max_w), id.with("caption")) {
                         action = Some(a);
                     }
                 }
             }
-            // the size goes into the link (`![[pic.png|300]]`, EDIT-024)
+            // the size goes into the link (`![[pic.png|300]]`, EDIT-052)
             for (range, w) in resized.into_iter().rev() {
                 if text.get(range.clone()) == now_text.get(range.clone()) {
                     let link = markdown::embed_with_width(&text[range.clone()], w);
@@ -2757,7 +2757,7 @@ mod tests {
         Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
     }
 
-    // spec: EDIT-025
+    // spec: EDIT-053
     #[test]
     fn a_shown_embed_has_its_link_as_a_caption_below_it_and_a_click_on_it_follows_the_link() {
         let (v, d) = vault_for_tests("caption");
@@ -2806,7 +2806,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: EDIT-024
+    // spec: EDIT-052
     #[test]
     fn dragging_a_corner_sets_the_width_in_the_link_and_the_buttons_do_their_work() {
         let (v, d) = vault_for_tests("resize");
@@ -4308,7 +4308,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: EDIT-024
+    // spec: EDIT-019
     #[test]
     fn pasting_a_picture_or_media_files_saves_them_to_the_media_folder() {
         let (v, d) = vault_for_tests("paste");
@@ -4352,7 +4352,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: EDIT-024
+    // spec: EDIT-019
     #[test]
     fn a_pasted_img_tag_becomes_the_clipboards_picture() {
         let (v, d) = vault_for_tests("imgtag");

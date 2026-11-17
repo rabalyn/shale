@@ -36,7 +36,7 @@ impl LinkSpan {
 
 impl LinkSpan {
     /// The width an embed asks for (`![[pic.png|300]]`, `|300x200` too: the width counts), if its
-    /// last `|` part is a number (EDIT-024).
+    /// last `|` part is a number (EDIT-052).
     pub fn embed_width(&self) -> Option<f32> {
         if !self.embed || self.markdown_style {
             return None;
@@ -48,7 +48,7 @@ impl LinkSpan {
 }
 
 /// The text of a `![[…]]` embed with its width set to `width` points (`|300`): an existing
-/// numeric last `|` part is replaced, otherwise one is added (EDIT-024).
+/// numeric last `|` part is replaced, otherwise one is added (EDIT-052).
 pub fn embed_with_width(link: &str, width: u32) -> String {
     let Some(inner) = link.strip_suffix("]]") else { return link.to_string() };
     let (head, last) = inner.rsplit_once('|').map(|(h, l)| (Some(h), l)).unwrap_or((None, inner));
@@ -1043,7 +1043,7 @@ pub fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
-    // spec: EDIT-024
+    // spec: EDIT-052
     #[test]
     fn an_embeds_width_is_its_last_numeric_alias_part() {
         let w = |t: &str| find_links(t).into_iter().next().and_then(|l| l.embed_width());

@@ -1,4 +1,4 @@
-//! What the editor lays over a shown picture or video (EDIT-024, MEDIA-012): draggable edges and
+//! What the editor lays over a shown picture or video (EDIT-052, MEDIA-012): draggable edges and
 //! corners that change its size, a round "100%" button (natural size) and a round fullscreen
 //! button, drawn like the play button of the player (its opacity setting, opaque on hover), and the
 //! fullscreen view itself. The size is kept in the link as `![[pic.png|300]]`; this module only

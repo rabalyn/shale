@@ -1,6 +1,6 @@
-//! Every `// spec:` comment names spec rows that exist (DEV-014).
+//! Every `// spec:` comment names spec rows that exist, and no row ID is used twice (DEV-014).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -83,6 +83,32 @@ fn dev_014_every_spec_comment_names_an_existing_row() {
     }
     assert!(seen > 100, "the spec comments are found ({seen})");
     assert!(bad.is_empty(), "spec comments that name no row:\n{}", bad.join("\n"));
+}
+
+// spec: DEV-014
+#[test]
+fn dev_014_no_spec_row_id_is_used_twice() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut specs = Vec::new();
+    files(&root.join("docs/spec"), "md", &mut specs);
+    specs.sort();
+    let mut first: BTreeMap<String, String> = BTreeMap::new();
+    let mut twice = Vec::new();
+    for path in &specs {
+        let text = fs::read_to_string(path).unwrap();
+        for (n, line) in text.lines().enumerate() {
+            let Some(id) = rows_in(line).next() else { continue };
+            let at = format!("{}:{}", path.strip_prefix(root).unwrap().display(), n + 1);
+            match first.get(id) {
+                Some(earlier) => twice.push(format!("{id} at {at}, already at {earlier}")),
+                None => {
+                    first.insert(id.to_string(), at);
+                }
+            }
+        }
+    }
+    assert!(first.len() > 100, "the spec rows are read ({})", first.len());
+    assert!(twice.is_empty(), "spec row IDs used twice:\n{}", twice.join("\n"));
 }
 
 // spec: DEV-014
