@@ -1,17 +1,17 @@
 //! Inline Markdown as LaTeX (TEX-008, TEX-015): the text of one line with its emphasis, strong text,
-//! strike-through, inline code, colours, links and tags. The reading view's own parser
-//! (`reader::inline_painted`) finds all of that, so the PDF says what the screen says; this module
-//! turns the styled pieces it returns into TeX. Everything that is text goes through
-//! [`tex_escape`], so no text of a note is ever read as a command.
+//! strike-through, inline code, colours, links, pictures in the line (TEX-031) and tags. The reading
+//! view's own parser (`reader::inline_painted`) finds all of that, so the PDF says what the screen
+//! says; this module turns the styled pieces it returns into TeX. Everything that is text goes
+//! through [`tex_escape`], so no text of a note is ever read as a command.
 
 use super::sets::tex_escape;
 use crate::markdown;
-use crate::pdf::export::{over_white, print_bg};
+use crate::pdf::export::{over_white, print_bg, print_color};
 use crate::theme;
 use crate::vault::Vault;
 use eframe::egui::{Color32, FontFamily};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// `[` and `*` at the start of the text after `\item`, `\\` or `&` would be read as an optional
@@ -50,18 +50,68 @@ fn href_url(url: &str) -> String {
     out
 }
 
-/// Where the wiki links of a book go (BOOK-016): the `\label` of each note of the book and of
-/// its headings.
+/// The files the document needs in its work folder and what could not be used (TEX-015): one
+/// list for the embeds on a line of their own and the pictures inside a line (TEX-031), so a file
+/// used twice is one file.
+#[derive(Default)]
+pub struct Files {
+    pub list: Vec<(String, Vec<u8>)>,
+    /// What went wrong without stopping the export (an embed that is missing).
+    pub warnings: Vec<String>,
+    /// The vault file of an embed → the name it has in the work folder.
+    named: HashMap<PathBuf, String>,
+}
+
+impl Files {
+    /// The name a vault file already has in the work folder.
+    pub fn named(&self, rel: &Path) -> Option<String> {
+        self.named.get(rel).cloned()
+    }
+
+    /// Remember a file for the work folder under a name made here (never one from the note).
+    pub fn keep(&mut self, rel: &Path, what: &str, ext: &str, bytes: Vec<u8>) -> String {
+        let name = format!("{what}-{}.{ext}", self.list.len() + 1);
+        self.list.push((name.clone(), bytes));
+        self.named.insert(rel.to_path_buf(), name.clone());
+        name
+    }
+
+    /// The red italic text that stands where a file could not be used, and its warning.
+    pub fn missing(&mut self, what: &str) -> String {
+        self.warnings.push(what.to_string());
+        let c = theme::LINK_MISSING;
+        format!("\\textcolor[RGB]{{{},{},{}}}{{\\textit{{[{}]}}}}", c.r(), c.g(), c.b(), tex_escape(what))
+    }
+}
+
+/// The name of the anchor of the heading on this line of the note (TEX-032).
+pub fn anchor_name(line: usize) -> String {
+    format!("shale-h{line}")
+}
+
+/// The anchor of a heading: a link to it lands here (TEX-032; `\shaleanchor` is a named
+/// `\phantomsection`, defined by the writer's helpers).
+pub fn anchor(line: usize) -> String {
+    anchor_named(&anchor_name(line))
+}
+
+/// An anchor of this name (a book's, BOOK-016, are named by their place in the book).
+pub fn anchor_named(name: &str) -> String {
+    format!("\\shaleanchor{{{name}}}")
+}
+
+/// Where the wiki links of a book go (BOOK-016): the anchor of each note of the book and of its
+/// headings.
 #[derive(Default, Debug)]
 pub struct Targets {
-    /// note → its label and its headings' labels by their plain text in lower case
+    /// note → its anchor and its headings' anchors by their plain text in lower case
     pub notes: HashMap<PathBuf, (String, HashMap<String, String>)>,
 }
 
 impl Targets {
-    /// The label a link goes to: the heading's when the note of the book has it, else the note's;
+    /// The anchor a link goes to: the heading's when the note of the book has it, else the note's;
     /// none for a note outside the book.
-    fn label(&self, vault: &Vault, from: &Path, link: &markdown::LinkSpan) -> Option<&str> {
+    fn anchor(&self, vault: &Vault, from: &Path, link: &markdown::LinkSpan) -> Option<&str> {
         let (note, heads) = self.notes.get(&vault.resolve(&link.target, Some(from))?)?;
         let head = link.heading.as_ref().and_then(|h| heads.get(&markdown::heading_plain(h).to_lowercase()));
         Some(head.unwrap_or(note))
@@ -72,29 +122,77 @@ impl Targets {
 pub struct Look<'a> {
     pub vault: &'a Vault,
     pub rel: &'a Path,
+    /// The note's text: a link to one of its headings is found in it (TEX-032).
+    pub text: &'a str,
+    /// The lines of the headings that have an anchor in the document.
+    pub anchors: &'a HashSet<usize>,
+    /// Whether embeds are drawn (the dialog's box); off, every embed is its link text.
+    pub embeds: bool,
+    pub files: &'a RefCell<Files>,
     /// The footnotes the note defines (TEX-029): label → the Markdown of the definition.
     pub notes: HashMap<String, String>,
     /// Inside a table, where `\footnote` prints no text: the texts of the footnotes of the cells
     /// written so far, set down below the table (`\footnotemark` is written in their place).
     pub deferred: RefCell<Option<Vec<String>>>,
-    /// In a book: where its wiki links go (`\hyperref`); a single note's are text.
+    /// In a book: where its wiki links go (BOOK-016), in the place of the headings of this note.
     pub targets: Option<&'a Targets>,
 }
 
 impl<'a> Look<'a> {
-    pub fn new(vault: &'a Vault, rel: &'a Path, notes: HashMap<String, String>) -> Self {
-        Look { vault, rel, notes, deferred: RefCell::new(None), targets: None }
-    }
-
-    /// The same note, its wiki links going to these labels.
-    pub fn with_targets(self, targets: &'a Targets) -> Self {
-        Look { targets: Some(targets), ..self }
-    }
-
     /// The same note without footnotes: the text of a footnote has none inside it.
     fn without_notes(&self) -> Look<'a> {
-        Look { targets: self.targets, ..Look::new(self.vault, self.rel, HashMap::new()) }
+        Look { notes: HashMap::new(), deferred: RefCell::new(None), ..*self }
     }
+
+    /// A link to a heading of this note that has an anchor: the anchor's name (TEX-032).
+    fn heading_anchor(&self, l: &markdown::LinkSpan) -> Option<String> {
+        let heading = l.heading.as_deref()?;
+        if self.vault.resolve(&l.target, Some(self.rel)).as_deref() != Some(self.rel) {
+            return None;
+        }
+        let line = markdown::find_heading(self.text, heading)?;
+        self.anchors.contains(&line).then(|| anchor_name(line))
+    }
+
+    /// A picture embedded inside a line (TEX-031): as high as the line, in the line. A picture
+    /// that is missing or cannot be read is the red text of a missing embed. None for an embed
+    /// that is not a picture, or with embeds off: it stays its link text.
+    fn picture_in_line(&self, l: &markdown::LinkSpan) -> Option<String> {
+        if !self.embeds {
+            return None;
+        }
+        let rel = self.vault.resolve(&l.target, Some(self.rel));
+        let is_picture = crate::media::is_image(rel.as_deref().unwrap_or(Path::new(&l.target)));
+        if !is_picture {
+            return None;
+        }
+        let mut files = self.files.borrow_mut();
+        let Some(rel) = rel else { return Some(files.missing(&format!("missing: {}", l.target))) };
+        let name = match files.named(&rel) {
+            Some(n) => n,
+            None => match picture_file(&self.vault.abs(&rel)) {
+                Some((ext, bytes)) => files.keep(&rel, "picture", ext, bytes),
+                None => return Some(files.missing(&format!("not readable: {}", l.target))),
+            },
+        };
+        Some(format!("\\raisebox{{-0.2\\baselineskip}}{{\\includegraphics[height=0.9\\baselineskip,width=\\linewidth,keepaspectratio]{{{name}}}}}"))
+    }
+}
+
+/// A picture as a file LuaLaTeX can include: a PNG or JPEG as it is, any other format converted
+/// to PNG. None when it cannot be read.
+pub fn picture_file(abs: &Path) -> Option<(&'static str, Vec<u8>)> {
+    let bytes = crate::fsutil::read(abs).ok()?;
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return Some(("png", bytes));
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some(("jpg", bytes));
+    }
+    let img = image::load_from_memory(&bytes).ok()?;
+    let mut png = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut png, image::ImageFormat::Png).ok()?;
+    Some(("png", png.into_inner()))
 }
 
 /// One line of Markdown as TeX text.
@@ -168,6 +266,16 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
             skip_to = r.end;
             continue;
         }
+        // a link of the vault (not a web link, not a footnote) that this piece is part of
+        let wiki = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && !crate::lists::is_web_url(&l.target) && crate::reader::footnote_of(l).is_none());
+        // a picture inside the line: the picture, once for the whole link (TEX-031)
+        if let Some((sr, l, _)) = wiki.filter(|(_, l, _)| l.embed) {
+            if let Some(pic) = look.picture_in_line(l) {
+                out.push_str(&pic);
+                skip_to = sr.end;
+                continue;
+            }
+        }
         let paint = paints.iter().find(|(pr, ..)| pr.start <= r.start && r.end <= pr.end);
         let (face_bold, face_italic) = crate::fonts::bold_italic_of(&f.font_id.family);
         let code = f.font_id.family == FontFamily::Monospace;
@@ -191,7 +299,12 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
                 Some(false) => t = format!("\\textsubscript{{{t}}}"),
                 None => {}
             }
-            if let Some((_, _, Some([r, g, b, _]))) = paint {
+            // a link of the vault has the colour of links on paper, as in the built-in export:
+            // a missing note the colour of missing links (TEX-032); else the colour the note gives
+            if let Some((_, _, ok)) = wiki {
+                let c = print_color(if *ok { theme::LINK } else { theme::LINK_MISSING });
+                t = format!("\\textcolor[RGB]{{{}}}{{{t}}}", rgb([c.0, c.1, c.2]));
+            } else if let Some((_, _, Some([r, g, b, _]))) = paint {
                 t = format!("\\textcolor[RGB]{{{}}}{{{t}}}", rgb([*r, *g, *b]));
             }
             // a highlight: the colour the note asks for, else the reading view's (over white paper)
@@ -203,16 +316,17 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
             if let Some(c) = bg {
                 t = format!("\\colorbox[RGB]{{{}}}{{{t}}}", rgb([c.0, c.1, c.2]));
             }
-            let link = spans.iter().find(|(sr, _, _)| sr.start <= r.start && r.end <= sr.end).map(|(_, l, _)| l);
-            match link {
-                Some(l) if crate::lists::is_web_url(&l.target) => t = format!("\\href{{{}}}{{{t}}}", href_url(&l.target)),
-                // a link to a note of the book goes to its chapter or heading (BOOK-016)
-                Some(l) => {
-                    if let Some(label) = look.targets.and_then(|ts| ts.label(look.vault, look.rel, l)) {
-                        t = format!("\\hyperref[{label}]{{{t}}}");
-                    }
-                }
-                None => {}
+            if let Some((_, l, _)) = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)) {
+                t = format!("\\href{{{}}}{{{t}}}", href_url(&l.target));
+            }
+            // a link to a heading of this note goes there (TEX-032), other notes are not in the PDF;
+            // in a book, a link to one of its notes goes to its chapter or heading (BOOK-016)
+            let name = match look.targets {
+                Some(ts) => wiki.and_then(|(_, l, _)| ts.anchor(look.vault, look.rel, l)).map(str::to_string),
+                None => wiki.and_then(|(_, l, _)| look.heading_anchor(l)),
+            };
+            if let Some(name) = name {
+                t = format!("\\hyperlink{{{name}}}{{{t}}}");
             }
             t
         };

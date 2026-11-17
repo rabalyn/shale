@@ -214,3 +214,19 @@ fn tex_env_the_real_tex_passes_the_probe_with_every_package() {
     assert!(e.kernel.as_str() >= MIN_KERNEL, "{}", e.kernel);
     assert!(e.missing.is_empty(), "the image has the packages of packages.txt: missing {:?}", e.missing);
 }
+
+// spec: TEX-034
+#[cfg(unix)]
+#[test]
+fn the_pretend_tex_of_the_screenshots_is_found_as_the_managed_one_and_makes_a_pdf() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/screenshots/fixtures/fake-tex");
+    let d = detect(Some(&fixtures.join("data")), None);
+    let e = d.managed.unwrap_or_else(|e| panic!("the pretend TeX Live is not usable: {e}"));
+    assert_eq!((e.kind, e.kernel.as_str()), (Kind::Managed, "2025-11-01"));
+    assert!(e.missing.is_empty(), "every package is there: {:?}", e.missing);
+    let out = super::compile::compile_test_document(&e).unwrap_or_else(|e| panic!("{}", e.headline));
+    assert!(out.pdf.starts_with(b"%PDF"));
+    // the screenshots' PATH has an xdg-open that opens nothing, so the test page starts no viewer
+    let opener = std::process::Command::new(fixtures.join("path/xdg-open")).arg("x.pdf").status().unwrap();
+    assert!(opener.success());
+}

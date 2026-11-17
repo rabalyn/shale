@@ -207,7 +207,7 @@ impl Gnupg {
             cmd.env("GNUPGHOME", home_text(h));
         }
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = spawn_retrying(&mut cmd).map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GpgError::Missing(s) } else { GpgError::Io(e.to_string()) })?;
+        let mut child = crate::program::spawn(&mut cmd).map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GpgError::Missing(s) } else { GpgError::Io(e.to_string()) })?;
         let stdin = child.stdin.take();
         let mut stdout = child.stdout.take().ok_or_else(|| GpgError::Io("no stdout".into()))?;
         let mut stderr = child.stderr.take().ok_or_else(|| GpgError::Io("no stderr".into()))?;
@@ -271,24 +271,9 @@ impl Gnupg {
         }
         cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
         let failed = |e: std::io::Error| if e.kind() == std::io::ErrorKind::NotFound { GpgError::Missing(s) } else { GpgError::Io(e.to_string()) };
-        let out = spawn_retrying(&mut cmd).map_err(failed)?.wait_with_output().map_err(|e| GpgError::Io(e.to_string()))?;
+        let out = crate::program::spawn(&mut cmd).map_err(failed)?.wait_with_output().map_err(|e| GpgError::Io(e.to_string()))?;
         let text = String::from_utf8_lossy(&out.stdout);
         Ok(text.lines().next().unwrap_or("").trim().to_string())
-    }
-}
-
-/// Start the child. A program that was written a moment ago can be "busy" while another thread's fork still holds its file
-/// open (Linux `ETXTBSY`, seen with test stand-ins); that passes within milliseconds, so it is tried again a few times.
-fn spawn_retrying(cmd: &mut Command) -> std::io::Result<std::process::Child> {
-    let mut tries = 0;
-    loop {
-        match cmd.spawn() {
-            Err(e) if e.raw_os_error() == Some(26) && tries < 50 => {
-                tries += 1;
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            r => return r,
-        }
     }
 }
 

@@ -151,7 +151,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   PhD; slides, letters and posters are greyed) the book is one LaTeX document: in a thesis the subfolders are
   `\part`s and the notes `\chapter`s, in an article kind they start at `\section`; folder notes' text goes
   under their part, the top folder note's before the first chapter and its properties fill the fields; links
-  between the chapters are `\hyperref`s to their labels; embeds of the same name in different folders stay
+  between the chapters jump to their chapter or heading (`\hyperlink`); embeds of the same name in different folders stay
   apart. LaTeX makes the numbers, the contents and the bookmarks (BOOK-013 to BOOK-017).
 
 - **Settings → LaTeX** finds the TeX for the LaTeX export of notes (LuaLaTeX and biber, the one on the
@@ -203,6 +203,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![Step 4: your details](userguide/z_media/screenshots/setup-details.png)
 
+  ![Step 5: the test page, when it worked](userguide/z_media/screenshots/setup-test-done.png)
+
   ![Step 5: the test page, when it did not work](userguide/z_media/screenshots/setup-test-failed.png)
 
 - **Export through a LaTeX template**: the PDF dialog of a note has an engine choice, **Built-in** (the
@@ -213,10 +215,12 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the background (a spinner, Cancel). Headings become sections, chapters, slides or poster boxes by how
   they are nested; emphasis, code in colours, lists, tasks, tables with their column sizes, quotes,
   links, colours, pictures, drawings (as vector graphics) and PDF pages are written, with every special
-  character kept as text. A failure shows the file and line of the error or the package that is missing,
+  character kept as text; code sits on a light box, a picture inside a line is as high as the line, and a
+  link to a heading of the note jumps there in the PDF (links to other notes are link-coloured text). A failure shows the file and line of the error or the package that is missing,
   and **Save the .tex** writes the document and its pictures into a folder for debugging with your own
   TeX. The dialog remembers the last engine, set and kind per vault, and a note can name its template
-  with `latex-template: tuda/thesis` (TEX-008 to TEX-016, TEX-018, TEX-019).
+  with `latex-template: tuda/thesis`; a template the vault does not have is said in the dialog (TEX-008 to
+  TEX-016, TEX-018, TEX-019, TEX-030 to TEX-033).
 
   ![The export dialog with the LaTeX template engine](userguide/z_media/screenshots/pdf-export-dialog-latex.png)
 

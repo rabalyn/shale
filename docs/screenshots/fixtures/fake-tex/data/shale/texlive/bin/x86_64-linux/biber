@@ -1,0 +1,3 @@
+#!/bin/sh
+# A pretend biber for the screenshots only (TEX-034): it is there, and that is all the probe asks.
+echo 'biber version: 2.20 (pretend)'

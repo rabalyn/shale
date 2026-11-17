@@ -1,5 +1,5 @@
 //! A folder's book through a LaTeX template (BOOK-013…BOOK-016): the structure commands by depth
-//! for the book and the article family, the folder notes' and the top note's text, the labels and
+//! for the book and the article family, the folder notes' and the top note's text, the anchors and
 //! the links between the chapters, the embeds of different folders, the fields from the top folder
 //! note, and the kinds that cannot hold a folder. Against LuaLaTeX itself: `book_env_tests.rs`.
 
@@ -66,16 +66,16 @@ fn a_book_kind_has_parts_for_the_subfolders_chapters_for_the_notes_and_the_headi
     let tex = tex_of(&v, "thesis", &ExportOptions::for_note());
     // the reading order by name: Appendix, Getting started, R&D (Deep, Lists); the intro first
     let order = [
-        "\\maketitle\n\\tableofcontents\n\\phantomsection\\label{shale-1}\nIntro text",
-        "\\section*{Intro head}\n\\phantomsection\\label{shale-1-1}\n\n",
-        "\\chapter{Appendix}\n\\label{shale-2}\n\nThe end",
-        "\\chapter{Getting started}\n\\label{shale-3}\n\nStart here",
-        "\\section{First steps}\n\\label{shale-3-1}\n",
-        "\\part{R\\&D}\n\\label{shale-4}\n\nPart intro text",
-        "\\chapter*{Note on the part}\n\\phantomsection\\label{shale-4-1}\n\n",
-        "\\chapter{Deep}\n\\label{shale-5}\n",
-        "\\section{x}\n\\label{shale-6}\n\n\\subsection{In x}\n\\label{shale-6-1}\n",
-        "\\chapter{Lists}\n\\label{shale-7}\n\n\\section{Bullets}\n\\label{shale-7-1}\n\n\\subsection{Deeper}\n\\label{shale-7-2}\n",
+        "\\maketitle\n\\tableofcontents\n\\shaleanchor{shale-1}\nIntro text",
+        "\\section*{Intro head}\\shaleanchor{shale-1-1}\n\n",
+        "\\chapter{Appendix}\\shaleanchor{shale-2}\n\nThe end",
+        "\\chapter{Getting started}\\shaleanchor{shale-3}\n\nStart here",
+        "\\section{First steps}\\shaleanchor{shale-3-1}\n",
+        "\\part{R\\&D}\\shaleanchor{shale-4}\n\nPart intro text",
+        "\\chapter*{Note on the part}\\shaleanchor{shale-4-1}\n\n",
+        "\\chapter{Deep}\\shaleanchor{shale-5}\n",
+        "\\section{x}\\shaleanchor{shale-6}\n\n\\subsection{In x}\\shaleanchor{shale-6-1}\n",
+        "\\chapter{Lists}\\shaleanchor{shale-7}\n\n\\section{Bullets}\\shaleanchor{shale-7-1}\n\n\\subsection{Deeper}\\shaleanchor{shale-7-2}\n",
     ];
     let places: Vec<usize> = order.iter().map(|o| at(&tex, o)).collect();
     assert!(places.windows(2).all(|w| w[0] < w[1]), "in reading order: {places:?}\n{tex}");
@@ -84,7 +84,7 @@ fn a_book_kind_has_parts_for_the_subfolders_chapters_for_the_notes_and_the_headi
     // a book without subfolders has no part
     let (flat, flat_dir) = vault("flat", &[("Book/a.md", b"## A head\n"), ("Book/b.md", b"text\n")]);
     let tex = tex_of(&flat, "phd", &ExportOptions::for_note());
-    assert!(!tex.contains("\\part") && tex.contains("\\chapter{a}\n\\label{shale-1}") && tex.contains("\\section{A head}") && tex.contains("\\chapter{b}"), "{tex}");
+    assert!(!tex.contains("\\part") && tex.contains("\\chapter{a}\\shaleanchor{shale-1}") && tex.contains("\\section{A head}") && tex.contains("\\chapter{b}"), "{tex}");
     let _ = std::fs::remove_dir_all(dir);
     let _ = std::fs::remove_dir_all(flat_dir);
 }
@@ -96,15 +96,15 @@ fn an_article_kind_starts_the_same_structure_at_sections() {
     let tex = tex_of(&v, "report", &ExportOptions::for_note());
     let order = [
         "\\subsection*{Intro head}",
-        "\\section{Appendix}\n\\label{shale-2}",
-        "\\section{Getting started}\n\\label{shale-3}",
+        "\\section{Appendix}\\shaleanchor{shale-2}",
+        "\\section{Getting started}\\shaleanchor{shale-3}",
         "\\subsection{First steps}",
-        "\\section{R\\&D}\n\\label{shale-4}",
+        "\\section{R\\&D}\\shaleanchor{shale-4}",
         "\\subsection*{Note on the part}",
-        "\\subsection{Deep}\n\\label{shale-5}",
-        "\\subsubsection{x}\n\\label{shale-6}",
-        "\\paragraph{In x}\n\\phantomsection\\label{shale-6-1}",
-        "\\subsection{Lists}\n\\label{shale-7}",
+        "\\subsection{Deep}\\shaleanchor{shale-5}",
+        "\\subsubsection{x}\\shaleanchor{shale-6}",
+        "\\paragraph{In x}\\shaleanchor{shale-6-1}",
+        "\\subsection{Lists}\\shaleanchor{shale-7}",
         "\\subsubsection{Bullets}",
         "\\paragraph{Deeper}",
     ];
@@ -121,26 +121,26 @@ fn the_books_numbering_and_contents_decide_and_a_notes_own_switch_does_not() {
     // numbering off: everything starred, and still in the contents
     let tex = tex_of(&v, "thesis", &ExportOptions { numbered_headings: false, ..ExportOptions::for_note() });
     for want in [
-        "\\part*{R\\&D}\n\\phantomsection\\label{shale-4}\n\\addcontentsline{toc}{part}{R\\&D}\n",
-        "\\chapter*{Appendix}\n\\phantomsection\\label{shale-2}\n\\addcontentsline{toc}{chapter}{Appendix}\n",
-        "\\section*{Bullets}\n\\phantomsection\\label{shale-7-1}\n\\addcontentsline{toc}{section}{Bullets}\n",
+        "\\part*{R\\&D}\\shaleanchor{shale-4}\n\\addcontentsline{toc}{part}{R\\&D}\n",
+        "\\chapter*{Appendix}\\shaleanchor{shale-2}\n\\addcontentsline{toc}{chapter}{Appendix}\n",
+        "\\section*{Bullets}\\shaleanchor{shale-7-1}\n\\addcontentsline{toc}{section}{Bullets}\n",
     ] {
         assert!(tex.contains(want), "{want:?} in\n{tex}");
     }
     // a folder note's headings are never in the contents
-    assert!(tex.contains("\\chapter*{Note on the part}\n\\phantomsection\\label{shale-4-1}\n\n") && !tex.contains("{Note on the part}\n\\addcontentsline"), "{tex}");
+    assert!(tex.contains("\\chapter*{Note on the part}\\shaleanchor{shale-4-1}\n\n") && !tex.contains("{Note on the part}\n\\addcontentsline"), "{tex}");
     // no contents: no \tableofcontents and nothing added to it
     let tex = tex_of(&v, "thesis", &ExportOptions { numbered_headings: false, toc: false, ..ExportOptions::for_note() });
     assert!(!tex.contains("\\tableofcontents") && !tex.contains("\\addcontentsline") && !tex.contains("tocdepth"), "{tex}");
     // numbering on: `numbered-headings: false` of Lists does not change the book's
     let tex = tex_of(&v, "thesis", &ExportOptions { numbered_headings: true, ..ExportOptions::for_note() });
-    assert!(tex.contains("\\section{Bullets}\n\\label{shale-7-1}"), "{tex}");
+    assert!(tex.contains("\\section{Bullets}\\shaleanchor{shale-7-1}"), "{tex}");
     let _ = std::fs::remove_dir_all(dir);
 }
 
 // spec: BOOK-016
 #[test]
-fn links_to_notes_of_the_book_are_hyperrefs_to_their_labels_and_others_are_text() {
+fn links_to_notes_of_the_book_are_hyperlinks_to_their_anchors_and_others_are_text() {
     let (v, dir) = vault(
         "links",
         &[
@@ -155,23 +155,23 @@ fn links_to_notes_of_the_book_are_hyperrefs_to_their_labels_and_others_are_text(
     let tex = tex_of(&v, "thesis", &ExportOptions::for_note());
     // a = shale-1, b = shale-2, c = shale-3, Part = shale-4, p = shale-5
     for want in [
-        "\\hyperref[shale-2]{b}",
-        "\\hyperref[shale-2-1]{the grid}",
-        "\\hyperref[shale-2]{no heading}",
-        "\\hyperref[shale-4]{Part}",
-        "\\hyperref[shale-3]{c}",
-        "\\hyperref[shale-1-1]{Local}",
-        "\\hyperref[shale-5]{p}",
-        "\\hyperref[shale-1]{a}",
-        "\\footnote{Also \\hyperref[shale-1-1]{",
+        "\\hyperlink{shale-2}{\\textcolor[RGB]{26,95,180}{b}}",
+        "\\hyperlink{shale-2-1}{\\textcolor[RGB]{26,95,180}{the grid}}",
+        "\\hyperlink{shale-2}{\\textcolor[RGB]{26,95,180}{no heading}}",
+        "\\hyperlink{shale-4}{\\textcolor[RGB]{26,95,180}{Part}}",
+        "\\hyperlink{shale-3}{\\textcolor[RGB]{26,95,180}{c}}",
+        "\\hyperlink{shale-1-1}{\\textcolor[RGB]{26,95,180}{Local}}",
+        "\\hyperlink{shale-5}{\\textcolor[RGB]{26,95,180}{p}}",
+        "\\hyperlink{shale-1}{\\textcolor[RGB]{26,95,180}{a}}",
+        "\\footnote{Also \\hyperlink{shale-1-1}{",
         "\\href{https://e.com}{web}",
     ] {
         assert!(tex.contains(want), "{want:?} in\n{tex}");
     }
-    assert!(tex.contains(", Outside, Missing, ") && !tex.contains("]{Outside}") && !tex.contains("]{Missing}"), "links outside the book are text\n{tex}");
-    // every label a link goes to is in the document
-    for label in tex.match_indices("\\hyperref[").map(|(i, _)| tex[i + 10..].split(']').next().unwrap().to_string()) {
-        assert!(tex.contains(&format!("\\label{{{label}}}")), "{label} has a \\label\n{tex}");
+    assert!(tex.contains("}, \\textcolor[RGB]{26,95,180}{Outside}, \\textcolor[RGB]{192,28,40}{Missing}, "), "links outside the book are link-coloured text (TEX-032)\n{tex}");
+    // every anchor a link goes to is in the document
+    for name in tex.match_indices("\\hyperlink{").map(|(i, _)| tex[i + 11..].split('}').next().unwrap().to_string()) {
+        assert!(tex.contains(&format!("\\shaleanchor{{{name}}}")), "{name} has an anchor\n{tex}");
     }
     let _ = std::fs::remove_dir_all(dir);
 }

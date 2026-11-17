@@ -5,7 +5,7 @@
 
 use super::book::*;
 use super::compile_tests::container_engine;
-use super::pdf_text::{outline_entries, page_texts};
+use super::pdf_text::{links_inside, outline_entries, page_texts};
 use super::sets::*;
 use super::sets_env_tests::{mounted_root, patient, the_set};
 use super::writer_tests::{fields, temp_vault};
@@ -18,8 +18,9 @@ fn png(rgb: [u8; 3]) -> Vec<u8> {
     out.into_inner()
 }
 
-/// The book as a kind of the imported set, compiled; the text of its PDF without spaces and its bookmarks.
-fn compile_book(kind_id: &str) -> (String, usize, String) {
+/// The book as a kind of the imported set, compiled: the text of its PDF without spaces, its
+/// bookmarks, its links inside the book and the document.
+fn compile_book(kind_id: &str) -> (String, usize, usize, String) {
     let (red, blue) = (png([200, 30, 30]), png([30, 30, 200]));
     let files: Vec<(&str, &[u8])> = vec![
         ("index.md", b"---\ntitle: The Book\nauthor: Ada Lovelace\nreviewer: [Prof. Babbage, Prof. Turing]\ndepartment: ce\n---\nIntroduction text of the book.\n"),
@@ -50,11 +51,11 @@ fn compile_book(kind_id: &str) -> (String, usize, String) {
     let pdf = out.output.pdf;
     assert!(pdf.starts_with(b"%PDF"), "{kind_id}: a PDF");
     let text: String = page_texts(pdf.clone()).concat().chars().filter(|c| !c.is_whitespace()).collect();
-    (text, outline_entries(&pdf), doc.tex)
+    (text, outline_entries(&pdf), links_inside(&pdf, "shale-"), doc.tex)
 }
 
 fn check(kind_id: &str) {
-    let (text, bookmarks, tex) = compile_book(kind_id);
+    let (text, bookmarks, links, tex) = compile_book(kind_id);
     for want in [
         "TheBook",
         "AdaLovelace",
@@ -78,6 +79,8 @@ fn check(kind_id: &str) {
     assert!(text.matches("Shapes").count() >= 2 && text.matches("Lists").count() >= 3, "{kind_id}: the contents in {text}\n{tex}");
     // two parts, three chapters and their two headings at least
     assert!(bookmarks >= 7, "{kind_id}: {bookmarks} bookmarks\n{tex}");
+    // Lists, the bullets and Overview: links that go to their places in the PDF (BOOK-016)
+    assert_eq!(links, 3, "{kind_id}: links inside the book\n{tex}");
 }
 
 // spec: BOOK-017, BOOK-014, BOOK-015, BOOK-016

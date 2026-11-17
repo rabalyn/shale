@@ -2,20 +2,22 @@
 //! (parts, chapters, reading order, titles) written as one document of a kind of the article or
 //! book family. Parts and chapters are sectioning commands by their depth, the folder notes' text
 //! is under their part, the top folder note's text comes before the first chapter, and the wiki
-//! links between the notes of the book are `\hyperref`s to the `\label` of a chapter or heading.
-//! The blocks are written by the single note's writer (`writer.rs`, `body.rs`, `inline.rs`).
+//! links between the notes of the book are `\hyperlink`s to the anchor of a chapter or heading
+//! (the anchors of TEX-032, named by their place in the book). The blocks are written by the single
+//! note's writer (`writer.rs`, `body.rs`, `inline.rs`).
 
 use super::blocks::{self, Block};
 use super::body::Body;
-use super::inline::{Look, Targets};
+use super::inline::{anchor_named, Files, Look, Targets};
 use super::sets::{tex_escape, KindManifest, Mapping, SetInfo};
 use super::writer::{document, drop_title_heading, field_values, heading, nested_levels, toc_depth, Document, SECTION};
 use crate::markdown;
 use crate::pdf::book::{Item, Plan};
 use crate::pdf::export::ExportOptions;
 use crate::vault::Vault;
-use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 
 /// Why a kind is greyed in the dialog of a folder (BOOK-013).
 pub const ONLY_ARTICLES_AND_BOOKS: &str = "A folder is printed as an article or a book: slides, letters and posters take a single note";
@@ -56,13 +58,13 @@ struct Section {
     text: String,
     /// The note's blocks, the heading that says the title again left out (PDF-008).
     blocks: Vec<Block>,
-    label: String,
+    anchor: String,
 }
 
 impl Section {
-    /// The labels of the note's headings, in the order of its blocks.
-    fn heading_label(&self, n: usize) -> String {
-        format!("{}-{n}", self.label)
+    /// The anchors of the note's headings, in the order of its blocks.
+    fn heading_anchor(&self, n: usize) -> String {
+        format!("{}-{n}", self.anchor)
     }
 }
 
@@ -107,8 +109,8 @@ impl Sections<'_> {
         if role != Role::Intro {
             drop_title_heading(&mut blocks, &title);
         }
-        let label = format!("shale-{}", self.out.len() + 1);
-        self.out.push(Section { role, rank, title, rel, text, blocks, label });
+        let anchor = format!("shale-{}", self.out.len() + 1);
+        self.out.push(Section { role, rank, title, rel, text, blocks, anchor });
     }
 
     fn walk(&mut self, items: &[Item], depth: usize) {
@@ -125,7 +127,7 @@ impl Sections<'_> {
     }
 }
 
-/// Where the links of the book go (BOOK-016): every note to its section's label, and its headings
+/// Where the links of the book go (BOOK-016): every note to its section's anchor, and its headings
 /// (the first of a text) to theirs.
 fn targets(secs: &[Section]) -> Targets {
     let mut t = Targets::default();
@@ -134,10 +136,10 @@ fn targets(secs: &[Section]) -> Targets {
         let mut heads = HashMap::new();
         for (n, b) in s.blocks.iter().filter(|b| matches!(b, Block::Heading { .. })).enumerate() {
             if let Block::Heading { text, .. } = b {
-                heads.entry(markdown::heading_plain(text).to_lowercase()).or_insert_with(|| s.heading_label(n + 1));
+                heads.entry(markdown::heading_plain(text).to_lowercase()).or_insert_with(|| s.heading_anchor(n + 1));
             }
         }
-        t.notes.insert(rel.clone(), (s.label.clone(), heads));
+        t.notes.insert(rel.clone(), (s.anchor.clone(), heads));
     }
     t
 }
@@ -158,19 +160,22 @@ pub fn write_book(req: &BookRequest) -> Result<Document, String> {
     // the book's numbering, whatever a note's own front matter says (BOOK-006)
     let (numbered, toc) = (req.opts.numbered_headings, req.opts.toc);
     let plain = |t: &str| tex_escape(&markdown::heading_plain(t));
-    // one body for all notes: the files of the work folder are named by it, so they never collide
-    let mut body = Body::new(Look::new(vault, Path::new(""), HashMap::new()), req.opts, true);
+    // one list of files for all notes: the work folder's files are named by it, so they never collide
+    let files = RefCell::new(Files::default());
+    // the headings have the book's anchors, not those of a single note (TEX-032)
+    let no_anchors = HashSet::new();
     let mut main = String::from("\\maketitle\n");
     if toc {
         main.push_str("\\tableofcontents\n");
     }
     for s in &secs {
         match s.role {
-            Role::Intro => main.push_str(&format!("\\phantomsection\\label{{{}}}\n", s.label)),
-            _ => main.push_str(&heading(s.rank, numbered, toc, &plain(&s.title), Some(&s.label))),
+            Role::Intro => main.push_str(&format!("{}\n", anchor_named(&s.anchor))),
+            _ => main.push_str(&heading(s.rank, numbered, toc, &plain(&s.title), &anchor_named(&s.anchor))),
         }
         let Some(rel) = &s.rel else { continue };
-        body.look = Look::new(vault, rel, blocks::footnote_texts(&s.text)).with_targets(&targets);
+        let look = Look { vault, rel, text: &s.text, anchors: &no_anchors, embeds: req.opts.embeds, files: &files, notes: blocks::footnote_texts(&s.text), deferred: RefCell::new(None), targets: Some(&targets) };
+        let body = Body::new(look, req.opts, true);
         // a chapter's headings are numbered and listed like it; a folder note's are neither (BOOK-014)
         let chapter = s.role == Role::Chapter;
         let levels: Vec<usize> = s.blocks.iter().filter_map(|b| if let Block::Heading { level, .. } = b { Some(*level) } else { None }).collect();
@@ -179,12 +184,13 @@ pub fn write_book(req: &BookRequest) -> Result<Document, String> {
             match b {
                 Block::Heading { text, .. } => {
                     let (n, level) = nested.next().unwrap_or((0, 1));
-                    main.push_str(&heading(s.rank + level, numbered && chapter, toc && chapter, &plain(text), Some(&s.heading_label(n + 1))));
+                    main.push_str(&heading(s.rank + level, numbered && chapter, toc && chapter, &plain(text), &anchor_named(&s.heading_anchor(n + 1))));
                 }
                 b => main.push_str(&body.block(b)),
             }
         }
     }
     let tex = document(kind, &req.set.settings, true, false, toc.then(|| toc_depth(book)), &values, &main);
-    Ok(Document { tex, files: body.files, warnings: body.warnings })
+    let files = files.into_inner();
+    Ok(Document { tex, files: files.list, warnings: files.warnings })
 }

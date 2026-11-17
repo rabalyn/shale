@@ -1,0 +1,14 @@
+#!/bin/sh
+# A pretend LuaLaTeX for the screenshots only (TEX-034), never a TeX: it answers Shale's probe with a
+# kernel date and "compiles" any document to a one-page PDF, so the pictures can show a found TeX
+# and a test page that worked. docs/screenshots/recipes.conf points SHALE_FAKE_DATA_DIR at ../../../..
+for a; do last=$a; done
+case "$last" in
+*SHALE-KERNEL*)
+    echo 'SHALE-KERNEL 2025-11-01'
+    exit 0
+    ;;
+esac
+stem=$(basename "$last" .tex)
+echo "This is a pretend LuaLaTeX (Shale's screenshots). Output written on $stem.pdf (1 page)." > "$stem.log"
+printf '%%PDF-1.4\n%% a pretend PDF of the screenshots\n%%%%EOF\n' > "$stem.pdf"

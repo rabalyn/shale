@@ -184,7 +184,11 @@ Settings → LaTeX.
 
 5. **Test page.** Shale makes a small PDF from a sample note with your templates and your details
    and opens it. When it works the step says **All set. Export a note with its ⋯ menu → Export to PDF… →
-   Engine: LaTeX template.** When it does not, it shows what went
+   Engine: LaTeX template.**
+
+   ![[setup-test-done.png]]
+
+   When it does not, it shows what went
    wrong in words, **Run again** tries once more and **Save the .tex** writes the document into the vault's
    `exports` folder, to look at it or to ask someone.
 
@@ -364,7 +368,9 @@ always exported with the built-in engine.
   of the set) when the note has none.
 - The dialog remembers the engine, set and kind you used last, per vault. A note can name its own
   template with the property `latex-template: tuda/thesis` (the folder of the set, a slash, the
-  kind's file name); the dialog then opens on LaTeX with that kind.
+  kind's file name); the dialog then opens on LaTeX with that kind. When the vault has no set or kind
+  of that name (or the value has no `/kind`), a red line at the top says what was not found and what the
+  dialog uses instead; choosing a set or kind yourself takes it away.
 
 ### How the note becomes the document
 
@@ -420,13 +426,19 @@ contents list the `#` to `###` headings, and the PDF's bookmarks have all levels
 
 Also exported: emphasis, strong, ~~strike-through~~, inline code, block quotes, lists, task lists
 (a box, with a cross when done), rules, tables (with the alignment of their columns, a bold header and
-the column widths you set in the editor), fenced code in its syntax colours (on white paper, without a
-grey background), web links (clickable), the highlights and colours of [[Editor]] as exact colours, and
+the column widths you set in the editor), fenced code in its syntax colours on a light grey box (a long block goes on on the next page in
+documents; on slides and posters it stays in one piece), web links (clickable), the highlights and colours of [[Editor]] as exact colours, and
 `![[…]]` embeds on a line of their own: a picture as wide in proportion to the text as in the
 note, a drawing as a vector graphic, all pages of a PDF, each with its caption; a file that is
 missing is a red line `[missing: name]` in the PDF and a note in the message afterwards, and a sound
-or video is such a line too. Wiki links show their text (they are not clickable in the PDF), and a
-picture inside a line of text is shown as its link text.
+or video is such a line too. A **picture inside a line** of text (`an icon ![[icon.png]] here`, also in a
+table cell) is drawn in the line, as high as the line, like a letter; a missing one is the red
+`[missing: name]` in the line. Other embeds inside a line (a drawing, a PDF) stay their link text.
+
+**Wiki links:** the PDF holds only this note. A link to one of its own headings (`[[#Results]]`,
+`[[Report#Results|see the results]]`) is clickable and jumps to that heading. Links to other notes are
+their text in the colour of links (red when the note does not exist), without a target, as in the
+built-in export.
 
 Also written through a template: `<u>` as underlined, `<sub>` and `<sup>` as lowered and raised text,
 **footnotes** (a `[^1]` that has a definition becomes a real footnote at the bottom of the page with the

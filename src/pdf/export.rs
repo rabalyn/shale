@@ -152,7 +152,7 @@ fn rgba(c: Color32) -> Rgba {
 }
 
 /// Screen (dark theme) colours → colours that print well on white paper.
-fn print_color(c: Color32) -> Rgba {
+pub(crate) fn print_color(c: Color32) -> Rgba {
     let map = [
         (theme::LINK, Rgba(26, 95, 180, 255)),
         (theme::LINK_MISSING, Rgba(192, 28, 40, 255)),

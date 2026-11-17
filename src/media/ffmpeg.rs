@@ -169,7 +169,9 @@ impl Tools {
 
     /// Run to the end and return stdout; the error is a sentence with ffmpeg's last words.
     fn capture(program: &Path, args: &[OsString]) -> Result<Vec<u8>, String> {
-        let o = Self::command(program, args).output().map_err(|e| format!("{} could not be started: {e}", program.display()))?;
+        let mut cmd = Self::command(program, args);
+        let started = crate::program::spawn(&mut cmd).map_err(|e| format!("{} could not be started: {e}", program.display()))?;
+        let o = started.wait_with_output().map_err(|e| format!("{} could not be read: {e}", program.display()))?;
         if o.status.success() {
             Ok(o.stdout)
         } else {
@@ -225,7 +227,7 @@ pub struct Proc {
 impl Proc {
     fn spawn(mut cmd: Command) -> Result<Proc, String> {
         let program = cmd.get_program().to_string_lossy().into_owned();
-        let mut child = cmd.spawn().map_err(|e| format!("{program} could not be started: {e}"))?;
+        let mut child = crate::program::spawn(&mut cmd).map_err(|e| format!("{program} could not be started: {e}"))?;
         let stdout = child.stdout.take().ok_or("ffmpeg has no output")?;
         let tail = Arc::new(Mutex::new(String::new()));
         if let Some(mut err) = child.stderr.take() {
