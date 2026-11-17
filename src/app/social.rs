@@ -16,7 +16,8 @@ impl ShaleApp {
     pub fn social_view(&mut self, ui: &mut Ui, feed: Option<FeedRef>) {
         let accounts = self.cfg.social_accounts.clone();
         let tab = TabCtx { id: self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id).unwrap_or(0), feed, last: self.cfg.social_last.clone(), keys: self.modal.is_none() };
-        for a in feed_ui::show(ui, &mut self.social, &accounts, &tab) {
+        let font = self.fonts.area(crate::fonts::Area::Social);
+        for a in crate::fonts::with_area(ui, &font, |ui| feed_ui::show(ui, &mut self.social, &accounts, &tab)) {
             match a {
                 Ask::Accounts => self.open_social_accounts(),
                 Ask::Pick { feed, new_tab } => self.open_feed(feed, new_tab),

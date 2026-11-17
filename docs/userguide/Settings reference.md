@@ -2,49 +2,90 @@
 
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
-button of the ribbon; it has two tabs, **General** and **Keybindings**.
+button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**, and the button
+**Open settings file** at the top right (see below).
 
 Two files hold settings:
 
-- **Global**: `~/.config/shale/config.json` (this computer, all vaults). On Windows and macOS
-  the program's config folder; Shale tells you the path in the window.
+- **Global**: `~/.config/shale/config.toml` (this computer, all vaults). On Windows and macOS
+  the program's config folder; the settings file tab shows the path.
 - **Vault**: `<vault>/.shale/settings.json` (travels with the vault) and
   `<vault>/.shale/state.json` (session state).
 
 A value of the wrong shape in the file loads as its default; fields Shale does not know are kept.
-You normally never edit these files; the "Where" column says which window changes a value.
+The "Where" column says which window changes a value. The global file is meant to be edited
+too: it is plain text with a description above every setting.
 
-## Global settings (`config.json`)
+## The settings file
+
+**Settings → Open settings file** opens `config.toml` in a tab of its own. It is not a note: it
+is not in the file tree, not in any vault and not in the lists of recent files. Change a value,
+and the file is saved a moment after you stop typing (or press **Ctrl+S** or **Save**) and the
+setting is used at once. You can edit the file with any other program as well; Shale notices the
+change within a second.
+
+- Shale writes the whole file again whenever a setting changes, with the descriptions, so
+  comments you add yourself do not stay. Settings Shale does not know are kept as they are.
+- A line you delete takes its default. The cache settings take `"none"` for "forever" or "no
+  limit".
+- Text that is not valid settings is not saved: the file stays as it was, the settings in use stay,
+  the tab keeps your text and says what is wrong. If another program leaves an error in the
+  file, Shale keeps using the settings it has, tells you, and does not write over the file until
+  it is valid again.
+- Passwords and tokens are not in the file: they are in the system keyring.
+- An old `config.json` is turned into `config.toml` the first time this version starts; the old
+  file is renamed `config.json.migrated`.
+
+## Global settings (`config.toml`)
 
 ### Links and notes
 
 | Key | Default | Where |
 |---|---|---|
-| `ctrl_to_follow` | off (a plain click follows a link) | Settings → General → Links |
-| `new_notes_next_to_current` | off (new notes go to the vault root) | Settings → General → Links |
-| `update_links_on_rename` | on | Settings → General → Links |
-| `auto_convert_canvas` | off (asks) | Settings → General → Drawings; or the tick in the canvas question |
+| `ctrl_to_follow` | off (a plain click follows a link) | Settings → Editor → Links |
+| `new_notes_next_to_current` | off (new notes go to the vault root) | Settings → Editor → Links |
+| `update_links_on_rename` | on | Settings → Editor → Links |
+| `auto_convert_canvas` | off (asks) | Settings → Editor → Drawings; or the tick in the canvas question |
 | `file_sort` | `NameAsc` (file name A to Z); also `NameDesc`, `ModifiedDesc`, `ModifiedAsc`, `CreatedDesc`, `CreatedAsc` | the sort icon above the file list |
 
 ### Appearance and editor
 
 | Key | Default | Where |
 |---|---|---|
-| `font_size` | 15.5 (range 12 to 24) | Settings → General → Appearance, "Text size" |
 | `readable_width` | on | Appearance, "Readable line length" |
 | `dark_canvas` | on | Appearance, "Dark drawing canvas" |
 | `inline_images` | on | Appearance, "Show embedded images and players inside the editor" |
-| `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → General → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
+| `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
 | `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
-| `line_numbers` | on | Appearance, "Show line numbers in the editor" |
-| `format_toolbar` | on | Settings → General → Editing, "Show formatting toolbar above the text of a note" |
+
+### Fonts
+
+One table, `fonts` (`[fonts]` in the file), in the settings file. Each area has a `family` (an installed font family such as
+"DejaVu Sans"; left out: Shale's own font) and a `size` in points (8 to 48). Settings → Fonts shows them
+(see [[Fonts]]).
+
+| Key | Default | Where |
+|---|---|---|
+| `fonts.same_everywhere` | on | Settings → Fonts, "Use the same font and size everywhere"; on: `fonts.all` is used for every area and the tables of the single areas rest |
+| `fonts.all` | Shale's font, 14 | Fonts, "Font and size" while the checkbox is on; the size is the one of dialogs and menus, the text of the editor is drawn 11 % larger (15.5 against 14), as it always was |
+| `fonts.ui` | Shale's font, 14 | Fonts, "Dialogs and menus", with the checkbox off: dialogs, menus, sidebars and everything not listed below |
+| `fonts.editor_raw` | Shale's font, 15.5 | Fonts, "Editor: raw markdown": the markdown text in the editor, and the raw lines around the cursor in the preview |
+| `fonts.editor_rendered` | Shale's font, 15.5 | Fonts, "Editor: rendered text and reading view": the rendered lines of the preview and the reading view |
+| `fonts.mail` | Shale's font, 14 | Fonts, "Mail" |
+| `fonts.calendar` | Shale's font, 14 | Fonts, "Calendar" (the calendar view and the calendar of the right sidebar) |
+| `fonts.social` | Shale's font, 14 | Fonts, "Feeds" |
+
+Inside each of these tables: `family` and `size`. The old `font_size` of earlier versions became the
+size of the two editor areas when you updated.
+| `line_numbers` | on | Editor, "Show line numbers in the editor" |
+| `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
 | `font_colours` | red, orange, blue, green, purple (`[[229,62,62], …]`, RGB, up to 8) | Editing, "Font colours": the swatches of the toolbar's font colour palette |
 | `highlight_colours` | neon yellow, green, cyan, magenta (RGB, up to 8) | Editing, "Highlight colours": the swatches of the toolbar's highlight palette |
-| `live_preview` | off | Appearance, "Markdown preview in the editor"; the eye icon of the editor |
-| `preview_raw_lines` | 0 (range 0 to 20) | Appearance, "Raw lines around the cursor" |
-| `table_cell_edit` | on | Appearance, "Edit table cells in the grid"; a single table is switched by the button above the top right corner of its grid |
-| `vim_mode` | off | Appearance, "Vim-style editing" |
+| `live_preview` | off | Editor, "Markdown preview in the editor"; the eye icon of the editor |
+| `preview_raw_lines` | 0 (range 0 to 20) | Editor, "Raw lines around the cursor" |
+| `table_cell_edit` | on | Editor, "Edit table cells in the grid"; a single table is switched by the button above the top right corner of its grid |
+| `vim_mode` | off | Editor, "Vim-style editing" |
 | `keybindings` | empty (the defaults of [[Keyboard shortcuts]]) | Settings → Keybindings; only the actions you changed are stored |
 
 ### Window and vault
@@ -52,7 +93,7 @@ You normally never edit these files; the "Where" column says which window change
 | Key | Default | Where |
 |---|---|---|
 | `version` | the format version of the file (1) | written by Shale |
-| `vault` | none | the vault opened last; Settings → General → Vault folder |
+| `vault` | none | the vault opened last; Settings → Vault → Vault folder |
 | `recent` | empty | the recent vaults of the start screen |
 | `show_left` | on | the left sidebar toggle of the ribbon |
 | `show_right` | on | the right sidebar toggle of the ribbon |
@@ -68,17 +109,17 @@ You normally never edit these files; the "Where" column says which window change
 
 | Key | Default | Where |
 |---|---|---|
-| `calendars` | empty; each entry has `id`, `name`, `color`, `enabled`, `sync_minutes` (15 for a new CalDAV calendar) and its source (a local `.ics` file, or a CalDAV URL with user name and password) | Settings → General → Calendars… |
-| `week_starts_monday` | on | the Calendars… dialog |
+| `calendars` | empty; each entry has `id`, `name`, `color`, `enabled`, `sync_minutes` (15 for a new CalDAV calendar) and its source (a local `.ics` file, or a CalDAV URL with user name and password) | Settings → Calendar → Calendars… |
+| `week_starts_monday` | on | Settings → Calendar, and the Calendars… dialog |
 
 ### Mail ([[Mail]])
 
 | Key | Default | Where |
 |---|---|---|
 | `mail_accounts` | empty; one entry per account, fields below | Mail view → Accounts… |
-| `mail_sync_minutes` | 10 (0 = only with Sync) | Accounts… |
-| `mail_mark_read` | on | Accounts…, "Mark as read when opened" |
-| `mail_mark_read_secs` | 2 (0 = at once) | Accounts… |
+| `mail_sync_minutes` | 10 (0 = only with Sync) | Settings → Mail, and Accounts… |
+| `mail_mark_read` | on | Settings → Mail, and Accounts…, "Mark as read when opened" |
+| `mail_mark_read_secs` | 2 (0 = at once) | Settings → Mail, and Accounts… |
 | `mail_undo_secs` | 10 (0 = send at once) | Accounts…, Sending, "Undo send" |
 | `mail_encryption_consent` | none (nothing is decrypted); the date you typed the consent sentence | Accounts…, Encryption |
 
@@ -115,14 +156,14 @@ system keyring, never in this file):
 | `social_accounts` | empty | Feeds → Accounts… (secrets in the keyring) |
 | `social_last` | none; the account and feed shown last | set by Shale |
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
-| `social_check_minutes` | 5 (0 = never) | Feeds → Accounts… |
+| `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
 
 ### Data and troubleshooting ([[Data usage and caches]])
 
 | Key | Default | Where |
 |---|---|---|
-| `input_log` | off | Settings → General → Troubleshooting, "Record keyboard input to a file" |
-| `caches` | the values below; each can be "forever" or "no limit" | Settings → General → How long caches are kept; Data usage… rows |
+| `input_log` | off | Settings → Help → Troubleshooting, "Record keyboard input to a file" |
+| `caches` | the values below; each can be "forever" or "no limit" | Settings → Data → How long caches are kept; Data usage… rows |
 | `caches.picture_days` | 30 (social pictures, days) | same |
 | `caches.picture_mb` | 500 (social pictures, MB) | same |
 | `caches.post_days` | 365 (social post index, days) | same |
@@ -137,9 +178,9 @@ system keyring, never in this file):
 | Key | Default | Where |
 |---|---|---|
 | `version` | 1 | written by Shale |
-| `people_dir` | `Adressbuch` | Settings → General → People, "People folder" ([[Tags and people]]) |
-| `sync` | the group of the four keys below | Settings → General → Git sync |
-| `sync.enabled` | on (only matters when the vault is a git repository) | Settings → General → Git sync, "Sync this vault automatically" ([[Git sync]]) |
+| `people_dir` | `Adressbuch` | Settings → Vault → People, "People folder" ([[Tags and people]]) |
+| `sync` | the group of the four keys below | Settings → Sync |
+| `sync.enabled` | on (only matters when the vault is a git repository) | Settings → Sync, "Sync this vault automatically" ([[Git sync]]) |
 | `sync.interval_minutes` | 5 (1 to 1440) | Git sync, "Every … minutes" |
 | `sync.commit_prefix` | empty | Git sync, "Commit message prefix" |
 | `sync.commit_suffix` | empty | Git sync, "suffix" |

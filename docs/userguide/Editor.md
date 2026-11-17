@@ -11,7 +11,7 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 - **Enter** continues a list (also numbered lists and to-dos `- [ ]`).
 - **Tab / Shift+Tab** indent list items, or change heading levels.
 - **Alt+↑ / Alt+↓** move the current line.
-- A gutter on the left shows **line numbers** (Settings → General → Appearance, on by default);
+- A gutter on the left shows **line numbers** (Settings → Editor, on by default);
   a wrapped line keeps one number.
 
 ## Formatting toolbar
@@ -30,14 +30,14 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
   toggles off when they all have it. A heading replaces a list marker and the other way round.
 - Every click is one undo step, and the keyboard stays in the note, with the Markdown preview on
   or off and with vim-style editing (insert mode stays, otherwise you are in normal mode).
-- Settings → General → Editing, "Show formatting toolbar" turns the toolbar off; "Toolbar button size"
+- Settings → Editor → Editing, "Show formatting toolbar" turns the toolbar off; "Toolbar button size"
   makes its buttons bigger or smaller (80 % to 200 %, 110 % by default).
 
 ## Colours
 
 The **highlight colour** button opens a palette of four neon colours (yellow, green, cyan, magenta),
 "No highlight", and "Custom colour…" with a colour picker. The **font colour** button does the same
-with your own preset colours: edit them under "Font colours" in Settings → General → Editing (the
+with your own preset colours: edit them under "Font colours" in Settings → Editor → Editing (the
 highlight presets are there too). A new colour on text that already has one replaces it.
 
 The colours are stored in the note as plain HTML, the way Obsidian's colour plugins write it, so
@@ -67,7 +67,7 @@ numbers and called names are coloured.
 
 ![[preview-toggle.webm]]
 
-Turn it on with Settings → General → Appearance, or the eye icon in the top right of the
+Turn it on with Settings → Editor, or the eye icon in the top right of the
 editor (off by default). Every line is drawn rendered: headings at their size, bold, italic,
 strike and code without their markers, links as just their text. Only the line the cursor is in
 shows the raw markdown; with "Raw lines around the cursor" that many lines before and after do
@@ -111,8 +111,7 @@ with Backspace:
 
 ![[table-cell-block.webm]]
 
-If you prefer the raw markdown, turn off "Edit table cells in the grid" in Settings → General →
-Appearance: a click on a table then shows its raw rows to edit. A single table can be switched
+If you prefer the raw markdown, turn off "Edit table cells in the grid" in Settings → Editor: a click on a table then shows its raw rows to edit. A single table can be switched
 either way by the small button above the top right corner of its grid (**md**: edit this table
 as raw markdown; the grid icon: edit its cells in the grid).
 
@@ -160,7 +159,7 @@ Videos resize the same way (the controls stay below the picture; **100%** is the
 
 ## Vim-style editing
 
-Settings → General → Appearance, off by default. Notes open in normal mode.
+Settings → Editor, off by default. Notes open in normal mode.
 
 | Keys | What it does |
 |---|---|
@@ -189,7 +188,8 @@ changed in Settings → Keybindings, see [[Keyboard shortcuts]].
 
 ## Text size and width
 
-Text size (12 to 24) and "Readable line length" are in Settings → General → Appearance, see
-[[Settings reference]].
+"Readable line length" is in Settings → Appearance. The font and size of the raw markdown text and
+of the rendered text (the preview and the reading view) are two settings of their own in
+Settings → Fonts, see [[Fonts]] and [[Settings reference]].
 
 #userguide #editor

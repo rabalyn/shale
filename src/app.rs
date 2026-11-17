@@ -42,6 +42,8 @@ pub enum View {
     Mail,
     /// Mastodon / Bluesky feeds: the feed of this tab (None: not chosen yet, the last one is shown)
     Social(Option<crate::social::FeedRef>),
+    /// The text of the settings file (`~/.config/shale/config.toml`), outside every vault (CFG-011)
+    SettingsFile,
 }
 
 impl View {
@@ -150,12 +152,7 @@ impl egui::DroppedFile for ScriptDrop {
     }
 }
 
-/// The tabs of the Settings dialog (KEY-006).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SettingsTab {
-    General,
-    Keybindings,
-}
+pub use crate::settings::SettingsTab;
 
 pub enum Modal {
     /// The picker window (`Space f f`, NAV-020)
@@ -341,6 +338,10 @@ pub struct ShaleApp {
     frames: u32,
     /// the last failure to save the global settings (shown once)
     cfg_error: Option<String>,
+    /// The settings file in its tab (CFG-011)
+    pub sf: crate::settings_file::SettingsFile,
+    /// The fonts of the areas of the window and the installed fonts (CFG-030).
+    pub fonts: crate::fonts::FontState,
     /// the scripted input of tests of the real window (BUILD-007)
     script: crate::script::ScriptRun,
     /// where unsaved text is rescued to, and the rescues not dismissed yet (DATA-011)
@@ -526,6 +527,8 @@ impl ShaleApp {
             shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
             cfg_error: None,
+            sf: crate::settings_file::SettingsFile::new(),
+            fonts: crate::fonts::FontState::new(),
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             usage: crate::data_usage::DataUsage::new(places),
@@ -616,6 +619,7 @@ impl ShaleApp {
         }
         cfg = app.cfg.clone();
         let _ = cfg;
+        app.settings_file_baseline();
         app
     }
 
@@ -654,6 +658,7 @@ impl ShaleApp {
             } else {
                 self.cfg_error = None;
             }
+            self.settings_file_written();
             if let Err(e) = self.vdata.save() {
                 self.toast(e);
             }
@@ -1895,10 +1900,11 @@ impl ShaleApp {
         }
         if save {
             self.flush_all();
+            self.settings_file_flush(true);
             self.toast("Saved");
         }
         if settings {
-            self.open_settings(SettingsTab::General);
+            self.open_settings(crate::settings::last_tab(ui.ctx()));
         }
         if is(KeyAction::UserGuide) {
             self.open_user_guide();
@@ -2187,6 +2193,7 @@ impl eframe::App for ShaleApp {
     fn on_exit(&mut self) {
         // flush_all waits for a running sync's merge step first
         self.flush_all();
+        self.settings_file_flush(false);
         self.undo.flush_all();
         self.rescue_unsaved();
         self.save_mail_draft_at_exit();
@@ -2204,6 +2211,10 @@ impl ShaleApp {
         self.screenshot_tick(ui);
         self.shortcuts(ui);
         self.autosave();
+        self.settings_file_tick(ui.ctx());
+        if let Some(m) = self.fonts.sync(ui.ctx(), &self.cfg.fonts) {
+            self.toast(m);
+        }
         self.undo.tick(unix_now());
         for p in self.undo.take_problems() {
             self.toast(p);

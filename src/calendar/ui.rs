@@ -3,7 +3,7 @@
 use crate::calendar::store::{CalendarStore, Occ};
 use crate::calendar::time::{self as t, civil_from_days, days_from_civil, MONTHS, WEEKDAYS};
 use crate::theme;
-use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -257,7 +257,7 @@ impl CalendarView {
             if b.clicked() {
                 self.step(1);
             }
-            ui.label(egui::RichText::new(&title).size(if large { 18.0 } else { 14.0 }).color(theme::TEXT_STRONG));
+            ui.label(egui::RichText::new(&title).size(crate::fonts::px(if large { 18.0 } else { 14.0 })).color(theme::TEXT_STRONG));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let b = ui.small_button("⚙").on_hover_text("Calendar settings");
                 self.rec("settings", b.rect);
@@ -369,7 +369,7 @@ impl CalendarView {
         }
         let label = if show_time && !o.all_day { format!("{} {}", t::hhmm(t::utc_to_local(o.start).1), e.summary) } else { e.summary.clone() };
         let size = (rect.height() * 0.68).clamp(9.0, 13.0);
-        p.text(rect.left_center() + Vec2::new(if o.all_day { 4.0 } else { 6.0 }, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(size), if o.all_day { Color32::WHITE } else { theme::TEXT });
+        p.text(rect.left_center() + Vec2::new(if o.all_day { 4.0 } else { 6.0 }, 0.0), Align2::LEFT_CENTER, label, crate::fonts::font(size), if o.all_day { Color32::WHITE } else { theme::TEXT });
         let resp = ui.interact(rect, ui.scope_id().with((&key, o.start)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
         self.rec(key, rect);
         if resp.clicked() {
@@ -419,7 +419,7 @@ impl CalendarView {
         for i in 0..7 {
             let wd = if monday { i } else { (i + 6) % 7 };
             let name = if large { WEEKDAYS[wd] } else { &WEEKDAYS[wd][..2] };
-            ui.painter().text(Pos2::new(hr.min.x + cw * (i as f32 + 0.5), hr.center().y), Align2::CENTER_CENTER, name, FontId::proportional(11.0), theme::MUTED);
+            ui.painter().text(Pos2::new(hr.min.x + cw * (i as f32 + 0.5), hr.center().y), Align2::CENTER_CENTER, name, crate::fonts::font(11.0), theme::MUTED);
         }
         let today = t::today();
         let (grid, _) = ui.allocate_exact_size(Vec2::new(w, ch * rows as f32), Sense::hover());
@@ -453,7 +453,7 @@ impl CalendarView {
             } else {
                 theme::FAINT
             };
-            p.text(num_pos, Align2::CENTER_CENTER, dd.to_string(), FontId::proportional(11.5), numc);
+            p.text(num_pos, Align2::CENTER_CENTER, dd.to_string(), crate::fonts::font(11.5), numc);
             let list = &by_day[i as usize];
             match self.size {
                 Size::Small => {
@@ -484,7 +484,7 @@ impl CalendarView {
                     if list.len() > shown {
                         let mr = Rect::from_min_size(Pos2::new(r.min.x + 2.0, r.min.y + 19.0 + shown as f32 * (chip_h + 2.0)), Vec2::new(r.width() - 4.0, chip_h));
                         let more = ui.interact(mr, ui.scope_id().with(("more", d)), Sense::click()).on_hover_text("Show this day");
-                        ui.painter().text(mr.left_center() + Vec2::new(4.0, 0.0), Align2::LEFT_CENTER, format!("+{} more", list.len() - shown), FontId::proportional(11.0), theme::MUTED);
+                        ui.painter().text(mr.left_center() + Vec2::new(4.0, 0.0), Align2::LEFT_CENTER, format!("+{} more", list.len() - shown), crate::fonts::font(11.0), theme::MUTED);
                         self.rec(format!("more:{d}"), mr);
                         if more.clicked() {
                             self.mode = Mode::Day;
@@ -501,10 +501,10 @@ impl CalendarView {
         if self.size == Size::Small {
             // the selected day's events under the small grid
             ui.add_space(6.0);
-            ui.label(egui::RichText::new(t::long_date(self.selected)).size(12.5).color(theme::TEXT_STRONG));
+            ui.label(egui::RichText::new(t::long_date(self.selected)).size(crate::fonts::px(12.5)).color(theme::TEXT_STRONG));
             let day_occ: Vec<Occ> = store.occurrences(self.selected, self.selected);
             if day_occ.is_empty() {
-                ui.label(egui::RichText::new("No events").size(12.0).color(theme::MUTED));
+                ui.label(egui::RichText::new("No events").size(crate::fonts::px(12.0)).color(theme::MUTED));
             }
             for o in day_occ {
                 let Some(e) = store.event(&o) else { continue };
@@ -513,7 +513,7 @@ impl CalendarView {
                 let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
                 let label_o = Occ { all_day: o.all_day, ..o.clone() };
                 self.chip(ui, ChipSpec { rect: r, occ: &label_o, key: format!("agenda:{summary}"), show_time: false }, store, clicked);
-                ui.painter().text(r.right_center() - Vec2::new(6.0, 0.0), Align2::RIGHT_CENTER, time, FontId::proportional(11.0), if o.all_day { Color32::WHITE } else { theme::MUTED });
+                ui.painter().text(r.right_center() - Vec2::new(6.0, 0.0), Align2::RIGHT_CENTER, time, crate::fonts::font(11.0), if o.all_day { Color32::WHITE } else { theme::MUTED });
             }
         }
     }
@@ -536,7 +536,7 @@ impl CalendarView {
             if *d == today {
                 ui.painter().rect_filled(r.shrink(2.0), CornerRadius::same(4), theme::ACCENT.gamma_multiply(0.35));
             }
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(12.0), if *d == today { theme::TEXT_STRONG } else { theme::MUTED });
+            ui.painter().text(r.center(), Align2::CENTER_CENTER, label, crate::fonts::font(12.0), if *d == today { theme::TEXT_STRONG } else { theme::MUTED });
             if resp.clicked() && n > 1 {
                 self.mode = Mode::Day;
                 self.anchor = *d;
@@ -548,7 +548,7 @@ impl CalendarView {
         let rows = lane.iter().map(|l| l.len()).max().unwrap_or(0).min(4);
         if rows > 0 {
             let (lr, _) = ui.allocate_exact_size(Vec2::new(w, rows as f32 * 18.0 + 4.0), Sense::hover());
-            ui.painter().text(Pos2::new(lr.min.x + 2.0, lr.min.y + 9.0), Align2::LEFT_CENTER, "all day", FontId::proportional(10.0), theme::FAINT);
+            ui.painter().text(Pos2::new(lr.min.x + 2.0, lr.min.y + 9.0), Align2::LEFT_CENTER, "all day", crate::fonts::font(10.0), theme::FAINT);
             for (i, list) in lane.iter().enumerate() {
                 for (k, o) in list.iter().take(rows).enumerate() {
                     let r = Rect::from_min_size(Pos2::new(lr.min.x + gutter + col_w * i as f32 + 1.0, lr.min.y + 2.0 + k as f32 * 18.0), Vec2::new(col_w - 2.0, 16.0));
@@ -588,7 +588,7 @@ impl CalendarView {
                 let y = gr.min.y + h as f32 * hour_h;
                 p.line_segment([Pos2::new(gr.min.x + gutter, y), Pos2::new(gr.max.x, y)], Stroke::new(1.0, theme::BORDER));
                 if h > 0 {
-                    p.text(Pos2::new(gr.min.x + gutter - 4.0, y), Align2::RIGHT_CENTER, format!("{h:02}:00"), FontId::proportional(10.0), theme::FAINT);
+                    p.text(Pos2::new(gr.min.x + gutter - 4.0, y), Align2::RIGHT_CENTER, format!("{h:02}:00"), crate::fonts::font(10.0), theme::FAINT);
                 }
             }
             for i in 0..=n {
@@ -661,13 +661,13 @@ impl CalendarView {
         p.rect_filled(Rect::from_min_size(r.min, Vec2::new(3.0, r.height())), CornerRadius::same(1), col);
         let mut y = r.min.y + 2.0;
         let big = r.height() > 30.0;
-        p.text(Pos2::new(r.min.x + 6.0, y), Align2::LEFT_TOP, &e.summary, FontId::proportional(11.5), theme::TEXT_STRONG);
+        p.text(Pos2::new(r.min.x + 6.0, y), Align2::LEFT_TOP, &e.summary, crate::fonts::font(11.5), theme::TEXT_STRONG);
         y += 14.0;
         if big {
-            p.text(Pos2::new(r.min.x + 6.0, y), Align2::LEFT_TOP, format!("{} – {}", t::hhmm(t::utc_to_local(o.start).1), t::hhmm(t::utc_to_local(o.end).1)), FontId::proportional(10.0), theme::MUTED);
+            p.text(Pos2::new(r.min.x + 6.0, y), Align2::LEFT_TOP, format!("{} – {}", t::hhmm(t::utc_to_local(o.start).1), t::hhmm(t::utc_to_local(o.end).1)), crate::fonts::font(10.0), theme::MUTED);
             y += 13.0;
             if !e.location.is_empty() && r.height() > 44.0 {
-                p.text(Pos2::new(r.min.x + 6.0, y), Align2::LEFT_TOP, &e.location, FontId::proportional(10.0), theme::MUTED);
+                p.text(Pos2::new(r.min.x + 6.0, y), Align2::LEFT_TOP, &e.location, crate::fonts::font(10.0), theme::MUTED);
             }
         }
         let resp = ui.interact(r, ui.scope_id().with((&key, o.start)), Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -711,7 +711,7 @@ impl CalendarView {
                 ui.painter().rect_filled(bar, CornerRadius::same(2), col);
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(if e.summary.is_empty() { "(no title)" } else { &e.summary }).size(17.0).color(theme::TEXT_STRONG)).wrap());
+                    ui.add(egui::Label::new(egui::RichText::new(if e.summary.is_empty() { "(no title)" } else { &e.summary }).size(crate::fonts::px(17.0)).color(theme::TEXT_STRONG)).wrap());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                         let b = ui.small_button("✕").on_hover_text("Close (Esc)");
                         rects.push(("popup-x".into(), b.rect));
@@ -722,8 +722,8 @@ impl CalendarView {
                 });
                 let row = |ui: &mut Ui, label: &str, value: &str| {
                     ui.horizontal_top(|ui| {
-                        ui.add_sized([72.0, 16.0], egui::Label::new(egui::RichText::new(label).size(11.5).color(theme::MUTED)));
-                        ui.add(egui::Label::new(egui::RichText::new(value).size(12.5).color(theme::TEXT)).wrap());
+                        ui.add_sized([72.0, 16.0], egui::Label::new(egui::RichText::new(label).size(crate::fonts::px(11.5)).color(theme::MUTED)));
+                        ui.add(egui::Label::new(egui::RichText::new(value).size(crate::fonts::px(12.5)).color(theme::TEXT)).wrap());
                     });
                 };
                 row(ui, "When", &when_text(&occ));
@@ -731,10 +731,10 @@ impl CalendarView {
                     row(ui, "Repeats", &rrule_text(r));
                 }
                 ui.horizontal(|ui| {
-                    ui.add_sized([72.0, 16.0], egui::Label::new(egui::RichText::new("Calendar").size(11.5).color(theme::MUTED)));
+                    ui.add_sized([72.0, 16.0], egui::Label::new(egui::RichText::new("Calendar").size(crate::fonts::px(11.5)).color(theme::MUTED)));
                     let (dot, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
                     ui.painter().circle_filled(dot.center(), 4.5, col);
-                    ui.label(egui::RichText::new(&src.name).size(12.5));
+                    ui.label(egui::RichText::new(&src.name).size(crate::fonts::px(12.5)));
                 });
                 if !e.location.is_empty() {
                     row(ui, "Where", &e.location);
@@ -756,7 +756,7 @@ impl CalendarView {
                 }
                 if !e.url.is_empty() {
                     ui.horizontal(|ui| {
-                        ui.add_sized([72.0, 16.0], egui::Label::new(egui::RichText::new("Link").size(11.5).color(theme::MUTED)));
+                        ui.add_sized([72.0, 16.0], egui::Label::new(egui::RichText::new("Link").size(crate::fonts::px(11.5)).color(theme::MUTED)));
                         let l = ui.link(&e.url);
                         rects.push(("popup-url".into(), l.rect));
                         if l.clicked() {
@@ -767,7 +767,7 @@ impl CalendarView {
                 if !e.description.is_empty() {
                     ui.separator();
                     egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
-                        ui.add(egui::Label::new(egui::RichText::new(&e.description).size(12.5).color(theme::TEXT)).wrap());
+                        ui.add(egui::Label::new(egui::RichText::new(&e.description).size(crate::fonts::px(12.5)).color(theme::TEXT)).wrap());
                     });
                 }
                 ui.add_space(6.0);
@@ -778,8 +778,8 @@ impl CalendarView {
                         Confirm::All => format!("Delete “{name}”?"),
                         Confirm::One => format!("Delete only {} of “{name}”?", when_text(&occ)),
                     };
-                    ui.add(egui::Label::new(egui::RichText::new(q).size(13.0).color(theme::TEXT_STRONG)).wrap());
-                    ui.label(egui::RichText::new("A copy is kept, so it can be brought back by hand.").size(11.5).color(theme::MUTED));
+                    ui.add(egui::Label::new(egui::RichText::new(q).size(crate::fonts::px(13.0)).color(theme::TEXT_STRONG)).wrap());
+                    ui.label(egui::RichText::new("A copy is kept, so it can be brought back by hand.").size(crate::fonts::px(11.5)).color(theme::MUTED));
                     ui.horizontal(|ui| {
                         let b = ui.button(egui::RichText::new("Delete").color(theme::LINK_MISSING));
                         rects.push(("popup-confirm".into(), b.rect));

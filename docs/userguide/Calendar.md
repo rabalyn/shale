@@ -13,7 +13,7 @@ views in three sizes. Back to [[Start here]].
 
 ## Calendars
 
-Settings → General → Calendars… adds local calendars (`.ics` files) or CalDAV accounts (for
+Settings → Calendar → Calendars… adds local calendars (`.ics` files) or CalDAV accounts (for
 example Nextcloud; "Find calendars" asks the server), chooses colours, shows or hides calendars
 and sets the sync interval per calendar (15 minutes by default).
 

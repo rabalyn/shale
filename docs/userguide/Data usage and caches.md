@@ -6,7 +6,7 @@ features:
 
 ![[data-usage.png]]
 
-Settings → General → Data and caches → **Data usage…** (or Ctrl+Shift+D) shows what Shale keeps
+Settings → Data → **Data usage…** (or Ctrl+Shift+D) shows what Shale keeps
 on disk. Back to [[Start here]].
 
 - **Saved**: the vault by kind (notes, drawings, pictures, PDFs, other files, `.shale/`,

@@ -15,7 +15,7 @@ use crate::mail::imap_sync::{FolderKind, NO_PASSWORD};
 use crate::mail::keys::MenuTarget;
 use crate::mail::ui::*;
 use crate::theme;
-use eframe::egui::{self, Align, Color32, CornerRadius, FontId, Key, Layout, Modifiers, Pos2, Rect, RichText, Sense, Stroke, Ui, UiBuilder, Vec2};
+use eframe::egui::{self, Align, Color32, CornerRadius, Key, Layout, Modifiers, Pos2, Rect, RichText, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 /// What a button or a menu entry of the phase 2 actions asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +79,7 @@ impl MailView {
             ui.scope_builder(UiBuilder::new().max_rect(strip).layout(Layout::left_to_right(Align::Center)), |ui| {
                 ui.set_clip_rect(strip.intersect(ui.clip_rect()));
                 ui.add_space(10.0);
-                ui.label(RichText::new(format!("Not done: {last}")).size(12.5).color(theme::LINK_MISSING));
+                ui.label(RichText::new(format!("Not done: {last}")).size(crate::fonts::px(12.5)).color(theme::LINK_MISSING));
                 let r = ui.small_button("Dismiss");
                 rects.push(("mail:problem-dismiss".into(), r.rect));
                 if r.clicked() {
@@ -96,7 +96,7 @@ impl MailView {
             ui.scope_builder(UiBuilder::new().max_rect(strip).layout(Layout::left_to_right(Align::Center)), |ui| {
                 ui.set_clip_rect(strip.intersect(ui.clip_rect()));
                 ui.add_space(10.0);
-                ui.label(RichText::new(text).size(12.5).color(theme::TEXT));
+                ui.label(RichText::new(text).size(crate::fonts::px(12.5)).color(theme::TEXT));
                 let r = ui.small_button("Undo send");
                 rects.push(("mail:undo-send".into(), r.rect));
                 if r.on_hover_text(undo_tip).clicked() {
@@ -130,7 +130,7 @@ impl MailView {
             StoreState::Ready(_) if cfg.mail_accounts.is_empty() => {
                 ui.scope_builder(UiBuilder::new().max_rect(body.shrink(30.0)), |ui| {
                     ui.add_space(40.0);
-                    ui.label(RichText::new("No mail account yet").size(20.0).color(theme::TEXT));
+                    ui.label(RichText::new("No mail account yet").size(crate::fonts::px(20.0)).color(theme::TEXT));
                     ui.label(muted("Shale reads your mail from your mail server and keeps a local copy. Syncing never changes anything on the server; only what you do yourself does (mark read, flag, move, delete)."));
                     ui.add_space(8.0);
                     let r = ui.button("Add an account…");
@@ -401,9 +401,9 @@ impl MailView {
         }
         ui.add_space(10.0);
         if self.searching || self.search_edited_pending() {
-            ui.label(muted("Searching…").size(12.0));
+            ui.label(muted("Searching…").size(crate::fonts::px(12.0)));
         } else if let Some(e) = &self.search_error {
-            ui.label(RichText::new(format!("Search failed: {e}")).size(12.0).color(theme::LINK_MISSING));
+            ui.label(RichText::new(format!("Search failed: {e}")).size(crate::fonts::px(12.0)).color(theme::LINK_MISSING));
         }
         // the state of the syncs
         let mut errs: Vec<String> = vec![];
@@ -420,17 +420,17 @@ impl MailView {
             }
         }
         if let Some((t, why)) = self.orphaned_text(cfg) {
-            ui.label(muted(t).size(12.0)).on_hover_text(why);
+            ui.label(muted(t).size(crate::fonts::px(12.0))).on_hover_text(why);
         }
         if let Some(t) = self.pending_text(cfg) {
             let why = self.offline.values().next().cloned();
-            let l = ui.label(muted(t).size(12.0));
+            let l = ui.label(muted(t).size(crate::fonts::px(12.0)));
             if let Some(w) = why {
                 l.on_hover_text(format!("The server could not be reached: {w}"));
             }
         }
         if let Some(t) = self.status(cfg) {
-            ui.label(muted(t).size(12.0));
+            ui.label(muted(t).size(crate::fonts::px(12.0)));
         } else if !errs.is_empty() {
             let first = errs.first().cloned().unwrap_or_default();
             let short = if first.contains(NO_PASSWORD) {
@@ -440,9 +440,9 @@ impl MailView {
             } else {
                 first.chars().take(90).collect()
             };
-            ui.label(RichText::new(format!("Sync problem: {short}")).size(12.0).color(theme::LINK_MISSING)).on_hover_text(errs.join("\n"));
+            ui.label(RichText::new(format!("Sync problem: {short}")).size(crate::fonts::px(12.0)).color(theme::LINK_MISSING)).on_hover_text(errs.join("\n"));
         } else if self.syncs.values().any(|r| r.finished.is_some()) {
-            ui.label(muted(format!("Synced · {added} new")).size(12.0));
+            ui.label(muted(format!("Synced · {added} new")).size(crate::fonts::px(12.0)));
         }
     }
 
@@ -553,7 +553,7 @@ impl MailView {
                 let folders = self.account_folders(&a.id);
                 egui::CollapsingHeader::new(RichText::new(title).color(theme::TEXT_STRONG)).id_salt(("mail-account", a.id.clone())).default_open(true).show(ui, |ui| {
                     if folders.is_empty() {
-                        ui.label(muted("No folders yet. Press Sync, or “Test connection” in the account settings.").size(12.0));
+                        ui.label(muted("No folders yet. Press Sync, or “Test connection” in the account settings.").size(crate::fonts::px(12.0)));
                     }
                     for f in &folders {
                         let (total, unread) = self.counts.get(&f.id).copied().unwrap_or((0, 0));
@@ -626,7 +626,7 @@ impl MailView {
         };
         ui.horizontal(|ui| {
             ui.add_space(10.0);
-            ui.label(RichText::new(title).size(13.0).color(theme::MUTED));
+            ui.label(RichText::new(title).size(crate::fonts::px(13.0)).color(theme::MUTED));
         });
         // what is going on with a folder that is not synced
         let load_tip = self.tip("Load the list of this folder from the server", KeyAction::MailLoad);
@@ -636,14 +636,14 @@ impl MailView {
                 Some(ListingState::Loading) => {
                     ui.horizontal(|ui| {
                         ui.add_space(10.0);
-                        ui.label(muted("Loading the list from the server…").size(12.0));
+                        ui.label(muted("Loading the list from the server…").size(crate::fonts::px(12.0)));
                     });
                 }
                 Some(ListingState::Failed(e)) => {
                     let e = e.clone();
                     ui.horizontal_wrapped(|ui| {
                         ui.add_space(10.0);
-                        ui.label(RichText::new(format!("Could not load the list: {e}")).size(12.0).color(theme::LINK_MISSING));
+                        ui.label(RichText::new(format!("Could not load the list: {e}")).size(crate::fonts::px(12.0)).color(theme::LINK_MISSING));
                         let r = ui.small_button("Try again");
                         rec(rects, "mail:retry-list", &r);
                         if r.on_hover_text(load_tip.as_str()).clicked() {
@@ -655,7 +655,7 @@ impl MailView {
                     let n = *n;
                     ui.horizontal(|ui| {
                         ui.add_space(10.0);
-                        ui.label(muted(format!("Not synced automatically: the list comes from the server when you open the folder ({n} new).")).size(12.0));
+                        ui.label(muted(format!("Not synced automatically: the list comes from the server when you open the folder ({n} new).")).size(crate::fonts::px(12.0)));
                         let r = ui.small_button("Refresh");
                         rec(rects, "mail:refresh-list", &r);
                         if r.on_hover_text(load_tip.as_str()).clicked() {
@@ -667,7 +667,7 @@ impl MailView {
                     if row.as_ref().is_some_and(|f| !f.sync_enabled && crate::mail::imap_sync::kind_of(f) == FolderKind::Normal) {
                         ui.horizontal(|ui| {
                             ui.add_space(10.0);
-                            ui.label(muted("This folder is not synced; tick it in the account settings to fetch it.").size(12.0));
+                            ui.label(muted("This folder is not synced; tick it in the account settings to fetch it.").size(crate::fonts::px(12.0)));
                         });
                     }
                 }
@@ -810,7 +810,7 @@ impl MailView {
         let strong = |c: Color32| c.gamma_multiply(dim);
         let from = if m.from.trim().is_empty() { "(unknown sender)".to_string() } else { display_name(&m.from) };
         let date = list_date(m.date, now);
-        let date_g = p.layout_no_wrap(date, FontId::proportional(12.0), strong(theme::MUTED));
+        let date_g = p.layout_no_wrap(date, crate::fonts::font(12.0), strong(theme::MUTED));
         let x0 = rect.min.x + 16.0;
         let date_x = rect.max.x - 10.0 - date_g.size().x;
         if unread {
@@ -826,7 +826,7 @@ impl MailView {
             rects.push((format!("mail:flag-mark:{i}"), Rect::from_min_size(Pos2::new(x - 2.0, y), Vec2::new(11.0, 12.0))));
         }
         p.galley(Pos2::new(date_x, rect.min.y + 7.0), date_g, Color32::WHITE);
-        let from_g = p.layout_no_wrap(from, FontId::proportional(14.0), strong(if unread { theme::TEXT_STRONG } else { theme::TEXT }));
+        let from_g = p.layout_no_wrap(from, crate::fonts::font(14.0), strong(if unread { theme::TEXT_STRONG } else { theme::TEXT }));
         let from_clip = p.with_clip_rect(Rect::from_min_max(Pos2::new(x0, rect.min.y), Pos2::new(date_x - 8.0, rect.max.y)));
         from_clip.galley(Pos2::new(x0, rect.min.y + 6.0), from_g.clone(), Color32::WHITE);
         if unread {
@@ -843,20 +843,20 @@ impl MailView {
             right_edge -= 18.0;
         }
         if m.state == STATE_HEADER || m.state == STATE_TOO_LARGE {
-            let g = p.layout_no_wrap("not downloaded".into(), FontId::proportional(11.0), strong(theme::FAINT));
+            let g = p.layout_no_wrap("not downloaded".into(), crate::fonts::font(11.0), strong(theme::FAINT));
             right_edge -= g.size().x;
             p.galley(Pos2::new(right_edge, rect.min.y + 26.0), g, Color32::WHITE);
             right_edge -= 8.0;
         }
         if let Some(kind) = &m.pending {
-            let g = p.layout_no_wrap(pending_word(kind).into(), FontId::proportional(11.0), strong(theme::ACCENT));
+            let g = p.layout_no_wrap(pending_word(kind).into(), crate::fonts::font(11.0), strong(theme::ACCENT));
             right_edge -= g.size().x;
             let at = Pos2::new(right_edge, rect.min.y + 26.0);
             rects.push((format!("mail:pending-mark:{i}"), Rect::from_min_size(at, g.size())));
             p.galley(at, g, Color32::WHITE);
             right_edge -= 8.0;
         }
-        let subj_g = p.layout_no_wrap(subject, FontId::proportional(13.0), strong(if unread { theme::TEXT } else { theme::MUTED }));
+        let subj_g = p.layout_no_wrap(subject, crate::fonts::font(13.0), strong(if unread { theme::TEXT } else { theme::MUTED }));
         let subj_clip = p.with_clip_rect(Rect::from_min_max(Pos2::new(x0, rect.min.y), Pos2::new(right_edge, rect.max.y)));
         subj_clip.galley(Pos2::new(x0, rect.min.y + 25.0), subj_g.clone(), Color32::WHITE);
         if unread {
@@ -904,7 +904,7 @@ impl MailView {
             if scroll != 0.0 {
                 ui.scroll_with_delta(Vec2::new(0.0, -scroll));
             }
-            ui.label(RichText::new(if msg.subject.trim().is_empty() { "(no subject)" } else { msg.subject.as_str() }).size(19.0).color(theme::TEXT_STRONG));
+            ui.label(RichText::new(if msg.subject.trim().is_empty() { "(no subject)" } else { msg.subject.as_str() }).size(crate::fonts::px(19.0)).color(theme::TEXT_STRONG));
             ui.add_space(4.0);
             let line = |ui: &mut Ui, k: &str, v: &str| {
                 if !v.trim().is_empty() {
@@ -978,15 +978,15 @@ impl MailView {
                     }
                 }
                 if msg.is_flagged() {
-                    ui.label(RichText::new("Flagged").size(12.0).color(theme::LINK_MISSING));
+                    ui.label(RichText::new("Flagged").size(crate::fonts::px(12.0)).color(theme::LINK_MISSING));
                 }
                 if let Some(k) = &msg.pending {
-                    ui.label(muted(format!("{} waiting for the server", pending_word(k).trim_end_matches('…'))).size(12.0));
+                    ui.label(muted(format!("{} waiting for the server", pending_word(k).trim_end_matches('…'))).size(crate::fonts::px(12.0)));
                 }
             });
             if msg.gone_on_server {
                 ui.add_space(4.0);
-                ui.label(RichText::new("This mail was deleted on the server. This is the copy Shale kept.").color(theme::LINK_MISSING).size(12.5));
+                ui.label(RichText::new("This mail was deleted on the server. This is the copy Shale kept.").color(theme::LINK_MISSING).size(crate::fonts::px(12.5)));
             }
             ui.separator();
             match &self.open.as_ref().map(|o| &o.body) {
@@ -1022,7 +1022,7 @@ impl MailView {
                     let l = l.clone();
                     security_strip(ui, &l.security, rects, &mut strip);
                     if !l.mail.attachments.is_empty() {
-                        ui.label(muted(format!("{} attachment{}", l.mail.attachments.len(), if l.mail.attachments.len() == 1 { "" } else { "s" })).size(12.5));
+                        ui.label(muted(format!("{} attachment{}", l.mail.attachments.len(), if l.mail.attachments.len() == 1 { "" } else { "s" })).size(crate::fonts::px(12.5)));
                         for (i, a) in l.mail.attachments.iter().enumerate() {
                             ui.horizontal_wrapped(|ui| {
                                 // the attachment the keys o and Shift+O work on (MAIL-065)
@@ -1032,7 +1032,7 @@ impl MailView {
                                 } else {
                                     ui.label(RichText::new(name).color(theme::TEXT));
                                 }
-                                ui.label(muted(size_text(a.data.len() as u64)).size(12.0));
+                                ui.label(muted(size_text(a.data.len() as u64)).size(crate::fonts::px(12.0)));
                                 let o = ui.small_button("Open");
                                 rec(rects, format!("mail:att-open:{i}"), &o);
                                 if o.on_hover_text(self.tip("Open a temporary copy with the default program", KeyAction::MailAttOpen)).clicked() {
@@ -1047,7 +1047,7 @@ impl MailView {
                         }
                         ui.separator();
                     }
-                    ui.add(egui::Label::new(RichText::new(l.shown.as_str()).color(theme::TEXT).size(cfg.font_size - 1.0)).selectable(true));
+                    ui.add(egui::Label::new(RichText::new(l.shown.as_str()).color(theme::TEXT)).selectable(true));
                     if l.cut {
                         ui.add_space(6.0);
                         ui.label(muted("The text is very long and is cut here. Import the mail to get all of it."));
@@ -1193,7 +1193,7 @@ impl MailView {
         let (mut yes, mut no) = (false, false);
         let title = format!("Delete {n} message{} forever?", if n == 1 { "" } else { "s" });
         let resp = crate::dialog::Dialog::new("mail-forever", title).width(380.0).non_modal().show(ui.ctx(), |ui| {
-            ui.label(muted("They are removed from the server and cannot be brought back from there. Shale keeps its own local copy of each, in the folder “.trash” of its mail folder.").size(12.5));
+            ui.label(muted("They are removed from the server and cannot be brought back from there. Shale keeps its own local copy of each, in the folder “.trash” of its mail folder.").size(crate::fonts::px(12.5)));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let r = ui.button(RichText::new(format!("Delete {n} forever")).color(theme::LINK_MISSING));
@@ -1244,7 +1244,7 @@ fn security_strip(ui: &mut Ui, sec: &crate::mail::crypto::Security, rects: &mut 
         };
         let r = egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, color)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(text).color(color).size(12.5));
+            ui.label(RichText::new(text).color(color).size(crate::fonts::px(12.5)));
         });
         rects.push((format!("mail:sec:{i}"), r.response.rect));
         ui.add_space(3.0);

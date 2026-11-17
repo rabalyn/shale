@@ -347,7 +347,7 @@ fn lay_008_the_split_layout_is_stored_and_comes_back_and_a_broken_one_gives_the_
     assert_eq!((w2.views(), w2.ribbon()), (views, ribbon), "both menubars come back as they were");
     assert_eq!(w2.app.side.bars.len(), 2);
     // a settings file with a layout that cannot be read: the rest loads, the layout is the default
-    for broken in [r#"{"sidebars": {"right": "nonsense"}, "font_size": 17.0}"#, r#"{"sidebars": 5}"#, r#"{"sidebars": {"ribbon": ["x"], "right": [{"icons": ["mail", "nope"], "active": 3}]}}"#] {
+    for broken in [r#"{"sidebars": {"right": "nonsense"}, "toolbar_size": 17}"#, r#"{"sidebars": 5}"#, r#"{"sidebars": {"ribbon": ["x"], "right": [{"icons": ["mail", "nope"], "active": 3}]}}"#] {
         let (cfg, _) = crate::vault_state::parse::<Config>(broken.as_bytes()).unwrap();
         assert_eq!(Layout::from_config(&cfg), Layout::default(), "{broken}");
     }

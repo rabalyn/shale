@@ -1,7 +1,7 @@
 //! Sidebars (files, search, tags, linked notes, outline, local graph), the vault-wide
 //! to-do list and the dialogs.
 
-use crate::app::{graph_click, muted, Action, LeftPanel, Modal, RightPanel, SettingsTab, ShaleApp, View};
+use crate::app::{graph_click, muted, Action, LeftPanel, Modal, RightPanel, ShaleApp, View};
 use crate::keys::{Action as KeyAction, Scope};
 use crate::layout::{icon_button, paint_icon, Icon};
 use crate::markdown;
@@ -487,7 +487,8 @@ impl ShaleApp {
             let area = ui.available_rect_before_wrap();
             self.drag.add_calendar_area(area);
             egui::ScrollArea::vertical().id_salt("side-calendar").auto_shrink([false, false]).show(ui, |ui| {
-                act = self.cal.side.show(ui, &self.calendar, monday, false);
+                let font = self.fonts.area(crate::fonts::Area::Calendar);
+                act = crate::fonts::with_area(ui, &font, |ui| self.cal.side.show(ui, &self.calendar, monday, false));
             });
             if let Some(a) = act {
                 self.calendar_action(a);
@@ -719,6 +720,8 @@ impl ShaleApp {
         let mut open_calendars = false;
         let mut open_usage = false;
         let mut open_guide = false;
+        let mut open_mail = false;
+        let mut open_social = false;
         let ctx = ui.ctx().clone();
         match &mut modal {
             Modal::Picker(p) => {
@@ -900,176 +903,9 @@ impl ShaleApp {
             }
             Modal::Settings { vault_path, tab, keys } => {
                 let mut done = false;
-                let mut body = |ui: &mut egui::Ui| {
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(tab, SettingsTab::General, "General");
-                        ui.selectable_value(tab, SettingsTab::Keybindings, "Keybindings");
-                    });
-                    ui.separator();
-                    if *tab == SettingsTab::Keybindings {
-                        if crate::keys_ui::show(ui, keys, &mut self.keymap) {
-                            self.cfg.keybindings = self.keymap.overrides();
-                            self.save_config();
-                        }
-                        return;
-                    }
-                    self.keymap.recording = false;
-                    ui.label(egui::RichText::new("Vault folder").color(theme::MUTED));
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(vault_path).desired_width(360.0));
-                        if ui.button("Open").clicked() {
-                            let p = PathBuf::from(crate::layout::shellexpand(vault_path));
-                            if p.is_dir() {
-                                self.actions.push(Action::OpenVault(p));
-                                keep = false;
-                            } else {
-                                self.toasts.push(("That folder doesn't exist".into(), std::time::Instant::now()));
-                            }
-                        }
-                    });
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Calendars").color(theme::MUTED));
-                    ui.horizontal(|ui| {
-                        if ui.button("Calendars…").on_hover_text("Add local calendars or CalDAV accounts").clicked() {
-                            open_calendars = true;
-                        }
-                        ui.label(muted(format!("{} configured", self.cfg.calendars.len())).size(12.0));
-                    });
-                    ui.add_space(8.0);
-                    if ui.button("Close this vault (back to the start screen)").clicked() {
-                        self.flush_all();
-                        self.remember_open_files();
-                        self.save_config();
-                        self.vdata = crate::vault_state::VaultData::default();
-                        self.media.stop();
-                        self.vault = None;
-                        self.tabbar.tabs.clear();
-                        self.cfg.vault = None;
-                        keep = false;
-                    }
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Links").color(theme::MUTED));
-                    let mut changed = false;
-                    changed |= ui.checkbox(&mut self.cfg.ctrl_to_follow, "Follow links only with Ctrl+click (plain click places the cursor)").changed();
-                    changed |= ui.checkbox(&mut self.cfg.new_notes_next_to_current, "Create notes from red links next to the current note (instead of the vault root)").changed();
-                    changed |= ui.checkbox(&mut self.cfg.update_links_on_rename, "Update links in other notes when renaming").changed();
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("People").color(theme::MUTED));
-                    ui.horizontal(|ui| {
-                        ui.label("People folder");
-                        changed |= ui
-                            .add(egui::TextEdit::singleline(&mut self.vdata.settings.people_dir).hint_text(crate::import::people::DEFAULT_DIR).desired_width(220.0))
-                            .on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.")
-                            .changed();
-                    });
-                    ui.label(muted("Type [[p followed by a name to pick a person from this folder (or make a new contact note).").size(12.0));
-                    ui.add_space(8.0);
-                    changed |= self.sync_settings_ui(ui);
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Drawings").color(theme::MUTED));
-                    changed |= ui
-                        .checkbox(&mut self.cfg.auto_convert_canvas, "Convert Obsidian canvases to editable drawings when opening them (instead of asking)")
-                        .on_hover_text("Off: Shale asks, and can show the canvas read-only. The canvas file is never changed.")
-                        .changed();
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Appearance").color(theme::MUTED));
-                    changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
-                    changed |= ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed();
-                    changed |= ui.checkbox(&mut self.cfg.inline_images, "Show embedded images and players inside the editor (the link text appears while the cursor is on it)").changed();
-                    changed |= ui.checkbox(&mut self.cfg.line_numbers, "Show line numbers in the editor").changed();
-                    changed |= ui.checkbox(&mut self.cfg.live_preview, "Markdown preview in the editor (the lines around the cursor show raw markdown)").changed();
-                    ui.add_enabled_ui(self.cfg.live_preview, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Raw lines around the cursor");
-                            changed |= ui.add(egui::DragValue::new(&mut self.cfg.preview_raw_lines).range(0..=20)).changed();
-                        });
-                        changed |= ui
-                            .checkbox(&mut self.cfg.table_cell_edit, "Edit table cells in the grid")
-                            .on_hover_text("Off: a click on a table shows its raw markdown. A single table can be switched by the button above its top right corner.")
-                            .changed();
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Play button over the artwork of a sound or video");
-                        changed |= ui
-                            .add(
-                                egui::Slider::new(&mut self.cfg.media_play_button_opacity, 0.0..=1.0)
-                                    .custom_formatter(|v, _| format!("{:.0} %", v * 100.0))
-                                    .custom_parser(|t| t.trim().trim_end_matches('%').trim().parse::<f64>().ok().map(|v| v / 100.0)),
-                            )
-                            .on_hover_text("How opaque the round button is; it is fully opaque while the mouse is over it")
-                            .changed();
-                    });
-                    // videos are decoded by the system's ffmpeg (MEDIA-010)
-                    match self.media.ffmpeg() {
-                        Some(p) => ui.label(egui::RichText::new(format!("Videos are played with ffmpeg ({})", p.display())).small().color(theme::MUTED)),
-                        None => ui.label(egui::RichText::new(crate::media::ffmpeg::MISSING_HELP).small().color(theme::LINK_MISSING)),
-                    };
-                    changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing: notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back").changed();
-                    ui.horizontal(|ui| {
-                        ui.label("Text size");
-                        changed |= ui.add(egui::Slider::new(&mut self.cfg.font_size, 12.0..=24.0)).changed();
-                    });
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Editing").color(theme::MUTED));
-                    changed |= ui.checkbox(&mut self.cfg.format_toolbar, "Show formatting toolbar above the text of a note").changed();
-                    ui.add_enabled_ui(self.cfg.format_toolbar, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("Toolbar button size");
-                            changed |= ui.add(egui::Slider::new(&mut self.cfg.toolbar_size, 80..=200).step_by(10.0).suffix(" %")).changed();
-                        });
-                    });
-                    changed |= crate::format_bar::preset_editor(ui, "Font colours", &mut self.cfg.font_colours, &crate::config::DEFAULT_FONT_COLOURS);
-                    changed |= crate::format_bar::preset_editor(ui, "Highlight colours", &mut self.cfg.highlight_colours, &crate::config::DEFAULT_HIGHLIGHT_COLOURS);
-                    ui.label(muted("The colours of the toolbar's palettes. Colours are saved in the note as <span style=\"color: #RRGGBB;\"> and <mark style=\"background: #RRGGBB;\">.").size(12.0));
-                    ui.add_space(8.0);
-                    self.post_index_settings(ui);
-                    ui.label(egui::RichText::new("Data and caches").color(theme::MUTED));
-                    ui.horizontal(|ui| {
-                        if ui.button("Data usage…").on_hover_text("What Shale keeps on disk, and its caches").clicked() {
-                            open_usage = true;
-                        }
-                        let total = self.usage.total().map(|t| format!("caches: {}", crate::data_usage::human_bytes(t))).unwrap_or_else(|| "caches: not counted yet".into());
-                        ui.label(muted(total).size(12.0));
-                    });
-                    egui::CollapsingHeader::new("How long caches are kept").id_salt("settings-retention").show(ui, |ui| {
-                        for id in crate::data_usage::CacheId::ALL.into_iter().filter(|id| !id.kept_current()) {
-                            ui.label(id.name());
-                            ui.indent(("retention", id), |ui| {
-                                if crate::data_usage::dialog::retention_ui(ui, id, &mut self.cfg.caches) {
-                                    self.usage.setting_changed(id);
-                                    changed = true;
-                                }
-                            });
-                        }
-                    });
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Help").color(theme::MUTED));
-                    if ui.button("Open user guide (F1)").on_hover_text("The guide is a vault: a copy of it is made in Shale's data folder, once per version, and opened").clicked() {
-                        open_guide = true;
-                    }
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Troubleshooting").color(theme::MUTED));
-                    if ui.checkbox(&mut self.cfg.input_log, "Record keyboard input to a file (to find keyboard problems)").changed() {
-                        if self.cfg.input_log {
-                            self.start_input_log();
-                        }
-                        changed = true;
-                    }
-                    if self.cfg.input_log {
-                        let p = crate::config::input_log_path();
-                        ui.horizontal(|ui| {
-                            ui.label(muted(p.to_string_lossy()).size(12.0));
-                            if ui.small_button("Copy path").clicked() {
-                                ui.ctx().copy_text(p.to_string_lossy().into_owned());
-                            }
-                        });
-                    }
-                    ui.label(muted(format!("Build {}", crate::config::build_stamp())).size(12.0));
-                    if changed {
-                        self.save_config();
-                    }
-                };
-                let resp = crate::dialog::Dialog::new("settings", "Settings").width(640.0).show_with_footer(
+                let mut asks = crate::settings::Asks::default();
+                let mut body = |ui: &mut egui::Ui| asks = self.settings_body(ui, vault_path, tab, keys);
+                let resp = crate::dialog::Dialog::new("settings", "Settings").width(740.0).show_with_footer(
                     &ctx,
                     &mut done,
                     |ui, _| body(ui),
@@ -1079,14 +915,27 @@ impl ShaleApp {
                         }
                     },
                 );
-                if done {
+                if done || asks.close {
                     keep = false;
                 }
+                open_calendars |= asks.calendars;
+                open_usage |= asks.usage;
+                open_guide |= asks.guide;
+                open_mail |= asks.mail;
+                open_social |= asks.social;
                 if resp.should_close() {
                     self.keymap.recording = false;
                     keep = false;
                 }
             }
+        }
+        if open_mail {
+            self.open_mail_settings();
+            keep = false;
+        }
+        if open_social {
+            self.open_social_accounts();
+            keep = false;
         }
         if open_calendars {
             self.open_calendar_settings();

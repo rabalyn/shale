@@ -177,13 +177,13 @@ fn a_video_that_is_an_lfs_pointer_is_downloaded_first_even_without_ffmpeg() {
 #[test]
 fn the_settings_say_where_ffmpeg_is_or_that_it_is_missing_and_where_to_get_it() {
     let mut fx = Fx::new_with("v-settings", VIDEO_NOTE, &["clip.mp4"], |a| a.media.use_ffmpeg(|| None));
-    fx.app.open_settings(SettingsTab::General);
+    fx.app.open_settings(SettingsTab::Appearance);
     fx.hl.frames(&mut fx.app, 3);
     assert!(texts(&fx).iter().any(|t| t.contains("ffmpeg is not installed")), "{:?}", texts(&fx));
     assert!(texts(&fx).iter().any(|t| t.contains("ffmpeg.org")), "it says where to get it");
     if have_ffmpeg() {
         let mut fx = Fx::new("v-settings2", VIDEO_NOTE, &["clip.mp4"]);
-        fx.app.open_settings(SettingsTab::General);
+        fx.app.open_settings(SettingsTab::Appearance);
         fx.hl.frames(&mut fx.app, 3);
         assert!(texts(&fx).iter().any(|t| t.starts_with("Videos are played with ffmpeg")), "{:?}", texts(&fx));
     }
