@@ -32,7 +32,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   thread by one author) as a note, with its pictures and a link back to the post.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
   and a graph of the whole vault. Headings can be numbered (1, 1.1, 1.2), a note's title line hides a `YYMMDD_` date prefix, links to a heading
-  scroll to it, and the PDF export has a table of contents and bookmarks; a folder, or the whole vault, exports as one PDF, a book, with a title page, contents, running headers and links between the chapters (`shale --export-pdf <folder> <file.pdf>` does it without a window). A note can also be
+  scroll to it, and the PDF export has a table of contents and bookmarks; a folder, or the whole vault, exports as one PDF, a book, with a title page, contents, running headers and links between the chapters (`shale --export-pdf <folder> <file.pdf>` does it without a window). A note, or a folder as a thesis or report, can also be
   exported through LaTeX templates (the TU Darmstadt classes, for instance): a guided setup finds or
   installs the TeX, imports the templates and asks for your logo and details. The built-in export needs
   nothing; the LaTeX export needs a TeX, which Shale installs for you only when you agree (about 100 MB to

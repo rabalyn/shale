@@ -142,10 +142,17 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   (or the heading), and nested bookmarks. The convention needs no renaming: chapters are the notes (not
   `export: false`), a folder note (`index.md`, `README.md`, the note named like the folder, or
   `folder-note: true`) introduces a folder, the reading order is its `order:` list, else the order of its
-  links, then the rest by name with numbers by value. The dialog has the built-in engine only and a folded
-  **Reading order** to check the tree; the export is a background job with Cancel.
+  links, then the rest by name with numbers by value. The dialog has a folded **Reading order** to check the
+  tree; the export is a background job with Cancel.
   `shale --export-pdf <folder> <file.pdf>` does it without a window, and `scripts/userguide-pdf.sh` makes the PDF of this
   user guide (BOOK-001 to BOOK-012).
+- **A folder through a LaTeX template** (#309): the folder's export dialog has the engine choice of a note's.
+  With **LaTeX template** and a kind of the article or book family (publication, report, exercise, thesis,
+  PhD; slides, letters and posters are greyed) the book is one LaTeX document: in a thesis the subfolders are
+  `\part`s and the notes `\chapter`s, in an article kind they start at `\section`; folder notes' text goes
+  under their part, the top folder note's before the first chapter and its properties fill the fields; links
+  between the chapters are `\hyperref`s to their labels; embeds of the same name in different folders stay
+  apart. LaTeX makes the numbers, the contents and the bookmarks (BOOK-013 to BOOK-017).
 
 - **Settings → LaTeX** finds the TeX for the LaTeX export of notes (LuaLaTeX and biber, the one on the
   computer when its kernel is from 2022-06-01 or newer, else a TeX Live that Shale installs itself):
