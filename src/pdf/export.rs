@@ -77,7 +77,7 @@ pub struct ExportOptions {
     pub plain_tables: bool,
     /// notes: a *Contents* page with the `##`–`####` headings and the pages they start on (PDF-008)
     pub toc: bool,
-    /// notes: the setting for numbered headings (CFG-040); a note's front matter overrides it
+    /// notes: the setting for numbered headings (CFG-042); a note's front matter overrides it
     pub numbered_headings: bool,
     /// notes: the width in points of the editor's text column, where the note was shown
     /// (`NoteEditor::column`); embeds are as big in proportion to the text as there (PDF-005).
@@ -1268,7 +1268,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: PDF-008, CFG-040
+    // spec: PDF-008, CFG-042
     #[test]
     fn without_the_box_or_without_headings_there_is_no_contents_page_and_numbering_follows_the_note() {
         let (v, d) = vault();

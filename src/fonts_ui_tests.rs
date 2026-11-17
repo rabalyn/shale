@@ -1,4 +1,4 @@
-//! The fonts of the areas (CFG-030 to CFG-036), driven through the whole window (headless).
+//! The fonts of the areas (CFG-030 to CFG-040), driven through the whole window (headless).
 //! The installed fonts are a list of our own (the bundled Virgil), never what is on the machine.
 
 use crate::app::{Options, SettingsTab, ShaleApp, View};
@@ -164,10 +164,10 @@ fn cfg_032_the_picker_filters_and_picks_by_keyboard() {
     // used at once, and not just in the picker
     assert_eq!(f.app.fonts.area(Area::Ui).family, FontFamily::Name(format!("system:{}", f.virgil).into()));
     assert!(f.texts().iter().any(|(t, _, fam)| t == "Use the same font and size everywhere" && *fam == FontFamily::Name(format!("system:{}", f.virgil).into())), "the dialog is drawn in the font");
-    // arrow keys move (and wrap around), Enter picks: down twice from Default is Default again
+    // the list opens on the chosen font (CFG-040); arrow keys move and wrap around, Enter picks:
+    // down from the last font is Default
     f.click(&format!("{}  ⏷", f.virgil));
     f.frames(3);
-    f.key(Key::ArrowDown);
     f.key(Key::ArrowDown);
     f.key(Key::Enter);
     assert_eq!(f.app.cfg.fonts.all.family, None);
@@ -233,5 +233,132 @@ fn cfg_037_the_editor_draws_raw_text_and_the_reading_view_rendered_text_at_their
     f.app.tabbar.tabs[f.app.tabbar.active].reading = true;
     f.frames(4);
     assert_eq!(size_of(&mut f), Some(26.0), "the reading view shows rendered text at the rendered size");
+    let _ = std::fs::remove_dir_all(&f.dir);
+}
+
+// spec: CFG-040
+#[test]
+fn cfg_040_every_row_has_a_sample_that_follows_the_highlighted_font_until_one_is_picked() {
+    let mut f = F::new("sample");
+    f.app.open_settings(SettingsTab::Fonts);
+    f.frames(3);
+    let virgil = FontFamily::Name(format!("system:{}", f.virgil).into());
+    let samples = |f: &mut F| -> Vec<(f32, FontFamily)> { f.texts().into_iter().filter(|(t, _, _)| t.starts_with(crate::settings::fonts::SAMPLE[0].trim_end())).map(|(_, s, fam)| (s, fam)).collect() };
+    assert_eq!(samples(&mut f), [(14.0, FontFamily::Proportional)], "one row, Shale's own font at the row's size");
+    // the list open: the mouse over an entry shows it in the sample, without picking it
+    f.click("Default  ⏷");
+    f.frames(3);
+    let at = f.hl.find_label(&mut f.app, &f.virgil.clone()).center();
+    f.hl.frame(&mut f.app, vec![Event::PointerMoved(at)]);
+    assert!(f.texts().iter().any(|(t, _, _)| t == "Loading the font…"), "the font is loaded for the sample first");
+    f.frames(3);
+    assert_eq!(samples(&mut f), [(14.0, virgil.clone())]);
+    assert!(f.app.cfg.fonts.all.family.is_none(), "nothing is picked");
+    assert_eq!(f.app.fonts.area(Area::Ui).family, FontFamily::Proportional, "the areas keep their font");
+    // the keyboard moves the highlight too; Esc goes back to the chosen font
+    f.key(Key::ArrowUp);
+    assert_eq!(samples(&mut f), [(14.0, FontFamily::Proportional)], "up to Default");
+    f.key(Key::ArrowDown);
+    assert_eq!(samples(&mut f), [(14.0, virgil.clone())]);
+    f.key(Key::Escape);
+    assert_eq!(samples(&mut f), [(14.0, FontFamily::Proportional)], "closed: the chosen font again");
+    assert!(f.app.cfg.fonts.all.family.is_none());
+    // a row for every area: each sample in its own font and size, all at once; a large size is capped
+    f.app.cfg.fonts.separate();
+    f.app.cfg.fonts.mail.family = Some(f.virgil.clone());
+    f.app.cfg.fonts.editor_raw.size = 40.0;
+    f.frames(4);
+    let s = samples(&mut f);
+    assert_eq!(s.len(), Area::ALL.len(), "{s:?}");
+    assert_eq!(s.iter().filter(|(_, fam)| *fam == virgil).count(), 1, "the mail row: {s:?}");
+    assert!(s.contains(&(28.0, FontFamily::Proportional)), "the raw editor's 40 points are drawn at 28: {s:?}");
+    // a chosen font that is not installed has no sample, only the hint
+    f.app.cfg.fonts.calendar.family = Some("No Such Font".into());
+    f.frames(4);
+    assert_eq!(samples(&mut f).len(), Area::ALL.len() - 1);
+    assert!(f.texts().iter().any(|(t, _, _)| t == "not installed"));
+    let _ = std::fs::remove_dir_all(&f.dir);
+}
+
+impl F {
+    /// The place of a tab button of the Settings dialog.
+    fn tab(&mut self, label: &str) -> egui::Rect {
+        self.hl.find_label(&mut self.app, label)
+    }
+
+    /// The border between the tab list and the page: where it is drawn.
+    fn tab_border(&mut self) -> egui::Pos2 {
+        let r = self.tab("Vault");
+        egui::pos2(r.right() + 6.5, r.center().y)
+    }
+
+    fn drag_tab_border(&mut self, by: f32) {
+        let from = self.tab_border();
+        let to = from + egui::vec2(by, 0.0);
+        let path = Headless::steps(from, to, 5);
+        self.hl.press_and_move(&mut self.app, from, &path);
+    }
+}
+
+// spec: CFG-041
+#[test]
+fn cfg_041_no_tab_name_wraps_at_any_font_size_and_the_list_follows_the_size() {
+    let mut f = F::new("tab-auto");
+    f.app.open_settings(SettingsTab::Vault);
+    f.frames(3);
+    let widths = |f: &mut F| -> (f32, f32) {
+        let heights = ["Vault", "Appearance", "Keybindings"].map(|l| f.tab(l).height());
+        assert!(heights.iter().all(|h| *h == heights[0]), "every name on one line: {heights:?}");
+        (f.tab("Keybindings").width(), heights[0])
+    };
+    let (w14, h14) = widths(&mut f);
+    assert_eq!(w14, f.tab("Appearance").width().max(w14), "the list is as wide as its widest name");
+    f.app.cfg.fonts.all.size = 30.0;
+    f.frames(5);
+    let (w30, h30) = widths(&mut f);
+    assert!(w30 > w14 && h30 > h14, "a bigger font: the list is wider ({w14} -> {w30}) and no name wraps");
+    let _ = std::fs::remove_dir_all(&f.dir);
+}
+
+// spec: CFG-041
+#[test]
+fn cfg_041_dragging_the_border_sets_the_width_when_the_drag_ends_and_a_double_click_resets_it() {
+    let mut f = F::new("tab-drag");
+    f.app.open_settings(SettingsTab::Vault);
+    f.frames(3);
+    let auto = f.tab("Vault").width();
+    assert_eq!(f.app.cfg.settings_tab_width, None);
+    // the resize cursor on the border
+    let b = f.tab_border();
+    f.hl.frame(&mut f.app, vec![Event::PointerMoved(b)]);
+    f.hl.frame(&mut f.app, vec![Event::PointerMoved(b)]);
+    assert_eq!(f.hl.cursor, egui::CursorIcon::ResizeHorizontal);
+    // wider: the width follows the pointer, and is written only when the drag ends
+    f.drag_tab_border(60.0);
+    assert!((f.tab("Vault").width() - (auto + 60.0)).abs() <= 1.5, "{} vs {}", f.tab("Vault").width(), auto + 60.0);
+    assert_eq!(f.app.cfg.settings_tab_width, None, "not written while dragging");
+    let to = f.tab_border();
+    f.hl.release(&mut f.app, to);
+    let set = f.app.cfg.settings_tab_width.expect("written when the drag ends");
+    assert!((set as f32 - (auto + 60.0)).abs() <= 1.5, "{set}");
+    assert_eq!(f.tab("Vault").width(), set as f32, "and the list keeps it");
+    assert!(crate::config::text::to_toml(&f.app.cfg).contains(&format!("settings_tab_width = {set}")), "and the file has it");
+    // too far: half of the dialog at most
+    f.drag_tab_border(2000.0);
+    let to = f.tab_border();
+    f.hl.release(&mut f.app, to);
+    let most = f.app.cfg.settings_tab_width.unwrap();
+    assert!((300..=400).contains(&most) && most > set, "about half of the 740 points of the dialog: {most}");
+    // too narrow: 60 at least
+    f.drag_tab_border(-2000.0);
+    let to = f.tab_border();
+    f.hl.release(&mut f.app, to);
+    assert_eq!(f.app.cfg.settings_tab_width, Some(60));
+    // a double-click on the border: automatic again
+    let b = f.tab_border();
+    f.hl.click(&mut f.app, b, PointerButton::Primary);
+    f.hl.click(&mut f.app, b, PointerButton::Primary);
+    assert_eq!(f.app.cfg.settings_tab_width, None);
+    assert_eq!(f.tab("Vault").width(), auto);
     let _ = std::fs::remove_dir_all(&f.dir);
 }

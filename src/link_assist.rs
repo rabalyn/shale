@@ -53,7 +53,7 @@ pub struct LinkAssist {
     pub id: egui::Id,
     /// folder of the contact notes (`[[p` lists these; set from the app's settings)
     pub people_dir: String,
-    /// the setting for numbered headings (CFG-040): the heading list shows the numbers
+    /// the setting for numbered headings (CFG-042): the heading list shows the numbers
     pub numbered_headings: bool,
     pub(crate) ac_active: bool,
     /// byte where the `[[` of the open suggestions starts

@@ -25,14 +25,18 @@
 2. **`land.sh` fast-forwards the local `main`** after it pushed `origin/main`, when the checkout
    of `main` is clean and has no commits of its own; otherwise it says why it left it.
 3. **A check tag is a pre-release** `vX.Y.Z-rc.N`, made by `scripts/make-tag.sh` when the owner
-   is done for now: it bumps the version, lands the bump, tags the landed commit and pushes the
-   tag to Forgejo. A green run pushes `main` to GitHub; the tag stays on Forgejo, and GitHub
-   builds nothing.
+   is done for now: it bumps the version, merges `docs/changelog-pending/` into `[Unreleased]`,
+   lands the bump, tags the landed commit and pushes the tag to Forgejo. A green run pushes
+   `main` to GitHub; the tag stays on Forgejo, and GitHub builds nothing.
 4. **A release is `vX.Y.Z`**, made by `scripts/make-release.sh`: it bumps the version, moves
    `[Unreleased]` and `docs/changelog-pending/` into the version's `CHANGELOG.md` section, runs
    the release check, lands, tags and pushes the tag to Forgejo. A green run pushes `main` and the
    tag to GitHub, which builds and publishes the release (BUILD-012).
-5. A tag that was pushed is never moved or deleted: a failed run is fixed in a branch, landed, and
+5. **No tag without a changelog update** (owner, 2026-11-17): a check tag needs a change to
+   `CHANGELOG.md` or `docs/changelog-pending/` since the previous tag, a release needs entries in
+   `[Unreleased]` or `docs/changelog-pending/`; otherwise the script stops with "the changelog
+   needs an update first".
+6. A tag that was pushed is never moved or deleted: a failed run is fixed in a branch, landed, and
    a new tag is made (`-rc.N+1`, or a new patch version).
 
 ## Consequences

@@ -564,7 +564,7 @@ pub struct NoteEditor {
     pub pending_cursor: Option<usize>,
     /// The next scroll to `pending_cursor` puts its line at the top of the view (a heading link, LINK-015).
     pub scroll_to_top: bool,
-    /// Draw the numbers of the headings (LINK-014, CFG-040): the setting; a note's front matter overrides it.
+    /// Draw the numbers of the headings (LINK-014, CFG-042): the setting; a note's front matter overrides it.
     pub numbered_headings: bool,
     pub request_focus: bool,
     /// Frames left to ask again when the request was not granted (a dialog that has just closed
@@ -4073,7 +4073,7 @@ mod tests {
         &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format
     }
 
-    // spec: LINK-014, CFG-040
+    // spec: LINK-014, CFG-042
     #[test]
     fn headings_show_their_numbers_before_the_text_and_the_buffer_stays_as_it_is() {
         let (v, d) = vault_for_tests("numbers");

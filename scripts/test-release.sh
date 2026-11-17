@@ -105,10 +105,13 @@ check "the tag is on the remote and points at the landed bump" 'remote_tag v0.4.
 check "main has the version in Cargo.toml and Cargo.lock" '[ "$(version_on_main)" = 0.4.0-rc.1 ] && git show origin/main:Cargo.lock | grep -A1 "name = \"shale\"" | grep -Fq "0.4.0-rc.1" && git show origin/main:Cargo.lock | grep -Fq "version = \"9.9.9\"" && git show origin/main:Cargo.toml | grep -Fq "other = { version = \"9.9.9\" }"'
 check "the tag is annotated" '[ "$(git cat-file -t v0.4.0-rc.1)" = tag ]'
 check "the release issue was made and named in the commit" 'grep -Fq "issue create -R rabalyn/shale --title Release 0.4.0" "$GH_LOG" && git log -1 --format=%B "origin/main^2" | grep -Fq "Version 0.4.0-rc.1 (check tag, Refs #77)"'
-check "the changelog is left for the release" 'git show origin/main:docs/changelog-pending/I2.md >/dev/null 2>&1 && git show origin/main:CHANGELOG.md | grep -Fq "## [Unreleased]" && ! git show origin/main:CHANGELOG.md | grep -Fq "0.4.0"'
+check "a check tag merges the pending files into [Unreleased], without a version section" '[ -z "$(git ls-tree origin/main docs/changelog-pending/)" ] && git show origin/main:CHANGELOG.md | sed -n "/^## \[Unreleased\]/,/^## \[0.3.0\]/p" | grep -Fq -- "- Two (#2)." && ! git show origin/main:CHANGELOG.md | grep -Fq "0.4.0"'
 check "the local main followed and no release branch is left" '[ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ] && ! git rev-parse -q --verify refs/heads/release/v0.4.0-rc.1 >/dev/null'
+expect "a check tag without a changelog update is refused" 1 "the changelog needs an update first" make-tag.sh --dry-run
+land pend3 docs/changelog-pending/I3.md $'### Fixed\n\n- Three (#3).'
 expect "without a level the next rc follows" 0 "check tag: v0.4.0-rc.2" make-tag.sh
 check "the open release issue is reused" '[ "$(grep -c "issue create" "$GH_LOG")" = 1 ] && grep -Fq "issue comment 77" "$GH_LOG"'
+land pend4 docs/changelog-pending/I4.md $'### Fixed\n\n- Four (#4).'
 expect "minor again continues the rc of that version" 0 "check tag: v0.4.0-rc.3" make-tag.sh --dry-run minor
 expect "an existing tag is refused" 1 "exists already" make-tag.sh 0.4.0-rc.2
 printf 'dirty\n' >> Cargo.toml
@@ -146,6 +149,8 @@ Intro text.
 
 ### Fixed
 
+- Three (#3).
+- Four (#4).
 - Nine (#9).
 
 ### Tests
@@ -166,7 +171,7 @@ check "the changelog section merges [Unreleased] and the pending files by headin
 check "the pending files are gone" '[ -z "$(git ls-tree origin/main docs/changelog-pending/)" ]'
 check "the release commit names the issue" 'git log -1 --format=%s "origin/main^2" | grep -Fxq "Release 0.4.0 (Refs #77)"'
 check "the tag message names the version" '[ "$(git tag -l --format="%(contents:subject)" v0.4.0)" = "Shale 0.4.0" ]'
-expect "a release needs changelog entries" 1 "no changelog entries to release" make-release.sh patch
+expect "a release needs changelog entries" 1 "the changelog needs an update first" make-release.sh patch
 land stray docs/changelog-pending/I11.md "- not under a heading"
 expect "a changelog line outside a heading is refused and named" 1 "outside a ### heading in docs/changelog-pending/I11.md" make-release.sh patch
 check "no release worktree is left behind" '! git worktree list | grep -Fq release/worktree'

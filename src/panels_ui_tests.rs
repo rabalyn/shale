@@ -325,7 +325,7 @@ fn edit_037_the_size_is_a_setting_in_the_editor_tab_with_reset() {
 
 // spec: CFG-040, CFG-020
 #[test]
-fn cfg_040_number_headings_is_a_setting_of_the_editor_tab_and_on_by_default() {
+fn cfg_042_number_headings_is_a_setting_of_the_editor_tab_and_on_by_default() {
     let mut p = P::new("number-headings-setting", &[]);
     p.app.open_settings(SettingsTab::Editor);
     assert!(p.shows(Show::Modals, "Number headings"), "the setting is on the Editor tab");
