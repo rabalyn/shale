@@ -695,7 +695,7 @@ fn panel_file_tree_opens_folds_and_offers_menus() {
         assert!(ok, "{item}: {} actions", a.len());
     }
     // the menu of a folder
-    for (item, want) in [("New note here", 0), ("New drawing here", 1), ("New folder here", 2), ("Rename…", 3), ("Move to trash", 4)] {
+    for (item, want) in [("New note here", 0), ("New drawing here", 1), ("New folder here", 2), ("Rename…", 3), ("Move to trash", 4), ("Export to PDF…", 5)] {
         let r = p.row("Box");
         p.click_rect(Show::Files, r, PointerButton::Secondary);
         p.actions();
@@ -706,7 +706,8 @@ fn panel_file_tree_opens_folds_and_offers_menus() {
             1 => matches!(a.as_slice(), [Action::NewDrawing { folder, .. }] if folder == Path::new("Box")),
             2 => matches!(a.as_slice(), [Action::NewFolder(f)] if f == Path::new("Box")),
             3 => matches!(a.as_slice(), [Action::Rename(f)] if f == Path::new("Box")),
-            _ => matches!(a.as_slice(), [Action::Trash(f)] if f == Path::new("Box")),
+            4 => matches!(a.as_slice(), [Action::Trash(f)] if f == Path::new("Box")),
+            _ => matches!(a.as_slice(), [Action::ExportFolder(f)] if f == Path::new("Box")),
         };
         assert!(ok, "{item}: {} actions", a.len());
     }
