@@ -288,7 +288,7 @@ fn bar_ends(width: f32, scale: f32) -> (egui::Rect, egui::Rect) {
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 400.0))), ..Default::default() };
         let mut out = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().frame(egui::Frame::new()).show(ui, |ui| {
-                bar.show(ui, "text", 0..0, &palettes);
+                bar.show(ui, "text", 0..0, false, &palettes);
             });
         });
         out.textures_delta.clear();
@@ -338,4 +338,118 @@ fn the_app_draws_the_toolbar_at_the_size_of_the_setting() {
     fx.app.cfg.toolbar_size = 5;
     fx.hl.frames(&mut fx.app, 3);
     assert!((fx.hl.find_label(&mut fx.app, "Bold: **text**").height() - 26.0 * 0.8).abs() < 0.5, "a value out of range is clamped to 80 %");
+}
+
+const CELLS: &str = "before\n\n| A | B |\n|---|---|\n| one two | x |\n";
+const ESC: Event = Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+
+impl Fx {
+    /// A note with a table drawn as a grid (the markdown preview is on).
+    fn table(tag: &str) -> Fx {
+        let mut fx = Fx::new(tag, CELLS);
+        fx.app.cfg.live_preview = true;
+        fx.hl.frames(&mut fx.app, 4);
+        fx
+    }
+
+    /// Click into the cell with this text (it is edited in the grid).
+    fn edit_cell(&mut self, text: &str) {
+        let (_, at) = self.hl.text.iter().find(|(t, _)| t == text).cloned().unwrap_or_else(|| panic!("{text} is not painted"));
+        self.hl.click(&mut self.app, at + egui::Vec2::new(4.0, 6.0), PointerButton::Primary);
+        assert!(self.editor().editing_cell().is_some(), "the cell of {text} is edited");
+    }
+
+    fn editor(&self) -> &crate::editor::NoteEditor {
+        &self.app.tabbar.tabs[self.app.tabbar.active].editor
+    }
+
+    /// Select chars in the box of the cell being edited (it has the keyboard).
+    fn select_in_cell(&mut self, from: usize, to: usize) {
+        let id = self.editor().cell_box_id();
+        let mut st = egui::text_edit::TextEditState::load(self.hl.ctx(), id).unwrap_or_default();
+        st.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(from), CCursor::new(to))));
+        st.store(self.hl.ctx(), id);
+        self.hl.frames(&mut self.app, 2);
+    }
+
+    fn selected_in_cell(&self) -> (usize, usize) {
+        let r = egui::text_edit::TextEditState::load(self.hl.ctx(), self.editor().cell_box_id()).and_then(|st| st.cursor.char_range()).unwrap();
+        (r.primary.index.0.min(r.secondary.index.0), r.primary.index.0.max(r.secondary.index.0))
+    }
+
+    fn escape(&mut self) {
+        self.hl.frame(&mut self.app, vec![ESC]);
+        self.hl.frames(&mut self.app, 3);
+    }
+}
+
+// spec: EDIT-030, EDIT-027
+#[test]
+fn in_a_cell_the_inline_buttons_format_the_cell_selection_and_the_cursor_and_undo_takes_it_back_with_the_edit() {
+    let mut fx = Fx::table("cell-inline");
+    fx.edit_cell("one two");
+    fx.select_in_cell(4, 7);
+    fx.click("Bold: **text**");
+    assert_eq!(fx.text(), "before\n\n| A | B |\n|---|---|\n| one **two** | x |\n", "the selection in the cell is wrapped, the note around it is not touched");
+    assert_eq!(fx.editor().editing_cell(), Some((1, 0)), "the cell is still edited");
+    assert_eq!(fx.selected_in_cell(), (6, 9), "the word stays selected, inside the markers");
+    // a cursor with no selection: the pair goes in with the cursor between, and typing goes in there
+    fx.select_in_cell(3, 3);
+    fx.click("Inline code: `code`");
+    fx.hl.frame(&mut fx.app, vec![Event::Text("y".into())]);
+    fx.hl.frames(&mut fx.app, 2);
+    assert_eq!(fx.text(), "before\n\n| A | B |\n|---|---|\n| one`y` **two** | x |\n");
+    // the same transforms toggle off again
+    fx.select_in_cell(9, 12);
+    fx.click("Bold: **text**");
+    assert_eq!(fx.text(), "before\n\n| A | B |\n|---|---|\n| one`y` two | x |\n");
+    // leaving the cell: everything is one step of the note's undo history (EDIT-021)
+    fx.escape();
+    assert_eq!(fx.editor().editing_cell(), None);
+    let mut text = fx.text();
+    assert!(fx.app.undo.of(&PathBuf::from(NOTE)).undo(&mut text).is_some());
+    assert_eq!(text, CELLS, "one undo takes the formatting back together with the typing of the cell");
+}
+
+// spec: EDIT-030, EDIT-026
+#[test]
+fn while_a_cell_is_edited_the_line_buttons_are_greyed_out_and_do_nothing() {
+    let mut fx = Fx::table("cell-lines");
+    fx.edit_cell("one two");
+    fx.select_in_cell(0, 3);
+    for tip in [
+        "Bullet list: - item",
+        "Numbered list: 1. item",
+        "Task: - [ ] item",
+        "Quote: > text",
+        "Code block: ``` fence",
+        "Horizontal rule: ---",
+        "Table: 2 columns, 2 rows",
+        "Heading level",
+        "Embed a file or picture: opens the file picker (![[file]])",
+    ] {
+        fx.click(tip);
+        assert_eq!(fx.text(), CELLS, "{tip} does nothing in a cell");
+        assert_eq!(fx.editor().editing_cell(), Some((1, 0)), "and the editing goes on");
+    }
+    assert!(!fx.editor().picker_visible(), "the embed did not start the file picker");
+    fx.click("Italic: *text*");
+    assert!(fx.text().contains("| *one* two |"), "the inline buttons are not greyed out: {}", fx.text());
+}
+
+// spec: EDIT-030, EDIT-027
+#[test]
+fn with_no_cell_edited_the_toolbar_acts_on_the_note_text_even_in_a_note_with_a_table() {
+    let mut fx = Fx::table("cell-none");
+    fx.select(0, 6);
+    fx.click("Bold: **text**");
+    assert_eq!(fx.text(), "**before**\n\n| A | B |\n|---|---|\n| one two | x |\n");
+    fx.click("Bullet list: - item");
+    assert!(fx.text().starts_with("- **before**"), "the line buttons work: {}", fx.text());
+    // after a cell was edited and left, the bar is back on the note
+    fx.edit_cell("one two");
+    fx.escape();
+    fx.select(4, 10);
+    fx.click("Italic: *text*");
+    assert!(fx.text().starts_with("- ***before***"), "{}", fx.text());
 }

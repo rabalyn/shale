@@ -140,7 +140,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   rows instead. Drag the borders to resize columns and rows, the edges to resize the whole table;
   a double click on a border makes all columns (rows) the same size. Hover the grid for buttons
   that add a row or column and delete the hovered row or column. Toolbar formatting of a
-  selection across cells formats each cell on its own.
+  selection across cells formats each cell on its own; while a cell is edited in the grid the
+  toolbar formats the cell's text (the line buttons are greyed out) and the change is part of
+  the cell's undo step.
 
   ![The Markdown preview](userguide/z_media/screenshots/editor-preview.png)
 

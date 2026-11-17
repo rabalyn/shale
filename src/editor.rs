@@ -573,12 +573,21 @@ impl NoteEditor {
     }
 
     /// Draw the formatting toolbar (EDIT-026); a click is done to the text by the next `show`.
+    /// While a table cell is edited in the grid the bar works on the text of the cell (EDIT-030).
     pub fn toolbar(&mut self, ui: &mut Ui, text: &str, palettes: &crate::format_bar::Palettes) {
-        let sel = self.selection_bytes(ui.ctx(), text);
-        if let Some(cmd) = self.bar.show(ui, text, sel, palettes) {
+        let in_cell = self.grid.cell.is_some();
+        let (shown, sel) = match &self.grid.cell {
+            Some(c) => (c.buf.as_str(), c.selection_bytes()),
+            None => (text, self.selection_bytes(ui.ctx(), text)),
+        };
+        let bar = ui.scope(|ui| self.bar.show(ui, shown, sel, in_cell, palettes));
+        // a press on the bar (or on its popups) takes the keyboard from the cell's box: that does not end the editing
+        let pressed = ui.input(|i| i.pointer.any_down() || i.pointer.any_released());
+        self.grid.hold = in_cell && pressed && (ui.rect_contains_pointer(bar.response.rect) || egui::Popup::is_any_open(ui.ctx()));
+        if let Some(cmd) = bar.inner {
             self.format_request = Some(cmd);
             // the click took the keyboard from the text box: give it back
-            self.request_focus = true;
+            self.request_focus = !in_cell;
             ui.ctx().request_repaint();
         }
     }
@@ -603,6 +612,18 @@ impl NoteEditor {
             self.vim_apply_cursor(ui, text);
         }
         true
+    }
+
+    /// The table cell being edited in the grid: (row, column) (testing aid).
+    #[cfg(test)]
+    pub(crate) fn editing_cell(&self) -> Option<(usize, usize)> {
+        self.grid.cell.as_ref().map(|c| (c.row, c.col))
+    }
+
+    /// The id of the box of the cell being edited (testing aid).
+    #[cfg(test)]
+    pub(crate) fn cell_box_id(&self) -> egui::Id {
+        crate::table_grid::TableGrid::cell_id(self.id)
     }
 
     /// Is the `[!` file picker popup on screen?
@@ -1082,6 +1103,12 @@ impl NoteEditor {
         }
         if let Some((n, change)) = self.table_edit.take() {
             changed |= self.apply_table_edit(ui, text, undo.of(rel), n, &change, true);
+        }
+        // a toolbar command goes to the cell being edited (EDIT-030); else to the note below
+        if let Some(n) = self.grid.cell.as_ref().map(|c| c.table) {
+            if let Some(cmd) = self.format_request.take() {
+                self.grid.format(ui.ctx(), self.id, n, cmd);
+            }
         }
         for (n, change, step) in std::mem::take(&mut self.grid.pending) {
             changed |= self.apply_table_edit(ui, text, undo.of(rel), n, &change, step);

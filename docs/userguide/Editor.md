@@ -78,6 +78,12 @@ the last column to the next row), **←** at its start to the previous one, **�
 of the text to the cell above and **↓** on its last line to the cell below. Everything from the click to leaving is one
 step you can undo. Moving the cursor into the table with the keyboard still shows its raw rows.
 
+While a cell is edited, the [[#Formatting toolbar]] works on the cell: bold, italic, strikethrough,
+highlight, code, links, colours and "Clear formatting" format the selected text in the cell (or
+put the markers in at the cursor), and the change is part of the cell's undo step. The buttons
+for headings, lists, tasks, quotes, code blocks, rules, tables and embeds are greyed out then,
+because they make no sense inside a cell.
+
 ![[table-cell-edit.png]]
 
 If you prefer the raw markdown, turn off "Edit table cells in the grid" in Settings → General →

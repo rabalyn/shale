@@ -3,9 +3,11 @@
 //! `TableGrid`; what it does to the note comes out as `table::Change`s the editor makes at the
 //! start of its next frame.
 
+use crate::markdown;
 use crate::table::{Change, Laid, Meta, Sizes, Table, MIN_COL};
 use crate::theme;
 use eframe::egui::{self, Key, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
+use std::ops::Range;
 
 /// Half the width of the strip over a border that resizes (EDIT-031).
 const GRAB: f32 = 3.0;
@@ -22,6 +24,11 @@ pub struct CellEdit {
     pub before: Option<String>,
     /// the cell's box had the keyboard (losing it afterwards ends the editing)
     had_focus: bool,
+    /// the selection in the box (chars: primary, secondary) when it last had the keyboard: a press on the
+    /// toolbar takes the keyboard away, and the box then drops its selection (EDIT-030)
+    sel: (usize, usize),
+    /// the toolbar had the pointer last frame
+    held: bool,
     /// the cursor was on the first / the last line of the box's text last frame (Up and Down leave the cell there)
     first_line: bool,
     last_line: bool,
@@ -80,6 +87,16 @@ pub struct TableGrid {
     pub ended: Option<(Option<String>, bool)>,
     /// the table of the cell being edited was drawn as a grid this frame
     seen: bool,
+    /// the pointer is on the formatting toolbar this frame: losing the keyboard to it does not end the editing (EDIT-030)
+    pub hold: bool,
+}
+
+impl CellEdit {
+    /// The selection of the box as bytes of `buf` (a cursor is an empty range).
+    pub fn selection_bytes(&self) -> Range<usize> {
+        let (a, b) = (markdown::char_to_byte(&self.buf, self.sel.0), markdown::char_to_byte(&self.buf, self.sel.1));
+        a.min(b)..a.max(b)
+    }
 }
 
 /// The text of a cell of `table` (row 0 is the header).
@@ -145,8 +162,29 @@ impl TableGrid {
         self.seen = false;
     }
 
+    /// Do a toolbar command to the text of the cell being edited (EDIT-030, EDIT-027): the same text
+    /// transform as for the note, the result selected, the keyboard back in the cell's box and the
+    /// change part of the editing's undo step. False when no cell is edited, the command makes no
+    /// sense in a cell or changes nothing.
+    pub fn format(&mut self, ctx: &egui::Context, id: egui::Id, table: usize, cmd: crate::format::Cmd) -> bool {
+        let Some(c) = self.cell.as_mut().filter(|c| c.table == table && crate::format::works_in_a_cell(cmd)) else { return false };
+        let box_id = Self::cell_id(id);
+        ctx.memory_mut(|m| m.request_focus(box_id));
+        let Some((new, r)) = crate::format::apply(cmd, &c.buf, c.selection_bytes()) else { return false };
+        let sel = (markdown::byte_to_char(&new, r.start), markdown::byte_to_char(&new, r.end));
+        c.buf = new;
+        c.sel = sel;
+        let mut state = egui::text_edit::TextEditState::load(ctx, box_id).unwrap_or_default();
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(sel.0), egui::text::CCursor::new(sel.1))));
+        state.store(ctx, box_id);
+        self.pending.push((table, Change::Cell { row: c.row, col: c.col, text: c.buf.clone() }, false));
+        ctx.request_repaint();
+        true
+    }
+
     /// Call after the grids were drawn: an editing whose table is no longer a grid ends.
     pub fn end_frame(&mut self) {
+        self.hold = false;
         if self.cell.is_some() && !self.seen {
             self.finish(false);
         }
@@ -167,7 +205,7 @@ impl TableGrid {
         let mut state = egui::text_edit::TextEditState::default();
         state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
         state.store(ui.ctx(), id);
-        self.cell = Some(CellEdit { table: s.ordinal, row, col, buf, before, had_focus: false, first_line: true, last_line: true });
+        self.cell = Some(CellEdit { table: s.ordinal, row, col, buf, before, had_focus: false, held: false, sel: (at, at), first_line: true, last_line: true });
         ui.ctx().memory_mut(|m| m.request_focus(id));
         ui.ctx().request_repaint();
     }
@@ -251,6 +289,13 @@ impl TableGrid {
         let font = egui::FontId::proportional(if size > 2.0 { size } else { 14.0 });
         // the background goes under the box, whose height is known once it is drawn
         let back = ui.painter().add(egui::Shape::Noop);
+        if self.hold || c.held {
+            // the toolbar had the pointer (this frame or the last): the box drops its selection when it loses the keyboard to a press there
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(c.sel.0), egui::text::CCursor::new(c.sel.1))));
+            state.store(ui.ctx(), id);
+        }
+        c.held = self.hold;
         let inner = Rect::from_min_size(rect.min + Vec2::new(6.0, 3.0), Vec2::new(rect.width() - 12.0, f32::INFINITY));
         let out = ui
             .scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
@@ -266,6 +311,9 @@ impl TableGrid {
             .inner;
         // which line of the box the cursor is on, for Up and Down next frame
         if let Some(r) = out.cursor_range {
+            if !self.hold {
+                c.sel = (r.primary.index.0, r.secondary.index.0);
+            }
             let at = out.galley.pos_from_cursor(r.primary);
             let rows = &out.galley.rows;
             c.first_line = rows.first().is_none_or(|row| at.center().y < row.rect().max.y);
@@ -290,9 +338,12 @@ impl TableGrid {
         }
         if resp.has_focus() {
             c.had_focus = true;
-        } else if c.had_focus {
+        } else if c.had_focus && !self.hold {
             // a click elsewhere took the keyboard
             self.finish(false);
+        } else if c.had_focus {
+            // the toolbar took it: the cell keeps the editing
+            ui.ctx().memory_mut(|m| m.request_focus(id));
         } else {
             ui.ctx().memory_mut(|m| m.request_focus(id));
         }
