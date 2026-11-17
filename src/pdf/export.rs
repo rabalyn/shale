@@ -148,8 +148,6 @@ fn over_white([r, g, b, a]: [u8; 4]) -> Rgba {
 fn print_bg(c: Color32) -> Option<Rgba> {
     if c == Color32::TRANSPARENT {
         None
-    } else if c == theme::CODE_BG {
-        Some(Rgba(238, 238, 240, 255))
     } else if c == theme::TAG_BG {
         Some(Rgba(236, 232, 251, 255))
     } else {
