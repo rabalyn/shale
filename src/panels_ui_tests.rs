@@ -336,6 +336,54 @@ fn cfg_042_number_headings_is_a_setting_of_the_editor_tab_and_on_by_default() {
     assert!(p.app.cfg.numbered_headings);
 }
 
+// spec: EDIT-038
+#[test]
+fn edit_038_the_lift_dialog_pastes_lifted_or_as_it_is_and_esc_pastes_as_it_is() {
+    let deep = "## A\ntext\n### B\n";
+    let pasted = |a: Vec<Action>| match a.as_slice() {
+        [Action::PasteText(t)] => t.clone(),
+        other => panic!("{} actions", other.len()),
+    };
+    let mut p = P::new("lift-paste", &[]);
+    // the editor's question reaches the app and opens the dialog
+    p.app.actions.push(Action::AskLiftHeadings(deep.into()));
+    p.app.process_actions();
+    assert!(matches!(&p.app.modal, Some(Modal::LiftPaste { text }) if text == deep));
+    assert!(p.shows(Show::Modals, "The pasted text has no # heading. Lift its headings?"));
+    p.click(Show::Modals, "Lift");
+    assert!(p.app.modal.is_none());
+    assert_eq!(pasted(p.actions()), "# A\ntext\n## B\n");
+    // as it is
+    p.app.modal = Some(Modal::LiftPaste { text: deep.into() });
+    p.click(Show::Modals, "Paste as it is");
+    assert!(p.app.modal.is_none());
+    assert_eq!(pasted(p.actions()), deep);
+    // Esc: as it is
+    p.app.modal = Some(Modal::LiftPaste { text: deep.into() });
+    p.look(Show::Modals);
+    p.key(Show::Modals, Key::Escape);
+    assert!(p.app.modal.is_none());
+    assert_eq!(pasted(p.actions()), deep);
+    // the answer is handed to the editor of the open note, which pastes it at the cursor
+    p.app.open(Path::new("Welcome.md"), false);
+    p.app.actions.push(Action::PasteText("# A\n".into()));
+    p.app.process_actions();
+    assert_eq!(p.app.tabbar.tabs[p.app.tabbar.active].editor.pending_paste.as_deref(), Some("# A\n"));
+}
+
+// spec: CFG-043, CFG-020
+#[test]
+fn cfg_043_date_prefix_for_new_notes_is_a_setting_of_the_editor_tab_and_on_by_default() {
+    let mut p = P::new("date-prefix-setting", &[]);
+    p.app.open_settings(SettingsTab::Editor);
+    assert!(p.shows(Show::Modals, "Date prefix for new notes"), "the setting is on the Editor tab");
+    assert!(p.app.cfg.date_prefix_new_notes, "on by default");
+    p.click(Show::Modals, "Date prefix for new notes");
+    assert!(!p.app.cfg.date_prefix_new_notes);
+    p.click(Show::Modals, "Date prefix for new notes");
+    assert!(p.app.cfg.date_prefix_new_notes);
+}
+
 // spec: EDIT-026, EDIT-028
 #[test]
 fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {

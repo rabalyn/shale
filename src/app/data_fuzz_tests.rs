@@ -133,6 +133,7 @@ impl Sim {
         crate::fsutil::write_atomic(&sandbox.join("outside/sentinel"), b"do not touch\n").unwrap();
         let mut sim =
             Sim { app: ShaleApp::build(Options { screenshot: None, vault: Some(root.clone()), view: None, keys: None }, false), sandbox, root, rng: Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1), next: 1, log: vec![], locked: vec![] };
+        sim.app.cfg.date_prefix_new_notes = false;
         for stem in STEMS.iter().take(4) {
             let folder = FOLDERS[sim.rng.below(FOLDERS.len())];
             let text = sim.content();

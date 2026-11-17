@@ -2,8 +2,6 @@
 features:
   - "Notes and links"
 ---
-# Notes and links
-
 A vault is a folder of markdown files. Notes link to each other with `[[wiki links]]`.
 Back to [[Start here]].
 
@@ -32,7 +30,9 @@ Back to [[Start here]].
 
 ![[link-completion.webm]]
 
-- Type `[[` to get matching notes; the last entry creates a new note. Esc closes the list.
+- Type `[[` to get matching notes; the last entry creates a new note. Esc closes the list. With
+  "Date prefix for new notes" on, the new note is named `YYMMDD_<name>` and the link you followed is
+  rewritten to `[[261117_Plan|Plan]]` so it still reaches the note.
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab
   completes like a shell. Files from outside the vault are copied to `z_media/<year>/<month>/`.
 - Type `[[p ` and a name to link a person ([[Tags and people]]).
@@ -42,8 +42,9 @@ Back to [[Start here]].
 
 ## Numbered headings
 
-The headings of a note can show numbers before their text: `##` is 1, a `###` under it 1.1, the next
-`###` 1.2, the next `##` 2. The first `#` heading is the note's title and has no number. The numbers
+The headings of a note can show numbers before their text: `#` is 1, a `##` under it 1.1, the next
+`##` 1.2, the next `#` 2. The note's title is the title line above the text ([[Editor]]), not a heading, so a `#` is
+numbered like the others. The numbers
 are only drawn, in a muted colour, never written into the file; you see them in the editor, the
 Markdown preview, the [[Reading view]], the outline ([[Graph and backlinks]]), the link preview and
 the [[PDF]]. Links stay `[[Note#Heading]]`, with the heading's text. Settings → Editor → "Number

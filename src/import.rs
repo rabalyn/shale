@@ -50,6 +50,13 @@ pub enum Source {
         name: String,
         data: MediaData,
     },
+    /// a Markdown file, imported as a note with its text as it is (IMP-033); `lift`: its headings
+    /// move up so the highest is `#` (IMP-034), only when it has none and the box is ticked
+    Markdown {
+        name: String,
+        text: String,
+        lift: bool,
+    },
     /// text dropped from another program (Wayland, IMP-011)
     #[cfg(target_os = "linux")]
     Text(String),
@@ -91,6 +98,7 @@ impl Item {
             Source::Email { .. } => "E-mail".into(),
             Source::Event { .. } => "Event".into(),
             Source::Files(_) => "Files".into(),
+            Source::Markdown { .. } => "Markdown note".into(),
             Source::Media { kind, .. } => kind.label().into(),
             #[cfg(target_os = "linux")]
             Source::Text(_) => "Text".into(),
@@ -107,6 +115,7 @@ impl Item {
             Source::Event { event, .. } => format!("{}\n{}\n{}", event.summary, event.location, event.description),
             Source::Files(p) => p.iter().map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(" "),
             Source::Media { name, .. } => name.clone(),
+            Source::Markdown { text, .. } => text.clone(),
             #[cfg(target_os = "linux")]
             Source::Text(t) => t.clone(),
             Source::Social { saved, .. } => {
@@ -132,6 +141,7 @@ impl Item {
                 #[cfg(any(target_os = "linux", test))]
                 MediaData::Bytes(b) => format!("{name} · {}", dialog::size_text(b.len())),
             },
+            Source::Markdown { name, text, .. } => format!("{name} · {} characters", text.chars().count()),
             #[cfg(target_os = "linux")]
             Source::Text(s) => format!("{} characters of text", s.chars().count()),
             Source::Social { saved, network, .. } => {
@@ -257,6 +267,14 @@ fn files_item(paths: Vec<PathBuf>) -> Item {
     Item { source: Source::Files(paths), include: true, title: safe_title(&title), att_on: vec![], already: None, people: vec![] }
 }
 
+/// An item for a Markdown file (IMP-033): a note named like the file, its text unchanged unless
+/// the headings are lifted (IMP-034), which is ticked when the text has headings but no `#`.
+pub fn markdown_item(name: String, text: String) -> Item {
+    let title = safe_title(&Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| name.clone()));
+    let lift = crate::markdown::lift_headings(&text).is_some();
+    Item { source: Source::Markdown { name, text, lift }, include: true, title, att_on: vec![], already: None, people: vec![] }
+}
+
 /// An item for a picture, PDF or audio file; its title is the file name the file is saved under.
 pub fn media_item(kind: media::Kind, name: String, data: MediaData) -> Item {
     Item { source: Source::Media { kind, name: name.clone(), data }, include: true, title: name, att_on: vec![], already: None, people: vec![] }
@@ -302,6 +320,10 @@ pub fn items_from_paths(paths: &[PathBuf]) -> (Vec<Item>, Vec<String>) {
                     }
                     items.extend(found);
                 }
+                Err(e) => notes.push(format!("Could not read “{name}”: {e}")),
+            },
+            "md" | "markdown" => match crate::fsutil::read_to_string(p) {
+                Ok(text) => items.push(markdown_item(name, text)),
                 Err(e) => notes.push(format!("Could not read “{name}”: {e}")),
             },
             _ if p.is_file() => match media::media_kind(p) {
@@ -585,6 +607,10 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                     }
                     s
                 }
+                Source::Markdown { text, lift, .. } => match crate::markdown::lift_headings(text).filter(|_| *lift) {
+                    Some(lifted) => lifted,
+                    None => text.clone(),
+                },
                 #[cfg(target_os = "linux")]
                 Source::Text(text) => {
                     let mut s = front(&[("type", "text".into()), ("date", ymd_text(today_ymd()))], &o.tags);
@@ -783,6 +809,44 @@ mod tests {
         assert_eq!(again[1].already.as_deref(), Some(made[0].as_path()), "a post that is part of a saved thread");
         assert!(!again[0].include && !again[1].include);
         assert!(again[2].already.is_none() && again[2].include);
+    }
+
+    // spec: IMP-033, IMP-034
+    #[test]
+    fn markdown_files_become_notes_and_their_headings_are_lifted_when_the_box_is_ticked() {
+        let mut v = temp_vault("markdown");
+        let src = v.root.join("..").join(format!("shale-import-mdsrc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&src);
+        std::fs::create_dir_all(&src).unwrap();
+        let deep = "---\ntitle: x\n---\n### Intro\ntext\n```\n### code\n```\n#### Part\n";
+        for (n, t) in [("Deep.md", deep), ("Top notes.markdown", "# Top\n## Sub\n"), ("Plain.MD", "no headings\n"), ("other.txt", "t")] {
+            std::fs::write(src.join(n), t).unwrap();
+        }
+        let paths: Vec<PathBuf> = ["Deep.md", "Top notes.markdown", "Plain.MD", "other.txt"].iter().map(|n| src.join(n)).collect();
+        let (mut items, notes) = items_from_paths(&paths);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(items.iter().map(|i| i.kind().to_string()).collect::<Vec<_>>(), vec!["Markdown note", "Markdown note", "Markdown note", "Files"], "other files stay attachments");
+        assert_eq!(items.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), vec!["Deep", "Top notes", "Plain", "other"]);
+        assert!(items[0].detail().starts_with("Deep.md"), "{}", items[0].detail());
+        assert!(items[0].tag_text().contains("Intro"));
+        // the lift box is ticked for the one with headings but no #, and for it only
+        let lifts: Vec<bool> = items.iter().take(3).map(|i| matches!(i.source, Source::Markdown { lift: true, .. })).collect();
+        assert_eq!(lifts, vec![true, false, false]);
+        let o = Options { folder: PathBuf::from("In"), tags: vec!["ignored".into()], keep_original: false, people_dir: "Adressbuch".into() };
+        let Imported { notes: made, errors, .. } = import(&mut v, &items[..3], &o);
+        assert!(errors.is_empty(), "{errors:?}");
+        let read = |i: usize| std::fs::read_to_string(v.abs(&made[i])).unwrap();
+        assert_eq!(made.iter().map(|m| rel_to_string(m)).collect::<Vec<_>>(), vec!["In/Deep.md", "In/Top notes.md", "In/Plain.md"], "named like the file, no date prefix");
+        assert_eq!(read(0), "---\ntitle: x\n---\n# Intro\ntext\n```\n### code\n```\n## Part\n", "ticked: lifted, code and front matter untouched");
+        assert_eq!((read(1).as_str(), read(2).as_str()), ("# Top\n## Sub\n", "no headings\n"), "the text as it is");
+        // unticked: the text unchanged
+        if let Source::Markdown { lift, .. } = &mut items[0].source {
+            *lift = false;
+        }
+        items[0].title = "Deep again".into();
+        let Imported { notes: made, .. } = import(&mut v, &items[..1], &o);
+        assert_eq!(std::fs::read_to_string(v.abs(&made[0])).unwrap(), deep);
+        let _ = std::fs::remove_dir_all(&src);
     }
 
     // spec: IMP-031

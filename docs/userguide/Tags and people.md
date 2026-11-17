@@ -3,8 +3,6 @@ features:
   - "People (contact notes)"
   - "Tags found automatically (no server, no AI)"
 ---
-# Tags and people
-
 Back to [[Start here]]. This note is itself tagged: #userguide #tags #people.
 
 ## Tags

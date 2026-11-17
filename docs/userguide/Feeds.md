@@ -2,8 +2,6 @@
 features:
   - "Feeds: read Mastodon and Bluesky, save posts to the vault"
 ---
-# Feeds
-
 ![[social-feed.png]]
 
 Read your Mastodon and Bluesky timelines next to your notes. The ribbon's speech-bubble button

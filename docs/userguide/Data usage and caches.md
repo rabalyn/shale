@@ -2,8 +2,6 @@
 features:
   - "Data usage and caches"
 ---
-# Data usage and caches
-
 ![[data-usage.png]]
 
 Settings → Data → **Data usage…** (or Ctrl+Shift+D) shows what Shale keeps

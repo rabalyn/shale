@@ -2,8 +2,6 @@
 features:
   - "Git sync"
 ---
-# Git sync
-
 Keep a vault on several computers with git. Back to [[Start here]].
 
 - Needs `git` installed. In Settings → Sync, enter the URL of a git repository

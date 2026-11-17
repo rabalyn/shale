@@ -397,15 +397,15 @@ its section from this file.
   release workflow on GitHub from the version tag. Check it with
   `gh attestation verify <file> --repo rabalyn/shale --signer-workflow rabalyn/shale/.github/workflows/build.yml --source-ref refs/tags/v<version>`;
   the release page also has the attestation as `<file>.sigstore.json` (BUILD-014).
-- **Numbered headings.** The headings of a note (`##` and deeper) show a number before their text, `1`,
+- **Numbered headings.** The headings of a note (`#` and deeper) show a number before their text, `1`,
   `1.1`, `1.2`, `2`, drawn muted in the editor, the Markdown preview, the reading view, the outline, the
-  link preview and the PDF; the number is never written into the file, and the first `#` heading, the
-  note's title, has none. Settings → Editor → "Number headings" (on by default) turns it on or off, and a
+  link preview and the PDF; the number is never written into the file (the note's title is the title
+  line above the text, not a `#` heading, #287). Settings → Editor → "Number headings" (on by default) turns it on or off, and a
   note's front matter `numbered-headings: true` or `false` overrides it for that note (LINK-014, CFG-042, #283).
 - **Table of contents and bookmarks in the PDF.** The note export has a "Table of contents" checkbox (on):
-  after the title, a *Contents* page lists the `##`–`####` headings with their numbers and the pages they
+  after the title, a *Contents* page lists the `#`–`###` headings with their numbers and the pages they
   start on, each entry a link; the text starts on the next page. The PDF also has bookmarks for the
-  `##`–`######` headings, nested by level (PDF-008, #283).
+  `#`–`######` headings, nested by level (PDF-008, #283).
 - **Heading completion.** After `[[Note#` or `[[#` the link suggestions list the headings of that note, with
   their numbers, and insert the heading's plain text (LINK-016, #283).
 

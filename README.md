@@ -29,7 +29,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **Feeds**: read your Mastodon and Bluesky timelines in Shale and save a post (or a whole
   thread by one author) as a note, with its pictures and a link back to the post.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
-  and a graph of the whole vault. Headings can be numbered (1, 1.1, 1.2), links to a heading
+  and a graph of the whole vault. Headings can be numbered (1, 1.1, 1.2), a note's title line hides a `YYMMDD_` date prefix, links to a heading
   scroll to it, and the PDF export has a table of contents and bookmarks.
 - **Mail**: read your IMAP mail next to your notes, search it, mark it read, flag, move or delete
   it, write, reply, forward and send mail (plain text, attachments, drafts, an outbox with "undo

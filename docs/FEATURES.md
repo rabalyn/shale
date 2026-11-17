@@ -98,8 +98,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
   the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
   player card; highlights and font colours are printed as written; a **Contents** page after the title lists the
-  `##`–`####` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
-  out, and the PDF has bookmarks for its `##`–`######` headings, PDF-008), insert a
+  `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
+  out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
+  heading is a `#` that says the same as the title, the separate title is left out, PDF-008), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
@@ -270,10 +271,17 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 - The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline (headings with their formatting and numbers, as in the editor) and a local
   graph of the open note.
-- **Numbered headings** (LINK-014, CFG-042): the headings of a note show a number before their text, `##` 1, `###` 1.1, `###` 1.2, `##` 2; the first `#` heading is the note's title
-  and is never numbered. The numbers are only drawn (muted), never written into the file: in the editor, the Markdown preview, the reading view, the outline, the link preview and
+- **Numbered headings** (LINK-014, CFG-042): the headings of a note show a number before their text, `#` 1, `##` 1.1, `##` 1.2, `#` 2; the note's title is the title line above
+  the text (below), not a heading, so a `#` is numbered like the others. The numbers are only drawn (muted), never written into the file: in the editor, the Markdown preview, the reading view, the outline, the link preview and
   the PDF. Settings → Editor → "Number headings" (on by default) switches it for every note; a note's front matter
   `numbered-headings: true` or `false` (also `yes` / `no`) overrides it for that note.
+- **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
+  leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
+  list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale
+  (new note, red link, quick switcher, new drawing) `YYMMDD_<name>.md` with today's date; a red link `[[Plan]]` that makes `261117_Plan.md` is rewritten in the note to
+  `[[261117_Plan|Plan]]` so it still reaches it. Imports and daily notes keep their names.
+- **Lift headings on paste** (EDIT-038): pasting text whose headings are all `##` or deeper opens "The pasted text has no # heading. Lift its headings?" with **Lift** and **Paste as it
+  is** (Esc pastes as it is); text without headings or with a `#` is pasted at once.
 - **Heading links scroll** (LINK-015): `[[Note#Heading]]`, `[[#Heading]]` and `[text](Note.md#Heading)` open the note with the heading at the top of the view, in the mode the tab is
   in: the cursor on the heading line in the editor, the reading view scrolled to it in the reading view. The heading is found ignoring case, spaces and inline markup
   (`## **Plan** v2` matches `#Plan v2`); a missing one opens the note at its top and says so. The outline's entries do the same.
@@ -548,6 +556,10 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   Audio, Video) and is saved as a file in the media folder (`z_media/YYYY/MM/YYMMDD_name`). Dropped
   on a note, the note gets a link line for each. An image dragged out of a web browser (Wayland) is
   saved the same way, from the picture the browser hands over or downloaded from its address.
+- A dropped or picked `.md` / `.markdown` file becomes a note (its text unchanged, listed as
+  "Markdown note"), not an attachment (IMP-033). When it has headings but no `#`, a box "Lift headings
+  (## → #, ### → ##, …)" is ticked: all headings move up so that the highest becomes `#`; code and front
+  matter stay as they are (IMP-034).
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add

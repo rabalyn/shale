@@ -75,7 +75,7 @@ pub struct ExportOptions {
     pub embeds: bool,
     /// notes: print tables as plain text lines instead of a grid (EDIT-024)
     pub plain_tables: bool,
-    /// notes: a *Contents* page with the `##`–`####` headings and the pages they start on (PDF-008)
+    /// notes: a *Contents* page with the `#`–`###` headings and the pages they start on (PDF-008)
     pub toc: bool,
     /// notes: the setting for numbered headings (CFG-042); a note's front matter overrides it
     pub numbered_headings: bool,
@@ -365,8 +365,9 @@ impl<'a> Writer<'a> {
         let grey = Rgba(120, 120, 120, 255);
         let sans = |c| TextStyle::plain(FontKind::Sans, size, c);
         let (left, right) = (self.m, self.m + self.cw());
+        let shallowest = entries.iter().map(|e| e.level).min().unwrap_or(1);
         for (e, (page, top)) in entries.iter().zip(slots) {
-            let x = left + (e.level - 2) as f32 * size * 1.4;
+            let x = left + (e.level - shallowest) as f32 * size * 1.4;
             let number = e.dest.map(|d| (d.page + 1).to_string()).unwrap_or_default();
             let nw = crate::pdf::write::text_width(FontKind::Sans, size, &number);
             let room = right - x - nw - size * 1.5;
@@ -719,11 +720,15 @@ fn natural_size(w: u32, h: u32) -> Vec2 {
 
 /// Export a note (its current text) to PDF bytes.
 pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
-    let name = vault.file(rel).map(|f| f.display_name()).unwrap_or_else(|| markdown::strip_md_ext(&rel.to_string_lossy()).to_string());
+    // the title line's text: no `.md`, no date prefix (VAULT-025)
+    let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
     let mut w = Writer::new(&name, opts);
     let base = opts.font_pt;
     let ink = Color32::from_rgb(30, 30, 30);
-    if opts.title {
+    let heads = markdown::heading_numbers(text);
+    // a first heading `# Title` that says the same as the title makes the title a second print of it (PDF-008)
+    let said_by_heading = heads.first().is_some_and(|(_, level, title, _)| *level == 1 && markdown::heading_plain(title).to_lowercase() == markdown::heading_plain(&name).to_lowercase());
+    if opts.title && !said_by_heading {
         let pieces = vec![Piece { text: name.clone(), kind: FontKind::Sans, size: base * 2.0, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None }];
         let x = w.m;
         let cw = w.cw();
@@ -732,8 +737,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     }
     // the headings with their numbers (LINK-014); where they are is found while the text is laid out
     let numbers = crate::reader::Extras::numbers_of(text, opts.numbered_headings);
-    let heads = markdown::heading_numbers(text);
-    let contents: Vec<&(usize, usize, String, Option<String>)> = heads.iter().filter(|h| opts.toc && (2..=4).contains(&h.1)).collect();
+    let contents: Vec<&(usize, usize, String, Option<String>)> = heads.iter().filter(|h| opts.toc && (1..=3).contains(&h.1)).collect();
     let slots = if contents.is_empty() { vec![] } else { w.reserve_contents(contents.len()) };
     let mut places: HashMap<usize, Dest> = HashMap::new();
     let fenced = markdown::fenced_code_lines(text);
@@ -891,8 +895,8 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     };
     let entries: Vec<Entry> = contents.iter().map(|(line, level, title, _)| Entry { level: *level, label: label(*line, title), dest: places.get(line).copied() }).collect();
     w.draw_contents(&entries, &slots);
-    // the bookmarks of PDF readers: every ## to ###### heading, nested by level
-    for (line, level, title, _) in heads.iter().filter(|h| h.1 >= 2) {
+    // the bookmarks of PDF readers: every # to ###### heading, nested by level
+    for (line, level, title, _) in &heads {
         if let Some(to) = places.get(line) {
             w.doc.bookmarks.push(Bookmark { level: *level, title: label(*line, title), to: *to });
         }
@@ -1215,7 +1219,7 @@ pub(crate) mod tests {
         headings.iter().map(|h| format!("{h}\n\n") + &"filler line of the section\n\n".repeat(25)).collect()
     }
 
-    // spec: PDF-008, LINK-014
+    // spec: PDF-008, LINK-014, VAULT-025
     #[test]
     fn the_pdf_starts_with_a_contents_page_of_numbered_headings_with_their_pages_and_links() {
         let (v, d) = vault();
@@ -1227,44 +1231,68 @@ pub(crate) mod tests {
         // page 1: the title, then the contents with the numbers and the pages the headings start on
         let first = &pages[0];
         assert!(first.contains(&hex("Welcome")) && first.contains(&hex("Contents")), "the name as the title, then the contents");
-        for label in ["1 Alpha", "1.1 Beta", "2 Gamma", "2.1 Deep"] {
+        for label in ["1 Title of the note", "1.1 Alpha", "1.1.1 Beta", "1.2 Gamma"] {
             assert!(first.contains(&hex(label)), "{label} is in the contents");
         }
-        assert!(!first.contains(&hex("Title")) && !first.contains(&hex("Five")), "# and ##### are not in the contents");
+        assert!(!first.contains(&hex("Deep")) && !first.contains(&hex("Five")), "#### and ##### are not in the contents");
         assert!(!first.contains(&hex("filler")), "the text starts on a new page");
         assert!(pages[1].contains(&hex("Title")), "the note's text follows on page 2");
         let body = |word: &str| (1..pages.len()).find(|i| pages[*i].contains(&hex(word))).unwrap_or_else(|| panic!("{word} is in the text of no page")) + 1;
         let (alpha, gamma) = (body("Alpha"), body("Gamma"));
         assert!(gamma > alpha && alpha >= 2, "the headings are on pages {alpha} and {gamma}");
-        for (label, page) in [("1 Alpha", alpha), ("2 Gamma", gamma)] {
+        for (label, page) in [("1.1 Alpha", alpha), ("1.2 Gamma", gamma)] {
             assert!(first.contains(&hex(&page.to_string())), "the contents say {label} is on page {page}");
         }
         // each entry is a link to the page of its heading, and so is each bookmark
         let (ids, links) = page_ids_and_link_targets(&bytes);
         assert_eq!(links.len(), 4, "a link per entry");
-        assert_eq!(links[0], ids[alpha - 1]);
-        assert_eq!(links[2], ids[gamma - 1]);
+        assert_eq!(links[1], ids[alpha - 1]);
+        assert_eq!(links[3], ids[gamma - 1]);
         assert!(links.iter().all(|l| ids.contains(l)));
         let raw = String::from_utf8_lossy(&bytes);
-        assert!(raw.contains("/Type /Outlines") && raw.contains("/Count 5"), "bookmarks for ## to ######: the five headings");
+        assert!(raw.contains("/Type /Outlines") && raw.contains("/Count 6"), "bookmarks for # to ######: the six headings");
         assert!(raw.contains("/Type /Catalog") && raw.contains("/Outlines "), "the catalog points to them");
         let utf16 = |t: &str| t.encode_utf16().map(|u| format!("{u:04X}")).collect::<String>();
-        for label in ["1 Alpha", "1.1 Beta", "2 Gamma", "2.1 Deep", "2.1.1 Five"] {
+        for label in ["1 Title of the note", "1.1 Alpha", "1.1.1 Beta", "1.2 Gamma", "1.2.1 Deep", "1.2.1.1 Five"] {
             assert!(raw.contains(&format!("<FEFF{}>", utf16(label))), "bookmark {label}");
         }
-        assert!(!raw.contains(&utf16("Title of the note")), "the title (#) has no bookmark");
         // nested by level: Beta is below Alpha, Gamma is not
         let obj_of = |label: &str| raw.split("\nendobj").find(|o| o.contains(&format!("/Title <FEFF{}>", utf16(label)))).unwrap().to_string();
         let id_of = |o: &str| o.split_whitespace().next().unwrap().to_string();
-        let (alpha_obj, beta_obj, gamma_obj) = (obj_of("1 Alpha"), obj_of("1.1 Beta"), obj_of("2 Gamma"));
+        let (alpha_obj, beta_obj, gamma_obj) = (obj_of("1.1 Alpha"), obj_of("1.1.1 Beta"), obj_of("1.2 Gamma"));
         assert!(beta_obj.contains(&format!("/Parent {} 0 R", id_of(&alpha_obj))), "Beta is below Alpha");
         assert!(!gamma_obj.contains(&format!("/Parent {} 0 R", id_of(&alpha_obj))), "Gamma is not");
         assert!(alpha_obj.contains("/First") && alpha_obj.contains("/Next"), "Alpha has Beta below and Gamma after");
         // the headings in the text carry their numbers too
-        let (page, number) = (&pages[alpha - 1], hex("1 "));
+        let (page, number) = (&pages[alpha - 1], hex("1.1 "));
         assert!(page.contains(&format!("<{number}> Tj")), "the number is printed with the heading");
-        assert_eq!(y_of(page, "1 "), y_of(page, "Alpha"), "on its line");
-        assert!(x_of(page, "1 ") < x_of(page, "Alpha"), "before its text");
+        assert_eq!(y_of(page, "1.1 "), y_of(page, "Alpha"), "on its line");
+        assert!(x_of(page, "1.1 ") < x_of(page, "Alpha"), "before its text");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-008, VAULT-025
+    #[test]
+    fn the_title_is_printed_once_when_the_first_heading_says_the_same_and_has_no_date_prefix() {
+        let (v, d) = vault();
+        std::fs::write(d.join("261117_Plan.md"), "").unwrap();
+        let v = {
+            drop(v);
+            Vault::open(&d).unwrap()
+        };
+        let rel = Path::new("261117_Plan.md");
+        let count = |text: &str, opts: &ExportOptions, word: &str| contents(&export_note(&v, rel, text, opts).unwrap()).matches(&format!("<{}> Tj", hex(word))).count();
+        let plain = ExportOptions { toc: false, ..ExportOptions::for_note() };
+        // the same text as the title (ignoring case and markup): once, from the heading
+        assert_eq!(count("# **plan**\ntext\n", &plain, "plan"), 1, "the heading is the title");
+        assert_eq!(count("# Plan\ntext\n", &plain, "Plan"), 1);
+        // another first heading, a `##`, or a later `# Plan`: the title is printed as well
+        assert_eq!(count("# Roadmap\n# Plan\n", &plain, "Plan"), 2, "only the first heading counts");
+        assert_eq!(count("## Plan\ntext\n", &plain, "Plan"), 2);
+        assert_eq!(count("text\n", &plain, "Plan"), 1, "no heading: the title alone, without the date prefix");
+        assert_eq!(count("text\n", &plain, "261117_Plan"), 0);
+        // the box off: no title, whatever the headings
+        assert_eq!(count("## Plan\n", &ExportOptions { title: false, ..plain.clone() }, "Plan"), 1);
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1282,7 +1310,8 @@ pub(crate) mod tests {
         assert!(raw.contains("/Type /Outlines"), "the bookmarks are there anyway");
         let (_, c) = export_text(&v, "Just text, no headings.\n");
         assert!(!c.contains(&hex("Contents")), "no headings, no contents");
-        assert!(!String::from_utf8_lossy(&export_note(&v, rel, "# Only a title\ntext\n", &ExportOptions::for_note()).unwrap()).contains("/Outlines"), "no bookmarks without ## headings");
+        assert!(!String::from_utf8_lossy(&export_note(&v, rel, "text only\n", &ExportOptions::for_note()).unwrap()).contains("/Outlines"), "no bookmarks without headings");
+        assert!(String::from_utf8_lossy(&export_note(&v, rel, "# Only a title\ntext\n", &ExportOptions::for_note()).unwrap()).contains("/Outlines"), "a # heading has a bookmark too");
         // numbering: off by the setting, on or off by the note's front matter
         let plain = |t: &str, numbered: bool| contents(&export_note(&v, rel, t, &ExportOptions { numbered_headings: numbered, ..ExportOptions::for_note() }).unwrap());
         assert!(plain("## Alpha\n", true).contains(&hex("1 Alpha")));

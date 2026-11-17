@@ -2,8 +2,6 @@
 features:
   - "Keyboard only: sidebar, file list and vim-style editing"
 ---
-# Editor
-
 How you write in Shale. Back to [[Start here]]; the links and embeds are in [[Notes and links]].
 
 ## Lists and lines
@@ -13,6 +11,19 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 - **Alt+↑ / Alt+↓** move the current line.
 - A gutter on the left shows **line numbers** (Settings → Editor, on by default);
   a wrapped line keeps one number.
+
+## The title line and pasting
+
+Above the first line a note shows its **title line**: the file name without `.md` and without a
+leading date prefix `YYMMDD_` (a note called `261117_Plan.md` shows `Plan`). Edit it to rename the
+note; the prefix stays and links in other notes are updated. Tabs show the name without the prefix
+too; the file list and links keep the full name. Settings → Editor → "Date prefix for new notes"
+(on by default) names the notes Shale makes `YYMMDD_<name>` with today's date. The title line is not
+part of the text, so a `#` heading in the note is an ordinary heading, numbered like the others.
+
+Pasting text whose headings are all `##` or deeper asks "The pasted text has no # heading. Lift its
+headings?": **Lift** moves them up so that the highest becomes `#`, **Paste as it is** (or Esc) pastes
+the text unchanged. Text without headings, or with a `#`, is pasted at once.
 
 ## Formatting toolbar
 

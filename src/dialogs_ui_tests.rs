@@ -413,9 +413,9 @@ fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     let mut p = P::new("import", &[]);
     let outside = p.dir.with_extension("outside");
     std::fs::create_dir_all(&outside).unwrap();
-    std::fs::write(outside.join("Meeting notes.md"), "# Meeting\n\nText from outside\n").unwrap();
-    std::fs::write(outside.join("More.md"), "# More\n").unwrap();
-    let (items, notes) = crate::import::items_from_paths(&[outside.join("Meeting notes.md")]);
+    std::fs::write(outside.join("Meeting notes.txt"), "# Meeting\n\nText from outside\n").unwrap();
+    std::fs::write(outside.join("More.txt"), "# More\n").unwrap();
+    let (items, notes) = crate::import::items_from_paths(&[outside.join("Meeting notes.txt")]);
     p.app.open_import(items, notes, None);
     p.look(Show::Modals);
     assert!(p.shows(Show::Modals, "Import 1 item"));
@@ -429,7 +429,7 @@ fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     };
     assert!(p.shows(Show::Modals, &msg), "{msg}");
     // another file added by its path
-    fill(&mut p, "add-path", &outside.join("More.md").to_string_lossy());
+    fill(&mut p, "add-path", &outside.join("More.txt").to_string_lossy());
     click_control(&mut p, "add");
     assert!(p.shows(Show::Modals, "Import 2 items"));
     // a new folder, a tag and Import: both notes are in the vault, the dialog is gone
@@ -442,9 +442,9 @@ fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     made.sort();
     assert_eq!(made.len(), 2, "{made:?}");
     let text = std::fs::read_to_string(a.join(&made[1])).unwrap() + &std::fs::read_to_string(a.join(&made[0])).unwrap();
-    assert!(text.contains("tags: [from-outside]") && text.contains("[[z_media/") && text.contains("Meeting notes.md]]"), "{text}");
+    assert!(text.contains("tags: [from-outside]") && text.contains("[[z_media/") && text.contains("Meeting notes.txt]]"), "{text}");
     // the files themselves were copied into the vault's media folder
-    let copies: Vec<PathBuf> = walk_files(&p.dir.join("z_media")).into_iter().filter(|f| f.to_string_lossy().ends_with("Meeting notes.md")).collect();
+    let copies: Vec<PathBuf> = walk_files(&p.dir.join("z_media")).into_iter().filter(|f| f.to_string_lossy().ends_with("Meeting notes.txt")).collect();
     assert_eq!(copies.len(), 1);
     assert_eq!(std::fs::read_to_string(&copies[0]).unwrap(), "# Meeting\n\nText from outside\n");
     assert!(p.app.toasts.iter().any(|(t, _)| t.contains("Imported 2 notes into “Imported/Inbox”")), "{:?}", p.app.toasts);

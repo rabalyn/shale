@@ -465,7 +465,7 @@ impl ShaleApp {
         }
     }
 
-    fn tab_title(&self, view: &View) -> String {
+    pub(crate) fn tab_title(&self, view: &View) -> String {
         match view {
             View::Empty => "New tab".into(),
             View::Tasks => "Tasks".into(),
@@ -474,7 +474,7 @@ impl ShaleApp {
             View::Mail => "Mail".into(),
             View::SettingsFile => "Settings file".into(),
             View::Social(f) => self.social_title(f.as_ref()),
-            View::Note(p) | View::Drawing(p) => self.vault.as_ref().and_then(|v| v.file(p).map(|f| f.display_name())).unwrap_or_else(|| rel_to_string(p)),
+            View::Note(p) | View::Drawing(p) => self.vault.as_ref().and_then(|v| v.file(p).map(|f| f.title())).unwrap_or_else(|| rel_to_string(p)),
         }
     }
 
@@ -785,7 +785,8 @@ impl ShaleApp {
         let ctrl = self.cfg.ctrl_to_follow;
         let dark = self.cfg.dark_canvas;
         let active = self.tabbar.active;
-        let display_name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_default();
+        // the title line: the name without `.md` and without the date prefix, which a rename keeps (VAULT-025)
+        let (display_name, kept_prefix) = self.vault.as_ref().and_then(|v| v.file(&rel)).map(|f| (f.title(), crate::vault::date_prefix_of(&f.display_name()).unwrap_or_default().to_string())).unwrap_or_default();
         let mut rename_to: Option<String> = None;
         // the formatting toolbar sits above the text and stays when the note scrolls (EDIT-026)
         if self.cfg.format_toolbar && !self.tabbar.tabs[active].reading {
@@ -815,7 +816,7 @@ impl ShaleApp {
                         egui::TextEdit::singleline(&mut tab.title_buf).font(FontId::proportional(base * 1.9)).text_color(theme::TEXT_STRONG).frame(egui::Frame::NONE).desired_width(f32::INFINITY).id(egui::Id::unique(("title", tab.id)));
                     let tr = ui.add(title);
                     if tr.lost_focus() && tab.title_buf.trim() != display_name && !tab.title_buf.trim().is_empty() {
-                        rename_to = Some(tab.title_buf.trim().to_string());
+                        rename_to = Some(format!("{kept_prefix}{}", tab.title_buf.trim()));
                     } else if tr.lost_focus() {
                         tab.title_buf = display_name.clone();
                     }

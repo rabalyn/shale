@@ -458,7 +458,7 @@ fn imp_031_pictures_and_pdfs_dropped_on_a_note_are_saved_as_files_and_linked_fro
     w.drop_files(at, &[w.file("cat.png"), w.file("plan.pdf"), w.file("first drop.md")]);
     w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
     let d = w.dialog();
-    assert_eq!(d.items.iter().map(|i| i.kind().to_string()).collect::<Vec<_>>(), vec!["Image", "PDF", "Files"], "{:?}", d.notes);
+    assert_eq!(d.items.iter().map(|i| i.kind().to_string()).collect::<Vec<_>>(), vec!["Image", "PDF", "Markdown note"], "{:?}", d.notes);
     assert!(d.link_on);
     let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
     d.items.truncate(2);

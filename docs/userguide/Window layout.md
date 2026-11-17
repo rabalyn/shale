@@ -2,8 +2,6 @@
 features:
   - "The ribbon and the sidebars"
 ---
-# Window layout
-
 ![[sidebar-split.png]]
 
 Back to [[Start here]]. The ribbon is the narrow bar on the left; the right sidebar is a stack

@@ -860,6 +860,27 @@ impl ShaleApp {
                     keep = false;
                 }
             }
+            Modal::LiftPaste { text } => {
+                let resp = crate::dialog::Dialog::new("lift-paste", "Lift headings?").width(440.0).show(&ctx, |ui| {
+                    ui.label("The pasted text has no # heading. Lift its headings?");
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new("Lift").strong()).on_hover_text("## becomes #, ### becomes ##, and so on").clicked() {
+                            let lifted = markdown::lift_headings(text).unwrap_or_else(|| text.clone());
+                            self.actions.push(Action::PasteText(lifted));
+                            keep = false;
+                        }
+                        if ui.button("Paste as it is").clicked() {
+                            self.actions.push(Action::PasteText(std::mem::take(text)));
+                            keep = false;
+                        }
+                    });
+                });
+                if resp.should_close() && keep {
+                    self.actions.push(Action::PasteText(std::mem::take(text)));
+                    keep = false;
+                }
+            }
             Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
