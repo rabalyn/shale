@@ -13,9 +13,10 @@ use crate::theme;
 use crate::vault::{FileKind, Vault};
 use eframe::egui::{self, Color32, Pos2, Shape, Vec2};
 use std::collections::HashMap;
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
-const MM: f32 = 72.0 / 25.4;
+pub(super) const MM: f32 = 72.0 / 25.4;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Paper {
@@ -83,6 +84,8 @@ pub struct ExportOptions {
     /// (`NoteEditor::column`); embeds are as big in proportion to the text as there (PDF-005).
     /// None: the column of `embed_size::DEFAULT_COLUMN`.
     pub column: Option<f32>,
+    /// a book (BOOK-005): every part and chapter starts on a new page
+    pub new_page_each: bool,
     /// drawings
     pub background: Background,
     /// drawings: scale to fill the page (otherwise 100%, shrunk only if it doesn't fit)
@@ -103,6 +106,7 @@ impl ExportOptions {
             toc: true,
             numbered_headings: true,
             column: None,
+            new_page_each: true,
             background: Background::White,
             fill_page: true,
         }
@@ -121,6 +125,7 @@ impl ExportOptions {
             toc: false,
             numbered_headings: false,
             column: None,
+            new_page_each: false,
             background: Background::White,
             fill_page: true,
         }
@@ -129,7 +134,7 @@ impl ExportOptions {
     pub(crate) fn column(&self) -> f32 {
         self.column.unwrap_or(crate::embed_size::DEFAULT_COLUMN)
     }
-    fn page_size(&self) -> [f32; 2] {
+    pub(super) fn page_size(&self) -> [f32; 2] {
         let [w, h] = self.paper.size().unwrap_or([595.0, 842.0]);
         if self.landscape {
             [h, w]
@@ -197,9 +202,18 @@ fn font_kind(f: &egui::FontFamily) -> FontKind {
 
 // ---------------------------------------------------------------- note layout
 
+/// Where a clickable piece of text goes.
 #[derive(Clone)]
-struct Piece {
-    text: String,
+enum Link {
+    /// a web address (PDF-001)
+    Web(String),
+    /// a note of the book and maybe a heading of it (BOOK-009)
+    Book(PathBuf, Option<String>),
+}
+
+#[derive(Clone)]
+pub(super) struct Piece {
+    pub(super) text: String,
     kind: FontKind,
     size: f32,
     color: Rgba,
@@ -208,7 +222,14 @@ struct Piece {
     bold: bool,
     underline: bool,
     strike: bool,
-    link: Option<String>,
+    link: Option<Link>,
+}
+
+impl Piece {
+    /// Plain sans text of a colour, bold or not.
+    pub(super) fn plain(text: &str, size: f32, color: Rgba, bold: bool) -> Piece {
+        Piece { text: text.to_string(), kind: FontKind::Sans, size, color, bg: None, italic: false, bold, underline: false, strike: false, link: None }
+    }
 }
 
 fn piece_width(p: &Piece) -> f32 {
@@ -216,7 +237,7 @@ fn piece_width(p: &Piece) -> f32 {
 }
 
 /// Break pieces into lines of at most `avail` points (words stay whole unless longer than a line).
-fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
+pub(super) fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
     // split into words (keeping the trailing spaces with each word)
     let mut words: Vec<Piece> = Vec::new();
     for p in pieces {
@@ -273,14 +294,16 @@ fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
 const CONTENTS_LINE: f32 = 1.7;
 
 /// A line of the *Contents* list: the heading's level, its text with its number, the place it is at.
-struct Entry {
-    level: usize,
-    label: String,
-    dest: Option<Dest>,
+pub(super) struct Entry {
+    pub(super) level: usize,
+    pub(super) label: String,
+    pub(super) dest: Option<Dest>,
+    /// a part of a book is set in bold
+    pub(super) bold: bool,
 }
 
 /// `text` shortened with an ellipsis to fit `room` points.
-fn fit_text(text: &str, size: f32, room: f32) -> String {
+pub(super) fn fit_text(text: &str, size: f32, room: f32) -> String {
     let mut out = text.to_string();
     if crate::pdf::write::text_width(FontKind::Sans, size, &out) <= room {
         return out;
@@ -295,36 +318,61 @@ fn fit_text(text: &str, size: f32, room: f32) -> String {
 const CELL_PAD_X: f32 = 5.0;
 const CELL_PAD_Y: f32 = 3.0;
 
-struct Writer<'a> {
-    doc: Doc,
-    opts: &'a ExportOptions,
-    w: f32,
-    h: f32,
-    m: f32,
-    page: usize,
-    y: f32,
+/// A link from a place on a page to a note of the book, found out when the book is done (BOOK-009).
+pub(super) struct BookLink {
+    pub(super) page: usize,
+    /// x, y, width, height from the page's top left
+    pub(super) rect: [f32; 4],
+    pub(super) rel: PathBuf,
+    pub(super) heading: Option<String>,
+}
+
+/// What the running header of a page says (BOOK-008).
+#[derive(Clone, Default)]
+pub(super) struct PageHead {
+    /// the title of the chapter the page belongs to; none: no header
+    pub(super) title: Option<String>,
+    /// the first page of a part or chapter has none
+    pub(super) first: bool,
+}
+
+pub(super) struct Writer<'a> {
+    pub(super) doc: Doc,
+    pub(super) opts: &'a ExportOptions,
+    pub(super) w: f32,
+    pub(super) h: f32,
+    pub(super) m: f32,
+    pub(super) page: usize,
+    pub(super) y: f32,
+    /// a book: the notes in it; a link to one of them is a link inside the PDF (BOOK-009)
+    pub(super) members: Option<HashSet<PathBuf>>,
+    pub(super) book_links: Vec<BookLink>,
+    /// a book: the header of every page (BOOK-008), and the one the next new page gets
+    pub(super) heads: Vec<PageHead>,
+    pub(super) running: Option<String>,
 }
 
 impl<'a> Writer<'a> {
-    fn new(title: &str, opts: &'a ExportOptions) -> Self {
+    pub(super) fn new(title: &str, opts: &'a ExportOptions) -> Self {
         let [w, h] = opts.page_size();
         let mut doc = Doc::new(title);
         let page = doc.add_page(w, h);
         let m = opts.margin_mm * MM;
-        Writer { doc, opts, w, h, m, page, y: m }
+        Writer { doc, opts, w, h, m, page, y: m, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None }
     }
-    fn cw(&self) -> f32 {
+    pub(super) fn cw(&self) -> f32 {
         self.w - 2.0 * self.m
     }
-    fn p(&mut self) -> &mut Page {
+    pub(super) fn p(&mut self) -> &mut Page {
         self.doc.page(self.page)
     }
-    fn new_page(&mut self) {
+    pub(super) fn new_page(&mut self) {
         self.page = self.doc.add_page(self.w, self.h);
         self.y = self.m;
+        self.heads.push(PageHead { title: self.running.clone(), first: false });
     }
     /// Make room for `height`; start a new page if it doesn't fit (unless the page is empty).
-    fn need(&mut self, height: f32) {
+    pub(super) fn need(&mut self, height: f32) {
         if self.y + height > self.h - self.m && self.y > self.m + 0.5 {
             self.new_page();
         }
@@ -335,7 +383,12 @@ impl<'a> Writer<'a> {
     /// the page's top), going on at new pages as needed. The note's text starts on a new page after
     /// them. The entries are drawn later by [`Writer::draw_contents`], when the pages of the
     /// headings are known.
-    fn reserve_contents(&mut self, count: usize) -> Vec<(usize, f32)> {
+    pub(super) fn reserve_contents(&mut self, count: usize) -> Vec<(usize, f32)> {
+        self.reserve_contents_gapped(&vec![0.0; count])
+    }
+
+    /// [`Writer::reserve_contents`] with some more room above each line (in points).
+    pub(super) fn reserve_contents_gapped(&mut self, gaps: &[f32]) -> Vec<(usize, f32)> {
         let base = self.opts.font_pt;
         if self.y > self.m + 0.5 {
             self.y += base * 0.8;
@@ -344,10 +397,12 @@ impl<'a> Writer<'a> {
         let (x, cw) = (self.m, self.cw());
         self.paragraph(&head, x, cw);
         self.y += base * 0.6;
-        let mut slots = Vec::with_capacity(count);
-        for _ in 0..count {
-            if self.y + base * CONTENTS_LINE > self.h - self.m {
+        let mut slots = Vec::with_capacity(gaps.len());
+        for gap in gaps {
+            if self.y + gap + base * CONTENTS_LINE > self.h - self.m {
                 self.new_page();
+            } else {
+                self.y += gap;
             }
             slots.push((self.page, self.y));
             self.y += base * CONTENTS_LINE;
@@ -359,37 +414,37 @@ impl<'a> Writer<'a> {
     /// The entries of the *Contents* list in the room [`Writer::reserve_contents`] made: each
     /// indented by its level, with its number, a dotted leader and the page it starts on,
     /// right-aligned; the whole line is a link to that page.
-    fn draw_contents(&mut self, entries: &[Entry], slots: &[(usize, f32)]) {
+    pub(super) fn draw_contents(&mut self, entries: &[Entry], slots: &[(usize, f32)]) {
         let size = self.opts.font_pt;
         let ink = Rgba(30, 30, 30, 255);
         let grey = Rgba(120, 120, 120, 255);
-        let sans = |c| TextStyle::plain(FontKind::Sans, size, c);
         let (left, right) = (self.m, self.m + self.cw());
         let shallowest = entries.iter().map(|e| e.level).min().unwrap_or(1);
         for (e, (page, top)) in entries.iter().zip(slots) {
             let x = left + (e.level - shallowest) as f32 * size * 1.4;
             let number = e.dest.map(|d| (d.page + 1).to_string()).unwrap_or_default();
             let nw = crate::pdf::write::text_width(FontKind::Sans, size, &number);
+            let style = |c| TextStyle { bold: e.bold, ..TextStyle::plain(FontKind::Sans, size, c) };
             let room = right - x - nw - size * 1.5;
             let label = fit_text(&e.label, size, room);
-            let lw = crate::pdf::write::text_width(FontKind::Sans, size, &label);
+            let lw = crate::pdf::write::text_width(FontKind::Sans, size, &label) + if e.bold { size * 0.3 } else { 0.0 };
             let base = top + size * 1.08;
             let unit = crate::pdf::write::text_width(FontKind::Sans, size, ". ");
             let dots = (((right - nw - size * 0.5) - (x + lw + size * 0.5)) / unit).floor().max(0.0) as usize;
             let p = self.doc.page(*page);
-            p.text(sans(ink), x, base, &label);
+            p.text(style(ink), x, base, &label);
             if dots > 0 {
-                p.text(sans(grey), right - nw - size * 0.5 - dots as f32 * unit, base, &". ".repeat(dots));
+                p.text(style(grey), right - nw - size * 0.5 - dots as f32 * unit, base, &". ".repeat(dots));
             }
             if let Some(d) = e.dest {
-                p.text(sans(ink), right - nw, base, &number);
+                p.text(style(ink), right - nw, base, &number);
                 p.jump(left, *top, right - left, size * CONTENTS_LINE, d);
             }
         }
     }
 
     /// Lay out pieces from `x0` with width `avail`; moves `y`.
-    fn paragraph(&mut self, pieces: &[Piece], x0: f32, avail: f32) {
+    pub(super) fn paragraph(&mut self, pieces: &[Piece], x0: f32, avail: f32) {
         for line in wrap_pieces(pieces, avail) {
             let lh = self.line_height(&line);
             self.need(lh);
@@ -486,16 +541,226 @@ impl<'a> Writer<'a> {
         self.y += height;
     }
 
-    fn line_size(&self, line: &[Piece]) -> f32 {
+    /// The text of a note laid out from here on (PDF-001…PDF-008): the paragraphs, lists, tables,
+    /// code, embeds and headings. `numbers` are the numbers printed before headings, by line;
+    /// `levels` (a book chapter, BOOK-006) say what level a heading is printed at, by line, else
+    /// it is as big as the `#`s say. Returns where each heading is, by line.
+    pub(super) fn note_body(&mut self, vault: &Vault, rel: &Path, text: &str, numbers: &HashMap<usize, String>, levels: Option<&HashMap<usize, usize>>) -> HashMap<usize, Dest> {
+        let opts = self.opts;
+        let base = opts.font_pt;
+        let ink = Color32::from_rgb(30, 30, 30);
+        let mut places: HashMap<usize, Dest> = HashMap::new();
+        let fenced = markdown::fenced_code_lines(text);
+        let lines = markdown::lines_with_offsets(text);
+        let mut i = 0;
+        // skip front matter
+        if lines.first().map(|(_, l)| l.trim() == "---").unwrap_or(false) {
+            if let Some(end) = lines.iter().skip(1).position(|(_, l)| l.trim() == "---") {
+                i = end + 2;
+            }
+        }
+        let tables = if opts.plain_tables { vec![] } else { crate::table::find_tables(text) };
+        // a line that goes on the paragraph above it (PDF-009): text, no blank, heading, rule, list or
+        // task marker, quote, table, fence or embed of its own
+        let continues = |j: usize| -> bool {
+            let Some((_, l)) = lines.get(j) else { return false };
+            let t = l.trim();
+            if t.is_empty() || fenced.get(j).copied().unwrap_or(false) || tables.iter().any(|b| b.lines.contains(&j)) {
+                return false;
+            }
+            if matches!(t, "---" | "***" | "___") || markdown::heading_level(l).is_some() || markdown::parse_task_line(l).is_some() || list_marker(l).is_some() || t.starts_with('>') {
+                return false;
+            }
+            let links = markdown::find_links(l);
+            !(links.len() == 1 && links[0].embed && t.len() == links[0].range.len())
+        };
+        // a line that ends in two spaces or a backslash is a hard break: the next line starts a new one
+        let hard = |j: usize| lines[j].1.ends_with("  ") || lines[j].1.ends_with('\\');
+        // the text of line `i` with the lines that go on it joined by a space, and how many they are;
+        // `indented`: only lines that start with a space (the continuation of a list item)
+        let gather = |i: usize, first: &str, indented: bool| -> (String, usize) {
+            let (mut text, mut n) = (first.to_string(), 0);
+            while !hard(i + n) && continues(i + n + 1) && (!indented || lines[i + n + 1].1.starts_with(char::is_whitespace)) {
+                n += 1;
+                text = format!("{} {}", text.trim_end().trim_end_matches('\\'), lines[i + n].1.trim());
+            }
+            (text, n)
+        };
+        let mut extra;
+        while i < lines.len() {
+            extra = 0;
+            if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
+                self.table(vault, rel, &b.table, &b.meta.sizes, ink);
+                i = b.lines.end;
+                continue;
+            }
+            let (off, line) = lines[i];
+            let trimmed = line.trim();
+            let x0 = self.m;
+            let cw = self.cw();
+            if fenced.get(i).copied().unwrap_or(false) {
+                // code block: collect, then draw on the code background (PDF-007)
+                let word = crate::syntax::fence_language(line);
+                let mut code = Vec::new();
+                i += 1;
+                while i < lines.len() && !(lines[i].1.trim_start().starts_with("```") || lines[i].1.trim_start().starts_with("~~~")) {
+                    code.push(lines[i].1);
+                    i += 1;
+                }
+                i += 1;
+                self.code_block(&word, &code, base * 0.9);
+                self.y += base * 0.5;
+                continue;
+            }
+            // an embed on its own line
+            let line_links = markdown::find_links(line);
+            if line_links.len() == 1 && line_links[0].embed && trimmed.len() == line_links[0].range.len() {
+                let target = vault.resolve(&line_links[0].target, Some(rel));
+                if let (Some(t), true) = (target, opts.embeds) {
+                    let abs = vault.abs(&t);
+                    let kind = vault.file(&t).map(|f| f.kind).unwrap_or(FileKind::Other);
+                    // the link under the thumbnail (PDF-004); the size the editor gives it (PDF-005)
+                    let caption = crate::caption::text(&line_links[0]);
+                    let asked = line_links[0].embed_width();
+                    let ref_w = opts.column();
+                    if kind == FileKind::Drawing {
+                        if let Ok(scene) = Scene::read_file(&abs) {
+                            if let Some(b) = scene.bounds() {
+                                let b = b.expand(20.0);
+                                let size = self.page_size(crate::embed_size::drawing(Vec2::new(b.width(), b.height()), ref_w));
+                                self.need(size.y + 6.0 + self.caption_room(Some(&caption)));
+                                let (x, y) = (x0, self.y);
+                                let pics = add_pictures(&mut self.doc, &crate::drawing::pictures::images(&scene, vault, &t));
+                                draw_scene(self.p(), &scene, [x, y, size.x, size.y], false, None, &pics);
+                                self.y += size.y;
+                                self.picture_end(Some(&caption));
+                            }
+                        }
+                        i += 1;
+                        continue;
+                    } else if crate::media::is_image(&t) {
+                        if let Ok(img) = image::open(&abs) {
+                            let img = img.to_rgba8();
+                            let size = self.page_size(crate::embed_size::picture(natural_size(img.width(), img.height()), asked, ref_w));
+                            self.image(&img, size, Some(&caption));
+                            i += 1;
+                            continue;
+                        }
+                    } else if crate::media::is_media(&t) && abs.is_file() {
+                        self.player_card(&abs, asked, Some(&caption));
+                        i += 1;
+                        continue;
+                    } else if crate::pdf::view::is_pdf(&t) {
+                        if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdf::view::render_pages(d, 40, 2.0)) {
+                            let last = r.images.len().saturating_sub(1);
+                            for (n, img) in r.images.iter().enumerate() {
+                                if let Some(rgba) = rgba_of(img) {
+                                    // the editor shows its pages rendered at 1.5; these are at 2.0
+                                    let size = self.page_size(crate::embed_size::pdf_page(Vec2::new(img.size[0] as f32, img.size[1] as f32) * 0.75, ref_w));
+                                    self.image(&rgba, size, (n == last).then_some(caption.as_str()));
+                                }
+                            }
+                            i += 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+            if trimmed.is_empty() {
+                self.y += base * 0.6;
+            } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+                self.need(base);
+                let y = self.y + base * 0.5;
+                self.p().line([x0, y], [x0 + cw, y], Rgba(180, 180, 180, 255), 0.8);
+                self.y += base;
+            } else if let Some(level) = markdown::heading_level(line) {
+                self.y += base * 0.5;
+                let scale = match levels.and_then(|l| l.get(&i)) {
+                    Some(printed) => book_scale(*printed),
+                    None => crate::editor::heading_scale(level as u8),
+                };
+                let mut ps = self.pieces(vault, rel, line[level..].trim_start(), base * scale, theme::HEADING, false);
+                for p in &mut ps {
+                    p.bold = true;
+                    p.color = Rgba(0, 0, 0, 255);
+                }
+                if let Some(n) = numbers.get(&i) {
+                    ps.insert(0, Piece { text: format!("{n} "), kind: FontKind::Sans, size: base * scale, color: Rgba(130, 130, 130, 255), bg: None, italic: false, bold: false, underline: false, strike: false, link: None });
+                }
+                self.need(base * scale * 2.0);
+                places.insert(i, Dest { page: self.page, y: self.y });
+                self.paragraph(&ps, x0, cw);
+                self.y += base * 0.2;
+            } else if let Some((_, done, rest, indent)) = markdown::parse_task_line(line) {
+                let ind = indent as f32 * 4.0;
+                let size = base;
+                self.need(size * 1.45);
+                let y = self.y;
+                let bx = x0 + ind;
+                let box_s = size * 0.8;
+                let by = y + size * 0.35;
+                self.p().rect(bx, by, box_s, box_s, None, Some((Rgba(90, 90, 90, 255), 0.8)));
+                if done {
+                    self.p().path(&[[bx + box_s * 0.2, by + box_s * 0.55], [bx + box_s * 0.42, by + box_s * 0.78], [bx + box_s * 0.82, by + box_s * 0.22]], false, None, Some((Rgba(105, 65, 198, 255), 1.2)));
+                }
+                let (rest, n) = gather(i, rest, true);
+                extra = n;
+                let ps = self.pieces(vault, rel, &rest, size, ink, done);
+                self.paragraph(&ps, bx + box_s + size * 0.5, cw - ind - box_s - size * 0.5);
+            } else if let Some((marker, rest_off)) = list_marker(line) {
+                let ind = (line.len() - line.trim_start().len()) as f32 * 4.0;
+                self.need(base * 1.45);
+                let y = self.y;
+                self.p().text(TextStyle::plain(FontKind::Sans, base, Rgba(105, 65, 198, 255)), x0 + ind + 2.0, y + base * 1.08, &marker);
+                let (rest, n) = gather(i, &line[rest_off..], true);
+                extra = n;
+                let ps = self.pieces(vault, rel, &rest, base, ink, false);
+                let indent = ind + base * 1.6;
+                self.paragraph(&ps, x0 + indent, cw - indent);
+            } else if trimmed.starts_with('>') {
+                let mut content = line[line.find('>').unwrap() + 1..].trim_start().to_string();
+                // the lines of a quote that go on, with or without their own `>`
+                while !hard(i + extra) {
+                    let next = lines.get(i + extra + 1).map(|(_, l)| l.trim_start());
+                    let more = match next {
+                        Some(n) if n.starts_with('>') => Some(n[1..].trim()).filter(|c| !c.is_empty()),
+                        Some(_) if continues(i + extra + 1) => Some(lines[i + extra + 1].1.trim()),
+                        _ => None,
+                    };
+                    let Some(more) = more else { break };
+                    extra += 1;
+                    content = format!("{} {more}", content.trim_end().trim_end_matches('\\'));
+                }
+                let start_y = self.y;
+                let start_page = self.page;
+                let ps = self.pieces(vault, rel, &content, base, theme::QUOTE, false);
+                self.paragraph(&ps, x0 + 12.0, cw - 12.0);
+                let end_y = self.y;
+                if self.page == start_page {
+                    self.p().line([x0 + 2.0, start_y + 2.0], [x0 + 2.0, end_y - 2.0], Rgba(105, 65, 198, 180), 2.5);
+                }
+            } else {
+                let (text, n) = gather(i, line, false);
+                extra = n;
+                let ps = self.pieces(vault, rel, &text, base, ink, false);
+                self.paragraph(&ps, x0, cw);
+            }
+            let _ = off;
+            i += 1 + extra;
+        }
+        places
+    }
+
+    pub(super) fn line_size(&self, line: &[Piece]) -> f32 {
         line.iter().map(|p| p.size).fold(self.opts.font_pt, f32::max)
     }
 
-    fn line_height(&self, line: &[Piece]) -> f32 {
+    pub(super) fn line_height(&self, line: &[Piece]) -> f32 {
         self.line_size(line) * 1.45
     }
 
     /// One wrapped line with its baseline at `base`, starting at `x`.
-    fn draw_line(&mut self, line: &[Piece], x: f32, base: f32) {
+    pub(super) fn draw_line(&mut self, line: &[Piece], x: f32, base: f32) {
         let mut x = x;
         for p in line {
             let pw = piece_width(p);
@@ -515,8 +780,13 @@ impl<'a> Writer<'a> {
             if p.strike {
                 self.p().line([x, base - p.size * 0.3], [x + tw, base - p.size * 0.3], p.color, p.size * 0.06);
             }
-            if let Some(uri) = &p.link {
-                self.p().link(x, base - p.size, tw, p.size * 1.3, uri);
+            match &p.link {
+                Some(Link::Web(uri)) => self.p().link(x, base - p.size, tw, p.size * 1.3, uri),
+                Some(Link::Book(rel, heading)) => {
+                    let page = self.page;
+                    self.book_links.push(BookLink { page, rect: [x, base - p.size, tw, p.size * 1.3], rel: rel.clone(), heading: heading.clone() });
+                }
+                None => {}
             }
             x += pw;
         }
@@ -538,7 +808,14 @@ impl<'a> Writer<'a> {
             let f = &s.format;
             // colours the note asks for are printed as written (EDIT-028), not mapped for paper
             let paint = paints.iter().find(|(pr, ..)| pr.start <= r.start && r.end <= pr.end);
-            let link = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)).map(|(_, l, _)| l.target.clone());
+            let link = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && (crate::lists::is_web_url(&l.target) || self.members.is_some())).and_then(|(_, l, _)| {
+                if crate::lists::is_web_url(&l.target) {
+                    return Some(Link::Web(l.target.clone()));
+                }
+                // a link to a note of the book is a link inside the PDF (BOOK-009)
+                let target = vault.resolve(&l.target, Some(rel))?;
+                self.members.as_ref()?.contains(&target).then(|| Link::Book(target, l.heading.clone()))
+            });
             // inline code keeps its screen colours on the code background (PDF-007)
             let on_code = f.background == theme::CODE_BG;
             // a bold or italic face of a chosen font has no imitation that says so (CFG-039)
@@ -724,7 +1001,6 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
     let mut w = Writer::new(&name, opts);
     let base = opts.font_pt;
-    let ink = Color32::from_rgb(30, 30, 30);
     let heads = markdown::heading_numbers(text);
     // a first heading `# Title` that says the same as the title makes the title a second print of it (PDF-008)
     let said_by_heading = heads.first().is_some_and(|(_, level, title, _)| *level == 1 && markdown::heading_plain(title).to_lowercase() == markdown::heading_plain(&name).to_lowercase());
@@ -739,161 +1015,12 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     let numbers = crate::reader::Extras::numbers_of(text, opts.numbered_headings);
     let contents: Vec<&(usize, usize, String, Option<String>)> = heads.iter().filter(|h| opts.toc && (1..=3).contains(&h.1)).collect();
     let slots = if contents.is_empty() { vec![] } else { w.reserve_contents(contents.len()) };
-    let mut places: HashMap<usize, Dest> = HashMap::new();
-    let fenced = markdown::fenced_code_lines(text);
-    let lines = markdown::lines_with_offsets(text);
-    let mut i = 0;
-    // skip front matter
-    if lines.first().map(|(_, l)| l.trim() == "---").unwrap_or(false) {
-        if let Some(end) = lines.iter().skip(1).position(|(_, l)| l.trim() == "---") {
-            i = end + 2;
-        }
-    }
-    let tables = if opts.plain_tables { vec![] } else { crate::table::find_tables(text) };
-    while i < lines.len() {
-        if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
-            w.table(vault, rel, &b.table, &b.meta.sizes, ink);
-            i = b.lines.end;
-            continue;
-        }
-        let (off, line) = lines[i];
-        let trimmed = line.trim();
-        let x0 = w.m;
-        let cw = w.cw();
-        if fenced.get(i).copied().unwrap_or(false) {
-            // code block: collect, then draw on the code background (PDF-007)
-            let word = crate::syntax::fence_language(line);
-            let mut code = Vec::new();
-            i += 1;
-            while i < lines.len() && !(lines[i].1.trim_start().starts_with("```") || lines[i].1.trim_start().starts_with("~~~")) {
-                code.push(lines[i].1);
-                i += 1;
-            }
-            i += 1;
-            w.code_block(&word, &code, base * 0.9);
-            w.y += base * 0.5;
-            continue;
-        }
-        // an embed on its own line
-        let line_links = markdown::find_links(line);
-        if line_links.len() == 1 && line_links[0].embed && trimmed.len() == line_links[0].range.len() {
-            let target = vault.resolve(&line_links[0].target, Some(rel));
-            if let (Some(t), true) = (target, opts.embeds) {
-                let abs = vault.abs(&t);
-                let kind = vault.file(&t).map(|f| f.kind).unwrap_or(FileKind::Other);
-                // the link under the thumbnail (PDF-004); the size the editor gives it (PDF-005)
-                let caption = crate::caption::text(&line_links[0]);
-                let asked = line_links[0].embed_width();
-                let ref_w = opts.column();
-                if kind == FileKind::Drawing {
-                    if let Ok(scene) = Scene::read_file(&abs) {
-                        if let Some(b) = scene.bounds() {
-                            let b = b.expand(20.0);
-                            let size = w.page_size(crate::embed_size::drawing(Vec2::new(b.width(), b.height()), ref_w));
-                            w.need(size.y + 6.0 + w.caption_room(Some(&caption)));
-                            let (x, y) = (x0, w.y);
-                            let pics = add_pictures(&mut w.doc, &crate::drawing::pictures::images(&scene, vault, &t));
-                            draw_scene(w.p(), &scene, [x, y, size.x, size.y], false, None, &pics);
-                            w.y += size.y;
-                            w.picture_end(Some(&caption));
-                        }
-                    }
-                    i += 1;
-                    continue;
-                } else if crate::media::is_image(&t) {
-                    if let Ok(img) = image::open(&abs) {
-                        let img = img.to_rgba8();
-                        let size = w.page_size(crate::embed_size::picture(natural_size(img.width(), img.height()), asked, ref_w));
-                        w.image(&img, size, Some(&caption));
-                        i += 1;
-                        continue;
-                    }
-                } else if crate::media::is_media(&t) && abs.is_file() {
-                    w.player_card(&abs, asked, Some(&caption));
-                    i += 1;
-                    continue;
-                } else if crate::pdf::view::is_pdf(&t) {
-                    if let Ok(r) = crate::fsutil::read(&abs).map_err(|e| e.to_string()).and_then(|d| crate::pdf::view::render_pages(d, 40, 2.0)) {
-                        let last = r.images.len().saturating_sub(1);
-                        for (n, img) in r.images.iter().enumerate() {
-                            if let Some(rgba) = rgba_of(img) {
-                                // the editor shows its pages rendered at 1.5; these are at 2.0
-                                let size = w.page_size(crate::embed_size::pdf_page(Vec2::new(img.size[0] as f32, img.size[1] as f32) * 0.75, ref_w));
-                                w.image(&rgba, size, (n == last).then_some(caption.as_str()));
-                            }
-                        }
-                        i += 1;
-                        continue;
-                    }
-                }
-            }
-        }
-        if trimmed.is_empty() {
-            w.y += base * 0.6;
-        } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-            w.need(base);
-            let y = w.y + base * 0.5;
-            w.p().line([x0, y], [x0 + cw, y], Rgba(180, 180, 180, 255), 0.8);
-            w.y += base;
-        } else if let Some(level) = markdown::heading_level(line) {
-            w.y += base * 0.5;
-            let scale = crate::editor::heading_scale(level as u8);
-            let mut ps = w.pieces(vault, rel, line[level..].trim_start(), base * scale, theme::HEADING, false);
-            for p in &mut ps {
-                p.bold = true;
-                p.color = Rgba(0, 0, 0, 255);
-            }
-            if let Some(n) = numbers.get(&i) {
-                ps.insert(0, Piece { text: format!("{n} "), kind: FontKind::Sans, size: base * scale, color: Rgba(130, 130, 130, 255), bg: None, italic: false, bold: false, underline: false, strike: false, link: None });
-            }
-            w.need(base * scale * 2.0);
-            places.insert(i, Dest { page: w.page, y: w.y });
-            w.paragraph(&ps, x0, cw);
-            w.y += base * 0.2;
-        } else if let Some((_, done, rest, indent)) = markdown::parse_task_line(line) {
-            let ind = indent as f32 * 4.0;
-            let size = base;
-            w.need(size * 1.45);
-            let y = w.y;
-            let bx = x0 + ind;
-            let box_s = size * 0.8;
-            let by = y + size * 0.35;
-            w.p().rect(bx, by, box_s, box_s, None, Some((Rgba(90, 90, 90, 255), 0.8)));
-            if done {
-                w.p().path(&[[bx + box_s * 0.2, by + box_s * 0.55], [bx + box_s * 0.42, by + box_s * 0.78], [bx + box_s * 0.82, by + box_s * 0.22]], false, None, Some((Rgba(105, 65, 198, 255), 1.2)));
-            }
-            let ps = w.pieces(vault, rel, rest, size, ink, done);
-            w.paragraph(&ps, bx + box_s + size * 0.5, cw - ind - box_s - size * 0.5);
-        } else if let Some((marker, rest_off)) = list_marker(line) {
-            let ind = (line.len() - line.trim_start().len()) as f32 * 4.0;
-            w.need(base * 1.45);
-            let y = w.y;
-            w.p().text(TextStyle::plain(FontKind::Sans, base, Rgba(105, 65, 198, 255)), x0 + ind + 2.0, y + base * 1.08, &marker);
-            let ps = w.pieces(vault, rel, &line[rest_off..], base, ink, false);
-            let indent = ind + base * 1.6;
-            w.paragraph(&ps, x0 + indent, cw - indent);
-        } else if trimmed.starts_with('>') {
-            let content = line[line.find('>').unwrap() + 1..].trim_start();
-            let start_y = w.y;
-            let start_page = w.page;
-            let ps = w.pieces(vault, rel, content, base, theme::QUOTE, false);
-            w.paragraph(&ps, x0 + 12.0, cw - 12.0);
-            let end_y = w.y;
-            if w.page == start_page {
-                w.p().line([x0 + 2.0, start_y + 2.0], [x0 + 2.0, end_y - 2.0], Rgba(105, 65, 198, 180), 2.5);
-            }
-        } else {
-            let ps = w.pieces(vault, rel, line, base, ink, false);
-            w.paragraph(&ps, x0, cw);
-        }
-        let _ = off;
-        i += 1;
-    }
+    let places = w.note_body(vault, rel, text, &numbers, None);
     let label = |line: usize, title: &str| match numbers.get(&line) {
         Some(n) => format!("{n} {}", markdown::heading_plain(title)),
         None => markdown::heading_plain(title),
     };
-    let entries: Vec<Entry> = contents.iter().map(|(line, level, title, _)| Entry { level: *level, label: label(*line, title), dest: places.get(line).copied() }).collect();
+    let entries: Vec<Entry> = contents.iter().map(|(line, level, title, _)| Entry { level: *level, label: label(*line, title), dest: places.get(line).copied(), bold: false }).collect();
     w.draw_contents(&entries, &slots);
     // the bookmarks of PDF readers: every # to ###### heading, nested by level
     for (line, level, title, _) in &heads {
@@ -917,10 +1044,15 @@ pub(crate) fn list_marker(line: &str) -> Option<(String, usize)> {
     None
 }
 
-fn finish(mut doc: Doc, opts: &ExportOptions) -> Result<Vec<u8>, String> {
+fn finish(doc: Doc, opts: &ExportOptions) -> Result<Vec<u8>, String> {
+    finish_from(doc, opts, 0)
+}
+
+/// The document's bytes, the pages from `first` on with their numbers (a book has none on its title page).
+pub(super) fn finish_from(mut doc: Doc, opts: &ExportOptions, first: usize) -> Result<Vec<u8>, String> {
     if opts.page_numbers {
         let n = doc.pages.len();
-        for i in 0..n {
+        for i in first..n {
             let (pw, ph) = (doc.pages[i].width, doc.pages[i].height);
             let label = format!("{} / {n}", i + 1);
             let tw = crate::pdf::write::text_width(FontKind::Sans, 9.0, &label);
@@ -1126,7 +1258,7 @@ pub(crate) mod tests {
         h[from..].windows(n.len()).position(|w| w == n).map(|p| p + from)
     }
 
-    fn hex(s: &str) -> String {
+    pub(crate) fn hex(s: &str) -> String {
         s.chars().filter_map(crate::pdf::write::win_ansi).map(|b| format!("{b:02x}")).collect()
     }
 
@@ -1179,7 +1311,7 @@ pub(crate) mod tests {
     }
 
     /// The content stream of each page (the streams that draw text).
-    fn page_streams(bytes: &[u8]) -> Vec<String> {
+    pub(crate) fn page_streams(bytes: &[u8]) -> Vec<String> {
         let mut out = Vec::new();
         let mut i = 0;
         while let Some(p) = find(bytes, b"stream\n", i) {
@@ -1195,7 +1327,7 @@ pub(crate) mod tests {
     }
 
     /// The object numbers of the pages, in order, and of the targets of the links (in the file's order).
-    fn page_ids_and_link_targets(bytes: &[u8]) -> (Vec<usize>, Vec<usize>) {
+    pub(crate) fn page_ids_and_link_targets(bytes: &[u8]) -> (Vec<usize>, Vec<usize>) {
         let text = String::from_utf8_lossy(bytes);
         let mut pages = Vec::new();
         let mut links = Vec::new();
@@ -1217,6 +1349,59 @@ pub(crate) mod tests {
     /// `text` with enough filler lines after each heading that the headings are on different pages.
     fn long_note(headings: &[&str]) -> String {
         headings.iter().map(|h| format!("{h}\n\n") + &"filler line of the section\n\n".repeat(25)).collect()
+    }
+
+    /// The distance from the page's bottom of the first word that starts with `word` in the page text.
+    fn line_of(bytes: &[u8], word: &str) -> String {
+        let c = contents(bytes);
+        let at = c.find(&format!("<{}", hex(word.trim_end()))).unwrap_or_else(|| panic!("no {word:?} in the text: {}", c.lines().filter(|l| l.contains(" Tm")).collect::<Vec<_>>().join("|")));
+        let head = &c[..at];
+        let tm = head.rfind(" Tm").unwrap();
+        head[..tm].split_whitespace().last().unwrap().to_string()
+    }
+
+    // spec: PDF-009
+    #[test]
+    fn lines_of_one_paragraph_are_joined_and_flow_to_the_page_width() {
+        let (v, _) = vault();
+        let export = |t: &str| export_note(&v, Path::new("Welcome.md"), t, &ExportOptions { title: false, toc: false, ..ExportOptions::for_note() }).unwrap();
+        let same = |t: &str, a: &str, b: &str| {
+            let bytes = export(t);
+            line_of(&bytes, a) == line_of(&bytes, b)
+        };
+        // a paragraph wrapped in the source is one paragraph, reflowed
+        assert!(same("alpha beta\ngamma delta epsilon\n", "beta ", "gamma "), "the source line break is a space");
+        let long = format!("{}\n{}\n", "word ".repeat(60).trim(), "tail end of the paragraph");
+        let bytes = export(&long);
+        assert_ne!(line_of(&bytes, "tail "), line_of(&bytes, "word "), "a long paragraph still wraps at the page's width");
+        // a blank line, a hard break (two spaces, a backslash), a heading, a list, a table and an embed stay apart
+        assert!(!same("alpha beta\n\ngamma delta\n", "beta ", "gamma "), "a blank line");
+        assert!(!same("alpha beta  \ngamma delta epsilon\n", "beta ", "gamma "), "two spaces at the end");
+        assert!(!same("alpha beta\\\ngamma delta epsilon\n", "beta", "gamma "), "a backslash at the end");
+        assert!(!same("alpha beta\n## Head\ngamma delta epsilon\n", "beta", "gamma "), "a heading");
+        assert!(!same("alpha beta\n- gamma delta epsilon\n", "beta", "gamma "), "a list item");
+        assert!(!same("alpha beta\n---\ngamma delta epsilon\n", "beta", "gamma "), "a rule");
+        assert!(!same("alpha beta\n![[Sketch.excalidraw]]\ngamma delta epsilon\n", "beta", "gamma "), "an embed on its own line");
+        assert!(!same("alpha beta\n```\ngamma\n```\n", "beta", "gamma"), "a fence");
+    }
+
+    // spec: PDF-009
+    #[test]
+    fn a_continuation_line_joins_its_list_item_task_or_quote() {
+        let (v, _) = vault();
+        let bytes = |t: &str| export_note(&v, Path::new("Welcome.md"), t, &ExportOptions { title: false, toc: false, ..ExportOptions::for_note() }).unwrap();
+        let b = bytes("- first item\n  goes on here\n- second one\n");
+        assert_eq!(line_of(&b, "item "), line_of(&b, "goes "), "an indented line joins its item");
+        assert_ne!(line_of(&b, "goes "), line_of(&b, "second "), "the next item is its own");
+        let b = bytes("- first item\nnot indented\n");
+        assert_ne!(line_of(&b, "item "), line_of(&b, "not "), "a line that is not indented is a paragraph");
+        let b = bytes("- [ ] open task\n  with more text\n");
+        assert_eq!(line_of(&b, "task "), line_of(&b, "with "), "and a task");
+        let b = bytes("> quoted words\n> go on here\n\nafter\n");
+        assert_eq!(line_of(&b, "words "), line_of(&b, "go "), "the lines of a quote");
+        assert_ne!(line_of(&b, "go "), line_of(&b, "after"), "a quote ends at the blank line");
+        let b = bytes("1. numbered item\n   continues\n2. next\n");
+        assert_eq!(line_of(&b, "item "), line_of(&b, "continues"));
     }
 
     // spec: PDF-008, LINK-014, VAULT-025
@@ -1812,5 +1997,17 @@ mod preview {
                 image::RgbaImage::from_raw(img.size[0] as u32, img.size[1] as u32, raw).unwrap().save(d.join(format!("{name}-{i}.png"))).unwrap();
             }
         }
+    }
+}
+
+/// How big a heading of a book is set, by the level it is printed at (BOOK-006), in text sizes.
+pub(super) fn book_scale(level: usize) -> f32 {
+    match level {
+        0 | 1 => 2.1,
+        2 => 1.7,
+        3 => 1.4,
+        4 => 1.2,
+        5 => 1.1,
+        _ => 1.0,
     }
 }

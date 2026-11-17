@@ -832,3 +832,109 @@ fn nav_028_import_opened_again_with_one_item_has_no_empty_band_left_from_many() 
     assert_eq!(short.min, tall.min, "it comes back where it was");
     let _ = std::fs::remove_dir_all(&outside);
 }
+
+/// A handbook of the BOOK convention in a vault, with a note beside it.
+const BOOK_FILES: &[(&str, &str)] = &[
+    ("Handbook/index.md", "---\ntitle: The Handbook\n---\nStart with [[Getting started]].\n"),
+    ("Handbook/Getting started.md", "# Getting started\n\n## First steps\n\nDo things.\n"),
+    ("Handbook/Writing/Lists.md", "## Bullets\n\n- one\n"),
+    ("Handbook/Draft.md", "---\nexport: false\n---\nsecret\n"),
+    ("Top.md", "beside the handbook\n"),
+];
+
+// spec: BOOK-010
+#[test]
+fn book_010_the_menus_of_a_folder_and_of_the_vault_open_the_dialog_for_the_book() {
+    let mut p = P::with_files("book-menus", BOOK_FILES);
+    p.app.tree.expanded.clear();
+    let r = p.row("Handbook");
+    p.click_rect(Show::Files, r, PointerButton::Secondary);
+    p.actions();
+    p.click(Show::Files, "Export to PDF…");
+    let a = p.actions();
+    assert!(matches!(a.as_slice(), [Action::ExportFolder(f)] if f == Path::new("Handbook")), "{} actions", a.len());
+    p.app.actions = a;
+    p.app.process_actions();
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the export dialog opens") };
+    assert!(d.book.is_some() && !d.drawing && d.tex.is_none(), "the built-in engine only");
+    assert_eq!(Path::new(&d.path), p.dir.join("exports/Handbook.pdf"), "<vault>/exports/<folder name>.pdf");
+    // the menu of the vault, at the empty place under the tree
+    p.app.modal = None;
+    p.frame(Show::Files, vec![]);
+    p.click_rect(Show::Files, Rect::from_center_size(Pos2::new(60.0, 2000.0), Vec2::new(8.0, 8.0)), PointerButton::Secondary);
+    p.actions();
+    p.click(Show::Files, "Export to PDF…");
+    let a = p.actions();
+    assert!(matches!(a.as_slice(), [Action::ExportFolder(f)] if f.as_os_str().is_empty()), "{} actions", a.len());
+    p.app.actions = a;
+    p.app.process_actions();
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the export dialog opens") };
+    let vault_name = p.dir.file_name().unwrap().to_string_lossy().into_owned();
+    assert_eq!(Path::new(&d.path), p.dir.join("exports").join(format!("{vault_name}.pdf")), "for the vault: its name");
+    assert!(d.book.as_ref().is_some_and(|b| b.plan.is_ok()));
+}
+
+// spec: BOOK-010
+#[test]
+fn book_010_the_dialog_has_the_options_of_a_book_and_the_reading_order_to_check() {
+    let mut p = P::with_files("book-order", BOOK_FILES);
+    p.app.open_export_folder_dialog(Path::new("Handbook"));
+    assert!(p.shows(Show::Modals, "Export the folder “Handbook” to PDF"));
+    for text in ["Title page", "Table of contents", "Each note on a new page", "Page numbers"] {
+        assert!(p.shows(Show::Modals, text), "{text}");
+    }
+    assert!(!p.shows(Show::Modals, "Engine"), "no LaTeX choice for a folder");
+    assert!(!p.shows(Show::Modals, "Getting started"), "the reading order is folded");
+    p.click(Show::Modals, "Reading order");
+    // the tree as numbered, a note that is left out greyed and without a number
+    for line in ["1  Getting started", "2  Writing", "2.1  Lists", "Draft  (left out: export: false)"] {
+        assert!(p.shows(Show::Modals, line), "{line}");
+    }
+    // the box "Each note on a new page" is on, and a click turns it off; so does Title page
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!() };
+    assert!(d.opts.new_page_each && d.opts.title && d.opts.toc);
+    p.click(Show::Modals, "Each note on a new page");
+    p.click(Show::Modals, "Title page");
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!() };
+    assert!(!d.opts.new_page_each && !d.opts.title);
+}
+
+// spec: BOOK-010
+#[test]
+fn book_010_export_runs_as_a_job_and_saves_the_book_where_asked() {
+    let mut p = P::with_files("book-job", BOOK_FILES);
+    p.app.open_export_folder_dialog(Path::new("Handbook"));
+    p.look(Show::Modals);
+    p.click(Show::Modals, "Export");
+    let target = p.dir.join("exports/Handbook.pdf");
+    until(&mut p, Show::Modals, "the book is exported and the dialog closes", |p| p.app.modal.is_none());
+    let bytes = std::fs::read(&target).unwrap();
+    assert!(bytes.starts_with(b"%PDF") && String::from_utf8_lossy(&bytes).contains("/Type /Outlines"), "a PDF with bookmarks");
+    assert!(p.app.toasts.iter().any(|(t, _)| t.starts_with("Exported to") && t.contains("Handbook.pdf")), "{:?}", p.app.toasts);
+    assert!(p.app.vault.as_ref().unwrap().exists("exports/Handbook.pdf", None), "the export shows up in the vault");
+    // a place that cannot be written: the dialog stays with the reason
+    std::fs::write(p.dir.join("in-the-way"), "a file").unwrap();
+    p.app.open_export_folder_dialog(Path::new("Handbook"));
+    p.look(Show::Modals);
+    if let Some(Modal::Export(d)) = &mut p.app.modal {
+        d.path = p.dir.join("in-the-way/out.pdf").to_string_lossy().into_owned();
+    }
+    p.click(Show::Modals, "Export");
+    until(&mut p, Show::Modals, "the failure is shown", |p| matches!(&p.app.modal, Some(Modal::Export(d)) if d.error.is_some()));
+    let Some(Modal::Export(d)) = &p.app.modal else { panic!("the dialog closed") };
+    assert!(d.error.as_deref().unwrap().contains("Could not create the folder"), "{:?}", d.error);
+    assert!(d.book.as_ref().is_some_and(|b| !b.working()), "the job has ended");
+}
+
+// spec: BOOK-010
+#[test]
+fn book_010_a_folder_without_notes_says_so_and_cannot_be_exported() {
+    let mut p = P::with_files("book-none", &[("Empty/pic.png", "x"), ("Top.md", "x\n")]);
+    p.app.open_export_folder_dialog(Path::new("Empty"));
+    assert!(p.shows(Show::Modals, "“Empty” has no notes to export"));
+    p.click(Show::Modals, "Export");
+    assert!(matches!(&p.app.modal, Some(Modal::Export(d)) if !d.book.as_ref().unwrap().working()), "Export is disabled: no job");
+    assert!(!p.dir.join("exports").exists());
+    p.click(Show::Modals, "Cancel");
+    assert!(p.app.modal.is_none());
+}

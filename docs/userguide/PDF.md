@@ -15,6 +15,8 @@ their numbers. A note without such headings gets no contents page. The title (th
 title line without a `YYMMDD_` date prefix; when the note's first heading is a `#` that says the same, the title is
 not printed a second time.
 
+Paragraphs are reflowed as in Markdown: the lines of a paragraph you wrapped by hand in the note are joined and laid out to the page's width. A blank line, a heading, a list, a table, a code block, an embed on its own line and a line that ends in two spaces or a backslash still end a line. Arrows, check marks and similar symbols are printed too.
+
 Highlights (`==text==`) and the colours of [[Editor]] (`<mark style="background: …">` behind the text, `<span style="color: …">` as the text colour) are printed as written, with the tags left out and the text still selectable.
 
 Code looks as on screen: fenced code blocks and inline code are printed in their syntax colours on the same dark code background as in the reading view (see [[Editor]]), the text still selectable.
@@ -41,6 +43,59 @@ text lines)" in the dialog to get the raw `| a | b |` lines instead; the box is 
 the dialog opens, so nothing is stored in the settings.
 
 ![[pdf-export-dialog.png]]
+
+## A folder as one PDF
+
+A folder of the vault, up to the vault itself, is exported as **one PDF**, a book: right-click the
+folder in the file list (or the empty space under the tree, for the whole vault) and choose
+**Export to PDF…**. The PDF has a title page, one **Contents** page, and every note one after the other,
+each on a new page, with a running header (the chapter's title, small and grey, top right) from the
+first chapter on. The paper, margins, text size, embeds, plain tables and page numbers of the dialog apply
+to the whole book; **Title page**, **Table of contents** and **Each note on a new page** are boxes of the
+dialog, and the folded **Reading order** shows the tree as it will be printed (the notes left out are
+greyed), so you can check it before you export. The export runs in the background, with **Cancel**.
+The default path is `<vault>/exports/<folder name>.pdf`.
+
+Nothing has to be renamed: a folder prints as a book when it follows this convention.
+
+```
+Handbook/                     the book: its title is the folder note's `title`, else "Handbook"
+  index.md                    the folder note: the introduction, the title page, the reading order
+  Getting started.md          chapter 1 (index.md links it first)
+  Writing/                    part 2, a folder
+    Writing.md                its folder note (named like the folder)
+    Lists.md                  2.1
+    Tables.md                 2.2
+  Appendix.md                 3 (not linked: after the linked ones, by name)
+  Draft.md                    `export: false`: left out
+  z_media/                    no notes: not a part (pictures come in through embeds)
+```
+
+- **Chapters are notes.** Every note of the folder and its subfolders is a chapter, except one with
+  `export: false` in its properties. Pictures, drawings, PDFs, sounds and videos are no chapters: they are
+  printed where a note embeds them. Folders that start with `.` or `_`, the folders `exports` and `templates`
+  of the vault and folders without a chapter are left out.
+- **The folder note** introduces a folder: `index.md`, else `README.md`, else the note named like the
+  folder, else the one note whose properties say `folder-note: true`. Its text is printed first in the
+  folder's part, under the part's heading. The top folder's note also gives the title page its `title`,
+  `subtitle`, `author` and `date`.
+- **The reading order** is, in a folder: the notes and folders its folder note names in `order:` (a list
+  of names without `.md`), else the ones its links point to, in the order of their first link (a link
+  to a subfolder's folder note stands for the subfolder), then all others by name, numbers by value (`2 Lists`
+  before `10 Tables`), notes and folders mixed. A note is printed once.
+- **Titles and numbers.** A chapter is called by its `title:` property, else by its title line (the file
+  name without a `YYMMDD_` date prefix). Parts and chapters are numbered by their place (`2`, `2.1`),
+  the headings of a note continue its chapter's number (`2.1.1`), under the setting
+  **Number headings** (see [[Notes and links]]); a note's own `numbered-headings:` does not change the book.
+  A `#` heading at the start of a note that says the chapter's title is not printed a second time.
+- **Links between chapters** are links in the PDF: a wiki link to a note of the book (`[[Tables]]`,
+  `[[Tables#Grid]]`) jumps to its page; a link to a note outside the book is its text. The contents and
+  the bookmarks of your PDF reader nest parts, chapters and headings.
+
+This guide is such a book: "Start here" is its folder note, and `scripts/userguide-pdf.sh` makes its PDF.
+On the command line, `shale --export-pdf <folder> <file.pdf>` writes the book of a folder without opening
+a window (A4, numbered headings, title page, contents, each note on a new page); it ends with 0, or with 1
+and the reason on stderr.
 
 ## Read
 
