@@ -145,7 +145,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   links, then the rest by name with numbers by value. The dialog has the built-in engine only and a folded
   **Reading order** to check the tree; the export is a background job with Cancel.
   `shale --export-pdf <folder> <file.pdf>` does it without a window, and `scripts/userguide-pdf.sh` makes the PDF of this
-  user guide (BOOK-001 to BOOK-012).
+  user guide (BOOK-001 to BOOK-012), which every release has as `shale-userguide-<version>.pdf`.
 
 - **Settings → LaTeX** finds the TeX for the LaTeX export of notes (LuaLaTeX and biber, the one on the
   computer when its kernel is from 2022-06-01 or newer, else a TeX Live that Shale installs itself):
@@ -435,7 +435,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - **F1** (or Settings → Help → **Open user guide**) opens the user guide, itself a Shale vault:
   The guide is built into the program, which unpacks it once per version into its data folder (a
   copy you edited is not overwritten) and opens it at "Start here". This works in every build on
-  every system; the release also has it as `shale-userguide-<version>.zip`.
+  every system; the release also has it as `shale-userguide-<version>.zip` and, to print or read
+  anywhere, as one PDF, `shale-userguide-<version>.pdf`.
 
 ![The right sidebar split into two views: Backlinks above, Calendar below](userguide/z_media/screenshots/sidebar-split.png)
 
