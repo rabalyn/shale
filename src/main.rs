@@ -35,6 +35,7 @@ mod graph;
 mod import;
 mod instance;
 mod jobs;
+mod key_badges;
 mod keys;
 mod keys_ui;
 mod layout;

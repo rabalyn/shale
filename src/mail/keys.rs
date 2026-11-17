@@ -59,7 +59,7 @@ impl MailView {
         self.kbd.mnemonics = BUTTON_KEYS
             .iter()
             .filter_map(|&a| {
-                let c = keys.bindings(a).into_iter().find(|b| b.0.len() == 1 && b.0[0].alt && !b.0[0].ctrl && !b.0[0].shift)?.0[0];
+                let c = keys.alt_chord(a)?;
                 let mut letters = c.key.symbol_or_name().chars();
                 letters.next().filter(|l| l.is_alphabetic() && letters.next().is_none()).map(|l| (a, l.to_ascii_lowercase()))
             })
