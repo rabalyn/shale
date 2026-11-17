@@ -10,6 +10,202 @@ its section from this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Template sets for the LaTeX export.** Settings → LaTeX → Template sets imports the templates a PDF
+  is made with into your vault (`templates/tex/<set>/`), so they are synced and backed up with your
+  notes. **Import TU Darmstadt templates** downloads the tested tuda-ci 4.06 (its checksum is checked),
+  makes the class files with docstrip and sets up the 11 document kinds (publication, report, exercise
+  sheet, thesis, doctoral thesis, slides, letter, poster, scientific poster, leaflet, announcement), each a
+  small `kinds/<kind>.toml` you can edit. The newest version from CTAN, a GitHub repository, a `.zip`,
+  a `.tar.gz` or a folder can be imported as well (a set without Shale's manifests is imported without
+  kinds, which are added by hand); archives are read by Shale itself and anything that could write
+  outside the set's folder (`..`, absolute paths, links) refuses the whole archive. Importing is a job with
+  progress and Cancel and never leaves half a set in the vault; **Update set** keeps your `settings.toml`
+  and logo and moves the old files to the vault's trash; **Remove set…** moves a set to the trash.
+  **Test page** compiles a small document of the set with your TeX and opens the PDF. The university's logo
+  may not be redistributed: **Choose logo…** copies yours into the set, and until then compiles use a
+  placeholder and the set says "logo missing: exports are not CI-conformant". The export dialog and the
+  conversion of notes follow with the next steps (TEX-005 to TEX-007, TEX-024 to TEX-027, #280, #277).
+- **Export a note to PDF through a LaTeX template** (#281). The export dialog of a note has an engine
+  choice at the top: **Built-in** (the default, as before) or **LaTeX template**. With the template you pick
+  a template set of your vault and a kind (publication, report, exercise sheet, thesis, doctoral thesis,
+  slides, letter, poster, scientific poster, leaflet, announcement), fill the kind's fields (they start
+  with the note's properties: `author`, `subtitle`, `reviewer`, `recipient`, `subject`, … and a note's
+  name is its title), switch the table of contents (for the kinds that have one) and press Export:
+  Shale writes the note as a LaTeX document and compiles it with LuaLaTeX in the background, with
+  **Cancel**. Headings follow how they are nested starting with `#`: sections for a publication,
+  chapters for a thesis, a section and slides for slides (`#` a section, `##` a slide), bold lines in a
+  letter, boxes on a scientific poster; the numbers follow the note's setting and the contents and
+  the PDF bookmarks list every level. Emphasis, strike-through, inline code, fenced code in its syntax
+  colours, quotes, lists, task lists, tables (alignment, header, the column widths you set), web links,
+  the colours and highlights of the editor, pictures sized as in the editor, drawings as vector
+  graphics and PDF pages are written, and every special character of a note stays text: a note
+  cannot run a command or end the document. A file that is missing is a visible line instead of a failed
+  compile. When LaTeX fails, the dialog shows the file and line or the missing package, and **Save the
+  .tex** writes `main.tex` and its pictures into a folder next to the PDF to debug it with your own TeX.
+  The dialog remembers the last engine, set and kind in the vault, and a note can name its template
+  with `latex-template: tuda/thesis`. The 11 kinds of the TU Darmstadt set are tested in German and
+  English against a real LuaLaTeX (TEX-008 to TEX-016, TEX-018, TEX-019, #281, #277).
+- The test image and the managed TeX Live install `ulem` (strike-through) too.
+- **A guided setup for the LaTeX export** (#282): **Settings → LaTeX → Set up LaTeX export…**, and by itself
+  the first time you choose **LaTeX template** in the export dialog of a vault where no TeX is usable or no
+  template set is there (the hints of that dialog for a missing TeX, template set or logo have a **Set up…**
+  button as well). It is for people who are not firm in TeX but want to use their university's templates, and
+  takes five steps with a step indicator, Back, Next and Cancel, a green tick on every step that is done
+  already: **TeX** (found, or installed after you agree: about 100 MB to download and 330 MB on disk, with
+  progress and Cancel; the built-in export needs none of it), **Templates** (the tested TU Darmstadt version,
+  the newest from CTAN, a file, a folder or GitHub, or a set the vault has), **Logo** (the university's logo
+  may not be shipped with Shale: the step says where members of the university get it and takes the file by
+  path or by **drag and drop onto the window**; Later skips it and exports carry a placeholder), **Your
+  details** (the accent colour as swatches with their codes `0a` to `11d`, the language, your department and,
+  if you like, your name, written to the set's `settings.toml` and kept by an update) and a **Test page** that
+  is made with your templates and details and opened, or, when it fails, explained in words with **Save the
+  .tex** and **Run again**. The setup opens by itself once per vault and returns to the export dialog (on the
+  LaTeX engine, with the set chosen) or to Settings.
+- **Drag and drop onto the setup and onto Settings → LaTeX**: a PDF or PNG dropped while the setup is on its
+  logo step becomes the set's logo, a `.zip`, a `.tar.gz` or a folder dropped on the templates step is
+  imported as a template set, and the same works on Settings → LaTeX (an archive or folder is imported, a logo
+  goes to the set whose **Choose logo…** is open or to the only set that has a logo slot). These files are no
+  longer offered to the Import dialog as notes or media (TEX-017, TEX-028).
+- A set's `settings.toml` has an `author` (the guided setup asks for it): it fills the author field of the
+  export dialog, and the document, when a note gives none; the `department` does the same for the kinds that
+  have one (TEX-018).
+- **Word files become notes.** With **Settings → Import → Import Word files as notes** ticked and
+  [pandoc](https://pandoc.org) installed, a dropped or picked `.docx` file is a "Word document" in the Import
+  dialog and becomes a note: headings, emphasis, underline, sub- and superscript, links, lists, tables
+  (with merged cells too), footnotes, math, highlights and pictures with their captions. Pictures and the
+  kept original (box "Keep the original .docx") go into one folder `z_media/<year>/<month>/import_docx_<name>/`.
+  Pandoc runs in the background with a two-minute limit; a file it cannot read leaves nothing in the vault
+  and the message names the file and pandoc's first error line. The settings `docx_import` and
+  `pandoc_path` are new; Settings has an Import tab that shows where pandoc was found, its version, and how
+  to install it. Off, or without pandoc, a `.docx` is an attachment as before (IMP-035 to IMP-039, #295).
+- **Portable file names.** `fsutil::portable_name` makes names that work on Linux, macOS and Windows (no
+  characters Windows forbids, no trailing dot or space, no device names like `CON`, at most 127 bytes);
+  the Word import uses it first (VAULT-026, #298).
+- **Footnotes, underline, subscript, superscript and line breaks in table cells are shown** (#296).
+  A footnote reference `[^1]` that has a definition `[^1]: text` (continuation lines indented by four
+  spaces or a tab) is a small raised label in the link colour, with its brackets hidden by the Markdown
+  preview; the definition shows its label raised and its text a little smaller, and a reference without a
+  definition stays as written. In the reading view a click on a reference scrolls to its definition and a
+  click on the label of a definition scrolls back. `<u>text</u>` is underlined, `<sub>…</sub>` lowered and
+  `<sup>…</sup>` raised and smaller, read with the same rules as `<mark>` and `<span>` (any letter case,
+  nesting, pairs only, nothing in code), and `<br>`, `<br/>` and `<br />` inside a cell of a table start a
+  new line in the cell (the cell editor keeps the tag). All of it shows in the editor's Markdown preview,
+  the reading view, table cells, the outline and the PDF export, where a footnote reference links to its
+  definition. These are the forms pandoc writes for a Word document, and common in hand-written notes
+  (EDIT-045, EDIT-050, EDIT-051, PDF-011).
+
+- **Footnotes, underline, sub- and superscript and line breaks in table cells are written by the LaTeX export** (#296): `\footnote{…}` with the text of the definition, `\underline`, `\textsubscript`, `\textsuperscript`, and `<br>` as a line break in the cell (TEX-029).
+- **Math is typeset** (#297). A formula between dollar signs, `$E = mc^2$`, is set in the text; `$$…$$` on a
+  line of its own, `$$` lines around several lines, or a ```` ```math ```` block is set centred in display
+  style. Shale does it itself, in pure Rust, with the bundled font STIX Two Math (SIL Open Font License) and
+  its OpenType MATH table: no TeX is needed. Supported: letters in math italic, digits and operators
+  upright, groups, super- and subscripts, `\frac` `\dfrac` `\tfrac` `\binom`, `\sqrt` and `\sqrt[n]`, Greek
+  letters, relations, binary operators, arrows and symbols, big operators with limits (`\sum` `\prod` `\int`
+  `\iint` `\oint` `\lim` …, `\limits`, `\nolimits`), function names and `\operatorname`, `\left…\right`
+  delimiters that grow, accents, `\text`, `\mathrm` `\mathbf` `\mathit` `\mathbb` `\mathcal`, spaces, and the
+  environments `matrix` `pmatrix` `bmatrix` `vmatrix` `cases` `aligned`. `$5 and $10` is no formula, and
+  nothing in code or front matter is one. It shows in the reading view, the editor's Markdown preview (the
+  cursor line shows its TeX), table cells, the outline and the PDF export (as sharp vector outlines). A
+  formula Shale cannot typeset (an unknown command, unbalanced braces, more than 64 levels or 10 000
+  characters) stays as its TeX in the code style, with the reason when you point at it. This is how a Word
+  document's formulas, which the pandoc import writes as `$…$`, look (EDIT-046 to EDIT-049, PDF-012).
+
+- **Math is written by the LaTeX export** (#297): a formula Shale can typeset goes to LuaLaTeX unchanged as `\(…\)` or `\[…\]`, one it cannot is written as code, so a note cannot run TeX through a formula; `%`, `#`, `&`, `^`, `_`, `$`, `~` inside `\text{…}` must now be written with a backslash (TEX-029).
+- **Every name Shale writes is portable.** A name you type for a new note, folder or drawing, or for a
+  rename (the title line too), is no longer taken as typed when Windows cannot have it: `< > : " / \ | ? *`
+  and control characters become `-`, a trailing dot is dropped, a device name like `CON` gets `_`, and the
+  name is cut to 200 bytes. The message tells it ("Saved as `a-b.md`: `:` is not allowed on Windows") and
+  links, also a red link you followed, use the name the file got. The media folder, the imports and the
+  people notes use names of at most 127 bytes. Existing files are not renamed by this (VAULT-027, #298).
+- **Check names for Windows and macOS.** Settings → Vault lists, from a background job, the files and
+  folders whose names would break on another system (forbidden characters, a trailing dot or space,
+  device names, names over 200 bytes, paths over 240 characters, names that differ only in letter case),
+  each with the name it would get. Rename one, or all after a question: links are rewritten as for any
+  rename and a name that is taken gets ` 2`, ` 3` (VAULT-028, #298).
+- **Esc keeps the cursor in place.** In Vim-style editing, Esc from insert mode now leaves the cursor on the
+  character right after where you stopped typing instead of stepping back one character. Settings → Vim →
+  "Esc from insert mode" (`esc_cursor` in the settings file) brings back Vim's step back (#303).
+- **A Vim tab in Settings**, listed under Editor and drawn indented: the Vim-style editing switch, the cursor
+  of normal mode, "Esc from insert mode" and the link preview size moved there from the Editor tab. Editor has
+  a "Cursor" section for the cursor while typing and the blinking (#303).
+- **A folder as one PDF, a book** (#306). **Export to PDF…** in the menu of a folder in the file list, and in
+  the menu of the vault (right-click the empty space under the tree), writes the notes of the folder
+  and its subfolders as one PDF: a title page, one table of contents, every note on a new page, numbered
+  headings that continue the chapter's number, a small running header with the chapter's title, links
+  between the chapters and nested bookmarks. A folder prints as a book without renaming anything: its
+  notes are the chapters (`export: false` leaves one out), a folder note (`index.md`, `README.md`, the note
+  named like the folder, or `folder-note: true`) introduces a folder and gives the book its `title`,
+  `subtitle`, `author` and `date`, and the reading order is the folder note's `order:` list, else the order
+  of its links, then the other notes and folders by name with numbers by value. The dialog has a folded
+  **Reading order** to check the tree and runs the export in the background with Cancel.
+  `shale --export-pdf <folder> <file.pdf>` writes the book without opening a window, and
+  `scripts/userguide-pdf.sh` makes the PDF of the user guide, which now follows the convention
+  (BOOK-001 to BOOK-012).
+- **The user guide as a PDF**: every release has `shale-userguide-<version>.pdf` next to the
+  guide's zip, the whole guide as one book to print or read anywhere, with its `.sha256` file and
+  the build attestation (#310).
+
+### Changed
+
+- **Settings → Keybindings asks before it overwrites a key** (#294). A key that another action
+  already uses is no longer refused: on Enter a question says “Ctrl+H is used by “…”. Overwrite it?”
+  (naming every action it clashes with, for a sequence that is the start of others too), with **Yes**
+  and **No**. No has the keyboard, so Enter is No; Esc is No, Y and N answer directly. Yes takes the key
+  from the other action (it stays without a key, "not set") and saves the new one; No changes nothing.
+  While you record, a note under the keys says which action they would clash with as soon as all keys
+  are released. Keys that Shale must keep (plain letters for a shortcut that works everywhere, Ctrl+C
+  and the like, Enter and Esc of the lists) are still refused with their message (KEY-018).
+- **LaTeX export: the gaps of the writer** (#305). Fenced code sits on a light grey box and keeps its
+  syntax colours; in documents a long block goes on on the next page. A picture inside a line of text
+  (`an icon ![[icon.png]] here`, also in a table cell) is drawn in the line, as high as the line; a missing
+  one says `[missing: name]` in red. A link to a heading of the same note (`[[#Results]]`,
+  `[[Note#Results]]`) is clickable in the PDF and jumps to the heading; links to other notes are their text
+  in the colour of links (red for a note that does not exist), as in the built-in export. A
+  `latex-template:` that names a set or kind the vault does not have is no longer replaced silently: the
+  export dialog says what was not found and what it uses instead (TEX-030 to TEX-033).
+- The user guide shows the export dialog with a TeX that was found and the setup's test page when it
+  worked; the screenshots use a pretend TeX made for them (TEX-034).
+- The PDF export (of a note and of a book) reflows paragraphs: lines of text that are one paragraph in
+  Markdown, such as a note wrapped at 100 columns, are joined and laid out to the page's width; a blank line,
+  a heading, a list, a table, a fence, an embed or a hard break (two spaces, a backslash) still ends a line
+  (PDF-009). Arrows (`→ ← ↑ ↓ ↗`), `⋯`, `▸` and `📅` are printed too, from the bundled Hack and emoji fonts
+  (PDF-010).
+
+### Fixed
+
+- **Videos play with an older ffmpeg** (4.x, as on Ubuntu 22.04). Its `ffprobe` refused one of
+  the questions Shale asks about a video, so every video was called damaged and showed no
+  player and no first picture, also in the PDF export. Shale now asks again in the older form
+  (#299).
+- **A video plays on a computer without a sound output** (#304). Before, the player only said "No
+  sound output" and showed nothing moving. Now the video plays its pictures without sound, with the
+  note "No sound output: playing without sound". A sound file still says "No sound output".
+
+### Internal
+
+- The video tests no longer fail on slow machines (macOS CI): their pretend sound card keeps real
+  time (#266).
+- The tests of the Alt keys of the note buttons build the Linux/Windows keymap explicitly and check the macOS keymap, which has no Alt defaults, separately, so they pass on macOS too (KEY-002, KEY-014, KEY-015, #300).
+- The TeX compile test compares the resolved work folder, so it passes on macOS where the temp folder is
+  behind `/var` -> `/private/var`; it now runs its work folder through a symlink on Linux too (#301).
+- **macOS: the closed-port test helper holds its port again.** The helper for tests of an
+  unreachable server now holds a bound socket that does not listen, since macOS gave the port
+  of a connected socket to a later bind with SO_REUSEADDR (#302).
+- Spec row IDs are unique again: the picture and video resizing row is now EDIT-052 and the
+  captions row EDIT-053 (they shared EDIT-024 and EDIT-025 with the table rows), and a test fails
+  when a spec row ID is used twice (DEV-014, #307).
+- **Two TeX export tests pass on Windows.** The search path test expected a Unix folder, and the
+  install question test a Unix install folder; both now use what the product does on each
+  system. `TEXINPUTS` is joined with kpathsea's separator (`;` on Windows, `:` elsewhere) by
+  Shale itself, and a template folder whose name has the separator is refused instead of being
+  quoted in a form TeX cannot read (#311).
+- **One way to start external programs**: gpg, LuaLaTeX and ffmpeg/ffprobe are all started
+  through `program::spawn`, which tries a program again that the system briefly calls "busy" right
+  after it was written (a test stand-in under load). The ffprobe test no longer fails now and then
+  with "Text file busy" (#316).
+
 ## [0.4.0] - 2026-11-17
 
 ### Added
