@@ -67,6 +67,10 @@ winit = "0.30"
 wayland-client = "0.31"
 wayland-backend = { version = "0.3", features = ["client_system"] }
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# a fake compositor in the tests of the drop glue (DEV-022)
+wayland-server = "0.31"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 winit = "0.30"
 # the Keychain (secrets/keychain.rs); the versions the TLS stack already pulls in
