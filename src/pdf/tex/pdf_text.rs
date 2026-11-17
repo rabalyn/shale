@@ -66,7 +66,10 @@ pub(super) fn outline_entries(pdf: &[u8]) -> usize {
         let body = rest.strip_prefix(b"\r\n").or_else(|| rest.strip_prefix(b"\n")).unwrap_or(rest);
         let skipped = rest.len() - body.len();
         let Some(end) = find(start + skipped, b"endstream") else { break };
-        let data = pdf[start + skipped..end].trim_ascii_end();
+        // only the end of line before `endstream` goes: the compressed data may end in a byte that
+        // looks like white space (a tab)
+        let raw = &pdf[start + skipped..end];
+        let data = raw.strip_suffix(b"\r\n").or_else(|| raw.strip_suffix(b"\n")).or_else(|| raw.strip_suffix(b"\r")).unwrap_or(raw);
         count += crate::pdf::write::inflate(data).windows(6).filter(|w| *w == b"/Title").count();
         at = end + 9;
     }

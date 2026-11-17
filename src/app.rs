@@ -1881,15 +1881,26 @@ impl ShaleApp {
     }
 
     /// Show the export dialog for a folder as one PDF, a book (BOOK-010): `dir` is the folder, the
-    /// empty path the vault. It is saved to `<vault>/exports/<folder name>.pdf`.
+    /// empty path the vault. It is saved to `<vault>/exports/<folder name>.pdf`. It offers the LaTeX
+    /// templates that can hold a folder too (BOOK-013), starting as a note's dialog does: on the
+    /// template the top folder note names, else on the last export's engine, set and kind.
     pub fn open_export_folder_dialog(&mut self, dir: &Path) {
+        use crate::pdf::export_dialog::ExportEngine;
         self.flush_all();
         let Some(v) = &self.vault else { return };
         let name = dir.file_name().or_else(|| v.root.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Vault".to_string());
         let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
         let book = crate::pdf::book_dialog::BookExport::new(v, dir);
-        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(dir.to_path_buf(), false, name, opts, path).with_book(book))));
+        let plan = book.plan.as_ref().ok();
+        let title = plan.map(|p| p.title.clone()).unwrap_or_else(|| name.clone());
+        let text = plan.and_then(|p| p.note.as_deref()).map(|n| self.note_text(n)).unwrap_or_default();
+        let last = &self.vdata.state.latex_export;
+        let noted = crate::pdf::tex::dialog::note_choice(&crate::markdown::front_matter_values(&text));
+        let engine = if noted.is_some() || last.latex { ExportEngine::Latex } else { ExportEngine::Builtin };
+        let prefer = noted.or_else(|| (!last.set.is_empty()).then(|| (last.set.clone(), last.kind.clone())));
+        let tex = crate::pdf::tex::dialog::TexExport::for_folder(&v.root, title, &text, prefer);
+        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(dir.to_path_buf(), false, name, opts, path).with_book(book).with_latex(tex, engine))));
     }
 
     /// Lay a folder's book out as a job (BOOK-010).
@@ -1899,6 +1910,7 @@ impl ShaleApp {
         let book = d.book.as_mut().ok_or("This is not the export of a folder")?;
         let ctx = ctx.clone();
         book.start(root, d.opts.clone(), move || ctx.request_repaint());
+        self.remember_export_engine(false, d);
         Ok(())
     }
 
@@ -2011,8 +2023,17 @@ impl ShaleApp {
         let v = self.vault.as_ref().ok_or("No vault is open")?;
         let tex = d.tex.as_mut().ok_or("This note has no LaTeX choices")?;
         let (set, kind) = (tex.current_set().ok_or("Choose a template set first: import one in Settings → LaTeX")?, tex.current_kind().ok_or("Choose a kind of document")?);
-        let opts = crate::pdf::export::ExportOptions { column, ..d.opts.clone() };
-        let doc = crate::pdf::tex::writer::write(&crate::pdf::tex::writer::Request { vault: v, rel: &d.rel, text: &text, opts: &opts, set, kind, fields: &tex.values })?;
+        let doc = match &d.book {
+            // a folder: its book as it is in the vault now, which has the saved notes (BOOK-014)
+            Some(book) => {
+                let plan = crate::pdf::book::plan(v, &book.folder)?;
+                crate::pdf::tex::book::write_book(&crate::pdf::tex::book::BookRequest { vault: v, plan: &plan, opts: &d.opts, set, kind, fields: &tex.values })?
+            }
+            None => {
+                let opts = crate::pdf::export::ExportOptions { column, ..d.opts.clone() };
+                crate::pdf::tex::writer::write(&crate::pdf::tex::writer::Request { vault: v, rel: &d.rel, text: &text, opts: &opts, set, kind, fields: &tex.values })?
+            }
+        };
         let ctx = ctx.clone();
         tex.start(engine, doc, move || ctx.request_repaint());
         self.remember_export_engine(true, d);

@@ -12,7 +12,7 @@ use crate::vault::Vault;
 use eframe::egui::{Color32, FontFamily};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// `[` and `*` at the start of the text after `\item`, `\\` or `&` would be read as an optional
 /// argument or a star: an empty group in front of the text keeps them text.
@@ -50,6 +50,24 @@ fn href_url(url: &str) -> String {
     out
 }
 
+/// Where the wiki links of a book go (BOOK-016): the `\label` of each note of the book and of
+/// its headings.
+#[derive(Default, Debug)]
+pub struct Targets {
+    /// note → its label and its headings' labels by their plain text in lower case
+    pub notes: HashMap<PathBuf, (String, HashMap<String, String>)>,
+}
+
+impl Targets {
+    /// The label a link goes to: the heading's when the note of the book has it, else the note's;
+    /// none for a note outside the book.
+    fn label(&self, vault: &Vault, from: &Path, link: &markdown::LinkSpan) -> Option<&str> {
+        let (note, heads) = self.notes.get(&vault.resolve(&link.target, Some(from))?)?;
+        let head = link.heading.as_ref().and_then(|h| heads.get(&markdown::heading_plain(h).to_lowercase()));
+        Some(head.unwrap_or(note))
+    }
+}
+
 /// What the pieces of a line need to know about the note.
 pub struct Look<'a> {
     pub vault: &'a Vault,
@@ -59,16 +77,23 @@ pub struct Look<'a> {
     /// Inside a table, where `\footnote` prints no text: the texts of the footnotes of the cells
     /// written so far, set down below the table (`\footnotemark` is written in their place).
     pub deferred: RefCell<Option<Vec<String>>>,
+    /// In a book: where its wiki links go (`\hyperref`); a single note's are text.
+    pub targets: Option<&'a Targets>,
 }
 
 impl<'a> Look<'a> {
     pub fn new(vault: &'a Vault, rel: &'a Path, notes: HashMap<String, String>) -> Self {
-        Look { vault, rel, notes, deferred: RefCell::new(None) }
+        Look { vault, rel, notes, deferred: RefCell::new(None), targets: None }
+    }
+
+    /// The same note, its wiki links going to these labels.
+    pub fn with_targets(self, targets: &'a Targets) -> Self {
+        Look { targets: Some(targets), ..self }
     }
 
     /// The same note without footnotes: the text of a footnote has none inside it.
     fn without_notes(&self) -> Look<'a> {
-        Look::new(self.vault, self.rel, HashMap::new())
+        Look { targets: self.targets, ..Look::new(self.vault, self.rel, HashMap::new()) }
     }
 }
 
@@ -178,8 +203,16 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
             if let Some(c) = bg {
                 t = format!("\\colorbox[RGB]{{{}}}{{{t}}}", rgb([c.0, c.1, c.2]));
             }
-            if let Some((_, l, _)) = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)) {
-                t = format!("\\href{{{}}}{{{t}}}", href_url(&l.target));
+            let link = spans.iter().find(|(sr, _, _)| sr.start <= r.start && r.end <= sr.end).map(|(_, l, _)| l);
+            match link {
+                Some(l) if crate::lists::is_web_url(&l.target) => t = format!("\\href{{{}}}{{{t}}}", href_url(&l.target)),
+                // a link to a note of the book goes to its chapter or heading (BOOK-016)
+                Some(l) => {
+                    if let Some(label) = look.targets.and_then(|ts| ts.label(look.vault, look.rel, l)) {
+                        t = format!("\\hyperref[{label}]{{{t}}}");
+                    }
+                }
+                None => {}
             }
             t
         };

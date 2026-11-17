@@ -2,7 +2,9 @@
 //! the kind, the table of contents, the state of TeX, and the export as a job with Cancel; when it
 //! fails, the readable errors and "Save the .tex" for someone who wants to debug it. The dialog
 //! itself (`pdf::export_dialog`) shows the engine choice and calls [`TexExport::show`] for the rest.
+//! A folder's dialog has the same choice, for the kinds that can hold a folder (BOOK-013).
 
+use super::book::{holds_a_folder, ONLY_ARTICLES_AND_BOOKS};
 use super::compile::{CompileError, Options};
 use super::engine::Engine;
 use super::sets::{self, KindManifest, LogoStatus, Mapping, SetInfo};
@@ -82,6 +84,8 @@ pub struct TexExport {
     /// A "Set up…" button beside a missing TeX, set or logo was pressed: the window opens the
     /// guided setup (TEX-017) at this step.
     pub setup_requested: Option<Step>,
+    /// The dialog of a folder: only the kinds of the article and book family (BOOK-013).
+    pub folder: bool,
 }
 
 /// The choice a note's properties make: `latex-template: tuda/thesis` (a set and a kind).
@@ -95,9 +99,19 @@ impl TexExport {
     /// The dialog for a note called `title` with this text, in a vault: the sets are read now;
     /// `prefer` is the set and kind to start on (the note's own choice, else the last one).
     pub fn new(vault: &Path, title: String, text: &str, prefer: Option<(String, String)>) -> TexExport {
+        Self::build(vault, title, text, prefer, false)
+    }
+
+    /// The dialog of a folder's book called `title`; `text` is its top folder note, whose
+    /// properties fill the fields (BOOK-015). Only kinds that can hold a folder can be chosen.
+    pub fn for_folder(vault: &Path, title: String, text: &str, prefer: Option<(String, String)>) -> TexExport {
+        Self::build(vault, title, text, prefer, true)
+    }
+
+    fn build(vault: &Path, title: String, text: &str, prefer: Option<(String, String)>, folder: bool) -> TexExport {
         let sets: Vec<SetInfo> = sets::scan(vault).into_iter().filter_map(|e| e.info.ok()).filter(|s| !s.kinds.is_empty()).collect();
         let props = crate::markdown::front_matter_values(text);
-        let mut t = TexExport { sets, set: 0, kind: String::new(), title, props, values: BTreeMap::new(), status: TexStatus::default(), job: None, failure: None, save_requested: false, setup_requested: None };
+        let mut t = TexExport { sets, set: 0, kind: String::new(), title, props, values: BTreeMap::new(), status: TexStatus::default(), job: None, failure: None, save_requested: false, setup_requested: None, folder };
         let (set, kind) = prefer.unzip();
         if let Some(i) = set.and_then(|id| t.sets.iter().position(|s| s.id == id)) {
             t.set = i;
@@ -111,7 +125,12 @@ impl TexExport {
     }
 
     pub fn current_kind(&self) -> Option<&KindManifest> {
-        self.current_set()?.kinds.iter().find(|(id, _)| *id == self.kind).map(|(_, k)| k)
+        self.current_set()?.kinds.iter().find(|(id, _)| *id == self.kind).map(|(_, k)| k).filter(|k| self.allows(k))
+    }
+
+    /// Whether a kind can be chosen: any for a note, the article and book family for a folder.
+    pub fn allows(&self, kind: &KindManifest) -> bool {
+        !self.folder || holds_a_folder(kind)
     }
 
     /// Choose a set, and a kind of it (the first when it has none of that name); the fields of the
@@ -119,13 +138,15 @@ impl TexExport {
     pub fn select_set(&mut self, i: usize, kind: Option<&str>) {
         self.set = i.min(self.sets.len().saturating_sub(1));
         let Some(set) = self.sets.get(self.set) else { return };
-        // the kind asked for, else the one the test page uses (the publication, else an article), else the first
-        self.kind = kind.and_then(|k| set.kinds.iter().find(|(id, _)| id == k)).or_else(|| sets::test_kind(set)).or_else(|| set.kinds.first()).map(|(id, _)| id.clone()).unwrap_or_default();
+        // the kind asked for, else the one the test page uses (the publication, else an article), else
+        // the first; of a folder's dialog, only one that can hold a folder
+        let ok = |k: &&(String, KindManifest)| self.allows(&k.1);
+        self.kind = kind.and_then(|k| set.kinds.iter().find(|(id, _)| id == k)).filter(ok).or_else(|| sets::test_kind(set).filter(ok)).or_else(|| set.kinds.iter().find(ok)).map(|(id, _)| id.clone()).unwrap_or_default();
         self.fill_fields();
     }
 
     pub fn select_kind(&mut self, id: &str) {
-        if self.current_set().is_some_and(|s| s.kinds.iter().any(|(k, _)| k == id)) {
+        if self.current_set().is_some_and(|s| s.kinds.iter().any(|(k, m)| k == id && self.allows(m))) {
             self.kind = id.to_string();
             self.fill_fields();
         }
@@ -229,7 +250,9 @@ impl TexExport {
                 let shown = self.current_kind().map(|k| k.name.clone()).unwrap_or_else(|| "none".into());
                 let combo = egui::ComboBox::from_id_salt("export-tex-kind").width(250.0).height(360.0).selected_text(shown).show_ui(ui, |ui| {
                     for (id, k) in self.current_set().map(|s| s.kinds.clone()).unwrap_or_default() {
-                        if rec(&format!("kind:{id}"), ui.selectable_label(self.kind == id, &k.name)).on_hover_text(&k.description).clicked() {
+                        // a folder's dialog greys the kinds that cannot hold a folder, and says why
+                        let label = ui.add_enabled(self.allows(&k), egui::Button::selectable(self.kind == id, &k.name));
+                        if rec(&format!("kind:{id}"), label).on_hover_text(&k.description).on_disabled_hover_text(ONLY_ARTICLES_AND_BOOKS).clicked() {
                             picked = Some(id);
                         }
                     }
@@ -263,6 +286,9 @@ impl TexExport {
                 ui.end_row();
             }
         });
+        if self.folder {
+            rec("folder-kinds", ui.label(muted(&format!("{ONLY_ARTICLES_AND_BOOKS}."))));
+        }
         ui.add_space(4.0);
         match &self.status {
             TexStatus::Checking => {

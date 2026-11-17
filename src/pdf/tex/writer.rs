@@ -107,7 +107,7 @@ fn family_of(k: &KindManifest) -> Family {
 
 /// The level each heading has by nesting from `#`: a heading below a shallower one is one level
 /// down from it, however many marks it has, and the first heading is level 1.
-fn nested_levels(levels: &[usize]) -> Vec<usize> {
+pub(super) fn nested_levels(levels: &[usize]) -> Vec<usize> {
     let mut open: Vec<usize> = Vec::new();
     levels
         .iter()
@@ -121,26 +121,34 @@ fn nested_levels(levels: &[usize]) -> Vec<usize> {
         .collect()
 }
 
-/// The command of a level: `\section` for level 1 of an article, `\chapter` for a book.
-fn level_command(book: bool, level: usize) -> &'static str {
-    const NAMES: [&str; 6] = ["chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"];
-    NAMES[(level - 1 + usize::from(!book)).min(5)]
+/// The sectioning commands from the top: a rank is an index into it (deeper ones repeat the last).
+const COMMANDS: [&str; 7] = ["part", "chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"];
+
+/// The rank of `\section` in [`COMMANDS`]: where an article starts, and the book family one above it.
+pub(super) const SECTION: usize = 2;
+
+/// The rank of a heading level of a note: level 1 is `\chapter` in a book, `\section` in an article.
+fn rank_of(book: bool, level: usize) -> usize {
+    level + usize::from(!book)
 }
 
-/// A heading of a kind in the article or book family: numbered, or starred and (when the table of
-/// contents is there) put into it by hand so it is still listed (TEX-009).
-fn section(book: bool, level: usize, numbered: bool, listed: bool, plain: &str) -> String {
-    let name = level_command(book, level);
+/// A heading of the article or book family at a rank of [`COMMANDS`]: numbered, or starred and
+/// (when the table of contents is there) put into it by hand so it is still listed (TEX-009). With a
+/// `label`, a link can go to it (`\label`, an anchor of its own when the heading has no number).
+pub(super) fn heading(rank: usize, numbered: bool, listed: bool, plain: &str, label: Option<&str>) -> String {
+    let name = COMMANDS[rank.min(COMMANDS.len() - 1)];
     // paragraphs have no star: the class does not number them anyway
-    if numbered || level_is_run_in(book, level) {
-        return format!("\\{name}{{{plain}}}\n\n");
+    let run_in = name.ends_with("paragraph");
+    let anchor = |numbered: bool| match label {
+        Some(l) if numbered => format!("\\label{{{l}}}\n"),
+        Some(l) => format!("\\phantomsection\\label{{{l}}}\n"),
+        None => String::new(),
+    };
+    if numbered || run_in {
+        return format!("\\{name}{{{plain}}}\n{}\n", anchor(numbered && !run_in));
     }
     let add = if listed { format!("\\addcontentsline{{toc}}{{{name}}}{{{plain}}}\n") } else { String::new() };
-    format!("\\{name}*{{{plain}}}\n{add}\n")
-}
-
-fn level_is_run_in(book: bool, level: usize) -> bool {
-    level_command(book, level).ends_with("paragraph")
+    format!("\\{name}*{{{plain}}}\n{}{add}\n", anchor(false))
 }
 
 /// A heading as a bold line, for the places a kind has no headings of its own.
@@ -166,25 +174,20 @@ fn helpers(long_tables: bool, columns: bool) -> String {
     t
 }
 
-/// Write the note as a document of the kind. Fails with a sentence for the person when a required
-/// field has no value.
-pub fn write(req: &Request) -> Result<Document, String> {
-    let (vault, kind) = (req.vault, req.kind);
-    let family = family_of(kind);
-    let fm = markdown::front_matter_values(req.text);
-    let title = note_title(vault, req.rel);
-
-    // the fields: the dialog, else the note's properties, else the manifest's default
+/// The values of a kind's fields (TEX-018): the dialog's, else the front matter's (`fm`), else the
+/// `title`, else the set's settings, else the manifest's default. Fails with a sentence for the
+/// person when a required field has no value.
+pub(super) fn field_values<'k>(kind: &'k KindManifest, settings: &SetSettings, fm: &[(String, Vec<String>)], title: &str, dialog: &BTreeMap<String, String>) -> Result<Vec<(&'k Field, Option<String>)>, String> {
     let value = |f: &Field| -> Option<String> {
-        let dialog = req.fields.get(&f.key).map(|v| v.trim()).filter(|v| !v.is_empty()).map(str::to_string);
-        let found = dialog
-            .or_else(|| front_value(&fm, f))
-            .or_else(|| (f.key == "title").then(|| title.clone()))
-            .or_else(|| (f.key == "subject" && kind.fields.iter().all(|o| o.key != "title")).then(|| title.clone()))
-            .or_else(|| settings_default(&req.set.settings, &f.key));
+        let given = dialog.get(&f.key).map(|v| v.trim()).filter(|v| !v.is_empty()).map(str::to_string);
+        let found = given
+            .or_else(|| front_value(fm, f))
+            .or_else(|| (f.key == "title").then(|| title.to_string()))
+            .or_else(|| (f.key == "subject" && kind.fields.iter().all(|o| o.key != "title")).then(|| title.to_string()))
+            .or_else(|| settings_default(settings, &f.key));
         found.map(|v| tex_value(f, &v)).or_else(|| (!f.default.is_empty()).then(|| f.default.clone()))
     };
-    let mut values: Vec<(&Field, Option<String>)> = Vec::new();
+    let mut values = Vec::new();
     for f in &kind.fields {
         let v = value(f);
         if f.required && v.is_none() {
@@ -193,18 +196,65 @@ pub fn write(req: &Request) -> Result<Document, String> {
         }
         values.push((f, v));
     }
-    let get = |key: &str| values.iter().find(|(f, _)| f.key == key).and_then(|(_, v)| v.clone());
+    Ok(values)
+}
 
-    // the blocks, without the heading that only says the title again (PDF-008)
-    let mut blocks = blocks::parse(req.text);
+/// Leave out the heading that only says the title again (PDF-008): the first heading, when it is a
+/// `#` with the title's text.
+pub(super) fn drop_title_heading(blocks: &mut Vec<Block>, title: &str) {
     let first_heading = blocks.iter().position(|b| matches!(b, Block::Heading { .. }));
     if let Some(i) = first_heading {
         if let Block::Heading { level: 1, text, .. } = &blocks[i] {
-            if markdown::heading_plain(text).to_lowercase() == markdown::heading_plain(&title).to_lowercase() {
+            if markdown::heading_plain(text).to_lowercase() == markdown::heading_plain(title).to_lowercase() {
                 blocks.remove(i);
             }
         }
     }
+}
+
+/// The whole document around `main` (what is between `\begin{document}` and `\end{document}`): the
+/// kind's lines, the writer's helpers, the depth of the contents when there are any, the fields.
+pub(super) fn document(kind: &KindManifest, settings: &SetSettings, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], main: &str) -> String {
+    let mut tex = class_and_preamble(kind, settings);
+    tex.push_str(&helpers(long_tables, columns));
+    if let Some(depth) = toc_depth {
+        tex.push_str(&format!("\\setcounter{{tocdepth}}{{{depth}}}\n"));
+    }
+    for (f, v) in values {
+        // no \date: the class puts in today's
+        if let (Some(c), Some(v)) = (&f.command, v) {
+            tex.push_str(&format!("\\{c}{{{v}}}\n"));
+        }
+    }
+    tex.push_str("\\begin{document}\n");
+    tex.push_str(main);
+    tex.push_str("\\end{document}\n");
+    tex
+}
+
+/// The depth of the table of contents (TEX-009, TEX-011): `#` to `###` of an article, `#` to `##`
+/// below the chapters of a book.
+pub(super) fn toc_depth(book: bool) -> usize {
+    if book {
+        2
+    } else {
+        3
+    }
+}
+
+/// Write the note as a document of the kind. Fails with a sentence for the person when a required
+/// field has no value.
+pub fn write(req: &Request) -> Result<Document, String> {
+    let (vault, kind) = (req.vault, req.kind);
+    let family = family_of(kind);
+    let fm = markdown::front_matter_values(req.text);
+    let title = note_title(vault, req.rel);
+    let values = field_values(kind, &req.set.settings, &fm, &title, req.fields)?;
+    let get = |key: &str| values.iter().find(|(f, _)| f.key == key).and_then(|(_, v)| v.clone());
+
+    // the blocks, without the heading that only says the title again (PDF-008)
+    let mut blocks = blocks::parse(req.text);
+    drop_title_heading(&mut blocks, &title);
     let numbered = markdown::headings_numbered(req.text, req.opts.numbered_headings);
     let has_headings = blocks.iter().any(|b| matches!(b, Block::Heading { .. }));
     let toc = req.opts.toc && matches!(family, Family::Article | Family::Book) && has_headings;
@@ -230,8 +280,8 @@ pub fn write(req: &Request) -> Result<Document, String> {
                     Block::Heading { text, .. } => {
                         let level = nested.next().unwrap_or(1);
                         main.push_str(&match family {
-                            Family::Poster => section(false, level, false, false, &plain(text)),
-                            f => section(f == Family::Book, level, numbered, toc, &plain(text)),
+                            Family::Poster => heading(rank_of(false, level), false, false, &plain(text), None),
+                            f => heading(rank_of(f == Family::Book, level), numbered, toc, &plain(text), None),
                         });
                     }
                     b => main.push_str(&body.block(b)),
@@ -262,21 +312,7 @@ pub fn write(req: &Request) -> Result<Document, String> {
         }
     }
 
-    // the document: the kind's lines, the writer's helpers, the fields, the body
-    let mut tex = class_and_preamble(kind, &req.set.settings);
-    tex.push_str(&helpers(long_tables, family == Family::Poster && kind.columns > 1));
-    if toc {
-        tex.push_str(&format!("\\setcounter{{tocdepth}}{{{}}}\n", if family == Family::Book { 2 } else { 3 }));
-    }
-    for (f, v) in &values {
-        // no \date: the class puts in today's
-        if let (Some(c), Some(v)) = (&f.command, v) {
-            tex.push_str(&format!("\\{c}{{{v}}}\n"));
-        }
-    }
-    tex.push_str("\\begin{document}\n");
-    tex.push_str(&main);
-    tex.push_str("\\end{document}\n");
+    let tex = document(kind, &req.set.settings, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &main);
     Ok(Document { tex, files: body.files, warnings: body.warnings })
 }
 

@@ -1152,6 +1152,8 @@ impl ShaleApp {
                 None => {}
             }
             match result {
+                // a note's or a folder's export through LaTeX (TEX-016, BOOK-013)
+                crate::pdf::export_dialog::DialogResult::Export if d.latex() => d.error = self.start_tex_export(d, &ctx).err(),
                 crate::pdf::export_dialog::DialogResult::Export if d.book.is_some() => d.error = self.start_book_export(d, &ctx).err(),
                 crate::pdf::export_dialog::DialogResult::Cancel if d.book.as_ref().is_some_and(|b| b.working()) => {
                     // Cancel stops the export that is running, and a second one closes the dialog
@@ -1159,7 +1161,6 @@ impl ShaleApp {
                         b.cancel();
                     }
                 }
-                crate::pdf::export_dialog::DialogResult::Export if d.latex() => d.error = self.start_tex_export(d, &ctx).err(),
                 crate::pdf::export_dialog::DialogResult::Export => match self.run_export(d) {
                     Ok(out) => {
                         done(self, d, out);
@@ -1175,7 +1176,8 @@ impl ShaleApp {
             }
             // a hint's "Set up…", or the first LaTeX choice while something is missing (TEX-017)
             if let Some(step) = self.tex_setup_wanted(d) {
-                self.open_tex_setup(Some(step), crate::pdf::tex::setup::Return::Export(d.rel.clone()));
+                let ret = if d.book.is_some() { crate::pdf::tex::setup::Return::ExportFolder(d.rel.clone()) } else { crate::pdf::tex::setup::Return::Export(d.rel.clone()) };
+                self.open_tex_setup(Some(step), ret);
                 keep = false;
             }
             if close_asked {

@@ -124,17 +124,16 @@ impl ShaleApp {
         let ret = std::mem::take(&mut self.tex.setup.ret);
         self.tex.setup = Default::default();
         match ret {
-            Return::Nothing => {}
-            Return::Settings => self.open_settings(crate::app::SettingsTab::Latex),
-            Return::Export(rel) => {
-                self.open_export_dialog(&rel);
-                if let Some(Modal::Export(d)) = &mut self.modal {
-                    d.engine = ExportEngine::Latex;
-                    if let Some(tex) = d.tex.as_mut() {
-                        if let Some(i) = set.and_then(|id| tex.sets.iter().position(|s| s.id == id)) {
-                            tex.select_set(i, None);
-                        }
-                    }
+            Return::Nothing => return,
+            Return::Settings => return self.open_settings(crate::app::SettingsTab::Latex),
+            Return::Export(rel) => self.open_export_dialog(&rel),
+            Return::ExportFolder(dir) => self.open_export_folder_dialog(&dir),
+        }
+        if let Some(Modal::Export(d)) = &mut self.modal {
+            d.engine = ExportEngine::Latex;
+            if let Some(tex) = d.tex.as_mut() {
+                if let Some(i) = set.and_then(|id| tex.sets.iter().position(|s| s.id == id)) {
+                    tex.select_set(i, None);
                 }
             }
         }
