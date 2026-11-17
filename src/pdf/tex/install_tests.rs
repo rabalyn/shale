@@ -193,9 +193,16 @@ mod fake {
 
     // ---------------------------------------------------------------- a pretend repository
 
-    /// A web server on 127.0.0.1 that serves `body` at `/tlnet/<archive>` and says 404 for the rest;
-    /// the paths asked for are recorded. It lives until the test process ends.
-    fn serve(body: Vec<u8>) -> (String, Arc<Mutex<Vec<String>>>) {
+    /// What the pretend web server answers to a path.
+    enum Reply {
+        Body(Vec<u8>),
+        Redirect(String),
+        NotFound,
+    }
+
+    /// A web server on 127.0.0.1 that answers each request with `answer(path)`; the paths asked for
+    /// are recorded. It lives until the test process ends. Gives `http://127.0.0.1:<port>/tlnet`.
+    fn serve_with(answer: impl Fn(&str) -> Reply + Send + 'static) -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://127.0.0.1:{}/tlnet", listener.local_addr().unwrap().port());
         let asked = Arc::new(Mutex::new(vec![]));
@@ -208,15 +215,45 @@ mod fake {
                 let first = String::from_utf8_lossy(&buf[..n]).lines().next().unwrap_or("").to_string();
                 let path = first.split_whitespace().nth(1).unwrap_or("").to_string();
                 log.lock().unwrap().push(path.clone());
-                let ok = path == format!("/tlnet/{}", installer_archive());
-                let head = if ok { format!("HTTP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()) } else { "HTTP/1.0 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_string() };
+                let (head, body) = match answer(&path) {
+                    Reply::Body(b) => (format!("HTTP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n", b.len()), b),
+                    Reply::Redirect(to) => (format!("HTTP/1.0 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\n\r\n"), vec![]),
+                    Reply::NotFound => ("HTTP/1.0 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_string(), vec![]),
+                };
                 let _ = stream.write_all(head.as_bytes());
-                if ok {
-                    let _ = stream.write_all(&body);
-                }
+                let _ = stream.write_all(&body);
             }
         });
         (url, asked)
+    }
+
+    /// A pretend repository (a mirror): `body` at `/tlnet/<archive>`, a checksum file at
+    /// `/tlnet/<MIRROR_PROBE>`, 404 for the rest.
+    fn serve(body: Vec<u8>) -> (String, Arc<Mutex<Vec<String>>>) {
+        serve_with(move |path| {
+            if path == format!("/tlnet/{}", installer_archive()) {
+                Reply::Body(body.clone())
+            } else if path == format!("/tlnet/{MIRROR_PROBE}") {
+                Reply::Body(b"0123abcd  texlive.tlpdb\n".to_vec())
+            } else {
+                Reply::NotFound
+            }
+        })
+    }
+
+    /// A pretend `mirror.ctan.org`: each request is sent on to the next of `mirrors` (in turn,
+    /// starting again after the last), with the path below `/tlnet` kept.
+    fn redirector(mirrors: Vec<String>) -> (String, Arc<Mutex<Vec<String>>>) {
+        let next = AtomicU32::new(0);
+        serve_with(move |path| {
+            let i = next.fetch_add(1, Ordering::SeqCst) as usize % mirrors.len();
+            Reply::Redirect(format!("{}{}", mirrors[i], path.strip_prefix("/tlnet").unwrap_or(path)))
+        })
+    }
+
+    /// The paths a server was asked for.
+    fn paths(asked: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+        asked.lock().unwrap().clone()
     }
 
     /// The archive of a pretend installer: a folder with the perl script `install-tl`.
@@ -275,7 +312,7 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         })
         .unwrap();
         assert_eq!(done, Done { warning: None }, "the pretend TeX compiles the test document");
-        assert_eq!(asked.lock().unwrap().as_slice(), [format!("/tlnet/{}", installer_archive())], "the installer was downloaded from the repository, nothing else");
+        assert_eq!(paths(&asked), [format!("/tlnet/{MIRROR_PROBE}"), format!("/tlnet/{}", installer_archive())], "the mirror was resolved and the installer downloaded from it, nothing else");
         let root = managed_root(&data);
         assert!(root.join("bin").is_dir() && !partial_root(&data).exists(), "moved into place, no partial folder left");
         let args = std::fs::read_to_string(root.join("install.args")).unwrap();
@@ -358,9 +395,16 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
     fn a_failed_download_or_a_bad_address_stops_before_anything_is_installed() {
         let data = temp("download");
         let (repo, asked) = serve(vec![]);
+        // no repository there: the mirror cannot be resolved
         let e = install(&env(&data, &format!("{repo}x")), &Handle::default(), &|| {}).unwrap_err();
-        assert!(e.contains("the download of") && e.contains("failed"), "{e}");
+        assert!(e.contains("could not be reached"), "{e}");
         assert_eq!(asked.lock().unwrap().len(), 1);
+        assert!(!partial_root(&data).exists());
+        // a repository without the installer
+        let (repo, asked) = serve_with(|path| if path.ends_with(MIRROR_PROBE) { Reply::Body(b"x".to_vec()) } else { Reply::NotFound });
+        let e = install(&env(&data, &repo), &Handle::default(), &|| {}).unwrap_err();
+        assert!(e.contains("the download of") && e.contains("failed"), "{e}");
+        assert_eq!(asked.lock().unwrap().len(), 2);
         assert!(!partial_root(&data).exists());
         let e = install(&env(&data, "not a url"), &Handle::default(), &|| {}).unwrap_err();
         assert!(e.contains("is not a repository address"), "{e}");
@@ -395,16 +439,101 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         script(&bin, "biber", "exit 0");
         script(&bin, "tlmgr", &format!("echo \"$@\" > '{}/tlmgr.args'\necho '[1/3, ??:??/??:??] update: pdftex [5k]'\necho '[2/3, ??:??/??:??] update: biber [5k]'", f.dir.display()));
         let handle = Handle::default();
-        let done = update(&env(&data, "https://example.org/tlnet/"), &handle, &|| {}).unwrap();
+        let (repo, _) = serve(vec![]);
+        let done = update(&env(&data, &format!("{repo}/")), &handle, &|| {}).unwrap();
         assert_eq!(done.warning, None);
-        assert_eq!(std::fs::read_to_string(f.dir.join("tlmgr.args")).unwrap().trim(), "--repository https://example.org/tlnet update --self --all");
+        assert_eq!(std::fs::read_to_string(f.dir.join("tlmgr.args")).unwrap().trim(), format!("--repository {repo} update --self --all"));
         assert_eq!(handle.progress().stage, Stage::Fonts);
         // not installed: nothing to update
         assert!(update(&env(&f.dir.join("empty"), "https://example.org/tlnet"), &Handle::default(), &|| {}).unwrap_err().contains("no TeX Live programs"));
         // a failing tlmgr
         script(&bin, "tlmgr", "echo 'tlmgr: remote repository is newer than local' >&2\nexit 1");
-        let e = update(&env(&data, "https://example.org/tlnet"), &Handle::default(), &|| {}).unwrap_err();
+        let e = update(&env(&data, &repo), &Handle::default(), &|| {}).unwrap_err();
         assert!(e.contains("tlmgr failed") && e.contains("is newer than local"), "{e}");
+    }
+
+    /// What tlmgr says on a mirror older than the installation (Forgejo run #361, #320).
+    const OLDER: &str = "echo 'tlmgr: Remote database at the mirror' >&2\necho '(revision 81147 of the texlive-scripts package)' >&2\necho 'seems to be older than the local installation' >&2\necho '(revision 81161 of texlive-scripts);' >&2\necho 'please use a different mirror and/or wait a day or two.' >&2\nexit 1";
+
+    // spec: TEX-002
+    #[test]
+    fn a_redirector_is_resolved_to_one_mirror_that_every_step_of_the_install_uses() {
+        // mirror.ctan.org sends each request somewhere else: install-tl and tlmgr must not get two
+        let data = temp("one-mirror");
+        let body = installer("one-mirror", &install_tl("", GOOD_TLMGR));
+        let (a, asked_a) = serve(body.clone());
+        let (b, asked_b) = serve(body);
+        let (redirect, asked_redirect) = redirector(vec![a.clone(), b]);
+        assert_eq!(resolve_mirror(&Handle::default(), &a), Ok(a.clone()), "a repository that does not redirect is its own mirror");
+        asked_a.lock().unwrap().clear();
+        install(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(paths(&asked_redirect), [format!("/tlnet/{MIRROR_PROBE}")], "the redirector is asked once");
+        assert_eq!(paths(&asked_a), [format!("/tlnet/{MIRROR_PROBE}"), format!("/tlnet/{}", installer_archive())], "the installer comes from the mirror it chose");
+        assert!(paths(&asked_b).is_empty(), "the other mirror is never used");
+        let root = managed_root(&data);
+        assert!(std::fs::read_to_string(root.join("install.args")).unwrap().trim_end().ends_with(&format!("-repository {a}")));
+        assert!(std::fs::read_to_string(root.join("tlmgr.args")).unwrap().starts_with(&format!("--repository {a} install ")));
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    // spec: TEX-002
+    #[test]
+    fn a_mirror_older_than_the_install_is_left_for_a_fresh_one() {
+        let data = temp("older-install");
+        let (new, _) = serve(vec![]);
+        let (old, _) = serve(vec![]);
+        // tlmgr finds every mirror but the new one older than the installation
+        let tlmgr = format!("case \"$*\" in *{new}*) ;; *) {OLDER} ;; esac\n{GOOD_TLMGR}");
+        let (first, _) = serve(installer("older-install", &install_tl("", &tlmgr)));
+        // the install gets the first mirror, tlmgr's retries the old one and then the new one
+        let (redirect, asked) = redirector(vec![first.clone(), old, new.clone()]);
+        install(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(paths(&asked).len(), MIRROR_TRIES, "the first mirror, then a fresh one for each refused tlmgr run");
+        let root = managed_root(&data);
+        assert!(std::fs::read_to_string(root.join("install.args")).unwrap().trim_end().ends_with(&format!("-repository {first}")), "install-tl ran on the first mirror");
+        assert!(std::fs::read_to_string(root.join("tlmgr.args")).unwrap().starts_with(&format!("--repository {new} install ")), "tlmgr installed from the new mirror");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    // spec: TEX-003
+    #[test]
+    fn an_update_on_an_older_mirror_tries_a_fresh_one_a_few_times_and_then_says_why() {
+        let f = Fake::new("older-update");
+        let data = f.dir.join("data");
+        let bin = managed_root(&data).join("bin").join("x86_64-linux");
+        script(&bin, "lualatex", "for a; do last=$a; done\nstem=${last%.tex}\necho ok > $stem.log\necho '%PDF' > $stem.pdf");
+        script(&bin, "biber", "exit 0");
+        let (new, _) = serve(vec![]);
+        let (old, _) = serve(vec![]);
+        let runs = f.dir.join("runs");
+        script(&bin, "tlmgr", &format!("echo run >> '{}'\ncase \"$*\" in *{old}*) {OLDER} ;; esac\necho \"$@\" > '{}/tlmgr.args'", runs.display(), f.dir.display()));
+        // the redirector sends the first request to the old mirror, the next to the new one
+        let (redirect, asked) = redirector(vec![old.clone(), new.clone()]);
+        assert_eq!(update(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap().warning, None);
+        assert_eq!(paths(&asked).len(), 2);
+        assert_eq!(std::fs::read_to_string(f.dir.join("tlmgr.args")).unwrap().trim(), format!("--repository {new} update --self --all"));
+        assert_eq!(std::fs::read_to_string(&runs).unwrap().lines().count(), 2);
+        // only old mirrors: MIRROR_TRIES runs, then tlmgr's words
+        std::fs::remove_file(&runs).unwrap();
+        let (redirect, asked) = redirector(vec![old.clone()]);
+        let e = update(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap_err();
+        assert!(e.contains("tlmgr failed") && e.contains("older than the local installation") && e.contains("different mirror"), "{e}");
+        assert_eq!(std::fs::read_to_string(&runs).unwrap().lines().count(), MIRROR_TRIES);
+        assert_eq!(paths(&asked).len(), MIRROR_TRIES);
+        // any other failure is not tried again
+        std::fs::remove_file(&runs).unwrap();
+        script(&bin, "tlmgr", &format!("echo run >> '{}'\necho 'tlmgr: no space left' >&2\nexit 1", runs.display()));
+        assert!(update(&env(&data, &new), &Handle::default(), &|| {}).unwrap_err().contains("no space left"));
+        assert_eq!(std::fs::read_to_string(&runs).unwrap().lines().count(), 1);
+    }
+
+    // spec: TEX-002
+    #[test]
+    fn a_redirect_that_does_not_end_at_a_repository_is_refused() {
+        let (elsewhere, _) = serve_with(|_| Reply::Body(b"<html>".to_vec()));
+        let (redirect, _) = serve_with(move |_| Reply::Redirect(format!("{elsewhere}/index.html")));
+        let e = resolve_mirror(&Handle::default(), &redirect).unwrap_err();
+        assert!(e.contains("which is no TeX Live repository"), "{e}");
     }
 }
 

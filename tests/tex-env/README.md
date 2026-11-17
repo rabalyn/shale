@@ -35,8 +35,11 @@ upstream `latexmkrc`).
 - **The current TeX Live** (ADR-0020): `install-tl` with `assets/tex/texlive.profile`
   (`scheme-infraonly`) from the default repository `https://mirror.ctan.org/systems/texlive/tlnet`, the one
   the managed install uses, then the packages of `assets/tex/packages.txt` (one list, shared with the
-  managed install). So the image is **not reproducible**: it is whatever TeX Live is current when it is
-  built. It records which one in `/etc/shale-tex-build` (year, repository, date), which `status` and the
+  managed install). `install-texlive.sh` does it in one step: the redirector is resolved once to one
+  mirror, which `install-tl` and `tlmgr` both use (two mirrors of different age made `tlmgr` refuse,
+  #320), and `tlmgr` tries a fresh mirror when its mirror is older than the installation (three runs at
+  most). So the image is **not reproducible**: it is whatever TeX Live is current when it is
+  built. It records which one in `/etc/shale-tex-build` (year, repository, mirror, date), which `status` and the
   demo test print. `build` reuses a cached image; `build --refresh` rebuilds it without the cache, which the
   weekly and tag CI runs do, so a change upstream shows within a week.
 - **tuda-ci at commit `e933be93…`** (v4.06; there is no tag): GitHub's archive, checked by sha256, in

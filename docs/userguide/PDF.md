@@ -238,6 +238,10 @@ the TeX and checks it:
   **Remove…** asks first, naming the folder and its size, and deletes that folder and nothing else.
 - **Download address** (`tex.repository`) is the TeX Live repository the install and update use;
   the default is CTAN's mirror redirector. Only `https://` (and `http://`) addresses are accepted.
+  The redirector sends each request to some mirror near you, so an install or update first asks it
+  once which mirror to use and then downloads everything from that one mirror. If that mirror is
+  behind your installation (mirrors catch up within a day or two), the update tries another mirror,
+  three times at most.
 
 Shale runs the programs without a shell, in a temporary folder that is removed afterwards, with
 each run limited to two minutes; a document cannot start programs (`\write18` is off) and cannot
