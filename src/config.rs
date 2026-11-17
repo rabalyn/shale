@@ -292,6 +292,10 @@ pub struct Config {
     pub format_toolbar: bool,
     /// The size of the toolbar's buttons in percent of the base size (EDIT-026), 80–200.
     pub toolbar_size: u32,
+    /// The width of the link preview in points (EDIT-037); used within `link_preview::clamp_size`.
+    pub link_preview_width: u32,
+    /// The height of the link preview in points (EDIT-037).
+    pub link_preview_height: u32,
     /// The preset font colours of the toolbar's palette (EDIT-028), as RGB.
     pub font_colours: Vec<[u8; 3]>,
     /// The preset highlight colours of the toolbar's palette (EDIT-028), as RGB.
@@ -382,6 +386,8 @@ impl Default for Config {
             line_numbers: true,
             format_toolbar: true,
             toolbar_size: 110,
+            link_preview_width: crate::link_preview::DEFAULT_WIDTH,
+            link_preview_height: crate::link_preview::DEFAULT_HEIGHT,
             font_colours: DEFAULT_FONT_COLOURS.to_vec(),
             highlight_colours: DEFAULT_HIGHLIGHT_COLOURS.to_vec(),
             live_preview: false,
@@ -728,6 +734,19 @@ mod tests {
         let c: Config = serde_json::from_str(r#"{"format_toolbar": false, "toolbar_size": 150, "font_colours": [[1, 2, 3]], "highlight_colours": []}"#).unwrap();
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.format_toolbar, back.toolbar_size, back.font_colours, back.highlight_colours), (false, 150, vec![[1, 2, 3]], vec![]));
+    }
+
+    // spec: EDIT-037, CFG-001
+    #[test]
+    fn the_link_preview_size_has_defaults_loads_from_old_files_and_round_trips() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert_eq!((c.link_preview_width, c.link_preview_height), (640, 480), "an old file has the default size");
+        assert_eq!(c.version, 2, "new fields with defaults need no migration (CFG-001)");
+        let c = Config { link_preview_width: 700, link_preview_height: 333, ..Config::default() };
+        let text = text::to_toml(&c);
+        assert!(text.contains("link_preview_width = 700") && text.contains("link_preview_height = 333"), "{text}");
+        let (back, _) = Config::parse_text(&text).unwrap();
+        assert_eq!((back.link_preview_width, back.link_preview_height), (700, 333));
     }
 
     // spec: MEDIA-004, MEDIA-006, CFG-001
