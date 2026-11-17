@@ -6,6 +6,7 @@ use crate::colour_tags;
 #[cfg(test)]
 use crate::link_assist::link_query;
 use crate::markdown::{self, LinkSpan};
+use crate::syntax;
 use crate::theme;
 use crate::vault::Vault;
 use eframe::egui::{self, text::LayoutJob, Color32, FontFamily, FontId, Galley, Key, Modifiers, Pos2, Rect, Stroke, TextFormat, Ui, Vec2};
@@ -44,6 +45,8 @@ struct Fmt {
     fg: Option<[u8; 4]>,
     /// a `<mark …>` or `<span …>` tag, long markup that the preview folds up to almost nothing
     ctag: bool,
+    /// highlighted code: what this piece of a code block or code span is (EDIT-032)
+    syn_kind: Option<crate::syntax::Kind>,
 }
 
 pub fn heading_scale(level: u8) -> f32 {
@@ -172,6 +175,12 @@ pub fn highlight(text: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob
 pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> LayoutJob {
     let mut fmts = vec![Fmt::default(); text.len()];
     let fenced = markdown::fenced_code_lines(text);
+    for block in syntax::fenced_blocks(text) {
+        let body = &text[block.body.clone()];
+        for (r, kind) in syntax::highlight(&block.lang, body).iter() {
+            set(&mut fmts, block.body.start + r.start..block.body.start + r.end, |f| f.syn_kind = Some(*kind));
+        }
+    }
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
     let mut in_front = false;
     for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
@@ -241,6 +250,10 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, imag
                     set(&mut fmts, r.clone(), |f| f.code = true);
                     set(&mut fmts, r.start..r.start + 1, |f| f.syn = true);
                     set(&mut fmts, r.end - 1..r.end, |f| f.syn = true);
+                    let inner = off + i + 1;
+                    for (sr, kind) in syntax::highlight_inline(&line[i + 1..i + 1 + e]) {
+                        set(&mut fmts, inner + sr.start..inner + sr.end, |f| f.syn_kind = Some(kind));
+                    }
                     local_code.push(r);
                     i += e + 2;
                     continue;
@@ -334,6 +347,24 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, imag
     job
 }
 
+/// A heading title as the outline shows it (LINK-013): the editor's inline styling (bold, italic,
+/// code, strike, highlight, `<mark>` colours, links by their shown text) with the markup left out
+/// of the text altogether, not just hidden.
+pub fn outline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob {
+    let job = highlight_preview(title, links, base, &[], Some(1..1));
+    let mut out = LayoutJob::default();
+    for s in &job.sections {
+        let hidden = s.format.color == Color32::TRANSPARENT && s.format.font_id.size <= 1.0;
+        if hidden {
+            continue;
+        }
+        let start = out.text.len();
+        out.text.push_str(&job.text[s.byte_range.start.0..s.byte_range.end.0]);
+        out.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(out.text.len()), format: s.format.clone() });
+    }
+    out
+}
+
 fn to_format(f: Fmt, base: f32) -> TextFormat {
     if f.image_h > 0 {
         return TextFormat { font_id: FontId::new(1.0, FontFamily::Proportional), color: Color32::TRANSPARENT, line_height: Some(f.image_h as f32), ..Default::default() };
@@ -354,7 +385,7 @@ fn to_format(f: Fmt, base: f32) -> TextFormat {
         color = theme::TEXT_STRONG;
     }
     if mono {
-        color = theme::CODE;
+        color = f.syn_kind.map_or(theme::CODE, theme::syntax_colour);
     }
     if f.marker {
         color = theme::ACCENT;
@@ -3852,6 +3883,60 @@ mod tests {
     fn format_of<'a>(job: &'a LayoutJob, text: &str, needle: &str) -> &'a TextFormat {
         let at = text.find(needle).unwrap_or_else(|| panic!("{needle} is not in the text"));
         &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format
+    }
+
+    // spec: LINK-013
+    #[test]
+    fn the_outline_shows_heading_text_formatted_without_markup() {
+        let plain = |t: &str, links: &[(LinkSpan, bool)]| outline_job(t, links, 14.0);
+        let job = plain("<mark style=\"background: #FFFF00;\">Audio</mark>", &[]);
+        assert_eq!(job.text, "Audio");
+        assert_eq!(job.sections[0].format.background, Color32::from_rgb(255, 255, 0));
+        assert_eq!(plain("**B** and *i* ~~s~~ `c` ==h==", &[]).text, "B and i s c h");
+        let job = plain("**B** x", &[]);
+        assert_eq!(job.sections[0].format.color, theme::TEXT_STRONG);
+        let job = plain("~~s~~", &[]);
+        assert_eq!(job.sections[0].format.strikethrough.width, 1.0);
+        let job = plain("`c`", &[]);
+        assert_eq!(job.sections[0].format.font_id.family, FontFamily::Monospace);
+        for t in ["See [[Note|Alias]] now", "See [Alias](Note.md) now"] {
+            let links: Vec<(LinkSpan, bool)> = markdown::find_links(t).into_iter().map(|l| (l, true)).collect();
+            let job = plain(t, &links);
+            assert_eq!(job.text, "See Alias now", "{t}");
+            let at = job.text.find("Alias").unwrap();
+            let f = &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format;
+            assert_eq!(f.color, theme::LINK);
+        }
+    }
+
+    // spec: EDIT-032
+    #[test]
+    fn fenced_code_is_coloured_by_the_language_of_its_fence_and_stays_plain_without_one() {
+        let js = "```js\nconsole.log(\"foooo\")\n```";
+        let job = highlight(js, &[], 15.0);
+        let string = format_of(&job, js, "\"foooo\"");
+        assert_eq!(string.color, theme::syntax_colour(syntax::Kind::String));
+        assert_eq!((string.background, string.font_id.family.clone()), (theme::CODE_BG, FontFamily::Monospace), "still a code block");
+        assert_ne!(format_of(&job, js, "console").color, string.color, "more than one colour in the block");
+        for plain in ["```\nlet a = \"x\"\n```", "```klingon\nlet a = \"x\"\n```"] {
+            let job = highlight(plain, &[], 15.0);
+            assert_eq!(format_of(&job, plain, "\"x\"").color, theme::CODE, "{plain}");
+        }
+        // the markdown preview draws code blocks as they are
+        let job = highlight_preview(js, &[], 15.0, &[], Some(5..5));
+        assert_eq!(format_of(&job, js, "\"foooo\"").color, theme::syntax_colour(syntax::Kind::String));
+    }
+
+    // spec: EDIT-032
+    #[test]
+    fn inline_code_colours_its_strings_numbers_and_calls_and_keeps_the_backticks_dim_code() {
+        let text = "call `console.log(\"fooo\", 7)` now and `plain` too";
+        let job = highlight(text, &[], 15.0);
+        assert_eq!(format_of(&job, text, "\"fooo\"").color, theme::syntax_colour(syntax::Kind::String));
+        assert_eq!(format_of(&job, text, "7)").color, theme::syntax_colour(syntax::Kind::Number));
+        assert_eq!(format_of(&job, text, "log").color, theme::syntax_colour(syntax::Kind::Function));
+        assert_eq!(format_of(&job, text, "plain").color, theme::CODE);
+        assert_eq!(format_of(&job, text, "\"fooo\"").background, theme::CODE_BG);
     }
 
     // spec: EDIT-029

@@ -163,11 +163,21 @@ fn keep_copy(trash: &std::path::Path, parts: &[Event]) -> Result<PathBuf, String
     unreachable!()
 }
 
+/// A delete must not bring back a local calendar file that vanished after loading (CAL-021):
+/// nothing is kept and nothing is written. A save does create the file again.
+fn ensure_not_gone(target: &Target) -> Result<(), String> {
+    match target {
+        Target::Local { file, .. } if !file.exists() => Err("the calendar file is gone".into()),
+        _ => Ok(()),
+    }
+}
+
 /// Remove an event from a calendar after a copy of `series` was kept. Returns where the copy is.
 /// `series`: every loaded part of the event; it is also what a server must still have when
 /// there is no version tag.
 fn remove_from(target: &Target, e: &Event, trash: &std::path::Path, series: &[Event]) -> Result<PathBuf, String> {
     let series: Vec<Event> = if series.is_empty() { vec![e.clone()] } else { series.to_vec() };
+    ensure_not_gone(target)?;
     let copy = keep_copy(trash, &series)?;
     match target {
         Target::Local { file, name } => {
@@ -594,7 +604,7 @@ impl CalendarStore {
                     remove_from(&target, &event, &trash, &series)
                 } else {
                     // the whole series as it was is kept before one date of it goes
-                    keep_copy(&trash, &series).and_then(|copy| write_to(&target, &parts, true, &series).map(|_| copy))
+                    ensure_not_gone(&target).and_then(|_| keep_copy(&trash, &series)).and_then(|copy| write_to(&target, &parts, true, &series).map(|_| copy))
                 };
                 r.map(|copy| format!("This date was removed. A copy of the event is kept in {}", copy.display())).map_err(|e| format!("Could not remove the date from “{name}”: {e}"))
             },

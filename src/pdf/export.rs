@@ -148,8 +148,6 @@ fn over_white([r, g, b, a]: [u8; 4]) -> Rgba {
 fn print_bg(c: Color32) -> Option<Rgba> {
     if c == Color32::TRANSPARENT {
         None
-    } else if c == theme::CODE_BG {
-        Some(Rgba(238, 238, 240, 255))
     } else if c == theme::TAG_BG {
         Some(Rgba(236, 232, 251, 255))
     } else {
@@ -429,13 +427,16 @@ impl<'a> Writer<'a> {
             // colours the note asks for are printed as written (EDIT-028), not mapped for paper
             let paint = paints.iter().find(|(pr, ..)| pr.start <= r.start && r.end <= pr.end);
             let link = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)).map(|(_, l, _)| l.target.clone());
+            // inline code keeps its screen colours on the code background (PDF-007)
+            let on_code = f.background == theme::CODE_BG;
             out.push(Piece {
                 text: job.text[r].to_string(),
                 kind: font_kind(&f.font_id.family),
                 size: f.font_id.size,
-                color: if paint.is_some() { rgba(f.color) } else { print_color(f.color) },
+                color: if paint.is_some() || on_code { rgba(f.color) } else { print_color(f.color) },
                 bg: match paint.and_then(|p| p.1) {
                     Some([r, g, b, a]) => Some(over_white([r, g, b, a])),
+                    None if on_code => Some(rgba(theme::CODE_BG)),
                     None => print_bg(f.background),
                 },
                 italic: f.italics,
@@ -446,6 +447,59 @@ impl<'a> Writer<'a> {
             });
         }
         out
+    }
+
+    /// A fenced code block as the reading view shows it (PDF-007): the lines on the code
+    /// background, each piece in the colour of its kind (`syntax::highlight`; plain without a
+    /// known language), long lines wrapped by characters.
+    fn code_block(&mut self, word: &str, lines: &[&str], size: f32) {
+        let (x0, cw) = (self.m, self.cw());
+        let lh = size * 1.4;
+        let plain = rgba(theme::CODE);
+        let text = lines.join("\n");
+        let spans = crate::syntax::highlight(word, &text);
+        let mut span = spans.iter().peekable();
+        let mut at = 0;
+        for line in lines {
+            // every character with its colour; a tab is four spaces
+            let mut chars: Vec<(char, Rgba)> = Vec::new();
+            for (bi, c) in line.char_indices() {
+                let pos = at + bi;
+                while span.next_if(|(r, _)| r.end <= pos).is_some() {}
+                let colour = span.peek().filter(|(r, _)| r.start <= pos).map_or(plain, |(_, k)| rgba(theme::syntax_colour(*k)));
+                chars.extend(std::iter::repeat_n((if c == '\t' { ' ' } else { c }, colour), if c == '\t' { 4 } else { 1 }));
+            }
+            at += line.len() + 1;
+            let mut rest = &chars[..];
+            loop {
+                let mut cut = rest.len();
+                let mut acc = 0.0;
+                for (n, (c, _)) in rest.iter().enumerate() {
+                    acc += crate::pdf::write::char_width(FontKind::Mono, size, *c);
+                    if acc > cw - 12.0 {
+                        cut = n.max(1);
+                        break;
+                    }
+                }
+                let (now, later) = rest.split_at(cut);
+                self.need(lh);
+                let y = self.y;
+                self.p().rect(x0, y, cw, lh, Some(rgba(theme::CODE_BG)), None);
+                let mut x = x0 + 6.0;
+                let mut n = 0;
+                while n < now.len() {
+                    let colour = now[n].1;
+                    let run: String = now[n..].iter().take_while(|(_, k)| *k == colour).map(|(c, _)| *c).collect();
+                    n += run.chars().count();
+                    x += self.p().text(TextStyle::plain(FontKind::Mono, size, colour), x, y + size * 1.05, &run);
+                }
+                self.y += lh;
+                if later.is_empty() {
+                    break;
+                }
+                rest = later;
+            }
+        }
     }
 
     /// What an embed that is `editor_size` big in the editor is in the PDF (PDF-005).
@@ -584,41 +638,16 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
         let x0 = w.m;
         let cw = w.cw();
         if fenced.get(i).copied().unwrap_or(false) {
-            // code block: collect, then draw in a grey box
+            // code block: collect, then draw on the code background (PDF-007)
+            let word = crate::syntax::fence_language(line);
             let mut code = Vec::new();
             i += 1;
             while i < lines.len() && !(lines[i].1.trim_start().starts_with("```") || lines[i].1.trim_start().starts_with("~~~")) {
-                code.push(lines[i].1.replace('\t', "    "));
+                code.push(lines[i].1);
                 i += 1;
             }
             i += 1;
-            let size = base * 0.9;
-            let lh = size * 1.4;
-            for l in code {
-                // wrap long code lines by characters
-                let mut rest: String = l;
-                loop {
-                    let mut cut = rest.len();
-                    let mut acc = 0.0;
-                    for (bi, c) in rest.char_indices() {
-                        acc += crate::pdf::write::char_width(FontKind::Mono, size, c);
-                        if acc > cw - 12.0 {
-                            cut = bi;
-                            break;
-                        }
-                    }
-                    let (now, later) = rest.split_at(cut.max(rest.chars().next().map(|c| c.len_utf8()).unwrap_or(0).min(rest.len())));
-                    w.need(lh);
-                    let y = w.y;
-                    w.p().rect(x0, y, cw, lh, Some(Rgba(238, 238, 240, 255)), None);
-                    w.p().text(TextStyle::plain(FontKind::Mono, size, Rgba(150, 70, 0, 255)), x0 + 6.0, y + size * 1.05, now);
-                    w.y += lh;
-                    if later.is_empty() {
-                        break;
-                    }
-                    rest = later.to_string();
-                }
-            }
+            w.code_block(&word, &code, base * 0.9);
             w.y += base * 0.5;
             continue;
         }
@@ -1374,6 +1403,66 @@ pub(crate) mod tests {
         assert!(c.contains("1.000 0.945 0.659 rg"), "==soft== is filled too");
         // black text on neon (dark text on a bright background), white on navy
         assert!(c.contains("0.000 0.000 0.502 rg"), "navy fill");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The `rg` operator of a screen colour, as the writer prints it.
+    fn rg(c: Color32) -> String {
+        let [r, g, b, _] = c.to_srgba_unmultiplied();
+        format!("{:.3} {:.3} {:.3} rg", r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+    }
+
+    /// The fill colour (as an `rg` operator) last set before the run drawn as `word`.
+    fn colour_of(content: &str, word: &str) -> String {
+        let at = content.find(&format!("<{}> Tj", hex(word))).unwrap_or_else(|| panic!("{word} is not drawn"));
+        let head = &content[..at];
+        let end = head.rfind(" rg").expect("a fill colour before the text");
+        let rgb: Vec<&str> = head[..end].rsplit(' ').take(3).collect();
+        format!("{} {} {} rg", rgb[2], rgb[1], rgb[0])
+    }
+
+    // spec: PDF-007, EDIT-032
+    #[test]
+    fn code_blocks_have_the_code_background_and_the_syntax_colours_of_the_reading_view() {
+        use crate::syntax::Kind;
+        let (v, d) = vault();
+        let rel = Path::new("Ideas.md");
+        let o = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
+        let js = export_note(&v, rel, "```js\nconst x = \"hi\"; // note\n```\n", &o).unwrap();
+        let c = contents(&js);
+        assert!(c.contains(&rg(theme::CODE_BG)), "the lines are filled with the code background");
+        assert_eq!(colour_of(&c, "const"), rg(theme::syntax_colour(Kind::Keyword)));
+        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::syntax_colour(Kind::String)));
+        assert_eq!(colour_of(&c, "// note"), rg(theme::syntax_colour(Kind::Comment)));
+        let colours: std::collections::HashSet<String> = ["const", "\"hi\"", "// note"].iter().map(|w| colour_of(&c, w)).collect();
+        assert!(colours.len() >= 3, "several distinct colours for the code text");
+        // no language, an unknown one: plain code colour, still on the code background
+        for fence in ["```", "```klingon"] {
+            let plain = export_note(&v, rel, &format!("{fence}\nconst x = \"hi\";\n```\n"), &o).unwrap();
+            let c = contents(&plain);
+            assert!(c.contains(&rg(theme::CODE_BG)), "{fence}: code background");
+            assert_eq!(colour_of(&c, "const x = \"hi\";"), rg(theme::CODE), "{fence}: one plain run in the code colour");
+        }
+        // a long line wraps and keeps its colours; a tab is four spaces
+        let long = format!("```js\n\tconst s = \"{}\";\n```\n", "x".repeat(300));
+        let c = contents(&export_note(&v, rel, &long, &o).unwrap());
+        assert!(c.contains(&format!("<{}> Tj", hex("    "))), "the tab is four spaces");
+        assert!(c.matches(&rg(theme::syntax_colour(Kind::String))).count() >= 2, "the string goes on in its colour on the next row");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-007, EDIT-032
+    #[test]
+    fn inline_code_is_on_the_code_background_with_the_colours_of_the_inline_rule() {
+        use crate::syntax::Kind;
+        let (v, d) = vault();
+        let o = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
+        let c = contents(&export_note(&v, Path::new("Ideas.md"), "Call `log(\"hi\", 42)` now and `plain` too.\n", &o).unwrap());
+        assert!(c.contains(&rg(theme::CODE_BG)), "a code background behind the run");
+        assert_eq!(colour_of(&c, "log"), rg(theme::syntax_colour(Kind::Function)));
+        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::syntax_colour(Kind::String)));
+        assert_eq!(colour_of(&c, "42"), rg(theme::syntax_colour(Kind::Number)));
+        assert_eq!(colour_of(&c, "plain"), rg(theme::CODE), "a span without such parts is code-coloured");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

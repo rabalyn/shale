@@ -562,6 +562,11 @@ pub fn signatures(status: &[Status]) -> Vec<SigStatus> {
             }
             "TRUST_UNDEFINED" | "TRUST_NEVER" | "TRUST_MARGINAL" | "TRUST_FULLY" | "TRUST_ULTIMATE" => {
                 if let Some(last) = out.last_mut() {
+                    // gpgsm says a revoked certificate as GOODSIG, then `TRUST_NEVER 94` (GPG_ERR_CERT_REVOKED): the
+                    // signature is mathematically good, the certificate no longer counts
+                    if st.keyword == "TRUST_NEVER" && last.state == SigState::Good && st.fields().first().and_then(|c| c.parse::<u32>().ok()).is_some_and(|c| c & 0xFFFF == 94) {
+                        last.state = SigState::RevokedKey;
+                    }
                     last.trust = match st.keyword.as_str() {
                         "TRUST_NEVER" => Trust::Never,
                         "TRUST_UNDEFINED" => Trust::Undefined,
@@ -834,7 +839,7 @@ impl Drop for TempDir {
 pub(crate) mod testkit {
     //! A throw-away `GNUPGHOME` with generated keys, for tests. The keys have no passphrase and are made with the
     //! loopback pinentry, which only the tests use (ADR-0011 §5). S/MIME certificates are self-signed and listed in
-    //! `trustlist.txt` as trusted roots: `gpgsm` cannot issue certificates.
+    //! `trustlist.txt` as trusted roots: `gpgsm` cannot issue certificates. A CA, its certificates and its CRL (for revoked ones) come from `openssl` ([`TestCa`]), so no PKCS#12 file is ever imported.
 
     use super::*;
     use std::sync::atomic::AtomicUsize;
@@ -850,9 +855,103 @@ pub(crate) mod testkit {
         AtomicBool::new(false)
     }
 
+    /// Is `openssl` here? Tests that need a CA skip themselves with a note when it is not.
+    pub fn have_openssl() -> bool {
+        let have = Command::new("openssl").arg("version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+        if !have {
+            eprintln!("skipping: openssl is not installed here");
+        }
+        have
+    }
+
+    /// A throw-away certificate authority made with `openssl`, for S/MIME certificates that chain to a root and can be
+    /// revoked. Only public certificates and the CRL go into a home (`gpgsm` imports no private key from it), and
+    /// signatures are made with `openssl cms`, so nothing here depends on a PKCS#12 import (which `gpgsm` cannot do
+    /// from OpenSSL 4 files). Never reaches the network: the home asks `dirmngr` for the CRL it was given.
+    pub struct TestCa {
+        dir: PathBuf,
+    }
+
+    /// A certificate issued by a [`TestCa`], with its key in the CA's folder; imported into a home as a public certificate.
+    pub struct CaCert {
+        /// The fingerprint `gpgsm` knows it by.
+        pub fpr: String,
+        crt: PathBuf,
+        key: PathBuf,
+    }
+
+    impl TestCa {
+        fn openssl(&self, args: &[&str]) -> Vec<u8> {
+            let out = Command::new("openssl").args(args).current_dir(&self.dir).stdin(Stdio::null()).output().expect("openssl runs");
+            assert!(out.status.success(), "openssl {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            out.stdout
+        }
+
+        /// A new CA called `cn`, imported into `home` as a trusted root. The home is set to check CRLs, by the issuer
+        /// (the test certificates have no distribution point) and offline; the CA's (still empty) CRL is loaded.
+        pub fn new(home: &TestHome, cn: &str) -> TestCa {
+            let dir = home.dir.join(format!("ca-{}", COUNT.fetch_add(1, Ordering::SeqCst)));
+            std::fs::create_dir(&dir).unwrap();
+            let conf = "[ca]\ndefault_ca=c\n[c]\ndatabase=index.txt\nnew_certs_dir=.\nserial=serial\ncrlnumber=crlnumber\ndefault_md=sha256\ndefault_days=3650\ndefault_crl_days=3650\npolicy=p\nunique_subject=no\n[p]\ncommonName=supplied\norganizationName=optional\n[req]\ndistinguished_name=d\nprompt=no\n[d]\nCN=x\n[v3_ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n";
+            for (name, text) in [("ca.cnf", conf), ("index.txt", ""), ("serial", "1000\n"), ("crlnumber", "01\n")] {
+                std::fs::write(dir.join(name), text).unwrap();
+            }
+            let ca = TestCa { dir };
+            ca.openssl(&["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-config", "ca.cnf", "-extensions", "v3_ca", "-days", "3650", "-subj", &format!("/CN={cn}/O=Shale Test")]);
+            // gpgsm.conf of a test home says `disable-crl-checks`; a CA needs the CRL looked at, and only the cached one
+            std::fs::write(home.dir.join("gpgsm.conf"), "enable-issuer-based-crl-check\n").unwrap();
+            std::fs::write(home.dir.join("dirmngr.conf"), "disable-http\ndisable-ldap\n").unwrap();
+            let crt = std::fs::read(ca.dir.join("ca.crt")).unwrap();
+            home.import_smime(&crt);
+            let fpr = home.g.list_keys(CryptoStandard::Smime, false, None, &no_cancel()).unwrap().into_iter().find(|k| k.uids.iter().any(|u| u.contains(cn))).expect("the CA certificate").fingerprint;
+            home.trust_smime(&fpr);
+            ca.publish_crl(home);
+            ca
+        }
+
+        /// A certificate for `CN=cn` with `email`, signed by this CA, imported into `home` (the public part only).
+        pub fn issue(&self, home: &TestHome, cn: &str, email: &str) -> CaCert {
+            let n = COUNT.fetch_add(1, Ordering::SeqCst);
+            let (key, csr, crt) = (format!("u{n}.key"), format!("u{n}.csr"), format!("u{n}.crt"));
+            self.openssl(&["req", "-newkey", "rsa:2048", "-nodes", "-keyout", &key, "-out", &csr, "-subj", &format!("/CN={cn}/O=Shale Test/emailAddress={email}")]);
+            let ext = format!("basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nsubjectAltName=email:{email}\nauthorityKeyIdentifier=keyid\n");
+            std::fs::write(self.dir.join(format!("u{n}.ext")), ext).unwrap();
+            self.openssl(&["ca", "-batch", "-config", "ca.cnf", "-cert", "ca.crt", "-keyfile", "ca.key", "-in", &csr, "-out", &crt, "-extfile", &format!("u{n}.ext"), "-notext"]);
+            home.import_smime(&std::fs::read(self.dir.join(&crt)).unwrap());
+            let fpr = home.g.list_keys(CryptoStandard::Smime, false, Some(email), &no_cancel()).unwrap().into_iter().next().expect("the issued certificate").fingerprint;
+            CaCert { fpr, crt: self.dir.join(crt), key: self.dir.join(key) }
+        }
+
+        /// Revoke `cert` and give `home` the new CRL.
+        pub fn revoke(&self, home: &TestHome, cert: &CaCert) {
+            let crt = cert.crt.file_name().unwrap().to_string_lossy().into_owned();
+            self.openssl(&["ca", "-config", "ca.cnf", "-cert", "ca.crt", "-keyfile", "ca.key", "-revoke", &crt]);
+            self.publish_crl(home);
+        }
+
+        /// Make a CRL of what is revoked so far and load it into the `dirmngr` of `home`.
+        fn publish_crl(&self, home: &TestHome) {
+            self.openssl(&["ca", "-config", "ca.cnf", "-cert", "ca.crt", "-keyfile", "ca.key", "-gencrl", "-out", "ca.crl"]);
+            self.openssl(&["crl", "-in", "ca.crl", "-outform", "DER", "-out", "ca.crl.der"]);
+            let out = home.cmd("gpgsm").args(["--batch", "--call-dirmngr", "loadcrl"]).arg(self.dir.join("ca.crl.der")).output().expect("gpgsm runs");
+            assert!(out.status.success(), "gpgsm --call-dirmngr loadcrl: {}", String::from_utf8_lossy(&out.stderr));
+        }
+    }
+
+    impl CaCert {
+        /// A detached S/MIME signature (DER) over `data` by this certificate, made by `openssl cms`; the CA's
+        /// certificate goes along, as a mail client would send it.
+        pub fn sign(&self, ca: &TestCa, data: &[u8]) -> Vec<u8> {
+            std::fs::write(ca.dir.join("data.bin"), data).unwrap();
+            let (crt, key) = (self.crt.to_string_lossy().into_owned(), self.key.to_string_lossy().into_owned());
+            ca.openssl(&["cms", "-sign", "-binary", "-in", "data.bin", "-signer", &crt, "-inkey", &key, "-certfile", "ca.crt", "-outform", "DER", "-md", "sha256"])
+        }
+    }
+
     impl Drop for TestHome {
         fn drop(&mut self) {
             let _ = Command::new("gpgconf").arg("--homedir").arg(home_text(&self.dir)).args(["--kill", "gpg-agent"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let _ = Command::new("gpgconf").arg("--homedir").arg(home_text(&self.dir)).args(["--kill", "dirmngr"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
             let _ = Command::new("gpgconf").arg("--homedir").arg(home_text(&self.dir)).arg("--remove-socketdir").stdout(Stdio::null()).stderr(Stdio::null()).status();
             let _ = std::fs::remove_dir_all(&self.dir);
         }
@@ -937,6 +1036,7 @@ pub(crate) mod testkit {
 
         /// A new OpenPGP key that is protected by `passphrase`; its fingerprint. A call that needs the key asks the
         /// agent's pinentry, which in the tests is the stub of [`use_pinentry_stub`](Self::use_pinentry_stub).
+        #[cfg(unix)]
         pub fn gen_pgp_protected(&self, name: &str, email: &str, passphrase: &str) -> String {
             let uid = format!("{name} <{email}>");
             let out = self.cmd("gpg").args(["--batch", "--pinentry-mode", "loopback", "--passphrase", passphrase, "--quick-gen-key", &uid, "default", "default", "never"]).output().expect("gpg runs");
@@ -1491,6 +1591,10 @@ mod tests {
             let s = sigs(&[(kw, "BBBB2222 Bob <bob@x.org>")]);
             assert_eq!((s[0].state, s[0].fingerprint.as_str(), s[0].signer.as_str()), (state, "BBBB2222", "Bob <bob@x.org>"), "{kw}");
         }
+        // gpgsm: a revoked certificate is a good signature, then TRUST_NEVER with the code of "certificate revoked"
+        let rv = sigs(&[("GOODSIG", "A x"), ("TRUST_NEVER", "94")]);
+        assert_eq!((rv[0].state, rv[0].trust), (SigState::RevokedKey, Trust::Never));
+        assert_eq!(sigs(&[("GOODSIG", "A x"), ("TRUST_NEVER", "0 pgp")])[0].state, SigState::Good, "another reason for no trust is no revocation");
         // a status line that belongs to no signature changes nothing
         assert!(sigs(&[("VALIDSIG", "AA"), ("TRUST_FULLY", "0 pgp"), ("NEWSIG", "")]).is_empty());
         // ERRSIG: rc 9 is a missing key, anything else is an error
@@ -1653,5 +1757,38 @@ mod tests {
         let e = old.g.sign_detached(CryptoStandard::Smime, &fpr, b"x", &no_cancel()).unwrap_err();
         assert!(e.starts_with("The mail was not signed"), "{e}");
         assert!(me.g.encrypt(CryptoStandard::Smime, &to(&my), None, b"x", &no_cancel()).is_ok());
+    }
+
+    // spec: MAIL-174, MAIL-193, MAIL-197
+    #[test]
+    fn an_s_mime_certificate_that_a_ca_has_revoked_is_never_shown_as_valid_and_is_refused_for_encrypting() {
+        if !have_gnupg() || !have_openssl() {
+            return;
+        }
+        let h = TestHome::new();
+        let ca = TestCa::new(&h, "Shale Test CA");
+        let good = ca.issue(&h, "Good Person", "good@example.org");
+        let bad = ca.issue(&h, "Revoked Person", "revoked@example.org");
+        let data = b"signed before the revocation\r\n";
+        let (good_sig, bad_sig) = (good.sign(&ca, data), bad.sign(&ca, data));
+        let verdict = |sig: &[u8]| h.g.verify_detached(CryptoStandard::Smime, sig, data, &no_cancel()).unwrap();
+        // control: the chain through the CA and its CRL is built, and a certificate that is not revoked is valid
+        let v = verdict(&good_sig);
+        assert_eq!((v.len(), v[0].state, v[0].fingerprint.as_str(), v[0].trust), (1, SigState::Good, good.fpr.as_str(), Trust::Full), "{v:?}");
+        let v = verdict(&bad_sig);
+        assert_eq!((v[0].state, v[0].trust), (SigState::Good, Trust::Full), "not revoked yet: {v:?}");
+        let to = |f: &str| vec![(f.to_string(), false)];
+        assert!(h.g.encrypt(CryptoStandard::Smime, &to(&bad.fpr), None, b"x", &no_cancel()).is_ok());
+        // the CA revokes one certificate and publishes a new CRL
+        ca.revoke(&h, &bad);
+        let v = verdict(&bad_sig);
+        assert_eq!((v.len(), v[0].state, v[0].fingerprint.as_str()), (1, SigState::RevokedKey, bad.fpr.as_str()), "{v:?}");
+        assert_eq!(verdict(&good_sig)[0].state, SigState::Good, "the other certificate of the CA is still valid");
+        // one changed byte of a revoked certificate's mail is bad, not revoked
+        assert_eq!(h.g.verify_detached(CryptoStandard::Smime, &bad_sig, b"changed\r\n", &no_cancel()).unwrap()[0].state, SigState::Bad);
+        // encrypting to it is refused in words, to the other one is not
+        let e = h.g.encrypt(CryptoStandard::Smime, &to(&bad.fpr), None, b"x", &no_cancel()).unwrap_err();
+        assert!(e.starts_with("The mail was not encrypted:"), "{e}");
+        assert!(h.g.encrypt(CryptoStandard::Smime, &to(&good.fpr), None, b"x", &no_cancel()).is_ok());
     }
 }

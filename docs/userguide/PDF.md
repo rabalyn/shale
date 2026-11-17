@@ -11,6 +11,8 @@ the export shows up in the vault.
 
 Highlights (`==text==`) and the colours of [[Editor]] (`<mark style="background: …">` behind the text, `<span style="color: …">` as the text colour) are printed as written, with the tags left out and the text still selectable.
 
+Code looks as on screen: fenced code blocks and inline code are printed in their syntax colours on the same dark code background as in the reading view (see [[Editor]]), the text still selectable.
+
 Pictures, drawings and PDFs embedded with `![[…]]` on a line of their own are drawn as
 thumbnails with their link as a small caption below (the same caption as in the editor, see
 [[Notes and links]]); so are the first frame of a video (needs ffmpeg) and the cover of a sound.
