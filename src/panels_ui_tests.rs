@@ -309,6 +309,20 @@ fn panel_trash_dialog_moves_to_trash_or_cancels() {
     assert!(p.app.modal.is_none() && p.dir.join("Welcome.md").exists());
 }
 
+// spec: EDIT-037, CFG-020
+#[test]
+fn edit_037_the_size_is_a_setting_in_the_editor_tab_with_reset() {
+    let mut p = P::new("preview-size-setting", &[]);
+    p.app.open_settings(SettingsTab::Editor);
+    assert!(p.shows(Show::Modals, "Link preview size (Shift+K)"), "the setting is on the Editor tab");
+    assert_eq!((p.app.cfg.link_preview_width, p.app.cfg.link_preview_height), (640, 480));
+    (p.app.cfg.link_preview_width, p.app.cfg.link_preview_height) = (300, 200);
+    p.click(Show::Modals, "Reset size");
+    assert_eq!((p.app.cfg.link_preview_width, p.app.cfg.link_preview_height), (640, 480), "Reset brings back the default");
+    p.app.open_settings(SettingsTab::Appearance);
+    assert!(!p.shows(Show::Modals, "Link preview size (Shift+K)"), "a setting is on one tab only");
+}
+
 // spec: EDIT-026, EDIT-028
 #[test]
 fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {

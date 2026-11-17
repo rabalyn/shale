@@ -14,14 +14,71 @@ use crate::markdown;
 use crate::reader;
 use crate::theme;
 use crate::vault::{FileKind, Vault};
-use eframe::egui::{self, Event, InputState, Key, Rect, Ui};
+use eframe::egui::{self, Event, InputState, Key, Pos2, Rect, Ui, Vec2};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 
-/// The widest and the tallest the preview gets (points).
-pub const MAX_WIDTH: f32 = 520.0;
-pub const MAX_HEIGHT: f32 = 400.0;
+/// The size a preview has by default and the least it can be dragged to (points, EDIT-037).
+pub const DEFAULT_WIDTH: u32 = 640;
+pub const DEFAULT_HEIGHT: u32 = 480;
+pub const MIN_WIDTH: f32 = 240.0;
+pub const MIN_HEIGHT: f32 = 160.0;
+/// The room the frame keeps to the window's edges (points).
+const SCREEN_MARGIN: f32 = 16.0;
+/// How far the handles of the edges reach into and out of the frame (points).
+pub const GRAB: f32 = 4.0;
+
+/// The size of a preview for the setting `want` (EDIT-037): not under the least, not over the window.
+/// A window smaller than the least wins over the least.
+pub fn clamp_size(want: Vec2, screen: Vec2) -> Vec2 {
+    let one = |w: f32, min: f32, room: f32| {
+        let max = (room - SCREEN_MARGIN).max(1.0);
+        w.clamp(min.min(max), max)
+    };
+    Vec2::new(one(want.x, MIN_WIDTH, screen.x), one(want.y, MIN_HEIGHT, screen.y))
+}
+
+/// The size in the settings (EDIT-037) as points.
+pub fn size_of(cfg: &crate::config::Config) -> Vec2 {
+    Vec2::new(cfg.link_preview_width as f32, cfg.link_preview_height as f32)
+}
+
+/// Which edges of the frame a handle drags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Grip {
+    /// -1 the left edge, 1 the right edge, 0 none
+    pub x: i8,
+    /// -1 the top edge, 1 the bottom edge, 0 none
+    pub y: i8,
+}
+
+impl Grip {
+    pub const ALL: [Grip; 8] = [Grip { x: -1, y: 0 }, Grip { x: 1, y: 0 }, Grip { x: 0, y: -1 }, Grip { x: 0, y: 1 }, Grip { x: -1, y: -1 }, Grip { x: 1, y: -1 }, Grip { x: -1, y: 1 }, Grip { x: 1, y: 1 }];
+
+    /// The part of the frame `r` the handle covers: a strip along an edge, a square at a corner.
+    pub fn rect(self, r: Rect) -> Rect {
+        let one = |g: i8, min: f32, max: f32| match g {
+            -1 => (min - GRAB, min + GRAB),
+            1 => (max - GRAB, max + GRAB),
+            _ => (min + GRAB, max - GRAB),
+        };
+        let (x0, x1) = one(self.x, r.min.x, r.max.x);
+        let (y0, y1) = one(self.y, r.min.y, r.max.y);
+        let (x1, y1) = (x1.max(x0), y1.max(y0));
+        Rect::from_min_max(Pos2::new(x0, y0), Pos2::new(x1, y1))
+    }
+
+    /// The mouse cursor over the handle.
+    pub fn cursor(self) -> egui::CursorIcon {
+        match (self.x, self.y) {
+            (0, _) => egui::CursorIcon::ResizeVertical,
+            (_, 0) => egui::CursorIcon::ResizeHorizontal,
+            (x, y) if x == y => egui::CursorIcon::ResizeNwSe,
+            _ => egui::CursorIcon::ResizeNeSw,
+        }
+    }
+}
 /// The most of a note that is drawn (characters, cut at a line end).
 const MAX_NOTE_CHARS: usize = 30_000;
 /// The most that is downloaded of a web page.
@@ -409,15 +466,52 @@ pub struct Open {
     /// where the frame was drawn last (a click outside it closes the preview)
     pub rect: Option<Rect>,
     pub scroll: f32,
-    /// the height of the content drawn last frame: the frame is as tall (at most `MAX_HEIGHT`)
+    /// the size of the frame, from the settings when it opened, changed by dragging its edges (EDIT-037)
+    pub size: Vec2,
+    /// what the frame's margins and stroke take of its size
+    pub pad: Vec2,
+    /// how far dragging the left edge moved the frame sideways
+    pub shift_x: f32,
+    /// the frame is being dragged by an edge: it is as big as `size`, not as the content
+    pub resizing: bool,
+    /// the height of the content drawn last frame: the frame is as tall (at most `size`)
     height: f32,
     max_scroll: f32,
     page: f32,
 }
 
 impl Open {
-    pub fn new(target: Target, content: Content, (tab, cursor, text_hash): (u64, usize, u64), anchor: Rect) -> Open {
-        Open { target, content, focused: false, tab, cursor, text_hash, anchor, rect: None, id: egui::Id::unique("link-preview"), scroll: 0.0, height: 24.0, max_scroll: f32::MAX, page: MAX_HEIGHT * 0.9 }
+    pub fn new(target: Target, content: Content, (tab, cursor, text_hash): (u64, usize, u64), anchor: Rect, size: Vec2) -> Open {
+        Open {
+            target,
+            content,
+            focused: false,
+            tab,
+            cursor,
+            text_hash,
+            anchor,
+            rect: None,
+            id: egui::Id::unique("link-preview"),
+            scroll: 0.0,
+            size,
+            pad: Vec2::splat(14.0),
+            shift_x: 0.0,
+            resizing: false,
+            height: 24.0,
+            max_scroll: f32::MAX,
+            page: size.y * 0.9,
+        }
+    }
+
+    /// Drag the handle `grip` by `delta` (EDIT-037): the size follows, within `clamp_size` of `screen`; the left
+    /// edge moves the frame sideways with it. The edge at the cursor row stays where it is, the frame hangs there.
+    pub fn resize(&mut self, grip: Grip, delta: Vec2, screen: Vec2) {
+        let want = self.size + Vec2::new(delta.x * f32::from(grip.x), delta.y * f32::from(grip.y));
+        let new = clamp_size(want, screen);
+        if grip.x < 0 {
+            self.shift_x -= new.x - self.size.x;
+        }
+        self.size = new;
     }
 
     fn scroll_by(&mut self, d: f32) {
@@ -518,7 +612,10 @@ impl LinkPreview {
     pub fn show(&mut self, ui: &mut Ui, vault: &Vault, caches: &mut reader::Caches, base: f32, dark: bool) -> Option<(reader::ReaderAction, PathBuf)> {
         let open = self.open.as_mut()?;
         let mut action = None;
-        let area = egui::ScrollArea::vertical().min_scrolled_height(open.height.min(MAX_HEIGHT)).max_height(open.height.min(MAX_HEIGHT)).auto_shrink([false, false]).vertical_scroll_offset(open.scroll).show(ui, |ui| {
+        let room = open.size - open.pad;
+        // the content's height, but as tall as the frame while it is dragged
+        let shown = if open.resizing { room.y } else { open.height.min(room.y) };
+        let area = egui::ScrollArea::vertical().min_scrolled_height(shown).max_height(shown).auto_shrink([false, false]).vertical_scroll_offset(open.scroll).show(ui, |ui| {
             ui.set_width(ui.available_width());
             match &open.content {
                 Content::Note { rel, text } => {
@@ -532,7 +629,7 @@ impl LinkPreview {
                     ui.label(egui::RichText::new("Note does not exist yet").strong().color(theme::LINK_MISSING));
                     ui.label(egui::RichText::new(format!("“{name}” is created when you press Enter")).color(theme::MUTED));
                 }
-                Content::Image { abs, rel } => match crate::media::image_widget(ui.ctx(), abs, MAX_WIDTH - 24.0, MAX_HEIGHT - 40.0) {
+                Content::Image { abs, rel } => match crate::media::image_widget(ui.ctx(), abs, room.x, room.y - 16.0) {
                     Some(img) => {
                         ui.add(img);
                     }
@@ -592,6 +689,46 @@ impl LinkPreview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: EDIT-037
+    #[test]
+    fn edit_037_the_size_stays_between_the_least_and_the_window() {
+        let screen = Vec2::new(1500.0, 900.0);
+        assert_eq!(clamp_size(Vec2::new(640.0, 480.0), screen), Vec2::new(640.0, 480.0), "a size that fits stays");
+        assert_eq!(clamp_size(Vec2::new(10.0, 20.0), screen), Vec2::new(MIN_WIDTH, MIN_HEIGHT), "not under the least");
+        assert_eq!(clamp_size(Vec2::new(5000.0, 5000.0), screen), Vec2::new(1484.0, 884.0), "not over the window, with a margin");
+        assert_eq!(clamp_size(Vec2::new(640.0, 480.0), Vec2::new(200.0, 100.0)), Vec2::new(184.0, 84.0), "a window smaller than the least wins");
+        assert_eq!(clamp_size(Vec2::new(640.0, 480.0), Vec2::new(5.0, 5.0)), Vec2::new(1.0, 1.0), "and never below one point");
+    }
+
+    // spec: EDIT-037
+    #[test]
+    fn edit_037_dragging_a_handle_changes_the_size_of_its_edges() {
+        let screen = Vec2::new(1500.0, 900.0);
+        let target = Target::Web { url: "https://example.org/".into() };
+        let by = |g: Grip, d: Vec2| {
+            let mut o = Open::new(target.clone(), Content::Plain(String::new()), (1, 0, 0), Rect::ZERO, Vec2::new(640.0, 480.0));
+            o.resize(g, d, screen);
+            (o.size, o.shift_x)
+        };
+        let d = Vec2::new(30.0, 20.0);
+        assert_eq!(by(Grip { x: 1, y: 1 }, d), (Vec2::new(670.0, 500.0), 0.0), "the corner changes both");
+        assert_eq!(by(Grip { x: 1, y: 0 }, d), (Vec2::new(670.0, 480.0), 0.0), "the right edge only the width");
+        assert_eq!(by(Grip { x: 0, y: 1 }, d), (Vec2::new(640.0, 500.0), 0.0), "the bottom edge only the height");
+        assert_eq!(by(Grip { x: -1, y: 0 }, -d), (Vec2::new(670.0, 480.0), -30.0), "the left edge dragged left: wider, and the frame moves with it");
+        assert_eq!(by(Grip { x: 0, y: -1 }, -d), (Vec2::new(640.0, 500.0), 0.0), "the top edge dragged up: taller");
+        assert_eq!(by(Grip { x: -1, y: -1 }, Vec2::new(1000.0, 1000.0)).0, Vec2::new(MIN_WIDTH, MIN_HEIGHT), "not under the least");
+        assert_eq!(by(Grip { x: -1, y: 0 }, Vec2::new(1000.0, 0.0)).1, 640.0 - MIN_WIDTH, "the frame moves only by what the width gave");
+        // the handles: strips along the edges, squares at the corners, all around the frame's edge
+        let r = Rect::from_min_size(Pos2::new(100.0, 100.0), Vec2::new(300.0, 200.0));
+        let rects: Vec<Rect> = Grip::ALL.iter().map(|g| g.rect(r)).collect();
+        assert!(rects.iter().all(|h| h.width() > 0.0 && h.height() > 0.0 && r.expand(GRAB).contains_rect(*h)));
+        let overlap = |a: &Rect, b: &Rect| a.intersect(*b).width() > 0.0 && a.intersect(*b).height() > 0.0;
+        assert!(rects.iter().enumerate().all(|(i, a)| rects.iter().skip(i + 1).all(|b| !overlap(a, b))), "no two handles overlap");
+        assert_eq!(Grip { x: 1, y: 1 }.rect(r), Rect::from_center_size(r.max, Vec2::splat(2.0 * GRAB)));
+        use egui::CursorIcon::{ResizeHorizontal as H, ResizeNeSw as NeSw, ResizeNwSe as NwSe, ResizeVertical as V};
+        assert_eq!(Grip::ALL.map(Grip::cursor), [H, H, V, V, NwSe, NeSw, NeSw, NwSe]);
+    }
 
     const PAGE: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>The &amp; Title</title>

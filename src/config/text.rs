@@ -71,6 +71,8 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("line_numbers", "true: a column with line numbers sits left of the text in the editor."),
     ("format_toolbar", "true: the formatting toolbar is shown above the text of a note."),
     ("toolbar_size", "The size of the toolbar's buttons in percent of the base size, 80 to 200."),
+    ("link_preview_width", "The width of the link preview (Shift+K in vim-style editing) in points; dragging its edges changes it. At least 240, at most the window."),
+    ("link_preview_height", "The height of the link preview in points; dragging its edges changes it. At least 160, at most the window."),
     ("font_colours", "The font colours of the toolbar's palette, each as [red, green, blue] (0 to 255)."),
     ("highlight_colours", "The highlight colours of the toolbar's palette, each as [red, green, blue] (0 to 255)."),
     ("live_preview", "true: the editor draws every line but the cursor's rendered (Markdown preview)."),

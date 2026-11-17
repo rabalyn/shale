@@ -3,7 +3,7 @@
 //! what its keys ask for ([`ShaleApp::link_preview_outcome`]).
 
 use super::{handle_editor_action, handle_reader_action, ShaleApp, View};
-use crate::link_preview::{content_for, target_at, Open, Outcome, Target, MAX_HEIGHT, MAX_WIDTH};
+use crate::link_preview::{clamp_size, content_for, size_of, target_at, Grip, Open, Outcome, Target, GRAB};
 use crate::{markdown, theme};
 use eframe::egui::{self, Align2, Pos2, Rect, Ui, Vec2};
 use std::hash::{Hash, Hasher};
@@ -14,6 +14,11 @@ fn hash_text(text: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut h);
     h.finish()
+}
+
+/// The frame's line: thick and in the accent colour while the preview has the keyboard.
+fn stroke_of(focused: bool) -> egui::Stroke {
+    egui::Stroke::new(if focused { 2.0 } else { 1.0 }, if focused { theme::ACCENT } else { theme::MUTED })
 }
 
 impl ShaleApp {
@@ -83,7 +88,8 @@ impl ShaleApp {
             let c = ctx.clone();
             self.link_preview.load(url, move || c.request_repaint());
         }
-        self.link_preview.open = Some(Open::new(target, content, state, anchor));
+        let size = clamp_size(size_of(&self.cfg), ctx.content_rect().size());
+        self.link_preview.open = Some(Open::new(target, content, state, anchor, size));
     }
 
     /// Does the preview still belong to what the editor shows: the same tab, text and cursor, normal mode, the keyboard?
@@ -102,7 +108,8 @@ impl ShaleApp {
         }
         let Some(open) = self.link_preview.open.as_ref() else { return };
         let press = ctx.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
-        let inside = press.zip(open.rect).is_some_and(|(p, r)| r.contains(p));
+        // (the handles of the edges reach a little out of the frame)
+        let inside = press.zip(open.rect).is_some_and(|(p, r)| r.expand(GRAB).contains(p));
         if inside {
             // a click in the preview: it has the keyboard, and the editor keeps its focus (the press took it)
             let id = self.tabbar.tabs[self.tabbar.active].editor.id;
@@ -117,24 +124,53 @@ impl ShaleApp {
         let Some(open) = self.link_preview.open.as_mut() else { return };
         open.focused |= inside;
         let screen = ctx.content_rect();
-        let width = MAX_WIDTH.min(screen.width() - 16.0).max(120.0);
-        let (anchor, id) = (open.anchor, open.id);
-        let x = anchor.min.x.min(screen.right() - width - 8.0).max(screen.left() + 8.0);
+        open.size = clamp_size(open.size, screen.size());
+        open.pad = egui::Frame::popup(ui.style()).stroke(stroke_of(open.focused)).total_margin().sum();
+        let (size, pad, anchor, id) = (open.size, open.pad, open.anchor, open.id);
+        let x = (anchor.min.x + open.shift_x).min(screen.right() - size.x - 8.0).max(screen.left() + 8.0);
         // below the cursor row, above it when the room below is too small and the room above is not
-        let below = anchor.max.y + 4.0 + MAX_HEIGHT <= screen.bottom() - 8.0 || anchor.min.y - 4.0 - MAX_HEIGHT < screen.top();
+        let below = anchor.max.y + 4.0 + size.y <= screen.bottom() - 8.0 || anchor.min.y - 4.0 - size.y < screen.top();
         let (pos, pivot) = if below { (Pos2::new(x, anchor.max.y + 4.0), Align2::LEFT_TOP) } else { (Pos2::new(x, anchor.min.y - 4.0), Align2::LEFT_BOTTOM) };
-        let stroke = egui::Stroke::new(if open.focused { 2.0 } else { 1.0 }, if open.focused { theme::ACCENT } else { theme::MUTED });
+        let stroke = stroke_of(open.focused);
         let (scenes, media) = (&mut self.scenes, &self.media);
         let lp = &mut self.link_preview;
         let mut clicked = None;
+        // the handles (EDIT-037): which one is dragged, by how much, and whether the drag ended
+        let mut dragged: Option<(Grip, Vec2, bool, Rect)> = None;
+        let mut ended = false;
         let area = egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(pos).pivot(pivot).constrain(true).show(&ctx, |ui| {
-            egui::Frame::popup(ui.style()).stroke(stroke).show(ui, |ui| {
-                ui.set_width(width - 24.0);
+            let frame = egui::Frame::popup(ui.style()).stroke(stroke).show(ui, |ui| {
+                ui.set_width(size.x - pad.x);
                 clicked = crate::fonts::with_area(ui, &fonts.rendered, |ui| lp.show(ui, vault, &mut crate::reader::Caches { scenes, media }, base, dark));
             });
+            for grip in Grip::ALL {
+                let resp = ui.interact(grip.rect(frame.response.rect), id.with(("grip", grip.x, grip.y)), egui::Sense::drag()).on_hover_cursor(grip.cursor());
+                if resp.drag_started() || resp.dragged() {
+                    ui.ctx().set_cursor_icon(grip.cursor());
+                    dragged = Some((grip, resp.drag_delta(), resp.drag_started(), frame.response.rect));
+                }
+                ended |= resp.drag_stopped();
+            }
         });
         if let Some(open) = lp.open.as_mut() {
             open.rect = Some(area.response.rect);
+            if let Some((grip, delta, started, rect)) = dragged {
+                if started && grip.y != 0 {
+                    // the frame is as big as the content; the drag starts from what is seen
+                    open.size.y = clamp_size(rect.size(), screen.size()).y;
+                }
+                open.resizing = true;
+                open.resize(grip, delta, screen.size());
+                ctx.request_repaint();
+            }
+            if ended {
+                open.resizing = false;
+                let size = open.size;
+                // the size is a setting that every preview uses; it is kept when the drag ends
+                self.cfg.link_preview_width = size.x.round() as u32;
+                self.cfg.link_preview_height = size.y.round() as u32;
+                self.save_config();
+            }
         }
         if let Some((a, from)) = clicked {
             let toggles = matches!(a, crate::reader::ReaderAction::ToggleTask(_));
@@ -158,7 +194,7 @@ mod tests {
         let mut app = ShaleApp::build(Options { screenshot: None, vault: None, view: None, keys: None }, false);
         let url = "https://example.org/".to_string();
         let target = Target::Web { url: url.clone() };
-        app.link_preview.open = Some(Open::new(target, Content::Web { url: url.clone() }, (1, 0, 0), Rect::ZERO));
+        app.link_preview.open = Some(Open::new(target, Content::Web { url: url.clone() }, (1, 0, 0), Rect::ZERO, Vec2::new(640.0, 480.0)));
         app.link_preview_outcome(Outcome::OpenInSplit);
         assert!(app.link_preview.open.is_none());
         assert_eq!(app.panes.len(), 1);

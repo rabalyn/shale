@@ -2,6 +2,7 @@
 
 use super::section;
 use crate::app::{muted, ShaleApp};
+use crate::link_preview::{DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH};
 use eframe::egui::{self, Ui};
 
 impl ShaleApp {
@@ -22,6 +23,16 @@ impl ShaleApp {
         changed |= ui.checkbox(&mut self.cfg.ctrl_to_follow, "Follow links only with Ctrl+click (plain click places the cursor)").changed();
         changed |= ui.checkbox(&mut self.cfg.new_notes_next_to_current, "Create notes from red links next to the current note (instead of the vault root)").changed();
         changed |= ui.checkbox(&mut self.cfg.update_links_on_rename, "Update links in other notes when renaming").changed();
+        ui.horizontal(|ui| {
+            ui.label("Link preview size (Shift+K)");
+            changed |= ui.add(egui::DragValue::new(&mut self.cfg.link_preview_width).range(MIN_WIDTH as u32..=4000).suffix(" wide")).changed();
+            changed |= ui.add(egui::DragValue::new(&mut self.cfg.link_preview_height).range(MIN_HEIGHT as u32..=4000).suffix(" high")).changed();
+            if ui.button("Reset size").on_hover_text("The preview is 640 x 480 points; dragging its edges changes the size too").clicked() {
+                self.cfg.link_preview_width = DEFAULT_WIDTH;
+                self.cfg.link_preview_height = DEFAULT_HEIGHT;
+                changed = true;
+            }
+        });
         section(ui, "Drawings");
         changed |= ui
             .checkbox(&mut self.cfg.auto_convert_canvas, "Convert Obsidian canvases to editable drawings when opening them (instead of asking)")

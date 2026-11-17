@@ -174,7 +174,7 @@ Settings → Editor, off by default. Notes open in normal mode.
 | gt | follow the link under the cursor like a click (a note link or a web address) |
 | Shift+K | preview the link under the cursor (see below) |
 
-**Link preview.** With the cursor on a link, **Shift+K** shows a small floating window below
+**Link preview.** With the cursor on a link, **Shift+K** shows a floating window (640 x 480 points at first) below
 the cursor, like neovim's hover. A note link shows the note as the reading view draws it, from the
 heading when the link has one (`[[Note#Heading]]`); a note that does not exist yet says so; a picture
 is shown; a web link shows the page's title, its description and the start of its text. The page is
@@ -188,6 +188,12 @@ one (see [[Tabs]]; a web link opens in the browser as with Enter), and **Esc** c
 editor, with the cursor where it was and the text unchanged. Off a link, Shift+K only says so in the
 status bar. The key is one of the definable ones (Settings → Keybindings → Vim-style editing, normal
 mode): you can give it, for example, **Space Space**.
+
+The preview's size can be changed: drag one of its four edges or four corners (the mouse pointer
+turns into a resize arrow). The preview stays open while you drag, and the editor's cursor stays where
+it is. The size is a setting that every preview uses and that is still there after a restart:
+Settings → Editor → "Link preview size (Shift+K)" shows it as two numbers (width and height in points;
+at least 240 x 160, and never bigger than the window) with a **Reset size** button, see [[Settings reference]].
 
 The status bar shows NORMAL, INSERT, VISUAL or V-LINE. The vim keys themselves cannot be
 rebound. In normal mode **Space Tab** goes back to the view this tab showed just before, and

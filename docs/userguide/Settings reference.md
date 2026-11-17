@@ -80,6 +80,8 @@ size of the two editor areas when you updated.
 | `line_numbers` | on | Editor, "Show line numbers in the editor" |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
+| `link_preview_width` | 640 (at least 240, at most the window) | Editor, "Link preview size (Shift+K)", the first number; also set by dragging the preview's edges |
+| `link_preview_height` | 480 (at least 160, at most the window) | Editor, "Link preview size (Shift+K)", the second number; "Reset size" brings back 640 x 480 |
 | `font_colours` | red, orange, blue, green, purple (`[[229,62,62], …]`, RGB, up to 8) | Editing, "Font colours": the swatches of the toolbar's font colour palette |
 | `highlight_colours` | neon yellow, green, cyan, magenta (RGB, up to 8) | Editing, "Highlight colours": the swatches of the toolbar's highlight palette |
 | `live_preview` | off | Editor, "Markdown preview in the editor"; the eye icon of the editor |
