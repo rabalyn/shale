@@ -62,7 +62,7 @@ pub fn run(mut cmd: Command, timeout: Duration, cancel: Option<&AtomicBool>, mut
         // CREATE_NO_WINDOW: no console window flashes up for a command line tool
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = spawn(&mut cmd)?;
+    let mut child = crate::program::spawn(&mut cmd)?;
     let (tx, rx) = mpsc::channel::<String>();
     let readers: Vec<_> = [child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>), child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>)]
         .into_iter()
@@ -121,28 +121,6 @@ pub fn run(mut cmd: Command, timeout: Duration, cancel: Option<&AtomicBool>, mut
     // the readers end by themselves; one whose pipe a stray grandchild still holds is not waited for
     drop(readers);
     Ok(Run { ending: ending.unwrap_or(Ending::Exited(None)), tail: tail.into() })
-}
-
-/// Start `cmd`. On Linux a program file that was written a moment ago can be "text file busy"
-/// while another thread's `fork` still holds it open for writing; that passes within
-/// milliseconds, so it is tried again for a short while.
-#[cfg(unix)]
-fn spawn(cmd: &mut Command) -> io::Result<std::process::Child> {
-    let mut tries = 0;
-    loop {
-        match cmd.spawn() {
-            Err(e) if tries < 100 && e.raw_os_error() == Some(libc::ETXTBSY) => {
-                tries += 1;
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            r => return r,
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn spawn(cmd: &mut Command) -> io::Result<std::process::Child> {
-    cmd.spawn()
 }
 
 /// Send the lines of a pipe (split at `\n` and `\r`, empty ones left out) until it closes.

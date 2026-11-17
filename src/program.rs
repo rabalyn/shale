@@ -3,6 +3,35 @@
 //! the shell's), so after `PATH` the usual places are searched too.
 
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
+
+/// Start `cmd`. A program file that was written a moment ago can be "text file busy" (Unix
+/// `ETXTBSY`) while another thread's `fork` still holds it open for writing, which test stand-ins
+/// (pretend gpg, lualatex, ffprobe) run into under load; that passes within milliseconds, so it
+/// is tried again for a short while (#232, #316). Every start of an external program goes through
+/// here.
+pub fn spawn(cmd: &mut Command) -> std::io::Result<Child> {
+    let mut tries = 0;
+    loop {
+        match cmd.spawn() {
+            Err(e) if tries < 100 && is_busy(&e) => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            r => return r,
+        }
+    }
+}
+
+#[cfg(unix)]
+fn is_busy(e: &std::io::Error) -> bool {
+    e.raw_os_error() == Some(libc::ETXTBSY)
+}
+
+#[cfg(not(unix))]
+fn is_busy(_: &std::io::Error) -> bool {
+    false
+}
 
 /// Where programs of the user's are often installed but a window program's `PATH` lacks them.
 const USUAL_DIRS: [&str; 3] = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
