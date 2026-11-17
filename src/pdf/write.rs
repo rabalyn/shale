@@ -67,10 +67,11 @@ fn symbols() -> &'static LoadedFont {
     SYMBOLS.get_or_init(|| LoadedFont::parse(epaint_default_fonts::NOTO_EMOJI_REGULAR))
 }
 
-/// A character the fonts have no glyph for, as one they have (a heavy cross as a multiplication sign).
+/// A character the fonts have no glyph for, as one they have (a heavy cross as a multiplication sign, a check mark as the heavy one).
 fn substitute(c: char) -> char {
     match c {
         '✕' | '✖' => '×',
+        '✓' => '✔',
         _ => c,
     }
 }
@@ -730,11 +731,12 @@ mod tests {
         assert!(std::ptr::eq(f, font(FontKind::Sans)) && g == GlyphId::NOTDEF);
         assert_eq!(char_width(FontKind::Sans, 10.0, '\u{10ffff}'), f.advances.advance_width(g).unwrap() * 10.0 / 1000.0);
         assert!(!has_glyph('\u{10ffff}'));
-        // arrows come from Hack, a calendar from the symbols font, a heavy cross as a multiplication sign (PDF-010)
-        for c in ['→', '←', '↑', '↓', '↗', '⋯', '▸', '📅', '✕'] {
+        // arrows come from Hack, a calendar from the symbols font, a heavy cross as a multiplication sign, a check mark as the heavy one (PDF-010)
+        for c in ['→', '←', '↑', '↓', '↗', '⋯', '▸', '📅', '✕', '✓', '✔'] {
             assert!(has_glyph(c), "{c}");
         }
         assert_eq!(char_width(FontKind::Sans, 10.0, '✕'), char_width(FontKind::Sans, 10.0, '×'));
+        assert_eq!(char_width(FontKind::Sans, 10.0, '✓'), char_width(FontKind::Sans, 10.0, '✔'));
         assert!(!std::ptr::eq(face_for(FontKind::Sans, '→').0, font(FontKind::Sans)));
     }
 
