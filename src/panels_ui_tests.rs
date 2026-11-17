@@ -742,3 +742,37 @@ fn dev_020_the_help_button_in_settings_opens_the_user_guide_as_the_vault() {
     assert!(p.app.modal.is_none(), "Settings closes");
     assert_eq!(p.app.vault.as_ref().map(|v| v.root.clone()), Some(copy));
 }
+
+// spec: VAULT-028
+#[test]
+fn vault_028_settings_vault_checks_names_in_the_background_and_renames_one_or_all_after_a_question() {
+    let mut p = P::with_files("names-check", &[("a:b.md", "A\n"), ("c?d.md", "C\n"), ("Fine.md", "F\n"), ("Linker.md", "[[a:b]] [[c?d]]\n"), (".trash/2026-11-17/e:f.md", "gone\n")]);
+    p.app.open_settings(SettingsTab::Vault);
+    let shown = shown_labels(&mut p);
+    assert!(shown.iter().any(|l| l == "Check names for Windows and macOS…"));
+    assert!(!shown.iter().any(|l| l.contains("would not work")), "nothing is listed before the check");
+    p.click(Show::Modals, "Check names for Windows and macOS…");
+    let shown = labels_until(&mut p, "2 names would not work on Windows or macOS");
+    assert!(shown.iter().any(|l| l.starts_with("a:b.md")), "{shown:?}");
+    assert!(shown.iter().any(|l| l == "`:` is not allowed on Windows"), "{shown:?}");
+    assert!(shown.iter().any(|l| l == "→ a-b.md") && shown.iter().any(|l| l == "→ c-d.md"), "{shown:?}");
+    assert!(!shown.iter().any(|l| l.contains("e:f.md") || l.contains("Fine.md")), "the trash and good names are not listed");
+    // one at a time
+    let first = p.find(Show::Modals, None, "Rename");
+    p.click_rect(Show::Modals, first, PointerButton::Primary);
+    let shown = labels_until(&mut p, "1 name would not work on Windows or macOS");
+    assert!(p.dir.join("a-b.md").exists() && !p.dir.join("a:b.md").exists());
+    assert_eq!(std::fs::read_to_string(p.dir.join("Linker.md")).unwrap(), "[[a-b]] [[c?d]]\n", "links are rewritten");
+    assert!(shown.iter().any(|l| l.starts_with("Renamed 1 file or folder, updated links in 1 file(s)")), "{shown:?}");
+    // all of them: first a question, Cancel changes nothing
+    p.click(Show::Modals, "Rename all…");
+    let shown = shown_labels(&mut p);
+    assert!(shown.iter().any(|l| l == "Rename 1 file or folder? Links to them are updated."), "{shown:?}");
+    p.click(Show::Modals, "Cancel");
+    assert!(p.dir.join("c?d.md").exists());
+    p.click(Show::Modals, "Rename all…");
+    p.click(Show::Modals, "Rename all");
+    labels_until(&mut p, "All names work on Windows and macOS.");
+    assert!(p.dir.join("c-d.md").exists() && !p.dir.join("c?d.md").exists());
+    assert_eq!(std::fs::read_to_string(p.dir.join("Linker.md")).unwrap(), "[[a-b]] [[c-d]]\n");
+}

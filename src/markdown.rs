@@ -830,8 +830,13 @@ pub fn find_ci(line: &str, query_lower: &str) -> Option<usize> {
 }
 
 pub fn sanitize_note_name(name: &str) -> String {
-    let cleaned: String = name.chars().map(|c| if matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0') { '-' } else { c }).collect();
-    cleaned.trim().trim_matches('.').trim().to_string()
+    sanitize_note_name_max(name, crate::fsutil::TYPED_NAME_MAX)
+}
+
+/// [`sanitize_note_name`] cut to `max_bytes`.
+pub fn sanitize_note_name_max(name: &str, max_bytes: usize) -> String {
+    let name = name.trim().trim_start_matches('.');
+    crate::fsutil::portable_name(name, max_bytes).trim().to_string()
 }
 
 /// Simple case-insensitive fuzzy score: higher is better, None = no match.

@@ -383,16 +383,23 @@ pub fn import_file(vault_root: &Path, src: &Path, date: (i32, u32, u32)) -> io::
 }
 
 /// A media path for `name` that isn't taken yet (a number is added if needed); makes the folder.
+/// The file name is portable (VAULT-027) and at most 127 bytes with its date prefix and number.
 fn free_media_path(vault_root: &Path, name: &str, date: (i32, u32, u32)) -> io::Result<PathBuf> {
     // names have to work inside [[links]]
     let safe = crate::markdown::link_safe_name(name);
-    let name = if safe.trim().is_empty() { "file" } else { safe.as_str() };
-    let mut rel = media_rel_path(name, date);
-    let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = Path::new(name).extension().map(|s| format!(".{}", s.to_string_lossy())).unwrap_or_default();
+    let prefix = media_rel_path("", date).file_name().map(|n| n.len()).unwrap_or(0);
+    let room = crate::fsutil::MADE_NAME_MAX - prefix;
+    let name = crate::fsutil::portable_name(&safe, room);
+    let name = if name.trim().is_empty() { "file".to_string() } else { name };
+    let mut rel = media_rel_path(&name, date);
+    let stem = Path::new(&name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = Path::new(&name).extension().map(|s| format!(".{}", s.to_string_lossy())).unwrap_or_default();
     let mut i = 1;
     while vault_root.join(&rel).exists() {
-        rel = media_rel_path(&format!("{stem} {i}{ext}"), date);
+        // the number is part of the 127 bytes
+        let suffix = format!(" {i}");
+        let stem = crate::fsutil::portable_name(&stem, room.saturating_sub(ext.len() + suffix.len()));
+        rel = media_rel_path(&format!("{stem}{suffix}{ext}"), date);
         i += 1;
     }
     if let Some(p) = vault_root.join(&rel).parent() {
@@ -541,5 +548,35 @@ mod tests {
     fn local_date_is_sane() {
         let (y, m, d) = local_date();
         assert!(y >= 2024 && (1..=12).contains(&m) && (1..=31).contains(&d));
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn saved_media_names_are_portable_within_127_bytes_and_the_link_has_the_real_name() {
+        let root = tmp("portable");
+        let date = (2026, 11, 17);
+        let rel = save_bytes(&root, "Plan: v2? <final>.pdf", b"x", date).unwrap();
+        assert_eq!(crate::vault::rel_to_string(&rel), "z_media/2026/11/261117_Plan- v2- -final-.pdf");
+        assert!(link_for(&rel).contains("261117_Plan- v2- -final-.pdf"), "the link uses the name the file got");
+        let rel = save_bytes(&root, "NUL.txt", b"x", date).unwrap();
+        assert!(rel.ends_with("261117_NUL_.txt"), "a device name gets its underscore: {rel:?}");
+        let rel = save_bytes(&root, "name...", b"x", date).unwrap();
+        assert!(rel.ends_with("261117_name"), "{rel:?}");
+        // long names keep their extension and a number fits as well
+        let long = format!("{}.pdf", "ä".repeat(200));
+        let (a, b) = (save_bytes(&root, &long, b"1", date).unwrap(), save_bytes(&root, &long, b"2", date).unwrap());
+        for r in [&a, &b] {
+            let n = r.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(n.len() <= 127 && n.ends_with(".pdf"), "{n} is {} bytes", n.len());
+        }
+        assert_ne!(a, b);
+        assert!(b.file_name().unwrap().to_string_lossy().ends_with(" 1.pdf"));
+        // a file from elsewhere is copied under a portable name too
+        let src = tmp("portable-src").join("Scan: 1?.png");
+        fs::write(&src, b"png").unwrap();
+        let rel = import_file(&root, &src, date).unwrap();
+        assert_eq!(crate::vault::rel_to_string(&rel), "z_media/2026/11/261117_Scan- 1-.png");
+        assert!(root.join(&rel).exists());
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -95,6 +95,7 @@ mod userguide_ui_tests;
 #[cfg(test)]
 mod utf8_tests;
 mod vault;
+mod vault_check;
 mod vault_path;
 mod vault_state;
 mod vim;

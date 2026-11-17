@@ -700,7 +700,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
         })();
         match result {
             Ok(text) => {
-                let rel = vault.new_note_path(&o.folder, &title);
+                let rel = vault.new_note_path_max(&o.folder, &title, crate::fsutil::MADE_NAME_MAX);
                 match vault.create_file(&rel, &text) {
                     Ok(r) => made.push(r),
                     Err(e) => errors.push(format!("“{title}”: could not write the note: {e}")),
@@ -961,6 +961,51 @@ mod tests {
         let mixed = vec![event_item(Event { uid: "u".into(), summary: "Termin".into(), start: 0, end: 3600, ..Default::default() }, "Work".into(), None), media_item(media::Kind::Pdf, "a.pdf".into(), MediaData::Bytes(b"%PDF".to_vec()))];
         let r = import(&mut v, &mixed, &o);
         assert_eq!((r.notes.len(), r.files.len()), (1, 1));
+        let _ = std::fs::remove_dir_all(&src);
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn imported_notes_and_files_get_portable_names_within_127_bytes() {
+        let mut v = temp_vault("portable");
+        let day = t::days_from_civil(2026, 12, 2);
+        let long_subject = format!("Re: Plan? {}", "wörter ".repeat(60));
+        let e = |summary: &str| Event { uid: format!("ev-{}@x", summary.len()), summary: summary.into(), start: t::local_to_utc(day, 10 * 3600), end: t::local_to_utc(day, 11 * 3600), ..Default::default() };
+        let mut mail = crate::mail::parse(&crate::mail::tests::sample_eml());
+        mail.subject = long_subject;
+        let src = std::env::temp_dir().join(format!("shale-import-portable-src-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&src);
+        std::fs::create_dir_all(&src).unwrap();
+        let file = src.join("Notes: 1?.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let mut items = vec![
+            email_item(mail, ("Mail: original?.eml".into(), b"raw".to_vec())),
+            event_item(e("Meeting: Q4 *final*"), "Work".into(), Some(("Cal: x?.ics".into(), b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n".to_vec()))),
+            markdown_item("Idea: A?.md".into(), "# Idea\n".into()),
+            media_item(media::Kind::Pdf, "Plan: v2?.pdf".into(), MediaData::Bytes(b"%PDF".to_vec())),
+        ];
+        items.extend(items_from_paths(std::slice::from_ref(&file)).0);
+        let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into() };
+        let Imported { notes, files, errors } = import(&mut v, &items, &o);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(notes.len(), 4, "{notes:?}");
+        for n in notes.iter().chain(&files) {
+            let name = n.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(!name.contains([':', '?', '*', '<', '>']) && name.len() <= 127, "{name} ({} bytes)", name.len());
+            assert!(v.root.join(n).exists(), "{n:?}");
+        }
+        let names: Vec<String> = notes.iter().map(|n| n.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert!(names.contains(&"2026-12-02 Meeting- Q4 -final-.md".to_string()), "{names:?}");
+        assert!(names.contains(&"Idea- A-.md".to_string()), "{names:?}");
+        assert!(files.iter().any(|f| f.to_string_lossy().ends_with("_Plan- v2-.pdf")), "{files:?}");
+        // the links in the notes name the files as they really are
+        let text = |n: &PathBuf| std::fs::read_to_string(v.abs(n)).unwrap();
+        let ev = notes.iter().find(|n| n.to_string_lossy().contains("Meeting")).unwrap();
+        assert!(text(ev).contains("_Cal- x-.ics]]"), "{}", text(ev));
+        let em = notes.iter().find(|n| n.to_string_lossy().contains("Re- Plan")).unwrap();
+        assert!(text(em).contains("_Mail- original-.eml]]"), "{}", text(em));
+        let fl = notes.iter().find(|n| n.to_string_lossy().contains("Notes- 1-")).unwrap();
+        assert!(text(fl).contains("_Notes- 1-.txt]]"), "{}", text(fl));
         let _ = std::fs::remove_dir_all(&src);
     }
 }

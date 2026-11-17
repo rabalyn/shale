@@ -268,7 +268,7 @@ pub fn import_item(vault: &mut Vault, it: &Item, o: &Options) -> Result<PathBuf,
     let title = if title.is_empty() { "Imported".to_string() } else { title };
     let text = note_text(&prepared, *lift, &o.tags);
     prepared.commit(&vault.root)?;
-    let rel = vault.new_note_path(&o.folder, &title);
+    let rel = vault.new_note_path_max(&o.folder, &title, crate::fsutil::MADE_NAME_MAX);
     match vault.create_file(&rel, &text) {
         Ok(r) => Ok(r),
         Err(e) => {
