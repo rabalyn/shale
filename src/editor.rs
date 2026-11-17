@@ -353,6 +353,64 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorF
     job
 }
 
+/// A heading number to draw (LINK-014): where its title starts in the text, the number and the font.
+pub(crate) struct NumberMark {
+    pub title: usize,
+    pub number: String,
+    pub font: FontId,
+}
+
+/// Make room for the numbers of the headings in `job`: the section where a heading's title starts
+/// gets leading space as wide as the number and a space, so the text is the buffer's text only and
+/// every cursor position stays what it is. `raw_lines` are the lines drawn raw (as in
+/// [`highlight_preview`]). The marks say where to draw the numbers.
+pub(crate) fn make_room_for_numbers(ui: &Ui, job: &mut LayoutJob, fonts: &EditorFonts, vault_default: bool, raw_lines: Option<&Range<usize>>) -> Vec<NumberMark> {
+    let mut marks = Vec::new();
+    if !markdown::headings_numbered(&job.text, vault_default) {
+        return marks;
+    }
+    for (line, level, _, number) in markdown::heading_numbers(&job.text) {
+        let Some(number) = number else { continue };
+        let at = markdown::line_start_byte(&job.text, line) + level + 1;
+        let line_end = job.text[at..].find('\n').map_or(job.text.len(), |p| at + p);
+        let Some(i) = job.sections.iter().position(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).filter(|_| at < line_end) else { continue };
+        if job.sections[i].byte_range.start.0 < at {
+            let mut tail = job.sections[i].clone();
+            tail.byte_range.start = egui::text::ByteIndex(at);
+            job.sections[i].byte_range.end = egui::text::ByteIndex(at);
+            job.sections.insert(i + 1, tail);
+        }
+        let raw = raw_lines.is_none_or(|r| r.contains(&line));
+        let font = to_format(Fmt { heading: level as u8, rendered: !raw, ..Fmt::default() }, fonts).font_id;
+        let i = if job.sections[i].byte_range.start.0 == at { i } else { i + 1 };
+        job.sections[i].leading_space = ui.painter().layout_no_wrap(format!("{number} "), font.clone(), Color32::WHITE).size().x;
+        marks.push(NumberMark { title: at, number, font });
+    }
+    marks
+}
+
+/// Paint the numbers of the headings in the room [`make_room_for_numbers`] made, muted, on the
+/// baseline of the heading's text.
+fn paint_numbers(ui: &Ui, marks: &[NumberMark], galley: &Galley, galley_pos: Pos2) {
+    let painter = ui.painter().with_clip_rect(ui.clip_rect());
+    for m in marks {
+        let c = markdown::byte_to_char(&galley.job.text, m.title.min(galley.job.text.len()));
+        let r = galley.pos_from_cursor(CCursor::new(c));
+        let mut first = 0;
+        let Some(row) = galley.rows.iter().find(|row| {
+            first += row.char_count_including_newline().0;
+            c < first
+        }) else {
+            continue;
+        };
+        let baseline = row.row.glyphs.iter().filter(|g| g.font_height > 2.0).map(|g| g.pos.y).reduce(f32::max).unwrap_or(row.rect().height() * 0.78);
+        let number = painter.layout_no_wrap(m.number.clone(), m.font.clone(), theme::MUTED);
+        let ascent = number.rows.first().and_then(|r| r.row.glyphs.first()).map(|gl| gl.pos.y).unwrap_or(number.size().y * 0.8);
+        let room = painter.layout_no_wrap(format!("{} ", m.number), m.font.clone(), theme::MUTED).size().x;
+        painter.galley(galley_pos + Vec2::new(r.min.x - room, row.pos.y + baseline - ascent), number, theme::MUTED);
+    }
+}
+
 /// A heading title as the outline shows it (LINK-013): the editor's inline styling (bold, italic,
 /// code, strike, highlight, `<mark>` colours, links by their shown text) with the markup left out
 /// of the text altogether, not just hidden.
@@ -504,6 +562,10 @@ pub struct NoteEditor {
     pub assist: crate::link_assist::LinkAssist,
     /// Put the cursor here (char index) on the next frame and scroll to it.
     pub pending_cursor: Option<usize>,
+    /// The next scroll to `pending_cursor` puts its line at the top of the view (a heading link, LINK-015).
+    pub scroll_to_top: bool,
+    /// Draw the numbers of the headings (LINK-014, CFG-040): the setting; a note's front matter overrides it.
+    pub numbered_headings: bool,
     pub request_focus: bool,
     /// Frames left to ask again when the request was not granted (a dialog that has just closed
     /// still blocks the keyboard for the window behind it for a frame).
@@ -572,6 +634,8 @@ impl NoteEditor {
             cache: Cache::default(),
             assist: crate::link_assist::LinkAssist::new(id),
             pending_cursor: None,
+            scroll_to_top: false,
+            numbered_headings: false,
             request_focus: false,
             focus_retry: 0,
             last_layout: None,
@@ -1356,6 +1420,8 @@ impl NoteEditor {
         let image_keys: Vec<(String, f32)> = images.iter().map(|(r, h, _, _)| (text[r.clone()].to_string(), *h)).collect();
         let links = self.cache.links.clone();
         let links_text = text.clone();
+        let numbered_default = self.numbered_headings;
+        let number_marks = std::cell::RefCell::new(Vec::new());
         self.assist.arm(text, media_handled);
         let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| -> Arc<Galley> {
             let s = buf.as_str();
@@ -1379,6 +1445,7 @@ impl NoteEditor {
                 ranges.extend(table_rows(s, &table_keys, raw).into_iter().flat_map(|g| g.rows));
             }
             let mut job = highlight_preview(s, use_links, fonts, &ranges, preview.clone());
+            *number_marks.borrow_mut() = make_room_for_numbers(ui, &mut job, fonts, numbered_default, preview.as_ref());
             job.wrap.max_width = wrap_width;
             ui.ctx().fonts_mut(|f| f.layout_job(job))
         };
@@ -1406,6 +1473,7 @@ impl NoteEditor {
         }
 
         self.last_layout = Some((output.galley.clone(), output.galley_pos));
+        paint_numbers(ui, &number_marks.borrow(), &output.galley, output.galley_pos);
         if let Some(r) = output.cursor_range.filter(|_| resp.has_focus() && self.keep_selection.is_none()) {
             self.last_selection = Some((r.primary.index.0, r.secondary.index.0));
         }
@@ -1547,7 +1615,11 @@ impl NoteEditor {
         if let Some(c) = self.pending_cursor.take().or(self.vim_scroll.take()) {
             let r = output.galley.pos_from_cursor(CCursor::new(c));
             let screen = r.translate(output.galley_pos.to_vec2());
-            ui.scroll_to_rect(screen.expand(60.0), Some(egui::Align::Center));
+            if std::mem::take(&mut self.scroll_to_top) {
+                ui.scroll_to_rect(screen, Some(egui::Align::TOP));
+            } else {
+                ui.scroll_to_rect(screen.expand(60.0), Some(egui::Align::Center));
+            }
         }
 
         // --- hover / click on links and checkboxes
@@ -3942,6 +4014,68 @@ mod tests {
     fn format_of<'a>(job: &'a LayoutJob, text: &str, needle: &str) -> &'a TextFormat {
         let at = text.find(needle).unwrap_or_else(|| panic!("{needle} is not in the text"));
         &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format
+    }
+
+    // spec: LINK-014, CFG-040
+    #[test]
+    fn headings_show_their_numbers_before_the_text_and_the_buffer_stays_as_it_is() {
+        let (v, d) = vault_for_tests("numbers");
+        let rel = Path::new("Welcome.md");
+        let original = "# Title\n## Plan\n### Step\n## Next\n";
+        for preview in [false, true] {
+            let mut text = original.to_string();
+            let mut ed = NoteEditor::new(egui::Id::unique("numbers"));
+            let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+            ed.numbered_headings = true;
+            ed.live_preview = preview;
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            assert_eq!(text, original, "the numbers are drawn, never written");
+            for n in ["1", "1.1", "2"] {
+                assert!(h.texts.iter().any(|t| t == n), "number {n} is painted (preview {preview}): {:?}", h.texts);
+            }
+            assert!(!h.texts.iter().any(|t| t == "0" || t == "3"), "the title has none: {:?}", h.texts);
+            // the number sits left of its heading's text, on its row
+            let (galley, pos) = ed.last_layout.clone().unwrap();
+            let step = galley.pos_from_cursor(CCursor::new(original.find("Step").unwrap()));
+            let number = h.rects.iter().find(|(t, _)| t == "1.1").unwrap().1;
+            assert!(number.max.x <= pos.x + step.min.x && number.max.x > pos.x + step.min.x - 20.0, "{number:?} before {step:?}");
+            assert!(number.center().y > pos.y + step.min.y && number.center().y < pos.y + step.max.y, "{number:?} on the row {step:?}");
+            // setting off: no numbers; the front matter overrides it both ways
+            ed.numbered_headings = false;
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            assert!(!h.texts.iter().any(|t| t == "1.1"), "no numbers when off: {:?}", h.texts);
+            let mut text = "---\nnumbered-headings: true\n---\n## A\n".to_string();
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            assert!(h.texts.iter().any(|t| t == "1"), "front matter turns them on: {:?}", h.texts);
+            ed.numbered_headings = true;
+            let mut text = "---\nnumbered-headings: no\n---\n## A\n".to_string();
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            h.frame(&mut ed, &mut text, &v, rel, vec![]);
+            assert!(!h.texts.iter().any(|t| t == "1"), "front matter turns them off: {:?}", h.texts);
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-014
+    #[test]
+    fn room_for_a_number_is_made_in_the_section_where_the_title_starts_and_adds_no_text() {
+        let ctx = egui::Context::default();
+        let fonts = EditorFonts::uniform(15.0);
+        let text = "# T\n## **Bold** one\n\n##\n### Sub\n";
+        let mut job = highlight_preview(text, &[], &fonts, &[], Some(0..0));
+        let mut out = ctx.run_ui(RawInput::default(), |ui| {
+            let marks = make_room_for_numbers(ui, &mut job, &fonts, true, Some(&(0..0)));
+            let numbers: Vec<&str> = marks.iter().map(|m| m.number.as_str()).collect();
+            assert_eq!(numbers, vec!["1", "1.1"], "an empty heading gets no number");
+            assert!(make_room_for_numbers(ui, &mut job.clone(), &fonts, false, None).is_empty());
+        });
+        out.textures_delta.clear();
+        assert_eq!(job.text, text);
+        let room: Vec<usize> = job.sections.iter().filter(|s| s.leading_space > 0.0).map(|s| s.byte_range.start.0).collect();
+        assert_eq!(room, vec![text.find("**Bold").unwrap(), text.find("Sub").unwrap()]);
+        assert!(job.sections.windows(2).all(|w| w[0].byte_range.end == w[1].byte_range.start), "the sections still tile the text");
     }
 
     // spec: LINK-013

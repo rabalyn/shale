@@ -833,13 +833,15 @@ impl ShaleApp {
                     }
                     if reading {
                         let text = doc.text.clone();
-                        let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, base, dark));
+                        let extras = reader::Extras { numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings), scroll_to: tab.reader_line.take() };
+                        let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, base, dark, &extras));
                         if let Some(a) = shown {
                             handle_reader_action(&mut self.actions, a, &rel);
                         }
                     } else {
                         tab.editor.inline_images = self.cfg.inline_images;
                         tab.editor.line_numbers = self.cfg.line_numbers;
+                        tab.editor.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.live_preview = self.cfg.live_preview;
                         tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
                         tab.editor.table_cell_edit = self.cfg.table_cell_edit;

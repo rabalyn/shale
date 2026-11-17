@@ -17,12 +17,33 @@ use std::time::SystemTime;
 pub enum ReaderAction {
     OpenLink {
         target: String,
+        /// the heading the link names (LINK-015)
+        heading: Option<String>,
         new_tab: bool,
     },
     ToggleTask(usize),
     OpenFile(PathBuf),
     /// A web link: open in the default browser.
     OpenUrl(String),
+}
+
+/// What the reading view shows besides the text: the numbers of the headings by line (LINK-014)
+/// and the line of a heading to scroll to (LINK-015).
+#[derive(Default)]
+pub struct Extras {
+    pub numbers: HashMap<usize, String>,
+    pub scroll_to: Option<usize>,
+}
+
+impl Extras {
+    /// The numbers of the headings of `text` by line; none when numbering is off for the note
+    /// (`vault_default` is the setting, the front matter can override it, CFG-040).
+    pub fn numbers_of(text: &str, vault_default: bool) -> HashMap<usize, String> {
+        if !markdown::headings_numbered(text, vault_default) {
+            return HashMap::new();
+        }
+        markdown::heading_numbers(text).into_iter().filter_map(|(line, _, _, n)| n.map(|n| (line, n))).collect()
+    }
 }
 
 /// What the reading view draws embeds from.
@@ -289,7 +310,7 @@ fn follow_span(ui: &Ui, resp: &egui::Response, byte: usize, spans: &[(Range<usiz
         });
         if resp.clicked() || resp.middle_clicked() {
             let new_tab = resp.middle_clicked() || ui.input(|i| i.modifiers.command);
-            *out = Some(ReaderAction::OpenLink { target: l.target.clone(), new_tab });
+            *out = Some(ReaderAction::OpenLink { target: l.target.clone(), heading: l.heading.clone(), new_tab });
         }
     }
 }
@@ -311,7 +332,7 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
     (out, plain_click)
 }
 
-pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Caches, base: f32, dark_canvas: bool) -> Option<ReaderAction> {
+pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Caches, base: f32, dark_canvas: bool, extras: &Extras) -> Option<ReaderAction> {
     let mut out = None;
     let hint = |t: &str| vault.link_hint(t, Some(rel));
     let all_links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
@@ -405,7 +426,15 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             ui.add_space(base * 0.5);
             let size = base * heading_scale(level as u8);
             let (job, spans) = inline_job(line[level..].trim_start(), &shift(&line_links, level + (line[level..].len() - line[level..].trim_start().len())), size, theme::HEADING, false);
-            inline_block(ui, job, &spans, &hint, &mut out);
+            let shown = ui.horizontal_top(|ui| {
+                if let Some(n) = extras.numbers.get(&i) {
+                    ui.label(egui::RichText::new(n).size(size).color(theme::MUTED));
+                }
+                inline_block(ui, job, &spans, &hint, &mut out)
+            });
+            if extras.scroll_to == Some(i) {
+                shown.response.scroll_to_me(Some(egui::Align::TOP));
+            }
             ui.add_space(base * 0.2);
         } else if let Some((check, done, rest, _)) = markdown::parse_task_line(line) {
             let rest_off = line.len() - rest.len();
@@ -646,7 +675,7 @@ mod tests {
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(700.0, 500.0))), time: Some(time), events, ..Default::default() };
             let mut action = None;
             let mut out = ctx.run_ui(raw, |ui| {
-                action = show(ui, text, &v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, 15.0, true);
+                action = show(ui, text, &v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, 15.0, true, &Extras::default());
             });
             out.textures_delta.clear();
             (action, shapes_text(&out.shapes))

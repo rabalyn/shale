@@ -24,7 +24,7 @@ impl TabBar {
     pub fn new_tab(&mut self, view: View) {
         let id = self.next_tab_id;
         self.next_tab_id += 1;
-        self.tabs.push(Tab { id, view, back: vec![], fwd: vec![], reading: false, pinned: false, editor: NoteEditor::new(egui::Id::unique(("note-editor", id))), title_buf: String::new(), title_for: None });
+        self.tabs.push(Tab { id, view, back: vec![], fwd: vec![], reading: false, reader_line: None, pinned: false, editor: NoteEditor::new(egui::Id::unique(("note-editor", id))), title_buf: String::new(), title_for: None });
         self.active = self.tabs.len() - 1;
     }
 }

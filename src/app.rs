@@ -61,6 +61,8 @@ pub struct Tab {
     pub back: Vec<View>,
     pub fwd: Vec<View>,
     pub reading: bool,
+    /// The line of a heading the reading view scrolls to when it next draws (LINK-015).
+    pub reader_line: Option<usize>,
     /// Pinned tabs sit left of all others (NAV-016).
     pub pinned: bool,
     pub editor: NoteEditor,
@@ -233,6 +235,11 @@ pub enum Action {
     ToggleTask {
         rel: PathBuf,
         offset: usize,
+    },
+    /// A heading of the Outline: scroll to it in the tab's mode (LINK-015).
+    GotoHeading {
+        rel: PathBuf,
+        line: usize,
     },
     GotoLine {
         rel: PathBuf,
@@ -967,10 +974,16 @@ impl ShaleApp {
     pub fn open_link(&mut self, target: &str, heading: Option<String>, from: Option<PathBuf>, new_tab: bool) {
         let Some(v) = &self.vault else { return };
         if let Some(rel) = v.resolve(target, from.as_deref()) {
-            let line = heading.and_then(|h| v.notes.get(&rel).and_then(|n| markdown::find_headings(&n.text).into_iter().find(|(_, _, t)| t.eq_ignore_ascii_case(&h)).map(|x| x.0)));
             self.open(&rel, new_tab);
-            if let Some(line) = line {
-                self.goto_line(&rel, line);
+            if let Some(h) = heading.filter(|h| !h.trim().is_empty()) {
+                let found = self.notes.get(&rel).and_then(|d| markdown::find_heading(&d.text, &h));
+                match found {
+                    Some(line) => self.goto_heading(&rel, line),
+                    None => {
+                        let name = self.vault.as_ref().and_then(|v| v.file(&rel)).map(|f| f.display_name()).unwrap_or_default();
+                        self.toast(format!("No heading “{}” in {name}", h.trim()));
+                    }
+                }
             }
             return;
         }
@@ -1048,6 +1061,20 @@ impl ShaleApp {
             }
         }
         self.open(&rel, false);
+    }
+
+    /// Open `rel` with the heading on `line` at the top of the view, in the mode the tab is in:
+    /// the cursor on the line in the editor, the reading view scrolled to it (LINK-015).
+    pub fn goto_heading(&mut self, rel: &Path, line: usize) {
+        self.open(rel, false);
+        if let Some(tab) = self.tabbar.tabs.get_mut(self.tabbar.active).filter(|t| t.reading && t.view.path() == Some(rel)) {
+            tab.reader_line = Some(line);
+        } else {
+            self.goto_line(rel, line);
+            if let Some(tab) = self.tabbar.tabs.get_mut(self.tabbar.active) {
+                tab.editor.scroll_to_top = true;
+            }
+        }
     }
 
     pub fn goto_line(&mut self, rel: &Path, line: usize) {
@@ -1843,6 +1870,7 @@ impl ShaleApp {
                 Action::NewDrawing { folder, embed_into } => self.new_drawing(&folder, embed_into),
                 Action::ToggleTask { rel, offset } => self.toggle_task(&rel, offset),
                 Action::GotoLine { rel, line } => self.goto_line(&rel, line),
+                Action::GotoHeading { rel, line } => self.goto_heading(&rel, line),
                 Action::GotoMatch { rel, line, col } => self.goto_match(&rel, line, col),
                 Action::ShowView(v) => self.show_view(v, false),
                 Action::ShowViewInNewTab(v) => self.show_view(v, true),
@@ -2428,7 +2456,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
 
 pub fn handle_reader_action(app_actions: &mut Vec<Action>, a: ReaderAction, from: &Path) {
     match a {
-        ReaderAction::OpenLink { target, new_tab } => app_actions.push(Action::OpenLink { target, heading: None, from: Some(from.to_path_buf()), new_tab }),
+        ReaderAction::OpenLink { target, heading, new_tab } => app_actions.push(Action::OpenLink { target, heading, from: Some(from.to_path_buf()), new_tab }),
         ReaderAction::ToggleTask(offset) => app_actions.push(Action::ToggleTask { rel: from.to_path_buf(), offset }),
         ReaderAction::OpenFile(rel) => app_actions.push(Action::Open { rel, new_tab: false }),
         ReaderAction::OpenUrl(url) => app_actions.push(Action::OpenUrl(url)),

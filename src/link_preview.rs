@@ -378,6 +378,8 @@ pub enum Content {
     Note {
         rel: PathBuf,
         text: String,
+        /// the numbers of its headings by line of `text` (LINK-014); none when numbering is off
+        numbers: std::collections::HashMap<usize, String>,
     },
     /// no such note (Enter creates it)
     Missing(String),
@@ -399,7 +401,7 @@ pub enum Content {
 
 /// The content for a link of the note `from`; `note_text` gives the text of a note (the open buffer
 /// when the note is open).
-pub fn content_for(target: &Target, vault: &Vault, note_text: &dyn Fn(&Path) -> Option<String>) -> Content {
+pub fn content_for(target: &Target, vault: &Vault, note_text: &dyn Fn(&Path) -> Option<String>, numbered: bool) -> Content {
     let (link, heading, from) = match target {
         Target::Web { url } if url.to_ascii_lowercase().starts_with("mailto:") => return Content::Plain(format!("A mail to {}. Enter opens your mail program.", url[7..].split('?').next().unwrap_or(""))),
         Target::Web { url } => return Content::Web { url: fetchable(url) },
@@ -409,7 +411,10 @@ pub fn content_for(target: &Target, vault: &Vault, note_text: &dyn Fn(&Path) -> 
     match vault.file(&rel).map(|f| f.kind) {
         Some(FileKind::Note) => {
             let text = note_text(&rel).unwrap_or_default();
-            Content::Note { text: from_heading(&text, heading.as_deref()), rel }
+            let (start, shown) = from_heading(&text, heading.as_deref());
+            // the numbers are those of the whole note, also when the preview starts at a heading
+            let numbers = reader::Extras::numbers_of(&text, numbered).into_iter().filter_map(|(l, n)| l.checked_sub(start).map(|l| (l, n))).collect();
+            Content::Note { text: shown, numbers, rel }
         }
         Some(FileKind::Drawing) => Content::File { rel, kind: "Drawing" },
         _ if crate::media::is_image(&rel) => Content::Image { abs: vault.abs(&rel), rel },
@@ -420,12 +425,12 @@ pub fn content_for(target: &Target, vault: &Vault, note_text: &dyn Fn(&Path) -> 
     }
 }
 
-/// The text from the line of `heading` on (the whole text when there is none or it is not found),
-/// cut at `MAX_NOTE_CHARS`.
-fn from_heading(text: &str, heading: Option<&str>) -> String {
-    let start = heading.and_then(|h| markdown::find_headings(text).into_iter().find(|(_, _, t)| t.eq_ignore_ascii_case(h))).map(|(line, _, _)| line);
+/// The line of `heading` and the text from it on (the whole text from line 0 when there is no
+/// heading or it is not found), cut at `MAX_NOTE_CHARS`.
+fn from_heading(text: &str, heading: Option<&str>) -> (usize, String) {
+    let start = heading.and_then(|h| markdown::find_heading(text, h)).unwrap_or(0);
     let mut out = String::new();
-    for line in text.lines().skip(start.unwrap_or(0)) {
+    for line in text.lines().skip(start) {
         if out.chars().count() + line.chars().count() > MAX_NOTE_CHARS {
             out.push('…');
             break;
@@ -433,7 +438,7 @@ fn from_heading(text: &str, heading: Option<&str>) -> String {
         out.push_str(line);
         out.push('\n');
     }
-    out
+    (start, out)
 }
 
 /// What the keys of the preview ask the app to do (EDIT-035). One place carries it out:
@@ -618,10 +623,10 @@ impl LinkPreview {
         let area = egui::ScrollArea::vertical().min_scrolled_height(shown).max_height(shown).auto_shrink([false, false]).vertical_scroll_offset(open.scroll).show(ui, |ui| {
             ui.set_width(ui.available_width());
             match &open.content {
-                Content::Note { rel, text } => {
+                Content::Note { rel, text, numbers } => {
                     if text.trim().is_empty() {
                         ui.label(egui::RichText::new("The note is empty").color(theme::MUTED));
-                    } else if let Some(a) = reader::show(ui, text, vault, rel, caches, base, dark) {
+                    } else if let Some(a) = reader::show(ui, text, vault, rel, caches, base, dark, &reader::Extras { numbers: numbers.clone(), scroll_to: None }) {
                         action = Some((a, rel.clone()));
                     }
                 }
@@ -797,11 +802,11 @@ mod tests {
     #[test]
     fn the_note_preview_starts_at_the_heading() {
         let text = "intro\n# One\nfirst\n## Two\nsecond\n";
-        assert_eq!(from_heading(text, None), text);
-        assert_eq!(from_heading(text, Some("two")), "## Two\nsecond\n");
-        assert_eq!(from_heading(text, Some("nope")), text, "an unknown heading shows the note from the top");
+        assert_eq!(from_heading(text, None).1, text);
+        assert_eq!(from_heading(text, Some("two")), (3, "## Two\nsecond\n".to_string()));
+        assert_eq!(from_heading(text, Some("nope")).1, text, "an unknown heading shows the note from the top");
         let big = "line of text\n".repeat(5000);
-        assert!(from_heading(&big, None).chars().count() <= MAX_NOTE_CHARS + 1);
+        assert!(from_heading(&big, None).1.chars().count() <= MAX_NOTE_CHARS + 1);
         assert_eq!(fetchable("www.example.org"), "https://www.example.org");
         assert_eq!(fetchable("http://a.b"), "http://a.b");
     }
