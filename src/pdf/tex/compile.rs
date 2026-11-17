@@ -20,6 +20,9 @@ pub const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 /// How many lines of the log a failure carries.
 const TAIL_LINES: usize = 40;
 
+#[cfg(test)]
+static NEXT_IN: AtomicU64 = AtomicU64::new(0);
+
 /// A temporary folder for one compile: private to the user, removed when it is dropped, so it is
 /// also removed after a failure.
 pub struct WorkDir(PathBuf);
@@ -30,6 +33,15 @@ impl WorkDir {
         let root = crate::fsutil::private_temp_root("shale-tex")?;
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
         let dir = root.join(format!("{}-{}-{nanos}", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst)));
+        crate::fsutil::create_private_dir_new(&dir)?;
+        Ok(WorkDir(dir))
+    }
+
+    /// Tests: a work folder below `parent` (whose name may have spaces).
+    #[cfg(test)]
+    pub fn new_in(parent: &Path) -> std::io::Result<WorkDir> {
+        std::fs::create_dir_all(parent)?;
+        let dir = parent.join(format!("work-{}", NEXT_IN.fetch_add(1, Ordering::SeqCst)));
         crate::fsutil::create_private_dir_new(&dir)?;
         Ok(WorkDir(dir))
     }

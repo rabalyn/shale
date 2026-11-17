@@ -26,6 +26,10 @@ fn the_sizes_shown_before_a_download_are_the_measured_ones() {
 fn the_profile_moves_every_path_into_the_managed_folder_and_keeps_the_rest() {
     let root = Path::new("/home/u/.local/share/shale/texlive.partial");
     let p = profile(root, "aarch64-linux");
+    // a folder with spaces (macOS: ~/Library/Application Support) is written as it is: the value of a profile line runs to its end
+    let spaced = profile(Path::new("/Users/u/Library/Application Support/shale/texlive.partial"), "universal-darwin");
+    assert!(spaced.lines().any(|l| l == "TEXDIR /Users/u/Library/Application Support/shale/texlive.partial"), "{spaced}");
+    assert!(spaced.lines().any(|l| l == "TEXMFHOME /Users/u/Library/Application Support/shale/texlive.partial/home/texmf"), "{spaced}");
     assert!(!p.contains("/opt/texlive"), "no path of the test image is left:\n{p}");
     for key in ["TEXDIR", "TEXMFLOCAL", "TEXMFSYSCONFIG", "TEXMFSYSVAR", "TEXMFCONFIG", "TEXMFHOME", "TEXMFVAR"] {
         let line = p.lines().find(|l| l.starts_with(&format!("{key} "))).unwrap_or_else(|| panic!("{key} in the profile"));
@@ -441,7 +445,8 @@ const FROZEN_REPOSITORY: &str = "https://ftp.math.utah.edu/pub/tex/historic/syst
 #[test]
 #[ignore = "needs the network and takes minutes: installs TeX Live from the frozen repository"]
 fn tex_install_the_managed_tex_live_installs_is_found_compiles_and_is_removed() {
-    let data = temp("real");
+    // a space in the path: the default on macOS (~/Library/Application Support)
+    let data = temp("real tex test");
     // SHALE_TEX_INSTALL_REPOSITORY: another repository, to see whether the default one (CTAN's newest TeX Live) still works
     let repository = std::env::var("SHALE_TEX_INSTALL_REPOSITORY").unwrap_or_else(|_| FROZEN_REPOSITORY.to_string());
     let env = Env { data: data.clone(), repository };

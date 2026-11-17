@@ -419,6 +419,23 @@ fn tex_env_a_small_article_compiles_to_a_pdf() {
 // spec: TEX-004
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
+fn tex_env_a_work_folder_and_a_template_folder_with_spaces_work() {
+    let parent = std::env::temp_dir().join(format!("shale tex space {}", std::process::id()));
+    let work = WorkDir::new_in(&parent).unwrap();
+    let tpl = work.path().join("my templates");
+    std::fs::create_dir_all(&tpl).unwrap();
+    work.write("main.tex", b"\\documentclass{article}\n\\usepackage{spacey}\n\\begin{document}\\spacey\n\\end{document}\n").unwrap();
+    std::fs::write(tpl.join("spacey.sty"), "\\ProvidesPackage{spacey}\\newcommand\\spacey{ok}").unwrap();
+    let engine = container_engine(work.path());
+    let opts = Options { tex_inputs: vec![tpl], ..Options::default() };
+    let out = compile(&engine, work, "main.tex", &opts).unwrap_or_else(|e| panic!("{e}\n{}", e.log_tail));
+    assert!(out.pdf.starts_with(b"%PDF"));
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+// spec: TEX-004
+#[test]
+#[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_missing_package_is_reported_as_missing() {
     let e = container_compile(&[("main.tex", "\\documentclass{article}\n\\usepackage{nosuchpackage}\n\\begin{document}x\\end{document}\n")], "main.tex", &Options::default()).unwrap_err();
     assert_eq!(e.problems.iter().map(Problem::text).collect::<Vec<_>>(), ["package nosuchpackage is missing"], "{e}\n{}", e.log_tail);
