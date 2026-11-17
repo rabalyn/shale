@@ -19,6 +19,7 @@ Writing and finding:
 - [[Search and pickers]]: find notes, text, mail and posts.
 - [[Tabs]]: reorder, pin, come back later.
 - [[Tags and people]]: tags, tag suggestions and contact notes.
+- [[Sounds and videos]]: players for audio and video in your notes.
 
 Organising:
 
