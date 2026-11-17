@@ -155,9 +155,24 @@ fn serve(mut s: TcpStream, st: &Arc<Mutex<ServerState>>) {
                 respond(&mut s, 401, "application/json", r#"{"error":"AuthenticationRequired","message":"Invalid identifier or password"}"#);
             }
         }
+        // web pages for the link preview (EDIT-034)
+        ("GET", "/preview/page") => respond(&mut s, 200, "text/html; charset=utf-8", PREVIEW_PAGE),
+        ("GET", "/preview/slow") => {
+            drop(g);
+            std::thread::sleep(Duration::from_millis(600));
+            respond(&mut s, 200, "text/html", "<title>Slow page</title><p>It took its time to arrive, this page, and it is long enough.</p>")
+        }
+        ("GET", "/preview/error") => respond(&mut s, 500, "text/html", "<p>Broken</p>"),
+        ("GET", "/preview/file") => respond(&mut s, 200, "image/png", "not really a picture"),
         _ => respond(&mut s, 404, "application/json", "{}"),
     }
 }
+
+/// The page of the link preview tests.
+pub const PREVIEW_PAGE: &str = r#"<!DOCTYPE html><html><head><title>Fake Page &amp; Co</title>
+<meta name="description" content="What the fake page is about"></head>
+<body><nav>Menu entry</nav><p>The first paragraph of the fake page is long enough to be shown in the preview.</p>
+<script>var hidden = 1;</script></body></html>"#;
 
 /// What the person does on the Mastodon sign-in page.
 #[derive(Clone, Copy, PartialEq, Debug)]

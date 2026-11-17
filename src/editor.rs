@@ -537,6 +537,8 @@ pub struct NoteEditor {
     vim_scroll: Option<usize>,
     /// `gt` was typed this frame: follow the link under vim's cursor (EDIT-023)
     vim_follow: bool,
+    /// where vim's block cursor was drawn this frame (normal mode with the keyboard): the link preview hangs below it (EDIT-033)
+    pub vim_cursor_rect: Option<Rect>,
     /// The formatting toolbar above the text (EDIT-026)
     bar: crate::format_bar::FormatBar,
     /// A toolbar command to do to the text at the start of the next frame of the editor (EDIT-027)
@@ -590,6 +592,7 @@ impl NoteEditor {
             table_cell_edit: true,
             focus_before_press: false,
             vim_follow: false,
+            vim_cursor_rect: None,
             bar: Default::default(),
             format_request: None,
             last_selection: None,
@@ -1528,6 +1531,7 @@ impl NoteEditor {
             }
         }
         // normal mode: a block on the character under the cursor
+        self.vim_cursor_rect = None;
         if self.vim_enabled && resp.has_focus() && self.vim.mode == crate::vim::Mode::Normal {
             let c = self.vim.cursor;
             let here = output.galley.pos_from_cursor(CCursor::new(c));
@@ -1535,6 +1539,7 @@ impl NoteEditor {
             let w = if (next.min.y - here.min.y).abs() < 1.0 && next.min.x > here.min.x { next.min.x - here.min.x } else { base_size * 0.55 };
             let block = Rect::from_min_size(output.galley_pos + here.min.to_vec2(), Vec2::new(w, here.height()));
             ui.painter().rect_filled(block, 1.0, theme::ACCENT.gamma_multiply(0.45));
+            self.vim_cursor_rect = Some(block);
         }
         if let Some(c) = self.pending_cursor.take().or(self.vim_scroll.take()) {
             let r = output.galley.pos_from_cursor(CCursor::new(c));

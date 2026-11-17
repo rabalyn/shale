@@ -77,6 +77,10 @@ pub(crate) struct TabMarks {
     pub pinned: Vec<usize>,
     /// the "Pin tab" / "Unpin tab" entry of an open tab menu
     pub menu_pin: Option<egui::Rect>,
+    /// the "Open in split right" entry of an open tab menu (NAV-033)
+    pub menu_split: Option<egui::Rect>,
+    /// the line that marks this tab bar as the one of the focused pane, when there are several (NAV-032)
+    pub focus_line: Option<egui::Rect>,
 }
 
 pub struct NoteDoc {
@@ -129,7 +133,9 @@ mod drops;
 mod drops_tests;
 #[cfg(test)]
 mod handover_tests;
+mod link_preview;
 mod mail;
+pub mod panes;
 mod screenshot;
 mod social;
 mod sync;
@@ -245,6 +251,11 @@ pub enum Action {
     /// open a mail found by the search in the mail view (NAV-025)
     OpenMail(Box<crate::mail::db::MessageSummary>),
     CloseTab(usize),
+    /// open tab `tab` of pane `pane` in a new pane to its right (NAV-033)
+    SplitTabRight {
+        pane: usize,
+        tab: usize,
+    },
     Rename(PathBuf),
     Trash(PathBuf),
     /// put the item moved to the trash last (in this session) back where it was (VAULT-020)
@@ -288,6 +299,8 @@ pub struct ShaleApp {
     pub vault: Option<Vault>,
     /// the open tabs, the active one and what the tab bar drew last frame
     pub tabbar: tabs::TabBar,
+    /// the panes of the middle area; `tabbar` is the tab bar of the focused one (NAV-032)
+    pub panes: panes::Panes,
     pub notes: HashMap<PathBuf, NoteDoc>,
     /// The undo history of every note that vim-lite edited, by vault path (EDIT-021).
     pub undo: crate::undo::Histories,
@@ -346,6 +359,8 @@ pub struct ShaleApp {
     script: crate::script::ScriptRun,
     /// where unsaved text is rescued to, and the rescues not dismissed yet (DATA-011)
     pub recovery: crate::recovery::RecoveryState,
+    /// The preview of the link under vim's cursor and the web pages it read (EDIT-033).
+    pub link_preview: crate::link_preview::LinkPreview,
 }
 
 impl ShaleApp {
@@ -489,6 +504,7 @@ impl ShaleApp {
             sync: sync::SyncState::default(),
             vault: None,
             tabbar: tabs::TabBar::new(),
+            panes: panes::Panes::new(),
             notes: HashMap::new(),
             undo: crate::undo::Histories::default(),
             drawings: HashMap::new(),
@@ -531,6 +547,7 @@ impl ShaleApp {
             fonts: crate::fonts::FontState::new(),
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
+            link_preview: Default::default(),
             usage: crate::data_usage::DataUsage::new(places),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
@@ -648,6 +665,8 @@ impl ShaleApp {
 
     /// Save the global config and the open vault's `.shale/` files.
     pub fn save_config(&mut self) {
+        // (which tab is open in each pane is saved with the rest)
+        self.remember_open_files();
         if self.persist_config {
             // shown once per message, not at every save
             if let Err(e) = self.cfg.save() {
@@ -705,47 +724,42 @@ impl ShaleApp {
                 self.media.stop();
                 self.vault = Some(v);
                 self.tabbar.tabs.clear();
+                self.panes.reset();
                 self.notes.clear();
                 self.drawings.clear();
                 self.tabbar.active = 0;
                 self.cfg.remember_vault(path.to_path_buf());
                 // (opening a note rewrites the saved list, so read it first)
-                let saved: Vec<crate::vault_state::SavedTab> = self.vdata.state.tabs.clone();
-                for st in &saved {
-                    let before = self.tabbar.tabs.len();
-                    let new_tab = !self.tabbar.tabs.is_empty();
-                    if let Some(f) = &st.file {
-                        let rel = PathBuf::from(f);
-                        if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
-                            continue;
-                        }
-                        // a canvas tab comes back as it was left: read-only, without the question
-                        if crate::drawing::canvas::is_canvas_path(&rel) {
-                            self.open_canvas_read_only(&rel, new_tab);
-                        } else {
-                            self.open(&rel, new_tab);
-                        }
-                    } else if let Some(f) = &st.feed {
-                        // (the account must still exist)
-                        if self.cfg.social_accounts.iter().any(|e| e.account.id == f.account) {
-                            self.show_view(View::Social(Some(f.clone())), new_tab);
-                        }
+                let saved_panes: Vec<crate::vault_state::SavedPane> = if self.vdata.state.panes.is_empty() {
+                    // (a file from before panes: its last tab was the open one)
+                    vec![crate::vault_state::SavedPane { tabs: self.vdata.state.tabs.clone(), active: self.vdata.state.tabs.len().saturating_sub(1), ..Default::default() }]
+                } else {
+                    self.vdata.state.panes.clone()
+                };
+                let saved_focus = self.vdata.state.focused_pane;
+                for (pi, sp) in saved_panes.iter().enumerate() {
+                    if pi > 0 {
+                        self.add_pane_right();
                     }
-                    if self.tabbar.tabs.len() > before {
-                        self.tabbar.tabs[self.tabbar.active].pinned = st.pinned;
+                    self.restore_pane_tabs(sp);
+                    // a pane whose tabs are all gone is not brought back
+                    if pi > 0 && self.tabbar.tabs.is_empty() {
+                        self.close_pane(self.panes.focused);
                     }
                 }
-                // pinned tabs are left-most (a hand-edited file may say otherwise)
-                let open_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
-                self.tabbar.tabs.sort_by_key(|t| !t.pinned);
-                self.tabbar.active = open_id.and_then(|id| self.tabbar.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
-                if self.tabbar.tabs.is_empty() {
+                if self.tabbar.tabs.is_empty() && self.panes.len() == 1 {
                     let first = self.vault.as_ref().and_then(|v| v.files.iter().find(|f| f.link_name.eq_ignore_ascii_case("welcome")).or_else(|| v.files.iter().find(|f| f.kind == FileKind::Note)).map(|f| f.rel.clone()));
                     match first {
                         Some(r) => self.open(&r, false),
                         None => self.tabbar.new_tab(View::Empty),
                     }
                 }
+                // the widths as they were (only when every pane that was saved came back)
+                if saved_panes.len() == self.panes.len() && saved_panes.iter().all(|p| p.weight.is_finite() && p.weight > 0.0) {
+                    self.panes.weights = saved_panes.iter().map(|p| p.weight).collect();
+                }
+                self.focus_pane(saved_focus);
+                self.remember_open_files();
                 if !had_files {
                     self.toast("Empty vault opened. Create a note with Ctrl+N.");
                 }
@@ -754,6 +768,43 @@ impl ShaleApp {
             }
             Err(e) => self.toast(format!("Could not open vault: {e}")),
         }
+    }
+
+    /// Open the tabs of one saved pane in the (empty) focused pane: pinned tabs left-most, the
+    /// open one as saved (the last one when it is gone).
+    fn restore_pane_tabs(&mut self, sp: &crate::vault_state::SavedPane) {
+        let mut open_id = None;
+        for (k, st) in sp.tabs.iter().enumerate() {
+            let before = self.tabbar.tabs.len();
+            let new_tab = !self.tabbar.tabs.is_empty();
+            if let Some(f) = &st.file {
+                let rel = PathBuf::from(f);
+                if !self.vault.as_ref().map(|v| v.file(&rel).is_some()).unwrap_or(false) {
+                    continue;
+                }
+                // a canvas tab comes back as it was left: read-only, without the question
+                if crate::drawing::canvas::is_canvas_path(&rel) {
+                    self.open_canvas_read_only(&rel, new_tab);
+                } else {
+                    self.open(&rel, new_tab);
+                }
+            } else if let Some(f) = &st.feed {
+                // (the account must still exist)
+                if self.cfg.social_accounts.iter().any(|e| e.account.id == f.account) {
+                    self.show_view(View::Social(Some(f.clone())), new_tab);
+                }
+            }
+            if self.tabbar.tabs.len() > before {
+                self.tabbar.tabs[self.tabbar.active].pinned = st.pinned;
+            }
+            if k == sp.active && self.tabbar.tabs.len() > before {
+                open_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
+            }
+        }
+        // pinned tabs are left-most (a hand-edited file may say otherwise)
+        let last_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
+        self.tabbar.tabs.sort_by_key(|t| !t.pinned);
+        self.tabbar.active = open_id.or(last_id).and_then(|id| self.tabbar.tabs.iter().position(|t| t.id == id)).unwrap_or(0);
     }
 
     pub fn show_view(&mut self, view: View, new_tab: bool) {
@@ -898,15 +949,10 @@ impl ShaleApp {
         if self.vault.is_none() {
             return;
         }
-        self.vdata.state.tabs = self
-            .tabbar
-            .tabs
-            .iter()
-            .filter_map(|t| match &t.view {
-                View::Social(Some(f)) if !f.feed.is_empty() => Some(crate::vault_state::SavedTab { feed: Some(f.clone()), pinned: t.pinned, ..Default::default() }),
-                v => v.path().map(|p| crate::vault_state::SavedTab { file: Some(rel_to_string(p)), pinned: t.pinned, ..Default::default() }),
-            })
-            .collect();
+        self.vdata.state.panes = self.saved_panes();
+        self.vdata.state.focused_pane = self.panes.focused;
+        // (the tabs of the first pane stay where a Shale without panes reads them)
+        self.vdata.state.tabs = self.vdata.state.panes.first().map(|p| p.tabs.clone()).unwrap_or_default();
     }
 
     pub fn current_path(&self) -> Option<PathBuf> {
@@ -1237,7 +1283,7 @@ impl ShaleApp {
         }
         // tabs pointing at files that vanished
         let files: HashSet<PathBuf> = v.files.iter().map(|f| f.rel.clone()).collect();
-        for t in &mut self.tabbar.tabs {
+        for t in self.all_tabs_mut() {
             if let Some(p) = t.view.path() {
                 if !files.contains(p) {
                     t.view = View::Empty;
@@ -1347,7 +1393,7 @@ impl ShaleApp {
                 }
             }
         }
-        for t in &mut self.tabbar.tabs {
+        for t in self.all_tabs_mut() {
             for view in std::iter::once(&mut t.view).chain(t.back.iter_mut()).chain(t.fwd.iter_mut()) {
                 match view {
                     View::Note(p) | View::Drawing(p) => {
@@ -1422,7 +1468,7 @@ impl ShaleApp {
                 self.trashed.push(in_trash);
                 self.notes.retain(|k, _| !k.starts_with(rel));
                 self.drawings.retain(|k, _| !k.starts_with(rel));
-                for t in &mut self.tabbar.tabs {
+                for t in self.all_tabs_mut() {
                     if t.view.path().map(|p| p.starts_with(rel)).unwrap_or(false) {
                         t.view = t.back.pop().unwrap_or(View::Empty);
                     }
@@ -1636,7 +1682,7 @@ impl ShaleApp {
         } else {
             let text = self.notes.get(&d.rel).map(|n| n.text.clone()).or_else(|| v.notes.get(&d.rel).map(|n| n.text.clone())).unwrap_or_default();
             // embeds as big in proportion to the text as in the editor that shows the note (PDF-005)
-            let column = self.tabbar.tabs.iter().filter(|t| matches!(&t.view, View::Note(p) if *p == d.rel)).find_map(|t| t.editor.column);
+            let column = self.all_tabs().filter(|t| matches!(&t.view, View::Note(p) if *p == d.rel)).find_map(|t| t.editor.column);
             crate::pdf::export::export_note(v, &d.rel, &text, &crate::pdf::export::ExportOptions { column, ..d.opts.clone() })?
         };
         let out = PathBuf::from(crate::layout::shellexpand(&d.path));
@@ -1660,7 +1706,7 @@ impl ShaleApp {
             let closed = self.tabbar.tabs.remove(i);
             // the sound of a note stops with its tab (MEDIA-007)
             if let View::Note(rel) = &closed.view {
-                if !self.tabbar.tabs.iter().any(|t| t.view == closed.view) {
+                if !self.all_tabs().any(|t| t.view == closed.view) {
                     self.media.stop_for_note(rel);
                 }
             }
@@ -1668,6 +1714,10 @@ impl ShaleApp {
                 self.tabbar.active = self.tabbar.tabs.len() - 1;
             } else if i < self.tabbar.active {
                 self.tabbar.active -= 1;
+            }
+            // the last tab of a pane takes the pane with it (NAV-035)
+            if self.tabbar.tabs.is_empty() && self.panes.len() > 1 {
+                self.close_pane(self.panes.focused);
             }
             self.remember_open_files();
         }
@@ -1788,6 +1838,10 @@ impl ShaleApp {
                 Action::OpenPost(hit) => self.open_post_hit(&hit),
                 Action::OpenMail(msg) => self.open_mail_hit(*msg),
                 Action::CloseTab(i) => self.close_tab(i),
+                Action::SplitTabRight { pane, tab } => {
+                    self.focus_pane(pane);
+                    self.open_tab_in_split_right(tab);
+                }
                 Action::Rename(rel) => {
                     let name = self.vault.as_ref().and_then(|v| v.file(&rel).map(|f| f.display_name())).unwrap_or_else(|| rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
                     self.modal = Some(Modal::Rename { rel, name, error: None });
@@ -1835,10 +1889,21 @@ impl ShaleApp {
         } else if is(KeyAction::NextTab) {
             self.step_tab(1);
         }
+        if is(KeyAction::SplitRight) {
+            self.split_right();
+        } else if is(KeyAction::NextPane) {
+            self.step_pane(1);
+        } else if is(KeyAction::PrevPane) {
+            self.step_pane(-1);
+        } else if is(KeyAction::ClosePane) {
+            self.close_pane(self.panes.focused);
+        }
         // the alternate view from every view, also mail and drawings (KEY-011)
         if is(KeyAction::AlternateView) && self.modal.is_none() {
             self.swap_alternate();
         }
+        // the keys of the open link preview come before everything the editor reads (EDIT-035)
+        self.link_preview_keys(ui);
         // Space sequences of vim-style normal mode (EDIT-015); a half typed one is forgotten
         // when the keys are not read any more
         if self.normal_keys_active(ui.ctx()) {
@@ -1846,6 +1911,7 @@ impl ShaleApp {
                 Some(KeyAction::NormalAlternate) => self.swap_alternate(),
                 Some(KeyAction::NormalFindFile) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::FileNames))),
                 Some(KeyAction::NormalSearchAll) => self.modal = Some(Modal::Picker(crate::picker::Picker::new(crate::picker::Source::Everything))),
+                Some(KeyAction::NormalLinkPreview) => self.link_preview_key(ui.ctx()),
                 _ => {}
             }
         } else {
@@ -2272,6 +2338,7 @@ impl ShaleApp {
             self.layout(ui);
         }
         self.social_tick(ui.ctx());
+        self.link_preview_ui(ui);
         self.modals(ui);
         self.handle_drops(ui);
         self.learn_tags_tick();

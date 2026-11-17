@@ -1,6 +1,7 @@
 ---
 features:
   - "Tabs"
+  - "Panes side by side"
 ---
 # Tabs
 
@@ -11,7 +12,16 @@ features:
 - Right-click a tab and choose **Pin tab** (or **Unpin tab**): pinned tabs move to the far
   left, show a small pin and keep their order. Pinned tabs can still be closed.
 - Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, after the last comes the first.
-- The order of all open tabs (notes, drawings and Feeds tabs) and which are pinned come back at
+- Right-click a tab and choose **Open in split right**, or press Ctrl+\, to open it in a new
+  **pane** to the right: the middle area can hold any number of panes side by side, each with its
+  own tab bar, tabs and back / forward history.
+- The pane with the focus has an accent line under its tab bar. Click into a pane, or press
+  Ctrl+Alt+→ / Ctrl+Alt+← to move the focus. Opening a note or link, the quick switcher, new
+  notes, closing tabs, previous / next tab, back / forward and the reading view all act on the
+  focused pane; renaming or moving a file updates the tabs of every pane.
+- Drag the border between two panes to change their widths (a pane is never narrower than 240
+  points). Closing the last tab of a pane, or Ctrl+Alt+W, closes the pane; the last pane stays.
+- The panes and the order of all open tabs (notes, drawings and Feeds tabs) and which are pinned, the open tab of each pane, the focused pane and the widths come back at
   the next start (they are kept in `.shale/state.json`, see [[Vault settings]]).
 
 Back to [[Start here]]; Feeds tabs are in [[Feeds]].

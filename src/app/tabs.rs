@@ -8,7 +8,7 @@ use eframe::egui;
 pub struct TabBar {
     pub tabs: Vec<Tab>,
     pub active: usize,
-    next_tab_id: u64,
+    pub(crate) next_tab_id: u64,
     /// where the tabs of the tab bar are, and their close marks (for tests)
     pub(crate) tab_rects: Vec<(egui::Rect, egui::Rect)>,
     /// what the tab bar showed last frame besides the tabs (for tests)

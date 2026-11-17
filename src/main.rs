@@ -39,6 +39,9 @@ mod keys;
 mod keys_ui;
 mod layout;
 mod link_assist;
+mod link_preview;
+#[cfg(test)]
+mod link_preview_ui_tests;
 mod lists;
 mod mail;
 mod markdown;
@@ -47,6 +50,8 @@ mod media;
 mod notes_vault_tests;
 mod opener;
 mod panels;
+#[cfg(test)]
+mod panes_ui_tests;
 mod pdf;
 mod picker;
 #[cfg(test)]

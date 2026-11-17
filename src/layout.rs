@@ -1,5 +1,6 @@
 //! Window layout: ribbon, sidebars, tab bar, the note/drawing/tasks/graph views and status bar.
 
+use crate::app::panes::{drag_weights, pane_widths, BORDER_W, MIN_PANE_W};
 use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, ShaleApp, TabMarks, View};
 use crate::markdown;
 use crate::reader;
@@ -354,11 +355,60 @@ impl ShaleApp {
             );
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG_PRIMARY)).show(ui, |ui| {
+            self.panes_ui(ui);
+        });
+        self.side_drag_tick(ui);
+    }
+
+    /// The middle area: one pane, or several side by side with a draggable border between
+    /// every two (NAV-032, NAV-034). Each pane is drawn with its tab bar in `self.tabbar`, so
+    /// the drawing code does not know about panes; a press inside a pane focuses it.
+    fn panes_ui(&mut self, ui: &mut Ui) {
+        let n = self.panes.len();
+        self.panes.rects.clear();
+        self.panes.borders.clear();
+        if n == 1 {
             self.tab_bar(ui);
             self.view_header(ui);
             self.content(ui);
-        });
-        self.side_drag_tick(ui);
+            return;
+        }
+        let area = ui.available_rect_before_wrap();
+        let total = area.width() - BORDER_W * (n - 1) as f32;
+        let widths = pane_widths(&self.panes.weights, total, MIN_PANE_W);
+        let pressed = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
+        let mut clicked = None;
+        let mut x = area.min.x;
+        for (i, w) in widths.iter().enumerate() {
+            let rect = Rect::from_min_size(Pos2::new(x, area.min.y), Vec2::new(*w, area.height()));
+            self.panes.rects.push(rect);
+            x += w + BORDER_W;
+            self.enter_pane(i);
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).id_salt(("pane", i)).layout(egui::Layout::top_down(egui::Align::Min)));
+            child.set_clip_rect(rect.intersect(ui.clip_rect()));
+            self.tab_bar(&mut child);
+            self.view_header(&mut child);
+            self.content(&mut child);
+            if pressed.is_some_and(|p| rect.contains(p)) {
+                clicked = Some(i);
+            }
+        }
+        self.enter_pane(self.panes.focused);
+        ui.allocate_rect(area, Sense::hover());
+        // the borders come last, so that they win where a pane reaches them
+        for i in 1..n {
+            let border = Rect::from_min_max(Pos2::new(self.panes.rects[i].min.x - BORDER_W, area.min.y), Pos2::new(self.panes.rects[i].min.x, area.max.y));
+            self.panes.borders.push(border);
+            let resp = ui.interact(border, ui.scope_id().with(("pane-border", i)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            let line = if resp.hovered() || resp.dragged() { theme::ACCENT } else { theme::BORDER };
+            ui.painter().rect_filled(Rect::from_center_size(border.center(), Vec2::new(1.0, border.height())), CornerRadius::ZERO, line);
+            if resp.dragged() {
+                self.panes.weights = drag_weights(&self.panes.weights, i, resp.drag_delta().x, total, MIN_PANE_W);
+            }
+        }
+        if let Some(i) = clicked {
+            self.focus_pane(i);
+        }
     }
 
     fn ribbon(&mut self, ui: &mut Ui) {
@@ -433,16 +483,19 @@ impl ShaleApp {
         let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
         ui.painter().rect_filled(bar, CornerRadius::ZERO, theme::BG_SECONDARY);
         ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, theme::BORDER));
+        // the focused one of several panes has an accent line under its tab bar (NAV-032)
+        let focus_line = (self.panes.len() > 1 && self.panes.drawn() == self.panes.focused).then(|| Rect::from_min_max(Pos2::new(bar.min.x, bar.max.y - 2.0), bar.max));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(6.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Max)));
         child.spacing_mut().item_spacing.x = 2.0;
         let n = self.tabbar.tabs.len().max(1);
         let tab_w = ((bar.width() - 50.0) / n as f32).clamp(60.0, 220.0);
         let mut close = None;
         self.tabbar.tab_rects.clear();
-        self.tabbar.tab_marks = TabMarks::default();
+        self.tabbar.tab_marks = TabMarks { focus_line, ..TabMarks::default() };
         let mut dragging = None;
         let mut dropped = None;
         let mut pin_toggle = None;
+        let mut split = None;
         for i in 0..self.tabbar.tabs.len() {
             let title = self.tab_title(&self.tabbar.tabs[i].view);
             let dirty = self.tabbar.tabs[i].view.path().map(|p| self.notes.get(p).map(|d| d.dirty).unwrap_or(false) || self.drawings.get(p).map(|d| d.dirty).unwrap_or(false)).unwrap_or(false);
@@ -500,6 +553,12 @@ impl ShaleApp {
                     pin_toggle = Some((i, !pinned));
                     ui.close();
                 }
+                let entry = ui.button("Open in split right");
+                self.tabbar.tab_marks.menu_split = Some(entry.rect);
+                if entry.clicked() {
+                    split = Some(i);
+                    ui.close();
+                }
             });
             resp.on_hover_text(title);
         }
@@ -524,8 +583,14 @@ impl ShaleApp {
         if icon_button(&mut child, Icon::Plus, 26.0, false, "New tab").clicked() {
             self.tabbar.new_tab(View::Empty);
         }
+        if let Some(line) = self.tabbar.tab_marks.focus_line {
+            ui.painter().rect_filled(line, CornerRadius::ZERO, theme::ACCENT);
+        }
         if let Some(i) = close {
             self.actions.push(Action::CloseTab(i));
+        }
+        if let Some(tab) = split {
+            self.actions.push(Action::SplitTabRight { pane: self.panes.drawn(), tab });
         }
     }
 

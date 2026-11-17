@@ -119,6 +119,20 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![A pinned tab and its context menu](userguide/z_media/screenshots/tab-pinned-menu.png)
 
+## Panes side by side
+
+- The middle area splits into any number of **panes** side by side, each with its own tab bar,
+  tabs, open tab and back / forward history. **Ctrl+\** (or **Open in split right** in the
+  right-click menu of a tab) opens the tab in a new pane to the right of the focused one.
+- One pane has the focus: click into it (tab bar or content) or press **Ctrl+Alt+→ / Ctrl+Alt+←**.
+  Its tab bar has an accent line. Opening notes and links, the quick switcher, new notes, closing
+  and switching tabs, back / forward and the reading view all work on the focused pane; renaming,
+  moving or deleting a file updates its tabs in every pane.
+- Drag the border between two panes to resize them (neither gets narrower than 240 points).
+  Closing the last tab of a pane (or **Ctrl+Alt+W**) removes the pane; the last pane stays.
+- The panes, their tabs, the open tab of each, the focused pane and the widths come back at the
+  next start. All the keys can be changed in Settings, Keybindings.
+
 ## Fonts and text sizes
 
 - Settings → Fonts sets the font and size of six areas: dialogs and menus, the raw markdown text of
@@ -184,7 +198,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   start typing, Esc stops; x deletes a character; `dd` deletes the line (onto the clipboard,
   `p` puts it back below); v and V select with the same motions, d cuts and y copies to the
   clipboard, p pastes; `gt` follows the link under the cursor like a click (a note link or a web
-  address). `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
+  address); **Shift+K** (definable, for example as Space Space) previews the link under the cursor in a floating frame like neovim's hover: a note as the reading view draws it (from the heading of the link), "Note does not exist yet" for a missing one, a picture, or for a web link the page's title, description and the start of its text, loaded in the background (https only, 30 s, 1.5 MB, kept per address while Shale runs). Moving the cursor, typing or Esc close it; Shift+K again moves the keyboard into it (j / k, ↓ / ↑, Ctrl+D / Ctrl+U, PageDown / PageUp scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc gives the keyboard back to the editor with the cursor where it was). `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
   from i to Esc is one step; the history is shared by all tabs of the note and kept in the vault
   for 30 days by default (a setting of the undo histories cache, see Data usage), so `u` works
   after a restart too). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
@@ -712,6 +726,9 @@ Text editing keys and vim keys are fixed.
 | Ctrl+Shift+F | Search all notes |
 | Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
 | Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
+| Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
+| Ctrl+Alt+→ / Ctrl+Alt+← | Focus the next / previous pane |
+| Ctrl+Alt+W | Close the pane with all its tabs |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
@@ -721,6 +738,7 @@ Text editing keys and vim keys are fixed.
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
 | Space f f | Vim-style editing, normal mode: find a file by name (↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens it in this tab, Esc closes) |
 | Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
+| Shift+K | Vim-style editing, normal mode: preview the link under the cursor (a note as in the reading view, a web page's title and text; press it again to move the keyboard into the preview: j / k or ↓ / ↑ scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc closes). Definable, e.g. as Space Space |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
 | Shift+arrows | In a table cell edited in the grid: select a block of cells (formatting buttons and Delete / Backspace work on all of them; typing ends it) |

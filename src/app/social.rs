@@ -127,7 +127,7 @@ impl ShaleApp {
 
     /// The feeds of the open Feeds tabs, in tab order (for the state file).
     pub fn open_feed_refs(&self) -> Vec<FeedRef> {
-        self.tabbar.tabs.iter().filter_map(|t| if let View::Social(Some(f)) = &t.view { Some(f.clone()) } else { None }).filter(|f| !f.feed.is_empty()).collect()
+        self.all_tabs().filter_map(|t| if let View::Social(Some(f)) = &t.view { Some(f.clone()) } else { None }).filter(|f| !f.feed.is_empty()).collect()
     }
 
     pub fn open_social_accounts(&mut self) {
