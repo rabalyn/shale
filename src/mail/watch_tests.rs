@@ -22,6 +22,8 @@ struct TestConnector {
     /// The first this many connections fail (a server that is not there yet).
     fail_first: AtomicUsize,
     attempts: AtomicUsize,
+    /// Connections that got through the sign-in (the server has seen all of its commands by then).
+    signed_in: AtomicUsize,
     /// Every connection is refused as a wrong password.
     refuse_sign_in: bool,
 }
@@ -37,13 +39,15 @@ impl Connector for TestConnector {
             return Err(ImapError::Connection("no route to the pretend host".into()));
         }
         let mut a = PlainAuth::new(&self.user, &self.password);
-        Client::connect_test(&self.settings, server_cert(), &mut a)
+        let client = Client::connect_test(&self.settings, server_cert(), &mut a)?;
+        self.signed_in.fetch_add(1, Ordering::SeqCst);
+        Ok(client)
     }
 }
 
 fn connector(server: &FakeServer) -> Arc<TestConnector> {
     let s = server.state();
-    Arc::new(TestConnector { settings: server.settings(), user: s.user.clone(), password: s.password.clone(), fail_first: AtomicUsize::new(0), attempts: AtomicUsize::new(0), refuse_sign_in: false })
+    Arc::new(TestConnector { settings: server.settings(), user: s.user.clone(), password: s.password.clone(), fail_first: AtomicUsize::new(0), attempts: AtomicUsize::new(0), signed_in: AtomicUsize::new(0), refuse_sign_in: false })
 }
 
 fn root(tag: &str) -> std::path::PathBuf {
@@ -336,10 +340,12 @@ fn a_quick_check_never_runs_beside_a_full_sync_of_the_same_account_and_catches_u
     let guard = SyncGuard::try_enter(&store, "acct1").expect("nobody else is syncing");
     assert!(SyncGuard::try_enter(&store, "acct1").is_none(), "two at once for one account");
     assert!(SyncGuard::try_enter(&store, "another").is_some(), "other accounts are independent");
-    let before = server.state().connections;
-    let mut rig = Rig::new(&store, connector(&server));
+    let conn = connector(&server);
+    let mut rig = Rig::new(&store, conn.clone());
     rig.watch(&["INBOX"]);
-    assert!(wait_for(10, || server.state().connections > before));
+    // count from the end of the watcher's sign-in: its TLS handshake and LOGIN can come late under
+    // load, and the server counts a connection when it accepts it (raba/shale#260)
+    assert!(wait_for(10, || conn.signed_in.load(Ordering::SeqCst) > 0));
     std::thread::sleep(Duration::from_millis(300));
     let sent = server.state().commands.len();
     server.state().set_flags("INBOX", 2, &[]);
