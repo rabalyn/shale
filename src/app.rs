@@ -347,6 +347,8 @@ pub struct ShaleApp {
     pub media: crate::media::MediaPlayer,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
+    /// the LaTeX page of the settings: the TeX found, the managed TeX Live and its jobs (TEX-001)
+    pub tex: crate::pdf::tex::settings_ui::TexState,
     /// where the user guide comes from and where its copy goes (DEV-020)
     pub guide: crate::userguide::Places,
     /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
@@ -362,6 +364,8 @@ pub struct ShaleApp {
     pub welcome_path: String,
     /// screenshot mode: where the picture goes and whether it was saved
     shot: screenshot::ScreenshotRun,
+    /// the `cursor_blink` setting that the visuals of egui follow (true at the start; screenshots start steady)
+    blink_applied: bool,
     /// the frames drawn so far (paces screenshots and scripted input)
     frames: u32,
     /// the last failure to save the global settings (shown once)
@@ -557,6 +561,7 @@ impl ShaleApp {
             welcome_path: default_welcome.to_string_lossy().into_owned(),
             shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
+            blink_applied: true,
             cfg_error: None,
             sf: crate::settings_file::SettingsFile::new(),
             fonts: crate::fonts::FontState::new(),
@@ -564,6 +569,7 @@ impl ShaleApp {
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             link_preview: Default::default(),
             usage: crate::data_usage::DataUsage::new(places),
+            tex: crate::pdf::tex::settings_ui::TexState::new(persist, &tag),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
         };
@@ -1624,7 +1630,7 @@ impl ShaleApp {
     }
 
     /// After a button or key that only changes what the window shows: the editor of the open note has the
-    /// keyboard again, with the cursor and selection where they were (EDIT-039). Nothing in the reading
+    /// keyboard again, with the cursor and selection where they were (EDIT-042). Nothing in the reading
     /// view or another view, which have no editor to give it to.
     pub(crate) fn focus_editor_if_note(&mut self) {
         if self.tabbar.tabs.get(self.tabbar.active).is_some_and(|t| matches!(t.view, View::Note(_)) && !t.reading) {
@@ -1874,6 +1880,7 @@ impl ShaleApp {
                 self.close_pane(self.panes.focused);
             }
             self.remember_open_files();
+            self.keyboard_after_close();
         }
     }
 
@@ -2468,6 +2475,12 @@ impl ShaleApp {
         self.drag.calendar_areas.clear();
         self.drag.tree_targets.clear();
         self.screenshot_tick(ui);
+        if self.blink_applied != self.cfg.cursor_blink {
+            self.blink_applied = self.cfg.cursor_blink;
+            let blink = self.cfg.cursor_blink && !self.shot.active();
+            ui.ctx().all_styles_mut(|s| s.visuals.text_cursor.blink = blink);
+        }
+        self.keyboard_guard(ui.ctx());
         self.shortcuts(ui);
         self.autosave();
         self.settings_file_tick(ui.ctx());
@@ -2487,6 +2500,7 @@ impl ShaleApp {
         }
         let ctx = ui.ctx().clone();
         self.media_tick(&ctx);
+        self.tex.poll(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
         self.mail_tick(&ctx);

@@ -9,6 +9,11 @@ impl ShaleApp {
     pub(super) fn editor_tab(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
         changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing: notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back").changed();
+        changed |= cursor_combo(ui, "Cursor while typing", "cursor-shape", &mut self.cfg.cursor_shape);
+        ui.add_enabled_ui(self.cfg.vim_mode, |ui| {
+            changed |= cursor_combo(ui, "Cursor in normal mode (Vim-style editing)", "normal-cursor-shape", &mut self.cfg.normal_cursor_shape);
+        });
+        changed |= ui.checkbox(&mut self.cfg.cursor_blink, "Blinking cursor").changed();
         changed |= ui.checkbox(&mut self.cfg.line_numbers, "Show line numbers in the editor").changed();
         changed |= ui
             .checkbox(&mut self.cfg.numbered_headings, "Number headings")
@@ -61,4 +66,18 @@ impl ShaleApp {
         ui.label(muted("The colours of the toolbar's palettes. Colours are saved in the note as <span style=\"color: #RRGGBB;\"> and <mark style=\"background: #RRGGBB;\">.").size(12.0));
         changed
     }
+}
+
+/// A choice of cursor shape (EDIT-039, EDIT-040).
+fn cursor_combo(ui: &mut Ui, label: &str, id: &str, shape: &mut crate::cursor_style::CursorShape) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label(label);
+        egui::ComboBox::from_id_salt(id).selected_text(shape.label()).show_ui(ui, |ui| {
+            for s in crate::cursor_style::CursorShape::ALL {
+                changed |= ui.selectable_value(shape, s, s.label()).changed();
+            }
+        });
+    });
+    changed
 }

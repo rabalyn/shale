@@ -49,3 +49,43 @@ pages, rendered in the background). PDFs dropped on the window go through [[Impo
 [[Notes and links]] for embeds.
 
 #userguide #pdf
+
+## LaTeX export: the TeX it needs
+
+A note can also be exported through LaTeX templates (the first ones are the TU Darmstadt classes
+`tuda-ci`; they are imported into your vault, and the export dialog that uses them comes with a
+later version of Shale). That needs **LuaLaTeX** and **biber**. **Settings → LaTeX** sets up
+the TeX and checks it:
+
+![[settings-latex.png]]
+
+- **Which TeX is used.** Shale looks for a `lualatex` on your computer (in `PATH`): it is accepted
+  when its LaTeX kernel is from 2022-06-01 or newer (the templates need that) and `biber` is next
+  to it. Shale also looks for the TeX Live it installed itself (below). The page says which one is
+  used and why the other one is not, for example "the TeX of this computer misses roboto,
+  xcharter; use the managed one". **Check again** looks again, for example after you installed a
+  TeX Live; looking happens in the background and never stops the window.
+- **TeX to use** (`tex.engine`, see [[Settings reference]]): *Automatic* takes the TeX Live that
+  Shale installed if there is one, else the one of your computer if it is complete;
+  the other two choices force one of them.
+- **Test** compiles a small document with the fonts the templates use and a bibliography, and
+  shows the result, or, when it fails, the readable problems ("package x is missing", `file:line`
+  and the message of an error) and the end of the log. The first LuaLaTeX run builds a font cache
+  and takes longer; the page says so.
+- **Install TeX Live…** installs a TeX Live of Shale's own, with only the packages the export
+  needs. Before anything is downloaded, the page tells you the sizes (**about 100 MB to download and
+  330 MB on disk**), where it comes from and the folder it goes to
+  (`<data folder>/shale/texlive`, on Linux `~/.local/share/shale/texlive`), and only
+  **Download and install** starts it; **Not now** changes nothing. A bar shows the progress with the
+  package being installed, and **Cancel install** stops it and removes what was downloaded so far.
+  The folder is built under another name and renamed when it is complete, so a half-finished install is never
+  used. It takes a few minutes. On Linux and macOS the installer needs `perl`; if there is none, the
+  page says "install perl first" (for example `sudo apt install perl`) before downloading anything.
+- **Update** brings Shale's TeX Live and its packages up to date (`tlmgr update --self --all`).
+  **Remove…** asks first, naming the folder and its size, and deletes that folder and nothing else.
+- **Download address** (`tex.repository`) is the TeX Live repository the install and update use;
+  the default is CTAN's mirror redirector. Only `https://` (and `http://`) addresses are accepted.
+
+Shale runs the programs without a shell, in a temporary folder that is removed afterwards, with
+each run limited to two minutes; a document cannot start programs (`\write18` is off) and cannot
+write outside its folder.

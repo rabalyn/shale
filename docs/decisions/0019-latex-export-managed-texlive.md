@@ -1,6 +1,6 @@
 # ADR-0019: PDF export through LaTeX templates, with a managed TeX Live
 
-- **Status**: Accepted (owner decision, 2026-11-17)
+- **Status**: Accepted, amended by 0020 (owner decision, 2026-11-17)
 - **Date**: 2026-11-17
 - **Specs**: TEX-001…TEX-022 ([`docs/spec/tex-export.md`](../spec/tex-export.md)), PDF-001 (the built-in export stays the default)
 - **Issues**: #277 (umbrella), #278 (this decision and the test stack), #279 (engine), #280 (template sets), #281 (writer), #282 (dialog, setup, user guide)

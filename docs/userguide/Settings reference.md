@@ -1,6 +1,6 @@
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
-button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**, and the button
+button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, LaTeX, Help) and **Keybindings**, and the button
 **Open settings file** at the top right (see below). The tab list is as wide as its longest name at any font size; drag its border to change the width, double-click the border to make it automatic again.
 
 Two files hold settings:
@@ -92,6 +92,9 @@ size of the two editor areas when you updated.
 | `preview_raw_lines` | 0 (range 0 to 20) | Editor, "Raw lines around the cursor" |
 | `table_cell_edit` | on | Editor, "Edit table cells in the grid"; a single table is switched by the button above the top right corner of its grid |
 | `vim_mode` | off | Editor, "Vim-style editing" |
+| `cursor_shape` | `bar` (`bar`, `bar_after`, `block` or `underline`; another word is `bar`) | Editor, "Cursor while typing": also vim's insert and visual mode |
+| `normal_cursor_shape` | `block` (the same four words) | Editor, "Cursor in normal mode"; used only with Vim-style editing |
+| `cursor_blink` | on | Editor, "Blinking cursor"; off keeps the cursor steady |
 | `keybindings` | empty (the defaults of [[Keyboard shortcuts]]) | Settings → Keybindings; only the actions you changed are stored |
 
 ### Window and vault
@@ -163,6 +166,16 @@ system keyring, never in this file):
 | `social_last` | none; the account and feed shown last | set by Shale |
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
 | `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
+
+### LaTeX ([[PDF]])
+
+Settings → LaTeX is the table `[tex]` in the settings file.
+
+| Key | Default | Where |
+|---|---|---|
+| `tex` | the group of the two keys below | Settings → LaTeX |
+| `tex.engine` | `Auto` (the TeX Live that Shale installs when it is there, else the `lualatex` of your computer when it is new enough and has all the packages); `System` (the `lualatex` of your computer); `Managed` (the TeX Live that Shale installs) | Settings → LaTeX, "TeX to use" |
+| `tex.repository` | `https://mirror.ctan.org/systems/texlive/tlnet` (the TeX Live repository the install and the update download from) | Settings → LaTeX, "Download address" |
 
 ### Data and troubleshooting ([[Data usage and caches]])
 

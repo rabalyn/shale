@@ -27,11 +27,15 @@ pub struct Panes {
     /// where each pane was drawn last frame, and the borders between them (for tests)
     pub(crate) rects: Vec<Rect>,
     pub(crate) borders: Vec<Rect>,
+    /// did a widget have the keyboard at the start of the last frame (the keyboard guard, NAV-037)
+    had_keyboard: bool,
+    /// was the pointer pressed or held at the start of the last frame (NAV-037)
+    pressed_last: bool,
 }
 
 impl Panes {
     pub fn new() -> Self {
-        Panes { bars: vec![TabBar::new()], cur: 0, focused: 0, weights: vec![1.0], rects: vec![], borders: vec![] }
+        Panes { bars: vec![TabBar::new()], cur: 0, focused: 0, weights: vec![1.0], rects: vec![], borders: vec![], had_keyboard: false, pressed_last: false }
     }
 
     pub fn len(&self) -> usize {
@@ -224,6 +228,45 @@ impl ShaleApp {
             }
         }
         self.remember_open_files();
+        self.keyboard_after_close();
+    }
+
+    /// After a tab or pane was closed the keyboard goes into the editor of the open tab of the
+    /// focused pane, so it is not left nowhere (NAV-037). Closing is done from the middle area;
+    /// when the sidebar is being browsed or the search box has the keyboard, it stays there.
+    pub(crate) fn keyboard_after_close(&mut self) {
+        if self.tree.sel.is_none() && self.search.sel.is_none() && !self.search.focus {
+            self.focus_editor();
+        }
+    }
+
+    /// The guard of NAV-037, called at the start of every frame: when a widget had the keyboard
+    /// at the start of the last frame, none has it now (its tab, pane, popup or dialog is gone),
+    /// the window has the focus, nothing was pressed with the pointer this frame (a click on
+    /// empty space is the user's own choice), no dialog or popup is open, the sidebar is not browsed, the
+    /// search box does not want the keyboard and the open tab is not the mail view (it has its
+    /// own panes keyboard) and has no table cell being edited, the keyboard goes into the editor of the focused pane's open tab.
+    pub(crate) fn keyboard_guard(&mut self, ctx: &eframe::egui::Context) {
+        let has = ctx.memory(|m| m.focused()).is_some();
+        let lost = self.panes.had_keyboard && !has;
+        self.panes.had_keyboard = has;
+        // a press drops the focus while the frame runs, so the loss shows in the next frame, when
+        // the press is over: that frame counts as pressed too
+        let pressed = ctx.input(|i| i.pointer.any_pressed() || i.pointer.any_down());
+        let pressed_before = std::mem::replace(&mut self.panes.pressed_last, pressed);
+        if !lost || self.modal.is_some() || self.tree.sel.is_some() || self.search.sel.is_some() || self.search.focus {
+            return;
+        }
+        if pressed || pressed_before || !ctx.input(|i| i.focused) || eframe::egui::Popup::is_any_open(ctx) {
+            return;
+        }
+        match self.current_tab() {
+            // the mail view has its own panes keyboard, and a table grid keeps the keyboard
+            // while a cell is edited or a block of cells is selected
+            Some(t) if matches!(t.view, View::Mail) || t.editor.grid_has_keyboard() => return,
+            _ => {}
+        }
+        self.focus_pane_keyboard(self.panes.focused);
     }
 
     /// The panes as they are saved (NAV-026).

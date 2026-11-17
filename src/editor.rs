@@ -609,6 +609,10 @@ pub struct NoteEditor {
     vim_follow: bool,
     /// where vim's block cursor was drawn this frame (normal mode with the keyboard): the link preview hangs below it (EDIT-033)
     pub vim_cursor_rect: Option<Rect>,
+    /// the shapes and the blinking of the text cursor (EDIT-039…EDIT-041)
+    pub cursor_style: crate::cursor_style::CursorStyle,
+    /// where the cursor was drawn last frame (char, normal mode) and when it moved there (seconds)
+    cursor_seen: Option<((usize, bool), f64)>,
     /// The formatting toolbar above the text (EDIT-026)
     bar: crate::format_bar::FormatBar,
     /// A toolbar command to do to the text at the start of the next frame of the editor (EDIT-027)
@@ -666,6 +670,8 @@ impl NoteEditor {
             focus_before_press: false,
             vim_follow: false,
             vim_cursor_rect: None,
+            cursor_style: crate::cursor_style::CursorStyle::default(),
+            cursor_seen: None,
             bar: Default::default(),
             format_request: None,
             last_selection: None,
@@ -706,7 +712,7 @@ impl NoteEditor {
         }
     }
 
-    /// The keyboard goes back to a text box that has none (EDIT-039): it dropped its selection while it had
+    /// The keyboard goes back to a text box that has none (EDIT-042): it dropped its selection while it had
     /// none, so the one it had last is put back (vim-lite keeps its own cursor).
     fn restore_selection(&self, ctx: &egui::Context, text: &str) {
         if self.vim_enabled || self.keep_selection.is_some() || ctx.memory(|m| m.has_focus(self.id)) {
@@ -780,6 +786,12 @@ impl NoteEditor {
     #[cfg(test)]
     pub(crate) fn cell_box_id(&self) -> egui::Id {
         crate::table_grid::TableGrid::cell_id(self.id)
+    }
+
+    /// Is a cell of a table grid being edited, or a block of cells selected? The grid then has
+    /// the keyboard even when no widget has it (NAV-037).
+    pub fn grid_has_keyboard(&self) -> bool {
+        self.grid.cell.is_some()
     }
 
     /// Is the `[!` file picker popup on screen?
@@ -1527,6 +1539,8 @@ impl NoteEditor {
             .desired_rows(20)
             .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
             .layouter(&mut layouter);
+        // egui's pipe is not drawn: the one cursor is painted below, in the chosen shape (EDIT-039)
+        let pipe = std::mem::replace(&mut ui.visuals_mut().text_cursor.stroke, Stroke::NONE);
         let output = if gutter > 0.0 {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -1537,6 +1551,7 @@ impl NoteEditor {
         } else {
             edit.show(ui)
         };
+        ui.visuals_mut().text_cursor.stroke = pipe;
         let resp = &output.response.response;
         if resp.changed() {
             changed = true;
@@ -1671,16 +1686,35 @@ impl NoteEditor {
                 ui.ctx().request_repaint();
             }
         }
-        // normal mode: a block on the character under the cursor
+        // the one cursor, in the shape of the mode (EDIT-039, EDIT-040), blinking (EDIT-041)
         self.vim_cursor_rect = None;
-        if self.vim_enabled && resp.has_focus() && self.vim.mode == crate::vim::Mode::Normal {
-            let c = self.vim.cursor;
+        let normal = self.vim_enabled && self.vim.mode == crate::vim::Mode::Normal;
+        let at = if normal { Some(self.vim.cursor) } else { output.cursor_range.map(|r| r.primary.index.0) };
+        if let Some(c) = at.filter(|_| resp.has_focus()) {
             let here = output.galley.pos_from_cursor(CCursor::new(c));
             let next = output.galley.pos_from_cursor(CCursor::new(c + 1));
             let w = if (next.min.y - here.min.y).abs() < 1.0 && next.min.x > here.min.x { next.min.x - here.min.x } else { base_size * 0.55 };
-            let block = Rect::from_min_size(output.galley_pos + here.min.to_vec2(), Vec2::new(w, here.height()));
-            ui.painter().rect_filled(block, 1.0, theme::ACCENT.gamma_multiply(0.45));
-            self.vim_cursor_rect = Some(block);
+            let ch = Rect::from_min_size(output.galley_pos + here.min.to_vec2(), Vec2::new(w, here.height()));
+            let now = ui.input(|i| i.time);
+            let moved = match self.cursor_seen {
+                Some((seen, t)) if seen == (c, normal) && !resp.changed() => t,
+                _ => now,
+            };
+            self.cursor_seen = Some(((c, normal), moved));
+            let cur = ui.visuals().text_cursor.clone();
+            let (shown, next_toggle) = crate::cursor_style::blink_phase(self.cursor_style.blink && cur.blink, now - moved, cur.on_duration, cur.off_duration);
+            if shown {
+                let shape = if normal { self.cursor_style.normal_shape } else { self.cursor_style.shape };
+                shape.paint(ui.painter(), ch);
+            }
+            if let Some(t) = next_toggle {
+                ui.ctx().request_repaint_after_secs(t as f32);
+            }
+            if normal {
+                self.vim_cursor_rect = Some(ch);
+            }
+        } else {
+            self.cursor_seen = None;
         }
         if let Some(c) = self.pending_cursor.take().or(self.vim_scroll.take()) {
             let r = output.galley.pos_from_cursor(CCursor::new(c));

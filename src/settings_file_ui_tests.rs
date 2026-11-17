@@ -331,3 +331,25 @@ fn cfg_015_unsaved_settings_text_goes_to_the_recovery_folder_at_exit() {
     assert!(w.disk().contains("toolbar_size = 21"), "the other program's file stays");
     assert_eq!(std::fs::read_to_string(rec.join(&day).join("settings/config.toml")).unwrap(), mine);
 }
+
+// spec: EDIT-039, EDIT-040, EDIT-041
+#[test]
+fn edit_039_the_cursor_settings_are_in_the_file_and_unknown_words_are_the_default() {
+    use crate::cursor_style::CursorShape;
+    let mut w = W::new("cursor");
+    w.app.open_settings_file();
+    assert_eq!((w.app.cfg.cursor_shape, w.app.cfg.normal_cursor_shape, w.app.cfg.cursor_blink), (CursorShape::Bar, CursorShape::Block, true));
+    assert!(w.app.sf.text.contains("cursor_shape = \"bar\"") && w.app.sf.text.contains("normal_cursor_shape = \"block\"") && w.app.sf.text.contains("cursor_blink = true"), "{}", w.app.sf.text);
+    // a change in the tab is used at once and round-trips
+    w.app.sf.text = w.app.sf.text.replace("cursor_shape = \"bar\"", "cursor_shape = \"underline\"").replace("normal_cursor_shape = \"block\"", "normal_cursor_shape = \"bar_after\"").replace("cursor_blink = true", "cursor_blink = false");
+    w.app.sf.dirty = true;
+    assert!(w.app.save_settings_file(true));
+    assert_eq!((w.app.cfg.cursor_shape, w.app.cfg.normal_cursor_shape, w.app.cfg.cursor_blink), (CursorShape::Underline, CursorShape::BarAfter, false));
+    assert!(w.disk().contains("cursor_shape = \"underline\"") && w.disk().contains("normal_cursor_shape = \"bar_after\""));
+    // an unknown word is the default of that setting, and the rest of the file is still read
+    w.app.sf.text =
+        w.app.sf.text.replace("cursor_shape = \"underline\"", "cursor_shape = \"squiggle\"").replace("normal_cursor_shape = \"bar_after\"", "normal_cursor_shape = \"squiggle\"").replace("toolbar_size = 110", "toolbar_size = 19");
+    w.app.sf.dirty = true;
+    assert!(w.app.save_settings_file(true));
+    assert_eq!((w.app.cfg.cursor_shape, w.app.cfg.normal_cursor_shape, w.app.cfg.toolbar_size), (CursorShape::Bar, CursorShape::Block, 19));
+}

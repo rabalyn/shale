@@ -677,7 +677,7 @@ fn a_plain_arrow_key_esc_and_a_click_end_the_block() {
     assert_eq!(fx.text(), BLOCK);
 }
 
-// The Alt keys of the buttons of a note (KEY-014 … KEY-016, EDIT-039)
+// The Alt keys of the buttons of a note (KEY-014 … KEY-016, EDIT-042)
 
 use eframe::egui::{Key, Modifiers, Pos2};
 
@@ -751,7 +751,7 @@ fn alt_v_and_alt_p_change_the_view_and_the_toolbar_keys_do_nothing_in_the_readin
     assert!(!egui::Popup::is_any_open(fx.hl.ctx()), "no menu opened");
     fx.alt_key(Key::V, "v");
     assert!(!fx.reading(), "Alt+V again: back to editing");
-    assert!(fx.has_focus() && fx.selected() == "two", "EDIT-039: the keyboard is back, the selection is where it was");
+    assert!(fx.has_focus() && fx.selected() == "two", "EDIT-042: the keyboard is back, the selection is where it was");
     // Alt+P switches the preview
     fx.alt_key(Key::P, "p");
     assert_eq!(fx.app.cfg.live_preview, !preview);
@@ -794,7 +794,7 @@ fn alt_1_does_what_a_click_on_the_first_ribbon_item_does_and_alt_comma_toggles_t
     fx.alt_key(Key::Num1, "1");
     assert!(fx.app.side.left == crate::app::LeftPanel::Files && fx.app.cfg.show_left, "the first item: Files");
     assert_eq!(fx.text(), "one two three\n", "no 1 typed");
-    assert!(fx.has_focus() && fx.selected() == "two", "EDIT-039");
+    assert!(fx.has_focus() && fx.selected() == "two", "EDIT-042");
     fx.alt_key(Key::Comma, ",");
     assert!(!fx.app.cfg.show_left, "Alt+, hides the left sidebar");
     fx.alt_key(Key::Comma, ",");
@@ -873,7 +873,7 @@ fn a_greyed_out_button_of_a_cell_has_no_badge() {
     }
 }
 
-// spec: EDIT-039
+// spec: EDIT-042
 #[test]
 fn after_a_view_button_or_a_toolbar_button_the_editor_has_the_keyboard_and_the_selection_is_unchanged() {
     let mut fx = Fx::new("focus-back", "one two three\n");
