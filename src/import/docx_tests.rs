@@ -62,6 +62,31 @@ fn import_fixture(tag: &str, name: &str, keep: bool) -> Option<(Vault, Imported)
     Some((v, done))
 }
 
+/// The text with the rows of its pipe tables reduced to their cells: padding and the column
+/// alignment depend on the pandoc version (3.11 drops a right alignment that 3.14 keeps) and are
+/// not the filter's business, the cells are.
+fn loose_tables(text: &str) -> String {
+    text.lines()
+        .map(|l| {
+            if !l.starts_with('|') {
+                return l.to_string();
+            }
+            let cells: Vec<&str> = l.trim_matches('|').split('|').map(str::trim).collect();
+            let delimiter = cells.iter().all(|c| !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':'));
+            let cells: Vec<&str> = if delimiter { cells.iter().map(|_| "---").collect() } else { cells };
+            format!("| {} |", cells.join(" | "))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// spec: IMP-039
+#[test]
+fn tables_are_compared_by_their_cells_whatever_the_padding_and_alignment() {
+    assert_eq!(loose_tables("a\n| A  | B |\n|:---|--:|\n| 1  |  2 |\n"), "a\n| A | B |\n| --- | --- |\n| 1 | 2 |");
+    assert_eq!(loose_tables("| x |   |\n|---|---|"), "| x |  |\n| --- | --- |", "an empty cell stays a cell");
+}
+
 // spec: IMP-035, IMP-037, IMP-039
 #[test]
 fn a_word_file_with_text_becomes_a_note_with_the_markdown_of_the_filter() {
@@ -80,7 +105,7 @@ A [web link](https://example.com), a link to the heading and a footnote.[^1]\n\n
 **Term**\n\nIts definition.\n\n\
 Math inline $E = mc^{2}$ and display:\n\n$$\\int_{0}^{1}x^{2}\\, dx$$\n\n\
 [^1]: The footnote text.\n";
-    assert_eq!(text, expected);
+    assert_eq!(loose_tables(&text), loose_tables(expected));
     assert!(!v.root.join("z_media").exists(), "nothing but the note: no pictures, the original is not kept");
 }
 
@@ -96,7 +121,7 @@ fn a_table_with_merged_cells_and_a_list_in_a_cell_is_a_pipe_table() {
 | Top                | Item list<br>• apple<br>• pear |\n\
 | Tall               | Plain                          |\n\
 |                    | Last                           |\n";
-    assert_eq!(text, expected, "no HTML table: the merged cell is followed by an empty one, the row span by one in the next row");
+    assert_eq!(loose_tables(&text), loose_tables(expected), "no HTML table: the merged cell is followed by an empty one, the row span by one in the next row");
 }
 
 // spec: IMP-035, IMP-037, IMP-038, IMP-039
