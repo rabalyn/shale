@@ -182,7 +182,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
   folder to folder, Space opens or closes a folder, Enter opens a file.
 - Every shortcut of this section can be changed in Settings → Keybindings; a key that another
-  action already uses is refused, and a binding can be a sequence of keys.
+  action already uses asks “Overwrite it?” (Yes takes it from that action and leaves it without a key, No
+  changes nothing; Enter answers No), and a binding can be a sequence of keys. While you record, a note
+  under the keys says which action they would clash with.
 - Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
@@ -757,7 +759,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 ## Keyboard
 
 The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
-(everywhere, file list, search results, mail view, note view, vim normal mode; double bindings are refused).
+(everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
 
 | Keys | Action |
