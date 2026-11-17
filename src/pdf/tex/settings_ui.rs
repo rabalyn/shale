@@ -1,6 +1,7 @@
 //! Settings → LaTeX (TEX-001 to TEX-003): which TeX is used, the managed TeX Live (install after
-//! consent, update, remove), and a test compile. The state is one small struct of the window;
-//! every slow thing (finding a TeX, the install, the test) is a background job.
+//! consent, update, remove), a test compile, and the template sets of the vault (`sets_ui`). The
+//! state is one small struct of the window; every slow thing (finding a TeX, the install, the
+//! test, an import) is a background job.
 
 use super::compile::compile_test_document;
 use super::engine::{self, Detection, Engine, Kind, TexChoice, TexConfig};
@@ -20,11 +21,14 @@ pub struct Notice {
     pub ok: bool,
     /// The end of a log, shown on request.
     pub details: Option<String>,
+    /// A PDF to open when the job is taken by the window (file name, bytes): the opener runs on
+    /// the window's thread, not in the job (the test page of a template set, TEX-024).
+    pub open: Option<(String, Vec<u8>)>,
 }
 
 impl Notice {
-    fn new(text: impl Into<String>, ok: bool) -> Notice {
-        Notice { text: text.into(), ok, details: None }
+    pub(super) fn new(text: impl Into<String>, ok: bool) -> Notice {
+        Notice { text: text.into(), ok, details: None, open: None }
     }
 }
 
@@ -35,6 +39,10 @@ pub enum TaskKind {
     Update,
     Remove,
     Test,
+    /// Importing or updating a template set (TEX-006).
+    Import,
+    /// Compiling the test page of a template set (TEX-024).
+    TestPage,
 }
 
 /// A running install, update, removal or test.
@@ -60,6 +68,8 @@ pub struct TexState {
     pub confirm_remove: bool,
     /// What the last job said.
     pub notice: Option<Notice>,
+    /// The template sets of the open vault.
+    pub sets: super::sets_ui::SetsState,
 }
 
 impl TexState {
@@ -72,7 +82,7 @@ impl TexState {
             static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             (Some(std::env::temp_dir().join(format!("shale-texdata-{tag}-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)))), None)
         };
-        TexState { data, path_var, detection: None, detecting: None, task: None, consent: false, confirm_remove: false, notice: None }
+        TexState { data, path_var, detection: None, detecting: None, task: None, consent: false, confirm_remove: false, notice: None, sets: Default::default() }
     }
 
     /// Take what the jobs have finished; call it every frame.
@@ -88,10 +98,25 @@ impl TexState {
         }
         if let Some(t) = &self.task {
             if let Ok(r) = t.rx.try_recv() {
+                let kind = t.kind;
                 self.task = None;
-                self.notice = Some(r.unwrap_or_else(|e| Notice::new(e, false)));
-                // the install, the update and the removal change what is there
-                self.detection = None;
+                let mut notice = r.unwrap_or_else(|e| Notice::new(e, false));
+                if let Some((name, pdf)) = notice.open.take() {
+                    match crate::opener::open_temp_copy(&name, &pdf) {
+                        Ok(()) => notice.text.push_str(" It was opened in your PDF viewer."),
+                        Err(e) => {
+                            notice.ok = false;
+                            notice.text.push_str(&format!(" It could not be opened: {e}"));
+                        }
+                    }
+                }
+                self.notice = Some(notice);
+                if matches!(kind, TaskKind::Import | TaskKind::TestPage) {
+                    self.sets.job_ended(kind);
+                } else {
+                    // the install, the update and the removal change what is there
+                    self.detection = None;
+                }
             }
         }
         if self.task.is_some() || self.detecting.is_some() {
@@ -111,7 +136,7 @@ impl TexState {
     }
 
     /// Start a job of the page; its answer is a notice.
-    fn start(&mut self, ctx: &Context, kind: TaskKind, work: impl FnOnce(&Handle, &dyn Fn()) -> Notice + Send + 'static) {
+    pub(super) fn start(&mut self, ctx: &Context, kind: TaskKind, work: impl FnOnce(&Handle, &dyn Fn()) -> Notice + Send + 'static) {
         if self.task.is_some() {
             return;
         }
@@ -157,7 +182,7 @@ fn test_notice(engine: &Engine) -> Notice {
             ),
             true,
         ),
-        Err(e) => Notice { text: format!("The test document did not compile: {e}"), ok: false, details: Some(e.log_tail) },
+        Err(e) => Notice { details: Some(e.log_tail.clone()), ..Notice::new(format!("The test document did not compile: {e}"), false) },
     }
 }
 
@@ -233,6 +258,8 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     ui.label(egui::RichText::new("Shale's own TeX Live").color(theme::MUTED));
     managed_section(ui, st, cfg, &ctx);
 
+    super::sets_ui::show(ui, st, cfg);
+
     egui::CollapsingHeader::new("Download address").id_salt("tex-repository").show(ui, |ui| {
         ui.label(muted("The TeX Live repository the install and the update download from.").size(12.0));
         if ui.add(egui::TextEdit::singleline(&mut cfg.repository).desired_width(360.0)).changed() {
@@ -293,6 +320,8 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
                     ui.label("Compiling the test document…");
                 });
             }
+            // shown with the template sets
+            TaskKind::Import | TaskKind::TestPage => {}
         }
         return;
     }

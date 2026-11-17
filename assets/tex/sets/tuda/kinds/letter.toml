@@ -1,0 +1,47 @@
+# TU Darmstadt, letter (class tudaletter, KOMA-Script's scrlttr2). The recipient is the argument of
+# the letter environment; the fields with a komavar are set with \setkomavar{name}{value}
+# (mapping "letter"). The sender's address data can be put in an .lco file in tex/.
+name = "Letter"
+description = "Letters (class tudaletter)"
+mapping = "letter"
+class = "tudaletter"
+before_class = ["\\RequirePackage{pdfmanagement}", "\\SetKeys[document/metadata]{pdfstandard=a-2b,pdfversion=1.7,lang={lang}}"]
+options = ["{language}", "accentcolor={accent}", "premium=true"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
+logo = true
+
+[[fields]]
+key = "recipient"
+label = "Recipient (lines separated by \\\\)"
+required = true
+
+[[fields]]
+key = "subject"
+label = "Subject"
+komavar = "subject"
+required = true
+
+[[fields]]
+key = "sender"
+label = "Sender"
+komavar = "fromname"
+
+[[fields]]
+key = "sender_address"
+label = "Sender's address"
+komavar = "fromaddress"
+
+[[fields]]
+key = "date"
+label = "Date"
+komavar = "date"
+
+[[fields]]
+key = "opening"
+label = "Opening"
+default = "Dear Sir or Madam,"
+
+[[fields]]
+key = "closing"
+label = "Closing"
+default = "Kind regards"

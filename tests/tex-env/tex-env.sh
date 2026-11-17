@@ -8,11 +8,12 @@
 #            as /work. TEXINPUTS is /work/tex// and BIBINPUTS /work; SHALE_TEX_PRE is TeX code put
 #            before the file (the tuda-ci demos get graphicx' `demo` option this way)
 #   exec     run <cmd> inside the image with the absolute folder <dir> mounted at the same path and as
-#            the working directory; TEXINPUTS, BIBINPUTS, openout_any and shell_escape are
-#            passed on when set (Shale's compile tests put this in front of lualatex and biber)
+#            the working directory (the folder this script was started in, when that is inside <dir>);
+#            TEXINPUTS, BIBINPUTS, openout_any and shell_escape are passed on when set (Shale's compile tests put this in front of lualatex and biber)
 #   reset    remove the image and the cache (the next build starts again)
 # SHALE_TEX_ENV_ENGINE=docker selects Docker instead of Podman.
 set -eu
+caller=$(pwd)
 cd "$(dirname "$0")"
 root=$(pwd)
 
@@ -74,7 +75,8 @@ case "${1:-}" in
     [ $# -ge 4 ] && [ "$3" = "--" ] || { echo "usage: $0 exec <dir> -- <cmd>…" >&2; exit 2; }
     dir=$(cd "$2" && pwd)
     shift 3
-    "$ENGINE" run --rm -v "$dir:$dir:Z" -w "$dir" -e TEXINPUTS -e BIBINPUTS -e openout_any -e shell_escape "$IMAGE" "$@"
+    case "$caller/" in "$dir"/*) wd=$caller ;; *) wd=$dir ;; esac
+    "$ENGINE" run --rm -v "$dir:$dir:Z" -w "$wd" -e TEXINPUTS -e BIBINPUTS -e openout_any -e shell_escape "$IMAGE" "$@"
     ;;
   reset)
     "$ENGINE" rmi -f "$IMAGE" >/dev/null 2>&1 || true

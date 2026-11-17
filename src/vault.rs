@@ -253,6 +253,29 @@ pub fn trash_origin(trash_rel: &Path) -> Option<PathBuf> {
     (!rest.as_os_str().is_empty()).then(|| rest.to_path_buf())
 }
 
+/// [`Vault::trash`] for a vault folder that is not held as a `Vault` (a background job of the TeX
+/// template sets, TEX-006): the move into `.trash/<date>/`, without any index to bring up to date.
+pub fn move_to_trash(root: &Path, rel: &Path) -> io::Result<PathBuf> {
+    let checked = VaultPath::new(rel).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("“{}”: {e}", rel.display())))?;
+    if checked.as_path().as_os_str().is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "that is the vault itself"));
+    }
+    let day = Path::new(TRASH_DIR).join(crate::mail::store::today_string());
+    let is_dir = fs::symlink_metadata(root.join(rel)).map(|m| m.is_dir()).unwrap_or(false);
+    for n in 1..=1000 {
+        let dest = day.join(numbered(rel, n, is_dir));
+        if let Some(parent) = root.join(&dest).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        match fsutil::rename_noreplace(&root.join(rel), &root.join(&dest)) {
+            Ok(()) => return Ok(dest),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::other("there are too many files with that name in today's trash"))
+}
+
 /// A note with search hits: (note, [(line, byte offset of the match in the line, line text)]).
 pub type SearchHit = (PathBuf, Vec<(usize, usize, String)>);
 
@@ -1084,24 +1107,9 @@ impl Vault {
     /// deleting it for good (VAULT-017). Nothing there is replaced: a taken path gets ` (2)`,
     /// ` (3)` … before the extension. Returns where it went, relative to the vault.
     pub fn trash(&mut self, rel: &Path) -> io::Result<PathBuf> {
-        self.abs_checked(rel)?;
-        let day = Path::new(TRASH_DIR).join(crate::mail::store::today_string());
-        let is_dir = fs::symlink_metadata(self.abs(rel)).map(|m| m.is_dir()).unwrap_or(false);
-        for n in 1..=1000 {
-            let dest = day.join(numbered(rel, n, is_dir));
-            if let Some(parent) = self.abs(&dest).parent() {
-                fs::create_dir_all(parent)?;
-            }
-            match fsutil::rename_noreplace(&self.abs(rel), &self.abs(&dest)) {
-                Ok(()) => {
-                    self.rescan();
-                    return Ok(dest);
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(e) => return Err(e),
-            }
-        }
-        Err(io::Error::other("there are too many files with that name in today's trash"))
+        let dest = move_to_trash(&self.root, rel)?;
+        self.rescan();
+        Ok(dest)
     }
 
     /// Put an entry of the dated trash (`.trash/<date>/<path>`) back at its original path

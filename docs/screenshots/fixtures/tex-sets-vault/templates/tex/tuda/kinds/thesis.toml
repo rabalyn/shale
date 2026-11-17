@@ -1,0 +1,60 @@
+# TU Darmstadt, Bachelor's or Master's thesis (class tudapub with the option thesis). The writer
+# maps H1 to \title, H2 to \chapter, H3 to \section, H4 to \subsection (mapping "book").
+# type=bachelor can be master, diplom, ... (see the tuda-ci documentation).
+name = "Thesis"
+description = "Bachelor's and Master's theses (class tudapub, thesis)"
+mapping = "book"
+class = "tudapub"
+before_class = ["\\RequirePackage{pdfmanagement}", "\\SetKeys[document/metadata]{pdfstandard=a-2b,pdfversion=1.7,lang={lang}}"]
+options = ["{language}", "accentcolor={accent}", "ruledheaders=section", "class=report", "thesis={type=bachelor}", "fontsize=11pt", "parskip=half-", "custommargins=true", "marginpar=false"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
+logo = true
+
+[[fields]]
+key = "title"
+label = "Title"
+command = "title"
+required = true
+
+[[fields]]
+key = "subtitle"
+label = "Subtitle"
+command = "subtitle"
+
+[[fields]]
+key = "author"
+label = "Author"
+command = "author"
+required = true
+
+[[fields]]
+key = "reviewer"
+label = "Reviewers (separated by \\and)"
+command = "reviewer"
+
+[[fields]]
+key = "department"
+label = "Department (a short name such as ce, or the full name)"
+command = "department"
+
+[[fields]]
+key = "institute"
+label = "Institute"
+command = "institute"
+
+[[fields]]
+key = "group"
+label = "Group"
+command = "group"
+
+[[fields]]
+key = "submissiondate"
+label = "Submission date"
+command = "submissiondate"
+default = "\\today"
+
+[[fields]]
+key = "examdate"
+label = "Exam date"
+command = "examdate"
+default = "\\today"

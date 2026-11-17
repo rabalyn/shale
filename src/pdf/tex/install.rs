@@ -104,6 +104,14 @@ pub enum Stage {
     Update,
     /// The first LuaLaTeX run, which builds the font names database.
     Fonts,
+    /// A template import (TEX-006): downloading the archive.
+    Fetch,
+    /// Reading the archive or the folder.
+    Read,
+    /// Generating the class files with docstrip.
+    Generate,
+    /// Putting the set into the vault.
+    Place,
 }
 
 /// What an install or update has done, for the window.
@@ -129,6 +137,10 @@ impl Progress {
             Stage::Packages => (0.5, 0.44),
             Stage::Fonts => (0.94, 0.06),
             Stage::Update => (0.0, 1.0),
+            Stage::Fetch => (0.1, 0.0),
+            Stage::Read => (0.4, 0.0),
+            Stage::Generate => (0.6, 0.0),
+            Stage::Place => (0.9, 0.0),
         };
         from + share * within
     }
@@ -143,6 +155,10 @@ impl Progress {
             Stage::Packages => "Installing the packages",
             Stage::Update => "Updating",
             Stage::Fonts => "Building the font cache (the first LuaLaTeX run, this takes a moment)",
+            Stage::Fetch => "Downloading the templates",
+            Stage::Read => "Reading the templates",
+            Stage::Generate => "Generating the class files with docstrip",
+            Stage::Place => "Putting the set into the vault",
         };
         match (self.total, self.package.is_empty()) {
             (0, _) => step.to_string(),
@@ -172,7 +188,7 @@ pub fn parse_progress(line: &str) -> Option<(u32, u32, String)> {
 #[derive(Clone, Default)]
 pub struct Handle {
     progress: Arc<Mutex<Progress>>,
-    cancel: Arc<AtomicBool>,
+    pub(super) cancel: Arc<AtomicBool>,
 }
 
 impl Handle {
@@ -197,7 +213,7 @@ impl Handle {
         }
     }
 
-    fn stage(&self, stage: Stage) {
+    pub(super) fn stage(&self, stage: Stage) {
         self.set(|p| *p = Progress { stage, ..Progress::default() });
     }
 }
@@ -244,7 +260,7 @@ fn step(handle: &Handle, notify: &dyn Fn(), stage: Stage, what: &str, cmd: Comma
 
 /// Download a file with `curl` (the way the CalDAV client does its HTTP): https only, no
 /// `.curlrc`, redirects only to https, a size limit.
-fn download(handle: &Handle, url: &str, to: &Path) -> Result<(), String> {
+pub(super) fn download(handle: &Handle, url: &str, to: &Path) -> Result<(), String> {
     let protos = if url.starts_with("http://") { "=http,https" } else { "=https" };
     let mut c = Command::new("curl");
     c.args(["-q", "-sS", "-f", "-L", "--max-redirs", "5", "--proto", protos, "--proto-redir", "=https", "--connect-timeout", "20", "--max-filesize", "52428800", "-o"]).arg(to).arg(url);

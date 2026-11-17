@@ -89,3 +89,90 @@ the TeX and checks it:
 Shale runs the programs without a shell, in a temporary folder that is removed afterwards, with
 each run limited to two minutes; a document cannot start programs (`\write18` is off) and cannot
 write outside its folder.
+
+## LaTeX export: template sets
+
+The templates a LaTeX export is made with are not part of TeX Live and not part of Shale: they are
+**template sets in your vault**, in the folder `templates/tex/<set>/`. A vault therefore carries
+the exact class files its documents were written for; they are synced and backed up with your
+notes, and an update of TeX Live cannot change a document. TeX Live supplies only the engine and
+the generic packages. A set looks like this:
+
+```
+templates/tex/tuda/
+  set.toml            what the set is: name, version, where it came from and when
+  settings.toml       your choices: accent colour, language, department, logo (kept when you update)
+  tex/                the class and package files (tudapub.cls, tudabeamer.cls, ...)
+  kinds/pub.toml      one file per document kind (publication, thesis, slides, letter, ...)
+  logo/               the logo you supply (kept when you update)
+  README.md           a note for people browsing the vault
+```
+
+**Settings → LaTeX → Template sets** lists the sets of the open vault with their name, version,
+source, number of document kinds and the state of the logo, and has these buttons:
+
+- **Import TU Darmstadt templates** imports the corporate design of the TU Darmstadt
+  ([tuda-ci](https://github.com/tudace/tuda_latex_templates), 11 kinds: publication, report,
+  exercise sheet, thesis, doctoral thesis, slides, letter, poster, scientific poster, leaflet and
+  announcement). It downloads the version Shale was tested with (4.06, a fixed commit whose
+  checksum is checked: a different file is refused), makes the class files with docstrip using your
+  TeX, and puts the finished set into the vault in one step. A progress bar shows where it is, and
+  **Cancel import** stops it; a cancelled or failed import leaves the vault as it was.
+- **Newest TU Darmstadt templates from CTAN** does the same with whatever version CTAN has today. It
+  is not pinned and has no checksum, and the kinds were tested with 4.06 only; the page says so.
+- **Import from GitHub…** takes a repository address (`https://github.com/owner/repository`) and
+  optionally a branch, tag or commit. **Import from file or folder…** takes the path of a `.zip` or
+  `.tar.gz` file or of a folder. Shale does not know the document kinds of such a set: it imports the
+  files and says so; the kinds must be added by hand (see below). Archives are read by Shale itself
+  and anything that could write outside the set's folder (`..`, absolute paths, links) refuses the
+  whole archive.
+- **Update set** imports the set again from where it came from. The old folder of the set is
+  moved to the vault's `.trash` (so changes you made by hand to a class or a kind are not lost),
+  the new files are put in place, and your `settings.toml` and your logo are kept.
+- **Test page** compiles a small document of the set's publication kind (`pub`) with your TeX and
+  opens the PDF, or shows the readable errors ("package x is missing", `file:line` and the message)
+  and the end of the log.
+- **Remove set…** asks first and then moves the set to the vault's `.trash` (never a hard delete);
+  "Restore last deleted" in the file list puts it back.
+
+### The logo
+
+The logo of the university, `tuda_logo.pdf`, may not be redistributed, so Shale does not ship it:
+get it from the corporate design portal of the TU Darmstadt. **Choose logo…** takes the path of
+the PDF (or a PNG) and copies it into the set's `logo/` folder under the name the classes look for;
+you can also put `tuda_logo.pdf` there yourself. Until a logo is there, the set's status says
+**logo missing: exports are not CI-conformant** and every compile uses a grey placeholder bar, so
+slides, letters and posters still compile; the placeholder lives only in the temporary folder of the
+compile, never in your vault. Documents with the placeholder must not be used as official documents.
+
+### Your choices: `settings.toml`
+
+Each set has its own `settings.toml`, which a re-import keeps:
+
+| Key | Meaning |
+|---|---|
+| `accent` | the accent colour of the templates; for tuda-ci `0a` to `9d` (default `9c`) |
+| `language` | `en` or `de`: the language of the documents (class option and babel) |
+| `department` | used for the `department` field of a kind when a note does not give one |
+| `logo` | the logo file in `logo/`, set by **Choose logo…** |
+
+### Adding or changing a document kind: `kinds/<kind>.toml`
+
+A kind says which LaTeX class a note is written to and which properties of the note go where. Shale
+ships these files for tuda-ci and copies them into the vault; you can edit them, and for a set Shale
+does not know you write them yourself (the README of the set has an example):
+
+| Key | Meaning |
+|---|---|
+| `name`, `description` | what the export dialog shows |
+| `mapping` | how the note becomes the document: `article` (H1 title, H2 `\section`), `book` (H2 `\chapter`), `beamer` (H2 a frame), `letter`, `poster` |
+| `class` | the document class, a `<class>.cls` in `tex/` or in TeX Live |
+| `before_class` | lines of LaTeX before `\documentclass` (for tuda-ci the PDF/A set-up that some kinds need) |
+| `options` | the class options; `{accent}` and `{language}` are filled in from `settings.toml`, and an option whose `{accent}` is empty is left out |
+| `preamble` | lines of LaTeX after `\documentclass` (`{language}` and `{lang}` are filled in too) |
+| `logo` | `true` when the kind needs the set's logo |
+| `[[fields]]` | one table per value: `key` (the property of the note), `label`, `command` (the LaTeX command that gets it, `title` for `\title{…}`) or `komavar` (`\setkomavar{…}` of a letter), `required`, `default` (LaTeX code used when the note has none) |
+
+A kind that cannot be read is shown in red in the list of sets with the reason. The export dialog
+that lets you pick a set and a kind, and the conversion of the note itself, come with later versions of
+Shale; today the sets, their logo and the test page are there.

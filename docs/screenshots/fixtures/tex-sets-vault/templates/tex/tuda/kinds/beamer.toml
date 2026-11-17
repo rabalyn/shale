@@ -1,0 +1,41 @@
+# TU Darmstadt, slides (class tudabeamer). The writer maps H1 to the title slide and every H2 to
+# a frame (mapping "beamer").
+name = "Slides"
+description = "Presentation slides (class tudabeamer)"
+mapping = "beamer"
+class = "tudabeamer"
+options = ["{language}", "accentcolor={accent}"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
+logo = true
+
+[[fields]]
+key = "title"
+label = "Title"
+command = "title"
+required = true
+
+[[fields]]
+key = "subtitle"
+label = "Subtitle"
+command = "subtitle"
+
+[[fields]]
+key = "author"
+label = "Author"
+command = "author"
+required = true
+
+[[fields]]
+key = "department"
+label = "Department"
+command = "department"
+
+[[fields]]
+key = "institute"
+label = "Institute"
+command = "institute"
+
+[[fields]]
+key = "date"
+label = "Date"
+command = "date"

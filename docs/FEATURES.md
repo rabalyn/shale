@@ -118,6 +118,22 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![The LaTeX tab of Settings with the question before the install](userguide/z_media/screenshots/settings-latex.png)
 
+- **Template sets** (Settings → LaTeX) are the templates a LaTeX export is made with, kept in your vault
+  (`templates/tex/<set>/`: the class files, one small manifest per document kind, your settings and the
+  logo), so they are synced and backed up with your notes and a TeX Live update cannot change a document.
+  **Import TU Darmstadt templates** downloads the tested tuda-ci (checked by its checksum) and builds the
+  11 document kinds (publication, report, exercise sheet, thesis, doctoral thesis, slides, letter,
+  poster, scientific poster, leaflet, announcement); the newest version from CTAN, a GitHub repository, a
+  zip, a `.tar.gz` or a folder can be imported too (a set Shale has no kinds for is imported without
+  kinds, which are then added by hand). Importing runs as a job with progress and Cancel and never leaves
+  half a set; **Update set** keeps your settings and logo and moves the old files to the vault's trash;
+  **Test page** compiles a small document of the set and opens the PDF; **Remove set…** moves it to the
+  trash. The university's logo may not be redistributed: **Choose logo…** copies yours into the set, and
+  until then exports use a placeholder and the set says "logo missing: exports are not CI-conformant"
+  (TEX-005 to TEX-007, TEX-024 to TEX-027).
+
+  ![Template sets in Settings → LaTeX](userguide/z_media/screenshots/settings-latex-sets.png)
+
 - Every dialog is a window you can move by its title bar and resize from any edge or corner.
 
 ## Tabs

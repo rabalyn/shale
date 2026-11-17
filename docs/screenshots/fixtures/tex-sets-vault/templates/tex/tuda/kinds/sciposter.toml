@@ -1,0 +1,36 @@
+# TU Darmstadt, scientific poster (class tudasciposter, boxes of tcolorbox's poster library).
+# The writer puts every H2 into a posterboxenv of a tcbposter (mapping "poster").
+name = "Scientific poster"
+description = "Scientific posters with boxes (class tudasciposter)"
+mapping = "poster"
+class = "tudasciposter"
+options = ["{language}", "accentcolor={accent}"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
+logo = true
+
+[[fields]]
+key = "title"
+label = "Title"
+command = "title"
+required = true
+
+[[fields]]
+key = "subtitle"
+label = "Subtitle"
+command = "subtitle"
+
+[[fields]]
+key = "author"
+label = "Author"
+command = "author"
+required = true
+
+[[fields]]
+key = "institute"
+label = "Institute"
+command = "institute"
+
+[[fields]]
+key = "footer"
+label = "Footer text"
+command = "footer"

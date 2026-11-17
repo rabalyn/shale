@@ -96,7 +96,9 @@ checks() {
     else
       # the real install of TeX Live is heavy: only when the change touches it
       install_tests=$(sh .forgejo/scripts/env-tests.sh install-wanted "$base" HEAD)
-      step "real-server suites (podman)" env SHALE_ENV_TESTS_TEX_INSTALL="$install_tests" sh .forgejo/scripts/env-tests.sh run || return 1
+      # and so are the downloads of the template sets
+      import_tests=$(sh .forgejo/scripts/env-tests.sh import-wanted "$base" HEAD)
+      step "real-server suites (podman)" env SHALE_ENV_TESTS_TEX_INSTALL="$install_tests" SHALE_ENV_TESTS_TEX_IMPORT="$import_tests" sh .forgejo/scripts/env-tests.sh run || return 1
     fi
   fi
 }
