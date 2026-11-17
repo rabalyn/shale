@@ -92,6 +92,9 @@ size of the two editor areas when you updated.
 | `preview_raw_lines` | 0 (range 0 to 20) | Editor, "Raw lines around the cursor" |
 | `table_cell_edit` | on | Editor, "Edit table cells in the grid"; a single table is switched by the button above the top right corner of its grid |
 | `vim_mode` | off | Editor, "Vim-style editing" |
+| `cursor_shape` | `bar` (`bar`, `bar_after`, `block` or `underline`; another word is `bar`) | Editor, "Cursor while typing": also vim's insert and visual mode |
+| `normal_cursor_shape` | `block` (the same four words) | Editor, "Cursor in normal mode"; used only with Vim-style editing |
+| `cursor_blink` | on | Editor, "Blinking cursor"; off keeps the cursor steady |
 | `keybindings` | empty (the defaults of [[Keyboard shortcuts]]) | Settings → Keybindings; only the actions you changed are stored |
 
 ### Window and vault

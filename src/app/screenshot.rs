@@ -41,6 +41,11 @@ impl ScreenshotRun {
         Self { path, requested: false, done: Arc::new(AtomicBool::new(false)), rec: Arc::default(), asked: 0 }
     }
 
+    /// A screenshot or recording is being made (the text cursor then stays steady).
+    pub(super) fn active(&self) -> bool {
+        self.path.is_some()
+    }
+
     pub(super) fn recording(&self) -> bool {
         self.path.as_deref().is_some_and(recorder::is_clip)
     }

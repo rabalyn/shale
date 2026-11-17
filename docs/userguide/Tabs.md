@@ -23,6 +23,8 @@ features:
   keyboard lands in the editor of the pane's open note.
 - Drag the border between two panes to change their widths (a pane is never narrower than 240
   points). Closing the last tab of a pane, or Ctrl+Alt+W, closes the pane; the last pane stays.
+  After closing a tab or a pane the keyboard goes into the editor of the open note of the focused
+  pane, so no key is lost.
 - The panes and the order of all open tabs (notes, drawings and Feeds tabs) and which are pinned, the open tab of each pane, the focused pane and the widths come back at
   the next start (they are kept in `.shale/state.json`, see [[Vault settings]]).
 

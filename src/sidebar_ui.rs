@@ -134,7 +134,8 @@ impl ShaleApp {
     pub(crate) fn ribbon_items(&mut self, ui: &mut Ui) {
         self.side.ribbon_rect = Some(ui.max_rect().expand2(Vec2::new(6.0, 8.0)));
         let cur = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.view.clone());
-        for item in self.side.layout.ribbon.clone() {
+        let badges = crate::key_badges::Badges::of_frame(&self.keymap, ui);
+        for (slot, item) in self.side.layout.ribbon.clone().into_iter().enumerate() {
             let active = match item {
                 Item::Files => self.cfg.show_left && self.side.left == LeftPanel::Files,
                 Item::Search => self.cfg.show_left && self.side.left == LeftPanel::Search,
@@ -150,6 +151,9 @@ impl ShaleApp {
             };
             let resp = icon_button_sense(ui, item.icon(), 30.0, active, item.tip(), Sense::click_and_drag());
             self.side.ribbon_icons.push((item, resp.rect));
+            if let Some(&key) = crate::keys::RIBBON_SLOTS.get(slot) {
+                badges.paint(ui, resp.rect, key);
+            }
             if resp.drag_started() {
                 self.side.drag = Some(item);
             } else if resp.clicked() {

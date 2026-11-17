@@ -364,6 +364,8 @@ pub struct ShaleApp {
     pub welcome_path: String,
     /// screenshot mode: where the picture goes and whether it was saved
     shot: screenshot::ScreenshotRun,
+    /// the `cursor_blink` setting that the visuals of egui follow (true at the start; screenshots start steady)
+    blink_applied: bool,
     /// the frames drawn so far (paces screenshots and scripted input)
     frames: u32,
     /// the last failure to save the global settings (shown once)
@@ -559,6 +561,7 @@ impl ShaleApp {
             welcome_path: default_welcome.to_string_lossy().into_owned(),
             shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
+            blink_applied: true,
             cfg_error: None,
             sf: crate::settings_file::SettingsFile::new(),
             fonts: crate::fonts::FontState::new(),
@@ -1626,6 +1629,75 @@ impl ShaleApp {
         self.focus_editor();
     }
 
+    /// After a button or key that only changes what the window shows: the editor of the open note has the
+    /// keyboard again, with the cursor and selection where they were (EDIT-042). Nothing in the reading
+    /// view or another view, which have no editor to give it to.
+    pub(crate) fn focus_editor_if_note(&mut self) {
+        if self.tabbar.tabs.get(self.tabbar.active).is_some_and(|t| matches!(t.view, View::Note(_)) && !t.reading) {
+            self.focus_editor();
+        }
+    }
+
+    /// The edit / reading view button and its keys (Ctrl+E, KEY-015).
+    pub(crate) fn toggle_reading_view(&mut self) {
+        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
+            t.reading = !t.reading;
+        }
+        self.focus_editor_if_note();
+    }
+
+    /// The Markdown preview button and its key (KEY-015).
+    pub(crate) fn toggle_live_preview(&mut self) {
+        self.cfg.live_preview = !self.cfg.live_preview;
+        self.save_config();
+        self.focus_editor_if_note();
+    }
+
+    pub(crate) fn toggle_left_sidebar(&mut self) {
+        self.cfg.show_left = !self.cfg.show_left;
+        self.focus_editor_if_note();
+    }
+
+    pub(crate) fn toggle_right_sidebar(&mut self) {
+        self.cfg.show_right = !self.cfg.show_right;
+        self.focus_editor_if_note();
+    }
+
+    /// Do the keys of the note view (KEY-014) count now: the focused pane shows a note, no dialog or link
+    /// preview is open, and the keyboard is in its text or in no text field.
+    fn note_keys_active(&self, ctx: &egui::Context) -> bool {
+        let Some(tab) = self.tabbar.tabs.get(self.tabbar.active) else { return false };
+        let View::Note(rel) = &tab.view else { return false };
+        self.modal.is_none() && self.link_preview.open.is_none() && self.notes.contains_key(rel) && tab.editor.owns_keyboard(ctx)
+    }
+
+    /// An Alt key of a button of the note view: the same as a click on that button; a button that is not
+    /// there (the toolbar in the reading view, the preview button there) or greyed out does nothing (KEY-015).
+    fn note_key(&mut self, ctx: &egui::Context, a: KeyAction) {
+        let active = self.tabbar.active;
+        let Some(tab) = self.tabbar.tabs.get(active) else { return };
+        let (View::Note(rel), reading, tab_id) = (&tab.view, tab.reading, tab.id) else { return };
+        let bar = self.cfg.format_toolbar && !reading && self.notes.get(rel).is_some_and(|d| d.unreadable.is_none());
+        match a {
+            KeyAction::NoteReading => self.toggle_reading_view(),
+            KeyAction::NotePreview if !reading => self.toggle_live_preview(),
+            KeyAction::NoteNewTab => self.tabbar.new_tab(View::Empty),
+            KeyAction::NoteMenu => {
+                ctx.data_mut(|d| d.insert_temp(egui::Id::unique(("note-menu-key", tab_id)), true));
+                ctx.request_repaint();
+            }
+            KeyAction::NoteHighlightColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Highlight),
+            KeyAction::NoteFontColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Font),
+            KeyAction::NoteHeading if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Heading),
+            _ => {
+                if let Some(cmd) = crate::format_bar::cmd_of(a).filter(|_| bar) {
+                    self.tabbar.tabs[active].editor.key_format(cmd);
+                }
+            }
+        }
+        ctx.request_repaint();
+    }
+
     /// Put the keyboard back into the editor of the open note (Ctrl+L).
     pub fn focus_editor(&mut self) {
         self.tree.sel = None;
@@ -1808,6 +1880,7 @@ impl ShaleApp {
                 self.close_pane(self.panes.focused);
             }
             self.remember_open_files();
+            self.keyboard_after_close();
         }
     }
 
@@ -1997,8 +2070,26 @@ impl ShaleApp {
         if is(KeyAction::AlternateView) && self.modal.is_none() {
             self.swap_alternate();
         }
+        // the Alt keys of the ribbon (KEY-015): what a click on the item or the sidebar toggle does
+        if self.modal.is_none() {
+            if let Some(&item) = action.and_then(KeyAction::ribbon_slot).and_then(|n| self.side.layout.ribbon.get(n)) {
+                self.ribbon_click(item);
+            } else if is(KeyAction::SidebarLeft) {
+                self.toggle_left_sidebar();
+            } else if is(KeyAction::SidebarRight) {
+                self.toggle_right_sidebar();
+            }
+        }
         // the keys of the open link preview come before everything the editor reads (EDIT-035)
         self.link_preview_keys(ui);
+        // the Alt keys of the buttons of a note, with the keyboard in its text or not (KEY-014, KEY-015)
+        if self.note_keys_active(ui.ctx()) {
+            if let Some(a) = ui.input_mut(|i| self.keymap.poll(i, Scope::NoteView)) {
+                self.note_key(ui.ctx(), a);
+            }
+        } else {
+            self.keymap.cancel(Scope::NoteView);
+        }
         // Space sequences of vim-style normal mode (EDIT-015); a half typed one is forgotten
         // when the keys are not read any more
         if self.normal_keys_active(ui.ctx()) {
@@ -2027,9 +2118,7 @@ impl ShaleApp {
             self.new_untitled(&f);
         }
         if toggle {
-            if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
-                t.reading = !t.reading;
-            }
+            self.toggle_reading_view();
         }
         if files {
             self.side.left = LeftPanel::Files;
@@ -2386,6 +2475,12 @@ impl ShaleApp {
         self.drag.calendar_areas.clear();
         self.drag.tree_targets.clear();
         self.screenshot_tick(ui);
+        if self.blink_applied != self.cfg.cursor_blink {
+            self.blink_applied = self.cfg.cursor_blink;
+            let blink = self.cfg.cursor_blink && !self.shot.active();
+            ui.ctx().all_styles_mut(|s| s.visuals.text_cursor.blink = blink);
+        }
+        self.keyboard_guard(ui.ctx());
         self.shortcuts(ui);
         self.autosave();
         self.settings_file_tick(ui.ctx());

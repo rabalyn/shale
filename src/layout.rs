@@ -414,8 +414,11 @@ impl ShaleApp {
     fn ribbon(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing.y = 6.0;
         ui.vertical_centered(|ui| {
-            if icon_button(ui, Icon::SidebarLeft, 30.0, false, "Toggle left sidebar").clicked() {
-                self.cfg.show_left = !self.cfg.show_left;
+            let badges = crate::key_badges::Badges::of_frame(&self.keymap, ui);
+            let left = icon_button(ui, Icon::SidebarLeft, 30.0, false, "Toggle left sidebar");
+            badges.paint(ui, left.rect, crate::keys::Action::SidebarLeft);
+            if left.clicked() {
+                self.toggle_left_sidebar();
             }
             ui.add_space(4.0);
             self.ribbon_items(ui);
@@ -423,8 +426,10 @@ impl ShaleApp {
                 if icon_button(ui, Icon::Settings, 30.0, false, "Settings and vault (Ctrl+,)").clicked() {
                     self.open_settings(crate::settings::last_tab(ui.ctx()));
                 }
-                if icon_button(ui, Icon::SidebarRight, 30.0, false, "Toggle right sidebar").clicked() {
-                    self.cfg.show_right = !self.cfg.show_right;
+                let right = icon_button(ui, Icon::SidebarRight, 30.0, false, "Toggle right sidebar");
+                badges.paint(ui, right.rect, crate::keys::Action::SidebarRight);
+                if right.clicked() {
+                    self.toggle_right_sidebar();
                 }
             });
         });
@@ -436,6 +441,7 @@ impl ShaleApp {
             Item::Files => {
                 self.side.left = LeftPanel::Files;
                 self.cfg.show_left = true;
+                self.focus_editor_if_note();
             }
             Item::Search => {
                 self.side.left = LeftPanel::Search;
@@ -445,6 +451,7 @@ impl ShaleApp {
             Item::Tags => {
                 self.side.left = LeftPanel::Tags;
                 self.cfg.show_left = true;
+                self.focus_editor_if_note();
             }
             Item::Switcher => self.modal = Some(Modal::QuickSwitch { query: String::new(), sel: 0 }),
             Item::Graph => self.actions.push(Action::ShowView(View::Graph)),
@@ -461,7 +468,19 @@ impl ShaleApp {
                 let f = self.current_folder();
                 self.actions.push(Action::NewNote { folder: f });
             }
-            Item::Panel(p) => self.toggle_peek(p),
+            Item::Panel(p) => {
+                self.toggle_peek(p);
+                self.focus_editor_if_note();
+            }
+        }
+    }
+
+    /// The Alt keys to show on the buttons of the focused pane while Alt is held (KEY-016).
+    pub(crate) fn key_badges(&self, ui: &Ui) -> crate::key_badges::Badges {
+        if self.panes.drawn() == self.panes.focused {
+            crate::key_badges::Badges::of_frame(&self.keymap, ui)
+        } else {
+            Default::default()
         }
     }
 
@@ -580,7 +599,12 @@ impl ShaleApp {
         if let Some((i, pinned)) = pin_toggle {
             self.set_tab_pinned(i, pinned);
         }
-        if icon_button(&mut child, Icon::Plus, 26.0, false, "New tab").clicked() {
+        let plus = icon_button(&mut child, Icon::Plus, 26.0, false, "New tab");
+        // its key works while the focused pane shows a note (KEY-015)
+        if self.tabbar.tabs.get(self.tabbar.active).is_some_and(|t| matches!(t.view, View::Note(_))) {
+            self.key_badges(ui).paint(ui, plus.rect, crate::keys::Action::NoteNewTab);
+        }
+        if plus.clicked() {
             self.tabbar.new_tab(View::Empty);
         }
         if let Some(line) = self.tabbar.tab_marks.focus_line {
@@ -600,6 +624,8 @@ impl ShaleApp {
         let can_back = !tab.back.is_empty();
         let can_fwd = !tab.fwd.is_empty();
         let reading = tab.reading;
+        let tab_id = tab.id;
+        let badges = self.key_badges(ui);
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
@@ -623,20 +649,21 @@ impl ShaleApp {
                 ui.add_space(8.0);
                 if let View::Note(p) = &view {
                     let (icon, tip) = if reading { (Icon::Pencil, "Edit (Ctrl+E)") } else { (Icon::Book, "Reading view (Ctrl+E)") };
-                    if icon_button(ui, icon, 26.0, false, tip).clicked() {
-                        if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
-                            t.reading = !t.reading;
-                        }
+                    let toggle = icon_button(ui, icon, 26.0, false, tip);
+                    badges.paint(ui, toggle.rect, crate::keys::Action::NoteReading);
+                    if toggle.clicked() {
+                        self.toggle_reading_view();
                     }
                     if !reading {
                         let on = self.cfg.live_preview;
-                        if icon_button(ui, Icon::Preview, 26.0, on, if on { "Raw markdown" } else { "Markdown preview" }).clicked() {
-                            self.cfg.live_preview = !on;
-                            self.save_config();
+                        let preview = icon_button(ui, Icon::Preview, 26.0, on, if on { "Raw markdown" } else { "Markdown preview" });
+                        badges.paint(ui, preview.rect, crate::keys::Action::NotePreview);
+                        if preview.clicked() {
+                            self.toggle_live_preview();
                         }
                     }
                     let p2 = p.clone();
-                    ui.menu_button(egui::RichText::new("⋯").size(16.0).color(theme::MUTED), |ui| {
+                    let menu = ui.menu_button(egui::RichText::new("⋯").size(16.0).color(theme::MUTED), |ui| {
                         if ui.button("Export to PDF…").clicked() {
                             self.actions.push(Action::Export(p2.clone()));
                             ui.close();
@@ -659,6 +686,11 @@ impl ShaleApp {
                             ui.close();
                         }
                     });
+                    badges.paint(ui, menu.response.rect, crate::keys::Action::NoteMenu);
+                    // the key of the ⋯ menu opens it (KEY-015)
+                    if ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::unique(("note-menu-key", tab_id)))).is_some() {
+                        egui::Popup::toggle_id(ui.ctx(), egui::Popup::default_response_id(&menu.response));
+                    }
                 }
                 if let View::Drawing(p) = &view {
                     let p2 = p.clone();
@@ -791,7 +823,8 @@ impl ShaleApp {
         // the formatting toolbar sits above the text and stays when the note scrolls (EDIT-026)
         if self.cfg.format_toolbar && !self.tabbar.tabs[active].reading {
             if let Some(doc) = self.notes.get(&rel).filter(|d| d.unreadable.is_none()) {
-                let palettes = crate::format_bar::Palettes { highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours, scale: self.cfg.toolbar_size.clamp(80, 200) as f32 / 100.0 };
+                let badges = self.key_badges(ui);
+                let palettes = crate::format_bar::Palettes { badges: &badges, highlight: &self.cfg.highlight_colours, font: &self.cfg.font_colours, scale: self.cfg.toolbar_size.clamp(80, 200) as f32 / 100.0 };
                 ui.add_space(4.0);
                 self.tabbar.tabs[active].editor.toolbar(ui, &doc.text, &palettes);
                 ui.add_space(2.0);
@@ -847,6 +880,7 @@ impl ShaleApp {
                         tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
                         tab.editor.table_cell_edit = self.cfg.table_cell_edit;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
+                        tab.editor.cursor_style = crate::cursor_style::CursorStyle { shape: self.cfg.cursor_shape, normal_shape: self.cfg.normal_cursor_shape, blink: self.cfg.cursor_blink };
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
                         tab.editor.assist.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.dark_canvas = self.cfg.dark_canvas;

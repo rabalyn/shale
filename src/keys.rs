@@ -16,13 +16,15 @@ pub enum Scope {
     FileList,
     SearchResults,
     MailView,
+    /// The buttons of a note (KEY-014): active while the focused pane shows a note, in the editor and in the reading view.
+    NoteView,
     /// Vim-lite normal mode (EDIT-015): sequences that start with Space.
     EditorNormal,
 }
 
 impl Scope {
     /// The scopes in the order the keybindings list shows them.
-    pub const ALL: [Scope; 5] = [Scope::Global, Scope::FileList, Scope::SearchResults, Scope::MailView, Scope::EditorNormal];
+    pub const ALL: [Scope; 6] = [Scope::Global, Scope::FileList, Scope::SearchResults, Scope::MailView, Scope::NoteView, Scope::EditorNormal];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -30,6 +32,7 @@ impl Scope {
             Scope::FileList => "File list (Ctrl+Shift+B)",
             Scope::SearchResults => "Search results",
             Scope::MailView => "Mail view",
+            Scope::NoteView => "Note view",
             Scope::EditorNormal => "Vim-style editing, normal mode",
         }
     }
@@ -41,6 +44,7 @@ impl Scope {
             Scope::FileList => &[Key::Enter, Key::Escape],
             Scope::SearchResults => &[Key::Enter, Key::Escape, Key::Slash],
             Scope::MailView => &[Key::Enter, Key::Escape],
+            Scope::NoteView => &[],
             // every key vim-lite uses in normal mode (EDIT-011…014), with or without Shift; but see
             // `Keymap::check`: Shift+K is no vim key (the link preview has it, EDIT-033)
             Scope::EditorNormal => &[
@@ -76,9 +80,10 @@ impl Scope {
         }
     }
 
-    /// Two scopes can see the same key press when they are the same or one is Global.
+    /// Two scopes can see the same key press when they are the same, one is Global, or they are
+    /// the note view and vim-style normal mode (the editor shows a note, KEY-014). Symmetric.
     fn overlaps(self, other: Scope) -> bool {
-        self == other || self == Scope::Global || other == Scope::Global
+        self == other || self == Scope::Global || other == Scope::Global || matches!((self, other), (Scope::NoteView, Scope::EditorNormal) | (Scope::EditorNormal, Scope::NoteView))
     }
 }
 
@@ -228,6 +233,43 @@ actions! {
     PrevPane => "global.prev_pane", "Focus the previous pane", Global, ["Ctrl+Alt+Left"];
     ClosePane => "global.close_pane", "Close the pane (with its tabs)", Global, ["Ctrl+Alt+W"];
     AlternateView => "global.alternate_view", "Alternate view: swap with the previous view of this tab (again: back)", Global, ["Ctrl+6"];
+    // The ribbon (KEY-015): its first ten shown items by position, and the sidebar toggles; no default on macOS
+    RibbonSlot1 => "global.ribbon_1", "Ribbon: 1st item", Global, ["Alt+1"];
+    RibbonSlot2 => "global.ribbon_2", "Ribbon: 2nd item", Global, ["Alt+2"];
+    RibbonSlot3 => "global.ribbon_3", "Ribbon: 3rd item", Global, ["Alt+3"];
+    RibbonSlot4 => "global.ribbon_4", "Ribbon: 4th item", Global, ["Alt+4"];
+    RibbonSlot5 => "global.ribbon_5", "Ribbon: 5th item", Global, ["Alt+5"];
+    RibbonSlot6 => "global.ribbon_6", "Ribbon: 6th item", Global, ["Alt+6"];
+    RibbonSlot7 => "global.ribbon_7", "Ribbon: 7th item", Global, ["Alt+7"];
+    RibbonSlot8 => "global.ribbon_8", "Ribbon: 8th item", Global, ["Alt+8"];
+    RibbonSlot9 => "global.ribbon_9", "Ribbon: 9th item", Global, ["Alt+9"];
+    RibbonSlot10 => "global.ribbon_10", "Ribbon: 10th item", Global, ["Alt+0"];
+    SidebarLeft => "global.sidebar_left", "Show or hide the left sidebar", Global, ["Alt+Comma"];
+    SidebarRight => "global.sidebar_right", "Show or hide the right sidebar", Global, ["Alt+Period"];
+    // The buttons of a note (KEY-015): the formatting toolbar, the view header and the tab bar; no default on macOS
+    NoteBold => "note.bold", "Note: Bold button", NoteView, ["Alt+B"];
+    NoteItalic => "note.italic", "Note: Italic button", NoteView, ["Alt+I"];
+    NoteStrike => "note.strike", "Note: Strikethrough button", NoteView, ["Alt+S"];
+    NoteHighlight => "note.highlight", "Note: Highlight button", NoteView, ["Alt+H"];
+    NoteCode => "note.code", "Note: Inline code button", NoteView, ["Alt+C"];
+    NoteHighlightColour => "note.highlight_colour", "Note: Highlight colour button (opens its palette)", NoteView, ["Alt+Y"];
+    NoteFontColour => "note.font_colour", "Note: Font colour button (opens its palette)", NoteView, ["Alt+F"];
+    NoteHeading => "note.heading", "Note: Heading level button (opens its menu)", NoteView, ["Alt+E"];
+    NoteBullet => "note.bullet", "Note: Bullet list button", NoteView, ["Alt+U"];
+    NoteNumbered => "note.numbered", "Note: Numbered list button", NoteView, ["Alt+O"];
+    NoteTask => "note.task", "Note: Task button", NoteView, ["Alt+T"];
+    NoteQuote => "note.quote", "Note: Quote button", NoteView, ["Alt+Q"];
+    NoteCodeBlock => "note.code_block", "Note: Code block button", NoteView, ["Alt+K"];
+    NoteRule => "note.rule", "Note: Horizontal rule button", NoteView, ["Alt+R"];
+    NoteTable => "note.table", "Note: Table button", NoteView, ["Alt+A"];
+    NoteWikiLink => "note.wiki_link", "Note: Link to a note button", NoteView, ["Alt+L"];
+    NoteWebLink => "note.web_link", "Note: Web link button", NoteView, ["Alt+W"];
+    NoteEmbed => "note.embed", "Note: Embed button (opens the file picker)", NoteView, ["Alt+M"];
+    NoteClear => "note.clear", "Note: Clear formatting button", NoteView, ["Alt+X"];
+    NoteReading => "note.reading", "Note: Edit / reading view button", NoteView, ["Alt+V"];
+    NotePreview => "note.preview", "Note: Markdown preview button", NoteView, ["Alt+P"];
+    NoteMenu => "note.menu", "Note: ⋯ menu button (opens its menu)", NoteView, ["Alt+D"];
+    NoteNewTab => "note.new_tab", "Note: New tab button", NoteView, ["Alt+N"];
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
     NormalSearchAll => "normal.search_all", "Search notes, mail and posts", EditorNormal, ["Space F G"];
@@ -286,17 +328,37 @@ impl Action {
         DEFS.iter().find(|d| d.action == self).expect("every action has a row in DEFS")
     }
 
-    fn defaults(self) -> Vec<Binding> {
+    /// The default keys on Linux and Windows, or on macOS when `mac`.
+    fn defaults_for(self, mac: bool) -> Vec<Binding> {
+        if mac && self.is_alt_key() {
+            return vec![];
+        }
         self.def().defaults.iter().map(|d| Binding::parse(d).expect("the defaults in DEFS are valid")).collect()
     }
+
+    /// The Alt keys of the buttons of a note and of the ribbon (KEY-015): on macOS, where Option+letter
+    /// types characters, they have no default key.
+    pub fn is_alt_key(self) -> bool {
+        let d = self.def();
+        d.scope == Scope::NoteView || d.id.starts_with("global.ribbon_") || d.id.starts_with("global.sidebar_")
+    }
+
+    /// The place (0 to 9) of the ribbon item a `RibbonSlot` action opens.
+    pub fn ribbon_slot(self) -> Option<usize> {
+        RIBBON_SLOTS.iter().position(|&a| a == self)
+    }
 }
+
+/// The actions of the first ten ribbon items, in order (KEY-015).
+pub const RIBBON_SLOTS: [Action; 10] =
+    [Action::RibbonSlot1, Action::RibbonSlot2, Action::RibbonSlot3, Action::RibbonSlot4, Action::RibbonSlot5, Action::RibbonSlot6, Action::RibbonSlot7, Action::RibbonSlot8, Action::RibbonSlot9, Action::RibbonSlot10];
 
 /// Ctrl chords of text editing, which a Global binding must not swallow.
 const RESERVED_TEXT: [(bool, Key); 7] = [(false, Key::A), (false, Key::C), (false, Key::V), (false, Key::X), (false, Key::Z), (false, Key::Y), (true, Key::Z)];
 
 /// Take this chord's key press out of the frame's input, if it was pressed with exactly these
-/// modifiers (so Ctrl+Alt+L is not Ctrl+L). A bare key also takes the character it typed, so a
-/// binding like `Space f f` never reaches a text box or vim as typing.
+/// modifiers (so Ctrl+Alt+L is not Ctrl+L). A bare key, or an Alt key (without Ctrl), also takes the
+/// character it typed, so a binding like `Space f f` or `Alt+B` never reaches a text box or vim as typing.
 fn consume_exact(input: &mut InputState, c: Chord) -> bool {
     let want = c.modifiers();
     let mut found = false;
@@ -305,7 +367,7 @@ fn consume_exact(input: &mut InputState, c: Chord) -> bool {
         found |= hit;
         !hit
     });
-    if found && !c.ctrl && !c.alt {
+    if found && !c.ctrl {
         let typed = if c.key == Key::Space { " ".to_string() } else { c.key.symbol_or_name().to_string() };
         if let Some(i) = input.events.iter().position(|e| matches!(e, Event::Text(t) if t.eq_ignore_ascii_case(&typed))) {
             input.events.remove(i);
@@ -317,9 +379,10 @@ fn consume_exact(input: &mut InputState, c: Chord) -> bool {
 /// How long an unfinished sequence waits for its next key (KEY-009).
 pub const SEQUENCE_TIMEOUT: f64 = 1.5;
 
-#[derive(Default)]
 pub struct Keymap {
     custom: BTreeMap<Action, Vec<Binding>>,
+    /// Whose defaults the keymap starts from: macOS has none for the Alt keys of the buttons (KEY-015).
+    mac: bool,
     /// The chords typed so far of an unfinished sequence, per scope, and the time (egui seconds)
     /// of the last one (KEY-009).
     pending: HashMap<Scope, (Vec<Chord>, f64)>,
@@ -327,11 +390,27 @@ pub struct Keymap {
     pub recording: bool,
 }
 
+impl Default for Keymap {
+    fn default() -> Self {
+        Keymap::for_os(cfg!(target_os = "macos"))
+    }
+}
+
 impl Keymap {
+    /// The keymap with the defaults of macOS (`mac`) or of Linux and Windows, and no changes.
+    pub fn for_os(mac: bool) -> Keymap {
+        Keymap { custom: BTreeMap::new(), mac, pending: HashMap::new(), recording: false }
+    }
+
     /// The keymap for the saved changes (`"id" -> ["binding", …]`). What is unknown, unreadable
     /// or in conflict is ignored (KEY-007).
     pub fn from_overrides(saved: &BTreeMap<String, Vec<String>>) -> Keymap {
-        let mut k = Keymap::default();
+        Keymap::from_overrides_for(saved, cfg!(target_os = "macos"))
+    }
+
+    /// `from_overrides` on the given system (the defaults differ, KEY-015).
+    pub fn from_overrides_for(saved: &BTreeMap<String, Vec<String>>, mac: bool) -> Keymap {
+        let mut k = Keymap::for_os(mac);
         for d in DEFS {
             let Some(texts) = saved.get(d.id) else { continue };
             // an empty list is an action the user cleared: it stays unbound
@@ -355,7 +434,18 @@ impl Keymap {
     }
 
     pub fn bindings(&self, a: Action) -> Vec<Binding> {
-        self.custom.get(&a).cloned().unwrap_or_else(|| a.defaults())
+        self.custom.get(&a).cloned().unwrap_or_else(|| a.defaults_for(self.mac))
+    }
+
+    /// The single-chord Alt key of `a` (Alt without Ctrl or Shift), the one the badges and underlines show
+    /// while Alt is held (KEY-016, MAIL-229); `None` when it has none.
+    pub fn alt_chord(&self, a: Action) -> Option<Chord> {
+        self.bindings(a).into_iter().find(|b| b.0.len() == 1 && b.0[0].alt && !b.0[0].ctrl && !b.0[0].shift).map(|b| b.0[0])
+    }
+
+    /// The text of the key of `a` for a badge: `B`, `1`, `,` (KEY-016); `None` without an Alt key.
+    pub fn alt_badge(&self, a: Action) -> Option<String> {
+        self.alt_chord(a).map(|c| c.key.symbol_or_name().to_uppercase())
     }
 
     pub fn is_default(&self, a: Action) -> bool {
@@ -379,29 +469,60 @@ impl Keymap {
 
     /// Can `a` take `b`? The error is the message for the user (KEY-004, KEY-005).
     pub fn check(&self, a: Action, b: &Binding) -> Result<(), String> {
+        self.check_rules(a, b)?;
+        match self.clashes_of(a, b).first() {
+            Some(other) => Err(format!("{} is already used by “{}”", b.display(), other.def().label)),
+            None => Ok(()),
+        }
+    }
+
+    /// The rules for a binding of `a` that no overwrite can lift: Ctrl or Alt, reserved keys, fixed
+    /// keys (KEY-005). The error is the message for the user.
+    pub fn check_rules(&self, a: Action, b: &Binding) -> Result<(), String> {
         let scope = a.def().scope;
         let first = b.0[0];
         let function_key = first.key.name().strip_prefix('F').is_some_and(|n| n.parse::<u8>().is_ok());
-        if scope == Scope::Global && !first.ctrl && !first.alt && !function_key {
+        if matches!(scope, Scope::Global | Scope::NoteView) && !first.ctrl && !first.alt && !function_key {
             return Err(format!("{} needs Ctrl or Alt: a shortcut that works everywhere must not get in the way of typing", b.display()));
         }
-        if b.0.len() == 1 && scope == Scope::Global && RESERVED_TEXT.iter().any(|(shift, key)| first.ctrl && !first.alt && first.shift == *shift && first.key == *key) {
+        if b.0.len() == 1 && matches!(scope, Scope::Global | Scope::NoteView) && RESERVED_TEXT.iter().any(|(shift, key)| first.ctrl && !first.alt && first.shift == *shift && first.key == *key) {
             return Err(format!("{} is reserved for text editing", b.display()));
         }
         // a fixed key cannot start a binding (also not a sequence, which it would never complete)
         // Ctrl+R redoes in vim normal mode (EDIT-021)
+        // the editor moves rows with Alt+Up / Alt+Down (EDIT-026 lists, KEY-014)
+        let moves_rows = scope == Scope::NoteView && first.alt && !first.ctrl && matches!(first.key, Key::ArrowUp | Key::ArrowDown);
         let vim_redo = scope == Scope::EditorNormal && first.ctrl && !first.alt && !first.shift && first.key == Key::R;
         // vim-lite has a plain k but no K (EDIT-033)
         let shift_k_is_free = scope == Scope::EditorNormal && first.shift && first.key == Key::K;
-        if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key) && !shift_k_is_free) || vim_redo {
+        if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key) && !shift_k_is_free) || vim_redo || moves_rows {
             return Err(format!("{} has a fixed meaning here", b.display()));
         }
-        for d in DEFS.iter().filter(|d| d.action != a && d.scope.overlaps(scope)) {
-            if self.bindings(d.action).iter().any(|o| o.clashes(b)) {
-                return Err(format!("{} is already used by “{}”", b.display(), d.label));
-            }
-        }
         Ok(())
+    }
+
+    /// The other actions, in the order of `DEFS`, that `b` would clash with if `a` took it: a binding
+    /// equal to it or the start of it (or the other way round) in the same or an overlapping scope
+    /// (KEY-004, KEY-017, KEY-018).
+    pub fn clashes_of(&self, a: Action, b: &Binding) -> Vec<Action> {
+        let scope = a.def().scope;
+        DEFS.iter().filter(|d| d.action != a && d.scope.overlaps(scope) && self.bindings(d.action).iter().any(|o| o.clashes(b))).map(|d| d.action).collect()
+    }
+
+    /// Give `a` the binding `b` (in addition to its others when `adding`, else replacing them) and take
+    /// the clashing bindings away from the actions that have them, only those (KEY-018); an action left
+    /// without a key is stored as cleared (KEY-007). Nothing changes when a rule refuses `b`.
+    pub fn overwrite(&mut self, a: Action, b: Binding, adding: bool) -> Result<(), String> {
+        self.check_rules(a, &b)?;
+        for other in self.clashes_of(a, &b) {
+            let kept = self.bindings(other).into_iter().filter(|o| !o.clashes(&b)).collect();
+            self.store(other, kept);
+        }
+        if adding {
+            self.add(a, b)
+        } else {
+            self.set(a, b)
+        }
     }
 
     /// Give `a` this one binding (replacing its others); nothing changes when it is refused.
@@ -429,7 +550,7 @@ impl Keymap {
 
     /// Keep these bindings of `a` as a change, or forget the change when they are the defaults.
     fn store(&mut self, a: Action, all: Vec<Binding>) {
-        if a.defaults() == all {
+        if a.defaults_for(self.mac) == all {
             self.custom.remove(&a);
         } else {
             self.custom.insert(a, all);
@@ -538,7 +659,111 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 29 + 36 + 6);
+        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 23);
+        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 23);
+    }
+
+    // spec: KEY-014
+    #[test]
+    fn the_note_view_overlaps_global_and_vim_normal_mode_both_ways_and_alt_arrows_are_the_editors() {
+        let mut k = Keymap::default();
+        // the editor's own Alt+Up / Alt+Down (moving rows) cannot start a binding there, also not in a sequence
+        for text in ["Alt+Up", "Alt+Down", "Alt+Up X"] {
+            assert!(k.check(Action::NoteBold, &b(text)).unwrap_err().contains("fixed meaning"), "{text}");
+        }
+        assert_eq!(k.check(Action::NoteBold, &b("Alt+B")), Ok(()), "its own key");
+        // a binding that would type is refused, as in Global
+        assert!(k.check(Action::NoteBold, &b("G")).unwrap_err().contains("needs Ctrl or Alt"));
+        // against Global ...
+        assert_eq!(k.check(Action::NoteBold, &b("Alt+Left")), Err("Alt+← is already used by “Back”".to_string()));
+        assert_eq!(k.check(Action::Save, &b("Alt+B")), Err("Alt+B is already used by “Note: Bold button”".to_string()));
+        // ... and against vim-style normal mode, from both sides
+        k.set(Action::NormalFindFile, b("Ctrl+Alt+Q")).unwrap();
+        assert_eq!(k.check(Action::NoteBold, &b("Ctrl+Alt+Q")), Err("Ctrl+Alt+Q is already used by “Find a file by name”".to_string()));
+        assert_eq!(k.check(Action::NormalSearchAll, &b("Alt+I")), Err("Alt+I is already used by “Note: Italic button”".to_string()));
+        assert_eq!(k.check(Action::NormalSearchAll, &b("Alt+B Alt+B")), Err("Alt+B Alt+B is already used by “Note: Bold button”".to_string()));
+        // the other scopes do not see the note view's keys: the mail view has Alt+I of its own
+        assert_eq!(k.check(Action::TreeNextFile, &b("Alt+B")), Ok(()));
+        assert_eq!(k.check(Action::MailBtnImport, &b("Alt+I")), Ok(()));
+        // the overlap is symmetric for every pair of scopes
+        for a in Scope::ALL {
+            for c in Scope::ALL {
+                assert_eq!(a.overlaps(c), c.overlaps(a), "{a:?} {c:?}");
+            }
+        }
+        // a saved change that clashes is ignored on load (KEY-007)
+        let saved: BTreeMap<String, Vec<String>> = [("note.bold".to_string(), vec!["Alt+Left".to_string()]), ("normal.find_file".to_string(), vec!["Alt+I".to_string()])].into_iter().collect();
+        assert!(Keymap::from_overrides_for(&saved, false).overrides().is_empty());
+    }
+
+    // spec: KEY-015
+    #[test]
+    fn the_alt_keys_of_the_buttons_have_defaults_on_linux_and_windows_but_none_on_macos() {
+        let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
+        let alt: Vec<&Def> = DEFS.iter().filter(|d| d.action.is_alt_key()).collect();
+        assert_eq!(alt.len(), 23 + 12);
+        for d in &alt {
+            assert!(!linux.bindings(d.action).is_empty(), "{} has a default on Linux", d.id);
+            assert!(mac.bindings(d.action).is_empty(), "{} has none on macOS", d.id);
+            assert!(d.scope == Scope::NoteView || d.scope == Scope::Global);
+        }
+        // everything else has the same keys on both
+        for d in DEFS.iter().filter(|d| !d.action.is_alt_key()) {
+            assert_eq!(linux.bindings(d.action), mac.bindings(d.action), "{}", d.id);
+        }
+        assert_eq!(linux.bindings(Action::NoteBold), vec![b("Alt+B")]);
+        assert_eq!(linux.bindings(Action::RibbonSlot10), vec![b("Alt+0")]);
+        assert_eq!(linux.display(Action::RibbonSlot1), "Alt+1");
+        assert_eq!(linux.display(Action::SidebarLeft), "Alt+,");
+        assert_eq!(linux.display(Action::SidebarRight), "Alt+.");
+        assert_eq!(Action::RibbonSlot3.ribbon_slot(), Some(2));
+        assert_eq!(Action::NoteBold.ribbon_slot(), None);
+        // KEY-007: a change is what differs from the defaults of the system
+        let mut m = Keymap::for_os(true);
+        m.set(Action::NoteBold, b("Alt+B")).unwrap();
+        assert_eq!(m.overrides().get("note.bold"), Some(&vec!["Alt+B".to_string()]), "on macOS Alt+B is a change");
+        let mut l = Keymap::for_os(false);
+        l.set(Action::NoteBold, b("Alt+B")).unwrap();
+        assert!(l.overrides().is_empty(), "on Linux it is the default");
+        l.clear(Action::NoteBold);
+        assert_eq!(l.overrides().get("note.bold"), Some(&vec![]));
+        // what a Mac user saved is read back as it was
+        let back = Keymap::from_overrides_for(&m.overrides(), true);
+        assert_eq!(back.bindings(Action::NoteBold), vec![b("Alt+B")]);
+        // the badge and underline text of a single Alt chord
+        assert_eq!(linux.alt_badge(Action::NoteBold).as_deref(), Some("B"));
+        assert_eq!(linux.alt_badge(Action::RibbonSlot1).as_deref(), Some("1"));
+        assert_eq!(linux.alt_badge(Action::SidebarLeft).as_deref(), Some(","));
+        assert_eq!(linux.alt_badge(Action::Save), None, "Ctrl+S is no Alt key");
+        assert_eq!(mac.alt_badge(Action::NoteBold), None);
+    }
+
+    // spec: KEY-017
+    #[test]
+    fn no_two_actions_of_scopes_that_are_active_together_clash_on_any_system() {
+        let sets: [&[Scope]; 5] = [&[Scope::Global, Scope::FileList], &[Scope::Global, Scope::SearchResults], &[Scope::Global, Scope::MailView], &[Scope::Global, Scope::NoteView], &[Scope::Global, Scope::NoteView, Scope::EditorNormal]];
+        for (system, mac) in [("linux", false), ("windows", false), ("macos", true)] {
+            let k = Keymap::for_os(mac);
+            for set in sets {
+                let actions: Vec<&Def> = DEFS.iter().filter(|d| set.contains(&d.scope)).collect();
+                for (i, x) in actions.iter().enumerate() {
+                    for y in &actions[i + 1..] {
+                        for bx in k.bindings(x.action) {
+                            for by in k.bindings(y.action) {
+                                assert!(!bx.clashes(&by), "{system}: {} and {} both use {}", x.id, y.id, bx.display());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // the sets are every combination that can be active together: no other two scopes overlap
+        for a in Scope::ALL {
+            for c in Scope::ALL {
+                let together = a == c || sets.iter().any(|s| s.contains(&a) && s.contains(&c));
+                assert_eq!(a.overlaps(c), together, "{a:?} {c:?}");
+            }
+        }
     }
 
     // spec: KEY-003
@@ -581,6 +806,66 @@ mod tests {
         assert!(k.check(Action::TreePrevFile, &b("Space")).is_err());
         assert!(k.check(Action::TreePrevFile, &b("Space f g")).is_ok());
         assert!(k.check(Action::TreePrevFile, &b("Space f f g")).is_err());
+    }
+
+    // spec: KEY-018
+    #[test]
+    fn clashes_of_finds_equal_and_prefix_clashes_in_scopes_that_are_active_together() {
+        let mut k = Keymap::default();
+        // equal, in the same scope and against Global
+        assert_eq!(k.clashes_of(Action::TreePrevFile, &b("J")), vec![Action::TreeNextFile]);
+        assert_eq!(k.clashes_of(Action::TreeNextFile, &b("J")), vec![], "its own key is no clash");
+        assert_eq!(k.clashes_of(Action::TreeNextFile, &b("Ctrl+H")), vec![Action::FocusSidebar]);
+        // Note view against Global, and the other way round
+        assert_eq!(k.clashes_of(Action::NoteBold, &b("Ctrl+E")), vec![Action::ToggleReading]);
+        assert_eq!(k.clashes_of(Action::Save, &b("Alt+B")), vec![Action::NoteBold]);
+        // Note view against vim normal mode
+        k.set(Action::NoteBold, b("Ctrl+Alt+K")).unwrap();
+        assert_eq!(k.clashes_of(Action::NormalAlternate, &b("Ctrl+Alt+K")), vec![Action::NoteBold]);
+        assert_eq!(k.clashes_of(Action::NoteBold, &b("Space Tab")), vec![Action::NormalAlternate]);
+        // unrelated scopes do not clash
+        assert_eq!(k.clashes_of(Action::HitNext, &b("J")), vec![]);
+        // a prefix clash names every action: Space f against Space f f and Space f g
+        k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
+        k.set(Action::TreePrevFile, b("Space f g")).unwrap();
+        assert_eq!(k.clashes_of(Action::TreeNextFile, &b("Space f")), vec![Action::TreePrevFile, Action::TreeToggleFolder]);
+        // the rules of KEY-005 are no clashes
+        assert_eq!(k.clashes_of(Action::Save, &b("G")), vec![]);
+        assert!(k.check_rules(Action::Save, &b("G")).is_err());
+    }
+
+    // spec: KEY-018, KEY-007
+    #[test]
+    fn overwrite_takes_only_the_clashing_bindings_and_stores_an_emptied_action_as_cleared() {
+        let mut k = Keymap::default();
+        let down = k.bindings(Action::TreeNextFile);
+        assert!(down.len() > 1, "the action has more than one key by default");
+        k.overwrite(Action::TreePrevFile, b("J"), false).unwrap();
+        assert_eq!(k.bindings(Action::TreePrevFile), vec![b("J")]);
+        assert_eq!(k.bindings(Action::TreeNextFile), down.into_iter().filter(|d| !d.clashes(&b("J"))).collect::<Vec<_>>(), "its other keys stay");
+        // an action left without a key is stored as cleared and survives the config
+        k.overwrite(Action::TreeToggleFolder, b("Ctrl+Alt+R"), false).unwrap();
+        let only = k.bindings(Action::NewNote);
+        assert_eq!(only.len(), 1, "New note has one key by default");
+        k.overwrite(Action::FocusSidebar, only[0].clone(), true).unwrap();
+        assert_eq!(k.bindings(Action::NewNote), vec![]);
+        assert_eq!(k.overrides().get("global.new_note"), Some(&vec![]));
+        assert!(k.bindings(Action::FocusSidebar).contains(&only[0]), "adding keeps the other keys");
+        let k2 = Keymap::from_overrides(&k.overrides());
+        assert_eq!(k2.bindings(Action::NewNote), vec![]);
+        assert_eq!(k2.display(Action::NewNote), "not set");
+        assert_eq!(k2.overrides(), k.overrides());
+        // a prefix clash takes both sequences
+        k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
+        k.set(Action::HitNext, b("Space f g")).unwrap();
+        k.overwrite(Action::TreeNextFile, b("Space f"), false).unwrap();
+        assert_eq!(k.bindings(Action::TreeToggleFolder), vec![]);
+        assert_eq!(k.bindings(Action::TreeNextFile), vec![b("Space f")]);
+        assert_eq!(k.bindings(Action::HitNext), vec![b("Space f g")], "another scope, kept");
+        // a rule still refuses and changes nothing
+        let before = k.overrides();
+        assert!(k.overwrite(Action::Save, b("Ctrl+C"), false).unwrap_err().contains("reserved"));
+        assert_eq!(k.overrides(), before);
     }
 
     // spec: KEY-005
@@ -654,7 +939,7 @@ mod tests {
         let k2 = Keymap::from_overrides(&loaded.keybindings);
         assert_eq!(k2.bindings(Action::FocusSidebar), vec![b("Ctrl+Alt+B")]);
         assert_eq!(k2.bindings(Action::TreeToggleFolder), vec![b("Space f f")]);
-        assert_eq!(k2.bindings(Action::FocusEditor), Action::FocusEditor.defaults());
+        assert_eq!(k2.bindings(Action::FocusEditor), Action::FocusEditor.defaults_for(false));
         // a file without the field means all defaults
         cfg.keybindings.clear();
         assert!(Keymap::from_overrides(&cfg.keybindings).overrides().is_empty());

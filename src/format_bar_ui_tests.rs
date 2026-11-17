@@ -282,7 +282,7 @@ fn bar_ends(width: f32, scale: f32) -> (egui::Rect, egui::Rect) {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     let mut bar = crate::format_bar::FormatBar::default();
-    let palettes = crate::format_bar::Palettes { highlight: &[[255, 255, 0]], font: &[[255, 0, 0]], scale };
+    let palettes = crate::format_bar::Palettes { badges: &Default::default(), highlight: &[[255, 255, 0]], font: &[[255, 0, 0]], scale };
     let mut nodes = vec![];
     for _ in 0..3 {
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 400.0))), ..Default::default() };
@@ -675,4 +675,238 @@ fn a_plain_arrow_key_esc_and_a_click_end_the_block() {
     fx.hl.frames(&mut fx.app, 3);
     assert_eq!((fx.selected_cells().len(), fx.editor().editing_cell()), (0, None));
     assert_eq!(fx.text(), BLOCK);
+}
+
+// The Alt keys of the buttons of a note (KEY-014 … KEY-016, EDIT-042)
+
+use eframe::egui::{Key, Modifiers, Pos2};
+
+impl Fx {
+    /// Press Alt and this key (with the character a system types for it) and let the window settle.
+    fn alt_key(&mut self, key: Key, typed: &str) {
+        let events = vec![Event::ModifiersChanged(Modifiers::ALT), Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::ALT }, Event::Text(typed.to_string())];
+        self.hl.frame(&mut self.app, events);
+        self.hl.frame(&mut self.app, vec![Event::ModifiersChanged(Modifiers::NONE)]);
+        self.hl.frames(&mut self.app, 3);
+    }
+
+    /// The badges one frame draws with these modifiers held: the text and the place of each.
+    fn badges(&mut self, mods: Modifiers) -> Vec<(String, Pos2)> {
+        fn walk(s: &egui::Shape, out: &mut Vec<(String, Pos2)>) {
+            match s {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                egui::Shape::Text(t) if t.galley.job.sections.first().is_some_and(|sec| sec.format.font_id.size == crate::key_badges::FONT_SIZE) => out.push((t.galley.text().to_string(), t.pos)),
+                _ => {}
+            }
+        }
+        self.hl.frame(&mut self.app, vec![Event::ModifiersChanged(mods)]);
+        let out = self.hl.frame(&mut self.app, vec![]);
+        let mut got = vec![];
+        out.shapes.iter().for_each(|c| walk(&c.shape, &mut got));
+        self.hl.frame(&mut self.app, vec![Event::ModifiersChanged(Modifiers::NONE)]);
+        got
+    }
+
+    fn reading(&self) -> bool {
+        self.app.tabbar.tabs[self.app.tabbar.active].reading
+    }
+}
+
+const CTRL_ALT: Modifiers = Modifiers { alt: true, ctrl: true, shift: false, mac_cmd: false, command: true };
+
+// spec: KEY-015, KEY-014
+#[test]
+fn alt_b_bolds_the_selection_with_the_keyboard_in_the_text_and_types_nothing() {
+    let mut fx = Fx::new("alt-b", "one two three\n");
+    fx.select(4, 7);
+    fx.alt_key(Key::B, "b");
+    assert_eq!(fx.text(), "one **two** three\n", "what a click on Bold does, and no b typed");
+    assert_eq!(fx.selected(), "two");
+    assert!(fx.has_focus());
+    // a line button
+    fx.alt_key(Key::U, "u");
+    assert_eq!(fx.text(), "- one **two** three\n");
+    // a rebound key works, and the old one is free (the character it types goes into the text)
+    fx.app.keymap.set(crate::keys::Action::NoteBold, crate::keys::Binding::parse("Alt+Z").unwrap()).unwrap();
+    fx.select(8, 11);
+    fx.alt_key(Key::Z, "z");
+    assert_eq!(fx.text(), "- one **two** three\n".replacen("**two**", "two", 1), "Alt+Z takes the markers off again");
+}
+
+// spec: KEY-015
+#[test]
+fn alt_v_and_alt_p_change_the_view_and_the_toolbar_keys_do_nothing_in_the_reading_view() {
+    let mut fx = Fx::new("alt-v", "one two three\n");
+    fx.select(4, 7);
+    fx.alt_key(Key::V, "v");
+    assert!(fx.reading(), "Alt+V: the reading view");
+    assert_eq!(fx.text(), "one two three\n");
+    // the toolbar and the preview button are not there: their keys do nothing
+    let preview = fx.app.cfg.live_preview;
+    for (key, typed) in [(Key::B, "b"), (Key::P, "p"), (Key::E, "e"), (Key::Y, "y")] {
+        fx.alt_key(key, typed);
+    }
+    assert_eq!(fx.text(), "one two three\n");
+    assert_eq!(fx.app.cfg.live_preview, preview, "Alt+P does nothing in the reading view");
+    assert!(!egui::Popup::is_any_open(fx.hl.ctx()), "no menu opened");
+    fx.alt_key(Key::V, "v");
+    assert!(!fx.reading(), "Alt+V again: back to editing");
+    assert!(fx.has_focus() && fx.selected() == "two", "EDIT-042: the keyboard is back, the selection is where it was");
+    // Alt+P switches the preview
+    fx.alt_key(Key::P, "p");
+    assert_eq!(fx.app.cfg.live_preview, !preview);
+    assert_eq!(fx.text(), "one two three\n", "no p typed");
+}
+
+// spec: KEY-015
+#[test]
+fn the_keys_of_the_menu_buttons_open_their_popups_and_new_tab_and_the_menu_key_work() {
+    let mut fx = Fx::new("alt-menus", "one two three\n");
+    fx.select(4, 7);
+    fx.alt_key(Key::E, "e");
+    assert!(fx.has("Heading 2"), "Alt+E opens the heading menu");
+    fx.click("Heading 2");
+    assert_eq!(fx.text(), "## one two three\n");
+    fx.alt_key(Key::Y, "y");
+    assert!(fx.has("No highlight"), "Alt+Y opens the highlight palette");
+    fx.alt_key(Key::F, "f");
+    assert!(fx.has("Default colour") && !fx.has("No highlight"), "Alt+F opens the font palette instead");
+    egui::Popup::close_all(fx.hl.ctx());
+    fx.hl.frames(&mut fx.app, 2);
+    fx.alt_key(Key::D, "d");
+    assert!(fx.has("Export to PDF…"), "Alt+D opens the ⋯ menu");
+    assert_eq!(fx.text(), "## one two three\n", "nothing was typed");
+    egui::Popup::close_all(fx.hl.ctx());
+    fx.hl.frames(&mut fx.app, 2);
+    let tabs = fx.app.tabbar.tabs.len();
+    fx.alt_key(Key::N, "n");
+    assert_eq!(fx.app.tabbar.tabs.len(), tabs + 1, "Alt+N: a new tab");
+}
+
+// spec: KEY-015
+#[test]
+fn alt_1_does_what_a_click_on_the_first_ribbon_item_does_and_alt_comma_toggles_the_sidebar() {
+    let mut fx = Fx::new("alt-ribbon", "one two three\n");
+    assert_eq!(fx.app.side.layout.ribbon[0], crate::sidebar::Item::Files);
+    fx.app.side.left = crate::app::LeftPanel::Tags;
+    fx.app.cfg.show_left = false;
+    fx.select(4, 7);
+    fx.alt_key(Key::Num1, "1");
+    assert!(fx.app.side.left == crate::app::LeftPanel::Files && fx.app.cfg.show_left, "the first item: Files");
+    assert_eq!(fx.text(), "one two three\n", "no 1 typed");
+    assert!(fx.has_focus() && fx.selected() == "two", "EDIT-042");
+    fx.alt_key(Key::Comma, ",");
+    assert!(!fx.app.cfg.show_left, "Alt+, hides the left sidebar");
+    fx.alt_key(Key::Comma, ",");
+    assert!(fx.app.cfg.show_left);
+    let right = fx.app.cfg.show_right;
+    fx.alt_key(Key::Period, ".");
+    assert_eq!(fx.app.cfg.show_right, !right, "Alt+. toggles the right sidebar");
+    assert!(fx.has_focus() && fx.selected() == "two");
+    assert_eq!(fx.text(), "one two three\n");
+    // the second item is Search, which takes the keyboard (it is not a change of the view only)
+    fx.alt_key(Key::Num2, "2");
+    assert!(fx.app.side.left == crate::app::LeftPanel::Search);
+}
+
+// spec: KEY-015, EDIT-030
+#[test]
+fn in_a_cell_the_keys_of_the_greyed_out_buttons_do_nothing_and_the_inline_ones_work() {
+    let mut fx = Fx::table("alt-cell");
+    fx.edit_cell("one two");
+    fx.select_in_cell(0, 3);
+    for (key, typed) in [(Key::K, "k"), (Key::O, "o"), (Key::T, "t"), (Key::Q, "q"), (Key::R, "r"), (Key::A, "a"), (Key::M, "m"), (Key::E, "e"), (Key::U, "u")] {
+        fx.alt_key(key, typed);
+        assert_eq!(fx.text(), CELLS, "Alt+{key:?} does nothing in a cell");
+        assert_eq!(fx.editor().editing_cell(), Some((1, 0)));
+    }
+    assert!(!egui::Popup::is_any_open(fx.hl.ctx()), "the heading menu is greyed out too");
+    assert!(!fx.editor().picker_visible());
+    fx.alt_key(Key::I, "i");
+    assert!(fx.text().contains("| *one* two |"), "{}", fx.text());
+}
+
+// spec: KEY-016
+#[test]
+fn holding_alt_shows_the_key_of_each_button_at_its_corner_and_a_rebound_key_moves_the_badge() {
+    let mut fx = Fx::new("badges", "one two three\n");
+    assert!(fx.badges(Modifiers::NONE).is_empty(), "no badge without Alt");
+    assert!(fx.badges(CTRL_ALT).is_empty(), "none with Ctrl+Alt (AltGr)");
+    let shown = fx.badges(Modifiers::ALT);
+    let texts: Vec<&str> = shown.iter().map(|(t, _)| t.as_str()).collect();
+    for want in ["B", "I", "S", "H", "C", "Y", "F", "E", "U", "O", "T", "Q", "K", "R", "A", "L", "W", "M", "X", "V", "P", "D", "N", "1", "2", ",", "."] {
+        assert!(texts.contains(&want), "no badge {want}: {texts:?}");
+    }
+    // the badge of Bold sits at the corner of its button
+    let bold = fx.hl.find_label(&mut fx.app, "Bold: **text**");
+    let at = shown.iter().find(|(t, _)| t == "B").unwrap().1;
+    assert!(bold.expand(8.0).contains(at), "{at:?} is not at the Bold button {bold:?}");
+    // the ribbon: one per item, the tenth shows 0
+    let items = fx.app.side.layout.ribbon.len();
+    assert!(items >= 5);
+    assert_eq!(texts.iter().filter(|t| t.len() == 1 && t.chars().all(|c| c.is_ascii_digit())).count(), items.min(10));
+    // a rebound key: the new text, at the same button
+    fx.app.keymap.set(crate::keys::Action::NoteBold, crate::keys::Binding::parse("Alt+Z").unwrap()).unwrap();
+    let shown = fx.badges(Modifiers::ALT);
+    assert!(!shown.iter().any(|(t, _)| t == "B"));
+    let moved = shown.iter().find(|(t, _)| t == "Z").unwrap().1;
+    assert!(bold.expand(8.0).contains(moved), "the badge Z is at the Bold button too");
+    // an action without an Alt key has no badge
+    fx.app.keymap.clear(crate::keys::Action::NoteItalic);
+    assert!(!fx.badges(Modifiers::ALT).iter().any(|(t, _)| t == "I"));
+    // the reading view has no toolbar and no preview button; the view button is still there
+    fx.alt_key(Key::V, "v");
+    let texts: Vec<String> = fx.badges(Modifiers::ALT).into_iter().map(|(t, _)| t).collect();
+    assert!(!texts.contains(&"Z".to_string()) && !texts.contains(&"P".to_string()), "{texts:?}");
+    assert!(texts.contains(&"V".to_string()) && texts.contains(&"N".to_string()) && texts.contains(&"1".to_string()));
+}
+
+// spec: KEY-016, EDIT-030
+#[test]
+fn a_greyed_out_button_of_a_cell_has_no_badge() {
+    let mut fx = Fx::table("badges-cell");
+    fx.edit_cell("one two");
+    let texts: Vec<String> = fx.badges(Modifiers::ALT).into_iter().map(|(t, _)| t).collect();
+    assert!(texts.contains(&"B".to_string()) && texts.contains(&"Y".to_string()), "{texts:?}");
+    for greyed in ["K", "O", "E", "T", "Q", "R", "A", "M", "U"] {
+        assert!(!texts.contains(&greyed.to_string()), "{greyed} is greyed out: {texts:?}");
+    }
+}
+
+// spec: EDIT-042
+#[test]
+fn after_a_view_button_or_a_toolbar_button_the_editor_has_the_keyboard_and_the_selection_is_unchanged() {
+    let mut fx = Fx::new("focus-back", "one two three\n");
+    // a click on the preview button, the edit / reading button, the sidebar toggle, a ribbon item
+    for tip in ["Markdown preview", "Raw markdown", "Toggle left sidebar", "Toggle left sidebar", "Files"] {
+        fx.select(4, 7);
+        fx.click(tip);
+        assert!(fx.has_focus(), "after a click on {tip} the editor has the keyboard");
+        assert_eq!(fx.selected(), "two", "…and the selection is unchanged after {tip}");
+    }
+    // the reading view has no editor; the button back to editing gives it the keyboard
+    fx.select(4, 7);
+    fx.click("Reading view (Ctrl+E)");
+    assert!(fx.reading());
+    fx.click("Edit (Ctrl+E)");
+    assert!(!fx.reading(), "editing again");
+    assert!(fx.has_focus(), "the editor has the keyboard");
+    assert_eq!(fx.selected(), "two");
+    // the same through the keys
+    fx.select(4, 7);
+    for (key, typed) in [(Key::P, "p"), (Key::Comma, ","), (Key::Comma, ","), (Key::Num1, "1")] {
+        fx.alt_key(key, typed);
+        assert!(fx.has_focus(), "after Alt+{key:?} the editor has the keyboard");
+        assert_eq!(fx.selected(), "two", "after Alt+{key:?}");
+    }
+    // the reading view and back
+    fx.alt_key(Key::V, "v");
+    fx.alt_key(Key::V, "v");
+    assert!(fx.has_focus() && fx.selected() == "two", "after Alt+V twice");
+    assert_eq!(fx.text(), "one two three\n");
+    // a toolbar button, by click and by key
+    fx.click("Bold: **text**");
+    assert!(fx.has_focus() && fx.selected() == "two");
+    fx.alt_key(Key::I, "i");
+    assert!(fx.has_focus() && fx.selected() == "two");
 }

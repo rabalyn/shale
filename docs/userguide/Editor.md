@@ -11,6 +11,9 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 - **Alt+↑ / Alt+↓** move the current line.
 - A gutter on the left shows **line numbers** (Settings → Editor, on by default);
   a wrapped line keeps one number.
+- The **cursor** has a shape of your choice (Settings → Editor): a bar before the character at the
+  cursor (the default), a bar after it, a block or an underline. With vim-style editing the cursor in
+  normal mode has its own choice (default: block). "Blinking cursor" turns the blinking off.
 
 ## The title line and pasting
 
@@ -41,6 +44,12 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
   toggles off when they all have it. A heading replaces a list marker and the other way round.
 - Every click is one undo step, and the keyboard stays in the note, with the Markdown preview on
   or off and with vim-style editing (insert mode stays, otherwise you are in normal mode).
+- Every button has an Alt key: hold **Alt** and a small badge with the key shows at each button
+  (Alt+B bold, Alt+I italic, Alt+E the heading menu, Alt+V edit / reading view, Alt+P Markdown
+  preview, Alt+N new tab, Alt+1 … Alt+0 the ribbon icons, Alt+, and Alt+. the sidebars; the list is
+  in [[Keyboard shortcuts]]). A key does what a click does, with the keyboard staying in the note,
+  and does nothing where the button is not there or greyed out. The keys can be changed in
+  Settings → Keybindings (scope Note view); on macOS they have no key until you set one.
 - Settings → Editor → Editing, "Show formatting toolbar" turns the toolbar off; "Toolbar button size"
   makes its buttons bigger or smaller (80 % to 200 %, 110 % by default).
 
@@ -170,7 +179,8 @@ Videos resize the same way (the controls stay below the picture; **100%** is the
 
 ## Vim-style editing
 
-Settings → Editor, off by default. Notes open in normal mode.
+Settings → Editor, off by default. Notes open in normal mode. The cursor in normal mode is a block
+unless you choose another shape ("Cursor in normal mode"); typing uses "Cursor while typing".
 
 | Keys | What it does |
 |---|---|

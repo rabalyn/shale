@@ -16,6 +16,9 @@ mod calendar;
 mod caption;
 mod colour_tags;
 mod config;
+mod cursor_style;
+#[cfg(test)]
+mod cursor_ui_tests;
 mod data_usage;
 mod dialog;
 mod drawing;
@@ -35,6 +38,7 @@ mod graph;
 mod import;
 mod instance;
 mod jobs;
+mod key_badges;
 mod keys;
 mod keys_ui;
 mod layout;
