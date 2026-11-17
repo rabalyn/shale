@@ -405,6 +405,15 @@ impl MediaPlayer {
         self.lock().open_output = Some(|| Err("no sound output".into()));
     }
 
+    /// Tests: a seek of the current file is still waiting for the mixer.
+    #[cfg(test)]
+    pub fn seek_pending(&self) -> bool {
+        let s = self.lock();
+        let Some(c) = s.current.as_ref() else { return false };
+        let status = c.status.lock().unwrap_or_else(|e| e.into_inner());
+        matches!(&*status, Status::Ready(shared) if shared.seek_pending())
+    }
+
     /// Tests: how far the current file is, in seconds.
     #[cfg(test)]
     pub fn position(&self) -> Option<f64> {
