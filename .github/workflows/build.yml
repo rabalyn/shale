@@ -3,7 +3,8 @@
 # request, so the public runners are not used for day-to-day work. Day-to-day CI for Linux and the
 # daily dependency audit run on the homelab Forgejo instead: .forgejo/workflows/ci.yml and
 # security.yml.
-# 1. Releases (BUILD-012): GitHub gets the version tags that make-release.sh pushes.
+# 1. Releases (BUILD-012): GitHub gets the release tags that scripts/make-release.sh pushes to
+#    Forgejo, from Forgejo's `mirror` job once they passed CI there (BUILD-016).
 #    - every version tag (v0.2.0, ...): checks, builds and tests it again on Linux, and publishes a
 #      release page named after the version, with that version's notes from CHANGELOG.md (the tag
 #      must match the version in Cargo.toml), the tarball and the zip of the user guide (DEV-020), their
@@ -19,7 +20,9 @@ name: build
 
 on:
   push:
-    tags: ['v*']
+    # release tags only: a pre-release check tag (vX.Y.Z-rc.N, FORGE-013) stays on Forgejo and is
+    # never built here, even if it is pushed by hand
+    tags: ['v*', '!v*-*']
   workflow_dispatch:
 
 # each job asks for what it needs

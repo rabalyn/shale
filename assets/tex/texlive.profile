@@ -1,4 +1,4 @@
-# The install-tl profile for Shale's TeX Live (ADR-0018): only the infrastructure (the engines and
+# The install-tl profile for Shale's TeX Live (ADR-0019): only the infrastructure (the engines and
 # tlmgr), no documentation and no sources. The packages come afterwards from packages.txt with
 # `tlmgr install`. Used by tests/tex-env/Containerfile; the managed install (#279) uses the same
 # profile and replaces TEXDIR and the TEXMF* folders with its own folder.

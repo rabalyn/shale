@@ -3,7 +3,7 @@
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
 button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**, and the button
-**Open settings file** at the top right (see below).
+**Open settings file** at the top right (see below). The tab list is as wide as its longest name at any font size; drag its border to change the width, double-click the border to make it automatic again.
 
 Two files hold settings:
 
@@ -60,6 +60,8 @@ change within a second.
 | `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
 | `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
 
+| `settings_tab_width` | left out (as wide as the longest tab name; 60 points at least, half of the window at most) | the border between the tab list and the page of the Settings window: drag it to set the width, double-click it to go back to automatic |
+
 ### Fonts
 
 One table, `fonts` (`[fonts]` in the file), in the settings file. Each area has a `family` (an installed font family such as
@@ -80,6 +82,7 @@ One table, `fonts` (`[fonts]` in the file), in the settings file. Each area has 
 Inside each of these tables: `family` and `size`. The old `font_size` of earlier versions became the
 size of the two editor areas when you updated.
 | `line_numbers` | on | Editor, "Show line numbers in the editor" |
+| `numbered_headings` | on | Editor, "Number headings": `##` and deeper show 1, 1.1, 1.2 before their text; a note's front matter `numbered-headings: true` or `false` overrides it for that note (see [[Notes and links]]) |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
 | `link_preview_width` | 640 (at least 240, at most the window) | Editor, "Link preview size (Shift+K)", the first number; also set by dragging the preview's edges |

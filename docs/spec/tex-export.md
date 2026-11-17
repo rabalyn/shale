@@ -1,7 +1,7 @@
 # Spec: PDF export through LaTeX templates (TEX)
 
 **IS NOW** = true of the code today (⚠ = known defect) · **SHOULD BE** = agreed target.
-Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Decisions: [ADR-0018](../decisions/0018-latex-export-managed-texlive.md).
+Format: [ADR-0001](../decisions/0001-spec-driven-development.md). Decisions: [ADR-0019](../decisions/0019-latex-export-managed-texlive.md).
 Umbrella issue: #277. The built-in pure-Rust export (PDF-001…PDF-007, `src/pdf/`) stays the
 default; the LaTeX path is a second engine the person picks per export (TEX-016). Tests are named
 `file.rs::test_fn` (under `src/`).

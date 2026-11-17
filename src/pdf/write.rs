@@ -182,6 +182,24 @@ pub struct Page {
     alphas: BTreeSet<u8>,
     fonts: BTreeSet<FontKind>,
     links: Vec<([f32; 4], String)>,
+    /// clickable rectangles that go to a place in the document (PDF-008)
+    jumps: Vec<([f32; 4], Dest)>,
+}
+
+/// A place in the document: a page (by index) and the distance from its top in points.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dest {
+    pub page: usize,
+    pub y: f32,
+}
+
+/// An entry of the bookmarks (the document outline of PDF readers): nested by `level`, a deeper
+/// level belongs to the nearest entry before it with a shallower one (PDF-008).
+#[derive(Clone, Debug)]
+pub struct Bookmark {
+    pub level: usize,
+    pub title: String,
+    pub to: Dest,
 }
 
 impl Page {
@@ -315,6 +333,12 @@ impl Page {
         let r = [x, self.y(y + h), x + w, self.y(y)];
         self.links.push((r, uri.to_string()));
     }
+
+    /// A clickable rect that goes to a place in the document (a page and the distance from its top).
+    pub fn jump(&mut self, x: f32, y: f32, w: f32, h: f32, to: Dest) {
+        let r = [x, self.y(y + h), x + w, self.y(y)];
+        self.jumps.push((r, to));
+    }
 }
 
 struct PathOps {
@@ -371,6 +395,8 @@ pub struct Doc {
     pub pages: Vec<Page>,
     images: Vec<Image>,
     pub title: String,
+    /// the bookmarks, in document order (PDF-008)
+    pub bookmarks: Vec<Bookmark>,
 }
 
 fn deflate(data: &[u8]) -> Vec<u8> {
@@ -392,13 +418,23 @@ fn esc(s: &str) -> String {
     out
 }
 
+/// A PDF text string with any characters: UTF-16BE in hex.
+fn text_string(s: &str) -> String {
+    let mut out = String::from("<FEFF");
+    for u in s.encode_utf16() {
+        let _ = write!(out, "{u:04X}");
+    }
+    out.push('>');
+    out
+}
+
 impl Doc {
     pub fn new(title: &str) -> Doc {
         Doc { title: title.to_string(), ..Default::default() }
     }
 
     pub fn add_page(&mut self, width: f32, height: f32) -> usize {
-        self.pages.push(Page { width, height, ops: String::new(), images: BTreeSet::new(), alphas: BTreeSet::new(), fonts: BTreeSet::new(), links: vec![] });
+        self.pages.push(Page { width, height, ops: String::new(), images: BTreeSet::new(), alphas: BTreeSet::new(), fonts: BTreeSet::new(), links: vec![], jumps: vec![] });
         self.pages.len() - 1
     }
 
@@ -409,6 +445,57 @@ impl Doc {
     pub fn add_image(&mut self, img: Image) -> usize {
         self.images.push(img);
         self.images.len() - 1
+    }
+
+    /// The bookmarks as PDF objects (PDF-008): the root of the outline, with entries nested by
+    /// level, each with its parent, its neighbours, its first and last child and the number of
+    /// entries below it. Returns the root's object number, None without bookmarks.
+    fn outline_objects(&self, objs: &mut Vec<Vec<u8>>, dest: &dyn Fn(&Dest) -> String) -> Option<usize> {
+        let marks = &self.bookmarks;
+        if marks.is_empty() {
+            return None;
+        }
+        objs.push(Vec::new());
+        let root = objs.len();
+        let ids: Vec<usize> = marks
+            .iter()
+            .map(|_| {
+                objs.push(Vec::new());
+                objs.len()
+            })
+            .collect();
+        let mut parent: Vec<Option<usize>> = Vec::new();
+        let mut open: Vec<usize> = Vec::new();
+        for (i, m) in marks.iter().enumerate() {
+            while open.last().is_some_and(|&j| marks[j].level >= m.level) {
+                open.pop();
+            }
+            parent.push(open.last().copied());
+            open.push(i);
+        }
+        let kids = |p: Option<usize>| -> Vec<usize> { (0..marks.len()).filter(|&i| parent[i] == p).collect() };
+        // the entries below an entry: all that come after it until one is as shallow as it
+        let below = |i: usize| marks[i + 1..].iter().take_while(|m| m.level > marks[i].level).count();
+        let top = kids(None);
+        objs[root - 1] = format!("<< /Type /Outlines /First {} 0 R /Last {} 0 R /Count {} >>", ids[top[0]], ids[*top.last().unwrap_or(&0)], marks.len()).into_bytes();
+        for (i, m) in marks.iter().enumerate() {
+            let siblings = kids(parent[i]);
+            let at = siblings.iter().position(|&j| j == i).unwrap_or(0);
+            let mut o = format!("<< /Title {} /Parent {} 0 R /Dest {}", text_string(&m.title), parent[i].map_or(root, |p| ids[p]), dest(&m.to));
+            if at > 0 {
+                let _ = write!(o, " /Prev {} 0 R", ids[siblings[at - 1]]);
+            }
+            if let Some(next) = siblings.get(at + 1) {
+                let _ = write!(o, " /Next {} 0 R", ids[*next]);
+            }
+            let mine = kids(Some(i));
+            if let (Some(first), Some(last)) = (mine.first(), mine.last()) {
+                let _ = write!(o, " /First {} 0 R /Last {} 0 R /Count {}", ids[*first], ids[*last], below(i));
+            }
+            o.push_str(" >>");
+            objs[ids[i] - 1] = o.into_bytes();
+        }
+        Some(root)
     }
 
     /// Serialize the whole document.
@@ -479,9 +566,14 @@ impl Doc {
             objs[id - 1] = o;
             image_ids.push(id);
         }
-        // pages
+        // pages (their ids first: links and bookmarks point to pages that come later)
+        let page_ids: Vec<usize> = self.pages.iter().map(|_| reserve(&mut objs)).collect();
+        let dest = |d: &Dest| {
+            let (id, height) = page_ids.get(d.page).zip(self.pages.get(d.page)).map_or((page_ids[0], 0.0), |(id, p)| (*id, p.height));
+            format!("[{id} 0 R /XYZ 0 {:.2} 0]", height - d.y)
+        };
         let mut kids = Vec::new();
-        for p in &self.pages {
+        for (pi, p) in self.pages.iter().enumerate() {
             let content_id = reserve(&mut objs);
             let data = deflate(p.ops.as_bytes());
             let mut o = format!("<< /Length {} /Filter /FlateDecode >>\nstream\n", data.len()).into_bytes();
@@ -497,14 +589,21 @@ impl Doc {
                 objs[id - 1] = format!("<< /Type /Annot /Subtype /Link /Rect [{:.2} {:.2} {:.2} {:.2}] /Border [0 0 0] /A << /S /URI /URI ({}) >> >>", r[0], r[1], r[2], r[3], esc(uri)).into_bytes();
                 annots.push(format!("{id} 0 R"));
             }
+            for (r, to) in &p.jumps {
+                let id = reserve(&mut objs);
+                objs[id - 1] = format!("<< /Type /Annot /Subtype /Link /Rect [{:.2} {:.2} {:.2} {:.2}] /Border [0 0 0] /Dest {} >>", r[0], r[1], r[2], r[3], dest(to)).into_bytes();
+                annots.push(format!("{id} 0 R"));
+            }
             let annots = if annots.is_empty() { String::new() } else { format!(" /Annots [{}]", annots.join(" ")) };
-            let page_id = reserve(&mut objs);
+            let page_id = page_ids[pi];
             objs[page_id - 1] =
                 format!("<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents {content_id} 0 R /Resources << /Font << {fonts}>> /XObject << {xobj}>> /ExtGState << {gs}>> >>{annots} >>", p.width, p.height)
                     .into_bytes();
             kids.push(format!("{page_id} 0 R"));
         }
-        objs[catalog - 1] = format!("<< /Type /Catalog /Pages {pages_id} 0 R >>").into_bytes();
+        let outlines = self.outline_objects(&mut objs, &dest);
+        let outlines = outlines.map(|id| format!(" /Outlines {id} 0 R")).unwrap_or_default();
+        objs[catalog - 1] = format!("<< /Type /Catalog /Pages {pages_id} 0 R{outlines} >>").into_bytes();
         objs[pages_id - 1] = format!("<< /Type /Pages /Kids [{}] /Count {} >>", kids.join(" "), kids.len()).into_bytes();
         objs[info - 1] = format!("<< /Title ({}) /Producer (Shale) >>", esc(&self.title)).into_bytes();
         let mut out = b"%PDF-1.5\n%\xe2\xe3\xcf\xd3\n".to_vec();
@@ -556,6 +655,36 @@ mod tests {
         // the red rectangle is where we put it (x 50, y 30 from the top)
         let i = ((30 * pm.width() as usize) + 50) * 4;
         assert!(px[i] > 150 && px[i + 1] < 100, "red rectangle rendered: {:?}", &px[i..i + 4]);
+    }
+
+    // spec: PDF-008
+    #[test]
+    fn bookmarks_nest_by_level_and_links_to_pages_are_destinations_and_the_pdf_still_renders() {
+        let mut d = Doc::new("Test");
+        let (a, b) = (d.add_page(300.0, 200.0), d.add_page(300.0, 200.0));
+        d.page(a).jump(10.0, 10.0, 100.0, 20.0, Dest { page: b, y: 40.0 });
+        d.page(b).text(TextStyle::plain(FontKind::Sans, 12.0, Rgba::BLACK), 10.0, 50.0, "second");
+        for (level, title, page) in [(2, "One Ü", a), (3, "Sub", b), (3, "Sub 2", b), (2, "Two", b)] {
+            d.bookmarks.push(Bookmark { level, title: title.into(), to: Dest { page, y: 40.0 } });
+        }
+        let bytes = d.finish();
+        let raw = String::from_utf8_lossy(&bytes).into_owned();
+        let obj = |needle: &str| raw.split("\nendobj").find(|o| o.contains(needle)).unwrap_or_else(|| panic!("no object with {needle}")).to_string();
+        let id = |o: &str| o.split_whitespace().next().unwrap().to_string();
+        let (one, sub, sub2, two) = (obj(&text_string("One Ü")), obj(&format!("/Title {}", text_string("Sub"))), obj(&text_string("Sub 2")), obj(&text_string("Two")));
+        assert!(raw.contains("/Type /Outlines") && raw.contains("/Count 4"), "the root counts all entries");
+        assert!(one.contains("/Count 2") && one.contains(&format!("/First {} 0 R /Last {} 0 R", id(&sub), id(&sub2))), "{one}");
+        assert!(sub.contains(&format!("/Parent {} 0 R", id(&one))) && sub.contains(&format!("/Next {} 0 R", id(&sub2))) && !sub.contains("/Prev"), "{sub}");
+        assert!(sub2.contains(&format!("/Prev {} 0 R", id(&sub))) && !sub2.contains("/Next"), "{sub2}");
+        assert!(two.contains(&format!("/Prev {} 0 R", id(&one))) && !two.contains("/First"), "{two}");
+        assert!(one.contains("/XYZ 0 160.00 0]"), "a place 40 points from the top of a 200 point page: {one}");
+        let link = obj("/Subtype /Link");
+        assert!(link.contains("/Dest [") && link.contains("/XYZ 0 160.00 0]") && !link.contains("/URI"), "{link}");
+        let pdf = hayro::hayro_syntax::Pdf::new(bytes).expect("a PDF with bookmarks parses");
+        assert_eq!(pdf.pages().len(), 2);
+        let mut plain = Doc::new("Plain");
+        plain.add_page(100.0, 100.0);
+        assert!(!String::from_utf8_lossy(&plain.finish()).contains("/Outlines"), "no bookmarks, no outline");
     }
 
     // spec: PDF-001

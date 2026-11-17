@@ -562,15 +562,19 @@ impl ShaleApp {
             }
             RightPanel::Outline => {
                 let text = self.notes.get(&rel).map(|d| d.text.clone()).or_else(|| v.notes.get(&rel).map(|n| n.text.clone())).unwrap_or_default();
-                let heads = markdown::find_headings(&text);
+                let numbered = markdown::headings_numbered(&text, self.cfg.numbered_headings);
+                let heads = markdown::heading_numbers(&text);
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     if heads.is_empty() {
                         ui.label(muted("No headings in this note."));
                     }
                     let min = heads.iter().map(|h| h.1).min().unwrap_or(1);
-                    for (line, level, title) in heads {
+                    for (line, level, title, number) in heads {
                         ui.horizontal(|ui| {
                             ui.add_space((level - min) as f32 * 14.0);
+                            if let Some(n) = number.filter(|_| numbered) {
+                                ui.label(muted(n).size(14.0));
+                            }
                             let links: Vec<_> = markdown::find_links(&title)
                                 .into_iter()
                                 .map(|l| {
@@ -580,7 +584,7 @@ impl ShaleApp {
                                 .collect();
                             let job = crate::editor::outline_job(&title, &links, 14.0);
                             if ui.add(egui::Label::new(job).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                                self.actions.push(Action::GotoLine { rel: rel.clone(), line });
+                                self.actions.push(Action::GotoHeading { rel: rel.clone(), line });
                             }
                         });
                     }

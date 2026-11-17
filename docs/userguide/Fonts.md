@@ -21,7 +21,14 @@ row per area; each starts with what it had.
 
 To choose a font, press the button of a row. A list of the fonts installed on the computer opens
 with a search field on top: type a part of the name, move with the arrow keys, press **Enter** to pick
-(a click works too) and **Esc** to close without picking. **Default** is Shale's own font. The
+(a click works too) and **Esc** to close without picking. **Default** is Shale's own font. The list
+opens on the font the row has.
+
+Next to every row is a sample text, "The quick brown fox, **bold** and *italic*", in the row's
+font and size, so you see all the fonts you have chosen side by side. While a list is open, the
+sample of its row shows the font the mouse is over (or the one you moved to with the arrow keys)
+without picking it; close the list and it shows the chosen font again. A font you have not used yet
+takes a moment to load ("Loading the font…"). Large sizes are shown at 28 points at most. The
 list is read in the background the first time it is needed, so it may take a moment on a computer with
 very many fonts. The size is in points, 8 to 48; code stays in a monospace font.
 

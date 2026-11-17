@@ -2,7 +2,7 @@
 
 A container image with a real LuaLaTeX and `biber` (TeX Live 2025), and the TU Darmstadt
 templates [tuda-ci](https://github.com/tudace/tuda_latex_templates) 4.06, to test Shale's LaTeX
-export against a real TeX (TEX-020, TEX-021, [ADR-0018](../../docs/decisions/0018-latex-export-managed-texlive.md)).
+export against a real TeX (TEX-020, TEX-021, [ADR-0019](../../docs/decisions/0019-latex-export-managed-texlive.md)).
 Nothing runs in the background: the image is built once, each compile is a short-lived container.
 
 Needs `podman` (or Docker: `SHALE_TEX_ENV_ENGINE=docker`), `curl` and `sha256sum` (or `shasum`).

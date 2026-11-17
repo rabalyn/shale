@@ -1,4 +1,4 @@
-# TeX Live for Shale's LaTeX export tests (TEX-020, ADR-0018): LuaLaTeX and biber, installed from a
+# TeX Live for Shale's LaTeX export tests (TEX-020, ADR-0019): LuaLaTeX and biber, installed from a
 # frozen repository so the image is the same every time it is built. The packages are the list of
 # assets/tex/packages.txt; the templates are not part of the image (tests/tex-env/README.md).
 FROM docker.io/library/debian:bookworm-20260112-slim

@@ -14,7 +14,12 @@ Back to [[Start here]].
 - `[[Note]]` is **blue** when the note exists and **red** when it does not. Click a blue link to
   open the note; click a red one to create it (next to the current note if you set
   "Create notes from red links next to the current note").
-- `[[Note|shown text]]` shows another text, `[[Note#Heading]]` goes to a heading.
+- `[[Note|shown text]]` shows another text, `[[Note#Heading]]` goes to a heading: the note opens with
+  that heading at the top of the view, in the mode the tab is in (the cursor on the heading in the
+  editor, the reading view scrolled to it in the reading view). `[[#Heading]]` is a heading of this
+  note, and `[text](Note.md#Heading)` works too. The heading is found ignoring case, spaces and
+  formatting (`#plan v2` finds `## **Plan** v2`); if there is none, the note opens at its top and a
+  message says so.
 - A link by name (`[[Editor]]`) finds the note wherever it is; a link by path
   (`[[Folder/Note]]`, `./Note`, `../Note`) is exact.
 - Web links `[text](https://…)` open in your browser.
@@ -31,7 +36,19 @@ Back to [[Start here]].
 - Type `[!` to pick a file: `/` starts at the vault, `~/` at your home folder, and Tab
   completes like a shell. Files from outside the vault are copied to `z_media/<year>/<month>/`.
 - Type `[[p ` and a name to link a person ([[Tags and people]]).
+- After `[[Note#` (or `[[#` for this note) the list shows that note's headings, indented by level
+  and with their numbers, and typing narrows it; picking one inserts the heading's text.
 - In these lists ↓ / ↑ or Ctrl+J / Ctrl+K move the highlight; Enter, Tab or a click picks the entry.
+
+## Numbered headings
+
+The headings of a note can show numbers before their text: `##` is 1, a `###` under it 1.1, the next
+`###` 1.2, the next `##` 2. The first `#` heading is the note's title and has no number. The numbers
+are only drawn, in a muted colour, never written into the file; you see them in the editor, the
+Markdown preview, the [[Reading view]], the outline ([[Graph and backlinks]]), the link preview and
+the [[PDF]]. Links stay `[[Note#Heading]]`, with the heading's text. Settings → Editor → "Number
+headings" (on by default) switches it for all notes; put `numbered-headings: true` or `false` (or
+`yes` / `no`) in a note's front matter to decide for that note alone (see [[Settings reference]]).
 
 ## Embeds
 

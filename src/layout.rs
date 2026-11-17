@@ -833,18 +833,21 @@ impl ShaleApp {
                     }
                     if reading {
                         let text = doc.text.clone();
-                        let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, base, dark));
+                        let extras = reader::Extras { numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings), scroll_to: tab.reader_line.take() };
+                        let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, (base, dark), &extras));
                         if let Some(a) = shown {
                             handle_reader_action(&mut self.actions, a, &rel);
                         }
                     } else {
                         tab.editor.inline_images = self.cfg.inline_images;
                         tab.editor.line_numbers = self.cfg.line_numbers;
+                        tab.editor.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.live_preview = self.cfg.live_preview;
                         tab.editor.preview_raw_lines = self.cfg.preview_raw_lines;
                         tab.editor.table_cell_edit = self.cfg.table_cell_edit;
                         tab.editor.vim_enabled = self.cfg.vim_mode;
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
+                        tab.editor.assist.numbered_headings = self.cfg.numbered_headings;
                         tab.editor.dark_canvas = self.cfg.dark_canvas;
                         tab.editor.media = self.media.clone();
                         let (changed, action) = crate::fonts::with_family(&fonts.rendered, || tab.editor.show(ui, &mut doc.text, vault, crate::editor::Note { rel: &rel, undo: &mut self.undo }, &fonts, ctrl));

@@ -1,14 +1,16 @@
-# CI on the homelab Forgejo (git remote `origin`): every push to `main` and every release tag is
-# formatted, linted, built, tested and packaged here (the dependencies are audited by
-# security.yml, which also turns advisories into GitHub issues, BUILD-021). Changes
-# are landed locally by scripts/land.sh, which runs the checks before it pushes `main` (FORGE-011,
-# ADR-0016); this workflow checks again afterwards in a clean container, and a red `main` is
-# fixed at once.
-# Nothing is published from here. Releases are built and published by GitHub from `v*` tags
+# CI on the homelab Forgejo (git remote `origin`): every `v*` tag is formatted, linted, built,
+# tested and packaged here (the dependencies are audited by security.yml, which also turns
+# advisories into GitHub issues, BUILD-021). Changes are landed locally by scripts/land.sh, which
+# runs the checks before it pushes `main` (FORGE-011, ADR-0016); a push to `main` runs nothing
+# here (ADR-0018). The tags are made by script: scripts/make-tag.sh makes a pre-release check tag
+# `vX.Y.Z-rc.N` when the owner is done for now (FORGE-013), scripts/make-release.sh a release
+# `vX.Y.Z` (FORGE-014). A red run is fixed in a branch and a new tag is made; a pushed tag is
+# never moved.
+# Nothing is published from here. Releases are built and published by GitHub from release tags
 # (.github/workflows/build.yml; Forgejo ignores .github/workflows because this folder exists).
-# A push to `main` that passes the build is also pushed to GitHub's `main` (the `mirror` job), so
-# the public repository has the code its issues talk about; GitHub builds nothing for it (only
-# release tags, where macOS and Windows are built and tested too: BUILD-016, BUILD-017).
+# The commit of a tag that passes the build is pushed to GitHub's `main` (the `mirror` job), so
+# the public repository has the code its issues talk about; a release tag is pushed there too,
+# which starts the release build, also on macOS and Windows (BUILD-016, BUILD-017).
 #
 # The runner starts the job in a container (Docker or Podman). Steps are plain shell: JavaScript
 # actions (checkout, cache, upload-artifact) need Node, which the Rust image does not have, and
@@ -16,9 +18,9 @@
 name: ci
 
 on:
-  # branches and pull requests run nothing: scripts/land.sh checks them locally (FORGE-011)
+  # main, branches and pull requests run nothing: scripts/land.sh checks them locally (FORGE-011,
+  # ADR-0018); only tags run CI
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
   # weekly, so the real-server suites notice changed test images (only env-tests runs then)
@@ -77,8 +79,8 @@ jobs:
 
       # The checkout above is shallow and has no tags; the release check and the commit check
       # need the history and the tags (the token is only needed when the repository is private).
-      - name: Fetch the history and the tags (tags and main)
-        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+      - name: Fetch the history and the tags (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
           TOKEN: ${{ github.token }}
@@ -91,9 +93,6 @@ jobs:
           if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
             git "${auth[@]}" fetch -q --unshallow origin
           fi
-          # the commit a push is compared with may be outside the fetched history
-          sha="${{ github.event.before }}"
-          if [ -n "$sha" ]; then git "${auth[@]}" fetch -q origin "$sha" || true; fi
 
       # BUILD-013: valid semver, greater than the previous tag, Cargo.toml and Cargo.lock agree,
       # and the CHANGELOG.md section is not empty and names every issue closed since the previous tag
@@ -101,16 +100,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: sh .github/check-release.sh "${GITHUB_REF_NAME#v}"
 
-      # FORGE-008: every new commit names an issue or starts with "no-issue:"
-      - name: Check that commits name an issue (main)
-        if: github.ref == 'refs/heads/main'
-        run: sh .forgejo/scripts/check-commit-issues.sh "${{ github.event.before }}" "${{ github.sha }}"
-
       - name: Test the release and commit checks
         run: |
           sh .github/test-check-release.sh
           sh .forgejo/scripts/test-check-commit-issues.sh
           bash scripts/test-land.sh
+          bash scripts/test-release.sh
 
       # BUILD-015: the README and every release page start with the AI-development notice
       - name: Check the AI notice
@@ -296,7 +291,7 @@ jobs:
   # job container; where the runner offers none, the job says so and ends green without running the
   # suites (see tests/caldav-env/README.md, "In CI"). Separate from the build, so it never blocks it.
   env-tests:
-    if: github.event_name != 'workflow_dispatch' && (github.event_name != 'push' || github.ref == 'refs/heads/main')
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     container:
       image: docker.io/library/rust:1.100.0-bookworm
@@ -369,17 +364,19 @@ jobs:
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
         run: sh .forgejo/scripts/env-tests.sh run "${{ steps.engine.outputs.engine }}"
 
-  # A `main` that is green on Linux goes to GitHub's `main` (BUILD-016, FORGE-003): the public
-  # repository, where the issues are (ADR-0017), shows the code they refer to; a pushed commit
-  # that says `Closes #N` closes that issue there. GitHub runs no workflow for it (only release
-  # tags). Only `main`, never a branch. The write credential is the owner's: a fine-grained GitHub
+  # The commit of a tag that is green on Linux goes to GitHub's `main` (BUILD-016, FORGE-003): the
+  # public repository, where the issues are (ADR-0017), shows the code they refer to; a pushed
+  # commit that says `Closes #N` closes that issue there. GitHub runs no workflow for it. A release
+  # tag (`vX.Y.Z`, no pre-release part) is pushed after it and starts the release build there
+  # (BUILD-012); a pre-release check tag (`vX.Y.Z-rc.N`, FORGE-013) stays here. Only the commit of
+  # a tag that is on Forgejo's `main`, never a branch. The write credential is the owner's: a fine-grained GitHub
   # token for rabalyn/shale only, with Contents and Workflows read and write (a deploy key may not
   # push changes to .github/workflows/, raba/shale#52) and Issues read and write (BUILD-021), kept
   # as the Forgejo Actions secret MIRROR_DEPLOY_KEY (the name is from the deploy key it replaced;
   # Forgejo refuses names that start with GITHUB_). Without it the job says so and fails.
   mirror:
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     container:
       image: docker.io/library/rust:1.100.0-bookworm
@@ -391,12 +388,12 @@ jobs:
             echo "Added the runner's extra CA."
           fi
 
-      - name: Push this commit to GitHub's main
+      - name: Push the tag's commit to GitHub's main, and a release tag
         shell: bash
         env:
           TOKEN: ${{ github.token }}
           MIRROR_TOKEN: ${{ secrets.MIRROR_DEPLOY_KEY }}
-          SHA: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [ -z "$MIRROR_TOKEN" ]; then
@@ -407,16 +404,40 @@ jobs:
           git init -q .
           git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
           auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
-          git "${auth[@]}" fetch -q origin "+refs/heads/main:refs/remotes/origin/main"
-          git cat-file -e "$SHA^{commit}"
+          git "${auth[@]}" fetch -q origin "+refs/heads/main:refs/remotes/origin/main" "+refs/tags/$TAG:refs/tags/$TAG"
+          SHA=$(git rev-parse "refs/tags/$TAG^{commit}")
+          # only a commit of main is sent to GitHub's main
+          if ! git merge-base --is-ancestor "$SHA" refs/remotes/origin/main; then
+            echo "::error::the tag $TAG points at $SHA, which is not on Forgejo's main; nothing is pushed"
+            exit 1
+          fi
           # the token goes in a header, never in the remote's address (which git may print)
           git remote add github https://github.com/rabalyn/shale.git
           gh=(-c "http.https://github.com/.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$MIRROR_TOKEN" | base64 -w0)")
           git "${gh[@]}" fetch -q github "+refs/heads/main:refs/remotes/github/main" || true
-          # a later push of main got there first: nothing to do (an older commit is never forced over it)
+          # a later tag got there first: main stays (an older commit is never forced over it)
           if git rev-parse -q --verify refs/remotes/github/main >/dev/null && git merge-base --is-ancestor "$SHA" refs/remotes/github/main; then
             echo "GitHub's main already contains $SHA."
-            exit 0
+          else
+            git "${gh[@]}" push github "$SHA:refs/heads/main"
+            echo "Pushed $SHA to GitHub's main."
           fi
-          git "${gh[@]}" push github "$SHA:refs/heads/main"
-          echo "Pushed $SHA to GitHub's main."
+          case "$TAG" in
+            *-*)
+              echo "$TAG is a pre-release (check tag): it stays on Forgejo."
+              exit 0
+              ;;
+          esac
+          # a release tag: GitHub builds and publishes it (BUILD-012); an existing one is never replaced
+          there=$(git "${gh[@]}" ls-remote github "refs/tags/$TAG" | cut -f1)
+          here=$(git rev-parse "refs/tags/$TAG")
+          if [ -n "$there" ]; then
+            if [ "$there" = "$here" ]; then
+              echo "GitHub already has the tag $TAG."
+              exit 0
+            fi
+            echo "::error::GitHub has a different tag $TAG ($there, here $here); nothing is replaced"
+            exit 1
+          fi
+          git "${gh[@]}" push github "refs/tags/$TAG:refs/tags/$TAG"
+          echo "Pushed the tag $TAG to GitHub: its release build starts there."

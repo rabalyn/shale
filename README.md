@@ -29,7 +29,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **Feeds**: read your Mastodon and Bluesky timelines in Shale and save a post (or a whole
   thread by one author) as a note, with its pictures and a link back to the post.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note
-  and a graph of the whole vault.
+  and a graph of the whole vault. Headings can be numbered (1, 1.1, 1.2), links to a heading
+  scroll to it, and the PDF export has a table of contents and bookmarks.
 - **Mail**: read your IMAP mail next to your notes, search it, mark it read, flag, move or delete
   it, write, reply, forward and send mail (plain text, attachments, drafts, an outbox with "undo
   send"), and turn a mail into a note with one key. Shale keeps a local copy of the mail; syncing never
@@ -79,9 +80,9 @@ its `.sha256` file) to unpack anywhere and open as a vault (`shale --vault <fold
 
 | System | Tested | Notes |
 |---|---|---|
-| Linux (Wayland and X11), x86_64 | on every push (Forgejo) and for every release | the release download is for this system |
-| macOS (Apple silicon, arm64) | built, linted and tested on GitHub (`macos-latest`) for every push to `main` | build it from source for now |
-| Windows 10 and 11 (x86_64) | built, linted and tested on GitHub (`windows-latest`) for every push to `main` | build it from source for now |
+| Linux (Wayland and X11), x86_64 | before every change lands, for every check tag (Forgejo) and for every release | the release download is for this system |
+| macOS (Apple silicon, arm64) | built, linted and tested on GitHub (`macos-latest`) for every release; clippy before every change lands | build it from source for now |
+| Windows 10 and 11 (x86_64) | built, linted and tested on GitHub (`windows-latest`) for every release; clippy before every change lands | build it from source for now |
 
 Release downloads for macOS and Windows do not exist yet. What differs from Linux:
 
@@ -142,22 +143,34 @@ built; it does not show that a person checked the build.
 
 ### Making a release
 
-1. Raise `version` in `Cargo.toml` ([semver](https://semver.org/): before 1.0, new features raise
-   the middle number, fixes the last one) and run `cargo build` (updates `Cargo.lock`).
-2. Move the notes from `## [Unreleased]` in `CHANGELOG.md` to a new `## [x.y.z] - date` section.
-3. Commit, then run `sh make-release.sh`: it tags the commit `vx.y.z` and pushes the commit and
-   the tag to the development server (remote `origin`) and to GitHub (remote `github`). GitHub
-   builds it and creates the release page with the AI notice (`.github/ai-notice.md`) and that
-   section as its notes and the `.sha256` file.
+Tags are made by two scripts ([ADR-0018](docs/decisions/0018-tag-only-ci.md)); both bump the
+version in `Cargo.toml` and `Cargo.lock` ([semver](https://semver.org/): before 1.0, new features
+raise the middle number, fixes the last one), land the bump with `scripts/land.sh`, tag the landed
+commit and push the tag to the development server (remote `origin`), whose CI runs only for tags.
+`--dry-run` shows the tag without changing anything. Without a changelog update (for a check tag:
+nothing new in `CHANGELOG.md` or `docs/changelog-pending/` since the previous tag; for a release:
+no entries at all) both stop with "the changelog needs an update first".
+
+1. **Check tag**, when the work is done for now: `scripts/make-tag.sh minor` (or `patch`,
+   `major`) makes `v0.4.0-rc.1`, and `scripts/make-tag.sh` the next `rc`. It merges the files in
+   `docs/changelog-pending/` into `## [Unreleased]`. When the development server's CI passes,
+   `main` is pushed to GitHub, which builds nothing; the tag stays there.
+2. **Release**: `scripts/make-release.sh` releases the version the check tags led to (`0.4.0`).
+   It also turns `## [Unreleased]` in `CHANGELOG.md` and the files in `docs/changelog-pending/`
+   into the section `## [0.4.0] - date`. When the development server's CI passes, `main` and the
+   tag go to GitHub, which builds it and creates the release page with the AI notice
+   (`.github/ai-notice.md`) and that section as its notes and the `.sha256` file.
    Before tagging, and again in both CI systems, `.github/check-release.sh` checks that the
-   version is valid semver and greater than the previous `v*` tag, that `Cargo.toml` and
-   `Cargo.lock` agree, and that the changelog section is not empty and mentions every issue
-   closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
+   version is valid semver and greater than every other `v*` tag, that `Cargo.toml` and
+   `Cargo.lock` agree, and, for a release, that the changelog section is not empty and mentions
+   every issue closed (`Closes #N`) since the previous release; otherwise nothing is tagged or
+   built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
-formats, lints, builds, tests and packages every push to `main` and audits the dependencies
-daily (`security.yml`); GitHub gets `main` and builds only the releases, on Linux, macOS and
-Windows (`.github/workflows/build.yml` runs for release tags and by hand, never for a push).
+formats, lints, builds, tests and packages every tag and audits the dependencies daily
+(`security.yml`); GitHub gets `main` with each green tag and builds only the releases, on Linux,
+macOS and Windows (`.github/workflows/build.yml` runs for release tags and by hand, never for a
+push or a check tag).
 
 ## Development and issues
 
@@ -170,9 +183,9 @@ owner's self-hosted Forgejo, which is not public; `main` is pushed here after it
 [engineering.md](docs/spec/engineering.md)). The issue numbers before 2026-11-17 come from Forgejo
 and were imported with their numbers, so `#N` in the history is the issue `#N` here. Changes land locally: `scripts/land.sh <branch>`
 merges a branch into `main`, runs fmt, clippy and the tests, and pushes only when they pass
-([ADR-0016](docs/decisions/0016-local-landing.md)). The Forgejo runner checks `main` again
-afterwards (`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012), also on macOS and
-Windows (BUILD-017).
+([ADR-0016](docs/decisions/0016-local-landing.md)). The Forgejo runner checks again for every tag
+(`.forgejo/workflows/ci.yml`, [ADR-0018](docs/decisions/0018-tag-only-ci.md)); GitHub builds
+release tags (BUILD-012), also on macOS and Windows (BUILD-017).
 
 ## Build and run
 

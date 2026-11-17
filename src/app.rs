@@ -61,6 +61,8 @@ pub struct Tab {
     pub back: Vec<View>,
     pub fwd: Vec<View>,
     pub reading: bool,
+    /// The line of a heading the reading view scrolls to when it next draws (LINK-015).
+    pub reader_line: Option<usize>,
     /// Pinned tabs sit left of all others (NAV-016).
     pub pinned: bool,
     pub editor: NoteEditor,
@@ -233,6 +235,11 @@ pub enum Action {
     ToggleTask {
         rel: PathBuf,
         offset: usize,
+    },
+    /// A heading of the Outline: scroll to it in the tab's mode (LINK-015).
+    GotoHeading {
+        rel: PathBuf,
+        line: usize,
     },
     GotoLine {
         rel: PathBuf,
@@ -967,10 +974,16 @@ impl ShaleApp {
     pub fn open_link(&mut self, target: &str, heading: Option<String>, from: Option<PathBuf>, new_tab: bool) {
         let Some(v) = &self.vault else { return };
         if let Some(rel) = v.resolve(target, from.as_deref()) {
-            let line = heading.and_then(|h| v.notes.get(&rel).and_then(|n| markdown::find_headings(&n.text).into_iter().find(|(_, _, t)| t.eq_ignore_ascii_case(&h)).map(|x| x.0)));
             self.open(&rel, new_tab);
-            if let Some(line) = line {
-                self.goto_line(&rel, line);
+            if let Some(h) = heading.filter(|h| !h.trim().is_empty()) {
+                let found = self.notes.get(&rel).and_then(|d| markdown::find_heading(&d.text, &h));
+                match found {
+                    Some(line) => self.goto_heading(&rel, line),
+                    None => {
+                        let name = self.vault.as_ref().and_then(|v| v.file(&rel)).map(|f| f.display_name()).unwrap_or_default();
+                        self.toast(format!("No heading “{}” in {name}", h.trim()));
+                    }
+                }
             }
             return;
         }
@@ -1048,6 +1061,20 @@ impl ShaleApp {
             }
         }
         self.open(&rel, false);
+    }
+
+    /// Open `rel` with the heading on `line` at the top of the view, in the mode the tab is in:
+    /// the cursor on the line in the editor, the reading view scrolled to it (LINK-015).
+    pub fn goto_heading(&mut self, rel: &Path, line: usize) {
+        self.open(rel, false);
+        if let Some(tab) = self.tabbar.tabs.get_mut(self.tabbar.active).filter(|t| t.reading && t.view.path() == Some(rel)) {
+            tab.reader_line = Some(line);
+        } else {
+            self.goto_line(rel, line);
+            if let Some(tab) = self.tabbar.tabs.get_mut(self.tabbar.active) {
+                tab.editor.scroll_to_top = true;
+            }
+        }
     }
 
     pub fn goto_line(&mut self, rel: &Path, line: usize) {
@@ -1674,7 +1701,7 @@ impl ShaleApp {
             let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| crate::drawing::Scene::read_file(&v.abs(rel)).ok()).unwrap_or_default();
             crate::pdf::export::ExportOptions::for_drawing(&scene)
         } else {
-            crate::pdf::export::ExportOptions::for_note()
+            crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }
         };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
         self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path))));
@@ -1843,6 +1870,7 @@ impl ShaleApp {
                 Action::NewDrawing { folder, embed_into } => self.new_drawing(&folder, embed_into),
                 Action::ToggleTask { rel, offset } => self.toggle_task(&rel, offset),
                 Action::GotoLine { rel, line } => self.goto_line(&rel, line),
+                Action::GotoHeading { rel, line } => self.goto_heading(&rel, line),
                 Action::GotoMatch { rel, line, col } => self.goto_match(&rel, line, col),
                 Action::ShowView(v) => self.show_view(v, false),
                 Action::ShowViewInNewTab(v) => self.show_view(v, true),
@@ -2428,7 +2456,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
 
 pub fn handle_reader_action(app_actions: &mut Vec<Action>, a: ReaderAction, from: &Path) {
     match a {
-        ReaderAction::OpenLink { target, new_tab } => app_actions.push(Action::OpenLink { target, heading: None, from: Some(from.to_path_buf()), new_tab }),
+        ReaderAction::OpenLink { target, heading, new_tab } => app_actions.push(Action::OpenLink { target, heading, from: Some(from.to_path_buf()), new_tab }),
         ReaderAction::ToggleTask(offset) => app_actions.push(Action::ToggleTask { rel: from.to_path_buf(), offset }),
         ReaderAction::OpenFile(rel) => app_actions.push(Action::Open { rel, new_tab: false }),
         ReaderAction::OpenUrl(url) => app_actions.push(Action::OpenUrl(url)),
@@ -2543,6 +2571,45 @@ pub(crate) mod tests {
         // back goes to the previous note
         app.go_back();
         assert_eq!(app.current_path(), Some(PathBuf::from("Welcome.md")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-015
+    #[test]
+    fn a_heading_link_puts_the_cursor_on_the_heading_in_the_editor_and_scrolls_the_reading_view_in_the_reading_view() {
+        let (mut app, d) = test_app("heading-link");
+        std::fs::write(d.join("Roadmap.md"), "# Roadmap\nintro\n## **Plan** v2\ntext\n## Review\n").unwrap();
+        app.vault.as_mut().unwrap().rescan();
+        let from = Some(PathBuf::from("Welcome.md"));
+        let tab = |app: &ShaleApp| app.tabbar.active;
+        fn active(app: &mut ShaleApp) -> &mut Tab {
+            let i = app.tabbar.active;
+            &mut app.tabbar.tabs[i]
+        }
+        // editor: cursor at the start of the line, shown at the top
+        app.open_link("Roadmap", Some("plan V2".into()), from.clone(), false);
+        assert_eq!(app.current_path(), Some(PathBuf::from("Roadmap.md")));
+        let t = &app.tabbar.tabs[tab(&app)];
+        assert!(!t.reading);
+        assert_eq!(t.editor.pending_cursor, Some("# Roadmap\nintro\n".chars().count()), "the heading line, found ignoring case and markup");
+        assert!(t.editor.scroll_to_top);
+        // reading view: the tab stays there and the view is told where to scroll
+        active(&mut app).reading = true;
+        active(&mut app).reader_line = None;
+        app.open_link("Roadmap", Some(" Review ".into()), from.clone(), false);
+        let t = &app.tabbar.tabs[tab(&app)];
+        assert!(t.reading, "the tab keeps its mode");
+        assert_eq!(t.reader_line, Some(4));
+        // [[#Heading]] is the open note
+        app.open_link("", Some("Plan v2".into()), Some(PathBuf::from("Roadmap.md")), false);
+        assert_eq!(app.tabbar.tabs[tab(&app)].reader_line, Some(2));
+        assert_eq!(app.current_path(), Some(PathBuf::from("Roadmap.md")));
+        // a heading that is not there: the note opens at the top and says so
+        active(&mut app).reader_line = None;
+        app.open_link("Roadmap", Some("Nope".into()), from.clone(), false);
+        assert!(app.toasts.iter().any(|(t, _)| t == "No heading “Nope” in Roadmap"), "{:?}", app.toasts);
+        assert_eq!(app.tabbar.tabs[tab(&app)].reader_line, None);
+        assert_eq!(app.current_path(), Some(PathBuf::from("Roadmap.md")));
         let _ = std::fs::remove_dir_all(&d);
     }
 

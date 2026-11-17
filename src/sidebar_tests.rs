@@ -506,3 +506,53 @@ fn lay_016_a_middle_click_on_mail_feeds_or_calendar_opens_a_new_tab() {
     w.hl.click(&mut w.app, p, PointerButton::Middle);
     assert_eq!(w.app.tabbar.tabs.len(), n);
 }
+
+// spec: LINK-007, LINK-014, LINK-015, CFG-040
+#[test]
+fn the_outline_shows_the_numbers_and_a_click_scrolls_the_reading_view_to_the_heading_and_keeps_the_mode() {
+    let mut w = W::new("outline-numbers");
+    let long: String = "# Long\n\n## First\n\n### Sub\n\n".to_string() + &"filler line\n\n".repeat(60) + "## Down here\n\n" + &"after\n\n".repeat(40);
+    std::fs::write(w.dir.join("Long.md"), &long).unwrap();
+    w.app.vault.as_mut().unwrap().rescan();
+    w.app.open(std::path::Path::new("Long.md"), false);
+    w.frames(4);
+    w.click_at(w.bar_icon(0, panel(RightPanel::Outline)).center());
+    w.frames(3);
+    let outline = w.right_text();
+    for want in ["1", "1.1", "2", "First", "Sub", "Down here"] {
+        assert!(outline.iter().any(|t| t == want), "{want} is in the outline: {outline:?}");
+    }
+    assert!(!outline.iter().any(|t| t == "0"), "the title has no number");
+    // the setting, and the front matter over it, change the open view at once
+    w.app.cfg.numbered_headings = false;
+    w.frames(3);
+    assert!(!w.right_text().iter().any(|t| t == "1.1"), "numbering off: {:?}", w.right_text());
+    let doc = w.app.notes.get_mut(std::path::Path::new("Long.md")).unwrap();
+    doc.text = format!("---\nnumbered-headings: true\n---\n{}", doc.text);
+    w.frames(3);
+    assert!(w.right_text().iter().any(|t| t == "1.1"), "the note's front matter turns it on: {:?}", w.right_text());
+    w.app.cfg.numbered_headings = true;
+    // reading view: the click scrolls, the tab stays in the reading view
+    w.app.tabbar.tabs[w.app.tabbar.active].reading = true;
+    w.frames(4);
+    let y = |w: &W| w.hl.text.iter().find(|(t, p)| t == "Down here" && p.x < w.app.side.right_rect.unwrap().min.x).map(|(_, p)| p.y);
+    assert!(y(&w).unwrap() > 1000.0, "far below the window: {:?}", y(&w));
+    let at = w.hl.text.iter().find(|(t, p)| t == "Down here" && p.x >= w.app.side.right_rect.unwrap().min.x).unwrap().1;
+    w.click_at(at + Vec2::new(4.0, 4.0));
+    w.frames(30);
+    assert!(w.app.tabbar.tabs[w.app.tabbar.active].reading, "the tab keeps the reading view");
+    let top = y(&w).unwrap();
+    assert!(top < 300.0, "the heading is at the top of the view: {top}");
+    // editor: the cursor goes to the heading line
+    w.app.tabbar.tabs[w.app.tabbar.active].reading = false;
+    w.frames(3);
+    let at = w.hl.text.iter().find(|(t, p)| t == "Down here" && p.x >= w.app.side.right_rect.unwrap().min.x).unwrap().1;
+    w.click_at(at + Vec2::new(4.0, 4.0));
+    w.frames(3);
+    let tab = &w.app.tabbar.tabs[w.app.tabbar.active];
+    let doc = &w.app.notes[std::path::Path::new("Long.md")];
+    let at = tab.editor.selection_bytes(w.hl.ctx(), &doc.text).start;
+    let line = doc.text[..at].matches('\n').count();
+    assert_eq!(doc.text.lines().nth(line), Some("## Down here"), "the cursor is on the heading line");
+    assert!(!tab.reading);
+}

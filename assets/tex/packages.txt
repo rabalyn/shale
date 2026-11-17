@@ -1,4 +1,4 @@
-# TeX Live packages Shale installs next to scheme-infraonly (ADR-0018): the engine and the generic
+# TeX Live packages Shale installs next to scheme-infraonly (ADR-0019): the engine and the generic
 # packages. The templates themselves (tuda-ci, ...) are not here: they live in the vault (TEX-005).
 # One package per line; text after # is a comment. Shared by the managed install (#279) and by
 # tests/tex-env/Containerfile; the list is whatever makes the 25 tuda-ci demos compile there.

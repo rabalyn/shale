@@ -9,6 +9,12 @@ selectable (fonts are embedded), web links stay clickable and drawings are vecto
 sets paper size, margins, fonts and more. The default path is `<vault>/exports/<name>.pdf`, so
 the export shows up in the vault.
 
+A **Table of contents** (a checkbox in the dialog, on by default) puts a *Contents* page after the title: the
+`##`–`####` headings, indented by level, with their numbers (see [[Notes and links]]), a dotted leader and the page
+they start on; each line is a link to that page, and the text starts on the next page. The PDF also has
+bookmarks for the `##`–`######` headings in your PDF reader's outline, and the headings in the text carry
+their numbers. A note without such headings gets no contents page.
+
 Highlights (`==text==`) and the colours of [[Editor]] (`<mark style="background: …">` behind the text, `<span style="color: …">` as the text colour) are printed as written, with the tags left out and the text still selectable.
 
 Code looks as on screen: fenced code blocks and inline code are printed in their syntax colours on the same dark code background as in the reading view (see [[Editor]]), the text still selectable.
