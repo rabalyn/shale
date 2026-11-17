@@ -71,6 +71,8 @@ link (`z_media/photo.png`), or the words you give it after a `|`: `![[photo.png|
 
 Drag notes, drawings, files and folders in the file list into another folder. Rename a note from
 its menu. In both cases links in other notes (and in drawings) are updated, so nothing breaks.
+A name with a character that does not work on Windows (such as `:` or `?`) is not refused: the file gets
+a name without it and the message says so ([[Vault settings]]).
 
 ## The note menu
 

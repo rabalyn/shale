@@ -226,6 +226,9 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 
 The git remote itself is git's (`git remote`), set with **Connect** in the same section.
 
+Settings → Vault also has **Check names for Windows and macOS…** (no setting, a tool): it lists the files
+and folders whose names would break on Windows or macOS and renames them on request ([[Vault settings]]).
+
 ## Vault session state (`<vault>/.shale/state.json`)
 
 Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]).

@@ -323,6 +323,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale
   (new note, red link, quick switcher, new drawing) `YYMMDD_<name>.md` with today's date; a red link `[[Plan]]` that makes `261117_Plan.md` is rewritten in the note to
   `[[261117_Plan|Plan]]` so it still reaches it. Imports and daily notes keep their names.
+- **Portable names** (VAULT-026, VAULT-027, VAULT-028): every file and folder name Shale makes works on Linux, macOS and Windows. A name you type for a new note, folder or drawing, or
+  a rename (also from the title line), never fails for its characters: `< > : " / \ | ? *` and control characters become `-`, a trailing dot is dropped, a Windows device name like `CON`
+  gets `_`, and the name is cut to 200 bytes; the toast says so ("Saved as `a-b.md`: `:` is not allowed on Windows"). A red link `[[Plan: v2]]` is rewritten to the name its note got.
+  Names Shale makes itself (imports, the people notes, the media folder) stay within 127 bytes. Existing files are never renamed by this. **Settings → Vault → Check names for Windows
+  and macOS…** lists, from a background job, the files and folders of the vault that would break there (forbidden characters, trailing dot or space, device names, names over 200
+  bytes, paths over 240 characters, names that differ only in letter case) with the portable name for each; **Rename** does one, **Rename all…** all of them after a question,
+  through the usual rename, so links are rewritten, and a name that is taken gets ` 2`, ` 3`. `.git`, `.shale` and `.trash` are skipped.
 - **Lift headings on paste** (EDIT-038): pasting text whose headings are all `##` or deeper opens "The pasted text has no # heading. Lift its headings?" with **Lift** and **Paste as it
   is** (Esc pastes as it is); text without headings or with a `#` is pasted at once.
 - **Heading links scroll** (LINK-015): `[[Note#Heading]]`, `[[#Heading]]` and `[text](Note.md#Heading)` open the note with the heading at the top of the view, in the mode the tab is
