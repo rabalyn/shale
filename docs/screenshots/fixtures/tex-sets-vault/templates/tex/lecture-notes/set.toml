@@ -1,0 +1,6 @@
+name = "Lecture notes"
+imported_at = "2026-11-14"
+
+[source]
+kind = "local"
+path = "~/Downloads/lecture-notes.zip"

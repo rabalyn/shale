@@ -1,0 +1,19 @@
+# TU Darmstadt, leaflet (class tudaleaflet, based on the leaflet class).
+name = "Leaflet"
+description = "Folded leaflets (class tudaleaflet)"
+mapping = "poster"
+class = "tudaleaflet"
+options = ["{language}", "accentcolor={accent}"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
+logo = true
+
+[[fields]]
+key = "title"
+label = "Title"
+command = "title"
+required = true
+
+[[fields]]
+key = "subtitle"
+label = "Subtitle"
+command = "subtitle"

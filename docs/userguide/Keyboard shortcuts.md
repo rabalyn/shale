@@ -7,7 +7,7 @@ Back to [[Start here]]. Editing keys are in [[Editor]], the settings window is i
 ![[keybindings.png]]
 
 The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
-(everywhere, file list, search results, mail view, note view, vim normal mode; double bindings are refused).
+(everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
 
 | Keys | Action |

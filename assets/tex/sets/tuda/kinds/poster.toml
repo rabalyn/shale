@@ -1,0 +1,30 @@
+# TU Darmstadt, poster (class tudaposter), A0 by default (paper=a1, a2, ... for others).
+name = "Poster"
+description = "Posters (class tudaposter)"
+mapping = "poster"
+class = "tudaposter"
+options = ["{language}", "accentcolor={accent}", "paper=a0", "logo=body", "footer=true"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}", "\\usepackage{multicol}"]
+logo = true
+
+[[fields]]
+key = "title"
+label = "Title"
+command = "title"
+required = true
+
+[[fields]]
+key = "subtitle"
+label = "Subtitle"
+command = "subtitle"
+
+[[fields]]
+key = "author"
+label = "Author"
+command = "author"
+required = true
+
+[[fields]]
+key = "footer"
+label = "Footer text"
+command = "footer"

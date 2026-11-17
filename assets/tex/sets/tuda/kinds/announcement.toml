@@ -1,0 +1,35 @@
+# TU Darmstadt, announcement of a final thesis defence or a talk (class tudaposter, type=announcement), A4.
+name = "Announcement"
+description = "Announcements, for example of a thesis defence (class tudaposter, type=announcement)"
+mapping = "poster"
+class = "tudaposter"
+options = ["{language}", "accentcolor={accent}", "paper=a4", "type=announcement", "footer=true"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
+logo = true
+
+[[fields]]
+key = "title"
+label = "Title"
+command = "title"
+required = true
+
+[[fields]]
+key = "subtitle"
+label = "Subtitle"
+command = "subtitle"
+
+[[fields]]
+key = "author"
+label = "Author"
+command = "author"
+required = true
+
+[[fields]]
+key = "info"
+label = "Additional information below the subtitle"
+command = "titleinfo"
+
+[[fields]]
+key = "footer"
+label = "Footer text"
+command = "footer"

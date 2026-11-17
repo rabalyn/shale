@@ -10,6 +10,8 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-17
+
 ### Added
 
 - **Mail view**: read your IMAP mail in Shale. Ribbon button or Ctrl+Shift+M opens
@@ -408,6 +410,52 @@ its section from this file.
   `#`–`######` headings, nested by level (PDF-008, #283).
 - **Heading completion.** After `[[Note#` or `[[#` the link suggestions list the headings of that note, with
   their numbers, and insert the heading's plain text (LINK-016, #283).
+- **Settings → LaTeX.** The first part of the PDF export through LaTeX templates: the page finds a
+  LuaLaTeX (the one on your computer when its LaTeX kernel is from 2022-06-01 or newer and `biber` is
+  next to it, else a TeX Live that Shale installs itself) and says which one is used or why none can
+  be. **Install TeX Live…** shows the sizes (about 100 MB to download, 330 MB on disk) first and
+  downloads nothing until you agree; it shows the progress, can be cancelled (nothing half-installed is
+  left) and runs without touching anything outside Shale's data folder. **Update** and **Remove…**
+  (which names the folder and its size) keep it tidy, **Test** compiles a small document with the fonts
+  and a bibliography, and the new settings `tex.engine` and `tex.repository` choose the TeX and the
+  download address. Compiling runs LuaLaTeX and biber as often as the log asks, in a temporary folder,
+  without a shell, with a time limit, and turns the log into readable errors ("package x is missing",
+  `file:line: message`). The export dialog that uses it follows with the next steps (TEX-001 to TEX-004,
+  TEX-023, CFG-044, #279, #277).
+- **Title line without the date prefix.** A note's title line (above line 1) and its tab show the file name
+  without `.md` and without a leading `YYMMDD_` date prefix (`261117_Plan.md` shows `Plan`); renaming from
+  the title line keeps the prefix. The file list, the quick switcher and links keep the full name
+  (VAULT-025, #287).
+- **Date prefix for new notes.** Settings → Editor → "Date prefix for new notes" (on by default): a note
+  made by Shale (new note, red link, quick switcher, new drawing) is named `YYMMDD_<name>.md` with today's
+  date. A red link `[[Plan]]` that makes `261117_Plan.md` is rewritten in its note to `[[261117_Plan|Plan]]`
+  so it still reaches the note; imports and daily notes keep their names (CFG-043, #287).
+- **Markdown files become notes.** A dropped or picked `.md` / `.markdown` file is imported as a note with
+  its text unchanged (listed as "Markdown note") instead of an attachment of a Files note (IMP-033, #288).
+- **Lift headings.** When an imported Markdown note has headings but no `#`, the Import dialog has a ticked
+  box "Lift headings (## → #, ### → ##, …)": every heading moves up by the same number of levels so that the
+  highest becomes `#`; code blocks and front matter stay as they are (IMP-034, #288).
+- **Lift headings on paste.** Pasting text whose headings are all `##` or deeper asks "The pasted text has no
+  # heading. Lift its headings?" with Lift and Paste as it is (Esc pastes as it is) (EDIT-038, #288).
+- **Edit accounts without removing them** (#290). Settings → Calendars: **Edit** on a CalDAV
+  calendar changes its address, user name or password (empty password = keep the saved one); a new
+  user name or password also goes to the other calendars of the same server and user name. Feeds →
+  Accounts…: **Edit** signs in to an account again (a new app password, code or token) and replaces
+  its secret, keeping its feeds, posts and open tabs.
+- **Alt keys for the buttons of a note** (#292). Every button of the formatting toolbar, the view
+  header (edit / reading view, Markdown preview, the ⋯ menu) and the tab bar (New tab) has an Alt key
+  (Alt+B bold, Alt+I italic, Alt+E heading menu, Alt+V reading view, Alt+P preview, Alt+N new tab, …),
+  and the ribbon's first ten icons answer to Alt+1 … Alt+9 and Alt+0, the sidebars to Alt+, and Alt+.
+  The keys work with the keyboard in the text and type nothing. Hold Alt and a small badge with the key
+  shows at each button (it follows a key you changed). They are definable in Settings → Keybindings (new
+  scope Note view); on macOS they have no default key. A test now checks that no two keys that can be
+  active together clash, on every system.
+- **Cursor shapes.** Settings → Editor → "Cursor while typing": a bar before the character (as
+  before), a bar after it, a block or an underline; "Cursor in normal mode" (Vim-style editing)
+  chooses the cursor of normal mode, a block by default; "Blinking cursor" (on by default) can be
+  turned off. Exactly one cursor is drawn in every mode: in normal mode the block no longer comes
+  with a bar of the text box. The settings file has `cursor_shape`, `normal_cursor_shape` and
+  `cursor_blink` (EDIT-039, EDIT-040, EDIT-041, #293).
 
 ### Changed
 
@@ -681,6 +729,15 @@ its section from this file.
   the border between the list and the page to set the width (60 points to half of the window;
   kept as `settings_tab_width`), double-click it to make the width automatic again (CFG-041;
   raba/shale#284).
+- **`#` is numbered.** With numbering on, a `#` heading is number 1 like any other level (`#` 1, `##` 1.1,
+  `###` 1.1.1); the title of a note is its title line (LINK-014, #287).
+- **PDF title once, contents `#`–`###`.** The contents page lists the `#`–`###` headings and the bookmarks
+  cover `#`–`######`; the title is printed from the title line (without the date prefix), and not a second
+  time when the note's first heading is a `#` that says the same (PDF-008, #287).
+- The user guide, the sample vault and the screenshot fixtures lost the `# Name` line that repeated the
+  title line of each note (#287).
+- After a click on a toolbar button, the edit / reading, preview or sidebar buttons or an icon that only
+  opens a sidebar panel, the editor has the keyboard again with the cursor and selection where they were.
 
 ### Fixed
 
@@ -875,6 +932,11 @@ its section from this file.
 - **Windows: pasting copied files into a note.** A `file:///C:/…` address (what a file manager
   copies) is now understood, so pasted pictures, PDFs and media files are saved to the media
   folder instead of being pasted as text.
+- **The keyboard is no longer lost when a pane closes** (#291). Closing the last tab of a split
+  pane (or any tab, or the pane itself) now puts the keyboard into the editor of the open note of
+  the focused pane. As a guard, when the widget that had the keyboard disappears and nothing else
+  takes it, the editor gets it back (not while the sidebar is browsed, a dialog is open or the
+  mail view is shown).
 
 ### Tests
 
@@ -989,7 +1051,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/rabalyn/shale/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rabalyn/shale/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rabalyn/shale/compare/6851a04...v0.2.0
 [0.1.0]: https://github.com/rabalyn/shale/tree/6851a043e3c1f98af9b92575a43a93202b3b13b7

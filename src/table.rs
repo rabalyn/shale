@@ -558,7 +558,7 @@ fn halign(c: Col) -> Align {
 
 /// One cell as a layout job (the inline formatting of the reading view); the header is bold.
 fn cell_job(text: &str, links: &[(LinkSpan, bool)], base: f32, header: bool) -> (LayoutJob, Spans) {
-    let (mut job, spans) = crate::reader::inline_job(text, links, base, theme::TEXT, false);
+    let (mut job, spans, _) = crate::reader::cell_painted(text, links, base, theme::TEXT);
     if header {
         for s in &mut job.sections {
             if s.format.color == theme::TEXT {
@@ -825,6 +825,34 @@ mod tests {
         let head = &l.cells[0][0].galley.job.sections[0].format;
         assert_eq!(head.color, theme::TEXT_STRONG, "the header is strong");
         assert_eq!(cell.galley.job.sections[0].format.color, theme::CODE);
+    }
+
+    // spec: EDIT-045
+    #[test]
+    fn br_in_a_cell_starts_a_new_line_in_the_grid() {
+        let l = laid(600.0, vec![Col::Left, Col::Left], &["A", "B"], &[&["\u{2022} a<br>\u{2022} b<br/>c<BR />d", "x"]]);
+        let cell = &l.cells[1][0];
+        assert_eq!(cell.galley.job.text, "\u{2022} a\n\u{2022} b\nc\nd");
+        assert_eq!(cell.galley.rows.len(), 4, "one row for each line");
+        assert!(l.heights[1] > l.heights[0] * 2.5, "the row is as tall as its lines: {:?}", l.heights);
+        assert_eq!(l.cells[1][1].galley.rows.len(), 1);
+        // the width of the column is that of its longest line, not of all of them
+        let one = laid(600.0, vec![Col::Left], &["A"], &[&["\u{2022} a \u{2022} b c d"]]);
+        assert!(l.widths[0] < one.widths[0], "{:?} / {:?}", l.widths, one.widths);
+        // a cell without the tag stays on one line; the tag in a code span is text
+        let code = laid(600.0, vec![Col::Left], &["A"], &[&["`a<br>b`"]]);
+        assert_eq!(code.cells[1][0].galley.job.text, "a<br>b");
+    }
+
+    // spec: EDIT-045
+    #[test]
+    fn the_cell_editor_keeps_the_br_tag_in_the_text_of_the_cell() {
+        let src = "| A | B |\n|---|---|\n| \u{2022} a<br>\u{2022} b | x |\n";
+        let t = find_tables(src).remove(0).table;
+        assert_eq!(t.rows[0][0], "\u{2022} a<br>\u{2022} b", "the cell text has the tag, the editor gets it as it is");
+        let edited = set_cell(src, 1, 0, "\u{2022} a<br />\u{2022} b<br>c").unwrap();
+        assert_eq!(find_tables(&edited).remove(0).table.rows[0][0], "\u{2022} a<br />\u{2022} b<br>c");
+        assert!(edited.contains("| \u{2022} a<br />\u{2022} b<br>c |"), "{edited}");
     }
 
     // spec: EDIT-024

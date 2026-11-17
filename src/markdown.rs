@@ -400,6 +400,168 @@ pub fn find_tags(text: &str) -> Vec<(Range<usize>, String)> {
     out
 }
 
+// ------------------------------------------------------------------ footnotes (EDIT-043)
+
+/// A footnote reference `[^label]` in a note.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FootnoteRef {
+    /// 0-based line number
+    pub line: usize,
+    /// byte range of `[^label]` in the line
+    pub range: Range<usize>,
+    pub label: String,
+}
+
+/// A footnote definition `[^label]: text` with the lines it takes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FootnoteDef {
+    pub label: String,
+    /// the lines of the definition (0-based, end excluded): its first line and the indented ones after it
+    pub lines: Range<usize>,
+    /// byte range of `[^label]:` in the first line
+    pub marker: Range<usize>,
+}
+
+/// The footnotes of a note: references and definitions, in the order of the text.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Footnotes {
+    pub refs: Vec<FootnoteRef>,
+    pub defs: Vec<FootnoteDef>,
+}
+
+impl Footnotes {
+    /// The (first) definition of `label`.
+    pub fn def(&self, label: &str) -> Option<&FootnoteDef> {
+        self.defs.iter().find(|d| d.label == label)
+    }
+
+    /// The first reference to `label`.
+    pub fn first_ref(&self, label: &str) -> Option<&FootnoteRef> {
+        self.refs.iter().find(|r| r.label == label)
+    }
+
+    /// The labels that have a definition.
+    pub fn defined(&self) -> std::collections::HashSet<String> {
+        self.defs.iter().map(|d| d.label.clone()).collect()
+    }
+
+    /// The definition that has `line` as its first line.
+    pub fn def_at(&self, line: usize) -> Option<&FootnoteDef> {
+        self.defs.iter().find(|d| d.lines.start == line)
+    }
+
+    /// Whether `line` is an indented line after the first line of a definition.
+    pub fn is_continuation(&self, line: usize) -> bool {
+        self.defs.iter().any(|d| d.lines.start < line && line < d.lines.end)
+    }
+}
+
+fn is_footnote_label_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '-' || c == '_'
+}
+
+/// The `[^label]:` that starts a line: its label and its byte range.
+pub fn footnote_def_marker(line: &str) -> Option<(String, Range<usize>)> {
+    let rest = line.strip_prefix("[^")?;
+    let len: usize = rest.chars().take_while(|c| is_footnote_label_char(*c)).map(char::len_utf8).sum();
+    (len > 0 && rest[len..].starts_with("]:")).then(|| (rest[..len].to_string(), 0..2 + len + 2))
+}
+
+/// Whether a line continues a footnote definition: indented by 4 spaces or a tab, and not blank.
+pub fn is_footnote_continuation(line: &str) -> bool {
+    (line.starts_with("    ") || line.starts_with('\t')) && !line.trim().is_empty()
+}
+
+/// The footnote references in one line, not the ones in inline code and not the label of a
+/// definition at the start of the line. Ranges are in the line.
+pub fn footnote_refs_in_line(line: &str) -> Vec<(Range<usize>, String)> {
+    if !line.contains("[^") {
+        return Vec::new();
+    }
+    let code = inline_code_ranges(line);
+    let own = footnote_def_marker(line).map(|(_, r)| r);
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(p) = line[from..].find("[^") {
+        let at = from + p;
+        from = at + 2;
+        let rest = &line[at + 2..];
+        let len: usize = rest.chars().take_while(|c| is_footnote_label_char(*c)).map(char::len_utf8).sum();
+        if len == 0 || !rest[len..].starts_with(']') || in_ranges(at, &code) || own.as_ref().is_some_and(|r| r.start == at) {
+            continue;
+        }
+        let end = at + 2 + len + 1;
+        out.push((at..end, rest[..len].to_string()));
+        from = end;
+    }
+    out
+}
+
+/// The footnotes of a note (EDIT-043). Fenced code and front matter hold none.
+pub fn find_footnotes(text: &str) -> Footnotes {
+    let code = fenced_code_lines(text);
+    let front = front_matter_lines(text);
+    let lines = lines_with_offsets(text);
+    let mut out = Footnotes::default();
+    let mut li = 0;
+    while li < lines.len() {
+        let line = lines[li].1;
+        if li < front || code.get(li).copied().unwrap_or(false) {
+            li += 1;
+            continue;
+        }
+        for (range, label) in footnote_refs_in_line(line) {
+            out.refs.push(FootnoteRef { line: li, range, label });
+        }
+        if let Some((label, marker)) = footnote_def_marker(line) {
+            let mut end = li + 1;
+            while end < lines.len() && !code.get(end).copied().unwrap_or(false) && is_footnote_continuation(lines[end].1) {
+                for (range, label) in footnote_refs_in_line(lines[end].1) {
+                    out.refs.push(FootnoteRef { line: end, range, label });
+                }
+                end += 1;
+            }
+            out.defs.push(FootnoteDef { label, lines: li..end, marker });
+            li = end;
+            continue;
+        }
+        li += 1;
+    }
+    out
+}
+
+thread_local! {
+    /// The labels that have a definition in the note that is being drawn (EDIT-043).
+    static DEFINED: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+/// The labels that have a definition, in force while this value lives: the inline layout of the
+/// reading view, tables and the PDF export shows a reference as a footnote mark only for these
+/// (EDIT-043). The labels before come back when it is dropped.
+pub struct DefinedFootnotes(std::collections::HashSet<String>);
+
+impl DefinedFootnotes {
+    pub fn set(labels: std::collections::HashSet<String>) -> Self {
+        DefinedFootnotes(DEFINED.with(|d| std::mem::replace(&mut *d.borrow_mut(), labels)))
+    }
+}
+
+impl Drop for DefinedFootnotes {
+    fn drop(&mut self) {
+        DEFINED.with(|d| *d.borrow_mut() = std::mem::take(&mut self.0));
+    }
+}
+
+/// The labels set by [`DefinedFootnotes`].
+pub fn defined_footnotes_in_scope() -> std::collections::HashSet<String> {
+    DEFINED.with(|d| d.borrow().clone())
+}
+
+/// Whether the note being drawn has a definition for `label` (see [`DefinedFootnotes`]).
+pub fn footnote_is_defined(label: &str) -> bool {
+    DEFINED.with(|d| d.borrow().contains(label))
+}
+
 /// How many lines the front matter (`---` … `---` at the top) takes; 0 when there is none.
 pub fn front_matter_lines(text: &str) -> usize {
     let mut lines = text.split('\n');
@@ -978,5 +1140,65 @@ mod tests {
         assert_eq!(find_heading(text, "Linked part"), Some(3));
         assert_eq!(find_heading(text, "Hidden"), None);
         assert_eq!(find_heading(text, "Nope"), None);
+    }
+
+    // spec: EDIT-043
+    #[test]
+    fn footnote_references_and_definitions_are_found_with_their_lines() {
+        let text = "Text[^1] and[^note-2], again [^1].\n\n[^1]: The body[^3]\n    goes on\n\tand on\nnot indented\n[^note-2]: two\n[^3]: three\n";
+        let f = find_footnotes(text);
+        let refs: Vec<(usize, &str, Range<usize>)> = f.refs.iter().map(|r| (r.line, r.label.as_str(), r.range.clone())).collect();
+        assert_eq!(refs, [(0, "1", 4..8), (0, "note-2", 12..21), (0, "1", 29..33), (2, "3", 14..18)]);
+        let defs: Vec<(&str, Range<usize>, Range<usize>)> = f.defs.iter().map(|d| (d.label.as_str(), d.lines.clone(), d.marker.clone())).collect();
+        assert_eq!(defs, [("1", 2..5, 0..5), ("note-2", 6..7, 0..10), ("3", 7..8, 0..5)]);
+        assert_eq!(f.def("note-2").map(|d| d.lines.start), Some(6));
+        assert_eq!(f.first_ref("1").map(|r| r.line), Some(0));
+        assert!(f.first_ref("nobody").is_none() && f.def("nobody").is_none());
+        assert_eq!(f.def_at(2).map(|d| d.label.as_str()), Some("1"));
+        assert!(f.def_at(3).is_none());
+        assert!(f.is_continuation(3) && f.is_continuation(4) && !f.is_continuation(2) && !f.is_continuation(5));
+        assert_eq!(f.defined(), ["1", "note-2", "3"].iter().map(|s| s.to_string()).collect());
+    }
+
+    // spec: EDIT-043
+    #[test]
+    fn a_footnote_marker_at_the_start_of_a_line_is_a_definition_and_no_reference() {
+        assert_eq!(footnote_def_marker("[^a]: x"), Some(("a".to_string(), 0..5)));
+        assert_eq!(footnote_def_marker("[^Ä_-9]:x"), Some(("Ä_-9".to_string(), 0..9)));
+        for no in ["[^a] x", " [^a]: x", "[^]: x", "[^a b]: x", "[a]: x", "[^a:"] {
+            assert_eq!(footnote_def_marker(no), None, "{no}");
+        }
+        assert!(footnote_refs_in_line("[^a]: x").is_empty(), "the label of a definition is no reference");
+        assert_eq!(footnote_refs_in_line(" [^a]: x").len(), 1, "indented, it is a reference");
+        assert!(is_footnote_continuation("    x") && is_footnote_continuation("\tx"));
+        assert!(!is_footnote_continuation("   x") && !is_footnote_continuation("    ") && !is_footnote_continuation("x"));
+    }
+
+    // spec: EDIT-043
+    #[test]
+    fn footnotes_in_code_front_matter_and_with_odd_labels_are_none() {
+        for text in ["`a[^1]b`", "```\n[^1]\n[^1]: x\n```", "---\nk: [^1]\n---\n", "[^]", "[^a b]", "[^1", "[1]", "^[inline]"] {
+            assert_eq!(find_footnotes(text), Footnotes::default(), "{text}");
+        }
+        // the code ends at its backticks; a reference after it is one
+        assert_eq!(find_footnotes("`x` y[^1]").refs.len(), 1);
+        // an indented line after a definition in fenced code is no continuation
+        let f = find_footnotes("[^1]: a\n```\n    x\n```\n");
+        assert_eq!(f.defs[0].lines, 0..1);
+    }
+
+    // spec: EDIT-043
+    #[test]
+    fn the_defined_labels_hold_while_their_guard_lives() {
+        assert!(!footnote_is_defined("a"));
+        let outer = DefinedFootnotes::set(["a".to_string()].into());
+        assert!(footnote_is_defined("a") && defined_footnotes_in_scope().len() == 1);
+        {
+            let _inner = DefinedFootnotes::set(["b".to_string()].into());
+            assert!(footnote_is_defined("b") && !footnote_is_defined("a"));
+        }
+        assert!(footnote_is_defined("a") && !footnote_is_defined("b"), "the outer labels come back");
+        drop(outer);
+        assert!(!footnote_is_defined("a"));
     }
 }

@@ -50,6 +50,13 @@ struct Fmt {
     rendered: bool,
     /// highlighted code: what this piece of a code block or code span is (EDIT-032)
     syn_kind: Option<crate::syntax::Kind>,
+    /// text inside `<u>…</u>` (EDIT-044)
+    under: bool,
+    /// text inside `<sub>` (1) or `<sup>` (2): smaller and lowered or raised (EDIT-044)
+    script: u8,
+    /// footnotes (EDIT-043): 1 the label of a reference, 2 the label of a definition (both raised
+    /// once the line is drawn rendered), 3 the text of a definition (a little smaller)
+    fnote: u8,
 }
 
 pub fn heading_scale(level: u8) -> f32 {
@@ -160,7 +167,39 @@ fn colour_pairs(line: &str, off: usize, fmts: &mut [Fmt]) {
         match r.kind {
             colour_tags::Kind::Mark => set(fmts, inner, |f| f.bg = Some(r.rgba)),
             colour_tags::Kind::Font => set(fmts, inner, |f| f.fg = Some(r.rgba)),
+            colour_tags::Kind::Underline => set(fmts, inner, |f| f.under = true),
+            colour_tags::Kind::Sub => set(fmts, inner, |f| f.script = 1),
+            colour_tags::Kind::Sup => set(fmts, inner, |f| f.script = 2),
         }
+    }
+}
+
+/// Footnotes in a line (EDIT-043): `[^` and `]` of a reference to a defined footnote are markup,
+/// its label is a footnote mark; the marker of a definition is the same with `]:`, and the text after
+/// it (and the indented lines that go on with it) is footnote text. `defined` are the labels that
+/// have a definition; `continuation` says the whole line goes on with a definition.
+fn footnote_pairs(line: &str, off: usize, fmts: &mut [Fmt], defined: &std::collections::HashSet<String>, continuation: bool) {
+    let markup = |fmts: &mut [Fmt], r: Range<usize>| {
+        set(fmts, r, |f| {
+            f.dim = true;
+            f.syn = true
+        })
+    };
+    for (r, label) in markdown::footnote_refs_in_line(line) {
+        if !defined.contains(&label) {
+            continue;
+        }
+        markup(fmts, off + r.start..off + r.start + 2);
+        markup(fmts, off + r.end - 1..off + r.end);
+        set(fmts, off + r.start + 2..off + r.end - 1, |f| f.fnote = 1);
+    }
+    if let Some((_, m)) = markdown::footnote_def_marker(line) {
+        markup(fmts, off + m.start..off + m.start + 2);
+        markup(fmts, off + m.end - 2..off + m.end);
+        set(fmts, off + m.start + 2..off + m.end - 2, |f| f.fnote = 2);
+        set(fmts, off + m.end..off + line.len(), |f| f.fnote = 3);
+    } else if continuation {
+        set(fmts, off..off + line.len(), |f| f.fnote = 3);
     }
 }
 
@@ -185,6 +224,9 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorF
         }
     }
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
+    let notes = markdown::find_footnotes(text);
+    let mut defined = notes.defined();
+    defined.extend(markdown::defined_footnotes_in_scope());
     let mut in_front = false;
     for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
         let lr = off..off + line.len();
@@ -266,6 +308,7 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorF
         }
         inline_pairs(line, off, &mut fmts, &local_code);
         colour_pairs(line, off, &mut fmts);
+        footnote_pairs(line, off, &mut fmts, &defined, notes.is_continuation(li));
         code_ranges.extend(local_code);
     }
     for (l, exists) in links {
@@ -435,7 +478,7 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
     if f.image_h > 0 {
         return TextFormat { font_id: FontId::new(1.0, family), color: Color32::TRANSPARENT, line_height: Some(f.image_h as f32), ..Default::default() };
     }
-    let size = base * heading_scale(f.heading);
+    let size = base * heading_scale(f.heading) * if f.fnote == 3 { FOOTNOTE_TEXT } else { 1.0 };
     if f.hidden {
         // the colour tags are far longer than the other markup: folded up smaller, so no gap shows
         let tiny = if f.ctag { 0.12 } else { 1.0 };
@@ -460,6 +503,9 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
     }
     if f.tag {
         color = theme::TAG;
+    }
+    if f.fnote == 1 || f.fnote == 2 {
+        color = theme::LINK;
     }
     if f.strike {
         color = theme::DONE;
@@ -507,8 +553,30 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
     if f.bold && (mono || styled.fake_bold) {
         tf.extra_letter_spacing = 0.3;
     }
+    if f.under && !f.dim {
+        tf.underline = Stroke::new(1.0, color);
+    }
+    // sub and superscript, and the mark of a footnote on a rendered line: smaller, and placed at the
+    // bottom or the top of the row, which needs the text not to have a line height of its own
+    let script = if f.script > 0 {
+        f.script
+    } else if f.rendered && (f.fnote == 1 || f.fnote == 2) {
+        2
+    } else {
+        0
+    };
+    if script > 0 && !f.dim {
+        tf.font_id.size *= SCRIPT_SCALE;
+        tf.line_height = None;
+        tf.valign = if script == 2 { egui::Align::TOP } else { egui::Align::BOTTOM };
+    }
     tf
 }
+
+/// The size of sub and superscript and of the mark of a footnote, in parts of the text (EDIT-044, EDIT-043).
+pub const SCRIPT_SCALE: f32 = 0.7;
+/// The size of the text of a footnote definition, in parts of the text (EDIT-043).
+pub const FOOTNOTE_TEXT: f32 = 0.9;
 
 /// Something shown in place of an embed link in the editor.
 enum Art {
@@ -1286,6 +1354,8 @@ impl NoteEditor {
         let base_size = if self.live_preview { fonts.rendered.size } else { fonts.raw.size };
         let mut action = None;
         let mut changed = false;
+        // the footnotes with a definition are marks in the grids of tables too (EDIT-043)
+        let _defined = markdown::DefinedFootnotes::set(markdown::find_footnotes(text).defined());
         let focused = ui.ctx().memory(|m| m.has_focus(self.id));
         if focused || !ui.input(|i| i.pointer.any_down()) {
             self.focus_before_press = focused;
@@ -4307,6 +4377,92 @@ mod tests {
             let f = &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format;
             assert_eq!(f.color, theme::LINK);
         }
+    }
+
+    fn is_hidden(f: &TextFormat) -> bool {
+        f.color == Color32::TRANSPARENT && f.font_id.size <= 1.0
+    }
+
+    // spec: EDIT-044
+    #[test]
+    fn underline_sub_and_sup_are_drawn_and_their_tags_are_hidden_in_the_preview() {
+        let text = "a <u>b</u> H<sub>2</sub>O x<sup>2</sup> <U>c<SUP>d</SUP></U>\n";
+        let fonts = EditorFonts::uniform(15.0);
+        let job = highlight_preview(text, &[], &fonts, &[], Some(0..0));
+        let f = |n: &str| format_of(&job, text, n).clone();
+        assert_eq!(f("b").underline.width, 1.0);
+        assert_eq!(f("a ").underline, Stroke::NONE);
+        let (sub, sup) = (f("2</sub>"), f("2</sup>"));
+        assert_eq!((sub.font_id.size, sub.valign, sub.line_height), (15.0 * SCRIPT_SCALE, egui::Align::BOTTOM, None));
+        assert_eq!((sup.font_id.size, sup.valign, sup.line_height), (15.0 * SCRIPT_SCALE, egui::Align::TOP, None));
+        assert_eq!(f("O").font_id.size, 15.0, "the text around stays as it was");
+        // nested: underlined and raised
+        let d = f("d");
+        assert_eq!((d.underline.width, d.valign), (1.0, egui::Align::TOP));
+        for tag in ["<u>", "</u>", "<sub>", "</sub>", "<sup>", "</sup>", "<U>", "</U>", "<SUP>", "</SUP>"] {
+            assert!(is_hidden(format_of(&job, text, tag)), "{tag} is hidden");
+        }
+        // on a raw line the tags show, dimmed, and the text is still formatted
+        let raw = highlight_preview(text, &[], &fonts, &[], Some(0..1));
+        assert!(!is_hidden(format_of(&raw, text, "<u>")));
+        assert_eq!(format_of(&raw, text, "<u>").color, theme::FAINT);
+        assert_eq!(format_of(&raw, text, "b").underline.width, 1.0);
+        assert_eq!(format_of(&raw, text, "2</sup>").valign, egui::Align::TOP);
+        // in code they are plain
+        let code = "`<u>x</u>` <u>y";
+        let job = highlight_preview(code, &[], &fonts, &[], Some(0..0));
+        assert_eq!(format_of(&job, code, "x").underline, Stroke::NONE);
+        assert_eq!(format_of(&job, code, "y").underline, Stroke::NONE);
+    }
+
+    // spec: EDIT-043
+    #[test]
+    fn footnote_marks_are_raised_in_the_preview_and_show_their_text_on_the_raw_line() {
+        let text = "A[^1] b[^2] c\n\n[^1]: Body\n    more\nplain\n";
+        let fonts = EditorFonts::uniform(15.0);
+        let defined = markdown::find_footnotes(text).defined();
+        assert_eq!(defined.len(), 1, "only [^1] has a definition");
+        let job = highlight_preview(text, &[], &fonts, &[], Some(0..0));
+        let at = |n: &str| text.find(n).unwrap();
+        let fmt = |n: &str| format_of(&job, text, n).clone();
+        // the reference: `[^` and `]` hidden, the label raised and smaller in the link colour
+        assert!(is_hidden(format_of(&job, text, "[^1]")) && is_hidden(&job.sections.iter().find(|s| s.byte_range.start.0 <= at("]") && at("]") < s.byte_range.end.0).unwrap().format));
+        let label = format_of(&job, text, "1] b");
+        assert_eq!((label.valign, label.font_id.size, label.color, label.line_height), (egui::Align::TOP, 15.0 * SCRIPT_SCALE, theme::LINK, None));
+        // a reference without a definition is shown as written
+        let two = fmt("[^2]");
+        assert!(!is_hidden(&two) && two.valign != egui::Align::TOP && two.color == theme::TEXT);
+        // the definition: its label raised, its text and its continuation lines a little smaller
+        let def = format_of(&job, text, "1]: Body");
+        assert_eq!((def.valign, def.color), (egui::Align::TOP, theme::LINK));
+        assert_eq!(fmt("Body").font_id.size, 15.0 * FOOTNOTE_TEXT);
+        assert_eq!(fmt("    more").font_id.size, 15.0 * FOOTNOTE_TEXT);
+        assert_eq!(fmt("plain").font_id.size, 15.0);
+        assert!(is_hidden(format_of(&job, text, "]: Body")), "the markup of the definition is hidden");
+        // with the cursor in the reference the text shows (EDIT-016): the brackets are dim and the label is not raised
+        let raw = highlight_preview(text, &[], &fonts, &[], Some(0..1));
+        assert!(!is_hidden(format_of(&raw, text, "[^1]")));
+        assert_eq!(format_of(&raw, text, "[^1]").color, theme::FAINT);
+        let label = format_of(&raw, text, "1] b");
+        assert_eq!((label.valign, label.font_id.size, label.color), (egui::Align::BOTTOM, 15.0, theme::LINK));
+        // nothing happens in code
+        let code = "`a[^1]` x\n[^1]: d\n";
+        let job = highlight_preview(code, &[], &fonts, &[], Some(0..0));
+        let in_code = format_of(&job, code, "[^1]");
+        assert!(!is_hidden(in_code) && in_code.valign == egui::Align::BOTTOM, "a reference in code is plain");
+    }
+
+    // spec: EDIT-043, EDIT-044, LINK-013
+    #[test]
+    fn the_outline_shows_footnote_marks_and_script_without_their_markup() {
+        let _defined = markdown::DefinedFootnotes::set(["1".to_string()].into());
+        let job = outline_job("H<sub>2</sub>O<u>x</u>[^1][^2]", &[], 14.0);
+        assert_eq!(job.text, "H2Ox1[^2]", "the tags and the brackets of a defined footnote are left out, an undefined one stays");
+        let sec = |n: &str| job.sections.iter().find(|s| job.text[s.byte_range.start.0..s.byte_range.end.0].contains(n)).unwrap().format.clone();
+        assert_eq!((sec("2").font_id.size, sec("2").valign), (14.0 * SCRIPT_SCALE, egui::Align::BOTTOM));
+        assert_eq!(sec("x").underline.width, 1.0);
+        let mark = job.sections.iter().find(|s| &job.text[s.byte_range.start.0..s.byte_range.end.0] == "1").unwrap();
+        assert_eq!((mark.format.valign, mark.format.color), (egui::Align::TOP, theme::LINK));
     }
 
     // spec: EDIT-032

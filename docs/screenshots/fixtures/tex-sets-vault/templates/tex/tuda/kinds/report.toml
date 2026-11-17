@@ -1,0 +1,30 @@
+# TU Darmstadt, report: the minimal tudapub setup without an accent colour, no margin column.
+name = "Report"
+description = "Reports without accent colour and margin column (class tudapub, type=intern)"
+mapping = "article"
+class = "tudapub"
+options = ["{language}", "accentcolor={accent}", "type=intern", "marginpar=false"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
+logo = true
+
+[[fields]]
+key = "title"
+label = "Title"
+command = "title"
+required = true
+
+[[fields]]
+key = "subtitle"
+label = "Subtitle"
+command = "subtitle"
+
+[[fields]]
+key = "author"
+label = "Author"
+command = "author"
+required = true
+
+[[fields]]
+key = "date"
+label = "Date"
+command = "date"

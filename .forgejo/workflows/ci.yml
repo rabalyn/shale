@@ -365,6 +365,8 @@ jobs:
         env:
           # CI runs only for tags and weekly, so the real install of TeX Live (about 100 MB, minutes) is worth it here
           SHALE_ENV_TESTS_TEX_INSTALL: 'yes'
+          # and the template import from GitHub and CTAN (a few MB), which also shows when CTAN's tuda-ci stops fitting the kinds
+          SHALE_ENV_TESTS_TEX_IMPORT: 'yes'
           # and the TeX image is built again from the current TeX Live, so upstream breakage shows up within a week (ADR-0020)
           SHALE_ENV_TESTS_TEX_REFRESH: 'yes'
         run: sh .forgejo/scripts/env-tests.sh run "${{ steps.engine.outputs.engine }}"

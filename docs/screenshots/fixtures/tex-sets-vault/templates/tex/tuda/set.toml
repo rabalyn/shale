@@ -1,0 +1,10 @@
+name = "TU Darmstadt (tuda-ci)"
+version = "4.06"
+imported_at = "2026-11-12"
+logo_file = "tuda_logo"
+
+[source]
+kind = "github"
+repo = "tudace/tuda_latex_templates"
+reference = "e933be93b07008edc9ce77e33b877d15489a476f"
+sha256 = "477060aeb6e459d661baac1942e83a2bd45e7dd9cdfdff9c3c24f72006b5c6d3"

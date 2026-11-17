@@ -13,13 +13,35 @@ pub struct KeyDialog {
     adding: bool,
     /// Why the last binding was refused.
     pub error: Option<String>,
+    /// A recorded binding that clashes with other actions, waiting for the answer to “Overwrite it?”
+    /// (KEY-018).
+    pub confirm: Option<Confirm>,
     /// Where the controls were drawn (`key:<id>`, `add:<id>`, `clear:<id>`, `reset:<id>`,
     /// `reset-all`), for tests.
     pub rects: Vec<(String, Rect)>,
 }
 
+/// The question “<keys> is used by “<action>”. Overwrite it?” (KEY-018).
+pub struct Confirm {
+    action: Action,
+    binding: Binding,
+    adding: bool,
+    /// The actions the binding clashes with.
+    clashes: Vec<Action>,
+}
+
+/// `“A”`, `“A” and “B”`, `“A”, “B” and “C”`.
+fn names(actions: &[Action]) -> String {
+    let quoted: Vec<String> = actions.iter().map(|a| format!("“{}”", a.def().label)).collect();
+    match quoted.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => quoted.join(""),
+    }
+}
+
 impl KeyDialog {
     fn start(&mut self, a: Action, adding: bool) {
+        self.confirm = None;
         self.recording = Some((a, vec![]));
         self.adding = adding;
         self.error = None;
@@ -37,15 +59,18 @@ impl KeyDialog {
                 self.recording = None;
             } else if bare && *key == Key::Enter && !chords.is_empty() {
                 let binding = Binding(std::mem::take(chords));
-                match if self.adding { keys.add(*action, binding) } else { keys.set(*action, binding) } {
+                let action = *action;
+                self.recording = None;
+                match keys.check_rules(action, &binding) {
+                    Err(msg) => self.error = Some(msg),
                     Ok(()) => {
-                        self.recording = None;
-                        self.error = None;
-                        saved = true;
-                    }
-                    Err(msg) => {
-                        self.error = Some(msg);
-                        self.recording = None;
+                        let clashes = keys.clashes_of(action, &binding);
+                        if clashes.is_empty() {
+                            saved = self.apply(keys, action, binding, self.adding);
+                        } else {
+                            self.error = None;
+                            self.confirm = Some(Confirm { action, binding, adding: self.adding, clashes });
+                        }
                     }
                 }
             } else {
@@ -54,12 +79,86 @@ impl KeyDialog {
         }
         saved
     }
+
+    /// The answer to the question: Yes overwrites, No changes nothing.
+    fn answer(&mut self, keys: &mut Keymap, yes: bool, changed: &mut bool) {
+        if let Some(c) = self.confirm.take() {
+            if yes {
+                *changed |= self.apply(keys, c.action, c.binding, c.adding);
+            }
+        }
+    }
+
+    /// Save the binding, taking it from the actions it clashes with. Returns true when it was saved.
+    fn apply(&mut self, keys: &mut Keymap, action: Action, binding: Binding, adding: bool) -> bool {
+        match keys.overwrite(action, binding, adding) {
+            Ok(()) => {
+                self.error = None;
+                true
+            }
+            Err(msg) => {
+                self.error = Some(msg);
+                false
+            }
+        }
+    }
+
+    /// The keys of one frame while the question is open: Y is Yes; Enter, Esc and N are No (No has the
+    /// keyboard focus). Returns `Some(answer)` when it was answered.
+    fn answer_keys(events: &[Event]) -> Option<bool> {
+        events.iter().find_map(|e| {
+            let Event::Key { key, pressed: true, repeat: false, modifiers, .. } = e else { return None };
+            if modifiers.any() {
+                return None;
+            }
+            match key {
+                Key::Y => Some(true),
+                Key::Enter | Key::Escape | Key::N => Some(false),
+                _ => None,
+            }
+        })
+    }
+
+    /// Draw the question. Returns `Some(answer)` when a button was clicked.
+    fn draw_confirm(&mut self, ctx: &egui::Context) -> Option<bool> {
+        let c = self.confirm.as_ref()?;
+        let text = format!("{} is used by {}. Overwrite it?", c.binding.display(), names(&c.clashes));
+        let mut answer = None;
+        let mut rects = vec![];
+        egui::Window::new("Overwrite the key?").id(egui::Id::unique(("keys", "overwrite"))).order(egui::Order::Foreground).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            ui.label(text);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let yes = ui.button("Yes");
+                rects.push(("overwrite-yes".to_string(), yes.rect));
+                let no = ui.button("No");
+                rects.push(("overwrite-no".to_string(), no.rect));
+                no.request_focus();
+                if yes.clicked() {
+                    answer = Some(true);
+                } else if no.clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+        self.rects.extend(rects);
+        answer
+    }
 }
 
 /// Draw the tab's content. Returns true when a binding changed (the caller saves).
 pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
     let mut changed = false;
     d.rects.clear();
+    if d.confirm.is_some() {
+        // the question takes every key: nothing else may trigger and Esc must not close the dialog
+        let events = ui.input(|i| i.events.clone());
+        if let Some(yes) = KeyDialog::answer_keys(&events) {
+            d.answer(keys, yes, &mut changed);
+        }
+        ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
+    }
     if d.recording.is_some() {
         // the recording takes every key: Esc must not close the dialog, nothing may press a button
         let events = ui.input(|i| i.events.clone());
@@ -71,7 +170,17 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
             }
         });
     }
+    // the clash note, once all keys are released (KEY-018): informs only
+    let note = d.recording.as_ref().filter(|(_, chords)| !chords.is_empty() && ui.input(|i| i.keys_down.is_empty())).and_then(|(a, chords)| {
+        let b = Binding(chords.clone());
+        let clashes = if keys.check_rules(*a, &b).is_ok() { keys.clashes_of(*a, &b) } else { vec![] };
+        (!clashes.is_empty()).then(|| format!("{} would clash with {}. Enter then asks whether to overwrite it.", b.display(), names(&clashes)))
+    });
     ui.label(muted("Press Change (replaces the keys) or Add (one more), then the keys: one key or chord, or several in a row (a sequence). Enter saves, Esc cancels."));
+    if let Some(n) = note {
+        ui.add_space(4.0);
+        ui.label(muted(n));
+    }
     if let Some(e) = &d.error {
         ui.add_space(4.0);
         ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
@@ -150,7 +259,10 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
         d.error = None;
         changed = true;
     }
-    keys.recording = d.recording.is_some();
+    if let Some(yes) = d.draw_confirm(ui.ctx()) {
+        d.answer(keys, yes, &mut changed);
+    }
+    keys.recording = d.recording.is_some() || d.confirm.is_some();
     changed
 }
 
@@ -311,27 +423,34 @@ mod tests {
         assert!(!w.app.keymap.recording, "triggers work again after the recording");
     }
 
-    // spec: KEY-004
+    fn shows(w: &W, needle: &str) -> bool {
+        w.texts.iter().any(|t| t.contains(needle))
+    }
+
+    // spec: KEY-004, KEY-005, KEY-018
     #[test]
-    fn a_double_binding_is_refused_with_the_name_of_the_other_action() {
+    fn a_binding_that_breaks_a_rule_is_refused_with_its_message_and_no_dialog() {
         let mut w = W::new("double");
         w.open_dialog();
-        w.click("key:global.focus_editor");
-        w.press(Key::H, CTRL);
-        w.press(Key::Enter, Modifiers::NONE);
-        assert_eq!(w.dialog().error.as_deref(), Some("Ctrl+H is already used by “Keyboard one place to the left (pane, then left sidebar)”"));
-        assert!(w.app.keymap.is_default(Action::FocusEditor), "nothing changed");
-        assert!(w.app.cfg.keybindings.is_empty());
-        // a binding that is taken in the other direction too: a Global key against a list key
-        w.click("key:global.back");
-        w.press(Key::J, CTRL);
-        w.press(Key::Enter, Modifiers::NONE);
-        assert_eq!(w.dialog().error.as_deref(), Some("Ctrl+J is already used by “Next folder”"));
         // a plain key is no global shortcut
         w.click("key:global.back");
         w.press(Key::G, Modifiers::NONE);
         w.press(Key::Enter, Modifiers::NONE);
         assert!(w.dialog().error.as_deref().unwrap().contains("needs Ctrl or Alt"));
+        assert!(w.dialog().confirm.is_none(), "no dialog for a refusal that is no clash");
+        // reserved for text editing
+        w.click("key:global.back");
+        w.press(Key::C, CTRL);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.dialog().error.as_deref().unwrap().contains("reserved"));
+        assert!(w.dialog().confirm.is_none());
+        // a fixed meaning
+        w.click("key:files.toggle_folder");
+        w.press(Key::Enter, Modifiers::NONE);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.dialog().error.as_deref().unwrap().contains("fixed meaning"));
+        assert!(w.dialog().confirm.is_none());
+        assert!(w.app.cfg.keybindings.is_empty());
         // a sequence can be recorded in a list scope
         w.click("key:files.toggle_folder");
         w.press(Key::Space, Modifiers::NONE);
@@ -339,6 +458,138 @@ mod tests {
         w.press(Key::Enter, Modifiers::NONE);
         assert_eq!(w.dialog().error, None);
         assert_eq!(w.app.cfg.keybindings.get("files.toggle_folder"), Some(&vec!["Space F".to_string()]));
+    }
+
+    // spec: KEY-018
+    #[test]
+    fn a_clashing_key_asks_to_overwrite_and_no_changes_nothing() {
+        let mut w = W::new("ask-no");
+        w.open_dialog();
+        w.click("key:global.focus_editor");
+        w.press(Key::H, CTRL);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.dialog().confirm.is_some(), "the question is open");
+        assert_eq!(w.dialog().error, None);
+        assert!(shows(&w, "Ctrl+H is used by “Keyboard one place to the left (pane, then left sidebar)”. Overwrite it?"), "{:?}", w.texts);
+        assert!(w.dialog().rects.iter().any(|r| r.0 == "overwrite-yes") && w.dialog().rects.iter().any(|r| r.0 == "overwrite-no"));
+        assert!(w.app.keymap.recording, "the keys trigger nothing meanwhile");
+        // keys do nothing else while it is open: Ctrl+E would switch the view
+        w.press(Key::E, CTRL);
+        assert!(!w.reading());
+        assert!(w.dialog().confirm.is_some());
+        // Enter is No
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.dialog().confirm.is_none());
+        assert!(w.app.keymap.is_default(Action::FocusEditor) && w.app.keymap.is_default(Action::FocusSidebar), "nothing changed");
+        assert!(w.app.cfg.keybindings.is_empty());
+        assert!(!w.app.keymap.recording);
+        // a click on No, and N
+        for answer in ["click", "n"] {
+            w.click("key:global.focus_editor");
+            w.press(Key::H, CTRL);
+            w.press(Key::Enter, Modifiers::NONE);
+            assert!(w.dialog().confirm.is_some());
+            if answer == "n" {
+                w.press(Key::N, Modifiers::NONE);
+            } else {
+                w.click("overwrite-no");
+            }
+            assert!(w.dialog().confirm.is_none(), "{answer}");
+            assert!(w.app.cfg.keybindings.is_empty(), "{answer}");
+        }
+    }
+
+    // spec: KEY-018, KEY-008, KEY-007
+    #[test]
+    fn yes_takes_the_key_from_the_other_action_and_the_new_one_works_at_once() {
+        for answer in ["y", "click"] {
+            let mut w = W::new(&format!("ask-yes-{answer}"));
+            w.open_dialog();
+            // Ctrl+N is “New note”; give it to the reading view action
+            w.click("key:global.toggle_reading");
+            w.press(Key::N, CTRL);
+            w.press(Key::Enter, Modifiers::NONE);
+            assert!(shows(&w, "Ctrl+N is used by “New note”. Overwrite it?"), "{:?}", w.texts);
+            if answer == "y" {
+                w.press(Key::Y, Modifiers::NONE);
+            } else {
+                w.click("overwrite-yes");
+            }
+            assert!(w.dialog().confirm.is_none());
+            assert_eq!(w.dialog().error, None);
+            assert_eq!(w.app.keymap.display(Action::NewNote), "not set");
+            assert_eq!(w.app.keymap.display(Action::ToggleReading), "Ctrl+N");
+            assert_eq!(w.app.cfg.keybindings.get("global.new_note"), Some(&vec![]), "stored as cleared");
+            assert_eq!(w.app.cfg.keybindings.get("global.toggle_reading"), Some(&vec!["Ctrl+N".to_string()]));
+            assert!(shows(&w, "not set"), "the tab shows it");
+            w.app.modal = None;
+            w.frame(vec![]);
+            let tabs = w.app.tabbar.tabs.len();
+            w.press(Key::N, CTRL);
+            assert!(w.reading(), "the edited action fires on the key");
+            assert_eq!(w.app.tabbar.tabs.len(), tabs, "and New note no longer does");
+            assert!(w.app.notes.len() <= 1 + tabs);
+        }
+    }
+
+    // spec: KEY-018
+    #[test]
+    fn esc_on_the_question_is_no_and_the_settings_stay_open() {
+        let mut w = W::new("ask-esc");
+        w.open_dialog();
+        w.click("key:global.focus_editor");
+        w.press(Key::H, CTRL);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(w.dialog().confirm.is_some());
+        w.press(Key::Escape, Modifiers::NONE);
+        assert!(w.dialog().confirm.is_none(), "Esc is No");
+        assert!(matches!(w.app.modal, Some(Modal::Settings { .. })), "the settings window stays open");
+        assert!(w.app.cfg.keybindings.is_empty());
+    }
+
+    // spec: KEY-018
+    #[test]
+    fn a_prefix_clash_names_every_action_and_yes_takes_them_all() {
+        let mut w = W::new("ask-prefix");
+        w.app.keymap.set(Action::TreeToggleFolder, Binding::parse("Space f f").unwrap()).unwrap();
+        w.app.keymap.set(Action::TreePrevFile, Binding::parse("Space f g").unwrap()).unwrap();
+        w.open_dialog();
+        w.click("key:files.next_file");
+        w.press(Key::Space, Modifiers::NONE);
+        w.press(Key::F, Modifiers::NONE);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(shows(&w, "Space f is used by “Previous file” and “Open or close the folder”. Overwrite it?"), "{:?}", w.texts);
+        w.press(Key::Y, Modifiers::NONE);
+        assert_eq!(w.app.keymap.display(Action::TreeToggleFolder), "not set");
+        assert_eq!(w.app.keymap.display(Action::TreePrevFile), "not set");
+        assert_eq!(w.app.keymap.display(Action::TreeNextFile), "Space f");
+        // Add: the edited action keeps its other keys, the other one loses only the clashing one
+        w.click("add:files.next_file");
+        w.press(Key::J, CTRL);
+        w.press(Key::Enter, Modifiers::NONE);
+        assert!(shows(&w, "Ctrl+J is used by “Next folder”. Overwrite it?"), "{:?}", w.texts);
+        w.press(Key::Y, Modifiers::NONE);
+        assert_eq!(w.app.keymap.display(Action::TreeNextFolder), "not set");
+        assert_eq!(w.app.keymap.display(Action::TreeNextFile), "Space f / Ctrl+J");
+    }
+
+    // spec: KEY-018
+    #[test]
+    fn the_clash_note_shows_once_all_keys_are_released_and_not_while_one_is_held() {
+        let mut w = W::new("note");
+        w.open_dialog();
+        w.click("key:global.focus_editor");
+        let ev = |pressed| Event::Key { key: Key::H, physical_key: None, pressed, repeat: false, modifiers: CTRL };
+        w.frame(vec![ev(true)]);
+        w.frame(vec![]);
+        assert!(!shows(&w, "would clash"), "H is still held: {:?}", w.texts);
+        w.frame(vec![ev(false)]);
+        assert!(shows(&w, "Ctrl+H would clash with “Keyboard one place to the left (pane, then left sidebar)”"), "{:?}", w.texts);
+        assert!(w.dialog().confirm.is_none(), "the note only informs");
+        // a key that clashes with nothing has no note
+        w.click("key:global.focus_editor");
+        w.press(Key::E, CTRL_ALT);
+        assert!(!shows(&w, "would clash"), "{:?}", w.texts);
     }
 
     // spec: KEY-006
@@ -558,11 +809,12 @@ mod tests {
         w.press(Key::Enter, Modifiers::NONE);
         assert_eq!(w.dialog().error, None);
         assert_eq!(w.app.cfg.keybindings.get("files.next_file"), Some(&vec!["J".to_string(), "Down".to_string(), "Ctrl+Alt+J".to_string()]));
-        // an added binding that clashes is refused with the name of the other action and changes nothing
+        // an added binding that clashes asks first (KEY-018); No changes nothing
         w.click("add:files.next_file");
         w.press(Key::K, Modifiers::NONE);
         w.press(Key::Enter, Modifiers::NONE);
-        assert_eq!(w.dialog().error.as_deref(), Some("k is already used by “Previous file”"));
+        assert!(shows(&w, "k is used by “Previous file”. Overwrite it?"), "{:?}", w.texts);
+        w.press(Key::N, Modifiers::NONE);
         assert_eq!(w.app.keymap.bindings(Action::TreeNextFile).len(), 3);
         // Change replaces all of them
         w.click("key:files.next_file");

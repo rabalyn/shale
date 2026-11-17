@@ -440,7 +440,7 @@ fn colour_run(line: &str, seg: &Range<usize>, kind: Kind) -> Option<Run> {
 fn colour_line(line: &str, seg: &Range<usize>, kind: Kind, colour: Option<[u8; 3]>) -> LineOut {
     let (open_of, close) = match kind {
         Kind::Mark => (colour_tags::mark_open as fn([u8; 3]) -> String, colour_tags::MARK_CLOSE),
-        Kind::Font => (colour_tags::font_open as fn([u8; 3]) -> String, colour_tags::FONT_CLOSE),
+        _ => (colour_tags::font_open as fn([u8; 3]) -> String, colour_tags::FONT_CLOSE),
     };
     // a plain `==highlight==` around the text goes when it gets a colour or is cleared
     let (line, seg) = if kind == Kind::Mark {

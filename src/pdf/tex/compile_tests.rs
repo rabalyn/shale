@@ -390,7 +390,7 @@ if [ -f "$S/bcf" ]; then cp "$S/bcf" "$stem.bcf"; fi"#,
 
 /// The real LuaLaTeX of the image `shale-tex-env`: every program runs through
 /// `tests/tex-env/tex-env.sh exec <work folder> --`.
-fn container_engine(work: &Path) -> Engine {
+pub(super) fn container_engine(work: &Path) -> Engine {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tex-env/tex-env.sh");
     let mut e = Engine::new(Kind::System, PathBuf::new());
     e.wrapper = vec!["sh".into(), script.to_string_lossy().into_owned(), "exec".into(), work.to_string_lossy().into_owned(), "--".into()];

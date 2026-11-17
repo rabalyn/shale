@@ -1,0 +1,64 @@
+# TU Darmstadt, doctoral thesis (class tudapub with the option thesis, dr). Mapping "book" as for
+# the thesis. dr=rernat is the Dr. rer. nat.; others are ing, phil, ... (see the tuda-ci documentation).
+name = "Doctoral thesis"
+description = "Doctoral theses (class tudapub, thesis type dr)"
+mapping = "book"
+class = "tudapub"
+before_class = ["\\RequirePackage{pdfmanagement}", "\\SetKeys[document/metadata]{pdfstandard=a-2b,pdfversion=1.7,lang={lang}}"]
+options = ["{language}", "accentcolor={accent}", "ruledheaders=chapter", "class=book", "thesis={type=dr,dr=rernat}", "fontsize=11pt", "parskip=half-", "custommargins=true", "marginpar=false"]
+preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
+logo = true
+
+[[fields]]
+key = "title"
+label = "Title"
+command = "title"
+required = true
+
+[[fields]]
+key = "subtitle"
+label = "Subtitle"
+command = "subtitle"
+
+[[fields]]
+key = "author"
+label = "Author"
+command = "author"
+required = true
+
+[[fields]]
+key = "reviewer"
+label = "Reviewers (separated by \\and)"
+command = "reviewer"
+
+[[fields]]
+key = "department"
+label = "Department (a short name such as phys, or the full name)"
+command = "department"
+
+[[fields]]
+key = "institute"
+label = "Institute"
+command = "institute"
+
+[[fields]]
+key = "group"
+label = "Group"
+command = "group"
+
+[[fields]]
+key = "submissiondate"
+label = "Submission date"
+command = "submissiondate"
+default = "\\today"
+
+[[fields]]
+key = "examdate"
+label = "Exam date"
+command = "examdate"
+default = "\\today"
+
+[[fields]]
+key = "dedication"
+label = "Dedication"
+command = "dedication"

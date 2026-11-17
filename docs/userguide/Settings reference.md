@@ -187,6 +187,15 @@ Settings → LaTeX is the table `[tex]` in the settings file.
 | `tex.engine` | `Auto` (the TeX Live that Shale installs when it is there, else the `lualatex` of your computer when it is new enough and has all the packages); `System` (the `lualatex` of your computer); `Managed` (the TeX Live that Shale installs) | Settings → LaTeX, "TeX to use" |
 | `tex.repository` | `https://mirror.ctan.org/systems/texlive/tlnet` (the TeX Live repository the install and the update download from) | Settings → LaTeX, "Download address" |
 
+The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a settings file of their own each, `templates/tex/<set>/settings.toml`, which lives in the vault and not in the settings file of Shale:
+
+| Key | Default | Where |
+|---|---|---|
+| `accent` | `9c` for the TU Darmstadt set, empty for others (the accent colour of the templates) | `settings.toml` of the set |
+| `language` | `en` (or `de`) | `settings.toml` of the set |
+| `department` | empty (used when a note gives no department) | `settings.toml` of the set |
+| `logo` | none, set by Settings → LaTeX → Template sets → Choose logo… | `settings.toml` of the set |
+
 ### Data and troubleshooting ([[Data usage and caches]])
 
 | Key | Default | Where |

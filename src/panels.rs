@@ -564,6 +564,8 @@ impl ShaleApp {
                 let text = self.notes.get(&rel).map(|d| d.text.clone()).or_else(|| v.notes.get(&rel).map(|n| n.text.clone())).unwrap_or_default();
                 let numbered = markdown::headings_numbered(&text, self.cfg.numbered_headings);
                 let heads = markdown::heading_numbers(&text);
+                // a reference in a heading is a footnote mark when the note defines it (EDIT-043)
+                let _defined = markdown::DefinedFootnotes::set(markdown::find_footnotes(&text).defined());
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     if heads.is_empty() {
                         ui.label(muted("No headings in this note."));

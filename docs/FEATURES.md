@@ -46,6 +46,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
   `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
   the Markdown preview), the reading view, table cells and the PDF export, and nest with bold and italic.
+- **Footnotes, underline, sub and superscript.** A footnote reference `[^1]` with a definition
+  `[^1]: text` (continuation lines indented by four spaces or a tab) is a small raised label in the
+  link colour, the definition shows its label raised and its text a little smaller; in the reading
+  view a click on a reference jumps to its definition and back. `<u>text</u>` underlines,
+  `<sub>…</sub>` lowers and `<sup>…</sup>` raises, and `<br>` in a table cell starts a new line.
+  All of it shows in the Markdown preview, the reading view, the outline, table cells and the PDF
+  export (a reference links to its definition) and is what pandoc writes for a Word document.
 
   ![Colours and the toolbar](userguide/z_media/screenshots/editor-colours.png)
 
@@ -104,7 +111,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   embedded pictures, drawings, PDFs, the first frame of a video and the cover of a sound are
   drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
   the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
-  player card; highlights and font colours are printed as written; a **Contents** page after the title lists the
+  player card; highlights and font colours are printed as written, as are footnotes (a reference links to
+  its definition), underline, sub and superscript and `<br>` in table cells; a **Contents** page after the title lists the
   `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008), insert a
@@ -124,6 +132,22 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   into readable errors (TEX-001 to TEX-004).
 
   ![The LaTeX tab of Settings with the question before the install](userguide/z_media/screenshots/settings-latex.png)
+
+- **Template sets** (Settings → LaTeX) are the templates a LaTeX export is made with, kept in your vault
+  (`templates/tex/<set>/`: the class files, one small manifest per document kind, your settings and the
+  logo), so they are synced and backed up with your notes and a TeX Live update cannot change a document.
+  **Import TU Darmstadt templates** downloads the tested tuda-ci (checked by its checksum) and builds the
+  11 document kinds (publication, report, exercise sheet, thesis, doctoral thesis, slides, letter,
+  poster, scientific poster, leaflet, announcement); the newest version from CTAN, a GitHub repository, a
+  zip, a `.tar.gz` or a folder can be imported too (a set Shale has no kinds for is imported without
+  kinds, which are then added by hand). Importing runs as a job with progress and Cancel and never leaves
+  half a set; **Update set** keeps your settings and logo and moves the old files to the vault's trash;
+  **Test page** compiles a small document of the set and opens the PDF; **Remove set…** moves it to the
+  trash. The university's logo may not be redistributed: **Choose logo…** copies yours into the set, and
+  until then exports use a placeholder and the set says "logo missing: exports are not CI-conformant"
+  (TEX-005 to TEX-007, TEX-024 to TEX-027).
+
+  ![Template sets in Settings → LaTeX](userguide/z_media/screenshots/settings-latex-sets.png)
 
 - Every dialog is a window you can move by its title bar and resize from any edge or corner.
 
@@ -182,7 +206,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
   folder to folder, Space opens or closes a folder, Enter opens a file.
 - Every shortcut of this section can be changed in Settings → Keybindings; a key that another
-  action already uses is refused, and a binding can be a sequence of keys.
+  action already uses asks “Overwrite it?” (Yes takes it from that action and leaves it without a key, No
+  changes nothing; Enter answers No), and a binding can be a sequence of keys. While you record, a note
+  under the keys says which action they would clash with.
 - Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
@@ -770,7 +796,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 ## Keyboard
 
 The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
-(everywhere, file list, search results, mail view, note view, vim normal mode; double bindings are refused).
+(everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
 
 | Keys | Action |
