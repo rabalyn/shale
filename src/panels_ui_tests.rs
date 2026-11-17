@@ -311,16 +311,16 @@ fn panel_trash_dialog_moves_to_trash_or_cancels() {
 
 // spec: EDIT-037, CFG-020
 #[test]
-fn edit_037_the_size_is_a_setting_in_the_editor_tab_with_reset() {
+fn edit_037_the_size_is_a_setting_in_the_vim_tab_with_reset() {
     let mut p = P::new("preview-size-setting", &[]);
-    p.app.open_settings(SettingsTab::Editor);
-    assert!(p.shows(Show::Modals, "Link preview size (Shift+K)"), "the setting is on the Editor tab");
+    p.app.open_settings(SettingsTab::Vim);
+    assert!(p.shows(Show::Modals, "Link preview size"), "the setting is on the Vim tab");
     assert_eq!((p.app.cfg.link_preview_width, p.app.cfg.link_preview_height), (640, 480));
     (p.app.cfg.link_preview_width, p.app.cfg.link_preview_height) = (300, 200);
     p.click(Show::Modals, "Reset size");
     assert_eq!((p.app.cfg.link_preview_width, p.app.cfg.link_preview_height), (640, 480), "Reset brings back the default");
     p.app.open_settings(SettingsTab::Appearance);
-    assert!(!p.shows(Show::Modals, "Link preview size (Shift+K)"), "a setting is on one tab only");
+    assert!(!p.shows(Show::Modals, "Link preview size"), "a setting is on one tab only");
 }
 
 // spec: CFG-040, CFG-020
@@ -483,9 +483,10 @@ fn shown_labels(p: &mut P) -> Vec<String> {
 #[test]
 fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     let mut p = P::new("settings-tabs", &[]);
-    let wants: [(SettingsTab, &[&str]); 11] = [
+    let wants: [(SettingsTab, &[&str]); 12] = [
         (SettingsTab::Vault, &["Vault folder", "People folder"]),
-        (SettingsTab::Editor, &["Show line numbers in the editor", "Update links in other notes when renaming", "Font colours"]),
+        (SettingsTab::Editor, &["Cursor while typing", "Blinking cursor", "Show line numbers in the editor", "Update links in other notes when renaming", "Font colours"]),
+        (SettingsTab::Vim, &["Vim-style editing", "Cursor in normal mode", "Esc from insert mode", "Link preview size"]),
         (SettingsTab::Appearance, &["Readable line length", "Dark drawing canvas"]),
         (SettingsTab::Fonts, &["Use the same font and size everywhere", "Font and size"]),
         (SettingsTab::Sync, &["Git sync"]),
@@ -511,6 +512,36 @@ fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     assert!(!shown_labels(&mut p).iter().any(|s| s.starts_with("Show line numbers")));
 }
 
+// spec: EDIT-044
+#[test]
+fn edit_044_the_vim_tab_follows_editor_indented_and_holds_the_vim_settings() {
+    let mut p = P::new("settings-vim-tab", &[]);
+    let all = SettingsTab::ALL;
+    let at = all.iter().position(|t| *t == SettingsTab::Editor).unwrap();
+    assert_eq!(all[at + 1], SettingsTab::Vim, "listed right after Editor");
+    p.app.open_settings(SettingsTab::Vim);
+    let shown = p.look(Show::Modals);
+    let x = |l: &str| shown.iter().find(|(_, t, _)| t == l).map(|x| x.2.min.x).unwrap_or_else(|| panic!("no {l:?}"));
+    assert!(x("Vim") > x("Editor") + 8.0, "the Vim tab is indented under Editor");
+    assert!((x("Appearance") - x("Editor")).abs() < 1.0, "the other tabs are not");
+    // the settings moved: the Editor tab has none of them, the Vim tab has all
+    p.app.open_settings(SettingsTab::Editor);
+    let shown = shown_labels(&mut p);
+    assert!(shown.iter().all(|s| !s.starts_with("Link preview size") && s != "Cursor in normal mode"), "{shown:?}");
+    assert!(shown.iter().any(|s| s.starts_with("Vim-style editing: off")), "{shown:?}");
+    // the combos are off while vim mode is off
+    p.app.cfg.vim_mode = false;
+    p.app.open_settings(SettingsTab::Vim);
+    let shown = p.look(Show::Modals);
+    assert!(shown.iter().any(|(_, t, _)| t == "Esc from insert mode"));
+    // a click on the link in the Editor tab goes to the Vim tab
+    p.app.open_settings(SettingsTab::Editor);
+    p.click(Show::Modals, "Vim tab");
+    assert!(matches!(&p.app.modal, Some(Modal::Settings { tab, .. }) if *tab == SettingsTab::Vim));
+    p.click(Show::Modals, "Keybindings tab");
+    assert!(matches!(&p.app.modal, Some(Modal::Settings { tab, .. }) if *tab == SettingsTab::Keybindings));
+}
+
 // spec: CFG-021
 #[test]
 fn set_002_settings_open_on_a_short_page() {
@@ -526,7 +557,7 @@ fn set_002_settings_open_on_a_short_page() {
     p.app.open_settings(SettingsTab::Editor);
     let shown = p.look(Show::Modals);
     let rect = |l: &str| shown.iter().find(|(_, t, _)| t.starts_with(l)).map(|x| x.2).unwrap_or_else(|| panic!("no {l:?}"));
-    assert!(rect("The colours of the toolbar").bottom() - rect("Vim-style").top() > 300.0, "the editor page is the long one");
+    assert!(rect("The colours of the toolbar").bottom() - rect("Cursor while typing").top() > 300.0, "the editor page is the long one");
 }
 
 // spec: CFG-022

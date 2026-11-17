@@ -11,9 +11,9 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 - **Alt+↑ / Alt+↓** move the current line.
 - A gutter on the left shows **line numbers** (Settings → Editor, on by default);
   a wrapped line keeps one number.
-- The **cursor** has a shape of your choice (Settings → Editor): a bar before the character at the
+- The **cursor** has a shape of your choice (Settings → Editor → Cursor): a bar before the character at the
   cursor (the default), a bar after it, a block or an underline. With vim-style editing the cursor in
-  normal mode has its own choice (default: block). "Blinking cursor" turns the blinking off.
+  normal mode has its own choice (Settings → Vim, default: block). "Blinking cursor" turns the blinking off.
 
 ## The title line and pasting
 
@@ -179,8 +179,10 @@ Videos resize the same way (the controls stay below the picture; **100%** is the
 
 ## Vim-style editing
 
-Settings → Editor, off by default. Notes open in normal mode. The cursor in normal mode is a block
-unless you choose another shape ("Cursor in normal mode"); typing uses "Cursor while typing".
+Settings → Vim (listed under Editor), off by default. Notes open in normal mode. The cursor in normal mode is a block
+unless you choose another shape ("Cursor in normal mode"); typing uses "Cursor while typing" (Settings → Editor).
+When you press Esc to leave insert mode, the cursor stays on the character right after where you stopped
+typing; "Esc from insert mode" can make it step back one character like Vim does.
 
 | Keys | What it does |
 |---|---|
@@ -213,7 +215,7 @@ mode): you can give it, for example, **Space Space**.
 The preview's size can be changed: drag one of its four edges or four corners (the mouse pointer
 turns into a resize arrow). The preview stays open while you drag, and the editor's cursor stays where
 it is. The size is a setting that every preview uses and that is still there after a restart:
-Settings → Editor → "Link preview size (Shift+K)" shows it as two numbers (width and height in points;
+Settings → Vim → "Link preview size" shows it as two numbers (width and height in points;
 at least 240 x 160, and never bigger than the window) with a **Reset size** button, see [[Settings reference]].
 
 The status bar shows NORMAL, INSERT, VISUAL or V-LINE. The vim keys themselves cannot be

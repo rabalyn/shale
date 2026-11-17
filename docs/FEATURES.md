@@ -27,9 +27,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on the same dark code background (PDF-007).
 - Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
-- The **text cursor** (Settings → Editor) is one of four shapes: a bar before the character (default), a bar after it,
+- The **text cursor** (Settings → Editor → Cursor) is one of four shapes: a bar before the character (default), a bar after it,
   a block or an underline; with Vim-style editing the cursor of normal mode has its own choice (default: block).
-  "Blinking cursor" (on by default) makes it steady when off. Exactly one cursor is drawn in every mode.
+  "Blinking cursor" (on by default) makes it steady when off. The Vim tab (listed under Editor) holds the Vim settings: the switch, the cursor of normal mode, "Esc from insert mode" (the cursor stays after the typing by default, or steps back like Vim) and the link preview size. Exactly one cursor is drawn in every mode.
 - A **formatting toolbar** above the text (Settings → Editor, on by default, button size 80–200 %) has a button for
   everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
   Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, tables, `[[note]]`
@@ -236,7 +236,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![A table in the reading view](userguide/z_media/screenshots/table-reading.png)
 
-- **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
+- **Vim-style editing** (Settings → Vim, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
   start typing, Esc stops; x deletes a character; `dd` deletes the line (onto the clipboard,
   `p` puts it back below); v and V select with the same motions, d cuts and y copies to the
