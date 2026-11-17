@@ -17,12 +17,33 @@ use std::time::SystemTime;
 pub enum ReaderAction {
     OpenLink {
         target: String,
+        /// the heading the link names (LINK-015)
+        heading: Option<String>,
         new_tab: bool,
     },
     ToggleTask(usize),
     OpenFile(PathBuf),
     /// A web link: open in the default browser.
     OpenUrl(String),
+}
+
+/// What the reading view shows besides the text: the numbers of the headings by line (LINK-014)
+/// and the line of a heading to scroll to (LINK-015).
+#[derive(Default)]
+pub struct Extras {
+    pub numbers: HashMap<usize, String>,
+    pub scroll_to: Option<usize>,
+}
+
+impl Extras {
+    /// The numbers of the headings of `text` by line; none when numbering is off for the note
+    /// (`vault_default` is the setting, the front matter can override it, CFG-040).
+    pub fn numbers_of(text: &str, vault_default: bool) -> HashMap<usize, String> {
+        if !markdown::headings_numbered(text, vault_default) {
+            return HashMap::new();
+        }
+        markdown::heading_numbers(text).into_iter().filter_map(|(line, _, _, n)| n.map(|n| (line, n))).collect()
+    }
 }
 
 /// What the reading view draws embeds from.
@@ -289,7 +310,7 @@ fn follow_span(ui: &Ui, resp: &egui::Response, byte: usize, spans: &[(Range<usiz
         });
         if resp.clicked() || resp.middle_clicked() {
             let new_tab = resp.middle_clicked() || ui.input(|i| i.modifiers.command);
-            *out = Some(ReaderAction::OpenLink { target: l.target.clone(), new_tab });
+            *out = Some(ReaderAction::OpenLink { target: l.target.clone(), heading: l.heading.clone(), new_tab });
         }
     }
 }
@@ -311,7 +332,9 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
     (out, plain_click)
 }
 
-pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Caches, base: f32, dark_canvas: bool) -> Option<ReaderAction> {
+/// Draw a note. `look` is the text size and whether drawings get a dark canvas.
+pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Caches, look: (f32, bool), extras: &Extras) -> Option<ReaderAction> {
+    let (base, dark_canvas) = look;
     let mut out = None;
     let hint = |t: &str| vault.link_hint(t, Some(rel));
     let all_links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
@@ -405,7 +428,15 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             ui.add_space(base * 0.5);
             let size = base * heading_scale(level as u8);
             let (job, spans) = inline_job(line[level..].trim_start(), &shift(&line_links, level + (line[level..].len() - line[level..].trim_start().len())), size, theme::HEADING, false);
-            inline_block(ui, job, &spans, &hint, &mut out);
+            let shown = ui.horizontal_top(|ui| {
+                if let Some(n) = extras.numbers.get(&i) {
+                    ui.label(egui::RichText::new(n).size(size).color(theme::MUTED));
+                }
+                inline_block(ui, job, &spans, &hint, &mut out)
+            });
+            if extras.scroll_to == Some(i) {
+                shown.response.scroll_to_me(Some(egui::Align::TOP));
+            }
             ui.add_space(base * 0.2);
         } else if let Some((check, done, rest, _)) = markdown::parse_task_line(line) {
             let rest_off = line.len() - rest.len();
@@ -646,7 +677,7 @@ mod tests {
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(700.0, 500.0))), time: Some(time), events, ..Default::default() };
             let mut action = None;
             let mut out = ctx.run_ui(raw, |ui| {
-                action = show(ui, text, &v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, 15.0, true);
+                action = show(ui, text, &v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, (15.0, true), &Extras::default());
             });
             out.textures_delta.clear();
             (action, shapes_text(&out.shapes))
@@ -669,6 +700,79 @@ mod tests {
             Some(ReaderAction::OpenLink { target, .. }) => assert_eq!(target, "Ideas"),
             _ => panic!("clicking the link in the table did nothing"),
         }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Draw `text` in the reading view of a 700 x 500 window (in a scroll area, like the app's)
+    /// for some frames (a scroll is animated); returns the last action and what was painted.
+    fn read(v: &Vault, text: &str, extras: &Extras, frames: Vec<Vec<Event>>) -> (Option<ReaderAction>, Vec<(String, Rect)>) {
+        let (mut scenes, media) = (SceneCache::default(), crate::media::MediaPlayer::default());
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut last = (None, vec![]);
+        for (n, events) in std::iter::repeat_with(Vec::new).take(3).chain(frames).chain(std::iter::repeat_with(Vec::new).take(20)).enumerate() {
+            time += 0.05;
+            let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(700.0, 500.0))), time: Some(time), events, ..Default::default() };
+            let mut action = None;
+            let mut out = ctx.run_ui(raw, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    // the target is asked for in the first frame only, as the app does
+                    let e = Extras { numbers: extras.numbers.clone(), scroll_to: extras.scroll_to.filter(|_| n == 0) };
+                    action = show(ui, text, v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, (15.0, true), &e);
+                });
+            });
+            out.textures_delta.clear();
+            last = (action.or(last.0), shapes_text(&out.shapes));
+        }
+        last
+    }
+
+    // spec: LINK-014
+    #[test]
+    fn the_reading_view_draws_the_numbers_of_the_headings_before_their_text() {
+        let d = std::env::temp_dir().join(format!("shale-reader-numbers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        crate::vault::write_sample_vault(&d).unwrap();
+        let v = Vault::open(&d).unwrap();
+        let text = "# Title\n## Plan\n### Step\n## Next\n";
+        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, true), scroll_to: None }, vec![vec![]]);
+        for (n, title) in [("1", "Plan"), ("1.1", "Step"), ("2", "Next")] {
+            let number = painted.iter().find(|(t, _)| t == n).unwrap_or_else(|| panic!("{n} is painted: {painted:?}")).1;
+            let title = painted.iter().find(|(t, _)| t == title).unwrap().1;
+            assert!(number.max.x <= title.min.x + 0.5 && (number.center().y - title.center().y).abs() < 6.0, "{n} is left of {title:?} on its row: {number:?}");
+        }
+        assert!(!painted.iter().any(|(t, _)| t == "0"), "the title has none");
+        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, false), scroll_to: None }, vec![vec![]]);
+        assert!(!painted.iter().any(|(t, _)| t == "1" || t == "1.1"), "numbering off: {painted:?}");
+        let on = "---\nnumbered-headings: yes\n---\n## Plan\n";
+        assert_eq!(Extras::numbers_of(on, false).get(&3).map(String::as_str), Some("1"), "front matter turns it on (line 3, after the properties)");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: LINK-015
+    #[test]
+    fn a_heading_link_in_the_reading_view_carries_its_heading_and_the_view_scrolls_to_a_heading() {
+        let d = std::env::temp_dir().join(format!("shale-reader-heading-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        crate::vault::write_sample_vault(&d).unwrap();
+        let v = Vault::open(&d).unwrap();
+        for (link, shown) in [("[[Ideas#Top part]]", "Ideas > Top part"), ("[to](Ideas.md#Top%20part)", "to")] {
+            let (_, painted) = read(&v, link, &Extras::default(), vec![vec![]]);
+            let at = painted.iter().find(|(t, _)| t == shown).unwrap_or_else(|| panic!("{shown} is painted: {painted:?}")).1.center();
+            let click = |pressed| vec![Event::PointerMoved(at), Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }];
+            match read(&v, link, &Extras::default(), vec![click(true), click(false)]).0 {
+                Some(ReaderAction::OpenLink { target, heading, .. }) => assert_eq!((target.as_str(), heading.as_deref()), ("Ideas", Some("Top part")), "{link}"),
+                _ => panic!("clicking {link} did nothing"),
+            }
+        }
+        // the heading far down is at the top of the view after the scroll
+        let text: String = (0..80).map(|i| format!("line {i}\n")).collect::<String>() + "## Down here\n" + &"after\n".repeat(60);
+        let line = text.lines().position(|l| l == "## Down here").unwrap();
+        let (_, before) = read(&v, &text, &Extras::default(), vec![vec![]]);
+        assert!(before.iter().find(|(t, _)| t == "Down here").unwrap().1.min.y > 1000.0, "far below the window");
+        let (_, after) = read(&v, &text, &Extras { numbers: Default::default(), scroll_to: Some(line) }, vec![vec![]]);
+        let y = after.iter().find(|(t, _)| t == "Down here").unwrap().1.min.y;
+        assert!((0.0..40.0).contains(&y), "the heading is at the top of the view: {y}");
         let _ = std::fs::remove_dir_all(&d);
     }
 

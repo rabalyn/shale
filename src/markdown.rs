@@ -400,17 +400,98 @@ pub fn find_tags(text: &str) -> Vec<(Range<usize>, String)> {
     out
 }
 
-/// Headings: (line number, level, title).
+/// How many lines the front matter (`---` … `---` at the top) takes; 0 when there is none.
+pub fn front_matter_lines(text: &str) -> usize {
+    let mut lines = text.split('\n');
+    if lines.next().map(str::trim) != Some("---") {
+        return 0;
+    }
+    lines.position(|l| l.trim() == "---").map_or(0, |p| p + 2)
+}
+
+/// Headings: (line number, level, title). Fenced code and front matter hold none.
 pub fn find_headings(text: &str) -> Vec<(usize, usize, String)> {
     let code = fenced_code_lines(text);
+    let front = front_matter_lines(text);
     let mut out = Vec::new();
     for (li, (_, line)) in lines_with_offsets(text).into_iter().enumerate() {
-        if code.get(li).copied().unwrap_or(false) {
+        if li < front || code.get(li).copied().unwrap_or(false) {
             continue;
         }
         if let Some(level) = heading_level(line) {
             out.push((li, level, line[level..].trim().to_string()));
         }
+    }
+    out
+}
+
+/// The title of a heading as it reads: no inline markup, links by their shown text.
+pub fn heading_plain(title: &str) -> String {
+    let links: Vec<(LinkSpan, bool)> = find_links(title).into_iter().map(|l| (l, true)).collect();
+    let (job, _) = crate::reader::inline_job(title, &links, 14.0, crate::theme::TEXT, false);
+    job.text.trim().to_string()
+}
+
+/// The line of the first heading whose text is `heading`, ignoring case, surrounding spaces and
+/// inline markup (LINK-015): `## **Plan** v2` is found by `Plan v2`.
+pub fn find_heading(text: &str, heading: &str) -> Option<usize> {
+    let want = heading_plain(heading).to_lowercase();
+    find_headings(text).into_iter().find(|(_, _, t)| heading_plain(t).to_lowercase() == want).map(|(line, _, _)| line)
+}
+
+/// Whether the headings of this note are numbered: the front matter's `numbered-headings:`
+/// (`true`/`false`, `yes`/`no`) when it has one, else `vault_default` (CFG-040).
+pub fn headings_numbered(text: &str, vault_default: bool) -> bool {
+    let mut lines = text.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return vault_default;
+    }
+    for l in lines {
+        if l.trim() == "---" {
+            break;
+        }
+        if let Some(v) = l.strip_prefix("numbered-headings:") {
+            match v.trim().trim_matches(|c| c == '"' || c == '\'').to_lowercase().as_str() {
+                "true" | "yes" => return true,
+                "false" | "no" => return false,
+                _ => {}
+            }
+        }
+    }
+    vault_default
+}
+
+/// The headings with their numbers (LINK-014): (line, level, title as in [`find_headings`], number
+/// such as `1.2`). `#` is the note's title and has none; `##` and deeper are numbered by nesting,
+/// a heading deeper than the one before it but with nothing shallower above it starts at 1.
+pub fn heading_numbers(text: &str) -> Vec<(usize, usize, String, Option<String>)> {
+    // the open headings: (level, its number); `kids` counts the children of each, `top` those of the root
+    let mut open: Vec<(usize, Vec<usize>, usize)> = Vec::new();
+    let mut top = 0;
+    let mut out = Vec::new();
+    for (line, level, title) in find_headings(text) {
+        if level == 1 {
+            out.push((line, level, title, None));
+            continue;
+        }
+        while open.last().is_some_and(|(l, _, _)| *l >= level) {
+            open.pop();
+        }
+        let mut number = match open.last_mut() {
+            Some((_, n, kids)) => {
+                *kids += 1;
+                let mut n = n.clone();
+                n.push(*kids);
+                n
+            }
+            None => {
+                top += 1;
+                vec![top]
+            }
+        };
+        let label = number.iter().map(usize::to_string).collect::<Vec<_>>().join(".");
+        open.push((level, std::mem::take(&mut number), 0));
+        out.push((line, level, title, Some(label)));
     }
     out
 }
@@ -753,5 +834,64 @@ mod tests {
         let text = "<mark style=\"background: #FFFF00;\">hi</mark> <span style='color: #F00'>x</span> <mark style=\"background: #0F0\">open #real";
         let tags: Vec<String> = find_tags(text).into_iter().map(|(_, t)| t).collect();
         assert_eq!(tags, vec!["real"], "only the real tag is one, also after an unclosed mark");
+    }
+
+    fn numbers(text: &str) -> Vec<(usize, Option<String>)> {
+        heading_numbers(text).into_iter().map(|(l, _, _, n)| (l, n)).collect()
+    }
+
+    // spec: LINK-014
+    #[test]
+    fn headings_are_numbered_by_nesting_and_the_title_is_not() {
+        let text = "# Title\n## A\n### B\n### C\n## D\n#### E\n### F\n## G\n";
+        let n: Vec<Option<String>> = numbers(text).into_iter().map(|(_, n)| n).collect();
+        let s = |x: &str| Some(x.to_string());
+        assert_eq!(n, vec![None, s("1"), s("1.1"), s("1.2"), s("2"), s("2.1"), s("2.2"), s("3")], "a #### under a ## is 1.1, a later ### goes on after it");
+        let (line, level, title, num) = &heading_numbers("x\n## Plan v2")[0];
+        assert_eq!((*line, *level, title.as_str(), num.as_deref()), (1, 2, "Plan v2", Some("1")));
+    }
+
+    // spec: LINK-014
+    #[test]
+    fn a_heading_with_nothing_shallower_above_it_starts_at_one_and_every_h1_is_unnumbered() {
+        let n: Vec<Option<String>> = numbers("### X\n#### Y\n## A\n# Another\n## B").into_iter().map(|(_, n)| n).collect();
+        let s = |x: &str| Some(x.to_string());
+        assert_eq!(n, vec![s("1"), s("1.1"), s("2"), None, s("3")]);
+    }
+
+    // spec: LINK-014
+    #[test]
+    fn code_fences_and_front_matter_hold_no_headings() {
+        let text = "---\n# a yaml comment\ntitle: x\n---\n## A\n```\n## not\n```\n## B\n";
+        assert_eq!(numbers(text), vec![(4, Some("1".into())), (8, Some("2".into()))]);
+        assert_eq!(find_headings(text).len(), 2);
+        assert_eq!(front_matter_lines(text), 4);
+        assert_eq!(front_matter_lines("---\nunclosed\n"), 0);
+        assert_eq!(front_matter_lines("text"), 0);
+    }
+
+    // spec: CFG-040
+    #[test]
+    fn front_matter_overrides_the_vault_default_for_numbered_headings() {
+        let with = |v: &str| format!("---\nnumbered-headings: {v}\n---\n## A");
+        for (v, want) in [("true", true), ("yes", true), ("false", false), ("no", false), ("\"No\"", false), ("TRUE", true)] {
+            assert_eq!(headings_numbered(&with(v), !want), want, "{v} wins over the default");
+        }
+        assert!(headings_numbered("## A", true));
+        assert!(!headings_numbered("## A", false));
+        assert!(headings_numbered(&with("maybe"), true), "an unknown value is ignored");
+        assert!(!headings_numbered("## A\nnumbered-headings: true", false), "only the front matter counts");
+        assert!(!headings_numbered("---\ntags: x\n---\nnumbered-headings: true", false));
+    }
+
+    // spec: LINK-015
+    #[test]
+    fn a_heading_is_found_ignoring_case_spaces_and_markup() {
+        let text = "# T\n## **Plan** v2\n## Plan v2\n## [[Note|Linked]] part\n```\n## Hidden\n```\n";
+        assert_eq!(find_heading(text, "plan v2"), Some(1), "the first match wins");
+        assert_eq!(find_heading(text, "  PLAN V2  "), Some(1));
+        assert_eq!(find_heading(text, "Linked part"), Some(3));
+        assert_eq!(find_heading(text, "Hidden"), None);
+        assert_eq!(find_heading(text, "Nope"), None);
     }
 }

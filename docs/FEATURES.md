@@ -97,7 +97,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   embedded pictures, drawings, PDFs, the first frame of a video and the cover of a sound are
   drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
   the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
-  player card; highlights and font colours are printed as written), insert a
+  player card; highlights and font colours are printed as written; a **Contents** page after the title lists the
+  `##`–`####` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
+  out, and the PDF has bookmarks for its `##`–`######` headings, PDF-008), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
@@ -266,8 +268,16 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![Graph](userguide/z_media/screenshots/graph.png)
 
-- The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline (headings with their formatting, as in the editor) and a local
+- The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline (headings with their formatting and numbers, as in the editor) and a local
   graph of the open note.
+- **Numbered headings** (LINK-014, CFG-042): the headings of a note show a number before their text, `##` 1, `###` 1.1, `###` 1.2, `##` 2; the first `#` heading is the note's title
+  and is never numbered. The numbers are only drawn (muted), never written into the file: in the editor, the Markdown preview, the reading view, the outline, the link preview and
+  the PDF. Settings → Editor → "Number headings" (on by default) switches it for every note; a note's front matter
+  `numbered-headings: true` or `false` (also `yes` / `no`) overrides it for that note.
+- **Heading links scroll** (LINK-015): `[[Note#Heading]]`, `[[#Heading]]` and `[text](Note.md#Heading)` open the note with the heading at the top of the view, in the mode the tab is
+  in: the cursor on the heading line in the editor, the reading view scrolled to it in the reading view. The heading is found ignoring case, spaces and inline markup
+  (`## **Plan** v2` matches `#Plan v2`); a missing one opens the note at its top and says so. The outline's entries do the same.
+  While typing `[[Note#` or `[[#`, the suggestions list that note's headings (indented by level, with their numbers, filtered by what follows the `#`) and insert the plain text of the one you pick (LINK-016).
 - The vault graph shows every note. Red dots are missing notes and green ones are drawings.
 
 ## The ribbon and the sidebars

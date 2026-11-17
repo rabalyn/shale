@@ -288,6 +288,8 @@ pub struct Config {
     pub inline_images: bool,
     /// Show a gutter with line numbers in the editor (EDIT-018).
     pub line_numbers: bool,
+    /// Number the headings of a note: `##` and deeper, as 1, 1.1, 1.2 (LINK-014, CFG-042).
+    pub numbered_headings: bool,
     /// Show the formatting toolbar above the text of a note (EDIT-026).
     pub format_toolbar: bool,
     /// The size of the toolbar's buttons in percent of the base size (EDIT-026), 80–200.
@@ -388,6 +390,7 @@ impl Default for Config {
             file_sort: FileSort::NameAsc,
             inline_images: true,
             line_numbers: true,
+            numbered_headings: true,
             format_toolbar: true,
             toolbar_size: 110,
             link_preview_width: crate::link_preview::DEFAULT_WIDTH,
@@ -714,6 +717,10 @@ mod tests {
         assert!(!c.ctrl_to_follow);
         assert!(c.inline_images);
         assert!(c.line_numbers, "line numbers are on by default (EDIT-018)");
+        // spec: CFG-040
+        assert!(c.numbered_headings, "headings are numbered by default");
+        let c: Config = serde_json::from_str(r#"{"numbered_headings": false}"#).unwrap();
+        assert!(!c.numbered_headings);
         // spec: EDIT-016, EDIT-017
         assert!(!c.live_preview);
         assert_eq!(c.preview_raw_lines, 0);

@@ -82,6 +82,7 @@ One table, `fonts` (`[fonts]` in the file), in the settings file. Each area has 
 Inside each of these tables: `family` and `size`. The old `font_size` of earlier versions became the
 size of the two editor areas when you updated.
 | `line_numbers` | on | Editor, "Show line numbers in the editor" |
+| `numbered_headings` | on | Editor, "Number headings": `##` and deeper show 1, 1.1, 1.2 before their text; a note's front matter `numbered-headings: true` or `false` overrides it for that note (see [[Notes and links]]) |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
 | `link_preview_width` | 640 (at least 240, at most the window) | Editor, "Link preview size (Shift+K)", the first number; also set by dragging the preview's edges |

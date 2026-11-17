@@ -323,6 +323,19 @@ fn edit_037_the_size_is_a_setting_in_the_editor_tab_with_reset() {
     assert!(!p.shows(Show::Modals, "Link preview size (Shift+K)"), "a setting is on one tab only");
 }
 
+// spec: CFG-040, CFG-020
+#[test]
+fn cfg_042_number_headings_is_a_setting_of_the_editor_tab_and_on_by_default() {
+    let mut p = P::new("number-headings-setting", &[]);
+    p.app.open_settings(SettingsTab::Editor);
+    assert!(p.shows(Show::Modals, "Number headings"), "the setting is on the Editor tab");
+    assert!(p.app.cfg.numbered_headings, "on by default");
+    p.click(Show::Modals, "Number headings");
+    assert!(!p.app.cfg.numbered_headings);
+    p.click(Show::Modals, "Number headings");
+    assert!(p.app.cfg.numbered_headings);
+}
+
 // spec: EDIT-026, EDIT-028
 #[test]
 fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {

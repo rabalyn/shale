@@ -8,7 +8,7 @@
 
 use crate::drawing::{self, Element, Scene, View};
 use crate::markdown;
-use crate::pdf::write::{Doc, FontKind, Image, Page, Rgba, TextStyle};
+use crate::pdf::write::{Bookmark, Dest, Doc, FontKind, Image, Page, Rgba, TextStyle};
 use crate::theme;
 use crate::vault::{FileKind, Vault};
 use eframe::egui::{self, Color32, Pos2, Shape, Vec2};
@@ -75,6 +75,10 @@ pub struct ExportOptions {
     pub embeds: bool,
     /// notes: print tables as plain text lines instead of a grid (EDIT-024)
     pub plain_tables: bool,
+    /// notes: a *Contents* page with the `##`–`####` headings and the pages they start on (PDF-008)
+    pub toc: bool,
+    /// notes: the setting for numbered headings (CFG-042); a note's front matter overrides it
+    pub numbered_headings: bool,
     /// notes: the width in points of the editor's text column, where the note was shown
     /// (`NoteEditor::column`); embeds are as big in proportion to the text as there (PDF-005).
     /// None: the column of `embed_size::DEFAULT_COLUMN`.
@@ -87,11 +91,39 @@ pub struct ExportOptions {
 
 impl ExportOptions {
     pub fn for_note() -> Self {
-        ExportOptions { paper: Paper::A4, landscape: false, margin_mm: 20.0, font_pt: 11.0, title: true, page_numbers: true, embeds: true, plain_tables: false, column: None, background: Background::White, fill_page: true }
+        ExportOptions {
+            paper: Paper::A4,
+            landscape: false,
+            margin_mm: 20.0,
+            font_pt: 11.0,
+            title: true,
+            page_numbers: true,
+            embeds: true,
+            plain_tables: false,
+            toc: true,
+            numbered_headings: true,
+            column: None,
+            background: Background::White,
+            fill_page: true,
+        }
     }
     pub fn for_drawing(scene: &Scene) -> Self {
         let wide = scene.bounds().map(|b| b.width() > b.height()).unwrap_or(true);
-        ExportOptions { paper: Paper::FitDrawing, landscape: wide, margin_mm: 10.0, font_pt: 11.0, title: false, page_numbers: false, embeds: true, plain_tables: false, column: None, background: Background::White, fill_page: true }
+        ExportOptions {
+            paper: Paper::FitDrawing,
+            landscape: wide,
+            margin_mm: 10.0,
+            font_pt: 11.0,
+            title: false,
+            page_numbers: false,
+            embeds: true,
+            plain_tables: false,
+            toc: false,
+            numbered_headings: false,
+            column: None,
+            background: Background::White,
+            fill_page: true,
+        }
     }
     /// The editor's text column the sizes of the embeds are worked out for.
     fn column(&self) -> f32 {
@@ -237,6 +269,28 @@ fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
     lines
 }
 
+/// The height of a line of the *Contents* list, in text sizes.
+const CONTENTS_LINE: f32 = 1.7;
+
+/// A line of the *Contents* list: the heading's level, its text with its number, the place it is at.
+struct Entry {
+    level: usize,
+    label: String,
+    dest: Option<Dest>,
+}
+
+/// `text` shortened with an ellipsis to fit `room` points.
+fn fit_text(text: &str, size: f32, room: f32) -> String {
+    let mut out = text.to_string();
+    if crate::pdf::write::text_width(FontKind::Sans, size, &out) <= room {
+        return out;
+    }
+    while !out.is_empty() && crate::pdf::write::text_width(FontKind::Sans, size, &format!("{out}…")) > room {
+        out.pop();
+    }
+    format!("{}…", out.trim_end())
+}
+
 /// Space between a table cell's border and its text.
 const CELL_PAD_X: f32 = 5.0;
 const CELL_PAD_Y: f32 = 3.0;
@@ -273,6 +327,63 @@ impl<'a> Writer<'a> {
     fn need(&mut self, height: f32) {
         if self.y + height > self.h - self.m && self.y > self.m + 0.5 {
             self.new_page();
+        }
+    }
+
+    /// Room for the *Contents* list (PDF-008): its title is printed now (under the note's title,
+    /// when there is one), and each of the `count` entries gets a line (page and distance from
+    /// the page's top), going on at new pages as needed. The note's text starts on a new page after
+    /// them. The entries are drawn later by [`Writer::draw_contents`], when the pages of the
+    /// headings are known.
+    fn reserve_contents(&mut self, count: usize) -> Vec<(usize, f32)> {
+        let base = self.opts.font_pt;
+        if self.y > self.m + 0.5 {
+            self.y += base * 0.8;
+        }
+        let head = vec![Piece { text: "Contents".into(), kind: FontKind::Sans, size: base * 1.5, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None }];
+        let (x, cw) = (self.m, self.cw());
+        self.paragraph(&head, x, cw);
+        self.y += base * 0.6;
+        let mut slots = Vec::with_capacity(count);
+        for _ in 0..count {
+            if self.y + base * CONTENTS_LINE > self.h - self.m {
+                self.new_page();
+            }
+            slots.push((self.page, self.y));
+            self.y += base * CONTENTS_LINE;
+        }
+        self.new_page();
+        slots
+    }
+
+    /// The entries of the *Contents* list in the room [`Writer::reserve_contents`] made: each
+    /// indented by its level, with its number, a dotted leader and the page it starts on,
+    /// right-aligned; the whole line is a link to that page.
+    fn draw_contents(&mut self, entries: &[Entry], slots: &[(usize, f32)]) {
+        let size = self.opts.font_pt;
+        let ink = Rgba(30, 30, 30, 255);
+        let grey = Rgba(120, 120, 120, 255);
+        let sans = |c| TextStyle::plain(FontKind::Sans, size, c);
+        let (left, right) = (self.m, self.m + self.cw());
+        for (e, (page, top)) in entries.iter().zip(slots) {
+            let x = left + (e.level - 2) as f32 * size * 1.4;
+            let number = e.dest.map(|d| (d.page + 1).to_string()).unwrap_or_default();
+            let nw = crate::pdf::write::text_width(FontKind::Sans, size, &number);
+            let room = right - x - nw - size * 1.5;
+            let label = fit_text(&e.label, size, room);
+            let lw = crate::pdf::write::text_width(FontKind::Sans, size, &label);
+            let base = top + size * 1.08;
+            let unit = crate::pdf::write::text_width(FontKind::Sans, size, ". ");
+            let dots = (((right - nw - size * 0.5) - (x + lw + size * 0.5)) / unit).floor().max(0.0) as usize;
+            let p = self.doc.page(*page);
+            p.text(sans(ink), x, base, &label);
+            if dots > 0 {
+                p.text(sans(grey), right - nw - size * 0.5 - dots as f32 * unit, base, &". ".repeat(dots));
+            }
+            if let Some(d) = e.dest {
+                p.text(sans(ink), right - nw, base, &number);
+                p.jump(left, *top, right - left, size * CONTENTS_LINE, d);
+            }
         }
     }
 
@@ -619,6 +730,12 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
         w.paragraph(&pieces, x, cw);
         w.y += base * 0.6;
     }
+    // the headings with their numbers (LINK-014); where they are is found while the text is laid out
+    let numbers = crate::reader::Extras::numbers_of(text, opts.numbered_headings);
+    let heads = markdown::heading_numbers(text);
+    let contents: Vec<&(usize, usize, String, Option<String>)> = heads.iter().filter(|h| opts.toc && (2..=4).contains(&h.1)).collect();
+    let slots = if contents.is_empty() { vec![] } else { w.reserve_contents(contents.len()) };
+    let mut places: HashMap<usize, Dest> = HashMap::new();
     let fenced = markdown::fenced_code_lines(text);
     let lines = markdown::lines_with_offsets(text);
     let mut i = 0;
@@ -722,7 +839,11 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
                 p.bold = true;
                 p.color = Rgba(0, 0, 0, 255);
             }
+            if let Some(n) = numbers.get(&i) {
+                ps.insert(0, Piece { text: format!("{n} "), kind: FontKind::Sans, size: base * scale, color: Rgba(130, 130, 130, 255), bg: None, italic: false, bold: false, underline: false, strike: false, link: None });
+            }
             w.need(base * scale * 2.0);
+            places.insert(i, Dest { page: w.page, y: w.y });
             w.paragraph(&ps, x0, cw);
             w.y += base * 0.2;
         } else if let Some((_, done, rest, indent)) = markdown::parse_task_line(line) {
@@ -763,6 +884,18 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
         }
         let _ = off;
         i += 1;
+    }
+    let label = |line: usize, title: &str| match numbers.get(&line) {
+        Some(n) => format!("{n} {}", markdown::heading_plain(title)),
+        None => markdown::heading_plain(title),
+    };
+    let entries: Vec<Entry> = contents.iter().map(|(line, level, title, _)| Entry { level: *level, label: label(*line, title), dest: places.get(line).copied() }).collect();
+    w.draw_contents(&entries, &slots);
+    // the bookmarks of PDF readers: every ## to ###### heading, nested by level
+    for (line, level, title, _) in heads.iter().filter(|h| h.1 >= 2) {
+        if let Some(to) = places.get(line) {
+            w.doc.bookmarks.push(Bookmark { level: *level, title: label(*line, title), to: *to });
+        }
     }
     finish(w.doc, opts)
 }
@@ -1039,6 +1172,144 @@ pub(crate) mod tests {
         let bytes = export_note(v, Path::new("Welcome.md"), text, &ExportOptions::for_note()).unwrap();
         let c = contents(&bytes);
         (bytes, c)
+    }
+
+    /// The content stream of each page (the streams that draw text).
+    fn page_streams(bytes: &[u8]) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while let Some(p) = find(bytes, b"stream\n", i) {
+            let start = p + 7;
+            let Some(end) = find(bytes, b"\nendstream", start) else { break };
+            let s = String::from_utf8_lossy(&inflate(&bytes[start..end])).into_owned();
+            if s.contains(" Tf") {
+                out.push(s);
+            }
+            i = end + b"\nendstream".len();
+        }
+        out
+    }
+
+    /// The object numbers of the pages, in order, and of the targets of the links (in the file's order).
+    fn page_ids_and_link_targets(bytes: &[u8]) -> (Vec<usize>, Vec<usize>) {
+        let text = String::from_utf8_lossy(bytes);
+        let mut pages = Vec::new();
+        let mut links = Vec::new();
+        for obj in text.split("\nendobj") {
+            let Some((head, body)) = obj.split_once(" 0 obj\n") else { continue };
+            let id: usize = head.trim().rsplit('\n').next().unwrap_or("").trim().parse().unwrap_or(0);
+            if body.starts_with("<< /Type /Page /Parent") {
+                pages.push(id);
+            }
+            if body.contains("/Subtype /Link") {
+                if let Some((_, d)) = body.split_once("/Dest [") {
+                    links.push(d.split_whitespace().next().unwrap().parse().unwrap());
+                }
+            }
+        }
+        (pages, links)
+    }
+
+    /// `text` with enough filler lines after each heading that the headings are on different pages.
+    fn long_note(headings: &[&str]) -> String {
+        headings.iter().map(|h| format!("{h}\n\n") + &"filler line of the section\n\n".repeat(25)).collect()
+    }
+
+    // spec: PDF-008, LINK-014
+    #[test]
+    fn the_pdf_starts_with_a_contents_page_of_numbered_headings_with_their_pages_and_links() {
+        let (v, d) = vault();
+        let rel = Path::new("Welcome.md");
+        let text = long_note(&["# Title of the note", "## Alpha", "### Beta", "## Gamma", "#### Deep", "##### Five"]);
+        let bytes = export_note(&v, rel, &text, &ExportOptions::for_note()).unwrap();
+        let pages = page_streams(&bytes);
+        assert_eq!(render(&bytes).len(), pages.len(), "every page renders");
+        // page 1: the title, then the contents with the numbers and the pages the headings start on
+        let first = &pages[0];
+        assert!(first.contains(&hex("Welcome")) && first.contains(&hex("Contents")), "the name as the title, then the contents");
+        for label in ["1 Alpha", "1.1 Beta", "2 Gamma", "2.1 Deep"] {
+            assert!(first.contains(&hex(label)), "{label} is in the contents");
+        }
+        assert!(!first.contains(&hex("Title")) && !first.contains(&hex("Five")), "# and ##### are not in the contents");
+        assert!(!first.contains(&hex("filler")), "the text starts on a new page");
+        assert!(pages[1].contains(&hex("Title")), "the note's text follows on page 2");
+        let body = |word: &str| (1..pages.len()).find(|i| pages[*i].contains(&hex(word))).unwrap_or_else(|| panic!("{word} is in the text of no page")) + 1;
+        let (alpha, gamma) = (body("Alpha"), body("Gamma"));
+        assert!(gamma > alpha && alpha >= 2, "the headings are on pages {alpha} and {gamma}");
+        for (label, page) in [("1 Alpha", alpha), ("2 Gamma", gamma)] {
+            assert!(first.contains(&hex(&page.to_string())), "the contents say {label} is on page {page}");
+        }
+        // each entry is a link to the page of its heading, and so is each bookmark
+        let (ids, links) = page_ids_and_link_targets(&bytes);
+        assert_eq!(links.len(), 4, "a link per entry");
+        assert_eq!(links[0], ids[alpha - 1]);
+        assert_eq!(links[2], ids[gamma - 1]);
+        assert!(links.iter().all(|l| ids.contains(l)));
+        let raw = String::from_utf8_lossy(&bytes);
+        assert!(raw.contains("/Type /Outlines") && raw.contains("/Count 5"), "bookmarks for ## to ######: the five headings");
+        assert!(raw.contains("/Type /Catalog") && raw.contains("/Outlines "), "the catalog points to them");
+        let utf16 = |t: &str| t.encode_utf16().map(|u| format!("{u:04X}")).collect::<String>();
+        for label in ["1 Alpha", "1.1 Beta", "2 Gamma", "2.1 Deep", "2.1.1 Five"] {
+            assert!(raw.contains(&format!("<FEFF{}>", utf16(label))), "bookmark {label}");
+        }
+        assert!(!raw.contains(&utf16("Title of the note")), "the title (#) has no bookmark");
+        // nested by level: Beta is below Alpha, Gamma is not
+        let obj_of = |label: &str| raw.split("\nendobj").find(|o| o.contains(&format!("/Title <FEFF{}>", utf16(label)))).unwrap().to_string();
+        let id_of = |o: &str| o.split_whitespace().next().unwrap().to_string();
+        let (alpha_obj, beta_obj, gamma_obj) = (obj_of("1 Alpha"), obj_of("1.1 Beta"), obj_of("2 Gamma"));
+        assert!(beta_obj.contains(&format!("/Parent {} 0 R", id_of(&alpha_obj))), "Beta is below Alpha");
+        assert!(!gamma_obj.contains(&format!("/Parent {} 0 R", id_of(&alpha_obj))), "Gamma is not");
+        assert!(alpha_obj.contains("/First") && alpha_obj.contains("/Next"), "Alpha has Beta below and Gamma after");
+        // the headings in the text carry their numbers too
+        let (page, number) = (&pages[alpha - 1], hex("1 "));
+        assert!(page.contains(&format!("<{number}> Tj")), "the number is printed with the heading");
+        assert_eq!(y_of(page, "1 "), y_of(page, "Alpha"), "on its line");
+        assert!(x_of(page, "1 ") < x_of(page, "Alpha"), "before its text");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-008, CFG-042
+    #[test]
+    fn without_the_box_or_without_headings_there_is_no_contents_page_and_numbering_follows_the_note() {
+        let (v, d) = vault();
+        let rel = Path::new("Welcome.md");
+        let text = long_note(&["## Alpha", "### Beta"]);
+        let off = export_note(&v, rel, &text, &ExportOptions { toc: false, ..ExportOptions::for_note() }).unwrap();
+        let (pages, raw) = (page_streams(&off), String::from_utf8_lossy(&off).into_owned());
+        assert!(!pages.iter().any(|p| p.contains(&hex("Contents"))), "no contents page with the box off");
+        assert!(pages[0].contains(&hex("Welcome")) && pages[0].contains(&hex("Alpha")), "the text starts at once");
+        assert!(page_ids_and_link_targets(&off).1.is_empty(), "no links to pages");
+        assert!(raw.contains("/Type /Outlines"), "the bookmarks are there anyway");
+        let (_, c) = export_text(&v, "Just text, no headings.\n");
+        assert!(!c.contains(&hex("Contents")), "no headings, no contents");
+        assert!(!String::from_utf8_lossy(&export_note(&v, rel, "# Only a title\ntext\n", &ExportOptions::for_note()).unwrap()).contains("/Outlines"), "no bookmarks without ## headings");
+        // numbering: off by the setting, on or off by the note's front matter
+        let plain = |t: &str, numbered: bool| contents(&export_note(&v, rel, t, &ExportOptions { numbered_headings: numbered, ..ExportOptions::for_note() }).unwrap());
+        assert!(plain("## Alpha\n", true).contains(&hex("1 Alpha")));
+        let c = plain("## Alpha\n", false);
+        assert!(c.contains(&hex("Alpha")) && !c.contains(&hex("1 Alpha")), "numbering off: no numbers in the contents or the text");
+        assert!(plain("---\nnumbered-headings: true\n---\n## Alpha\n", false).contains(&hex("1 Alpha")));
+        assert!(!plain("---\nnumbered-headings: false\n---\n## Alpha\n", true).contains(&hex("1 Alpha")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-008
+    #[test]
+    fn a_long_contents_list_takes_as_many_pages_as_it_needs_and_non_ascii_titles_work() {
+        let (v, d) = vault();
+        let rel = Path::new("Welcome.md");
+        let heads: Vec<String> = (1..=90).map(|n| format!("## Überblick {n}")).collect();
+        let text = long_note(&heads.iter().map(String::as_str).collect::<Vec<_>>());
+        let bytes = export_note(&v, rel, &text, &ExportOptions::for_note()).unwrap();
+        let pages = page_streams(&bytes);
+        let contents_pages = pages.iter().take_while(|p| !p.contains(&hex("filler"))).count();
+        assert!(contents_pages >= 2, "90 entries do not fit one page: {contents_pages}");
+        assert!(pages[contents_pages - 1].contains(&hex("90 Überblick 90")), "the last entry is on the last contents page");
+        let (ids, links) = page_ids_and_link_targets(&bytes);
+        assert_eq!(links.len(), 90);
+        assert_eq!(links[0], ids[contents_pages], "the first entry goes to the first page of the text");
+        assert_eq!(render(&bytes).len(), pages.len());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: PDF-004

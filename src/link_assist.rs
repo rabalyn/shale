@@ -53,6 +53,8 @@ pub struct LinkAssist {
     pub id: egui::Id,
     /// folder of the contact notes (`[[p` lists these; set from the app's settings)
     pub people_dir: String,
+    /// the setting for numbered headings (CFG-042): the heading list shows the numbers
+    pub numbered_headings: bool,
     pub(crate) ac_active: bool,
     /// byte where the `[[` of the open suggestions starts
     ac_start: Option<usize>,
@@ -88,6 +90,7 @@ impl LinkAssist {
         LinkAssist {
             id,
             people_dir: crate::import::people::DEFAULT_DIR.into(),
+            numbered_headings: true,
             ac_active: false,
             ac_start: None,
             ac_dismissed: None,
@@ -253,7 +256,7 @@ impl LinkAssist {
                     self.ac_sel = 0;
                 }
                 self.ac_active = true;
-                self.fill_suggestions(vault, &q);
+                self.fill_suggestions(vault, &q, text);
                 if self.ac_sel >= self.ac_items.len() {
                     self.ac_sel = 0;
                 }
@@ -411,8 +414,45 @@ impl LinkAssist {
         (changed, action)
     }
 
-    /// The `[[` list for query `q`: notes and drawings, or people for `[[p `.
-    fn fill_suggestions(&mut self, vault: &Vault, q: &str) {
+    /// The headings for a query with a `#` (LINK-016): `Note#fil` or `#fil` (the text being typed,
+    /// `open`, for the open note). Each item is what replaces the query (`Note#Heading`), each
+    /// label the heading indented by level with its number. Headings that a link cannot hold
+    /// (with `|`, `[` or `]` in their text) are left out.
+    fn heading_items(&self, vault: &Vault, q: &str, open: &str) -> (Vec<(String, bool)>, Vec<String>) {
+        let (target, typed) = q.split_once('#').unwrap_or((q, ""));
+        let note;
+        let text = if target.trim().is_empty() {
+            open
+        } else {
+            note = vault.resolve(target, None).and_then(|rel| vault.notes.get(&rel)).map(|n| n.text.as_str());
+            match note {
+                Some(t) => t,
+                None => return (vec![], vec![]),
+            }
+        };
+        let numbered = markdown::headings_numbered(text, self.numbered_headings);
+        let typed = typed.trim();
+        let mut items = Vec::new();
+        let mut labels = Vec::new();
+        for (_, level, title, number) in markdown::heading_numbers(text) {
+            let plain = markdown::heading_plain(&title);
+            if plain.is_empty() || plain.contains(['|', '[', ']']) || (!typed.is_empty() && markdown::fuzzy_score(typed, &plain).is_none()) {
+                continue;
+            }
+            let number = number.filter(|_| numbered).map(|n| format!("{n} ")).unwrap_or_default();
+            labels.push(format!("{}{number}{plain}", "\u{2003}".repeat(level - 1)));
+            items.push((format!("{target}#{plain}"), true));
+        }
+        (items, labels)
+    }
+
+    /// The `[[` list for query `q`: notes and drawings, headings after a `#`, or people for `[[p `.
+    fn fill_suggestions(&mut self, vault: &Vault, q: &str, open: &str) {
+        if q.contains('#') && !q.starts_with("p ") {
+            self.ac_people = false;
+            (self.ac_items, self.ac_labels) = self.heading_items(vault, q, open);
+            return;
+        }
         let people_q = q.strip_prefix("p ").map(|r| r.to_string());
         self.ac_people = people_q.is_some();
         let mut labels: Vec<String> = Vec::new();
