@@ -3,6 +3,7 @@
 //! Usage:
 //!   shale                       open the last vault (or the start screen)
 //!   shale --vault <folder>      open a specific folder as vault
+//!   shale --export-pdf <folder> <file.pdf>   write the notes of a folder as one PDF (a book), without a window
 //!   shale --screenshot out.png  start with a demo vault, draw ~120 frames, save a picture, exit
 //!   shale --screenshot out.png --view tasks|graph|drawing|reading|calendar|mail   (same, other view)
 //!   shale --screenshot out.png --keys 'click:@Sync|waitfor:@Compose'   (scripted input, see script.rs)
@@ -128,7 +129,7 @@ fn window(size: [f32; 2]) -> egui::ViewportBuilder {
     egui::ViewportBuilder::default().with_title("Shale").with_app_id("shale").with_icon(icon()).with_inner_size(size).with_min_inner_size(MIN_WINDOW)
 }
 
-const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [(--screenshot <file.png> | --record <file.webm>) [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]";
+const USAGE: &str = "usage: shale [<folder> | --vault <folder>] [(--screenshot <file.png> | --record <file.webm>) [--view <name>] [--size WIDTHxHEIGHT] [--keys <script>]]\n       shale --export-pdf <folder> <file.pdf>";
 
 /// What the command line asked for.
 #[derive(Debug, PartialEq)]
@@ -143,6 +144,8 @@ struct Cli {
     keys: Option<String>,
     /// testing aid with --screenshot: the window size in points
     size: [f32; 2],
+    /// `--export-pdf <folder> <file.pdf>`: the folder as one PDF, no window (BOOK-011)
+    export_pdf: Option<(PathBuf, PathBuf)>,
 }
 
 /// The result of reading the command line.
@@ -163,7 +166,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Parsed {
 }
 
 fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
-    let mut cli = Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0] };
+    let mut cli = Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0], export_pdf: None };
     let mut args = args.into_iter();
     while let Some(opt) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{opt} needs a value"));
@@ -175,6 +178,14 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
                     return Err(format!("--record needs a file name ending in .webm, not {v}"));
                 }
                 cli.record = Some(PathBuf::from(v));
+            }
+            "--export-pdf" => {
+                let folder = value()?;
+                let file = value()?;
+                if !file.to_lowercase().ends_with(".pdf") {
+                    return Err(format!("--export-pdf needs a file name ending in .pdf, not {file}"));
+                }
+                cli.export_pdf = Some((PathBuf::from(folder), PathBuf::from(file)));
             }
             "--vault" => cli.vault = Some(PathBuf::from(value()?)),
             "--view" => cli.view = Some(value()?),
@@ -194,6 +205,9 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
     if cli.screenshot.is_some() && cli.record.is_some() {
         return Err("--screenshot and --record are two modes; use one of them".into());
     }
+    if cli.export_pdf.is_some() && (cli.screenshot.is_some() || cli.record.is_some() || cli.vault.is_some() || cli.view.is_some() || cli.keys.is_some()) {
+        return Err("--export-pdf is a mode of its own: it takes a folder and a file and nothing else".into());
+    }
     script::parse(cli.keys.as_deref().unwrap_or("")).map_err(|e| format!("--keys: {e}"))?;
     Ok(Parsed::Run(cli))
 }
@@ -203,7 +217,7 @@ fn main() -> eframe::Result {
     if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {
         eprintln!("shale: could not make the process undumpable: {e}");
     }
-    let Cli { screenshot, record, vault, view, keys, size } = match parse_args(std::env::args().skip(1)) {
+    let Cli { screenshot, record, vault, view, keys, size, export_pdf } = match parse_args(std::env::args().skip(1)) {
         Parsed::Run(cli) => cli,
         Parsed::Help => {
             println!("{USAGE}");
@@ -214,6 +228,17 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
+
+    // the book of a folder: no window, no instance lock, the exit code says how it went (BOOK-011)
+    if let Some((folder, file)) = export_pdf {
+        match pdf::book_export::export_folder(&folder, &file) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                eprintln!("shale: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
 
     // a recording is a screenshot run that ends in a clip; ffmpeg must be there before a window opens (BUILD-018)
     if record.is_some() {
@@ -325,7 +350,7 @@ mod tests {
     // spec: BUILD-019
     #[test]
     fn an_option_needs_its_value() {
-        for o in ["--screenshot", "--record", "--vault", "--view", "--keys", "--size"] {
+        for o in ["--screenshot", "--record", "--vault", "--view", "--keys", "--size", "--export-pdf"] {
             assert_eq!(bad(&[o]), format!("{o} needs a value"));
         }
     }
@@ -339,17 +364,32 @@ mod tests {
         assert_eq!(parse_size("axb"), None);
     }
 
+    // spec: BOOK-011
+    #[test]
+    fn export_pdf_takes_a_folder_and_a_pdf_file_and_nothing_else() {
+        assert_eq!(cli(parse(&["--export-pdf", "docs/userguide", "out.pdf"])).export_pdf, Some((PathBuf::from("docs/userguide"), PathBuf::from("out.pdf"))));
+        assert_eq!(cli(parse(&["--export-pdf", "notes", "OUT.PDF"])).export_pdf, Some((PathBuf::from("notes"), PathBuf::from("OUT.PDF"))), "any case of .pdf");
+        assert_eq!(bad(&["--export-pdf", "notes"]), "--export-pdf needs a value", "the file is missing");
+        assert_eq!(bad(&["--export-pdf", "notes", "out.txt"]), "--export-pdf needs a file name ending in .pdf, not out.txt");
+        for other in [&["--vault", "/v"][..], &["--screenshot", "a.png"], &["--record", "a.webm"], &["--view", "tasks"], &["--keys", "key:Down"]] {
+            let mut args = vec!["--export-pdf", "notes", "out.pdf"];
+            args.extend_from_slice(other);
+            assert!(bad(&args).contains("mode of its own"), "{other:?}");
+        }
+        assert!(bad(&["--export-pdf", "notes", "out.pdf", "/vault"]).contains("mode of its own"), "no bare vault folder either");
+    }
+
     // spec: DEV-013
     #[test]
     fn no_arguments_start_with_the_defaults() {
-        assert_eq!(cli(parse(&[])), Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0] });
+        assert_eq!(cli(parse(&[])), Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0], export_pdf: None });
     }
 
     // spec: DEV-013
     #[test]
     fn every_option_is_read() {
         let c = cli(parse(&["--vault", "/v", "--screenshot", "out.png", "--view", "tasks", "--keys", "key:Down|key:Tab", "--size", "1400x900"]));
-        assert_eq!(c, Cli { screenshot: Some("out.png".into()), record: None, vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1400.0, 900.0] });
+        assert_eq!(c, Cli { screenshot: Some("out.png".into()), record: None, vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1400.0, 900.0], export_pdf: None });
     }
 
     // spec: DEV-013, BUILD-019

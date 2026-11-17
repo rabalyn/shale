@@ -60,21 +60,42 @@ fn font(kind: FontKind) -> &'static LoadedFont {
     cell.get_or_init(|| LoadedFont::parse(data))
 }
 
-/// The face that actually has a glyph for `c` (falls back to Sans).
-fn face_for(kind: FontKind, c: char) -> (FontKind, GlyphId) {
-    if let Some(g) = font(kind).glyph_index(c) {
-        return (kind, g);
+/// The emoji and symbols font, a last resort for characters the text fonts lack (arrows come from
+/// Hack, a calendar from here).
+fn symbols() -> &'static LoadedFont {
+    static SYMBOLS: OnceLock<LoadedFont> = OnceLock::new();
+    SYMBOLS.get_or_init(|| LoadedFont::parse(epaint_default_fonts::NOTO_EMOJI_REGULAR))
+}
+
+/// A character the fonts have no glyph for, as one they have (a heavy cross as a multiplication sign, a check mark as the heavy one).
+fn substitute(c: char) -> char {
+    match c {
+        '✕' | '✖' => '×',
+        '✓' => '✔',
+        _ => c,
     }
-    if let Some(g) = font(FontKind::Sans).glyph_index(c) {
-        return (FontKind::Sans, g);
+}
+
+/// The font that actually has a glyph for `c`: the text's own, else Sans, Hack, then the symbols.
+fn face_for(kind: FontKind, c: char) -> (&'static LoadedFont, GlyphId) {
+    let c = substitute(c);
+    for f in [font(kind), font(FontKind::Sans), font(FontKind::Mono), symbols()] {
+        if let Some(g) = f.glyph_index(c) {
+            return (f, g);
+        }
     }
-    (kind, GlyphId::NOTDEF)
+    (font(kind), GlyphId::NOTDEF)
+}
+
+/// Whether some bundled font has a glyph for `c` (the PDF draws it, not an empty box).
+#[cfg(test)]
+pub fn has_glyph(c: char) -> bool {
+    c.is_whitespace() || face_for(FontKind::Sans, c).1 != GlyphId::NOTDEF
 }
 
 /// Width of one character in points.
 pub fn char_width(kind: FontKind, size: f32, c: char) -> f32 {
-    let (k, g) = face_for(kind, c);
-    let f = font(k);
+    let (f, g) = face_for(kind, c);
     f.advances.advance_width(g).unwrap_or(0.0) * size / f.units_per_em()
 }
 
@@ -309,8 +330,7 @@ impl Page {
 
     fn glyph_outline(&mut self, style: TextStyle, x: f32, y: f32, c: char, skew: f32) {
         let TextStyle { kind, size, color, .. } = style;
-        let (k, g) = face_for(kind, c);
-        let f = font(k);
+        let (f, g) = face_for(kind, c);
         let scale = size / f.units_per_em();
         let mut b = PathOps { out: String::new(), x, y: self.height - y, scale, skew };
         let drawn = f.outlines.get(g).is_some_and(|o| o.draw(DrawSettings::unhinted(Size::unscaled(), LocationRef::default()), &mut b).is_ok());
@@ -322,7 +342,7 @@ impl Page {
         }
     }
 
-    /// A typeset formula (PDF-010) with the left end of its baseline at (x, baseline): the outlines
+    /// A typeset formula (PDF-012) with the left end of its baseline at (x, baseline): the outlines
     /// of its glyphs from the math font, and its rules.
     pub fn math(&mut self, layout: &crate::math::layout::Layout, x: f32, baseline: f32, color: Rgba) {
         use crate::math::layout::Item;
@@ -717,7 +737,7 @@ mod tests {
         assert_eq!(char_of_win_ansi(0x95), Some('•'));
     }
 
-    // spec: PDF-001
+    // spec: PDF-001, PDF-010
     #[test]
     fn font_metrics_come_from_the_bundled_fonts_in_design_units() {
         // Ubuntu Light: 1000 units per em, "a" is 509 wide, ascender 932 (hhea)
@@ -727,9 +747,17 @@ mod tests {
         assert!((char_width(FontKind::Mono, 2048.0, 'a') - 1233.0).abs() < 0.01);
         assert!((text_width(FontKind::Mono, 2048.0, "abc") - 3.0 * 1233.0).abs() < 0.01);
         // a character no font has is as wide as the .notdef glyph of the font
-        let (k, g) = face_for(FontKind::Sans, '\u{10ffff}');
-        assert_eq!((k, g), (FontKind::Sans, GlyphId::NOTDEF));
-        assert_eq!(char_width(k, 10.0, '\u{10ffff}'), font(k).advances.advance_width(g).unwrap() * 10.0 / 1000.0);
+        let (f, g) = face_for(FontKind::Sans, '\u{10ffff}');
+        assert!(std::ptr::eq(f, font(FontKind::Sans)) && g == GlyphId::NOTDEF);
+        assert_eq!(char_width(FontKind::Sans, 10.0, '\u{10ffff}'), f.advances.advance_width(g).unwrap() * 10.0 / 1000.0);
+        assert!(!has_glyph('\u{10ffff}'));
+        // arrows come from Hack, a calendar from the symbols font, a heavy cross as a multiplication sign, a check mark as the heavy one (PDF-010)
+        for c in ['→', '←', '↑', '↓', '↗', '⋯', '▸', '📅', '✕', '✓', '✔'] {
+            assert!(has_glyph(c), "{c}");
+        }
+        assert_eq!(char_width(FontKind::Sans, 10.0, '✕'), char_width(FontKind::Sans, 10.0, '×'));
+        assert_eq!(char_width(FontKind::Sans, 10.0, '✓'), char_width(FontKind::Sans, 10.0, '✔'));
+        assert!(!std::ptr::eq(face_for(FontKind::Sans, '→').0, font(FontKind::Sans)));
     }
 
     // spec: PDF-001

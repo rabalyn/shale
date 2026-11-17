@@ -1,4 +1,4 @@
-//! Math typesetting in pure Rust (EDIT-046 to EDIT-049, PDF-010): the TeX subset is parsed
+//! Math typesetting in pure Rust (EDIT-046 to EDIT-049, PDF-012): the TeX subset is parsed
 //! (`parse`), laid out with the font's MATH table (`layout`, `font`) and drawn on the screen as a
 //! sharp mask in the text colour (`raster`, `paint`) or in the PDF as glyphs and rules.
 

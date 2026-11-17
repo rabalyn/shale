@@ -133,6 +133,20 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![The PDF export dialog](userguide/z_media/screenshots/pdf-export-dialog.png)
 
+- **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
+  or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
+  subfolders as one PDF: a title page (the folder note's `title`, `subtitle`, `author`, `date`), one
+  contents page (parts, chapters and the first level of headings, with numbers, a dotted leader and the
+  page, each a link), every note on a new page (a box), numbered headings that continue the chapter's number,
+  a small grey running header with the chapter's title, links between the chapters that go to the page
+  (or the heading), and nested bookmarks. The convention needs no renaming: chapters are the notes (not
+  `export: false`), a folder note (`index.md`, `README.md`, the note named like the folder, or
+  `folder-note: true`) introduces a folder, the reading order is its `order:` list, else the order of its
+  links, then the rest by name with numbers by value. The dialog has the built-in engine only and a folded
+  **Reading order** to check the tree; the export is a background job with Cancel.
+  `shale --export-pdf <folder> <file.pdf>` does it without a window, and `scripts/userguide-pdf.sh` makes the PDF of this
+  user guide (BOOK-001 to BOOK-012).
+
 - **Settings → LaTeX** finds the TeX for the LaTeX export of notes (LuaLaTeX and biber, the one on the
   computer when its kernel is from 2022-06-01 or newer, else a TeX Live that Shale installs itself):
   the page says which TeX is used or why none can be, tests it with a small document, and installs,

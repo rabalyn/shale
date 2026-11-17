@@ -216,6 +216,8 @@ pub enum Action {
     FocusEditor,
     /// open the "Export to PDF" dialog for a note or drawing
     Export(PathBuf),
+    /// open the "Export to PDF" dialog for a folder as one PDF, a book; the empty path is the vault (BOOK-010)
+    ExportFolder(PathBuf),
     Open {
         rel: PathBuf,
         new_tab: bool,
@@ -1878,6 +1880,34 @@ impl ShaleApp {
         self.modal = Some(Modal::Export(Box::new(dialog)));
     }
 
+    /// Show the export dialog for a folder as one PDF, a book (BOOK-010): `dir` is the folder, the
+    /// empty path the vault. It is saved to `<vault>/exports/<folder name>.pdf`.
+    pub fn open_export_folder_dialog(&mut self, dir: &Path) {
+        self.flush_all();
+        let Some(v) = &self.vault else { return };
+        let name = dir.file_name().or_else(|| v.root.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Vault".to_string());
+        let opts = crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() };
+        let path = v.root.join("exports").join(format!("{name}.pdf"));
+        let book = crate::pdf::book_dialog::BookExport::new(v, dir);
+        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(dir.to_path_buf(), false, name, opts, path).with_book(book))));
+    }
+
+    /// Lay a folder's book out as a job (BOOK-010).
+    pub fn start_book_export(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog, ctx: &egui::Context) -> Result<(), String> {
+        self.flush_all();
+        let root = self.vault.as_ref().ok_or("No vault is open")?.root.clone();
+        let book = d.book.as_mut().ok_or("This is not the export of a folder")?;
+        let ctx = ctx.clone();
+        book.start(root, d.opts.clone(), move || ctx.request_repaint());
+        Ok(())
+    }
+
+    /// Where a folder's export is: when the job has ended, the PDF is saved (or why not).
+    pub fn book_export_tick(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog) -> Option<Result<PathBuf, String>> {
+        let made = d.book.as_mut()?.poll()?;
+        Some(made.and_then(|bytes| self.save_pdf(&d.path, &bytes)))
+    }
+
     /// The text of a note as the window has it: the editor's buffer, else what the vault read.
     fn note_text(&self, rel: &Path) -> String {
         self.notes.get(rel).map(|n| n.text.clone()).or_else(|| self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| n.text.clone())).unwrap_or_default()
@@ -2154,6 +2184,7 @@ impl ShaleApp {
                 Action::NewFolder(parent) => self.modal = Some(Modal::NewFolder { parent, name: String::new() }),
                 Action::OpenVault(p) => self.open_vault(&p),
                 Action::Export(rel) => self.open_export_dialog(&rel),
+                Action::ExportFolder(dir) => self.open_export_folder_dialog(&dir),
                 Action::Rescan => self.rescan(),
                 Action::Toast(m) => self.toast(m),
                 Action::OpenUrl(url) => {

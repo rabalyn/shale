@@ -95,6 +95,10 @@ impl ShaleApp {
                     ui.close();
                 }
                 ui.separator();
+                if ui.button("Export to PDF…").clicked() {
+                    self.actions.push(Action::ExportFolder(PathBuf::new()));
+                    ui.close();
+                }
                 if ui.add_enabled(self.can_restore_trashed(), egui::Button::new("Restore last deleted")).clicked() {
                     self.actions.push(Action::RestoreTrashed);
                     ui.close();
@@ -239,6 +243,10 @@ impl ShaleApp {
                     ui.close();
                 }
                 ui.separator();
+                if ui.button("Export to PDF…").clicked() {
+                    self.actions.push(Action::ExportFolder(f.clone()));
+                    ui.close();
+                }
                 if ui.button("Rename…").clicked() {
                     self.actions.push(Action::Rename(f.clone()));
                     ui.close();
@@ -1117,10 +1125,10 @@ impl ShaleApp {
             }
         }
         if let Modal::Export(d) = &mut modal {
-            let title = format!("Export “{}” to PDF", d.name);
-            // a LaTeX export that is running or has just ended (TEX-016)
-            let finished = self.tex_export_tick(d, &ctx);
-            if d.tex.as_ref().is_some_and(|t| t.working()) {
+            let title = if d.book.is_some() { format!("Export the folder “{}” to PDF", d.name) } else { format!("Export “{}” to PDF", d.name) };
+            // a LaTeX export that is running or has just ended (TEX-016), or the book of a folder (BOOK-010)
+            let finished = self.tex_export_tick(d, &ctx).or_else(|| self.book_export_tick(d));
+            if d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working()) {
                 ctx.request_repaint_after(std::time::Duration::from_millis(250));
             }
             let mut st = (&mut **d, crate::pdf::export_dialog::DialogResult::Open);
@@ -1144,6 +1152,13 @@ impl ShaleApp {
                 None => {}
             }
             match result {
+                crate::pdf::export_dialog::DialogResult::Export if d.book.is_some() => d.error = self.start_book_export(d, &ctx).err(),
+                crate::pdf::export_dialog::DialogResult::Cancel if d.book.as_ref().is_some_and(|b| b.working()) => {
+                    // Cancel stops the export that is running, and a second one closes the dialog
+                    if let Some(b) = d.book.as_mut() {
+                        b.cancel();
+                    }
+                }
                 crate::pdf::export_dialog::DialogResult::Export if d.latex() => d.error = self.start_tex_export(d, &ctx).err(),
                 crate::pdf::export_dialog::DialogResult::Export => match self.run_export(d) {
                     Ok(out) => {

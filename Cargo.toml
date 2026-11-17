@@ -11,7 +11,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6"
 hayro = "0.9"
-epaint_default_fonts = "0.37"
+epaint_default_fonts = { version = "0.37", features = ["monochrome_emoji_fonts"] }
 miniz_oxide = "0.8"
 # SHA-256 of a downloaded template archive (TEX-006); already built for rustls
 ring = "0.17"

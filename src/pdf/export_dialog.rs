@@ -2,6 +2,7 @@
 //! size, orientation, margins, text size, what to include, background and scale for drawings,
 //! where to save, and whether to open the PDF afterwards.
 
+use crate::pdf::book_dialog::BookExport;
 use crate::pdf::export::{Background, ExportOptions, Paper};
 use crate::pdf::tex::dialog::TexExport;
 use crate::theme;
@@ -28,6 +29,8 @@ pub struct ExportDialog {
     pub engine: ExportEngine,
     /// The LaTeX choices of a note; none for a drawing.
     pub tex: Option<Box<TexExport>>,
+    /// A folder as one PDF (BOOK-010): its reading order and the job; none for a note or drawing.
+    pub book: Option<Box<BookExport>>,
     /// screen rect of every control (used by the UI tests)
     pub rects: Vec<(String, Rect)>,
 }
@@ -41,13 +44,19 @@ pub enum DialogResult {
 
 impl ExportDialog {
     pub fn new(rel: PathBuf, drawing: bool, name: String, opts: ExportOptions, default_path: PathBuf) -> Self {
-        ExportDialog { rel, drawing, name, opts, path: default_path.to_string_lossy().into_owned(), open_after: false, error: None, engine: ExportEngine::Builtin, tex: None, rects: vec![] }
+        ExportDialog { rel, drawing, name, opts, path: default_path.to_string_lossy().into_owned(), open_after: false, error: None, engine: ExportEngine::Builtin, tex: None, book: None, rects: vec![] }
     }
 
     /// A note's dialog with the LaTeX choices, on this engine.
     pub fn with_latex(mut self, tex: TexExport, engine: ExportEngine) -> Self {
         self.tex = Some(Box::new(tex));
         self.engine = engine;
+        self
+    }
+
+    /// A folder's dialog: the book it makes.
+    pub fn with_book(mut self, book: BookExport) -> Self {
+        self.book = Some(Box::new(book));
         self
     }
 
@@ -151,8 +160,11 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
             ui.end_row();
             ui.label(muted("Include"));
             ui.vertical(|ui| {
-                rec("title", ui.checkbox(&mut d.opts.title, "The note's name as a title"));
+                rec("title", ui.checkbox(&mut d.opts.title, if d.book.is_some() { "Title page" } else { "The note's name as a title" }));
                 rec("toc", ui.checkbox(&mut d.opts.toc, "Table of contents"));
+                if d.book.is_some() {
+                    rec("new-page-each", ui.checkbox(&mut d.opts.new_page_each, "Each note on a new page"));
+                }
                 rec("pagenumbers", ui.checkbox(&mut d.opts.page_numbers, "Page numbers"));
                 rec("embeds", ui.checkbox(&mut d.opts.embeds, "Embedded pictures, drawings, PDFs, videos and sounds"));
                 rec("plain-tables", ui.checkbox(&mut d.opts.plain_tables, "Export plain text (tables as raw text lines)"));
@@ -165,6 +177,10 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
         ui.end_row();
     });
     ui.add_space(4.0);
+    if let Some(book) = d.book.as_deref_mut() {
+        book.show(ui, &mut rec);
+        ui.add_space(4.0);
+    }
     rec("open-after", ui.checkbox(&mut d.open_after, "Open the PDF after exporting"));
     d.rects = rects;
 }
@@ -178,7 +194,7 @@ pub fn footer(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
     }
     ui.add_space(4.0);
     // LaTeX needs a TeX, a kind and no export running (TEX-016)
-    let ready = !d.latex() || d.tex.as_ref().is_some_and(|t| t.can_export());
+    let ready = (!d.latex() || d.tex.as_ref().is_some_and(|t| t.can_export())) && d.book.as_ref().is_none_or(|b| b.can_export());
     ui.horizontal(|ui| {
         let mut rec = |k: &str, r: egui::Response| -> egui::Response {
             d.rects.push((k.to_string(), r.rect));
