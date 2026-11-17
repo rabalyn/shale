@@ -10,6 +10,8 @@ TEXMFSYSVAR /opt/texlive/texmf-var
 TEXMFCONFIG /opt/texlive/home/texmf-config
 TEXMFHOME /opt/texlive/home/texmf
 TEXMFVAR /opt/texlive/home/texmf-var
+# the platform: tests/tex-env/Containerfile replaces it with the one of the machine (aarch64-linux
+# on the arm64 runner, #289); the managed install (#279) has to do the same
 binary_x86_64-linux 1
 # nothing is added to the system: no symlinks into /usr/local, no change of PATH files
 instopt_adjustpath 0
