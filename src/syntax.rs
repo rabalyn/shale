@@ -1,6 +1,7 @@
 //! Syntax highlighting of code (EDIT-032): fenced code blocks by the language on the opening
-//! fence, inline code spans by a small language-neutral rule. The grammars are the ones bundled
-//! with syntect (no theme: the scopes it finds are sorted into a few `Kind`s that `theme` colours).
+//! fence, inline code spans by a small language-neutral rule. The grammars are the ones of the
+//! two-face crate (bat's set, parsed by syntect; no theme: the scopes it finds are sorted into a
+//! few `Kind`s that `theme` colours).
 //! The result for a block is cached, so a long note is not highlighted again on every frame.
 
 use std::collections::hash_map::DefaultHasher;
@@ -72,14 +73,14 @@ pub fn fenced_blocks(text: &str) -> Vec<Block> {
 
 fn syntaxes() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
-    SET.get_or_init(SyntaxSet::load_defaults_newlines)
+    SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
 /// The names people give a language that the bundled grammars know under another one.
 fn alias(word: &str) -> &str {
     match word {
-        // there is no TypeScript grammar bundled: JavaScript's colours it well enough
-        "ts" | "typescript" | "tsx" | "jsx" | "mjs" | "cjs" | "node" | "javascript" => "js",
+        "jsx" | "mjs" | "cjs" | "node" | "javascript" => "js",
+        "typescript" => "ts",
         "python" | "python3" | "py3" => "py",
         "rust" => "rs",
         "shell" | "zsh" | "console" | "sh-session" | "fish" => "sh",
@@ -263,7 +264,10 @@ mod tests {
             ("python", "Python"),
             ("sh", "Bourne Again Shell (bash)"),
             ("bash", "Bourne Again Shell (bash)"),
-            ("ts", "JavaScript"),
+            ("ts", "TypeScript"),
+            ("typescript", "TypeScript"),
+            ("tsx", "TypeScriptReact"),
+            ("toml", "TOML"),
             ("c++", "C++"),
             ("yml", "YAML"),
             ("json", "JSON"),
@@ -301,6 +305,28 @@ mod tests {
             assert!(k.contains(&want), "{want:?} in {spans:?}");
         }
         assert!(spans.windows(2).all(|w| w[0].0.end <= w[1].0.start) && spans.iter().all(|(r, _)| rust.is_char_boundary(r.start) && rust.is_char_boundary(r.end)));
+    }
+
+    // spec: EDIT-032
+    #[test]
+    fn typescript_and_toml_have_grammars_of_their_own_and_get_sensible_kinds() {
+        let ts = "interface A { n: number }\n// hi\nconst s: string = \"x\";\nfunction f(a: A): void {}\n";
+        let spans = highlight("ts", ts);
+        let text_of = |code: &str, spans: &Spans, k: Kind| spans.iter().filter(|(_, x)| *x == k).map(|(r, _)| code[r.clone()].to_string()).collect::<Vec<_>>();
+        assert!(text_of(ts, &spans, Kind::Keyword).contains(&"interface".to_string()), "{spans:?}");
+        assert!(text_of(ts, &spans, Kind::Type).iter().any(|t| t == "number" || t == "string"), "{spans:?}");
+        assert_eq!(text_of(ts, &spans, Kind::String), ["\"x\""]);
+        assert_eq!(text_of(ts, &spans, Kind::Comment), ["// hi"]);
+        assert!(!highlight("tsx", "const e = <div id=\"a\">{1}</div>;\n").is_empty());
+
+        let toml = "# conf\n[package]\nname = \"shale\"\nversion = 3\non = true\n";
+        let spans = highlight("toml", toml);
+        assert_eq!(text_of(toml, &spans, Kind::Comment), ["# conf"]);
+        assert_eq!(text_of(toml, &spans, Kind::String), ["\"shale\""]);
+        assert_eq!(text_of(toml, &spans, Kind::Number), ["3"]);
+        assert!(text_of(toml, &spans, Kind::Type).contains(&"package".to_string()), "table name: {spans:?}");
+        let kinds_found = kinds(&spans);
+        assert!(kinds_found.contains(&Kind::Constant) || kinds_found.contains(&Kind::Keyword), "keys or booleans: {spans:?}");
     }
 
     // spec: EDIT-032

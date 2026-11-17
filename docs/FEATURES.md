@@ -21,7 +21,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
 
 - **Syntax highlighting**: a fenced code block is coloured by the language on its opening fence
-  (```` ```js ````, ```` ```rust ````, `python`, `sh`, `json`, `yaml`, `c++`, … with the usual aliases) in the
+  (```` ```js ````, ```` ```rust ````, `python`, `ts`, `toml`, `sh`, `json`, `yaml`, `c++`, … about 140 languages, with the usual aliases) in the
   editor and the reading view; a block without a language or with an unknown one stays plain.
   Inline code colours its strings, numbers and called names. The PDF export draws code the same way,
   on the same dark code background (PDF-007).

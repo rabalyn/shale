@@ -55,7 +55,7 @@ Markdown preview hides them), in the [[Reading view]], in table cells and in the
 ## Code
 
 Code is coloured: write the language after the opening fence, as in ```` ```js ````
-or ```` ```rust ```` (also `python`, `sh`, `json`, `yaml`; the usual short names such as `rs`,
+or ```` ```rust ```` (also `python`, `sh`, `json`, `yaml`, `typescript`, `tsx`, `toml` and about 140 more; the usual short names such as `rs`,
 `py` and `yml` work too), and keywords, strings, numbers, comments, functions and types get their
 own colours, in the editor, in the reading view and in the [[PDF]] export. A block with no language, or one Shale does
 not know, stays plain. Inline code (`console.log("hi")`) has no language, so only its strings,
