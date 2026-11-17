@@ -1,14 +1,18 @@
 #!/bin/sh
 # Checks that a version may be released (spec BUILD-013). Run in the repository to check (the
-# current directory), before tagging (make-release.sh) and for a `v*` tag in CI (Forgejo and
-# GitHub; the checkout needs the tags and the history since the previous tag).
+# current directory), before tagging (scripts/make-tag.sh, scripts/make-release.sh) and for a
+# `v*` tag in CI (Forgejo and GitHub; the checkout needs the tags and the history since the
+# previous tag).
 #   sh .github/check-release.sh 0.4.0
 # Fails with a message per problem unless:
-#   - the version is valid semver and greater than the previous `v*` tag (the highest semver
+#   - the version is valid semver and greater than every other `v*` tag (the highest semver
 #     `v*` tag that is not on HEAD, so a tag being built is not its own predecessor);
 #   - Cargo.toml and the `shale` package in Cargo.lock have this version;
-#   - the CHANGELOG.md section of the version is not empty, and mentions (as `#N` or
-#     `raba/shale#N`) every issue named as `Closes #N` in the commits since the previous tag.
+#   - for a release (no pre-release part such as `-rc.1`, FORGE-014): the CHANGELOG.md section of
+#     the version is not empty, and mentions (as `#N` or `raba/shale#N`) every issue named as
+#     `Closes #N` in the commits since the previous release (the highest `v*` tag without a
+#     pre-release part that is not on HEAD). A pre-release (a check tag, FORGE-013) needs no
+#     section: its notes are not published.
 # Without a previous tag the comparisons that need one are skipped.
 set -u
 VERSION="${1#v}"
@@ -45,9 +49,11 @@ CARGO=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml 2>/dev/null | head -1)
 LOCK=$(awk '/^name = "shale"$/ { on = 1; next } on && /^version = / { gsub(/^version = "|"$/, ""); print; exit }' Cargo.lock 2>/dev/null)
 [ "$LOCK" = "$VERSION" ] || fail "Cargo.lock has version \"$LOCK\" for shale, not $VERSION; run cargo build and commit"
 
-# the previous release: the highest semver v* tag that is not on HEAD
+# the previous tag: the highest semver v* tag that is not on HEAD; the previous release: the
+# same among the tags without a pre-release part
 HEAD_TAGS=$(git tag --points-at HEAD)
 PREV=""
+PREV_RELEASE=""
 for t in $(git tag --list 'v*'); do
   is_semver "${t#v}" || continue
   case "
@@ -56,22 +62,31 @@ $HEAD_TAGS
 $t
 "*) continue ;; esac
   if [ -z "$PREV" ] || [ "$(greater "${t#v}" "${PREV#v}")" = 1 ]; then PREV="$t"; fi
+  case "${t%%+*}" in *-*) continue ;; esac
+  if [ -z "$PREV_RELEASE" ] || [ "$(greater "${t#v}" "${PREV_RELEASE#v}")" = 1 ]; then PREV_RELEASE="$t"; fi
 done
 
 if [ -n "$PREV" ] && is_semver "$VERSION"; then
-  [ "$(greater "$VERSION" "${PREV#v}")" = 1 ] || fail "version $VERSION is not greater than the previous release $PREV"
+  [ "$(greater "$VERSION" "${PREV#v}")" = 1 ] || fail "version $VERSION is not greater than the previous tag $PREV"
 fi
 
-if ! NOTES=$(sh "$HERE/release-notes.sh" "$VERSION" ./CHANGELOG.md); then
+case "${VERSION%%+*}" in
+  *-*) PRE=yes ;;
+  *) PRE=no ;;
+esac
+
+if [ "$PRE" = yes ]; then
+  : # a pre-release (check tag) publishes no notes
+elif ! NOTES=$(sh "$HERE/release-notes.sh" "$VERSION" ./CHANGELOG.md); then
   FAIL=1
-elif [ -n "$PREV" ]; then
-  ISSUES=$(git log "$PREV..HEAD" --format=%B | grep -oiE 'closes +(raba/shale)?#[0-9]+' | grep -oE '[0-9]+$' | sort -un)
+elif [ -n "$PREV_RELEASE" ]; then
+  ISSUES=$(git log "$PREV_RELEASE..HEAD" --format=%B | grep -oiE 'closes +(raba/shale)?#[0-9]+' | grep -oE '[0-9]+$' | sort -un)
   MISSING=""
   for n in $ISSUES; do
     printf '%s\n' "$NOTES" | grep -Eq "#$n([^0-9]|\$)" || MISSING="$MISSING #$n"
   done
-  [ -z "$MISSING" ] || fail "the CHANGELOG.md section of $VERSION does not mention the issues closed since $PREV:$MISSING"
+  [ -z "$MISSING" ] || fail "the CHANGELOG.md section of $VERSION does not mention the issues closed since $PREV_RELEASE:$MISSING"
 fi
 
-[ "$FAIL" = 0 ] && echo "Release check passed for $VERSION${PREV:+ (previous release $PREV)}."
+[ "$FAIL" = 0 ] && echo "Release check passed for $VERSION${PREV:+ (previous tag $PREV)}."
 exit "$FAIL"

@@ -12,7 +12,10 @@
 # suites of tests/caldav-env and tests/mail-env when the change touches the CalDAV or mail code
 # or the environments (`.forgejo/scripts/env-tests.sh wanted`); --no-env-tests skips them and
 # says so. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
-# it there and run land.sh again.
+# it there and run land.sh again. After the push the local branch `main` is fast-forwarded to
+# the landed commit (in the worktree that has it checked out, when that one is clean), so new
+# sessions start from it; when it has commits of its own or its checkout has changes, it is left
+# as it is and the script says why (ADR-0018).
 #
 # The worktree and the build folder stay in `<git dir>/land/`, so the next landing builds only
 # what changed. Environment, for the test of this script: LAND_REMOTE (default origin),
@@ -27,7 +30,7 @@ for a in "$@"; do
   case $a in
     --release) RELEASE=yes ;;
     --no-env-tests) ENV_TESTS=no ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "land.sh: unknown option $a" >&2; exit 2 ;;
     *) BRANCHES+=("$a") ;;
   esac
@@ -120,6 +123,34 @@ resolve() {
   fi
 }
 
+# Moves the local branch `main` up to the landed commit $1 (FORGE-011, ADR-0018). Never fails
+# the landing: what it cannot do, it says.
+update_local_main() {
+  local new=$1 cur wt="" path="" line
+  cur=$(git rev-parse -q --verify refs/heads/main) || return 0
+  [ "$cur" = "$new" ] && return 0
+  if ! git merge-base --is-ancestor "$cur" "$new"; then
+    echo "note: local main has commits that are not on $REMOTE/main; it was left at $(git rev-parse --short "$cur")"
+    return 0
+  fi
+  while IFS= read -r line; do
+    case $line in
+      "worktree "*) path=${line#worktree } ;;
+      "branch refs/heads/main") wt=$path ;;
+    esac
+  done < <(git worktree list --porcelain)
+  if [ -z "$wt" ]; then
+    git update-ref refs/heads/main "$new" "$cur"
+  elif [ -n "$(git -C "$wt" status --porcelain --untracked-files=no)" ]; then
+    echo "note: local main was left at $(git rev-parse --short "$cur"): its checkout $wt has uncommitted changes"
+    return 0
+  elif ! git -C "$wt" merge -q --ff-only "$new" >/dev/null 2>&1; then
+    echo "note: local main was left at $(git rev-parse --short "$cur"): the fast-forward in $wt failed (untracked files in the way?)"
+    return 0
+  fi
+  echo "local main is now $(git rev-parse --short "$new")"
+}
+
 for b in "${BRANCHES[@]}"; do
   echo "== $b"
   git fetch -q "$REMOTE"
@@ -149,4 +180,5 @@ for b in "${BRANCHES[@]}"; do
     exit 1
   fi
   echo "landed $b as $(git -C "$WT" rev-parse --short HEAD) on $REMOTE/main"
+  update_local_main "$(git -C "$WT" rev-parse HEAD)"
 done
