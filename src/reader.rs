@@ -96,13 +96,13 @@ struct Inline {
     /// the innermost `<mark style="background: …">` and `<span style="color: …">` here (EDIT-028)
     bg: Option<[u8; 4]>,
     fg: Option<[u8; 4]>,
-    /// inside `<u>` (EDIT-044)
+    /// inside `<u>` (EDIT-051)
     under: bool,
     /// inside `<sub>` or `<sup>`, the innermost of them
     script: Option<colour_tags::Kind>,
 }
 
-/// What a footnote link span stands for (EDIT-043): spans of the layout of a line that are not
+/// What a footnote link span stands for (EDIT-050): spans of the layout of a line that are not
 /// links, but marks that jump to the other end of a footnote.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Foot {
@@ -384,7 +384,7 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
     (job, link_spans, paints, maths)
 }
 
-/// `f` as sub or superscript (EDIT-044): smaller, placed at the top or the bottom of the row, which
+/// `f` as sub or superscript (EDIT-051): smaller, placed at the top or the bottom of the row, which
 /// needs the text not to have a line height of its own.
 fn script_format(mut f: TextFormat, raised: bool) -> TextFormat {
     f.font_id.size *= SCRIPT_SCALE;
@@ -393,7 +393,7 @@ fn script_format(mut f: TextFormat, raised: bool) -> TextFormat {
     f
 }
 
-/// The first line of a footnote definition (EDIT-043): its label raised, then the text a little
+/// The first line of a footnote definition (EDIT-050): its label raised, then the text a little
 /// smaller. `line` is the whole line, `marker` the range of `[^label]:` in it.
 pub(crate) fn footnote_def_painted(line: &str, label: &str, marker: &Range<usize>, links: &[(LinkSpan, bool)], size: f32, color: Color32) -> Painted {
     let lead = line[marker.end..].len() - line[marker.end..].trim_start().len();
@@ -479,7 +479,7 @@ fn math_block(ui: &mut Ui, tex: &str, base: f32) {
 /// the tooltip and the action (web links open the browser, notes open or are created).
 fn follow_span(ui: &Ui, resp: &egui::Response, byte: usize, spans: &[(Range<usize>, LinkSpan, bool)], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) {
     if let Some((kind, label)) = spans.iter().find(|(r, ..)| r.contains(&byte)).and_then(|(_, l, _)| footnote_of(l)) {
-        // a footnote mark goes to the other end of its footnote, in the next frame (EDIT-043)
+        // a footnote mark goes to the other end of its footnote, in the next frame (EDIT-050)
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         resp.clone().on_hover_text(if kind == Foot::Reference { "Go to the footnote" } else { "Back to the text" });
         if resp.clicked() {
@@ -535,7 +535,7 @@ fn jump_id() -> egui::Id {
     egui::Id::unique("shale-footnote-jump")
 }
 
-/// The line a waiting footnote jump goes to (EDIT-043): the definition, or the first reference.
+/// The line a waiting footnote jump goes to (EDIT-050): the definition, or the first reference.
 /// The jump is taken: it is done once.
 fn jump_target(ctx: &egui::Context, notes: &markdown::Footnotes) -> Option<usize> {
     let (kind, label): (Foot, String) = ctx.data_mut(|d| d.remove_temp(jump_id()))?;
@@ -581,7 +581,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
     while i < lines.len() {
         let span = tables.iter().find(|b| b.lines.start == i).map_or(i + 1, |b| b.lines.end);
         if target.is_some_and(|t| (i..span).contains(&t)) {
-            // the end of a footnote jump (EDIT-043): this is the line
+            // the end of a footnote jump (EDIT-050): this is the line
             ui.scroll_to_rect(egui::Rect::from_min_size(ui.cursor().min, Vec2::new(1.0, base * 1.5)), Some(egui::Align::TOP));
         }
         if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
@@ -653,7 +653,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             ui.separator();
             ui.add_space(4.0);
         } else if let Some(def) = notes.def_at(i) {
-            // a footnote definition: its label raised, its text a little smaller (EDIT-043)
+            // a footnote definition: its label raised, its text a little smaller (EDIT-050)
             let (job, spans, _, maths) = footnote_def_painted(line, &def.label, &def.marker, &line_links, base, theme::TEXT);
             inline_block(ui, job, &spans, &maths, &hint, &mut out);
         } else if notes.is_continuation(i) {
@@ -1045,7 +1045,7 @@ mod tests {
         job.sections.iter().find(|s| s.byte_range.start.0 <= b && b < s.byte_range.end.0).unwrap().format.clone()
     }
 
-    // spec: EDIT-044
+    // spec: EDIT-051
     #[test]
     fn the_reading_view_underlines_lowers_and_raises_and_hides_the_tags() {
         let line = "Plain <u>under</u> H<sub>2</sub>O x<sup>2</sup> <U>a <SUP>b</SUP></U> <u>open `<sub>x</sub>`";
@@ -1063,7 +1063,7 @@ mod tests {
         assert!(paints.is_empty(), "they are no colours");
     }
 
-    // spec: EDIT-043
+    // spec: EDIT-050
     #[test]
     fn a_reference_with_a_definition_is_a_raised_mark_and_one_without_stays_as_written() {
         let line = "Note[^1] and[^2] and `[^1]`";
@@ -1082,7 +1082,7 @@ mod tests {
         assert!(spans.is_empty());
     }
 
-    // spec: EDIT-043
+    // spec: EDIT-050
     #[test]
     fn a_definition_shows_its_label_raised_and_its_text_smaller_with_its_links_working() {
         let line = "[^a]:   See **bold** [[Ideas]] and[^a]";
@@ -1125,7 +1125,7 @@ mod tests {
         assert_eq!(br_len("é<br>"), None);
     }
 
-    // spec: EDIT-043
+    // spec: EDIT-050
     #[test]
     fn a_click_on_a_footnote_mark_scrolls_to_its_definition_and_back() {
         let d = std::env::temp_dir().join(format!("shale-reader-footnote-{}", std::process::id()));

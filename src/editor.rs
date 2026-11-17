@@ -50,11 +50,11 @@ struct Fmt {
     rendered: bool,
     /// highlighted code: what this piece of a code block or code span is (EDIT-032)
     syn_kind: Option<crate::syntax::Kind>,
-    /// text inside `<u>…</u>` (EDIT-044)
+    /// text inside `<u>…</u>` (EDIT-051)
     under: bool,
-    /// text inside `<sub>` (1) or `<sup>` (2): smaller and lowered or raised (EDIT-044)
+    /// text inside `<sub>` (1) or `<sup>` (2): smaller and lowered or raised (EDIT-051)
     script: u8,
-    /// footnotes (EDIT-043): 1 the label of a reference, 2 the label of a definition (both raised
+    /// footnotes (EDIT-050): 1 the label of a reference, 2 the label of a definition (both raised
     /// once the line is drawn rendered), 3 the text of a definition (a little smaller)
     fnote: u8,
     /// the TeX of a formula that the preview draws typeset: 1 + its number among the marks; the
@@ -182,7 +182,7 @@ fn colour_pairs(line: &str, off: usize, fmts: &mut [Fmt]) {
     }
 }
 
-/// Footnotes in a line (EDIT-043): `[^` and `]` of a reference to a defined footnote are markup,
+/// Footnotes in a line (EDIT-050): `[^` and `]` of a reference to a defined footnote are markup,
 /// its label is a footnote mark; the marker of a definition is the same with `]:`, and the text after
 /// it (and the indented lines that go on with it) is footnote text. `defined` are the labels that
 /// have a definition; `continuation` says the whole line goes on with a definition.
@@ -703,9 +703,9 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
     tf
 }
 
-/// The size of sub and superscript and of the mark of a footnote, in parts of the text (EDIT-044, EDIT-043).
+/// The size of sub and superscript and of the mark of a footnote, in parts of the text (EDIT-051, EDIT-050).
 pub const SCRIPT_SCALE: f32 = 0.7;
-/// The size of the text of a footnote definition, in parts of the text (EDIT-043).
+/// The size of the text of a footnote definition, in parts of the text (EDIT-050).
 pub const FOOTNOTE_TEXT: f32 = 0.9;
 
 /// Something shown in place of an embed link in the editor.
@@ -1487,7 +1487,7 @@ impl NoteEditor {
         let base_size = if self.live_preview { fonts.rendered.size } else { fonts.raw.size };
         let mut action = None;
         let mut changed = false;
-        // the footnotes with a definition are marks in the grids of tables too (EDIT-043)
+        // the footnotes with a definition are marks in the grids of tables too (EDIT-050)
         let _defined = markdown::DefinedFootnotes::set(markdown::find_footnotes(text).defined());
         let focused = ui.ctx().memory(|m| m.has_focus(self.id));
         if focused || !ui.input(|i| i.pointer.any_down()) {
@@ -4520,7 +4520,7 @@ mod tests {
         f.color == Color32::TRANSPARENT && f.font_id.size <= 1.0
     }
 
-    // spec: EDIT-044
+    // spec: EDIT-051
     #[test]
     fn underline_sub_and_sup_are_drawn_and_their_tags_are_hidden_in_the_preview() {
         let text = "a <u>b</u> H<sub>2</sub>O x<sup>2</sup> <U>c<SUP>d</SUP></U>\n";
@@ -4552,7 +4552,7 @@ mod tests {
         assert_eq!(format_of(&job, code, "y").underline, Stroke::NONE);
     }
 
-    // spec: EDIT-043
+    // spec: EDIT-050
     #[test]
     fn footnote_marks_are_raised_in_the_preview_and_show_their_text_on_the_raw_line() {
         let text = "A[^1] b[^2] c\n\n[^1]: Body\n    more\nplain\n";
@@ -4589,7 +4589,7 @@ mod tests {
         assert!(!is_hidden(in_code) && in_code.valign == egui::Align::BOTTOM, "a reference in code is plain");
     }
 
-    // spec: EDIT-043, EDIT-044, LINK-013
+    // spec: EDIT-050, EDIT-051, LINK-013
     #[test]
     fn the_outline_shows_footnote_marks_and_script_without_their_markup() {
         let _defined = markdown::DefinedFootnotes::set(["1".to_string()].into());

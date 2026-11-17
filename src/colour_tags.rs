@@ -1,7 +1,7 @@
 //! Coloured highlight and font colour as inline HTML (EDIT-028): `<mark style="background: #FFFF00;">`
 //! and `<span style="color: #FF0000;">`, the convention of Obsidian's colour plugins. Reading is
 //! tolerant, writing is always the canonical form. No UI; the editor, the reading view, tables and
-//! the PDF export find the colours here (EDIT-029). The tags `<u>`, `<sub>` and `<sup>` (EDIT-044)
+//! the PDF export find the colours here (EDIT-029). The tags `<u>`, `<sub>` and `<sup>` (EDIT-051)
 //! are read with the same rules, as runs without a colour.
 
 use std::ops::Range;
@@ -13,7 +13,7 @@ pub enum Kind {
     Mark,
     /// `<span style="color: …">`: the colour of the text
     Font,
-    /// `<u>`: underlined text (EDIT-044)
+    /// `<u>`: underlined text (EDIT-051)
     Underline,
     /// `<sub>`: lowered, smaller text
     Sub,
@@ -232,7 +232,7 @@ pub fn open_tags(line: &str) -> Vec<Range<usize>> {
     line.match_indices('<').filter(|(at, _)| !code.iter().any(|r| r.contains(at))).filter_map(|(at, _)| parse_open(&line[at..]).map(|o| at..at + o.len)).collect()
 }
 
-/// The style that applies at byte `at` of a line from `<u>`, `<sub>` and `<sup>` (EDIT-044): whether
+/// The style that applies at byte `at` of a line from `<u>`, `<sub>` and `<sup>` (EDIT-051): whether
 /// the text is underlined, and the innermost of `Sub` and `Sup` around it.
 pub fn style_at(runs: &[Run], at: usize) -> (bool, Option<Kind>) {
     let inside = |r: &&Run| r.inner().contains(&at);
@@ -354,7 +354,7 @@ mod tests {
         assert!(!dark_text_on([255, 0, 255, 255]));
     }
 
-    // spec: EDIT-044
+    // spec: EDIT-051
     #[test]
     fn underline_sub_and_sup_are_read_with_the_rules_of_the_colour_tags() {
         for (tag, kind) in [("u", Kind::Underline), ("sub", Kind::Sub), ("sup", Kind::Sup)] {
@@ -377,7 +377,7 @@ mod tests {
         assert_eq!(style_at(&runs, 0), (false, None));
     }
 
-    // spec: EDIT-044
+    // spec: EDIT-051
     #[test]
     fn unclosed_stray_code_and_look_alike_tags_stay_plain_text() {
         for line in ["<u>never closed", "closed never</u>", "`<u>`x</u>", "<ul>x</ul>", "<sub", "<sup>x</sub>", "<u x</u>", "<b>x</b>", "<sup<u>x</sup>", "<subx>y</subx>", "<u>é</sub>"] {

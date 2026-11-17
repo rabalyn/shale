@@ -400,7 +400,7 @@ pub fn find_tags(text: &str) -> Vec<(Range<usize>, String)> {
     out
 }
 
-// ------------------------------------------------------------------ footnotes (EDIT-043)
+// ------------------------------------------------------------------ footnotes (EDIT-050)
 
 /// A footnote reference `[^label]` in a note.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -497,7 +497,7 @@ pub fn footnote_refs_in_line(line: &str) -> Vec<(Range<usize>, String)> {
     out
 }
 
-/// The footnotes of a note (EDIT-043). Fenced code and front matter hold none.
+/// The footnotes of a note (EDIT-050). Fenced code and front matter hold none.
 pub fn find_footnotes(text: &str) -> Footnotes {
     let code = fenced_code_lines(text);
     let front = front_matter_lines(text);
@@ -531,13 +531,13 @@ pub fn find_footnotes(text: &str) -> Footnotes {
 }
 
 thread_local! {
-    /// The labels that have a definition in the note that is being drawn (EDIT-043).
+    /// The labels that have a definition in the note that is being drawn (EDIT-050).
     static DEFINED: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
 /// The labels that have a definition, in force while this value lives: the inline layout of the
 /// reading view, tables and the PDF export shows a reference as a footnote mark only for these
-/// (EDIT-043). The labels before come back when it is dropped.
+/// (EDIT-050). The labels before come back when it is dropped.
 pub struct DefinedFootnotes(std::collections::HashSet<String>);
 
 impl DefinedFootnotes {
@@ -1268,7 +1268,7 @@ mod tests {
         assert_eq!(find_heading(text, "Nope"), None);
     }
 
-    // spec: EDIT-043
+    // spec: EDIT-050
     #[test]
     fn footnote_references_and_definitions_are_found_with_their_lines() {
         let text = "Text[^1] and[^note-2], again [^1].\n\n[^1]: The body[^3]\n    goes on\n\tand on\nnot indented\n[^note-2]: two\n[^3]: three\n";
@@ -1286,7 +1286,7 @@ mod tests {
         assert_eq!(f.defined(), ["1", "note-2", "3"].iter().map(|s| s.to_string()).collect());
     }
 
-    // spec: EDIT-043
+    // spec: EDIT-050
     #[test]
     fn a_footnote_marker_at_the_start_of_a_line_is_a_definition_and_no_reference() {
         assert_eq!(footnote_def_marker("[^a]: x"), Some(("a".to_string(), 0..5)));
@@ -1300,7 +1300,7 @@ mod tests {
         assert!(!is_footnote_continuation("   x") && !is_footnote_continuation("    ") && !is_footnote_continuation("x"));
     }
 
-    // spec: EDIT-043
+    // spec: EDIT-050
     #[test]
     fn footnotes_in_code_front_matter_and_with_odd_labels_are_none() {
         for text in ["`a[^1]b`", "```\n[^1]\n[^1]: x\n```", "---\nk: [^1]\n---\n", "[^]", "[^a b]", "[^1", "[1]", "^[inline]"] {
@@ -1313,7 +1313,7 @@ mod tests {
         assert_eq!(f.defs[0].lines, 0..1);
     }
 
-    // spec: EDIT-043
+    // spec: EDIT-050
     #[test]
     fn the_defined_labels_hold_while_their_guard_lives() {
         assert!(!footnote_is_defined("a"));

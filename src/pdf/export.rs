@@ -209,9 +209,9 @@ struct Piece {
     underline: bool,
     strike: bool,
     link: Option<String>,
-    /// 1 raised and 2 lowered, the text being smaller (EDIT-044, EDIT-043); 0 on the line
+    /// 1 raised and 2 lowered, the text being smaller (EDIT-051, EDIT-050); 0 on the line
     script: i8,
-    /// the label of the footnote whose definition this is a link to (EDIT-043)
+    /// the label of the footnote whose definition this is a link to (EDIT-050)
     jump: Option<String>,
     /// a typeset formula that takes the place of the text (PDF-010)
     math: Option<std::sync::Arc<crate::math::Formula>>,
@@ -1717,7 +1717,7 @@ pub(crate) mod tests {
         toks[toks.len() - 2].parse().unwrap()
     }
 
-    // spec: PDF-009, EDIT-044
+    // spec: PDF-009, EDIT-051
     #[test]
     fn underline_sub_and_superscript_are_drawn_in_the_pdf_and_their_tags_are_not_printed() {
         let (v, d) = vault();
@@ -1741,7 +1741,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    // spec: PDF-009, EDIT-043
+    // spec: PDF-009, EDIT-050
     #[test]
     fn a_footnote_reference_in_the_pdf_is_a_raised_link_to_its_definition_which_is_printed_where_it_stands() {
         let (v, d) = vault();
