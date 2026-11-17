@@ -139,6 +139,8 @@ pub struct Asks {
     pub social: bool,
     pub usage: bool,
     pub guide: bool,
+    /// Open the guided setup of the LaTeX export (TEX-017).
+    pub tex_setup: bool,
 }
 
 fn last_tab_id() -> Id {
@@ -219,7 +221,7 @@ impl ShaleApp {
                     SettingsTab::Mail => self.mail_tab(ui, &mut asks),
                     SettingsTab::Social => self.social_tab(ui, &mut asks),
                     SettingsTab::Data => self.data_tab(ui, &mut asks),
-                    SettingsTab::Latex => self.latex_tab(ui),
+                    SettingsTab::Latex => self.latex_tab(ui, &mut asks),
                     SettingsTab::Help => self.help_tab(ui, &mut asks),
                     SettingsTab::Keybindings => {
                         let edited = egui::ScrollArea::horizontal().auto_shrink([false, true]).show(ui, |ui| crate::keys_ui::show(ui, keys, &mut self.keymap)).inner;

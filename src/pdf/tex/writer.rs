@@ -7,7 +7,7 @@
 use super::blocks::{self, Block};
 use super::body::Body;
 use super::inline::Look;
-use super::sets::{class_and_preamble, tex_escape, Field, KindManifest, Mapping, SetInfo};
+use super::sets::{class_and_preamble, tex_escape, Field, KindManifest, Mapping, SetInfo, SetSettings};
 use crate::markdown;
 use crate::pdf::export::ExportOptions;
 use crate::vault::Vault;
@@ -62,6 +62,17 @@ fn front_value(fm: &[(String, Vec<String>)], f: &Field) -> Option<String> {
     let values = fm.iter().find(|(k, _)| *k == f.key.to_lowercase())?;
     let joined = values.1.iter().map(|v| v.trim()).filter(|v| !v.is_empty()).collect::<Vec<_>>().join(&format!(" {} ", joiner(f)));
     (!joined.is_empty()).then_some(joined)
+}
+
+/// What the set's settings give a field when nothing else does: the author and the department
+/// the guided setup asked for (TEX-017, TEX-018).
+pub fn settings_default(s: &SetSettings, key: &str) -> Option<String> {
+    let v = match key {
+        "author" => &s.author,
+        "department" => &s.department,
+        _ => return None,
+    };
+    (!v.trim().is_empty()).then(|| v.trim().to_string())
 }
 
 /// What the dialog shows in the fields of a kind before the person changes anything: the
@@ -163,7 +174,11 @@ pub fn write(req: &Request) -> Result<Document, String> {
     // the fields: the dialog, else the note's properties, else the manifest's default
     let value = |f: &Field| -> Option<String> {
         let dialog = req.fields.get(&f.key).map(|v| v.trim()).filter(|v| !v.is_empty()).map(str::to_string);
-        let found = dialog.or_else(|| front_value(&fm, f)).or_else(|| (f.key == "title").then(|| title.clone())).or_else(|| (f.key == "subject" && kind.fields.iter().all(|o| o.key != "title")).then(|| title.clone()));
+        let found = dialog
+            .or_else(|| front_value(&fm, f))
+            .or_else(|| (f.key == "title").then(|| title.clone()))
+            .or_else(|| (f.key == "subject" && kind.fields.iter().all(|o| o.key != "title")).then(|| title.clone()))
+            .or_else(|| settings_default(&req.set.settings, &f.key));
         found.map(|v| tex_value(f, &v)).or_else(|| (!f.default.is_empty()).then(|| f.default.clone()))
     };
     let mut values: Vec<(&Field, Option<String>)> = Vec::new();

@@ -50,6 +50,71 @@ pages, rendered in the background). PDFs dropped on the window go through [[Impo
 
 #userguide #pdf
 
+## Export with your university's LaTeX template: the guided setup
+
+Besides the built-in export, a note can be exported through a **LaTeX template**, for example the
+corporate design of the TU Darmstadt. You do not have to know what TeX is: **Settings → LaTeX → Set up
+LaTeX export…** takes you through it in five steps, and it opens by itself the first time you choose
+**LaTeX template** in the export dialog of a vault where something is still missing (and from the
+**Set up…** button next to each hint of that dialog: no TeX, no templates, no logo). Each step says in
+plain words what it is for, shows a green tick when it is done already, and **Next** passes it; **Back**
+goes a step back and **Cancel** leaves, with the export dialog or Settings back where you were.
+
+What it costs: the built-in export needs nothing. The LaTeX export needs a program called TeX, and if
+your computer has none that is new enough, Shale installs its own in a folder of its own: **about
+100 MB to download and 330 MB on disk**, shown before anything is downloaded. You can remove it again in
+Settings → LaTeX.
+
+![[setup-tex.png]]
+
+1. **TeX.** If a usable TeX is found, the step says "Found: … ✓" and you go on. If not, it says so in a
+   sentence and offers **Install (about 100 MB download, 330 MB on disk)**; only that button downloads
+   anything. A bar shows the progress, **Cancel install** stops it and removes what was downloaded. On
+   Linux and macOS the installer needs `perl`; a computer without it is told so in words before anything is
+   downloaded.
+2. **Templates.** **TU Darmstadt (tested version)** is the recommended choice (the version Shale was
+   tested with, its checksum is checked); **The newest version from CTAN**, **From a file or a folder**
+   and **From a GitHub repository** are there for the others. A set that is in the vault already is
+   offered first (**Use this set**). Importing shows its progress and can be cancelled.
+
+   ![[setup-templates.png]]
+
+3. **Logo.** The templates put the university's logo on the title page, and the logo may not be shipped
+   with Shale or with the templates: members of the TU Darmstadt get it from the page of the university
+   library about LaTeX (the same page the tuda-ci README names, linked in the step with **Open that
+   page**) in the university network. Give it to Shale by **dragging the file onto the window** (a PDF or
+   a PNG), or type or paste where it is. **Later** skips the step: exports then carry a grey
+   placeholder and are not CI-conformant, and you can add the logo any time in Settings → LaTeX.
+
+   ![[setup-logo.png]]
+
+   ![[setup-logo-drop.webm]]
+
+4. **Your details.** The **accent colour** (the colours of the templates as swatches with their codes,
+   `0a` to `11d`), the **language** of your documents (German or English), your **department** and,
+   if you like, your **name**. They are written to the set's `settings.toml` and are kept when the set is
+   updated; the department and the name fill the fields of that name in the export dialog when a note
+   gives none.
+
+   ![[setup-details.png]]
+
+5. **Test page.** Shale makes a small PDF from a sample note with your templates and your details
+   and opens it. When it works the step says **All set. Export a note with its ⋯ menu → Export to PDF… →
+   Engine: LaTeX template.** When it does not, it shows what went
+   wrong in words, **Run again** tries once more and **Save the .tex** writes the document into the vault's
+   `exports` folder, to look at it or to ask someone.
+
+   ![[setup-test-failed.png]]
+
+The files you drop on the window while the setup is open belong to it: on the logo step a PDF or PNG
+becomes the logo, on the templates step a `.zip`, a `.tar.gz` or a folder is imported as the templates; they
+are never imported into the vault as notes. The same works in Settings → LaTeX: a dropped archive or
+folder is imported, a dropped PDF or PNG becomes the logo of the only set that has a logo slot (or of the
+set whose **Choose logo…** is open).
+
+The setup opens by itself only once per vault (finishing or cancelling it both count); run it again from
+Settings → LaTeX whenever you like. The steps are the buttons of Settings → LaTeX (below), put in order.
+
 ## LaTeX export: the TeX it needs
 
 A note can also be exported through LaTeX templates (the first ones are the TU Darmstadt classes
@@ -138,9 +203,13 @@ source, number of document kinds and the state of the logo, and has these button
 ### The logo
 
 The logo of the university, `tuda_logo.pdf`, may not be redistributed, so Shale does not ship it:
-get it from the corporate design portal of the TU Darmstadt. **Choose logo…** takes the path of
+members of the TU Darmstadt get it from the page of the university library about LaTeX
+(<https://www.ulb.tu-darmstadt.de/finden_nutzen/medien_nutzen/dokumente_erstellen/latex/index.de.jsp>,
+as the README of tuda-ci says; in the university network the file is also at
+<https://download.hrz.tu-darmstadt.de/protected/ULB/tuda_logo.pdf>). **Choose logo…** takes the path of
 the PDF (or a PNG) and copies it into the set's `logo/` folder under the name the classes look for;
-you can also put `tuda_logo.pdf` there yourself. Until a logo is there, the set's status says
+a PDF or PNG dropped on the window while **Choose logo…** is open (or while the guided setup is on its
+logo step) does the same; you can also put `tuda_logo.pdf` there yourself. Until a logo is there, the set's status says
 **logo missing: exports are not CI-conformant** and every compile uses a grey placeholder bar, so
 slides, letters and posters still compile; the placeholder lives only in the temporary folder of the
 compile, never in your vault. Documents with the placeholder must not be used as official documents.
@@ -151,9 +220,10 @@ Each set has its own `settings.toml`, which a re-import keeps:
 
 | Key | Meaning |
 |---|---|
-| `accent` | the accent colour of the templates; for tuda-ci `0a` to `9d` (default `9c`) |
+| `accent` | the accent colour of the templates; for tuda-ci `0a` to `0d` and `1a` to `11d` (default `9c`) |
 | `language` | `en` or `de`: the language of the documents (class option and babel) |
-| `department` | used for the `department` field of a kind when a note does not give one |
+| `department` | used for the `department` field of a kind when a note and the dialog give none |
+| `author` | used for the `author` field of a kind when a note and the dialog give none |
 | `logo` | the logo file in `logo/`, set by **Choose logo…** |
 
 ### Adding or changing a document kind: `kinds/<kind>.toml`
@@ -195,7 +265,9 @@ always exported with the built-in engine.
   the box for embedded pictures stays.
 - A line under the fields says which TeX is used, or **No TeX: install it in Settings → LaTeX**
   (**Export** is off then). A red warning says that the set's logo is missing: the PDF then has a grey
-  placeholder where the logo goes and is not CI-conformant (see "The logo").
+  placeholder where the logo goes and is not CI-conformant (see "The logo"). Next to the hints for a
+  missing TeX, missing templates and a missing logo is a **Set up…** button that opens the guided setup
+  (above) at that step.
 - **Export** writes the note as a LaTeX document and compiles it in the background: the dialog shows
   that it is working and the window stays usable; **Cancel** (or closing the dialog) stops it. The PDF goes
   to the path of the dialog (`<vault>/exports/<name>.pdf` by default). The first export after an
@@ -204,6 +276,8 @@ always exported with the built-in engine.
   error (`main.tex:21: Undefined control sequence.`), a package that is missing, and the end of the log.
   **Save the .tex** writes `main.tex`, its pictures and a `README.txt` with the command to compile it
   into a folder next to the PDF (`<name>-tex`), so you can look at it and run it with your own TeX.
+- The fields **author** and **department** start with what you gave in the guided setup (`settings.toml`
+  of the set) when the note has none.
 - The dialog remembers the engine, set and kind you used last, per vault. A note can name its own
   template with the property `latex-template: tuda/thesis` (the folder of the set, a slash, the
   kind's file name); the dialog then opens on LaTeX with that kind.

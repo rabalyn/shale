@@ -6,6 +6,7 @@
 use super::compile::{CompileError, Options};
 use super::engine::Engine;
 use super::sets::{self, KindManifest, LogoStatus, Mapping, SetInfo};
+use super::setup::Step;
 use super::writer::{self, Document};
 use crate::pdf::export::ExportOptions;
 use crate::theme;
@@ -78,6 +79,9 @@ pub struct TexExport {
     pub failure: Option<Failure>,
     /// "Save the .tex" was pressed: the window writes the folder.
     pub save_requested: bool,
+    /// A "Set up…" button beside a missing TeX, set or logo was pressed: the window opens the
+    /// guided setup (TEX-017) at this step.
+    pub setup_requested: Option<Step>,
 }
 
 /// The choice a note's properties make: `latex-template: tuda/thesis` (a set and a kind).
@@ -93,7 +97,7 @@ impl TexExport {
     pub fn new(vault: &Path, title: String, text: &str, prefer: Option<(String, String)>) -> TexExport {
         let sets: Vec<SetInfo> = sets::scan(vault).into_iter().filter_map(|e| e.info.ok()).filter(|s| !s.kinds.is_empty()).collect();
         let props = crate::markdown::front_matter_values(text);
-        let mut t = TexExport { sets, set: 0, kind: String::new(), title, props, values: BTreeMap::new(), status: TexStatus::default(), job: None, failure: None, save_requested: false };
+        let mut t = TexExport { sets, set: 0, kind: String::new(), title, props, values: BTreeMap::new(), status: TexStatus::default(), job: None, failure: None, save_requested: false, setup_requested: None };
         let (set, kind) = prefer.unzip();
         if let Some(i) = set.and_then(|id| t.sets.iter().position(|s| s.id == id)) {
             t.set = i;
@@ -131,8 +135,21 @@ impl TexExport {
     fn fill_fields(&mut self) {
         let Some(kind) = self.current_kind() else { return };
         let fill = writer::prefill(&self.title, &self.props, kind);
+        let defaults = self.current_set().map(|s| s.settings.clone()).unwrap_or_default();
         for (k, v) in fill {
+            // the author and the department of the set's settings start an empty field (TEX-018)
+            let v = if v.is_empty() { writer::settings_default(&defaults, &k).unwrap_or(v) } else { v };
             self.values.entry(k).or_insert(v);
+        }
+    }
+
+    /// Where the setup starts when it opens by itself: the first of TeX and the sets that is
+    /// missing (a missing logo is only pointed out, it does not open anything).
+    pub fn auto_setup_step(&self) -> Option<Step> {
+        match &self.status {
+            TexStatus::Missing(_) => Some(Step::Tex),
+            _ if self.sets.is_empty() => Some(Step::Templates),
+            _ => None,
         }
     }
 
@@ -153,12 +170,8 @@ impl TexExport {
     /// Compile a document against the chosen set as a job (TEX-004).
     pub fn start(&mut self, engine: Engine, document: Document, notify: impl FnOnce() + Send + 'static) {
         let Some(set) = self.current_set().cloned() else { return };
-        let cancel = Arc::new(AtomicBool::new(false));
-        let doc = Arc::new(document);
-        let (c, d) = (cancel.clone(), doc.clone());
         self.failure = None;
-        let rx = crate::jobs::spawn(move || compile_job(&engine, &set, &d, c), notify);
-        self.job = Some(Job { rx, cancel });
+        self.job = Some(spawn_compile(engine, set, Arc::new(document), notify));
     }
 
     /// What the finished job made, once; a failure is kept for the dialog to show.
@@ -182,7 +195,12 @@ impl TexExport {
     pub fn show(&mut self, ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
         let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
         if self.sets.is_empty() {
-            rec("no-sets", ui.colored_label(theme::LINK_MISSING, "This vault has no template sets yet: import one in Settings → LaTeX → Template sets."));
+            ui.horizontal_wrapped(|ui| {
+                rec("no-sets", ui.colored_label(theme::LINK_MISSING, "This vault has no template sets yet: import one in Settings → LaTeX → Template sets."));
+                if rec("setup:sets", ui.button("Set up…")).on_hover_text("The guided setup imports the templates").clicked() {
+                    self.setup_requested = Some(Step::Templates);
+                }
+            });
         }
         let busy = self.working();
         egui::Grid::new("export-tex-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
@@ -254,13 +272,23 @@ impl TexExport {
                 rec("tex-status", ui.label(muted(t)));
             }
             TexStatus::Missing(why) => {
-                rec("tex-status", ui.colored_label(theme::LINK_MISSING, "No TeX: install it in Settings → LaTeX"));
+                ui.horizontal_wrapped(|ui| {
+                    rec("tex-status", ui.colored_label(theme::LINK_MISSING, "No TeX: install it in Settings → LaTeX"));
+                    if rec("setup:tex", ui.button("Set up…")).on_hover_text("The guided setup installs TeX for you").clicked() {
+                        self.setup_requested = Some(Step::Tex);
+                    }
+                });
                 ui.label(muted(why));
             }
         }
         if let (Some(set), Some(kind)) = (self.current_set(), self.current_kind()) {
             if kind.logo && set.logo == LogoStatus::Missing {
-                rec("logo-warning", ui.colored_label(theme::LINK_MISSING, "The set's logo is missing: the PDF gets a grey placeholder and is not CI-conformant. Choose the logo in Settings → LaTeX → Template sets."));
+                ui.horizontal_wrapped(|ui| {
+                    rec("logo-warning", ui.colored_label(theme::LINK_MISSING, "The set's logo is missing: the PDF gets a grey placeholder and is not CI-conformant. Choose the logo in Settings → LaTeX → Template sets."));
+                    if rec("setup:logo", ui.button("Set up…")).on_hover_text("The guided setup asks for the logo").clicked() {
+                        self.setup_requested = Some(Step::Logo);
+                    }
+                });
             }
         }
         if self.working() {
@@ -285,6 +313,15 @@ impl TexExport {
             }
         }
     }
+}
+
+/// Compile a written document against a set as a job (TEX-004); the export dialog and the test
+/// page of the guided setup (TEX-017) both run it.
+pub fn spawn_compile(engine: Engine, set: SetInfo, doc: Arc<Document>, notify: impl FnOnce() + Send + 'static) -> Job {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let c = cancel.clone();
+    let rx = crate::jobs::spawn(move || compile_job(&engine, &set, &doc, c), notify);
+    Job { rx, cancel }
 }
 
 /// Compile a written document against a set and turn the answer into what the dialog needs.
