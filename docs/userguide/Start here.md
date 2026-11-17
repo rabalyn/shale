@@ -55,7 +55,9 @@ into the program, which unpacks it once per version into its data folder (on Lin
 `~/.local/share/shale/userguide-<version>/`; on macOS and Windows the "data" folder of the
 system) and opens that copy as a vault. Your notes, tabs and edits stay in the copy: the next
 version of Shale makes a new copy, and a copy that exists is never overwritten. The release
-also has the guide as `shale-userguide-<version>.zip`, to unpack anywhere and open as a vault.
+also has the guide as `shale-userguide-<version>.zip`, to unpack anywhere and open as a vault,
+and as one PDF to print or read anywhere, `shale-userguide-<version>.pdf` (made from this vault
+as a book).
 
 ## How to read this guide
 
