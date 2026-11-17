@@ -30,7 +30,7 @@ Shale is a native Rust notes app. These rules are binding; the full versions are
 - **Your final report** lists the issues you opened, commented on or closed.
 - **Landing changes** (FORGE-010, FORGE-011, [ADR-0016](docs/decisions/0016-local-landing.md)):
   `main` changes only through `scripts/land.sh <branch>…`, which merges each branch into the
-  current `origin/main`, runs fmt, clippy, `cargo test` (and the podman suites when CalDAV or mail
+  current `origin/main`, runs fmt, clippy (Linux, and macOS and Windows via `scripts/cross-check.sh`), `cargo test` (and the podman suites when CalDAV or mail
   code changed) and pushes `main` when all pass; one landing at a time. Push your branch (or keep
   it local), then land it; do not wait for CI, which runs only on `main` afterwards. A conflict:
   merge `origin/main` into your branch, resolve it there (keep both sides; renumber a clashing
