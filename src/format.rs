@@ -61,6 +61,12 @@ pub fn apply(cmd: Cmd, text: &str, sel: Range<usize>) -> Option<Out> {
     }
 }
 
+/// Whether `cmd` can be done to the text of a table cell edited in the grid (EDIT-030): the inline
+/// commands. The line commands, the table and the embed (it starts the note's file picker) make no sense there.
+pub fn works_in_a_cell(cmd: Cmd) -> bool {
+    matches!(cmd, Cmd::Bold | Cmd::Italic | Cmd::Strike | Cmd::Highlight | Cmd::Code | Cmd::WikiLink | Cmd::WebLink | Cmd::HighlightColour(_) | Cmd::FontColour(_) | Cmd::Clear)
+}
+
 /// Whether `cmd` is "on" at the selection, for the pressed look of a button: the selection (or the
 /// cursor) is inside the markers of an inline command, or the line has the marker of a line command.
 pub fn is_on(cmd: Cmd, text: &str, sel: Range<usize>) -> bool {
@@ -1167,5 +1173,14 @@ mod tests {
         // part of a cell
         let at = text.find("az").unwrap();
         assert_eq!(apply(Cmd::Italic, text, at..at + 2).unwrap().0, "| A | B |\n|---|---|\n| bar | b*az* |\n");
+    }
+
+    // spec: EDIT-030
+    #[test]
+    fn only_the_inline_commands_work_in_a_table_cell() {
+        let inline = [Cmd::Bold, Cmd::Italic, Cmd::Strike, Cmd::Highlight, Cmd::Code, Cmd::WikiLink, Cmd::WebLink, Cmd::HighlightColour(None), Cmd::FontColour(Some([1, 2, 3])), Cmd::Clear];
+        let other = [Cmd::Heading(0), Cmd::Heading(2), Cmd::Bullet, Cmd::Numbered, Cmd::Task, Cmd::Quote, Cmd::CodeBlock, Cmd::Rule, Cmd::Embed, Cmd::Table];
+        assert!(inline.into_iter().all(works_in_a_cell));
+        assert!(!other.into_iter().any(works_in_a_cell));
     }
 }

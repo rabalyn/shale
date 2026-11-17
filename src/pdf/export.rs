@@ -287,10 +287,11 @@ impl<'a> Writer<'a> {
         }
     }
 
-    /// A table as a grid (EDIT-024): column widths from the same rule as on screen, cells
+    /// A table as a grid (EDIT-024): column widths from the table's stored sizes in proportion
+    /// (EDIT-031) or else from the same rule as on screen, cells
     /// wrapped inside their column, the header filled and bold. A table that does not fit the
     /// rest of the page goes on at the next page between two rows, with the header row again.
-    fn table(&mut self, vault: &Vault, rel: &Path, t: &crate::table::Table, ink: Color32) {
+    fn table(&mut self, vault: &Vault, rel: &Path, t: &crate::table::Table, sizes: &crate::table::Sizes, ink: Color32) {
         let base = self.opts.font_pt;
         let x0 = self.m;
         let ncols = t.header.len();
@@ -319,9 +320,24 @@ impl<'a> Writer<'a> {
                 }
             }
         }
-        let text_w = crate::table::column_widths(&natural, &least, self.cw() - 2.0 * CELL_PAD_X * ncols as f32);
+        let text_w = match crate::table::stored_widths(&sizes.cols, ncols, self.cw()) {
+            Some(w) => w.iter().map(|w| (w - 2.0 * CELL_PAD_X).max(1.0)).collect(),
+            None => crate::table::column_widths(&natural, &least, self.cw() - 2.0 * CELL_PAD_X * ncols as f32),
+        };
         let lines: Vec<Vec<Vec<Vec<Piece>>>> = rows.iter().map(|row| row.iter().enumerate().map(|(c, ps)| wrap_pieces(ps, text_w[c].max(1.0))).collect()).collect();
-        let heights: Vec<f32> = lines.iter().map(|row| row.iter().map(|ls| ls.iter().map(|l| self.line_height(l)).sum::<f32>()).fold(base * 1.45, f32::max) + 2.0 * CELL_PAD_Y).collect();
+        let rows_fit = sizes.rows.len() == lines.len() && sizes.rows.iter().all(|h| h.is_finite());
+        let heights: Vec<f32> = lines
+            .iter()
+            .enumerate()
+            .map(|(r, row)| {
+                let h = row.iter().map(|ls| ls.iter().map(|l| self.line_height(l)).sum::<f32>()).fold(base * 1.45, f32::max) + 2.0 * CELL_PAD_Y;
+                if rows_fit {
+                    h.max(sizes.rows[r])
+                } else {
+                    h
+                }
+            })
+            .collect();
         let widths: Vec<f32> = text_w.iter().map(|w| w + 2.0 * CELL_PAD_X).collect();
         self.need(heights[0] + heights.get(1).copied().unwrap_or(0.0));
         for r in 0..lines.len() {
@@ -613,7 +629,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     let tables = if opts.plain_tables { vec![] } else { crate::table::find_tables(text) };
     while i < lines.len() {
         if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
-            w.table(vault, rel, &b.table, ink);
+            w.table(vault, rel, &b.table, &b.meta.sizes, ink);
             i = b.lines.end;
             continue;
         }
@@ -1217,6 +1233,13 @@ pub(crate) mod tests {
         toks[toks.len() - 3].parse().unwrap()
     }
 
+    /// The y (PDF coordinates, up) of the text drawn as `word`.
+    fn y_of(content: &str, word: &str) -> f32 {
+        let at = content.find(&format!("<{}> Tj", hex(word))).unwrap_or_else(|| panic!("{word} is not drawn"));
+        let toks: Vec<&str> = content[..at].split_whitespace().collect();
+        toks[toks.len() - 2].parse().unwrap()
+    }
+
     // spec: EDIT-024, PDF-001
     #[test]
     fn a_table_is_a_grid_in_the_pdf_and_plain_text_lines_when_asked() {
@@ -1256,6 +1279,46 @@ pub(crate) mod tests {
         // the long cell wraps in its column: the table is a few lines tall but still one page wide
         assert!(c.matches(&format!("<{}> Tj", hex("words "))).count() >= 119, "all the words are drawn");
         assert_eq!(render(&bytes).len(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-031, PDF-001
+    #[test]
+    fn stored_column_widths_and_row_heights_shape_the_pdf_table() {
+        let (v, d) = vault();
+        let rel = Path::new("Ideas.md");
+        let opts = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
+        let x_second = |text: &str| {
+            let c = contents(&export_note(&v, rel, text, &opts).unwrap());
+            x_of(&c, "Bbb")
+        };
+        let body = "| Aaa | Bbb |\n|---|---|\n| a | b |\n";
+        let auto = x_second(body);
+        let m = 20.0 * MM;
+        let text_w = 595.0 - 2.0 * m;
+        // a table that fits keeps its stored widths: a narrow table stays narrow, as in the editor
+        let narrow = x_second(&format!("<!-- shale-table cols=100,300 -->\n{body}"));
+        assert!((narrow - (m + 100.0 + CELL_PAD_X)).abs() < 1.0, "{narrow}");
+        // one that is too wide is scaled down together to the text width
+        let wide = x_second(&format!("<!-- shale-table cols=3000,1000 -->\n{body}"));
+        assert!((wide - (m + (text_w - 1.0) * 0.75 + CELL_PAD_X)).abs() < 1.0, "{wide}");
+        // a tiny stored width is raised to MIN_COL
+        let clamped = x_second(&format!("<!-- shale-table cols=1,100 -->\n{body}"));
+        assert!((clamped - (m + crate::table::MIN_COL + CELL_PAD_X)).abs() < 1.0, "{clamped}");
+        // sizes that do not match the columns (or are no numbers) are ignored
+        for bad in ["cols=100", "cols=100,200,300", "cols=0,100", "cols=x,y"] {
+            let got = x_second(&format!("<!-- shale-table {bad} -->\n{body}"));
+            assert!((got - auto).abs() < 0.01, "{bad}: {got} {auto}");
+        }
+        // a stored row height is a least height: the table is that much taller
+        let y_last = |text: &str| y_of(&contents(&export_note(&v, rel, text, &opts).unwrap()), "a");
+        let plain = y_last(body);
+        let tall = y_last(&format!("<!-- shale-table rows=60,80 -->\n{body}"));
+        assert!(tall < plain - 30.0, "the header row is at least 60 high: {plain} {tall}");
+        let short = y_last(&format!("<!-- shale-table rows=1,1 -->\n{body}"));
+        assert!((short - plain).abs() < 0.01, "a row is never shorter than its text");
+        let mismatch = y_last(&format!("<!-- shale-table rows=60 -->\n{body}"));
+        assert!((mismatch - plain).abs() < 0.01, "row heights that do not match are ignored");
         let _ = std::fs::remove_dir_all(&d);
     }
 

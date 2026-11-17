@@ -87,7 +87,29 @@ the last column to the next row), **←** at its start to the previous one, **�
 of the text to the cell above and **↓** on its last line to the cell below. Everything from the click to leaving is one
 step you can undo. Moving the cursor into the table with the keyboard still shows its raw rows.
 
+While a cell is edited, the [[#Formatting toolbar]] works on the cell: bold, italic, strikethrough,
+highlight, code, links, colours and "Clear formatting" format the selected text in the cell (or
+put the markers in at the cursor), and the change is part of the cell's undo step. The buttons
+for headings, lists, tasks, quotes, code blocks, rules, tables and embeds are greyed out then,
+because they make no sense inside a cell.
+
+**Shift+arrow keys** select several cells: from the cell you edit, Shift+→ and then Shift+↑ select
+a block of 2 by 2 cells (it can span rows and columns, and shrinks again with the opposite arrow).
+Inside a cell's text the Shift+arrow keys select text first; at the edge of the text they go on to
+the cells. All selected cells are highlighted. A toolbar button (bold, italic, …) formats every
+selected cell, **Delete** or **Backspace** clears all of them, and both are part of the editing's
+one undo step. Typing ends the selection: the text goes into the top left cell of the block. A
+plain arrow key (it moves one cell on from the cell you started in) or **Esc** (it keeps that cell
+edited) ends the selection too.
+
 ![[table-cell-edit.png]]
+
+![[table-cell-block.png]]
+
+The clip selects a block with Shift+→ and Shift+↓, makes it bold with the toolbar and clears it
+with Backspace:
+
+![[table-cell-block.webm]]
 
 If you prefer the raw markdown, turn off "Edit table cells in the grid" in Settings → General →
 Appearance: a click on a table then shows its raw rows to edit. A single table can be switched
@@ -101,7 +123,7 @@ table's current width), or a row border to give all rows the same height.
 
 The switch and the sizes are kept in the note, in a comment line right above the table, e.g.
 `<!-- shale-table edit=raw cols=160,90 rows=30,30,44 -->`. It is hidden with the grid, in the
-reading view and in the PDF; other apps such as Obsidian ignore HTML comments.
+reading view and in the PDF (which uses the sizes); other apps such as Obsidian ignore HTML comments.
 
 While the pointer is over the grid, small buttons appear: a **+** right of the header adds a
 column at the end, a **+** bar under the table adds a row at the end, and for the row and the

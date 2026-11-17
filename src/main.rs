@@ -67,6 +67,7 @@ mod syntax;
 mod tab_order_tests;
 mod table;
 mod table_grid;
+mod table_select;
 mod theme;
 #[cfg(test)]
 mod ui_test_support;

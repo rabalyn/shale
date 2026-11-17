@@ -604,12 +604,21 @@ impl NoteEditor {
     }
 
     /// Draw the formatting toolbar (EDIT-026); a click is done to the text by the next `show`.
+    /// While a table cell is edited in the grid the bar works on the text of the cell (EDIT-030).
     pub fn toolbar(&mut self, ui: &mut Ui, text: &str, palettes: &crate::format_bar::Palettes) {
-        let sel = self.selection_bytes(ui.ctx(), text);
-        if let Some(cmd) = self.bar.show(ui, text, sel, palettes) {
+        let in_cell = self.grid.cell.is_some();
+        let (shown, sel) = match &self.grid.cell {
+            Some(c) => (c.buf.as_str(), c.selection_bytes()),
+            None => (text, self.selection_bytes(ui.ctx(), text)),
+        };
+        let bar = ui.scope(|ui| self.bar.show(ui, shown, sel, in_cell, palettes));
+        // a press on the bar (or on its popups) takes the keyboard from the cell's box: that does not end the editing
+        let pressed = ui.input(|i| i.pointer.any_down() || i.pointer.any_released());
+        self.grid.hold = in_cell && pressed && (ui.rect_contains_pointer(bar.response.rect) || egui::Popup::is_any_open(ui.ctx()));
+        if let Some(cmd) = bar.inner {
             self.format_request = Some(cmd);
             // the click took the keyboard from the text box: give it back
-            self.request_focus = true;
+            self.request_focus = !in_cell;
             ui.ctx().request_repaint();
         }
     }
@@ -634,6 +643,24 @@ impl NoteEditor {
             self.vim_apply_cursor(ui, text);
         }
         true
+    }
+
+    /// The table cell being edited in the grid: (row, column) (testing aid).
+    #[cfg(test)]
+    pub(crate) fn editing_cell(&self) -> Option<(usize, usize)> {
+        self.grid.cell.as_ref().map(|c| (c.row, c.col))
+    }
+
+    /// The cells of the block selected with Shift+arrow keys, as (row, column) (testing aid).
+    #[cfg(test)]
+    pub(crate) fn selected_cells(&self) -> Vec<(usize, usize)> {
+        self.grid.cell.as_ref().and_then(|c| c.block).map_or(vec![], |b| b.cells())
+    }
+
+    /// The id of the box of the cell being edited (testing aid).
+    #[cfg(test)]
+    pub(crate) fn cell_box_id(&self) -> egui::Id {
+        crate::table_grid::TableGrid::cell_id(self.id)
     }
 
     /// Is the `[!` file picker popup on screen?
@@ -1113,6 +1140,12 @@ impl NoteEditor {
         }
         if let Some((n, change)) = self.table_edit.take() {
             changed |= self.apply_table_edit(ui, text, undo.of(rel), n, &change, true);
+        }
+        // a toolbar command goes to the cell being edited (EDIT-030); else to the note below
+        if let Some(n) = self.grid.cell.as_ref().map(|c| c.table) {
+            if let Some(cmd) = self.format_request.take() {
+                self.grid.format(ui.ctx(), self.id, n, cmd);
+            }
         }
         for (n, change, step) in std::mem::take(&mut self.grid.pending) {
             changed |= self.apply_table_edit(ui, text, undo.of(rel), n, &change, step);
@@ -3499,16 +3532,15 @@ mod tests {
         g.key(Key::ArrowLeft, Modifiers::NONE);
         g.key(Key::ArrowLeft, Modifiers::NONE);
         assert_eq!((g.editing(), g.cell_caret().0), (Some((0, 0)), 0), "the first cell: Left stays");
-        // Shift+arrow selects inside the cell and never leaves it
+        // Shift+arrow selects text inside the cell, and the cells at the edge of the text (raba/shale#243)
         g.key(Key::ArrowRight, Modifiers::SHIFT);
-        assert_eq!((g.editing(), g.cell_caret()), (Some((0, 0)), (1, true)));
+        assert_eq!((g.editing(), g.cell_caret(), g.ed.selected_cells()), (Some((0, 0)), (1, true), vec![]));
         g.key(Key::ArrowRight, Modifiers::SHIFT);
-        assert_eq!(g.editing(), Some((0, 0)));
-        // with text selected Right does not leave either
+        assert_eq!((g.editing(), g.ed.selected_cells()), (Some((0, 0)), vec![(0, 0), (0, 1)]));
+        // a plain arrow ends that and moves on from the cell
         g.key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(g.editing(), Some((0, 0)));
+        assert_eq!((g.editing(), g.ed.selected_cells()), (Some((0, 1)), vec![]));
         // typing after a move goes where the cursor is
-        g.key(Key::ArrowRight, Modifiers::NONE);
         g.type_text("x");
         g.frames(1);
         assert_eq!(g.editing(), Some((0, 1)));

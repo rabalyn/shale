@@ -288,7 +288,7 @@ fn bar_ends(width: f32, scale: f32) -> (egui::Rect, egui::Rect) {
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 400.0))), ..Default::default() };
         let mut out = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().frame(egui::Frame::new()).show(ui, |ui| {
-                bar.show(ui, "text", 0..0, &palettes);
+                bar.show(ui, "text", 0..0, false, &palettes);
             });
         });
         out.textures_delta.clear();
@@ -338,4 +338,341 @@ fn the_app_draws_the_toolbar_at_the_size_of_the_setting() {
     fx.app.cfg.toolbar_size = 5;
     fx.hl.frames(&mut fx.app, 3);
     assert!((fx.hl.find_label(&mut fx.app, "Bold: **text**").height() - 26.0 * 0.8).abs() < 0.5, "a value out of range is clamped to 80 %");
+}
+
+const CELLS: &str = "before\n\n| A | B |\n|---|---|\n| one two | x |\n";
+const ESC: Event = Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+
+impl Fx {
+    /// A note with a table drawn as a grid (the markdown preview is on).
+    fn table(tag: &str) -> Fx {
+        let mut fx = Fx::new(tag, CELLS);
+        fx.app.cfg.live_preview = true;
+        fx.hl.frames(&mut fx.app, 4);
+        fx
+    }
+
+    /// Click into the cell with this text (it is edited in the grid).
+    fn edit_cell(&mut self, text: &str) {
+        let (_, at) = self.hl.text.iter().find(|(t, _)| t == text).cloned().unwrap_or_else(|| panic!("{text} is not painted"));
+        self.hl.click(&mut self.app, at + egui::Vec2::new(4.0, 6.0), PointerButton::Primary);
+        assert!(self.editor().editing_cell().is_some(), "the cell of {text} is edited");
+    }
+
+    fn editor(&self) -> &crate::editor::NoteEditor {
+        &self.app.tabbar.tabs[self.app.tabbar.active].editor
+    }
+
+    /// Select chars in the box of the cell being edited (it has the keyboard).
+    fn select_in_cell(&mut self, from: usize, to: usize) {
+        let id = self.editor().cell_box_id();
+        let mut st = egui::text_edit::TextEditState::load(self.hl.ctx(), id).unwrap_or_default();
+        st.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(from), CCursor::new(to))));
+        st.store(self.hl.ctx(), id);
+        self.hl.frames(&mut self.app, 2);
+    }
+
+    fn selected_in_cell(&self) -> (usize, usize) {
+        let r = egui::text_edit::TextEditState::load(self.hl.ctx(), self.editor().cell_box_id()).and_then(|st| st.cursor.char_range()).unwrap();
+        (r.primary.index.0.min(r.secondary.index.0), r.primary.index.0.max(r.secondary.index.0))
+    }
+
+    fn escape(&mut self) {
+        self.hl.frame(&mut self.app, vec![ESC]);
+        self.hl.frames(&mut self.app, 3);
+    }
+}
+
+// spec: EDIT-030, EDIT-027
+#[test]
+fn in_a_cell_the_inline_buttons_format_the_cell_selection_and_the_cursor_and_undo_takes_it_back_with_the_edit() {
+    let mut fx = Fx::table("cell-inline");
+    fx.edit_cell("one two");
+    fx.select_in_cell(4, 7);
+    fx.click("Bold: **text**");
+    assert_eq!(fx.text(), "before\n\n| A | B |\n|---|---|\n| one **two** | x |\n", "the selection in the cell is wrapped, the note around it is not touched");
+    assert_eq!(fx.editor().editing_cell(), Some((1, 0)), "the cell is still edited");
+    assert_eq!(fx.selected_in_cell(), (6, 9), "the word stays selected, inside the markers");
+    // a cursor with no selection: the pair goes in with the cursor between, and typing goes in there
+    fx.select_in_cell(3, 3);
+    fx.click("Inline code: `code`");
+    fx.hl.frame(&mut fx.app, vec![Event::Text("y".into())]);
+    fx.hl.frames(&mut fx.app, 2);
+    assert_eq!(fx.text(), "before\n\n| A | B |\n|---|---|\n| one`y` **two** | x |\n");
+    // the same transforms toggle off again
+    fx.select_in_cell(9, 12);
+    fx.click("Bold: **text**");
+    assert_eq!(fx.text(), "before\n\n| A | B |\n|---|---|\n| one`y` two | x |\n");
+    // leaving the cell: everything is one step of the note's undo history (EDIT-021)
+    fx.escape();
+    assert_eq!(fx.editor().editing_cell(), None);
+    let mut text = fx.text();
+    assert!(fx.app.undo.of(&PathBuf::from(NOTE)).undo(&mut text).is_some());
+    assert_eq!(text, CELLS, "one undo takes the formatting back together with the typing of the cell");
+}
+
+// spec: EDIT-030, EDIT-026
+#[test]
+fn while_a_cell_is_edited_the_line_buttons_are_greyed_out_and_do_nothing() {
+    let mut fx = Fx::table("cell-lines");
+    fx.edit_cell("one two");
+    fx.select_in_cell(0, 3);
+    for tip in [
+        "Bullet list: - item",
+        "Numbered list: 1. item",
+        "Task: - [ ] item",
+        "Quote: > text",
+        "Code block: ``` fence",
+        "Horizontal rule: ---",
+        "Table: 2 columns, 2 rows",
+        "Heading level",
+        "Embed a file or picture: opens the file picker (![[file]])",
+    ] {
+        fx.click(tip);
+        assert_eq!(fx.text(), CELLS, "{tip} does nothing in a cell");
+        assert_eq!(fx.editor().editing_cell(), Some((1, 0)), "and the editing goes on");
+    }
+    assert!(!fx.editor().picker_visible(), "the embed did not start the file picker");
+    fx.click("Italic: *text*");
+    assert!(fx.text().contains("| *one* two |"), "the inline buttons are not greyed out: {}", fx.text());
+}
+
+// spec: EDIT-030, EDIT-027
+#[test]
+fn with_no_cell_edited_the_toolbar_acts_on_the_note_text_even_in_a_note_with_a_table() {
+    let mut fx = Fx::table("cell-none");
+    fx.select(0, 6);
+    fx.click("Bold: **text**");
+    assert_eq!(fx.text(), "**before**\n\n| A | B |\n|---|---|\n| one two | x |\n");
+    fx.click("Bullet list: - item");
+    assert!(fx.text().starts_with("- **before**"), "the line buttons work: {}", fx.text());
+    // after a cell was edited and left, the bar is back on the note
+    fx.edit_cell("one two");
+    fx.escape();
+    fx.select(4, 10);
+    fx.click("Italic: *text*");
+    assert!(fx.text().starts_with("- ***before***"), "{}", fx.text());
+}
+
+const BLOCK: &str = "before\n\n| A | B | C |\n|---|---|---|\n| a1 | b1 | c1 |\n| a2 | b2 | c2 |\n| a3 | b3 | c3 |\n";
+const SHIFT: egui::Modifiers = egui::Modifiers::SHIFT;
+const NONE: egui::Modifiers = egui::Modifiers::NONE;
+
+impl Fx {
+    /// A note with a 3 column, 4 row table drawn as a grid.
+    fn block(tag: &str) -> Fx {
+        let mut fx = Fx::new(tag, BLOCK);
+        fx.app.cfg.live_preview = true;
+        fx.hl.frames(&mut fx.app, 4);
+        fx
+    }
+
+    fn press(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
+        self.hl.frame(&mut self.app, vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }]);
+        self.hl.frames(&mut self.app, 3);
+    }
+
+    fn type_text(&mut self, s: &str) {
+        self.hl.frame(&mut self.app, vec![Event::Text(s.into())]);
+        self.hl.frames(&mut self.app, 3);
+    }
+
+    fn selected_cells(&self) -> Vec<(usize, usize)> {
+        self.editor().selected_cells()
+    }
+
+    /// The cells of the first table: header row first.
+    fn cells(&self) -> Vec<Vec<String>> {
+        let t = &crate::table::find_tables(&self.text())[0].table;
+        std::iter::once(t.header.clone()).chain(t.rows.iter().cloned()).collect()
+    }
+
+    /// One undo of the note's history.
+    fn undo(&mut self) -> String {
+        let mut text = self.text();
+        assert!(self.app.undo.of(&PathBuf::from(NOTE)).undo(&mut text).is_some());
+        text
+    }
+
+    /// Select the 2 by 2 block b1 c1 / b2 c2 with Shift+Right and Shift+Down from b1.
+    fn block_b1_c2(&mut self) {
+        self.edit_cell("b1");
+        self.press(egui::Key::ArrowRight, SHIFT);
+        self.press(egui::Key::ArrowDown, SHIFT);
+        assert_eq!(self.selected_cells(), [(1, 1), (1, 2), (2, 1), (2, 2)]);
+    }
+}
+
+// spec: EDIT-030
+#[test]
+fn shift_arrows_extend_a_block_of_cells_across_rows_and_columns_and_shrink_it_again() {
+    let mut fx = Fx::block("block-extend");
+    fx.edit_cell("b1");
+    assert!(fx.selected_cells().is_empty(), "one cell edited: no block");
+    fx.press(egui::Key::ArrowRight, SHIFT);
+    assert_eq!(fx.selected_cells(), [(1, 1), (1, 2)], "Shift+Right: two cells");
+    fx.press(egui::Key::ArrowUp, SHIFT);
+    assert_eq!(fx.selected_cells(), [(0, 1), (0, 2), (1, 1), (1, 2)], "then Shift+Up: a 2 by 2 block spanning rows and columns");
+    assert_eq!(fx.editor().editing_cell(), Some((1, 1)), "the anchor stays the edited cell");
+    // it shrinks back and the cell is edited as before
+    fx.press(egui::Key::ArrowLeft, SHIFT);
+    assert_eq!(fx.selected_cells(), [(0, 1), (1, 1)], "Shift+Left: a column of two");
+    fx.press(egui::Key::ArrowDown, SHIFT);
+    assert!(fx.selected_cells().is_empty(), "back to one cell");
+    assert_eq!(fx.editor().editing_cell(), Some((1, 1)));
+    fx.type_text("z");
+    assert_eq!(fx.cells()[1][1], "b1z", "the cell is edited again");
+    // the block can grow down over several rows and does not leave the table
+    for _ in 0..3 {
+        fx.press(egui::Key::ArrowDown, SHIFT);
+    }
+    assert_eq!(fx.selected_cells(), [(1, 1), (2, 1), (3, 1)], "stops at the last row");
+    assert_eq!(fx.cells()[3][1], "b3", "the keys changed nothing");
+}
+
+// spec: EDIT-030
+#[test]
+fn shift_arrows_select_text_in_the_cell_first_and_extend_to_cells_at_its_edge() {
+    let mut fx = Fx::block("block-text");
+    fx.edit_cell("b1");
+    fx.select_in_cell(0, 0);
+    fx.press(egui::Key::ArrowRight, SHIFT);
+    assert_eq!((fx.selected_in_cell(), fx.selected_cells().len()), ((0, 1), 0), "inside the text Shift+Right selects text");
+    fx.press(egui::Key::ArrowRight, SHIFT);
+    assert_eq!((fx.selected_in_cell(), fx.selected_cells().len()), ((0, 2), 0), "up to the end of the text");
+    fx.press(egui::Key::ArrowRight, SHIFT);
+    assert_eq!(fx.selected_cells(), [(1, 1), (1, 2)], "at the end of the text the cells are selected");
+    // at the edge of the table nothing more happens
+    fx.press(egui::Key::ArrowRight, SHIFT);
+    assert_eq!(fx.selected_cells(), [(1, 1), (1, 2)]);
+    assert_eq!(fx.text(), BLOCK, "no key changed the note");
+}
+
+// spec: EDIT-030, EDIT-027
+#[test]
+fn a_toolbar_button_formats_every_cell_of_the_block_as_one_undo_step() {
+    let mut fx = Fx::block("block-format");
+    fx.block_b1_c2();
+    fx.click("Bold: **text**");
+    assert_eq!(fx.cells()[1], ["a1", "**b1**", "**c1**"]);
+    assert_eq!(fx.cells()[2], ["a2", "**b2**", "**c2**"]);
+    assert_eq!(fx.cells()[3], ["a3", "b3", "c3"], "cells outside the block are left alone");
+    assert_eq!(fx.selected_cells().len(), 4, "the block stays selected");
+    // all are bold: the button takes it off again
+    fx.click("Bold: **text**");
+    assert_eq!(fx.text(), BLOCK);
+    fx.click("Italic: *text*");
+    assert_eq!(fx.cells()[2], ["a2", "*b2*", "*c2*"]);
+    // line buttons stay greyed out
+    let before = fx.text();
+    for tip in ["Bullet list: - item", "Quote: > text", "Heading level", "Horizontal rule: ---"] {
+        fx.click(tip);
+        assert_eq!(fx.text(), before, "{tip} does nothing");
+        assert_eq!(fx.selected_cells().len(), 4);
+    }
+    // Esc ends the block, Esc again the editing; one undo takes all of it back
+    fx.escape();
+    assert!(fx.selected_cells().is_empty());
+    fx.escape();
+    assert_eq!(fx.editor().editing_cell(), None);
+    assert_eq!(fx.undo(), BLOCK, "all the formatting is one undo step");
+}
+
+// spec: EDIT-030, EDIT-027
+#[test]
+fn formatting_a_block_where_some_cells_have_it_adds_it_to_the_others() {
+    let mut fx = Fx::new("block-mixed", "| A | B |\n|---|---|\n| **x** | y |\n| z | w |\n");
+    fx.app.cfg.live_preview = true;
+    fx.hl.frames(&mut fx.app, 4);
+    fx.edit_cell("x");
+    fx.press(egui::Key::ArrowRight, SHIFT);
+    fx.press(egui::Key::ArrowDown, SHIFT);
+    fx.click("Bold: **text**");
+    assert_eq!(fx.cells()[1], ["**x**", "**y**"], "the bold cell stays bold, the other gets it");
+    assert_eq!(fx.cells()[2], ["**z**", "**w**"], "the second row too");
+}
+
+// spec: EDIT-030
+#[test]
+fn delete_and_backspace_clear_every_cell_of_the_block_as_one_undo_step() {
+    let mut fx = Fx::block("block-delete");
+    fx.block_b1_c2();
+    fx.press(egui::Key::Delete, NONE);
+    assert_eq!(fx.cells()[1], ["a1", "", ""]);
+    assert_eq!(fx.cells()[2], ["a2", "", ""]);
+    assert_eq!(fx.cells()[3], ["a3", "b3", "c3"]);
+    assert_eq!(fx.selected_cells().len(), 4, "the block stays selected");
+    // Backspace on another block, in the same editing: from b1 (edited again after a plain arrow) down to b3
+    fx.press(egui::Key::ArrowLeft, NONE);
+    assert_eq!(fx.editor().editing_cell(), Some((1, 0)));
+    fx.press(egui::Key::ArrowDown, SHIFT);
+    fx.press(egui::Key::ArrowDown, SHIFT);
+    fx.press(egui::Key::Backspace, NONE);
+    assert_eq!([fx.cells()[1][0].as_str(), fx.cells()[2][0].as_str(), fx.cells()[3][0].as_str()], ["", "", ""], "the column a is cleared");
+    assert_eq!(fx.cells()[3], ["", "b3", "c3"]);
+    fx.escape();
+    fx.escape();
+    assert_eq!(fx.editor().editing_cell(), None);
+    assert_eq!(fx.undo(), BLOCK, "one undo brings back everything");
+}
+
+// spec: EDIT-030
+#[test]
+fn typing_ends_the_block_and_goes_only_into_its_top_left_cell() {
+    let mut fx = Fx::block("block-type");
+    fx.block_b1_c2();
+    fx.type_text("X");
+    assert!(fx.selected_cells().is_empty(), "the block is gone");
+    assert_eq!(fx.editor().editing_cell(), Some((1, 1)), "the top left cell is edited");
+    assert_eq!(fx.cells()[1], ["a1", "b1X", "c1"]);
+    assert_eq!(fx.cells()[2], ["a2", "b2", "c2"], "no other cell got the text");
+    fx.type_text("Y");
+    assert_eq!(fx.cells()[1][1], "b1XY", "and the cell goes on being edited normally");
+    // the anchor is not the top left when the block grows up and to the left
+    fx.escape();
+    fx.select(0, 0);
+    fx.edit_cell("b2");
+    fx.press(egui::Key::ArrowUp, SHIFT);
+    fx.press(egui::Key::ArrowLeft, SHIFT);
+    assert_eq!(fx.editor().editing_cell(), Some((2, 1)));
+    fx.type_text("Q");
+    assert_eq!(fx.editor().editing_cell(), Some((1, 0)), "the top left cell of the block");
+    assert_eq!(fx.cells()[1], ["a1Q", "b1XY", "c1"]);
+    assert_eq!(fx.cells()[2], ["a2", "b2", "c2"]);
+}
+
+// spec: EDIT-030
+#[test]
+fn a_plain_arrow_key_esc_and_a_click_end_the_block() {
+    let mut fx = Fx::block("block-collapse");
+    fx.block_b1_c2();
+    fx.press(egui::Key::ArrowRight, NONE);
+    assert!(fx.selected_cells().is_empty());
+    assert_eq!(fx.editor().editing_cell(), Some((1, 2)), "Right: one cell on from the edited cell, as with one cell");
+    fx.press(egui::Key::ArrowLeft, NONE);
+    fx.press(egui::Key::ArrowDown, SHIFT);
+    assert_eq!(fx.selected_cells().len(), 2);
+    fx.press(egui::Key::ArrowDown, NONE);
+    assert!(fx.selected_cells().is_empty());
+    assert_eq!(fx.editor().editing_cell(), Some((2, 1)), "Down: the cell below the edited one");
+    // Esc: the block ends, the cell stays edited; Esc again ends the editing
+    fx.press(egui::Key::ArrowUp, SHIFT);
+    assert_eq!(fx.selected_cells().len(), 2);
+    fx.escape();
+    assert!(fx.selected_cells().is_empty());
+    assert_eq!(fx.editor().editing_cell(), Some((2, 1)), "Esc keeps the anchor cell edited");
+    fx.escape();
+    assert_eq!(fx.editor().editing_cell(), None);
+    // a click on a cell edits that cell
+    fx.block_b1_c2();
+    let (_, at) = fx.hl.text.iter().find(|(t, _)| t == "a2").cloned().unwrap();
+    fx.hl.click(&mut fx.app, at + egui::Vec2::new(4.0, 6.0), PointerButton::Primary);
+    assert_eq!((fx.selected_cells().len(), fx.editor().editing_cell()), (0, Some((2, 0))));
+    // a click elsewhere ends the editing
+    fx.block_b1_c2();
+    let (_, before) = fx.hl.text.iter().find(|(t, _)| t.starts_with("before")).cloned().unwrap();
+    fx.hl.click(&mut fx.app, before + egui::Vec2::new(4.0, 6.0), PointerButton::Primary);
+    fx.hl.frames(&mut fx.app, 3);
+    assert_eq!((fx.selected_cells().len(), fx.editor().editing_cell()), (0, None));
+    assert_eq!(fx.text(), BLOCK);
 }
