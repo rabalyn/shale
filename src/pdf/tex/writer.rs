@@ -140,6 +140,9 @@ fn bold_line(plain: &str) -> String {
 /// The helpers every document has: the packages the body needs, the box of a task, the block of code.
 fn helpers(long_tables: bool, columns: bool) -> String {
     let mut t = String::from("\\usepackage{graphicx}\n\\usepackage{xcolor}\n\\usepackage[normalem]{ulem}\n\\usepackage{booktabs}\n\\usepackage{tabularx}\n");
+    // math (TEX-028): amsmath for matrices, cases, \\dfrac and \\binom, the symbols and \\mathbb of amssymb
+    // unless unicode-math (the template's) has them
+    t.push_str("\\IfPackageLoadedTF{amsmath}{}{\\usepackage{amsmath}}\n\\IfPackageLoadedTF{unicode-math}{}{\\IfPackageLoadedTF{amssymb}{}{\\usepackage{amssymb}}}\n");
     if long_tables {
         t.push_str("\\usepackage{xltabular}\n");
     }
@@ -191,7 +194,7 @@ pub fn write(req: &Request) -> Result<Document, String> {
     let has_headings = blocks.iter().any(|b| matches!(b, Block::Heading { .. }));
     let toc = req.opts.toc && matches!(family, Family::Article | Family::Book) && has_headings;
     let long_tables = matches!(family, Family::Article | Family::Book | Family::Letter) || (family == Family::Poster && kind.columns <= 1);
-    let mut body = Body::new(Look { vault, rel: req.rel }, req.opts, long_tables);
+    let mut body = Body::new(Look::new(vault, req.rel, blocks::footnote_texts(req.text)), req.opts, long_tables);
     let plain = |t: &str| tex_escape(&markdown::heading_plain(t));
 
     // everything between \begin{document} and \end{document}

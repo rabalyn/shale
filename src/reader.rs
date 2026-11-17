@@ -393,6 +393,19 @@ fn script_format(mut f: TextFormat, raised: bool) -> TextFormat {
     f
 }
 
+/// Whether the text of a section of a layout is a sub or superscript (EDIT-051): `Some(true)` when
+/// raised, `Some(false)` when lowered. Their format has no line height of its own (see
+/// [`script_format`]), and no other text of a line has none. The TeX export reads it back (TEX-028).
+pub(crate) fn script_of(f: &TextFormat) -> Option<bool> {
+    f.line_height.is_none().then_some(f.valign == egui::Align::TOP)
+}
+
+/// Whether the text of a section of a layout is underlined by `<u>` (EDIT-051): its line has the
+/// colour of the text; a link's line is a paler one. The TeX export reads it back (TEX-028).
+pub(crate) fn underlined(f: &TextFormat) -> bool {
+    f.underline.width > 0.0 && f.underline.color == f.color
+}
+
 /// The first line of a footnote definition (EDIT-050): its label raised, then the text a little
 /// smaller. `line` is the whole line, `marker` the range of `[^label]:` in it.
 pub(crate) fn footnote_def_painted(line: &str, label: &str, marker: &Range<usize>, links: &[(LinkSpan, bool)], size: f32, color: Color32) -> Painted {

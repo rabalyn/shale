@@ -50,6 +50,9 @@ pub enum Block {
         lines: Vec<String>,
     },
     Table(crate::table::Block),
+    /// A formula on lines of its own that Shale can typeset: its TeX (TEX-028). One it cannot
+    /// typeset is a [`Block::Code`] of its lines.
+    Math(String),
     /// An embed alone on its line.
     Embed(markdown::LinkSpan),
     Rule,
@@ -66,6 +69,8 @@ pub fn parse(text: &str) -> Vec<Block> {
     let lines = markdown::lines_with_offsets(text);
     let fenced = markdown::fenced_code_lines(text);
     let tables = crate::table::find_tables(text);
+    let maths = markdown::find_math(text);
+    let notes = markdown::find_footnotes(text);
     let mut out: Vec<Block> = Vec::new();
     let mut i = markdown::front_matter_lines(text);
     // lines of a paragraph, of a list and of a quote that are not yet closed
@@ -86,6 +91,20 @@ pub fn parse(text: &str) -> Vec<Block> {
         };
     }
     while i < lines.len() {
+        // a formula on lines of its own (a `$$` block, a `math` fence): math when Shale can typeset it, else its text as code
+        if let Some(m) = maths.iter().find(|m| m.block && m.lines.start == i) {
+            close!();
+            let tex = text[m.tex.clone()].trim();
+            out.push(if crate::math::typeset(tex, 14.0, true).is_ok() { Block::Math(tex.to_string()) } else { Block::Code { lang: String::new(), lines: lines[m.lines.clone()].iter().map(|l| l.1.to_string()).collect() } });
+            i = m.lines.end.max(i + 1);
+            continue;
+        }
+        // a footnote definition is written where its reference is (TEX-028)
+        if let Some(d) = notes.def_at(i) {
+            close!();
+            i = d.lines.end;
+            continue;
+        }
         if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
             close!();
             out.push(Block::Table(b.clone()));
@@ -151,5 +170,18 @@ pub fn parse(text: &str) -> Vec<Block> {
         i += 1;
     }
     close!();
+    out
+}
+
+/// The footnotes a note defines: label → the text of the definition, its first line after the label
+/// and the lines that go on with it joined by spaces (TEX-028). The first definition of a label counts.
+pub fn footnote_texts(text: &str) -> std::collections::HashMap<String, String> {
+    let lines = markdown::lines_with_offsets(text);
+    let mut out = std::collections::HashMap::new();
+    for d in markdown::find_footnotes(text).defs {
+        let first = lines[d.lines.start].1;
+        let parts = std::iter::once(first[d.marker.end..].trim()).chain(lines[d.lines.start + 1..d.lines.end].iter().map(|l| l.1.trim()));
+        out.entry(d.label).or_insert_with(|| parts.filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" "));
+    }
     out
 }

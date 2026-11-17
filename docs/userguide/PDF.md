@@ -272,4 +272,14 @@ grey background), web links (clickable), the highlights and colours of [[Editor]
 note, a drawing as a vector graphic, all pages of a PDF, each with its caption; a file that is
 missing is a red line `[missing: name]` in the PDF and a note in the message afterwards, and a sound
 or video is such a line too. Wiki links show their text (they are not clickable in the PDF), and a
-picture inside a line of text is shown as its link text. Footnotes do not exist in notes.
+picture inside a line of text is shown as its link text.
+
+Also written through a template: `<u>` as underlined, `<sub>` and `<sup>` as lowered and raised text,
+**footnotes** (a `[^1]` that has a definition becomes a real footnote at the bottom of the page with the
+text of the definition, and the definition is not printed where it stands; a reference without a
+definition stays as written; in a table cell the text comes below the table), `<br>` in a table cell as a
+line break (the column then takes the room that is left, like a long text), and **math**: a formula
+Shale can typeset (see [[Editor]]) is written to LaTeX as it is, `$…$` inline and `$$…$$` or a `math`
+block on its own, and set by LuaLaTeX. A formula Shale cannot read is written as code, as it is, and never
+reaches TeX: a note cannot run TeX commands through a formula. In a `\text{…}` a `%`, `#`, `&`, `^`, `_`,
+`$` or `~` must be written with a backslash (`\%`), else the formula is refused.

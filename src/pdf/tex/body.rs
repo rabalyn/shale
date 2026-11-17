@@ -4,7 +4,7 @@
 //! (`writer.rs`): what a heading becomes depends on the kind.
 
 use super::blocks::{Block, Item, ListLine, QuoteLine};
-use super::inline::{inline, lead, Look};
+use super::inline::{cell, inline, lead, one_line, Look};
 use super::sets::tex_escape;
 use crate::drawing::Scene;
 use crate::markdown::LinkSpan;
@@ -54,6 +54,7 @@ impl<'a> Body<'a> {
             Block::List(lines) => self.list(lines),
             Block::Code { lang, lines } => code(lang, lines),
             Block::Table(t) => self.table(t),
+            Block::Math(tex) => format!("\\[\n{}\n\\]\n\n", one_line(tex)),
             Block::Embed(link) => self.embed(link),
             Block::Rule => "\\par\\medskip\\noindent\\hrulefill\\par\\medskip\n\n".into(),
         }
@@ -175,7 +176,9 @@ impl<'a> Body<'a> {
                 ((total / column).clamp(0.05, 1.0), cols)
             }
             None => {
-                let mut wide: Vec<bool> = (0..n).map(|c| longest(c) >= LONG_CELL).collect();
+                // a line break in a cell (`<br>`, TEX-028) needs a column of paragraphs
+                let breaks = |c: usize| t.rows.iter().map(|r| &r[c]).chain([&t.header[c]]).any(|x| x.to_ascii_lowercase().contains("<br"));
+                let mut wide: Vec<bool> = (0..n).map(|c| longest(c) >= LONG_CELL || breaks(c)).collect();
                 if !wide.contains(&true) {
                     // there must be a column that takes the room that is left
                     if let Some(c) = (0..n).rev().max_by_key(|c| longest(*c)) {
@@ -188,9 +191,10 @@ impl<'a> Body<'a> {
         };
         let env = if self.long_tables { "xltabular" } else { "tabularx" };
         let row = |cells: &[String], bold: bool| {
-            let cells: Vec<String> = cells.iter().map(|c| inline(&self.look, c)).map(|c| if bold && !c.is_empty() { format!("\\textbf{{{c}}}") } else { c }).collect();
+            let cells: Vec<String> = cells.iter().map(|c| cell(&self.look, c)).map(|c| if bold && !c.is_empty() { format!("\\textbf{{{c}}}") } else { c }).collect();
             format!("{} \\\\\n", cells.join(" & "))
         };
+        *self.look.deferred.borrow_mut() = Some(Vec::new());
         let mut out = format!("\\begingroup\\renewcommand{{\\arraystretch}}{{1.2}}\\par\\medskip\n\\begin{{{env}}}{{{width:.3}\\linewidth}}{{{spec}}}\n\\toprule\n");
         out.push_str(&row(&t.header, true));
         out.push_str("\\midrule\n");
@@ -200,7 +204,17 @@ impl<'a> Body<'a> {
         for r in &t.rows {
             out.push_str(&row(r, false));
         }
-        out.push_str(&format!("\\bottomrule\n\\end{{{env}}}\n\\par\\medskip\\endgroup\n\n"));
+        out.push_str(&format!("\\bottomrule\n\\end{{{env}}}\n"));
+        // the footnotes of the cells: `\footnote` prints nothing inside a table, so the marks were written
+        // and their texts come here, the counter taken back to the first mark
+        let later = self.look.deferred.borrow_mut().take().unwrap_or_default();
+        if !later.is_empty() {
+            out.push_str(&format!("\\addtocounter{{footnote}}{{-{}}}\n", later.len()));
+            for t in later {
+                out.push_str(&format!("\\stepcounter{{footnote}}\\footnotetext{{{t}}}\n"));
+            }
+        }
+        out.push_str("\\par\\medskip\\endgroup\n\n");
         out
     }
 

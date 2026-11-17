@@ -474,3 +474,92 @@ fn other_picture_formats_become_png_and_a_broken_drawing_pdf_or_empty_drawing_is
     assert!(out.files[0].1.starts_with(&[0x89, b'P', b'N', b'G']) && out.files[1].1.starts_with(&[0xFF, 0xD8]));
     assert_eq!(out.warnings, ["not readable: broken.pdf", "not readable: broken.excalidraw", "empty drawing: empty.excalidraw"]);
 }
+
+const NEW_FORMATS: &str = "Water H<sub>2</sub>O, x<sup>2</sup>, <u>under</u> and <u><b>x</b></u>[^1] plus [^nope] and <u>a **b** c</u>.\n\n[^1]: The *note* with $x^2$\n    goes on with [^2] here.\n[^2]: Second.\n\nAfter.\n";
+
+// spec: TEX-028
+#[test]
+fn underline_sub_and_superscript_are_written_as_commands_around_bold_and_italic() {
+    let b = body_of(&doc("<u>under</u> H<sub>2</sub>O x<sup>2</sup> <u>a **b**</u> <sup>*i*</sup>\n", "pub")).to_string();
+    for want in ["\\underline{under}", "\\textsubscript{2}", "\\textsuperscript{2}", "\\underline{\\textbf{b}}", "\\textsuperscript{\\textit{i}}"] {
+        assert!(b.contains(want), "{want} is in {b}");
+    }
+    assert!(!b.contains("<u>") && !b.contains("<sub>") && !b.contains("<sup>"), "{b}");
+}
+
+// spec: TEX-028
+#[test]
+fn a_footnote_reference_is_the_definitions_text_and_the_definition_is_not_written_where_it_stands() {
+    let b = body_of(&doc(NEW_FORMATS, "pub")).to_string();
+    assert!(b.contains("\\footnote{The \\textit{note} with \\(x^2\\) goes on with [\\textasciicircum{}2] here.}"), "the definition with its continuation, nested reference as text: {b}");
+    assert!(b.contains("[\\textasciicircum{}nope]"), "a reference without a definition stays text: {b}");
+    assert_eq!(b.matches("\\footnote{").count(), 1, "{b}");
+    assert!(!b.contains("Second") && !b.contains("]:") && !b.contains("\\textsuperscript{1}"), "the definitions and the mark text are not written: {b}");
+    assert!(b.contains("After."), "{b}");
+}
+
+// spec: TEX-028
+#[test]
+fn a_footnote_in_a_table_cell_is_a_mark_and_its_text_comes_after_the_table() {
+    let b = body_of(&doc("| a | b |\n| --- | --- |\n| x[^1] | y[^2] |\n\n[^1]: One\n[^2]: Two\n", "pub")).to_string();
+    assert!(b.contains("x\\footnotemark{} & y\\footnotemark{}"), "{b}");
+    assert!(b.contains("\\addtocounter{footnote}{-2}\n\\stepcounter{footnote}\\footnotetext{One}\n\\stepcounter{footnote}\\footnotetext{Two}\n"), "{b}");
+    assert!(!b.contains("\\footnote{"), "{b}");
+}
+
+// spec: TEX-028
+#[test]
+fn br_in_a_table_cell_is_a_line_break_in_a_paragraph_column() {
+    let b = body_of(&doc("| a | b |\n| --- | --- |\n| one<br>two | x<BR/>y |\n| three | z |\n", "pub")).to_string();
+    assert!(b.contains("one \\newline two") && b.contains("x \\newline y"), "{b}");
+    assert!(b.contains(">{\\raggedright\\arraybackslash}X>{\\raggedright\\arraybackslash}X"), "both columns are X columns: {b}");
+    assert!(!b.to_ascii_lowercase().contains("<br"), "{b}");
+}
+
+// spec: TEX-028
+#[test]
+fn math_that_parses_is_written_unchanged_and_math_that_does_not_is_code() {
+    let note = "Inline $\\frac{a}{b} + \\text{if } x \\in \\mathbb{R}$ and $$\\sum_{i=1}^n i$$ in text, $\\foo$ and $\\input{/etc/passwd}$.\n\n$$\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\n$$\n\n```math\n\\sqrt[3]{x}\n```\n\n$$\\write18{x}$$\n\n```math\n\\frac{a\n```\n";
+    let b = body_of(&doc(note, "pub")).to_string();
+    assert!(b.contains("\\(\\frac{a}{b} + \\text{if } x \\in \\mathbb{R}\\)"), "{b}");
+    assert!(b.contains("\\(\\displaystyle \\sum_{i=1}^n i\\)"), "{b}");
+    assert!(b.contains("\\[\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\n\\]"), "{b}");
+    assert!(b.contains("\\[\n\\sqrt[3]{x}\n\\]"), "{b}");
+    // a formula Shale cannot typeset is code text, and the hidden TeX is not written besides
+    assert!(b.contains("\\texttt{\\$\\textbackslash{}foo\\$}"), "{b}");
+    assert!(!b.contains("\\input{/etc") && !b.contains("\\write18"), "{b}");
+    assert!(b.contains("\\textbackslash{}input\\{/etc/passwd\\}") && b.contains("\\textbackslash{}write18\\{x\\}"), "{b}");
+    assert!(b.contains("\\textbackslash{}frac\\{a"), "the failed block is code: {b}");
+    assert_eq!(b.matches("\\frac{a}{b}").count(), 1, "the hidden TeX is not written twice: {b}");
+    assert!(doc(note, "pub").contains("\\usepackage{amsmath}"), "amsmath for matrices and \\dfrac");
+}
+
+// spec: TEX-008, TEX-028
+#[test]
+fn a_hostile_formula_can_never_run_tex() {
+    // everything TeX could take as a command comes out as text, and what is written as math has only known commands
+    for hostile in [
+        "$\\input{/etc/passwd}$",
+        "$\\write18{x}$",
+        "$\\text{\\input{a}}$",
+        "$\\text{^^5cinput{a}}$",
+        "$\\operatorname{^^5cinput}$",
+        "$\\catcode`\\{=12$",
+        "$a^^5cinput{x}$",
+        "$\\text{50% rest}$",
+        "$\\text{a}} \\end{document} \\text{b}$",
+        "$$\\end{document}$$",
+        "$a\\end{document}$",
+        "$\\text{a {b}$",
+        "$\\verb|x|$",
+        "$\\csname x\\endcsname$",
+        "$\\def\\a{b}$",
+    ] {
+        let t = doc(&format!("x {hostile} y\n\n{hostile}\n"), "pub");
+        let b = body_of(&t);
+        assert_eq!(t.matches("\\end{document}").count(), 1, "{hostile}: only the last line ends the document: {t}");
+        for bad in ["\\input{", "\\write18", "\\catcode", "^^5c", "\\csname", "\\def\\", "\\verb"] {
+            assert!(!b.contains(bad), "{hostile}: {bad} would be a command in {b}");
+        }
+    }
+}
