@@ -1198,7 +1198,7 @@ impl ShaleApp {
     }
 
     /// At exit: what still could not be saved goes to the recovery folder instead of being lost
-    /// (DATA-011). Returns where each text went. Failures are the last resort: stderr.
+    /// (DATA-011, and the text of the settings tab, CFG-015). Returns where each text went. Failures are the last resort: stderr.
     pub fn rescue_unsaved(&mut self) -> Vec<PathBuf> {
         let date = crate::mail::store::today_string();
         let mut texts: Vec<(PathBuf, Vec<u8>)> = self.notes.iter().filter(|(_, d)| d.dirty && d.unreadable.is_none()).map(|(r, d)| (r.clone(), d.text.clone().into_bytes())).collect();
@@ -1208,6 +1208,10 @@ impl ShaleApp {
                     texts.push((rel.clone(), t.into_bytes()));
                 }
             }
+        }
+        // the settings tab: text with an error, or kept while the file changed outside (CFG-015)
+        if self.sf.dirty {
+            texts.push((PathBuf::from("settings/config.toml"), self.sf.text.clone().into_bytes()));
         }
         let mut out = Vec::new();
         for (rel, bytes) in texts {
@@ -2281,7 +2285,8 @@ impl eframe::App for ShaleApp {
     fn on_exit(&mut self) {
         // flush_all waits for a running sync's merge step first
         self.flush_all();
-        self.settings_file_flush(false);
+        // a valid text of the settings tab is saved now; what is left is rescued (CFG-015)
+        self.settings_file_flush(true);
         self.undo.flush_all();
         self.rescue_unsaved();
         self.save_mail_draft_at_exit();

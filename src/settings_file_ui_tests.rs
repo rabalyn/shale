@@ -283,3 +283,51 @@ fn cfg_014_a_file_left_broken_from_outside_is_not_written_over_until_it_is_valid
     w.app.save_config();
     assert!(w.disk().contains("dark_canvas = false"));
 }
+
+// spec: CFG-015
+#[test]
+fn cfg_015_unsaved_settings_text_goes_to_the_recovery_folder_at_exit() {
+    let day = crate::mail::store::today_string();
+    // text with an error: rescued, the file stays
+    let mut w = W::new("exit-broken");
+    let rec = w.dir.join("recovery-root");
+    w.app.recovery.root = rec.clone();
+    w.app.open_settings_file();
+    let before = w.disk();
+    let broken = before.replace("toolbar_size = 110", "toolbar_size = [");
+    w.app.sf.text = broken.clone();
+    w.app.sf.dirty = true;
+    w.app.sf.error = Config::parse_text(&broken).err();
+    eframe::App::on_exit(&mut w.app);
+    assert_eq!(w.disk(), before, "the settings file is not touched");
+    assert_eq!(std::fs::read_to_string(rec.join(&day).join("settings/config.toml")).unwrap(), broken);
+    assert_eq!(crate::recovery::unseen(&rec), vec![rec.join(&day)], "announced at the next start");
+
+    // valid text typed just before quitting: saved, nothing rescued
+    let mut w = W::new("exit-valid");
+    let rec = w.dir.join("recovery-root");
+    w.app.recovery.root = rec.clone();
+    w.app.open_settings_file();
+    w.app.sf.text = w.disk().replace("toolbar_size = 110", "toolbar_size = 17");
+    w.app.sf.dirty = true;
+    w.app.sf.last_edit = Instant::now();
+    eframe::App::on_exit(&mut w.app);
+    assert!(w.disk().contains("toolbar_size = 17"));
+    assert!(!rec.exists(), "a clean exit rescues nothing");
+
+    // the file changed outside while the tab kept its own text: the tab's text is rescued
+    let mut w = W::new("exit-outside");
+    let rec = w.dir.join("recovery-root");
+    w.app.recovery.root = rec.clone();
+    w.app.open_settings_file();
+    let mine = w.disk().replace("toolbar_size = 110", "toolbar_size = 19");
+    w.app.sf.text = mine.clone();
+    w.app.sf.dirty = true;
+    w.app.sf.last_edit = Instant::now();
+    w.write_outside(&w.disk().replace("toolbar_size = 110", "toolbar_size = 21"));
+    w.app.check_settings_file(true);
+    assert!(w.app.sf.disk_changed);
+    eframe::App::on_exit(&mut w.app);
+    assert!(w.disk().contains("toolbar_size = 21"), "the other program's file stays");
+    assert_eq!(std::fs::read_to_string(rec.join(&day).join("settings/config.toml")).unwrap(), mine);
+}
