@@ -52,7 +52,7 @@ impl SettingsTab {
     }
 
     /// All tabs in the order of the list.
-    pub const ALL: [SettingsTab; 13] = [
+    pub const ALL: [SettingsTab; 14] = [
         SettingsTab::Vault,
         SettingsTab::Editor,
         SettingsTab::Vim,
