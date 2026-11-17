@@ -3,7 +3,7 @@
 //! names after `[[`.
 
 use crate::colour_tags;
-use crate::fonts::{AreaFont, EditorFonts};
+use crate::fonts::EditorFonts;
 #[cfg(test)]
 use crate::link_assist::link_query;
 use crate::markdown::{self, LinkSpan};
@@ -372,7 +372,8 @@ pub fn outline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> Layout
 }
 
 fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
-    let AreaFont { family, size: base } = if f.rendered { &fonts.rendered } else { &fonts.raw }.clone();
+    let area = if f.rendered { &fonts.rendered } else { &fonts.raw };
+    let (family, base) = (area.family.clone(), area.size);
     if f.image_h > 0 {
         return TextFormat { font_id: FontId::new(1.0, family), color: Color32::TRANSPARENT, line_height: Some(f.image_h as f32), ..Default::default() };
     }
@@ -383,7 +384,9 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
         return TextFormat { font_id: FontId::new(tiny, family), color: Color32::TRANSPARENT, line_height: Some(size * 1.5), ..Default::default() };
     }
     let mono = f.code || f.fence;
-    let font_id = if mono { FontId::new(base * 0.92 * heading_scale(f.heading), FontFamily::Monospace) } else { FontId::new(size, family) };
+    // bold and italic in the font's own faces where it has them (CFG-039)
+    let styled = area.styled(f.bold, f.italic || f.quote);
+    let font_id = if mono { FontId::new(base * 0.92 * heading_scale(f.heading), FontFamily::Monospace) } else { FontId::new(size, styled.family.clone()) };
     let mut color = if f.heading > 0 { theme::HEADING } else { theme::TEXT };
     if f.quote {
         color = theme::QUOTE;
@@ -424,7 +427,7 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
             theme::FAINT
         };
     }
-    let mut tf = TextFormat { font_id, color, italics: f.italic || f.quote, line_height: Some(size * 1.5), ..Default::default() };
+    let mut tf = TextFormat { font_id, color, italics: if mono { f.italic || f.quote } else { styled.fake_italic }, line_height: Some(size * 1.5), ..Default::default() };
     if f.fence || (f.code && !f.dim) {
         tf.background = theme::CODE_BG;
     }
@@ -443,7 +446,7 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
     if f.strike && !f.dim {
         tf.strikethrough = Stroke::new(1.0, theme::DONE);
     }
-    if f.bold {
+    if f.bold && (mono || styled.fake_bold) {
         tf.extra_letter_spacing = 0.3;
     }
     tf
@@ -4052,12 +4055,41 @@ mod tests {
         assert_eq!(format_of(&job, text, "hi").background, Color32::from_rgb(255, 255, 0));
     }
 
+    // spec: CFG-039
+    #[test]
+    fn cfg_039_bold_and_italic_use_the_font_s_own_faces_in_the_raw_and_rendered_editor() {
+        use crate::fonts::{AreaFont, Faces};
+        let fam = |n: &str| FontFamily::Name(n.into());
+        let font = |faces| AreaFont { family: fam("system:X"), size: 15.0, faces };
+        let text = "**bold** *it* **b *both* b** `**code**`\n> quoted";
+        let all = Faces { bold: true, italic: true, bold_italic: true };
+        for fonts in [EditorFonts { raw: font(all), rendered: font(Faces::default()) }, EditorFonts { raw: font(Faces::default()), rendered: font(all) }] {
+            for preview in [false, true] {
+                // the raw editor, or the preview with every line drawn rendered (no line raw)
+                let job = highlight_preview(text, &[], &fonts, &[], preview.then_some(99..99));
+                let real = if preview { fonts.rendered.faces == all } else { fonts.raw.faces == all };
+                let f = |n: &str| format_of(&job, text, n).clone();
+                if real {
+                    assert_eq!((f("bold").font_id.family, f("bold").extra_letter_spacing), (fam("system:X:bold"), 0.0));
+                    assert_eq!((f("it").font_id.family, f("it").italics), (fam("system:X:italic"), false));
+                    assert_eq!((f("both").font_id.family, f("both").italics, f("both").extra_letter_spacing), (fam("system:X:bold-italic"), false, 0.0));
+                    assert_eq!((f("quoted").font_id.family, f("quoted").italics), (fam("system:X:italic"), false), "a quote is italic too");
+                } else {
+                    assert_eq!(f("bold").font_id.family, fam("system:X"));
+                    assert!(f("bold").extra_letter_spacing > 0.0 && f("it").italics && f("quoted").italics, "imitated without the faces");
+                }
+                assert_eq!(f("bold").color, theme::TEXT_STRONG, "bold keeps its stronger colour");
+                assert_eq!(f("code").font_id.family, FontFamily::Monospace, "code stays monospace");
+            }
+        }
+    }
+
     // spec: CFG-037
     #[test]
     fn cfg_037_raw_and_rendered_lines_of_the_preview_are_laid_out_at_their_own_sizes() {
         let (v, d) = vault_for_tests("fonts-two");
         let rel = Path::new("Welcome.md");
-        let fonts = EditorFonts { raw: AreaFont { family: FontFamily::Proportional, size: 12.0 }, rendered: AreaFont { family: FontFamily::Proportional, size: 24.0 } };
+        let fonts = EditorFonts { raw: crate::fonts::AreaFont::shale(12.0), rendered: crate::fonts::AreaFont::shale(24.0) };
         let ctx = egui::Context::default();
         crate::theme::install_fonts(&ctx);
         let mut text = String::from("rendered line\nraw line\nrendered again");

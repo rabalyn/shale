@@ -1,4 +1,4 @@
-//! Fonts and text sizes (CFG-030 to CFG-037): one font and size for each area of the window,
+//! Fonts and text sizes (CFG-030 to CFG-039): one font and size for each area of the window,
 //! the system fonts to choose from, and the egui fonts and text styles that follow from the
 //! settings.
 //!
@@ -194,11 +194,100 @@ impl FontsCfg {
     }
 }
 
-/// A font that can be used in egui: the family and the size in points.
+/// A font that can be used in egui: the family, the size in points, and which faces of its
+/// own the family has for bold and italic text (CFG-039).
 #[derive(Clone, Debug, PartialEq)]
 pub struct AreaFont {
     pub family: FontFamily,
     pub size: f32,
+    pub faces: Faces,
+}
+
+/// The faces a family has besides its regular one (CFG-039). Shale's own font has none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Faces {
+    pub bold: bool,
+    pub italic: bool,
+    pub bold_italic: bool,
+}
+
+impl Faces {
+    fn has(self, v: Variant) -> bool {
+        match v {
+            Variant::Regular => true,
+            Variant::Bold => self.bold,
+            Variant::Italic => self.italic,
+            Variant::BoldItalic => self.bold_italic,
+        }
+    }
+}
+
+/// A face of a family (CFG-039).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Variant {
+    Regular,
+    Bold,
+    Italic,
+    BoldItalic,
+}
+
+impl Variant {
+    const ALL: [Variant; 4] = [Variant::Regular, Variant::Bold, Variant::Italic, Variant::BoldItalic];
+
+    fn suffix(self) -> &'static str {
+        match self {
+            Variant::Regular => "",
+            Variant::Bold => ":bold",
+            Variant::Italic => ":italic",
+            Variant::BoldItalic => ":bold-italic",
+        }
+    }
+
+    fn bold(self) -> bool {
+        matches!(self, Variant::Bold | Variant::BoldItalic)
+    }
+
+    fn italic(self) -> bool {
+        matches!(self, Variant::Italic | Variant::BoldItalic)
+    }
+}
+
+/// How bold or italic text is drawn (CFG-039): in `family`, and with egui's imitation of bold
+/// (`fake_bold`: extra letter spacing) or italic (`fake_italic`: slanted) where the family has
+/// no face of its own for it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Styled {
+    pub family: FontFamily,
+    pub fake_bold: bool,
+    pub fake_italic: bool,
+}
+
+impl AreaFont {
+    /// Shale's own font at `size`.
+    pub fn shale(size: f32) -> AreaFont {
+        AreaFont { family: FontFamily::Proportional, size, faces: Faces::default() }
+    }
+
+    /// The family and imitation for text that is `bold` and/or `italic` (CFG-039): the face that
+    /// has both, else the one that has the most of it, with the rest imitated.
+    pub fn styled(&self, bold: bool, italic: bool) -> Styled {
+        let wanted = match (bold, italic) {
+            (true, true) => Variant::BoldItalic,
+            (true, false) => Variant::Bold,
+            (false, true) => Variant::Italic,
+            (false, false) => Variant::Regular,
+        };
+        let order: &[Variant] = match wanted {
+            Variant::BoldItalic => &[Variant::BoldItalic, Variant::Bold, Variant::Italic, Variant::Regular],
+            v => &[v, Variant::Regular],
+        };
+        let v = order.iter().copied().find(|v| self.faces.has(*v)).unwrap_or(Variant::Regular);
+        let family = match (&self.family, v) {
+            (FontFamily::Name(n), v) if v != Variant::Regular => FontFamily::Name(format!("{n}{}", v.suffix()).into()),
+            (f, _) => f.clone(),
+        };
+        Styled { family, fake_bold: bold && !v.bold(), fake_italic: italic && !v.italic() }
+    }
 }
 
 /// The two fonts of the editor (CFG-032).
@@ -211,14 +300,19 @@ pub struct EditorFonts {
 impl EditorFonts {
     /// One size in Shale's own font for both (the outline, tests).
     pub fn uniform(size: f32) -> EditorFonts {
-        let f = AreaFont { family: FontFamily::Proportional, size };
+        let f = AreaFont::shale(size);
         EditorFonts { raw: f.clone(), rendered: f }
     }
 }
 
-/// The name of the egui family that holds the system font `name`.
+/// The name of the egui family (and font data) that holds the face `v` of the system font `name`.
+fn key_of(name: &str, v: Variant) -> String {
+    format!("system:{name}{}", v.suffix())
+}
+
+/// The egui family that holds the system font `name`.
 fn family_of(name: &str) -> FontFamily {
-    FontFamily::Name(format!("system:{name}").into())
+    FontFamily::Name(key_of(name, Variant::Regular).into())
 }
 
 /// The font of every area as egui uses it.
@@ -227,7 +321,7 @@ struct Resolved([AreaFont; 6]);
 
 impl Default for Resolved {
     fn default() -> Self {
-        Resolved(Area::ALL.map(|a| AreaFont { family: FontFamily::Proportional, size: a.default_size() }))
+        Resolved(Area::ALL.map(|a| AreaFont::shale(a.default_size())))
     }
 }
 
@@ -292,11 +386,24 @@ impl SystemFonts {
         &self.families
     }
 
-    /// The regular face of a family: the bytes of its file and the index of the face in it.
-    fn face(&self, name: &str) -> Option<(Vec<u8>, u32)> {
+    /// A face of a family: the bytes of its file and the index of the face in it. A bold or
+    /// italic face only when the family has one of its own (CFG-039): not the regular face that
+    /// the search offers in its place, nor a face that is not what was asked for.
+    fn face(&self, name: &str, v: Variant) -> Option<(Vec<u8>, u32)> {
         let db = self.db.as_ref()?;
-        let q = fontdb::Query { families: &[fontdb::Family::Name(name)], weight: fontdb::Weight::NORMAL, stretch: fontdb::Stretch::Normal, style: fontdb::Style::Normal };
-        let id = db.query(&q)?;
+        let find = |v: Variant| {
+            let weight = if v.bold() { fontdb::Weight::BOLD } else { fontdb::Weight::NORMAL };
+            let style = if v.italic() { fontdb::Style::Italic } else { fontdb::Style::Normal };
+            db.query(&fontdb::Query { families: &[fontdb::Family::Name(name)], weight, stretch: fontdb::Stretch::Normal, style })
+        };
+        let id = find(v)?;
+        if v != Variant::Regular {
+            let info = db.face(id)?;
+            let fits = (!v.bold() || info.weight.0 >= 600) && (!v.italic() || info.style != fontdb::Style::Normal);
+            if !fits || find(Variant::Regular) == Some(id) {
+                return None;
+            }
+        }
         db.with_face_data(id, |data, index| {
             let mut bytes = data.to_vec();
             hide_mono_bitmaps(&mut bytes);
@@ -341,6 +448,14 @@ pub fn hide_mono_bitmaps(font: &mut [u8]) {
             }
         }
     }
+}
+
+/// A system font that is loaded: its name, the faces it has besides the regular one, and the
+/// font data of each face it has, the regular one first (CFG-039).
+struct Loaded {
+    name: String,
+    faces: Faces,
+    data: Vec<(Variant, egui::FontData)>,
 }
 
 /// What is in use, and what the settings ask for (CFG-036).
@@ -400,7 +515,8 @@ impl FontState {
         self.waiting = !wanted.is_empty() && !self.system.ready();
         let mut resolved = Resolved::default();
         let mut missing = BTreeSet::new();
-        let mut loaded: Vec<(String, egui::FontData)> = Vec::new();
+        // each family once: its faces, and the font data of each (the regular one first)
+        let mut loaded: Vec<Loaded> = Vec::new();
         for (i, area) in Area::ALL.iter().enumerate() {
             let c = cfg.choice(*area);
             resolved.0[i].size = c.size;
@@ -408,23 +524,23 @@ impl FontState {
             if !self.system.ready() {
                 continue;
             }
-            if loaded.iter().any(|(n, _)| *n == name) {
+            if let Some(l) = loaded.iter().find(|l| l.name == name) {
                 resolved.0[i].family = family_of(&name);
-            } else if let Some((bytes, index)) = self.system.face(&name) {
-                let mut data = egui::FontData::from_owned(bytes);
-                data.index = index;
-                loaded.push((name.clone(), data));
+                resolved.0[i].faces = l.faces;
+            } else if let Some(l) = self.load_family(&name) {
                 resolved.0[i].family = family_of(&name);
+                resolved.0[i].faces = l.faces;
+                loaded.push(l);
             } else {
                 missing.insert(name);
             }
         }
-        let now: BTreeSet<String> = loaded.iter().map(|(n, _)| n.clone()).collect();
+        let now: BTreeSet<String> = loaded.iter().map(|l| l.name.clone()).collect();
         if self.waiting {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         if now != self.installed {
-            ctx.set_fonts(theme::font_definitions(loaded.into_iter().map(|(n, d)| (family_of(&n), n, d)).collect()));
+            ctx.set_fonts(theme::font_definitions(families_for_egui(loaded)));
             self.installed = now;
             self.pending = Some((resolved, ctx.cumulative_pass_nr()));
         } else {
@@ -439,12 +555,53 @@ impl FontState {
         }
     }
 
+    /// The faces of the system font `name` that it has (CFG-039), the regular one first; none
+    /// when it has no regular face.
+    fn load_family(&self, name: &str) -> Option<Loaded> {
+        let mut faces = Faces::default();
+        let mut data = Vec::new();
+        for v in Variant::ALL {
+            let Some((bytes, index)) = self.system.face(name, v) else {
+                if v == Variant::Regular {
+                    return None;
+                }
+                continue;
+            };
+            let mut d = egui::FontData::from_owned(bytes);
+            d.index = index;
+            data.push((v, d));
+            match v {
+                Variant::Regular => {}
+                Variant::Bold => faces.bold = true,
+                Variant::Italic => faces.italic = true,
+                Variant::BoldItalic => faces.bold_italic = true,
+            }
+        }
+        Some(Loaded { name: name.to_string(), faces, data })
+    }
+
     fn use_resolved(&mut self, ctx: &egui::Context, r: Resolved) {
         if r.get(Area::Ui) != self.resolved.get(Area::Ui) {
             theme::set_text_styles(ctx, r.get(Area::Ui));
         }
         self.resolved = r;
     }
+}
+
+/// The fonts of the loaded families as egui takes them: every face as font data of its own,
+/// and every face as a family that falls back to the regular face of its font (CFG-039).
+fn families_for_egui(loaded: Vec<Loaded>) -> theme::SystemFonts {
+    let mut out = theme::SystemFonts::default();
+    for l in loaded {
+        let regular = key_of(&l.name, Variant::Regular);
+        for (v, data) in l.data {
+            let key = key_of(&l.name, v);
+            let chain = if v == Variant::Regular { vec![key.clone()] } else { vec![key.clone(), regular.clone()] };
+            out.families.push((key.clone(), chain));
+            out.data.push((key, data));
+        }
+    }
+    out
 }
 
 thread_local! {
@@ -475,14 +632,22 @@ pub fn with_family<R>(font: &AreaFont, add: impl FnOnce() -> R) -> R {
     r
 }
 
-/// The family of the area that is being drawn: Shale's own font outside of an area.
-pub fn family() -> FontFamily {
-    ACTIVE.with(|a| a.borrow().as_ref().map_or(FontFamily::Proportional, |f| f.family.clone()))
-}
-
 /// A size of the 14-point design of the dialogs, in the size of the area that is drawn.
 pub fn px(size: f32) -> f32 {
     ACTIVE.with(|a| a.borrow().as_ref().map_or(size, |f| size * f.size / UI_SIZE))
+}
+
+/// How bold or italic text is drawn in the area that is being drawn (CFG-039).
+pub fn styled(bold: bool, italic: bool) -> Styled {
+    ACTIVE.with(|a| a.borrow().as_ref().map_or_else(|| AreaFont::shale(UI_SIZE).styled(bold, italic), |f| f.styled(bold, italic)))
+}
+
+/// Whether `family` is the bold and/or italic face of a system font (CFG-039): text in such a
+/// face has no imitation that says so, so the PDF export asks here.
+pub fn bold_italic_of(family: &FontFamily) -> (bool, bool) {
+    let FontFamily::Name(n) = family else { return (false, false) };
+    let v = [Variant::BoldItalic, Variant::Bold, Variant::Italic].into_iter().find(|v| n.starts_with("system:") && n.ends_with(v.suffix()));
+    v.map_or((false, false), |v| (v.bold(), v.italic()))
 }
 
 /// A font of `size` points of the 14-point design, in the font and size of the area that is drawn.
@@ -624,6 +789,30 @@ pub(crate) mod tests {
         (db, name)
     }
 
+    /// A copy of the bundled Virgil font that says it has `weight` and is italic or not (its
+    /// `OS/2` table): a family of real faces for the tests, whatever is installed (CFG-039).
+    fn virgil_as(weight: u16, italic: bool) -> Vec<u8> {
+        let mut f = include_bytes!("../assets/fonts/Virgil.otf").to_vec();
+        let n = u16::from_be_bytes([f[4], f[5]]) as usize;
+        let entry = (0..n).map(|i| 12 + 16 * i).find(|e| &f[*e..*e + 4] == b"OS/2").expect("Virgil has an OS/2 table");
+        let os2 = u32::from_be_bytes([f[entry + 8], f[entry + 9], f[entry + 10], f[entry + 11]]) as usize;
+        f[os2 + 4..os2 + 6].copy_from_slice(&weight.to_be_bytes());
+        let mut sel = u16::from_be_bytes([f[os2 + 62], f[os2 + 63]]) & !(1 | 1 << 6 | 1 << 9);
+        sel |= if italic { 1 } else { 1 << 6 };
+        f[os2 + 62..os2 + 64].copy_from_slice(&sel.to_be_bytes());
+        f
+    }
+
+    /// The Virgil family with the faces of `faces`: (weight, italic) each.
+    pub(crate) fn virgil_family(faces: &[(u16, bool)]) -> (fontdb::Database, String) {
+        let mut db = fontdb::Database::new();
+        for (w, it) in faces {
+            db.load_font_data(virgil_as(*w, *it));
+        }
+        let name = virgil_db().1;
+        (db, name)
+    }
+
     fn pass(ctx: &egui::Context) {
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() };
         let mut out = ctx.run_ui(raw, |ui| {
@@ -641,9 +830,9 @@ pub(crate) mod tests {
         s.set(db);
         assert!(s.ready());
         assert_eq!(s.families(), std::slice::from_ref(&name));
-        let (bytes, index) = s.face(&name).expect("the face loads");
+        let (bytes, index) = s.face(&name, Variant::Regular).expect("the face loads");
         assert!(bytes.len() > 1000 && index == 0);
-        assert!(s.face("No Such Family").is_none());
+        assert!(s.face("No Such Family", Variant::Regular).is_none());
     }
 
     // spec: CFG-035
@@ -721,7 +910,7 @@ pub(crate) mod tests {
         theme::apply(&ctx);
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() };
         let mut out = ctx.run_ui(raw, |ui| {
-            let big = AreaFont { family: FontFamily::Proportional, size: 28.0 };
+            let big = AreaFont::shale(28.0);
             assert_eq!((px(10.0), font(10.0).size), (10.0, 10.0));
             with_area(ui, &big, |ui| {
                 assert_eq!(ui.style().text_styles[&egui::TextStyle::Body].size, 28.0);
@@ -733,5 +922,109 @@ pub(crate) mod tests {
             assert_eq!(px(10.0), 10.0);
         });
         out.textures_delta.clear();
+    }
+
+    // spec: CFG-039
+    #[test]
+    fn cfg_039_a_family_s_own_bold_and_italic_faces_are_loaded_and_stand_ins_are_not() {
+        let weight = |b: &[u8]| {
+            let mut db = fontdb::Database::new();
+            db.load_font_data(b.to_vec());
+            let f = db.faces().next().unwrap();
+            (f.weight.0, f.style)
+        };
+        let (db, name) = virgil_family(&[(400, false), (700, false), (400, true)]);
+        let mut s = SystemFonts::default();
+        s.set(db);
+        assert_eq!(s.families(), std::slice::from_ref(&name), "one family, however many faces");
+        assert_eq!(weight(&s.face(&name, Variant::Regular).unwrap().0), (400, fontdb::Style::Normal));
+        assert_eq!(weight(&s.face(&name, Variant::Bold).unwrap().0), (700, fontdb::Style::Normal));
+        assert_eq!(weight(&s.face(&name, Variant::Italic).unwrap().0), (400, fontdb::Style::Italic));
+        assert!(s.face(&name, Variant::BoldItalic).is_none(), "the italic face the search offers is not bold");
+        // only a regular face: the search offers it for everything, and it is not taken
+        let (db, name) = virgil_family(&[(400, false)]);
+        s.set(db);
+        assert!(s.face(&name, Variant::Regular).is_some());
+        assert!([Variant::Bold, Variant::Italic, Variant::BoldItalic].iter().all(|v| s.face(&name, *v).is_none()));
+        // only a bold face: it is the regular one too, and not a second time the bold one
+        let (db, name) = virgil_family(&[(700, false)]);
+        s.set(db);
+        assert_eq!(weight(&s.face(&name, Variant::Regular).unwrap().0).0, 700);
+        assert!(s.face(&name, Variant::Bold).is_none());
+        // a semibold face counts as bold, a medium one does not
+        let (db, name) = virgil_family(&[(400, false), (600, false)]);
+        s.set(db);
+        assert!(s.face(&name, Variant::Bold).is_some());
+        let (db, name) = virgil_family(&[(400, false), (500, false)]);
+        s.set(db);
+        assert!(s.face(&name, Variant::Bold).is_none());
+    }
+
+    // spec: CFG-039
+    #[test]
+    fn cfg_039_bold_and_italic_take_the_faces_there_are_and_imitate_the_rest() {
+        let fam = |n: &str| FontFamily::Name(n.into());
+        let font = |bold, italic, bold_italic| AreaFont { family: fam("system:X"), size: 15.0, faces: Faces { bold, italic, bold_italic } };
+        let st = |f: &AreaFont, b, i| {
+            let s = f.styled(b, i);
+            (s.family, s.fake_bold, s.fake_italic)
+        };
+        let all = font(true, true, true);
+        assert_eq!(st(&all, false, false), (fam("system:X"), false, false));
+        assert_eq!(st(&all, true, false), (fam("system:X:bold"), false, false));
+        assert_eq!(st(&all, false, true), (fam("system:X:italic"), false, false));
+        assert_eq!(st(&all, true, true), (fam("system:X:bold-italic"), false, false));
+        // no bold-italic face: the bold one with a slant, else the italic one made bold
+        assert_eq!(st(&font(true, true, false), true, true), (fam("system:X:bold"), false, true));
+        assert_eq!(st(&font(false, true, false), true, true), (fam("system:X:italic"), true, false));
+        // no faces at all, and Shale's own font: everything imitated as before
+        assert_eq!(st(&font(false, false, false), true, true), (fam("system:X"), true, true));
+        let shale = AreaFont::shale(15.0);
+        assert_eq!(st(&shale, true, true), (FontFamily::Proportional, true, true));
+        assert_eq!(st(&shale, false, false), (FontFamily::Proportional, false, false));
+        // the area that is drawn says which faces there are
+        assert_eq!(styled(true, false), Styled { family: FontFamily::Proportional, fake_bold: true, fake_italic: false });
+        with_family(&all, || assert_eq!(styled(true, false), Styled { family: fam("system:X:bold"), fake_bold: false, fake_italic: false }));
+        // the PDF export finds out from the family what the face is
+        assert_eq!(bold_italic_of(&fam("system:X:bold")), (true, false));
+        assert_eq!(bold_italic_of(&fam("system:X:italic")), (false, true));
+        assert_eq!(bold_italic_of(&fam("system:X:bold-italic")), (true, true));
+        assert_eq!(bold_italic_of(&fam("system:X")), (false, false));
+        assert_eq!(bold_italic_of(&FontFamily::Proportional), (false, false));
+        assert_eq!(bold_italic_of(&fam(theme::HAND_FONT)), (false, false));
+    }
+
+    // spec: CFG-039
+    #[test]
+    fn cfg_039_the_faces_of_a_chosen_font_are_loaded_into_egui_and_text_is_laid_out_in_them() {
+        let ctx = egui::Context::default();
+        theme::apply(&ctx);
+        let (db, name) = virgil_family(&[(400, false), (700, false), (400, true), (700, true)]);
+        let mut st = FontState::new();
+        st.system.set(db);
+        let cfg = FontsCfg { all: FontChoice { family: Some(name.clone()), size: 16.0 }, ..FontsCfg::default() };
+        assert_eq!(st.sync(&ctx, &cfg), None);
+        pass(&ctx);
+        st.sync(&ctx, &cfg);
+        let ui = st.area(Area::Ui);
+        assert_eq!(ui.faces, Faces { bold: true, italic: true, bold_italic: true });
+        assert_eq!(st.area(Area::EditorRendered).faces, ui.faces, "every area of the family");
+        for (b, i) in [(true, false), (false, true), (true, true)] {
+            let family = ui.styled(b, i).family;
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                ui.label(egui::RichText::new("Bold text").family(family.clone()));
+            });
+            out.textures_delta.clear();
+        }
+        // a family with no faces of its own: none are said to be there
+        let (db, name) = virgil_family(&[(400, false)]);
+        let mut st = FontState::new();
+        st.system.set(db);
+        let cfg = FontsCfg { all: FontChoice { family: Some(name), size: 16.0 }, ..FontsCfg::default() };
+        st.sync(&ctx, &cfg);
+        pass(&ctx);
+        st.sync(&ctx, &cfg);
+        assert_eq!(st.area(Area::Ui).faces, Faces::default());
     }
 }

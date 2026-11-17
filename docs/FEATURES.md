@@ -142,7 +142,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   switched off, every area has a row of its own, starting from what it had.
 - A font is chosen from a list of the fonts installed on the computer: a button opens a list with a
   search field (type to narrow it, ↑ ↓ and Enter to pick, Esc to close); "Default" is Shale's own
-  font. Characters a chosen font lacks (emoji) are drawn with Shale's own fonts. A font that is no
+  font. Characters a chosen font lacks (emoji) are drawn with Shale's own fonts. Bold and italic text
+  is drawn in the font's own bold, italic and bold-italic faces where it has them. A font that is no
   longer installed is replaced by Shale's own, with a message, and used again when it comes back.
 - Changes show at once, also when you edit `[fonts]` in the settings file. The old "Text size"
   setting became the size of the editor.

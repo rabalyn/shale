@@ -113,8 +113,10 @@ pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, 
     let tags = markdown::find_tags(line);
     let mut st = Inline { strike: strike_all, ..Default::default() };
     let fmt = |st: &Inline, color: Color32| {
+        // bold and italic in the font's own faces where it has them (CFG-039)
+        let styled = crate::fonts::styled(st.bold && !st.code, st.italic && !st.code);
         let mut f = TextFormat {
-            font_id: if st.code { FontId::new(size * 0.92, FontFamily::Monospace) } else { FontId::new(size, crate::fonts::family()) },
+            font_id: if st.code { FontId::new(size * 0.92, FontFamily::Monospace) } else { FontId::new(size, styled.family) },
             color: if st.code {
                 theme::CODE
             } else if st.bold {
@@ -122,7 +124,7 @@ pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, 
             } else {
                 color
             },
-            italics: st.italic,
+            italics: if st.code { st.italic } else { styled.fake_italic },
             line_height: Some(size * 1.5),
             ..Default::default()
         };
@@ -136,7 +138,7 @@ pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, 
             f.strikethrough = Stroke::new(1.0, theme::DONE);
             f.color = theme::DONE;
         }
-        if st.bold {
+        if st.bold && (st.code || styled.fake_bold) {
             f.extra_letter_spacing = 0.3;
         }
         // a coloured highlight with readable text on it, and a font colour (EDIT-029)
@@ -689,5 +691,26 @@ mod tests {
         let hi = job.text.find("hi ").unwrap();
         let there = job.text.find("there").unwrap();
         assert_eq!(paints, vec![(hi..there, Some([255, 255, 0, 255]), None), (there..there + 5, Some([255, 255, 0, 255]), Some([255, 0, 0, 255]))]);
+    }
+
+    // spec: CFG-039
+    #[test]
+    fn cfg_039_the_reading_view_draws_bold_and_italic_in_the_font_s_own_faces() {
+        use crate::fonts::{AreaFont, Faces};
+        let fam = |n: &str| FontFamily::Name(n.into());
+        let line = "**bold** *it* `code`";
+        let at = |job: &LayoutJob, w: &str| {
+            let b = job.text.find(w).unwrap();
+            job.sections.iter().find(|s| s.byte_range.start.0 <= b && b < s.byte_range.end.0).unwrap().format.clone()
+        };
+        let font = AreaFont { family: fam("system:X"), size: 15.0, faces: Faces { bold: true, italic: true, bold_italic: false } };
+        let (job, _) = crate::fonts::with_family(&font, || inline_job(line, &[], 15.0, theme::TEXT, false));
+        assert_eq!((at(&job, "bold").font_id.family, at(&job, "bold").extra_letter_spacing), (fam("system:X:bold"), 0.0));
+        assert_eq!((at(&job, "it").font_id.family, at(&job, "it").italics), (fam("system:X:italic"), false));
+        assert_eq!(at(&job, "code").font_id.family, FontFamily::Monospace);
+        // Shale's own font has no faces: bold and italic are imitated as before
+        let (job, _) = inline_job(line, &[], 15.0, theme::TEXT, false);
+        assert_eq!(at(&job, "bold").font_id.family, FontFamily::Proportional);
+        assert!(at(&job, "bold").extra_letter_spacing > 0.0 && at(&job, "it").italics);
     }
 }

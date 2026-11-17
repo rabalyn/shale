@@ -429,6 +429,8 @@ impl<'a> Writer<'a> {
             let link = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)).map(|(_, l, _)| l.target.clone());
             // inline code keeps its screen colours on the code background (PDF-007)
             let on_code = f.background == theme::CODE_BG;
+            // a bold or italic face of a chosen font has no imitation that says so (CFG-039)
+            let (face_bold, face_italic) = crate::fonts::bold_italic_of(&f.font_id.family);
             out.push(Piece {
                 text: job.text[r].to_string(),
                 kind: font_kind(&f.font_id.family),
@@ -439,8 +441,8 @@ impl<'a> Writer<'a> {
                     None if on_code => Some(rgba(theme::CODE_BG)),
                     None => print_bg(f.background),
                 },
-                italic: f.italics,
-                bold: f.extra_letter_spacing > 0.0,
+                italic: f.italics || face_italic,
+                bold: f.extra_letter_spacing > 0.0 || face_bold,
                 underline: f.underline.width > 0.0,
                 strike: f.strikethrough.width > 0.0,
                 link,
@@ -1463,6 +1465,26 @@ pub(crate) mod tests {
         assert_eq!(colour_of(&c, "\"hi\""), rg(theme::syntax_colour(Kind::String)));
         assert_eq!(colour_of(&c, "42"), rg(theme::syntax_colour(Kind::Number)));
         assert_eq!(colour_of(&c, "plain"), rg(theme::CODE), "a span without such parts is code-coloured");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: CFG-039
+    #[test]
+    fn bold_and_italic_in_a_font_s_own_faces_are_still_printed_bold_and_italic() {
+        use crate::fonts::{AreaFont, Faces};
+        let (v, d) = vault();
+        let o = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
+        let font = AreaFont { family: egui::FontFamily::Name("system:X".into()), size: 15.0, faces: Faces { bold: true, italic: true, bold_italic: true } };
+        // even inside an area whose font has the faces, as when the export starts from the editor
+        let bytes = crate::fonts::with_family(&font, || export_note(&v, Path::new("Ideas.md"), "Some **strong** and *slanted* words.\n", &o).unwrap());
+        let c = contents(&bytes);
+        let op = |w: &str| {
+            let at = c.find(&format!("<{}> Tj", hex(w))).unwrap_or_else(|| panic!("{w} is not drawn"));
+            c[c[..at].rfind("BT").unwrap()..at].to_string()
+        };
+        assert!(op("strong").contains(" 2 Tr"), "bold: {}", op("strong"));
+        assert!(op("slanted").contains("1 0 0.2 1"), "italic: {}", op("slanted"));
+        assert!(op("words.").contains(" 0 Tr 1 0 0 1"), "plain: {}", op("words."));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

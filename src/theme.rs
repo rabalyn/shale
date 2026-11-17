@@ -43,29 +43,37 @@ pub const QUOTE: Color32 = Color32::from_rgb(170, 170, 170);
 /// Font family name of the bundled hand-drawn font (Virgil, SIL Open Font License).
 pub const HAND_FONT: &str = "hand";
 
+/// System fonts to hand to egui: the font data of every face by its key, and the families, each
+/// a list of keys to look a character up in (CFG-033, CFG-039).
+#[derive(Default)]
+pub struct SystemFonts {
+    pub data: Vec<(String, egui::FontData)>,
+    pub families: Vec<(String, Vec<String>)>,
+}
+
 /// The fonts of egui: the normal ones, the bundled hand-drawn font as `FontFamily::Name("hand")`
-/// and each system font in `system` as a family of its own (all with the normal fonts as
-/// fallback for characters they don't have).
-pub fn font_definitions(system: Vec<(FontFamily, String, egui::FontData)>) -> egui::FontDefinitions {
+/// and each family of `system` as a family of its own (all with the normal fonts as fallback for
+/// characters they don't have).
+pub fn font_definitions(system: SystemFonts) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();
     let normal = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     defs.font_data.insert("virgil".into(), std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../assets/fonts/Virgil.otf"))));
     let mut fam = vec!["virgil".to_string()];
     fam.extend(normal.clone());
     defs.families.insert(FontFamily::Name(HAND_FONT.into()), fam);
-    for (family, name, data) in system {
-        let key = format!("system:{name}");
-        defs.font_data.insert(key.clone(), std::sync::Arc::new(data));
-        let mut fam = vec![key];
+    for (key, data) in system.data {
+        defs.font_data.insert(key, std::sync::Arc::new(data));
+    }
+    for (key, mut fam) in system.families {
         fam.extend(normal.clone());
-        defs.families.insert(family, fam);
+        defs.families.insert(FontFamily::Name(key.into()), fam);
     }
     defs
 }
 
 /// Register the bundled hand-drawn font.
 pub fn install_fonts(ctx: &egui::Context) {
-    ctx.set_fonts(font_definitions(vec![]));
+    ctx.set_fonts(font_definitions(SystemFonts::default()));
 }
 
 /// The text styles for a font: the sizes of Small, Heading and Monospace follow the size of
@@ -91,7 +99,7 @@ pub fn apply(ctx: &egui::Context) {
     install_fonts(ctx);
     ctx.set_visuals(egui::Visuals::dark());
     let mut style = (*ctx.global_style()).clone();
-    style.text_styles = text_styles(&AreaFont { family: FontFamily::Proportional, size: crate::fonts::UI_SIZE });
+    style.text_styles = text_styles(&AreaFont::shale(crate::fonts::UI_SIZE));
     style.spacing.item_spacing = egui::vec2(6.0, 4.0);
     style.spacing.button_padding = egui::vec2(8.0, 4.0);
     style.spacing.scroll.bar_width = 8.0;
