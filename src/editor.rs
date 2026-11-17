@@ -620,6 +620,12 @@ impl NoteEditor {
         self.grid.cell.as_ref().map(|c| (c.row, c.col))
     }
 
+    /// The cells of the block selected with Shift+arrow keys, as (row, column) (testing aid).
+    #[cfg(test)]
+    pub(crate) fn selected_cells(&self) -> Vec<(usize, usize)> {
+        self.grid.cell.as_ref().and_then(|c| c.block).map_or(vec![], |b| b.cells())
+    }
+
     /// The id of the box of the cell being edited (testing aid).
     #[cfg(test)]
     pub(crate) fn cell_box_id(&self) -> egui::Id {
@@ -3495,16 +3501,15 @@ mod tests {
         g.key(Key::ArrowLeft, Modifiers::NONE);
         g.key(Key::ArrowLeft, Modifiers::NONE);
         assert_eq!((g.editing(), g.cell_caret().0), (Some((0, 0)), 0), "the first cell: Left stays");
-        // Shift+arrow selects inside the cell and never leaves it
+        // Shift+arrow selects text inside the cell, and the cells at the edge of the text (raba/shale#243)
         g.key(Key::ArrowRight, Modifiers::SHIFT);
-        assert_eq!((g.editing(), g.cell_caret()), (Some((0, 0)), (1, true)));
+        assert_eq!((g.editing(), g.cell_caret(), g.ed.selected_cells()), (Some((0, 0)), (1, true), vec![]));
         g.key(Key::ArrowRight, Modifiers::SHIFT);
-        assert_eq!(g.editing(), Some((0, 0)));
-        // with text selected Right does not leave either
+        assert_eq!((g.editing(), g.ed.selected_cells()), (Some((0, 0)), vec![(0, 0), (0, 1)]));
+        // a plain arrow ends that and moves on from the cell
         g.key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(g.editing(), Some((0, 0)));
+        assert_eq!((g.editing(), g.ed.selected_cells()), (Some((0, 1)), vec![]));
         // typing after a move goes where the cursor is
-        g.key(Key::ArrowRight, Modifiers::NONE);
         g.type_text("x");
         g.frames(1);
         assert_eq!(g.editing(), Some((0, 1)));

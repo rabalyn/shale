@@ -84,6 +84,15 @@ put the markers in at the cursor), and the change is part of the cell's undo ste
 for headings, lists, tasks, quotes, code blocks, rules, tables and embeds are greyed out then,
 because they make no sense inside a cell.
 
+**Shift+arrow keys** select several cells: from the cell you edit, Shift+→ and then Shift+↑ select
+a block of 2 by 2 cells (it can span rows and columns, and shrinks again with the opposite arrow).
+Inside a cell's text the Shift+arrow keys select text first; at the edge of the text they go on to
+the cells. All selected cells are highlighted. A toolbar button (bold, italic, …) formats every
+selected cell, **Delete** or **Backspace** clears all of them, and both are part of the editing's
+one undo step. Typing ends the selection: the text goes into the top left cell of the block. A
+plain arrow key (it moves one cell on from the cell you started in) or **Esc** (it keeps that cell
+edited) ends the selection too.
+
 ![[table-cell-edit.png]]
 
 If you prefer the raw markdown, turn off "Edit table cells in the grid" in Settings → General →

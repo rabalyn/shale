@@ -5,6 +5,7 @@
 
 use crate::markdown;
 use crate::table::{Change, Laid, Meta, Sizes, Table, MIN_COL};
+use crate::table_select::Block;
 use crate::theme;
 use eframe::egui::{self, Key, Modifiers, Pos2, Rect, Sense, Ui, Vec2};
 use std::ops::Range;
@@ -32,6 +33,9 @@ pub struct CellEdit {
     /// the cursor was on the first / the last line of the box's text last frame (Up and Down leave the cell there)
     first_line: bool,
     last_line: bool,
+    /// Shift+arrow keys selected a block of several cells, this cell the anchor of it (EDIT-030, raba/shale#243);
+    /// the box then only holds the keyboard and the keys work on the cells
+    pub block: Option<Block>,
 }
 
 /// Where the cursor goes in a cell that is entered.
@@ -89,6 +93,8 @@ pub struct TableGrid {
     seen: bool,
     /// the pointer is on the formatting toolbar this frame: losing the keyboard to it does not end the editing (EDIT-030)
     pub hold: bool,
+    /// the table as it was drawn while a block of cells is selected (what the toolbar formats)
+    snapshot: Option<Table>,
 }
 
 impl CellEdit {
@@ -170,6 +176,9 @@ impl TableGrid {
         let Some(c) = self.cell.as_mut().filter(|c| c.table == table && crate::format::works_in_a_cell(cmd)) else { return false };
         let box_id = Self::cell_id(id);
         ctx.memory_mut(|m| m.request_focus(box_id));
+        if c.block.is_some() {
+            return self.format_block(ctx, cmd);
+        }
         let Some((new, r)) = crate::format::apply(cmd, &c.buf, c.selection_bytes()) else { return false };
         let sel = (markdown::byte_to_char(&new, r.start), markdown::byte_to_char(&new, r.end));
         c.buf = new;
@@ -180,6 +189,29 @@ impl TableGrid {
         self.pending.push((table, Change::Cell { row: c.row, col: c.col, text: c.buf.clone() }, false));
         ctx.request_repaint();
         true
+    }
+
+    /// A toolbar command on every cell of the selected block (EDIT-030, raba/shale#243): the text transform on the
+    /// whole text of each cell; when some cells already have the format it is added to those that do not,
+    /// else it is taken off all. Empty cells are left alone. One change per cell, all in the editing's undo step.
+    fn format_block(&mut self, ctx: &egui::Context, cmd: crate::format::Cmd) -> bool {
+        let (Some(c), Some(t)) = (self.cell.as_ref(), self.snapshot.as_ref()) else { return false };
+        let Some(b) = c.block else { return false };
+        let texts: Vec<((usize, usize), String)> = b.cells().into_iter().filter_map(|(r, col)| cell_text(t, r, col).filter(|x| !x.is_empty()).map(|x| ((r, col), x))).collect();
+        let on = |x: &String| crate::format::is_on(cmd, x, 0..x.len());
+        let all_on = texts.iter().all(|(_, x)| on(x));
+        let table = c.table;
+        let mut changed = false;
+        for ((row, col), x) in texts {
+            if all_on || !on(&x) {
+                if let Some((text, _)) = crate::format::apply(cmd, &x, 0..x.len()) {
+                    self.pending.push((table, Change::Cell { row, col, text }, false));
+                    changed = true;
+                }
+            }
+        }
+        ctx.request_repaint();
+        changed
     }
 
     /// Call after the grids were drawn: an editing whose table is no longer a grid ends.
@@ -205,7 +237,7 @@ impl TableGrid {
         let mut state = egui::text_edit::TextEditState::default();
         state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
         state.store(ui.ctx(), id);
-        self.cell = Some(CellEdit { table: s.ordinal, row, col, buf, before, had_focus: false, held: false, sel: (at, at), first_line: true, last_line: true });
+        self.cell = Some(CellEdit { table: s.ordinal, row, col, buf, before, had_focus: false, held: false, sel: (at, at), first_line: true, last_line: true, block: None });
         ui.ctx().memory_mut(|m| m.request_focus(id));
         ui.ctx().request_repaint();
     }
@@ -255,7 +287,34 @@ impl TableGrid {
         // the arrows leave the cell at the edge of its text (no modifiers, nothing selected)
         let caret = egui::text_edit::TextEditState::load(ui.ctx(), id).and_then(|st| st.cursor.char_range());
         let len = c.buf.chars().count();
+        let (mut block, here) = (c.block, (c.row, c.col));
         let (at_start, at_end) = caret.filter(|r| r.primary == r.secondary).map_or((false, false), |r| (r.primary.index.0 == 0, r.primary.index.0 >= len));
+        // Shift+arrow: at the edge of the text (the moving end of a text selection) the cells get selected, in a block the corner moves
+        if focused {
+            let (p_start, p_end) = caret.map_or((false, false), |r| (r.primary.index.0 == 0, r.primary.index.0 >= len));
+            let edges = [(Key::ArrowRight, p_end), (Key::ArrowLeft, p_start), (Key::ArrowUp, c.first_line), (Key::ArrowDown, c.last_line)];
+            for (key, edge) in edges {
+                if (edge || block.is_some()) && ui.input_mut(|i| i.consume_key(Modifiers::SHIFT, key)) {
+                    let base = block.unwrap_or(Block::single((c.row, c.col)));
+                    let Some(next) = base.moved(key, nrows, ncols) else { break };
+                    if next.is_single() {
+                        return self.start(ui, s, here.0, here.1, Caret::End);
+                    }
+                    if block.is_none() {
+                        // the box now only holds the keyboard: no text selection of the cell stays
+                        let mut state = egui::text_edit::TextEditState::default();
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(0))));
+                        state.store(ui.ctx(), id);
+                    }
+                    c.block = Some(next);
+                    block = Some(next);
+                    ui.ctx().request_repaint();
+                    break;
+                }
+            }
+        }
+        let multi = block.is_some();
+        let (at_start, at_end, first_line, last_line) = if multi { (true, true, true, true) } else { (at_start, at_end, c.first_line, c.last_line) };
         let plain = focused && ui.input(|i| i.modifiers.is_none());
         let arrow = |ui: &mut Ui, key: Key, ok: bool, to: Option<usize>| match to.filter(|t| plain && ok && *t < cells) {
             Some(t) if ui.input_mut(|i| i.consume_key(Modifiers::NONE, key)) => Some(t),
@@ -264,10 +323,14 @@ impl TableGrid {
         let moved = arrow(ui, Key::ArrowRight, at_end, Some(flat + 1))
             .map(|t| (t, Caret::Start))
             .or_else(|| arrow(ui, Key::ArrowLeft, at_start, flat.checked_sub(1)).map(|t| (t, Caret::End)))
-            .or_else(|| arrow(ui, Key::ArrowUp, c.first_line, flat.checked_sub(ncols)).map(|t| (t, Caret::End)))
-            .or_else(|| arrow(ui, Key::ArrowDown, c.last_line, Some(flat + ncols)).map(|t| (t, Caret::End)));
+            .or_else(|| arrow(ui, Key::ArrowUp, first_line, flat.checked_sub(ncols)).map(|t| (t, Caret::End)))
+            .or_else(|| arrow(ui, Key::ArrowDown, last_line, Some(flat + ncols)).map(|t| (t, Caret::End)));
         if let Some((t, caret)) = moved {
             return self.start(ui, s, t / ncols, t % ncols, caret);
+        }
+        // a plain arrow that has nowhere to go (the edge of the table) still ends the selection of cells
+        if multi && plain && [Key::ArrowRight, Key::ArrowLeft, Key::ArrowUp, Key::ArrowDown].into_iter().any(|k| ui.input_mut(|i| i.consume_key(Modifiers::NONE, k))) {
+            return self.start(ui, s, here.0, here.1, Caret::End);
         }
         let target = if take(ui, Key::Escape, Modifiers::NONE) {
             Some(None)
@@ -283,6 +346,9 @@ impl TableGrid {
         } else {
             None
         };
+        if let Some(b) = block {
+            return self.block_box(ui, s, b, target);
+        }
         let rect = s.laid.cell_rect(s.origin, c.row, c.col);
         // the size of the cell's own text
         let size = s.laid.cells[c.row][c.col].galley.job.sections.iter().map(|x| x.format.font_id.size).fold(0.0, f32::max);
@@ -336,17 +402,104 @@ impl TableGrid {
             Some(_) => return self.finish(true),
             None => {}
         }
-        if resp.has_focus() {
+        let has_focus = resp.has_focus();
+        self.keep_focus(ui, id, has_focus);
+    }
+
+    /// The editing keeps the keyboard: a box that had it and lost it to a click elsewhere ends the editing,
+    /// the toolbar taking it does not.
+    fn keep_focus(&mut self, ui: &Ui, id: egui::Id, has_focus: bool) {
+        let hold = self.hold;
+        let Some(c) = self.cell.as_mut() else { return };
+        if has_focus {
             c.had_focus = true;
-        } else if c.had_focus && !self.hold {
+        } else if c.had_focus && !hold {
             // a click elsewhere took the keyboard
             self.finish(false);
-        } else if c.had_focus {
-            // the toolbar took it: the cell keeps the editing
-            ui.ctx().memory_mut(|m| m.request_focus(id));
         } else {
+            // the toolbar took it (the cell keeps the editing), or it has not had it yet
             ui.ctx().memory_mut(|m| m.request_focus(id));
         }
+    }
+
+    /// A block of several cells is selected (EDIT-030, raba/shale#243): the selected cells are drawn
+    /// as selected and an invisible box holds the keyboard. Delete and Backspace clear the cells; typed text
+    /// ends the selection and goes into the top left cell; the arrow keys and Esc are handled in `cell_box`.
+    fn block_box(&mut self, ui: &mut Ui, s: &Shown, b: Block, target: Option<Option<usize>>) {
+        let id = Self::cell_id(s.id);
+        let cells = s.laid.heights.len() * s.laid.widths.len();
+        self.snapshot = Some(s.table.clone());
+        if ui.ctx().memory(|m| m.has_focus(id)) {
+            // what is typed or pasted: the cell at the top left is edited and gets it at its end
+            let typed = ui.input_mut(|i| {
+                let mut typed = String::new();
+                i.events.retain(|e| match e {
+                    egui::Event::Text(t) | egui::Event::Paste(t) => {
+                        typed.push_str(t);
+                        false
+                    }
+                    _ => true,
+                });
+                typed
+            });
+            if !typed.is_empty() {
+                return self.type_into_top_left(ui, s, b, &typed);
+            }
+            let delete = ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Delete) | i.consume_key(Modifiers::NONE, Key::Backspace));
+            if let Some(c) = self.cell.as_ref().filter(|_| delete) {
+                let table = c.table;
+                for (row, col) in b.cells() {
+                    if cell_text(s.table, row, col).is_some_and(|t| !t.is_empty()) {
+                        self.pending.push((table, Change::Cell { row, col, text: String::new() }, false));
+                    }
+                }
+                ui.ctx().request_repaint();
+            }
+        }
+        let (top, bottom) = (b.top_left(), b.bottom_right());
+        let tint = theme::ACCENT.gamma_multiply(0.3);
+        for (row, col) in b.cells() {
+            ui.painter().rect_filled(s.laid.cell_rect(s.origin, row, col).shrink(1.0), 0.0, tint);
+        }
+        let outline = s.laid.cell_rect(s.origin, top.0, top.1).union(s.laid.cell_rect(s.origin, bottom.0, bottom.1)).shrink(1.0);
+        ui.painter().rect_stroke(outline, 0.0, egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+        // the box that holds the keyboard: empty, one point wide, its cursor not drawn
+        let at = s.laid.cell_rect(s.origin, b.anchor.0, b.anchor.1).min;
+        let mut holder = String::new();
+        let resp = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(Rect::from_min_size(at, Vec2::splat(1.0))), |ui| {
+                ui.visuals_mut().text_cursor.stroke = egui::Stroke::NONE;
+                egui::TextEdit::multiline(&mut holder).id(id).frame(egui::Frame::NONE).desired_width(1.0).desired_rows(1).event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true }).show(ui)
+            })
+            .inner
+            .response;
+        match target {
+            Some(Some(t)) if t < cells => {
+                let ncols = s.laid.widths.len();
+                return self.start(ui, s, t / ncols, t % ncols, Caret::End);
+            }
+            // Esc: the selection of cells ends, the anchor cell is edited
+            Some(None) => return self.start(ui, s, b.anchor.0, b.anchor.1, Caret::End),
+            // Tab or Enter past the first or the last cell: the editing ends
+            Some(_) => return self.finish(true),
+            None => {}
+        }
+        self.keep_focus(ui, id, resp.has_focus());
+    }
+
+    /// Typed text ends the selection of cells: the cell at the top left is edited and the text goes to its end.
+    fn type_into_top_left(&mut self, ui: &mut Ui, s: &Shown, b: Block, typed: &str) {
+        let (row, col) = b.top_left();
+        self.start(ui, s, row, col, Caret::End);
+        let id = Self::cell_id(s.id);
+        let Some(c) = self.cell.as_mut() else { return };
+        c.buf.push_str(&typed.replace(['\n', '\r'], " "));
+        let at = c.buf.chars().count();
+        c.sel = (at, at);
+        let mut state = egui::text_edit::TextEditState::default();
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
+        state.store(ui.ctx(), id);
+        self.pending.push((s.ordinal, Change::Cell { row, col, text: c.buf.clone() }, false));
     }
 
     /// The resize strips over the borders (EDIT-031).

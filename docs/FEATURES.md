@@ -142,7 +142,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   that add a row or column and delete the hovered row or column. Toolbar formatting of a
   selection across cells formats each cell on its own; while a cell is edited in the grid the
   toolbar formats the cell's text (the line buttons are greyed out) and the change is part of
-  the cell's undo step.
+  the cell's undo step. **Shift+arrow keys** select a rectangular block of cells (Shift+Right then
+  Shift+Up gives 2 by 2; the arrows select text first and go on to cells at the edge of the text):
+  the selected cells are highlighted, the toolbar's inline buttons format all of them, Delete and
+  Backspace clear them (one undo step each editing), typing goes into the block's top left cell,
+  and a plain arrow key or Esc ends the block.
 
   ![The Markdown preview](userguide/z_media/screenshots/editor-preview.png)
 
@@ -689,6 +693,7 @@ Text editing keys and vim keys are fixed.
 | Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
+| Shift+arrows | In a table cell edited in the grid: select a block of cells (formatting buttons and Delete / Backspace work on all of them; typing ends it) |
 
 ### Mail view keys
 
