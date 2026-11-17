@@ -955,7 +955,8 @@ mod tests {
         let mut w = W::new("short-scroll");
         w.size = Vec2::new(1000.0, 600.0);
         w.open_dialog();
-        let last = DEFS.last().expect("actions").id;
+        // the last row of the list is the last action of the last scope it shows
+        let last = DEFS.iter().rev().find(|d| Scope::ALL.last() == Some(&d.scope)).expect("actions").id;
         let key = format!("key:{last}");
         let shown = |w: &W| {
             let r = w.dialog().rects.iter().find(|r| r.0 == key).expect("control").1;

@@ -10,6 +10,13 @@ use std::path::{Path, PathBuf};
 const CTRL: Modifiers = Modifiers::COMMAND;
 const CTRL_ALT: Modifiers = Modifiers { alt: true, ctrl: true, shift: false, mac_cmd: false, command: true };
 
+/// A point with no widget: the top left corner of the window lies in the inner margin of the ribbon
+/// panel (6 points left, 8 points top, layout.rs `ribbon`), where no icon button is drawn. (5, 5) is
+/// the ribbon's "Toggle left sidebar" button, which gives the keyboard back to the editor (EDIT-042).
+fn empty_space() -> Pos2 {
+    Pos2::new(2.0, 2.0)
+}
+
 struct W {
     app: ShaleApp,
     hl: Headless,
@@ -535,8 +542,8 @@ fn nav_037_the_guard_gives_the_keyboard_back_to_the_editor_but_not_to_the_sideba
     assert_eq!(w.keyboard_pane(), Some(1), "the guard refocuses the editor");
     // a press with the pointer on empty space is the user's choice and is left alone
     w.drop_keyboard();
-    w.hl.frame_with(&mut w.app, vec![Event::PointerButton { pos: Pos2::new(5.0, 5.0), button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }], |_, _| {});
-    w.hl.frame(&mut w.app, vec![Event::PointerButton { pos: Pos2::new(5.0, 5.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+    w.hl.frame_with(&mut w.app, vec![Event::PointerButton { pos: empty_space(), button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }], |_, _| {});
+    w.hl.frame(&mut w.app, vec![Event::PointerButton { pos: empty_space(), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
     // sidebar browsing keeps the keyboard
     w.app.focus_sidebar(w.hl.ctx());
     w.frames(3);
@@ -558,7 +565,7 @@ fn nav_037_a_click_that_takes_the_keyboard_away_is_not_undone_by_the_guard() {
     w.app.focus_editor();
     w.frames(2);
     assert_eq!(w.keyboard_pane(), Some(0));
-    let at = Pos2::new(5.0, 5.0);
+    let at = empty_space();
     let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
     w.hl.frame(&mut w.app, vec![Event::PointerMoved(at)]);
     w.hl.frame(&mut w.app, vec![button(true)]);

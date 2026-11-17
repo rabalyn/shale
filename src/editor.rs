@@ -712,6 +712,42 @@ impl NoteEditor {
         }
     }
 
+    /// The keyboard goes back to a text box that has none (EDIT-042): it dropped its selection while it had
+    /// none, so the one it had last is put back (vim-lite keeps its own cursor).
+    fn restore_selection(&self, ctx: &egui::Context, text: &str) {
+        if self.vim_enabled || self.keep_selection.is_some() || ctx.memory(|m| m.has_focus(self.id)) {
+            return;
+        }
+        if let Some((a, b)) = self.last_selection {
+            let n = text.chars().count();
+            let mut state = egui::text_edit::TextEditState::load(ctx, self.id).unwrap_or_default();
+            state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(a.min(n)), CCursor::new(b.min(n)))));
+            state.store(ctx, self.id);
+        }
+    }
+
+    /// The key of a toolbar button (KEY-015): the same as a click on it. A button that is greyed out in a cell does nothing.
+    pub fn key_format(&mut self, cmd: crate::format::Cmd) {
+        let in_cell = self.grid.cell.is_some();
+        if crate::format_bar::enabled_in(cmd, in_cell) {
+            self.format_request = Some(cmd);
+            self.request_focus = !in_cell;
+        }
+    }
+
+    /// The key of a toolbar button that opens a popup (KEY-015); the heading menu is greyed out in a cell.
+    pub fn key_menu(&mut self, menu: crate::format_bar::Menu) {
+        if menu != crate::format_bar::Menu::Heading || self.grid.cell.is_none() {
+            self.bar.open(menu);
+        }
+    }
+
+    /// Does the note's text (or the cell being edited) have the keyboard, or does no text field
+    /// have it? Then the Alt keys of the note view are for the note (KEY-014).
+    pub fn owns_keyboard(&self, ctx: &egui::Context) -> bool {
+        !ctx.egui_wants_keyboard_input() || ctx.memory(|m| m.has_focus(self.id)) || self.grid.cell.is_some()
+    }
+
     /// Do a toolbar command to the text: one undo step (EDIT-021), the result selected, the keyboard
     /// back in the text box, and vim-lite in a mode that takes keys (EDIT-027). True when the text changed.
     fn apply_format(&mut self, ui: &Ui, text: &mut String, cmd: crate::format::Cmd, hist: &mut crate::undo::History) -> bool {
@@ -1362,12 +1398,14 @@ impl NoteEditor {
             // a note opened just now may not have the keyboard in the first frame: ask again
             self.focus_retry = 3;
         } else if self.request_focus {
+            self.restore_selection(ui.ctx(), text);
             ui.ctx().memory_mut(|m| m.request_focus(self.id));
             self.focus_retry = 3;
         } else if self.focus_retry > 0 {
             if ui.ctx().memory(|m| m.has_focus(self.id)) {
                 self.focus_retry = 0;
             } else {
+                self.restore_selection(ui.ctx(), text);
                 ui.ctx().memory_mut(|m| m.request_focus(self.id));
                 self.focus_retry -= 1;
             }

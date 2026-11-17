@@ -2,20 +2,64 @@
 //! command a click asks for. What the commands do to the text is `format.rs`.
 
 use crate::format::{self, Cmd};
+use crate::key_badges::Badges;
+use crate::keys::Action;
 use crate::theme;
 use eframe::egui::{self, text::LayoutJob, Color32, CornerRadius, FontId, Pos2, Rect, Response, Sense, Stroke, TextFormat, Ui, Vec2};
 use std::ops::Range;
 
 /// The colours the palettes offer (the settings, EDIT-028) and the size of the buttons.
 pub struct Palettes<'a> {
+    /// the Alt keys to show on the buttons while Alt is held (KEY-016)
+    pub badges: &'a Badges,
     pub highlight: &'a [[u8; 3]],
     pub font: &'a [[u8; 3]],
     /// the buttons' size as a factor of the base size (the setting "Toolbar button size", EDIT-026)
     pub scale: f32,
 }
 
+/// A button with a popup that a key opens (KEY-015).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Menu {
+    Highlight,
+    Font,
+    Heading,
+}
+
+/// The buttons that run a command, with their Alt keys (KEY-015).
+pub const BUTTON_KEYS: [(Action, Cmd); 16] = [
+    (Action::NoteBold, Cmd::Bold),
+    (Action::NoteItalic, Cmd::Italic),
+    (Action::NoteStrike, Cmd::Strike),
+    (Action::NoteHighlight, Cmd::Highlight),
+    (Action::NoteCode, Cmd::Code),
+    (Action::NoteBullet, Cmd::Bullet),
+    (Action::NoteNumbered, Cmd::Numbered),
+    (Action::NoteTask, Cmd::Task),
+    (Action::NoteQuote, Cmd::Quote),
+    (Action::NoteCodeBlock, Cmd::CodeBlock),
+    (Action::NoteRule, Cmd::Rule),
+    (Action::NoteTable, Cmd::Table),
+    (Action::NoteWikiLink, Cmd::WikiLink),
+    (Action::NoteWebLink, Cmd::WebLink),
+    (Action::NoteEmbed, Cmd::Embed),
+    (Action::NoteClear, Cmd::Clear),
+];
+
+/// The command a key of the note view runs, for the buttons that run one.
+pub fn cmd_of(a: Action) -> Option<Cmd> {
+    BUTTON_KEYS.iter().find(|(k, _)| *k == a).map(|(_, c)| *c)
+}
+
+/// Whether a button for `cmd` can be pressed in a note (`cell`: in a table cell, EDIT-030): the rule of its look and its key.
+pub fn enabled_in(cmd: Cmd, cell: bool) -> bool {
+    !cell || format::works_in_a_cell(cmd)
+}
+
 /// The toolbar's own state: the colours of the pickers and which of them is open.
 pub struct FormatBar {
+    /// a popup to open in the next frame (the key of its button, KEY-015)
+    open_request: Option<Menu>,
     custom_mark: Color32,
     custom_font: Color32,
     /// the colours last used, shown on the two colour buttons
@@ -28,7 +72,7 @@ pub struct FormatBar {
 
 impl Default for FormatBar {
     fn default() -> Self {
-        FormatBar { custom_mark: Color32::from_rgb(255, 165, 0), custom_font: Color32::from_rgb(220, 20, 60), last_mark: [255, 255, 0], last_font: [229, 62, 62], picker_open: [false; 2], width: 0.0 }
+        FormatBar { open_request: None, custom_mark: Color32::from_rgb(255, 165, 0), custom_font: Color32::from_rgb(220, 20, 60), last_mark: [255, 255, 0], last_font: [229, 62, 62], picker_open: [false; 2], width: 0.0 }
     }
 }
 
@@ -43,15 +87,23 @@ struct Label {
 
 /// How the buttons are drawn: their scale and whether they are for the text of a table cell (EDIT-030).
 #[derive(Clone, Copy)]
-struct Look {
+struct Look<'a> {
     scale: f32,
     cell: bool,
+    badges: &'a Badges,
 }
 
-impl Look {
+impl Look<'_> {
     /// Whether `cmd` can be pressed: all of them for the note, the inline ones in a cell.
     fn enabled(self, cmd: Cmd) -> bool {
-        !self.cell || format::works_in_a_cell(cmd)
+        enabled_in(cmd, self.cell)
+    }
+
+    /// The Alt key of the button for `cmd` at its corner, while Alt is held and the button is enabled (KEY-016).
+    fn badge(self, ui: &Ui, rect: Rect, cmd: Cmd) {
+        if let Some((action, _)) = BUTTON_KEYS.iter().find(|(_, c)| *c == cmd).filter(|_| self.enabled(cmd)) {
+            self.badges.paint(ui, rect, *action);
+        }
     }
 }
 
@@ -157,12 +209,16 @@ fn draw_clear(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
 
 /// A text button for a command: the command when it was clicked.
 fn text_cmd(ui: &mut Ui, b: Look, on: bool, cmd: Cmd, text: &str, l: Label, tip: &str) -> Option<Cmd> {
-    text_tool(ui, b.scale, text, l, on, b.enabled(cmd), tip).clicked().then_some(cmd)
+    let resp = text_tool(ui, b.scale, text, l, on, b.enabled(cmd), tip);
+    b.badge(ui, resp.rect, cmd);
+    resp.clicked().then_some(cmd)
 }
 
 /// A drawn button for a command: the command when it was clicked.
 fn draw_cmd(ui: &mut Ui, b: Look, on: bool, cmd: Cmd, tip: &str, draw: fn(&egui::Painter, Rect, Color32, f32)) -> Option<Cmd> {
-    tool(ui, b.scale, BUTTON, on, b.enabled(cmd), tip, draw).clicked().then_some(cmd)
+    let resp = tool(ui, b.scale, BUTTON, on, b.enabled(cmd), tip, draw);
+    b.badge(ui, resp.rect, cmd);
+    resp.clicked().then_some(cmd)
 }
 
 fn separator(ui: &mut Ui, s: f32) {
@@ -171,6 +227,11 @@ fn separator(ui: &mut Ui, s: f32) {
 }
 
 impl FormatBar {
+    /// Open the popup of a button in the next frame (its key, KEY-015).
+    pub fn open(&mut self, menu: Menu) {
+        self.open_request = Some(menu);
+    }
+
     /// Draw the toolbar; returns the command a click asked for. `text` and `sel` (bytes) are the note and
     /// its selection, which say what is "on" at the cursor. `cell`: they are the text of a table cell edited
     /// in the grid (EDIT-030), and the buttons that make no sense there are greyed out.
@@ -196,7 +257,8 @@ impl FormatBar {
     fn frame(&mut self, ui: &mut Ui, text: &str, sel: &Range<usize>, cell: bool, palettes: &Palettes) -> (Vec2, Option<Cmd>) {
         let mut out = None;
         let on = |cmd| format::is_on(cmd, text, sel.clone());
-        let bar = Look { scale: palettes.scale, cell };
+        let open = self.open_request.take();
+        let bar = Look { scale: palettes.scale, cell, badges: palettes.badges };
         let sc = bar.scale;
         let resp = egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(CornerRadius::same(6)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -210,10 +272,10 @@ impl FormatBar {
                     text_cmd(ui, bar, on(Cmd::Code), Cmd::Code, "<>", mono, "Inline code: `code`"),
                 ];
                 separator(ui, sc);
-                cmds.push(self.palette(ui, 0, palettes));
-                cmds.push(self.palette(ui, 1, palettes));
+                cmds.push(self.palette(ui, 0, palettes, open == Some(Menu::Highlight)));
+                cmds.push(self.palette(ui, 1, palettes, open == Some(Menu::Font)));
                 separator(ui, sc);
-                cmds.push(heading_menu(ui, bar, text, sel));
+                cmds.push(heading_menu(ui, bar, text, sel, open == Some(Menu::Heading)));
                 cmds.push(draw_cmd(ui, bar, on(Cmd::Bullet), Cmd::Bullet, "Bullet list: - item", draw_bullets));
                 cmds.push(text_cmd(ui, bar, on(Cmd::Numbered), Cmd::Numbered, "1.", Label::default(), "Numbered list: 1. item"));
                 cmds.push(draw_cmd(ui, bar, on(Cmd::Task), Cmd::Task, "Task: - [ ] item", draw_task));
@@ -235,7 +297,7 @@ impl FormatBar {
     }
 
     /// One of the two colour buttons (0: highlight, 1: font colour) with its palette popup.
-    fn palette(&mut self, ui: &mut Ui, which: usize, palettes: &Palettes) -> Option<Cmd> {
+    fn palette(&mut self, ui: &mut Ui, which: usize, palettes: &Palettes, open_now: bool) -> Option<Cmd> {
         let mark = which == 0;
         let (tip, none_label) = if mark { ("Highlight colour", "No highlight") } else { ("Font colour", "Default colour") };
         let last = if mark { self.last_mark } else { self.last_font };
@@ -252,6 +314,10 @@ impl FormatBar {
             }
             caret(p, Pos2::new(r.right() - 6.0 * s, r.center().y), c, s);
         });
+        palettes.badges.paint(ui, resp.rect, if mark { Action::NoteHighlightColour } else { Action::NoteFontColour });
+        if open_now {
+            egui::Popup::toggle_id(ui.ctx(), egui::Popup::default_response_id(&resp));
+        }
         // what the popup picked: a colour, or (`Some(None)`) "no colour"
         let mut pick: Option<Option<[u8; 3]>> = None;
         egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
@@ -302,7 +368,7 @@ fn colour_dark(c: [u8; 3]) -> bool {
 }
 
 /// The heading button: Normal text and H1 to H6 in a menu.
-fn heading_menu(ui: &mut Ui, b: Look, text: &str, sel: &Range<usize>) -> Option<Cmd> {
+fn heading_menu(ui: &mut Ui, b: Look, text: &str, sel: &Range<usize>, open_now: bool) -> Option<Cmd> {
     let level = (0..=6u8).find(|n| *n > 0 && format::is_on(Cmd::Heading(*n), text, sel.clone())).unwrap_or(0);
     let (s, cell) = (b.scale, b.cell);
     let resp = tool(ui, s, BUTTON + 14.0, level > 0, !cell, "Heading level", |p, r, c, s| {
@@ -311,6 +377,12 @@ fn heading_menu(ui: &mut Ui, b: Look, text: &str, sel: &Range<usize>) -> Option<
         p.galley(r.center() - t.size() / 2.0 - Vec2::new(4.0 * s, 0.0), t, c);
         caret(p, Pos2::new(r.right() - 7.0 * s, r.center().y), c, s);
     });
+    if !cell {
+        b.badges.paint(ui, resp.rect, Action::NoteHeading);
+        if open_now {
+            egui::Popup::toggle_id(ui.ctx(), egui::Popup::default_response_id(&resp));
+        }
+    }
     let mut out = None;
     egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
         ui.set_min_width(130.0);
