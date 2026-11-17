@@ -349,7 +349,14 @@ fn a_quick_check_never_runs_beside_a_full_sync_of_the_same_account_and_catches_u
     drop(guard);
     assert!(wait_for(10, || flags_of(&store, "INBOX", 2).is_empty()), "the quick check did not catch up");
     // and the other way round: a full sync waits for a quick check that is running, and can be cancelled while it waits
-    let held = SyncGuard::try_enter(&store, "acct1").unwrap();
+    // the quick check stores the flags before it lets go of the account, so wait for that
+    // (raba/shale#252: taking it at once failed under load)
+    let mut held = None;
+    assert!(wait_for(10, || {
+        held = SyncGuard::try_enter(&store, "acct1");
+        held.is_some()
+    }));
+    let held = held.expect("the quick check let go of the account");
     let cancel = Arc::new(AtomicBool::new(false));
     let (c2, s2, conn) = (cancel.clone(), store.clone(), connector(&server));
     let sync = std::thread::spawn(move || {
