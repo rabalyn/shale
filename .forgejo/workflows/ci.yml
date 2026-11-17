@@ -362,6 +362,9 @@ jobs:
       # starts both stacks, runs both ignored suites and always takes the stacks down again
       - name: CalDAV, mail and TeX tests against the real servers
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
+        env:
+          # CI runs only for tags and weekly, so the real install of TeX Live (about 100 MB, minutes) is worth it here
+          SHALE_ENV_TESTS_TEX_INSTALL: 'yes'
         run: sh .forgejo/scripts/env-tests.sh run "${{ steps.engine.outputs.engine }}"
 
   # The commit of a tag that is green on Linux goes to GitHub's `main` (BUILD-016, FORGE-003): the

@@ -351,6 +351,9 @@ pub struct Config {
     /// How long each cache is kept (USE-020).
     #[serde(deserialize_with = "lenient")]
     pub caches: CacheRetention,
+    /// The TeX that exports notes to PDF through LaTeX templates (TEX-001, CFG-043).
+    #[serde(deserialize_with = "lenient")]
+    pub tex: crate::pdf::tex::TexConfig,
     /// Keybindings the user changed: action id -> bindings as text (KEY-007). Missing = defaults.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub keybindings: std::collections::BTreeMap<String, Vec<String>>,
@@ -419,6 +422,7 @@ impl Default for Config {
             social_replies: false,
             social_check_minutes: 5,
             caches: CacheRetention::default(),
+            tex: Default::default(),
             keybindings: Default::default(),
             legacy_open_files: None,
             legacy_last_import_folder: None,

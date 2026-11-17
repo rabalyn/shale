@@ -1,0 +1,344 @@
+//! Compiling a document with LuaLaTeX and biber (TEX-004): in a folder of its own, without a
+//! shell, with a timeout per run, as often as the log asks for (like `latexmk`, at most
+//! [`MAX_RUNS`] runs of LuaLaTeX), and with the log turned into readable errors.
+
+use super::engine::Engine;
+use super::proc::{self, Ending};
+use std::collections::hash_map::DefaultHasher;
+use std::ffi::OsString;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+/// The most runs of LuaLaTeX for one document.
+pub const MAX_RUNS: u32 = 5;
+
+/// How long one run of LuaLaTeX or biber may take.
+pub const RUN_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How many lines of the log a failure carries.
+const TAIL_LINES: usize = 40;
+
+/// A temporary folder for one compile: private to the user, removed when it is dropped, so it is
+/// also removed after a failure.
+pub struct WorkDir(PathBuf);
+
+impl WorkDir {
+    pub fn new() -> std::io::Result<WorkDir> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = crate::fsutil::private_temp_root("shale-tex")?;
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+        let dir = root.join(format!("{}-{}-{nanos}", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst)));
+        crate::fsutil::create_private_dir_new(&dir)?;
+        Ok(WorkDir(dir))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Put a file into the folder (a name without folders; an existing file is not replaced).
+    pub fn write(&self, name: &str, bytes: &[u8]) -> std::io::Result<()> {
+        crate::fsutil::create_new(&self.0.join(name), bytes)
+    }
+}
+
+impl Drop for WorkDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// How to compile.
+#[derive(Clone, Debug)]
+pub struct Options {
+    /// Folders with the template files (classes, packages, logos): searched below, with all
+    /// their sub folders, before TeX's own folders.
+    pub tex_inputs: Vec<PathBuf>,
+    /// The time one run of LuaLaTeX or biber may take.
+    pub timeout: Duration,
+    /// The most runs of LuaLaTeX.
+    pub max_runs: u32,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options { tex_inputs: vec![], timeout: RUN_TIMEOUT, max_runs: MAX_RUNS }
+    }
+}
+
+/// What a compile made.
+#[derive(Debug)]
+pub struct CompileOutput {
+    pub pdf: Vec<u8>,
+    /// How many times LuaLaTeX ran.
+    pub runs: u32,
+    /// The font names database was built in this compile (the first run after an install is slow).
+    pub font_cache_built: bool,
+}
+
+/// One problem found in a log or in what biber said.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Problem {
+    pub message: String,
+    /// The file, from `-file-line-error`.
+    pub file: Option<String>,
+    pub line: Option<u32>,
+    /// The file TeX could not find (`foo.sty`).
+    pub missing: Option<String>,
+}
+
+impl Problem {
+    /// "main.tex:12: Undefined control sequence." or "package foo is missing".
+    pub fn text(&self) -> String {
+        let what = match &self.missing {
+            Some(m) => missing_text(m),
+            None => self.message.clone(),
+        };
+        match (&self.file, self.line) {
+            (Some(f), Some(l)) => format!("{}:{l}: {what}", f.trim_start_matches("./")),
+            _ => what,
+        }
+    }
+}
+
+/// "package foo is missing" for `foo.sty`.
+fn missing_text(file: &str) -> String {
+    let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
+    match file.rsplit_once('.').map(|(_, e)| e) {
+        Some("sty") => format!("package {stem} is missing"),
+        Some("cls") => format!("class {stem} is missing"),
+        _ => format!("file {file} is missing"),
+    }
+}
+
+/// Why a compile failed: a headline, the problems, and the end of the log.
+#[derive(Debug)]
+pub struct CompileError {
+    pub headline: String,
+    pub problems: Vec<Problem>,
+    pub log_tail: String,
+}
+
+impl std::fmt::Display for CompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.headline)?;
+        for p in &self.problems {
+            write!(f, "\n- {}", p.text())?;
+        }
+        Ok(())
+    }
+}
+
+/// The messages `latex` prints after the error that stopped it: not a problem of their own.
+fn is_follow_up(message: &str) -> bool {
+    message.contains("Emergency stop") || message.contains("Fatal error occurred") || message.contains("no output PDF file produced")
+}
+
+/// The file in `File `x.sty' not found` / `File 'x.sty' not found` / `I can't find file `x'`.
+fn missing_file(message: &str) -> Option<String> {
+    let quoted = |after: &str| -> Option<String> {
+        let rest = message.split_once(after)?.1;
+        let start = rest.find(['`', '\'', '"'])? + 1;
+        let end = rest[start..].find(['\'', '`', '"'])? + start;
+        Some(rest[start..end].to_string())
+    };
+    if message.contains("not found") {
+        quoted("File ").filter(|f| !f.is_empty())
+    } else {
+        quoted("I can't find file ").filter(|f| !f.is_empty())
+    }
+}
+
+/// `main.tex:12: Message` as (file, line, message); the file must have an extension, so that a
+/// line of text that happens to have `: 12: ` in it is not taken.
+pub(super) fn split_file_line(line: &str) -> Option<(&str, u32, &str)> {
+    for (i, _) in line.match_indices(':') {
+        let (file, rest) = (&line[..i], &line[i + 1..]);
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        if digits == 0 || file.is_empty() || !rest[digits..].starts_with(": ") {
+            continue;
+        }
+        let name = file.rsplit(['/', '\\']).next().unwrap_or(file);
+        if file.starts_with(char::is_whitespace) || !name.contains('.') || name.ends_with('.') {
+            continue;
+        }
+        return Some((file, rest[..digits].parse().ok()?, rest[digits + 2..].trim()));
+    }
+    None
+}
+
+/// The problems in a TeX log: `! Message` lines, and `file:line: message` lines of
+/// `-file-line-error`; the messages that only follow an error are left out.
+pub fn problems(log: &str) -> Vec<Problem> {
+    let mut found: Vec<Problem> = vec![];
+    for line in log.lines() {
+        let (file, lineno, message) = if let Some(m) = line.strip_prefix("! ") {
+            (None, None, m.trim())
+        } else if let Some((f, n, m)) = split_file_line(line) {
+            (Some(f.to_string()), Some(n), m)
+        } else {
+            continue;
+        };
+        if message.is_empty() {
+            continue;
+        }
+        let p = Problem { message: message.to_string(), file, line: lineno, missing: missing_file(message) };
+        if !found.contains(&p) {
+            found.push(p);
+        }
+    }
+    let real: Vec<Problem> = found.iter().filter(|p| !is_follow_up(&p.message)).cloned().collect();
+    if real.is_empty() {
+        found
+    } else {
+        real
+    }
+}
+
+/// The `ERROR` lines of biber's output as problems.
+pub fn biber_problems(output: &str) -> Vec<Problem> {
+    output.lines().filter_map(|l| l.split_once("ERROR - ").map(|(_, m)| Problem { message: m.trim().to_string(), file: None, line: None, missing: None })).collect()
+}
+
+/// Whether the log asks for another run: references, outlines or labels that changed, or a
+/// bibliography that is not made yet.
+pub fn asks_rerun(log: &str) -> bool {
+    const PHRASES: [&str; 5] = ["rerun to get", "please rerun", "rerun latex", "(re)run biber", "label(s) may have changed"];
+    let lower = log.to_lowercase();
+    PHRASES.iter().any(|p| lower.contains(p))
+}
+
+/// Whether luaotfload built its font names database in this run.
+pub fn built_font_cache(log: &str) -> bool {
+    log.contains("Font names database not found") || log.contains("Reload initiated")
+}
+
+/// The last lines of a text.
+fn tail_of(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(TAIL_LINES)..].join("\n")
+}
+
+/// A file name that is safe on the command line: no folders, no leading `-` or `\`, and only
+/// letters, digits, `_`, `-` and `.`.
+pub fn valid_main_name(name: &str) -> bool {
+    name.ends_with(".tex") && name.len() > 4 && !name.starts_with(['-', '.']) && name.chars().all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
+}
+
+/// `TEXINPUTS`: the template folders with all their sub folders, then TeX's own (the empty last
+/// entry stands for the default path).
+pub fn tex_inputs(dirs: &[PathBuf]) -> Result<OsString, String> {
+    let mut entries: Vec<OsString> = dirs
+        .iter()
+        .map(|d| {
+            let mut s = d.clone().into_os_string();
+            s.push("//");
+            s
+        })
+        .collect();
+    entries.push(OsString::new());
+    std::env::join_paths(entries).map_err(|e| format!("a template folder has a character that cannot be used in a search path ({e})"))
+}
+
+/// The arguments of every LuaLaTeX run: nothing stops for input, the first error stops the
+/// run, errors carry `file:line`, and no program can be started from the document.
+pub fn lualatex_args(main_tex: &str) -> Vec<String> {
+    ["-interaction=nonstopmode", "-halt-on-error", "-file-line-error", "-no-shell-escape", main_tex].map(String::from).to_vec()
+}
+
+fn hash_of(bytes: &[u8]) -> u64 {
+    let mut h = DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
+/// Compile `main_tex` (a file in `work`) to a PDF: LuaLaTeX, biber when the run made a `.bcf`,
+/// and more runs while the log asks for them. The folder `work` is removed when this returns.
+pub fn compile(engine: &Engine, work: WorkDir, main_tex: &str, opts: &Options) -> Result<CompileOutput, CompileError> {
+    let fail = |headline: String, problems: Vec<Problem>, log_tail: String| CompileError { headline, problems, log_tail };
+    if !valid_main_name(main_tex) {
+        return Err(fail(format!("{main_tex:?} is not a usable file name"), vec![], String::new()));
+    }
+    let inputs = tex_inputs(&opts.tex_inputs).map_err(|e| fail(e, vec![], String::new()))?;
+    let stem = &main_tex[..main_tex.len() - 4];
+    let base = |program: &str| {
+        let mut c = engine.command(program);
+        c.current_dir(work.path()).env("TEXINPUTS", &inputs);
+        // a document writes only into its own folder (and not into a parent or a dot file)
+        c.env("openout_any", "p");
+        c
+    };
+    let read_log = || crate::fsutil::read(work.path().join(format!("{stem}.log"))).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+    let mut runs = 0;
+    let mut bcf_seen: Option<u64> = None;
+    let mut font_cache_built = false;
+    loop {
+        let mut cmd = base("lualatex");
+        cmd.args(lualatex_args(main_tex));
+        runs += 1;
+        let run = proc::run(cmd, opts.timeout, None, |_| {}).map_err(|e| fail(format!("lualatex could not be started ({e}); check Settings → LaTeX"), vec![], String::new()))?;
+        let log = read_log();
+        font_cache_built |= built_font_cache(&log);
+        let (log_text, tail) = if log.is_empty() { (run.tail_text(), run.tail_text()) } else { (log.clone(), tail_of(&log)) };
+        match run.ending {
+            Ending::TimedOut => return Err(fail(format!("LuaLaTeX ran for more than {} seconds and was stopped", opts.timeout.as_secs()), problems(&log_text), tail)),
+            Ending::Cancelled => return Err(fail("the compile was cancelled".into(), vec![], tail)),
+            Ending::Exited(Some(0)) => {}
+            Ending::Exited(code) => {
+                let mut p = problems(&log_text);
+                if p.is_empty() {
+                    p.push(Problem { message: format!("LuaLaTeX stopped without saying why (exit code {})", code.map_or_else(|| "none".to_string(), |c| c.to_string())), file: None, line: None, missing: None });
+                }
+                return Err(fail("LuaLaTeX stopped with an error".into(), p, tail));
+            }
+        }
+        let mut again = asks_rerun(&log);
+        if let Ok(bcf) = crate::fsutil::read(work.path().join(format!("{stem}.bcf"))) {
+            let h = hash_of(&bcf);
+            if bcf_seen != Some(h) {
+                bcf_seen = Some(h);
+                let mut cmd = base("biber");
+                cmd.arg(stem);
+                let b = proc::run(cmd, opts.timeout, None, |_| {}).map_err(|e| fail(format!("biber could not be started ({e}); check Settings → LaTeX"), vec![], String::new()))?;
+                match b.ending {
+                    Ending::TimedOut => return Err(fail(format!("biber ran for more than {} seconds and was stopped", opts.timeout.as_secs()), vec![], b.tail_text())),
+                    Ending::Cancelled => return Err(fail("the compile was cancelled".into(), vec![], b.tail_text())),
+                    Ending::Exited(Some(0)) => {}
+                    Ending::Exited(_) => {
+                        let mut p = biber_problems(&b.tail_text());
+                        if p.is_empty() {
+                            p.push(Problem { message: "biber stopped without saying why".into(), file: None, line: None, missing: None });
+                        }
+                        return Err(fail("biber stopped with an error".into(), p, b.tail_text()));
+                    }
+                }
+                again = true;
+            }
+        }
+        if !again || runs >= opts.max_runs {
+            break;
+        }
+    }
+    match crate::fsutil::read(work.path().join(format!("{stem}.pdf"))) {
+        Ok(pdf) if !pdf.is_empty() => Ok(CompileOutput { pdf, runs, font_cache_built }),
+        _ => Err(fail("LuaLaTeX made no PDF".into(), problems(&read_log()), tail_of(&read_log()))),
+    }
+}
+
+/// The small document of the check in Settings → LaTeX (and of the font cache after an install):
+/// the fonts and packages the templates stand on, and a bibliography, so that LuaLaTeX and
+/// biber are both tried.
+pub const TEST_DOCUMENT: &str = "\\documentclass{scrartcl}\n\\usepackage{fontspec}\n\\setmainfont{XCharter}\n\\setsansfont{Roboto}\n\\usepackage[backend=biber]{biblatex}\n\\addbibresource{test.bib}\n\\begin{document}\n\\section{Shale}\nHello from \\textsf{LuaLaTeX}. \\cite{shale}\n\\printbibliography\n\\end{document}\n";
+
+/// The bibliography of [`TEST_DOCUMENT`].
+pub const TEST_BIB: &str = "@book{shale,\n  author = {Lovelace, Ada},\n  title = {Notes},\n  year = {1843},\n}\n";
+
+/// Compile the test document with an engine.
+pub fn compile_test_document(engine: &Engine) -> Result<CompileOutput, CompileError> {
+    let fail = |m: String| CompileError { headline: m, problems: vec![], log_tail: String::new() };
+    let work = WorkDir::new().map_err(|e| fail(format!("no temporary folder ({e})")))?;
+    work.write("test.tex", TEST_DOCUMENT.as_bytes()).and_then(|_| work.write("test.bib", TEST_BIB.as_bytes())).map_err(|e| fail(format!("the test document could not be written ({e})")))?;
+    compile(engine, work, "test.tex", &Options::default())
+}

@@ -2,7 +2,7 @@
 
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
-button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**, and the button
+button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, LaTeX, Help) and **Keybindings**, and the button
 **Open settings file** at the top right (see below). The tab list is as wide as its longest name at any font size; drag its border to change the width, double-click the border to make it automatic again.
 
 Two files hold settings:
@@ -164,6 +164,16 @@ system keyring, never in this file):
 | `social_last` | none; the account and feed shown last | set by Shale |
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
 | `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
+
+### LaTeX ([[PDF]])
+
+Settings → LaTeX is the table `[tex]` in the settings file.
+
+| Key | Default | Where |
+|---|---|---|
+| `tex` | the group of the two keys below | Settings → LaTeX |
+| `tex.engine` | `Auto` (the TeX Live that Shale installs when it is there, else the `lualatex` of your computer when it is new enough and has all the packages); `System` (the `lualatex` of your computer); `Managed` (the TeX Live that Shale installs) | Settings → LaTeX, "TeX to use" |
+| `tex.repository` | `https://mirror.ctan.org/systems/texlive/tlnet` (the TeX Live repository the install and the update download from) | Settings → LaTeX, "Download address" |
 
 ### Data and troubleshooting ([[Data usage and caches]])
 

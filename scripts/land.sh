@@ -94,7 +94,9 @@ checks() {
     if [ "$ENV_TESTS" = no ]; then
       echo "-- SKIPPED (--no-env-tests): the change touches CalDAV, mail or TeX export, the real-server suites did not run"
     else
-      step "real-server suites (podman)" sh .forgejo/scripts/env-tests.sh run || return 1
+      # the real install of TeX Live is heavy: only when the change touches it
+      install_tests=$(sh .forgejo/scripts/env-tests.sh install-wanted "$base" HEAD)
+      step "real-server suites (podman)" env SHALE_ENV_TESTS_TEX_INSTALL="$install_tests" sh .forgejo/scripts/env-tests.sh run || return 1
     fi
   fi
 }

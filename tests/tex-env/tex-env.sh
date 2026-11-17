@@ -1,11 +1,14 @@
 #!/bin/sh
-# Helper for Shale's TeX test environment. Usage: ./tex-env.sh build | status | compile <dir> <file.tex> | reset
+# Helper for Shale's TeX test environment. Usage: ./tex-env.sh build | status | compile <dir> <file.tex> | exec <dir> -- <cmd>… | reset
 #   build    fetch the tuda-ci sources (checked by sha256), build the TeX Live image, and generate the
 #            .cls/.sty files from the .dtx with docstrip (first time; later runs reuse all three)
 #   status   say whether the image and the tuda-ci files are there
 #   compile  run latexmk (LuaLaTeX, biber) on <dir>/<file.tex> inside the container, <dir> mounted
 #            as /work. TEXINPUTS is /work/tex// and BIBINPUTS /work; SHALE_TEX_PRE is TeX code put
 #            before the file (the tuda-ci demos get graphicx' `demo` option this way)
+#   exec     run <cmd> inside the image with the absolute folder <dir> mounted at the same path and as
+#            the working directory; TEXINPUTS, BIBINPUTS, openout_any and shell_escape are
+#            passed on when set (Shale's compile tests put this in front of lualatex and biber)
 #   reset    remove the image and the cache (the next build starts again)
 # SHALE_TEX_ENV_ENGINE=docker selects Docker instead of Podman.
 set -eu
@@ -63,12 +66,18 @@ case "${1:-}" in
     "$ENGINE" run --rm -v "$dir:/work:Z" -e TEXINPUTS=/work/tex//: -e BIBINPUTS=/work: -e SHALE_TEX_PRE="${SHALE_TEX_PRE:-}" "$IMAGE" \
       sh -c 'latexmk -lualatex -interaction=nonstopmode -halt-on-error -usepretex -pretex="$SHALE_TEX_PRE" "$1"' sh "$3"
     ;;
+  exec)
+    [ $# -ge 4 ] && [ "$3" = "--" ] || { echo "usage: $0 exec <dir> -- <cmd>…" >&2; exit 2; }
+    dir=$(cd "$2" && pwd)
+    shift 3
+    "$ENGINE" run --rm -v "$dir:$dir:Z" -w "$dir" -e TEXINPUTS -e BIBINPUTS -e openout_any -e shell_escape "$IMAGE" "$@"
+    ;;
   reset)
     "$ENGINE" rmi -f "$IMAGE" >/dev/null 2>&1 || true
     rm -rf "$cache"
     ;;
   *)
-    echo "usage: $0 build | status | compile <dir> <file.tex> | reset" >&2
+    echo "usage: $0 build | status | compile <dir> <file.tex> | exec <dir> -- <cmd>… | reset" >&2
     exit 2
     ;;
 esac

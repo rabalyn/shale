@@ -9,6 +9,7 @@ mod editor;
 mod font_picker;
 pub(crate) mod fonts;
 mod help;
+mod latex;
 mod mail_social;
 mod sync_calendar;
 mod vault;
@@ -31,13 +32,14 @@ pub enum SettingsTab {
     Mail,
     Social,
     Data,
+    Latex,
     Help,
     Keybindings,
 }
 
 impl SettingsTab {
     /// All tabs in the order of the list.
-    pub const ALL: [SettingsTab; 11] = [
+    pub const ALL: [SettingsTab; 12] = [
         SettingsTab::Vault,
         SettingsTab::Editor,
         SettingsTab::Appearance,
@@ -47,6 +49,7 @@ impl SettingsTab {
         SettingsTab::Mail,
         SettingsTab::Social,
         SettingsTab::Data,
+        SettingsTab::Latex,
         SettingsTab::Help,
         SettingsTab::Keybindings,
     ];
@@ -62,6 +65,7 @@ impl SettingsTab {
             SettingsTab::Mail => "Mail",
             SettingsTab::Social => "Feeds",
             SettingsTab::Data => "Data",
+            SettingsTab::Latex => "LaTeX",
             SettingsTab::Help => "Help",
             SettingsTab::Keybindings => "Keybindings",
         }
@@ -81,6 +85,7 @@ impl SettingsTab {
             SettingsTab::Mail => "Fetching and reading mail",
             SettingsTab::Social => "Feeds, new posts and the post search",
             SettingsTab::Data => "What Shale keeps on disk, and for how long",
+            SettingsTab::Latex => "The TeX that exports notes to PDF through LaTeX templates",
             SettingsTab::Help => "The user guide and tools to find problems",
             SettingsTab::Keybindings => "Which keys do what",
         }
@@ -184,6 +189,7 @@ impl ShaleApp {
                     SettingsTab::Mail => self.mail_tab(ui, &mut asks),
                     SettingsTab::Social => self.social_tab(ui, &mut asks),
                     SettingsTab::Data => self.data_tab(ui, &mut asks),
+                    SettingsTab::Latex => self.latex_tab(ui),
                     SettingsTab::Help => self.help_tab(ui, &mut asks),
                     SettingsTab::Keybindings => {
                         let edited = egui::ScrollArea::horizontal().auto_shrink([false, true]).show(ui, |ui| crate::keys_ui::show(ui, keys, &mut self.keymap)).inner;

@@ -14,9 +14,16 @@ The base image is pinned (`docker.io/library/debian:bookworm-20260112-slim`).
 tests/tex-env/tex-env.sh build      # the image, the tuda-ci sources, the generated classes
 tests/tex-env/tex-env.sh status
 tests/tex-env/tex-env.sh compile <dir> <file.tex>   # latexmk (LuaLaTeX, biber) in <dir>, mounted as /work
+tests/tex-env/tex-env.sh exec <dir> -- <cmd>…   # any command in the image, <dir> (absolute) mounted at the same path
 tests/tex-env/tex-env.sh reset      # remove the image and the cache
-cargo test -- --ignored tex_env     # the 25 demos
+cargo test -- --ignored tex_env     # the 25 demos, and Shale's own compile and detection code (src/pdf/tex/)
+cargo test -- --ignored tex_install # not this image: installs TeX Live for real from the frozen repository (network, minutes)
 ```
+
+`exec` is how `src/pdf/tex/compile_tests.rs` runs Shale's compile code against the real LuaLaTeX: the test's `Engine`
+has a command prefix `sh tex-env.sh exec <work folder> --`, so `lualatex`, `biber` and `kpsewhich` run in the
+container with the work folder mounted at the same path; `TEXINPUTS`, `BIBINPUTS`, `openout_any` and
+`shell_escape` are passed on when set.
 
 `compile` sets `TEXINPUTS=/work/tex//:` and `BIBINPUTS=/work:`; `SHALE_TEX_PRE` is TeX code put in
 front of the file (the tests use graphicx' `demo` option and the version macros, like the

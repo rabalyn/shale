@@ -2,6 +2,9 @@
 # packages. The templates themselves (tuda-ci, ...) are not here: they live in the vault (TEX-005).
 # One package per line; text after # is a comment. Shared by the managed install (#279) and by
 # tests/tex-env/Containerfile; the list is whatever makes the 25 tuda-ci demos compile there.
+# A newer TeX Live may have merged or renamed some of these (TL2026: l3backend is part of l3kernel,
+# pdfmanagement-testphase became pdfmanagement): the managed install skips a name the repository
+# does not have and says so (TEX-002).
 latex-bin
 luatex
 latexmk

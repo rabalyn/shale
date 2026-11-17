@@ -4,12 +4,17 @@
 #   env-tests.sh wanted <base> <head>
 #       prints "yes" or "no": whether the change from <base> to <head> touches the CalDAV, mail or
 #       TeX export code or the environments; scripts/land.sh runs the suites locally then (FORGE-011)
+#   env-tests.sh install-wanted <base> <head>
+#       prints "yes" or "no": whether the change touches the managed TeX Live install (`assets/tex/`,
+#       `src/pdf/tex/install*`); only then scripts/land.sh sets SHALE_ENV_TESTS_TEX_INSTALL=yes, which
+#       makes `run` also do the real install of TeX Live (about 100 MB from the frozen repository,
+#       several minutes, `tex_install`); the weekly schedule of the CI job sets it too
 #   env-tests.sh detect
 #       prints "podman", "docker" or "none": which container engine the job container can use
 #   env-tests.sh run [podman|docker]
 #       uses the given engine (the one the detect step found; detected again when left out),
 #       starts both stacks, builds the TeX image, runs `cargo test -- --ignored calendar::env_tests`,
-#       `… mail_env` and `… tex_env`, and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
+#       `… mail_env` and `… tex_env` (and `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
 set -eu
 cd "$(dirname "$0")/../.."
 
@@ -17,6 +22,15 @@ case "${1:-}" in
   wanted)
     files=$(git diff --name-only "$2" "$3")
     if printf '%s\n' "$files" | grep -Eq '^(src/(calendar/|mail|pdf/tex)|assets/tex/|tests/(caldav|mail|tex)-env/|\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh))'; then
+      echo yes
+    else
+      echo no
+    fi
+    ;;
+
+  install-wanted)
+    files=$(git diff --name-only "$2" "$3")
+    if printf '%s\n' "$files" | grep -Eq '^(assets/tex/|src/pdf/tex/install|\.forgejo/scripts/env-tests\.sh)'; then
       echo yes
     else
       echo no
@@ -76,7 +90,10 @@ case "${1:-}" in
     # the TeX image is no running stack: only built (the frozen TeX Live and the tuda-ci sources)
     sh tests/tex-env/tex-env.sh build || { echo "the TeX image could not be built" >&2; exit 1; }
 
-    for suite in calendar::env_tests mail_env tex_env; do
+    suites="calendar::env_tests mail_env tex_env"
+    # the real install of TeX Live downloads about 100 MB and takes minutes: only when asked for
+    if [ "${SHALE_ENV_TESTS_TEX_INSTALL:-no}" = yes ]; then suites="$suites tex_install"; fi
+    for suite in $suites; do
       log=$(mktemp)
       cargo test --locked -- --ignored "$suite" --test-threads=1 2>&1 | tee "$log" || status=1
       # a filter that matches nothing "passes": make sure the suite really ran
@@ -90,7 +107,7 @@ case "${1:-}" in
     ;;
 
   *)
-    echo "usage: $0 wanted <base> <head> | detect | run [podman|docker]" >&2
+    echo "usage: $0 wanted <base> <head> | install-wanted <base> <head> | detect | run [podman|docker]" >&2
     exit 2
     ;;
 esac

@@ -1,7 +1,8 @@
 # The install-tl profile for Shale's TeX Live (ADR-0019): only the infrastructure (the engines and
 # tlmgr), no documentation and no sources. The packages come afterwards from packages.txt with
-# `tlmgr install`. Used by tests/tex-env/Containerfile; the managed install (#279) uses the same
-# profile and replaces TEXDIR and the TEXMF* folders with its own folder.
+# `tlmgr install`. Used by tests/tex-env/Containerfile; the managed install
+# (src/pdf/tex/install.rs, TEX-002) uses the same profile: the image's folder in the TEXDIR and TEXMF*
+# lines becomes its own folder and the binary_ line the platform's.
 selected_scheme scheme-infraonly
 TEXDIR /opt/texlive
 TEXMFLOCAL /opt/texlive/texmf-local
