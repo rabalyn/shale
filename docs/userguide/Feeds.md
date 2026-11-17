@@ -13,7 +13,10 @@ opens **Feeds** in a **new tab** every time. Back to [[Start here]].
 
 **Accounts…** adds a Mastodon account (server, sign-in in the browser, paste the code; or an
 access token) or a Bluesky account (handle and an **app password**, never your main password).
-Secrets go to the system keyring. Try it without an account: `shale --screenshot out.png --view
+Secrets go to the system keyring. **Edit** next to an account signs in to it again (for example with
+a new app password after you revoked the old one): network, server and handle stay, a successful
+sign-in replaces the saved secret, and the account keeps its feeds, posts and open tabs. A sign-in
+for another handle is refused; a failed one keeps the old secret. **Cancel** leaves the form. Try it without an account: `shale --screenshot out.png --view
 social` shows made-up posts.
 
 ## Reading

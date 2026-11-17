@@ -962,6 +962,50 @@ pub(crate) mod tests {
         assert!(err.contains("read-only"), "{err}");
     }
 
+    // spec: CAL-032
+    #[test]
+    fn a_calendar_with_changed_credentials_is_downloaded_again_although_its_version_tag_is_the_same() {
+        if std::process::Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
+        let reports = Arc::new(Mutex::new(0usize));
+        let r2 = reports.clone();
+        let (base, _h) = crate::calendar::dav::tests::mock_http(10, move |m, _, _, _| {
+            match m {
+            "PROPFIND" => (207, r#"<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:response><d:href>/w/</d:href><d:propstat><d:prop><cs:getctag>7</cs:getctag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#.into()),
+            _ => {
+                *r2.lock().unwrap() += 1;
+                (207, r#"<d:multistatus xmlns:d="DAV:"/>"#.into())
+            }
+        }
+        });
+        let mut store = CalendarStore::new(vec![], tmp("edit-resync"));
+        let src = dav_source("w", format!("{base}/w/"));
+        store.set_sources(vec![src.clone()]);
+        let settle = |store: &mut CalendarStore| {
+            for _ in 0..300 {
+                store.poll();
+                if !store.is_loading() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        settle(&mut store);
+        assert_eq!(*reports.lock().unwrap(), 1);
+        // the same list again (Done without a change): the version tag is the same, nothing is downloaded
+        store.set_sources(vec![src.clone()]);
+        store.refresh_source("w");
+        settle(&mut store);
+        assert_eq!(*reports.lock().unwrap(), 1);
+        // a new password (an edit saved with Done): it is loaded again with it
+        let mut edited = src;
+        edited.kind = SourceKind::Caldav { url: format!("{base}/w/"), username: "ada".into(), password: "new".into() };
+        store.set_sources(vec![edited]);
+        settle(&mut store);
+        assert_eq!(*reports.lock().unwrap(), 2, "downloaded again, the old version tag is forgotten");
+    }
+
     // spec: CAL-004
     #[test]
     fn a_write_keeps_the_new_version_tag() {
