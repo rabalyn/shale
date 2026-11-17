@@ -72,8 +72,16 @@ fn playing_a_video_shows_its_frames_pauses_and_seeks_with_the_bar() {
     for clip in ["clip.mp4", "clip-silent.mp4"] {
         let mut fx = Fx::new("v-play", &format!("![[{clip}]]\n"), &[clip]);
         fx.reading(true);
-        fx.play();
+        let abs = fx.dir.join(clip);
+        // the length must be known, or the bar ignores a click
+        fx.until("the look is done", |a| a.media.thumbnail_size(&abs).is_some());
+        // start ffmpeg paused: the silent clip's 1 s clock must not run while a slow ffmpeg
+        // (a loaded machine) has no picture yet, or the clip ends before the test looks
+        fx.click_label("Play");
+        fx.click_label("Pause");
+        fx.until("the output is open", |a| a.media.position().is_some());
         fx.until("a frame of the video is shown", |a| a.media.picture_size().is_some());
+        fx.click_label("Play"); // the clock starts only now
         assert_eq!(fx.app.media.picture_size(), Some([160, 90]), "{clip}");
         fx.until("the video runs", |a| a.media.position().is_some_and(|p| p > 0.15));
         fx.click_label("Pause");
@@ -85,7 +93,7 @@ fn playing_a_video_shows_its_frames_pauses_and_seeks_with_the_bar() {
         // a click on the bar restarts ffmpeg at that place
         let bar = fx.label("Position");
         fx.hl.click(&mut fx.app, Pos2::new(bar.left() + bar.width() * 0.9, bar.center().y), PointerButton::Primary);
-        fx.until("the seek is done", |a| a.media.position().is_some_and(|p| p > 0.75));
+        fx.until("the seek is done", |a| !a.media.seek_pending() && a.media.position().is_some_and(|p| p > 0.75));
         fx.label("Play");
     }
 }

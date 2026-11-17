@@ -107,6 +107,12 @@ impl Shared {
         self.position_frames.load(Ordering::Relaxed) as f64 / self.rate as f64
     }
 
+    /// Tests: a seek was asked for and the mixer has not taken it up yet.
+    #[cfg(test)]
+    pub fn seek_pending(&self) -> bool {
+        self.lock().pending_seek.is_some()
+    }
+
     /// The source is at its end and everything it gave has been played.
     pub fn is_finished(&self) -> bool {
         self.finished.load(Ordering::Relaxed)
