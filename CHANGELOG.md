@@ -913,6 +913,9 @@ its section from this file.
 - **Flaky mail watch test fixed**: the pretend IMAP server now tells a client, as soon as its next
   `IDLE` starts, what changed while it was busy between two `IDLE`s, as a real server does; a new
   mail added in that gap was lost and the test timed out (#286).
+- **The TeX test image builds on arm64**: it installs the TeX Live binaries of the machine it is
+  built on (`aarch64-linux` on the arm64 Forgejo runner, `x86_64-linux` elsewhere) instead of
+  always the x86_64 ones (#289).
 
 ## [0.3.0] - 2026-11-13
 
