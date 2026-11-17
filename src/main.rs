@@ -22,6 +22,9 @@ mod drawing;
 mod editor;
 mod editor_preview;
 mod embed_size;
+mod fonts;
+#[cfg(test)]
+mod fonts_ui_tests;
 mod format;
 mod format_bar;
 #[cfg(test)]

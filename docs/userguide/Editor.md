@@ -157,7 +157,8 @@ changed in Settings → Keybindings, see [[Keyboard shortcuts]].
 
 ## Text size and width
 
-Text size (12 to 24) and "Readable line length" are in Settings → Appearance, see
-[[Settings reference]].
+"Readable line length" is in Settings → Appearance. The font and size of the raw markdown text and
+of the rendered text (the preview and the reading view) are two settings of their own in
+Settings → Fonts, see [[Fonts]] and [[Settings reference]].
 
 #userguide #editor

@@ -6,6 +6,8 @@
 mod appearance;
 mod data;
 mod editor;
+mod font_picker;
+mod fonts;
 mod help;
 mod mail_social;
 mod sync_calendar;
@@ -23,6 +25,7 @@ pub enum SettingsTab {
     Vault,
     Editor,
     Appearance,
+    Fonts,
     Sync,
     Calendar,
     Mail,
@@ -34,14 +37,26 @@ pub enum SettingsTab {
 
 impl SettingsTab {
     /// All tabs in the order of the list.
-    pub const ALL: [SettingsTab; 10] =
-        [SettingsTab::Vault, SettingsTab::Editor, SettingsTab::Appearance, SettingsTab::Sync, SettingsTab::Calendar, SettingsTab::Mail, SettingsTab::Social, SettingsTab::Data, SettingsTab::Help, SettingsTab::Keybindings];
+    pub const ALL: [SettingsTab; 11] = [
+        SettingsTab::Vault,
+        SettingsTab::Editor,
+        SettingsTab::Appearance,
+        SettingsTab::Fonts,
+        SettingsTab::Sync,
+        SettingsTab::Calendar,
+        SettingsTab::Mail,
+        SettingsTab::Social,
+        SettingsTab::Data,
+        SettingsTab::Help,
+        SettingsTab::Keybindings,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             SettingsTab::Vault => "Vault",
             SettingsTab::Editor => "Editor",
             SettingsTab::Appearance => "Appearance",
+            SettingsTab::Fonts => "Fonts",
             SettingsTab::Sync => "Sync",
             SettingsTab::Calendar => "Calendar",
             SettingsTab::Mail => "Mail",
@@ -60,6 +75,7 @@ impl SettingsTab {
             SettingsTab::Vault => "The folder this vault lives in, and where its contacts are",
             SettingsTab::Editor => "How notes are edited: links, tables, Vim keys and the toolbar",
             SettingsTab::Appearance => "How notes, drawings and media look",
+            SettingsTab::Fonts => "The font and text size of the editor, dialogs, mail, calendar and feeds",
             SettingsTab::Sync => "Keep this vault in a git repository",
             SettingsTab::Calendar => "Calendars and the week",
             SettingsTab::Mail => "Fetching and reading mail",
@@ -117,6 +133,7 @@ impl ShaleApp {
                     SettingsTab::Vault => self.vault_tab(ui, vault_path, &mut asks),
                     SettingsTab::Editor => self.editor_tab(ui),
                     SettingsTab::Appearance => self.appearance_tab(ui),
+                    SettingsTab::Fonts => self.fonts_tab(ui),
                     SettingsTab::Sync => self.sync_tab(ui),
                     SettingsTab::Calendar => self.calendar_tab(ui, &mut asks),
                     SettingsTab::Mail => self.mail_tab(ui, &mut asks),

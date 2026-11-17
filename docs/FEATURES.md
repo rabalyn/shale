@@ -114,6 +114,22 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![A pinned tab and its context menu](userguide/z_media/screenshots/tab-pinned-menu.png)
 
+## Fonts and text sizes
+
+- Settings → Fonts sets the font and size of six areas: dialogs and menus, the raw markdown text of
+  the editor, the rendered text (markdown preview and reading view), mail, calendar and feeds.
+  The raw and the rendered text of the editor can have different fonts and sizes.
+- "Use the same font and size everywhere" (on by default) shows one row that applies to all areas;
+  switched off, every area has a row of its own, starting from what it had.
+- A font is chosen from a list of the fonts installed on the computer: a button opens a list with a
+  search field (type to narrow it, ↑ ↓ and Enter to pick, Esc to close); "Default" is Shale's own
+  font. Characters a chosen font lacks (emoji) are drawn with Shale's own fonts. A font that is no
+  longer installed is replaced by Shale's own, with a message, and used again when it comes back.
+- Changes show at once, also when you edit `[fonts]` in the settings file. The old "Text size"
+  setting became the size of the editor.
+
+![The Fonts tab of Settings, one row per area](userguide/z_media/screenshots/settings-fonts.png)
+
 ## Keyboard only: sidebar, file list and vim-style editing
 
 ![The Keybindings tab of the settings](userguide/z_media/screenshots/keybindings.png)
@@ -587,7 +603,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 ## Settings that travel with the vault
 
 - **Settings** (Ctrl+, or the ribbon button) has a tab per domain in a list on the left: Vault, Editor,
-  Appearance, Sync, Calendar, Mail, Feeds, Data, Help and Keybindings. It opens on the short Vault
+  Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, Help and Keybindings. It opens on the short Vault
   page, and later on the tab you used last.
 - The settings of the program itself are one text file, `~/.config/shale/config.toml`, with a
   description above every setting. "Open settings file" (top right of Settings) opens it in a tab (no note, no

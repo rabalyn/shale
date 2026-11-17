@@ -340,6 +340,8 @@ pub struct ShaleApp {
     cfg_error: Option<String>,
     /// The settings file in its tab (CFG-011)
     pub sf: crate::settings_file::SettingsFile,
+    /// The fonts of the areas of the window and the installed fonts (CFG-030).
+    pub fonts: crate::fonts::FontState,
     /// the scripted input of tests of the real window (BUILD-007)
     script: crate::script::ScriptRun,
     /// where unsaved text is rescued to, and the rescues not dismissed yet (DATA-011)
@@ -526,6 +528,7 @@ impl ShaleApp {
             frames: 0,
             cfg_error: None,
             sf: crate::settings_file::SettingsFile::new(),
+            fonts: crate::fonts::FontState::new(),
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             usage: crate::data_usage::DataUsage::new(places),
@@ -2209,6 +2212,9 @@ impl ShaleApp {
         self.shortcuts(ui);
         self.autosave();
         self.settings_file_tick(ui.ctx());
+        if let Some(m) = self.fonts.sync(ui.ctx(), &self.cfg.fonts) {
+            self.toast(m);
+        }
         self.undo.tick(unix_now());
         for p in self.undo.take_problems() {
             self.toast(p);

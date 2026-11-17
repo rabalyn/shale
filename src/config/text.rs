@@ -33,7 +33,29 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("new_notes_next_to_current", "true: a note made from a red link goes next to the current note; false: into the vault's top folder."),
     ("update_links_on_rename", "true: renaming a note changes the links to it in other notes."),
     ("dark_canvas", "true: drawings are drawn on a dark canvas."),
-    ("font_size", "The text size of notes in points."),
+    ("fonts", "The fonts and text sizes. With same_everywhere on, [fonts.all] is used everywhere and the tables of the single areas are not; with it off, each area has its own."),
+    ("fonts.same_everywhere", "true: one font and size (fonts.all) for every area; false: each area uses its own table below."),
+    ("fonts.all", "Used for every area while same_everywhere is true. The size is the size of dialogs and menus in points; the editor's text is drawn 11 % larger, as it always was."),
+    ("fonts.all.family", "The name of an installed font family such as \"DejaVu Sans\"; leave the line out for Shale's own font. A font that is not installed is replaced by Shale's own."),
+    ("fonts.all.size", "The text size in points, 8 to 48."),
+    ("fonts.ui", "Dialogs, menus, sidebars and everything not listed below."),
+    ("fonts.ui.family", "The name of an installed font family such as \"DejaVu Sans\"; leave the line out for Shale's own font. A font that is not installed is replaced by Shale's own."),
+    ("fonts.ui.size", "The text size in points, 8 to 48."),
+    ("fonts.editor_raw", "The raw markdown text in the editor, and the raw lines around the cursor in the preview."),
+    ("fonts.editor_raw.family", "The name of an installed font family such as \"DejaVu Sans\"; leave the line out for Shale's own font. A font that is not installed is replaced by Shale's own."),
+    ("fonts.editor_raw.size", "The text size in points, 8 to 48."),
+    ("fonts.editor_rendered", "Rendered text: the lines of the markdown preview and the reading view."),
+    ("fonts.editor_rendered.family", "The name of an installed font family such as \"DejaVu Sans\"; leave the line out for Shale's own font. A font that is not installed is replaced by Shale's own."),
+    ("fonts.editor_rendered.size", "The text size in points, 8 to 48."),
+    ("fonts.mail", "The mail view."),
+    ("fonts.mail.family", "The name of an installed font family such as \"DejaVu Sans\"; leave the line out for Shale's own font. A font that is not installed is replaced by Shale's own."),
+    ("fonts.mail.size", "The text size in points, 8 to 48."),
+    ("fonts.calendar", "The calendar views."),
+    ("fonts.calendar.family", "The name of an installed font family such as \"DejaVu Sans\"; leave the line out for Shale's own font. A font that is not installed is replaced by Shale's own."),
+    ("fonts.calendar.size", "The text size in points, 8 to 48."),
+    ("fonts.social", "The feed view."),
+    ("fonts.social.family", "The name of an installed font family such as \"DejaVu Sans\"; leave the line out for Shale's own font. A font that is not installed is replaced by Shale's own."),
+    ("fonts.social.size", "The text size in points, 8 to 48."),
     ("readable_width", "true: the text of a note stays in a comfortable column; false: it uses the full width."),
     ("show_left", "true: the left panel (files, search) is shown."),
     ("show_right", "true: the right sidebar is shown."),
@@ -337,11 +359,21 @@ mod tests {
 
     /// A config in which every collection holds something and every setting that can be left out is set.
     fn full() -> Config {
+        let fc = |n: &str| crate::fonts::FontChoice { family: Some(n.into()), size: 16.0 };
         use crate::calendar::store::{CalendarSource, SourceKind};
         let mut c = Config {
             vault: Some("/v".into()),
             recent: vec!["/v".into(), "/w".into()],
-            font_size: 17.0,
+            fonts: crate::fonts::FontsCfg {
+                same_everywhere: false,
+                all: crate::fonts::FontChoice { family: Some("Sans".into()), size: 17.0 },
+                ui: fc("Ui"),
+                editor_raw: fc("Raw"),
+                editor_rendered: fc("Rendered"),
+                mail: fc("Mail"),
+                calendar: fc("Cal"),
+                social: fc("Soc"),
+            },
             sidebars: SidebarCfg { ribbon: vec!["files".into(), "mail".into()], right: vec![RightViewCfg { icons: vec!["outline".into()], active: "outline".into(), weight: 2 }], hidden: vec!["graph".into()] },
             calendars: vec![
                 CalendarSource { id: "a".into(), name: "Home".into(), color: "#ff0000".into(), enabled: true, sync_minutes: 15, kind: SourceKind::Local { file: "/x/a.ics".into() } },
@@ -413,7 +445,7 @@ mod tests {
                 && text.contains("[keybindings]"),
             "{text}"
         );
-        assert!(text.contains("font_size = 17.0") && text.contains("media_volume = 0.8\n"), "numbers are written as they are: {text}");
+        assert!(text.contains("size = 17.0") && text.contains("media_volume = 0.8\n"), "numbers are written as they are: {text}");
         let (back, newer) = Config::parse_text(&text).unwrap();
         assert!(!newer);
         assert_eq!(as_json(&back), as_json(&c), "{text}");
@@ -445,9 +477,9 @@ mod tests {
     // spec: CFG-009, CFG-007
     #[test]
     fn cfg_009_what_is_not_known_is_kept_and_says_so() {
-        let (c, newer) = Config::parse_text("font_size = 18.0\nmedia_autoplay = true\n[future]\nx = 1\n").unwrap();
+        let (c, newer) = Config::parse_text("toolbar_size = 18\nmedia_autoplay = true\n[future]\nx = 1\n").unwrap();
         assert!(!newer);
-        assert_eq!(c.font_size, 18.0);
+        assert_eq!(c.toolbar_size, 18);
         let text = to_toml(&c);
         let at = |l: &str| text.lines().position(|x| x == l).unwrap_or_else(|| panic!("{l:?} not in\n{text}"));
         assert!(text.lines().nth(at("media_autoplay = true") - 1).unwrap().starts_with("# Not known to this version"));
@@ -457,8 +489,8 @@ mod tests {
         // a file of a newer Shale is recognised by its version
         assert!(Config::parse_text("version = 9\n").unwrap().1);
         // a file that is not valid TOML, or a value of the wrong kind, is an error
-        assert!(Config::parse_text("font_size = [").is_err());
-        assert!(Config::parse_text("font_size = \"big\"").is_err());
+        assert!(Config::parse_text("toolbar_size = [").is_err());
+        assert!(Config::parse_text("toolbar_size = \"big\"").is_err());
     }
 
     // spec: CFG-009, SEC-011

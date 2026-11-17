@@ -408,10 +408,11 @@ fn shown_labels(p: &mut P) -> Vec<String> {
 #[test]
 fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     let mut p = P::new("settings-tabs", &[]);
-    let wants: [(SettingsTab, &[&str]); 9] = [
+    let wants: [(SettingsTab, &[&str]); 10] = [
         (SettingsTab::Vault, &["Vault folder", "People folder"]),
         (SettingsTab::Editor, &["Show line numbers in the editor", "Update links in other notes when renaming", "Font colours"]),
-        (SettingsTab::Appearance, &["Readable line length", "Dark drawing canvas", "Text size"]),
+        (SettingsTab::Appearance, &["Readable line length", "Dark drawing canvas"]),
+        (SettingsTab::Fonts, &["Use the same font and size everywhere", "Font and size"]),
         (SettingsTab::Sync, &["Git sync"]),
         (SettingsTab::Calendar, &["Calendars…", "Calendar weeks start on Monday (otherwise Sunday)"]),
         (SettingsTab::Mail, &["Mail accounts…", "Fetch new mail every"]),

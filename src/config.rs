@@ -273,7 +273,8 @@ pub struct Config {
     pub update_links_on_rename: bool,
     /// Draw on a dark canvas.
     pub dark_canvas: bool,
-    pub font_size: f32,
+    /// The font and size of every area of the window (CFG-030).
+    pub fonts: crate::fonts::FontsCfg,
     /// Keep the text in a comfortable column instead of the full width.
     pub readable_width: bool,
     pub show_left: bool,
@@ -371,7 +372,7 @@ impl Default for Config {
             new_notes_next_to_current: false,
             update_links_on_rename: true,
             dark_canvas: true,
-            font_size: 15.5,
+            fonts: crate::fonts::FontsCfg::default(),
             readable_width: true,
             show_left: true,
             show_right: true,
@@ -416,16 +417,30 @@ impl Default for Config {
 }
 
 impl Versioned for Config {
-    const CURRENT: u64 = 1;
+    const CURRENT: u64 = 2;
     const WHAT: &'static str = "settings";
-    fn step(_json: &mut serde_json::Map<String, serde_json::Value>, from: u64) {
+    fn step(json: &mut serde_json::Map<String, serde_json::Value>, from: u64) {
         match from {
             // 0 → 1: the first versioned format. The per-vault fields stay in the JSON; they
             // are moved into the first vault that is opened (`take_legacy`, CFG-008).
             0 => {}
+            // 1 → 2: the one text size of the editor became the fonts of the areas (CFG-034).
+            1 => move_font_size(json),
             _ => unreachable!("no migration from version {from}"),
         }
     }
+}
+
+/// Migration 1 → 2 (CFG-034): `font_size` was the size of the editor's text. A size that is not the
+/// old default makes the editor's two sizes and stops sharing one font, so every area keeps
+/// its look; the old default needs nothing.
+fn move_font_size(json: &mut serde_json::Map<String, serde_json::Value>) {
+    let Some(size) = json.remove("font_size").and_then(|v| v.as_f64()).filter(|s| s.is_finite() && (*s - 15.5).abs() > 1e-6) else { return };
+    if json.contains_key("fonts") {
+        return;
+    }
+    let area = serde_json::json!({ "size": size });
+    json.insert("fonts".into(), serde_json::json!({ "same_everywhere": false, "editor_raw": area, "editor_rendered": area }));
 }
 
 #[cfg(test)]
@@ -639,12 +654,50 @@ mod tests {
         assert_eq!(build_stamp(), stamp_of(env!("SHALE_BUILD_SECS").parse().unwrap()));
     }
 
+    // spec: CFG-034
+    #[test]
+    fn cfg_034_the_old_text_size_becomes_the_sizes_of_the_editor() {
+        use crate::fonts::{Area, FontChoice};
+        // a size of its own: the editor has it, the other areas keep their look
+        let (c, newer) = crate::vault_state::parse::<Config>(br#"{"font_size": 18.0, "vault": "/v"}"#).unwrap();
+        assert!(!newer && c.version == 2 && c.vault == Some(PathBuf::from("/v")));
+        assert!(!c.fonts.same_everywhere);
+        assert_eq!((c.fonts.choice(Area::EditorRaw).size, c.fonts.choice(Area::EditorRendered).size), (18.0, 18.0));
+        assert_eq!((c.fonts.choice(Area::Ui).size, c.fonts.choice(Area::Mail).size), (14.0, 14.0));
+        assert!(!c.other.contains_key("font_size"), "it is not kept as an unknown setting");
+        // the old default needs nothing
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"font_size": 15.5}"#).unwrap();
+        assert_eq!(c.fonts, crate::fonts::FontsCfg::default());
+        // something that is not a number is dropped, the fonts of a file that has them are kept
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"font_size": "big"}"#).unwrap();
+        assert_eq!(c.fonts, crate::fonts::FontsCfg::default());
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"font_size": 20.0, "fonts": {"all": {"size": 17.0}}}"#).unwrap();
+        assert_eq!(c.fonts.all, FontChoice { family: None, size: 17.0 });
+        // a file of the current version is not touched
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"version": 2, "font_size": 20.0}"#).unwrap();
+        assert_eq!((c.fonts.clone(), c.other.get("font_size").and_then(|v| v.as_f64())), (crate::fonts::FontsCfg::default(), Some(20.0)));
+    }
+
+    // spec: CFG-034
+    #[test]
+    fn cfg_034_a_settings_file_of_version_1_loads_and_is_written_with_fonts() {
+        let t = TestConfig::new("fonts-migrate");
+        write_private(&t.file(), b"version = 1\nfont_size = 19.0\nvim_mode = true\n").unwrap();
+        let (c, problem) = Config::load();
+        assert_eq!(problem, None);
+        assert!(c.vim_mode && !c.fonts.same_everywhere && c.fonts.editor_raw.size == 19.0);
+        c.save().unwrap();
+        let text = std::fs::read_to_string(t.file()).unwrap();
+        assert!(!text.contains("font_size") && text.contains("version = 2") && text.contains("[fonts.editor_raw]\n# ") && text.contains("size = 19.0"), "{text}");
+        assert_eq!(Config::load().0.fonts, c.fonts);
+    }
+
     // spec: CFG-001
     #[test]
     fn old_config_files_still_load() {
         let (c, newer) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
         assert!(!newer);
-        assert_eq!(c.version, 1);
+        assert_eq!(c.version, 2);
         assert_eq!(c.vault, Some(PathBuf::from("/tmp/v")));
         assert!(c.update_links_on_rename);
         assert!(!c.ctrl_to_follow);
@@ -671,7 +724,7 @@ mod tests {
         assert_eq!(c.toolbar_size, 110, "the buttons a bit bigger than the base size by default");
         assert_eq!(c.font_colours.len(), 5);
         assert_eq!(c.highlight_colours, vec![[255, 255, 0], [0x39, 0xFF, 0x14], [0, 255, 255], [255, 0, 255]], "neon yellow, green, cyan, magenta");
-        assert_eq!(c.version, 1, "new fields with defaults need no migration (CFG-001)");
+        assert_eq!(c.version, 2, "new fields with defaults need no migration (CFG-001)");
         let c: Config = serde_json::from_str(r#"{"format_toolbar": false, "toolbar_size": 150, "font_colours": [[1, 2, 3]], "highlight_colours": []}"#).unwrap();
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.format_toolbar, back.toolbar_size, back.font_colours, back.highlight_colours), (false, 150, vec![[1, 2, 3]], vec![]));
@@ -682,7 +735,7 @@ mod tests {
     fn the_media_settings_have_defaults_and_round_trip_without_a_version_bump() {
         let (c, _) = crate::vault_state::parse::<Config>(br#"{"vault": "/tmp/v"}"#).unwrap();
         assert_eq!((c.media_volume, c.media_play_button_opacity), (0.8, 0.6), "an older file gets the defaults");
-        assert_eq!(c.version, 1, "new fields with defaults need no migration (CFG-001)");
+        assert_eq!(c.version, 2, "new fields with defaults need no migration (CFG-001)");
         let c: Config = serde_json::from_str(r#"{"media_volume": 0.25, "media_play_button_opacity": 1.0}"#).unwrap();
         let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!((back.media_volume, back.media_play_button_opacity), (0.25, 1.0));
@@ -691,17 +744,17 @@ mod tests {
     // spec: MEDIA-007, CFG-001
     #[test]
     fn a_config_with_the_dropped_autoplay_setting_still_loads_and_keeps_it() {
-        let (c, newer) = crate::vault_state::parse::<Config>(br#"{"font_size": 18.0, "media_autoplay": true}"#).unwrap();
+        let (c, newer) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 18, "media_autoplay": true}"#).unwrap();
         assert!(!newer);
-        assert_eq!(c.font_size, 18.0);
+        assert_eq!(c.toolbar_size, 18);
         assert_eq!(c.other.get("media_autoplay"), Some(&serde_json::Value::Bool(true)), "an unknown field is kept as it is");
     }
 
     // spec: LAY-002
     #[test]
     fn lay_002_a_layout_of_the_wrong_shape_loads_as_the_default() {
-        let c: Config = serde_json::from_str(r#"{"sidebars": "oops", "font_size": 18.0}"#).unwrap();
-        assert_eq!((c.sidebars, c.font_size), (SidebarCfg::default(), 18.0), "the rest of the file still loads");
+        let c: Config = serde_json::from_str(r#"{"sidebars": "oops", "toolbar_size": 18}"#).unwrap();
+        assert_eq!((c.sidebars, c.toolbar_size), (SidebarCfg::default(), 18), "the rest of the file still loads");
         let c: Config = serde_json::from_str(r#"{"sidebars": {"ribbon": [1, 2]}}"#).unwrap();
         assert_eq!(c.sidebars, SidebarCfg::default());
         let c: Config = serde_json::from_str(r#"{"sidebars": {"ribbon": ["mail", "files"]}}"#).unwrap();
@@ -800,9 +853,9 @@ mod tests {
     // spec: CFG-004, CFG-008
     #[test]
     fn config_migration_0_to_1_keeps_the_old_vault_fields_until_taken() {
-        let old = br#"{"vault": "/v", "font_size": 17.0, "people_dir": "Adressbuch", "open_files": ["a.md"], "recent_tags": ["x"], "last_import_folder": "In"}"#;
+        let old = br#"{"vault": "/v", "toolbar_size": 17, "people_dir": "Adressbuch", "open_files": ["a.md"], "recent_tags": ["x"], "last_import_folder": "In"}"#;
         let (mut c, _) = crate::vault_state::parse::<Config>(old).unwrap();
-        assert_eq!(c.font_size, 17.0);
+        assert_eq!(c.toolbar_size, 17);
         let out = serde_json::to_string(&c).unwrap();
         assert!(out.contains("\"people_dir\":\"Adressbuch\""), "{out}");
         let legacy = c.take_legacy();
@@ -814,7 +867,7 @@ mod tests {
         for k in ["people_dir", "open_files", "recent_tags", "last_import_folder"] {
             assert!(!out.contains(k), "{k} still in {out}");
         }
-        assert!(out.contains("\"version\":1"));
+        assert!(out.contains("\"version\":2"));
         assert!(c.take_legacy().is_empty());
         c.restore_legacy(legacy.clone());
         assert_eq!(c.take_legacy(), legacy);
@@ -833,10 +886,10 @@ mod tests {
         let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(kept.len(), 1);
         assert!(kept[0].starts_with("config.toml.broken-"), "{kept:?}");
-        write_private(&p, b"version = 7\nfont_size = 20.0\nnew_thing = true\n").unwrap();
+        write_private(&p, b"version = 7\ntoolbar_size = 20\nnew_thing = true\n").unwrap();
         let (c, problem) = Config::load_from(&p);
         assert!(c.read_only && problem.is_some());
-        assert_eq!(c.font_size, 20.0);
+        assert_eq!(c.toolbar_size, 20);
         assert_eq!(c.other.get("new_thing"), Some(&serde_json::Value::Bool(true)));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -848,13 +901,13 @@ mod tests {
         let (c, problem) = Config::load();
         assert!(problem.is_none() && !c.read_only, "a first start has no file and no problem");
         let mut c = c;
-        c.font_size = 21.0;
+        c.toolbar_size = 21;
         c.remember_vault("/some/vault".into());
         c.save().unwrap();
         assert!(t.file().exists());
         let (back, problem) = Config::load();
         assert!(problem.is_none());
-        assert_eq!(back.font_size, 21.0);
+        assert_eq!(back.toolbar_size, 21);
         assert_eq!(back.vault, Some(PathBuf::from("/some/vault")));
         assert_eq!(back.recent, vec![PathBuf::from("/some/vault")]);
     }
@@ -867,20 +920,20 @@ mod tests {
         let (mut c, problem) = Config::load();
         assert!(problem.unwrap().contains("config.toml.broken-"));
         assert!(!c.read_only, "a broken file is replaced by the defaults, the original is kept");
-        c.font_size = 19.0;
+        c.toolbar_size = 19;
         c.save().unwrap();
-        assert_eq!(Config::load().0.font_size, 19.0);
+        assert_eq!(Config::load().0.toolbar_size, 19);
     }
 
     // spec: CFG-007
     #[test]
     fn cfg_007_a_config_of_a_newer_shale_is_not_overwritten_by_save() {
         let t = TestConfig::new("newer");
-        let newer = b"version = 99\nfont_size = 20.0\n";
+        let newer = b"version = 99\ntoolbar_size = 20\n";
         write_private(&t.file(), newer).unwrap();
         let (mut c, problem) = Config::load();
         assert!(c.read_only && problem.is_some());
-        c.font_size = 12.0;
+        c.toolbar_size = 12;
         assert!(c.save().is_ok(), "nothing to report: saving is skipped on purpose");
         assert_eq!(std::fs::read(t.file()).unwrap(), newer);
     }
@@ -890,29 +943,29 @@ mod tests {
     fn cfg_010_a_config_json_moves_into_config_toml() {
         let t = TestConfig::new("migrate");
         let old = t.file().with_file_name("config.json");
-        write_private(&old, br#"{"vault": "/v", "font_size": 17.0, "caches": {"picture_days": null, "picture_mb": 5}, "media_autoplay": true}"#).unwrap();
+        write_private(&old, br#"{"vault": "/v", "toolbar_size": 17, "caches": {"picture_days": null, "picture_mb": 5}, "media_autoplay": true}"#).unwrap();
         let (c, problem) = Config::load();
         assert!(problem.is_none(), "nothing is said: {problem:?}");
-        assert_eq!((c.font_size, c.vault.clone(), c.caches.picture_days, c.caches.picture_mb), (17.0, Some(PathBuf::from("/v")), None, Some(5)));
+        assert_eq!((c.toolbar_size, c.vault.clone(), c.caches.picture_days, c.caches.picture_mb), (17, Some(PathBuf::from("/v")), None, Some(5)));
         assert_eq!(c.other.get("media_autoplay"), Some(&serde_json::Value::Bool(true)));
         assert!(t.file().is_file() && !old.exists() && old.with_file_name("config.json.migrated").is_file());
-        assert!(std::fs::read_to_string(t.file()).unwrap().contains("# The text size of notes"), "the new file has the descriptions");
+        assert!(std::fs::read_to_string(t.file()).unwrap().contains("# The size of the toolbar's buttons"), "the new file has the descriptions");
         // the next start reads the new file, and the old one is not looked at again
         let (again, problem) = Config::load();
         assert!(problem.is_none());
-        assert_eq!((again.font_size, again.caches.picture_days, again.caches.picture_mb), (17.0, None, Some(5)));
-        write_private(&old, br#"{"font_size": 22.0}"#).unwrap();
-        assert_eq!(Config::load().0.font_size, 17.0);
+        assert_eq!((again.toolbar_size, again.caches.picture_days, again.caches.picture_mb), (17, None, Some(5)));
+        write_private(&old, br#"{"toolbar_size": 22}"#).unwrap();
+        assert_eq!(Config::load().0.toolbar_size, 17);
         // a file that cannot be read is set aside as always, and one of a newer Shale is left alone
         let t = TestConfig::new("migrate-broken");
         let old = t.file().with_file_name("config.json");
         write_private(&old, b"{oops").unwrap();
         let (c, problem) = Config::load();
         assert!(problem.unwrap().contains("config.json.broken-") && !t.file().exists());
-        assert_eq!(c.font_size, Config::default().font_size);
+        assert_eq!(c.toolbar_size, Config::default().toolbar_size);
         let t = TestConfig::new("migrate-newer");
         let old = t.file().with_file_name("config.json");
-        write_private(&old, br#"{"version": 9, "font_size": 20.0}"#).unwrap();
+        write_private(&old, br#"{"version": 9, "toolbar_size": 20}"#).unwrap();
         let (_, problem) = Config::load();
         assert!(problem.is_some() && old.is_file() && !t.file().exists(), "left alone");
     }
@@ -923,7 +976,7 @@ mod tests {
         let t = TestConfig::new("unwritable");
         // a folder where the file should be: the replacing rename cannot succeed
         std::fs::create_dir_all(t.file().join("in-the-way")).unwrap();
-        let c = Config { font_size: 17.0, ..Config::default() };
+        let c = Config { toolbar_size: 17, ..Config::default() };
         let e = c.save().unwrap_err();
         assert!(e.starts_with("could not save the settings"), "{e}");
         assert!(t.file().is_dir(), "what was there is left alone");

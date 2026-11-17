@@ -653,8 +653,11 @@ impl ShaleApp {
             View::Calendar => {
                 let monday = self.cfg.week_starts_monday;
                 let mut act = None;
-                egui::Frame::new().inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
-                    act = self.cal.main.show(ui, &self.calendar, monday, true);
+                let font = self.fonts.area(crate::fonts::Area::Calendar);
+                crate::fonts::with_area(ui, &font, |ui| {
+                    egui::Frame::new().inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
+                        act = self.cal.main.show(ui, &self.calendar, monday, true);
+                    });
                 });
                 if let Some(a) = act {
                     self.calendar_action(a);
@@ -663,7 +666,8 @@ impl ShaleApp {
             View::Mail => {
                 let modal_open = self.modal.is_some();
                 self.mail.away = self.tree.sel.is_some() || self.search.sel.is_some();
-                let acts = self.mail.show(ui, &self.cfg, &mut self.keymap, modal_open);
+                let font = self.fonts.area(crate::fonts::Area::Mail);
+                let acts = crate::fonts::with_area(ui, &font, |ui| self.mail.show(ui, &self.cfg, &mut self.keymap, modal_open));
                 for a in acts {
                     self.mail_action(a);
                 }
@@ -710,7 +714,8 @@ impl ShaleApp {
             self.actions.push(Action::Open { rel, new_tab: false });
             return;
         }
-        let base = self.cfg.font_size;
+        let fonts = self.fonts.editor();
+        let base = fonts.rendered.size;
         let readable = self.cfg.readable_width;
         let ctrl = self.cfg.ctrl_to_follow;
         let dark = self.cfg.dark_canvas;
@@ -763,7 +768,8 @@ impl ShaleApp {
                     }
                     if reading {
                         let text = doc.text.clone();
-                        if let Some(a) = reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, base, dark) {
+                        let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, base, dark));
+                        if let Some(a) = shown {
                             handle_reader_action(&mut self.actions, a, &rel);
                         }
                     } else {
@@ -776,7 +782,7 @@ impl ShaleApp {
                         tab.editor.assist.people_dir = self.vdata.settings.people_dir.clone();
                         tab.editor.dark_canvas = self.cfg.dark_canvas;
                         tab.editor.media = self.media.clone();
-                        let (changed, action) = tab.editor.show(ui, &mut doc.text, vault, crate::editor::Note { rel: &rel, undo: &mut self.undo }, base, ctrl);
+                        let (changed, action) = crate::fonts::with_family(&fonts.rendered, || tab.editor.show(ui, &mut doc.text, vault, crate::editor::Note { rel: &rel, undo: &mut self.undo }, &fonts, ctrl));
                         if changed {
                             doc.dirty = true;
                             doc.last_edit = std::time::Instant::now();

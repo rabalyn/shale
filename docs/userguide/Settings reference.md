@@ -2,7 +2,7 @@
 
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
-button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**, and the button
+button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**, and the button
 **Open settings file** at the top right (see below).
 
 Two files hold settings:
@@ -52,12 +52,31 @@ change within a second.
 
 | Key | Default | Where |
 |---|---|---|
-| `font_size` | 15.5 (range 12 to 24) | Settings → Appearance, "Text size" |
 | `readable_width` | on | Appearance, "Readable line length" |
 | `dark_canvas` | on | Appearance, "Dark drawing canvas" |
 | `inline_images` | on | Appearance, "Show embedded images and players inside the editor" |
 | `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
 | `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
+
+### Fonts
+
+One table, `fonts` (`[fonts]` in the file), in the settings file. Each area has a `family` (an installed font family such as
+"DejaVu Sans"; left out: Shale's own font) and a `size` in points (8 to 48). Settings → Fonts shows them
+(see [[Fonts]]).
+
+| Key | Default | Where |
+|---|---|---|
+| `fonts.same_everywhere` | on | Settings → Fonts, "Use the same font and size everywhere"; on: `fonts.all` is used for every area and the tables of the single areas rest |
+| `fonts.all` | Shale's font, 14 | Fonts, "Font and size" while the checkbox is on; the size is the one of dialogs and menus, the text of the editor is drawn 11 % larger (15.5 against 14), as it always was |
+| `fonts.ui` | Shale's font, 14 | Fonts, "Dialogs and menus", with the checkbox off: dialogs, menus, sidebars and everything not listed below |
+| `fonts.editor_raw` | Shale's font, 15.5 | Fonts, "Editor: raw markdown": the markdown text in the editor, and the raw lines around the cursor in the preview |
+| `fonts.editor_rendered` | Shale's font, 15.5 | Fonts, "Editor: rendered text and reading view": the rendered lines of the preview and the reading view |
+| `fonts.mail` | Shale's font, 14 | Fonts, "Mail" |
+| `fonts.calendar` | Shale's font, 14 | Fonts, "Calendar" (the calendar view and the calendar of the right sidebar) |
+| `fonts.social` | Shale's font, 14 | Fonts, "Feeds" |
+
+Inside each of these tables: `family` and `size`. The old `font_size` of earlier versions became the
+size of the two editor areas when you updated.
 | `line_numbers` | on | Editor, "Show line numbers in the editor" |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |

@@ -99,7 +99,7 @@ pub(crate) fn inline_painted(line: &str, links: &[(LinkSpan, bool)], size: f32, 
     let mut st = Inline { strike: strike_all, ..Default::default() };
     let fmt = |st: &Inline, color: Color32| {
         let mut f = TextFormat {
-            font_id: if st.code { FontId::new(size * 0.92, FontFamily::Monospace) } else { FontId::new(size, FontFamily::Proportional) },
+            font_id: if st.code { FontId::new(size * 0.92, FontFamily::Monospace) } else { FontId::new(size, crate::fonts::family()) },
             color: if st.code {
                 theme::CODE
             } else if st.bold {

@@ -7,10 +7,6 @@ use eframe::egui::{self, Ui};
 impl ShaleApp {
     pub(super) fn appearance_tab(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
-        ui.horizontal(|ui| {
-            ui.label("Text size");
-            changed |= ui.add(egui::Slider::new(&mut self.cfg.font_size, 12.0..=24.0)).changed();
-        });
         changed |= ui.checkbox(&mut self.cfg.readable_width, "Readable line length").changed();
         changed |= ui.checkbox(&mut self.cfg.dark_canvas, "Dark drawing canvas").changed();
         changed |= ui.checkbox(&mut self.cfg.inline_images, "Show embedded images and players inside the editor (the link text appears while the cursor is on it)").changed();

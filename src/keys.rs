@@ -640,7 +640,7 @@ mod tests {
         let path = dir.join("config.toml");
         crate::config::write_private(&path, crate::config::text::to_toml(&cfg).as_bytes()).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"global.focus_sidebar\" = [\"Ctrl+Alt+B\"]") && text.contains("version = 1"), "{text}");
+        assert!(text.contains("\"global.focus_sidebar\" = [\"Ctrl+Alt+B\"]") && text.contains("version = 2"), "{text}");
         let (loaded, problem) = crate::config::Config::load_from(&path);
         assert_eq!(problem, None);
         let k2 = Keymap::from_overrides(&loaded.keybindings);

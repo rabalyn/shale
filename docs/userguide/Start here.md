@@ -43,6 +43,7 @@ Keeping it safe and tidy:
 - [[Vault settings]]: what travels with a vault.
 - [[Data usage and caches]]: what Shale keeps on disk.
 - [[Settings reference]]: every setting, its default, and where it lives.
+- [[Fonts]]: the font and text size of the editor, dialogs, mail, calendar and feeds.
 
 ## Where this guide comes from
 

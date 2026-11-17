@@ -3,6 +3,7 @@
 //! names after `[[`.
 
 use crate::colour_tags;
+use crate::fonts::{AreaFont, EditorFonts};
 #[cfg(test)]
 use crate::link_assist::link_query;
 use crate::markdown::{self, LinkSpan};
@@ -44,6 +45,8 @@ struct Fmt {
     fg: Option<[u8; 4]>,
     /// a `<mark …>` or `<span …>` tag, long markup that the preview folds up to almost nothing
     ctag: bool,
+    /// the text of a line the preview draws rendered: it has the rendered font (CFG-032)
+    rendered: bool,
 }
 
 pub fn heading_scale(level: u8) -> f32 {
@@ -161,7 +164,7 @@ fn colour_pairs(line: &str, off: usize, fmts: &mut [Fmt]) {
 /// Build the coloured layout for the editor (without inline pictures).
 #[cfg(test)]
 pub fn highlight(text: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob {
-    highlight_preview(text, links, base, &[], None)
+    highlight_preview(text, links, &EditorFonts::uniform(base), &[], None)
 }
 
 /// The coloured layout for the editor: the given byte ranges (image links) are shrunk to
@@ -169,7 +172,7 @@ pub fn highlight(text: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob
 /// `raw_lines` (line numbers) the markdown preview is on (EDIT-016): the markup of every line
 /// outside that range is hidden (invisible, about one point wide); the text itself stays the
 /// same so that cursor, clicks and vim keep their indices.
-pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> LayoutJob {
+pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorFonts, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> LayoutJob {
     let mut fmts = vec![Fmt::default(); text.len()];
     let fenced = markdown::fenced_code_lines(text);
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
@@ -303,8 +306,11 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, imag
     // the preview: hide the markup of the lines that are not raw; the flag goes either way
     for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
         let raw = raw_lines.as_ref().is_none_or(|r| r.contains(&li));
-        set(&mut fmts, off..off + line.len(), |f| {
+        // the line break belongs to the line, so that it does not make the row taller
+        let end = (off + line.len() + 1).min(text.len());
+        set(&mut fmts, off..end, |f| {
             f.hidden = f.syn && !raw;
+            f.rendered = !raw;
             f.syn = false
         });
     }
@@ -321,7 +327,7 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, imag
         if f != cur || i == text.len() {
             if let Some(c) = cur {
                 if i > start {
-                    job.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(i), format: to_format(c, base) });
+                    job.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(i), format: to_format(c, fonts) });
                 }
             }
             start = i;
@@ -329,23 +335,24 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], base: f32, imag
         }
     }
     if job.sections.is_empty() {
-        job.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(0)..egui::text::ByteIndex(text.len()), format: to_format(Fmt::default(), base) });
+        job.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(0)..egui::text::ByteIndex(text.len()), format: to_format(Fmt::default(), fonts) });
     }
     job
 }
 
-fn to_format(f: Fmt, base: f32) -> TextFormat {
+fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
+    let AreaFont { family, size: base } = if f.rendered { &fonts.rendered } else { &fonts.raw }.clone();
     if f.image_h > 0 {
-        return TextFormat { font_id: FontId::new(1.0, FontFamily::Proportional), color: Color32::TRANSPARENT, line_height: Some(f.image_h as f32), ..Default::default() };
+        return TextFormat { font_id: FontId::new(1.0, family), color: Color32::TRANSPARENT, line_height: Some(f.image_h as f32), ..Default::default() };
     }
     let size = base * heading_scale(f.heading);
     if f.hidden {
         // the colour tags are far longer than the other markup: folded up smaller, so no gap shows
         let tiny = if f.ctag { 0.12 } else { 1.0 };
-        return TextFormat { font_id: FontId::new(tiny, FontFamily::Proportional), color: Color32::TRANSPARENT, line_height: Some(size * 1.5), ..Default::default() };
+        return TextFormat { font_id: FontId::new(tiny, family), color: Color32::TRANSPARENT, line_height: Some(size * 1.5), ..Default::default() };
     }
     let mono = f.code || f.fence;
-    let font_id = if mono { FontId::new(base * 0.92 * heading_scale(f.heading), FontFamily::Monospace) } else { FontId::new(size, FontFamily::Proportional) };
+    let font_id = if mono { FontId::new(base * 0.92 * heading_scale(f.heading), FontFamily::Monospace) } else { FontId::new(size, family) };
     let mut color = if f.heading > 0 { theme::HEADING } else { theme::TEXT };
     if f.quote {
         color = theme::QUOTE;
@@ -1072,8 +1079,10 @@ impl NoteEditor {
     }
 
     /// Show the editor. Returns (text changed, action).
-    pub fn show(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault, note: Note, base_size: f32, ctrl_to_follow: bool) -> (bool, Option<EditorAction>) {
+    pub fn show(&mut self, ui: &mut Ui, text: &mut String, vault: &Vault, note: Note, fonts: &EditorFonts, ctrl_to_follow: bool) -> (bool, Option<EditorAction>) {
         let Note { rel, undo } = note;
+        // the size of what is not text of a line: pictures' captions, tables, the line numbers
+        let base_size = if self.live_preview { fonts.rendered.size } else { fonts.raw.size };
         let mut action = None;
         let mut changed = false;
         let focused = ui.ctx().memory(|m| m.has_focus(self.id));
@@ -1299,7 +1308,7 @@ impl NoteEditor {
             if let Some(raw) = &preview {
                 ranges.extend(table_rows(s, &table_keys, raw).into_iter().flat_map(|g| g.rows));
             }
-            let mut job = highlight_preview(s, use_links, base_size, &ranges, preview.clone());
+            let mut job = highlight_preview(s, use_links, fonts, &ranges, preview.clone());
             job.wrap.max_width = wrap_width;
             ui.ctx().fonts_mut(|f| f.layout_job(job))
         };
@@ -1753,7 +1762,7 @@ mod tests {
                     // another focusable widget, like the real app's title box and sidebars
                     let mut other = String::from("title");
                     ui.add(egui::TextEdit::singleline(&mut other).id(egui::Id::unique("other-widget")));
-                    let (c, a) = ed.show(ui, text, vault, Note { rel, undo: &mut crate::undo::Histories::default() }, 15.0, false);
+                    let (c, a) = ed.show(ui, text, vault, Note { rel, undo: &mut crate::undo::Histories::default() }, &EditorFonts::uniform(15.0), false);
                     let mut other2 = String::from("after");
                     ui.add(egui::TextEdit::singleline(&mut other2).id(egui::Id::unique("other-widget-2")));
                     changed |= c;
@@ -1802,7 +1811,7 @@ mod tests {
         let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(*t), events, ..Default::default() };
         let mut out = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                ed.show(ui, text, v, Note { rel: Path::new("Welcome.md"), undo }, 15.0, false);
+                ed.show(ui, text, v, Note { rel: Path::new("Welcome.md"), undo }, &EditorFonts::uniform(15.0), false);
             });
         });
         out.textures_delta.clear();
@@ -1889,7 +1898,7 @@ mod tests {
         let mut action = None;
         let mut out = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                action = ed.show(ui, text, v, Note { rel: Path::new("Welcome.md"), undo }, 15.0, false).1;
+                action = ed.show(ui, text, v, Note { rel: Path::new("Welcome.md"), undo }, &EditorFonts::uniform(15.0), false).1;
             });
         });
         out.textures_delta.clear();
@@ -2917,7 +2926,7 @@ mod tests {
     /// (`_` hidden, `.` shown).
     fn hidden_map(text: &str, raw: Option<Range<usize>>) -> String {
         let links: Vec<(LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| (l, true)).collect();
-        let job = highlight_preview(text, &links, 15.0, &[], raw);
+        let job = highlight_preview(text, &links, &EditorFonts::uniform(15.0), &[], raw);
         assert_eq!(job.text, text, "the galley text is the buffer");
         text.char_indices()
             .map(|(i, c)| {
@@ -2950,8 +2959,8 @@ mod tests {
         let raw_all = hidden_map(text, Some(0..4));
         assert!(!raw_all.contains('_'));
         let links: Vec<(LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| (l, true)).collect();
-        let a = highlight_preview(text, &links, 15.0, &[], None);
-        let b = highlight_preview(text, &links, 15.0, &[], Some(0..4));
+        let a = highlight_preview(text, &links, &EditorFonts::uniform(15.0), &[], None);
+        let b = highlight_preview(text, &links, &EditorFonts::uniform(15.0), &[], Some(0..4));
         assert_eq!(a.sections.len(), b.sections.len());
         assert!(a.sections.iter().zip(&b.sections).all(|(x, y)| x.byte_range == y.byte_range && x.format == y.format));
     }
@@ -3125,7 +3134,7 @@ mod tests {
             let mut changed = false;
             let mut out = self.ctx.run_ui(raw, |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    changed = ed.show(ui, text, v, Note { rel: Path::new(REL), undo }, 15.0, false).0;
+                    changed = ed.show(ui, text, v, Note { rel: Path::new(REL), undo }, &EditorFonts::uniform(15.0), false).0;
                 });
             });
             out.textures_delta.clear();
@@ -3718,7 +3727,7 @@ mod tests {
         let mut action = None;
         let mut out = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                action = ed.show(ui, text, v, Note { rel: Path::new("Welcome.md"), undo: &mut crate::undo::Histories::default() }, 15.0, false).1;
+                action = ed.show(ui, text, v, Note { rel: Path::new("Welcome.md"), undo: &mut crate::undo::Histories::default() }, &EditorFonts::uniform(15.0), false).1;
             });
         });
         out.textures_delta.clear();
@@ -3907,7 +3916,46 @@ mod tests {
         assert!(!hidden_map(text, Some(0..1)).contains('_'));
         // hidden or not, the colour stays on the text
         let links = vec![];
-        let job = highlight_preview(text, &links, 15.0, &[], Some(1..2));
+        let job = highlight_preview(text, &links, &EditorFonts::uniform(15.0), &[], Some(1..2));
         assert_eq!(format_of(&job, text, "hi").background, Color32::from_rgb(255, 255, 0));
+    }
+
+    // spec: CFG-037
+    #[test]
+    fn cfg_037_raw_and_rendered_lines_of_the_preview_are_laid_out_at_their_own_sizes() {
+        let (v, d) = vault_for_tests("fonts-two");
+        let rel = Path::new("Welcome.md");
+        let fonts = EditorFonts { raw: AreaFont { family: FontFamily::Proportional, size: 12.0 }, rendered: AreaFont { family: FontFamily::Proportional, size: 24.0 } };
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        let mut text = String::from("rendered line\nraw line\nrendered again");
+        let mut ed = NoteEditor::new(egui::Id::unique("t-fonts-two"));
+        ed.live_preview = true;
+        ed.pending_cursor = Some(15); // in the second line
+        let rows = |ed: &mut NoteEditor, text: &mut String| -> Vec<f32> {
+            let mut t = 0.0;
+            let mut heights = vec![];
+            for _ in 0..4 {
+                t += 0.05;
+                let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))), time: Some(t), ..Default::default() };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        ed.show(ui, text, &v, Note { rel, undo: &mut crate::undo::Histories::default() }, &fonts, false);
+                    });
+                });
+                out.textures_delta.clear();
+                heights = ed.last_layout.as_ref().unwrap().0.rows.iter().map(|r| r.height()).collect();
+            }
+            heights
+        };
+        let h = rows(&mut ed, &mut text);
+        assert_eq!(h.len(), 3, "{h:?}");
+        assert!(h[0] > 30.0 && h[2] > 30.0, "the rendered lines are drawn at 24 points: {h:?}");
+        assert!(h[1] < 22.0, "the raw line is drawn at 12 points: {h:?}");
+        // without the preview every line is raw
+        ed.live_preview = false;
+        let h = rows(&mut ed, &mut text);
+        assert!(h.iter().all(|x| *x < 22.0), "{h:?}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

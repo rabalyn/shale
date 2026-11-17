@@ -487,7 +487,8 @@ impl ShaleApp {
             let area = ui.available_rect_before_wrap();
             self.drag.add_calendar_area(area);
             egui::ScrollArea::vertical().id_salt("side-calendar").auto_shrink([false, false]).show(ui, |ui| {
-                act = self.cal.side.show(ui, &self.calendar, monday, false);
+                let font = self.fonts.area(crate::fonts::Area::Calendar);
+                act = crate::fonts::with_area(ui, &font, |ui| self.cal.side.show(ui, &self.calendar, monday, false));
             });
             if let Some(a) = act {
                 self.calendar_action(a);

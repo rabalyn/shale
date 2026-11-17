@@ -92,10 +92,10 @@ fn cfg_011_the_button_opens_the_settings_file_in_a_tab_without_making_a_note() {
     assert!(w.app.modal.is_none(), "the dialog closes");
     assert_eq!(w.app.tabbar.tabs[w.app.tabbar.active].view, View::SettingsFile);
     assert_eq!(w.app.sf.text, w.disk(), "the tab shows the file");
-    assert!(w.app.sf.text.starts_with("# Shale settings") && w.app.sf.text.contains("font_size = 15.5"));
+    assert!(w.app.sf.text.starts_with("# Shale settings") && w.app.sf.text.contains("toolbar_size = 110"));
     // it is drawn as text, in a tab called for what it is
     w.hl.frames(&mut w.app, 3);
-    assert!(w.hl.text.iter().any(|(t, _)| t.contains("# The text size of notes in points.")), "the text is on screen");
+    assert!(w.hl.text.iter().any(|(t, _)| t.contains("# The size of the toolbar's buttons in percent")), "the text is on screen");
     assert!(w.hl.text.iter().any(|(t, _)| t == "Settings file"), "the tab has a title");
     // no note, no file in the vault, nothing in the lists of the vault
     assert_eq!(w.vault_files(), files, "nothing was created in the vault");
@@ -121,12 +121,12 @@ fn cfg_012_saving_the_tab_writes_the_file_and_applies_the_setting() {
     let mut w = W::new("save");
     w.app.open_settings_file();
     assert!(!w.app.cfg.vim_mode);
-    w.app.sf.text = w.app.sf.text.replace("font_size = 15.5", "font_size = 19.0").replace("vim_mode = false", "vim_mode = true").replace("picture_days = 30", "picture_days = \"none\"");
+    w.app.sf.text = w.app.sf.text.replace("toolbar_size = 110", "toolbar_size = 19").replace("vim_mode = false", "vim_mode = true").replace("picture_days = 30", "picture_days = \"none\"");
     w.app.sf.dirty = true;
     assert!(w.app.save_settings_file(true));
     assert!(!w.app.sf.dirty && w.app.sf.error.is_none());
-    assert_eq!((w.app.cfg.font_size, w.app.cfg.vim_mode, w.app.cfg.caches.picture_days), (19.0, true, None), "used at once");
-    assert!(w.disk().contains("font_size = 19.0"), "the file is what the tab held");
+    assert_eq!((w.app.cfg.toolbar_size, w.app.cfg.vim_mode, w.app.cfg.caches.picture_days), (19, true, None), "used at once");
+    assert!(w.disk().contains("toolbar_size = 19"), "the file is what the tab held");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -141,12 +141,12 @@ fn cfg_012_saving_the_tab_writes_the_file_and_applies_the_setting() {
     assert_eq!(w.app.sf.text, w.disk());
     assert!(w.app.sf.text.contains("# true: drawings are drawn on a dark canvas.\ndark_canvas = false"));
     // a tab that rests is saved by itself
-    w.app.sf.text = w.app.sf.text.replace("font_size = 19.0", "font_size = 13.0");
+    w.app.sf.text = w.app.sf.text.replace("toolbar_size = 19", "toolbar_size = 13");
     w.app.sf.dirty = true;
     w.app.sf.last_edit = Instant::now() - Duration::from_secs(2);
     w.hl.frames(&mut w.app, 2);
-    assert_eq!(w.app.cfg.font_size, 13.0);
-    assert!(w.disk().contains("font_size = 13.0") && !w.app.sf.dirty);
+    assert_eq!(w.app.cfg.toolbar_size, 13);
+    assert!(w.disk().contains("toolbar_size = 13") && !w.app.sf.dirty);
 }
 
 // spec: CFG-013
@@ -161,21 +161,21 @@ fn cfg_013_a_change_made_by_another_program_is_picked_up_and_shale_s_own_writes_
     assert!(w.toasts().is_empty() && !w.app.sf.disk_changed, "{:?}", w.toasts());
     assert!(w.app.sf.text.contains("media_volume = 0.3"), "the tab shows what Shale wrote");
     // another program
-    let edited = w.disk().replace("font_size = 15.5", "font_size = 21.0");
+    let edited = w.disk().replace("toolbar_size = 110", "toolbar_size = 21");
     w.write_outside(&edited);
     w.look();
-    assert_eq!(w.app.cfg.font_size, 21.0, "used at once");
+    assert_eq!(w.app.cfg.toolbar_size, 21, "used at once");
     assert_eq!(w.app.sf.text, edited, "the tab shows it");
     assert!(!w.app.sf.dirty && w.app.sf.error.is_none());
     assert_eq!(w.app.cfg.media_volume, 0.3);
     // the look is once a second
-    let edited = edited.replace("font_size = 21.0", "font_size = 22.0");
+    let edited = edited.replace("toolbar_size = 21", "toolbar_size = 22");
     w.write_outside(&edited);
     w.app.sf.checked = Instant::now();
     w.hl.frames(&mut w.app, 2);
-    assert_eq!(w.app.cfg.font_size, 21.0, "not yet");
+    assert_eq!(w.app.cfg.toolbar_size, 21, "not yet");
     w.look();
-    assert_eq!(w.app.cfg.font_size, 22.0);
+    assert_eq!(w.app.cfg.toolbar_size, 22);
     // the same text again (a program that only touches the file) changes nothing
     w.write_outside(&edited);
     w.look();
@@ -187,7 +187,7 @@ fn cfg_013_a_change_made_by_another_program_is_picked_up_and_shale_s_own_writes_
 fn cfg_013_a_change_from_outside_does_not_replace_unsaved_text_of_the_tab() {
     let mut w = W::new("outside-dirty");
     w.app.open_settings_file();
-    let mine = w.app.sf.text.replace("font_size = 15.5", "font_size = 11.0");
+    let mine = w.app.sf.text.replace("toolbar_size = 110", "toolbar_size = 11");
     w.app.sf.text = mine.clone();
     w.app.sf.dirty = true;
     w.write_outside(&w.disk().replace("show_left = true", "show_left = false"));
@@ -213,18 +213,18 @@ fn cfg_014_text_with_an_error_is_not_saved_and_the_file_and_settings_stay() {
     let mut w = W::new("error");
     w.app.open_settings_file();
     let before = w.disk();
-    let broken = w.app.sf.text.replace("font_size = 15.5", "font_size = [");
+    let broken = w.app.sf.text.replace("toolbar_size = 110", "toolbar_size = [");
     w.app.sf.text = broken.clone();
     w.app.sf.dirty = true;
     w.app.sf.error = Config::parse_text(&broken).err();
     assert!(!w.app.save_settings_file(true));
     assert_eq!(w.disk(), before, "the file is as it was");
-    assert_eq!(w.app.cfg.font_size, 15.5, "the settings in use are as they were");
+    assert_eq!(w.app.cfg.toolbar_size, 110, "the settings in use are as they were");
     assert_eq!(w.app.sf.text, broken, "the text stays in the tab");
     assert!(w.app.sf.dirty && w.app.sf.error.is_some());
     assert!(w.toasts().iter().any(|m| m.contains("not saved")), "{:?}", w.toasts());
     // a value of the wrong kind is an error too
-    w.app.sf.text = before.replace("font_size = 15.5", "font_size = \"big\"");
+    w.app.sf.text = before.replace("toolbar_size = 110", "toolbar_size = \"big\"");
     assert!(!w.app.save_settings_file(true) && w.disk() == before);
     // it does not save by itself, and the view says what is wrong
     w.app.sf.error = Config::parse_text(&w.app.sf.text).err();
@@ -233,10 +233,10 @@ fn cfg_014_text_with_an_error_is_not_saved_and_the_file_and_settings_stay() {
     assert_eq!(w.disk(), before);
     assert!(w.hl.text.iter().any(|(t, _)| t.contains("is not valid settings")), "{:?}", w.hl.text.iter().map(|x| &x.0).collect::<Vec<_>>());
     // fixed, it is saved
-    w.app.sf.text = before.replace("font_size = 15.5", "font_size = 16.0");
+    w.app.sf.text = before.replace("toolbar_size = 110", "toolbar_size = 16");
     w.app.sf.error = None;
     assert!(w.app.save_settings_file(true));
-    assert_eq!(w.app.cfg.font_size, 16.0);
+    assert_eq!(w.app.cfg.toolbar_size, 16);
 }
 
 // spec: CFG-014
@@ -245,11 +245,11 @@ fn cfg_014_a_file_left_broken_from_outside_is_not_written_over_until_it_is_valid
     let mut w = W::new("outside-error");
     w.app.open_settings_file();
     let good = w.disk();
-    let broken = good.replace("font_size = 15.5", "font_size = [");
+    let broken = good.replace("toolbar_size = 110", "toolbar_size = [");
     w.write_outside(&broken);
     w.look();
     assert!(w.toasts().iter().any(|m| m.contains("has an error")), "{:?}", w.toasts());
-    assert_eq!(w.app.cfg.font_size, 15.5, "the settings in use stay");
+    assert_eq!(w.app.cfg.toolbar_size, 110, "the settings in use stay");
     assert!(w.app.sf.error.is_some() && w.app.sf.text == broken, "the tab shows it");
     // Shale does not write over it, and does not set it aside either
     w.app.cfg.dark_canvas = false;
@@ -262,9 +262,9 @@ fn cfg_014_a_file_left_broken_from_outside_is_not_written_over_until_it_is_valid
     w.look();
     assert_eq!(w.toasts().len(), n);
     // valid again: used, and written again
-    w.write_outside(&good.replace("font_size = 15.5", "font_size = 18.0"));
+    w.write_outside(&good.replace("toolbar_size = 110", "toolbar_size = 18"));
     w.look();
-    assert_eq!((w.app.cfg.font_size, w.app.cfg.read_only), (18.0, false));
+    assert_eq!((w.app.cfg.toolbar_size, w.app.cfg.read_only), (18, false));
     assert!(w.app.sf.error.is_none());
     w.app.cfg.dark_canvas = false;
     w.app.save_config();
