@@ -26,6 +26,9 @@ cpal = "0.18.2"
 rubato = "5.1.0"
 # the clipboard's picture when a paste arrives as an <img> tag (EDIT-019); the features egui-winit uses
 arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
+syntect = { version = "5", default-features = false, features = ["parsing", "regex-fancy"] }
+# bat's extra grammars for syntect (TypeScript, TOML, ...; EDIT-032), the set that works with the pure-Rust regex engine
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
 fontdb = { version = "0.23", default-features = false, features = ["fs", "memmap", "fontconfig"] }
 

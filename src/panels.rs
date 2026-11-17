@@ -571,7 +571,15 @@ impl ShaleApp {
                     for (line, level, title) in heads {
                         ui.horizontal(|ui| {
                             ui.add_space((level - min) as f32 * 14.0);
-                            if ui.add(egui::Label::new(egui::RichText::new(title).color(theme::TEXT)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            let links: Vec<_> = markdown::find_links(&title)
+                                .into_iter()
+                                .map(|l| {
+                                    let ok = v.resolve(&l.target, Some(&rel)).is_some();
+                                    (l, ok)
+                                })
+                                .collect();
+                            let job = crate::editor::outline_job(&title, &links, 14.0);
+                            if ui.add(egui::Label::new(job).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                 self.actions.push(Action::GotoLine { rel: rel.clone(), line });
                             }
                         });

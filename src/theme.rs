@@ -22,6 +22,20 @@ pub const TAG: Color32 = Color32::from_rgb(170, 155, 255);
 pub const TAG_BG: Color32 = Color32::from_rgb(52, 48, 78);
 pub const CODE_BG: Color32 = Color32::from_rgb(42, 42, 46);
 pub const CODE: Color32 = Color32::from_rgb(230, 170, 120);
+/// The colour of a piece of highlighted code (EDIT-032); plain code keeps `CODE`. Shale has one
+/// (dark) theme, so there is one palette, readable on `CODE_BG`.
+pub fn syntax_colour(kind: crate::syntax::Kind) -> Color32 {
+    use crate::syntax::Kind;
+    match kind {
+        Kind::Keyword => Color32::from_rgb(198, 142, 235),
+        Kind::String => Color32::from_rgb(152, 205, 120),
+        Kind::Number | Kind::Constant => Color32::from_rgb(240, 150, 100),
+        Kind::Comment => Color32::from_rgb(120, 128, 140),
+        Kind::Function => Color32::from_rgb(110, 175, 250),
+        Kind::Type => Color32::from_rgb(230, 200, 110),
+        Kind::Operator => Color32::from_rgb(110, 205, 210),
+    }
+}
 pub const HEADING: Color32 = Color32::from_rgb(236, 236, 236);
 pub const DONE: Color32 = Color32::from_rgb(120, 120, 120);
 pub const QUOTE: Color32 = Color32::from_rgb(170, 170, 170);

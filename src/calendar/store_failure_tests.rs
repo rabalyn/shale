@@ -6,7 +6,7 @@
 //! where the file should be, a file where the folder should be), not with permission bits, which
 //! root ignores (the CI container runs as root).
 
-use crate::calendar::ics::{self, Event};
+use crate::calendar::ics::Event;
 use crate::calendar::store::tests::wait;
 use crate::calendar::store::{file_of, CalendarSource, CalendarStore, SourceKind, DEFAULT_SYNC_MINUTES};
 use crate::calendar::time as t;
@@ -115,6 +115,20 @@ fn a_local_delete_that_cannot_write_says_so() {
     assert!(store.delete_event("gone", event(), None).err().unwrap().contains("no longer configured"));
 }
 
+// spec: CAL-021
+#[test]
+fn a_local_delete_after_the_file_vanished_refuses() {
+    let (mut store, src, file) = local_with("delete-vanished", "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:e1\r\nDTSTART:20270115T080000Z\r\nSUMMARY:Dentist\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+    let e = store.find(&src.id, "e1").unwrap();
+    std::fs::remove_file(&file).unwrap();
+    let err = wait(&store.delete_event(&src.id, e, None).unwrap()).unwrap_err();
+    assert!(err.starts_with("Could not delete the event from “Home”") && err.contains("the calendar file is gone"), "{err}");
+    assert!(!file.exists(), "the file was not written again");
+    assert_eq!(trash_count(&store.trash_dir), 0);
+    store.reload_local();
+    assert!(store.events[&src.id].is_empty(), "the calendar is shown as it now is");
+}
+
 // spec: CAL-007, CAL-021
 #[test]
 fn deleting_one_date_of_a_repeating_event_leaves_the_others() {
@@ -177,13 +191,16 @@ fn deleting_one_date_when_the_file_cannot_be_written_or_has_vanished() {
     let err = wait(&store.delete_occurrence(&src.id, &master, master.start + DAY, None).unwrap()).unwrap_err();
     assert!(err.contains("nothing was deleted"), "{err}");
     assert!(!std::fs::read_to_string(&file).unwrap().contains("EXDATE"), "the file was not changed");
-    // the file vanished after loading: the series is written back without the date
-    let (store, src, file) = local_with("date-vanished", DAILY);
+    // the file vanished after loading: the delete is refused, nothing is written or kept
+    let (mut store, src, file) = local_with("date-vanished", DAILY);
     let master = store.find(&src.id, "daily").unwrap();
     std::fs::remove_file(&file).unwrap();
-    wait(&store.delete_occurrence(&src.id, &master, master.start + DAY, None).unwrap()).unwrap();
-    let evs = ics::parse_ics(&std::fs::read_to_string(&file).unwrap());
-    assert_eq!((evs.len(), evs[0].exdates.clone()), (1, vec![master.start + DAY]));
+    let err = wait(&store.delete_occurrence(&src.id, &master, master.start + DAY, None).unwrap()).unwrap_err();
+    assert!(err.starts_with("Could not remove the date from “Home”") && err.contains("the calendar file is gone"), "{err}");
+    assert!(!file.exists(), "the file was not written again");
+    assert_eq!(trash_count(&store.trash_dir), 0);
+    store.reload_local();
+    assert!(store.events[&src.id].is_empty(), "the calendar is shown as it now is");
     // refused before a job starts
     let (mut store, src, _) = local_with("date-ro", DAILY);
     let master = store.find(&src.id, "daily").unwrap();

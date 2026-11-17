@@ -28,6 +28,9 @@ and sets the sync interval per calendar (15 minutes by default).
   Delete asks first, and a copy is kept in `calendar-trash` in the data folder.
 - A repeating event asks what you mean: **Edit this date** or **Edit all repeats**, **Delete
   this date** or **Delete all repeats**.
+- If a local calendar's `.ics` file was deleted outside Shale, Delete shows an error ("the calendar
+  file is gone") and writes nothing; the calendar is reloaded and shown empty. Saving an event
+  creates the file again.
 - Double-click a day or time to create an event; it starts at the next full or half hour and is
   30 minutes long.
 

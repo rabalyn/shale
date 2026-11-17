@@ -7,6 +7,7 @@ use crate::fonts::{AreaFont, EditorFonts};
 #[cfg(test)]
 use crate::link_assist::link_query;
 use crate::markdown::{self, LinkSpan};
+use crate::syntax;
 use crate::theme;
 use crate::vault::Vault;
 use eframe::egui::{self, text::LayoutJob, Color32, FontFamily, FontId, Galley, Key, Modifiers, Pos2, Rect, Stroke, TextFormat, Ui, Vec2};
@@ -47,6 +48,8 @@ struct Fmt {
     ctag: bool,
     /// the text of a line the preview draws rendered: it has the rendered font (CFG-032)
     rendered: bool,
+    /// highlighted code: what this piece of a code block or code span is (EDIT-032)
+    syn_kind: Option<crate::syntax::Kind>,
 }
 
 pub fn heading_scale(level: u8) -> f32 {
@@ -175,6 +178,12 @@ pub fn highlight(text: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob
 pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorFonts, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> LayoutJob {
     let mut fmts = vec![Fmt::default(); text.len()];
     let fenced = markdown::fenced_code_lines(text);
+    for block in syntax::fenced_blocks(text) {
+        let body = &text[block.body.clone()];
+        for (r, kind) in syntax::highlight(&block.lang, body).iter() {
+            set(&mut fmts, block.body.start + r.start..block.body.start + r.end, |f| f.syn_kind = Some(*kind));
+        }
+    }
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
     let mut in_front = false;
     for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
@@ -244,6 +253,10 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorF
                     set(&mut fmts, r.clone(), |f| f.code = true);
                     set(&mut fmts, r.start..r.start + 1, |f| f.syn = true);
                     set(&mut fmts, r.end - 1..r.end, |f| f.syn = true);
+                    let inner = off + i + 1;
+                    for (sr, kind) in syntax::highlight_inline(&line[i + 1..i + 1 + e]) {
+                        set(&mut fmts, inner + sr.start..inner + sr.end, |f| f.syn_kind = Some(kind));
+                    }
                     local_code.push(r);
                     i += e + 2;
                     continue;
@@ -340,6 +353,24 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorF
     job
 }
 
+/// A heading title as the outline shows it (LINK-013): the editor's inline styling (bold, italic,
+/// code, strike, highlight, `<mark>` colours, links by their shown text) with the markup left out
+/// of the text altogether, not just hidden.
+pub fn outline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob {
+    let job = highlight_preview(title, links, &EditorFonts::uniform(base), &[], Some(1..1));
+    let mut out = LayoutJob::default();
+    for s in &job.sections {
+        let hidden = s.format.color == Color32::TRANSPARENT && s.format.font_id.size <= 1.0;
+        if hidden {
+            continue;
+        }
+        let start = out.text.len();
+        out.text.push_str(&job.text[s.byte_range.start.0..s.byte_range.end.0]);
+        out.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(out.text.len()), format: s.format.clone() });
+    }
+    out
+}
+
 fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
     let AreaFont { family, size: base } = if f.rendered { &fonts.rendered } else { &fonts.raw }.clone();
     if f.image_h > 0 {
@@ -361,7 +392,7 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
         color = theme::TEXT_STRONG;
     }
     if mono {
-        color = theme::CODE;
+        color = f.syn_kind.map_or(theme::CODE, theme::syntax_colour);
     }
     if f.marker {
         color = theme::ACCENT;
@@ -580,12 +611,21 @@ impl NoteEditor {
     }
 
     /// Draw the formatting toolbar (EDIT-026); a click is done to the text by the next `show`.
+    /// While a table cell is edited in the grid the bar works on the text of the cell (EDIT-030).
     pub fn toolbar(&mut self, ui: &mut Ui, text: &str, palettes: &crate::format_bar::Palettes) {
-        let sel = self.selection_bytes(ui.ctx(), text);
-        if let Some(cmd) = self.bar.show(ui, text, sel, palettes) {
+        let in_cell = self.grid.cell.is_some();
+        let (shown, sel) = match &self.grid.cell {
+            Some(c) => (c.buf.as_str(), c.selection_bytes()),
+            None => (text, self.selection_bytes(ui.ctx(), text)),
+        };
+        let bar = ui.scope(|ui| self.bar.show(ui, shown, sel, in_cell, palettes));
+        // a press on the bar (or on its popups) takes the keyboard from the cell's box: that does not end the editing
+        let pressed = ui.input(|i| i.pointer.any_down() || i.pointer.any_released());
+        self.grid.hold = in_cell && pressed && (ui.rect_contains_pointer(bar.response.rect) || egui::Popup::is_any_open(ui.ctx()));
+        if let Some(cmd) = bar.inner {
             self.format_request = Some(cmd);
             // the click took the keyboard from the text box: give it back
-            self.request_focus = true;
+            self.request_focus = !in_cell;
             ui.ctx().request_repaint();
         }
     }
@@ -610,6 +650,24 @@ impl NoteEditor {
             self.vim_apply_cursor(ui, text);
         }
         true
+    }
+
+    /// The table cell being edited in the grid: (row, column) (testing aid).
+    #[cfg(test)]
+    pub(crate) fn editing_cell(&self) -> Option<(usize, usize)> {
+        self.grid.cell.as_ref().map(|c| (c.row, c.col))
+    }
+
+    /// The cells of the block selected with Shift+arrow keys, as (row, column) (testing aid).
+    #[cfg(test)]
+    pub(crate) fn selected_cells(&self) -> Vec<(usize, usize)> {
+        self.grid.cell.as_ref().and_then(|c| c.block).map_or(vec![], |b| b.cells())
+    }
+
+    /// The id of the box of the cell being edited (testing aid).
+    #[cfg(test)]
+    pub(crate) fn cell_box_id(&self) -> egui::Id {
+        crate::table_grid::TableGrid::cell_id(self.id)
     }
 
     /// Is the `[!` file picker popup on screen?
@@ -1091,6 +1149,12 @@ impl NoteEditor {
         }
         if let Some((n, change)) = self.table_edit.take() {
             changed |= self.apply_table_edit(ui, text, undo.of(rel), n, &change, true);
+        }
+        // a toolbar command goes to the cell being edited (EDIT-030); else to the note below
+        if let Some(n) = self.grid.cell.as_ref().map(|c| c.table) {
+            if let Some(cmd) = self.format_request.take() {
+                self.grid.format(ui.ctx(), self.id, n, cmd);
+            }
         }
         for (n, change, step) in std::mem::take(&mut self.grid.pending) {
             changed |= self.apply_table_edit(ui, text, undo.of(rel), n, &change, step);
@@ -3477,16 +3541,15 @@ mod tests {
         g.key(Key::ArrowLeft, Modifiers::NONE);
         g.key(Key::ArrowLeft, Modifiers::NONE);
         assert_eq!((g.editing(), g.cell_caret().0), (Some((0, 0)), 0), "the first cell: Left stays");
-        // Shift+arrow selects inside the cell and never leaves it
+        // Shift+arrow selects text inside the cell, and the cells at the edge of the text (raba/shale#243)
         g.key(Key::ArrowRight, Modifiers::SHIFT);
-        assert_eq!((g.editing(), g.cell_caret()), (Some((0, 0)), (1, true)));
+        assert_eq!((g.editing(), g.cell_caret(), g.ed.selected_cells()), (Some((0, 0)), (1, true), vec![]));
         g.key(Key::ArrowRight, Modifiers::SHIFT);
-        assert_eq!(g.editing(), Some((0, 0)));
-        // with text selected Right does not leave either
+        assert_eq!((g.editing(), g.ed.selected_cells()), (Some((0, 0)), vec![(0, 0), (0, 1)]));
+        // a plain arrow ends that and moves on from the cell
         g.key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(g.editing(), Some((0, 0)));
+        assert_eq!((g.editing(), g.ed.selected_cells()), (Some((0, 1)), vec![]));
         // typing after a move goes where the cursor is
-        g.key(Key::ArrowRight, Modifiers::NONE);
         g.type_text("x");
         g.frames(1);
         assert_eq!(g.editing(), Some((0, 1)));
@@ -3861,6 +3924,60 @@ mod tests {
     fn format_of<'a>(job: &'a LayoutJob, text: &str, needle: &str) -> &'a TextFormat {
         let at = text.find(needle).unwrap_or_else(|| panic!("{needle} is not in the text"));
         &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format
+    }
+
+    // spec: LINK-013
+    #[test]
+    fn the_outline_shows_heading_text_formatted_without_markup() {
+        let plain = |t: &str, links: &[(LinkSpan, bool)]| outline_job(t, links, 14.0);
+        let job = plain("<mark style=\"background: #FFFF00;\">Audio</mark>", &[]);
+        assert_eq!(job.text, "Audio");
+        assert_eq!(job.sections[0].format.background, Color32::from_rgb(255, 255, 0));
+        assert_eq!(plain("**B** and *i* ~~s~~ `c` ==h==", &[]).text, "B and i s c h");
+        let job = plain("**B** x", &[]);
+        assert_eq!(job.sections[0].format.color, theme::TEXT_STRONG);
+        let job = plain("~~s~~", &[]);
+        assert_eq!(job.sections[0].format.strikethrough.width, 1.0);
+        let job = plain("`c`", &[]);
+        assert_eq!(job.sections[0].format.font_id.family, FontFamily::Monospace);
+        for t in ["See [[Note|Alias]] now", "See [Alias](Note.md) now"] {
+            let links: Vec<(LinkSpan, bool)> = markdown::find_links(t).into_iter().map(|l| (l, true)).collect();
+            let job = plain(t, &links);
+            assert_eq!(job.text, "See Alias now", "{t}");
+            let at = job.text.find("Alias").unwrap();
+            let f = &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format;
+            assert_eq!(f.color, theme::LINK);
+        }
+    }
+
+    // spec: EDIT-032
+    #[test]
+    fn fenced_code_is_coloured_by_the_language_of_its_fence_and_stays_plain_without_one() {
+        let js = "```js\nconsole.log(\"foooo\")\n```";
+        let job = highlight(js, &[], 15.0);
+        let string = format_of(&job, js, "\"foooo\"");
+        assert_eq!(string.color, theme::syntax_colour(syntax::Kind::String));
+        assert_eq!((string.background, string.font_id.family.clone()), (theme::CODE_BG, FontFamily::Monospace), "still a code block");
+        assert_ne!(format_of(&job, js, "console").color, string.color, "more than one colour in the block");
+        for plain in ["```\nlet a = \"x\"\n```", "```klingon\nlet a = \"x\"\n```"] {
+            let job = highlight(plain, &[], 15.0);
+            assert_eq!(format_of(&job, plain, "\"x\"").color, theme::CODE, "{plain}");
+        }
+        // the markdown preview draws code blocks as they are
+        let job = highlight_preview(js, &[], &crate::fonts::EditorFonts::uniform(15.0), &[], Some(5..5));
+        assert_eq!(format_of(&job, js, "\"foooo\"").color, theme::syntax_colour(syntax::Kind::String));
+    }
+
+    // spec: EDIT-032
+    #[test]
+    fn inline_code_colours_its_strings_numbers_and_calls_and_keeps_the_backticks_dim_code() {
+        let text = "call `console.log(\"fooo\", 7)` now and `plain` too";
+        let job = highlight(text, &[], 15.0);
+        assert_eq!(format_of(&job, text, "\"fooo\"").color, theme::syntax_colour(syntax::Kind::String));
+        assert_eq!(format_of(&job, text, "7)").color, theme::syntax_colour(syntax::Kind::Number));
+        assert_eq!(format_of(&job, text, "log").color, theme::syntax_colour(syntax::Kind::Function));
+        assert_eq!(format_of(&job, text, "plain").color, theme::CODE);
+        assert_eq!(format_of(&job, text, "\"fooo\"").background, theme::CODE_BG);
     }
 
     // spec: EDIT-029

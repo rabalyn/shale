@@ -20,6 +20,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
 
+- **Syntax highlighting**: a fenced code block is coloured by the language on its opening fence
+  (```` ```js ````, ```` ```rust ````, `python`, `ts`, `toml`, `sh`, `json`, `yaml`, `c++`, … about 140 languages, with the usual aliases) in the
+  editor and the reading view; a block without a language or with an unknown one stays plain.
+  Inline code colours its strings, numbers and called names. The PDF export draws code the same way,
+  on the same dark code background (PDF-007).
 - Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
 - A **formatting toolbar** above the text (Settings → Editor, on by default, button size 80–200 %) has a button for
@@ -156,13 +161,21 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   rows instead. Drag the borders to resize columns and rows, the edges to resize the whole table;
   a double click on a border makes all columns (rows) the same size. Hover the grid for buttons
   that add a row or column and delete the hovered row or column. Toolbar formatting of a
-  selection across cells formats each cell on its own.
+  selection across cells formats each cell on its own; while a cell is edited in the grid the
+  toolbar formats the cell's text (the line buttons are greyed out) and the change is part of
+  the cell's undo step. **Shift+arrow keys** select a rectangular block of cells (Shift+Right then
+  Shift+Up gives 2 by 2; the arrows select text first and go on to cells at the edge of the text):
+  the selected cells are highlighted, the toolbar's inline buttons format all of them, Delete and
+  Backspace clear them (one undo step each editing), typing goes into the block's top left cell,
+  and a plain arrow key or Esc ends the block.
 
   ![The Markdown preview](userguide/z_media/screenshots/editor-preview.png)
 
   ![A table as a grid, with its buttons](userguide/z_media/screenshots/table-grid.png)
 
   ![A table cell edited in the grid](userguide/z_media/screenshots/table-cell-edit.png)
+
+  ![A block of 2 by 2 cells selected with Shift+arrow keys](userguide/z_media/screenshots/table-cell-block.png)
 
   ![A table in the reading view](userguide/z_media/screenshots/table-reading.png)
 
@@ -234,7 +247,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![Graph](userguide/z_media/screenshots/graph.png)
 
-- The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline and a local
+- The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline (headings with their formatting, as in the editor) and a local
   graph of the open note.
 - The vault graph shows every note. Red dots are missing notes and green ones are drawings.
 
@@ -710,6 +723,7 @@ Text editing keys and vim keys are fixed.
 | Space f g | Vim-style editing, normal mode: search the text of notes, mail and posts (`*` and `?` are wildcards; results grouped with counts; ↓ / ↑ or Ctrl+J / Ctrl+K select, Enter opens the hit where it belongs, Esc closes) |
 | Alt+↑ / Alt+↓ | Move the current line |
 | Tab / Shift+Tab | Indent lists or change heading levels |
+| Shift+arrows | In a table cell edited in the grid: select a block of cells (formatting buttons and Delete / Backspace work on all of them; typing ends it) |
 
 ### Mail view keys
 

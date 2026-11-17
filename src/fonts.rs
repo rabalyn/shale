@@ -209,8 +209,7 @@ pub struct EditorFonts {
 }
 
 impl EditorFonts {
-    /// One size in Shale's own font for both (tests).
-    #[cfg(test)]
+    /// One size in Shale's own font for both (the outline, tests).
     pub fn uniform(size: f32) -> EditorFonts {
         let f = AreaFont { family: FontFamily::Proportional, size };
         EditorFonts { raw: f.clone(), rendered: f }

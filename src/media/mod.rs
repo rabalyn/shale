@@ -67,6 +67,7 @@ pub fn media_kind(p: &Path) -> Option<Kind> {
 }
 
 /// The file extension for a content type of a media file ("image/jpeg" → "jpg"), None if it is none.
+#[cfg(target_os = "linux")]
 pub fn ext_for_mime(mime: &str) -> Option<&'static str> {
     let m = mime.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
     Some(match m.as_str() {

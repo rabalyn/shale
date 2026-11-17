@@ -8,7 +8,7 @@
 #
 # A branch is a local branch if one has the name, else `origin/<branch>`, else any commit.
 # The checks: every new commit names an issue (FORGE-008), `cargo fmt --check`, clippy with
-# `-D warnings`, `cargo test` (also `cargo test --release` with --release), and the real-server
+# `-D warnings` for Linux, and for macOS and Windows (`scripts/cross-check.sh`), `cargo test` (also `cargo test --release` with --release), and the real-server
 # suites of tests/caldav-env and tests/mail-env when the change touches the CalDAV or mail code
 # or the environments (`.forgejo/scripts/env-tests.sh wanted`); --no-env-tests skips them and
 # says so. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
@@ -81,6 +81,8 @@ checks() {
   step "commits name an issue (FORGE-008)" sh .forgejo/scripts/check-commit-issues.sh "$base" HEAD || return 1
   step "cargo fmt --check" cargo fmt --check || return 1
   step "cargo clippy" cargo clippy -q --all-targets --locked -- -D warnings || return 1
+  # code used only from Linux-only `cfg` code is dead on macOS and Windows (BUILD-004, DEV-015)
+  step "macOS and Windows clippy (scripts/cross-check.sh)" sh scripts/cross-check.sh || return 1
   step "cargo test" cargo test -q --locked || return 1
   if [ "$RELEASE" = yes ]; then
     step "cargo test --release" cargo test -q --release --locked || return 1

@@ -148,8 +148,6 @@ fn over_white([r, g, b, a]: [u8; 4]) -> Rgba {
 fn print_bg(c: Color32) -> Option<Rgba> {
     if c == Color32::TRANSPARENT {
         None
-    } else if c == theme::CODE_BG {
-        Some(Rgba(238, 238, 240, 255))
     } else if c == theme::TAG_BG {
         Some(Rgba(236, 232, 251, 255))
     } else {
@@ -289,10 +287,11 @@ impl<'a> Writer<'a> {
         }
     }
 
-    /// A table as a grid (EDIT-024): column widths from the same rule as on screen, cells
+    /// A table as a grid (EDIT-024): column widths from the table's stored sizes in proportion
+    /// (EDIT-031) or else from the same rule as on screen, cells
     /// wrapped inside their column, the header filled and bold. A table that does not fit the
     /// rest of the page goes on at the next page between two rows, with the header row again.
-    fn table(&mut self, vault: &Vault, rel: &Path, t: &crate::table::Table, ink: Color32) {
+    fn table(&mut self, vault: &Vault, rel: &Path, t: &crate::table::Table, sizes: &crate::table::Sizes, ink: Color32) {
         let base = self.opts.font_pt;
         let x0 = self.m;
         let ncols = t.header.len();
@@ -321,9 +320,24 @@ impl<'a> Writer<'a> {
                 }
             }
         }
-        let text_w = crate::table::column_widths(&natural, &least, self.cw() - 2.0 * CELL_PAD_X * ncols as f32);
+        let text_w = match crate::table::stored_widths(&sizes.cols, ncols, self.cw()) {
+            Some(w) => w.iter().map(|w| (w - 2.0 * CELL_PAD_X).max(1.0)).collect(),
+            None => crate::table::column_widths(&natural, &least, self.cw() - 2.0 * CELL_PAD_X * ncols as f32),
+        };
         let lines: Vec<Vec<Vec<Vec<Piece>>>> = rows.iter().map(|row| row.iter().enumerate().map(|(c, ps)| wrap_pieces(ps, text_w[c].max(1.0))).collect()).collect();
-        let heights: Vec<f32> = lines.iter().map(|row| row.iter().map(|ls| ls.iter().map(|l| self.line_height(l)).sum::<f32>()).fold(base * 1.45, f32::max) + 2.0 * CELL_PAD_Y).collect();
+        let rows_fit = sizes.rows.len() == lines.len() && sizes.rows.iter().all(|h| h.is_finite());
+        let heights: Vec<f32> = lines
+            .iter()
+            .enumerate()
+            .map(|(r, row)| {
+                let h = row.iter().map(|ls| ls.iter().map(|l| self.line_height(l)).sum::<f32>()).fold(base * 1.45, f32::max) + 2.0 * CELL_PAD_Y;
+                if rows_fit {
+                    h.max(sizes.rows[r])
+                } else {
+                    h
+                }
+            })
+            .collect();
         let widths: Vec<f32> = text_w.iter().map(|w| w + 2.0 * CELL_PAD_X).collect();
         self.need(heights[0] + heights.get(1).copied().unwrap_or(0.0));
         for r in 0..lines.len() {
@@ -413,13 +427,16 @@ impl<'a> Writer<'a> {
             // colours the note asks for are printed as written (EDIT-028), not mapped for paper
             let paint = paints.iter().find(|(pr, ..)| pr.start <= r.start && r.end <= pr.end);
             let link = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)).map(|(_, l, _)| l.target.clone());
+            // inline code keeps its screen colours on the code background (PDF-007)
+            let on_code = f.background == theme::CODE_BG;
             out.push(Piece {
                 text: job.text[r].to_string(),
                 kind: font_kind(&f.font_id.family),
                 size: f.font_id.size,
-                color: if paint.is_some() { rgba(f.color) } else { print_color(f.color) },
+                color: if paint.is_some() || on_code { rgba(f.color) } else { print_color(f.color) },
                 bg: match paint.and_then(|p| p.1) {
                     Some([r, g, b, a]) => Some(over_white([r, g, b, a])),
+                    None if on_code => Some(rgba(theme::CODE_BG)),
                     None => print_bg(f.background),
                 },
                 italic: f.italics,
@@ -430,6 +447,59 @@ impl<'a> Writer<'a> {
             });
         }
         out
+    }
+
+    /// A fenced code block as the reading view shows it (PDF-007): the lines on the code
+    /// background, each piece in the colour of its kind (`syntax::highlight`; plain without a
+    /// known language), long lines wrapped by characters.
+    fn code_block(&mut self, word: &str, lines: &[&str], size: f32) {
+        let (x0, cw) = (self.m, self.cw());
+        let lh = size * 1.4;
+        let plain = rgba(theme::CODE);
+        let text = lines.join("\n");
+        let spans = crate::syntax::highlight(word, &text);
+        let mut span = spans.iter().peekable();
+        let mut at = 0;
+        for line in lines {
+            // every character with its colour; a tab is four spaces
+            let mut chars: Vec<(char, Rgba)> = Vec::new();
+            for (bi, c) in line.char_indices() {
+                let pos = at + bi;
+                while span.next_if(|(r, _)| r.end <= pos).is_some() {}
+                let colour = span.peek().filter(|(r, _)| r.start <= pos).map_or(plain, |(_, k)| rgba(theme::syntax_colour(*k)));
+                chars.extend(std::iter::repeat_n((if c == '\t' { ' ' } else { c }, colour), if c == '\t' { 4 } else { 1 }));
+            }
+            at += line.len() + 1;
+            let mut rest = &chars[..];
+            loop {
+                let mut cut = rest.len();
+                let mut acc = 0.0;
+                for (n, (c, _)) in rest.iter().enumerate() {
+                    acc += crate::pdf::write::char_width(FontKind::Mono, size, *c);
+                    if acc > cw - 12.0 {
+                        cut = n.max(1);
+                        break;
+                    }
+                }
+                let (now, later) = rest.split_at(cut);
+                self.need(lh);
+                let y = self.y;
+                self.p().rect(x0, y, cw, lh, Some(rgba(theme::CODE_BG)), None);
+                let mut x = x0 + 6.0;
+                let mut n = 0;
+                while n < now.len() {
+                    let colour = now[n].1;
+                    let run: String = now[n..].iter().take_while(|(_, k)| *k == colour).map(|(c, _)| *c).collect();
+                    n += run.chars().count();
+                    x += self.p().text(TextStyle::plain(FontKind::Mono, size, colour), x, y + size * 1.05, &run);
+                }
+                self.y += lh;
+                if later.is_empty() {
+                    break;
+                }
+                rest = later;
+            }
+        }
     }
 
     /// What an embed that is `editor_size` big in the editor is in the PDF (PDF-005).
@@ -559,7 +629,7 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     let tables = if opts.plain_tables { vec![] } else { crate::table::find_tables(text) };
     while i < lines.len() {
         if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
-            w.table(vault, rel, &b.table, ink);
+            w.table(vault, rel, &b.table, &b.meta.sizes, ink);
             i = b.lines.end;
             continue;
         }
@@ -568,41 +638,16 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
         let x0 = w.m;
         let cw = w.cw();
         if fenced.get(i).copied().unwrap_or(false) {
-            // code block: collect, then draw in a grey box
+            // code block: collect, then draw on the code background (PDF-007)
+            let word = crate::syntax::fence_language(line);
             let mut code = Vec::new();
             i += 1;
             while i < lines.len() && !(lines[i].1.trim_start().starts_with("```") || lines[i].1.trim_start().starts_with("~~~")) {
-                code.push(lines[i].1.replace('\t', "    "));
+                code.push(lines[i].1);
                 i += 1;
             }
             i += 1;
-            let size = base * 0.9;
-            let lh = size * 1.4;
-            for l in code {
-                // wrap long code lines by characters
-                let mut rest: String = l;
-                loop {
-                    let mut cut = rest.len();
-                    let mut acc = 0.0;
-                    for (bi, c) in rest.char_indices() {
-                        acc += crate::pdf::write::char_width(FontKind::Mono, size, c);
-                        if acc > cw - 12.0 {
-                            cut = bi;
-                            break;
-                        }
-                    }
-                    let (now, later) = rest.split_at(cut.max(rest.chars().next().map(|c| c.len_utf8()).unwrap_or(0).min(rest.len())));
-                    w.need(lh);
-                    let y = w.y;
-                    w.p().rect(x0, y, cw, lh, Some(Rgba(238, 238, 240, 255)), None);
-                    w.p().text(TextStyle::plain(FontKind::Mono, size, Rgba(150, 70, 0, 255)), x0 + 6.0, y + size * 1.05, now);
-                    w.y += lh;
-                    if later.is_empty() {
-                        break;
-                    }
-                    rest = later.to_string();
-                }
-            }
+            w.code_block(&word, &code, base * 0.9);
             w.y += base * 0.5;
             continue;
         }
@@ -1188,6 +1233,13 @@ pub(crate) mod tests {
         toks[toks.len() - 3].parse().unwrap()
     }
 
+    /// The y (PDF coordinates, up) of the text drawn as `word`.
+    fn y_of(content: &str, word: &str) -> f32 {
+        let at = content.find(&format!("<{}> Tj", hex(word))).unwrap_or_else(|| panic!("{word} is not drawn"));
+        let toks: Vec<&str> = content[..at].split_whitespace().collect();
+        toks[toks.len() - 2].parse().unwrap()
+    }
+
     // spec: EDIT-024, PDF-001
     #[test]
     fn a_table_is_a_grid_in_the_pdf_and_plain_text_lines_when_asked() {
@@ -1227,6 +1279,46 @@ pub(crate) mod tests {
         // the long cell wraps in its column: the table is a few lines tall but still one page wide
         assert!(c.matches(&format!("<{}> Tj", hex("words "))).count() >= 119, "all the words are drawn");
         assert_eq!(render(&bytes).len(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: EDIT-031, PDF-001
+    #[test]
+    fn stored_column_widths_and_row_heights_shape_the_pdf_table() {
+        let (v, d) = vault();
+        let rel = Path::new("Ideas.md");
+        let opts = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
+        let x_second = |text: &str| {
+            let c = contents(&export_note(&v, rel, text, &opts).unwrap());
+            x_of(&c, "Bbb")
+        };
+        let body = "| Aaa | Bbb |\n|---|---|\n| a | b |\n";
+        let auto = x_second(body);
+        let m = 20.0 * MM;
+        let text_w = 595.0 - 2.0 * m;
+        // a table that fits keeps its stored widths: a narrow table stays narrow, as in the editor
+        let narrow = x_second(&format!("<!-- shale-table cols=100,300 -->\n{body}"));
+        assert!((narrow - (m + 100.0 + CELL_PAD_X)).abs() < 1.0, "{narrow}");
+        // one that is too wide is scaled down together to the text width
+        let wide = x_second(&format!("<!-- shale-table cols=3000,1000 -->\n{body}"));
+        assert!((wide - (m + (text_w - 1.0) * 0.75 + CELL_PAD_X)).abs() < 1.0, "{wide}");
+        // a tiny stored width is raised to MIN_COL
+        let clamped = x_second(&format!("<!-- shale-table cols=1,100 -->\n{body}"));
+        assert!((clamped - (m + crate::table::MIN_COL + CELL_PAD_X)).abs() < 1.0, "{clamped}");
+        // sizes that do not match the columns (or are no numbers) are ignored
+        for bad in ["cols=100", "cols=100,200,300", "cols=0,100", "cols=x,y"] {
+            let got = x_second(&format!("<!-- shale-table {bad} -->\n{body}"));
+            assert!((got - auto).abs() < 0.01, "{bad}: {got} {auto}");
+        }
+        // a stored row height is a least height: the table is that much taller
+        let y_last = |text: &str| y_of(&contents(&export_note(&v, rel, text, &opts).unwrap()), "a");
+        let plain = y_last(body);
+        let tall = y_last(&format!("<!-- shale-table rows=60,80 -->\n{body}"));
+        assert!(tall < plain - 30.0, "the header row is at least 60 high: {plain} {tall}");
+        let short = y_last(&format!("<!-- shale-table rows=1,1 -->\n{body}"));
+        assert!((short - plain).abs() < 0.01, "a row is never shorter than its text");
+        let mismatch = y_last(&format!("<!-- shale-table rows=60 -->\n{body}"));
+        assert!((mismatch - plain).abs() < 0.01, "row heights that do not match are ignored");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -1311,6 +1403,66 @@ pub(crate) mod tests {
         assert!(c.contains("1.000 0.945 0.659 rg"), "==soft== is filled too");
         // black text on neon (dark text on a bright background), white on navy
         assert!(c.contains("0.000 0.000 0.502 rg"), "navy fill");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The `rg` operator of a screen colour, as the writer prints it.
+    fn rg(c: Color32) -> String {
+        let [r, g, b, _] = c.to_srgba_unmultiplied();
+        format!("{:.3} {:.3} {:.3} rg", r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+    }
+
+    /// The fill colour (as an `rg` operator) last set before the run drawn as `word`.
+    fn colour_of(content: &str, word: &str) -> String {
+        let at = content.find(&format!("<{}> Tj", hex(word))).unwrap_or_else(|| panic!("{word} is not drawn"));
+        let head = &content[..at];
+        let end = head.rfind(" rg").expect("a fill colour before the text");
+        let rgb: Vec<&str> = head[..end].rsplit(' ').take(3).collect();
+        format!("{} {} {} rg", rgb[2], rgb[1], rgb[0])
+    }
+
+    // spec: PDF-007, EDIT-032
+    #[test]
+    fn code_blocks_have_the_code_background_and_the_syntax_colours_of_the_reading_view() {
+        use crate::syntax::Kind;
+        let (v, d) = vault();
+        let rel = Path::new("Ideas.md");
+        let o = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
+        let js = export_note(&v, rel, "```js\nconst x = \"hi\"; // note\n```\n", &o).unwrap();
+        let c = contents(&js);
+        assert!(c.contains(&rg(theme::CODE_BG)), "the lines are filled with the code background");
+        assert_eq!(colour_of(&c, "const"), rg(theme::syntax_colour(Kind::Keyword)));
+        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::syntax_colour(Kind::String)));
+        assert_eq!(colour_of(&c, "// note"), rg(theme::syntax_colour(Kind::Comment)));
+        let colours: std::collections::HashSet<String> = ["const", "\"hi\"", "// note"].iter().map(|w| colour_of(&c, w)).collect();
+        assert!(colours.len() >= 3, "several distinct colours for the code text");
+        // no language, an unknown one: plain code colour, still on the code background
+        for fence in ["```", "```klingon"] {
+            let plain = export_note(&v, rel, &format!("{fence}\nconst x = \"hi\";\n```\n"), &o).unwrap();
+            let c = contents(&plain);
+            assert!(c.contains(&rg(theme::CODE_BG)), "{fence}: code background");
+            assert_eq!(colour_of(&c, "const x = \"hi\";"), rg(theme::CODE), "{fence}: one plain run in the code colour");
+        }
+        // a long line wraps and keeps its colours; a tab is four spaces
+        let long = format!("```js\n\tconst s = \"{}\";\n```\n", "x".repeat(300));
+        let c = contents(&export_note(&v, rel, &long, &o).unwrap());
+        assert!(c.contains(&format!("<{}> Tj", hex("    "))), "the tab is four spaces");
+        assert!(c.matches(&rg(theme::syntax_colour(Kind::String))).count() >= 2, "the string goes on in its colour on the next row");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-007, EDIT-032
+    #[test]
+    fn inline_code_is_on_the_code_background_with_the_colours_of_the_inline_rule() {
+        use crate::syntax::Kind;
+        let (v, d) = vault();
+        let o = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
+        let c = contents(&export_note(&v, Path::new("Ideas.md"), "Call `log(\"hi\", 42)` now and `plain` too.\n", &o).unwrap());
+        assert!(c.contains(&rg(theme::CODE_BG)), "a code background behind the run");
+        assert_eq!(colour_of(&c, "log"), rg(theme::syntax_colour(Kind::Function)));
+        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::syntax_colour(Kind::String)));
+        assert_eq!(colour_of(&c, "42"), rg(theme::syntax_colour(Kind::Number)));
+        assert_eq!(colour_of(&c, "plain"), rg(theme::CODE), "a span without such parts is code-coloured");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

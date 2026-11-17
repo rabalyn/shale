@@ -41,6 +41,20 @@ struct Label {
     strike: bool,
 }
 
+/// How the buttons are drawn: their scale and whether they are for the text of a table cell (EDIT-030).
+#[derive(Clone, Copy)]
+struct Look {
+    scale: f32,
+    cell: bool,
+}
+
+impl Look {
+    /// Whether `cmd` can be pressed: all of them for the note, the inline ones in a cell.
+    fn enabled(self, cmd: Cmd) -> bool {
+        !self.cell || format::works_in_a_cell(cmd)
+    }
+}
+
 /// The height of a button at scale 1.
 const BUTTON: f32 = 26.0;
 
@@ -51,15 +65,17 @@ fn rgb(c: [u8; 3]) -> Color32 {
 /// The button's look: the hover and pressed backgrounds of the icon buttons, then `draw` in the
 /// colour that goes with the state. Its tooltip is also its accessibility label (and the hint of scripts).
 /// `width` and everything `draw` paints are at scale 1; the button and the drawing are `s` times as big.
-fn tool(ui: &mut Ui, s: f32, width: f32, on: bool, tip: &str, draw: impl FnOnce(&egui::Painter, Rect, Color32, f32)) -> Response {
-    let (r, resp) = ui.allocate_exact_size(Vec2::new(width, BUTTON) * s, Sense::click());
-    let hovered = resp.hovered();
+fn tool(ui: &mut Ui, s: f32, width: f32, on: bool, enabled: bool, tip: &str, draw: impl FnOnce(&egui::Painter, Rect, Color32, f32)) -> Response {
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(width, BUTTON) * s, if enabled { Sense::click() } else { Sense::hover() });
+    let hovered = enabled && resp.hovered();
     if on {
         ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_ACTIVE);
     } else if hovered {
         ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_HOVER);
     }
-    let c = if on {
+    let c = if !enabled {
+        theme::FAINT
+    } else if on {
         theme::ACCENT
     } else if hovered {
         theme::TEXT_STRONG
@@ -68,7 +84,7 @@ fn tool(ui: &mut Ui, s: f32, width: f32, on: bool, tip: &str, draw: impl FnOnce(
     };
     draw(ui.painter(), r, c, s);
     crate::script::hint(tip, r);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, tip));
     resp.on_hover_text(tip)
 }
 
@@ -81,10 +97,10 @@ fn text_galley(painter: &egui::Painter, text: &str, l: Label, size: f32, c: Colo
 }
 
 /// A button with a text on it.
-fn text_tool(ui: &mut Ui, s: f32, text: &str, l: Label, on: bool, tip: &str) -> Response {
+fn text_tool(ui: &mut Ui, s: f32, text: &str, l: Label, on: bool, enabled: bool, tip: &str) -> Response {
     let size = if l.mono { 12.0 } else { 14.5 };
     let w = text_galley(ui.painter(), text, l, size, theme::TEXT).size().x + 12.0;
-    tool(ui, s, w.max(BUTTON), on, tip, |p, r, c, s| {
+    tool(ui, s, w.max(BUTTON), on, enabled, tip, |p, r, c, s| {
         let g = text_galley(p, text, l, size * s, c);
         let pos = r.center() - g.size() / 2.0;
         p.galley(pos, g.clone(), c);
@@ -140,13 +156,13 @@ fn draw_clear(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
 }
 
 /// A text button for a command: the command when it was clicked.
-fn text_cmd(ui: &mut Ui, s: f32, on: bool, cmd: Cmd, text: &str, l: Label, tip: &str) -> Option<Cmd> {
-    text_tool(ui, s, text, l, on, tip).clicked().then_some(cmd)
+fn text_cmd(ui: &mut Ui, b: Look, on: bool, cmd: Cmd, text: &str, l: Label, tip: &str) -> Option<Cmd> {
+    text_tool(ui, b.scale, text, l, on, b.enabled(cmd), tip).clicked().then_some(cmd)
 }
 
 /// A drawn button for a command: the command when it was clicked.
-fn draw_cmd(ui: &mut Ui, s: f32, on: bool, cmd: Cmd, tip: &str, draw: fn(&egui::Painter, Rect, Color32, f32)) -> Option<Cmd> {
-    tool(ui, s, BUTTON, on, tip, draw).clicked().then_some(cmd)
+fn draw_cmd(ui: &mut Ui, b: Look, on: bool, cmd: Cmd, tip: &str, draw: fn(&egui::Painter, Rect, Color32, f32)) -> Option<Cmd> {
+    tool(ui, b.scale, BUTTON, on, b.enabled(cmd), tip, draw).clicked().then_some(cmd)
 }
 
 fn separator(ui: &mut Ui, s: f32) {
@@ -156,15 +172,16 @@ fn separator(ui: &mut Ui, s: f32) {
 
 impl FormatBar {
     /// Draw the toolbar; returns the command a click asked for. `text` and `sel` (bytes) are the note and
-    /// its selection, which say what is "on" at the cursor.
-    pub fn show(&mut self, ui: &mut Ui, text: &str, sel: Range<usize>, palettes: &Palettes) -> Option<Cmd> {
+    /// its selection, which say what is "on" at the cursor. `cell`: they are the text of a table cell edited
+    /// in the grid (EDIT-030), and the buttons that make no sense there are greyed out.
+    pub fn show(&mut self, ui: &mut Ui, text: &str, sel: Range<usize>, cell: bool, palettes: &Palettes) -> Option<Cmd> {
         // centred over the editor (EDIT-026): the space left of it is half of what last frame's bar left
         // free; a bar that wraps (more than one row of buttons) counts as the whole width and so has none
         let full = ui.available_width();
         let pad = ((full - self.width) / 2.0).max(0.0).floor();
         let frame = ui.horizontal_top(|ui| {
             ui.add_space(pad);
-            self.frame(ui, text, &sel, palettes)
+            self.frame(ui, text, &sel, cell, palettes)
         });
         let (size, cmd) = frame.inner;
         let width = if size.y > BUTTON * palettes.scale * 1.5 { full } else { size.x };
@@ -176,40 +193,41 @@ impl FormatBar {
     }
 
     /// The bar's frame and buttons; returns the frame's size and the command a click asked for.
-    fn frame(&mut self, ui: &mut Ui, text: &str, sel: &Range<usize>, palettes: &Palettes) -> (Vec2, Option<Cmd>) {
+    fn frame(&mut self, ui: &mut Ui, text: &str, sel: &Range<usize>, cell: bool, palettes: &Palettes) -> (Vec2, Option<Cmd>) {
         let mut out = None;
         let on = |cmd| format::is_on(cmd, text, sel.clone());
-        let sc = palettes.scale;
+        let bar = Look { scale: palettes.scale, cell };
+        let sc = bar.scale;
         let resp = egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(CornerRadius::same(6)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(1.0, 2.0);
                 let mono = Label { mono: true, ..Default::default() };
                 let mut cmds: Vec<Option<Cmd>> = vec![
-                    text_cmd(ui, sc, on(Cmd::Bold), Cmd::Bold, "B", Label { bold: true, ..Default::default() }, "Bold: **text**"),
-                    text_cmd(ui, sc, on(Cmd::Italic), Cmd::Italic, "I", Label { italic: true, ..Default::default() }, "Italic: *text*"),
-                    text_cmd(ui, sc, on(Cmd::Strike), Cmd::Strike, "S", Label { strike: true, ..Default::default() }, "Strikethrough: ~~text~~"),
-                    text_cmd(ui, sc, on(Cmd::Highlight), Cmd::Highlight, "==", mono, "Highlight: ==text=="),
-                    text_cmd(ui, sc, on(Cmd::Code), Cmd::Code, "<>", mono, "Inline code: `code`"),
+                    text_cmd(ui, bar, on(Cmd::Bold), Cmd::Bold, "B", Label { bold: true, ..Default::default() }, "Bold: **text**"),
+                    text_cmd(ui, bar, on(Cmd::Italic), Cmd::Italic, "I", Label { italic: true, ..Default::default() }, "Italic: *text*"),
+                    text_cmd(ui, bar, on(Cmd::Strike), Cmd::Strike, "S", Label { strike: true, ..Default::default() }, "Strikethrough: ~~text~~"),
+                    text_cmd(ui, bar, on(Cmd::Highlight), Cmd::Highlight, "==", mono, "Highlight: ==text=="),
+                    text_cmd(ui, bar, on(Cmd::Code), Cmd::Code, "<>", mono, "Inline code: `code`"),
                 ];
                 separator(ui, sc);
                 cmds.push(self.palette(ui, 0, palettes));
                 cmds.push(self.palette(ui, 1, palettes));
                 separator(ui, sc);
-                cmds.push(heading_menu(ui, sc, text, sel));
-                cmds.push(draw_cmd(ui, sc, on(Cmd::Bullet), Cmd::Bullet, "Bullet list: - item", draw_bullets));
-                cmds.push(text_cmd(ui, sc, on(Cmd::Numbered), Cmd::Numbered, "1.", Label::default(), "Numbered list: 1. item"));
-                cmds.push(draw_cmd(ui, sc, on(Cmd::Task), Cmd::Task, "Task: - [ ] item", draw_task));
-                cmds.push(draw_cmd(ui, sc, on(Cmd::Quote), Cmd::Quote, "Quote: > text", draw_quote));
+                cmds.push(heading_menu(ui, bar, text, sel));
+                cmds.push(draw_cmd(ui, bar, on(Cmd::Bullet), Cmd::Bullet, "Bullet list: - item", draw_bullets));
+                cmds.push(text_cmd(ui, bar, on(Cmd::Numbered), Cmd::Numbered, "1.", Label::default(), "Numbered list: 1. item"));
+                cmds.push(draw_cmd(ui, bar, on(Cmd::Task), Cmd::Task, "Task: - [ ] item", draw_task));
+                cmds.push(draw_cmd(ui, bar, on(Cmd::Quote), Cmd::Quote, "Quote: > text", draw_quote));
                 separator(ui, sc);
-                cmds.push(text_cmd(ui, sc, false, Cmd::CodeBlock, "{ }", mono, "Code block: ``` fence"));
-                cmds.push(draw_cmd(ui, sc, false, Cmd::Rule, "Horizontal rule: ---", draw_rule));
-                cmds.push(draw_cmd(ui, sc, false, Cmd::Table, "Table: 2 columns, 2 rows", draw_table));
+                cmds.push(text_cmd(ui, bar, false, Cmd::CodeBlock, "{ }", mono, "Code block: ``` fence"));
+                cmds.push(draw_cmd(ui, bar, false, Cmd::Rule, "Horizontal rule: ---", draw_rule));
+                cmds.push(draw_cmd(ui, bar, false, Cmd::Table, "Table: 2 columns, 2 rows", draw_table));
                 separator(ui, sc);
-                cmds.push(text_cmd(ui, sc, false, Cmd::WikiLink, "[[ ]]", mono, "Link to a note: [[Note]]"));
-                cmds.push(text_cmd(ui, sc, false, Cmd::WebLink, "[ ]( )", mono, "Web link: [text](https://…)"));
-                cmds.push(text_cmd(ui, sc, false, Cmd::Embed, "![[ ]]", mono, "Embed a file or picture: opens the file picker (![[file]])"));
+                cmds.push(text_cmd(ui, bar, false, Cmd::WikiLink, "[[ ]]", mono, "Link to a note: [[Note]]"));
+                cmds.push(text_cmd(ui, bar, false, Cmd::WebLink, "[ ]( )", mono, "Web link: [text](https://…)"));
+                cmds.push(text_cmd(ui, bar, false, Cmd::Embed, "![[ ]]", mono, "Embed a file or picture: opens the file picker (![[file]])"));
                 separator(ui, sc);
-                cmds.push(draw_cmd(ui, sc, false, Cmd::Clear, "Clear formatting", draw_clear));
+                cmds.push(draw_cmd(ui, bar, false, Cmd::Clear, "Clear formatting", draw_clear));
                 out = cmds.into_iter().flatten().next();
             });
         });
@@ -221,7 +239,7 @@ impl FormatBar {
         let mark = which == 0;
         let (tip, none_label) = if mark { ("Highlight colour", "No highlight") } else { ("Font colour", "Default colour") };
         let last = if mark { self.last_mark } else { self.last_font };
-        let resp = tool(ui, palettes.scale, BUTTON + 10.0, false, tip, |p, r, c, s| {
+        let resp = tool(ui, palettes.scale, BUTTON + 10.0, false, true, tip, |p, r, c, s| {
             let g = Rect::from_center_size(r.center() + Vec2::new(-4.0, -1.0) * s, Vec2::splat(15.0 * s));
             if mark {
                 p.rect_filled(g.shrink2(Vec2::new(0.0, s)), 3.0 * s, rgb(last));
@@ -284,9 +302,10 @@ fn colour_dark(c: [u8; 3]) -> bool {
 }
 
 /// The heading button: Normal text and H1 to H6 in a menu.
-fn heading_menu(ui: &mut Ui, s: f32, text: &str, sel: &Range<usize>) -> Option<Cmd> {
+fn heading_menu(ui: &mut Ui, b: Look, text: &str, sel: &Range<usize>) -> Option<Cmd> {
     let level = (0..=6u8).find(|n| *n > 0 && format::is_on(Cmd::Heading(*n), text, sel.clone())).unwrap_or(0);
-    let resp = tool(ui, s, BUTTON + 14.0, level > 0, "Heading level", |p, r, c, s| {
+    let (s, cell) = (b.scale, b.cell);
+    let resp = tool(ui, s, BUTTON + 14.0, level > 0, !cell, "Heading level", |p, r, c, s| {
         let name = if level > 0 { format!("H{level}") } else { "H".to_string() };
         let t = text_galley(p, &name, Label { bold: true, ..Default::default() }, 14.0 * s, c);
         p.galley(r.center() - t.size() / 2.0 - Vec2::new(4.0 * s, 0.0), t, c);
