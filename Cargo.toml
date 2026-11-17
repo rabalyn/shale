@@ -26,6 +26,7 @@ cpal = "0.18.2"
 rubato = "5.1.0"
 # the clipboard's picture when a paste arrives as an <img> tag (EDIT-019); the features egui-winit uses
 arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "parsing", "regex-fancy"] }
 
 [dev-dependencies]
 # the time zone database that Windows builds bundle (below): the tests read it on every system
