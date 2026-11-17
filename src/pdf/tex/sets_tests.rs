@@ -19,6 +19,14 @@ pub(super) fn vault(tag: &str) -> PathBuf {
 
 pub(super) const META: &str = "name = \"Test set\"\nversion = \"1.0\"\nimported_at = \"2026-11-17\"\nlogo_file = \"mylogo\"\n\n[source]\nkind = \"local\"\npath = \"/somewhere/set.zip\"\n";
 
+/// `META` with a local source at `path`, written the way an import writes `set.toml` (the TOML
+/// writer escapes the backslashes of a Windows path, #323).
+pub(super) fn meta_from_local(path: &str) -> String {
+    let mut meta: SetMeta = toml::from_str(META).unwrap();
+    meta.source = Source::Local { path: path.into() };
+    toml::to_string_pretty(&meta).unwrap()
+}
+
 /// A set in the vault by hand: `set.toml`, one class file, and these kinds.
 pub(super) fn make_set(vault: &Path, id: &str, meta: &str, kinds: &[(&str, &str)]) -> PathBuf {
     let dir = sets_root(vault).join(id);
@@ -54,6 +62,23 @@ fn a_set_is_read_from_its_layout_in_the_vault() {
     assert!(s.problems.len() == 1 && s.problems[0].starts_with("kinds/broken.toml:"), "{:?}", s.problems);
     assert_eq!(s.dir, dir);
     assert_eq!(sets_root(&v), v.join("templates").join("tex"));
+    std::fs::remove_dir_all(&v).unwrap();
+}
+
+// spec: TEX-005
+#[test]
+fn a_windows_path_of_a_local_source_survives_set_toml() {
+    // #323: the path of a set imported on Windows has backslashes, which a TOML basic string
+    // would read as escapes; the import writes it escaped and the list reads it back unchanged
+    let v = vault("winpath");
+    let path = r"C:\Users\me\Downloads\tuda-ci.zip";
+    let text = meta_from_local(path);
+    assert_eq!(toml::from_str::<SetMeta>(&text).unwrap().source, Source::Local { path: path.into() });
+    make_set(&v, "mine", &text, &[("article", MINIMAL_KIND)]);
+    let found = scan(&v);
+    let s = found[0].info.as_ref().unwrap();
+    assert_eq!(s.meta.source, Source::Local { path: path.into() });
+    assert_eq!(s.meta.source.describe(), format!("from {path}"));
     std::fs::remove_dir_all(&v).unwrap();
 }
 
