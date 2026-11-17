@@ -1538,6 +1538,13 @@ impl ShaleApp {
         }
     }
 
+    /// Focus pane `i` and put the keyboard into the editor of its open note (Ctrl+H / Ctrl+L
+    /// between panes, NAV-011).
+    pub(crate) fn focus_pane_keyboard(&mut self, i: usize) {
+        self.focus_pane(i);
+        self.focus_editor();
+    }
+
     /// Put the keyboard back into the editor of the open note (Ctrl+L).
     pub fn focus_editor(&mut self) {
         self.tree.sel = None;
@@ -1919,6 +1926,8 @@ impl ShaleApp {
         }
         let in_mail = matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Mail));
         let sidebar_keys = self.tree.sel.is_some() || self.search.sel.is_some();
+        // the left sidebar has the keyboard: a marked row, or the search box
+        let in_sidebar = sidebar_keys || ui.ctx().memory(|m| m.has_focus(egui::Id::unique("search-input")));
         if mail_view {
             self.show_view(View::Mail, false);
         }
@@ -1938,13 +1947,26 @@ impl ShaleApp {
             self.side.left = LeftPanel::Files;
             self.focus_sidebar(ui.ctx());
         } else if to_sidebar && !(in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, -1, sidebar_keys)) {
-            self.focus_sidebar(ui.ctx());
+            // from a pane right of the first one: into the pane to its left (NAV-011)
+            if !in_sidebar && self.panes.focused > 0 {
+                self.focus_pane_keyboard(self.panes.focused - 1);
+            } else {
+                self.focus_sidebar(ui.ctx());
+            }
         }
         if to_editor {
+            // from the left sidebar the first pane is next; from a pane the one to its right,
+            // from the last one the keyboard stays (NAV-011)
+            if in_sidebar {
+                self.focus_pane(0);
+            }
+            let in_mail = matches!(self.tabbar.tabs.get(self.tabbar.active).map(|t| &t.view), Some(View::Mail));
             // in the mail view the keyboard goes to its panes (MAIL-063)
             if in_mail && self.mail.step_pane(ui.ctx(), &self.cfg, 1, sidebar_keys) {
                 self.tree.sel = None;
                 self.search.sel = None;
+            } else if !in_sidebar && self.panes.focused + 1 < self.panes.len() {
+                self.focus_pane_keyboard(self.panes.focused + 1);
             } else {
                 self.focus_editor();
             }

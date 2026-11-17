@@ -297,7 +297,49 @@ impl SystemFonts {
         let db = self.db.as_ref()?;
         let q = fontdb::Query { families: &[fontdb::Family::Name(name)], weight: fontdb::Weight::NORMAL, stretch: fontdb::Stretch::Normal, style: fontdb::Style::Normal };
         let id = db.query(&q)?;
-        db.with_face_data(id, |data, index| (data.to_vec(), index))
+        db.with_face_data(id, |data, index| {
+            let mut bytes = data.to_vec();
+            hide_mono_bitmaps(&mut bytes);
+            (bytes, index)
+        })
+    }
+}
+
+/// Hide the embedded black-and-white bitmaps (`EBDT`, `EBLC`) of every face in `font` that has
+/// outlines (CFG-038): egui takes them for colour glyphs and draws those letters white whatever
+/// colour the text has. The tags are renamed in place to ones that sort the same, so the table
+/// directory stays in order and the outlines are used. Anything that is not a font is left alone.
+pub fn hide_mono_bitmaps(font: &mut [u8]) {
+    let u32_at = |b: &[u8], at: usize| b.get(at..at + 4).map(|x| u32::from_be_bytes([x[0], x[1], x[2], x[3]]));
+    let faces: Vec<usize> = if font.starts_with(b"ttcf") {
+        let n = u32_at(font, 8).unwrap_or(0) as usize;
+        (0..n.min(4096)).filter_map(|i| u32_at(font, 12 + 4 * i).map(|o| o as usize)).collect()
+    } else {
+        vec![0]
+    };
+    for face in faces {
+        let Some(head) = font.get(face..face + 6) else { continue };
+        if !matches!(&head[..4], [0, 1, 0, 0] | b"true" | b"OTTO") {
+            continue;
+        }
+        let n = u16::from_be_bytes([head[4], head[5]]) as usize;
+        let tag_at = |i: usize| face + 12 + 16 * i;
+        let Some(dir) = font.get(face + 12..tag_at(n)) else { continue };
+        let (entries, _) = dir.as_chunks::<16>();
+        if !entries.iter().any(|e| matches!(&e[..4], b"glyf" | b"CFF " | b"CFF2")) {
+            continue; // a bitmap-only font: its bitmaps are its letters
+        }
+        for i in 0..n {
+            let at = tag_at(i);
+            let renamed: Option<&[u8; 4]> = match &font[at..at + 4] {
+                b"EBDT" => Some(b"EBDt"),
+                b"EBLC" => Some(b"EBLc"),
+                _ => None,
+            };
+            if let Some(r) = renamed {
+                font[at..at + 4].copy_from_slice(r);
+            }
+        }
     }
 }
 
@@ -452,6 +494,76 @@ pub fn font(size: f32) -> FontId {
 pub(crate) mod tests {
     use super::*;
     use crate::theme;
+
+    /// A font file of the given kind with these tables in its directory (offsets and lengths 0).
+    fn sfnt(kind: &[u8; 4], tags: &[&[u8; 4]]) -> Vec<u8> {
+        let mut b = kind.to_vec();
+        b.extend_from_slice(&(tags.len() as u16).to_be_bytes());
+        b.extend_from_slice(&[0; 6]);
+        for t in tags {
+            b.extend_from_slice(*t);
+            b.extend_from_slice(&[0; 12]);
+        }
+        b
+    }
+
+    fn tags(font: &[u8], face: usize) -> Vec<String> {
+        let n = u16::from_be_bytes([font[face + 4], font[face + 5]]) as usize;
+        (0..n).map(|i| String::from_utf8_lossy(&font[face + 12 + 16 * i..face + 16 + 16 * i]).into_owned()).collect()
+    }
+
+    // spec: CFG-038
+    #[test]
+    fn cfg_038_the_mono_bitmaps_of_an_outline_font_are_hidden_and_the_order_stays() {
+        let mut f = sfnt(&[0, 1, 0, 0], &[b"DSIG", b"EBDT", b"EBLC", b"EBSC", b"GDEF", b"glyf"]);
+        hide_mono_bitmaps(&mut f);
+        let t = tags(&f, 0);
+        assert_eq!(t, ["DSIG", "EBDt", "EBLc", "EBSC", "GDEF", "glyf"]);
+        let mut sorted = t.clone();
+        sorted.sort();
+        assert_eq!(t, sorted, "the directory stays sorted, so a binary search still finds every table");
+        // CFF outlines count as outlines too
+        for kind in [b"OTTO", b"true"] {
+            let mut f = sfnt(kind, &[b"CFF ", b"EBDT", b"EBLC"]);
+            hide_mono_bitmaps(&mut f);
+            assert_eq!(tags(&f, 0), ["CFF ", "EBDt", "EBLc"]);
+        }
+    }
+
+    // spec: CFG-038
+    #[test]
+    fn cfg_038_colour_glyphs_bitmap_only_fonts_and_other_bytes_are_left_alone() {
+        let colour = sfnt(&[0, 1, 0, 0], &[b"CBDT", b"CBLC", b"COLR", b"glyf", b"sbix"]);
+        let mut f = colour.clone();
+        hide_mono_bitmaps(&mut f);
+        assert_eq!(f, colour, "real colour glyphs stay");
+        let bitmaps_only = sfnt(&[0, 1, 0, 0], &[b"EBDT", b"EBLC", b"cmap"]);
+        let mut f = bitmaps_only.clone();
+        hide_mono_bitmaps(&mut f);
+        assert_eq!(f, bitmaps_only, "a font that is only bitmaps keeps them");
+        for junk in [vec![], b"wOFF0000".to_vec(), vec![0, 1, 0, 0, 0xff, 0xff, 0, 0], b"ttcf\0\x01\0\0\x7f\xff\xff\xff".to_vec()] {
+            let mut f = junk.clone();
+            hide_mono_bitmaps(&mut f);
+            assert_eq!(f, junk, "no font, a cut-off directory or a broken collection: unchanged, no panic");
+        }
+    }
+
+    // spec: CFG-038
+    #[test]
+    fn cfg_038_every_face_of_a_collection_is_treated() {
+        let a = sfnt(&[0, 1, 0, 0], &[b"EBDT", b"EBLC", b"glyf"]);
+        let b = sfnt(&[0, 1, 0, 0], &[b"EBDT", b"cmap"]);
+        let mut f = b"ttcf".to_vec();
+        f.extend_from_slice(&[0, 1, 0, 0, 0, 0, 0, 2]);
+        let first = 20;
+        f.extend_from_slice(&(first as u32).to_be_bytes());
+        f.extend_from_slice(&((first + a.len()) as u32).to_be_bytes());
+        f.extend_from_slice(&a);
+        f.extend_from_slice(&b);
+        hide_mono_bitmaps(&mut f);
+        assert_eq!(tags(&f, first), ["EBDt", "EBLc", "glyf"]);
+        assert_eq!(tags(&f, first + a.len()), ["EBDT", "cmap"], "the second face has no outlines");
+    }
 
     // spec: CFG-030
     #[test]

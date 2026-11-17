@@ -3,7 +3,7 @@
 use crate::app::{Options, ShaleApp, View};
 use crate::editor::NoteEditor;
 use crate::keys::{Action, Binding};
-use crate::link_preview::{Content, Target, MAX_HEIGHT, MAX_WIDTH};
+use crate::link_preview::{Content, Target};
 use crate::social::fake_server::FakeServer;
 use crate::ui_test_support::Headless;
 use eframe::egui::{self, text::CCursor, text::CCursorRange, Event, Key, Modifiers, Pos2, Rect};
@@ -122,7 +122,7 @@ fn edit_033_shift_k_previews_the_link_and_the_editor_keeps_the_keyboard() {
     // on the screen, near the cursor row, not bigger than the limit
     let r = open.rect.unwrap();
     assert!(Rect::from_min_size(Pos2::ZERO, egui::vec2(1500.0, 900.0)).contains_rect(r), "{r:?}");
-    assert!(r.width() <= MAX_WIDTH + 30.0 && r.height() <= MAX_HEIGHT + 30.0, "{r:?}");
+    assert!((r.width() - 640.0).abs() <= 30.0 && r.height() <= 510.0, "the default is 640 x 480: {r:?}");
     assert!(r.min.y >= open.anchor.max.y || r.max.y <= open.anchor.min.y, "it does not cover the cursor row");
     // a cursor move closes it, and the move is made
     w.plain(Key::L, "l");
@@ -351,4 +351,75 @@ fn edit_034_a_web_link_loads_in_the_background_and_is_kept() {
         assert!(e.contains(why), "{path}: {e}");
         assert!(w.painted("The page could not be loaded") && w.painted(&e), "{path}");
     }
+}
+
+// spec: EDIT-037, EDIT-033
+#[test]
+fn edit_037_a_corner_and_an_edge_resize_the_preview_and_the_size_is_kept() {
+    let mut w = W::new("resize", NOTE);
+    w.cursor_at("Ideas");
+    let (cursor, text) = (w.ed().vim.cursor, w.text());
+    w.shift_k();
+    w.shift_k();
+    // a page is 90 % of the visible height
+    w.key(Key::D, Modifiers::COMMAND, "");
+    let page_small = w.open().unwrap().scroll;
+    w.key(Key::U, Modifiers::COMMAND, "");
+    assert_eq!(w.open().unwrap().scroll, 0.0);
+    let before = w.open().unwrap().size;
+    assert_eq!(before, egui::vec2(640.0, 480.0), "the default size");
+    // the bottom right corner: the resize arrow, then a drag that makes it bigger
+    let r = w.open().unwrap().rect.unwrap();
+    let from = r.max - egui::vec2(1.0, 1.0);
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(from)]);
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(from)]);
+    assert!(matches!(w.hl.cursor, egui::CursorIcon::ResizeNwSe | egui::CursorIcon::ResizeNeSw), "a corner has the resize cursor: {:?}", w.hl.cursor);
+    let to = from + egui::vec2(60.0, 40.0);
+    let path = crate::ui_test_support::Headless::steps(from, to, 6);
+    w.hl.press_and_move(&mut w.app, from, &path);
+    let open = w.open().expect("a drag on a handle does not close the preview");
+    assert_eq!(open.size, before + egui::vec2(60.0, 40.0), "the corner moved the size with the pointer");
+    assert_eq!(w.app.cfg.link_preview_width, 640, "the setting is written when the drag ends, not before");
+    assert_eq!((w.ed().vim.cursor, w.text()), (cursor, text.clone()), "the press did not reach the editor");
+    w.hl.release(&mut w.app, to);
+    assert!(w.open().is_some());
+    assert_eq!((w.app.cfg.link_preview_width, w.app.cfg.link_preview_height), (700, 520), "kept as the setting");
+    assert_eq!((w.ed().vim.cursor, w.text()), (cursor, text.clone()));
+    let r = w.open().unwrap().rect.unwrap();
+    assert!((r.width() - 700.0).abs() <= 2.0 && (r.height() - 520.0).abs() <= 2.0, "the frame has the new size: {r:?}");
+    assert!(Rect::from_min_size(Pos2::ZERO, egui::vec2(1500.0, 900.0)).contains_rect(r), "and stays on the screen: {r:?}");
+    // the scrolling follows the height: a page is more now
+    w.key(Key::D, Modifiers::COMMAND, "");
+    assert!(w.open().unwrap().scroll > page_small, "{} > {page_small}", w.open().unwrap().scroll);
+    w.key(Key::U, Modifiers::COMMAND, "");
+    // an edge: the right edge only changes the width
+    let r = w.open().unwrap().rect.unwrap();
+    let from = Pos2::new(r.max.x, r.center().y);
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(from)]);
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(from)]);
+    assert_eq!(w.hl.cursor, egui::CursorIcon::ResizeHorizontal, "an edge has the resize cursor");
+    let to = from - egui::vec2(100.0, 0.0);
+    let path = crate::ui_test_support::Headless::steps(from, to, 5);
+    w.hl.press_and_move(&mut w.app, from, &path);
+    w.hl.release(&mut w.app, to);
+    assert_eq!((w.app.cfg.link_preview_width, w.app.cfg.link_preview_height), (600, 520), "only the width changed");
+    assert!(w.open().is_some());
+    // the left edge to the left: wider, the right edge stays
+    let r = w.open().unwrap().rect.unwrap();
+    let from = Pos2::new(r.min.x, r.center().y);
+    let to = from - egui::vec2(50.0, 0.0);
+    w.hl.frame(&mut w.app, vec![Event::PointerMoved(from)]);
+    let path = crate::ui_test_support::Headless::steps(from, to, 5);
+    w.hl.press_and_move(&mut w.app, from, &path);
+    w.hl.release(&mut w.app, to);
+    assert_eq!(w.app.cfg.link_preview_width, 650);
+    let after = w.open().unwrap().rect.unwrap();
+    assert!((after.max.x - r.max.x).abs() <= 2.0 && (after.min.x - (r.min.x - 50.0)).abs() <= 2.0, "{r:?} -> {after:?}");
+    // every preview opened later has the size
+    w.plain(Key::Escape, "");
+    assert!(w.open().is_none());
+    w.cursor_at("Ideas");
+    w.shift_k();
+    assert_eq!(w.open().unwrap().size, egui::vec2(650.0, 520.0), "a new preview uses the setting");
+    assert_eq!((w.ed().vim.cursor, w.text()), (cursor, text));
 }

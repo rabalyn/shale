@@ -153,7 +153,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![The Keybindings tab of the settings](userguide/z_media/screenshots/keybindings.png)
 
-- Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back into the note. Ctrl+Shift+B opens
+- Ctrl+H puts the keyboard one place to the left (with split panes: into the pane on the left,
+  from the first pane into the left sidebar), Ctrl+L one place to the right (from the sidebar into
+  the first pane, then pane by pane; it stays in the last one). Ctrl+Shift+B opens
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
   folder to folder, Space opens or closes a folder, Enter opens a file.
 - Every shortcut of this section can be changed in Settings → Keybindings; a key that another
@@ -198,7 +200,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   start typing, Esc stops; x deletes a character; `dd` deletes the line (onto the clipboard,
   `p` puts it back below); v and V select with the same motions, d cuts and y copies to the
   clipboard, p pastes; `gt` follows the link under the cursor like a click (a note link or a web
-  address); **Shift+K** (definable, for example as Space Space) previews the link under the cursor in a floating frame like neovim's hover: a note as the reading view draws it (from the heading of the link), "Note does not exist yet" for a missing one, a picture, or for a web link the page's title, description and the start of its text, loaded in the background (https only, 30 s, 1.5 MB, kept per address while Shale runs). Moving the cursor, typing or Esc close it; Shift+K again moves the keyboard into it (j / k, ↓ / ↑, Ctrl+D / Ctrl+U, PageDown / PageUp scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc gives the keyboard back to the editor with the cursor where it was). `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
+  address); **Shift+K** (definable, for example as Space Space) previews the link under the cursor in a floating frame like neovim's hover: a note as the reading view draws it (from the heading of the link), "Note does not exist yet" for a missing one, a picture, or for a web link the page's title, description and the start of its text, loaded in the background (https only, 30 s, 1.5 MB, kept per address while Shale runs). Moving the cursor, typing or Esc close it; Shift+K again moves the keyboard into it (j / k, ↓ / ↑, Ctrl+D / Ctrl+U, PageDown / PageUp scroll, Enter opens the link like `gt`, Ctrl+Enter opens it in a new pane on the right, Esc gives the keyboard back to the editor with the cursor where it was). The frame is 640 x 480 points at first; its four edges and corners are dragged to resize it, and the size is a setting (`link_preview_width`, `link_preview_height`, Settings → Editor, with Reset size) that every preview uses (EDIT-037). `u` undoes and Ctrl+R redoes, up to 200 steps per note (an insert session
   from i to Esc is one step; the history is shared by all tabs of the note and kept in the vault
   for 30 days by default (a setting of the undo histories cache, see Data usage), so `u` works
   after a restart too). The status bar shows NORMAL, INSERT, VISUAL or V-LINE.
@@ -724,7 +726,7 @@ Text editing keys and vim keys are fixed.
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |
-| Ctrl+H / Ctrl+L | Keyboard into the left sidebar / back into the editor |
+| Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane |
 | Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
 | Ctrl+Alt+→ / Ctrl+Alt+← | Focus the next / previous pane |
@@ -747,7 +749,7 @@ Text editing keys and vim keys are fixed.
 
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
 keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
-the folder pane Ctrl+H goes on into the left sidebar, from there Ctrl+L comes back). Letters work
+the folder pane Ctrl+H goes on into the pane on the left, or the left sidebar, from there Ctrl+L comes back). Letters work
 only while no text field has the keyboard. Every key can be changed in Settings → Keybindings
 (scope Mail view); Enter and Esc are fixed.
 

@@ -174,7 +174,7 @@ Settings → Editor, off by default. Notes open in normal mode.
 | gt | follow the link under the cursor like a click (a note link or a web address) |
 | Shift+K | preview the link under the cursor (see below) |
 
-**Link preview.** With the cursor on a link, **Shift+K** shows a small floating window below
+**Link preview.** With the cursor on a link, **Shift+K** shows a floating window (640 x 480 points at first) below
 the cursor, like neovim's hover. A note link shows the note as the reading view draws it, from the
 heading when the link has one (`[[Note#Heading]]`); a note that does not exist yet says so; a picture
 is shown; a web link shows the page's title, its description and the start of its text. The page is
@@ -189,6 +189,12 @@ editor, with the cursor where it was and the text unchanged. Off a link, Shift+K
 status bar. The key is one of the definable ones (Settings → Keybindings → Vim-style editing, normal
 mode): you can give it, for example, **Space Space**.
 
+The preview's size can be changed: drag one of its four edges or four corners (the mouse pointer
+turns into a resize arrow). The preview stays open while you drag, and the editor's cursor stays where
+it is. The size is a setting that every preview uses and that is still there after a restart:
+Settings → Editor → "Link preview size (Shift+K)" shows it as two numbers (width and height in points;
+at least 240 x 160, and never bigger than the window) with a **Reset size** button, see [[Settings reference]].
+
 The status bar shows NORMAL, INSERT, VISUAL or V-LINE. The vim keys themselves cannot be
 rebound. In normal mode **Space Tab** goes back to the view this tab showed just before, and
 again to return. **Space f f** and **Space f g** open the pickers of [[Search and pickers]].
@@ -197,7 +203,9 @@ again to return. **Space f f** and **Space f g** open the pickers of [[Search an
 
 ![[keybindings.png]]
 
-Ctrl+H puts the keyboard into the left sidebar, Ctrl+L back into the note. Ctrl+Shift+B opens
+Ctrl+H puts the keyboard one place to the left (with split panes: into the pane on the left,
+from the first pane into the left sidebar), Ctrl+L one place to the right (from the sidebar into
+the first pane, then pane by pane; it stays in the last one). Ctrl+Shift+B opens
 the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
 folder to folder, Space opens or closes a folder, Enter opens a file. All of this can be
 changed in Settings → Keybindings, see [[Keyboard shortcuts]].
