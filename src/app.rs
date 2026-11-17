@@ -342,7 +342,7 @@ pub struct ShaleApp {
     /// the feed view (Mastodon / Bluesky)
     pub social: crate::social::state::SocialState,
     /// for background jobs to wake the window up when they finish
-    ctx: Option<egui::Context>,
+    pub(crate) ctx: Option<egui::Context>,
     /// drag and drop: where things can be dropped, what is dragged over the window, drops being read
     pub(crate) drag: drops::DragState,
     /// the tag words learned from the vault, and the job that learns them (see tagwords)
@@ -352,8 +352,12 @@ pub struct ShaleApp {
     pub media: crate::media::MediaPlayer,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
+    /// the check of the vault's names for other systems (VAULT-028)
+    pub vault_check: crate::vault_check::VaultCheck,
     /// the LaTeX page of the settings: the TeX found, the managed TeX Live and its jobs (TEX-001)
     pub tex: crate::pdf::tex::settings_ui::TexState,
+    /// Where pandoc is, for Settings → Import (IMP-036).
+    pub word: crate::settings::import::WordProbe,
     /// where the user guide comes from and where its copy goes (DEV-020)
     pub guide: crate::userguide::Places,
     /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
@@ -574,7 +578,9 @@ impl ShaleApp {
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             link_preview: Default::default(),
             usage: crate::data_usage::DataUsage::new(places),
+            vault_check: Default::default(),
             tex: crate::pdf::tex::settings_ui::TexState::new(persist, &tag),
+            word: Default::default(),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
         };
@@ -949,7 +955,7 @@ impl ShaleApp {
     pub fn convert_canvas(&mut self, rel: &Path, new_tab: bool) -> Option<PathBuf> {
         let v = self.vault.as_mut()?;
         let made = fsutil::read_to_string(v.abs(rel)).map_err(|e| e.to_string()).and_then(|text| crate::drawing::canvas::converted_file(rel, &text)).and_then(|content| {
-            let to = v.new_note_path(rel.parent().unwrap_or(Path::new("")), &crate::drawing::canvas::drawing_name_for(rel));
+            let to = v.new_note_path_max(rel.parent().unwrap_or(Path::new("")), &crate::drawing::canvas::drawing_name_for(rel), fsutil::MADE_NAME_MAX);
             v.create_file(&to, &content).map_err(|e| e.to_string())
         });
         match made {
@@ -1028,13 +1034,14 @@ impl ShaleApp {
         self.relink_red_link(from.as_deref(), t, made.as_deref());
     }
 
-    /// A red link in `from` to `target` made the note `made`; when the note got a date prefix
-    /// (CFG-043) the links of `from` to that name are rewritten so they reach it.
+    /// A red link in `from` to `target` made the note `made`; when the note got another name than
+    /// the link says, a date prefix (CFG-043) or a portable name (VAULT-027), the links of `from`
+    /// to that name are rewritten so they reach it.
     fn relink_red_link(&mut self, from: Option<&Path>, target: &str, made: Option<&Path>) {
         let (Some(from), Some(made)) = (from, made) else { return };
         let Some(stem) = self.vault.as_ref().and_then(|v| v.file(made)).map(|f| f.link_name.clone()) else { return };
         let old_last = markdown::strip_md_ext(target.trim()).rsplit('/').next().unwrap_or_default();
-        if vault::date_prefix_of(&stem).is_none() || vault::date_prefix_of(old_last).is_some() {
+        if stem.rsplit('/').next().unwrap_or(&stem).eq_ignore_ascii_case(old_last) {
             return;
         }
         let Some(doc) = self.notes.get_mut(from).filter(|d| d.unreadable.is_none()) else { return };
@@ -1063,8 +1070,8 @@ impl ShaleApp {
         }
     }
 
-    pub fn create_note(&mut self, folder: &Path, name: &str, new_tab: bool) -> Option<PathBuf> {
-        let name = self.with_date_prefix(name);
+    pub fn create_note(&mut self, folder: &Path, typed: &str, new_tab: bool) -> Option<PathBuf> {
+        let name = self.with_date_prefix(typed);
         let v = self.vault.as_mut()?;
         let rel = v.new_note_path(folder, &name);
         let content = if crate::drawing::excalidraw_md::is_plugin_file(&rel) {
@@ -1077,7 +1084,9 @@ impl ShaleApp {
         match v.create_file(&rel, &content) {
             Ok(rel) => {
                 let shown = v.file(&rel).map(|f| f.display_name()).unwrap_or_default();
-                self.toast(format!("Created “{shown}”"));
+                // a typed name that had to change is told (VAULT-027)
+                let got = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                self.toast(fsutil::portable_notice("Saved as", typed, &got, fsutil::TYPED_NAME_MAX).unwrap_or_else(|| format!("Created “{shown}”")));
                 self.open(&rel, new_tab);
                 if let Some(t) = self.tabbar.tabs.get_mut(self.tabbar.active) {
                     t.editor.request_focus = true;
@@ -1382,14 +1391,29 @@ impl ShaleApp {
     }
 
     pub fn rename(&mut self, rel: &Path, new_name: &str) -> Result<(), String> {
-        let _tree = self.hold_sync_tree().ok_or("The sync is still changing files in the vault; try again in a moment")?;
-        self.flush_dirty();
-        let v = self.vault.as_mut().ok_or("no vault")?;
-        // one name, inside the note's folder (VAULT-018)
+        let to = self.renamed_path(rel, new_name)?;
+        if to == rel {
+            return Ok(());
+        }
+        // a typed name that had to change is told (VAULT-027)
+        let notice = to.file_name().and_then(|n| fsutil::portable_notice("Renamed to", new_name, &n.to_string_lossy(), fsutil::TYPED_NAME_MAX));
+        let (changed, failed) = self.rename_path(rel, &to)?;
+        if let Some(m) = rewrite_problems("Renamed", &changed.changed, &failed) {
+            self.toast(m);
+        } else {
+            let shown = to.file_name().map(|n| markdown::strip_md_ext(&n.to_string_lossy()).to_string()).unwrap_or_default();
+            let head = notice.unwrap_or_else(|| format!("Renamed to “{shown}”"));
+            self.toast(format!("{head}{}", links_message(&changed, "name")));
+        }
+        Ok(())
+    }
+
+    /// The vault path `rel` gets when the user types `new_name`: one name, in the same folder
+    /// (VAULT-018), made portable, with the extension of a note or drawing kept.
+    fn renamed_path(&self, rel: &Path, new_name: &str) -> Result<PathBuf, String> {
+        let v = self.vault.as_ref().ok_or("no vault")?;
         let new_name = VaultPath::name(new_name).map_err(|e| e.to_string())?;
-        let is_dir = v.abs(rel).is_dir();
-        let kind = v.file(rel).map(|f| f.kind);
-        let file_name = match kind {
+        let file_name = match v.file(rel).map(|f| f.kind) {
             Some(FileKind::Note) => format!("{}.md", markdown::strip_md_ext(&new_name)),
             Some(FileKind::Drawing) => {
                 // keep the format: an Obsidian `.excalidraw.md` drawing or `.canvas` stays one
@@ -1402,23 +1426,26 @@ impl ShaleApp {
                     format!("{stem}.excalidraw")
                 }
             }
-            _ => new_name.clone(),
+            _ => new_name,
         };
         let parent = VaultPath::new(rel.parent().unwrap_or(Path::new(""))).map_err(|e| e.to_string())?;
-        let to = parent.join_name(&file_name).map_err(|e| e.to_string())?.into_path_buf();
-        if to == rel {
-            return Ok(());
-        }
-        let changed = v.rename(rel, &to, self.cfg.update_links_on_rename).map_err(|e| e.to_string())?;
+        Ok(parent.join_name(&file_name).map_err(|e| e.to_string())?.into_path_buf())
+    }
+
+    /// Rename or move `rel` to `to` the way VAULT-016 says: links elsewhere are rewritten (when the
+    /// setting is on), open buffers and tabs follow. Returns what happened to links and the notes
+    /// that could not be updated. No toast: the callers tell.
+    pub(crate) fn rename_path(&mut self, rel: &Path, to: &Path) -> Result<(crate::vault::LinkUpdate, Vec<(PathBuf, String)>), String> {
+        let _tree = self.hold_sync_tree().ok_or("The sync is still changing files in the vault; try again in a moment")?;
+        self.flush_dirty();
+        let update_links = self.cfg.update_links_on_rename;
+        let v = self.vault.as_mut().ok_or("no vault")?;
+        let is_dir = v.abs(rel).is_dir();
+        let changed = v.rename(rel, to, update_links).map_err(|e| e.to_string())?;
         let failed = v.failed_rewrites.clone();
-        self.after_move(rel, &to, is_dir, &changed.changed);
-        if let Some(m) = rewrite_problems("Renamed", &changed.changed, &failed) {
-            self.toast(m);
-        } else {
-            self.toast(format!("Renamed to “{}”{}", markdown::strip_md_ext(&file_name), links_message(&changed, "name")));
-        }
+        self.after_move(rel, to, is_dir, &changed.changed);
         self.remember_open_files();
-        Ok(())
+        Ok((changed, failed))
     }
 
     /// Create the folder `name` (may be nested: `a/b`) inside `parent`. The result always stays
@@ -1430,6 +1457,10 @@ impl ShaleApp {
         }
         let v = self.vault.as_mut().ok_or("no vault")?;
         v.create_folder(&rel).map_err(|e| e.to_string())?;
+        let got = rel.as_path().file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if let Some(m) = fsutil::portable_notice("Saved as", &name.replace('\\', "/"), &got, fsutil::TYPED_NAME_MAX) {
+            self.toast(m);
+        }
         Ok(rel.into_path_buf())
     }
 
@@ -3380,6 +3411,105 @@ mod export_tests {
         // a file where a folder is needed: cannot be written on any system
         dialog.path = d.join("Ideas.md").join("x.pdf").to_string_lossy().into_owned();
         assert!(app.run_export(&dialog).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn last_toast(app: &ShaleApp) -> String {
+        app.toasts.last().map(|(t, _)| t.clone()).unwrap_or_default()
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn a_new_note_with_a_character_windows_forbids_is_saved_under_a_portable_name_and_the_toast_says_so() {
+        let (mut app, d) = test_app("portable-new-note");
+        app.cfg.date_prefix_new_notes = false;
+        let rel = app.create_note(Path::new(""), "a:b", false).unwrap();
+        assert_eq!(rel, PathBuf::from("a-b.md"));
+        assert!(d.join("a-b.md").exists());
+        assert_eq!(last_toast(&app), "Saved as `a-b.md`: `:` is not allowed on Windows");
+        // nothing to tell for a good name
+        app.create_note(Path::new(""), "Plain", false).unwrap();
+        assert_eq!(last_toast(&app), "Created “Plain”");
+        // a device name, a trailing dot, a long name
+        let rel = app.create_note(Path::new(""), "aux", false).unwrap();
+        assert_eq!(rel, PathBuf::from("aux_.md"));
+        assert_eq!(last_toast(&app), "Saved as `aux_.md`: `aux` is a reserved name on Windows");
+        let rel = app.create_note(Path::new(""), &"x".repeat(250), false).unwrap();
+        assert_eq!(rel.file_name().unwrap().len(), 200);
+        assert!(last_toast(&app).ends_with("the name is longer than 200 bytes"), "{}", last_toast(&app));
+        // with the date prefix the prefix is part of the 200 bytes
+        app.cfg.date_prefix_new_notes = true;
+        let rel = app.create_note(Path::new(""), "p?q", false).unwrap();
+        assert_eq!(rel, PathBuf::from(format!("{}p-q.md", vault::date_prefix_today())));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn a_red_link_with_a_forbidden_character_is_rewritten_to_the_name_its_note_really_got() {
+        let (mut app, d) = test_app("portable-red-link");
+        app.cfg.date_prefix_new_notes = false;
+        std::fs::write(d.join("Source.md"), "see [[Plan: v2]] and [x](Plan: v2.md) and [[Other]]\n").unwrap();
+        app.rescan();
+        app.open(Path::new("Source.md"), false);
+        app.open_link("Plan: v2", None, Some(PathBuf::from("Source.md")), false);
+        assert!(d.join("Plan- v2.md").exists());
+        let text = app.notes[Path::new("Source.md")].text.clone();
+        assert_eq!(text, "see [[Plan- v2|Plan: v2]] and [x](Plan-%20v2.md) and [[Other]]\n");
+        assert!(app.vault.as_ref().unwrap().exists("Plan- v2", None), "the link reaches the note");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn renaming_to_a_name_with_a_forbidden_character_uses_a_portable_one_tells_it_and_keeps_links() {
+        let (mut app, d) = test_app("portable-rename");
+        app.cfg.date_prefix_new_notes = false;
+        std::fs::write(d.join("Linker.md"), "to [[Mine]]\n").unwrap();
+        std::fs::write(d.join("Mine.md"), "mine\n").unwrap();
+        app.rescan();
+        app.rename(Path::new("Mine.md"), "Ideas: 2026?").unwrap();
+        assert!(d.join("Ideas- 2026-.md").exists() && !d.join("Mine.md").exists());
+        assert_eq!(last_toast(&app), "Renamed to `Ideas- 2026-.md`: `:` `?` are not allowed on Windows and updated links in 1 file(s)");
+        assert_eq!(std::fs::read_to_string(d.join("Linker.md")).unwrap(), "to [[Ideas- 2026-]]\n", "the link has the real name");
+        // a folder, and a plain rename says nothing about portability
+        app.rename(Path::new("Projects"), "Work*").unwrap();
+        assert!(d.join("Work-").is_dir());
+        assert!(last_toast(&app).starts_with("Renamed to `Work-`: `*` is not allowed"), "{}", last_toast(&app));
+        app.rename(Path::new("Work-"), "Work").unwrap();
+        assert!(last_toast(&app).starts_with("Renamed to “Work”"), "{}", last_toast(&app));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn a_new_folder_with_a_forbidden_character_gets_a_portable_name_and_a_toast() {
+        let (mut app, d) = test_app("portable-folder");
+        app.cfg.date_prefix_new_notes = false;
+        assert_eq!(app.create_folder(Path::new(""), "Notes: a").unwrap(), PathBuf::from("Notes- a"));
+        assert!(d.join("Notes- a").is_dir());
+        assert_eq!(last_toast(&app), "Saved as `Notes- a`: `:` is not allowed on Windows");
+        let n = app.toasts.len();
+        app.create_folder(Path::new(""), "Fine").unwrap();
+        assert_eq!(app.toasts.len(), n, "no toast for a good name");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn a_new_drawing_and_a_converted_canvas_get_portable_names_within_127_bytes() {
+        let (mut app, d) = test_app("portable-drawing");
+        app.cfg.date_prefix_new_notes = false;
+        app.new_drawing(Path::new(""), None);
+        assert!(d.join("Drawing.excalidraw").exists());
+        // a canvas whose name is long and has a colon: the drawing made from it is portable
+        let long = format!("{}: map", "k".repeat(200));
+        std::fs::write(d.join(format!("{long}.canvas")), r#"{"nodes":[],"edges":[]}"#).unwrap();
+        app.rescan();
+        let to = app.convert_canvas(Path::new(&format!("{long}.canvas")), false).unwrap();
+        let name = to.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.len() <= 127 && !name.contains(':') && name.ends_with(".excalidraw.md"), "{name}");
+        assert!(d.join(&to).exists());
         let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -19,6 +19,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   Click a blue link to open the note. Click a red link to create the note and open it.
 - **A formatting toolbar and colours**: a row of buttons above the text for bold, headings, lists, links,
   tables and more, and coloured highlights and font colours stored as plain `<mark>` / `<span>` HTML.
+- **Math**: `$E = mc^2$` and `$$…$$` are typeset in the text, the reading view, tables and the PDF export,
+  by Shale itself with the bundled font STIX Two Math (no TeX needed).
 - **Suggestions while you type**: type `[[` to get matching note names. Enter or a click picks one, and the
   last entry creates a new note.
 - **Drawings**: hand-drawn style sketches stored as standard `.excalidraw` JSON files.
@@ -99,6 +101,9 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
 - **Videos** in notes are played with `ffmpeg` and `ffprobe` on your computer (`brew install ffmpeg` on macOS,
   `winget install ffmpeg` on Windows, your package manager on Linux). Without them a video opens in your
   system's video player and Settings says so; everything else works.
+- **Word files** (`.docx`) are imported as notes by `pandoc` on your computer, once you turn it on in Settings →
+  Import (`brew install pandoc` on macOS, `winget install JohnMacFarlane.Pandoc` on Windows, your package
+  manager on Linux). Without it a `.docx` is saved as an attachment and the Import dialog says so.
 - **CalDAV** and **git sync** need `curl` and `git` on the path (both come with macOS and Windows 10 and later; Git
   for Windows is a separate install).
 - **Media files in git sync** (audio and video, stored with Git LFS) need `git-lfs` as well

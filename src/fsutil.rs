@@ -482,6 +482,110 @@ fn create_new_with(path: &Path, fill: impl FnOnce(&mut File) -> io::Result<()>) 
     Ok(())
 }
 
+/// A file or folder name that works on Linux, macOS and Windows (VAULT-026): the characters that
+/// Windows forbids (`< > : " / \ | ? *`) and control characters become `-`, trailing dots and
+/// spaces are trimmed, a Windows device name (`CON`, `NUL`, `COM1`, …, any case, with or without
+/// an extension) gets `_` added after its stem, and the name is cut at a character boundary to
+/// `max_bytes` bytes (UTF-8) with its extension kept. A name with nothing left stays empty: the
+/// caller chooses what to call it.
+pub fn portable_name(name: &str, max_bytes: usize) -> String {
+    let clean: String = name.chars().map(|c| if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') { '-' } else { c }).collect();
+    let clean = clean.trim_end_matches(['.', ' ']);
+    let mut budget = max_bytes;
+    loop {
+        let cut = cut_keeping_extension(clean, budget);
+        let fixed = avoid_device_name(&cut);
+        if fixed.len() <= max_bytes || budget == 0 {
+            return fixed;
+        }
+        budget -= 1;
+    }
+}
+
+/// The longest name the user types for a note, folder or file (VAULT-027).
+pub const TYPED_NAME_MAX: usize = 200;
+/// The longest name Shale makes itself (imports, the media folder; VAULT-026).
+pub const MADE_NAME_MAX: usize = 127;
+
+/// What about `name` would not work on Windows or on a file system with a shorter limit, one
+/// sentence each (VAULT-027, VAULT-028): `` `:` is not allowed on Windows``. Empty when
+/// [`portable_name`] would leave the name as it is (the outer spaces do not count: they are always
+/// trimmed).
+pub fn portable_problems(name: &str, max_bytes: usize) -> Vec<String> {
+    let name = name.trim();
+    let mut out = Vec::new();
+    let mut bad: Vec<char> = Vec::new();
+    for c in name.chars().filter(|c| matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')) {
+        if !bad.contains(&c) {
+            bad.push(c);
+        }
+    }
+    if !bad.is_empty() {
+        let list = bad.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(" ");
+        out.push(format!("{list} {} not allowed on Windows", if bad.len() == 1 { "is" } else { "are" }));
+    }
+    if name.chars().any(char::is_control) {
+        out.push("control characters are not allowed on Windows".into());
+    }
+    if name.ends_with('.') {
+        out.push("a name can't end in a dot on Windows".into());
+    }
+    let device = avoid_device_name(name);
+    if device != name {
+        let base = name.split('.').next().unwrap_or("").trim_end();
+        out.push(format!("`{base}` is a reserved name on Windows"));
+    }
+    if name.len() > max_bytes {
+        out.push(format!("the name is longer than {max_bytes} bytes"));
+    }
+    out
+}
+
+/// The toast for a name the user typed that [`portable_name`] had to change, `None` when nothing
+/// had to change (VAULT-027): "Saved as `a-b.md`: `:` is not allowed on Windows". `typed` may be a
+/// path (each part is looked at); `got` is the name the file really got; `verb` starts the text
+/// (`Saved as`, `Renamed to`).
+pub fn portable_notice(verb: &str, typed: &str, got: &str, max_bytes: usize) -> Option<String> {
+    let mut problems: Vec<String> = Vec::new();
+    for part in typed.split('/') {
+        for p in portable_problems(part, max_bytes) {
+            if !problems.contains(&p) {
+                problems.push(p);
+            }
+        }
+    }
+    (!problems.is_empty()).then(|| format!("{verb} `{got}`: {}", problems.join("; ")))
+}
+
+/// `name` cut to `max` bytes at a character boundary, the extension (from the last dot) kept when
+/// it is shorter than `max`.
+fn cut_keeping_extension(name: &str, max: usize) -> String {
+    if name.len() <= max {
+        return name.to_string();
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 && name.len() - i < max => name.split_at(i),
+        _ => (name, ""),
+    };
+    let mut end = max - ext.len();
+    while !stem.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{ext}", stem[..end].trim_end_matches(['.', ' ']))
+}
+
+/// `NUL` → `NUL_`, `con.txt` → `con_.txt`: Windows treats the part before the first dot as a device.
+fn avoid_device_name(name: &str) -> String {
+    let base = name.split('.').next().unwrap_or("");
+    let upper = base.trim_end().to_ascii_uppercase();
+    let device = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL") || (upper.len() == 4 && (upper.starts_with("COM") || upper.starts_with("LPT")) && matches!(upper.as_bytes()[3], b'1'..=b'9'));
+    if device {
+        format!("{base}_{}", &name[base.len()..])
+    } else {
+        name.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1020,5 +1124,95 @@ mod tests {
             }
         }
         assert!(bad.is_empty(), "write user data through fsutil instead:\n{}", bad.join("\n"));
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn portable_names_have_no_forbidden_or_control_characters() {
+        assert_eq!(portable_name("a<b>c:d\"e/f\\g|h?i*j", 127), "a-b-c-d-e-f-g-h-i-j");
+        assert_eq!(portable_name("tab\there\nnew\u{7f}del\u{85}x", 127), "tab-here-new-del-x");
+        assert_eq!(portable_name("Bericht 2026 – Übersicht.docx", 127), "Bericht 2026 – Übersicht.docx", "everything else stays");
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn portable_names_lose_trailing_dots_and_spaces() {
+        assert_eq!(portable_name("name. . ", 127), "name");
+        assert_eq!(portable_name("a.txt.", 127), "a.txt");
+        assert_eq!(portable_name(".hidden", 127), ".hidden", "a leading dot stays");
+        assert_eq!(portable_name("...", 127), "");
+        assert_eq!(portable_name("  ", 127), "");
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn portable_names_avoid_windows_device_names_in_any_case_with_or_without_an_extension() {
+        for d in ["CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1", "LPT9", "con", "Nul", "cOm5", "lpt3"] {
+            assert_eq!(portable_name(d, 127), format!("{d}_"), "{d}");
+            assert_eq!(portable_name(&format!("{d}.txt"), 127), format!("{d}_.txt"), "{d}.txt");
+        }
+        assert_eq!(portable_name("aux.tar.gz", 127), "aux_.tar.gz", "the part before the first dot decides");
+        for ok in ["COM0", "COM10", "COMX", "CONSOLE", "LPT", "console.txt", "xcon", "a.con"] {
+            assert_eq!(portable_name(ok, 127), ok, "{ok} is no device name");
+        }
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn portable_names_are_cut_at_a_character_boundary_and_keep_their_extension() {
+        let long = "a".repeat(300);
+        assert_eq!(portable_name(&long, 127).len(), 127);
+        let with_ext = format!("{long}.docx");
+        let cut = portable_name(&with_ext, 127);
+        assert_eq!(cut.len(), 127);
+        assert!(cut.ends_with(".docx") && cut.starts_with("aaa"), "{cut}");
+        // two-byte letters: never cut in the middle of one
+        let umlauts = "ä".repeat(100);
+        let cut = portable_name(&format!("{umlauts}.md"), 127);
+        assert_eq!(cut, format!("{}.md", "ä".repeat(62)), "62 letters = 124 bytes + 3");
+        assert!(cut.len() <= 127);
+        let cut = portable_name(&"€".repeat(100), 10);
+        assert_eq!(cut, "€€€", "three bytes each");
+        // the stem does not end in a dot or space after the cut
+        assert_eq!(portable_name("ab c.txt", 6), "ab.txt", "'ab ' loses its space before the extension");
+        // an extension as long as the limit is not kept
+        assert_eq!(portable_name("a.0123456789", 5), "a.012");
+        // a name that is short enough is not touched
+        assert_eq!(portable_name("short.md", 127), "short.md");
+    }
+
+    // spec: VAULT-026
+    #[test]
+    fn a_cut_that_makes_a_device_name_or_the_added_underscore_still_fits() {
+        assert_eq!(portable_name("CONSOLE.txt", 7), "CO.txt", "cut to CON.txt, then CON_.txt is one byte over: cut again");
+        assert_eq!(portable_name("CONSOLE", 3), "CO");
+        assert!(portable_name("NULL.txt", 7).len() <= 7);
+        assert_eq!(portable_name("x", 0), "");
+        assert_eq!(portable_name("", 127), "");
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn portable_problems_name_each_reason_and_nothing_for_a_good_name() {
+        assert!(portable_problems("Plan 2026 – Übersicht.md", TYPED_NAME_MAX).is_empty());
+        assert!(portable_problems("  padded  ", TYPED_NAME_MAX).is_empty(), "outer spaces are trimmed, not a problem");
+        assert_eq!(portable_problems("a:b", TYPED_NAME_MAX), vec!["`:` is not allowed on Windows"]);
+        assert_eq!(portable_problems("a:b?c:d", TYPED_NAME_MAX), vec!["`:` `?` are not allowed on Windows"]);
+        assert_eq!(portable_problems("tab\there", TYPED_NAME_MAX), vec!["control characters are not allowed on Windows"]);
+        assert_eq!(portable_problems("end.", TYPED_NAME_MAX), vec!["a name can't end in a dot on Windows"]);
+        assert_eq!(portable_problems("con.txt", TYPED_NAME_MAX), vec!["`con` is a reserved name on Windows"]);
+        assert_eq!(portable_problems(&"x".repeat(201), TYPED_NAME_MAX), vec!["the name is longer than 200 bytes"]);
+        assert!(portable_problems(&"x".repeat(200), TYPED_NAME_MAX).is_empty());
+        assert_eq!(portable_problems(&"ü".repeat(101), TYPED_NAME_MAX).len(), 1, "bytes, not characters");
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn the_notice_says_what_a_typed_name_became_and_is_silent_when_nothing_changed() {
+        assert_eq!(portable_notice("Saved as", "a:b", "a-b.md", TYPED_NAME_MAX).as_deref(), Some("Saved as `a-b.md`: `:` is not allowed on Windows"));
+        assert_eq!(portable_notice("Renamed to", "Plan", "Plan.md", TYPED_NAME_MAX), None);
+        // a path: every part is looked at, a reason is told once
+        assert_eq!(portable_notice("Saved as", "x:y/z:w/CON", "CON_.md", TYPED_NAME_MAX).as_deref(), Some("Saved as `CON_.md`: `:` is not allowed on Windows; `CON` is a reserved name on Windows"));
+        assert_eq!(portable_notice("Saved as", &"n".repeat(300), "n.md", TYPED_NAME_MAX).as_deref(), Some("Saved as `n.md`: the name is longer than 200 bytes"));
     }
 }

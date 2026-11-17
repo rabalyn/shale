@@ -9,6 +9,7 @@ mod editor;
 mod font_picker;
 pub(crate) mod fonts;
 mod help;
+pub(crate) mod import;
 mod latex;
 mod mail_social;
 mod sync_calendar;
@@ -34,6 +35,7 @@ pub enum SettingsTab {
     Calendar,
     Mail,
     Social,
+    Import,
     Data,
     Latex,
     Help,
@@ -50,7 +52,7 @@ impl SettingsTab {
     }
 
     /// All tabs in the order of the list.
-    pub const ALL: [SettingsTab; 13] = [
+    pub const ALL: [SettingsTab; 14] = [
         SettingsTab::Vault,
         SettingsTab::Editor,
         SettingsTab::Vim,
@@ -60,6 +62,7 @@ impl SettingsTab {
         SettingsTab::Calendar,
         SettingsTab::Mail,
         SettingsTab::Social,
+        SettingsTab::Import,
         SettingsTab::Data,
         SettingsTab::Latex,
         SettingsTab::Help,
@@ -77,6 +80,7 @@ impl SettingsTab {
             SettingsTab::Calendar => "Calendar",
             SettingsTab::Mail => "Mail",
             SettingsTab::Social => "Feeds",
+            SettingsTab::Import => "Import",
             SettingsTab::Data => "Data",
             SettingsTab::Latex => "LaTeX",
             SettingsTab::Help => "Help",
@@ -98,6 +102,7 @@ impl SettingsTab {
             SettingsTab::Calendar => "Calendars and the week",
             SettingsTab::Mail => "Fetching and reading mail",
             SettingsTab::Social => "Feeds, new posts and the post search",
+            SettingsTab::Import => "What the Import takes in, such as Word files through pandoc",
             SettingsTab::Data => "What Shale keeps on disk, and for how long",
             SettingsTab::Latex => "The TeX that exports notes to PDF through LaTeX templates",
             SettingsTab::Help => "The user guide and tools to find problems",
@@ -220,6 +225,7 @@ impl ShaleApp {
                     SettingsTab::Calendar => self.calendar_tab(ui, &mut asks),
                     SettingsTab::Mail => self.mail_tab(ui, &mut asks),
                     SettingsTab::Social => self.social_tab(ui, &mut asks),
+                    SettingsTab::Import => self.import_tab(ui),
                     SettingsTab::Data => self.data_tab(ui, &mut asks),
                     SettingsTab::Latex => self.latex_tab(ui, &mut asks),
                     SettingsTab::Help => self.help_tab(ui, &mut asks),

@@ -572,6 +572,8 @@ impl ShaleApp {
                 let text = self.notes.get(&rel).map(|d| d.text.clone()).or_else(|| v.notes.get(&rel).map(|n| n.text.clone())).unwrap_or_default();
                 let numbered = markdown::headings_numbered(&text, self.cfg.numbered_headings);
                 let heads = markdown::heading_numbers(&text);
+                // a reference in a heading is a footnote mark when the note defines it (EDIT-050)
+                let _defined = markdown::DefinedFootnotes::set(markdown::find_footnotes(&text).defined());
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     if heads.is_empty() {
                         ui.label(muted("No headings in this note."));
@@ -591,7 +593,7 @@ impl ShaleApp {
                                 })
                                 .collect();
                             let job = crate::editor::outline_job(&title, &links, 14.0);
-                            if ui.add(egui::Label::new(job).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            if crate::editor::outline_label(ui, job, 14.0).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                 self.actions.push(Action::GotoHeading { rel: rel.clone(), line });
                             }
                         });
@@ -1081,7 +1083,9 @@ impl ShaleApp {
                 |ui, (d, out)| *out = crate::import::dialog::footer(ui, d).or(out.take()),
             );
             let close_asked = resp.should_close();
-            if let Some(a) = st.1 {
+            // the Word files are converted: go on with the import (IMP-035)
+            let action = st.1.or_else(|| d.poll_conversion().then_some(crate::import::dialog::ImportAction::Import));
+            if let Some(a) = action {
                 if self.import_action(d, a) {
                     keep = false;
                 }

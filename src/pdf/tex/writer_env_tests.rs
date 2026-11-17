@@ -163,3 +163,17 @@ fn tex_env_unnumbered_headings_are_still_in_the_contents_and_the_pdf_has_bookmar
     // A, B, C and D: the fourth level has a bookmark too, though the contents stop at the third
     assert_eq!(outline_entries(&pdf), 4, "the bookmarks of every level\n{}", doc.tex);
 }
+
+// spec: TEX-029, TEX-027
+#[test]
+#[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
+fn tex_env_underline_scripts_footnotes_breaks_in_cells_and_math_compile_in_every_family() {
+    let note = "# Rich sample note\n\nWater H<sub>2</sub>O, x<sup>2</sup> and <u>under *lined*</u> text[^1] with $\\frac{a}{b} + \\sum_{i=1}^n \\binom{n}{i} + \\mathbb{R}$ and $$\\dfrac{x}{y}$$ inline, $\\input{/etc/passwd}$ and $\\text{50% ^^5cinput{x}}$.\n\n$$\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix} = \\begin{cases} x & y \\\\ z & \\text{else} \\end{cases}\n$$\n\n```math\n\\sqrt[3]{x^2} + \\operatorname{rank} A\n```\n\n| A | B |\n| --- | --- |\n| one<br>two[^2] | z |\n\n[^1]: A *footnote*\n    with a second line and $x^2$.\n[^2]: In a cell.\n\nLast paragraph\n";
+    for kind in ["pub", "report", "beamer", "letter", "poster", "sciposter", "leaflet"] {
+        let (pdf, doc) = export(note, kind, Language::En, AUTHOR, false);
+        let text = squashed(pdf);
+        for want in ["Afootnote", "withasecondline", "Inacell", "one", "two", "Lastparagraph", "else", "\\input{/etc/passwd}", "50%^^5c"] {
+            assert!(text.contains(want), "{kind}: {want} is not in {text}\n{}", doc.tex);
+        }
+    }
+}

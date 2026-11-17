@@ -497,3 +497,22 @@ fn the_user_guide_is_a_book_with_every_note_once_in_the_order_of_start_here() {
     assert!(shown.is_empty(), "printed with their brackets: {shown:?}");
     assert!(!c.contains(&hex("Back to [[")), "the link of every chapter is a link");
 }
+
+// spec: BOOK-006, PDF-011, PDF-012
+#[test]
+fn footnotes_link_within_their_own_chapter_and_math_is_drawn_in_a_book() {
+    let (v, d) = vault_with("notes", &[("Book/One.md", "# One\n\nfirst claim[^1]\n\n[^1]: firstdef\n\n$$\\frac{a}{b}$$\n"), ("Book/Two.md", "# Two\n\nsecond claim[^1]\n\n[^1]: seconddef\n")]);
+    let bytes = export_book(&v, Path::new("Book"), &ExportOptions { toc: false, ..opts() }, None).unwrap();
+    let streams = page_streams(&bytes);
+    let (ids, targets) = page_ids_and_link_targets(&bytes);
+    let first = streams.iter().position(|s| s.contains(&hex("firstdef"))).unwrap();
+    let second = streams.iter().position(|s| s.contains(&hex("seconddef"))).unwrap();
+    assert_ne!(first, second, "the chapters are on pages of their own");
+    for (page, def) in [(first, "firstdef"), (second, "seconddef")] {
+        assert_eq!(targets.iter().filter(|t| **t == ids[page]).count(), 1, "the one reference of the chapter links to its own definition {def}");
+    }
+    let c = streams[first].as_str();
+    assert!(!c.contains(&hex("[^1")) && !c.contains(&hex("frac")), "no raw footnote or TeX text");
+    assert!(c.matches(" f Q").count() >= 3, "the formula is drawn as outlines: {}", c.matches(" f Q").count());
+    clean(&d);
+}

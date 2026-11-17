@@ -50,6 +50,9 @@ mod link_preview_ui_tests;
 mod lists;
 mod mail;
 mod markdown;
+mod math;
+#[cfg(test)]
+mod math_ui_tests;
 mod media;
 #[cfg(test)]
 mod notes_vault_tests;
@@ -61,6 +64,7 @@ mod pdf;
 mod picker;
 #[cfg(test)]
 mod preview_ui_tests;
+mod program;
 mod reader;
 mod recorder;
 mod recovery;
@@ -95,6 +99,7 @@ mod userguide_ui_tests;
 #[cfg(test)]
 mod utf8_tests;
 mod vault;
+mod vault_check;
 mod vault_path;
 mod vault_state;
 mod vim;

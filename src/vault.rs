@@ -756,12 +756,21 @@ impl Vault {
 
     /// Pick a path for a new note called `name` (may contain folders) inside `folder`.
     /// The result is always inside the vault (VAULT-018): `..` and empty parts of `name` are
-    /// dropped, and a `folder` outside the vault is replaced by the vault root.
+    /// dropped, and a `folder` outside the vault is replaced by the vault root. Each part is made
+    /// portable (VAULT-027) and the file name is at most 200 bytes.
     pub fn new_note_path(&self, folder: &Path, name: &str) -> PathBuf {
+        self.new_note_path_max(folder, name, fsutil::TYPED_NAME_MAX)
+    }
+
+    /// [`Vault::new_note_path`] with the file name (extension and a number included) cut to
+    /// `max_bytes`: 127 for names Shale makes itself (VAULT-027).
+    pub fn new_note_path_max(&self, folder: &Path, name: &str, max_bytes: usize) -> PathBuf {
         let folder = VaultPath::new(folder).unwrap_or_default();
         let folder = folder.as_path();
         let name = name.trim().trim_start_matches('/');
-        let mut parts: Vec<String> = name.split('/').map(markdown::sanitize_note_name).filter(|s| !s.is_empty()).collect();
+        // the file name is cut below, when the extension and a number are known
+        let count = name.split('/').count();
+        let mut parts: Vec<String> = name.split('/').enumerate().map(|(i, p)| markdown::sanitize_note_name_max(p, if i + 1 == count { usize::MAX } else { fsutil::TYPED_NAME_MAX })).filter(|s| !s.is_empty()).collect();
         if parts.is_empty() {
             parts.push("Untitled".into());
         }
@@ -777,10 +786,17 @@ impl Vault {
         } else {
             (markdown::strip_md_ext(&file).to_string(), "md")
         };
-        let mut candidate = dir.join(format!("{stem}.{ext}"));
+        // the stem is cut so that the number and the extension still fit
+        let fit = |suffix: &str| {
+            let budget = max_bytes.saturating_sub(ext.len() + 1 + suffix.len());
+            let stem = fsutil::portable_name(&stem, budget);
+            let stem = if stem.is_empty() { "Untitled".to_string() } else { stem };
+            dir.join(format!("{stem}{suffix}.{ext}"))
+        };
+        let mut candidate = fit("");
         let mut i = 1;
         while self.abs(&candidate).exists() {
-            candidate = dir.join(format!("{stem} {i}.{ext}"));
+            candidate = fit(&format!(" {i}"));
             i += 1;
         }
         candidate
@@ -1892,6 +1908,33 @@ mod tests {
         let t = v.trash(Path::new("proj")).unwrap();
         assert_eq!(v.restore(&t).unwrap(), PathBuf::from("proj"));
         assert_eq!(fsutil::read_to_string(d.join("proj/deep/two.md")).unwrap(), "2\n");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn new_note_paths_are_portable_and_within_their_limit() {
+        let d = temp_vault("portable-new");
+        let mut v = Vault::open(&d).unwrap();
+        let name = |p: PathBuf| p.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(name(v.new_note_path(Path::new(""), "Plan: v2?")), "Plan- v2-.md");
+        assert_eq!(name(v.new_note_path(Path::new(""), "CON")), "CON_.md");
+        assert_eq!(name(v.new_note_path(Path::new(""), "Ends with dots...")), "Ends with dots.md");
+        assert_eq!(v.new_note_path(Path::new(""), "Dir: a/Sub*: b/Note"), PathBuf::from("Dir- a/Sub-- b/Note.md"), "every part");
+        assert_eq!(name(v.new_note_path(Path::new(""), "Zeichnung: 1.excalidraw")), "Zeichnung- 1.excalidraw");
+        assert_eq!(name(v.new_note_path(Path::new(""), "Plan.excalidraw.md")), "Plan.excalidraw.md");
+        // typed names: 200 bytes with the extension, Shale's own: 127
+        let long = "ü".repeat(300);
+        let typed = v.new_note_path(Path::new(""), &long);
+        assert!(name(typed.clone()).len() <= 200 && name(typed).len() > 190);
+        let made = v.new_note_path_max(Path::new(""), &long, crate::fsutil::MADE_NAME_MAX);
+        assert!(name(made.clone()).len() <= 127 && name(made).ends_with("ü.md"));
+        // a number for a taken name still fits
+        let first = v.new_note_path_max(Path::new(""), &long, 127);
+        v.create_file(&first, "").unwrap();
+        let second = v.new_note_path_max(Path::new(""), &long, 127);
+        assert_ne!(first, second);
+        assert!(name(second.clone()).len() <= 127 && name(second).ends_with(" 1.md"));
         let _ = fs::remove_dir_all(&d);
     }
 }

@@ -267,7 +267,7 @@ pub fn ensure_note(vault: &mut Vault, dir: &str, p: &Person) -> Result<PathBuf, 
         return Ok(e);
     }
     let name = markdown::link_safe_name(&markdown::sanitize_note_name(&p.name.replace('/', "-")));
-    let rel = vault.new_note_path(&crate::import::clean_folder(dir)?, if name.is_empty() { "Unknown" } else { &name });
+    let rel = vault.new_note_path_max(&crate::import::clean_folder(dir)?, if name.is_empty() { "Unknown" } else { &name }, crate::fsutil::MADE_NAME_MAX);
     vault.create_file(&rel, &note_for(p)).map_err(|e| format!("could not make the contact note for {}: {e}", p.name))
 }
 
@@ -344,6 +344,23 @@ mod tests {
         v.rescan();
         let p = of_event(&e, &Contacts::index(&v, "Adressbuch"));
         assert_eq!(p.iter().map(|p| (p.name.as_str(), p.existing.is_some(), p.on)).collect::<Vec<_>>(), vec![("Hans Müller", true, true), ("Anna Schmidt", true, true), ("Raum 2.04", false, false)]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn a_contact_note_gets_a_portable_name() {
+        let d = std::env::temp_dir().join(format!("shale-people-portable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let mut v = Vault::open(&d).unwrap();
+        let p = Person { name: "Dr. Müller: Hans?".into(), email: "h@x.example".into(), role: Role::From, existing: None, on: true };
+        let rel = ensure_note(&mut v, "Adressbuch", &p).unwrap();
+        assert_eq!(rel, PathBuf::from("Adressbuch/Dr. Müller- Hans-.md"));
+        assert_eq!(link_to(&v, &rel), "[[Dr. Müller- Hans-]]", "the link has the name the note got");
+        let long = Person { name: "L".repeat(300), email: "l@x.example".into(), role: Role::From, existing: None, on: true };
+        let rel = ensure_note(&mut v, "Adressbuch", &long).unwrap();
+        assert!(rel.file_name().unwrap().len() <= 127, "{rel:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

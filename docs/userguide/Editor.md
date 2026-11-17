@@ -72,6 +72,56 @@ other editors and renderers show them too:
 tag, or inside inline code, is just text. Colours show in the editor (the tags dimmed; the
 Markdown preview hides them), in the [[Reading view]], in table cells and in the [[PDF]] export.
 
+## Footnotes, underline, subscript and superscript
+
+A footnote is a reference in the text and a definition anywhere in the note:
+
+```
+The claim[^1] is old, as H<sub>2</sub>O and x<sup>2</sup> are, and <u>this</u> matters.
+
+[^1]: The source of the claim
+    with a second line, indented by four spaces or a tab.
+```
+
+A reference `[^label]` (letters, digits, `-` and `_`) with a definition shows only its label, raised
+and small, in the link colour; the brackets and the `^` are hidden by the Markdown preview. The
+definition `[^label]: text` at the start of a line shows its label raised and its text a little
+smaller; lines after it that start with four spaces or a tab belong to it. With the cursor in a line
+you see its raw text, as with every other markup. A reference without a definition is shown as
+written. In the [[Reading view]] a click on a reference scrolls to its definition, and a click on
+the label of a definition scrolls back to the first reference. Links, `#tags` and formatting work
+inside a definition. Footnotes in inline or fenced code are just text.
+
+`<u>…</u>` underlines, `<sub>…</sub>` lowers and `<sup>…</sup>` raises its text, both at about 70% of
+the size. They follow the rules of the colour tags above: any letter case, they nest with `<mark>`,
+`<span>` and each other, and a tag without its partner or inside inline code is plain text. The tags
+are hidden by the Markdown preview. In a table cell, `<br>` (also `<br/>` and `<br />`) starts a new
+line in the cell, where the table is drawn as a grid; the cell editor keeps the tag as you wrote it.
+
+All of this also shows in the heading titles of the outline, in table cells, and in the [[PDF]]
+export, where a footnote reference links to its definition. Word notes imported with pandoc use
+exactly these forms (see [[Import]]).
+
+## Math
+
+A formula between dollar signs is set in the text, `$E = mc^2$`, and two dollar signs make a display formula, centred in a row of its own:
+
+```
+The roots of a quadratic are $x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$.
+
+$$
+\sum_{k=1}^{n} k^2 = \frac{n(n+1)(2n+1)}{6}
+$$
+```
+
+![[math-editor.png]]
+
+The opening `$` is not followed by a space, the closing one is not preceded by a space and not followed by a digit, and both are on one line, so `costs $5 and $10` is no formula; `\$` is a plain dollar sign. A display formula is `$$…$$` on one line, or `$$` on lines of their own around one or more lines, or a ```` ```math ```` block. Nothing in code or in the front matter is a formula.
+
+Shale typesets formulas itself, with the bundled font STIX Two Math (SIL Open Font License, its licence is beside it in the program's sources) and no TeX installed. It knows letters in math italic, digits and operators upright, `{}` groups, `^` and `_` (also both, and nested), `\frac`, `\dfrac`, `\tfrac`, `\binom`, `\sqrt` and `\sqrt[n]`, Greek letters, the usual relations, binary operators, arrows and symbols, big operators with limits (`\sum`, `\prod`, `\int`, `\iint`, `\oint`, `\lim`; the limits stand below and above in display style and beside the symbol in the text; `\limits` and `\nolimits` change that), function names (`\sin`, `\log`, `\max`, `\operatorname{…}`), `\left…\right` delimiters that grow with their content, accents (`\hat`, `\bar`, `\vec`, `\dot`, `\tilde`, `\overline`, `\underline`), `\text{…}`, `\mathrm`, `\mathbf`, `\mathit`, `\mathbb`, `\mathcal`, the spaces `\,` `\:` `\;` `\quad` `\qquad` `\!`, and the environments `matrix`, `pmatrix`, `bmatrix`, `vmatrix`, `cases` and `aligned` (rows `\\`, columns `&`).
+
+With the Markdown preview on, a formula takes the place of its TeX; the line with the cursor shows the TeX, as with every other markup (the TeX stays in the note, so the cursor, selection and search work on it). The same formulas are drawn in the [[Reading view]], in table cells, in the headings of the outline and in the [[PDF]] export. A formula Shale cannot typeset (an unknown command, braces that do not match, `\left` without `\right`, more than 64 levels of nesting or more than 10 000 characters) stays as its TeX in the code style, and the reason shows when you point at it. Word files imported with pandoc bring their formulas as `$…$` and `$$…$$` (see [[Import]]).
+
 ## Code
 
 Code is coloured: write the language after the opening fence, as in ```` ```js ````

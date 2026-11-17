@@ -42,6 +42,74 @@ impl ShaleApp {
                 .changed();
         });
         ui.label(muted("Type [[p followed by a name to pick a person from this folder (or make a new contact note).").size(12.0));
+        self.names_check_ui(ui);
         changed
+    }
+
+    /// "Check names for Windows and macOS…" and its list (VAULT-028).
+    fn names_check_ui(&mut self, ui: &mut Ui) {
+        section(ui, "Names on other systems");
+        if self.vault_check.poll() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        let running = self.vault_check.running();
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!running && self.vault.is_some(), egui::Button::new("Check names for Windows and macOS…")).on_hover_text("Lists the files and folders whose names would not work on Windows or macOS").clicked() {
+                self.start_vault_check();
+            }
+            if running {
+                ui.spinner();
+                ui.label(muted("Checking…").size(12.0));
+            }
+        });
+        if let Some(r) = self.vault_check.report.clone() {
+            ui.label(muted(r).size(12.0));
+        }
+        let found = match &self.vault_check.result {
+            None => return,
+            Some(Err(e)) => {
+                ui.colored_label(crate::theme::LINK_MISSING, e.as_str());
+                return;
+            }
+            Some(Ok(found)) if found.is_empty() => {
+                ui.label("All names work on Windows and macOS.");
+                return;
+            }
+            Some(Ok(found)) => found.clone(),
+        };
+        let fixable: Vec<usize> = (0..found.len()).filter(|i| found[*i].proposed.is_some()).collect();
+        ui.label(format!("{} {} would not work on Windows or macOS:", found.len(), if found.len() == 1 { "name" } else { "names" }));
+        if self.vault_check.confirm_all {
+            ui.horizontal(|ui| {
+                ui.label(format!("Rename {} {}? Links to them are updated.", fixable.len(), if fixable.len() == 1 { "file or folder" } else { "files and folders" }));
+                if ui.button("Rename all").clicked() {
+                    self.rename_findings(&fixable);
+                }
+                if ui.button("Cancel").clicked() {
+                    self.vault_check.confirm_all = false;
+                }
+            });
+        } else if ui.add_enabled(!fixable.is_empty() && !running, egui::Button::new("Rename all…")).clicked() {
+            self.vault_check.confirm_all = true;
+        }
+        let mut one = None;
+        egui::ScrollArea::vertical().id_salt("names-check").max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
+            for (i, f) in found.iter().enumerate() {
+                ui.horizontal_wrapped(|ui| {
+                    if ui.add_enabled(f.proposed.is_some() && !running, egui::Button::new("Rename").small()).clicked() {
+                        one = Some(i);
+                    }
+                    ui.label(crate::vault::rel_to_string(&f.rel) + if f.is_dir { "/" } else { "" });
+                    ui.label(muted(f.reasons.join("; ")).size(12.0));
+                    match &f.proposed {
+                        Some(p) => ui.label(format!("→ {p}")),
+                        None => ui.label(muted("no name fits: shorten the folders above it").size(12.0)),
+                    };
+                });
+            }
+        });
+        if let Some(i) = one {
+            self.rename_findings(&[i]);
+        }
     }
 }

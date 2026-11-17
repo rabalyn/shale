@@ -1,10 +1,16 @@
 //! The "Import" dialog shown when e-mails, events or files are dropped on the window (or
 //! chosen with the Import button): what to import, the folder, tags and a few options.
 
-use crate::import::{self, Item, Source};
+use crate::import::{self, docx, Item, Source};
 use crate::theme;
 use eframe::egui::{self, Rect, Ui};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::Arc;
+
+/// The result of pandoc for the item at this place of the list.
+pub type Converted = (usize, Result<Arc<docx::Prepared>, String>);
 
 pub struct ImportDialog {
     pub items: Vec<Item>,
@@ -12,6 +18,12 @@ pub struct ImportDialog {
     pub folder: String,
     pub tags: String,
     pub keep_original: bool,
+    /// keep the original .docx of a Word file in its import folder (IMP-038)
+    pub keep_docx: bool,
+    /// pandoc runs for the Word files that are going on in a job (IMP-035)
+    pub converting: Option<Receiver<Result<Vec<Converted>, String>>>,
+    /// set when the dialog is let go: a pandoc run that is still going stops
+    pub cancel: Arc<AtomicBool>,
     /// a note to add links to the new notes to (where it was dropped / the open note)
     pub link_into: Option<PathBuf>,
     pub link_on: bool,
@@ -39,7 +51,94 @@ pub enum ImportAction {
 
 impl ImportDialog {
     pub fn new(items: Vec<Item>, notes: Vec<String>, folder: String, tags: String, link_into: Option<PathBuf>, link_on: bool) -> Self {
-        ImportDialog { items, folder, tags, keep_original: true, link_into, link_on, add_path: String::new(), notes, error: None, rects: vec![], auto_tags: vec![], suggested: vec![], people_dir: crate::import::people::DEFAULT_DIR.into() }
+        ImportDialog {
+            items,
+            folder,
+            tags,
+            keep_original: true,
+            keep_docx: true,
+            converting: None,
+            cancel: Arc::new(AtomicBool::new(false)),
+            link_into,
+            link_on,
+            add_path: String::new(),
+            notes,
+            error: None,
+            rects: vec![],
+            auto_tags: vec![],
+            suggested: vec![],
+            people_dir: crate::import::people::DEFAULT_DIR.into(),
+        }
+    }
+
+    /// Start pandoc, in a job, on the Word files that have not been converted yet (IMP-035). False
+    /// when there is nothing to do.
+    pub fn start_conversion(&mut self, root: PathBuf) -> bool {
+        let todo: Vec<(usize, PathBuf, PathBuf)> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.include)
+            .filter_map(|(k, i)| match &i.source {
+                Source::Docx { path, pandoc: Some(p), ready: None, .. } => Some((k, p.clone(), path.clone())),
+                _ => None,
+            })
+            .collect();
+        if todo.is_empty() {
+            return false;
+        }
+        let (keep, cancel, date) = (self.keep_docx, self.cancel.clone(), crate::media::local_date());
+        self.converting = Some(crate::jobs::spawn(
+            move || {
+                let mut reserved = std::collections::HashSet::new();
+                todo.into_iter()
+                    .map(|(k, pandoc, path)| {
+                        let c = docx::Convert { pandoc: &pandoc, docx: &path, root: &root, date, keep_original: keep, timeout: docx::TIMEOUT, cancel: &cancel };
+                        (k, docx::prepare(&c, &mut reserved).map(Arc::new))
+                    })
+                    .collect()
+            },
+            || {},
+        ));
+        true
+    }
+
+    /// Take the result of the job when it has ended. True when it has: the import can go on.
+    pub fn poll_conversion(&mut self) -> bool {
+        let Some(rx) = &self.converting else { return false };
+        let done = match rx.try_recv() {
+            Ok(r) => r,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => Err("the conversion stopped without a result".into()),
+        };
+        self.converting = None;
+        match done {
+            Ok(results) => {
+                for (k, r) in results {
+                    if let Some(Source::Docx { ready, .. }) = self.items.get_mut(k).map(|i| &mut i.source) {
+                        *ready = Some(r);
+                    }
+                }
+            }
+            Err(e) => {
+                // a crash: every file waiting for it fails with its words
+                for it in &mut self.items {
+                    if let Source::Docx { ready: ready @ None, pandoc: Some(_), .. } = &mut it.source {
+                        *ready = Some(Err(e.clone()));
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Forget the results of pandoc, so that the next Import runs it again (after a failure).
+    pub fn forget_conversions(&mut self) {
+        for it in &mut self.items {
+            if let Source::Docx { ready, .. } = &mut it.source {
+                *ready = None;
+            }
+        }
     }
 
     pub fn count(&self) -> usize {
@@ -56,6 +155,12 @@ impl ImportDialog {
             None => tags.push(tag.to_string()),
         }
         self.tags = tags.join(", ");
+    }
+}
+
+impl Drop for ImportDialog {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::SeqCst);
     }
 }
 
@@ -117,6 +222,10 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
                     rec(format!("lift:{i}"), ui.checkbox(lift, egui::RichText::new("Lift headings (## → #, ### → ##, …)").size(12.5)))
                         .on_hover_text("The text has no # heading: every heading moves up by the same number of levels so that the highest becomes #");
                 }
+            }
+            if let Source::Docx { lift, pandoc: Some(_), .. } = &mut it.source {
+                rec(format!("lift:{i}"), ui.checkbox(lift, egui::RichText::new("Lift headings (## → #, ### → ##, …)").size(12.5)))
+                    .on_hover_text("When the document has no # heading: every heading moves up by the same number of levels so that the highest becomes #");
             }
             if let Source::Email { mail, .. } = &it.source {
                 for (k, (a, on)) in mail.attachments.iter().zip(it.att_on.iter_mut()).enumerate() {
@@ -209,6 +318,13 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. })) {
         rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
     }
+    if d.items.iter().any(|i| matches!(i.source, Source::Docx { pandoc: Some(_), .. })) {
+        rec("keep-docx".into(), ui.checkbox(&mut d.keep_docx, "Keep the original .docx")).on_hover_text("Copies each Word file into its import folder and names it in the note's properties");
+    }
+    if d.converting.is_some() {
+        ui.label(muted("Converting the Word files with pandoc…"));
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+    }
     let included = || d.items.iter().filter(|i| i.include);
     let media = included().filter(|i| matches!(i.source, Source::Media { .. })).count();
     if media > 0 {
@@ -249,7 +365,7 @@ pub fn footer(ui: &mut Ui, d: &mut ImportDialog) -> Option<ImportAction> {
     };
     ui.horizontal(|ui| {
         let label = if n == 1 { "Import 1 item".to_string() } else { format!("Import {n} items") };
-        if rec("import", ui.add_enabled(n > 0, egui::Button::new(egui::RichText::new(label).strong()))).clicked() {
+        if rec("import", ui.add_enabled(n > 0 && d.converting.is_none(), egui::Button::new(egui::RichText::new(label).strong()))).clicked() {
             action = Some(ImportAction::Import);
         }
         if rec("cancel", ui.button("Cancel")).clicked() {
@@ -362,6 +478,68 @@ mod tests {
         assert!(matches!(d.items[0].source, Source::Markdown { lift: false, .. }), "a click unticks it");
         h.click("lift:0", &mut d, &[], &[]);
         assert!(matches!(d.items[0].source, Source::Markdown { lift: true, .. }));
+    }
+
+    // spec: IMP-035, IMP-038
+    #[test]
+    fn a_word_item_has_the_lift_and_keep_boxes_and_one_without_pandoc_has_none() {
+        let with = import::docx::docx_item(PathBuf::from("/in/Report.docx"), Some(PathBuf::from("/usr/bin/pandoc")));
+        let without = import::docx::docx_item(PathBuf::from("/in/Other.docx"), None);
+        assert_eq!((with.kind().as_ref(), without.kind().as_ref()), ("Word document", "Files"));
+        let mut d = ImportDialog::new(vec![with, without], vec![], String::new(), String::new(), None, false);
+        let mut h = H { ctx: egui::Context::default(), t: 0.0 };
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(d.rects.iter().any(|r| r.0 == "lift:0") && d.rects.iter().any(|r| r.0 == "keep-docx"));
+        assert!(!d.rects.iter().any(|r| r.0 == "lift:1"), "an item without pandoc is only an attachment");
+        assert!(d.keep_docx && matches!(d.items[0].source, Source::Docx { lift: true, .. }), "both ticked at first");
+        h.click("keep-docx", &mut d, &[], &[]);
+        assert!(!d.keep_docx);
+        h.click("lift:0", &mut d, &[], &[]);
+        assert!(matches!(d.items[0].source, Source::Docx { lift: false, .. }));
+        // no Word file with pandoc, no box
+        let mut d = ImportDialog::new(vec![import::docx::docx_item(PathBuf::from("/in/Other.docx"), None)], vec![], String::new(), String::new(), None, false);
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(!d.rects.iter().any(|r| r.0 == "keep-docx"));
+    }
+
+    // spec: IMP-035
+    #[test]
+    fn the_result_of_the_conversion_job_is_taken_and_a_crash_fails_the_files_waiting_for_it() {
+        let ready = |d: &ImportDialog| -> Vec<Option<bool>> { d.items.iter().map(|i| if let Source::Docx { ready, .. } = &i.source { ready.as_ref().map(|r| r.is_ok()) } else { None }).collect() };
+        let item = || import::docx::docx_item(PathBuf::from("/in/a.docx"), Some(PathBuf::from("/no/such/pandoc")));
+        let mut d = ImportDialog::new(vec![item(), import::markdown_item("n.md".into(), "x".into())], vec![], String::new(), String::new(), None, false);
+        assert!(!d.poll_conversion(), "nothing is running");
+        // the job runs pandoc, which is not there: the file fails with the words for it
+        assert!(d.start_conversion(std::env::temp_dir().join("shale-dialog-conv-never-used")));
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !d.poll_conversion() {
+            assert!(std::time::Instant::now() < end);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(ready(&d), vec![Some(false), None]);
+        assert!(!d.start_conversion(std::env::temp_dir()), "what has a result is not run again");
+        d.forget_conversions();
+        assert_eq!(ready(&d), vec![None, None]);
+        // a job that ends without a result
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Converted>, String>>();
+        drop(tx);
+        d.converting = Some(rx);
+        assert!(d.poll_conversion());
+        match &d.items[0].source {
+            Source::Docx { ready: Some(Err(e)), .. } => assert!(e.contains("without a result"), "{e}"),
+            other => panic!("{other:?}"),
+        }
+        // a job that crashed
+        d.forget_conversions();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Err("the background job crashed: boom".to_string())).unwrap();
+        d.converting = Some(rx);
+        assert!(d.poll_conversion());
+        assert!(matches!(&d.items[0].source, Source::Docx { ready: Some(Err(e)), .. } if e.contains("boom")));
+        // letting go of the dialog stops a run that is still going
+        let flag = d.cancel.clone();
+        drop(d);
+        assert!(flag.load(Ordering::SeqCst));
     }
 
     // spec: SOC-020

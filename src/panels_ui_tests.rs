@@ -483,7 +483,7 @@ fn shown_labels(p: &mut P) -> Vec<String> {
 #[test]
 fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
     let mut p = P::new("settings-tabs", &[]);
-    let wants: [(SettingsTab, &[&str]); 12] = [
+    let wants: [(SettingsTab, &[&str]); 13] = [
         (SettingsTab::Vault, &["Vault folder", "People folder"]),
         (SettingsTab::Editor, &["Cursor while typing", "Blinking cursor", "Show line numbers in the editor", "Update links in other notes when renaming", "Font colours"]),
         (SettingsTab::Vim, &["Vim-style editing", "Cursor in normal mode", "Esc from insert mode", "Link preview size"]),
@@ -493,6 +493,7 @@ fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
         (SettingsTab::Calendar, &["Calendars…", "Calendar weeks start on Monday (otherwise Sunday)"]),
         (SettingsTab::Mail, &["Mail accounts…", "Fetch new mail every"]),
         (SettingsTab::Social, &["Feed accounts…", "Look for new posts every", "Post search index"]),
+        (SettingsTab::Import, &["Import Word files as notes (needs pandoc)", "pandoc program", "Check again"]),
         (SettingsTab::Data, &["Data usage…"]),
         (SettingsTab::Latex, &["Which TeX is used", "Check again"]),
         (SettingsTab::Help, &["Open user guide (F1)", "Troubleshooting"]),
@@ -540,6 +541,52 @@ fn edit_044_the_vim_tab_follows_editor_indented_and_holds_the_vim_settings() {
     assert!(matches!(&p.app.modal, Some(Modal::Settings { tab, .. }) if *tab == SettingsTab::Vim));
     p.click(Show::Modals, "Keybindings tab");
     assert!(matches!(&p.app.modal, Some(Modal::Settings { tab, .. }) if *tab == SettingsTab::Keybindings));
+}
+
+/// The labels of Settings until one starts with `text` (a background job answers after a moment).
+fn labels_until(p: &mut P, text: &str) -> Vec<String> {
+    for _ in 0..300 {
+        let shown = shown_labels(p);
+        if shown.iter().any(|s| s.starts_with(text)) {
+            return shown;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("no label starting with {text:?} in {:?}", shown_labels(p));
+}
+
+// spec: IMP-036
+#[test]
+fn imp_036_the_import_tab_has_the_word_setting_and_says_where_pandoc_is_or_how_to_install_it() {
+    let mut p = P::new("settings-import", &[]);
+    assert!(!p.app.cfg.docx_import && p.app.cfg.pandoc_path.is_empty(), "off and searching by default");
+    // a pandoc that is not there: said in words, with the way to install it on each system
+    p.app.cfg.pandoc_path = p.dir.join("no-such-pandoc").to_string_lossy().into_owned();
+    p.app.open_settings(SettingsTab::Import);
+    let shown = labels_until(&mut p, "pandoc was not found");
+    for how in ["Linux: sudo pacman -S pandoc-cli   or   sudo apt install pandoc", "macOS: brew install pandoc", "Windows: winget install JohnMacFarlane.Pandoc", "or see https://pandoc.org/installing.html"] {
+        assert!(shown.iter().any(|s| s == how), "{how:?} missing in {shown:?}");
+    }
+    // the box can be ticked while pandoc is missing
+    p.click(Show::Modals, "Import Word files as notes (needs pandoc)");
+    assert!(p.app.cfg.docx_import);
+    p.click(Show::Modals, "Import Word files as notes (needs pandoc)");
+    assert!(!p.app.cfg.docx_import);
+    // a pandoc that is there: its version and place, no install help
+    #[cfg(unix)]
+    {
+        let fake = crate::import::docx_tests::fake_pandoc(&p.dir, "pandoc", "echo 'pandoc 9.9.1'");
+        p.app.cfg.pandoc_path = fake.to_string_lossy().into_owned();
+        p.click(Show::Modals, "Check again");
+        let shown = labels_until(&mut p, "pandoc 9.9.1, found at");
+        assert!(shown.iter().any(|s| *s == format!("pandoc 9.9.1, found at {}", fake.display())), "{shown:?}");
+        assert!(!shown.iter().any(|s| s.starts_with("macOS:")), "no install help when it is found");
+        // one that does not run: its words
+        let bad = crate::import::docx_tests::fake_pandoc(&p.dir, "pandoc-bad", "echo 'Illegal instruction' >&2; exit 4");
+        p.app.cfg.pandoc_path = bad.to_string_lossy().into_owned();
+        p.click(Show::Modals, "Check again");
+        labels_until(&mut p, &format!("{} does not work: Illegal instruction", bad.display()));
+    }
 }
 
 // spec: CFG-021
@@ -726,4 +773,38 @@ fn dev_020_the_help_button_in_settings_opens_the_user_guide_as_the_vault() {
     let copy = root.join(format!("userguide-{}", env!("CARGO_PKG_VERSION")));
     assert!(p.app.modal.is_none(), "Settings closes");
     assert_eq!(p.app.vault.as_ref().map(|v| v.root.clone()), Some(copy));
+}
+
+// spec: VAULT-028
+#[test]
+fn vault_028_settings_vault_checks_names_in_the_background_and_renames_one_or_all_after_a_question() {
+    let mut p = P::with_files("names-check", &[("a:b.md", "A\n"), ("c?d.md", "C\n"), ("Fine.md", "F\n"), ("Linker.md", "[[a:b]] [[c?d]]\n"), (".trash/2026-11-17/e:f.md", "gone\n")]);
+    p.app.open_settings(SettingsTab::Vault);
+    let shown = shown_labels(&mut p);
+    assert!(shown.iter().any(|l| l == "Check names for Windows and macOS…"));
+    assert!(!shown.iter().any(|l| l.contains("would not work")), "nothing is listed before the check");
+    p.click(Show::Modals, "Check names for Windows and macOS…");
+    let shown = labels_until(&mut p, "2 names would not work on Windows or macOS");
+    assert!(shown.iter().any(|l| l.starts_with("a:b.md")), "{shown:?}");
+    assert!(shown.iter().any(|l| l == "`:` is not allowed on Windows"), "{shown:?}");
+    assert!(shown.iter().any(|l| l == "→ a-b.md") && shown.iter().any(|l| l == "→ c-d.md"), "{shown:?}");
+    assert!(!shown.iter().any(|l| l.contains("e:f.md") || l.contains("Fine.md")), "the trash and good names are not listed");
+    // one at a time
+    let first = p.find(Show::Modals, None, "Rename");
+    p.click_rect(Show::Modals, first, PointerButton::Primary);
+    let shown = labels_until(&mut p, "1 name would not work on Windows or macOS");
+    assert!(p.dir.join("a-b.md").exists() && !p.dir.join("a:b.md").exists());
+    assert_eq!(std::fs::read_to_string(p.dir.join("Linker.md")).unwrap(), "[[a-b]] [[c?d]]\n", "links are rewritten");
+    assert!(shown.iter().any(|l| l.starts_with("Renamed 1 file or folder, updated links in 1 file(s)")), "{shown:?}");
+    // all of them: first a question, Cancel changes nothing
+    p.click(Show::Modals, "Rename all…");
+    let shown = shown_labels(&mut p);
+    assert!(shown.iter().any(|l| l == "Rename 1 file or folder? Links to them are updated."), "{shown:?}");
+    p.click(Show::Modals, "Cancel");
+    assert!(p.dir.join("c?d.md").exists());
+    p.click(Show::Modals, "Rename all…");
+    p.click(Show::Modals, "Rename all");
+    labels_until(&mut p, "All names work on Windows and macOS.");
+    assert!(p.dir.join("c-d.md").exists() && !p.dir.join("c?d.md").exists());
+    assert_eq!(std::fs::read_to_string(p.dir.join("Linker.md")).unwrap(), "[[a-b]] [[c-d]]\n");
 }

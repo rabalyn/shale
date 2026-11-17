@@ -12,6 +12,9 @@ use crate::vault::{rel_to_string, Vault};
 use std::path::{Path, PathBuf};
 
 pub mod dialog;
+pub mod docx;
+#[cfg(test)]
+pub(crate) mod docx_tests;
 /// What another program hands over in a drop (a whole message, calendar data, links, text,
 /// Thunderbird lookups): only Wayland delivers those kinds (IMP-011); `wl_drop.rs` is their one source.
 #[cfg(target_os = "linux")]
@@ -57,6 +60,17 @@ pub enum Source {
         text: String,
         lift: bool,
     },
+    /// a Word file, imported as a note by pandoc (IMP-035). Without `pandoc` it is saved as an
+    /// attachment (IMP-035). `lift`: the headings move up when the note has no `#` (IMP-034).
+    /// `ready`: the result of the run when the dialog has made it ahead of time in a job (else
+    /// `import` runs pandoc itself)
+    Docx {
+        name: String,
+        path: PathBuf,
+        pandoc: Option<PathBuf>,
+        lift: bool,
+        ready: Option<Result<std::sync::Arc<docx::Prepared>, String>>,
+    },
     /// text dropped from another program (Wayland, IMP-011)
     #[cfg(target_os = "linux")]
     Text(String),
@@ -99,6 +113,8 @@ impl Item {
             Source::Event { .. } => "Event".into(),
             Source::Files(_) => "Files".into(),
             Source::Markdown { .. } => "Markdown note".into(),
+            Source::Docx { pandoc: Some(_), .. } => "Word document".into(),
+            Source::Docx { pandoc: None, .. } => "Files".into(),
             Source::Media { kind, .. } => kind.label().into(),
             #[cfg(target_os = "linux")]
             Source::Text(_) => "Text".into(),
@@ -116,6 +132,7 @@ impl Item {
             Source::Files(p) => p.iter().map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>().join(" "),
             Source::Media { name, .. } => name.clone(),
             Source::Markdown { text, .. } => text.clone(),
+            Source::Docx { path, .. } => path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
             #[cfg(target_os = "linux")]
             Source::Text(t) => t.clone(),
             Source::Social { saved, .. } => {
@@ -142,6 +159,7 @@ impl Item {
                 MediaData::Bytes(b) => format!("{name} · {}", dialog::size_text(b.len())),
             },
             Source::Markdown { name, text, .. } => format!("{name} · {} characters", text.chars().count()),
+            Source::Docx { name, path, .. } => format!("{name} · from {}", path.parent().map(|d| d.display().to_string()).unwrap_or_default()),
             #[cfg(target_os = "linux")]
             Source::Text(s) => format!("{} characters of text", s.chars().count()),
             Source::Social { saved, network, .. } => {
@@ -155,6 +173,9 @@ impl Item {
 
     /// Something that went wrong while the post was fetched (pictures, the thread), if anything.
     pub fn warning(&self) -> Option<String> {
+        if let Source::Docx { pandoc: None, .. } = &self.source {
+            return Some(format!("{}. The file is saved as an attachment.", docx::MISSING));
+        }
         let Source::Social { saved, .. } = &self.source else { return None };
         let mut parts = vec![];
         if let Some(e) = &saved.thread_error {
@@ -265,6 +286,37 @@ pub fn event_item(event: Event, calendar: String, original: Option<(String, Vec<
 fn files_item(paths: Vec<PathBuf>) -> Item {
     let title = if paths.len() == 1 { paths[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "File".into()) } else { format!("{} Files", ymd_text(today_ymd())) };
     Item { source: Source::Files(paths), include: true, title: safe_title(&title), att_on: vec![], already: None, people: vec![] }
+}
+
+/// What the Import does with Word files (IMP-035, IMP-036).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Word {
+    /// the setting is off: a `.docx` is an attachment like any other file (IMP-031)
+    #[default]
+    Off,
+    /// the setting is on; the pandoc that was found, if any
+    On(Option<PathBuf>),
+}
+
+/// Make Word items of the `.docx` files that `items_from_paths` left in its "Files" items, when the
+/// Word import is on (IMP-035); the other files stay where they are.
+pub fn word_items(items: &mut Vec<Item>, word: &Word) {
+    let Word::On(pandoc) = word else { return };
+    let is_docx = |p: &PathBuf| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("docx"));
+    let mut out: Vec<Item> = Vec::new();
+    for it in items.drain(..) {
+        match it.source {
+            Source::Files(paths) if paths.iter().any(is_docx) => {
+                let (words, rest): (Vec<PathBuf>, Vec<PathBuf>) = paths.into_iter().partition(is_docx);
+                out.extend(words.into_iter().map(|p| docx::docx_item(p, pandoc.clone())));
+                if !rest.is_empty() {
+                    out.push(files_item(rest));
+                }
+            }
+            source => out.push(Item { source, ..it }),
+        }
+    }
+    *items = out;
 }
 
 /// An item for a Markdown file (IMP-033): a note named like the file, its text unchanged unless
@@ -416,6 +468,8 @@ pub struct Options {
     pub tags: Vec<String>,
     /// keep the original .eml / .ics next to the attachments
     pub keep_original: bool,
+    /// keep the original .docx in the import folder (IMP-038)
+    pub keep_docx: bool,
     /// where contact notes are (and new ones are made)
     pub people_dir: String,
 }
@@ -539,6 +593,19 @@ fn media_file_name(title: &str, name: &str) -> String {
     }
 }
 
+/// The note for files that are saved as attachments, with a link to each.
+fn files_note(root: &Path, paths: &[PathBuf], title: &str, tags: &[String]) -> Result<String, String> {
+    let date = today_ymd();
+    let mut s = front(&[("type", "files".into()), ("date", ymd_text(date))], tags);
+    s.push_str(&format!("\n# {title}\n\n"));
+    for p in paths {
+        let rel = media::import_file(root, p, date).map_err(|e| format!("could not copy “{}”: {e}", p.display()))?;
+        s.push_str(&link_line(&rel));
+        s.push('\n');
+    }
+    Ok(s)
+}
+
 /// Make the notes (and copy attachments / files into the media folder); pictures, PDFs and audio
 /// files become files there and no note.
 pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
@@ -559,6 +626,13 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
             match saved {
                 Ok(rel) => files.push(rel),
                 Err(e) => errors.push(format!("could not save “{file}”: {e}")),
+            }
+            continue;
+        }
+        if let Source::Docx { pandoc: Some(_), .. } = &it.source {
+            match docx::import_item(vault, it, o) {
+                Ok(rel) => made.push(rel),
+                Err(e) => errors.push(e),
             }
             continue;
         }
@@ -596,17 +670,8 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                     };
                     event_note(event, calendar, &o.tags, orig.as_deref(), &people)
                 }
-                Source::Files(paths) => {
-                    let date = today_ymd();
-                    let mut s = front(&[("type", "files".into()), ("date", ymd_text(date))], &o.tags);
-                    s.push_str(&format!("\n# {title}\n\n"));
-                    for p in paths {
-                        let rel = media::import_file(&root, p, date).map_err(|e| format!("could not copy “{}”: {e}", p.display()))?;
-                        s.push_str(&link_line(&rel));
-                        s.push('\n');
-                    }
-                    s
-                }
+                Source::Files(paths) => files_note(&root, paths, &title, &o.tags)?,
+                Source::Docx { path, .. } => files_note(&root, std::slice::from_ref(path), &title, &o.tags)?,
                 Source::Markdown { text, lift, .. } => match crate::markdown::lift_headings(text).filter(|_| *lift) {
                     Some(lifted) => lifted,
                     None => text.clone(),
@@ -635,7 +700,7 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
         })();
         match result {
             Ok(text) => {
-                let rel = vault.new_note_path(&o.folder, &title);
+                let rel = vault.new_note_path_max(&o.folder, &title, crate::fsutil::MADE_NAME_MAX);
                 match vault.create_file(&rel, &text) {
                     Ok(r) => made.push(r),
                     Err(e) => errors.push(format!("“{title}”: could not write the note: {e}")),
@@ -680,7 +745,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "2026-11-13 Neubau Hörsaal B – Pläne Stand 3");
         assert_eq!(items[0].att_on, vec![false, true, true], "the tiny inline logo is left out");
-        let o = Options { folder: PathBuf::from("Projekte/Neubau B"), tags: parse_tags("neubau-b, plaene"), keep_original: true, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("Projekte/Neubau B"), tags: parse_tags("neubau-b, plaene"), keep_original: true, keep_docx: true, people_dir: "Adressbuch".into() };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made, vec![PathBuf::from("Projekte/Neubau B/2026-11-13 Neubau Hörsaal B – Pläne Stand 3.md")]);
@@ -742,7 +807,7 @@ mod tests {
         std::fs::write(&txt, b"plan").unwrap();
         let (more, _) = items_from_paths(std::slice::from_ref(&txt));
         items.extend(more);
-        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into() };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 2);
@@ -775,7 +840,7 @@ mod tests {
         broken.failed_media.push(crate::social::note::FailedMedia { url: "https://x.test/a.jpg".into(), error: "gone".into(), post: 0, item: 0 });
         let w = social_item(broken, "Mastodon", false).warning().unwrap();
         assert!(w.contains("offline") && w.contains("1 picture or video could not be downloaded"), "{w}");
-        let o = Options { folder: PathBuf::from("Social"), tags: parse_tags("social, reading"), keep_original: false, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("Social"), tags: parse_tags("social, reading"), keep_original: false, keep_docx: true, people_dir: "Adressbuch".into() };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 2);
@@ -832,7 +897,7 @@ mod tests {
         // the lift box is ticked for the one with headings but no #, and for it only
         let lifts: Vec<bool> = items.iter().take(3).map(|i| matches!(i.source, Source::Markdown { lift: true, .. })).collect();
         assert_eq!(lifts, vec![true, false, false]);
-        let o = Options { folder: PathBuf::from("In"), tags: vec!["ignored".into()], keep_original: false, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("In"), tags: vec!["ignored".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into() };
         let Imported { notes: made, errors, .. } = import(&mut v, &items[..3], &o);
         assert!(errors.is_empty(), "{errors:?}");
         let read = |i: usize| std::fs::read_to_string(v.abs(&made[i])).unwrap();
@@ -869,7 +934,7 @@ mod tests {
         // a renamed title keeps the extension; a file of the vault is linked where it is
         items[0].title = "A cat".into();
         items[1].title = "anim.gif".into();
-        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["x".into()], keep_original: false, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["x".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into() };
         items.truncate(5);
         let Imported { notes, files, errors } = import(&mut v, &items, &o);
         assert!(errors.is_empty() && notes.is_empty(), "no note for media: {errors:?} {notes:?}");
@@ -896,6 +961,51 @@ mod tests {
         let mixed = vec![event_item(Event { uid: "u".into(), summary: "Termin".into(), start: 0, end: 3600, ..Default::default() }, "Work".into(), None), media_item(media::Kind::Pdf, "a.pdf".into(), MediaData::Bytes(b"%PDF".to_vec()))];
         let r = import(&mut v, &mixed, &o);
         assert_eq!((r.notes.len(), r.files.len()), (1, 1));
+        let _ = std::fs::remove_dir_all(&src);
+    }
+
+    // spec: VAULT-027
+    #[test]
+    fn imported_notes_and_files_get_portable_names_within_127_bytes() {
+        let mut v = temp_vault("portable");
+        let day = t::days_from_civil(2026, 12, 2);
+        let long_subject = format!("Re: Plan? {}", "wörter ".repeat(60));
+        let e = |summary: &str| Event { uid: format!("ev-{}@x", summary.len()), summary: summary.into(), start: t::local_to_utc(day, 10 * 3600), end: t::local_to_utc(day, 11 * 3600), ..Default::default() };
+        let mut mail = crate::mail::parse(&crate::mail::tests::sample_eml());
+        mail.subject = long_subject;
+        let src = std::env::temp_dir().join(format!("shale-import-portable-src-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&src);
+        std::fs::create_dir_all(&src).unwrap();
+        let file = src.join("Notes: 1?.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let mut items = vec![
+            email_item(mail, ("Mail: original?.eml".into(), b"raw".to_vec())),
+            event_item(e("Meeting: Q4 *final*"), "Work".into(), Some(("Cal: x?.ics".into(), b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n".to_vec()))),
+            markdown_item("Idea: A?.md".into(), "# Idea\n".into()),
+            media_item(media::Kind::Pdf, "Plan: v2?.pdf".into(), MediaData::Bytes(b"%PDF".to_vec())),
+        ];
+        items.extend(items_from_paths(std::slice::from_ref(&file)).0);
+        let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into() };
+        let Imported { notes, files, errors } = import(&mut v, &items, &o);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(notes.len(), 4, "{notes:?}");
+        for n in notes.iter().chain(&files) {
+            let name = n.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(!name.contains([':', '?', '*', '<', '>']) && name.len() <= 127, "{name} ({} bytes)", name.len());
+            assert!(v.root.join(n).exists(), "{n:?}");
+        }
+        let names: Vec<String> = notes.iter().map(|n| n.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert!(names.contains(&"2026-12-02 Meeting- Q4 -final-.md".to_string()), "{names:?}");
+        assert!(names.contains(&"Idea- A-.md".to_string()), "{names:?}");
+        assert!(files.iter().any(|f| f.to_string_lossy().ends_with("_Plan- v2-.pdf")), "{files:?}");
+        // the links in the notes name the files as they really are
+        let text = |n: &PathBuf| std::fs::read_to_string(v.abs(n)).unwrap();
+        let ev = notes.iter().find(|n| n.to_string_lossy().contains("Meeting")).unwrap();
+        assert!(text(ev).contains("_Cal- x-.ics]]"), "{}", text(ev));
+        let em = notes.iter().find(|n| n.to_string_lossy().contains("Re- Plan")).unwrap();
+        assert!(text(em).contains("_Mail- original-.eml]]"), "{}", text(em));
+        let fl = notes.iter().find(|n| n.to_string_lossy().contains("Notes- 1-")).unwrap();
+        assert!(text(fl).contains("_Notes- 1-.txt]]"), "{}", text(fl));
         let _ = std::fs::remove_dir_all(&src);
     }
 }
