@@ -314,7 +314,7 @@ fn test_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
     match &st.setup.outcome {
         None => {}
         Some(Outcome::Made { placeholder, opened, warnings }) => {
-            done_line(ui, "All set. Export a note with File → Export to PDF → LaTeX template. ✓");
+            done_line(ui, "All set. Export a note with its ⋯ menu → Export to PDF… → Engine: LaTeX template. ✓");
             match opened {
                 Ok(()) => ui.label(muted("The test page was opened in your PDF viewer.").size(12.0)),
                 Err(e) => ui.colored_label(theme::LINK_MISSING, format!("The test page could not be opened: {e}")),

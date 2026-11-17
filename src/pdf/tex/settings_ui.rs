@@ -84,7 +84,9 @@ impl TexState {
             (dirs::data_dir(), std::env::var_os("PATH"))
         } else {
             static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            (Some(std::env::temp_dir().join(format!("shale-texdata-{tag}-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)))), None)
+            // screenshots name a data folder to show (SHALE_FAKE_DATA_DIR, like SHALE_FAKE_NOW); nothing is written there
+            let fake = std::env::var_os("SHALE_FAKE_DATA_DIR").map(PathBuf::from);
+            (Some(fake.unwrap_or_else(|| std::env::temp_dir().join(format!("shale-texdata-{tag}-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst))))), None)
         };
         TexState { data, path_var, detection: None, detecting: None, task: None, consent: false, confirm_remove: false, notice: None, sets: Default::default(), setup: Default::default(), setup_requested: false }
     }

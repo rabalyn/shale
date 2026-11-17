@@ -344,7 +344,7 @@ mod fake {
         // the test page is made with them: a thesis, since a department was given
         assert_eq!(step(&t), Step::Test);
         until_outcome(&mut t);
-        assert!(t.shows("All set. Export a note with File → Export to PDF → LaTeX template. ✓") && t.shows("The test page was opened in your PDF viewer."), "{:?}", t.painted());
+        assert!(t.shows("All set. Export a note with its ⋯ menu → Export to PDF… → Engine: LaTeX template. ✓") && t.shows("The test page was opened in your PDF viewer."), "{:?}", t.painted());
         assert!(!t.shows("placeholder"), "the logo is there");
         assert!(f.get("args").contains("main.tex"), "{}", f.get("args"));
         let calls = opener.calls(1);
@@ -391,7 +391,7 @@ mod fake {
         f.put("log.last", "ok\n");
         t.click("Run again");
         until_outcome(&mut t);
-        assert!(t.shows("All set. Export a note with File → Export to PDF → LaTeX template. ✓") && t.shows("grey placeholder instead of the logo, so it is not CI-conformant"), "{:?}", t.painted());
+        assert!(t.shows("All set. Export a note with its ⋯ menu → Export to PDF… → Engine: LaTeX template. ✓") && t.shows("grey placeholder instead of the logo, so it is not CI-conformant"), "{:?}", t.painted());
         // Finish ends the setup; Back is off while nothing runs? it is on
         t.click("Finish");
         assert!(!is_open(&t), "Finish closes the setup");

@@ -99,8 +99,8 @@ Settings → LaTeX.
    ![[setup-details.png]]
 
 5. **Test page.** Shale makes a small PDF from a sample note with your templates and your details
-   and opens it. When it works the step says **All set. Export a note with File → Export to PDF → LaTeX
-   template.** (in Shale: the note menu **⋯ → Export to PDF…**). When it does not, it shows what went
+   and opens it. When it works the step says **All set. Export a note with its ⋯ menu → Export to PDF… →
+   Engine: LaTeX template.** When it does not, it shows what went
    wrong in words, **Run again** tries once more and **Save the .tex** writes the document into the vault's
    `exports` folder, to look at it or to ask someone.
 
