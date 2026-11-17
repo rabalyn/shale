@@ -23,7 +23,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - **Syntax highlighting**: a fenced code block is coloured by the language on its opening fence
   (```` ```js ````, ```` ```rust ````, `python`, `sh`, `json`, `yaml`, `c++`, … with the usual aliases) in the
   editor and the reading view; a block without a language or with an unknown one stays plain.
-  Inline code colours its strings, numbers and called names.
+  Inline code colours its strings, numbers and called names. The PDF export draws code the same way,
+  on the same dark code background (PDF-007).
 - Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
   line keeps one number.
 - A **formatting toolbar** above the text (Settings → Editing, on by default, button size 80–200 %) has a button for
