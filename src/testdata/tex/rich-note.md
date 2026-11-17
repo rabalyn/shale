@@ -10,6 +10,7 @@ numbered-headings: true
 
 Intro with *emphasis*, **strong**, ~~struck~~, `inline code`, ==highlight==, <mark style="background: #FFFF00;">marked</mark> and <span style="color: #FF0000;">red text</span>. Käse, Größe und Ärger. Specials: & % $ # _ { } ~ ^ \ end. A [web link](https://example.com/a_b?x=1&y=2#frag), a [[Wiki target]] and #sometag.
 Second line of the intro.
+An icon ![[pic.png]] in a line, a jump to [[#A subsection|that part]] and a link to [[Another note]].
 
 ## First section
 

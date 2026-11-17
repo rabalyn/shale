@@ -5,7 +5,7 @@
 //! names the kind and the language and carries the document and the end of the log.
 
 use super::compile_tests::container_engine;
-use super::pdf_text::{outline_entries, page_texts, squashed};
+use super::pdf_text::{fills_with, links_inside, outline_entries, page_texts, pictures_drawn, squashed};
 use super::sets::*;
 use super::sets_env_tests::{mounted_root, patient, the_set};
 use super::writer::*;
@@ -40,6 +40,11 @@ fn check_rich(kind_id: &str, lang: Language) {
     let (pdf, doc) = export(RICH_NOTE, kind_id, lang, AUTHOR, true);
     let pages = page_texts(pdf.clone());
     assert!(!pages.is_empty(), "{what}: the PDF has no page");
+    // the code on its light box, the picture in a line besides the one on its own, the jump to a heading (TEX-030 to TEX-032)
+    assert!(fills_with(&pdf, super::body::CODE_PAPER.to_array()[..3].try_into().unwrap()), "{what}: the code box\n{}", doc.tex);
+    assert_eq!(pictures_drawn(pdf.clone()), 2, "{what}: the picture on its own line and the one in a line\n{}", doc.tex);
+    // a link that wraps at the end of a line is two link areas
+    assert!((1..=2).contains(&links_inside(&pdf, "shale-h")), "{what}: the link to a heading of the note ({} links)\n{}", links_inside(&pdf, "shale-h"), doc.tex);
     let text = squashed(pdf);
     let lower = text.to_lowercase();
     let has =
@@ -57,6 +62,9 @@ fn check_rich(kind_id: &str, lang: Language) {
     has("A quoted line", "a quote");
     has("println!(\"Hi & 100%\");", "code");
     has("web link", "the text of a link");
+    has("that part", "the text of a link to a heading");
+    has("Another note", "the text of a link to another note");
+    has("An icon", "the text around a picture in a line");
     has("pic.png", "the caption of a picture");
     has("[missing: missing.png]", "the placeholder of a missing embed");
     has("Last paragraph", "the last paragraph");
@@ -175,5 +183,23 @@ fn tex_env_underline_scripts_footnotes_breaks_in_cells_and_math_compile_in_every
         for want in ["Afootnote", "withasecondline", "Inacell", "one", "two", "Lastparagraph", "else", "\\input{/etc/passwd}", "50%^^5c"] {
             assert!(text.contains(want), "{kind}: {want} is not in {text}\n{}", doc.tex);
         }
+    }
+}
+
+// spec: TEX-030, TEX-027
+#[test]
+#[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
+fn tex_env_long_code_breaks_across_pages_on_its_box_in_articles_and_books() {
+    let code: String = (1..=160).map(|n| format!("let line_{n} = {n}; // code\n")).collect();
+    let note = format!("# Rich sample note\n\n## Code\n\n```rust\n{code}```\n\nAfter the code\n");
+    for kind in ["pub", "thesis"] {
+        let (pdf, doc) = export(&note, kind, Language::En, &[("author", "Ada Lovelace"), ("reviewer", "Prof. A")], false);
+        let pages = page_texts(pdf.clone());
+        let squash = |t: &str| t.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        let first = pages.iter().position(|p| squash(p).contains("letline_1=1;")).unwrap_or_else(|| panic!("{kind}: the first line\n{}", doc.tex));
+        let last = pages.iter().position(|p| squash(p).contains("letline_160=160;")).unwrap_or_else(|| panic!("{kind}: the last line\n{}", doc.tex));
+        assert!(last > first, "{kind}: the code goes on on the next page ({first}, {last})");
+        assert!(fills_with(&pdf, super::body::CODE_PAPER.to_array()[..3].try_into().unwrap()), "{kind}: on its box");
+        assert!(squash(&pages.concat()).contains("Afterthecode"), "{kind}");
     }
 }

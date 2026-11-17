@@ -74,10 +74,17 @@ impl Drop for BrowserGuard {
 /// Tests only: install the pretend browser used by [`open_signin_url`] until the guard is dropped.
 #[cfg(test)]
 pub fn install_test_browser(b: TestBrowser) -> BrowserGuard {
-    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let g = no_test_browser();
     *test_browser().lock().unwrap_or_else(|e| e.into_inner()) = Some(b);
-    BrowserGuard { _serial: g }
+    g
+}
+
+/// Tests only: wait until no other test has the pretend browser, and keep it away until the
+/// guard is dropped (a test of what happens without one).
+#[cfg(test)]
+pub fn no_test_browser() -> BrowserGuard {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    BrowserGuard { _serial: SERIAL.lock().unwrap_or_else(|e| e.into_inner()) }
 }
 
 /// Tests only: like [`install_test_browser`], and sign-in addresses on `http://127.0.0.1:<port>`
@@ -395,6 +402,9 @@ fn launch(target: &std::ffi::OsStr) -> Result<(), String> {
             b(&target.to_string_lossy());
             return Ok(());
         }
+        // a test build never starts the real opener (#313): without a fake the call is only noted
+        unfaked_opens().lock().unwrap_or_else(|e| e.into_inner()).push(target.to_string_lossy().into_owned());
+        return Ok(());
     }
     #[cfg(windows)]
     {
@@ -445,6 +455,13 @@ thread_local! {
 thread_local! {
     /// The calls (one file each) the fake shell of this test thread has got.
     static FAKE_OPENER: std::cell::RefCell<Option<Vec<Vec<String>>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests: what was opened with no fake and no pretend browser installed; nothing was started (#313).
+#[cfg(test)]
+fn unfaked_opens() -> &'static std::sync::Mutex<Vec<String>> {
+    static OPENS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    &OPENS
 }
 
 #[cfg(test)]
@@ -827,6 +844,23 @@ mod real_opener_tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    // spec: SEC-022
+    #[test]
+    fn a_test_build_without_a_fake_starts_no_opener_and_answers_ok() {
+        assert!(!fake_opener_installed());
+        let _no_browser = no_test_browser();
+        let name = format!("shale-no-opener-{}.pdf", std::process::id());
+        // with no fake the real `xdg-open` would start, open a viewer and fail once the copy is gone
+        assert_eq!(open_temp_copy(&name, b"%PDF-1.4 x"), Ok(()));
+        let noted = unfaked_opens().lock().unwrap().clone();
+        let path = noted.iter().find(|p| p.ends_with(&name)).unwrap_or_else(|| panic!("the call is only noted: {noted:?}"));
+        let _ = fs::remove_dir_all(Path::new(path).parent().unwrap());
+        // the fake of the thread still gets the real start-up
+        let fake = FakeXdgOpen::install();
+        open_url("https://example.com/x").unwrap();
+        assert_eq!(fake.calls(1), [vec!["https://example.com/x".to_string()]]);
     }
 
     // spec: SEC-006

@@ -6,12 +6,13 @@
 
 use super::blocks::{self, Block};
 use super::body::Body;
-use super::inline::Look;
+use super::inline::{anchor, Files, Look};
 use super::sets::{class_and_preamble, tex_escape, Field, KindManifest, Mapping, SetInfo, SetSettings};
 use crate::markdown;
 use crate::pdf::export::ExportOptions;
 use crate::vault::Vault;
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 /// What the writer makes: the text of `main.tex`, the files next to it, and what it could not do
@@ -128,24 +129,25 @@ fn level_command(book: bool, level: usize) -> &'static str {
 }
 
 /// A heading of a kind in the article or book family: numbered, or starred and (when the table of
-/// contents is there) put into it by hand so it is still listed (TEX-009).
-fn section(book: bool, level: usize, numbered: bool, listed: bool, plain: &str) -> String {
+/// contents is there) put into it by hand so it is still listed (TEX-009); `mark` is its anchor
+/// (TEX-032).
+fn section(book: bool, level: usize, numbered: bool, listed: bool, plain: &str, mark: &str) -> String {
     let name = level_command(book, level);
     // paragraphs have no star: the class does not number them anyway
     if numbered || level_is_run_in(book, level) {
-        return format!("\\{name}{{{plain}}}\n\n");
+        return format!("\\{name}{{{plain}}}{mark}\n\n");
     }
     let add = if listed { format!("\\addcontentsline{{toc}}{{{name}}}{{{plain}}}\n") } else { String::new() };
-    format!("\\{name}*{{{plain}}}\n{add}\n")
+    format!("\\{name}*{{{plain}}}{mark}\n{add}\n")
 }
 
 fn level_is_run_in(book: bool, level: usize) -> bool {
     level_command(book, level).ends_with("paragraph")
 }
 
-/// A heading as a bold line, for the places a kind has no headings of its own.
-fn bold_line(plain: &str) -> String {
-    format!("\\par\\medskip\\noindent\\textbf{{{plain}}}\\par\\smallskip\n\n")
+/// A heading as a bold line with its anchor (TEX-032), for the places a kind has no headings of its own.
+fn bold_line(plain: &str, mark: &str) -> String {
+    format!("\\par\\medskip\\noindent{mark}\\textbf{{{plain}}}\\par\\smallskip\n\n")
 }
 
 /// The helpers every document has: the packages the body needs, the box of a task, the block of code.
@@ -161,8 +163,20 @@ fn helpers(long_tables: bool, columns: bool) -> String {
         t.push_str("\\IfPackageLoadedTF{multicol}{}{\\usepackage{multicol}}\n");
     }
     t.push_str("\\IfPackageLoadedTF{hyperref}{}{\\usepackage{hyperref}}\n\\hypersetup{bookmarksdepth=5}\n");
+    // the anchor of a heading (TEX-032): a named target where it is, raised to the line above as
+    // `\phantomsection` does, the same in every class (a `\label` would name it by the class)
+    t.push_str("\\makeatletter\\newcommand{\\shaleanchor}[1]{\\Hy@raisedlink{\\hyper@anchorstart{#1}\\hyper@anchorend}}\\makeatother\n");
     t.push_str("\\newcommand{\\shaletask}[1]{\\leavevmode{\\setlength{\\fboxsep}{1pt}\\setlength{\\fboxrule}{0.4pt}\\fbox{\\makebox[0.7em][c]{\\rule{0pt}{0.7em}#1}}}}\n");
-    t.push_str("\\newenvironment{shalecode}{\\par\\medskip\\begingroup\\ttfamily\\small\\raggedright\\setlength{\\parindent}{0pt}\\setlength{\\parskip}{0pt}\\setlength{\\leftskip}{0.6em}\\hyphenchar\\font=-1 }{\\par\\endgroup\\medskip}\n");
+    // fenced code on a light box (TEX-030): one that breaks across pages where tables may
+    let c = super::body::CODE_PAPER;
+    t.push_str(&format!("\\usepackage{{tcolorbox}}\n\\definecolor{{shalecodebg}}{{RGB}}{{{},{},{}}}\n", c.r(), c.g(), c.b()));
+    if long_tables {
+        t.push_str("\\tcbuselibrary{breakable}\n");
+    }
+    t.push_str(&format!(
+        "\\newtcolorbox{{shalecode}}{{{}colback=shalecodebg,colframe=shalecodebg,boxrule=0pt,arc=1pt,left=0.6em,right=0.6em,top=0.4em,bottom=0.4em,before skip=\\medskipamount,after skip=\\medskipamount,before upper={{\\ttfamily\\small\\raggedright\\setlength{{\\parindent}}{{0pt}}\\setlength{{\\parskip}}{{0pt}}\\hyphenchar\\font=-1 }}}}\n",
+        if long_tables { "breakable," } else { "" }
+    ));
     t
 }
 
@@ -209,7 +223,11 @@ pub fn write(req: &Request) -> Result<Document, String> {
     let has_headings = blocks.iter().any(|b| matches!(b, Block::Heading { .. }));
     let toc = req.opts.toc && matches!(family, Family::Article | Family::Book) && has_headings;
     let long_tables = matches!(family, Family::Article | Family::Book | Family::Letter) || (family == Family::Poster && kind.columns <= 1);
-    let mut body = Body::new(Look::new(vault, req.rel, blocks::footnote_texts(req.text)), req.opts, long_tables);
+    // every heading that is written has an anchor, so a link to it can go there (TEX-032)
+    let anchors: HashSet<usize> = blocks.iter().filter_map(|b| if let Block::Heading { line, .. } = b { Some(*line) } else { None }).collect();
+    let files = RefCell::new(Files::default());
+    let look = Look { vault, rel: req.rel, text: req.text, anchors: &anchors, embeds: req.opts.embeds, files: &files, notes: blocks::footnote_texts(req.text), deferred: RefCell::new(None) };
+    let body = Body::new(look, req.opts, long_tables);
     let plain = |t: &str| tex_escape(&markdown::heading_plain(t));
 
     // everything between \begin{document} and \end{document}
@@ -227,11 +245,11 @@ pub fn write(req: &Request) -> Result<Document, String> {
             }
             for b in &blocks {
                 match b {
-                    Block::Heading { text, .. } => {
+                    Block::Heading { text, line, .. } => {
                         let level = nested.next().unwrap_or(1);
                         main.push_str(&match family {
-                            Family::Poster => section(false, level, false, false, &plain(text)),
-                            f => section(f == Family::Book, level, numbered, toc, &plain(text)),
+                            Family::Poster => section(false, level, false, false, &plain(text), &anchor(*line)),
+                            f => section(f == Family::Book, level, numbered, toc, &plain(text), &anchor(*line)),
                         });
                     }
                     b => main.push_str(&body.block(b)),
@@ -241,8 +259,8 @@ pub fn write(req: &Request) -> Result<Document, String> {
                 main.push_str("\\end{multicols}\n");
             }
         }
-        Family::Beamer => main.push_str(&beamer(&blocks, &mut body, &plain)),
-        Family::Boxes => main.push_str(&boxes(&blocks, &mut body, &plain)),
+        Family::Beamer => main.push_str(&beamer(&blocks, &body, &plain)),
+        Family::Boxes => main.push_str(&boxes(&blocks, &body, &plain)),
         Family::Letter => {
             let recipient = get("recipient").unwrap_or_default();
             main.push_str(&format!("\\begin{{letter}}{{{recipient}}}\n"));
@@ -254,7 +272,7 @@ pub fn write(req: &Request) -> Result<Document, String> {
             main.push_str(&format!("\\opening{{{}}}\n", get("opening").unwrap_or_default()));
             for b in &blocks {
                 match b {
-                    Block::Heading { text, .. } => main.push_str(&bold_line(&plain(text))),
+                    Block::Heading { text, line, .. } => main.push_str(&bold_line(&plain(text), &anchor(*line))),
                     b => main.push_str(&body.block(b)),
                 }
             }
@@ -277,21 +295,29 @@ pub fn write(req: &Request) -> Result<Document, String> {
     tex.push_str("\\begin{document}\n");
     tex.push_str(&main);
     tex.push_str("\\end{document}\n");
-    Ok(Document { tex, files: body.files, warnings: body.warnings })
+    drop(body);
+    let files = files.into_inner();
+    Ok(Document { tex, files: files.list, warnings: files.warnings })
 }
 
 /// Slides: `#` is a section for the navigation and `##` a frame; deeper headings are bold lines
 /// in the frame. A note with no `##` has a frame for every `#` (TEX-012). Content before the
 /// first heading, and the text between a `#` and its first `##`, goes into a frame of its own.
-fn beamer(blocks: &[Block], body: &mut Body, plain: &dyn Fn(&str) -> String) -> String {
+fn beamer(blocks: &[Block], body: &Body, plain: &dyn Fn(&str) -> String) -> String {
     let frames_are_h2 = blocks.iter().any(|b| matches!(b, Block::Heading { level: 2, .. }));
     let frame_level = if frames_are_h2 { 2 } else { 1 };
     let mut out = String::from("\\maketitle\n");
     let mut open = false;
     // the title of a `#` section, for the frame its text (if it has any) is put into
     let mut section_title: Option<String> = None;
-    let open_frame = |out: &mut String, open: &mut bool, title: Option<String>| {
+    // the anchors of the headings above the next frame (a `#` section is not on a page of its own):
+    // they are the first thing in it (TEX-032)
+    let mut marks = String::new();
+    let open_frame = |out: &mut String, open: &mut bool, title: Option<String>, marks: &mut String| {
         out.push_str(&format!("\\begin{{frame}}[allowframebreaks]{{{}}}\n", title.unwrap_or_default()));
+        if !marks.is_empty() {
+            out.push_str(&format!("{}\n", std::mem::take(marks)));
+        }
         *open = true;
     };
     let close = |out: &mut String, open: &mut bool| {
@@ -302,25 +328,27 @@ fn beamer(blocks: &[Block], body: &mut Body, plain: &dyn Fn(&str) -> String) -> 
     };
     for b in blocks {
         match b {
-            Block::Heading { level: 1, text, .. } if frames_are_h2 => {
+            Block::Heading { level: 1, text, line } if frames_are_h2 => {
                 close(&mut out, &mut open);
                 out.push_str(&format!("\\section{{{}}}\n\n", plain(text)));
                 section_title = Some(plain(text));
+                marks.push_str(&anchor(*line));
             }
-            Block::Heading { level, text, .. } if *level <= frame_level => {
+            Block::Heading { level, text, line } if *level <= frame_level => {
                 close(&mut out, &mut open);
                 section_title = None;
-                open_frame(&mut out, &mut open, Some(plain(text)));
+                marks.push_str(&anchor(*line));
+                open_frame(&mut out, &mut open, Some(plain(text)), &mut marks);
             }
-            Block::Heading { text, .. } => {
+            Block::Heading { text, line, .. } => {
                 if !open {
-                    open_frame(&mut out, &mut open, section_title.take());
+                    open_frame(&mut out, &mut open, section_title.take(), &mut marks);
                 }
-                out.push_str(&bold_line(&plain(text)));
+                out.push_str(&bold_line(&plain(text), &anchor(*line)));
             }
             b => {
                 if !open {
-                    open_frame(&mut out, &mut open, section_title.take());
+                    open_frame(&mut out, &mut open, section_title.take(), &mut marks);
                 }
                 out.push_str(&body.block(b));
             }
@@ -332,18 +360,19 @@ fn beamer(blocks: &[Block], body: &mut Body, plain: &dyn Fn(&str) -> String) -> 
 
 /// A poster of boxes: every top level heading starts a box with its title, and what is below it,
 /// deeper headings as bold lines included, is the box's text; the boxes are in two columns.
-fn boxes(blocks: &[Block], body: &mut Body, plain: &dyn Fn(&str) -> String) -> String {
+fn boxes(blocks: &[Block], body: &Body, plain: &dyn Fn(&str) -> String) -> String {
     let top = blocks.iter().filter_map(|b| if let Block::Heading { level, .. } = b { Some(*level) } else { None }).min().unwrap_or(1);
     let mut cards: Vec<(Option<String>, String)> = Vec::new();
     for b in blocks {
         match b {
-            Block::Heading { level, text, .. } if *level == top => cards.push((Some(plain(text)), String::new())),
-            Block::Heading { text, .. } => {
+            // the box's anchor is the first thing in it (TEX-032)
+            Block::Heading { level, text, line } if *level == top => cards.push((Some(plain(text)), format!("{}\n", anchor(*line)))),
+            Block::Heading { text, line, .. } => {
                 if cards.is_empty() {
                     cards.push((None, String::new()));
                 }
                 if let Some(c) = cards.last_mut() {
-                    c.1.push_str(&bold_line(&plain(text)));
+                    c.1.push_str(&bold_line(&plain(text), &anchor(*line)));
                 }
             }
             b => {

@@ -127,3 +127,38 @@ fn dev_014_the_ids_of_a_comment_are_read_up_to_the_free_text() {
     let spec = "| ID | Rule |\n|---|---|\n| KEY-001 | One registry | IS NOW |\n| not a row |\nKEY-002 text\n";
     assert_eq!(rows_in(spec).collect::<Vec<_>>(), ["KEY-001"]);
 }
+
+/// The row IDs used more than once across `(file, text)` pairs, each with the files it is in.
+fn duplicates<'a>(specs: &[(&'a str, &'a str)]) -> Vec<(&'a str, Vec<&'a str>)> {
+    let mut found: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
+    for (file, text) in specs {
+        for id in rows_in(text) {
+            found.entry(id).or_default().push(file);
+        }
+    }
+    found.into_iter().filter(|(_, files)| files.len() > 1).collect()
+}
+
+// spec: DEV-023
+#[test]
+fn dev_023_every_spec_row_id_is_used_once() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut specs = Vec::new();
+    files(&root.join("docs/spec"), "md", &mut specs);
+    let texts: Vec<(String, String)> = specs.iter().map(|p| (p.strip_prefix(root).unwrap().display().to_string(), fs::read_to_string(p).unwrap())).collect();
+    let pairs: Vec<(&str, &str)> = texts.iter().map(|(f, t)| (f.as_str(), t.as_str())).collect();
+    let rows = pairs.iter().map(|(_, t)| rows_in(t).count()).sum::<usize>();
+    assert!(rows > 500, "the spec rows are read ({rows})");
+    let dups = duplicates(&pairs);
+    let list: Vec<String> = dups.iter().map(|(id, files)| format!("{id}: {}", files.join(", "))).collect();
+    assert!(dups.is_empty(), "spec row IDs used more than once:\n{}", list.join("\n"));
+}
+
+// spec: DEV-023
+#[test]
+fn dev_023_duplicates_are_found_across_files() {
+    let a = "| EDIT-024 | Pictures | IS NOW |\n| EDIT-025 | Captions | IS NOW |\n| EDIT-024 | Tables | IS NOW |\n";
+    let b = "| EDIT-025 | Table buttons | IS NOW |\n| KEY-001 | Keys | IS NOW |\n";
+    assert_eq!(duplicates(&[("a.md", a), ("b.md", b)]), [("EDIT-024", vec!["a.md", "a.md"]), ("EDIT-025", vec!["a.md", "b.md"])]);
+    assert!(duplicates(&[("b.md", b)]).is_empty());
+}
