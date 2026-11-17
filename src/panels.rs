@@ -1109,24 +1109,45 @@ impl ShaleApp {
         }
         if let Modal::Export(d) = &mut modal {
             let title = format!("Export “{}” to PDF", d.name);
+            // a LaTeX export that is running or has just ended (TEX-016)
+            let finished = self.tex_export_tick(d, &ctx);
+            if d.tex.as_ref().is_some_and(|t| t.working()) {
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            }
             let mut st = (&mut **d, crate::pdf::export_dialog::DialogResult::Open);
             let resp = crate::dialog::Dialog::new("export-pdf", title).width(460.0).show_with_footer(&ctx, &mut st, |ui, (d, _)| crate::pdf::export_dialog::show(ui, d), |ui, (d, out)| *out = crate::pdf::export_dialog::footer(ui, d));
             let close_asked = resp.should_close();
-            match st.1 {
+            let result = st.1;
+            let done = |s: &mut Self, d: &mut crate::pdf::export_dialog::ExportDialog, out: PathBuf| {
+                s.toast(format!("Exported to {}", out.display()));
+                if d.open_after {
+                    if let Err(e) = crate::opener::open_exported_pdf(&out) {
+                        s.toast(e);
+                    }
+                }
+            };
+            match finished {
+                Some(Ok(out)) => {
+                    done(self, d, out);
+                    keep = false;
+                }
+                Some(Err(e)) => d.error = Some(e),
+                None => {}
+            }
+            match result {
+                crate::pdf::export_dialog::DialogResult::Export if d.latex() => d.error = self.start_tex_export(d, &ctx).err(),
                 crate::pdf::export_dialog::DialogResult::Export => match self.run_export(d) {
                     Ok(out) => {
-                        self.toast(format!("Exported to {}", out.display()));
-                        if d.open_after {
-                            if let Err(e) = crate::opener::open_exported_pdf(&out) {
-                                self.toast(e);
-                            }
-                        }
+                        done(self, d, out);
                         keep = false;
                     }
                     Err(e) => d.error = Some(e),
                 },
                 crate::pdf::export_dialog::DialogResult::Cancel => keep = false,
                 crate::pdf::export_dialog::DialogResult::Open => {}
+            }
+            if d.tex.as_ref().is_some_and(|t| t.save_requested) {
+                self.save_failed_tex(d);
             }
             if close_asked {
                 keep = false;

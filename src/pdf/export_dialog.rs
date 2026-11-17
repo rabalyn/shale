@@ -1,10 +1,20 @@
-//! The "Export to PDF" dialog: paper size, orientation, margins, text size, what to include,
-//! background and scale for drawings, where to save, and whether to open the PDF afterwards.
+//! The "Export to PDF" dialog: for a note the engine (built-in, or a LaTeX template: TEX-016), paper
+//! size, orientation, margins, text size, what to include, background and scale for drawings,
+//! where to save, and whether to open the PDF afterwards.
 
 use crate::pdf::export::{Background, ExportOptions, Paper};
+use crate::pdf::tex::dialog::TexExport;
 use crate::theme;
 use eframe::egui::{self, Rect, Ui};
 use std::path::PathBuf;
+
+/// What makes the PDF of a note: the built-in export or a template of a set through LaTeX (TEX-016).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ExportEngine {
+    #[default]
+    Builtin,
+    Latex,
+}
 
 pub struct ExportDialog {
     pub rel: PathBuf,
@@ -14,6 +24,10 @@ pub struct ExportDialog {
     pub path: String,
     pub open_after: bool,
     pub error: Option<String>,
+    /// The engine of a note's export (a drawing has the built-in one only).
+    pub engine: ExportEngine,
+    /// The LaTeX choices of a note; none for a drawing.
+    pub tex: Option<Box<TexExport>>,
     /// screen rect of every control (used by the UI tests)
     pub rects: Vec<(String, Rect)>,
 }
@@ -27,7 +41,19 @@ pub enum DialogResult {
 
 impl ExportDialog {
     pub fn new(rel: PathBuf, drawing: bool, name: String, opts: ExportOptions, default_path: PathBuf) -> Self {
-        ExportDialog { rel, drawing, name, opts, path: default_path.to_string_lossy().into_owned(), open_after: false, error: None, rects: vec![] }
+        ExportDialog { rel, drawing, name, opts, path: default_path.to_string_lossy().into_owned(), open_after: false, error: None, engine: ExportEngine::Builtin, tex: None, rects: vec![] }
+    }
+
+    /// A note's dialog with the LaTeX choices, on this engine.
+    pub fn with_latex(mut self, tex: TexExport, engine: ExportEngine) -> Self {
+        self.tex = Some(Box::new(tex));
+        self.engine = engine;
+        self
+    }
+
+    /// Whether this export goes through LaTeX.
+    pub fn latex(&self) -> bool {
+        self.engine == ExportEngine::Latex && self.tex.is_some()
     }
 }
 
@@ -39,6 +65,33 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
         r
     };
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+    if d.tex.is_some() {
+        let busy = d.tex.as_ref().is_some_and(|t| t.working());
+        ui.horizontal(|ui| {
+            ui.label(muted("Engine"));
+            ui.add_enabled_ui(!busy, |ui| {
+                for (e, label, key) in [(ExportEngine::Builtin, "Built-in", "engine:builtin"), (ExportEngine::Latex, "LaTeX template", "engine:latex")] {
+                    if rec(key, ui.selectable_label(d.engine == e, label)).clicked() {
+                        d.engine = e;
+                    }
+                }
+            });
+        });
+        ui.add_space(4.0);
+    }
+    if let (ExportEngine::Latex, Some(tex)) = (d.engine, d.tex.as_deref_mut()) {
+        tex.show(ui, &mut d.opts, &mut rec);
+        ui.add_space(4.0);
+        egui::Grid::new("export-save-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+            ui.label(muted("Save as"));
+            rec("path", ui.add(egui::TextEdit::singleline(&mut d.path).desired_width(250.0)));
+            ui.end_row();
+        });
+        ui.add_space(4.0);
+        rec("open-after", ui.checkbox(&mut d.open_after, "Open the PDF after exporting"));
+        d.rects = rects;
+        return;
+    }
     egui::Grid::new("export-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
         ui.label(muted("Paper"));
         let choices: &[Paper] = if d.drawing { &Paper::DRAWING } else { &Paper::NOTE };
@@ -124,12 +177,14 @@ pub fn footer(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
         ui.colored_label(theme::LINK_MISSING, e);
     }
     ui.add_space(4.0);
+    // LaTeX needs a TeX, a kind and no export running (TEX-016)
+    let ready = !d.latex() || d.tex.as_ref().is_some_and(|t| t.can_export());
     ui.horizontal(|ui| {
         let mut rec = |k: &str, r: egui::Response| -> egui::Response {
             d.rects.push((k.to_string(), r.rect));
             r
         };
-        if rec("export", ui.button(egui::RichText::new("Export").strong())).clicked() {
+        if rec("export", ui.add_enabled(ready, egui::Button::new(egui::RichText::new("Export").strong()))).clicked() {
             result = DialogResult::Export;
         }
         if rec("cancel", ui.button("Cancel")).clicked() {

@@ -1,4 +1,5 @@
-# TU Darmstadt, leaflet (class tudaleaflet, based on the leaflet class).
+# TU Darmstadt, leaflet (class tudaleaflet, based on the leaflet class). The note is text with
+# \section*, \subsection*, ... by nesting (mapping "poster": no numbers, no contents).
 name = "Leaflet"
 description = "Folded leaflets (class tudaleaflet)"
 mapping = "poster"

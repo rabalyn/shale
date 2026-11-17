@@ -95,6 +95,34 @@ fn playing_a_video_shows_its_frames_pauses_and_seeks_with_the_bar() {
     }
 }
 
+// spec: MEDIA-013
+#[test]
+fn a_video_on_a_machine_without_sound_output_plays_its_pictures_with_a_note() {
+    if !have_ffmpeg() {
+        return;
+    }
+    for clip in ["clip.mp4", "clip-silent.mp4"] {
+        let mut fx = Fx::new("v-nodevice", &format!("![[{clip}]]\n"), &[clip]);
+        fx.app.media.use_no_output();
+        fx.reading(true);
+        let abs = fx.dir.join(clip);
+        fx.until("the look is done", |a| a.media.thumbnail_size(&abs).is_some());
+        fx.click_label("Play");
+        fx.until("a frame of the video is shown", |a| a.media.picture_size().is_some());
+        fx.until("the video runs", |a| a.media.position().is_some_and(|p| p > 0.15));
+        fx.hl.frames(&mut fx.app, 3);
+        assert!(texts(&fx).iter().any(|t| t == "No sound output: playing without sound"), "{clip}: the note shows: {:?}", texts(&fx));
+        fx.label("Pause");
+        fx.label("Position");
+        fx.click_label("Pause");
+        fx.hl.frames(&mut fx.app, 3);
+        std::thread::sleep(Duration::from_millis(80));
+        let p = fx.app.media.position().unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        assert!((fx.app.media.position().unwrap() - p).abs() < 0.001, "{clip}: paused");
+    }
+}
+
 // spec: MEDIA-007
 #[test]
 fn only_one_of_a_video_and_a_sound_plays() {

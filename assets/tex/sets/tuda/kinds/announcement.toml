@@ -1,4 +1,5 @@
 # TU Darmstadt, announcement of a final thesis defence or a talk (class tudaposter, type=announcement), A4.
+# The note is text with \section*, \subsection*, ... by nesting (mapping "poster").
 name = "Announcement"
 description = "Announcements, for example of a thesis defence (class tudaposter, type=announcement)"
 mapping = "poster"

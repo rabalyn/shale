@@ -1845,7 +1845,10 @@ impl ShaleApp {
     }
 
     /// Show the export dialog with sensible defaults (saved to `<vault>/exports/<name>.pdf`).
+    /// A note's dialog also offers the LaTeX templates of the vault (TEX-016): it starts on the
+    /// engine, set and kind of the last export, or on the ones the note's `latex-template:` names.
     pub fn open_export_dialog(&mut self, rel: &Path) {
+        use crate::pdf::export_dialog::ExportEngine;
         let Some(v) = &self.vault else { return };
         let Some(f) = v.file(rel) else { return };
         let drawing = f.kind == FileKind::Drawing;
@@ -1857,7 +1860,24 @@ impl ShaleApp {
             crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }
         };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
-        self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path))));
+        let mut dialog = crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path);
+        if !drawing {
+            let (title, root) = (f.title(), v.root.clone());
+            let text = self.note_text(rel);
+            let last = &self.vdata.state.latex_export;
+            let props = crate::markdown::front_matter_values(&text);
+            let noted = crate::pdf::tex::dialog::note_choice(&props);
+            // a note that names its template is exported through it; else the last choice of the vault
+            let engine = if noted.is_some() || last.latex { ExportEngine::Latex } else { ExportEngine::Builtin };
+            let prefer = noted.or_else(|| (!last.set.is_empty()).then(|| (last.set.clone(), last.kind.clone())));
+            dialog = dialog.with_latex(crate::pdf::tex::dialog::TexExport::new(&root, title, &text, prefer), engine);
+        }
+        self.modal = Some(Modal::Export(Box::new(dialog)));
+    }
+
+    /// The text of a note as the window has it: the editor's buffer, else what the vault read.
+    fn note_text(&self, rel: &Path) -> String {
+        self.notes.get(rel).map(|n| n.text.clone()).or_else(|| self.vault.as_ref().and_then(|v| v.notes.get(rel)).map(|n| n.text.clone())).unwrap_or_default()
     }
 
     /// Write the PDF for the dialog's file and options. Returns where it was saved.
@@ -1871,23 +1891,110 @@ impl ShaleApp {
             };
             crate::pdf::export::export_drawing(&scene, &d.name, &d.opts, &crate::drawing::pictures::images(&scene, v, &d.rel))?
         } else {
-            let text = self.notes.get(&d.rel).map(|n| n.text.clone()).or_else(|| v.notes.get(&d.rel).map(|n| n.text.clone())).unwrap_or_default();
-            // embeds as big in proportion to the text as in the editor that shows the note (PDF-005)
-            let column = self.all_tabs().filter(|t| matches!(&t.view, View::Note(p) if *p == d.rel)).find_map(|t| t.editor.column);
-            crate::pdf::export::export_note(v, &d.rel, &text, &crate::pdf::export::ExportOptions { column, ..d.opts.clone() })?
+            let text = self.note_text(&d.rel);
+            crate::pdf::export::export_note(v, &d.rel, &text, &crate::pdf::export::ExportOptions { column: self.editor_column(&d.rel), ..d.opts.clone() })?
         };
-        let out = PathBuf::from(crate::layout::shellexpand(&d.path));
+        self.remember_export_engine(false, d);
+        self.save_pdf(&d.path, &bytes)
+    }
+
+    /// The width of the editor's text column where a note is shown: embeds are as big in
+    /// proportion to the text as there (PDF-005).
+    fn editor_column(&self, rel: &Path) -> Option<f32> {
+        self.all_tabs().filter(|t| matches!(&t.view, View::Note(p) if p == rel)).find_map(|t| t.editor.column)
+    }
+
+    /// Save the PDF bytes at the dialog's path (made, with its folder, when it is not there yet).
+    fn save_pdf(&mut self, path: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+        let out = PathBuf::from(crate::layout::shellexpand(path));
         if out.as_os_str().is_empty() {
             return Err("Choose where to save the PDF".into());
         }
         if let Some(dir) = out.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("Could not create the folder: {e}"))?;
         }
-        crate::fsutil::write_atomic(&out, &bytes).map_err(|e| format!("Could not save the PDF: {e}"))?;
+        crate::fsutil::write_atomic(&out, bytes).map_err(|e| format!("Could not save the PDF: {e}"))?;
         if let Some(v) = self.vault.as_mut() {
             v.rescan();
         }
         Ok(out)
+    }
+
+    /// The engine, set and kind of this export are what the dialog starts on next time.
+    fn remember_export_engine(&mut self, latex: bool, d: &crate::pdf::export_dialog::ExportDialog) {
+        if d.drawing {
+            return;
+        }
+        let state = &mut self.vdata.state.latex_export;
+        state.latex = latex;
+        if let Some((set, kind)) = d.tex.as_ref().and_then(|t| Some((t.current_set()?.id.clone(), t.kind.clone()))) {
+            (state.set, state.kind) = (set, kind);
+        }
+        self.save_config();
+    }
+
+    /// Where the window is with a LaTeX export: what TeX it found, and the job that is running.
+    /// Returns where the PDF was saved when the job has just finished.
+    pub fn tex_export_tick(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog, ctx: &egui::Context) -> Option<Result<PathBuf, String>> {
+        use crate::pdf::tex::dialog::TexStatus;
+        if !d.latex() {
+            return None;
+        }
+        if self.tex.detection.is_none() {
+            self.tex.check_again(ctx);
+        }
+        let status = match self.tex.detection.as_ref().map(|det| det.selected(self.cfg.tex.engine)) {
+            None => TexStatus::Checking,
+            Some(Ok(e)) => TexStatus::Ready(format!("Using {} (LaTeX kernel {})", crate::pdf::tex::settings_ui::engine_name(e), e.kernel)),
+            Some(Err(why)) => TexStatus::Missing(why),
+        };
+        let tex = d.tex.as_mut()?;
+        tex.status = status;
+        let made = tex.poll()?;
+        let saved = self.save_pdf(&d.path, &made.pdf);
+        if saved.is_ok() {
+            let mut notes = Vec::new();
+            if made.placeholder_logo {
+                notes.push("the logo is a placeholder, so it is not CI-conformant".to_string());
+            }
+            if !made.warnings.is_empty() {
+                notes.push(format!("{} embed(s) could not be used: {}", made.warnings.len(), made.warnings.join(", ")));
+            }
+            self.toast(if notes.is_empty() { "Exported through LaTeX".to_string() } else { format!("Exported through LaTeX ({})", notes.join("; ")) });
+        }
+        Some(saved)
+    }
+
+    /// Export through LaTeX: write the note as the chosen kind now, compile it as a job.
+    pub fn start_tex_export(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog, ctx: &egui::Context) -> Result<(), String> {
+        self.flush_all();
+        let engine = match self.tex.detection.as_ref().map(|det| det.selected(self.cfg.tex.engine)) {
+            Some(Ok(e)) => e.clone(),
+            Some(Err(why)) => return Err(format!("No TeX can be used: {why}")),
+            None => return Err("Shale is still looking for a TeX: try again in a moment".into()),
+        };
+        let text = self.note_text(&d.rel);
+        let column = self.editor_column(&d.rel);
+        let v = self.vault.as_ref().ok_or("No vault is open")?;
+        let tex = d.tex.as_mut().ok_or("This note has no LaTeX choices")?;
+        let (set, kind) = (tex.current_set().ok_or("Choose a template set first: import one in Settings → LaTeX")?, tex.current_kind().ok_or("Choose a kind of document")?);
+        let opts = crate::pdf::export::ExportOptions { column, ..d.opts.clone() };
+        let doc = crate::pdf::tex::writer::write(&crate::pdf::tex::writer::Request { vault: v, rel: &d.rel, text: &text, opts: &opts, set, kind, fields: &tex.values })?;
+        let ctx = ctx.clone();
+        tex.start(engine, doc, move || ctx.request_repaint());
+        self.remember_export_engine(true, d);
+        Ok(())
+    }
+
+    /// "Save the .tex" of a failed export: the folder next to the PDF path.
+    pub fn save_failed_tex(&mut self, d: &mut crate::pdf::export_dialog::ExportDialog) {
+        let Some(tex) = d.tex.as_mut() else { return };
+        tex.save_requested = false;
+        let Some(f) = &tex.failure else { return };
+        match crate::pdf::tex::dialog::save_tex(f, Path::new(&crate::layout::shellexpand(&d.path))) {
+            Ok(dir) => self.toast(format!("Saved main.tex and its files in {}", dir.display())),
+            Err(e) => d.error = Some(e),
+        }
     }
 
     pub fn close_tab(&mut self, i: usize) {

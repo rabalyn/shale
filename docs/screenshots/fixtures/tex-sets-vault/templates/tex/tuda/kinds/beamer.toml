@@ -1,5 +1,6 @@
-# TU Darmstadt, slides (class tudabeamer). The writer maps H1 to the title slide and every H2 to
-# a frame (mapping "beamer").
+# TU Darmstadt, slides (class tudabeamer). The title slide comes from the fields; the writer maps
+# # to a section and every ## to a frame; a note with only # headings has a frame for each
+# (mapping "beamer").
 name = "Slides"
 description = "Presentation slides (class tudabeamer)"
 mapping = "beamer"

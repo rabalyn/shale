@@ -1,5 +1,5 @@
 # TU Darmstadt, doctoral thesis (class tudapub with the option thesis, dr). Mapping "book" as for
-# the thesis. dr=rernat is the Dr. rer. nat.; others are ing, phil, ... (see the tuda-ci documentation).
+# the thesis: # is a \chapter. dr=rernat is the Dr. rer. nat.; others are ing, phil, ... (see the tuda-ci documentation).
 name = "Doctoral thesis"
 description = "Doctoral theses (class tudapub, thesis type dr)"
 mapping = "book"

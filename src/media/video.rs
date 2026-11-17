@@ -272,7 +272,7 @@ fn silence_loop(info: &Info, shared: &Shared, stop: &AtomicBool, video_ended: &A
 mod tests {
     use super::*;
     use crate::media::ffmpeg::locate;
-    use crate::media::output::pretend_card;
+    use crate::media::output::clock_card;
     use crate::media::testdata::fixture;
     use std::sync::Arc;
 
@@ -393,7 +393,7 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
         let slot: FrameSlot = Mutex::new(None);
         let ctx = egui::Context::default();
-        let device = pretend_card(shared.clone(), stop.clone(), Duration::from_millis(10));
+        let device = clock_card(shared.clone(), stop.clone(), Duration::from_millis(10));
         std::thread::scope(|s| {
             let runner = s.spawn(|| run(tools, &path, &info, &shared, &stop, &slot, &ctx));
             // a failing assert in `body` must still stop the runner and the card, or the scope waits forever

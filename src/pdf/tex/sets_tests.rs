@@ -2,6 +2,8 @@
 //! kinds (the shipped ones of tuda-ci included), the settings of a set, the logo slot and the
 //! compile against a set.
 
+#[cfg(unix)]
+use super::compile::Options;
 use super::import::TUDA;
 use super::sets::*;
 use std::path::{Path, PathBuf};
@@ -157,7 +159,7 @@ fn the_settings_are_filled_into_options_and_preamble_and_an_empty_value_drops_it
 // spec: TEX-005
 #[test]
 fn text_for_tex_has_its_special_characters_escaped() {
-    assert_eq!(tex_escape("R&D #1 50% {a} $x$ a_b ^ ~ \\x"), "R\\&D \\#1 50\\% \\{a\\} \\$x\\$ a\\_b \\^{} \\~{} \\textbackslash{}x");
+    assert_eq!(tex_escape("R&D #1 50% {a} $x$ a_b ^ ~ \\x"), "R\\&D \\#1 50\\% \\{a\\} \\$x\\$ a\\_b \\textasciicircum{} \\textasciitilde{} \\textbackslash{}x");
     assert_eq!(tex_escape("Fachbereich Elektrotechnik für Ärzte"), "Fachbereich Elektrotechnik für Ärzte", "Unicode stays");
     assert_eq!(id_from("Tuda Latex_Templates.zip"), "tuda-latex_templates");
     assert_eq!(id_from("my-repo.git"), "my-repo");
@@ -321,7 +323,7 @@ mod fake {
         let v = vault("set-compile");
         let dir = make_set(&v, "mine", META, &[("article", MINIMAL_KIND)]);
         let set = read_set("mine", &dir).unwrap();
-        let out = compile_with_set(&f.engine(), &set, "page.tex", "\\documentclass{my}", &[("extra.bib", b"@book{}")]).unwrap();
+        let out = compile_with_set(&f.engine(), &set, "page.tex", "\\documentclass{my}", &[("extra.bib", b"@book{}")], Options::default()).unwrap();
         assert!(out.output.pdf.starts_with(b"%PDF") && out.placeholder_logo);
         assert_eq!(texinputs(&f), [dir.join("tex//"), PathBuf::new()], "the set's tex folder, then TeX's own; no logo folder yet");
         let ls = f.get("ls");
@@ -334,13 +336,13 @@ mod fake {
         std::fs::write(&logo, a_pdf()).unwrap();
         choose_logo(&v, &set, &logo).unwrap();
         let set = read_set("mine", &dir).unwrap();
-        let out = compile_with_set(&f.engine(), &set, "page.tex", "x", &[]).unwrap();
+        let out = compile_with_set(&f.engine(), &set, "page.tex", "x", &[], Options::default()).unwrap();
         assert!(!out.placeholder_logo);
         assert_eq!(texinputs(&f), [dir.join("tex//"), dir.join("logo//"), PathBuf::new()]);
         assert!(!f.get("ls").lines().any(|l| l == "mylogo.pdf"), "no placeholder next to the real logo: {}", f.get("ls"));
         // a set that needs no logo gets none
         let plain = read_set("mine", &make_set(&v, "plain", &META.replace("logo_file = \"mylogo\"\n", ""), &[])).unwrap();
-        assert!(!compile_with_set(&f.engine(), &plain, "page.tex", "x", &[]).unwrap().placeholder_logo);
+        assert!(!compile_with_set(&f.engine(), &plain, "page.tex", "x", &[], Options::default()).unwrap().placeholder_logo);
         assert!(!f.get("ls").lines().any(|l| l == "mylogo.pdf"));
         std::fs::remove_dir_all(&v).unwrap();
     }
@@ -354,10 +356,10 @@ mod fake {
         f.put("exit", "1");
         let v = vault("set-fail");
         let set = read_set("mine", &make_set(&v, "mine", META, &[])).unwrap();
-        let e = compile_with_set(&f.engine(), &set, "page.tex", "x", &[]).unwrap_err();
+        let e = compile_with_set(&f.engine(), &set, "page.tex", "x", &[], Options::default()).unwrap_err();
         assert!(e.problems.iter().any(|p| p.text() == "class my is missing"), "{e}");
         // names that cannot be written (a main file that exists twice) are errors, not panics
-        let e = compile_with_set(&f.engine(), &set, "page.tex", "x", &[("page.tex", b"again")]).unwrap_err();
+        let e = compile_with_set(&f.engine(), &set, "page.tex", "x", &[("page.tex", b"again")], Options::default()).unwrap_err();
         assert!(e.headline.contains("page.tex could not be written"), "{e}");
         std::fs::remove_dir_all(&v).unwrap();
     }

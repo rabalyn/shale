@@ -141,6 +141,10 @@ pub const CHECKED: &[(&str, &str)] = &[
     ("pgf", "tikz.sty"),
     ("beamer", "beamer.cls"),
     ("pdfx", "pdfx.sty"),
+    // what the writer of the export adds to a document (TEX-008)
+    ("ulem", "ulem.sty"),
+    ("booktabs", "booktabs.sty"),
+    ("xltabular", "xltabular.sty"),
 ];
 
 /// What detection found out (TEX-001).

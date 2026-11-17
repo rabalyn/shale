@@ -692,6 +692,54 @@ pub fn front_matter_lines(text: &str) -> usize {
     lines.position(|l| l.trim() == "---").map_or(0, |p| p + 2)
 }
 
+/// The properties of the front matter as (key in lower case, values): `key: value` has one value,
+/// `key: [a, b]` and a list of `- item` lines have several, `key: |` takes its indented lines.
+/// Quotes around a value are removed; nothing is interpreted (no dates, no numbers, no nesting).
+pub fn front_matter_values(text: &str) -> Vec<(String, Vec<String>)> {
+    let unquote = |v: &str| {
+        let v = v.trim();
+        let quoted = v.len() >= 2 && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')));
+        (if quoted { &v[1..v.len() - 1] } else { v }).to_string()
+    };
+    if front_matter_lines(text) == 0 {
+        return vec![];
+    }
+    let mut lines = text.lines();
+    lines.next();
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    // the key whose following lines (a list or a block) are still being read
+    let mut open: Option<usize> = None;
+    for l in lines {
+        if l.trim() == "---" {
+            break;
+        }
+        let item = l.trim().strip_prefix("- ").or_else(|| (l.trim() == "-").then_some(""));
+        match (open, item) {
+            (Some(i), Some(it)) if l.starts_with(char::is_whitespace) || l.starts_with('-') => {
+                out[i].1.push(unquote(it));
+                continue;
+            }
+            (Some(i), _) if l.starts_with(char::is_whitespace) && !l.trim().is_empty() => {
+                out[i].1.push(l.trim().to_string());
+                continue;
+            }
+            _ => {}
+        }
+        let Some((key, value)) = l.split_once(':').filter(|(k, _)| !k.is_empty() && !k.starts_with(char::is_whitespace) && !k.starts_with('#')) else {
+            continue;
+        };
+        let value = value.trim();
+        let values = match value {
+            "" | "|" | ">" | "|-" | ">-" => vec![],
+            v if v.starts_with('[') && v.ends_with(']') => v[1..v.len() - 1].split(',').map(unquote).filter(|x| !x.is_empty()).collect(),
+            v => vec![unquote(v)],
+        };
+        open = matches!(value, "" | "|" | ">" | "|-" | ">-").then_some(out.len());
+        out.push((key.trim().to_lowercase(), values));
+    }
+    out
+}
+
 /// Headings: (line number, level, title). Fenced code and front matter hold none.
 pub fn find_headings(text: &str) -> Vec<(usize, usize, String)> {
     let code = fenced_code_lines(text);
@@ -1196,6 +1244,23 @@ mod tests {
         assert_eq!(front_matter_lines(text), 4);
         assert_eq!(front_matter_lines("---\nunclosed\n"), 0);
         assert_eq!(front_matter_lines("text"), 0);
+    }
+
+    // spec: TEX-013
+    #[test]
+    fn front_matter_values_are_scalars_lists_and_blocks_with_their_quotes_removed() {
+        let text = "---\nTitle: \"A: B\"\nauthor: [Ada, 'Bob C.']\nreviewer:\n  - Prof. X\n  - Prof. Y\nrecipient: |\n  Line one\n  Line two\nempty:\nnumbered-headings: false\n# comment: no\n---\nbody: not a property\n";
+        let got = front_matter_values(text);
+        let get = |k: &str| got.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
+        assert_eq!(get("title"), Some(vec!["A: B".to_string()]), "keys are lower case, quotes go");
+        assert_eq!(get("author"), Some(vec!["Ada".to_string(), "Bob C.".to_string()]));
+        assert_eq!(get("reviewer"), Some(vec!["Prof. X".to_string(), "Prof. Y".to_string()]));
+        assert_eq!(get("recipient"), Some(vec!["Line one".to_string(), "Line two".to_string()]));
+        assert_eq!(get("empty"), Some(vec![]));
+        assert_eq!(get("numbered-headings"), Some(vec!["false".to_string()]));
+        assert!(get("body").is_none() && get("# comment").is_none() && got.len() == 6, "{got:?}");
+        assert!(front_matter_values("no front matter\nkey: value").is_empty());
+        assert!(front_matter_values("---\nunclosed: value\n").is_empty(), "no closing line, no front matter (as front_matter_lines)");
     }
 
     // spec: IMP-034, EDIT-038

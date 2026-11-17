@@ -254,13 +254,26 @@ pub struct VaultState {
     pub last_social_folder: String,
     /// Tags used for imports, most recent first.
     pub recent_tags: Vec<String>,
+    /// What the note export dialog had last: the engine and the LaTeX set and kind (TEX-016).
+    pub latex_export: LatexExport,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
 
+/// The last choices of the note export dialog in this vault.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct LatexExport {
+    /// The export went through LaTeX (else the built-in export).
+    pub latex: bool,
+    /// The template set (its folder name) and the kind (its id).
+    pub set: String,
+    pub kind: String,
+}
+
 impl Default for VaultState {
     fn default() -> Self {
-        VaultState { version: Self::CURRENT, tabs: vec![], panes: vec![], focused_pane: 0, last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], other: Map::new() }
+        VaultState { version: Self::CURRENT, tabs: vec![], panes: vec![], focused_pane: 0, last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], latex_export: LatexExport::default(), other: Map::new() }
     }
 }
 
@@ -595,6 +608,18 @@ mod tests {
         // a pane written by a newer Shale keeps its unknown fields
         let (s, _) = parse::<VaultState>(br#"{"version": 2, "panes": [{"tabs": [], "split": "v"}]}"#).unwrap();
         assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"split\""));
+    }
+
+    // spec: TEX-016
+    #[test]
+    fn the_last_latex_export_choice_is_saved_and_a_file_without_it_needs_no_version_bump() {
+        let (old, _) = parse::<VaultState>(br#"{"version": 2}"#).unwrap();
+        assert_eq!((old.version, old.latex_export.clone()), (2, LatexExport::default()));
+        assert!(!old.latex_export.latex && old.latex_export.set.is_empty() && old.latex_export.kind.is_empty());
+        let chosen = VaultState { latex_export: LatexExport { latex: true, set: "tuda".into(), kind: "thesis".into() }, ..VaultState::default() };
+        let (back, _) = parse::<VaultState>(&to_bytes(&chosen)).unwrap();
+        assert_eq!(back.latex_export, chosen.latex_export);
+        assert!(String::from_utf8(to_bytes(&chosen)).unwrap().contains("\"latex_export\""));
     }
 
     // spec: CFG-007
