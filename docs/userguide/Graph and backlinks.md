@@ -2,8 +2,6 @@
 features:
   - "Linked notes and the graph"
 ---
-# Graph and backlinks
-
 ![[graph.png]]
 
 ![[graph-drag.webm]]

@@ -20,7 +20,7 @@ pub const MIN_KERNEL: &str = "2022-06-01";
 /// A probe or a package search that takes longer than this is given up.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Which TeX Shale uses (CFG-043).
+/// Which TeX Shale uses (CFG-044).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TexChoice {
     /// The managed TeX Live when it is installed, else the one in `PATH` when it is good enough.
@@ -44,7 +44,7 @@ impl TexChoice {
     }
 }
 
-/// The settings of the LaTeX export (CFG-043).
+/// The settings of the LaTeX export (CFG-044).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct TexConfig {

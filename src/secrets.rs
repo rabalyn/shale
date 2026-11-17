@@ -551,6 +551,27 @@ mod tests {
         assert_eq!(backend::lookup(CALDAV, "https://sec003.example.com:443", "ada"), None);
     }
 
+    // spec: CAL-032
+    #[test]
+    fn an_edited_calendar_account_replaces_its_keyring_entry_and_the_old_user_name_entry_goes() {
+        let _serial = serial();
+        let before = vec![dav("e1", "https://cal032.example.com/cal/a/", "ada-edit", "old-pw"), dav("e2", "https://cal032.example.com/cal/b/", "ada-edit", "old-pw")];
+        let _ = for_file(&before);
+        let acct = "https://cal032.example.com:443";
+        assert_eq!(backend::lookup(CALDAV, acct, "ada-edit").as_ref().map(|s| s.expose()), Some("old-pw"));
+        // a new password for the same user: the entry is replaced
+        let pw = vec![dav("e1", "https://cal032.example.com/cal/a/", "ada-edit", "new-pw"), dav("e2", "https://cal032.example.com/cal/b/", "ada-edit", "new-pw")];
+        let file = for_file(&pw);
+        assert!(!serde_json::to_string(&file).unwrap().contains("new-pw"));
+        assert_eq!(backend::lookup(CALDAV, acct, "ada-edit").as_ref().map(|s| s.expose()), Some("new-pw"));
+        // a new user name: a new entry, the old one is cleared
+        let user = vec![dav("e1", "https://cal032.example.com/cal/a/", "ada-edit2", "new-pw"), dav("e2", "https://cal032.example.com/cal/b/", "ada-edit2", "new-pw")];
+        let _ = for_file(&user);
+        assert_eq!(backend::lookup(CALDAV, acct, "ada-edit2").as_ref().map(|s| s.expose()), Some("new-pw"));
+        assert_eq!(backend::lookup(CALDAV, acct, "ada-edit"), None);
+        let _ = for_file(&[]);
+    }
+
     // spec: MAIL-021
     #[test]
     fn mail_secrets_have_their_own_entries() {

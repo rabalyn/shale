@@ -397,6 +397,17 @@ its section from this file.
   release workflow on GitHub from the version tag. Check it with
   `gh attestation verify <file> --repo rabalyn/shale --signer-workflow rabalyn/shale/.github/workflows/build.yml --source-ref refs/tags/v<version>`;
   the release page also has the attestation as `<file>.sigstore.json` (BUILD-014).
+- **Numbered headings.** The headings of a note (`#` and deeper) show a number before their text, `1`,
+  `1.1`, `1.2`, `2`, drawn muted in the editor, the Markdown preview, the reading view, the outline, the
+  link preview and the PDF; the number is never written into the file (the note's title is the title
+  line above the text, not a `#` heading, #287). Settings → Editor → "Number headings" (on by default) turns it on or off, and a
+  note's front matter `numbered-headings: true` or `false` overrides it for that note (LINK-014, CFG-042, #283).
+- **Table of contents and bookmarks in the PDF.** The note export has a "Table of contents" checkbox (on):
+  after the title, a *Contents* page lists the `#`–`###` headings with their numbers and the pages they
+  start on, each entry a link; the text starts on the next page. The PDF also has bookmarks for the
+  `#`–`######` headings, nested by level (PDF-008, #283).
+- **Heading completion.** After `[[Note#` or `[[#` the link suggestions list the headings of that note, with
+  their numbers, and insert the heading's plain text (LINK-016, #283).
 
 ### Changed
 
@@ -660,6 +671,16 @@ its section from this file.
   builds refuse core dumps and memory reads by other programs. Where your system does not allow
   locking memory (RLIMIT_MEMLOCK), secrets are still wiped, but could reach swap: use encrypted
   swap next to full-disk encryption (SEC-014 to SEC-020).
+- **Heading links scroll to their heading.** `[[Note#Heading]]`, `[[#Heading]]`, `[text](Note.md#Heading)` and the
+  outline now open the note with the heading at the top of the view and keep the tab's mode: in the reading
+  view the view scrolls (before, a heading link always switched to the editor and the reading view dropped
+  the heading). The heading is found ignoring case, spaces and inline markup; a heading that is not there
+  opens the note at its top and says so (LINK-015, #283).
+- **The tab list of Settings is as wide as its longest name, and its border can be dragged.** With
+  a bigger font "Appearance" and "Keybindings" no longer wrap: the list measures its names. Drag
+  the border between the list and the page to set the width (60 points to half of the window;
+  kept as `settings_tab_width`), double-click it to make the width automatic again (CFG-041;
+  raba/shale#284).
 
 ### Fixed
 
@@ -889,6 +910,12 @@ its section from this file.
   `scripts/make-release.sh` makes a release: it bumps the version, writes the changelog section
   and tags. Both stop with "the changelog needs an update first" when the changelog has
   nothing new. GitHub builds release tags only, never check tags.
+- **Flaky mail watch test fixed**: the pretend IMAP server now tells a client, as soon as its next
+  `IDLE` starts, what changed while it was busy between two `IDLE`s, as a real server does; a new
+  mail added in that gap was lost and the test timed out (#286).
+- **The TeX test image builds on arm64**: it installs the TeX Live binaries of the machine it is
+  built on (`aarch64-linux` on the arm64 Forgejo runner, `x86_64-linux` elsewhere) instead of
+  always the x86_64 ones (#289).
 
 ## [0.3.0] - 2026-11-13
 

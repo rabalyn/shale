@@ -507,6 +507,46 @@ fn lay_016_a_middle_click_on_mail_feeds_or_calendar_opens_a_new_tab() {
     assert_eq!(w.app.tabbar.tabs.len(), n);
 }
 
+// spec: VAULT-025
+#[test]
+fn the_title_line_and_the_tab_hide_the_date_prefix_and_renaming_from_the_title_line_keeps_it() {
+    let mut w = W::new("title-line");
+    std::fs::write(w.dir.join("261117_Plan.md"), "Text of the plan with [[Other]].\n").unwrap();
+    std::fs::write(w.dir.join("Other.md"), "Back to [[261117_Plan]].\n").unwrap();
+    w.app.vault.as_mut().unwrap().rescan();
+    w.app.open(std::path::Path::new("261117_Plan.md"), false);
+    w.frames(4);
+    let lowest = |w: &W, text: &str| w.hl.text.iter().filter(|(t, _)| t == text).map(|(_, p)| *p).max_by(|a, b| a.y.total_cmp(&b.y));
+    let title = lowest(&w, "Plan").expect("the title line shows the name without the prefix");
+    assert!(title.y > 40.0, "below the tab bar: {title:?}");
+    assert!(w.hl.text.iter().filter(|(t, p)| t == "Plan" && p.y < 40.0).count() == 1, "the tab shows it too: {:?}", w.hl.text);
+    // the path in the toolbar is a path: it keeps the full name, like the file list
+    let full: Vec<f32> = w.hl.text.iter().filter(|(t, p)| t == "261117_Plan" && p.x > 300.0).map(|(_, p)| p.y).collect();
+    assert_eq!(full.len(), 1, "only the path of the toolbar: {:?}", w.hl.text);
+    assert!(w.hl.text.iter().any(|(t, p)| t == "261117_Plan" && p.x < 300.0), "the file list keeps the full name: {:?}", w.hl.text);
+    // rename from the title line: the prefix stays, the links follow
+    w.click_at(title + Vec2::new(10.0, 8.0));
+    let key = |key, modifiers| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+    w.frame(vec![key(egui::Key::A, Modifiers::COMMAND)]);
+    w.frame(vec![Event::Text("Roadmap".into())]);
+    w.frame(vec![key(egui::Key::Enter, Modifiers::NONE)]);
+    w.frames(4);
+    assert!(w.dir.join("261117_Roadmap.md").exists() && !w.dir.join("261117_Plan.md").exists(), "renamed with the prefix");
+    assert_eq!(w.app.current_path(), Some(PathBuf::from("261117_Roadmap.md")));
+    assert_eq!(std::fs::read_to_string(w.dir.join("Other.md")).unwrap(), "Back to [[261117_Roadmap]].\n", "links are updated as for any rename");
+    assert!(lowest(&w, "Roadmap").is_some_and(|p| p.y > 40.0), "the title line shows the new name: {:?}", w.hl.text);
+    // a note without a prefix is renamed as before
+    w.app.open(std::path::Path::new("Other.md"), false);
+    w.frames(4);
+    let title = lowest(&w, "Other").unwrap();
+    w.click_at(title + Vec2::new(10.0, 8.0));
+    w.frame(vec![key(egui::Key::A, Modifiers::COMMAND)]);
+    w.frame(vec![Event::Text("Elsewhere".into())]);
+    w.frame(vec![key(egui::Key::Enter, Modifiers::NONE)]);
+    w.frames(4);
+    assert!(w.dir.join("Elsewhere.md").exists());
+}
+
 // spec: LINK-007, LINK-014, LINK-015, CFG-040
 #[test]
 fn the_outline_shows_the_numbers_and_a_click_scrolls_the_reading_view_to_the_heading_and_keeps_the_mode() {
@@ -519,10 +559,10 @@ fn the_outline_shows_the_numbers_and_a_click_scrolls_the_reading_view_to_the_hea
     w.click_at(w.bar_icon(0, panel(RightPanel::Outline)).center());
     w.frames(3);
     let outline = w.right_text();
-    for want in ["1", "1.1", "2", "First", "Sub", "Down here"] {
+    for want in ["1", "1.1", "1.1.1", "1.2", "Long", "First", "Sub", "Down here"] {
         assert!(outline.iter().any(|t| t == want), "{want} is in the outline: {outline:?}");
     }
-    assert!(!outline.iter().any(|t| t == "0"), "the title has no number");
+    assert!(!outline.iter().any(|t| t == "0"), "no heading is numbered 0");
     // the setting, and the front matter over it, change the open view at once
     w.app.cfg.numbered_headings = false;
     w.frames(3);

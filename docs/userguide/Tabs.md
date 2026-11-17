@@ -3,8 +3,6 @@ features:
   - "Tabs"
   - "Panes side by side"
 ---
-# Tabs
-
 ![[tab-pinned-menu.png]]
 
 - Drag a tab left or right to reorder it; a marker shows where it will land. A click without

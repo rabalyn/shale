@@ -195,6 +195,10 @@ pub enum Modal {
     Import(Box<crate::import::dialog::ImportDialog>),
     MailAccounts(Box<crate::mail::dialog::MailDialog>),
     Social(Box<crate::social::accounts_ui::SocialDialog>),
+    /// pasted text with headings, none of them `#`: lift them? (EDIT-038)
+    LiftPaste {
+        text: String,
+    },
     /// an Obsidian canvas is being opened: convert it or open it read-only?
     ConvertCanvas {
         rel: PathBuf,
@@ -287,6 +291,10 @@ pub enum Action {
         rel: PathBuf,
         new_tab: bool,
     },
+    /// the pasted text has no `#` heading: ask whether to lift its headings (EDIT-038)
+    AskLiftHeadings(String),
+    /// paste this text into the open note's editor (the answer to the question above)
+    PasteText(String),
 }
 
 #[derive(Default)]
@@ -1000,19 +1008,57 @@ impl ShaleApp {
                         Some((dir, name)) => (PathBuf::from(dir), name.to_string()),
                         None => (PathBuf::new(), p),
                     };
-                    self.create_note(&folder, &name, new_tab);
+                    let made = self.create_note(&folder, &name, new_tab);
+                    self.relink_red_link(from.as_deref(), t, made.as_deref());
                 }
                 _ => self.toast("This link points outside the vault"),
             }
             return;
         }
         let folder = if self.cfg.new_notes_next_to_current { from.as_ref().and_then(|f| f.parent()).map(|p| p.to_path_buf()).unwrap_or_default() } else { PathBuf::new() };
-        self.create_note(&folder, target, new_tab);
+        let made = self.create_note(&folder, target, new_tab);
+        self.relink_red_link(from.as_deref(), t, made.as_deref());
+    }
+
+    /// A red link in `from` to `target` made the note `made`; when the note got a date prefix
+    /// (CFG-043) the links of `from` to that name are rewritten so they reach it.
+    fn relink_red_link(&mut self, from: Option<&Path>, target: &str, made: Option<&Path>) {
+        let (Some(from), Some(made)) = (from, made) else { return };
+        let Some(stem) = self.vault.as_ref().and_then(|v| v.file(made)).map(|f| f.link_name.clone()) else { return };
+        let old_last = markdown::strip_md_ext(target.trim()).rsplit('/').next().unwrap_or_default();
+        if vault::date_prefix_of(&stem).is_none() || vault::date_prefix_of(old_last).is_some() {
+            return;
+        }
+        let Some(doc) = self.notes.get_mut(from).filter(|d| d.unreadable.is_none()) else { return };
+        let Some(text) = markdown::relink_to(&doc.text, target, stem.rsplit('/').next().unwrap_or(&stem)) else { return };
+        doc.text = text.clone();
+        doc.dirty = true;
+        doc.last_edit = Instant::now();
+        if let Some(v) = self.vault.as_mut() {
+            v.set_note_text(from, &text);
+        }
+    }
+
+    /// `name` (may have folders) with today's `YYMMDD_` in front of its last part, when the setting
+    /// is on and the name has no date prefix yet (CFG-043).
+    fn with_date_prefix(&self, name: &str) -> String {
+        let name = name.trim();
+        let (dir, file) = name.rsplit_once('/').map_or(("", name), |(d, f)| (d, f));
+        if !self.cfg.date_prefix_new_notes || file.is_empty() || vault::date_prefix_of(file).is_some() {
+            return name.to_string();
+        }
+        let prefixed = format!("{}{file}", vault::date_prefix_today());
+        if name.contains('/') {
+            format!("{dir}/{prefixed}")
+        } else {
+            prefixed
+        }
     }
 
     pub fn create_note(&mut self, folder: &Path, name: &str, new_tab: bool) -> Option<PathBuf> {
+        let name = self.with_date_prefix(name);
         let v = self.vault.as_mut()?;
-        let rel = v.new_note_path(folder, name);
+        let rel = v.new_note_path(folder, &name);
         let content = if crate::drawing::excalidraw_md::is_plugin_file(&rel) {
             crate::drawing::excalidraw_md::new_file(&crate::drawing::Scene::default())
         } else if crate::drawing::excalidraw_md::is_drawing_path(&rel) {
@@ -1042,8 +1088,9 @@ impl ShaleApp {
     }
 
     pub fn new_drawing(&mut self, folder: &Path, embed_into: Option<PathBuf>) {
+        let name = self.with_date_prefix("Drawing.excalidraw");
         let Some(v) = self.vault.as_mut() else { return };
-        let rel = v.new_note_path(folder, "Drawing.excalidraw");
+        let rel = v.new_note_path(folder, &name);
         if let Err(e) = v.create_file(&rel, &crate::drawing::Scene::default().to_json()) {
             self.toast(format!("Could not create drawing: {e}"));
             return;
@@ -1861,7 +1908,7 @@ impl ShaleApp {
         self.remember_open_files();
     }
 
-    fn process_actions(&mut self) {
+    pub(crate) fn process_actions(&mut self) {
         let actions = std::mem::take(&mut self.actions);
         for a in actions {
             match a {
@@ -1903,6 +1950,12 @@ impl ShaleApp {
                 Action::CreatePerson(name) => self.create_person(&name),
                 Action::ConvertCanvas { rel, new_tab } => {
                     self.convert_canvas(&rel, new_tab);
+                }
+                Action::AskLiftHeadings(text) => self.modal = Some(Modal::LiftPaste { text }),
+                Action::PasteText(text) => {
+                    if let Some(tab) = self.tabbar.tabs.get_mut(self.tabbar.active) {
+                        tab.editor.pending_paste = Some(text);
+                    }
                 }
                 Action::Move { from, into } => {
                     if let Err(e) = self.move_into(&from, &into) {
@@ -2455,6 +2508,7 @@ pub fn handle_editor_action(app_actions: &mut Vec<Action>, a: EditorAction, from
             app_actions.push(Action::Toast(msg));
         }
         EditorAction::CreatePerson(name) => app_actions.push(Action::CreatePerson(name)),
+        EditorAction::AskLiftHeadings(text) => app_actions.push(Action::AskLiftHeadings(text)),
     }
 }
 
@@ -2491,7 +2545,9 @@ pub(crate) mod tests {
         let d = std::env::temp_dir().join(format!("shale-app-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         vault::write_sample_vault(&d).unwrap();
-        let app = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
+        let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(d.clone()), view: None, keys: None }, false);
+        // most tests name the notes they make; those of the prefix switch it on
+        app.cfg.date_prefix_new_notes = false;
         (app, d)
     }
 
@@ -2727,6 +2783,73 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: CFG-043, VAULT-025
+    #[test]
+    fn a_new_note_gets_todays_date_prefix_when_the_setting_is_on_and_shows_without_it() {
+        let (mut app, d) = test_app("prefix");
+        let today = vault::date_prefix_today();
+        assert!(today.len() == 7 && vault::date_prefix_of(&today).is_some(), "{today}");
+        app.cfg.date_prefix_new_notes = true;
+        // a new note, in a folder, twice (the second one gets the number)
+        let rel = app.create_note(Path::new("Projects"), "Plan", false).unwrap();
+        assert_eq!(rel, PathBuf::from(format!("Projects/{today}Plan.md")));
+        let second = app.create_note(Path::new("Projects"), "Plan", false).unwrap();
+        assert_eq!(second, PathBuf::from(format!("Projects/{today}Plan 1.md")));
+        // the title line and the tab show the name without the prefix; the file list and links keep the full name
+        let f = app.vault.as_ref().unwrap().file(&second).unwrap().clone();
+        assert_eq!((f.title().as_str(), f.display_name()), ("Plan 1", format!("{today}Plan 1")));
+        assert_eq!(app.tab_title(&View::Note(second)), "Plan 1");
+        app.new_untitled(Path::new(""));
+        assert_eq!(app.current_path(), Some(PathBuf::from(format!("{today}Untitled.md"))));
+        // a name that has a prefix already, or folders in the name
+        assert_eq!(app.create_note(Path::new(""), "261117_Kept", false).unwrap(), PathBuf::from("261117_Kept.md"));
+        assert_eq!(app.create_note(Path::new(""), "Sub/Deep", false).unwrap(), PathBuf::from(format!("Sub/{today}Deep.md")));
+        // a drawing
+        app.new_drawing(Path::new(""), None);
+        assert!(d.join(format!("{today}Drawing.excalidraw")).exists());
+        // off: the name as given
+        app.cfg.date_prefix_new_notes = false;
+        assert_eq!(app.create_note(Path::new(""), "Plain", false).unwrap(), PathBuf::from("Plain.md"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: CFG-043, LINK-005
+    #[test]
+    fn a_red_link_that_makes_a_prefixed_note_is_rewritten_so_it_resolves() {
+        let (mut app, d) = test_app("relink");
+        app.cfg.date_prefix_new_notes = true;
+        let today = vault::date_prefix_today();
+        std::fs::write(d.join("Source.md"), "a [[Plan]] b [[Plan#Goals]] c [t](Plan.md) d [[Other]] e [[Plan|kept]]\n").unwrap();
+        app.rescan();
+        app.open(Path::new("Source.md"), false);
+        app.open_link("Plan", None, Some(PathBuf::from("Source.md")), false);
+        assert_eq!(app.current_path(), Some(PathBuf::from(format!("{today}Plan.md"))));
+        let want = format!("a [[{today}Plan|Plan]] b [[{today}Plan#Goals|Plan > Goals]] c [t]({today}Plan.md) d [[Other]] e [[{today}Plan|kept]]\n");
+        assert_eq!(app.notes[Path::new("Source.md")].text, want);
+        let v = app.vault.as_ref().unwrap();
+        assert!(v.exists(&format!("{today}Plan"), None), "the link reaches the note");
+        app.flush_all();
+        assert_eq!(std::fs::read_to_string(d.join("Source.md")).unwrap(), want, "saved");
+        assert!(app.vault.as_ref().unwrap().backlinks(Path::new(&format!("{today}Plan.md"))).iter().any(|(p, _)| p == Path::new("Source.md")), "a backlink");
+        // a relative link (LINK-010) is made where it points, with the prefix, and rewritten alike
+        std::fs::write(d.join("Projects/Rel.md"), "x [[./Sub]] y\n").unwrap();
+        app.rescan();
+        app.open(Path::new("Projects/Rel.md"), false);
+        app.open_link("./Sub", None, Some(PathBuf::from("Projects/Rel.md")), false);
+        assert!(d.join(format!("Projects/{today}Sub.md")).exists());
+        assert_eq!(app.notes[Path::new("Projects/Rel.md")].text, format!("x [[./{today}Sub|./Sub]] y\n"));
+        assert!(app.vault.as_ref().unwrap().exists(&format!("./{today}Sub"), Some(Path::new("Projects/Rel.md"))));
+        // off: the link is left alone
+        app.cfg.date_prefix_new_notes = false;
+        std::fs::write(d.join("Source.md"), "[[Later]]\n").unwrap();
+        app.rescan();
+        app.open(Path::new("Source.md"), false);
+        app.open_link("Later", None, Some(PathBuf::from("Source.md")), false);
+        assert!(d.join("Later.md").exists());
+        assert_eq!(app.notes[Path::new("Source.md")].text, "[[Later]]\n");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: SEC-009
     #[test]
     fn nothing_typed_or_pasted_into_a_password_field_is_recorded() {
@@ -2831,6 +2954,37 @@ pub(crate) mod tests {
         // removing the account forgets it
         app.social_dialog_action(DialogAction::Remove(entry.account.id.clone()));
         assert!(app.cfg.social_accounts.is_empty() && !app.social.feeds.contains_key(&entry.account.id));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: SOC-043
+    #[test]
+    fn signing_in_again_replaces_only_the_secret_of_the_account() {
+        use crate::social::accounts_ui::DialogAction;
+        let (mut app, d) = test_app("social-resign");
+        let other = crate::social::SocialAccountEntry { account: crate::social::Account::new(crate::social::Network::Bluesky, "https://bsky.soc043.test", "bob.test", "Bob"), secret: Default::default() };
+        let mut entry = crate::social::SocialAccountEntry::new(crate::social::demo::account().account, &crate::secret::Secret::new("old-token"));
+        entry.account.server = "https://demo.soc043.test".into();
+        app.social_dialog_action(DialogAction::Added(entry.clone()));
+        app.social_dialog_action(DialogAction::Added(other.clone()));
+        app.social.load_demo(&entry);
+        let posts = app.social.feeds.len();
+        assert!(posts > 0);
+        // what the dialog's job did: the new secret went to the keyring and the entry is the account as it was
+        let new = crate::social::SocialAccountEntry::new(entry.account.clone(), &crate::secret::Secret::new("new-token"));
+        assert!(!app.social_dialog_action(DialogAction::Updated(new)));
+        assert_eq!(app.cfg.social_accounts.iter().map(|e| e.account.id.as_str()).collect::<Vec<_>>(), [entry.account.id.as_str(), other.account.id.as_str()], "same place, same id");
+        assert_eq!(app.cfg.social_accounts[0].account, entry.account, "name and server stay");
+        assert_eq!(app.cfg.social_accounts[0].secret().expose(), "new-token");
+        assert!(app.social.feeds.len() == posts && app.social.feeds.contains_key(&entry.account.id), "its feeds stay");
+        assert!(app.toasts.iter().any(|t| t.0.contains("Signed in again")), "it says so");
+        // the account was removed while the form ran: the secret that the sign-in stored goes again
+        app.social_dialog_action(DialogAction::Remove(entry.account.id.clone()));
+        let late = crate::social::SocialAccountEntry::new(entry.account.clone(), &crate::secret::Secret::new("late-token"));
+        app.social_dialog_action(DialogAction::Updated(late));
+        assert!(app.cfg.social_accounts.iter().all(|e| e.account.id != entry.account.id), "not added again");
+        assert_eq!(crate::secrets::social_lookup(&entry.account.server, &entry.account.handle), None);
+        crate::secrets::social_clear(&other.account.server, &other.account.handle);
         let _ = std::fs::remove_dir_all(&d);
     }
 

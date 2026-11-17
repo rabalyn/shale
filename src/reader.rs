@@ -736,12 +736,12 @@ mod tests {
         let v = Vault::open(&d).unwrap();
         let text = "# Title\n## Plan\n### Step\n## Next\n";
         let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, true), scroll_to: None }, vec![vec![]]);
-        for (n, title) in [("1", "Plan"), ("1.1", "Step"), ("2", "Next")] {
+        for (n, title) in [("1", "Title"), ("1.1", "Plan"), ("1.1.1", "Step"), ("1.2", "Next")] {
             let number = painted.iter().find(|(t, _)| t == n).unwrap_or_else(|| panic!("{n} is painted: {painted:?}")).1;
             let title = painted.iter().find(|(t, _)| t == title).unwrap().1;
             assert!(number.max.x <= title.min.x + 0.5 && (number.center().y - title.center().y).abs() < 6.0, "{n} is left of {title:?} on its row: {number:?}");
         }
-        assert!(!painted.iter().any(|(t, _)| t == "0"), "the title has none");
+        assert!(!painted.iter().any(|(t, _)| t == "0"), "no heading is numbered 0");
         let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, false), scroll_to: None }, vec![vec![]]);
         assert!(!painted.iter().any(|(t, _)| t == "1" || t == "1.1"), "numbering off: {painted:?}");
         let on = "---\nnumbered-headings: yes\n---\n## Plan\n";

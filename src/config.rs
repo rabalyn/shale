@@ -288,8 +288,10 @@ pub struct Config {
     pub inline_images: bool,
     /// Show a gutter with line numbers in the editor (EDIT-018).
     pub line_numbers: bool,
-    /// Number the headings of a note: `##` and deeper, as 1, 1.1, 1.2 (LINK-014, CFG-042).
+    /// Number the headings of a note: `#` and deeper, as 1, 1.1, 1.2 (LINK-014, CFG-042).
     pub numbered_headings: bool,
+    /// Name new notes `YYMMDD_<name>` with today's date (VAULT-025, CFG-043).
+    pub date_prefix_new_notes: bool,
     /// Show the formatting toolbar above the text of a note (EDIT-026).
     pub format_toolbar: bool,
     /// The size of the toolbar's buttons in percent of the base size (EDIT-026), 80–200.
@@ -351,7 +353,7 @@ pub struct Config {
     /// How long each cache is kept (USE-020).
     #[serde(deserialize_with = "lenient")]
     pub caches: CacheRetention,
-    /// The TeX that exports notes to PDF through LaTeX templates (TEX-001, CFG-043).
+    /// The TeX that exports notes to PDF through LaTeX templates (TEX-001, CFG-044).
     #[serde(deserialize_with = "lenient")]
     pub tex: crate::pdf::tex::TexConfig,
     /// Keybindings the user changed: action id -> bindings as text (KEY-007). Missing = defaults.
@@ -394,6 +396,7 @@ impl Default for Config {
             inline_images: true,
             line_numbers: true,
             numbered_headings: true,
+            date_prefix_new_notes: true,
             format_toolbar: true,
             toolbar_size: 110,
             link_preview_width: crate::link_preview::DEFAULT_WIDTH,
@@ -725,6 +728,11 @@ mod tests {
         assert!(c.numbered_headings, "headings are numbered by default");
         let c: Config = serde_json::from_str(r#"{"numbered_headings": false}"#).unwrap();
         assert!(!c.numbered_headings);
+        // spec: CFG-043
+        let c: Config = serde_json::from_str("{}").unwrap();
+        assert!(c.date_prefix_new_notes, "new notes get a date prefix by default");
+        let c: Config = serde_json::from_str(r#"{"date_prefix_new_notes": false}"#).unwrap();
+        assert!(!c.date_prefix_new_notes);
         // spec: EDIT-016, EDIT-017
         assert!(!c.live_preview);
         assert_eq!(c.preview_raw_lines, 0);

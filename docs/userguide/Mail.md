@@ -2,8 +2,6 @@
 features:
   - "Mail"
 ---
-# Mail
-
 ![[mail-view.png]]
 
 Open the **Mail** button in the ribbon (or Ctrl+Shift+M): accounts and folders with unread

@@ -810,8 +810,8 @@ mod tests {
         let target = |h: &str| Target::Link { target: "Roadmap".into(), heading: Some(h.into()), from: "Welcome.md".into() };
         let Content::Note { text: shown, numbers, .. } = content_for(&target("Two"), &v, &text, true) else { panic!("a note") };
         assert!(shown.starts_with("## Two"));
-        assert_eq!(numbers.get(&0).map(String::as_str), Some("2"), "Two is number 2 although the preview starts there");
-        assert_eq!(numbers.get(&1).map(String::as_str), Some("2.1"));
+        assert_eq!(numbers.get(&0).map(String::as_str), Some("1.2"), "Two is number 1.2 although the preview starts there");
+        assert_eq!(numbers.get(&1).map(String::as_str), Some("1.2.1"));
         let Content::Note { numbers, .. } = content_for(&target("Two"), &v, &text, false) else { panic!("a note") };
         assert!(numbers.is_empty(), "numbering off");
         let _ = std::fs::remove_dir_all(&d);

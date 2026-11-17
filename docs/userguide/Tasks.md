@@ -2,8 +2,6 @@
 features:
   - "To-do list across all notes"
 ---
-# Tasks
-
 ![[tasks.png]]
 
 Every `- [ ] task` of every note appears in one list (the check-mark icon in the ribbon).

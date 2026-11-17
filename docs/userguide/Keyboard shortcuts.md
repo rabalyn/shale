@@ -2,8 +2,6 @@
 features:
   - "Keyboard"
 ---
-# Keyboard shortcuts
-
 Back to [[Start here]]. Editing keys are in [[Editor]], the settings window is in [[Settings reference]].
 
 ![[keybindings.png]]

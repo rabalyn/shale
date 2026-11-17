@@ -13,8 +13,12 @@ impl ShaleApp {
         changed |= ui
             .checkbox(&mut self.cfg.numbered_headings, "Number headings")
             .on_hover_text(
-                "Headings from ## on are shown as 1, 1.1, 1.2; the title (#) is never numbered. The numbers are only drawn, never written into the note. A note's front matter numbered-headings: true or false overrides this for that note.",
+                "Headings from # on are shown as 1, 1.1, 1.2; the note's title is the title line above the text, not a heading. The numbers are only drawn, never written into the note. A note's front matter numbered-headings: true or false overrides this for that note.",
             )
+            .changed();
+        changed |= ui
+            .checkbox(&mut self.cfg.date_prefix_new_notes, "Date prefix for new notes")
+            .on_hover_text("New notes are named YYMMDD_name.md with today's date, so the file list sorts by date. The title line and the tabs show the name without the prefix.")
             .changed();
         changed |= ui.checkbox(&mut self.cfg.live_preview, "Markdown preview in the editor (the lines around the cursor show raw markdown)").changed();
         ui.add_enabled_ui(self.cfg.live_preview, |ui| {

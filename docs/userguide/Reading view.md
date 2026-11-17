@@ -1,5 +1,3 @@
-# Reading view
-
 **Ctrl+E** switches between editing and the reading view of a note. Back to [[Start here]].
 
 ![[reading.png]]

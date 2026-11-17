@@ -366,9 +366,29 @@ fn snapshot(st: &Arc<Mutex<FakeState>>, name: &str) -> Vec<(u32, Vec<String>)> {
     st.lock().unwrap().folders.iter().find(|f| f.name == name).map(|f| f.msgs.iter().map(|m| (m.uid, m.flags.clone())).collect()).unwrap_or_default()
 }
 
-/// `IDLE`: answer `+`, then every 30 ms tell what changed in the selected folder (`EXISTS` for new
-/// mail, `EXPUNGE` for mail gone, `FETCH` with the flags for changed ones) until the client says `DONE`.
-fn idle_session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, selected: &Option<String>, tag: &str) -> std::io::Result<bool> {
+/// Tells a client what changed in a folder from `before` to `now`: `EXPUNGE` for mail gone, `EXISTS`
+/// for new mail, `FETCH` with the flags for changed ones.
+fn tell_changes(out: &mut impl Write, before: &[(u32, Vec<String>)], now: &[(u32, Vec<String>)]) -> std::io::Result<()> {
+    for (i, (uid, _)) in before.iter().enumerate().rev() {
+        if !now.iter().any(|(u, _)| u == uid) {
+            write!(out, "* {} EXPUNGE\r\n", i + 1)?;
+        }
+    }
+    for (i, (uid, flags)) in now.iter().enumerate() {
+        match before.iter().find(|(u, _)| u == uid) {
+            None => write!(out, "* {} EXISTS\r\n", i + 1)?,
+            Some((_, old)) if old != flags => write!(out, "* {} FETCH (UID {uid} FLAGS ({}))\r\n", i + 1, flags.join(" "))?,
+            _ => {}
+        }
+    }
+    out.flush()
+}
+
+/// `IDLE`: answer `+`, tell at once what changed since the session was last told (`told`: at
+/// `EXAMINE` or the end of the last `IDLE`), as a real server does for changes made while the
+/// client was busy between two `IDLE`s (#286), then every 30 ms what changed until the client
+/// says `DONE`.
+fn idle_session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, selected: &Option<String>, told: &mut Option<Vec<(u32, Vec<String>)>>, tag: &str) -> std::io::Result<bool> {
     if st.lock().unwrap().idle_refused {
         write!(r.get_mut(), "{tag} NO IDLE is not allowed for you\r\n")?;
         return Ok(true);
@@ -381,6 +401,11 @@ fn idle_session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mu
     r.get_mut().flush()?;
     r.get_ref().read_timeout(Some(Duration::from_millis(30)));
     let mut before = snapshot(st, &name);
+    if let Some(old) = told.take() {
+        if old != before {
+            tell_changes(r.get_mut(), &old, &before)?;
+        }
+    }
     let mut line = String::new();
     let done = loop {
         match r.read_line(&mut line) {
@@ -392,20 +417,7 @@ fn idle_session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mu
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
                 let now = snapshot(st, &name);
                 if now != before {
-                    let out = r.get_mut();
-                    for (i, (uid, _)) in before.iter().enumerate().rev() {
-                        if !now.iter().any(|(u, _)| u == uid) {
-                            write!(out, "* {} EXPUNGE\r\n", i + 1)?;
-                        }
-                    }
-                    for (i, (uid, flags)) in now.iter().enumerate() {
-                        match before.iter().find(|(u, _)| u == uid) {
-                            None => write!(out, "* {} EXISTS\r\n", i + 1)?,
-                            Some((_, old)) if old != flags => write!(out, "* {} FETCH (UID {uid} FLAGS ({}))\r\n", i + 1, flags.join(" "))?,
-                            _ => {}
-                        }
-                    }
-                    out.flush()?;
+                    tell_changes(r.get_mut(), &before, &now)?;
                     before = now;
                 }
             }
@@ -413,6 +425,7 @@ fn idle_session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mu
         }
     };
     r.get_ref().read_timeout(Some(Duration::from_secs(20)));
+    *told = Some(before);
     if done {
         write!(r.get_mut(), "{tag} OK IDLE terminated\r\n")?;
     } else {
@@ -437,6 +450,8 @@ fn in_set(set: &str, uid: u32, max: u32) -> bool {
 
 fn session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<FakeState>>, tls: bool) -> std::io::Result<Next> {
     let mut selected: Option<String> = None;
+    // what the session was last told of the selected folder, for the next IDLE
+    let mut told: Option<Vec<(u32, Vec<String>)>> = None;
     let mut rw = false;
     let mut line = String::new();
     loop {
@@ -494,7 +509,7 @@ fn session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<F
             }
             "NOOP" => write!(out, "{tag} OK\r\n")?,
             "IDLE" if st.lock().unwrap().idle => {
-                if !idle_session(r, st, &selected, tag)? {
+                if !idle_session(r, st, &selected, &mut told, tag)? {
                     return Ok(Next::Done);
                 }
             }
@@ -571,6 +586,7 @@ fn session<S: Read + Write + ReadTimeout>(r: &mut BufReader<S>, st: &Arc<Mutex<F
                 match g.folders.iter().find(|f| f.name == name && !g.refuse_examine.contains(&name)) {
                     Some(f) => {
                         selected = Some(name);
+                        told = Some(f.msgs.iter().map(|m| (m.uid, m.flags.clone())).collect());
                         rw = verb == "SELECT";
                         write!(out, "* {} EXISTS\r\n* OK [UIDVALIDITY {}] ok\r\n* OK [UIDNEXT {}] ok\r\n", f.msgs.len(), f.uidvalidity, f.uidnext)?;
                         if g.condstore {

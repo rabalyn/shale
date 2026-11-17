@@ -1,4 +1,4 @@
-//! Finding a LuaLaTeX (TEX-001) and the setting that chooses one (CFG-043): the choice among what
+//! Finding a LuaLaTeX (TEX-001) and the setting that chooses one (CFG-044): the choice among what
 //! was found, the probe of a TeX (kernel date, biber, packages) with fake programs on Unix, and the
 //! probe of the real TeX of the container (ignored unless asked for).
 
@@ -75,7 +75,7 @@ fn an_explicit_choice_is_used_or_explained() {
     assert!(d.selected(TexChoice::Managed).unwrap_err().contains("not installed"));
 }
 
-// spec: CFG-043
+// spec: CFG-044
 #[test]
 fn the_tex_settings_default_to_auto_and_ctan_load_from_old_files_and_round_trip() {
     let c = crate::config::Config::default();

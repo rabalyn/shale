@@ -1,4 +1,4 @@
-//! The "Feed accounts" dialog: add a Mastodon or Bluesky account, remove one.
+//! The "Feed accounts" dialog: add a Mastodon or Bluesky account, sign in again to one (Edit, SOC-043), remove one.
 //!
 //! Mastodon: type the server, open the sign-in page in the browser, paste the code the server
 //! shows (or paste an access token you made yourself). Bluesky: handle and an *app password*.
@@ -14,6 +14,8 @@ enum Done {
     /// the app is registered on the server and the sign-in page is open
     Opened(String, AppCredentials),
     Added(SocialAccountEntry),
+    /// signed in again to the account that is being edited: the entry holds the new secret
+    Resigned(SocialAccountEntry),
 }
 
 type JobResult = Result<Done, String>;
@@ -31,6 +33,8 @@ pub struct SocialDialog {
     /// Mastodon: sign in with an access token instead of the browser
     pub use_token: bool,
     app: Option<(String, AppCredentials)>,
+    /// Edit (SOC-043): the account the form signs in to again; network, server and handle are fixed
+    pub editing: Option<Account>,
     job: Option<Receiver<JobResult>>,
     pub error: Option<String>,
     pub rects: Vec<(String, Rect)>,
@@ -41,6 +45,9 @@ pub enum DialogAction {
     Close,
     /// a new account signed in (its secret is already in the keyring or the entry)
     Added(SocialAccountEntry),
+    /// signed in again to this account: its secret is replaced (the entry carries the new one, or
+    /// nothing while the keyring holds it); everything else of the account stays (SOC-043)
+    Updated(SocialAccountEntry),
     /// remove the account with this id
     Remove(String),
     /// the number of minutes between looks for new posts was changed (0 = never)
@@ -59,7 +66,32 @@ fn spawn(ctx: &egui::Context, f: impl FnOnce() -> JobResult + Send + 'static) ->
 
 impl SocialDialog {
     pub fn new() -> SocialDialog {
-        SocialDialog { network: Network::Mastodon, server: String::new(), handle: String::new(), secret: Default::default(), code: String::new(), use_token: false, app: None, job: None, error: None, rects: vec![] }
+        SocialDialog { network: Network::Mastodon, server: String::new(), handle: String::new(), secret: Default::default(), code: String::new(), use_token: false, app: None, editing: None, job: None, error: None, rects: vec![] }
+    }
+
+    /// Edit (SOC-043): the form signs in again to `account`.
+    pub fn start_edit(&mut self, account: &Account) {
+        self.network = account.network;
+        self.server = account.server.clone();
+        self.handle = account.handle.clone();
+        self.editing = Some(account.clone());
+        self.clear_input();
+    }
+
+    /// Leave Edit: the form is empty again, ready to add an account.
+    pub fn cancel_edit(&mut self) {
+        self.editing = None;
+        self.server.clear();
+        self.handle.clear();
+        self.clear_input();
+    }
+
+    fn clear_input(&mut self) {
+        self.error = None;
+        self.secret.clear();
+        self.code.clear();
+        self.app = None;
+        self.use_token = false;
     }
 
     pub fn busy(&self) -> bool {
@@ -94,6 +126,7 @@ impl SocialDialog {
     fn sign_in(&mut self, ctx: &egui::Context) {
         self.error = None;
         let secret = crate::secret::Secret::new(self.secret.expose().trim());
+        let editing = self.editing.clone();
         match self.network {
             Network::Mastodon => {
                 let server = match self.server_ok() {
@@ -118,6 +151,9 @@ impl SocialDialog {
                         _ => secret,
                     };
                     let who = mastodon::verify(&server, token.expose())?;
+                    if let Some(old) = editing {
+                        return resigned(old, &who.handle, &token);
+                    }
                     Ok(Done::Added(SocialAccountEntry::new(Account::new(Network::Mastodon, &server, &who.handle, &who.display_name), &token)))
                 }));
             }
@@ -131,14 +167,17 @@ impl SocialDialog {
                 self.job = Some(spawn(ctx, move || {
                     let server = clean_server(&server).map_err(|e| format!("This server address can't be used: {e}"))?;
                     let session = bluesky::create_session(&server, &handle, secret.expose())?;
+                    if let Some(old) = editing {
+                        return resigned(old, &session.handle, &secret);
+                    }
                     Ok(Done::Added(SocialAccountEntry::new(Account::new(Network::Bluesky, &server, &session.handle, &session.handle), &secret)))
                 }));
             }
         }
     }
 
-    /// Take the result of the running step. An added account is returned.
-    fn poll(&mut self) -> Option<SocialAccountEntry> {
+    /// Take the result of the running step. The action of a finished sign-in is returned.
+    fn poll(&mut self) -> Option<DialogAction> {
         let rx = self.job.as_ref()?;
         let r = match rx.try_recv() {
             Ok(r) => r,
@@ -154,12 +193,26 @@ impl SocialDialog {
                 self.handle.clear();
                 self.server.clear();
                 self.app = None;
-                return Some(e);
+                return Some(DialogAction::Added(e));
+            }
+            Ok(Done::Resigned(e)) => {
+                self.cancel_edit();
+                return Some(DialogAction::Updated(e));
             }
             Err(e) => self.error = Some(e),
         }
         None
     }
+}
+
+/// The sign-in of Edit worked: it must be the account's own handle (nothing is stored for another
+/// one); then the secret goes to the keyring (or the entry) under the account's own name, and
+/// the entry is the account as it was.
+fn resigned(old: Account, signed_in_as: &str, secret: &crate::secret::Secret) -> JobResult {
+    if !signed_in_as.trim().trim_start_matches('@').eq_ignore_ascii_case(&old.handle) {
+        return Err(format!("This sign-in is for @{}, not for @{}. Nothing was changed.", signed_in_as.trim_start_matches('@'), old.handle));
+    }
+    Ok(Done::Resigned(SocialAccountEntry::new(old, secret)))
 }
 
 impl Default for SocialDialog {
@@ -176,8 +229,8 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
         r
     };
     let mut action = None;
-    if let Some(e) = d.poll() {
-        action = Some(DialogAction::Added(e));
+    if let Some(a) = d.poll() {
+        action = Some(a);
     }
     if d.busy() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(150));
@@ -187,6 +240,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
     if accounts.is_empty() {
         ui.label(muted("No account yet. Add a Mastodon or Bluesky account below to read its feeds here."));
     }
+    let mut start_edit = None;
     for (i, e) in accounts.iter().enumerate() {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(e.account.network.label()).size(11.0).color(theme::ACCENT));
@@ -194,11 +248,18 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
             ui.label(name);
             ui.label(muted(&e.account.server));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let (editing, busy) = (d.editing.as_ref().is_some_and(|a| a.id == e.account.id), d.busy());
                 if rec(format!("remove:{i}"), ui.small_button("Remove")).on_hover_text("Forget this account and its stored password").clicked() {
                     action = Some(DialogAction::Remove(e.account.id.clone()));
                 }
+                if rec(format!("edit:{i}"), ui.add_enabled(!busy && !editing, egui::Button::new("Edit").small())).on_hover_text("Sign in to this account again, for example with a new app password").clicked() {
+                    start_edit = Some(e.account.clone());
+                }
             });
         });
+    }
+    if let Some(a) = start_edit {
+        d.start_edit(&a);
     }
     ui.separator();
     ui.horizontal(|ui| {
@@ -210,9 +271,22 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
     });
     ui.separator();
     // ---- add
-    ui.label(egui::RichText::new("Add an account").size(14.0).color(theme::TEXT));
+    if let Some(a) = &d.editing {
+        ui.label(egui::RichText::new(format!("Sign in again as @{}", a.handle)).size(14.0).color(theme::TEXT));
+        ui.add(
+            egui::Label::new(muted(&format!(
+                "{} account on {}. The network, server and handle stay as they are; a successful sign-in replaces the saved secret, and the account keeps its feeds and posts. Cancel leaves this form.",
+                a.network.label(),
+                a.server
+            )))
+            .wrap(),
+        );
+    } else {
+        ui.label(egui::RichText::new("Add an account").size(14.0).color(theme::TEXT));
+    }
+    let (fixed, current) = (d.editing.is_some(), d.network);
     ui.horizontal(|ui| {
-        for n in [Network::Mastodon, Network::Bluesky] {
+        for n in [Network::Mastodon, Network::Bluesky].into_iter().filter(|n| !fixed || *n == current) {
             if rec(format!("network:{}", n.key()), ui.selectable_label(d.network == n, n.label())).clicked() && d.network != n {
                 d.network = n;
                 d.error = None;
@@ -227,7 +301,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
         Network::Mastodon => {
             egui::Grid::new("social-mastodon").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
                 ui.label(muted("Server"));
-                rec("server".into(), ui.add(egui::TextEdit::singleline(&mut d.server).hint_text("mastodon.social").desired_width(380.0)));
+                rec("server".into(), ui.add_enabled(!fixed, egui::TextEdit::singleline(&mut d.server).hint_text("mastodon.social").desired_width(380.0)));
                 ui.end_row();
                 if d.use_token {
                     ui.label(muted("Access token"));
@@ -260,13 +334,13 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
         Network::Bluesky => {
             egui::Grid::new("social-bluesky").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
                 ui.label(muted("Handle"));
-                rec("handle".into(), ui.add(egui::TextEdit::singleline(&mut d.handle).hint_text("you.bsky.social").desired_width(380.0)));
+                rec("handle".into(), ui.add_enabled(!fixed, egui::TextEdit::singleline(&mut d.handle).hint_text("you.bsky.social").desired_width(380.0)));
                 ui.end_row();
                 ui.label(muted("App password"));
                 rec("app-password".into(), crate::secrets::password_edit(ui, &mut d.secret, "xxxx-xxxx-xxxx-xxxx", 380.0));
                 ui.end_row();
                 ui.label(muted("Server"));
-                rec("server".into(), ui.add(egui::TextEdit::singleline(&mut d.server).hint_text(BLUESKY_SERVER).desired_width(380.0)));
+                rec("server".into(), ui.add_enabled(!fixed, egui::TextEdit::singleline(&mut d.server).hint_text(BLUESKY_SERVER).desired_width(380.0)));
                 ui.end_row();
             });
             ui.add(
@@ -287,6 +361,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
 /// step runs, and Close. Call it after [`show`] in the same frame.
 pub fn footer(ui: &mut Ui, d: &mut SocialDialog) -> Option<DialogAction> {
     let mut action = None;
+    let mut cancel_edit = false;
     let busy = d.busy();
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     if let Some(e) = &d.error {
@@ -303,6 +378,10 @@ pub fn footer(ui: &mut Ui, d: &mut SocialDialog) -> Option<DialogAction> {
             ui.spinner();
             ui.label(muted("Talking to the server…"));
         }
+        let editing = d.editing.is_some();
+        if editing && rec("edit-cancel", ui.add_enabled(!busy, egui::Button::new("Cancel"))).clicked() {
+            cancel_edit = true;
+        }
         if rec("close", ui.button("Close")).clicked() {
             action = Some(DialogAction::Close);
         }
@@ -310,6 +389,9 @@ pub fn footer(ui: &mut Ui, d: &mut SocialDialog) -> Option<DialogAction> {
             d.sign_in(ui.ctx());
         }
     });
+    if cancel_edit {
+        d.cancel_edit();
+    }
     action
 }
 
@@ -487,5 +569,95 @@ mod tests {
         assert_eq!((e.account.network, e.account.handle.as_str(), e.secret.expose(), e.secret().expose()), (Network::Bluesky, "ada.test", "", "abcd-efgh-ijkl-mnop"), "the app password is in the keyring");
         crate::secrets::social_clear(&e.account.server, &e.account.handle);
         assert!(d.secret.is_empty() && d.handle.is_empty(), "the app password does not stay in the dialog");
+    }
+
+    /// An account that is already in the list, its secret in the keyring.
+    fn existing(network: Network, server: &str, handle: &str, name: &str, secret: &str) -> SocialAccountEntry {
+        let e = SocialAccountEntry::new(Account::new(network, server, handle, name), &crate::secret::Secret::new(secret));
+        assert!(e.secret.is_empty(), "the keyring holds it");
+        e
+    }
+
+    // spec: SOC-043
+    #[test]
+    fn soc_043_edit_signs_in_again_to_a_bluesky_account_with_a_new_app_password_and_keeps_the_account() {
+        if !has_curl() {
+            return;
+        }
+        let server = super::super::fake_server::FakeServer::start();
+        let old = existing(Network::Bluesky, &server.address(), "ada.test", "Ada the Custom", "old-app-password");
+        let accounts = vec![old.clone()];
+        let (ctx, mut t, mut d) = (egui::Context::default(), 0.0, SocialDialog::new());
+        frame(&ctx, &mut t, vec![], &mut d, &accounts);
+        click(&ctx, &mut t, "edit:0", &mut d, &accounts);
+        assert_eq!(d.editing.as_ref().map(|a| a.id.as_str()), Some("bluesky:ada.test"));
+        assert_eq!((d.network, d.handle.as_str(), d.server.as_str()), (Network::Bluesky, "ada.test", server.address().as_str()), "network, handle and server are fixed to the account's");
+        assert!(!d.rects.iter().any(|r| r.0 == "network:mastodon") && d.rects.iter().any(|r| r.0 == "edit-cancel"), "no other network, a Cancel instead");
+        // a wrong app password: the error is shown, the old secret stays
+        d.secret = "wrong-wrong-wrong-wrong".into();
+        assert!(click_and_wait(&ctx, &mut t, "sign-in", &mut d).is_none());
+        assert_eq!(d.error.as_deref(), Some("Bluesky refused the handle or app password"));
+        assert!(d.editing.is_some(), "still in the form");
+        assert_eq!(crate::secrets::social_lookup(&old.account.server, "ada.test").as_ref().map(|s| s.expose()), Some("old-app-password"));
+        // the right one
+        d.secret = "abcd-efgh-ijkl-mnop".into();
+        let Some(DialogAction::Updated(e)) = click_and_wait(&ctx, &mut t, "sign-in", &mut d) else { panic!("not signed in again: {:?}", d.error) };
+        assert_eq!(e.account, old.account, "id, display name and server are the account's own");
+        assert_eq!(crate::secrets::social_lookup(&old.account.server, "ada.test").as_ref().map(|s| s.expose()), Some("abcd-efgh-ijkl-mnop"), "the keyring has the new app password");
+        assert!(d.editing.is_none() && d.secret.is_empty() && d.handle.is_empty() && d.server.is_empty(), "the form is empty again");
+        crate::secrets::social_clear(&e.account.server, &e.account.handle);
+    }
+
+    // spec: SOC-043
+    #[test]
+    fn soc_043_cancel_leaves_the_edit_form_and_changes_nothing() {
+        let old = existing(Network::Bluesky, "https://cancel.soc043.test", "ada.cancel", "Ada", "keep-me");
+        let accounts = vec![old.clone()];
+        let (ctx, mut t, mut d) = (egui::Context::default(), 0.0, SocialDialog::new());
+        frame(&ctx, &mut t, vec![], &mut d, &accounts);
+        click(&ctx, &mut t, "edit:0", &mut d, &accounts);
+        d.secret = "typed".into();
+        assert_eq!(click(&ctx, &mut t, "edit-cancel", &mut d, &accounts), None);
+        assert!(d.editing.is_none() && d.secret.is_empty() && d.handle.is_empty() && d.server.is_empty() && d.error.is_none());
+        assert!(d.rects.iter().any(|r| r.0 == "network:mastodon") && !d.rects.iter().any(|r| r.0 == "edit-cancel"), "the add form is back");
+        assert_eq!(crate::secrets::social_lookup("https://cancel.soc043.test", "ada.cancel").as_ref().map(|s| s.expose()), Some("keep-me"));
+        crate::secrets::social_clear("https://cancel.soc043.test", "ada.cancel");
+    }
+
+    // spec: SOC-043
+    #[test]
+    fn soc_043_a_mastodon_token_of_another_handle_is_refused_and_the_account_s_own_replaces_the_secret() {
+        if !has_curl() {
+            return;
+        }
+        let server = super::super::fake_server::FakeServer::start();
+        server.state.lock().unwrap().tokens.insert("new-token".into());
+        // the server says the token is for "ada@127.0.0.1", the account is bob's
+        let bob = existing(Network::Mastodon, &server.address(), "bob@127.0.0.1", "Bob", "bob-old");
+        let (ctx, mut t, mut d) = (egui::Context::default(), 0.0, SocialDialog::new());
+        let accounts = vec![bob.clone()];
+        frame(&ctx, &mut t, vec![], &mut d, &accounts);
+        click(&ctx, &mut t, "edit:0", &mut d, &accounts);
+        assert_eq!((d.network, d.server.as_str()), (Network::Mastodon, server.address().as_str()));
+        click(&ctx, &mut t, "use-token", &mut d, &accounts);
+        d.secret = "new-token".into();
+        assert!(click_and_wait(&ctx, &mut t, "sign-in", &mut d).is_none(), "refused");
+        let msg = d.error.clone().unwrap_or_default();
+        assert!(msg.contains("ada@127.0.0.1") && msg.contains("bob@127.0.0.1") && msg.contains("Nothing was changed"), "{msg}");
+        assert_eq!(crate::secrets::social_lookup(&bob.account.server, "bob@127.0.0.1").as_ref().map(|s| s.expose()), Some("bob-old"), "the old secret stays");
+        assert_eq!(crate::secrets::social_lookup(&bob.account.server, "ada@127.0.0.1"), None, "nothing is stored for the other handle");
+        crate::secrets::social_clear(&bob.account.server, "bob@127.0.0.1");
+        // the account is ada's: the same token is fine
+        let ada = existing(Network::Mastodon, &server.address(), "ada@127.0.0.1", "Ada Own Name", "ada-old");
+        let accounts = vec![ada.clone()];
+        d.cancel_edit();
+        frame(&ctx, &mut t, vec![], &mut d, &accounts);
+        click(&ctx, &mut t, "edit:0", &mut d, &accounts);
+        click(&ctx, &mut t, "use-token", &mut d, &accounts);
+        d.secret = "new-token".into();
+        let Some(DialogAction::Updated(e)) = click_and_wait(&ctx, &mut t, "sign-in", &mut d) else { panic!("{:?}", d.error) };
+        assert_eq!(e.account, ada.account, "the display name of the account stays, not the server's \"Ada L.\"");
+        assert_eq!(crate::secrets::social_lookup(&ada.account.server, "ada@127.0.0.1").as_ref().map(|s| s.expose()), Some("new-token"));
+        crate::secrets::social_clear(&ada.account.server, "ada@127.0.0.1");
     }
 }

@@ -1,4 +1,4 @@
-//! Settings → LaTeX (TEX-023, CFG-043) driven through the whole window, headless: the controls are
+//! Settings → LaTeX (TEX-023, CFG-044) driven through the whole window, headless: the controls are
 //! there, nothing is downloaded before the person agrees, a removal asks first, and the progress of
 //! a job is shown. The engine and the install are fakes (a detection written into the state, a
 //! temporary data folder); the jobs themselves are the real ones.
@@ -132,7 +132,7 @@ fn a_usable_tex_is_shown_with_its_kind_kernel_and_folder_and_a_system_tex_with_m
     assert!(t.shows("Using the TeX Live that Shale installs (LaTeX kernel 2025-11-01), 330.0 MB on disk"), "{:?}", t.painted());
 }
 
-// spec: CFG-043
+// spec: CFG-044
 #[test]
 fn the_engine_choice_is_a_setting_changed_by_a_click() {
     let mut t = T::new("choice", found(Ok(good(Kind::System, &[])), Ok(good(Kind::Managed, &[])), Some(1)));
