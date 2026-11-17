@@ -214,6 +214,26 @@ fn a_server_that_refuses_idle_says_no_and_the_connection_goes_on() {
     assert!(matches!(client.idle(Duration::from_secs(5), &|| false), Err(ImapError::Server(_))));
 }
 
+// spec: MAIL-230
+// A change made while the client is busy between two IDLEs (checking the folder) is told as soon as
+// the next IDLE starts, as a real server does; the pretend server forgot it once (#286).
+#[test]
+fn a_change_made_between_two_idles_is_told_when_the_next_idle_starts() {
+    let server = server();
+    let c = connector(&server);
+    let mut client = c.connect().unwrap();
+    client.examine("INBOX").unwrap();
+    server.state().add_message("INBOX", message("before idle", "n@x.de", "new"), NOW);
+    let t0 = Instant::now();
+    assert_eq!(client.idle(Duration::from_secs(20), &|| false).unwrap(), IdleEnd::Changed, "a change before the first IDLE");
+    assert!(t0.elapsed() < Duration::from_secs(5), "{:?}", t0.elapsed());
+    // told once: the next IDLE waits, then a change between two IDLEs is told again
+    assert_eq!(client.idle(Duration::from_millis(300), &|| false).unwrap(), IdleEnd::Elapsed);
+    server.state().set_flags("INBOX", 1, &["\\Seen"]);
+    assert_eq!(client.idle(Duration::from_secs(20), &|| false).unwrap(), IdleEnd::Changed, "a change between two IDLEs");
+    client.logout();
+}
+
 // spec: MAIL-231, MAIL-230
 #[test]
 fn an_unflag_in_another_client_reaches_the_index_within_seconds_through_idle_and_the_watcher_only_reads() {
