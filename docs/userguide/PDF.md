@@ -26,7 +26,9 @@ PDFs, videos and sounds" in the dialog switches all of this off.
 
 Tables are exported as real tables: a bordered grid with a filled bold header row, aligned
 columns and long cell text wrapping inside its column. A table that runs over a page break goes
-on at the top of the next page with its header row again. Tick "Export plain text (tables as raw
+on at the top of the next page with its header row again. Column widths and row heights you set
+by dragging in the editor are used too: the widths in proportion across the page's text width, the
+heights as least heights. Tick "Export plain text (tables as raw
 text lines)" in the dialog to get the raw `| a | b |` lines instead; the box is off each time
 the dialog opens, so nothing is stored in the settings.
 

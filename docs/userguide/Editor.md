@@ -92,7 +92,7 @@ table's current width), or a row border to give all rows the same height.
 
 The switch and the sizes are kept in the note, in a comment line right above the table, e.g.
 `<!-- shale-table edit=raw cols=160,90 rows=30,30,44 -->`. It is hidden with the grid, in the
-reading view and in the PDF; other apps such as Obsidian ignore HTML comments.
+reading view and in the PDF (which uses the sizes); other apps such as Obsidian ignore HTML comments.
 
 While the pointer is over the grid, small buttons appear: a **+** right of the header adds a
 column at the end, a **+** bar under the table adds a row at the end, and for the row and the
