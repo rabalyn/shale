@@ -939,45 +939,84 @@ pub(crate) mod tests {
     /// "unreachable" server answers (or takes one of the connections a `mock_http_with` counts).
     /// Hold the value until the connection attempt is over. DEV-016.
     ///
-    /// The port is held by a socket that is bound to 127.0.0.1 and does not listen. A connect to
-    /// it is refused. No other bind gets the port: not the kernel's hand-out of free ports, and
-    /// not a `bind` to the port itself, even with SO_REUSEADDR, which `TcpListener::bind` sets on
-    /// Unix. The local port of a connected socket is not enough: Windows, and macOS and the BSDs
-    /// when the new socket has SO_REUSEADDR, let a bind take a port that only connected sockets use.
+    /// A connect to the port is refused: the peer answers with an RST, so the error is "refused",
+    /// never a timeout. No other bind gets the port while it is held. How the port is held
+    /// differs, because the systems handle a socket that is bound but does not listen differently:
+    ///
+    /// - Linux and Windows: a socket that is bound to 127.0.0.1 and does not listen. Neither
+    ///   system finds it for an incoming SYN (only listening and connected sockets are looked up),
+    ///   so the SYN gets an RST. It blocks every other bind of the port, also one with
+    ///   SO_REUSEADDR (which `TcpListener::bind` sets on Unix): Linux because the held socket has
+    ///   no SO_REUSEADDR, Windows because the address is in use. The local port of a connected
+    ///   socket is not enough there: Windows lets a bind take a port only connected sockets use.
+    /// - macOS (BSD): `tcp_input` does find a bound, non-listening socket for the SYN, sees it in
+    ///   state CLOSED and drops the segment without an RST, so the connect times out (#302). The
+    ///   port is the local port of a connected socket instead. A SYN to it matches no listener
+    ///   and no connection (its foreign address is another one), so it gets an RST. A bind
+    ///   without SO_REUSEADDR is refused: its wildcard lookup counts connected sockets. A bind
+    ///   with SO_REUSEADDR looks only for sockets without a foreign address and could take the
+    ///   port; the kernel's hand-out of free ports (`127.0.0.1:0`) gets to it again only after
+    ///   going through the ephemeral range, unlike a dropped listener's port. No socket can both
+    ///   be refused and keep a SO_REUSEADDR bind away on BSD: whatever that bind's lookup finds,
+    ///   the SYN's lookup finds too, and it is either listening (accepts) or closed (drops).
     pub(crate) struct ClosedPort {
         pub(crate) port: u16,
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_vendor = "apple")))]
         _socket: std::os::fd::OwnedFd,
+        #[cfg(target_vendor = "apple")]
+        _client: std::net::TcpStream,
+        #[cfg(target_vendor = "apple")]
+        _listener: TcpListener,
         #[cfg(windows)]
         socket: windows_sys::Win32::Networking::WinSock::SOCKET,
     }
 
+    /// A TCP socket bound to 127.0.0.1:`port` (0: a free port) without SO_REUSEADDR and not
+    /// listening, and the port it got.
     #[cfg(unix)]
-    pub(crate) fn closed_port() -> ClosedPort {
+    fn bound_socket(port: u16) -> std::io::Result<(std::os::fd::OwnedFd, u16)> {
         use std::os::fd::{FromRawFd, OwnedFd};
         // SAFETY: a plain socket call; the result is checked below
         let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
-        assert!(fd >= 0, "socket");
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
         // SAFETY: `fd` is a new, open descriptor that nothing else owns
         let socket = unsafe { OwnedFd::from_raw_fd(fd) };
         // SAFETY: an all-zero sockaddr_in is a valid value
         let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
         addr.sin_family = libc::AF_INET as libc::sa_family_t;
-        addr.sin_port = 0;
+        addr.sin_port = port.to_be();
         addr.sin_addr.s_addr = u32::from_ne_bytes([127, 0, 0, 1]);
         let size = libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_in>()).unwrap();
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         {
             addr.sin_len = u8::try_from(size).unwrap();
         }
         // SAFETY: `addr` is a valid sockaddr_in of the length given
-        let bound = unsafe { libc::bind(fd, std::ptr::addr_of!(addr).cast(), size) };
-        assert_eq!(bound, 0, "bind");
+        if unsafe { libc::bind(fd, std::ptr::addr_of!(addr).cast(), size) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
         let mut len = size;
         // SAFETY: `addr` and `len` are valid for writing, `len` is the size of `addr`
-        let named = unsafe { libc::getsockname(fd, std::ptr::addr_of_mut!(addr).cast(), &mut len) };
-        assert_eq!(named, 0, "getsockname");
-        ClosedPort { port: u16::from_be(addr.sin_port), _socket: socket }
+        if unsafe { libc::getsockname(fd, std::ptr::addr_of_mut!(addr).cast(), &mut len) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok((socket, u16::from_be(addr.sin_port)))
+    }
+
+    #[cfg(all(unix, not(target_vendor = "apple")))]
+    pub(crate) fn closed_port() -> ClosedPort {
+        // port 0 and getsockname: no bind-drop-rebind race
+        let (socket, port) = bound_socket(0).unwrap();
+        ClosedPort { port, _socket: socket }
+    }
+
+    #[cfg(target_vendor = "apple")]
+    pub(crate) fn closed_port() -> ClosedPort {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        ClosedPort { port: client.local_addr().unwrap().port(), _client: client, _listener: listener }
     }
 
     #[cfg(windows)]
@@ -1012,7 +1051,13 @@ pub(crate) mod tests {
         let addr = ("127.0.0.1", held.port);
         let err = std::net::TcpStream::connect(addr).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::ConnectionRefused, "{err}");
-        assert!(TcpListener::bind(addr).is_err(), "no pretend server can be given the port (std sets SO_REUSEADDR on Unix)");
+        // a bind without SO_REUSEADDR (the kernel's own rule for a port in use) is refused everywhere
+        #[cfg(unix)]
+        assert!(bound_socket(held.port).is_err(), "a plain bind is not given the port");
+        // and on Linux and Windows even std's bind, which sets SO_REUSEADDR on Unix (see
+        // `ClosedPort` for why macOS cannot refuse that one and the connect too)
+        #[cfg(not(target_vendor = "apple"))]
+        assert!(TcpListener::bind(addr).is_err(), "no pretend server can be given the port");
     }
 
     /// A pretend HTTP server on localhost: `handler(method, path, headers, body) -> (status, body)`.
