@@ -1,7 +1,9 @@
 //! The font picker (CFG-032): a button that opens a list of the installed font families with a
 //! field on top that filters it. Typing narrows the list (the matching of the file picker,
 //! `markdown::fuzzy_score`), ↓ / ↑ move, Enter picks, Esc closes, a click picks. The first
-//! entry is "Default", Shale's own font. Every area of the Fonts tab uses it.
+//! entry is "Default", Shale's own font. Every area of the Fonts tab uses it. The list opens on
+//! the chosen font, the mouse highlights the entry it moves over, and the highlighted entry is
+//! handed back for the sample text of the row (CFG-040).
 
 use crate::markdown;
 use crate::picker::ListKeys;
@@ -42,20 +44,35 @@ pub fn entries<'a>(families: &'a [String], query: &str) -> Vec<Option<&'a str>> 
     out
 }
 
+/// What happened in the picker in this frame.
+#[derive(Default)]
+pub struct Outcome {
+    /// a font was picked
+    pub picked: bool,
+    /// while the list is open: the entry that is highlighted (`None` in it: "Default")
+    pub highlighted: Option<Option<String>>,
+}
+
 /// The picker for `current` (`None`: Shale's own font). `families` is the list of installed
-/// fonts; `searching` says it is not complete yet. Comes back true when a font was picked.
-pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[String], searching: bool) -> bool {
+/// fonts; `searching` says it is not complete yet.
+pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[String], searching: bool) -> Outcome {
     let id = ui.make_persistent_id(("font-picker", salt));
     let shown = current.as_deref().unwrap_or(DEFAULT_ENTRY);
     let button = ui.add(egui::Button::new(format!("{shown}  ⏷")).min_size(egui::vec2(220.0, 0.0))).on_hover_text("Choose the font; type to search the installed fonts");
     if button.clicked() {
-        ui.data_mut(|d| d.insert_temp(id, State { fresh: true, ..State::default() }));
+        // the list opens on the chosen font
+        let sel = entries(families, "").iter().position(|e| e.map(str::to_string) == *current).unwrap_or(0);
+        let row = ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().item_spacing.y + ui.spacing().button_padding.y * 2.0;
+        let offset = (sel as f32 * row - LIST_HEIGHT / 2.0).max(0.0);
+        ui.data_mut(|d| d.insert_temp(id, State { fresh: true, sel, offset, ..State::default() }));
     }
     let popup_id = Popup::default_response_id(&button);
     let mut picked = false;
+    let mut highlighted = None;
     Popup::from_toggle_button_response(&button).close_behavior(PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         ui.set_min_width(260.0);
         let mut st: State = ui.data(|d| d.get_temp(id)).unwrap_or_default();
+        let opened = st.fresh;
         let keys = ListKeys::take(ui);
         let list = entries(families, &st.query);
         let before = st.sel;
@@ -86,7 +103,9 @@ pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[S
         }
         let row_h = ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().item_spacing.y + ui.spacing().button_padding.y * 2.0;
         let mut area = egui::ScrollArea::vertical().id_salt(id.with("list")).max_height(LIST_HEIGHT).auto_shrink([false, true]);
-        if moved {
+        if opened {
+            area = area.vertical_scroll_offset(st.offset);
+        } else if moved {
             let top = st.sel as f32 * row_h;
             if top < st.offset {
                 area = area.vertical_scroll_offset(top);
@@ -94,6 +113,7 @@ pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[S
                 area = area.vertical_scroll_offset(top + row_h - LIST_HEIGHT);
             }
         }
+        let mut hover = None;
         let out = area.show_rows(ui, row_h, list.len(), |ui, range| {
             for i in range {
                 let name = list[i].unwrap_or(DEFAULT_ENTRY);
@@ -104,15 +124,23 @@ pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[S
                     *current = list[i].map(str::to_string);
                     picked = true;
                 }
+                // the mouse moving over an entry highlights it
+                if row.hovered() && ui.input(|inp| inp.pointer.delta() != egui::Vec2::ZERO) {
+                    hover = Some(i);
+                }
             }
         });
+        if let Some(i) = hover {
+            st.sel = i;
+        }
+        highlighted = list.get(st.sel).map(|e| e.map(str::to_string));
         st.offset = out.state.clamped_offset().y;
         ui.data_mut(|d| d.insert_temp(id, st));
         if keys.esc || picked {
             Popup::close_id(ui.ctx(), popup_id);
         }
     });
-    picked
+    Outcome { picked, highlighted: if picked { None } else { highlighted } }
 }
 
 #[cfg(test)]
