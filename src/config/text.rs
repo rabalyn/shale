@@ -147,6 +147,9 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("caches.broken_days", "Damaged mail index copies: days, by the date in their name."),
     ("caches.debug_log_mb", "The key recording of the troubleshooting log: its size in MB."),
     ("caches.undo_days", "Undo histories: days since a step was made."),
+    ("tex", "The TeX that exports notes to PDF through LaTeX templates."),
+    ("tex.engine", "Which TeX is used: Auto (the managed TeX Live when it is installed, else the lualatex of PATH when it is new enough), System (the lualatex of PATH) or Managed (the TeX Live Shale installs)."),
+    ("tex.repository", "The TeX Live repository the managed install and update download from."),
     ("keybindings", "Keys you changed: the id of an action and its keys. An empty list unbinds the action; an action not listed keeps its default."),
     ("keybindings.*", "The keys of this action, such as [\"Ctrl+Shift+P\"]; an empty list leaves the action without a key."),
 ];

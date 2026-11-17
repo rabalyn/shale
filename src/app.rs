@@ -347,6 +347,8 @@ pub struct ShaleApp {
     pub media: crate::media::MediaPlayer,
     /// the Data usage dialog's numbers, the cache jobs and the daily cleanup (USE)
     pub usage: crate::data_usage::DataUsage,
+    /// the LaTeX page of the settings: the TeX found, the managed TeX Live and its jobs (TEX-001)
+    pub tex: crate::pdf::tex::settings_ui::TexState,
     /// where the user guide comes from and where its copy goes (DEV-020)
     pub guide: crate::userguide::Places,
     /// paths that a second start of Shale hands over (DATA-015); none in tests and screenshots
@@ -564,6 +566,7 @@ impl ShaleApp {
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             link_preview: Default::default(),
             usage: crate::data_usage::DataUsage::new(places),
+            tex: crate::pdf::tex::settings_ui::TexState::new(persist, &tag),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
         };
@@ -2404,6 +2407,7 @@ impl ShaleApp {
         }
         let ctx = ui.ctx().clone();
         self.media_tick(&ctx);
+        self.tex.poll(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
         self.mail_tick(&ctx);
