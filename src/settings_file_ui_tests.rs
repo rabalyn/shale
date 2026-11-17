@@ -29,7 +29,20 @@ impl W {
         app.settings_file_baseline();
         let mut w = W { app, hl: Headless::new(), dir, t };
         w.hl.frames(&mut w.app, 3);
+        w.wait_for_tag_learner();
         w
+    }
+
+    /// The window learns the tag words of the vault in the background and keeps them in
+    /// `.shale/tag-words.json` when that is done, on a frame of its own. Wait for it, so that
+    /// the file does not appear in the middle of a test that looks at the vault's files.
+    fn wait_for_tag_learner(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while self.app.tag_learner.running() {
+            assert!(Instant::now() < deadline, "the tag words were not learned in 30 s");
+            std::thread::sleep(Duration::from_millis(5));
+            self.hl.frames(&mut self.app, 1);
+        }
     }
 
     fn file(&self) -> PathBuf {
