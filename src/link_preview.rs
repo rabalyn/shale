@@ -798,6 +798,25 @@ mod tests {
         assert!(matches!(Target::Web { url: "u".into() }.follow(false), EditorAction::OpenUrl(u) if u == "u"));
     }
 
+    // spec: LINK-014, EDIT-034
+    #[test]
+    fn the_preview_of_a_heading_link_shows_the_numbers_the_headings_have_in_the_whole_note() {
+        let d = std::env::temp_dir().join(format!("shale-preview-numbers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        crate::vault::write_sample_vault(&d).unwrap();
+        std::fs::write(d.join("Roadmap.md"), "# Roadmap\n## One\n## Two\n### Part\n").unwrap();
+        let v = Vault::open(&d).unwrap();
+        let text = |_: &Path| std::fs::read_to_string(d.join("Roadmap.md")).ok();
+        let target = |h: &str| Target::Link { target: "Roadmap".into(), heading: Some(h.into()), from: "Welcome.md".into() };
+        let Content::Note { text: shown, numbers, .. } = content_for(&target("Two"), &v, &text, true) else { panic!("a note") };
+        assert!(shown.starts_with("## Two"));
+        assert_eq!(numbers.get(&0).map(String::as_str), Some("2"), "Two is number 2 although the preview starts there");
+        assert_eq!(numbers.get(&1).map(String::as_str), Some("2.1"));
+        let Content::Note { numbers, .. } = content_for(&target("Two"), &v, &text, false) else { panic!("a note") };
+        assert!(numbers.is_empty(), "numbering off");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: EDIT-034
     #[test]
     fn the_note_preview_starts_at_the_heading() {

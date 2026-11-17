@@ -3012,6 +3012,63 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: LINK-016
+    #[test]
+    fn typing_a_hash_in_a_link_lists_the_headings_of_that_note_numbered_and_filtered_and_picks_the_plain_text() {
+        let (mut v, d) = vault_for_tests("heading-completion");
+        std::fs::write(d.join("Roadmap.md"), "# Roadmap\n## **Plan** one\n### Step a\n### Step b\n## Review\n```\n## Not a heading\n```\n").unwrap();
+        v.rescan();
+        let rel = Path::new("Welcome.md");
+        let enter = Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let list = |typed: &str, text: &mut String| {
+            let mut ed = NoteEditor::new(egui::Id::unique("hc"));
+            ed.request_focus = true;
+            let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+            h.frame(&mut ed, text, &v, rel, vec![]);
+            h.frame(&mut ed, text, &v, rel, vec![Event::Text(typed.into())]);
+            h.frame(&mut ed, text, &v, rel, vec![]);
+            (ed, h)
+        };
+        let mut text = String::new();
+        let (ed, _) = list("[[Roadmap#", &mut text);
+        let em = "\u{2003}";
+        assert_eq!(ed.assist.ac_labels, vec!["Roadmap".to_string(), format!("{em}1 Plan one"), format!("{em}{em}1.1 Step a"), format!("{em}{em}1.2 Step b"), format!("{em}2 Review")], "in order, by level, numbered");
+        let (ed, _) = list("[[Roadmap#ste", &mut text);
+        assert_eq!(ed.assist.ac_labels.len(), 2, "filtered by what is typed after the #: {:?}", ed.assist.ac_labels);
+        // picking inserts the plain text of the heading, no number and no markup
+        let mut text = String::new();
+        let (mut ed, mut h) = list("[[Roadmap#Pl", &mut text);
+        h.frame(&mut ed, &mut text, &v, rel, vec![enter.clone()]);
+        assert_eq!(text, "[[Roadmap#Plan one]]");
+        // [[# lists the headings of the open note (the text being edited)
+        let mut text = String::from("## First\n## Second\n");
+        let end = text.chars().count();
+        let mut ed = NoteEditor::new(egui::Id::unique("hc-own"));
+        ed.request_focus = true;
+        ed.pending_cursor = Some(end);
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[[#Sec".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert_eq!(ed.assist.ac_labels, vec![format!("{em}2 Second")]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![enter]);
+        assert!(text.ends_with("[[#Second]]"), "{text:?}");
+        // numbering off: no numbers in the list; a note that does not exist lists nothing
+        let mut text = String::new();
+        let mut ed = NoteEditor::new(egui::Id::unique("hc-off"));
+        ed.assist.numbered_headings = false;
+        ed.request_focus = true;
+        let mut h = Harness { ctx: egui::Context::default(), time: 0.0, texts: vec![], rects: vec![] };
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![Event::Text("[[Roadmap#Rev".into())]);
+        h.frame(&mut ed, &mut text, &v, rel, vec![]);
+        assert_eq!(ed.assist.ac_labels, vec![format!("{em}Review")]);
+        let mut text = String::new();
+        let (ed, _) = list("[[Nowhere#", &mut text);
+        assert!(ed.assist.ac_labels.is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: EDIT-001
     #[test]
     fn link_query_detects_open_brackets() {

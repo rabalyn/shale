@@ -11,8 +11,8 @@ impl ShaleApp {
         changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing: notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back").changed();
         changed |= ui.checkbox(&mut self.cfg.line_numbers, "Show line numbers in the editor").changed();
         changed |= ui
-            .checkbox(&mut self.cfg.numbered_headings, "Number headings (## and deeper: 1, 1.1, 1.2; the title # is never numbered)")
-            .on_hover_text("The numbers are only drawn, never written into the note. A note's front matter numbered-headings: true or false overrides this for that note.")
+            .checkbox(&mut self.cfg.numbered_headings, "Number headings")
+            .on_hover_text("Headings from ## on are shown as 1, 1.1, 1.2; the title (#) is never numbered. The numbers are only drawn, never written into the note. A note's front matter numbered-headings: true or false overrides this for that note.")
             .changed();
         changed |= ui.checkbox(&mut self.cfg.live_preview, "Markdown preview in the editor (the lines around the cursor show raw markdown)").changed();
         ui.add_enabled_ui(self.cfg.live_preview, |ui| {

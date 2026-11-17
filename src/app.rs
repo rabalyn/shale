@@ -2574,6 +2574,45 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    // spec: LINK-015
+    #[test]
+    fn a_heading_link_puts_the_cursor_on_the_heading_in_the_editor_and_scrolls_the_reading_view_in_the_reading_view() {
+        let (mut app, d) = test_app("heading-link");
+        std::fs::write(d.join("Roadmap.md"), "# Roadmap\nintro\n## **Plan** v2\ntext\n## Review\n").unwrap();
+        app.vault.as_mut().unwrap().rescan();
+        let from = Some(PathBuf::from("Welcome.md"));
+        let tab = |app: &ShaleApp| app.tabbar.active;
+        fn active(app: &mut ShaleApp) -> &mut Tab {
+            let i = app.tabbar.active;
+            &mut app.tabbar.tabs[i]
+        }
+        // editor: cursor at the start of the line, shown at the top
+        app.open_link("Roadmap", Some("plan V2".into()), from.clone(), false);
+        assert_eq!(app.current_path(), Some(PathBuf::from("Roadmap.md")));
+        let t = &app.tabbar.tabs[tab(&app)];
+        assert!(!t.reading);
+        assert_eq!(t.editor.pending_cursor, Some("# Roadmap\nintro\n".chars().count()), "the heading line, found ignoring case and markup");
+        assert!(t.editor.scroll_to_top);
+        // reading view: the tab stays there and the view is told where to scroll
+        active(&mut app).reading = true;
+        active(&mut app).reader_line = None;
+        app.open_link("Roadmap", Some(" Review ".into()), from.clone(), false);
+        let t = &app.tabbar.tabs[tab(&app)];
+        assert!(t.reading, "the tab keeps its mode");
+        assert_eq!(t.reader_line, Some(4));
+        // [[#Heading]] is the open note
+        app.open_link("", Some("Plan v2".into()), Some(PathBuf::from("Roadmap.md")), false);
+        assert_eq!(app.tabbar.tabs[tab(&app)].reader_line, Some(2));
+        assert_eq!(app.current_path(), Some(PathBuf::from("Roadmap.md")));
+        // a heading that is not there: the note opens at the top and says so
+        active(&mut app).reader_line = None;
+        app.open_link("Roadmap", Some("Nope".into()), from.clone(), false);
+        assert!(app.toasts.iter().any(|(t, _)| t == "No heading “Nope” in Roadmap"), "{:?}", app.toasts);
+        assert_eq!(app.tabbar.tabs[tab(&app)].reader_line, None);
+        assert_eq!(app.current_path(), Some(PathBuf::from("Roadmap.md")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     // spec: VAULT-018
     #[test]
     fn rename_refuses_names_that_leave_the_folder() {
