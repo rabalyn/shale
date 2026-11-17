@@ -55,6 +55,9 @@ mod script;
 mod search_all;
 mod secret;
 mod secrets;
+mod settings_file;
+#[cfg(test)]
+mod settings_file_ui_tests;
 mod sidebar;
 #[cfg(test)]
 mod sidebar_tests;

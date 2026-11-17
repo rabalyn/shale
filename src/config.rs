@@ -1,4 +1,6 @@
-//! App settings, saved as JSON in the user's config folder (~/.config/shale/config.json).
+//! App settings, saved as commented TOML in the user's config folder (~/.config/shale/config.toml, CFG-009).
+
+pub mod text;
 
 use crate::vault_state::{LegacyVaultFields, Versioned};
 use serde::{Deserialize, Serialize};
@@ -483,27 +485,76 @@ pub fn config_path() -> Option<PathBuf> {
     if let Some(p) = CONFIG_TEST_PATH.with(|c| c.borrow().clone()) {
         return Some(p);
     }
-    dirs::config_dir().map(|d| d.join("shale").join("config.json"))
+    dirs::config_dir().map(|d| d.join("shale").join("config.toml"))
+}
+
+/// The settings file of the versions before CFG-009, next to the current one.
+fn legacy_json_path(current: &Path) -> PathBuf {
+    current.with_file_name("config.json")
 }
 
 impl Config {
     /// Load the settings; a problem the user should hear about comes back too. A file that
-    /// fails to parse is kept as `config.json.broken-<date>` (CFG-004).
+    /// fails to parse is kept as `config.toml.broken-<date>` (CFG-004). Settings in the JSON
+    /// file of an older Shale move into `config.toml` first (CFG-010).
     pub fn load() -> (Config, Option<String>) {
         let Some(p) = config_path() else { return (Config::default(), None) };
+        let migrated = Self::migrate_json(&p);
         let (mut c, problem) = Self::load_from(&p);
-        crate::secrets::load_passwords(&mut c.calendars);
-        for e in c.social_accounts.iter_mut() {
+        c.load_secrets();
+        (c, migrated.or(problem))
+    }
+
+    /// The secrets that are not in the file: the keyring holds them.
+    pub fn load_secrets(&mut self) {
+        crate::secrets::load_passwords(&mut self.calendars);
+        for e in self.social_accounts.iter_mut() {
             crate::secrets::social_move_to_keyring(&e.account.server, &e.account.handle, &mut e.secret);
         }
-        (c, problem)
+    }
+
+    /// CFG-010: with no `config.toml`, the settings of `config.json` are written to it and the
+    /// old file is renamed to `config.json.migrated`. Says what went wrong, if anything; a
+    /// JSON file that cannot be read (or comes from a newer Shale) is left alone.
+    fn migrate_json(path: &Path) -> Option<String> {
+        let old = legacy_json_path(path);
+        if path.exists() || !old.is_file() {
+            return None;
+        }
+        let l = crate::vault_state::load::<Config>(&old);
+        if !l.writable || !l.existed {
+            return l.problem;
+        }
+        let mut c = l.value;
+        c.read_only = false;
+        if let Err(e) = c.save_to(path) {
+            return Some(format!("The settings of {} could not move to {}: {e}", old.display(), path.display()));
+        }
+        let done = old.with_file_name("config.json.migrated");
+        match crate::fsutil::rename_noreplace(&old, &done) {
+            Ok(()) => None,
+            Err(e) => Some(format!("The settings now are in {}, but {} could not be renamed to {}: {e}", path.display(), old.display(), done.display())),
+        }
     }
 
     pub fn load_from(path: &Path) -> (Config, Option<String>) {
-        let l = crate::vault_state::load::<Config>(path);
+        let l = crate::vault_state::load_with::<Config>(path, text::decode);
         let mut c = l.value;
         c.read_only = !l.writable;
         (c, l.problem)
+    }
+
+    /// The settings of a text (the settings file, or what is being typed into it); the second
+    /// value says it was written by a newer Shale (CFG-007).
+    pub fn parse_text(text: &str) -> Result<(Config, bool), String> {
+        crate::vault_state::parse_with::<Config>(text.as_bytes(), text::decode)
+    }
+
+    /// The settings as the text of the file (CFG-009), calendar passwords as the keyring wants them.
+    pub fn file_text(&self) -> String {
+        let mut out = self.clone();
+        out.calendars = crate::secrets::for_file(&self.calendars);
+        text::to_toml(&out)
     }
 
     /// The per-vault fields of an old config file, removed from this config (CFG-008).
@@ -519,17 +570,22 @@ impl Config {
         self.legacy_recent_tags = l.recent_tags;
     }
 
-    /// Write the settings. A failure is returned for the caller to show (DATA-009).
+    /// Write the settings. A failure is returned for the caller to show (DATA-009). A file that
+    /// already holds this text is not touched.
     pub fn save(&self) -> Result<(), String> {
         if self.read_only {
             return Ok(());
         }
         let Some(p) = config_path() else { return Ok(()) };
-        // CalDAV passwords go to the system keyring when there is one
-        let mut out = self.clone();
-        out.calendars = crate::secrets::for_file(&self.calendars);
-        let s = serde_json::to_string_pretty(&out).map_err(|e| format!("could not save the settings: {e}"))?;
-        write_private(&p, s.as_bytes()).map_err(|e| format!("could not save the settings: {e}"))
+        self.save_to(&p)
+    }
+
+    fn save_to(&self, p: &Path) -> Result<(), String> {
+        let s = self.file_text();
+        if crate::fsutil::read(p).is_ok_and(|old| old == s.as_bytes()) {
+            return Ok(());
+        }
+        write_private(p, s.as_bytes()).map_err(|e| format!("could not save the settings: {e}"))
     }
 
     pub fn remember_vault(&mut self, path: PathBuf) {
@@ -541,7 +597,38 @@ impl Config {
 }
 
 #[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+
+    /// Points the settings file of this test thread at `dir/shale/config.toml`, and back at the
+    /// end (also when the test fails).
+    pub(crate) struct TestConfig(PathBuf);
+
+    impl TestConfig {
+        pub(crate) fn new(tag: &str) -> TestConfig {
+            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let dir = std::env::temp_dir().join(format!("shale-config-{tag}-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            CONFIG_TEST_PATH.with(|c| *c.borrow_mut() = Some(dir.join("shale").join("config.toml")));
+            TestConfig(dir)
+        }
+        pub(crate) fn file(&self) -> PathBuf {
+            self.0.join("shale").join("config.toml")
+        }
+    }
+
+    impl Drop for TestConfig {
+        fn drop(&mut self) {
+            CONFIG_TEST_PATH.with(|c| *c.borrow_mut() = None);
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::testing::TestConfig;
     use super::*;
 
     // spec: DEV-007
@@ -662,7 +749,7 @@ mod tests {
     fn private_files_are_owner_only_and_replaced_whole() {
         let dir = std::env::temp_dir().join(format!("shale-private-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let p = dir.join("sub").join("config.json");
+        let p = dir.join("sub").join("config.toml");
         write_private(&p, b"one").unwrap();
         write_private(&p, b"two").unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "two");
@@ -738,45 +825,20 @@ mod tests {
     fn a_broken_config_is_kept_and_a_newer_one_is_not_overwritten() {
         let dir = std::env::temp_dir().join(format!("shale-config-broken-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let p = dir.join("config.json");
-        write_private(&p, b"{\"calendars\": [oops").unwrap();
+        let p = dir.join("config.toml");
+        write_private(&p, b"calendars = [oops").unwrap();
         let (c, problem) = Config::load_from(&p);
         assert!(!c.read_only);
-        assert!(problem.unwrap().contains("config.json.broken-"));
+        assert!(problem.unwrap().contains("config.toml.broken-"));
         let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(kept.len(), 1);
-        assert!(kept[0].starts_with("config.json.broken-"), "{kept:?}");
-        write_private(&p, br#"{"version": 7, "font_size": 20.0, "new_thing": true}"#).unwrap();
+        assert!(kept[0].starts_with("config.toml.broken-"), "{kept:?}");
+        write_private(&p, b"version = 7\nfont_size = 20.0\nnew_thing = true\n").unwrap();
         let (c, problem) = Config::load_from(&p);
         assert!(c.read_only && problem.is_some());
         assert_eq!(c.font_size, 20.0);
         assert_eq!(c.other.get("new_thing"), Some(&serde_json::Value::Bool(true)));
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Points the settings file of this test thread at `dir/shale/config.json`, and back at the
-    /// end (also when the test fails).
-    struct TestConfig(PathBuf);
-
-    impl TestConfig {
-        fn new(tag: &str) -> TestConfig {
-            static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-            let dir = std::env::temp_dir().join(format!("shale-config-{tag}-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            CONFIG_TEST_PATH.with(|c| *c.borrow_mut() = Some(dir.join("shale").join("config.json")));
-            TestConfig(dir)
-        }
-        fn file(&self) -> PathBuf {
-            self.0.join("shale").join("config.json")
-        }
-    }
-
-    impl Drop for TestConfig {
-        fn drop(&mut self) {
-            CONFIG_TEST_PATH.with(|c| *c.borrow_mut() = None);
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
     }
 
     // spec: CFG-001
@@ -801,9 +863,9 @@ mod tests {
     #[test]
     fn cfg_004_load_reports_a_broken_file_and_save_still_works_afterwards() {
         let t = TestConfig::new("corrupt");
-        write_private(&t.file(), b"{not json").unwrap();
+        write_private(&t.file(), b"[not toml").unwrap();
         let (mut c, problem) = Config::load();
-        assert!(problem.unwrap().contains("config.json.broken-"));
+        assert!(problem.unwrap().contains("config.toml.broken-"));
         assert!(!c.read_only, "a broken file is replaced by the defaults, the original is kept");
         c.font_size = 19.0;
         c.save().unwrap();
@@ -814,13 +876,45 @@ mod tests {
     #[test]
     fn cfg_007_a_config_of_a_newer_shale_is_not_overwritten_by_save() {
         let t = TestConfig::new("newer");
-        let newer = br#"{"version": 99, "font_size": 20.0}"#;
+        let newer = b"version = 99\nfont_size = 20.0\n";
         write_private(&t.file(), newer).unwrap();
         let (mut c, problem) = Config::load();
         assert!(c.read_only && problem.is_some());
         c.font_size = 12.0;
         assert!(c.save().is_ok(), "nothing to report: saving is skipped on purpose");
         assert_eq!(std::fs::read(t.file()).unwrap(), newer);
+    }
+
+    // spec: CFG-010
+    #[test]
+    fn cfg_010_a_config_json_moves_into_config_toml() {
+        let t = TestConfig::new("migrate");
+        let old = t.file().with_file_name("config.json");
+        write_private(&old, br#"{"vault": "/v", "font_size": 17.0, "caches": {"picture_days": null, "picture_mb": 5}, "media_autoplay": true}"#).unwrap();
+        let (c, problem) = Config::load();
+        assert!(problem.is_none(), "nothing is said: {problem:?}");
+        assert_eq!((c.font_size, c.vault.clone(), c.caches.picture_days, c.caches.picture_mb), (17.0, Some(PathBuf::from("/v")), None, Some(5)));
+        assert_eq!(c.other.get("media_autoplay"), Some(&serde_json::Value::Bool(true)));
+        assert!(t.file().is_file() && !old.exists() && old.with_file_name("config.json.migrated").is_file());
+        assert!(std::fs::read_to_string(t.file()).unwrap().contains("# The text size of notes"), "the new file has the descriptions");
+        // the next start reads the new file, and the old one is not looked at again
+        let (again, problem) = Config::load();
+        assert!(problem.is_none());
+        assert_eq!((again.font_size, again.caches.picture_days, again.caches.picture_mb), (17.0, None, Some(5)));
+        write_private(&old, br#"{"font_size": 22.0}"#).unwrap();
+        assert_eq!(Config::load().0.font_size, 17.0);
+        // a file that cannot be read is set aside as always, and one of a newer Shale is left alone
+        let t = TestConfig::new("migrate-broken");
+        let old = t.file().with_file_name("config.json");
+        write_private(&old, b"{oops").unwrap();
+        let (c, problem) = Config::load();
+        assert!(problem.unwrap().contains("config.json.broken-") && !t.file().exists());
+        assert_eq!(c.font_size, Config::default().font_size);
+        let t = TestConfig::new("migrate-newer");
+        let old = t.file().with_file_name("config.json");
+        write_private(&old, br#"{"version": 9, "font_size": 20.0}"#).unwrap();
+        let (_, problem) = Config::load();
+        assert!(problem.is_some() && old.is_file() && !t.file().exists(), "left alone");
     }
 
     // spec: DATA-009

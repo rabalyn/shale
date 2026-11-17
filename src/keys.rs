@@ -637,10 +637,10 @@ mod tests {
         let mut cfg = crate::config::Config { keybindings: k.overrides(), ..Default::default() };
         let dir = std::env::temp_dir().join(format!("shale-keys-cfg-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let path = dir.join("config.json");
-        crate::config::write_private(&path, serde_json::to_string(&cfg).unwrap().as_bytes()).unwrap();
+        let path = dir.join("config.toml");
+        crate::config::write_private(&path, crate::config::text::to_toml(&cfg).as_bytes()).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"global.focus_sidebar\":[\"Ctrl+Alt+B\"]") && text.contains("\"version\":1"), "{text}");
+        assert!(text.contains("\"global.focus_sidebar\" = [\"Ctrl+Alt+B\"]") && text.contains("version = 1"), "{text}");
         let (loaded, problem) = crate::config::Config::load_from(&path);
         assert_eq!(problem, None);
         let k2 = Keymap::from_overrides(&loaded.keybindings);

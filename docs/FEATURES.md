@@ -586,12 +586,16 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Settings that travel with the vault
 
+- The settings of the program itself are one text file, `~/.config/shale/config.toml`, with a
+  description above every setting. Settings → "Open settings file" opens it in a tab (no note, no
+  vault file); saving applies the values at once, a change from another editor is picked up within a
+  second, and text with an error is not saved. An old `config.json` is moved over at the first start.
 - Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
   behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
   are kept for 30 days (a setting) in `.shale/undo/`, one file per note; that folder stays on the computer
   and is not committed by git sync. Settings of the program itself (appearance, calendars,
-  recent vaults) stay in `~/.config/shale/config.json`.
+  recent vaults) stay in `~/.config/shale/config.toml`.
 - The files carry a format version and are upgraded on load. A settings file that can't be read
   is kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not
   changed.

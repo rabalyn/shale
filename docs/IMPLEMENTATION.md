@@ -92,7 +92,8 @@ both pace by it.
 | `src/drawing/pictures.rs` | Pictures in drawings: where each `image` element's picture comes from (plugin `## Embedded Files` or a `dataURL`), as textures for painting and as images for PDF export. |
 | `src/drawing/canvas.rs` | Obsidian Canvas (`.canvas`, JSON Canvas 1.0): turns cards and edges into an Excalidraw scene, writes the converted `.excalidraw.md` copy (marked `shale-converted-from` in its front matter) and finds it again. |
 | `src/graph.rs` | Force-directed graph used for the global graph and the local graph. |
-| `src/config.rs` | Settings saved to `~/.config/shale/config.json`. |
+| `src/config.rs`, `src/config/text.rs` | Settings saved as commented TOML to `~/.config/shale/config.toml` (CFG-009). |
+| `src/settings_file.rs` | The settings file as a tab: editing, saving, picking up outside changes (CFG-011 to CFG-014). |
 | `src/theme.rs` | Colours and egui style. |
 
 Data stays plain: notes are `.md` files and drawings are `.excalidraw` JSON files (the open

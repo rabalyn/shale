@@ -896,6 +896,10 @@ impl ShaleApp {
                     ui.horizontal(|ui| {
                         ui.selectable_value(tab, SettingsTab::General, "General");
                         ui.selectable_value(tab, SettingsTab::Keybindings, "Keybindings");
+                        if ui.button("Open settings file").on_hover_text("Edit all settings as text, with a description of each").clicked() {
+                            self.open_settings_file();
+                            keep = false;
+                        }
                     });
                     ui.separator();
                     if *tab == SettingsTab::Keybindings {
