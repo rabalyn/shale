@@ -60,13 +60,21 @@ impl T {
         self.hl.click(&mut self.app, r.center(), PointerButton::Primary);
     }
 
-    /// Frames, with a rest between them, until the job of the page has ended.
+    /// Frames, with a rest between them, until the job of the page has ended and the page is
+    /// quiet: an install, update or removal ends by looking for TeX again (a second job, which
+    /// changes what the page shows and so the height of its dialog), so that has to end too,
+    /// and the dialog has to settle at its new height, before what is painted can be checked
+    /// (raba/shale#308).
     pub(super) fn wait_for_job(&mut self) {
+        let busy = |app: &ShaleApp| app.tex.task.is_some() || app.tex.detecting.is_some();
         for _ in 0..300 {
             self.hl.frames(&mut self.app, 1);
-            if self.app.tex.task.is_none() {
+            if !busy(&self.app) {
+                // a frame of the page may start the look for TeX: then wait for that as well
                 self.hl.frames(&mut self.app, 3);
-                return;
+                if !busy(&self.app) {
+                    return;
+                }
             }
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -260,21 +268,17 @@ fn check_again_looks_for_a_tex_in_a_job_and_shows_what_it_found() {
     let ctx = t.hl.ctx().clone();
     t.app.tex.check_again(&ctx);
     assert!(t.app.tex.detection.is_none(), "the old answer is dropped while the job runs");
-    // (the job's answer arrives through the frames below; a click on the button does the same)
-    t.app.tex.detection = Some(found(Ok(good(Kind::System, &[])), Ok(good(Kind::Managed, &[])), Some(1)));
-    t.hl.frames(&mut t.app, 2);
-    t.click("Check again");
-    for _ in 0..300 {
-        t.hl.frames(&mut t.app, 1);
-        if t.app.tex.detection.is_some() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    t.wait_for_job();
     let d = t.app.tex.detection.clone().expect("the job answered");
     // a window of a test has no PATH and a data folder with nothing in it
     assert_eq!((d.system.unwrap_err().as_str(), d.managed.unwrap_err().as_str()), ("no lualatex in PATH", "not installed"));
-    assert!(t.shows("No TeX can be used"));
+    // the button does the same (it is off while a look runs, so only now; raba/shale#308)
+    t.app.tex.detection = Some(found(Ok(good(Kind::System, &[])), Ok(good(Kind::Managed, &[])), Some(1)));
+    t.click("Check again");
+    t.wait_for_job();
+    let d = t.app.tex.detection.clone().expect("the job answered");
+    assert_eq!((d.system.unwrap_err().as_str(), d.managed.unwrap_err().as_str()), ("no lualatex in PATH", "not installed"), "the button looked again");
+    assert!(t.shows("No TeX can be used"), "{:?}", t.painted());
 }
 
 // spec: TEX-001, TEX-023

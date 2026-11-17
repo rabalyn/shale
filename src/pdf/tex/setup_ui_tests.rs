@@ -117,7 +117,9 @@ fn a_missing_tex_is_explained_in_plain_words_and_installing_shows_progress_and_c
     t.click("Install (about 100 MB download, 330 MB on disk)");
     t.wait_for_job();
     let n = t.app.tex.notice.clone().expect("a notice");
-    assert!(!n.ok && n.text.contains("The install failed") && t.shows("is not a repository address") && step(&t) == Step::Tex, "{n:?}");
+    assert!(!n.ok && n.text.contains("The install failed") && n.text.contains("is not a repository address"), "the notice says why: {n:?}");
+    assert!(t.shows("is not a repository address"), "the step shows the notice: {:?}", t.painted());
+    assert_eq!(step(&t), Step::Tex, "the step is still not done");
     // a running install: its progress and Cancel
     let handle = Handle::default();
     handle.set(|p| *p = Progress { stage: Stage::Download, ..Progress::default() });
@@ -192,7 +194,9 @@ fn the_templates_step_offers_its_choices_and_imports_with_progress() {
     t.app.tex.setup.file = t.dir.join("nothing-here.zip").to_string_lossy().into_owned();
     t.click("Import");
     t.wait_for_job();
-    assert!(t.shows("The import failed, the vault is as it was") && step(&t) == Step::Templates && t.app.tex.chosen_set().is_none(), "{:?}", t.painted());
+    assert!(t.shows("The import failed, the vault is as it was"), "the step shows the notice: {:?}", t.painted());
+    assert_eq!(step(&t), Step::Templates, "the step is still not done");
+    assert!(t.app.tex.chosen_set().is_none(), "no set is chosen");
     // a folder of templates is imported as a job and the new set is chosen
     let src = tuda_source("templates");
     t.app.tex.setup.file = src.to_string_lossy().into_owned();
