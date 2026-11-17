@@ -1,6 +1,7 @@
 //! The managed TeX Live (TEX-002, TEX-003): downloaded with `curl`, installed by the official
 //! `install-tl` with the profile `assets/tex/texlive.profile`, completed with `tlmgr install` of
-//! `assets/tex/packages.txt`, updated with `tlmgr update`, removed by deleting its folder.
+//! `assets/tex/packages.txt`, updated with `tlmgr update`, removed by deleting its folder. Each
+//! install or update resolves the repository to one concrete mirror and uses only that (#320).
 //! It is installed into `<data>/shale/texlive.partial` and renamed to `texlive` only when it is
 //! complete, so a half-finished install is never used. Everything here runs in a job and
 //! reports progress through a [`Handle`].
@@ -29,6 +30,18 @@ const PROFILE_ROOT: &str = "/opt/texlive";
 
 /// How long one step (the download, `install-tl`, `tlmgr`) may take.
 const STEP_TIMEOUT: Duration = Duration::from_secs(45 * 60);
+
+/// A small file every TeX Live repository has: it is asked for to learn which mirror a redirector
+/// such as `mirror.ctan.org` sends to, so that one install or update uses that one mirror (#320).
+pub(super) const MIRROR_PROBE: &str = "tlpkg/texlive.tlpdb.sha512";
+
+/// How often `tlmgr` runs at most, each time on a freshly chosen mirror, while the mirror it got is
+/// older than the installation (#320).
+pub(super) const MIRROR_TRIES: usize = 3;
+
+/// What `tlmgr` says when the repository is older than the installation ("… seems to be older than
+/// the local installation …; please use a different mirror").
+const OLDER_MIRROR: &str = "older than the local installation";
 
 /// The packages of `assets/tex/packages.txt`, one name each.
 pub fn packages() -> Vec<&'static str> {
@@ -273,6 +286,46 @@ pub(super) fn download(handle: &Handle, url: &str, to: &Path) -> Result<(), Stri
     }
 }
 
+/// One concrete mirror for the repository `repo` (#320). A redirector such as `mirror.ctan.org`
+/// sends every request to some mirror, and mirrors are not all equally current: `install-tl` from a
+/// newer mirror followed by `tlmgr` from an older one fails ("older than the local installation").
+/// So the redirect is followed once, for [`MIRROR_PROBE`], and the address it ends at is used for
+/// every step; a repository that does not redirect is its own mirror.
+pub(super) fn resolve_mirror(handle: &Handle, repo: &str) -> Result<String, String> {
+    let work = WorkDir::new().map_err(|e| format!("no temporary folder ({e})"))?;
+    let probe = format!("{repo}/{MIRROR_PROBE}");
+    // an https repository is only ever left for https; an http one is not made safer by refusing http
+    let protos = if repo.starts_with("http://") { "=http,https" } else { "=https" };
+    let mut c = Command::new("curl");
+    c.args(["-q", "-sS", "-f", "-L", "--max-redirs", "5", "--proto", protos, "--proto-redir", protos, "--connect-timeout", "20", "--max-filesize", "1048576", "-w", "%{url_effective}\n", "-o"]).arg(work.path().join("probe")).arg(&probe);
+    let run = proc::run(c, Duration::from_secs(120), Some(&handle.cancel), |_| {}).map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
+    match run.ending {
+        Ending::Cancelled => Err("cancelled".into()),
+        Ending::TimedOut => Err(format!("the repository {repo} did not answer")),
+        Ending::Exited(Some(0)) => {
+            let effective = run.tail.iter().rev().map(|l| l.trim()).find(|l| !l.is_empty()).unwrap_or("");
+            let mirror = effective.strip_suffix(MIRROR_PROBE).map(|m| m.trim_end_matches('/')).ok_or_else(|| format!("the repository {repo} sent its {MIRROR_PROBE} to {effective:?}, which is no TeX Live repository"))?;
+            check_repository(mirror).map(str::to_string)
+        }
+        Ending::Exited(_) => Err(format!("the repository {repo} could not be reached: {}", run.tail_text())),
+    }
+}
+
+/// Run `tlmgr` (made by `cmd` for a mirror) on `mirror`. When `tlmgr` finds that mirror older than
+/// the installation, a fresh mirror of `repo` is chosen and tried, [`MIRROR_TRIES`] runs at most (#320).
+fn tlmgr_on_mirror(handle: &Handle, notify: &dyn Fn(), stage: Stage, repo: &str, mut mirror: String, cmd: impl Fn(&str) -> Command) -> Result<(), String> {
+    let mut runs = 1;
+    loop {
+        match step(handle, notify, stage, "tlmgr", cmd(&mirror)) {
+            Err(e) if e.contains(OLDER_MIRROR) && runs < MIRROR_TRIES => {
+                runs += 1;
+                mirror = resolve_mirror(handle, repo)?;
+            }
+            result => return result,
+        }
+    }
+}
+
 /// `perl` is needed to run `install-tl` and `tlmgr` on Linux and macOS.
 fn check_perl() -> Result<(), String> {
     if cfg!(windows) {
@@ -350,7 +403,9 @@ fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -
     std::fs::create_dir(&inst).map_err(|e| e.to_string())?;
     handle.stage(Stage::Download);
     notify();
-    download(handle, &format!("{repo}/{}", installer_archive()), &archive)?;
+    // one mirror for the installer, install-tl and tlmgr (#320)
+    let mirror = resolve_mirror(handle, repo)?;
+    download(handle, &format!("{mirror}/{}", installer_archive()), &archive)?;
     // the system's tar: bsdtar on Windows 10 and later reads the zip as well
     let mut tar = Command::new("tar");
     tar.arg("-xf").arg(&archive).arg("-C").arg(&inst).arg("--strip-components=1");
@@ -366,27 +421,35 @@ fn install_into(env: &Env, partial: &Path, handle: &Handle, notify: &dyn Fn()) -
         c.arg(inst.join("install-tl"));
         c
     };
-    install_tl.args(["-no-interaction", "-profile"]).arg(&profile_file).args(["-repository", repo]).current_dir(&inst);
+    install_tl.args(["-no-interaction", "-profile"]).arg(&profile_file).args(["-repository", &mirror]).current_dir(&inst);
     step(handle, notify, Stage::Base, "install-tl", install_tl)?;
     let bin = bin_dir_with(partial, tlmgr_name()).ok_or("install-tl made no tlmgr")?;
-    let mut tlmgr = Command::new(bin.join(tlmgr_name()));
-    tlmgr.env("PATH", engine::path_with(&bin)).args(["--repository", repo, "install"]).args(packages());
-    step(handle, notify, Stage::Packages, "tlmgr", tlmgr)?;
+    tlmgr_on_mirror(handle, notify, Stage::Packages, repo, mirror, |m| {
+        let mut tlmgr = Command::new(bin.join(tlmgr_name()));
+        tlmgr.env("PATH", engine::path_with(&bin)).args(["--repository", m, "install"]).args(packages());
+        tlmgr
+    })?;
     if !bin.join(exe_name("lualatex")).is_file() || !bin.join(exe_name("biber")).is_file() {
         return Err("the install finished but lualatex or biber is missing".into());
     }
     Ok(())
 }
 
-/// Update the managed TeX Live (TEX-003): `tlmgr update --self --all`.
+/// Update the managed TeX Live (TEX-003): `tlmgr update --self --all`, from one mirror of the
+/// repository, and from a fresh one while that mirror is older than the installation (#320).
 pub fn update(env: &Env, handle: &Handle, notify: &dyn Fn()) -> Result<Done, String> {
     let repo = check_repository(&env.repository)?;
     let root = managed_root(&env.data);
     let engine = managed_engine(&root)?;
     check_perl()?;
-    let mut tlmgr = engine.command(tlmgr_name());
-    tlmgr.args(["--repository", repo, "update", "--self", "--all"]);
-    step(handle, notify, Stage::Update, "tlmgr", tlmgr)?;
+    handle.stage(Stage::Update);
+    notify();
+    let mirror = resolve_mirror(handle, repo)?;
+    tlmgr_on_mirror(handle, notify, Stage::Update, repo, mirror, |m| {
+        let mut tlmgr = engine.command(tlmgr_name());
+        tlmgr.args(["--repository", m, "update", "--self", "--all"]);
+        tlmgr
+    })?;
     // a new TeX Live may have new fonts and a new kernel: try it
     handle.stage(Stage::Fonts);
     notify();

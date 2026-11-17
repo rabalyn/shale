@@ -2,7 +2,7 @@
 # Helper for Shale's TeX test environment. Usage: ./tex-env.sh build [--refresh] | status | compile <dir> <file.tex> | exec <dir> -- <cmd>… | reset
 #   build    (--refresh: without the image cache, so the current TeX Live is fetched again) fetch the tuda-ci sources (checked by sha256), build the TeX Live image, and generate the
 #            .cls/.sty files from the .dtx with docstrip (first time; later runs reuse all three)
-#   status   say whether the image and the tuda-ci files are there, and which TeX Live (year, repository,
+#   status   say whether the image and the tuda-ci files are there, and which TeX Live (year, repository, mirror,
 #            build date) the image was built from: it follows the current TeX Live (ADR-0020)
 #   compile  run latexmk (LuaLaTeX, biber) on <dir>/<file.tex> inside the container, <dir> mounted
 #            as /work. TEXINPUTS is /work/tex// and BIBINPUTS /work; SHALE_TEX_PRE is TeX code put
@@ -41,7 +41,7 @@ case "${1:-}" in
     # the build context: the Containerfile with the profile and the package list of assets/tex/
     ctx=$cache/context
     rm -rf "$ctx"; mkdir -p "$ctx"
-    cp Containerfile "$ctx/"
+    cp Containerfile install-texlive.sh "$ctx/"
     cp ../../assets/tex/texlive.profile ../../assets/tex/packages.txt "$ctx/"
     nocache=""
     [ "${2:-}" = "--refresh" ] && nocache="--no-cache"

@@ -32,6 +32,14 @@ repository does not know. A test image on a different TeX Live than the one peop
   change on purpose. `scripts/land.sh` uses the cached image; the CI job (tags and weekly) builds it with
   `tex-env.sh build --refresh` and runs the real install (`tex_install`), so upstream breakage shows
   within a week.
+- **One mirror per install** (#320): `mirror.ctan.org` sends every request to some CTAN mirror, and the
+  mirrors are not all equally current. When `install-tl` got a newer mirror and the following `tlmgr`
+  an older one, `tlmgr` refused it ("older than the local installation"; Forgejo run #361). So the
+  managed install and update (`install::resolve_mirror`) and the test image (`install-texlive.sh`)
+  resolve the redirector once to one concrete mirror and use it for every step, and `tlmgr` tries a
+  freshly resolved mirror when it still finds its mirror older (3 runs at most). The image records the
+  mirror in `/etc/shale-tex-build`. The default repository stays the redirector, so people still get a
+  mirror near them and the current TeX Live.
 - **Measured 2026-11-17 against TL2026** (`scheme-infraonly` plus the list, no documentation, no
   sources): **326 MB installed**, and the install took **28 s on a fast mirror** (the packages are
   downloaded one by one; the speed depends on the mirror the redirector picks and varies, minutes on a
