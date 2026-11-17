@@ -469,6 +469,16 @@ impl Keymap {
 
     /// Can `a` take `b`? The error is the message for the user (KEY-004, KEY-005).
     pub fn check(&self, a: Action, b: &Binding) -> Result<(), String> {
+        self.check_rules(a, b)?;
+        match self.clashes_of(a, b).first() {
+            Some(other) => Err(format!("{} is already used by “{}”", b.display(), other.def().label)),
+            None => Ok(()),
+        }
+    }
+
+    /// The rules for a binding of `a` that no overwrite can lift: Ctrl or Alt, reserved keys, fixed
+    /// keys (KEY-005). The error is the message for the user.
+    pub fn check_rules(&self, a: Action, b: &Binding) -> Result<(), String> {
         let scope = a.def().scope;
         let first = b.0[0];
         let function_key = first.key.name().strip_prefix('F').is_some_and(|n| n.parse::<u8>().is_ok());
@@ -488,12 +498,31 @@ impl Keymap {
         if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key) && !shift_k_is_free) || vim_redo || moves_rows {
             return Err(format!("{} has a fixed meaning here", b.display()));
         }
-        for d in DEFS.iter().filter(|d| d.action != a && d.scope.overlaps(scope)) {
-            if self.bindings(d.action).iter().any(|o| o.clashes(b)) {
-                return Err(format!("{} is already used by “{}”", b.display(), d.label));
-            }
-        }
         Ok(())
+    }
+
+    /// The other actions, in the order of `DEFS`, that `b` would clash with if `a` took it: a binding
+    /// equal to it or the start of it (or the other way round) in the same or an overlapping scope
+    /// (KEY-004, KEY-017, KEY-018).
+    pub fn clashes_of(&self, a: Action, b: &Binding) -> Vec<Action> {
+        let scope = a.def().scope;
+        DEFS.iter().filter(|d| d.action != a && d.scope.overlaps(scope) && self.bindings(d.action).iter().any(|o| o.clashes(b))).map(|d| d.action).collect()
+    }
+
+    /// Give `a` the binding `b` (in addition to its others when `adding`, else replacing them) and take
+    /// the clashing bindings away from the actions that have them, only those (KEY-018); an action left
+    /// without a key is stored as cleared (KEY-007). Nothing changes when a rule refuses `b`.
+    pub fn overwrite(&mut self, a: Action, b: Binding, adding: bool) -> Result<(), String> {
+        self.check_rules(a, &b)?;
+        for other in self.clashes_of(a, &b) {
+            let kept = self.bindings(other).into_iter().filter(|o| !o.clashes(&b)).collect();
+            self.store(other, kept);
+        }
+        if adding {
+            self.add(a, b)
+        } else {
+            self.set(a, b)
+        }
     }
 
     /// Give `a` this one binding (replacing its others); nothing changes when it is refused.
@@ -777,6 +806,66 @@ mod tests {
         assert!(k.check(Action::TreePrevFile, &b("Space")).is_err());
         assert!(k.check(Action::TreePrevFile, &b("Space f g")).is_ok());
         assert!(k.check(Action::TreePrevFile, &b("Space f f g")).is_err());
+    }
+
+    // spec: KEY-018
+    #[test]
+    fn clashes_of_finds_equal_and_prefix_clashes_in_scopes_that_are_active_together() {
+        let mut k = Keymap::default();
+        // equal, in the same scope and against Global
+        assert_eq!(k.clashes_of(Action::TreePrevFile, &b("J")), vec![Action::TreeNextFile]);
+        assert_eq!(k.clashes_of(Action::TreeNextFile, &b("J")), vec![], "its own key is no clash");
+        assert_eq!(k.clashes_of(Action::TreeNextFile, &b("Ctrl+H")), vec![Action::FocusSidebar]);
+        // Note view against Global, and the other way round
+        assert_eq!(k.clashes_of(Action::NoteBold, &b("Ctrl+E")), vec![Action::ToggleReading]);
+        assert_eq!(k.clashes_of(Action::Save, &b("Alt+B")), vec![Action::NoteBold]);
+        // Note view against vim normal mode
+        k.set(Action::NoteBold, b("Ctrl+Alt+K")).unwrap();
+        assert_eq!(k.clashes_of(Action::NormalAlternate, &b("Ctrl+Alt+K")), vec![Action::NoteBold]);
+        assert_eq!(k.clashes_of(Action::NoteBold, &b("Space Tab")), vec![Action::NormalAlternate]);
+        // unrelated scopes do not clash
+        assert_eq!(k.clashes_of(Action::HitNext, &b("J")), vec![]);
+        // a prefix clash names every action: Space f against Space f f and Space f g
+        k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
+        k.set(Action::TreePrevFile, b("Space f g")).unwrap();
+        assert_eq!(k.clashes_of(Action::TreeNextFile, &b("Space f")), vec![Action::TreePrevFile, Action::TreeToggleFolder]);
+        // the rules of KEY-005 are no clashes
+        assert_eq!(k.clashes_of(Action::Save, &b("G")), vec![]);
+        assert!(k.check_rules(Action::Save, &b("G")).is_err());
+    }
+
+    // spec: KEY-018, KEY-007
+    #[test]
+    fn overwrite_takes_only_the_clashing_bindings_and_stores_an_emptied_action_as_cleared() {
+        let mut k = Keymap::default();
+        let down = k.bindings(Action::TreeNextFile);
+        assert!(down.len() > 1, "the action has more than one key by default");
+        k.overwrite(Action::TreePrevFile, b("J"), false).unwrap();
+        assert_eq!(k.bindings(Action::TreePrevFile), vec![b("J")]);
+        assert_eq!(k.bindings(Action::TreeNextFile), down.into_iter().filter(|d| !d.clashes(&b("J"))).collect::<Vec<_>>(), "its other keys stay");
+        // an action left without a key is stored as cleared and survives the config
+        k.overwrite(Action::TreeToggleFolder, b("Ctrl+Alt+R"), false).unwrap();
+        let only = k.bindings(Action::NewNote);
+        assert_eq!(only.len(), 1, "New note has one key by default");
+        k.overwrite(Action::FocusSidebar, only[0].clone(), true).unwrap();
+        assert_eq!(k.bindings(Action::NewNote), vec![]);
+        assert_eq!(k.overrides().get("global.new_note"), Some(&vec![]));
+        assert!(k.bindings(Action::FocusSidebar).contains(&only[0]), "adding keeps the other keys");
+        let k2 = Keymap::from_overrides(&k.overrides());
+        assert_eq!(k2.bindings(Action::NewNote), vec![]);
+        assert_eq!(k2.display(Action::NewNote), "not set");
+        assert_eq!(k2.overrides(), k.overrides());
+        // a prefix clash takes both sequences
+        k.set(Action::TreeToggleFolder, b("Space f f")).unwrap();
+        k.set(Action::HitNext, b("Space f g")).unwrap();
+        k.overwrite(Action::TreeNextFile, b("Space f"), false).unwrap();
+        assert_eq!(k.bindings(Action::TreeToggleFolder), vec![]);
+        assert_eq!(k.bindings(Action::TreeNextFile), vec![b("Space f")]);
+        assert_eq!(k.bindings(Action::HitNext), vec![b("Space f g")], "another scope, kept");
+        // a rule still refuses and changes nothing
+        let before = k.overrides();
+        assert!(k.overwrite(Action::Save, b("Ctrl+C"), false).unwrap_err().contains("reserved"));
+        assert_eq!(k.overrides(), before);
     }
 
     // spec: KEY-005
