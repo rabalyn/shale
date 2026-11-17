@@ -25,7 +25,9 @@ Embed a sound like a picture, with `![[file.mp3]]`. Here is one:
   while you scroll or switch between the editor, the preview and the reading view, and stops when
   the note's tab is closed or another vault is opened.
 - **Never by itself.** Nothing ever starts playing until you press the button or Space.
-- **No sound output.** On a computer without a sound device the player says "No sound output".
+- **No sound output.** On a computer without a sound device the player says "No sound output" and
+  a sound file does not play. A video still plays its pictures, without sound, and says "No sound
+  output: playing without sound".
 
 ## Videos
 
