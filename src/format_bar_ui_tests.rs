@@ -19,6 +19,8 @@ impl Fx {
         let _ = std::fs::remove_dir_all(&dir);
         crate::vault::write_sample_vault(&dir).unwrap();
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
+        // these tests drive the Linux/Windows defaults of the Alt keys (KEY-015), which macOS does not have
+        app.keymap = crate::keys::Keymap::from_overrides_for(&app.cfg.keybindings, false);
         app.open(Path::new(NOTE), false);
         let mut hl = Headless::new();
         hl.frames(&mut app, 4);
@@ -731,6 +733,30 @@ fn alt_b_bolds_the_selection_with_the_keyboard_in_the_text_and_types_nothing() {
     fx.select(8, 11);
     fx.alt_key(Key::Z, "z");
     assert_eq!(fx.text(), "- one **two** three\n".replacen("**two**", "two", 1), "Alt+Z takes the markers off again");
+}
+
+// spec: KEY-015, KEY-016
+#[test]
+fn on_macos_the_alt_keys_do_nothing_and_show_no_badge_until_one_is_bound() {
+    use crate::keys::{Action, Binding, Keymap};
+    let mut fx = Fx::new("alt-mac", "one two three\n");
+    fx.app.keymap = Keymap::from_overrides_for(&fx.app.cfg.keybindings, true);
+    fx.select(4, 7);
+    assert!(fx.badges(Modifiers::ALT).is_empty(), "no key, no badge");
+    fx.alt_key(Key::B, "b");
+    assert_eq!(fx.text(), "one b three\n", "Alt+B is no bold key: the b it types replaces the selection");
+    fx.alt_key(Key::V, "v");
+    assert!(!fx.reading(), "Alt+V does not switch the view");
+    // bound by hand, the key works and its badge shows
+    fx.app.keymap.set(Action::NoteBold, Binding::parse("Alt+B").unwrap()).unwrap();
+    let text = fx.text();
+    let start = text.find("one").unwrap_or(0);
+    fx.select(start, start + 3);
+    fx.alt_key(Key::B, "b");
+    assert!(fx.text().contains("**"), "Alt+B bolds now: {:?}", fx.text());
+    let badges = fx.badges(Modifiers::ALT);
+    assert!(badges.iter().any(|(t, _)| t == "B"), "the badge of Bold shows: {badges:?}");
+    assert!(!badges.iter().any(|(t, _)| t == "I"), "no other toolbar letter: {badges:?}");
 }
 
 // spec: KEY-015
