@@ -316,6 +316,34 @@ mod tests {
         })
     }
 
+    /// Sets the flag when dropped, also when the owner unwinds from a panic.
+    struct StopOnDrop<'a>(&'a AtomicBool);
+
+    impl Drop for StopOnDrop<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
+    // spec: MEDIA-009
+    #[test]
+    fn a_failing_test_body_still_stops_the_player_threads() {
+        let stop = AtomicBool::new(false);
+        // like `playing`: a thread that only ends when `stop` is set, and a body that panics
+        let r = std::panic::catch_unwind(|| {
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    while !stop.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                });
+                let _stops = StopOnDrop(&stop);
+                panic!("an assert failed");
+            });
+        });
+        assert!(r.is_err() && stop.load(Ordering::Relaxed), "the panic comes out instead of a hang");
+    }
+
     /// Wait up to `secs` for `ok`.
     fn wait_for(secs: f64, mut ok: impl FnMut() -> bool) -> bool {
         let end = std::time::Instant::now() + Duration::from_secs_f64(secs);
@@ -340,8 +368,10 @@ mod tests {
         let device = card(&shared, &stop);
         std::thread::scope(|s| {
             let runner = s.spawn(|| run(&tools, &path, &info, &shared, &stop, &slot, &ctx));
+            // a failing assert in `body` must still stop the runner and the card, or the scope waits forever
+            let _stops = StopOnDrop(&stop);
             body(&shared, &slot, &stop);
-            stop.store(true, Ordering::Relaxed);
+            drop(_stops);
             runner.join().unwrap().unwrap();
         });
         device.join().unwrap();
