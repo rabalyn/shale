@@ -81,7 +81,9 @@ See **[docs/FEATURES.md](docs/FEATURES.md)** for all features with screenshots.
 (or Settings → Help → **Open user guide**): the guide is built into the program, which unpacks it once per
 version into its data folder (`~/.local/share/shale/userguide-<version>/` on Linux; a copy you edited is never
 overwritten) and opens it as a vault, at "Start here". This works in every build, on every system. Each release also has `shale-userguide-<version>.zip` (with
-its `.sha256` file) to unpack anywhere and open as a vault (`shale --vault <folder>`, or Settings → Vault folder).
+its `.sha256` file) to unpack anywhere and open as a vault (`shale --vault <folder>`, or Settings → Vault folder),
+and `shale-userguide-<version>.pdf`, the same guide as one book to print or read anywhere (made by
+`scripts/userguide-pdf.sh`).
 
 ## Supported systems
 
@@ -123,7 +125,7 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
 Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
 with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`,
 unpack it and run `./shale/shale`. (The user guide is in the archive as `shale/docs/userguide/`, and
-alone as `shale-userguide-<version>.zip`.) To start Shale from the app menu with its icon (on Wayland the
+alone as `shale-userguide-<version>.zip` and as a PDF, `shale-userguide-<version>.pdf`.) To start Shale from the app menu with its icon (on Wayland the
 taskbar needs this to show the icon), install the desktop file and the icon from the unpacked folder:
 
 ```sh
@@ -136,7 +138,7 @@ Releases are built by GitHub Actions
 version, build it from source (below).
 
 Each download has a `.sha256` file next to it; to check the download, put both files in one folder and run
-`sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256` (the same for `shale-userguide-<version>.zip`).
+`sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256` (the same for `shale-userguide-<version>.zip` and `shale-userguide-<version>.pdf`).
 This catches a damaged download, not a compromised release page.
 
 To check that a download was built by Shale's release workflow from its version tag, use the

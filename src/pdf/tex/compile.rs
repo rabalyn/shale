@@ -242,19 +242,29 @@ pub fn valid_main_name(name: &str) -> bool {
     name.ends_with(".tex") && name.len() > 4 && !name.starts_with(['-', '.']) && name.chars().all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
 }
 
+/// The separator of TeX's search paths (kpathsea's `ENV_SEP`): `;` on Windows, `:` elsewhere.
+pub const SEARCH_PATH_SEP: char = if cfg!(windows) { ';' } else { ':' };
+
 /// `TEXINPUTS`: the template folders with all their sub folders, then TeX's own (the empty last
 /// entry stands for the default path).
 pub fn tex_inputs(dirs: &[PathBuf]) -> Result<OsString, String> {
-    let mut entries: Vec<OsString> = dirs
-        .iter()
-        .map(|d| {
-            let mut s = d.clone().into_os_string();
-            s.push("//");
-            s
-        })
-        .collect();
-    entries.push(OsString::new());
-    std::env::join_paths(entries).map_err(|e| format!("a template folder has a character that cannot be used in a search path ({e})"))
+    search_path(dirs, SEARCH_PATH_SEP)
+}
+
+/// [`tex_inputs`] joined with `sep`. A folder with the separator in its name is refused: kpathsea
+/// splits at every separator and knows no quoting (`std::env::join_paths` quotes such a folder on
+/// Windows, which TeX does not read).
+pub fn search_path(dirs: &[PathBuf], sep: char) -> Result<OsString, String> {
+    let mut v = OsString::new();
+    for d in dirs {
+        if d.to_string_lossy().contains(sep) {
+            return Err(format!("the template folder {} has a {sep:?}, which cannot be used in a search path", d.display()));
+        }
+        v.push(d.as_os_str());
+        v.push("//");
+        v.push(sep.to_string());
+    }
+    Ok(v)
 }
 
 /// The arguments of every LuaLaTeX run: nothing stops for input, the first error stops the

@@ -7,8 +7,8 @@
 #    Forgejo, from Forgejo's `mirror` job once they passed CI there (BUILD-016).
 #    - every version tag (v0.2.0, ...): checks, builds and tests it again on Linux, and publishes a
 #      release page named after the version, with that version's notes from CHANGELOG.md (the tag
-#      must match the version in Cargo.toml), the tarball and the zip of the user guide (DEV-020), their
-#      .sha256 files and their build attestation
+#      must match the version in Cargo.toml), the tarball, the zip of the user guide (DEV-020) and
+#      the guide as a PDF (BUILD-023), their .sha256 files and their build attestation
 #    - workflow_dispatch: the same checks, build and attestation without publishing, to try the
 #      workflow (the files are a workflow artifact)
 #    The attestation (BUILD-014) is keyless: GitHub signs it through Sigstore with a short-lived
@@ -97,6 +97,9 @@ jobs:
           scripts/userguide-dist.sh dist/zip/userguide
           (cd dist/zip && zip -qr ../../shale-userguide.zip userguide)
           unzip -tq shale-userguide.zip
+          # BUILD-023: the guide as one PDF, a book (BOOK-011), made by this release build without a window
+          SHALE=target/release/shale scripts/userguide-pdf.sh shale-userguide.pdf
+          test "$(head -c 4 shale-userguide.pdf)" = "%PDF"
 
       # the files as they are published: versioned for a tag, "dev-<commit>" for a run by hand
       - name: Name the release files
@@ -111,10 +114,13 @@ jobs:
           cp shale-linux-x86_64.tar.gz "release/$ASSET"
           GUIDE="shale-userguide-${LABEL}.zip"
           cp shale-userguide.zip "release/$GUIDE"
+          PDF="shale-userguide-${LABEL}.pdf"
+          cp shale-userguide.pdf "release/$PDF"
           # the checksum names the file as it is downloaded, so `sha256sum -c` works on it
-          (cd release && for f in "$ASSET" "$GUIDE"; do sha256sum "$f" > "$f.sha256" && sha256sum -c "$f.sha256"; done)
+          (cd release && for f in "$ASSET" "$GUIDE" "$PDF"; do sha256sum "$f" > "$f.sha256" && sha256sum -c "$f.sha256"; done)
           echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
           echo "guide=$GUIDE" >> "$GITHUB_OUTPUT"
+          echo "pdf=$PDF" >> "$GITHUB_OUTPUT"
 
       # SLSA build provenance for the tarball and its checksum, signed keyless (BUILD-014)
       - name: Attest the build
@@ -126,6 +132,8 @@ jobs:
             release/${{ steps.files.outputs.asset }}.sha256
             release/${{ steps.files.outputs.guide }}
             release/${{ steps.files.outputs.guide }}.sha256
+            release/${{ steps.files.outputs.pdf }}
+            release/${{ steps.files.outputs.pdf }}.sha256
 
       # the bundle goes next to the files, and is checked the way a downloader checks it, so a
       # release never goes out with an attestation that does not verify
@@ -134,10 +142,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ASSET: ${{ steps.files.outputs.asset }}
           GUIDE: ${{ steps.files.outputs.guide }}
+          PDF: ${{ steps.files.outputs.pdf }}
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
           cp "$BUNDLE" "release/$ASSET.sigstore.json"
-          for f in "$ASSET" "$ASSET.sha256" "$GUIDE" "$GUIDE.sha256"; do
+          for f in "$ASSET" "$ASSET.sha256" "$GUIDE" "$GUIDE.sha256" "$PDF" "$PDF.sha256"; do
             gh attestation verify "release/$f" --bundle "release/$ASSET.sigstore.json" \
               --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/build.yml" \
               --source-ref "$GITHUB_REF" --deny-self-hosted-runners
@@ -155,13 +164,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ASSET: ${{ steps.files.outputs.asset }}
           GUIDE: ${{ steps.files.outputs.guide }}
+          PDF: ${{ steps.files.outputs.pdf }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           {
             printf '\n## Checking the download\n\n'
-            printf 'Against damage, with the file and its .sha256 file in one folder: `sha256sum -c %s.sha256` (the same for the user guide, `sha256sum -c %s.sha256`)\n\n' "$ASSET" "$GUIDE"
+            printf 'Against damage, with the file and its .sha256 file in one folder: `sha256sum -c %s.sha256` (the same for the user guide, `sha256sum -c %s.sha256` and `sha256sum -c %s.sha256`)\n\n' "$ASSET" "$GUIDE" "$PDF"
             printf 'That it was built from the tag `%s` by this repository'"'"'s release workflow on GitHub (needs the GitHub CLI; add `--bundle %s.sigstore.json` to use the attestation file from this page):\n\n' "$GITHUB_REF_NAME" "$ASSET"
-            printf '```sh\ngh attestation verify %s --repo %s --signer-workflow %s/.github/workflows/build.yml --source-ref %s\n```\nThe user guide zip `%s` is attested by the same file.\n' "$ASSET" "$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY" "$GITHUB_REF" "$GUIDE"
+            printf '```sh\ngh attestation verify %s --repo %s --signer-workflow %s/.github/workflows/build.yml --source-ref %s\n```\nThe user guide zip `%s` and its PDF `%s` are attested by the same file.\n' "$ASSET" "$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY" "$GITHUB_REF" "$GUIDE" "$PDF"
           } >> release-notes.md
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" --title "Shale $VERSION" --notes-file release-notes.md

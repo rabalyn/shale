@@ -60,7 +60,8 @@ pub struct TexState {
     path_var: Option<OsString>,
     /// What detection found, until something changes it.
     pub detection: Option<Detection>,
-    detecting: Option<Receiver<Result<Detection, String>>>,
+    /// The look for TeX that runs (a job), if any.
+    pub(super) detecting: Option<Receiver<Result<Detection, String>>>,
     pub task: Option<Task>,
     /// The person pressed Install and has not agreed yet.
     pub consent: bool,

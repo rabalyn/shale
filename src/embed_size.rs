@@ -1,4 +1,4 @@
-//! How big an embed is drawn (EDIT-024, MEDIA-012, PDF-005): one rule for the editor and the PDF
+//! How big an embed is drawn (EDIT-052, MEDIA-012, PDF-005): one rule for the editor and the PDF
 //! export, so a picture made smaller in the note, or the player of a sound, is as big in the PDF
 //! in proportion to the text. The editor asks for a place `max_w` wide (its text column); the
 //! export asks for the column the editor had (`ExportOptions::column`) and scales the result to

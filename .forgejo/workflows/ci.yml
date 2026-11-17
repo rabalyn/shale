@@ -172,6 +172,11 @@ jobs:
           sha256sum shale-userguide.zip > shale-userguide.zip.sha256
           sha256sum -c shale-userguide.zip.sha256
           unzip -tq shale-userguide.zip
+          # BUILD-023: the guide as one PDF, a book (BOOK-011), made by this release build without a window
+          SHALE="$CARGO_TARGET_DIR/release/shale" scripts/userguide-pdf.sh shale-userguide.pdf
+          test "$(head -c 4 shale-userguide.pdf)" = "%PDF"
+          sha256sum shale-userguide.pdf > shale-userguide.pdf.sha256
+          sha256sum -c shale-userguide.pdf.sha256
 
   # separate from the build, so an advisory published overnight shows up as a red job of its own
   # but never blocks the build

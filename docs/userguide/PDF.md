@@ -120,7 +120,8 @@ the ones above.
   contents, the running heads and the bookmarks.
 - Pictures with the same name in different folders stay two pictures.
 
-This guide is such a book: "Start here" is its folder note, and `scripts/userguide-pdf.sh` makes its PDF.
+This guide is such a book: "Start here" is its folder note, and `scripts/userguide-pdf.sh` makes its PDF
+(every release has it as `shale-userguide-<version>.pdf`).
 On the command line, `shale --export-pdf <folder> <file.pdf>` writes the book of a folder without opening
 a window (A4, numbered headings, title page, contents, each note on a new page); it ends with 0, or with 1
 and the reason on stderr.
