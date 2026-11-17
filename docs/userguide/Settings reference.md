@@ -29,7 +29,9 @@ change within a second.
 - A line you delete takes its default. The cache settings take `"none"` for "forever" or "no
   limit".
 - Text that is not valid settings is not saved: the file stays as it was, the settings in use stay,
-  the tab keeps your text and says what is wrong. If another program leaves an error in the
+  the tab keeps your text and says what is wrong. If you quit Shale while such text is still in
+  the tab, it goes to the recovery folder as `settings/config.toml` and the next start tells you
+  (as for notes that could not be saved). If another program leaves an error in the
   file, Shale keeps using the settings it has, tells you, and does not write over the file until
   it is valid again.
 - Passwords and tokens are not in the file: they are in the system keyring.

@@ -637,7 +637,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - The settings of the program itself are one text file, `~/.config/shale/config.toml`, with a
   description above every setting. "Open settings file" (top right of Settings) opens it in a tab (no note, no
   vault file); saving applies the values at once, a change from another editor is picked up within a
-  second, and text with an error is not saved. An old `config.json` is moved over at the first start.
+  second, and text with an error is not saved (quitting puts it in the recovery folder instead of losing it). An old `config.json` is moved over at the first start.
 - Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
   behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
