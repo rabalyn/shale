@@ -156,7 +156,7 @@ fn install_asks_first_with_the_sizes_and_downloads_nothing_until_the_person_agre
     assert!(t.app.tex.consent && t.app.tex.task.is_none(), "pressing Install only asks");
     let text = t.painted().join("\n");
     assert!(text.contains("about 100 MB") && text.contains("about 330 MB on disk"), "the sizes come first: {text}");
-    assert!(text.contains("https://mirror.ctan.org/systems/texlive/tlnet") && text.contains("shale/texlive"), "from where and into which folder: {text}");
+    assert!(text.contains("https://mirror.ctan.org/systems/texlive/tlnet") && text.contains(&*managed_root(&t.data()).to_string_lossy()), "from where and into which folder: {text}");
     assert!(text.contains("Nothing is downloaded before you agree"));
     assert!(t.shows("Download and install") && t.shows("Not now"));
     // not now: back to the button, nothing happened
