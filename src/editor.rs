@@ -3802,6 +3802,16 @@ mod tests {
         action
     }
 
+    /// The `file://` address of a file, as a file manager writes it (spaces as `%20`).
+    fn file_uri(path: &Path) -> String {
+        let p = path.to_string_lossy().replace('\\', "/").replace(' ', "%20");
+        if p.starts_with('/') {
+            format!("file://{p}")
+        } else {
+            format!("file:///{p}")
+        }
+    }
+
     fn pasted_toast(a: Option<EditorAction>) -> String {
         match a {
             Some(EditorAction::Pasted(m)) => m,
@@ -3835,7 +3845,7 @@ mod tests {
         for n in ["a b.pdf", "clip.mp4", "p.png"] {
             std::fs::write(src.join(n), n).unwrap();
         }
-        let list: String = ["a b.pdf", "clip.mp4", "p.png"].iter().map(|n| format!("file://{}/{}\r\n", src.display(), n.replace(' ', "%20"))).collect();
+        let list: String = ["a b.pdf", "clip.mp4", "p.png"].iter().map(|n| format!("{}\r\n", file_uri(&src.join(n)))).collect();
         let mut text = String::new();
         ed.pending_cursor = Some(0);
         paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![]);
@@ -3914,7 +3924,7 @@ mod tests {
         std::fs::write(&f, b"%PDF").unwrap();
         paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Text("gg".into())]);
         paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Text("p".into())]);
-        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(format!("file://{}", f.display()))]);
+        let a = paste_frame(&ctx, &mut t, &mut ed, &mut text, &v, vec![Event::Paste(file_uri(&f))]);
         assert_eq!(pasted_toast(a), "Saved 1 file to the media folder");
         assert!(text.starts_with(&format!("alpha\n[[{stamp}shale-vimpaste-")), "{text}");
         // plain text with p stays as before

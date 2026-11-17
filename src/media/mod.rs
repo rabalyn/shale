@@ -115,11 +115,17 @@ pub fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-/// The path of a `file://` address (`file://localhost/…` too), `%XX` decoded; None for any other address.
+/// The path of a `file://` address (`file://localhost/…` too, and `file:///C:/…` on Windows), `%XX` decoded; None for any other address.
 pub fn file_uri_path(uri: &str) -> Option<PathBuf> {
     let rest = uri.trim().strip_prefix("file://")?;
     let rest = rest.strip_prefix("localhost").unwrap_or(rest);
-    rest.starts_with('/').then(|| PathBuf::from(percent_decode(rest)))
+    if !rest.starts_with('/') {
+        return None;
+    }
+    let path = percent_decode(rest);
+    // Windows writes `file:///C:/Users/x`: the slash before the drive letter is not part of the path
+    let drive = path.as_bytes().get(1..3).is_some_and(|d| d[0].is_ascii_alphabetic() && d[1] == b':');
+    Some(PathBuf::from(if cfg!(windows) && drive { &path[1..] } else { &path }))
 }
 
 /// The media files of pasted text: every non-empty line is a `file://` address or an absolute

@@ -739,13 +739,20 @@ fn a_flag_that_another_client_removes_shows_in_the_open_folder_within_seconds_an
     w.settle_ops();
     w.until("the flag shows", flagged);
     assert!(w.server.state().messages("INBOX").iter().any(|(uid, f, _)| *uid == msg.uid && f.iter().any(|x| x == "\\Flagged")), "the server has it");
+    // The watching connection saw that change too, checked the folder and idles again: a change made
+    // between that check and the next IDLE is not announced (the server tells what changed during
+    // an IDLE), so the test waits for the second IDLE (slow computers, Windows, hit that window).
+    let st = w.server.state.clone();
+    w.until("the folder is idled on again", move |_| st.lock().unwrap().verbs().iter().filter(|v| *v == "IDLE").count() >= 2);
     // ... and another program takes it off again: no sync, no key, only waiting
     let t0 = Instant::now();
     w.server.state().set_flags("INBOX", msg.uid, &[]);
     w.until("the flag is gone from the list", move |a| a.mail.row(0).is_some_and(|m| !m.flags.contains("\\Flagged")));
     assert!(t0.elapsed() < Duration::from_secs(10), "{:?}", t0.elapsed());
     assert!(!w.app.mail.any_sync_running(), "no full sync was needed");
-    // another program flags another mail and reads it
+    // another program flags another mail and reads it (once the watching idles again, as above)
+    let st = w.server.state.clone();
+    w.until("the folder is idled on a third time", move |_| st.lock().unwrap().verbs().iter().filter(|v| *v == "IDLE").count() >= 3);
     let other = w.app.mail.row(1).unwrap().uid;
     w.server.state().set_flags("INBOX", other, &["\\Seen", "\\Flagged"]);
     w.until("the second change shows", |a| a.mail.row(1).is_some_and(|m| m.flags.contains("\\Flagged") && m.flags.contains("\\Seen")));

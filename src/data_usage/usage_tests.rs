@@ -72,7 +72,7 @@ fn the_undo_histories_are_counted_with_the_age_of_the_oldest_step() {
     let s = stats(CacheId::UndoHistories, &p).unwrap();
     assert_eq!((s.entries, s.oldest), (3, Some(5_000)), "the files of the cache, the time of the oldest step");
     assert!(s.bytes > 7);
-    assert!(p.location(CacheId::UndoHistories).ends_with(".shale/undo"));
+    assert!(std::path::Path::new(&p.location(CacheId::UndoHistories)).ends_with(std::path::Path::new(".shale").join("undo")), "a folder, shown with the separators of the system");
     let mut none = p.clone();
     none.vault = None;
     assert_eq!(stats(CacheId::UndoHistories, &none), Ok(CacheStats::default()));
