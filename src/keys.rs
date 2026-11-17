@@ -796,6 +796,35 @@ mod tests {
         out
     }
 
+    // spec: KEY-005, EDIT-033
+    #[test]
+    fn shift_k_is_the_link_preview_and_space_space_can_replace_it() {
+        let mut k = Keymap::default();
+        let a = Action::NormalLinkPreview;
+        assert_eq!(k.bindings(a), vec![b("Shift+K")], "the default");
+        assert_eq!(k.check(a, &b("Shift+K")), Ok(()), "Shift+K is no vim key");
+        // plain k (up) and the other shifted vim keys stay fixed
+        for text in ["K", "Shift+J", "Shift+O"] {
+            assert!(k.check(a, &b(text)).unwrap_err().contains("fixed meaning"), "{text}");
+        }
+        // Space Space is free: no clash with Space Tab, Space f f, Space f g
+        assert_eq!(k.check(a, &b("Space Space")), Ok(()));
+        assert_eq!(k.check(Action::NormalAlternate, &b("Space Tab")), Ok(()));
+        // the default fires on Shift+K, not on k
+        let none = Modifiers::NONE;
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::K, Modifiers::SHIFT)]), Some(a));
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::K, none)]), None, "plain k stays vim's");
+        // rebound: only the new sequence fires, the others still do
+        k.set(a, b("Space Space")).unwrap();
+        assert!(k.check(Action::NormalFindFile, &b("Space Space")).unwrap_err().contains("already used"), "the others cannot take it from the action");
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::K, Modifiers::SHIFT)]), None);
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Space, none)]), None);
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Space, none)]), Some(a));
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Space, none)]), None);
+        assert_eq!(frame(&mut k, Scope::EditorNormal, vec![key_event(Key::Tab, none)]), Some(Action::NormalAlternate));
+        assert_eq!(k.overrides().get("normal.link_preview"), Some(&vec!["Space Space".to_string()]), "stored as a change (KEY-007)");
+    }
+
     // spec: KEY-009, KEY-008
     #[test]
     fn a_sequence_fires_on_its_last_chord() {

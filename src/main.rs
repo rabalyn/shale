@@ -36,6 +36,9 @@ mod keys;
 mod keys_ui;
 mod layout;
 mod link_assist;
+mod link_preview;
+#[cfg(test)]
+mod link_preview_ui_tests;
 mod lists;
 mod mail;
 mod markdown;
