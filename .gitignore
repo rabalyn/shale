@@ -11,3 +11,4 @@ lcov.info
 /docs/userguide/.shale/state.json
 /docs/userguide/.shale/tag-words.json
 /docs/userguide/.trash/
+/tests/tex-env/cache/

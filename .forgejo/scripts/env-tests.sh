@@ -1,22 +1,22 @@
 #!/bin/sh
 # The CI job "env-tests" (DEV-005, CALENV-004): runs the real-server suites of the CalDAV and mail
-# test environments. Usage:
+# test environments and the LuaLaTeX suite of the TeX environment (TEX-020). Usage:
 #   env-tests.sh wanted <base> <head>
-#       prints "yes" or "no": whether the change from <base> to <head> touches the CalDAV or mail
-#       code or the environments; scripts/land.sh runs the suites locally then (FORGE-011)
+#       prints "yes" or "no": whether the change from <base> to <head> touches the CalDAV, mail or
+#       TeX export code or the environments; scripts/land.sh runs the suites locally then (FORGE-011)
 #   env-tests.sh detect
 #       prints "podman", "docker" or "none": which container engine the job container can use
 #   env-tests.sh run [podman|docker]
 #       uses the given engine (the one the detect step found; detected again when left out),
-#       starts both stacks, runs `cargo test -- --ignored calendar::env_tests` and `… mail_env`, and always
-#       takes the stacks down again; exits 1 if a stack or a test fails or no test ran
+#       starts both stacks, builds the TeX image, runs `cargo test -- --ignored calendar::env_tests`,
+#       `… mail_env` and `… tex_env`, and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
 set -eu
 cd "$(dirname "$0")/../.."
 
 case "${1:-}" in
   wanted)
     files=$(git diff --name-only "$2" "$3")
-    if printf '%s\n' "$files" | grep -Eq '^(src/(calendar/|mail)|tests/(caldav|mail)-env/|\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh))'; then
+    if printf '%s\n' "$files" | grep -Eq '^(src/(calendar/|mail|pdf/tex)|assets/tex/|tests/(caldav|mail|tex)-env/|\.forgejo/(workflows/ci\.yml|scripts/env-tests\.sh))'; then
       echo yes
     else
       echo no
@@ -49,7 +49,8 @@ case "${1:-}" in
         SHALE_CALDAV_ENV_COMPOSE=${SHALE_CALDAV_ENV_COMPOSE:-docker-compose}
         SHALE_MAIL_ENV_COMPOSE=${SHALE_MAIL_ENV_COMPOSE:-docker-compose}
         SHALE_MAIL_ENV_ENGINE=docker
-        export SHALE_CALDAV_ENV_COMPOSE SHALE_MAIL_ENV_COMPOSE SHALE_MAIL_ENV_ENGINE
+        SHALE_TEX_ENV_ENGINE=docker
+        export SHALE_CALDAV_ENV_COMPOSE SHALE_MAIL_ENV_COMPOSE SHALE_MAIL_ENV_ENGINE SHALE_TEX_ENV_ENGINE
         ;;
       *) echo "no container engine is usable here" >&2; exit 1 ;;
     esac
@@ -72,7 +73,10 @@ case "${1:-}" in
       exit 1
     fi
 
-    for suite in calendar::env_tests mail_env; do
+    # the TeX image is no running stack: only built (the frozen TeX Live and the tuda-ci sources)
+    sh tests/tex-env/tex-env.sh build || { echo "the TeX image could not be built" >&2; exit 1; }
+
+    for suite in calendar::env_tests mail_env tex_env; do
       log=$(mktemp)
       cargo test --locked -- --ignored "$suite" --test-threads=1 2>&1 | tee "$log" || status=1
       # a filter that matches nothing "passes": make sure the suite really ran

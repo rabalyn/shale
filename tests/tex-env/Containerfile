@@ -1,0 +1,22 @@
+# TeX Live for Shale's LaTeX export tests (TEX-020, ADR-0018): LuaLaTeX and biber, installed from a
+# frozen repository so the image is the same every time it is built. The packages are the list of
+# assets/tex/packages.txt; the templates are not part of the image (tests/tex-env/README.md).
+FROM docker.io/library/debian:bookworm-20260112-slim
+
+ARG TL_REPO=https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends perl wget ca-certificates xz-utils \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY texlive.profile /tmp/texlive.profile
+RUN mkdir /tmp/install-tl \
+ && wget -q -O - "$TL_REPO/install-tl-unx.tar.gz" | tar xz -C /tmp/install-tl --strip-components=1 \
+ && /tmp/install-tl/install-tl --no-interaction --profile /tmp/texlive.profile --repository "$TL_REPO" \
+ && rm -rf /tmp/install-tl
+ENV PATH=/opt/texlive/bin/x86_64-linux:$PATH
+
+COPY packages.txt /tmp/packages.txt
+RUN sed 's/#.*//' /tmp/packages.txt | xargs tlmgr --repository "$TL_REPO" install
+
+WORKDIR /work
