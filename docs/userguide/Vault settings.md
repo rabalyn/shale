@@ -12,7 +12,7 @@ Shale keeps settings in two places:
 |---|---|---|
 | `<vault>/.shale/settings.json` | people folder, git sync | yes (git sync commits it, [[Git sync]]) |
 | `<vault>/.shale/state.json` | open tabs and which are pinned, last import folder, recent tags | yes, but it is only session state |
-| `~/.config/shale/config.json` | the program itself: appearance, calendars, mail and Feeds accounts, keybindings, recent vaults | no, this computer only |
+| `~/.config/shale/config.toml` | the program itself: appearance, calendars, mail and Feeds accounts, keybindings, recent vaults | no, this computer only |
 
 - The files carry a format version and are upgraded on load. A file that cannot be read is
   kept as `….broken-<date>` and you are told; a file from a newer Shale is used but not

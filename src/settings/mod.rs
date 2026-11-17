@@ -97,7 +97,7 @@ impl ShaleApp {
     pub fn settings_body(&mut self, ui: &mut Ui, vault_path: &mut String, tab: &mut SettingsTab, keys: &mut KeyDialog) -> Asks {
         let mut asks = Asks::default();
         ui.ctx().data_mut(|d| d.insert_temp(last_tab_id(), *tab));
-        self.settings_header(ui, *tab);
+        self.settings_header(ui, *tab, &mut asks);
         ui.separator();
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
@@ -141,9 +141,15 @@ impl ShaleApp {
 
     /// The row above the tabs: what the page is for, and room on the right for buttons of the
     /// whole dialog (add them in a `right_to_left` layout here).
-    fn settings_header(&mut self, ui: &mut Ui, tab: SettingsTab) {
+    fn settings_header(&mut self, ui: &mut Ui, tab: SettingsTab, asks: &mut Asks) {
         ui.horizontal(|ui| {
             ui.label(muted(tab.about()).size(12.0));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Open settings file").on_hover_text("Edit all settings as text, with a description of each").clicked() {
+                    self.open_settings_file();
+                    asks.close = true;
+                }
+            });
         });
     }
 }

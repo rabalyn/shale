@@ -2,19 +2,41 @@
 
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
-button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**.
+button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**, and the button
+**Open settings file** at the top right (see below).
 
 Two files hold settings:
 
-- **Global**: `~/.config/shale/config.json` (this computer, all vaults). On Windows and macOS
-  the program's config folder; Shale tells you the path in the window.
+- **Global**: `~/.config/shale/config.toml` (this computer, all vaults). On Windows and macOS
+  the program's config folder; the settings file tab shows the path.
 - **Vault**: `<vault>/.shale/settings.json` (travels with the vault) and
   `<vault>/.shale/state.json` (session state).
 
 A value of the wrong shape in the file loads as its default; fields Shale does not know are kept.
-You normally never edit these files; the "Where" column says which window changes a value.
+The "Where" column says which window changes a value. The global file is meant to be edited
+too: it is plain text with a description above every setting.
 
-## Global settings (`config.json`)
+## The settings file
+
+**Settings → Open settings file** opens `config.toml` in a tab of its own. It is not a note: it
+is not in the file tree, not in any vault and not in the lists of recent files. Change a value,
+and the file is saved a moment after you stop typing (or press **Ctrl+S** or **Save**) and the
+setting is used at once. You can edit the file with any other program as well; Shale notices the
+change within a second.
+
+- Shale writes the whole file again whenever a setting changes, with the descriptions, so
+  comments you add yourself do not stay. Settings Shale does not know are kept as they are.
+- A line you delete takes its default. The cache settings take `"none"` for "forever" or "no
+  limit".
+- Text that is not valid settings is not saved: the file stays as it was, the settings in use stay,
+  the tab keeps your text and says what is wrong. If another program leaves an error in the
+  file, Shale keeps using the settings it has, tells you, and does not write over the file until
+  it is valid again.
+- Passwords and tokens are not in the file: they are in the system keyring.
+- An old `config.json` is turned into `config.toml` the first time this version starts; the old
+  file is renamed `config.json.migrated`.
+
+## Global settings (`config.toml`)
 
 ### Links and notes
 

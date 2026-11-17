@@ -422,6 +422,7 @@ impl ShaleApp {
             View::Graph => "Graph".into(),
             View::Calendar => "Calendar".into(),
             View::Mail => "Mail".into(),
+            View::SettingsFile => "Settings file".into(),
             View::Social(f) => self.social_title(f.as_ref()),
             View::Note(p) | View::Drawing(p) => self.vault.as_ref().and_then(|v| v.file(p).map(|f| f.display_name())).unwrap_or_else(|| rel_to_string(p)),
         }
@@ -647,6 +648,7 @@ impl ShaleApp {
                 }
             }
             View::Tasks => self.tasks_view(ui),
+            View::SettingsFile => self.settings_file_view(ui),
             View::Social(f) => self.social_view(ui, f.clone()),
             View::Calendar => {
                 let monday = self.cfg.week_starts_monday;
