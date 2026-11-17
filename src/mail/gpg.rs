@@ -1036,6 +1036,7 @@ pub(crate) mod testkit {
 
         /// A new OpenPGP key that is protected by `passphrase`; its fingerprint. A call that needs the key asks the
         /// agent's pinentry, which in the tests is the stub of [`use_pinentry_stub`](Self::use_pinentry_stub).
+        #[cfg(unix)]
         pub fn gen_pgp_protected(&self, name: &str, email: &str, passphrase: &str) -> String {
             let uid = format!("{name} <{email}>");
             let out = self.cmd("gpg").args(["--batch", "--pinentry-mode", "loopback", "--passphrase", passphrase, "--quick-gen-key", &uid, "default", "default", "never"]).output().expect("gpg runs");
