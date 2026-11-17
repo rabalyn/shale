@@ -39,6 +39,7 @@ in the background and lists each file or folder with the reason and the name it 
 
 **Rename** changes one, **Rename all…** all of them after a question. They are renamed like any rename
 ([[Notes and links]]): links in other notes are rewritten, and a name that is already taken gets
-` 2`, ` 3` and so on. `.git`, `.shale` and the trash are not looked at.
+` 2`, ` 3` and so on (a long name is shortened to make room for the number). `.git`, `.shale` and
+the trash are not looked at.
 
 #userguide #settings

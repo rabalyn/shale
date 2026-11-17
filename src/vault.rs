@@ -917,7 +917,8 @@ impl Vault {
     fn relocate(&mut self, from: &Path, to: &Path, update_links: bool) -> io::Result<LinkUpdate> {
         self.abs_checked(from)?;
         self.abs_checked(to)?;
-        if self.abs(to).exists() {
+        // a new letter case of the same name "exists" where letter case is ignored (macOS, Windows)
+        if self.abs(to).exists() && !fsutil::is_case_only_rename(&self.abs(from), &self.abs(to)) {
             // never replace anything (a rename onto an empty folder would succeed otherwise)
             return Err(io::Error::new(io::ErrorKind::AlreadyExists, "a file with that name already exists"));
         }
