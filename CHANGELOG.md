@@ -10,6 +10,63 @@ its section from this file.
 
 ## [Unreleased]
 
+### Added
+
+- **A folder as one PDF through a LaTeX template** (#309). The export dialog of a folder has the same
+  engine choice as a note's: with **LaTeX template** the folder's book is written as one document of a
+  kind of the article or book family (publication, report, exercise, thesis, PhD thesis; slides, letters
+  and posters are greyed with the reason). In a thesis the subfolders become `\part`s and the notes
+  `\chapter`s, in an article kind the same starts at `\section`; the folder notes' text goes under their
+  part and the top folder note's before the first chapter; the fields start with the top folder note's
+  properties; links between the chapters go to their chapter or heading (`\hyperlink`); pictures of the
+  same name in different folders stay apart. LaTeX numbers the parts and chapters and makes the contents
+  and the bookmarks (BOOK-013 to BOOK-017).
+
+### Fixed
+
+- **Installing or updating Shale's TeX Live no longer fails on an older CTAN mirror.** The default
+  download address sends each request to some CTAN mirror, and the installer and the package step could
+  end up on two mirrors of different age; the package manager then refused the older one ("seems to be
+  older than the local installation"). An install or update now asks once which mirror to use and takes
+  everything from that one mirror, and if that mirror is behind your installation it tries another one,
+  three times at most (#320).
+- **Windows: new notes and renames with a path over 260 characters work.** A vault deep in your profile
+  folder plus a long note name (up to 200 bytes) went over Windows' old path limit, and creating or
+  renaming such a note failed with "the system cannot find the path specified" (#321).
+- **macOS and Windows: a rename that only changes letter case works** (`plan` → `Plan`). Before, it was
+  refused as "a file with that name already exists", because these systems treat both spellings as the
+  same file (#321).
+- **Names check: a numbered name stays within 200 bytes.** When the portable name the check proposes is
+  taken, the number now replaces the end of a long name instead of making it too long again (#321).
+
+### Internal
+
+- **macOS: the closed-port test helper is refused again instead of timing out.** The helper for
+  tests of an unreachable server held a bound socket that does not listen on every Unix. Linux
+  answers a connect to it with a refusal, but macOS drops it, so the connect timed out and two
+  tests failed on the v0.5.0 tag. On macOS the helper now holds the port of a connected socket,
+  which is refused and which a plain bind does not get; Linux and Windows keep the bound socket,
+  which no bind gets at all. The comment of `ClosedPort` explains the rules of each system (#302).
+- **The TeX test image uses one mirror too**: `tests/tex-env/install-texlive.sh` installs TeX Live in one
+  step from one resolved mirror, retries `tlmgr` on a fresh mirror when its mirror is older, and records
+  the mirror in `/etc/shale-tex-build`. This fixes the red env-tests job of the 0.4.1 tag (#320).
+- **The names-check tests run on macOS and Windows**: the check of a folder works on a list of names, so
+  names those systems cannot store (`a:b.md`, `Plan.md` next to `plan.md`) are tested everywhere; the
+  parts that need such files on disk find out at run time whether the file system holds them and are
+  skipped with a note where it does not (#321).
+- **The test of "Update set" runs on Windows too** (#323). It wrote the folder it imports from into
+  `set.toml` by hand, and a Windows path's backslashes are escapes in a TOML string, so the set could
+  not be read and had no **Update set** button. The test now writes `set.toml` the way an import does,
+  and a new test checks that a Windows path of a local source is read back unchanged. Sets imported on
+  Windows were not affected: the import always wrote the path escaped.
+
+### Tests
+
+- **The folder-note test of the PDF book passes on Windows** (#322). It compared the folder note's path
+  as OS text (`T\A\Index.md` on Windows) with a vault path; it now compares it as a vault path with `/`
+  (`vault::rel_to_string`) and as the vault's own path. The book itself was not affected: it only uses
+  the vault's paths and compares them as paths, never as text.
+
 ## [0.5.0] - 2026-11-17
 
 ### Added
