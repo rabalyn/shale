@@ -2045,9 +2045,9 @@ fn a_mail_that_may_have_been_sent_waits_for_the_person_and_a_failed_one_can_be_r
     w.typ("mail:compose:subject", "Did it go");
     w.write_body("hello");
     w.ctrl_enter();
-    w.until("the mail is unsure", |a| a.mail.local_items.iter().any(|i| i.state == OutState::Unsure));
+    // the entry is Unsure on disk (and re-read while it was Sending) before the job's answer adds the notice: wait for both
+    w.until("the mail is unsure and the notice is shown", |a| a.mail.local_items.iter().any(|i| i.state == OutState::Unsure) && a.mail.problems.iter().any(|p| p.contains("may have been sent")));
     assert_eq!(smtp.state().received.len(), 1, "it did arrive: nobody could have known");
-    assert!(w.app.mail.problems.iter().any(|p| p.contains("may have been sent")));
     let acct = w.account.id.clone();
     w.click(&format!("mail:outbox:{acct}"));
     w.until("the entry is listed", |a| a.mail.rects.iter().any(|r| r.0 == "mail:outbox:0"));
