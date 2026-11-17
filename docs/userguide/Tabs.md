@@ -1,6 +1,7 @@
 ---
 features:
   - "Tabs"
+  - "Panes side by side"
 ---
 # Tabs
 

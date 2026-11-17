@@ -388,6 +388,8 @@ pub enum Outcome {
     Close,
     /// follow the link as `gt` does, and close it
     Open,
+    /// Ctrl+Enter: follow the link in a new pane right of this one, and close it (EDIT-036)
+    OpenInSplit,
 }
 
 /// The open preview.
@@ -434,6 +436,12 @@ impl Open {
                 if ctrl && !modifiers.alt && matches!(key, Key::D | Key::U) {
                     if *pressed {
                         moves.push(if *key == Key::D { self.page } else { -self.page });
+                    }
+                    return false;
+                }
+                if ctrl && !modifiers.alt && !modifiers.shift && *key == Key::Enter {
+                    if *pressed && out == Outcome::Stay {
+                        out = Outcome::OpenInSplit;
                     }
                     return false;
                 }

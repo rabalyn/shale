@@ -229,6 +229,36 @@ fn edit_035_k_again_focuses_the_preview_j_scrolls_esc_gives_the_cursor_back_ente
     assert_eq!(w.app.tabbar.tabs.len(), 1);
 }
 
+// spec: EDIT-036, NAV-033
+#[test]
+fn edit_036_ctrl_enter_opens_the_note_in_a_new_pane_on_the_right() {
+    let mut w = W::new("split", NOTE);
+    w.cursor_at("Ideas");
+    w.shift_k();
+    // an unfocused preview leaves Ctrl+Enter alone
+    w.key(Key::Enter, Modifiers::COMMAND, "");
+    assert_eq!(w.app.panes.len(), 1);
+    w.shift_k();
+    w.key(Key::Enter, Modifiers::COMMAND, "");
+    assert!(w.open().is_none(), "the preview closes");
+    assert_eq!(w.app.panes.len(), 2, "a second pane");
+    assert_eq!(w.app.panes.focused, 1, "the new pane on the right has the focus");
+    assert_eq!(w.view(), View::Note("Ideas.md".into()), "it shows the linked note");
+    assert_eq!(w.app.pane_bar(0).tabs[w.app.pane_bar(0).active].view, View::Note("A.md".into()), "the note being edited stays in its pane");
+    // a missing note is created, as with Enter
+    w.app.focus_pane(0);
+    w.app.focus_editor();
+    w.settle();
+    w.cursor_at("Nothing");
+    w.shift_k();
+    w.shift_k();
+    w.key(Key::Enter, Modifiers::COMMAND, "");
+    assert_eq!(w.app.panes.len(), 3);
+    assert_eq!(w.app.panes.focused, 1, "right of the pane it came from");
+    assert_eq!(w.view(), View::Note("Nothing.md".into()));
+    assert!(w.dir.join("Nothing.md").exists());
+}
+
 // spec: EDIT-035, EDIT-034
 #[test]
 fn edit_035_enter_on_a_missing_note_creates_it_like_gt() {

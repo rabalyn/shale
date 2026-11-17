@@ -34,7 +34,7 @@ impl ShaleApp {
     }
 
     /// The keys of the preview lead to one of three outcomes; this is the one place that does what they
-    /// ask (the split pane of raba/shale#249 gets its outcome here).
+    /// ask (Ctrl+Enter's split pane too, EDIT-036).
     pub(super) fn link_preview_outcome(&mut self, outcome: Outcome) {
         match outcome {
             Outcome::Stay => {}
@@ -47,6 +47,15 @@ impl ShaleApp {
                     Target::Web { .. } => PathBuf::new(),
                 };
                 handle_editor_action(&mut self.actions, open.target.follow(false), &from);
+            }
+            Outcome::OpenInSplit => {
+                let Some(open) = self.link_preview.open.take() else { return };
+                match open.target {
+                    // the note opens (or is created) as Enter does, in a new pane on the right
+                    Target::Link { target, heading, from } => self.in_split_right(|app| app.open_link(&target, heading, Some(from), true)),
+                    // a web page has no pane: it opens in the browser, as with Enter
+                    web @ Target::Web { .. } => handle_editor_action(&mut self.actions, web.follow(false), &PathBuf::new()),
+                }
             }
         }
     }
@@ -133,5 +142,25 @@ impl ShaleApp {
                 self.link_preview_outcome(Outcome::Close);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{Action, Options};
+    use super::*;
+    use crate::link_preview::Content;
+
+    // spec: EDIT-036
+    #[test]
+    fn ctrl_enter_on_a_web_link_opens_the_browser_and_no_pane() {
+        let mut app = ShaleApp::build(Options { screenshot: None, vault: None, view: None, keys: None }, false);
+        let url = "https://example.org/".to_string();
+        let target = Target::Web { url: url.clone() };
+        app.link_preview.open = Some(Open::new(target, Content::Web { url: url.clone() }, (1, 0, 0), Rect::ZERO));
+        app.link_preview_outcome(Outcome::OpenInSplit);
+        assert!(app.link_preview.open.is_none());
+        assert_eq!(app.panes.len(), 1);
+        assert!(matches!(app.actions.as_slice(), [Action::OpenUrl(u)] if *u == url));
     }
 }

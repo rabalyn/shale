@@ -155,11 +155,17 @@ impl ShaleApp {
 
     /// Open `view` in a new tab of a new pane right of the focused one and focus it (NAV-033).
     pub fn open_in_split_right(&mut self, view: View) {
+        self.in_split_right(|app| match view {
+            View::Note(rel) | View::Drawing(rel) => app.open(&rel, true),
+            other => app.show_view(other, true),
+        });
+    }
+
+    /// Run `open` with a new pane right of the focused one as the focused pane; it opens what the
+    /// pane shows (a view, a link of the link preview, EDIT-036).
+    pub(crate) fn in_split_right(&mut self, open: impl FnOnce(&mut Self)) {
         self.add_pane_right();
-        match view {
-            View::Note(rel) | View::Drawing(rel) => self.open(&rel, true),
-            other => self.show_view(other, true),
-        }
+        open(self);
         // a file that could not be opened leaves no empty pane behind
         if self.tabbar.tabs.is_empty() {
             self.close_pane(self.panes.focused);

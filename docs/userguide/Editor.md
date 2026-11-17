@@ -184,7 +184,8 @@ session), so the window never waits: it says "Loading …" first, and says why w
 read. The editor keeps the keyboard: moving the cursor, typing or **Esc** closes the preview. Press
 **Shift+K** again and the keyboard moves into the preview: **j / k** or **↓ / ↑** scroll,
 **Ctrl+D / Ctrl+U** or **PageDown / PageUp** scroll a page, **Enter** opens the link exactly as `gt`
-does (a missing note is created), and **Esc** closes the preview and gives the keyboard back to the
+does (a missing note is created), **Ctrl+Enter** opens it in a new pane to the right of this
+one (see [[Tabs]]; a web link opens in the browser as with Enter), and **Esc** closes the preview and gives the keyboard back to the
 editor, with the cursor where it was and the text unchanged. Off a link, Shift+K only says so in the
 status bar. The key is one of the definable ones (Settings → Keybindings → Vim-style editing, normal
 mode): you can give it, for example, **Space Space**.
