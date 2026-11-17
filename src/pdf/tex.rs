@@ -6,7 +6,7 @@
 pub mod compile;
 pub mod engine;
 pub mod install;
-mod proc;
+pub(crate) mod proc;
 pub mod settings_ui;
 
 pub use engine::TexConfig;

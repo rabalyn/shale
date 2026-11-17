@@ -62,7 +62,7 @@ pub fn run(mut cmd: Command, timeout: Duration, cancel: Option<&AtomicBool>, mut
         // CREATE_NO_WINDOW: no console window flashes up for a command line tool
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.spawn()?;
+    let mut child = spawn(&mut cmd)?;
     let (tx, rx) = mpsc::channel::<String>();
     let readers: Vec<_> = [child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>), child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>)]
         .into_iter()
@@ -123,6 +123,28 @@ pub fn run(mut cmd: Command, timeout: Duration, cancel: Option<&AtomicBool>, mut
     Ok(Run { ending: ending.unwrap_or(Ending::Exited(None)), tail: tail.into() })
 }
 
+/// Start `cmd`. On Linux a program file that was written a moment ago can be "text file busy"
+/// while another thread's `fork` still holds it open for writing; that passes within
+/// milliseconds, so it is tried again for a short while.
+#[cfg(unix)]
+fn spawn(cmd: &mut Command) -> io::Result<std::process::Child> {
+    let mut tries = 0;
+    loop {
+        match cmd.spawn() {
+            Err(e) if tries < 100 && e.raw_os_error() == Some(libc::ETXTBSY) => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            r => return r,
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn spawn(cmd: &mut Command) -> io::Result<std::process::Child> {
+    cmd.spawn()
+}
+
 /// Send the lines of a pipe (split at `\n` and `\r`, empty ones left out) until it closes.
 fn read_lines(mut pipe: Box<dyn Read + Send>, tx: mpsc::Sender<String>) {
     let mut pending: Vec<u8> = Vec::new();
@@ -167,4 +189,42 @@ fn kill_tree(child: &mut std::process::Child) {
         let _ = Command::new("taskkill").args(["/PID", &child.id().to_string(), "/T", "/F"]).creation_flags(0x0800_0000).stdout(Stdio::null()).stderr(Stdio::null()).status();
     }
     let _ = child.kill();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    // spec: IMP-035
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_is_still_open_for_writing_is_started_when_the_file_is_closed() {
+        let dir = std::env::temp_dir().join(format!("shale-proc-busy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("prog");
+        let mut open = std::fs::File::create(&script).unwrap();
+        io::Write::write_all(&mut open, b"#!/bin/sh\necho started\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // while it is open for writing the system refuses to run it (ETXTBSY); it is closed in a moment
+        let closer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            drop(open);
+        });
+        let run = run(Command::new(&script), Duration::from_secs(20), None, |_| {}).unwrap();
+        closer.join().unwrap();
+        assert!(run.success() && run.tail == ["started"], "{run:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: IMP-035
+    #[test]
+    fn a_program_that_is_missing_is_an_error_at_once() {
+        let started = Instant::now();
+        let e = run(Command::new("/no/such/program"), Duration::from_secs(20), None, |_| {}).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::NotFound);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

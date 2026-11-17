@@ -60,6 +60,7 @@ mod pdf;
 mod picker;
 #[cfg(test)]
 mod preview_ui_tests;
+mod program;
 mod reader;
 mod recorder;
 mod recovery;
