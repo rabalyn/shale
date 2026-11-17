@@ -1,4 +1,5 @@
-# TU Darmstadt, report: the minimal tudapub setup without an accent colour, no margin column.
+# TU Darmstadt, report: the minimal tudapub setup without an accent colour, no margin column. The
+# writer maps the headings by nesting: # to \section, ## to \subsection (mapping "article").
 name = "Report"
 description = "Reports without accent colour and margin column (class tudapub, type=intern)"
 mapping = "article"

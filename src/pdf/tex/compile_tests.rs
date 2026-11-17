@@ -187,7 +187,8 @@ stem=${{last%.tex}}
 if [ -f "$S/log.$n" ]; then cp "$S/log.$n" "$stem.log"; else cp "$S/log.last" "$stem.log"; fi
 if [ -f "$S/exit" ]; then exit $(cat "$S/exit"); fi
 echo '%PDF-1.5 fake' > "$stem.pdf"
-if [ -f "$S/bcf" ]; then cp "$S/bcf" "$stem.bcf"; fi"#,
+if [ -f "$S/bcf" ]; then cp "$S/bcf" "$stem.bcf"; fi
+if [ -f "$S/toc.$n" ]; then cp "$S/toc.$n" "$stem.toc"; fi"#,
                     st.display()
                 ),
             );
@@ -261,6 +262,32 @@ if [ -f "$S/bcf" ]; then cp "$S/bcf" "$stem.bcf"; fi"#,
         assert_eq!(out.runs, 3, "two asks, then a clean log");
         assert!(out.font_cache_built, "the fixture log says the font database was built");
         assert!(!f.state().join("biber.calls").exists(), "no .bcf, no biber");
+    }
+
+    // spec: TEX-004
+    #[test]
+    fn it_runs_again_while_the_contents_and_the_bookmarks_change_though_the_log_does_not_say_so() {
+        // the first run makes the table of contents, the second fills it, the third finds nothing new
+        let f = Fake::new("toc");
+        f.lualatex();
+        f.put("log.last", "all done\n");
+        f.put("toc.1", "\\contentsline {section}{A}{1}\n");
+        f.put("toc.2", "\\contentsline {section}{A}{2}\n");
+        f.put("toc.3", "\\contentsline {section}{A}{2}\n");
+        let out = compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap();
+        assert_eq!(out.runs, 3, "a new file, a changed one, then the same");
+        // a document with a contents that does not change on its second run needs two runs, one without none
+        let f = Fake::new("toc-same");
+        f.lualatex();
+        f.put("log.last", "all done\n");
+        f.put("toc.1", "x\n");
+        f.put("toc.2", "x\n");
+        assert_eq!(compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap().runs, 2);
+        // no such file: one run
+        let f = Fake::new("no-toc");
+        f.lualatex();
+        f.put("log.last", "all done\n");
+        assert_eq!(compile(&f.engine(), work_with_main(), "main.tex", &Options::default()).unwrap().runs, 1);
     }
 
     // spec: TEX-004

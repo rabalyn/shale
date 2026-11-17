@@ -53,8 +53,8 @@ pages, rendered in the background). PDFs dropped on the window go through [[Impo
 ## LaTeX export: the TeX it needs
 
 A note can also be exported through LaTeX templates (the first ones are the TU Darmstadt classes
-`tuda-ci`; they are imported into your vault, and the export dialog that uses them comes with a
-later version of Shale). That needs **LuaLaTeX** and **biber**. **Settings → LaTeX** sets up
+`tuda-ci`; they are imported into your vault, and the export dialog uses them: see "LaTeX export:
+a note through a template" below). That needs **LuaLaTeX** and **biber**. **Settings → LaTeX** sets up
 the TeX and checks it:
 
 ![[settings-latex.png]]
@@ -165,14 +165,107 @@ does not know you write them yourself (the README of the set has an example):
 | Key | Meaning |
 |---|---|
 | `name`, `description` | what the export dialog shows |
-| `mapping` | how the note becomes the document: `article` (H1 title, H2 `\section`), `book` (H2 `\chapter`), `beamer` (H2 a frame), `letter`, `poster` |
+| `mapping` | how the note becomes the document: `article` (`#` is a `\section`), `book` (`#` is a `\chapter`), `beamer` (`#` a section, `##` a frame), `letter`, `poster` (text without numbers; a class named `…sciposter` gets boxes); see below |
 | `class` | the document class, a `<class>.cls` in `tex/` or in TeX Live |
 | `before_class` | lines of LaTeX before `\documentclass` (for tuda-ci the PDF/A set-up that some kinds need) |
 | `options` | the class options; `{accent}` and `{language}` are filled in from `settings.toml`, and an option whose `{accent}` is empty is left out |
 | `preamble` | lines of LaTeX after `\documentclass` (`{language}` and `{lang}` are filled in too) |
 | `logo` | `true` when the kind needs the set's logo |
+| `columns` | `poster` kinds: the text of the note in this many columns (the poster has 2) |
 | `[[fields]]` | one table per value: `key` (the property of the note), `label`, `command` (the LaTeX command that gets it, `title` for `\title{…}`) or `komavar` (`\setkomavar{…}` of a letter), `required`, `default` (LaTeX code used when the note has none) |
 
-A kind that cannot be read is shown in red in the list of sets with the reason. The export dialog
-that lets you pick a set and a kind, and the conversion of the note itself, come with later versions of
-Shale; today the sets, their logo and the test page are there.
+A kind that cannot be read is shown in red in the list of sets with the reason.
+
+## LaTeX export: a note through a template
+
+![[pdf-export-dialog-latex.png]]
+
+Open the export dialog of a note (**⋯ → Export to PDF…**) and choose **LaTeX template** at the top, next to
+**Built-in**, which stays the default and works as described under "Export" above. A drawing is
+always exported with the built-in engine.
+
+- **Template set** and **Kind** list the sets of the vault ([[PDF]], "template sets") and the kinds
+  of the set: publication, report, exercise sheet, thesis, doctoral thesis, slides, letter, poster,
+  scientific poster, leaflet and announcement for TU Darmstadt. A vault without a set says so and
+  points to Settings → LaTeX → Template sets.
+- The **fields** of the kind are text boxes, filled from the note's properties (below); a field
+  with a star must have a value. The page size, margins, text size, title and page numbers are not
+  in the dialog: the template decides them. **Table of contents** is there for the kinds that have
+  one (publication, report, exercise sheet, thesis, doctoral thesis) and greyed out for the others;
+  the box for embedded pictures stays.
+- A line under the fields says which TeX is used, or **No TeX: install it in Settings → LaTeX**
+  (**Export** is off then). A red warning says that the set's logo is missing: the PDF then has a grey
+  placeholder where the logo goes and is not CI-conformant (see "The logo").
+- **Export** writes the note as a LaTeX document and compiles it in the background: the dialog shows
+  that it is working and the window stays usable; **Cancel** (or closing the dialog) stops it. The PDF goes
+  to the path of the dialog (`<vault>/exports/<name>.pdf` by default). The first export after an
+  install is slower: LuaLaTeX builds a font cache.
+- When it fails, the dialog stays open and shows what went wrong in words: the file and line of the
+  error (`main.tex:21: Undefined control sequence.`), a package that is missing, and the end of the log.
+  **Save the .tex** writes `main.tex`, its pictures and a `README.txt` with the command to compile it
+  into a folder next to the PDF (`<name>-tex`), so you can look at it and run it with your own TeX.
+- The dialog remembers the engine, set and kind you used last, per vault. A note can name its own
+  template with the property `latex-template: tuda/thesis` (the folder of the set, a slash, the
+  kind's file name); the dialog then opens on LaTeX with that kind.
+
+### How the note becomes the document
+
+The title is the note's name without a `YYMMDD_` date prefix (or the property `title`); a first
+heading `#` that says the same is not printed again. The front matter is never printed; its
+properties fill the fields of the kind:
+
+| Kind | Properties (`*` must have a value) |
+|---|---|
+| Publication, report | `title`* (the note's name), `subtitle`, `author`*, `date` |
+| Exercise sheet | `title`*, `subtitle`, `author`*, `term`, `sheet`, `date` |
+| Thesis | `title`*, `subtitle`, `author`*, `reviewer`, `department`, `institute`, `group`, `submissiondate`, `examdate` |
+| Doctoral thesis | as the thesis, and `dedication` |
+| Slides | `title`*, `subtitle`, `author`*, `department`, `institute`, `date` |
+| Letter | `recipient`*, `subject`* (the note's name), `sender`, `sender_address`, `date`, `opening`, `closing` |
+| Poster | `title`*, `subtitle`, `author`*, `footer` |
+| Scientific poster | `title`*, `subtitle`, `author`*, `institute`, `footer` |
+| Leaflet | `title`*, `subtitle` |
+| Announcement | `title`*, `subtitle`, `author`*, `info`, `footer` |
+
+A list (`author: [Ada, Bob]` or one `- name` per line) becomes `Ada \and Bob`; for the lines of an
+address use a block:
+
+```
+---
+recipient: |
+  Dr. Grace Hopper
+  Navy Street 1
+---
+```
+
+or write `\\` between the lines in the dialog. Whatever you write in a field is text, never LaTeX: the
+only exceptions are `\and` and `\\`. A field that is empty gets the default of the kind (for example the
+thesis' `submissiondate` is today); `date` is not set when empty, and the class puts in today's.
+
+**Headings** follow how they are nested, starting with `#`: in a publication, report or exercise
+sheet `#` is a `\section`, `##` a `\subsection`, `###` a `\subsubsection`, deeper ones paragraphs;
+in a thesis or doctoral thesis `#` is a `\chapter`, then `\section` and so on. A `###` directly under a `#`
+is the next level down: no level is skipped. The numbers follow the note's property `numbered-headings` and the
+setting (see [[Notes and links]]); without numbers the headings are still in the contents. The
+contents list the `#` to `###` headings, and the PDF's bookmarks have all levels.
+
+- **Slides:** `#` makes a section (for the navigation of the slides) and `##` a slide with that title and
+  what is below it; smaller headings are bold lines in the slide. A note with only `#` headings has
+  a slide for each. Text before the first heading, or between a `#` and its first `##`, gets a slide
+  of its own. The title slide comes from the fields. A slide that is too full continues on the next
+  page.
+- **Letter:** the text of the note is the body of the letter; headings become bold lines. The recipient,
+  subject (the note's name when you give none), opening and closing come from the properties.
+- **Poster, announcement and leaflet:** the note's text with headings in the same nesting but without
+  numbers; the poster sets its text in two columns. A **scientific poster** makes a box for every
+  heading of the top level of the note, with its title and what is below it, in two columns.
+
+Also exported: emphasis, strong, ~~strike-through~~, inline code, block quotes, lists, task lists
+(a box, with a cross when done), rules, tables (with the alignment of their columns, a bold header and
+the column widths you set in the editor), fenced code in its syntax colours (on white paper, without a
+grey background), web links (clickable), the highlights and colours of [[Editor]] as exact colours, and
+`![[…]]` embeds on a line of their own: a picture as wide in proportion to the text as in the
+note, a drawing as a vector graphic, all pages of a PDF, each with its caption; a file that is
+missing is a red line `[missing: name]` in the PDF and a note in the message afterwards, and a sound
+or video is such a line too. Wiki links show their text (they are not clickable in the PDF), and a
+picture inside a line of text is shown as its link text. Footnotes do not exist in notes.

@@ -3,7 +3,7 @@
 //! and remove a set. Import and the test page are background jobs of the page (`TexState::start`);
 //! a removal goes through the window's own trash (VAULT-017), which the settings tab carries out.
 
-use super::compile::CompileError;
+use super::compile::{CompileError, Options};
 use super::engine::{Engine, TexConfig};
 use super::import::{self, Request, What};
 use super::sets::{self, SetEntry, SetInfo, Source};
@@ -121,7 +121,7 @@ fn test_page_notice(engine: &Engine, set: &SetInfo) -> Notice {
         return fail(format!("“{}” has no article kind to make a test page of (see its README)", set.meta.name), None);
     };
     let source = sets::sample_document(kind, &set.settings);
-    match sets::compile_with_set(engine, set, "test-page.tex", &source, &[]) {
+    match sets::compile_with_set(engine, set, "test-page.tex", &source, &[], Options::default()) {
         Ok(out) => {
             let logo = if out.placeholder_logo { " It has a placeholder logo, so it is not CI-conformant." } else { "" };
             let text = format!("The test page of “{}” (kind {id}) compiled to a PDF of {} KB.{logo}", set.meta.name, out.output.pdf.len().div_ceil(1024));

@@ -246,6 +246,9 @@ pub struct KindManifest {
     /// export says it is not conformant.
     #[serde(default)]
     pub logo: bool,
+    /// Poster kinds: the text of the note is set in this many columns (0 and 1: one).
+    #[serde(default)]
+    pub columns: u8,
     /// The values of the kind and where they go.
     #[serde(default)]
     pub fields: Vec<Field>,
@@ -302,7 +305,7 @@ impl KindManifest {
 }
 
 /// The lines before the class, `\documentclass[options]{class}` and the preamble of a kind.
-fn class_and_preamble(k: &KindManifest, s: &SetSettings) -> String {
+pub(super) fn class_and_preamble(k: &KindManifest, s: &SetSettings) -> String {
     let opts = k.class_options(s).join(",");
     let mut t: String = k.before_class_lines(s).iter().map(|l| format!("{l}\n")).collect();
     t.push_str(&if opts.is_empty() { format!("\\documentclass{{{}}}\n", k.class) } else { format!("\\documentclass[{opts}]{{{}}}\n", k.class) });
@@ -313,7 +316,11 @@ fn class_and_preamble(k: &KindManifest, s: &SetSettings) -> String {
     t
 }
 
-/// Text for TeX: its special characters written as themselves.
+/// Text for TeX: every character that TeX would read as a command, a group, a comment or a shortcut
+/// is written as itself, so that no text of a note can end the document or run anything
+/// (TEX-008). The characters `\ { } $ & # ^ _ ~ %` get their commands, `"` (a shortcut of babel's German) and `< > |`
+/// (ligatures and old encodings) too; control characters and the byte order mark are left out.
+/// Unicode stays Unicode: the engine is LuaLaTeX.
 pub fn tex_escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -323,8 +330,14 @@ pub fn tex_escape(text: &str) -> String {
                 out.push('\\');
                 out.push(c);
             }
-            '^' => out.push_str("\\^{}"),
-            '~' => out.push_str("\\~{}"),
+            '^' => out.push_str("\\textasciicircum{}"),
+            '~' => out.push_str("\\textasciitilde{}"),
+            '"' => out.push_str("\\textquotedbl{}"),
+            '<' => out.push_str("\\textless{}"),
+            '>' => out.push_str("\\textgreater{}"),
+            '|' => out.push_str("\\textbar{}"),
+            '\t' | '\n' | '\r' | '\u{2028}' | '\u{2029}' => out.push(' '),
+            c if c.is_control() || c == '\u{feff}' => {}
             c => out.push(c),
         }
     }
@@ -559,7 +572,8 @@ pub struct SetOutput {
 /// Compile `main_tex` (with its text and the files it needs) against a set: `TEXINPUTS` is the
 /// set's `tex/`, its `logo/` and TeX's own. Without a logo in the slot a placeholder is put into
 /// the compile's work folder (never into the vault) so the class does not fail on the missing file.
-pub fn compile_with_set(engine: &Engine, set: &SetInfo, main_tex: &str, source: &str, files: &[(&str, &[u8])]) -> Result<SetOutput, CompileError> {
+/// `opts` carry the timeout and the cancel flag (TEX-004); its `tex_inputs` are replaced by the set's.
+pub fn compile_with_set(engine: &Engine, set: &SetInfo, main_tex: &str, source: &str, files: &[(&str, &[u8])], opts: Options) -> Result<SetOutput, CompileError> {
     let fail = |m: String| CompileError { headline: m, problems: vec![], log_tail: String::new() };
     let work = WorkDir::new().map_err(|e| fail(format!("no temporary folder ({e})")))?;
     work.write(main_tex, source.as_bytes()).map_err(|e| fail(format!("{main_tex} could not be written ({e})")))?;
@@ -577,7 +591,7 @@ pub fn compile_with_set(engine: &Engine, set: &SetInfo, main_tex: &str, source: 
     if set.dir.join("logo").is_dir() {
         tex_inputs.push(set.dir.join("logo"));
     }
-    let output = compile(engine, work, main_tex, &Options { tex_inputs, ..Options::default() })?;
+    let output = compile(engine, work, main_tex, &Options { tex_inputs, ..opts })?;
     Ok(SetOutput { output, placeholder_logo })
 }
 

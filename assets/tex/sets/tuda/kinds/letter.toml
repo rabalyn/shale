@@ -1,6 +1,7 @@
 # TU Darmstadt, letter (class tudaletter, KOMA-Script's scrlttr2). The recipient is the argument of
 # the letter environment; the fields with a komavar are set with \setkomavar{name}{value}
-# (mapping "letter"). The sender's address data can be put in an .lco file in tex/.
+# (mapping "letter"): headings are bold lines. The subject is the note's name when the note gives
+# none. The sender's address data can be put in an .lco file in tex/.
 name = "Letter"
 description = "Letters (class tudaletter)"
 mapping = "letter"

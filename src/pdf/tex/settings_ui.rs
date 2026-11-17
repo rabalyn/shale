@@ -186,7 +186,7 @@ fn test_notice(engine: &Engine) -> Notice {
     }
 }
 
-fn engine_name(e: &Engine) -> &'static str {
+pub fn engine_name(e: &Engine) -> &'static str {
     match e.kind {
         Kind::Managed => "the TeX Live that Shale installs",
         Kind::System => "the TeX of this computer",

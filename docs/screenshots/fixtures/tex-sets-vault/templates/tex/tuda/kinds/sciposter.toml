@@ -1,5 +1,6 @@
 # TU Darmstadt, scientific poster (class tudasciposter, boxes of tcolorbox's poster library).
-# The writer puts every H2 into a posterboxenv of a tcbposter (mapping "poster").
+# The writer puts every heading of the shallowest level of the note (# or ##) into a posterboxenv
+# of a tcbposter, in two columns (mapping "poster", and a class named *sciposter).
 name = "Scientific poster"
 description = "Scientific posters with boxes (class tudasciposter)"
 mapping = "poster"

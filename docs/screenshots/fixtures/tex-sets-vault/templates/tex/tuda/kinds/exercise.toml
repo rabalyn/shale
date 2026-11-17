@@ -1,4 +1,5 @@
-# TU Darmstadt, exercise sheet (class tudaexercise): a sheet with a term and a sheet number.
+# TU Darmstadt, exercise sheet (class tudaexercise): a sheet with a term and a sheet number. The
+# writer maps the headings by nesting: # to \section, ## to \subsection (mapping "article").
 name = "Exercise sheet"
 description = "Exercise sheets (class tudaexercise)"
 mapping = "article"

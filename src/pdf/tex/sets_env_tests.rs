@@ -4,6 +4,7 @@
 //! container, no network) and a document of every one of the 11 kinds is compiled from the set in
 //! the vault, without a logo (the placeholder) and with one.
 
+use super::compile::Options;
 use super::compile_tests::container_engine;
 use super::engine::Engine;
 use super::import::*;
@@ -16,7 +17,13 @@ use std::time::Duration;
 
 /// The folder the container mounts: the temporary root of the compiles. The vault lives in it
 /// too, so the container sees the set's files at the same path.
-fn mounted_root() -> PathBuf {
+/// Options for a compile in the container: a fresh container builds the font database before it
+/// starts, which takes long when the machine is busy, so a run may take much longer than in a window.
+pub(super) fn patient() -> Options {
+    Options { timeout: Duration::from_secs(900), ..Options::default() }
+}
+
+pub(super) fn mounted_root() -> PathBuf {
     crate::fsutil::private_temp_root("shale-tex").unwrap()
 }
 
@@ -31,7 +38,7 @@ fn request(vault: &Path, what: What, engine: Engine) -> Request {
 }
 
 /// The vault with the imported set, made once for all tests of the run.
-fn imported_vault() -> &'static (PathBuf, Imported) {
+pub(super) fn imported_vault() -> &'static (PathBuf, Imported) {
     static VAULT: OnceLock<(PathBuf, Imported)> = OnceLock::new();
     VAULT.get_or_init(|| {
         let root = mounted_root();
@@ -44,7 +51,7 @@ fn imported_vault() -> &'static (PathBuf, Imported) {
     })
 }
 
-fn the_set() -> SetInfo {
+pub(super) fn the_set() -> SetInfo {
     let (vault, _) = imported_vault();
     scan(vault).into_iter().find(|e| e.id == "tuda").expect("the set tuda").info.unwrap_or_else(|e| panic!("{e}"))
 }
@@ -95,7 +102,7 @@ fn compile_every_kind(set: &SetInfo, expect_placeholder: bool) {
     let mut failed = vec![];
     for (id, kind) in &set.kinds {
         let doc = sample_document(kind, &set.settings);
-        match compile_with_set(&engine, set, "page.tex", &doc, &[]) {
+        match compile_with_set(&engine, set, "page.tex", &doc, &[], patient()) {
             Err(e) => failed.push(format!("{id}: {e}\n{}\n--- the document:\n{doc}", e.log_tail)),
             Ok(out) => {
                 if out.placeholder_logo != expect_placeholder {
@@ -209,7 +216,7 @@ fn tex_import_the_newest_tuda_ci_from_ctan_is_imported_and_its_test_page_compile
     assert_eq!(set.meta.source, Source::Ctan { url: CTAN_URL.into() });
     assert_eq!(super::sets_ui::what_for(&set.meta.source), What::Ctan);
     let (id, kind) = test_kind(&set).unwrap();
-    let out = compile_with_set(&engine, &set, "page.tex", &sample_document(kind, &set.settings), &[]).unwrap_or_else(|e| panic!("kind {id}: {e}\n{}", e.log_tail));
+    let out = compile_with_set(&engine, &set, "page.tex", &sample_document(kind, &set.settings), &[], patient()).unwrap_or_else(|e| panic!("kind {id}: {e}\n{}", e.log_tail));
     assert!(out.placeholder_logo && out.output.pdf.starts_with(b"%PDF"));
     let _ = std::fs::remove_dir_all(&vault);
 }
