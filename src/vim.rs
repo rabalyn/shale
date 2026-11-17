@@ -20,6 +20,29 @@ pub enum Mode {
     VisualLine,
 }
 
+/// Where the cursor lands when Esc leaves insert mode (EDIT-043). Written in the settings file as
+/// `stay` or `step_back`.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EscCursor {
+    /// On the character right after the typing (at the end of a line: on its last character).
+    #[default]
+    Stay,
+    /// One character back, as in vim.
+    StepBack,
+}
+
+impl EscCursor {
+    pub const ALL: [EscCursor; 2] = [EscCursor::Stay, EscCursor::StepBack];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            EscCursor::Stay => "Cursor stays where you stopped",
+            EscCursor::StepBack => "Step back one character (like Vim)",
+        }
+    }
+}
+
 /// One key as vim-lite sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VimKey {
@@ -256,10 +279,11 @@ impl Vim {
         self.cursor = clamp_normal(&c, cursor);
     }
 
-    /// Leave insert mode: the cursor steps back one character, as in vim.
-    pub fn leave_insert(&mut self, text: &str, cursor: usize) {
+    /// Leave insert mode. With `EscCursor::StepBack` the cursor steps back one character, as in
+    /// vim; with `EscCursor::Stay` it stays on the character right after the typing (EDIT-043).
+    pub fn leave_insert(&mut self, text: &str, cursor: usize, esc: EscCursor) {
         let c: Vec<char> = text.chars().collect();
-        let back = if cursor > line_start(&c, cursor) { cursor - 1 } else { cursor };
+        let back = if esc == EscCursor::StepBack && cursor > line_start(&c, cursor) { cursor - 1 } else { cursor };
         self.mode = Mode::Normal;
         self.want_col = None;
         self.cursor = clamp_normal(&c, back);
@@ -569,6 +593,10 @@ mod tests {
 
     /// Run keys (typed characters; `<esc>`, `<cr>`, `<bs>`, `<c-r>` for the others) from `cursor`.
     fn run(text: &str, cursor: usize, keys: &str) -> (Vim, String, Effects) {
+        run_esc(text, cursor, keys, EscCursor::default())
+    }
+
+    fn run_esc(text: &str, cursor: usize, keys: &str, esc: EscCursor) -> (Vim, String, Effects) {
         let mut v = Vim::default();
         let mut t = text.to_string();
         v.reset(&t, cursor);
@@ -592,7 +620,7 @@ mod tests {
                 // in insert mode the text box types; only Esc comes back here
                 if k == VimKey::Esc {
                     let c = v.cursor;
-                    v.leave_insert(&t, c);
+                    v.leave_insert(&t, c, esc);
                 } else if let VimKey::Char(ch) = k {
                     replace_chars(&mut t, v.cursor, v.cursor, &ch.to_string());
                     v.cursor += 1;
@@ -674,6 +702,28 @@ mod tests {
         assert_eq!(at("Straße STRAẞE", 0, "/straße<cr>"), 7);
     }
 
+    // spec: EDIT-043
+    #[test]
+    fn esc_leaves_the_cursor_on_the_character_after_the_typing_or_steps_back() {
+        // mid-line: "a" + "XY" typed at 1 leaves the insert cursor at 3, before "b"
+        let (v, _, _) = run("abc", 1, "iXY<esc>");
+        assert_eq!((v.mode, v.cursor), (Mode::Normal, 3), "stay is the default: on the b");
+        let (v, t, _) = run_esc("abc", 1, "iXY<esc>", EscCursor::StepBack);
+        assert_eq!((v.cursor, t.as_str()), (2, "aXYbc"), "step back: on the Y");
+        // end of line: the cursor is clamped onto the last character either way
+        let (v, _, _) = run_esc("abc\nd", 0, "AX<esc>", EscCursor::Stay);
+        assert_eq!(v.cursor, 3);
+        let (v, _, _) = run_esc("abc\nd", 0, "AX<esc>", EscCursor::StepBack);
+        assert_eq!(v.cursor, 3);
+        // nothing typed at the line start: it cannot step back over the line break
+        assert_eq!(run_esc("ab\ncd", 3, "i<esc>", EscCursor::StepBack).0.cursor, 3);
+        assert_eq!(run_esc("ab\ncd", 3, "i<esc>", EscCursor::Stay).0.cursor, 3);
+        // an empty line
+        assert_eq!(run_esc("a\n\nb", 2, "i<esc>", EscCursor::Stay).0.cursor, 2);
+        // the default is stay
+        assert_eq!(EscCursor::default(), EscCursor::Stay);
+    }
+
     // spec: EDIT-013
     #[test]
     fn entering_and_leaving_insert_mode() {
@@ -684,7 +734,7 @@ mod tests {
         assert_eq!(run("abc\nd", 0, "oX<esc>").1, "abc\nX\nd");
         assert_eq!(run("abc\nd", 4, "OX<esc>").1, "abc\nX\nd");
         let (v, _, _) = run("abc", 0, "AX<esc>");
-        assert_eq!((v.mode, v.cursor), (Mode::Normal, 3), "Esc steps back onto the typed X");
+        assert_eq!((v.mode, v.cursor), (Mode::Normal, 3), "at the line end the cursor is on the typed X");
         assert_eq!(run("abc", 1, "x").1, "ac");
         assert_eq!(run("abc", 2, "x").0.cursor, 1, "x at the line end keeps the cursor on the line");
         assert_eq!(run("\nabc", 0, "x").1, "\nabc", "x on an empty line does nothing");

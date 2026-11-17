@@ -14,6 +14,7 @@ mod latex;
 mod mail_social;
 mod sync_calendar;
 mod vault;
+mod vim;
 
 use crate::app::{muted, ShaleApp};
 use crate::keys_ui::KeyDialog;
@@ -26,6 +27,8 @@ pub enum SettingsTab {
     /// The vault folder, closing it and the people folder: the short page Settings opens on.
     Vault,
     Editor,
+    /// A sub-category of Editor: listed right after it and drawn indented.
+    Vim,
     Appearance,
     Fonts,
     Sync,
@@ -40,10 +43,19 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
+    /// How far the name of a sub-category is moved to the right in the tab list (points).
+    pub const SUB_INDENT: f32 = 14.0;
+
+    /// The tab is a sub-category of the one before it (drawn indented).
+    pub fn is_sub(self) -> bool {
+        self == SettingsTab::Vim
+    }
+
     /// All tabs in the order of the list.
-    pub const ALL: [SettingsTab; 13] = [
+    pub const ALL: [SettingsTab; 14] = [
         SettingsTab::Vault,
         SettingsTab::Editor,
+        SettingsTab::Vim,
         SettingsTab::Appearance,
         SettingsTab::Fonts,
         SettingsTab::Sync,
@@ -61,6 +73,7 @@ impl SettingsTab {
         match self {
             SettingsTab::Vault => "Vault",
             SettingsTab::Editor => "Editor",
+            SettingsTab::Vim => "Vim",
             SettingsTab::Appearance => "Appearance",
             SettingsTab::Fonts => "Fonts",
             SettingsTab::Sync => "Sync",
@@ -81,7 +94,8 @@ impl SettingsTab {
     fn about(self) -> &'static str {
         match self {
             SettingsTab::Vault => "The folder this vault lives in, and where its contacts are",
-            SettingsTab::Editor => "How notes are edited: links, tables, Vim keys and the toolbar",
+            SettingsTab::Editor => "How notes are edited: the cursor, links, tables and the toolbar",
+            SettingsTab::Vim => "Vim-style editing: the switch, the cursor of normal mode and the link preview",
             SettingsTab::Appearance => "How notes, drawings and media look",
             SettingsTab::Fonts => "The font and text size of the editor, dialogs, mail, calendar and feeds",
             SettingsTab::Sync => "Keep this vault in a git repository",
@@ -104,7 +118,13 @@ const TAB_GRAB: f32 = 4.0;
 /// The width of the tab list when no width is set (CFG-041): the widest tab name laid out on one
 /// line in the font of the tab buttons, plus the padding of a button, rounded up.
 pub(crate) fn auto_tab_width(ui: &Ui) -> f32 {
-    let widest = SettingsTab::ALL.iter().map(|t| egui::WidgetText::from(t.label()).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x).fold(0.0, f32::max);
+    let widest = SettingsTab::ALL
+        .iter()
+        .map(|t| {
+            let indent = if t.is_sub() { SettingsTab::SUB_INDENT } else { 0.0 };
+            indent + egui::WidgetText::from(t.label()).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button).size().x
+        })
+        .fold(0.0, f32::max);
     (widest + 2.0 * ui.spacing().button_padding.x).ceil()
 }
 
@@ -152,7 +172,16 @@ impl ShaleApp {
                 ui.set_width(width);
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                     for t in SettingsTab::ALL {
-                        ui.selectable_value(tab, t, t.label());
+                        if t.is_sub() {
+                            // a sub-category of the tab before it: moved to the right, no guide line
+                            ui.scope(|ui| {
+                                ui.spacing_mut().indent = SettingsTab::SUB_INDENT;
+                                ui.visuals_mut().indent_has_left_vline = false;
+                                ui.indent(("settings-sub-tab", t.label()), |ui| ui.selectable_value(tab, t, t.label()));
+                            });
+                        } else {
+                            ui.selectable_value(tab, t, t.label());
+                        }
                     }
                 });
             });
@@ -186,7 +215,8 @@ impl ShaleApp {
                 }
                 let changed = match *tab {
                     SettingsTab::Vault => self.vault_tab(ui, vault_path, &mut asks),
-                    SettingsTab::Editor => self.editor_tab(ui),
+                    SettingsTab::Editor => self.editor_tab(ui, tab),
+                    SettingsTab::Vim => self.vim_tab(ui, tab),
                     SettingsTab::Appearance => self.appearance_tab(ui),
                     SettingsTab::Fonts => self.fonts_tab(ui),
                     SettingsTab::Sync => self.sync_tab(ui),

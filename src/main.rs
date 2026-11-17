@@ -49,6 +49,9 @@ mod link_preview_ui_tests;
 mod lists;
 mod mail;
 mod markdown;
+mod math;
+#[cfg(test)]
+mod math_ui_tests;
 mod media;
 #[cfg(test)]
 mod notes_vault_tests;

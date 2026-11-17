@@ -499,6 +499,8 @@ pub type Spans = Vec<(Range<usize>, LinkSpan, bool)>;
 pub struct LaidCell {
     pub galley: Arc<Galley>,
     pub spans: Spans,
+    /// the formulas in it (EDIT-048)
+    pub maths: Vec<crate::reader::MathAt>,
 }
 
 /// A table laid out for a given width: row 0 is the header.
@@ -557,8 +559,8 @@ fn halign(c: Col) -> Align {
 }
 
 /// One cell as a layout job (the inline formatting of the reading view); the header is bold.
-fn cell_job(text: &str, links: &[(LinkSpan, bool)], base: f32, header: bool) -> (LayoutJob, Spans) {
-    let (mut job, spans, _) = crate::reader::cell_painted(text, links, base, theme::TEXT);
+fn cell_job(text: &str, links: &[(LinkSpan, bool)], base: f32, header: bool) -> (LayoutJob, Spans, Vec<crate::reader::MathAt>) {
+    let (mut job, spans, _, mut maths) = crate::reader::cell_painted(text, links, base, theme::TEXT);
     if header {
         for s in &mut job.sections {
             if s.format.color == theme::TEXT {
@@ -566,8 +568,11 @@ fn cell_job(text: &str, links: &[(LinkSpan, bool)], base: f32, header: bool) -> 
                 s.format.extra_letter_spacing = 0.3;
             }
         }
+        for m in maths.iter_mut().filter(|m| m.color == theme::TEXT) {
+            m.color = theme::TEXT_STRONG;
+        }
     }
-    (job, spans)
+    (job, spans, maths)
 }
 
 /// The words of a job (split at blanks), each as a job of its own with the formats it had: the
@@ -620,7 +625,7 @@ pub fn stored_widths(cols: &[f32], ncols: usize, avail: f32) -> Option<Vec<f32>>
 /// text.
 pub fn layout(ctx: &egui::Context, table: &Table, sizes: &Sizes, base: f32, avail: f32, exists: &dyn Fn(&LinkSpan) -> bool) -> Laid {
     let ncols = table.header.len();
-    let mut jobs: Vec<Vec<(LayoutJob, Spans)>> = Vec::new();
+    let mut jobs: Vec<Vec<(LayoutJob, Spans, Vec<crate::reader::MathAt>)>> = Vec::new();
     for (r, row) in std::iter::once(&table.header).chain(&table.rows).enumerate() {
         jobs.push(
             row.iter()
@@ -635,7 +640,7 @@ pub fn layout(ctx: &egui::Context, table: &Table, sizes: &Sizes, base: f32, avai
     let mut natural = vec![0.0f32; ncols];
     let mut min = vec![0.0f32; ncols];
     for row in &jobs {
-        for (c, (job, _)) in row.iter().enumerate() {
+        for (c, (job, ..)) in row.iter().enumerate() {
             natural[c] = natural[c].max(measure(job));
             min[c] = min[c].max(words(job).iter().map(measure).fold(0.0, f32::max));
         }
@@ -651,12 +656,12 @@ pub fn layout(ctx: &egui::Context, table: &Table, sizes: &Sizes, base: f32, avai
     for (r, row) in jobs.into_iter().enumerate() {
         let mut laid_row = Vec::new();
         let mut h = base * 1.5;
-        for (c, (mut job, spans)) in row.into_iter().enumerate() {
+        for (c, (mut job, spans, maths)) in row.into_iter().enumerate() {
             job.wrap.max_width = text_w[c].max(1.0);
             job.halign = halign(table.aligns[c]);
             let galley = ctx.fonts_mut(|f| f.layout_job(job));
             h = h.max(galley.size().y);
-            laid_row.push(LaidCell { galley, spans });
+            laid_row.push(LaidCell { galley, spans, maths });
         }
         let least = if rows_fit { sizes.rows[r] } else { 0.0 };
         heights.push((h + 2.0 * PAD_Y).max(least));
@@ -677,7 +682,16 @@ pub fn paint(painter: &egui::Painter, origin: Pos2, laid: &Laid) {
         let mut x = origin.x;
         for (c, cell) in row.iter().enumerate() {
             let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(laid.widths[c], laid.heights[r]));
-            painter.with_clip_rect(rect).galley(laid.anchor(origin, r, c), cell.galley.clone(), Color32::PLACEHOLDER);
+            let cell_painter = painter.with_clip_rect(rect);
+            let anchor = laid.anchor(origin, r, c);
+            cell_painter.galley(anchor, cell.galley.clone(), Color32::PLACEHOLDER);
+            // the formulas of the cell, in the room their hidden TeX has (EDIT-048)
+            for m in &cell.maths {
+                if let Ok(f) = &m.formula {
+                    let at = markdown::byte_to_char(&cell.galley.job.text, m.range.start.min(cell.galley.job.text.len()));
+                    crate::math::paint::paint_in_galley(&cell_painter, &cell.galley, anchor, at, f, m.color);
+                }
+            }
             x += laid.widths[c];
             if c + 1 < row.len() {
                 painter.line_segment([Pos2::new(x, origin.y), Pos2::new(x, origin.y + size.y)], line);

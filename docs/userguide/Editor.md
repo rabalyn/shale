@@ -11,9 +11,9 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 - **Alt+↑ / Alt+↓** move the current line.
 - A gutter on the left shows **line numbers** (Settings → Editor, on by default);
   a wrapped line keeps one number.
-- The **cursor** has a shape of your choice (Settings → Editor): a bar before the character at the
+- The **cursor** has a shape of your choice (Settings → Editor → Cursor): a bar before the character at the
   cursor (the default), a bar after it, a block or an underline. With vim-style editing the cursor in
-  normal mode has its own choice (default: block). "Blinking cursor" turns the blinking off.
+  normal mode has its own choice (Settings → Vim, default: block). "Blinking cursor" turns the blinking off.
 
 ## The title line and pasting
 
@@ -101,6 +101,26 @@ line in the cell, where the table is drawn as a grid; the cell editor keeps the 
 All of this also shows in the heading titles of the outline, in table cells, and in the [[PDF]]
 export, where a footnote reference links to its definition. Word notes imported with pandoc use
 exactly these forms (see [[Import]]).
+
+## Math
+
+A formula between dollar signs is set in the text, `$E = mc^2$`, and two dollar signs make a display formula, centred in a row of its own:
+
+```
+The roots of a quadratic are $x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$.
+
+$$
+\sum_{k=1}^{n} k^2 = \frac{n(n+1)(2n+1)}{6}
+$$
+```
+
+![[math-editor.png]]
+
+The opening `$` is not followed by a space, the closing one is not preceded by a space and not followed by a digit, and both are on one line, so `costs $5 and $10` is no formula; `\$` is a plain dollar sign. A display formula is `$$…$$` on one line, or `$$` on lines of their own around one or more lines, or a ```` ```math ```` block. Nothing in code or in the front matter is a formula.
+
+Shale typesets formulas itself, with the bundled font STIX Two Math (SIL Open Font License, its licence is beside it in the program's sources) and no TeX installed. It knows letters in math italic, digits and operators upright, `{}` groups, `^` and `_` (also both, and nested), `\frac`, `\dfrac`, `\tfrac`, `\binom`, `\sqrt` and `\sqrt[n]`, Greek letters, the usual relations, binary operators, arrows and symbols, big operators with limits (`\sum`, `\prod`, `\int`, `\iint`, `\oint`, `\lim`; the limits stand below and above in display style and beside the symbol in the text; `\limits` and `\nolimits` change that), function names (`\sin`, `\log`, `\max`, `\operatorname{…}`), `\left…\right` delimiters that grow with their content, accents (`\hat`, `\bar`, `\vec`, `\dot`, `\tilde`, `\overline`, `\underline`), `\text{…}`, `\mathrm`, `\mathbf`, `\mathit`, `\mathbb`, `\mathcal`, the spaces `\,` `\:` `\;` `\quad` `\qquad` `\!`, and the environments `matrix`, `pmatrix`, `bmatrix`, `vmatrix`, `cases` and `aligned` (rows `\\`, columns `&`).
+
+With the Markdown preview on, a formula takes the place of its TeX; the line with the cursor shows the TeX, as with every other markup (the TeX stays in the note, so the cursor, selection and search work on it). The same formulas are drawn in the [[Reading view]], in table cells, in the headings of the outline and in the [[PDF]] export. A formula Shale cannot typeset (an unknown command, braces that do not match, `\left` without `\right`, more than 64 levels of nesting or more than 10 000 characters) stays as its TeX in the code style, and the reason shows when you point at it. Word files imported with pandoc bring their formulas as `$…$` and `$$…$$` (see [[Import]]).
 
 ## Code
 
@@ -209,8 +229,10 @@ Videos resize the same way (the controls stay below the picture; **100%** is the
 
 ## Vim-style editing
 
-Settings → Editor, off by default. Notes open in normal mode. The cursor in normal mode is a block
-unless you choose another shape ("Cursor in normal mode"); typing uses "Cursor while typing".
+Settings → Vim (listed under Editor), off by default. Notes open in normal mode. The cursor in normal mode is a block
+unless you choose another shape ("Cursor in normal mode"); typing uses "Cursor while typing" (Settings → Editor).
+When you press Esc to leave insert mode, the cursor stays on the character right after where you stopped
+typing; "Esc from insert mode" can make it step back one character like Vim does.
 
 | Keys | What it does |
 |---|---|
@@ -243,7 +265,7 @@ mode): you can give it, for example, **Space Space**.
 The preview's size can be changed: drag one of its four edges or four corners (the mouse pointer
 turns into a resize arrow). The preview stays open while you drag, and the editor's cursor stays where
 it is. The size is a setting that every preview uses and that is still there after a restart:
-Settings → Editor → "Link preview size (Shift+K)" shows it as two numbers (width and height in points;
+Settings → Vim → "Link preview size" shows it as two numbers (width and height in points;
 at least 240 x 160, and never bigger than the window) with a **Reset size** button, see [[Settings reference]].
 
 The status bar shows NORMAL, INSERT, VISUAL or V-LINE. The vim keys themselves cannot be

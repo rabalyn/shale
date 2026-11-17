@@ -57,6 +57,14 @@ struct Fmt {
     /// footnotes (EDIT-043): 1 the label of a reference, 2 the label of a definition (both raised
     /// once the line is drawn rendered), 3 the text of a definition (a little smaller)
     fnote: u8,
+    /// the TeX of a formula that the preview draws typeset: 1 + its number among the marks; the
+    /// text is hidden and the section has room for the formula (EDIT-048)
+    math: u32,
+    /// the second and later lines of a display formula that takes several lines: one point tall
+    math_rest: bool,
+    /// the text of a line with a formula that reaches below it has line boxes this much taller, in
+    /// quarter points (EDIT-048)
+    math_extra: u16,
 }
 
 pub fn heading_scale(level: u8) -> f32 {
@@ -215,6 +223,49 @@ pub fn highlight(text: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob
 /// outside that range is hidden (invisible, about one point wide); the text itself stays the
 /// same so that cursor, clicks and vim keep their indices.
 pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorFonts, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> LayoutJob {
+    highlight_with_math(text, links, fonts, images, raw_lines).0
+}
+
+/// A formula of the note that the Markdown preview draws (EDIT-048): its lines are not raw.
+#[derive(Clone)]
+pub(crate) struct MathMark {
+    /// the formula with its delimiters, bytes of the text
+    pub range: Range<usize>,
+    /// it takes whole lines: centred in a row of its own
+    pub block: bool,
+    pub lines: Range<usize>,
+    /// the size of the text it stands in
+    pub em: f32,
+    pub color: Color32,
+    pub formula: crate::math::Typeset,
+}
+
+/// The formulas that the preview draws (EDIT-048): those of the note whose lines are not raw (with
+/// `raw_lines` the preview is on; without it every line is raw), left alone where a table's grid or
+/// a picture takes the text's place. The size is that of the text of the line (a heading's is bigger).
+pub(crate) fn math_marks(text: &str, base: f32, images: &[(Range<usize>, f32)], raw_lines: Option<&Range<usize>>) -> Vec<MathMark> {
+    let Some(raw) = raw_lines else { return Vec::new() };
+    let lines = markdown::lines_with_offsets(text);
+    let mut out = Vec::new();
+    for m in markdown::find_math(text) {
+        if (m.lines.start < raw.end && raw.start < m.lines.end) || images.iter().any(|(r, _)| r.start < m.range.end && m.range.start < r.end) {
+            continue;
+        }
+        let line = lines.get(m.lines.start).map_or("", |(_, l)| *l);
+        let (em, color) = match markdown::heading_level(line) {
+            _ if m.block => (base * crate::math::DISPLAY_SCALE, theme::TEXT),
+            Some(level) => (base * heading_scale(level as u8), theme::HEADING),
+            _ if line.trim_start().starts_with('>') => (base, theme::QUOTE),
+            _ => (base, theme::TEXT),
+        };
+        let formula = crate::math::typeset(&text[m.tex.clone()], em, m.display);
+        out.push(MathMark { range: m.range, block: m.block, lines: m.lines, em, color, formula });
+    }
+    out
+}
+
+/// [`highlight_preview`] and the formulas it drew typeset, which are painted over their hidden TeX.
+pub(crate) fn highlight_with_math(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorFonts, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> (LayoutJob, Vec<MathMark>) {
     let mut fmts = vec![Fmt::default(); text.len()];
     let fenced = markdown::fenced_code_lines(text);
     for block in syntax::fenced_blocks(text) {
@@ -375,6 +426,27 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorF
             set(&mut fmts, r.clone(), |f| f.image_h = h.round().clamp(1.0, 30000.0) as u16);
         }
     }
+    // the formulas of the lines the preview draws: typeset, their TeX hidden with room for them in
+    // the first row; one that cannot be typeset is shown as code (EDIT-047, EDIT-049)
+    let marks = math_marks(text, fonts.rendered.size, images, raw_lines.as_ref());
+    let line_starts = markdown::lines_with_offsets(text);
+    for (n, m) in marks.iter().enumerate() {
+        if let (Ok(f), false) = (&m.formula, m.block) {
+            let extra = crate::math::paint::room_for(f, m.em).0;
+            let (from, to) = (line_starts[m.lines.start].0, line_starts.get(m.lines.end).map_or(text.len(), |(o, _)| *o));
+            set(&mut fmts, from..to, |x| x.math_extra = x.math_extra.max((extra * 4.0).ceil() as u16));
+        }
+        if m.formula.is_ok() {
+            let first_end = if m.block { line_starts.get(m.lines.start + 1).map_or(text.len(), |(o, _)| *o) } else { m.range.end };
+            set(&mut fmts, m.range.start..first_end.min(m.range.end.max(first_end)), |f| *f = Fmt { math: n as u32 + 1, ..Fmt::default() });
+            if m.block {
+                let rest_end = line_starts.get(m.lines.end).map_or(text.len(), |(o, _)| *o);
+                set(&mut fmts, first_end..rest_end.max(first_end), |f| *f = Fmt { math_rest: true, ..Fmt::default() });
+            }
+        } else {
+            set(&mut fmts, m.range.clone(), |f| *f = Fmt { code: true, rendered: true, heading: f.heading, quote: f.quote, ..Fmt::default() });
+        }
+    }
     let mut job = LayoutJob { text: text.to_string(), ..Default::default() };
     let mut start = 0;
     let mut cur: Option<Fmt> = None;
@@ -383,7 +455,19 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorF
         if f != cur || i == text.len() {
             if let Some(c) = cur {
                 if i > start {
-                    job.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(i), format: to_format(c, fonts) });
+                    let (leading_space, format) = match marks.get((c.math as usize).wrapping_sub(1)).map(|m| (m, &m.formula)) {
+                        Some((m, Ok(f))) if m.block => (0.0, crate::math::paint::block_format(f, m.em)),
+                        Some((m, Ok(f))) => {
+                            // the first character is a section of its own; the room is before the rest
+                            let at = start + crate::math::paint::room_starts(&text[start..i]);
+                            job.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(at), format: crate::math::paint::hidden_format(f, m.em) });
+                            start = at;
+                            (f.layout.width, crate::math::paint::hidden_format(f, m.em))
+                        }
+                        _ if c.math_rest => (0.0, TextFormat { font_id: FontId::proportional(crate::math::paint::HIDDEN_SIZE), color: Color32::TRANSPARENT, line_height: Some(1.0), ..Default::default() }),
+                        _ => (0.0, to_format(c, fonts)),
+                    };
+                    job.sections.push(egui::text::LayoutSection { leading_space, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(i), format });
                 }
             }
             start = i;
@@ -393,7 +477,7 @@ pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorF
     if job.sections.is_empty() {
         job.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(0)..egui::text::ByteIndex(text.len()), format: to_format(Fmt::default(), fonts) });
     }
-    job
+    (job, marks)
 }
 
 /// A heading number to draw (LINK-014): where its title starts in the text, the number and the font.
@@ -454,6 +538,30 @@ fn paint_numbers(ui: &Ui, marks: &[NumberMark], galley: &Galley, galley_pos: Pos
     }
 }
 
+/// Draw the formulas of the preview over the room their hidden TeX has (EDIT-048), and say why one
+/// that could not be typeset is shown as code when the pointer is on it (EDIT-049).
+fn paint_math(ui: &Ui, marks: &[MathMark], galley: &Galley, pos: Pos2, resp: &egui::Response) {
+    let painter = ui.painter().with_clip_rect(ui.clip_rect());
+    let text = &galley.job.text;
+    let pointer = ui.input(|i| i.pointer.hover_pos()).filter(|_| resp.hovered());
+    let under = pointer.map(|p| galley.cursor_from_pos(p - pos).index.0);
+    for m in marks {
+        if m.range.end > text.len() {
+            continue;
+        }
+        let at = markdown::byte_to_char(text, m.range.start);
+        match &m.formula {
+            Ok(f) if m.block => crate::math::paint::paint_block_in_galley(&painter, galley, pos, at, (pos.x, resp.rect.right()), f, m.color),
+            Ok(f) => crate::math::paint::paint_in_galley(&painter, galley, pos, at, f, m.color),
+            Err(why) => {
+                if under.is_some_and(|c| (at..markdown::byte_to_char(text, m.range.end)).contains(&c)) {
+                    resp.clone().on_hover_text(format!("This formula cannot be typeset: {why}"));
+                }
+            }
+        }
+    }
+}
+
 /// A heading title as the outline shows it (LINK-013): the editor's inline styling (bold, italic,
 /// code, strike, highlight, `<mark>` colours, links by their shown text) with the markup left out
 /// of the text altogether, not just hidden.
@@ -462,14 +570,36 @@ pub fn outline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> Layout
     let mut out = LayoutJob::default();
     for s in &job.sections {
         let hidden = s.format.color == Color32::TRANSPARENT && s.format.font_id.size <= 1.0;
-        if hidden {
+        // a formula keeps its hidden TeX and the room for it, to be painted over (EDIT-048)
+        if hidden && !crate::math::paint::is_hidden_formula(&s.format) {
             continue;
         }
         let start = out.text.len();
         out.text.push_str(&job.text[s.byte_range.start.0..s.byte_range.end.0]);
-        out.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(out.text.len()), format: s.format.clone() });
+        out.sections.push(egui::text::LayoutSection { leading_space: s.leading_space, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(out.text.len()), format: s.format.clone() });
     }
     out
+}
+
+/// A heading as the outline shows it: [`outline_job`] laid out as a clickable label, with its
+/// formulas painted typeset over the room their hidden TeX has (EDIT-048).
+pub fn outline_label(ui: &mut Ui, job: LayoutJob, base: f32) -> egui::Response {
+    let mut job = job;
+    job.wrap.max_width = ui.available_width();
+    let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
+    let (rect, resp) = ui.allocate_exact_size(galley.size(), egui::Sense::click());
+    ui.painter().galley(rect.min, galley.clone(), theme::TEXT);
+    // a formula is two sections: its first character, and the rest with the room before it
+    let sections = &galley.job.sections;
+    for (n, s) in sections.iter().enumerate().filter(|(n, s)| *n > 0 && s.leading_space > 0.0 && crate::math::paint::is_hidden_formula(&s.format)) {
+        let start = sections[n - 1].byte_range.start.0;
+        let shown = &galley.job.text[start..s.byte_range.end.0];
+        if let Ok(f) = crate::math::typeset(shown.trim_matches('$'), base, shown.starts_with("$$")) {
+            let at = markdown::byte_to_char(&galley.job.text, start);
+            crate::math::paint::paint_in_galley(ui.painter(), &galley, rect.min, at, &f, theme::TEXT);
+        }
+    }
+    resp
 }
 
 fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
@@ -531,7 +661,7 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
             theme::FAINT
         };
     }
-    let mut tf = TextFormat { font_id, color, italics: if mono { f.italic || f.quote } else { styled.fake_italic }, line_height: Some(size * 1.5), ..Default::default() };
+    let mut tf = TextFormat { font_id, color, italics: if mono { f.italic || f.quote } else { styled.fake_italic }, line_height: Some(size * 1.5 + f.math_extra as f32 / 4.0), ..Default::default() };
     if f.fence || (f.code && !f.dim) {
         tf.background = theme::CODE_BG;
     }
@@ -679,6 +809,8 @@ pub struct NoteEditor {
     pub vim_cursor_rect: Option<Rect>,
     /// the shapes and the blinking of the text cursor (EDIT-039…EDIT-041)
     pub cursor_style: crate::cursor_style::CursorStyle,
+    /// where Esc from insert mode puts the cursor (EDIT-043)
+    pub esc_cursor: crate::vim::EscCursor,
     /// where the cursor was drawn last frame (char, normal mode) and when it moved there (seconds)
     cursor_seen: Option<((usize, bool), f64)>,
     /// The formatting toolbar above the text (EDIT-026)
@@ -739,6 +871,7 @@ impl NoteEditor {
             vim_follow: false,
             vim_cursor_rect: None,
             cursor_style: crate::cursor_style::CursorStyle::default(),
+            esc_cursor: crate::vim::EscCursor::default(),
             cursor_seen: None,
             bar: Default::default(),
             format_request: None,
@@ -956,7 +1089,7 @@ impl NoteEditor {
             // Esc back to normal mode (an open popup took its Esc already, above)
             if !self.assist.is_open() && !self.assist.picker_visible() && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
                 let cur = self.text_cursor(ui).map(|c| c.0).unwrap_or(0);
-                self.vim.leave_insert(text, cur);
+                self.vim.leave_insert(text, cur, self.esc_cursor);
                 self.vim_apply_cursor(ui, text);
             }
             return false;
@@ -1574,6 +1707,7 @@ impl NoteEditor {
         let links_text = text.clone();
         let numbered_default = self.numbered_headings;
         let number_marks = std::cell::RefCell::new(Vec::new());
+        let formula_marks = std::cell::RefCell::new(Vec::new());
         self.assist.arm(text, media_handled);
         let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| -> Arc<Galley> {
             let s = buf.as_str();
@@ -1596,7 +1730,8 @@ impl NoteEditor {
             if let Some(raw) = &preview {
                 ranges.extend(table_rows(s, &table_keys, raw).into_iter().flat_map(|g| g.rows));
             }
-            let mut job = highlight_preview(s, use_links, fonts, &ranges, preview.clone());
+            let (mut job, formulas) = highlight_with_math(s, use_links, fonts, &ranges, preview.clone());
+            *formula_marks.borrow_mut() = formulas;
             *number_marks.borrow_mut() = make_room_for_numbers(ui, &mut job, fonts, numbered_default, preview.as_ref());
             job.wrap.max_width = wrap_width;
             ui.ctx().fonts_mut(|f| f.layout_job(job))
@@ -1629,6 +1764,7 @@ impl NoteEditor {
 
         self.last_layout = Some((output.galley.clone(), output.galley_pos));
         paint_numbers(ui, &number_marks.borrow(), &output.galley, output.galley_pos);
+        paint_math(ui, &formula_marks.borrow(), &output.galley, output.galley_pos, resp);
         if let Some(r) = output.cursor_range.filter(|_| resp.has_focus() && self.keep_selection.is_none()) {
             self.last_selection = Some((r.primary.index.0, r.secondary.index.0));
         }
@@ -2150,6 +2286,7 @@ mod tests {
         let mut undo = crate::undo::Histories::default();
         let mut ed = NoteEditor::new(egui::Id::unique("vim-ed"));
         ed.vim_enabled = true;
+        ed.esc_cursor = crate::vim::EscCursor::StepBack;
         let mut text = String::from("alpha beta\ngamma delta\nsee [[Ide");
         let cursor = |ctx: &egui::Context, ed: &NoteEditor| egui::text_edit::TextEditState::load(ctx, ed.id).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0).unwrap();
         let typed = |s: &str| vec![Event::Text(s.into())];

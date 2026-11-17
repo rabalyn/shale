@@ -106,3 +106,33 @@ fn edit_041_a_steady_cursor_is_painted_in_every_frame_and_a_blinking_one_goes_ou
     let shown: Vec<bool> = (0..60).map(|_| !w.cursor_paint().0.is_empty()).collect();
     assert!(shown.contains(&true) && shown.contains(&false), "{shown:?}");
 }
+
+// spec: EDIT-043
+#[test]
+fn edit_043_esc_leaves_the_cursor_where_the_typing_stopped_unless_step_back_is_chosen() {
+    use crate::vim::EscCursor;
+    // the default: i, type, Esc: the block is over the character after the typing
+    let mut w = W::new("esc-stay");
+    assert_eq!(w.app.cfg.esc_cursor, EscCursor::Stay);
+    w.type_key(Key::G, "g");
+    w.type_key(Key::G, "g");
+    w.type_key(Key::I, "i");
+    let (bar, _) = (w.cursor_paint().0[0], ());
+    w.type_key(Key::X, "x");
+    let (bar_after_typing, _) = (w.cursor_paint().0[0], ());
+    assert!(bar_after_typing.min.x > bar.min.x, "the bar moved on with the typing");
+    w.type_key(Key::Escape, "");
+    let block = w.vim_cursor_rect().expect("normal mode");
+    assert_eq!(block.min.x, bar_after_typing.min.x, "the block is where the bar was: {block:?} {bar_after_typing:?}");
+    // step back: the block is over the typed character
+    let mut w = W::new("esc-back");
+    w.app.cfg.esc_cursor = EscCursor::StepBack;
+    w.type_key(Key::G, "g");
+    w.type_key(Key::G, "g");
+    w.type_key(Key::I, "i");
+    w.type_key(Key::X, "x");
+    let bar = w.cursor_paint().0[0];
+    w.type_key(Key::Escape, "");
+    let block = w.vim_cursor_rect().expect("normal mode");
+    assert!(block.min.x < bar.min.x, "one character back: {block:?} {bar:?}");
+}

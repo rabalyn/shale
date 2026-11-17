@@ -340,6 +340,10 @@ pub struct Config {
     pub normal_cursor_shape: crate::cursor_style::CursorShape,
     /// The cursor blinks (EDIT-041).
     pub cursor_blink: bool,
+    /// Where Esc from vim's insert mode puts the cursor (EDIT-043); an unknown word in the file
+    /// is the default.
+    #[serde(deserialize_with = "lenient")]
+    pub esc_cursor: crate::vim::EscCursor,
     /// IMAP accounts of the mail view.
     pub mail_accounts: Vec<MailAccount>,
     /// The mail view fetches new mail by itself every this many minutes while the app runs
@@ -434,6 +438,7 @@ impl Default for Config {
             cursor_shape: crate::cursor_style::CursorShape::Bar,
             normal_cursor_shape: crate::cursor_style::CursorShape::Block,
             cursor_blink: true,
+            esc_cursor: crate::vim::EscCursor::Stay,
             mail_accounts: vec![],
             mail_sync_minutes: 10,
             mail_mark_read: true,

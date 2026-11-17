@@ -27,9 +27,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   on the same dark code background (PDF-007).
 - Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
-- The **text cursor** (Settings → Editor) is one of four shapes: a bar before the character (default), a bar after it,
+- The **text cursor** (Settings → Editor → Cursor) is one of four shapes: a bar before the character (default), a bar after it,
   a block or an underline; with Vim-style editing the cursor of normal mode has its own choice (default: block).
-  "Blinking cursor" (on by default) makes it steady when off. Exactly one cursor is drawn in every mode.
+  "Blinking cursor" (on by default) makes it steady when off. The Vim tab (listed under Editor) holds the Vim settings: the switch, the cursor of normal mode, "Esc from insert mode" (the cursor stays after the typing by default, or steps back like Vim) and the link preview size. Exactly one cursor is drawn in every mode.
 - A **formatting toolbar** above the text (Settings → Editor, on by default, button size 80–200 %) has a button for
   everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
   Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, tables, `[[note]]`
@@ -55,6 +55,16 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   export (a reference links to its definition) and is what pandoc writes for a Word document.
 
   ![Colours and the toolbar](userguide/z_media/screenshots/editor-colours.png)
+
+- **Math.** `$E = mc^2$` is set in the text, and `$$…$$` on lines of its own (or a ```` ```math ```` block) is
+  set centred in display style: fractions, roots, scripts, sums and integrals with limits, matrices,
+  cases, delimiters that grow and the usual symbols, typeset by Shale itself (pure Rust, no TeX needed)
+  with the bundled font STIX Two Math. It shows in the reading view, the editor's Markdown preview (the
+  cursor line shows its TeX), table cells, the outline and the PDF export, where it is drawn as sharp
+  vector outlines; a formula Shale cannot typeset stays as code, and says why when you point at it.
+
+  ![Math in the reading view](userguide/z_media/screenshots/math-reading.png)
+  ![Math in the Markdown preview](userguide/z_media/screenshots/math-editor.png)
 
 - Lists continue when you press Enter (also numbered lists and to-dos `- [ ]` / `1. [ ]`).
   Tab and Shift+Tab indent list items or change heading levels, and Alt+↑/↓ move lines.
@@ -112,7 +122,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   drawn as thumbnails with their link as the caption below, as big in proportion to the text as in
   the editor: a picture made smaller keeps its share of the width, a sound or video is drawn as its
   player card; highlights and font colours are printed as written, as are footnotes (a reference links to
-  its definition), underline, sub and superscript and `<br>` in table cells; a **Contents** page after the title lists the
+  its definition), underline, sub and superscript, `<br>` in table cells and math (vector outlines); a **Contents** page after the title lists the
   `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
   heading is a `#` that says the same as the title, the separate title is left out, PDF-008), insert a
@@ -244,7 +254,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![A table in the reading view](userguide/z_media/screenshots/table-reading.png)
 
-- **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
+- **Vim-style editing** (Settings → Vim, off by default): notes open in normal mode. h j k l, w b,
   W B, 0 $, gg G move; `:12` jumps to line 12; `/text` searches and n / N go on; i a I A o O
   start typing, Esc stops; x deletes a character; `dd` deletes the line (onto the clipboard,
   `p` puts it back below); v and V select with the same motions, d cuts and y copies to the

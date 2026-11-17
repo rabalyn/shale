@@ -229,8 +229,20 @@ if [ -f "$S/bcf" ]; then cp "$S/bcf" "$stem.bcf"; fi"#,
         let f = Fake::new("args");
         f.lualatex();
         f.put("log.last", "clean log\n");
-        let work = work_with_main();
+        // the work folder is behind a symlink, as the temp folder is on macOS (/var -> /private/var, #301):
+        // the engine reports the resolved folder, so the test compares resolved paths
+        let tmp = std::env::temp_dir();
+        let real = tmp.join(format!("shale-tex-linked-real-{}", std::process::id()));
+        let link = tmp.join(format!("shale-tex-linked-{}", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_dir_all(&real);
+        std::fs::create_dir_all(&real).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let work = WorkDir::new_in(&link).unwrap();
+        work.write("main.tex", b"\\documentclass{article}").unwrap();
         let path = work.path().to_path_buf();
+        // resolved before the compile, which removes the folder
+        let resolved = std::fs::canonicalize(&path).unwrap();
         // a folder name that a shell would run
         let templates = std::env::temp_dir().join("a$(touch pwned)b");
         let opts = Options { tex_inputs: vec![templates.clone()], ..Options::default() };
@@ -240,13 +252,15 @@ if [ -f "$S/bcf" ]; then cp "$S/bcf" "$stem.bcf"; fi"#,
         for a in ["-interaction=nonstopmode", "-halt-on-error", "-file-line-error", "-no-shell-escape", "main.tex"] {
             assert!(args.split_whitespace().any(|x| x == a), "{a} in {args}");
         }
-        assert_eq!(f.get("pwd").trim(), path.to_str().unwrap().trim(), "run in the work folder");
+        assert_eq!(PathBuf::from(f.get("pwd").trim()), resolved, "run in the work folder");
         let env = f.get("env");
         assert!(env.lines().any(|l| l == "openout_any=p"), "documents write only into their folder");
         let inputs = env.lines().find_map(|l| l.strip_prefix("TEXINPUTS=")).expect("TEXINPUTS is set");
         assert_eq!(inputs, format!("{}//:", templates.display()), "the folder, searched with its sub folders, then the default");
         assert!(!Path::new("pwned").exists() && !path.join("pwned").exists(), "nothing is run by a shell");
         assert!(!path.exists(), "the work folder is removed after the compile");
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_dir_all(&real);
     }
 
     // spec: TEX-004

@@ -8,7 +8,7 @@ use crate::markdown::{self, LinkSpan};
 use crate::syntax;
 use crate::theme;
 use crate::vault::{FileKind, Vault};
-use eframe::egui::{self, text::LayoutJob, Color32, CornerRadius, FontFamily, FontId, Sense, Stroke, TextFormat, Ui, Vec2};
+use eframe::egui::{self, text::LayoutJob, Color32, CornerRadius, FontFamily, FontId, Galley, Pos2, Sense, Stroke, TextFormat, Ui, Vec2};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -133,8 +133,22 @@ pub(crate) fn footnote_of(l: &LinkSpan) -> Option<(Foot, &str)> {
 /// and the text colour as written. The PDF export draws these exactly as written.
 pub(crate) type Paint = (Range<usize>, Option<[u8; 4]>, Option<[u8; 4]>);
 
-/// A line as a layout job, the links in it and its coloured text.
-pub(crate) type Painted = (LayoutJob, Vec<(Range<usize>, LinkSpan, bool)>, Vec<Paint>);
+/// A formula in a line (EDIT-048): where its TeX stands in the job's text (hidden when it was
+/// typeset, with room for the formula before it; shown as code when not), what came of it and the
+/// colour and size it is drawn in.
+#[derive(Clone)]
+pub(crate) struct MathAt {
+    pub range: Range<usize>,
+    pub formula: crate::math::Typeset,
+    pub color: Color32,
+    pub size: f32,
+}
+
+/// A line as a layout job, the links in it and its formulas.
+pub(crate) type InlineJob = (LayoutJob, Vec<(Range<usize>, LinkSpan, bool)>, Vec<MathAt>);
+
+/// A line as a layout job, the links in it, its coloured text and its formulas.
+pub(crate) type Painted = (LayoutJob, Vec<(Range<usize>, LinkSpan, bool)>, Vec<Paint>, Vec<MathAt>);
 
 /// The text of a fenced code block, coloured by its language (EDIT-032; plain when there is none).
 fn code_job(word: &str, code: &str, size: f32) -> LayoutJob {
@@ -151,9 +165,9 @@ fn code_job(word: &str, code: &str, size: f32) -> LayoutJob {
 }
 
 /// Turn one line of markdown into display text with formats and link positions.
-pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color32, strike_all: bool) -> (LayoutJob, Vec<(Range<usize>, LinkSpan, bool)>) {
-    let (job, spans, _) = inline_painted(line, links, size, base_color, strike_all);
-    (job, spans)
+pub(crate) fn inline_job(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color32, strike_all: bool) -> InlineJob {
+    let (job, spans, _, maths) = inline_painted(line, links, size, base_color, strike_all);
+    (job, spans, maths)
 }
 
 /// `inline_job`, and the text that has colours of its own.
@@ -180,6 +194,8 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
     let mut paints: Vec<Paint> = Vec::new();
     let runs = colour_tags::find(line);
     let mut link_spans = Vec::new();
+    let mut maths: Vec<MathAt> = Vec::new();
+    let formulas = markdown::find_math(line);
     let tags = markdown::find_tags(line);
     let notes: Vec<(Range<usize>, String)> = markdown::footnote_refs_in_line(line).into_iter().filter(|(_, label)| markdown::footnote_is_defined(label)).collect();
     let mut st = Inline { strike: strike_all, ..Default::default() };
@@ -265,6 +281,24 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
             i = r.end;
             continue;
         }
+        if let Some(m) = formulas.iter().find(|m| m.range.start == i) {
+            // a formula: its TeX stays in the text, hidden, with room for the typeset formula before it
+            // (EDIT-047); one that cannot be typeset is shown as code, and says why on hover (EDIT-049)
+            let f = fmt(&st, base_color);
+            let formula = crate::math::typeset(&line[m.tex.clone()], size, m.display);
+            let start = job.text.len();
+            match &formula {
+                Ok(done) => crate::math::paint::append_hidden(&mut job, &line[m.range.clone()], done, size),
+                Err(_) => {
+                    let mut s2 = st;
+                    s2.code = true;
+                    job.append(&line[m.range.clone()], 0.0, fmt(&s2, base_color));
+                }
+            }
+            maths.push(MathAt { range: start..job.text.len(), formula, color: f.color, size });
+            i = m.range.end;
+            continue;
+        }
         if breaks {
             if let Some(len) = br_len(&line[i..]) {
                 job.append("\n", 0.0, fmt(&st, base_color));
@@ -340,7 +374,14 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
     if job.text.is_empty() {
         job.append(" ", 0.0, fmt(&st, base_color));
     }
-    (job, link_spans, paints)
+    // a formula that reaches below the text needs lines of text with more room below (EDIT-048)
+    let extra = maths.iter().filter_map(|m| m.formula.as_ref().ok().map(|f| crate::math::paint::room_for(f, size).0)).fold(0.0, f32::max);
+    if extra > 0.0 {
+        for s in job.sections.iter_mut().filter(|s| !crate::math::paint::is_hidden_formula(&s.format)) {
+            s.format.line_height = s.format.line_height.map(|h| h + extra);
+        }
+    }
+    (job, link_spans, paints, maths)
 }
 
 /// `f` as sub or superscript (EDIT-044): smaller, placed at the top or the bottom of the row, which
@@ -357,7 +398,7 @@ fn script_format(mut f: TextFormat, raised: bool) -> TextFormat {
 pub(crate) fn footnote_def_painted(line: &str, label: &str, marker: &Range<usize>, links: &[(LinkSpan, bool)], size: f32, color: Color32) -> Painted {
     let lead = line[marker.end..].len() - line[marker.end..].trim_start().len();
     let by = marker.end + lead;
-    let (job, spans, paints) = inline_painted(&line[by..], &shift(links, by), size * FOOTNOTE_TEXT, color, false);
+    let (job, spans, paints, maths) = inline_painted(&line[by..], &shift(links, by), size * FOOTNOTE_TEXT, color, false);
     let mark = TextFormat { font_id: FontId::new(size * FOOTNOTE_TEXT, crate::fonts::styled(false, false).family), color: theme::LINK, ..Default::default() };
     let gap = mark.clone();
     let mut out = LayoutJob::default();
@@ -371,7 +412,7 @@ pub(crate) fn footnote_def_painted(line: &str, label: &str, marker: &Range<usize
     }
     let mut all = vec![(0..label.len(), footnote_span(0..label.len(), label, Foot::Definition), true)];
     all.extend(spans.into_iter().map(|(r, l, ok)| (at(&r), l, ok)));
-    (out, all, paints.into_iter().map(|(r, bg, fg)| (at(&r), bg, fg)).collect())
+    (out, all, paints.into_iter().map(|(r, bg, fg)| (at(&r), bg, fg)).collect(), maths.into_iter().map(|m| MathAt { range: at(&m.range), ..m }).collect())
 }
 
 /// An indented line that goes on with a footnote definition: its text a little smaller.
@@ -380,20 +421,58 @@ pub(crate) fn footnote_text_painted(line: &str, links: &[(LinkSpan, bool)], size
     inline_painted(&line[by..], &shift(links, by), size * FOOTNOTE_TEXT, color, false)
 }
 
-/// Paint an inline job as a wrapped block and handle link clicks.
+/// Paint an inline job as a wrapped block and handle link clicks; its formulas are drawn in the
+/// room they have in the text (EDIT-048), and one that failed says why on hover (EDIT-049).
 /// `hint` gives an extra tooltip line for a link target (LINK-008, LINK-012).
-fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) -> egui::Response {
+fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], maths: &[MathAt], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) -> egui::Response {
     let mut job = job;
     job.wrap.max_width = ui.available_width();
     let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
     let (rect, resp) = ui.allocate_exact_size(galley.size(), Sense::click());
     ui.painter().galley(rect.min, galley.clone(), theme::TEXT);
+    paint_maths(ui, &galley, rect.min, maths);
     if let Some(hp) = ui.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p)) {
         if let Some(c) = char_under(&galley, rect.min, hp) {
-            follow_span(ui, &resp, markdown::char_to_byte(&galley.job.text, c), spans, hint, out);
+            let byte = markdown::char_to_byte(&galley.job.text, c);
+            if let Some(Err(why)) = maths.iter().find(|m| m.range.contains(&byte)).map(|m| &m.formula) {
+                resp.clone().on_hover_text(format!("This formula cannot be typeset: {why}"));
+            }
+            follow_span(ui, &resp, byte, spans, hint, out);
         }
     }
     resp
+}
+
+/// Draw the formulas of a laid-out line in the room their hidden TeX has (EDIT-048).
+pub(crate) fn paint_maths(ui: &Ui, galley: &Galley, pos: Pos2, maths: &[MathAt]) {
+    for m in maths {
+        if let Ok(f) = &m.formula {
+            let at = markdown::byte_to_char(&galley.job.text, m.range.start.min(galley.job.text.len()));
+            crate::math::paint::paint_in_galley(ui.painter(), galley, pos, at, f, m.color);
+        }
+    }
+}
+
+/// A formula alone on its lines: centred in its own row in display style, or its TeX as code with
+/// the reason on hover when it cannot be typeset (EDIT-047, EDIT-049).
+fn math_block(ui: &mut Ui, tex: &str, base: f32) {
+    match crate::math::typeset(tex, base * crate::math::DISPLAY_SCALE, true) {
+        Ok(f) => {
+            let size = crate::math::paint::size(&f);
+            let width = ui.available_width();
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(width.max(size.x), size.y + base * 0.8), Sense::hover());
+            let left = rect.min.x + ((width - size.x) / 2.0).max(0.0);
+            let pos = Pos2::new(left, rect.min.y + base * 0.4 + f.layout.ascent);
+            crate::math::paint::paint(&ui.painter().with_clip_rect(ui.clip_rect()), &f, pos, theme::TEXT);
+        }
+        Err(why) => {
+            egui::Frame::new().fill(theme::CODE_BG).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(code_job("", tex.trim_end(), base * 0.9)).on_hover_text(format!("This formula cannot be typeset: {why}"));
+            });
+            ui.add_space(6.0);
+        }
+    }
 }
 
 /// Hover and click on the link at byte `byte` of a block's text (if there is one): the pointer,
@@ -444,9 +523,9 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
             (l, ok)
         })
         .collect();
-    let (job, spans) = inline_job(text, &links, base, theme::TEXT, done);
+    let (job, spans, maths) = inline_job(text, &links, base, theme::TEXT, done);
     let mut out = None;
-    let resp = inline_block(ui, job, &spans, &|t| vault.link_hint(t, Some(from)), &mut out);
+    let resp = inline_block(ui, job, &spans, &maths, &|t| vault.link_hint(t, Some(from)), &mut out);
     let plain_click = resp.clicked() && out.is_none();
     (out, plain_click)
 }
@@ -498,6 +577,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         }
     }
     let tables = crate::table::find_tables(text);
+    let formulas = markdown::find_math(text);
     while i < lines.len() {
         let span = tables.iter().find(|b| b.lines.start == i).map_or(i + 1, |b| b.lines.end);
         if target.is_some_and(|t| (i..span).contains(&t)) {
@@ -507,6 +587,12 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         if let Some(b) = tables.iter().find(|b| b.lines.start == i) {
             table_block(ui, b, vault, rel, base, &hint, &mut out);
             i = b.lines.end;
+            continue;
+        }
+        // a formula on lines of its own: `$$` lines, a `math` fence, `$$…$$` alone (EDIT-046)
+        if let Some(m) = formulas.iter().find(|m| m.block && m.lines.start == i) {
+            math_block(ui, &text[m.tex.clone()], base);
+            i = m.lines.end;
             continue;
         }
         let (off, line) = lines[i];
@@ -568,23 +654,23 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             ui.add_space(4.0);
         } else if let Some(def) = notes.def_at(i) {
             // a footnote definition: its label raised, its text a little smaller (EDIT-043)
-            let (job, spans, _) = footnote_def_painted(line, &def.label, &def.marker, &line_links, base, theme::TEXT);
-            inline_block(ui, job, &spans, &hint, &mut out);
+            let (job, spans, _, maths) = footnote_def_painted(line, &def.label, &def.marker, &line_links, base, theme::TEXT);
+            inline_block(ui, job, &spans, &maths, &hint, &mut out);
         } else if notes.is_continuation(i) {
-            let (job, spans, _) = footnote_text_painted(line, &line_links, base, theme::TEXT);
+            let (job, spans, _, maths) = footnote_text_painted(line, &line_links, base, theme::TEXT);
             ui.horizontal_top(|ui| {
                 ui.add_space(base * 1.2);
-                inline_block(ui, job, &spans, &hint, &mut out);
+                inline_block(ui, job, &spans, &maths, &hint, &mut out);
             });
         } else if let Some(level) = markdown::heading_level(line) {
             ui.add_space(base * 0.5);
             let size = base * heading_scale(level as u8);
-            let (job, spans) = inline_job(line[level..].trim_start(), &shift(&line_links, level + (line[level..].len() - line[level..].trim_start().len())), size, theme::HEADING, false);
+            let (job, spans, maths) = inline_job(line[level..].trim_start(), &shift(&line_links, level + (line[level..].len() - line[level..].trim_start().len())), size, theme::HEADING, false);
             let shown = ui.horizontal_top(|ui| {
                 if let Some(n) = extras.numbers.get(&i) {
                     ui.label(egui::RichText::new(n).size(size).color(theme::MUTED));
                 }
-                inline_block(ui, job, &spans, &hint, &mut out)
+                inline_block(ui, job, &spans, &maths, &hint, &mut out)
             });
             if extras.scroll_to == Some(i) {
                 shown.response.scroll_to_me(Some(egui::Align::TOP));
@@ -603,29 +689,29 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 if ui.checkbox(&mut d, "").clicked() {
                     out = Some(ReaderAction::ToggleTask(off + check));
                 }
-                let (job, spans) = inline_job(rest, &shift(&line_links, rest_off), base, theme::TEXT, done);
-                inline_block(ui, job, &spans, &hint, &mut out);
+                let (job, spans, maths) = inline_job(rest, &shift(&line_links, rest_off), base, theme::TEXT, done);
+                inline_block(ui, job, &spans, &maths, &hint, &mut out);
             });
         } else if let Some((marker, rest_off)) = list_marker(line) {
             ui.horizontal_top(|ui| {
                 ui.add_space(indent + 4.0);
                 ui.label(egui::RichText::new(marker).size(base).color(theme::ACCENT));
-                let (job, spans) = inline_job(&line[rest_off..], &shift(&line_links, rest_off), base, theme::TEXT, false);
-                inline_block(ui, job, &spans, &hint, &mut out);
+                let (job, spans, maths) = inline_job(&line[rest_off..], &shift(&line_links, rest_off), base, theme::TEXT, false);
+                inline_block(ui, job, &spans, &maths, &hint, &mut out);
             });
         } else if trimmed.starts_with('>') {
             let content_off = line.find('>').unwrap() + 1;
             let content = &line[content_off..];
             let lead = content.len() - content.trim_start().len();
             egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 4, top: 2, bottom: 2 }).show(ui, |ui| {
-                let (job, spans) = inline_job(content.trim_start(), &shift(&line_links, content_off + lead), base, theme::QUOTE, false);
-                inline_block(ui, job, &spans, &hint, &mut out);
+                let (job, spans, maths) = inline_job(content.trim_start(), &shift(&line_links, content_off + lead), base, theme::QUOTE, false);
+                inline_block(ui, job, &spans, &maths, &hint, &mut out);
                 let r = ui.min_rect();
                 ui.painter().line_segment([r.left_top() - Vec2::new(10.0, 0.0), r.left_bottom() - Vec2::new(10.0, 0.0)], Stroke::new(3.0, theme::ACCENT.gamma_multiply(0.7)));
             });
         } else {
-            let (job, spans) = inline_job(line, &line_links, base, theme::TEXT, false);
-            inline_block(ui, job, &spans, &hint, &mut out);
+            let (job, spans, maths) = inline_job(line, &line_links, base, theme::TEXT, false);
+            inline_block(ui, job, &spans, &maths, &hint, &mut out);
         }
         i += 1;
     }
@@ -642,7 +728,12 @@ fn table_block(ui: &mut Ui, b: &crate::table::Block, vault: &Vault, rel: &Path, 
         if let Some((r, c, anchor)) = laid.cell_at(rect.min, hp) {
             let cell = &laid.cells[r][c];
             if let Some(ch) = char_under(&cell.galley, anchor, hp) {
-                follow_span(ui, &resp, markdown::char_to_byte(&cell.galley.job.text, ch), &cell.spans, hint, out);
+                let byte = markdown::char_to_byte(&cell.galley.job.text, ch);
+                // a formula of the cell that failed says why (EDIT-049)
+                if let Some(Err(why)) = cell.maths.iter().find(|m| m.range.contains(&byte)).map(|m| &m.formula) {
+                    resp.clone().on_hover_text(format!("This formula cannot be typeset: {why}"));
+                }
+                follow_span(ui, &resp, byte, &cell.spans, hint, out);
             }
         }
     }
@@ -792,7 +883,7 @@ mod tests {
         assert_eq!(code_job("", "", 14.0).text, "", "an empty block");
 
         let line = "see `console.log(\"fooo\")` and `x`";
-        let (job, _) = inline_job(line, &[], 14.0, theme::TEXT, false);
+        let (job, _, _) = inline_job(line, &[], 14.0, theme::TEXT, false);
         assert_eq!(job.text, "see console.log(\"fooo\") and x", "the backticks are gone");
         assert_eq!(colours(&job, "\"fooo\""), theme::syntax_colour(syntax::Kind::String));
         assert_eq!(colours(&job, "log"), theme::syntax_colour(syntax::Kind::Function));
@@ -932,7 +1023,7 @@ mod tests {
     #[test]
     fn the_reading_view_colours_the_text_and_hides_the_tags() {
         let line = "a <mark style=\"background: #FFFF00;\">hi <span style=\"color: #FF0000;\">there</span></mark> **b** <mark style=\"background: #FFFF00\">open";
-        let (job, _, paints) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        let (job, _, paints, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
         assert_eq!(job.text, "a hi there b <mark style=\"background: #FFFF00\">open", "the tags are gone; an unclosed one is text");
         let at = |w: &str| {
             let b = job.text.find(w).unwrap();
@@ -958,7 +1049,7 @@ mod tests {
     #[test]
     fn the_reading_view_underlines_lowers_and_raises_and_hides_the_tags() {
         let line = "Plain <u>under</u> H<sub>2</sub>O x<sup>2</sup> <U>a <SUP>b</SUP></U> <u>open `<sub>x</sub>`";
-        let (job, _, paints) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        let (job, _, paints, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
         assert_eq!(job.text, "Plain under H2O x2 a b <u>open <sub>x</sub>", "the tags are gone; an unclosed one and one in code are text");
         assert_eq!(format_at(&job, "under").underline.width, 1.0);
         assert_eq!(format_at(&job, "Plain").underline.width, 0.0);
@@ -977,7 +1068,7 @@ mod tests {
     fn a_reference_with_a_definition_is_a_raised_mark_and_one_without_stays_as_written() {
         let line = "Note[^1] and[^2] and `[^1]`";
         let _defined = markdown::DefinedFootnotes::set(["1".to_string()].into());
-        let (job, spans, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        let (job, spans, _, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
         assert_eq!(job.text, "Note1 and[^2] and [^1]");
         let mark = format_at(&job, "1 and");
         assert_eq!((mark.valign, mark.font_id.size, mark.color, mark.line_height), (egui::Align::TOP, 15.0 * SCRIPT_SCALE, theme::LINK, None));
@@ -986,7 +1077,7 @@ mod tests {
         assert_eq!(format_at(&job, "[^2]").valign, egui::Align::BOTTOM);
         // the same line without any definition
         drop(_defined);
-        let (job, spans, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        let (job, spans, _, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
         assert_eq!(job.text, "Note[^1] and[^2] and [^1]");
         assert!(spans.is_empty());
     }
@@ -999,7 +1090,7 @@ mod tests {
         let _defined = markdown::DefinedFootnotes::set(notes.defined());
         let links: Vec<(LinkSpan, bool)> = markdown::find_links(line).into_iter().map(|l| (l, true)).collect();
         let def = &notes.defs[0];
-        let (job, spans, _) = footnote_def_painted(line, &def.label, &def.marker, &links, 15.0, theme::TEXT);
+        let (job, spans, _, _) = footnote_def_painted(line, &def.label, &def.marker, &links, 15.0, theme::TEXT);
         assert_eq!(job.text, "a See bold Ideas anda");
         let label = format_at(&job, "a See");
         assert_eq!((label.valign, label.color, label.font_id.size), (egui::Align::TOP, theme::LINK, 15.0 * FOOTNOTE_TEXT * SCRIPT_SCALE));
@@ -1008,7 +1099,7 @@ mod tests {
         let kinds: Vec<(Range<usize>, Option<Foot>, String)> = spans.iter().map(|(r, l, _)| (r.clone(), footnote_of(l).map(|f| f.0), l.target.clone())).collect();
         assert_eq!(kinds, [(0..1, Some(Foot::Definition), "a".to_string()), (11..16, None, "Ideas".to_string()), (20..21, Some(Foot::Reference), "a".to_string())]);
         // an indented line that goes on with it is smaller text
-        let (job, _, _) = footnote_text_painted("    more *text*", &[], 15.0, theme::TEXT);
+        let (job, _, _, _) = footnote_text_painted("    more *text*", &[], 15.0, theme::TEXT);
         assert_eq!(job.text, "more text");
         assert_eq!(format_at(&job, "more").font_id.size, 15.0 * FOOTNOTE_TEXT);
     }
@@ -1018,13 +1109,13 @@ mod tests {
     fn br_in_a_table_cell_is_a_line_break_and_elsewhere_it_is_text() {
         for tag in ["<br>", "<br/>", "<br />", "<BR>", "<Br  / >"] {
             let line = format!("• a{tag}• b");
-            let (job, _, _) = cell_painted(&line, &[], 15.0, theme::TEXT);
+            let (job, _, _, _) = cell_painted(&line, &[], 15.0, theme::TEXT);
             let want = if tag == "<Br  / >" { line.clone() } else { "• a\n• b".to_string() };
             assert_eq!(job.text, want, "{tag}");
         }
-        let (job, _, _) = cell_painted("a `x<br>y` b<br>", &[], 15.0, theme::TEXT);
+        let (job, _, _, _) = cell_painted("a `x<br>y` b<br>", &[], 15.0, theme::TEXT);
         assert_eq!(job.text, "a x<br>y b\n", "not in code");
-        let (job, _, _) = inline_painted("a<br>b", &[], 15.0, theme::TEXT, false);
+        let (job, _, _, _) = inline_painted("a<br>b", &[], 15.0, theme::TEXT, false);
         assert_eq!(job.text, "a<br>b", "outside a table the tag is text");
         assert_eq!(br_len("<br>x"), Some(4));
         assert_eq!(br_len("<br />"), Some(6));
@@ -1070,7 +1161,7 @@ mod tests {
         let claim = find(&before, "Claim1 here.").unwrap_or_else(|| panic!("the paragraph is painted: {before:?}"));
         let mark = {
             let _defined = markdown::DefinedFootnotes::set(["1".to_string()].into());
-            let (job, _, _) = inline_painted("Claim[^1] here.", &[], 15.0, theme::TEXT, false);
+            let (job, _, _, _) = inline_painted("Claim[^1] here.", &[], 15.0, theme::TEXT, false);
             let galley = ctx.fonts_mut(|f| f.layout_job(job));
             claim.min + galley.pos_from_cursor(egui::text::CCursor::new(5)).center().to_vec2() + egui::Vec2::new(2.0, 0.0)
         };
@@ -1099,12 +1190,12 @@ mod tests {
             job.sections.iter().find(|s| s.byte_range.start.0 <= b && b < s.byte_range.end.0).unwrap().format.clone()
         };
         let font = AreaFont { family: fam("system:X"), size: 15.0, faces: Faces { bold: true, italic: true, bold_italic: false } };
-        let (job, _) = crate::fonts::with_family(&font, || inline_job(line, &[], 15.0, theme::TEXT, false));
+        let (job, _, _) = crate::fonts::with_family(&font, || inline_job(line, &[], 15.0, theme::TEXT, false));
         assert_eq!((at(&job, "bold").font_id.family, at(&job, "bold").extra_letter_spacing), (fam("system:X:bold"), 0.0));
         assert_eq!((at(&job, "it").font_id.family, at(&job, "it").italics), (fam("system:X:italic"), false));
         assert_eq!(at(&job, "code").font_id.family, FontFamily::Monospace);
         // Shale's own font has no faces: bold and italic are imitated as before
-        let (job, _) = inline_job(line, &[], 15.0, theme::TEXT, false);
+        let (job, _, _) = inline_job(line, &[], 15.0, theme::TEXT, false);
         assert_eq!(at(&job, "bold").font_id.family, FontFamily::Proportional);
         assert!(at(&job, "bold").extra_letter_spacing > 0.0 && at(&job, "it").italics);
     }
