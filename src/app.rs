@@ -1805,6 +1805,7 @@ impl ShaleApp {
                 self.close_pane(self.panes.focused);
             }
             self.remember_open_files();
+            self.keyboard_after_close();
         }
     }
 
@@ -2383,6 +2384,7 @@ impl ShaleApp {
         self.drag.calendar_areas.clear();
         self.drag.tree_targets.clear();
         self.screenshot_tick(ui);
+        self.keyboard_guard(ui.ctx());
         self.shortcuts(ui);
         self.autosave();
         self.settings_file_tick(ui.ctx());
