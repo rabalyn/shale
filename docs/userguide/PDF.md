@@ -58,6 +58,7 @@ first chapter on. The paper, margins, text size, embeds, plain tables and page n
 to the whole book; **Title page**, **Table of contents** and **Each note on a new page** are boxes of the
 dialog, and the folded **Reading order** shows the tree as it will be printed (the notes left out are
 greyed), so you can check it before you export. The export runs in the background, with **Cancel**.
+The dialog can also write the book through a LaTeX template (below).
 The default path is `<vault>/exports/<folder name>.pdf`.
 
 Nothing has to be renamed: a folder prints as a book when it follows this convention.
@@ -96,6 +97,29 @@ Handbook/                     the book: its title is the folder note's `title`, 
   `[[Tables#Grid]]`) jumps to its page; a link to a note outside the book is its text. The contents and
   the bookmarks of your PDF reader nest parts, chapters and headings.
 
+### A folder through a LaTeX template
+
+The dialog of a folder has the same **Engine** choice as a note's: with **LaTeX template** the folder is
+written as one LaTeX document of a template kind (see below for the templates and their setup), for a
+thesis or a report kept as a folder of notes. Only kinds that hold a whole text can be chosen: the
+publication, report and exercise (articles), the thesis and the PhD thesis (books); slides, letters and
+posters are greyed, because they take a single note. The reading order, the folder notes and the titles are
+the ones above.
+
+- In a **thesis** each subfolder of the top folder is a `\part`, a folder inside it a `\chapter`, and the notes
+  are chapters (one level below their folder); a note directly in the top folder is a chapter too, so a folder
+  without subfolders is a thesis of chapters. The headings of a note go below its chapter.
+- In an **article** kind the same starts at sections: a subfolder is a `\section`, its notes are
+  subsections, and a note directly in the top folder is a section.
+- A folder note's text is printed right after its part's heading, the top folder note's text before the
+  first chapter; their headings are not numbered and not in the contents.
+- The fields (title, subtitle, author, date, reviewers, …) start with the top folder note's properties, as
+  a note's start with its own; the title is else the book's title.
+- Links between the notes of the book go to the chapter or heading in the PDF; links to notes outside the
+  book are their text. LaTeX numbers the parts, chapters and headings (under **Number headings**), makes the
+  contents, the running heads and the bookmarks.
+- Pictures with the same name in different folders stay two pictures.
+
 This guide is such a book: "Start here" is its folder note, and `scripts/userguide-pdf.sh` makes its PDF
 (every release has it as `shale-userguide-<version>.pdf`).
 On the command line, `shale --export-pdf <folder> <file.pdf>` writes the book of a folder without opening
@@ -112,7 +136,7 @@ pages, rendered in the background). PDFs dropped on the window go through [[Impo
 
 ## Export with your university's LaTeX template: the guided setup
 
-Besides the built-in export, a note can be exported through a **LaTeX template**, for example the
+Besides the built-in export, a note (or a folder, above) can be exported through a **LaTeX template**, for example the
 corporate design of the TU Darmstadt. You do not have to know what TeX is: **Settings → LaTeX → Set up
 LaTeX export…** takes you through it in five steps, and it opens by itself the first time you choose
 **LaTeX template** in the export dialog of a vault where something is still missing (and from the

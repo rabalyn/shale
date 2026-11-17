@@ -6,6 +6,7 @@
 mod archive;
 mod blocks;
 mod body;
+pub mod book;
 pub mod compile;
 pub mod dialog;
 pub mod engine;
@@ -24,6 +25,10 @@ pub use engine::TexConfig;
 
 #[cfg(test)]
 mod archive_tests;
+#[cfg(test)]
+mod book_env_tests;
+#[cfg(test)]
+mod book_tests;
 #[cfg(test)]
 mod compile_tests;
 #[cfg(test)]

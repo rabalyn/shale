@@ -92,7 +92,30 @@ pub fn anchor_name(line: usize) -> String {
 /// The anchor of a heading: a link to it lands here (TEX-032; `\shaleanchor` is a named
 /// `\phantomsection`, defined by the writer's helpers).
 pub fn anchor(line: usize) -> String {
-    format!("\\shaleanchor{{{}}}", anchor_name(line))
+    anchor_named(&anchor_name(line))
+}
+
+/// An anchor of this name (a book's, BOOK-016, are named by their place in the book).
+pub fn anchor_named(name: &str) -> String {
+    format!("\\shaleanchor{{{name}}}")
+}
+
+/// Where the wiki links of a book go (BOOK-016): the anchor of each note of the book and of its
+/// headings.
+#[derive(Default, Debug)]
+pub struct Targets {
+    /// note → its anchor and its headings' anchors by their plain text in lower case
+    pub notes: HashMap<PathBuf, (String, HashMap<String, String>)>,
+}
+
+impl Targets {
+    /// The anchor a link goes to: the heading's when the note of the book has it, else the note's;
+    /// none for a note outside the book.
+    fn anchor(&self, vault: &Vault, from: &Path, link: &markdown::LinkSpan) -> Option<&str> {
+        let (note, heads) = self.notes.get(&vault.resolve(&link.target, Some(from))?)?;
+        let head = link.heading.as_ref().and_then(|h| heads.get(&markdown::heading_plain(h).to_lowercase()));
+        Some(head.unwrap_or(note))
+    }
 }
 
 /// What the pieces of a line need to know about the note.
@@ -111,6 +134,8 @@ pub struct Look<'a> {
     /// Inside a table, where `\footnote` prints no text: the texts of the footnotes of the cells
     /// written so far, set down below the table (`\footnotemark` is written in their place).
     pub deferred: RefCell<Option<Vec<String>>>,
+    /// In a book: where its wiki links go (BOOK-016), in the place of the headings of this note.
+    pub targets: Option<&'a Targets>,
 }
 
 impl<'a> Look<'a> {
@@ -294,8 +319,13 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
             if let Some((_, l, _)) = spans.iter().find(|(sr, l, _)| sr.start <= r.start && r.end <= sr.end && crate::lists::is_web_url(&l.target)) {
                 t = format!("\\href{{{}}}{{{t}}}", href_url(&l.target));
             }
-            // a link to a heading of this note goes there (TEX-032); other notes are not in the PDF
-            if let Some(name) = wiki.and_then(|(_, l, _)| look.heading_anchor(l)) {
+            // a link to a heading of this note goes there (TEX-032), other notes are not in the PDF;
+            // in a book, a link to one of its notes goes to its chapter or heading (BOOK-016)
+            let name = match look.targets {
+                Some(ts) => wiki.and_then(|(_, l, _)| ts.anchor(look.vault, look.rel, l)).map(str::to_string),
+                None => wiki.and_then(|(_, l, _)| look.heading_anchor(l)),
+            };
+            if let Some(name) = name {
                 t = format!("\\hyperlink{{{name}}}{{{t}}}");
             }
             t

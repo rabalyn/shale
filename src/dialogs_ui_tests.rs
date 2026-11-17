@@ -842,7 +842,7 @@ const BOOK_FILES: &[(&str, &str)] = &[
     ("Top.md", "beside the handbook\n"),
 ];
 
-// spec: BOOK-010
+// spec: BOOK-010, BOOK-013
 #[test]
 fn book_010_the_menus_of_a_folder_and_of_the_vault_open_the_dialog_for_the_book() {
     let mut p = P::with_files("book-menus", BOOK_FILES);
@@ -856,7 +856,7 @@ fn book_010_the_menus_of_a_folder_and_of_the_vault_open_the_dialog_for_the_book(
     p.app.actions = a;
     p.app.process_actions();
     let Some(Modal::Export(d)) = &p.app.modal else { panic!("the export dialog opens") };
-    assert!(d.book.is_some() && !d.drawing && d.tex.is_none(), "the built-in engine only");
+    assert!(d.book.is_some() && !d.drawing && d.tex.is_some() && !d.latex(), "on the built-in engine, with the choice of a LaTeX template (BOOK-013)");
     assert_eq!(Path::new(&d.path), p.dir.join("exports/Handbook.pdf"), "<vault>/exports/<folder name>.pdf");
     // the menu of the vault, at the empty place under the tree
     p.app.modal = None;
@@ -874,7 +874,7 @@ fn book_010_the_menus_of_a_folder_and_of_the_vault_open_the_dialog_for_the_book(
     assert!(d.book.as_ref().is_some_and(|b| b.plan.is_ok()));
 }
 
-// spec: BOOK-010
+// spec: BOOK-010, BOOK-013
 #[test]
 fn book_010_the_dialog_has_the_options_of_a_book_and_the_reading_order_to_check() {
     let mut p = P::with_files("book-order", BOOK_FILES);
@@ -883,7 +883,7 @@ fn book_010_the_dialog_has_the_options_of_a_book_and_the_reading_order_to_check(
     for text in ["Title page", "Table of contents", "Each note on a new page", "Page numbers"] {
         assert!(p.shows(Show::Modals, text), "{text}");
     }
-    assert!(!p.shows(Show::Modals, "Engine"), "no LaTeX choice for a folder");
+    assert!(p.shows(Show::Modals, "Engine") && p.shows(Show::Modals, "LaTeX template"), "the engine choice of BOOK-013");
     assert!(!p.shows(Show::Modals, "Getting started"), "the reading order is folded");
     p.click(Show::Modals, "Reading order");
     // the tree as numbered, a note that is left out greyed and without a number

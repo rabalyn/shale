@@ -59,6 +59,18 @@ fn open_on(t: &mut T, name: &str, text: &str) {
     t.hl.frames(&mut t.app, 3);
 }
 
+/// A folder of notes in the vault, a book (BOOK-013), and its dialog opened.
+fn open_on_folder(t: &mut T) {
+    for (name, text) in [("Book/index.md", "---\ntitle: The Book\nauthor: Ada\n---\nIntro text\n"), ("Book/One.md", "# One\nSee [[Two]].\n"), ("Book/Part/Two.md", "## Head\nText\n")] {
+        let path = t.dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    t.app.vault.as_mut().unwrap().rescan();
+    t.app.open_export_folder_dialog(Path::new("Book"));
+    t.hl.frames(&mut t.app, 3);
+}
+
 /// Frames until `done` holds.
 #[cfg(unix)]
 fn until(t: &mut T, what: &str, done: impl Fn(&T) -> bool) {
@@ -134,6 +146,51 @@ fn the_pickers_offer_the_sets_of_the_vault_and_the_kinds_of_the_set() {
     click(&mut t, "kind");
     click(&mut t, "kind:letter");
     assert!(t.shows("Recipient") && t.shows("Subject") && !t.shows("Institute"), "{:?}", t.painted());
+}
+
+// spec: BOOK-013
+#[test]
+fn a_folder_has_the_engine_choice_and_only_the_kinds_that_can_hold_a_book() {
+    let mut t = T::new("dlg-folder", usable());
+    put_set(&t);
+    open_on_folder(&mut t);
+    assert_eq!(dialog(&t).engine, ExportEngine::Builtin, "the built-in engine until the person chooses otherwise");
+    assert!(t.shows("Engine") && t.shows("LaTeX template") && t.shows("Each note on a new page") && has(&t, "order"), "{:?}", t.painted());
+    click(&mut t, "engine:latex");
+    for want in ["Template set", "Kind", "Reading order", "Save as", "A folder is printed as an article or a book"] {
+        assert!(t.shows(want), "{want:?} in {:?}", t.painted());
+    }
+    assert!(!t.shows("Paper") && !t.shows("Each note on a new page") && has(&t, "order") && has(&t, "folder-kinds"), "{:?}", t.painted());
+    // the kind of the test page, the fields from the top folder note
+    let tex = dialog(&t).tex.as_ref().unwrap();
+    assert_eq!((tex.kind.as_str(), tex.values["title"].as_str(), tex.values["author"].as_str()), ("pub", "The Book", "Ada"));
+    for k in ["report", "exercise", "phd", "thesis"] {
+        click(&mut t, "kind");
+        click(&mut t, &format!("kind:{k}"));
+        assert_eq!(dialog(&t).tex.as_ref().unwrap().kind, k, "{k} can hold a folder");
+    }
+    for k in ["beamer", "letter", "poster", "sciposter", "leaflet", "announcement"] {
+        click(&mut t, "kind");
+        assert!(has(&t, &format!("kind:{k}")), "{k} is shown, greyed");
+        click(&mut t, &format!("kind:{k}"));
+        assert_eq!(dialog(&t).tex.as_ref().unwrap().kind, "thesis", "{k} cannot be chosen for a folder");
+    }
+}
+
+// spec: BOOK-013, TEX-017
+#[test]
+fn set_up_from_a_folder_goes_back_to_the_folders_dialog_on_the_latex_engine() {
+    let mut t = T::new("dlg-folder-setup", usable());
+    open_on_folder(&mut t);
+    click(&mut t, "engine:latex");
+    click(&mut t, "setup:sets");
+    t.hl.frames(&mut t.app, 4);
+    assert!(matches!(t.app.modal, Some(Modal::TexSetup)), "the guided setup is open");
+    assert_eq!(t.app.tex.setup.ret, super::setup::Return::ExportFolder(std::path::PathBuf::from("Book")));
+    t.click("Cancel");
+    t.hl.frames(&mut t.app, 6);
+    let d = dialog(&t);
+    assert!(d.book.as_ref().is_some_and(|b| b.folder == Path::new("Book")) && d.latex(), "the folder's dialog is back, on the LaTeX engine");
 }
 
 // spec: TEX-016
@@ -274,6 +331,58 @@ mod fake {
         assert!(!t.app.vdata.state.latex_export.latex && t.app.vdata.state.latex_export.kind == "pub");
         t.app.open_export_dialog(Path::new("Report.md"));
         t.hl.frames(&mut t.app, 3);
+        assert_eq!(dialog(&t).engine, ExportEngine::Builtin);
+    }
+
+    // spec: BOOK-013, BOOK-014, BOOK-016
+    #[test]
+    fn a_folder_is_written_as_one_book_compiled_as_a_job_and_saved_and_its_engine_is_remembered() {
+        let mut t = T::new("dlg-folder-run", usable());
+        put_set(&t);
+        let (f, keep) = recording_tex("folder-run");
+        t.app.tex.detection = Some(found(Ok(f.engine()), Err("not installed"), None));
+        open_on_folder(&mut t);
+        // an edit in the editor that is not saved yet is in the book
+        t.app.open(Path::new("Book/One.md"), false);
+        t.hl.frames(&mut t.app, 2);
+        let doc = t.app.notes.get_mut(Path::new("Book/One.md")).unwrap();
+        doc.text.push_str("\nUnsaved line\n");
+        doc.dirty = true;
+        t.app.open_export_folder_dialog(Path::new("Book"));
+        t.hl.frames(&mut t.app, 3);
+        click(&mut t, "engine:latex");
+        click(&mut t, "kind");
+        click(&mut t, "kind:report");
+        click(&mut t, "export");
+        until(&mut t, "the export is done", |t| t.app.modal.is_none());
+        let pdf = std::fs::read(t.dir.join("exports/Book.pdf")).unwrap();
+        assert!(pdf.starts_with(b"%PDF-1.5 fake"), "the PDF LuaLaTeX made is the file");
+        let tex = std::fs::read_to_string(keep.join("main.tex")).unwrap();
+        for want in [
+            "{tudapub}",
+            "\\title{The Book}",
+            "\\author{Ada}",
+            "Intro text",
+            "\\section{One}\\shaleanchor{shale-2}",
+            "See \\hyperlink{shale-4}{\\textcolor[RGB]{26,95,180}{Two}}",
+            "Unsaved line",
+            "\\section{Part}\\shaleanchor{shale-3}",
+            "\\subsection{Two}\\shaleanchor{shale-4}",
+            "\\subsubsection{Head}",
+        ] {
+            assert!(tex.contains(want), "{want:?} in\n{tex}");
+        }
+        assert!(t.app.toasts.iter().any(|(m, _)| m.starts_with("Exported to") && m.contains("Book.pdf")), "{:?}", t.app.toasts);
+        let last = &t.app.vdata.state.latex_export;
+        assert_eq!((last.latex, last.kind.as_str()), (true, "report"));
+        // the next dialog of a folder starts on it; the built-in export of a folder is remembered too
+        open_on_folder(&mut t);
+        assert_eq!((dialog(&t).engine, dialog(&t).tex.as_ref().unwrap().kind.as_str()), (ExportEngine::Latex, "report"));
+        click(&mut t, "engine:builtin");
+        click(&mut t, "export");
+        until(&mut t, "the built-in book is done", |t| t.app.modal.is_none());
+        assert!(!t.app.vdata.state.latex_export.latex);
+        open_on_folder(&mut t);
         assert_eq!(dialog(&t).engine, ExportEngine::Builtin);
     }
 

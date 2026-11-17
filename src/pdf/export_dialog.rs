@@ -1,4 +1,5 @@
-//! The "Export to PDF" dialog: for a note the engine (built-in, or a LaTeX template: TEX-016), paper
+//! The "Export to PDF" dialog: for a note or a folder the engine (built-in, or a LaTeX template:
+//! TEX-016, BOOK-013), paper
 //! size, orientation, margins, text size, what to include, background and scale for drawings,
 //! where to save, and whether to open the PDF afterwards.
 
@@ -25,9 +26,9 @@ pub struct ExportDialog {
     pub path: String,
     pub open_after: bool,
     pub error: Option<String>,
-    /// The engine of a note's export (a drawing has the built-in one only).
+    /// The engine of a note's or a folder's export (a drawing has the built-in one only).
     pub engine: ExportEngine,
-    /// The LaTeX choices of a note; none for a drawing.
+    /// The LaTeX choices of a note or a folder; none for a drawing.
     pub tex: Option<Box<TexExport>>,
     /// A folder as one PDF (BOOK-010): its reading order and the job; none for a note or drawing.
     pub book: Option<Box<BookExport>>,
@@ -75,7 +76,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     };
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     if d.tex.is_some() {
-        let busy = d.tex.as_ref().is_some_and(|t| t.working());
+        let busy = d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working());
         ui.horizontal(|ui| {
             ui.label(muted("Engine"));
             ui.add_enabled_ui(!busy, |ui| {
@@ -97,6 +98,11 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
             ui.end_row();
         });
         ui.add_space(4.0);
+        // a folder's reading order is the same through LaTeX (BOOK-013)
+        if let Some(book) = d.book.as_deref_mut() {
+            book.show(ui, &mut rec);
+            ui.add_space(4.0);
+        }
         rec("open-after", ui.checkbox(&mut d.open_after, "Open the PDF after exporting"));
         d.rects = rects;
         return;

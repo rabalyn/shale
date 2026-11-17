@@ -44,6 +44,9 @@ pub struct Plan {
     pub date: Option<String>,
     /// The top folder's note, printed before the first part or chapter.
     pub intro: Option<PathBuf>,
+    /// The top folder's note even when it is not printed: its front matter fills the fields of a
+    /// LaTeX template (BOOK-015).
+    pub note: Option<PathBuf>,
     pub items: Vec<Item>,
 }
 
@@ -324,8 +327,8 @@ pub fn plan(vault: &Vault, dir: &Path) -> Result<Plan, String> {
         return Err(format!("“{name}” has no notes to export"));
     }
     let text = note.as_deref().map(|n| cx.text(n)).unwrap_or("");
-    let intro = note.filter(|n| !left_out(cx.text(n)));
-    Ok(Plan { dir: dir.to_path_buf(), title: property(text, "title").unwrap_or(name), subtitle: property(text, "subtitle"), author: property(text, "author"), date: property(text, "date"), intro, items })
+    let intro = note.clone().filter(|n| !left_out(cx.text(n)));
+    Ok(Plan { dir: dir.to_path_buf(), title: property(text, "title").unwrap_or(name), subtitle: property(text, "subtitle"), author: property(text, "author"), date: property(text, "date"), intro, note, items })
 }
 
 /// The notes of the book as a set, for the links between chapters (BOOK-009).

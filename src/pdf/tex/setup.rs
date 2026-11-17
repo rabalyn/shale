@@ -64,6 +64,8 @@ pub enum Return {
     Settings,
     /// The export dialog of this note: it opened the setup by itself or by a "Set up…" button.
     Export(PathBuf),
+    /// The export dialog of this folder (BOOK-013), the same way.
+    ExportFolder(PathBuf),
 }
 
 /// What the person picked on the templates step.

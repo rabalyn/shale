@@ -77,7 +77,11 @@ fn streams(pdf: &[u8]) -> Vec<Vec<u8>> {
         let body = rest.strip_prefix(b"\r\n").or_else(|| rest.strip_prefix(b"\n")).unwrap_or(rest);
         let skipped = rest.len() - body.len();
         let Some(end) = find(start + skipped, b"endstream") else { break };
-        out.push(crate::pdf::write::inflate(pdf[start + skipped..end].trim_ascii_end()));
+        // only the end of line before `endstream` goes: the compressed data may end in a byte that
+        // looks like white space (a tab)
+        let raw = &pdf[start + skipped..end];
+        let data = raw.strip_suffix(b"\r\n").or_else(|| raw.strip_suffix(b"\n")).or_else(|| raw.strip_suffix(b"\r")).unwrap_or(raw);
+        out.push(crate::pdf::write::inflate(data));
         at = end + 9;
     }
     out
