@@ -562,6 +562,127 @@ pub fn footnote_is_defined(label: &str) -> bool {
     DEFINED.with(|d| d.borrow().contains(label))
 }
 
+// ------------------------------------------------------------------ math (EDIT-046)
+
+/// A formula in a note: `$…$`, `$$…$$` or a ```` ```math ```` block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MathSpan {
+    /// the whole formula with its delimiters, bytes of the text
+    pub range: Range<usize>,
+    /// the TeX inside the delimiters
+    pub tex: Range<usize>,
+    /// `$$…$$` and ```` ```math ````: typeset in display style
+    pub display: bool,
+    /// the formula takes whole lines (`$$` on lines of their own, a `math` fence, or `$$…$$` alone
+    /// on its line): it is drawn centred on its own
+    pub block: bool,
+    /// the lines it takes (0-based, end excluded)
+    pub lines: Range<usize>,
+}
+
+/// The formulas of a note, in the order of the text (EDIT-046). Inline math is `$…$` where the
+/// opening `$` is not followed by a space and the closing one is not preceded by a space nor
+/// followed by a digit, on one line; `\$` is a dollar sign. Display math is `$$…$$` on one line,
+/// or `$$` on lines of their own around other lines; a ```` ```math ```` fence is display math too.
+/// Nothing in code, in other fences or in the front matter counts.
+pub fn find_math(text: &str) -> Vec<MathSpan> {
+    let lines = lines_with_offsets(text);
+    let mut out = Vec::new();
+    let mut li = front_matter_lines(text);
+    // inside a fence: Some(None) is code, Some(Some((line, body start))) a math fence
+    let mut fence: Option<Option<(usize, usize)>> = None;
+    while li < lines.len() {
+        let (off, line) = lines[li];
+        let t = line.trim_start();
+        let is_fence = t.starts_with("```") || t.starts_with("~~~");
+        match fence {
+            Some(open) => {
+                if is_fence {
+                    if let Some((first, body)) = open {
+                        let end = off + line.len();
+                        out.push(MathSpan { range: lines[first].0..end, tex: body..off.saturating_sub(1).max(body), display: true, block: true, lines: first..li + 1 });
+                    }
+                    fence = None;
+                }
+            }
+            None if is_fence => {
+                let math = t.starts_with("```") && t[3..].trim().eq_ignore_ascii_case("math");
+                fence = Some(math.then(|| (li, off + line.len() + 1)));
+            }
+            None if line.trim() == "$$" => {
+                let close = (li + 2..lines.len()).find(|&k| lines[k].1.trim() == "$$");
+                if let Some(k) = close {
+                    let body = off + line.len() + 1;
+                    out.push(MathSpan { range: off..lines[k].0 + lines[k].1.len(), tex: body..lines[k].0 - 1, display: true, block: true, lines: li..k + 1 });
+                    li = k;
+                }
+            }
+            None => inline_math(line, off, li, &mut out),
+        }
+        li += 1;
+    }
+    out
+}
+
+/// The formulas inside one line (see [`find_math`]).
+fn inline_math(line: &str, off: usize, li: usize, out: &mut Vec<MathSpan>) {
+    let b = line.as_bytes();
+    let code = inline_code_ranges(line);
+    let mut i = 0;
+    // the first position after `from` where `want` (`$` or `$$`) stands, outside code and not escaped
+    let find = |from: usize, want: &str| -> Option<usize> {
+        let mut k = from;
+        while k < b.len() {
+            if b[k] == b'\\' {
+                k += 1 + line[k + 1..].chars().next().map_or(0, char::len_utf8);
+            } else if let Some(r) = code.iter().find(|r| r.contains(&k)) {
+                k = r.end;
+            } else if line[k..].starts_with(want) {
+                return Some(k);
+            } else {
+                k += 1;
+            }
+        }
+        None
+    };
+    while i < b.len() {
+        if b[i] == b'\\' {
+            i += 1 + line[i + 1..].chars().next().map_or(0, char::len_utf8);
+        } else if let Some(r) = code.iter().find(|r| r.contains(&i)) {
+            i = r.end;
+        } else if b[i] != b'$' {
+            i += 1;
+        } else if b.get(i + 1) == Some(&b'$') {
+            match find(i + 2, "$$").filter(|&j| !line[i + 2..j].trim().is_empty()) {
+                Some(j) => {
+                    let alone = line.trim() == &line[i..j + 2];
+                    out.push(MathSpan { range: off + i..off + j + 2, tex: off + i + 2..off + j, display: true, block: alone, lines: li..li + 1 });
+                    i = j + 2;
+                }
+                None => i += 2,
+            }
+        } else {
+            let opens = line[i + 1..].chars().next().is_some_and(|c| !c.is_whitespace());
+            let mut from = i + 1;
+            let close = loop {
+                let Some(j) = opens.then(|| find(from, "$")).flatten() else { break None };
+                let ok = j > i + 1 && !line[..j].ends_with(char::is_whitespace) && !b.get(j + 1).is_some_and(u8::is_ascii_digit);
+                if ok {
+                    break Some(j);
+                }
+                from = j + 1;
+            };
+            match close {
+                Some(j) => {
+                    out.push(MathSpan { range: off + i..off + j + 1, tex: off + i + 1..off + j, display: false, block: false, lines: li..li + 1 });
+                    i = j + 1;
+                }
+                None => i += 1,
+            }
+        }
+    }
+}
+
 /// How many lines the front matter (`---` … `---` at the top) takes; 0 when there is none.
 pub fn front_matter_lines(text: &str) -> usize {
     let mut lines = text.split('\n');
@@ -606,7 +727,7 @@ pub fn lift_headings(text: &str) -> Option<String> {
 /// The title of a heading as it reads: no inline markup, links by their shown text.
 pub fn heading_plain(title: &str) -> String {
     let links: Vec<(LinkSpan, bool)> = find_links(title).into_iter().map(|l| (l, true)).collect();
-    let (job, _) = crate::reader::inline_job(title, &links, 14.0, crate::theme::TEXT, false);
+    let (job, _, _) = crate::reader::inline_job(title, &links, 14.0, crate::theme::TEXT, false);
     job.text.trim().to_string()
 }
 
@@ -1200,5 +1321,55 @@ mod tests {
         assert!(footnote_is_defined("a") && !footnote_is_defined("b"), "the outer labels come back");
         drop(outer);
         assert!(!footnote_is_defined("a"));
+    }
+
+    fn tex_of(text: &str) -> Vec<(String, bool, bool)> {
+        find_math(text).into_iter().map(|m| (text[m.tex].to_string(), m.display, m.block)).collect()
+    }
+
+    // spec: EDIT-046
+    #[test]
+    fn inline_math_follows_the_dollar_rules() {
+        assert_eq!(tex_of("Let $x^2$ be, and $a+b$."), vec![("x^2".into(), false, false), ("a+b".into(), false, false)]);
+        assert!(tex_of("it costs $5 and $10 today").is_empty(), "a price is no math");
+        assert!(tex_of("$ x$ and $x $ end").is_empty(), "a space inside the dollars: no math");
+        assert!(tex_of("a $$ b").is_empty(), "no closing dollars");
+        assert!(tex_of("$x$5 is not math").is_empty(), "the closing dollar before a digit is no closing");
+        assert_eq!(tex_of(r"pay \$5 and $x$"), vec![("x".into(), false, false)], "an escaped dollar is a dollar");
+        assert_eq!(tex_of(r"$a\$b$"), vec![(r"a\$b".into(), false, false)], "an escaped dollar inside the formula stays in it");
+        let t = "a $x$ b";
+        let m = &find_math(t)[0];
+        assert_eq!((&t[m.range.clone()], &t[m.tex.clone()], m.lines.clone()), ("$x$", "x", 0..1));
+    }
+
+    // spec: EDIT-046
+    #[test]
+    fn display_math_is_one_line_or_dollar_lines_or_a_math_fence() {
+        assert_eq!(tex_of("$$x=1$$"), vec![("x=1".into(), true, true)], "alone on its line: a block");
+        assert_eq!(tex_of("a $$x=1$$ b"), vec![("x=1".into(), true, false)], "in a line of text: display style, no block");
+        let t = "a\n$$\nx = 1\ny = 2\n$$\nb";
+        let m = find_math(t);
+        assert_eq!(m.len(), 1);
+        assert_eq!((&t[m[0].tex.clone()], m[0].display, m[0].block, m[0].lines.clone()), ("x = 1\ny = 2", true, true, 1..5));
+        assert_eq!(&t[m[0].range.clone()], "$$\nx = 1\ny = 2\n$$");
+        let f = "```math\n\\frac{a}{b}\n```\nafter $y$";
+        let m = find_math(f);
+        assert_eq!(m.len(), 2);
+        assert_eq!((&f[m[0].tex.clone()], m[0].display, m[0].block, m[0].lines.clone()), ("\\frac{a}{b}", true, true, 0..3));
+        assert_eq!(&f[m[1].tex.clone()], "y");
+        assert!(tex_of("$$\nx\n").is_empty(), "no closing $$ line: no math");
+        assert!(tex_of("$$ $$").is_empty(), "an empty formula is none");
+    }
+
+    // spec: EDIT-046
+    #[test]
+    fn math_in_code_and_front_matter_is_none() {
+        assert!(tex_of("a `$x$` b").is_empty());
+        assert_eq!(tex_of("`a` $x$ `b`"), vec![("x".into(), false, false)]);
+        assert!(tex_of("```\n$x$\n$$\ny\n$$\n```\n").is_empty());
+        assert!(tex_of("~~~\n$x$\n~~~").is_empty());
+        assert!(tex_of("---\ntitle: $x$ and $y$\n---\ntext").is_empty());
+        assert_eq!(tex_of("---\na: 1\n---\n$z$"), vec![("z".into(), false, false)]);
+        assert!(tex_of("```rust\n$x$\n```").is_empty(), "other fences are code");
     }
 }
