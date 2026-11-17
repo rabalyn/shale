@@ -222,6 +222,10 @@ actions! {
     UserGuide => "global.user_guide", "Open the user guide", Global, ["F1"];
     PrevTab => "global.prev_tab", "Previous tab", Global, ["Ctrl+Alt+H"];
     NextTab => "global.next_tab", "Next tab", Global, ["Ctrl+Alt+L"];
+    SplitRight => "global.split_right", "Split right: open this tab in a new pane to the right", Global, ["Ctrl+Backslash"];
+    NextPane => "global.next_pane", "Focus the next pane", Global, ["Ctrl+Alt+Right"];
+    PrevPane => "global.prev_pane", "Focus the previous pane", Global, ["Ctrl+Alt+Left"];
+    ClosePane => "global.close_pane", "Close the pane (with its tabs)", Global, ["Ctrl+Alt+W"];
     AlternateView => "global.alternate_view", "Alternate view: swap with the previous view of this tab (again: back)", Global, ["Ctrl+6"];
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
@@ -530,7 +534,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 25 + 36 + 5);
+        assert_eq!(DEFS.len(), 29 + 36 + 5);
     }
 
     // spec: KEY-003
