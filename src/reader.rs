@@ -778,7 +778,7 @@ fn list_marker(line: &str) -> Option<(String, usize)> {
     None
 }
 
-/// `width` is what the link asks for (`![[pic.png|300]]`, EDIT-024); `text` is the text size and
+/// `width` is what the link asks for (`![[pic.png|300]]`, EDIT-052); `text` is the text size and
 /// whether drawings get a dark canvas.
 fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: &mut Caches, text: (f32, bool), out: &mut Option<ReaderAction>) {
     let (base, dark) = text;
