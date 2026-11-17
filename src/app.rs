@@ -150,12 +150,7 @@ impl egui::DroppedFile for ScriptDrop {
     }
 }
 
-/// The tabs of the Settings dialog (KEY-006).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SettingsTab {
-    General,
-    Keybindings,
-}
+pub use crate::settings::SettingsTab;
 
 pub enum Modal {
     /// The picker window (`Space f f`, NAV-020)
@@ -1898,7 +1893,7 @@ impl ShaleApp {
             self.toast("Saved");
         }
         if settings {
-            self.open_settings(SettingsTab::General);
+            self.open_settings(crate::settings::last_tab(ui.ctx()));
         }
         if is(KeyAction::UserGuide) {
             self.open_user_guide();

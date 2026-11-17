@@ -2,7 +2,7 @@
 
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
-button of the ribbon; it has two tabs, **General** and **Keybindings**.
+button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Sync, Calendar, Mail, Feeds, Data, Help) and **Keybindings**.
 
 Two files hold settings:
 
@@ -20,31 +20,31 @@ You normally never edit these files; the "Where" column says which window change
 
 | Key | Default | Where |
 |---|---|---|
-| `ctrl_to_follow` | off (a plain click follows a link) | Settings → General → Links |
-| `new_notes_next_to_current` | off (new notes go to the vault root) | Settings → General → Links |
-| `update_links_on_rename` | on | Settings → General → Links |
-| `auto_convert_canvas` | off (asks) | Settings → General → Drawings; or the tick in the canvas question |
+| `ctrl_to_follow` | off (a plain click follows a link) | Settings → Editor → Links |
+| `new_notes_next_to_current` | off (new notes go to the vault root) | Settings → Editor → Links |
+| `update_links_on_rename` | on | Settings → Editor → Links |
+| `auto_convert_canvas` | off (asks) | Settings → Editor → Drawings; or the tick in the canvas question |
 | `file_sort` | `NameAsc` (file name A to Z); also `NameDesc`, `ModifiedDesc`, `ModifiedAsc`, `CreatedDesc`, `CreatedAsc` | the sort icon above the file list |
 
 ### Appearance and editor
 
 | Key | Default | Where |
 |---|---|---|
-| `font_size` | 15.5 (range 12 to 24) | Settings → General → Appearance, "Text size" |
+| `font_size` | 15.5 (range 12 to 24) | Settings → Appearance, "Text size" |
 | `readable_width` | on | Appearance, "Readable line length" |
 | `dark_canvas` | on | Appearance, "Dark drawing canvas" |
 | `inline_images` | on | Appearance, "Show embedded images and players inside the editor" |
-| `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → General → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
+| `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
 | `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
-| `line_numbers` | on | Appearance, "Show line numbers in the editor" |
-| `format_toolbar` | on | Settings → General → Editing, "Show formatting toolbar above the text of a note" |
+| `line_numbers` | on | Editor, "Show line numbers in the editor" |
+| `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
 | `font_colours` | red, orange, blue, green, purple (`[[229,62,62], …]`, RGB, up to 8) | Editing, "Font colours": the swatches of the toolbar's font colour palette |
 | `highlight_colours` | neon yellow, green, cyan, magenta (RGB, up to 8) | Editing, "Highlight colours": the swatches of the toolbar's highlight palette |
-| `live_preview` | off | Appearance, "Markdown preview in the editor"; the eye icon of the editor |
-| `preview_raw_lines` | 0 (range 0 to 20) | Appearance, "Raw lines around the cursor" |
-| `table_cell_edit` | on | Appearance, "Edit table cells in the grid"; a single table is switched by the button above the top right corner of its grid |
-| `vim_mode` | off | Appearance, "Vim-style editing" |
+| `live_preview` | off | Editor, "Markdown preview in the editor"; the eye icon of the editor |
+| `preview_raw_lines` | 0 (range 0 to 20) | Editor, "Raw lines around the cursor" |
+| `table_cell_edit` | on | Editor, "Edit table cells in the grid"; a single table is switched by the button above the top right corner of its grid |
+| `vim_mode` | off | Editor, "Vim-style editing" |
 | `keybindings` | empty (the defaults of [[Keyboard shortcuts]]) | Settings → Keybindings; only the actions you changed are stored |
 
 ### Window and vault
@@ -52,7 +52,7 @@ You normally never edit these files; the "Where" column says which window change
 | Key | Default | Where |
 |---|---|---|
 | `version` | the format version of the file (1) | written by Shale |
-| `vault` | none | the vault opened last; Settings → General → Vault folder |
+| `vault` | none | the vault opened last; Settings → Vault → Vault folder |
 | `recent` | empty | the recent vaults of the start screen |
 | `show_left` | on | the left sidebar toggle of the ribbon |
 | `show_right` | on | the right sidebar toggle of the ribbon |
@@ -68,17 +68,17 @@ You normally never edit these files; the "Where" column says which window change
 
 | Key | Default | Where |
 |---|---|---|
-| `calendars` | empty; each entry has `id`, `name`, `color`, `enabled`, `sync_minutes` (15 for a new CalDAV calendar) and its source (a local `.ics` file, or a CalDAV URL with user name and password) | Settings → General → Calendars… |
-| `week_starts_monday` | on | the Calendars… dialog |
+| `calendars` | empty; each entry has `id`, `name`, `color`, `enabled`, `sync_minutes` (15 for a new CalDAV calendar) and its source (a local `.ics` file, or a CalDAV URL with user name and password) | Settings → Calendar → Calendars… |
+| `week_starts_monday` | on | Settings → Calendar, and the Calendars… dialog |
 
 ### Mail ([[Mail]])
 
 | Key | Default | Where |
 |---|---|---|
 | `mail_accounts` | empty; one entry per account, fields below | Mail view → Accounts… |
-| `mail_sync_minutes` | 10 (0 = only with Sync) | Accounts… |
-| `mail_mark_read` | on | Accounts…, "Mark as read when opened" |
-| `mail_mark_read_secs` | 2 (0 = at once) | Accounts… |
+| `mail_sync_minutes` | 10 (0 = only with Sync) | Settings → Mail, and Accounts… |
+| `mail_mark_read` | on | Settings → Mail, and Accounts…, "Mark as read when opened" |
+| `mail_mark_read_secs` | 2 (0 = at once) | Settings → Mail, and Accounts… |
 | `mail_undo_secs` | 10 (0 = send at once) | Accounts…, Sending, "Undo send" |
 | `mail_encryption_consent` | none (nothing is decrypted); the date you typed the consent sentence | Accounts…, Encryption |
 
@@ -115,14 +115,14 @@ system keyring, never in this file):
 | `social_accounts` | empty | Feeds → Accounts… (secrets in the keyring) |
 | `social_last` | none; the account and feed shown last | set by Shale |
 | `social_replies` | off | the tick "Include replies from others" in the Import dialog |
-| `social_check_minutes` | 5 (0 = never) | Feeds → Accounts… |
+| `social_check_minutes` | 5 (0 = never) | Settings → Feeds, and Feeds → Accounts… |
 
 ### Data and troubleshooting ([[Data usage and caches]])
 
 | Key | Default | Where |
 |---|---|---|
-| `input_log` | off | Settings → General → Troubleshooting, "Record keyboard input to a file" |
-| `caches` | the values below; each can be "forever" or "no limit" | Settings → General → How long caches are kept; Data usage… rows |
+| `input_log` | off | Settings → Help → Troubleshooting, "Record keyboard input to a file" |
+| `caches` | the values below; each can be "forever" or "no limit" | Settings → Data → How long caches are kept; Data usage… rows |
 | `caches.picture_days` | 30 (social pictures, days) | same |
 | `caches.picture_mb` | 500 (social pictures, MB) | same |
 | `caches.post_days` | 365 (social post index, days) | same |
@@ -137,9 +137,9 @@ system keyring, never in this file):
 | Key | Default | Where |
 |---|---|---|
 | `version` | 1 | written by Shale |
-| `people_dir` | `Adressbuch` | Settings → General → People, "People folder" ([[Tags and people]]) |
-| `sync` | the group of the four keys below | Settings → General → Git sync |
-| `sync.enabled` | on (only matters when the vault is a git repository) | Settings → General → Git sync, "Sync this vault automatically" ([[Git sync]]) |
+| `people_dir` | `Adressbuch` | Settings → Vault → People, "People folder" ([[Tags and people]]) |
+| `sync` | the group of the four keys below | Settings → Sync |
+| `sync.enabled` | on (only matters when the vault is a git repository) | Settings → Sync, "Sync this vault automatically" ([[Git sync]]) |
 | `sync.interval_minutes` | 5 (1 to 1440) | Git sync, "Every … minutes" |
 | `sync.commit_prefix` | empty | Git sync, "Commit message prefix" |
 | `sync.commit_suffix` | empty | Git sync, "suffix" |

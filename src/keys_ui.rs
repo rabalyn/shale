@@ -96,7 +96,11 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
             ui.label(RichText::new(scope.label()).strong());
             ui.end_row();
             for def in DEFS.iter().filter(|d| d.scope == scope) {
-                ui.label(def.label);
+                // long names wrap: the page sits next to the tab list of the settings
+                ui.scope(|ui| {
+                    ui.set_max_width(180.0);
+                    ui.add(egui::Label::new(def.label).wrap());
+                });
                 match &d.recording {
                     Some((a, chords)) if *a == def.action => {
                         let typed = Binding(chords.clone()).display();
@@ -544,8 +548,8 @@ mod tests {
     fn add_keeps_the_other_bindings_and_clear_unbinds() {
         let mut w = W::new("add-clear");
         w.open_dialog();
-        // the Keybindings tab sits in the settings next to the General one, which keeps the vault folder
-        assert!(w.texts.iter().any(|t| t == "General") && w.texts.iter().any(|t| t == "Keybindings"), "{:?}", w.texts);
+        // the Keybindings tab sits in the settings next to the Vault one, which keeps the vault folder
+        assert!(w.texts.iter().any(|t| t == "Vault") && w.texts.iter().any(|t| t == "Keybindings"), "{:?}", w.texts);
         assert!(w.texts.iter().any(|t| t.contains("Press Change")));
         assert!(!w.texts.iter().any(|t| t == "Vault folder"));
         // Add: j and Down stay, the new key joins them
@@ -660,7 +664,7 @@ mod tests {
         w.press(Key::Num6, CTRL_ALT);
         assert_eq!(kind(&w), "note");
         // not while a dialog is open
-        w.app.open_settings(SettingsTab::General);
+        w.app.open_settings(SettingsTab::Vault);
         settle(&mut w);
         w.press(Key::Num6, CTRL_ALT);
         assert_eq!(kind(&w), "note");
@@ -926,7 +930,7 @@ mod tests {
     #[test]
     fn nav_027_the_done_button_stays_in_view_on_every_tab_of_a_short_window() {
         for size in [Vec2::new(1000.0, 600.0), Vec2::new(800.0, 500.0)] {
-            for tab in [SettingsTab::Keybindings, SettingsTab::General] {
+            for tab in SettingsTab::ALL {
                 let mut w = W::new("short");
                 w.size = size;
                 w.app.open_settings(tab);

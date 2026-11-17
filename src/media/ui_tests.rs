@@ -353,7 +353,7 @@ fn a_damaged_file_says_so_and_a_machine_without_sound_output_keeps_the_player_wo
 #[test]
 fn the_settings_dialog_has_the_button_opacity_and_nothing_to_autoplay() {
     let mut fx = Fx::new("settings", NOTE, &["tone-cover.mp3"]);
-    fx.app.open_settings(SettingsTab::General);
+    fx.app.open_settings(SettingsTab::Appearance);
     fx.hl.frames(&mut fx.app, 3);
     let json = serde_json::to_string(&fx.app.cfg).unwrap();
     assert!(json.contains("\"media_play_button_opacity\":0.6"), "{json}");

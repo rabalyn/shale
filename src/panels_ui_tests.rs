@@ -4,7 +4,7 @@
 //! (A child module of `canvas_dialog_tests`, which has the frame helpers.)
 
 use super::*;
-use crate::app::Options;
+use crate::app::{Options, SettingsTab};
 use eframe::egui::{Event, PointerButton, RawInput};
 use egui::accesskit::Role;
 
@@ -313,7 +313,7 @@ fn panel_trash_dialog_moves_to_trash_or_cancels() {
 #[test]
 fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {
     let mut p = P::new("editing-settings", &[]);
-    p.app.open_settings(SettingsTab::General);
+    p.app.open_settings(SettingsTab::Editor);
     for want in ["Editing", "Toolbar button size", "Font colours", "Highlight colours"] {
         assert!(p.shows(Show::Modals, want), "{want:?} missing");
     }
@@ -344,20 +344,23 @@ fn the_editing_settings_switch_the_toolbar_and_edit_the_colour_presets() {
 #[test]
 fn panel_settings_dialog_changes_settings_and_closes() {
     let mut p = P::new("settings", &[]);
-    p.app.open_settings(SettingsTab::General);
+    p.app.open_settings(SettingsTab::Vault);
     let shown = p.look(Show::Modals);
-    for want in ["Vault folder", "Links", "Appearance", "Done", "Calendars…"] {
+    for want in ["Vault folder", "People folder", "Done", "Close this vault (back to the start screen)"] {
         assert!(shown.iter().any(|(_, l, _)| l == want), "{want:?} missing");
     }
     // check boxes change the setting
     let (ctrl, dark) = (p.app.cfg.ctrl_to_follow, p.app.cfg.dark_canvas);
+    p.click(Show::Modals, "Editor");
     p.click(Show::Modals, "Follow links only with Ctrl+click (plain click places the cursor)");
     assert_eq!(p.app.cfg.ctrl_to_follow, !ctrl);
-    p.click(Show::Modals, "Dark drawing canvas");
-    assert_eq!(p.app.cfg.dark_canvas, !dark);
     p.click(Show::Modals, "Update links in other notes when renaming");
     assert!(!p.app.cfg.update_links_on_rename);
+    p.click(Show::Modals, "Appearance");
+    p.click(Show::Modals, "Dark drawing canvas");
+    assert_eq!(p.app.cfg.dark_canvas, !dark);
     // opening a vault that is not there is refused with a message, the dialog stays
+    p.click(Show::Modals, "Vault");
     if let Some(Modal::Settings { vault_path, .. }) = &mut p.app.modal {
         *vault_path = "/this/folder/does/not/exist".into();
     }
@@ -371,30 +374,115 @@ fn panel_settings_dialog_changes_settings_and_closes() {
     p.click(Show::Modals, "Open");
     assert!(p.app.modal.is_none());
     assert!(matches!(p.actions().as_slice(), [Action::OpenVault(d)] if *d == p.dir));
-    // the Keybindings tab, and Done from it
-    p.app.open_settings(SettingsTab::General);
+    // the Keybindings tab, and Esc from it
+    p.app.open_settings(SettingsTab::Vault);
     p.click(Show::Modals, "Keybindings");
     assert!(matches!(&p.app.modal, Some(Modal::Settings { tab: SettingsTab::Keybindings, .. })));
     p.key(Show::Modals, Key::Escape);
     assert!(p.app.modal.is_none());
     // Calendars… leaves the settings for the calendar dialog
-    p.app.open_settings(SettingsTab::General);
+    p.app.open_settings(SettingsTab::Calendar);
     p.click(Show::Modals, "Calendars…");
     assert!(matches!(&p.app.modal, Some(Modal::Calendars(_))));
     p.key(Show::Modals, Key::Escape);
     assert!(p.app.modal.is_none());
     // Done and Esc close the settings
-    p.app.open_settings(SettingsTab::General);
+    p.app.open_settings(SettingsTab::Vault);
     p.click(Show::Modals, "Done");
     assert!(p.app.modal.is_none());
-    p.app.open_settings(SettingsTab::General);
+    p.app.open_settings(SettingsTab::Vault);
     p.look(Show::Modals);
     p.key(Show::Modals, Key::Escape);
     assert!(p.app.modal.is_none());
     // closing the vault goes back to the start screen
-    p.app.open_settings(SettingsTab::General);
+    p.app.open_settings(SettingsTab::Vault);
     p.click(Show::Modals, "Close this vault (back to the start screen)");
     assert!(p.app.vault.is_none() && p.app.modal.is_none() && p.app.cfg.vault.is_none());
+}
+
+fn shown_labels(p: &mut P) -> Vec<String> {
+    p.look(Show::Modals).into_iter().map(|(_, l, _)| l).collect()
+}
+
+// spec: CFG-020
+#[test]
+fn set_001_every_tab_of_the_settings_shows_the_settings_of_its_domain() {
+    let mut p = P::new("settings-tabs", &[]);
+    let wants: [(SettingsTab, &[&str]); 9] = [
+        (SettingsTab::Vault, &["Vault folder", "People folder"]),
+        (SettingsTab::Editor, &["Show line numbers in the editor", "Update links in other notes when renaming", "Font colours"]),
+        (SettingsTab::Appearance, &["Readable line length", "Dark drawing canvas", "Text size"]),
+        (SettingsTab::Sync, &["Git sync"]),
+        (SettingsTab::Calendar, &["Calendars…", "Calendar weeks start on Monday (otherwise Sunday)"]),
+        (SettingsTab::Mail, &["Mail accounts…", "Fetch new mail every"]),
+        (SettingsTab::Social, &["Feed accounts…", "Look for new posts every", "Post search index"]),
+        (SettingsTab::Data, &["Data usage…"]),
+        (SettingsTab::Help, &["Open user guide (F1)", "Troubleshooting"]),
+    ];
+    for (tab, labels) in wants {
+        p.app.open_settings(tab);
+        let shown = shown_labels(&mut p);
+        for l in labels {
+            assert!(shown.iter().any(|s| s == l), "{tab:?}: {l:?} missing in {shown:?}");
+        }
+        for t in SettingsTab::ALL {
+            assert!(shown.iter().any(|s| s == t.label()), "{tab:?}: the tab {:?} is not listed", t.label());
+        }
+    }
+    // a setting is on its own tab only
+    p.app.open_settings(SettingsTab::Appearance);
+    assert!(!shown_labels(&mut p).iter().any(|s| s.starts_with("Show line numbers")));
+}
+
+// spec: CFG-021
+#[test]
+fn set_002_settings_open_on_a_short_page() {
+    let mut p = P::new("settings-short", &[]);
+    p.app.open_settings(SettingsTab::Vault);
+    let shown = p.look(Show::Modals);
+    for hidden in ["Show line numbers in the editor", "Readable line length", "Git sync", "Troubleshooting", "Data usage…"] {
+        assert!(!shown.iter().any(|(_, l, _)| l == hidden), "{hidden:?} is not on the first page");
+    }
+    let rect = |l: &str| shown.iter().find(|(_, t, _)| t.starts_with(l)).map(|x| x.2).unwrap_or_else(|| panic!("no {l:?}"));
+    let height = rect("Type [[p followed").bottom() - rect("Vault folder").top();
+    assert!(height < 200.0, "the first page is {height} points high");
+    p.app.open_settings(SettingsTab::Editor);
+    let shown = p.look(Show::Modals);
+    let rect = |l: &str| shown.iter().find(|(_, t, _)| t.starts_with(l)).map(|x| x.2).unwrap_or_else(|| panic!("no {l:?}"));
+    assert!(rect("The colours of the toolbar").bottom() - rect("Vim-style").top() > 300.0, "the editor page is the long one");
+}
+
+// spec: CFG-022
+#[test]
+fn set_003_the_tab_list_switches_pages_and_the_last_tab_is_remembered() {
+    let mut p = P::new("settings-switch", &[]);
+    p.app.open_settings(SettingsTab::Vault);
+    for t in [SettingsTab::Mail, SettingsTab::Editor, SettingsTab::Keybindings] {
+        p.click(Show::Modals, t.label());
+        assert!(matches!(&p.app.modal, Some(Modal::Settings { tab, .. }) if *tab == t), "{t:?}");
+    }
+    p.key(Show::Modals, Key::Escape);
+    assert!(p.app.modal.is_none());
+    assert_eq!(crate::settings::last_tab(&p.ctx), SettingsTab::Keybindings, "Settings comes back where it was left");
+}
+
+// spec: CFG-023
+#[test]
+fn set_004_the_simple_mail_calendar_and_feed_settings_are_on_their_tabs() {
+    let mut p = P::new("settings-domains", &[]);
+    p.app.open_settings(SettingsTab::Mail);
+    assert!(p.app.cfg.mail_mark_read);
+    p.click(Show::Modals, "Opening a message marks it read on the server");
+    assert!(!p.app.cfg.mail_mark_read);
+    p.click(Show::Modals, "Mail accounts…");
+    assert!(matches!(&p.app.modal, Some(Modal::MailAccounts(_))));
+    p.app.open_settings(SettingsTab::Calendar);
+    assert!(p.app.cfg.week_starts_monday);
+    p.click(Show::Modals, "Calendar weeks start on Monday (otherwise Sunday)");
+    assert!(!p.app.cfg.week_starts_monday);
+    p.app.open_settings(SettingsTab::Social);
+    p.click(Show::Modals, "Feed accounts…");
+    assert!(matches!(&p.app.modal, Some(Modal::Social(_))));
 }
 
 const TASKS: &str = "# Plan\n\n- [ ] write the report 📅 2026-02-01\n- [x] book the room\n- [ ] call #urgent\n  - [ ] nested step\n";
@@ -522,7 +610,7 @@ fn dev_020_the_help_button_in_settings_opens_the_user_guide_as_the_vault() {
     let mut p = P::new("userguide-help", &[]);
     let root = p.dir.join("guide-data");
     p.app.guide = crate::userguide::Places { files: crate::userguide::tests::SAMPLE, root: Some(root.clone()) };
-    p.app.open_settings(SettingsTab::General);
+    p.app.open_settings(SettingsTab::Help);
     let shown = p.look(Show::Modals);
     assert!(shown.iter().any(|(_, l, _)| l == "Help"), "the Help section is shown");
     p.click(Show::Modals, "Open user guide (F1)");

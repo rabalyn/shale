@@ -20,9 +20,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![A picture with its resize buttons](userguide/z_media/screenshots/image-resize.png)
 
-- Line numbers are shown left of the text (Settings → Appearance, on by default); a wrapped
+- Line numbers are shown left of the text (Settings → Editor, on by default); a wrapped
   line keeps one number.
-- A **formatting toolbar** above the text (Settings → Editing, on by default, button size 80–200 %) has a button for
+- A **formatting toolbar** above the text (Settings → Editor, on by default, button size 80–200 %) has a button for
   everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
   Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, tables, `[[note]]`
   and `[text](url)` links, embeds (it opens the `[!` file picker) and "Clear formatting". With a
@@ -30,7 +30,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   cursor between them; a line button works on every line the selection touches. Each click is one undo
   step and the keyboard stays in the note, also with the Markdown preview and with vim-style editing.
 - **Colours.** The toolbar's highlight and font colour buttons open a palette (four neon highlights, a
-  "No highlight" entry and a colour picker; font colours you set in Settings → Editing) and write plain
+  "No highlight" entry and a colour picker; font colours you set in Settings → Editor) and write plain
   HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
   `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
   the Markdown preview), the reading view, table cells and the PDF export, and nest with bold and italic.
@@ -126,7 +126,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
-- **Markdown preview** (Settings → Appearance, or the eye icon in the top right of the editor;
+- **Markdown preview** (Settings → Editor, or the eye icon in the top right of the editor;
   off by default): every line is drawn rendered, with headings at their size, bold, italic,
   strike and code without their markers, links as just their text, and only the line the cursor
   is in (and, with "Raw lines around the cursor", that many lines before and after, or all the
@@ -201,7 +201,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `Name.excalidraw.md` next to it (Obsidian opens it with the Excalidraw plugin); **Open
   read-only** just shows it. The canvas file itself is never changed. Opening the canvas again
   offers the drawing made before.
-- Tick "Always convert canvases when opening them" (also in Settings → Drawings) to skip the
+- Tick "Always convert canvases when opening them" (also in Settings → Editor → Drawings) to skip the
   question.
 
 ![The question when a canvas is opened](userguide/z_media/screenshots/canvas-convert.png)
@@ -298,7 +298,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![Calendar settings](userguide/z_media/screenshots/calendar-settings.png)
 
-- Settings → Calendars: add local calendars or CalDAV accounts ("Find calendars" asks the
+- Settings → Calendar: add local calendars or CalDAV accounts ("Find calendars" asks the
   server), choose colours, show or hide calendars, and set the sync interval per calendar.
 
 ![Calendar in the sidebar](userguide/z_media/screenshots/calendar-sidebar.png)
@@ -542,7 +542,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   kept; removing an account removes its posts. Posts you save to the vault (the thread and the
   replies below it) are searchable too, a reply knows the post it answers even when that arrives
   later, and a hit whose post is gone from both index and feed is fetched from the server.
-  **Settings → General → Post search index** shows how many posts are indexed, **Rebuild**s it
+  **Settings → Feeds → Post search index** shows how many posts are indexed, **Rebuild**s it
   from the posts your open feeds hold, or **Clear…**s it (after a question). (Mouse only for now.)
 - **Save to vault** copies the post, and the whole thread when it is a thread by one author,
   into the Import dialog: choose the folder (default `Social`), tags and which pictures to
@@ -586,6 +586,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Settings that travel with the vault
 
+- **Settings** (Ctrl+, or the ribbon button) has a tab per domain in a list on the left: Vault, Editor,
+  Appearance, Sync, Calendar, Mail, Feeds, Data, Help and Keybindings. It opens on the short Vault
+  page, and later on the tab you used last.
 - Each vault keeps its own settings in `.shale/settings.json` (people folder, git sync) and its
   session in `.shale/state.json` (open notes, last import folder, recent tags), so a vault
   behaves the same on every computer. The undo histories of the notes (`u` in vim-style editing)
@@ -624,7 +627,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Git sync
 
-- Needs `git` installed. In Settings → Git sync, enter the URL of a git repository
+- Needs `git` installed. In Settings → Sync, enter the URL of a git repository
   (`https://…`, `ssh://…`, `git@host:notes.git` or a folder path) and press Connect (an address with a password in it, and plain `http://` or `git://` except on this computer, are refused: use a credential helper or an SSH key), or run
   `git init` in the vault folder yourself. Shale then syncs on its own: when the vault opens,
   every few minutes (default 5, changeable) and on "Sync now".
@@ -642,7 +645,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Passwords are git's business (credential helper or SSH key); Shale never asks for one.
 - **Media in Git LFS.** Audio and video files are large, so they do not belong in the git history.
   With `git-lfs` installed, a repository Shale creates (Connect on a folder that is no repository
-  yet) stores media with Git LFS from the start, and for an existing repository Settings → Git sync
+  yet) stores media with Git LFS from the start, and for an existing repository Settings → Sync
   has the button **Store media with Git LFS**. The settings show whether git-lfs is installed
   (and where to get it if not) and whether the repository uses it. Shale sets LFS up in this
   repository only (never your global git configuration), routes mp3, ogg, oga, opus, flac, m4a,
@@ -652,7 +655,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   files to the remote's LFS store before it pushes. Other computers get small pointer files and
   download a file when it is needed: a sound or picture that is still a pointer shows "Not
   downloaded (12 MB) — Download" (pressing play downloads first, then plays; a spinner shows while
-  it runs and a failure is said in words). Settings → Git sync has "Download media files after every
+  it runs and a failure is said in words). Settings → Sync has "Download media files after every
   sync" (vault setting `sync.lfs_download`: `on_demand`, the default, or `always`). A conflict copy of a media file is stored in LFS too. On a
   computer without git-lfs, a vault that stores media with LFS is not synced (nothing is
   committed) and the settings say why.

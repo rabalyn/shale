@@ -1,6 +1,6 @@
 //! Window layout: ribbon, sidebars, tab bar, the note/drawing/tasks/graph views and status bar.
 
-use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, SettingsTab, ShaleApp, TabMarks, View};
+use crate::app::{graph_click, handle_editor_action, handle_reader_action, muted, Action, LeftPanel, Modal, ShaleApp, TabMarks, View};
 use crate::markdown;
 use crate::reader;
 use crate::sidebar::Item;
@@ -371,7 +371,7 @@ impl ShaleApp {
             self.ribbon_items(ui);
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 if icon_button(ui, Icon::Settings, 30.0, false, "Settings and vault (Ctrl+,)").clicked() {
-                    self.open_settings(SettingsTab::General);
+                    self.open_settings(crate::settings::last_tab(ui.ctx()));
                 }
                 if icon_button(ui, Icon::SidebarRight, 30.0, false, "Toggle right sidebar").clicked() {
                     self.cfg.show_right = !self.cfg.show_right;
