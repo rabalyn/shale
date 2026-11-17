@@ -104,6 +104,13 @@ edited) ends the selection too.
 
 ![[table-cell-edit.png]]
 
+![[table-cell-block.png]]
+
+The clip selects a block with Shift+→ and Shift+↓, makes it bold with the toolbar and clears it
+with Backspace:
+
+![[table-cell-block.webm]]
+
 If you prefer the raw markdown, turn off "Edit table cells in the grid" in Settings → General →
 Appearance: a click on a table then shows its raw rows to edit. A single table can be switched
 either way by the small button above the top right corner of its grid (**md**: edit this table

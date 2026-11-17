@@ -159,6 +159,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![A table cell edited in the grid](userguide/z_media/screenshots/table-cell-edit.png)
 
+  ![A block of 2 by 2 cells selected with Shift+arrow keys](userguide/z_media/screenshots/table-cell-block.png)
+
   ![A table in the reading view](userguide/z_media/screenshots/table-reading.png)
 
 - **Vim-style editing** (Settings, off by default): notes open in normal mode. h j k l, w b,
