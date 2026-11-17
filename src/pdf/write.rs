@@ -3,10 +3,14 @@
 //! Coordinates given to this module are in points with the origin at the TOP-left of the page
 //! (y grows downwards, like on screen); they are flipped when written.
 
+use skrifa::charmap::Charmap;
+use skrifa::instance::{LocationRef, Size};
+use skrifa::metrics::{GlyphMetrics, Metrics};
+use skrifa::outline::{DrawSettings, OutlinePen};
+use skrifa::{FontRef, GlyphId, MetadataProvider, OutlineGlyphCollection};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::sync::OnceLock;
-use ttf_parser::{Face as TtfFace, GlyphId, OutlineBuilder};
 
 /// Fonts available for text.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
@@ -19,9 +23,29 @@ pub enum FontKind {
     Hand,
 }
 
+/// A bundled font, parsed once: the charmap, the horizontal advances and the outlines in font
+/// units (unscaled), and the font-wide metrics.
 struct LoadedFont {
     data: &'static [u8],
-    face: TtfFace<'static>,
+    charmap: Charmap<'static>,
+    advances: GlyphMetrics<'static>,
+    outlines: OutlineGlyphCollection<'static>,
+    metrics: Metrics,
+}
+
+impl LoadedFont {
+    fn parse(data: &'static [u8]) -> Self {
+        let font = FontRef::new(data).expect("bundled font");
+        LoadedFont { data, charmap: font.charmap(), advances: font.glyph_metrics(Size::unscaled(), LocationRef::default()), outlines: font.outline_glyphs(), metrics: font.metrics(Size::unscaled(), LocationRef::default()) }
+    }
+
+    fn glyph_index(&self, c: char) -> Option<GlyphId> {
+        self.charmap.map(c)
+    }
+
+    fn units_per_em(&self) -> f32 {
+        self.metrics.units_per_em as f32
+    }
 }
 
 fn font(kind: FontKind) -> &'static LoadedFont {
@@ -33,25 +57,25 @@ fn font(kind: FontKind) -> &'static LoadedFont {
         FontKind::Mono => (&MONO, epaint_default_fonts::HACK_REGULAR),
         FontKind::Hand => (&HAND, include_bytes!("../../assets/fonts/Virgil.otf")),
     };
-    cell.get_or_init(|| LoadedFont { data, face: TtfFace::parse(data, 0).expect("bundled font") })
+    cell.get_or_init(|| LoadedFont::parse(data))
 }
 
 /// The face that actually has a glyph for `c` (falls back to Sans).
 fn face_for(kind: FontKind, c: char) -> (FontKind, GlyphId) {
-    if let Some(g) = font(kind).face.glyph_index(c) {
+    if let Some(g) = font(kind).glyph_index(c) {
         return (kind, g);
     }
-    if let Some(g) = font(FontKind::Sans).face.glyph_index(c) {
+    if let Some(g) = font(FontKind::Sans).glyph_index(c) {
         return (FontKind::Sans, g);
     }
-    (kind, GlyphId(0))
+    (kind, GlyphId::NOTDEF)
 }
 
 /// Width of one character in points.
 pub fn char_width(kind: FontKind, size: f32, c: char) -> f32 {
     let (k, g) = face_for(kind, c);
-    let f = &font(k).face;
-    f.glyph_hor_advance(g).unwrap_or(0) as f32 * size / f.units_per_em() as f32
+    let f = font(k);
+    f.advances.advance_width(g).unwrap_or(0.0) * size / f.units_per_em()
 }
 
 /// Width of a string in points.
@@ -61,8 +85,8 @@ pub fn text_width(kind: FontKind, size: f32, s: &str) -> f32 {
 
 /// Ascender of a font as a fraction of the size.
 pub fn ascent(kind: FontKind) -> f32 {
-    let f = &font(kind).face;
-    f.ascender() as f32 / f.units_per_em() as f32
+    let f = font(kind);
+    f.metrics.ascent / f.units_per_em()
 }
 
 /// WinAnsiEncoding byte for a character, if it has one.
@@ -247,7 +271,7 @@ impl Page {
         };
         for c in s.chars() {
             let w = char_width(kind, size, c);
-            let embedded = kind != FontKind::Hand && win_ansi(c).is_some() && font(kind).face.glyph_index(c).is_some();
+            let embedded = kind != FontKind::Hand && win_ansi(c).is_some() && font(kind).glyph_index(c).is_some();
             if embedded {
                 if run.is_empty() {
                     run_x = cx;
@@ -268,10 +292,11 @@ impl Page {
     fn glyph_outline(&mut self, style: TextStyle, x: f32, y: f32, c: char, skew: f32) {
         let TextStyle { kind, size, color, .. } = style;
         let (k, g) = face_for(kind, c);
-        let f = &font(k).face;
-        let scale = size / f.units_per_em() as f32;
+        let f = font(k);
+        let scale = size / f.units_per_em();
         let mut b = PathOps { out: String::new(), x, y: self.height - y, scale, skew };
-        if f.outline_glyph(g, &mut b).is_some() {
+        let drawn = f.outlines.get(g).is_some_and(|o| o.draw(DrawSettings::unhinted(Size::unscaled(), LocationRef::default()), &mut b).is_ok());
+        if drawn {
             self.ops.push_str("q ");
             self.fill_color(color);
             self.ops.push_str(&b.out);
@@ -307,7 +332,7 @@ impl PathOps {
     }
 }
 
-impl OutlineBuilder for PathOps {
+impl OutlinePen for PathOps {
     fn move_to(&mut self, x: f32, y: f32) {
         let (a, b) = self.p(x, y);
         let _ = write!(self.out, "{a:.2} {b:.2} m ");
@@ -401,8 +426,8 @@ impl Doc {
         let mut font_ids: Vec<(FontKind, usize)> = Vec::new();
         for kind in used {
             let lf = font(kind);
-            let f = &lf.face;
-            let upem = f.units_per_em() as f32;
+            let m = &lf.metrics;
+            let upem = lf.units_per_em();
             let file_id = reserve(&mut objs);
             let compressed = deflate(lf.data);
             let mut fo = format!("<< /Length {} /Length1 {} /Filter /FlateDecode >>\nstream\n", compressed.len(), lf.data.len()).into_bytes();
@@ -410,25 +435,25 @@ impl Doc {
             fo.extend(b"\nendstream");
             objs[file_id - 1] = fo;
             let desc_id = reserve(&mut objs);
-            let bb = f.global_bounding_box();
+            let bb = m.bounds.expect("bundled font has a head table");
             let name = match kind {
                 FontKind::Sans => "UbuntuLight",
                 FontKind::Mono => "Hack",
                 FontKind::Hand => "Virgil",
             };
-            let s = |v: i16| (v as f32 * 1000.0 / upem).round() as i32;
+            let s = |v: f32| (v * 1000.0 / upem).round() as i32;
             objs[desc_id - 1] = format!(
                 "<< /Type /FontDescriptor /FontName /{name} /Flags 32 /FontBBox [{} {} {} {}] /ItalicAngle 0 /Ascent {} /Descent {} /CapHeight {} /StemV 80 /FontFile2 {file_id} 0 R >>",
                 s(bb.x_min),
                 s(bb.y_min),
                 s(bb.x_max),
                 s(bb.y_max),
-                s(f.ascender()),
-                s(f.descender()),
-                s(f.capital_height().unwrap_or(f.ascender()))
+                s(m.ascent),
+                s(m.descent),
+                s(m.cap_height.unwrap_or(m.ascent))
             )
             .into_bytes();
-            let widths: Vec<String> = (32u8..=255).map(|b| char_of_win_ansi(b).and_then(|c| f.glyph_index(c)).and_then(|g| f.glyph_hor_advance(g)).map(|a| (a as f32 * 1000.0 / upem).round() as i32).unwrap_or(0).to_string()).collect();
+            let widths: Vec<String> = (32u8..=255).map(|b| char_of_win_ansi(b).and_then(|c| lf.glyph_index(c)).and_then(|g| lf.advances.advance_width(g)).map(|a| (a * 1000.0 / upem).round() as i32).unwrap_or(0).to_string()).collect();
             let fid = reserve(&mut objs);
             objs[fid - 1] = format!("<< /Type /Font /Subtype /TrueType /BaseFont /{name} /FirstChar 32 /LastChar 255 /Widths [{}] /Encoding /WinAnsiEncoding /FontDescriptor {desc_id} 0 R >>", widths.join(" ")).into_bytes();
             font_ids.push((kind, fid));
@@ -541,5 +566,49 @@ mod tests {
         assert_eq!(win_ansi('€'), Some(0x80));
         assert_eq!(win_ansi('→'), None);
         assert_eq!(char_of_win_ansi(0x95), Some('•'));
+    }
+
+    // spec: PDF-001
+    #[test]
+    fn font_metrics_come_from_the_bundled_fonts_in_design_units() {
+        // Ubuntu Light: 1000 units per em, "a" is 509 wide, ascender 932 (hhea)
+        assert!((char_width(FontKind::Sans, 1000.0, 'a') - 509.0).abs() < 0.01);
+        assert!((ascent(FontKind::Sans) - 0.932).abs() < 1e-4);
+        // Hack: 2048 units per em, every glyph is 1233 wide
+        assert!((char_width(FontKind::Mono, 2048.0, 'a') - 1233.0).abs() < 0.01);
+        assert!((text_width(FontKind::Mono, 2048.0, "abc") - 3.0 * 1233.0).abs() < 0.01);
+        // a character no font has is as wide as the .notdef glyph of the font
+        let (k, g) = face_for(FontKind::Sans, '\u{10ffff}');
+        assert_eq!((k, g), (FontKind::Sans, GlyphId::NOTDEF));
+        assert_eq!(char_width(k, 10.0, '\u{10ffff}'), font(k).advances.advance_width(g).unwrap() * 10.0 / 1000.0);
+    }
+
+    // spec: PDF-001
+    #[test]
+    fn hand_written_text_is_drawn_as_filled_outlines_and_embedded_text_is_not() {
+        let mut d = Doc::new("Test");
+        let p = d.add_page(300.0, 200.0);
+        d.page(p).text(TextStyle::plain(FontKind::Hand, 20.0, Rgba::BLACK), 10.0, 50.0, "Ag");
+        let ops = d.page(p).ops.clone();
+        assert!(ops.contains(" m ") && ops.contains(" c ") && ops.contains("h f Q"), "outline path ops: {ops}");
+        assert!(!ops.contains(" Tj "), "no selectable text for the hand font");
+        let mut d = Doc::new("Test");
+        let p = d.add_page(300.0, 200.0);
+        d.page(p).text(TextStyle::plain(FontKind::Sans, 20.0, Rgba::BLACK), 10.0, 50.0, "Ag");
+        let ops = d.page(p).ops.clone();
+        assert!(ops.contains(" Tj ") && !ops.contains(" m "), "embedded text: {ops}");
+    }
+
+    // spec: PDF-001
+    #[test]
+    fn the_font_descriptor_has_the_metrics_of_the_font_in_a_thousand_units() {
+        let mut d = Doc::new("Test");
+        let p = d.add_page(300.0, 200.0);
+        d.page(p).text(TextStyle::plain(FontKind::Mono, 12.0, Rgba::BLACK), 10.0, 50.0, "a");
+        let text = String::from_utf8_lossy(&d.finish()).into_owned();
+        // Hack: bbox (-954 -605 1355 2027) / 2048, ascent 1901, descent -483, cap height 1493
+        assert!(text.contains("/FontBBox [-466 -295 662 990] /ItalicAngle 0 /Ascent 928 /Descent -236 /CapHeight 729"), "descriptor");
+        // "a" (0x61) is 1233 / 2048 em = 602
+        assert!(text.contains(" 602 "), "widths");
     }
 }
