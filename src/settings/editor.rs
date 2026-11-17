@@ -12,7 +12,9 @@ impl ShaleApp {
         changed |= ui.checkbox(&mut self.cfg.line_numbers, "Show line numbers in the editor").changed();
         changed |= ui
             .checkbox(&mut self.cfg.numbered_headings, "Number headings")
-            .on_hover_text("Headings from ## on are shown as 1, 1.1, 1.2; the title (#) is never numbered. The numbers are only drawn, never written into the note. A note's front matter numbered-headings: true or false overrides this for that note.")
+            .on_hover_text(
+                "Headings from ## on are shown as 1, 1.1, 1.2; the title (#) is never numbered. The numbers are only drawn, never written into the note. A note's front matter numbered-headings: true or false overrides this for that note.",
+            )
             .changed();
         changed |= ui.checkbox(&mut self.cfg.live_preview, "Markdown preview in the editor (the lines around the cursor show raw markdown)").changed();
         ui.add_enabled_ui(self.cfg.live_preview, |ui| {

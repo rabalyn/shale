@@ -1701,7 +1701,7 @@ impl ShaleApp {
             let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| crate::drawing::Scene::read_file(&v.abs(rel)).ok()).unwrap_or_default();
             crate::pdf::export::ExportOptions::for_drawing(&scene)
         } else {
-            crate::pdf::export::ExportOptions::for_note()
+            crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }
         };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
         self.modal = Some(Modal::Export(Box::new(crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path))));

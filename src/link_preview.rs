@@ -626,7 +626,7 @@ impl LinkPreview {
                 Content::Note { rel, text, numbers } => {
                     if text.trim().is_empty() {
                         ui.label(egui::RichText::new("The note is empty").color(theme::MUTED));
-                    } else if let Some(a) = reader::show(ui, text, vault, rel, caches, base, dark, &reader::Extras { numbers: numbers.clone(), scroll_to: None }) {
+                    } else if let Some(a) = reader::show(ui, text, vault, rel, caches, (base, dark), &reader::Extras { numbers: numbers.clone(), scroll_to: None }) {
                         action = Some((a, rel.clone()));
                     }
                 }

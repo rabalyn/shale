@@ -332,7 +332,9 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
     (out, plain_click)
 }
 
-pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Caches, base: f32, dark_canvas: bool, extras: &Extras) -> Option<ReaderAction> {
+/// Draw a note. `look` is the text size and whether drawings get a dark canvas.
+pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Caches, look: (f32, bool), extras: &Extras) -> Option<ReaderAction> {
+    let (base, dark_canvas) = look;
     let mut out = None;
     let hint = |t: &str| vault.link_hint(t, Some(rel));
     let all_links: Vec<(LinkSpan, bool)> = markdown::find_links(text)
@@ -675,7 +677,7 @@ mod tests {
             let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(700.0, 500.0))), time: Some(time), events, ..Default::default() };
             let mut action = None;
             let mut out = ctx.run_ui(raw, |ui| {
-                action = show(ui, text, &v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, 15.0, true, &Extras::default());
+                action = show(ui, text, &v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, (15.0, true), &Extras::default());
             });
             out.textures_delta.clear();
             (action, shapes_text(&out.shapes))
@@ -716,7 +718,7 @@ mod tests {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     // the target is asked for in the first frame only, as the app does
                     let e = Extras { numbers: extras.numbers.clone(), scroll_to: extras.scroll_to.filter(|_| n == 0) };
-                    action = show(ui, text, v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, 15.0, true, &e);
+                    action = show(ui, text, v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, (15.0, true), &e);
                 });
             });
             out.textures_delta.clear();
