@@ -1,5 +1,6 @@
 ---
 tags: [userguide, people]
+export: false
 ---
 An example contact note, so that `[[p ` has someone to find. See [[Tags and people]].
 
