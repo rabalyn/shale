@@ -25,6 +25,11 @@ with a search field on top: type a part of the name, move with the arrow keys, p
 list is read in the background the first time it is needed, so it may take a moment on a computer with
 very many fonts. The size is in points, 8 to 48; code stays in a monospace font.
 
+Bold and italic text (`**bold**`, `*italic*`, quotes) is drawn in the chosen font's own bold, italic
+and bold-italic faces when they are installed, as for most fonts that come in a family of styles. A
+font that has only a regular face (and Shale's own font) gets a slanted or wider-spaced imitation
+instead; bold text is also a little brighter either way.
+
 A font that is no longer installed (or comes with settings from another computer) is replaced by
 Shale's own font, you are told once, and the row says "not installed". The name stays in the settings
 and is used again when the font is installed.
