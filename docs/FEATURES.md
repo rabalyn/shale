@@ -111,6 +111,16 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
   ![The PDF export dialog](userguide/z_media/screenshots/pdf-export-dialog.png)
 
+- **Settings → LaTeX** finds the TeX for the LaTeX export of notes (LuaLaTeX and biber, the one on the
+  computer when its kernel is from 2022-06-01 or newer, else a TeX Live that Shale installs itself):
+  the page says which TeX is used or why none can be, tests it with a small document, and installs,
+  updates and removes the managed TeX Live. It shows the sizes (about 100 MB to download, 330 MB on
+  disk) before anything is downloaded, shows the progress, and can be cancelled; the compile that
+  the export will use runs LuaLaTeX and biber in a temporary folder with a timeout and turns the log
+  into readable errors (TEX-001 to TEX-004).
+
+  ![The LaTeX tab of Settings with the question before the install](userguide/z_media/screenshots/settings-latex.png)
+
 - Every dialog is a window you can move by its title bar and resize from any edge or corner.
 
 ## Tabs

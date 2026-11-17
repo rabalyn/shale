@@ -752,6 +752,12 @@ impl NoteEditor {
         crate::table_grid::TableGrid::cell_id(self.id)
     }
 
+    /// Is a cell of a table grid being edited, or a block of cells selected? The grid then has
+    /// the keyboard even when no widget has it (NAV-037).
+    pub fn grid_has_keyboard(&self) -> bool {
+        self.grid.cell.is_some()
+    }
+
     /// Is the `[!` file picker popup on screen?
     pub fn picker_visible(&self) -> bool {
         self.assist.picker_visible()

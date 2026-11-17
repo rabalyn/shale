@@ -1,9 +1,10 @@
 # TeX Live for Shale's LaTeX export tests (TEX-020, ADR-0019): LuaLaTeX and biber, installed from a
-# frozen repository so the image is the same every time it is built. The packages are the list of
+# repository the managed install uses too (the current TeX Live, ADR-0020), so the image is NOT the same
+# every time it is built: it records the TeX Live year and the date in /etc/shale-tex-build. The packages are the list of
 # assets/tex/packages.txt; the templates are not part of the image (tests/tex-env/README.md).
 FROM docker.io/library/debian:bookworm-20260112-slim
 
-ARG TL_REPO=https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final
+ARG TL_REPO=https://mirror.ctan.org/systems/texlive/tlnet
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends perl wget ca-certificates xz-utils \
@@ -28,5 +29,8 @@ ENV PATH=/opt/texlive/bin/aarch64-linux:/opt/texlive/bin/x86_64-linux:$PATH
 
 COPY packages.txt /tmp/packages.txt
 RUN sed 's/#.*//' /tmp/packages.txt | xargs tlmgr --repository "$TL_REPO" install
+
+# which TeX Live this image is: year, repository, build date (`tex-env.sh status` prints it)
+RUN echo "TeX Live $(head -n 1 /opt/texlive/release-texlive.txt | sed 's/.*version //') from $TL_REPO, built $(date -u +%Y-%m-%d)" > /etc/shale-tex-build
 
 WORKDIR /work
