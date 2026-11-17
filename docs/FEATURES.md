@@ -223,7 +223,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![Graph](userguide/z_media/screenshots/graph.png)
 
-- The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline and a local
+- The right sidebar shows backlinks, unlinked mentions, outgoing links, the outline (headings with their formatting, as in the editor) and a local
   graph of the open note.
 - The vault graph shows every note. Red dots are missing notes and green ones are drawings.
 
