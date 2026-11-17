@@ -11,6 +11,9 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
 - **Alt+↑ / Alt+↓** move the current line.
 - A gutter on the left shows **line numbers** (Settings → Editor, on by default);
   a wrapped line keeps one number.
+- The **cursor** has a shape of your choice (Settings → Editor): a bar before the character at the
+  cursor (the default), a bar after it, a block or an underline. With vim-style editing the cursor in
+  normal mode has its own choice (default: block). "Blinking cursor" turns the blinking off.
 
 ## The title line and pasting
 
@@ -170,7 +173,8 @@ Videos resize the same way (the controls stay below the picture; **100%** is the
 
 ## Vim-style editing
 
-Settings → Editor, off by default. Notes open in normal mode.
+Settings → Editor, off by default. Notes open in normal mode. The cursor in normal mode is a block
+unless you choose another shape ("Cursor in normal mode"); typing uses "Cursor while typing".
 
 | Keys | What it does |
 |---|---|
