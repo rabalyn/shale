@@ -1,12 +1,14 @@
 # CI on the homelab Forgejo (git remote `origin`): every push to `main` and every release tag is
-# formatted, linted, built, tested and packaged here, and the dependencies are audited. Changes
+# formatted, linted, built, tested and packaged here (the dependencies are audited by
+# security.yml, which also turns advisories into GitHub issues, BUILD-021). Changes
 # are landed locally by scripts/land.sh, which runs the checks before it pushes `main` (FORGE-011,
 # ADR-0016); this workflow checks again afterwards in a clean container, and a red `main` is
 # fixed at once.
 # Nothing is published from here. Releases are built and published by GitHub from `v*` tags
 # (.github/workflows/build.yml; Forgejo ignores .github/workflows because this folder exists).
-# A push to `main` that passes the build is also pushed to GitHub's `main` (the `mirror` job),
-# where macOS and Windows are built and tested: the homelab cannot run those (BUILD-016).
+# A push to `main` that passes the build is also pushed to GitHub's `main` (the `mirror` job), so
+# the public repository has the code its issues talk about; GitHub builds nothing for it (only
+# release tags, where macOS and Windows are built and tested too: BUILD-016, BUILD-017).
 #
 # The runner starts the job in a container (Docker or Podman). Steps are plain shell: JavaScript
 # actions (checkout, cache, upload-artifact) need Node, which the Rust image does not have, and
@@ -19,7 +21,7 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
-  # weekly, so advisories published for unchanged code are noticed (only the audit job runs then)
+  # weekly, so the real-server suites notice changed test images (only env-tests runs then)
   schedule:
     - cron: '17 5 * * 1'
 
@@ -28,7 +30,7 @@ env:
 
 jobs:
   build:
-    # the scheduled run is only for the audit below
+    # the scheduled run is only for env-tests
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # same compiler as rust-toolchain.toml (rustup in the image reads it and agrees)
@@ -116,7 +118,7 @@ jobs:
           sh .github/check-ai-notice.sh
           sh .github/test-check-ai-notice.sh
 
-      # jq: the test of scripts/report-github-ci.sh runs the script (BUILD-020)
+      # jq: the test of scripts/report-advisories.sh runs the script (BUILD-021)
       - name: Libraries for the window (Wayland, X11, OpenGL) and jq
         run: |
           apt-get update -qq
@@ -178,47 +180,6 @@ jobs:
 
   # separate from the build, so an advisory published overnight shows up as a red job of its own
   # but never blocks the build
-  audit:
-    runs-on: ubuntu-latest
-    container:
-      image: docker.io/library/rust:1.100.0-bookworm
-      volumes:
-        - /srv/data/deployments/forgejo-runner/cache/shale/registry:/usr/local/cargo/registry
-        - /srv/data/deployments/forgejo-runner/cache/shale/tools:/cache/tools
-    steps:
-      - name: Trust the runner's extra CA, if any
-        run: |
-          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
-            update-ca-certificates >/dev/null 2>&1
-            echo "Added the runner's extra CA."
-          fi
-
-      - name: Check out
-        shell: bash
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          if [ -f Cargo.toml ]; then
-            echo "Workspace already populated (local act_runner exec)."
-          else
-            git init -q .
-            git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
-            auth=()
-            if [ -n "$TOKEN" ]; then
-              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
-            fi
-            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.sha }}"
-            git checkout -q FETCH_HEAD
-          fi
-
-      - name: Install cargo-audit
-        # kept between runs: installed again only when a newer cargo-audit is out
-        run: cargo install cargo-audit --locked --root /cache/tools
-
-      # reads only Cargo.lock, so it needs no build and no system libraries
-      - name: Audit the dependencies
-        run: /cache/tools/bin/cargo-audit audit
-
   # DEV-002: a dependency that no code uses fails the build (vendor/ is skipped via .ignore)
   unused-deps:
     if: github.event_name != 'schedule'
@@ -306,7 +267,7 @@ jobs:
             git checkout -q FETCH_HEAD
           fi
 
-      # jq: the test of scripts/report-github-ci.sh runs the script (BUILD-020)
+      # jq: the test of scripts/report-advisories.sh runs the script (BUILD-021)
       - name: Libraries for the window (Wayland, X11, OpenGL) and jq
         run: |
           apt-get update -qq
@@ -408,14 +369,14 @@ jobs:
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
         run: sh .forgejo/scripts/env-tests.sh run "${{ steps.engine.outputs.engine }}"
 
-  # A `main` that is green on Linux goes to GitHub's `main`, whose workflow builds and tests it on
-  # macOS and Windows (BUILD-016, FORGE-003). Only `main`, never a branch or a pull request. The
-  # write credential is the owner's: a fine-grained GitHub token for rabalyn/shale only, with
-  # Contents and Workflows read and write (a deploy key may not push changes to
-  # .github/workflows/, raba/shale#52), kept as the Forgejo Actions secret MIRROR_DEPLOY_KEY (the
-  # name is from the deploy key it replaced; Forgejo refuses names that start with GITHUB_).
-  # Without it the job says so and fails.
-  # How those runs end is reported back by the scheduled workflow github-report.yml.
+  # A `main` that is green on Linux goes to GitHub's `main` (BUILD-016, FORGE-003): the public
+  # repository, where the issues are (ADR-0017), shows the code they refer to; a pushed commit
+  # that says `Closes #N` closes that issue there. GitHub runs no workflow for it (only release
+  # tags). Only `main`, never a branch. The write credential is the owner's: a fine-grained GitHub
+  # token for rabalyn/shale only, with Contents and Workflows read and write (a deploy key may not
+  # push changes to .github/workflows/, raba/shale#52) and Issues read and write (BUILD-021), kept
+  # as the Forgejo Actions secret MIRROR_DEPLOY_KEY (the name is from the deploy key it replaced;
+  # Forgejo refuses names that start with GITHUB_). Without it the job says so and fails.
   mirror:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

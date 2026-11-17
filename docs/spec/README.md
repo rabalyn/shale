@@ -11,7 +11,7 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 | [social.md](social.md) | Mastodon and Bluesky feeds, saving posts as notes | SOC |
 | [engineering.md](engineering.md) | Forge and work tracking, development rules, build and release, background jobs, performance | FORGE, DEV, BUILD, JOB, PERF |
 | [mail.md](mail.md) | Local mail store, IMAP account and sync, flags and moves, sending, signing and encrypting | MAIL |
-| [open-points.md](open-points.md) | Undecided questions (open work: Forgejo issues) | OPEN |
+| [open-points.md](open-points.md) | Undecided questions (open work: GitHub issues) | OPEN |
 
 ## Rules for editing
 
@@ -22,5 +22,5 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
   makes it true, with the test name in the Test column.
 - Tests that check a rule carry its ID in the name or a `// spec: ID` comment; a test checks that
   every such comment names an existing row (DEV-014, `tests/spec_refs.rs`).
-- A `SHOULD BE` row with planned work names its Forgejo issue (`raba/shale#N`); open work is
+- A `SHOULD BE` row with planned work names its GitHub issue (`#N`; `raba/shale#N` in older rows is the same number); open work is
   tracked in the issues, not in these files (FORGE-004, FORGE-007).

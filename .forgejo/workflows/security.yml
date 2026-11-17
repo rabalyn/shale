@@ -1,0 +1,81 @@
+# Security scan on the homelab runner (BUILD-009, BUILD-021, #257): `cargo audit` reads Cargo.lock
+# and every finding (a vulnerability, or the warnings unmaintained, unsound, yanked) becomes a
+# GitHub issue labelled `security`, which an agent picks up like any other work;
+# scripts/report-advisories.sh has the rules (one issue per advisory, closed when it is gone).
+#
+# Daily, because advisories are published for code that did not change; for every push to `main`
+# and every `v*` tag, because a change of Cargo.lock can bring one in. It takes seconds and runs
+# here, never on GitHub. A vulnerability fails the job (never the build or the release); warnings
+# do not.
+#
+# The GitHub token is the Actions secret MIRROR_DEPLOY_KEY (the one the `mirror` job of ci.yml
+# pushes with), which needs the permission Issues (read and write) for rabalyn/shale.
+name: security
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/rust:1.100.0-bookworm
+      volumes:
+        - /srv/data/deployments/forgejo-runner/cache/shale/registry:/usr/local/cargo/registry
+        - /srv/data/deployments/forgejo-runner/cache/shale/tools:/cache/tools
+    steps:
+      - name: Trust the runner's extra CA, if any
+        run: |
+          if [ -f /usr/local/share/ca-certificates/runner-extra-ca.crt ]; then
+            update-ca-certificates >/dev/null 2>&1
+            echo "Added the runner's extra CA."
+          fi
+
+      - name: Check out
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "Workspace already populated (local act_runner exec)."
+          else
+            git init -q .
+            git remote add origin "${{ github.server_url }}/${{ github.repository }}.git"
+            auth=()
+            if [ -n "$TOKEN" ]; then
+              auth=(-c "http.extraHeader=Authorization: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)")
+            fi
+            git "${auth[@]}" fetch -q --depth=1 origin "${{ github.sha }}"
+            git checkout -q FETCH_HEAD
+          fi
+
+      - name: Install cargo-audit and jq
+        # cargo-audit is kept between runs: installed again only when a newer one is out
+        run: |
+          cargo install cargo-audit --locked --root /cache/tools
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends jq >/dev/null
+
+      # reads only Cargo.lock, so it needs no build and no system libraries
+      - name: Audit the dependencies
+        run: |
+          status=0
+          /cache/tools/bin/cargo-audit audit || status=$?
+          echo "$status" >audit-status
+          /cache/tools/bin/cargo-audit audit --json >audit.json || true
+
+      - name: Report the findings as GitHub issues
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_DEPLOY_KEY }}
+          AUDIT_COMMIT: ${{ github.sha }}
+        run: sh scripts/report-advisories.sh audit.json
+
+      - name: Fail for a vulnerability
+        run: |
+          status=$(cat audit-status)
+          [ "$status" = 0 ] || { echo "::error::cargo audit found a vulnerability (see the issues labelled security on GitHub)"; exit "$status"; }

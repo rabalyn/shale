@@ -155,20 +155,24 @@ built; it does not show that a person checked the build.
    closed (`Closes #N`) since the previous tag; otherwise nothing is tagged or built.
 
 Day-to-day development is on a self-hosted Forgejo, whose CI (`.forgejo/workflows/ci.yml`)
-formats, lints, builds, tests, packages and audits every push to `main`; GitHub gets the
-released versions, and builds and tests macOS and Windows for every push to `main` (the Linux
-job of GitHub only runs for release tags).
+formats, lints, builds, tests and packages every push to `main` and audits the dependencies
+daily (`security.yml`); GitHub gets `main` and builds only the releases, on Linux, macOS and
+Windows (`.github/workflows/build.yml` runs for release tags and by hand, never for a push).
 
 ## Development and issues
 
-Shale is developed on Forgejo: <https://git.home.rabalyn.de/raba/shale>. Branches, pull requests
-and the **issues, which are the one list of open work**, live there; GitHub only builds and hosts the
-releases ([ADR-0013](docs/decisions/0013-forgejo-and-issue-tracking.md), FORGE rules in
-[engineering.md](docs/spec/engineering.md)). Changes land locally: `scripts/land.sh <branch>`
+**Issues are here on GitHub** (<https://github.com/rabalyn/shale/issues>), and they are the one
+list of open work: report a problem or ask for a feature there. Report a vulnerability privately
+instead ([SECURITY.md](SECURITY.md)). Every advisory on a dependency that `cargo audit` finds becomes
+an issue labelled `security` by itself (BUILD-021). Development and day-to-day CI happen on the
+owner's self-hosted Forgejo, which is not public; `main` is pushed here after its checks passed
+([ADR-0017](docs/decisions/0017-github-issues-forgejo-ci.md), FORGE rules in
+[engineering.md](docs/spec/engineering.md)). The issue numbers before 2026-11-17 come from Forgejo
+and were imported with their numbers, so `#N` in the history is the issue `#N` here. Changes land locally: `scripts/land.sh <branch>`
 merges a branch into `main`, runs fmt, clippy and the tests, and pushes only when they pass
 ([ADR-0016](docs/decisions/0016-local-landing.md)). The Forgejo runner checks `main` again
-afterwards (`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012) and tests macOS and
-Windows (BUILD-017); a red run there is reported back as a Forgejo issue (BUILD-020).
+afterwards (`.forgejo/workflows/ci.yml`); GitHub builds release tags (BUILD-012), also on macOS and
+Windows (BUILD-017).
 
 ## Build and run
 
@@ -303,7 +307,7 @@ cargo test
 The tests also run against a real vault if there is one: put notes, drawings and files into
 `notes/` next to `Cargo.toml` (it is not committed), or point `SHALE_TEST_VAULT` at a folder.
 Each test works on a copy, so the vault itself is never changed. Without such a folder those
-tests pass with a note. On macOS and Linux the test of `scripts/report-github-ci.sh` (BUILD-020) needs
+tests pass with a note. On macOS and Linux the test of `scripts/report-advisories.sh` (BUILD-021) needs
 `sh`, `curl` and `jq` on the path and fails with a message that says so when one is missing.
 
 CI also measures line coverage (`cargo llvm-cov`; gaps and the ratchet in
