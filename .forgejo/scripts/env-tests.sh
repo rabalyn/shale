@@ -8,19 +8,19 @@
 #       prints "yes" or "no": whether the change touches the managed TeX Live install (`assets/tex/`,
 #       `src/pdf/tex/install*`); only then scripts/land.sh sets SHALE_ENV_TESTS_TEX_INSTALL=yes, which
 #       makes `run` also do the real install of TeX Live (about 100 MB from the default
-#       repository, minutes, `tex_install`); only the weekly scheduled run of the CI job sets it too (ADR-0021)
+#       repository, minutes, `tex_install`); the weekly run and release tags of the CI job set it too, not check tags (ADR-0021)
 #   env-tests.sh import-wanted <base> <head>
 #       prints "yes" or "no": whether the change touches the template import from the network
 #       (`assets/tex/sets/`, `src/pdf/tex/import*`, `archive*`, `sets*`, `tests/tex-env/`); only then
 #       scripts/land.sh sets SHALE_ENV_TESTS_TEX_IMPORT=yes, which makes `run` also download the
 #       pinned tuda-ci from GitHub and the newest from CTAN (`tex_import`, a few MB, seconds); only the
-#       weekly scheduled run of the CI job sets it too (ADR-0021)
+#       weekly run and release tags of the CI job set it too, not check tags (ADR-0021)
 #   env-tests.sh detect
 #       prints "podman", "docker" or "none": which container engine the job container can use
 #   env-tests.sh run [podman|docker]
 #       uses the given engine (the one the detect step found; detected again when left out),
 #       starts both stacks, builds the TeX image, runs `cargo test -- --ignored calendar::env_tests`,
-#       `… mail_env` and `… tex_env` (the TeX image is built with --refresh when SHALE_ENV_TESTS_TEX_REFRESH=yes, as the weekly scheduled run of the CI job does, not a tag run, ADR-0021, so a change of the current TeX Live shows up; `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes and `… tex_import` with SHALE_ENV_TESTS_TEX_IMPORT=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
+#       `… mail_env` and `… tex_env` (the TeX image is built with --refresh when SHALE_ENV_TESTS_TEX_REFRESH=yes, as the weekly run and release tags of the CI job do, not check tags, ADR-0021, so a change of the current TeX Live shows up; `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes and `… tex_import` with SHALE_ENV_TESTS_TEX_IMPORT=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
 set -eu
 cd "$(dirname "$0")/../.."
 

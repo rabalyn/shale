@@ -368,13 +368,14 @@ jobs:
       - name: CalDAV, mail and TeX tests against the real servers
         if: steps.engine.outputs.engine == 'podman' || steps.engine.outputs.engine == 'docker'
         env:
-          # Only the weekly scheduled run does the slow TeX checks (ADR-0021, #325); a tag run builds the TeX
-          # image from its cache and runs calendar, mail and tex_env only. The real install of TeX Live (about 100 MB, minutes):
-          SHALE_ENV_TESTS_TEX_INSTALL: ${{ github.event_name == 'schedule' && 'yes' || 'no' }}
+          # The weekly run and release tags (vX.Y.Z) refresh TeX Live and run the real install and the
+          # template downloads; check tags (vX.Y.Z-rc.N) use the image as built (ADR-0021, #325).
+          # The real install of TeX Live (about 100 MB, minutes):
+          SHALE_ENV_TESTS_TEX_INSTALL: ${{ (github.event_name == 'schedule' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))) && 'yes' || 'no' }}
           # the template import from GitHub and CTAN (a few MB), which also shows when CTAN's tuda-ci stops fitting the kinds:
-          SHALE_ENV_TESTS_TEX_IMPORT: ${{ github.event_name == 'schedule' && 'yes' || 'no' }}
+          SHALE_ENV_TESTS_TEX_IMPORT: ${{ (github.event_name == 'schedule' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))) && 'yes' || 'no' }}
           # and the TeX image built again from the current TeX Live, so upstream breakage shows up within a week (ADR-0020):
-          SHALE_ENV_TESTS_TEX_REFRESH: ${{ github.event_name == 'schedule' && 'yes' || 'no' }}
+          SHALE_ENV_TESTS_TEX_REFRESH: ${{ (github.event_name == 'schedule' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))) && 'yes' || 'no' }}
         run: sh .forgejo/scripts/env-tests.sh run "${{ steps.engine.outputs.engine }}"
 
   # The commit of a tag that is green on Linux goes to GitHub's `main` (BUILD-016, FORGE-003): the
