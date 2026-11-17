@@ -72,7 +72,10 @@ bold and links inside the cells, and long text wrapping inside its own column.
 Click a cell to edit it right in the grid: the cell shows its own markdown in a small box, and
 what you type goes into the note at once (a `|` you type is written as `\|`). **Tab** and
 **Shift+Tab** go to the next and previous cell, **Enter** and **Shift+Enter** to the cell below
-and above, **Esc** (or a click elsewhere) leaves. Everything from the click to leaving is one
+and above, **Esc** (or a click elsewhere) leaves. The arrow keys move inside the cell's text
+and, at its edge, on to the next cell: **→** at the end of the text goes to the next cell (from
+the last column to the next row), **←** at its start to the previous one, **↑** on the first line
+of the text to the cell above and **↓** on its last line to the cell below. Everything from the click to leaving is one
 step you can undo. Moving the cursor into the table with the keyboard still shows its raw rows.
 
 ![[table-cell-edit.png]]

@@ -3427,6 +3427,80 @@ mod tests {
         assert_eq!(g.text, original);
     }
 
+    impl Grid {
+        /// The cursor in the box of the cell being edited (chars), and whether it selects.
+        fn cell_caret(&self) -> (usize, bool) {
+            let r = egui::text_edit::TextEditState::load(&self.ctx, crate::table_grid::TableGrid::cell_id(self.ed.id)).and_then(|st| st.cursor.char_range()).unwrap();
+            (r.primary.index.0, r.primary != r.secondary)
+        }
+    }
+
+    // spec: EDIT-030
+    #[test]
+    fn the_arrow_keys_move_inside_a_cell_and_leave_it_at_the_edge_of_its_text() {
+        let table = "| A | B |\n|:--|--:|\n| 1 | 22 |\n| 3 | 4 |\n";
+        let mut g = Grid::new("cell-arrows", &note_with(table), false);
+        let one = g.centre_of("1");
+        g.click(one);
+        assert_eq!((g.editing(), g.cell_caret()), (Some((1, 0)), (1, false)), "the cursor is behind the text");
+        g.key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!((g.editing(), g.cell_caret().0), (Some((1, 1)), 0), "Right at the end: the start of the next cell");
+        g.key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!((g.editing(), g.cell_caret().0), (Some((1, 1)), 1), "inside the text Right moves the cursor");
+        g.key(Key::ArrowRight, Modifiers::NONE);
+        g.key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!((g.editing(), g.cell_caret().0), (Some((2, 0)), 0), "from the last column to the next row");
+        g.key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!((g.editing(), g.cell_caret().0), (Some((1, 1)), 2), "Left at the start: the end of the previous cell, a row back");
+        g.key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(g.editing(), Some((2, 1)), "Down");
+        g.key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(g.editing(), Some((2, 1)), "the last row: Down stays");
+        g.key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(g.editing(), Some((2, 1)), "the last cell: Right stays");
+        g.key(Key::ArrowUp, Modifiers::NONE);
+        g.key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!((g.editing(), g.cell_caret().0), (Some((0, 1)), 1), "Up to the header, the cursor at the end");
+        g.key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!((g.editing(), g.cell_caret().0), (Some((0, 1)), 0), "the header: Up stays, the cursor goes to the start of the text");
+        g.key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!((g.editing(), g.cell_caret().0), (Some((0, 0)), 1), "the end of the first cell");
+        g.key(Key::ArrowLeft, Modifiers::NONE);
+        g.key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!((g.editing(), g.cell_caret().0), (Some((0, 0)), 0), "the first cell: Left stays");
+        // Shift+arrow selects inside the cell and never leaves it
+        g.key(Key::ArrowRight, Modifiers::SHIFT);
+        assert_eq!((g.editing(), g.cell_caret()), (Some((0, 0)), (1, true)));
+        g.key(Key::ArrowRight, Modifiers::SHIFT);
+        assert_eq!(g.editing(), Some((0, 0)));
+        // with text selected Right does not leave either
+        g.key(Key::ArrowRight, Modifiers::NONE);
+        assert_eq!(g.editing(), Some((0, 0)));
+        // typing after a move goes where the cursor is
+        g.key(Key::ArrowRight, Modifiers::NONE);
+        g.type_text("x");
+        g.frames(1);
+        assert_eq!(g.editing(), Some((0, 1)));
+        assert!(g.text.contains("| A | xB |"), "{}", g.text);
+    }
+
+    // spec: EDIT-030
+    #[test]
+    fn up_and_down_move_between_the_lines_of_a_wrapped_cell_first() {
+        let long = "word ".repeat(80);
+        let table = format!("| A | B |\n|---|---|\n| x | {long}|\n| y | z |\n");
+        let mut g = Grid::new("cell-arrows-wrap", &note_with(&table), false);
+        let z = g.centre_of("z");
+        g.click(z);
+        g.key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(g.editing(), Some((1, 1)), "into the long cell, at the end of its text: its last line");
+        g.key(Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(g.editing(), Some((1, 1)), "Up goes a line up inside the wrapped text first");
+        g.key(Key::ArrowDown, Modifiers::NONE);
+        g.key(Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(g.editing(), Some((2, 1)), "and on the last line Down leaves");
+    }
+
     // spec: EDIT-030
     #[test]
     fn the_editing_ends_past_the_last_cell_and_with_a_click_elsewhere_and_ctrl_z_takes_it_back() {

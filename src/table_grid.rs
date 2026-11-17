@@ -22,6 +22,16 @@ pub struct CellEdit {
     pub before: Option<String>,
     /// the cell's box had the keyboard (losing it afterwards ends the editing)
     had_focus: bool,
+    /// the cursor was on the first / the last line of the box's text last frame (Up and Down leave the cell there)
+    first_line: bool,
+    last_line: bool,
+}
+
+/// Where the cursor goes in a cell that is entered.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Caret {
+    Start,
+    End,
 }
 
 /// Which border is being dragged.
@@ -148,16 +158,16 @@ impl TableGrid {
         }
     }
 
-    fn start(&mut self, ui: &Ui, s: &Shown, row: usize, col: usize) {
+    fn start(&mut self, ui: &Ui, s: &Shown, row: usize, col: usize, caret: Caret) {
         let Some(buf) = cell_text(s.table, row, col) else { return };
         // a cell of the same editing keeps the undo step going
         let before = self.cell.take().and_then(|c| c.before);
-        // the cursor goes behind the cell's text
         let id = Self::cell_id(s.id);
+        let at = if caret == Caret::Start { 0 } else { buf.chars().count() };
         let mut state = egui::text_edit::TextEditState::default();
-        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(buf.chars().count()))));
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
         state.store(ui.ctx(), id);
-        self.cell = Some(CellEdit { table: s.ordinal, row, col, buf, before, had_focus: false });
+        self.cell = Some(CellEdit { table: s.ordinal, row, col, buf, before, had_focus: false, first_line: true, last_line: true });
         ui.ctx().memory_mut(|m| m.request_focus(id));
         ui.ctx().request_repaint();
     }
@@ -175,7 +185,7 @@ impl TableGrid {
             let resp = ui.interact(grid, s.id.with(("table-cells", s.ordinal)), Sense::click_and_drag());
             if resp.clicked() {
                 if let Some((row, col, _)) = resp.interact_pointer_pos().and_then(|p| s.laid.cell_at(s.origin, p)) {
-                    self.start(ui, s, row, col);
+                    self.start(ui, s, row, col, Caret::End);
                 }
             }
             if resp.hovered() {
@@ -203,6 +213,24 @@ impl TableGrid {
         let focused = ui.ctx().memory(|m| m.has_focus(id));
         let take = |ui: &mut Ui, key: Key, m: Modifiers| focused && ui.input_mut(|i| i.consume_key(m, key));
         let flat = c.row * ncols + c.col;
+        let cells = nrows * ncols;
+        // the arrows leave the cell at the edge of its text (no modifiers, nothing selected)
+        let caret = egui::text_edit::TextEditState::load(ui.ctx(), id).and_then(|st| st.cursor.char_range());
+        let len = c.buf.chars().count();
+        let (at_start, at_end) = caret.filter(|r| r.primary == r.secondary).map_or((false, false), |r| (r.primary.index.0 == 0, r.primary.index.0 >= len));
+        let plain = focused && ui.input(|i| i.modifiers.is_none());
+        let arrow = |ui: &mut Ui, key: Key, ok: bool, to: Option<usize>| match to.filter(|t| plain && ok && *t < cells) {
+            Some(t) if ui.input_mut(|i| i.consume_key(Modifiers::NONE, key)) => Some(t),
+            _ => None,
+        };
+        let moved = arrow(ui, Key::ArrowRight, at_end, Some(flat + 1))
+            .map(|t| (t, Caret::Start))
+            .or_else(|| arrow(ui, Key::ArrowLeft, at_start, flat.checked_sub(1)).map(|t| (t, Caret::End)))
+            .or_else(|| arrow(ui, Key::ArrowUp, c.first_line, flat.checked_sub(ncols)).map(|t| (t, Caret::End)))
+            .or_else(|| arrow(ui, Key::ArrowDown, c.last_line, Some(flat + ncols)).map(|t| (t, Caret::End)));
+        if let Some((t, caret)) = moved {
+            return self.start(ui, s, t / ncols, t % ncols, caret);
+        }
         let target = if take(ui, Key::Escape, Modifiers::NONE) {
             Some(None)
         // with Shift first: a key without modifiers would take the Shift one as well
@@ -224,7 +252,7 @@ impl TableGrid {
         // the background goes under the box, whose height is known once it is drawn
         let back = ui.painter().add(egui::Shape::Noop);
         let inner = Rect::from_min_size(rect.min + Vec2::new(6.0, 3.0), Vec2::new(rect.width() - 12.0, f32::INFINITY));
-        let resp = ui
+        let out = ui
             .scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
                 egui::TextEdit::multiline(&mut c.buf)
                     .id(id)
@@ -234,10 +262,16 @@ impl TableGrid {
                     .font(font)
                     .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
                     .show(ui)
-                    .response
-                    .response
             })
             .inner;
+        // which line of the box the cursor is on, for Up and Down next frame
+        if let Some(r) = out.cursor_range {
+            let at = out.galley.pos_from_cursor(r.primary);
+            let rows = &out.galley.rows;
+            c.first_line = rows.first().is_none_or(|row| at.center().y < row.rect().max.y);
+            c.last_line = rows.last().is_none_or(|row| at.center().y > row.rect().min.y);
+        }
+        let resp = out.response.response;
         let shown = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.max.y.max(resp.rect.bottom() + 3.0))).shrink(1.0);
         ui.painter().set(back, egui::Shape::rect_filled(shown, 0.0, theme::BG_PRIMARY));
         ui.painter().rect_stroke(shown, 0.0, egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
@@ -249,7 +283,7 @@ impl TableGrid {
             self.pending.push((s.ordinal, Change::Cell { row: c.row, col: c.col, text: c.buf.clone() }, false));
         }
         match target {
-            Some(Some(t)) if t < nrows * ncols => return self.start(ui, s, t / ncols, t % ncols),
+            Some(Some(t)) if t < cells => return self.start(ui, s, t / ncols, t % ncols, Caret::End),
             // Esc, or past the first or the last cell: the editing ends
             Some(_) => return self.finish(true),
             None => {}

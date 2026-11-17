@@ -134,7 +134,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   click and task boxes still tick. A **table** away from the cursor is drawn as a real grid (also
   in the reading view): borders, a bold header row, aligned columns, formatted cell text, long
   text wrapping in its own column. Click a cell to edit it right in the grid (Tab, Enter and
-  their Shift versions move between cells, Esc leaves; one undo step), or turn that off in
+  their Shift versions move between cells, so do the arrow keys at the edge of a cell's text;
+  Esc leaves; one undo step), or turn that off in
   Settings ("Edit table cells in the grid") or per table (a button at the grid) to edit the raw
   rows instead. Drag the borders to resize columns and rows, the edges to resize the whole table;
   a double click on a border makes all columns (rows) the same size. Hover the grid for buttons
