@@ -41,7 +41,8 @@ impl Scope {
             Scope::FileList => &[Key::Enter, Key::Escape],
             Scope::SearchResults => &[Key::Enter, Key::Escape, Key::Slash],
             Scope::MailView => &[Key::Enter, Key::Escape],
-            // every key vim-lite uses in normal mode (EDIT-011…014), with or without Shift
+            // every key vim-lite uses in normal mode (EDIT-011…014), with or without Shift; but see
+            // `Keymap::check`: Shift+K is no vim key (the link preview has it, EDIT-033)
             Scope::EditorNormal => &[
                 Key::H,
                 Key::J,
@@ -226,6 +227,7 @@ actions! {
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
     NormalSearchAll => "normal.search_all", "Search notes, mail and posts", EditorNormal, ["Space F G"];
+    NormalLinkPreview => "normal.link_preview", "Preview the link under the cursor (again: into the preview)", EditorNormal, ["Shift+K"];
     TreeNextFile => "files.next_file", "Next file", FileList, ["J", "Down"];
     TreePrevFile => "files.prev_file", "Previous file", FileList, ["K", "Up"];
     TreeNextFolder => "files.next_folder", "Next folder", FileList, ["Ctrl+J"];
@@ -385,7 +387,9 @@ impl Keymap {
         // a fixed key cannot start a binding (also not a sequence, which it would never complete)
         // Ctrl+R redoes in vim normal mode (EDIT-021)
         let vim_redo = scope == Scope::EditorNormal && first.ctrl && !first.alt && !first.shift && first.key == Key::R;
-        if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key)) || vim_redo {
+        // vim-lite has a plain k but no K (EDIT-033)
+        let shift_k_is_free = scope == Scope::EditorNormal && first.shift && first.key == Key::K;
+        if (!first.ctrl && !first.alt && scope.reserved().contains(&first.key) && !shift_k_is_free) || vim_redo {
             return Err(format!("{} has a fixed meaning here", b.display()));
         }
         for d in DEFS.iter().filter(|d| d.action != a && d.scope.overlaps(scope)) {
@@ -530,7 +534,7 @@ mod tests {
             let shown = k.display(d.action);
             assert!(row.contains(&shown), "KEY-002 does not name {shown} ({})", d.id);
         }
-        assert_eq!(DEFS.len(), 25 + 36 + 5);
+        assert_eq!(DEFS.len(), 25 + 36 + 6);
     }
 
     // spec: KEY-003
