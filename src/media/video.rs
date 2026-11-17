@@ -271,8 +271,8 @@ fn silence_loop(info: &Info, shared: &Shared, stop: &AtomicBool, video_ended: &A
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::media::engine::Mixer;
     use crate::media::ffmpeg::locate;
+    use crate::media::output::pretend_card;
     use crate::media::testdata::fixture;
     use std::sync::Arc;
 
@@ -339,19 +339,6 @@ mod tests {
         assert!(none.missing && none.look.error.is_none() && none.info.is_none(), "MEDIA-010: no ffmpeg is not an error");
     }
 
-    /// Render the mixer in the background like a sound card would, 10 ms at a time in real time.
-    fn card(shared: &Arc<Shared>, stop: &Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
-        let (shared, stop) = (shared.clone(), stop.clone());
-        std::thread::spawn(move || {
-            let mut m = Mixer::new(shared.clone());
-            let mut buf = vec![0.0f32; shared.rate as usize / 100 * shared.channels];
-            while !stop.load(Ordering::Relaxed) {
-                m.render(&mut buf);
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        })
-    }
-
     /// Sets the flag when dropped, also when the owner unwinds from a panic.
     struct StopOnDrop<'a>(&'a AtomicBool);
 
@@ -406,7 +393,7 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
         let slot: FrameSlot = Mutex::new(None);
         let ctx = egui::Context::default();
-        let device = card(&shared, &stop);
+        let device = pretend_card(shared.clone(), stop.clone(), Duration::from_millis(10));
         std::thread::scope(|s| {
             let runner = s.spawn(|| run(tools, &path, &info, &shared, &stop, &slot, &ctx));
             // a failing assert in `body` must still stop the runner and the card, or the scope waits forever
