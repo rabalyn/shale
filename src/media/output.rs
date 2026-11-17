@@ -55,34 +55,56 @@ fn build<T: SizedSample + FromSample<f32>>(device: &cpal::Device, config: &cpal:
         .map_err(|e| e.to_string())
 }
 
+/// Tests: a pretend sound card that keeps real time. On each wakeup it renders the frames the
+/// wall clock says are due since it started (in chunks of at most 10 ms), then sleeps `tick`; so
+/// the sound clock runs at the speed of sound even when the machine's sleeps run long (GitHub's
+/// macOS runner, #266). The thread ends when `stop` is set.
+#[cfg(test)]
+pub(crate) fn pretend_card(shared: Arc<Shared>, stop: Arc<std::sync::atomic::AtomicBool>, tick: std::time::Duration) -> std::thread::JoinHandle<()> {
+    use std::sync::atomic::Ordering;
+    std::thread::spawn(move || {
+        let mut mixer = Mixer::new(shared.clone());
+        let chunk = shared.rate as usize / 100;
+        let mut buf = vec![0.0f32; chunk * shared.channels];
+        let start = std::time::Instant::now();
+        let mut rendered: u64 = 0;
+        while !stop.load(Ordering::Relaxed) {
+            let due = (start.elapsed().as_secs_f64() * shared.rate as f64) as u64;
+            while rendered < due && !stop.load(Ordering::Relaxed) {
+                let n = (due - rendered).min(chunk as u64) as usize;
+                mixer.render(&mut buf[..n * shared.channels]);
+                rendered += n as u64;
+            }
+            std::thread::sleep(tick);
+        }
+    })
+}
+
 /// Tests: an output that plays into nothing, in real time, so that a player can be driven
 /// without a sound card (and without noise on the machine that runs the tests).
 #[cfg(test)]
 impl Output {
     pub fn silent() -> Output {
-        struct Clock(Arc<std::sync::atomic::AtomicBool>);
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct Clock(Arc<AtomicBool>);
         impl Drop for Clock {
             fn drop(&mut self) {
-                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                self.0.store(true, Ordering::Relaxed);
             }
         }
         let shared = Shared::new(48_000, 2);
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (sh, st) = (shared.clone(), stop.clone());
-        std::thread::spawn(move || {
-            let mut mixer = Mixer::new(sh);
-            let mut buf = vec![0.0; 480 * 2];
-            while !st.load(std::sync::atomic::Ordering::Relaxed) {
-                mixer.render(&mut buf);
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-        });
+        let stop = Arc::new(AtomicBool::new(false));
+        pretend_card(shared.clone(), stop.clone(), std::time::Duration::from_millis(10));
         Output { _keep: Box::new(Clock(stop)), shared }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
     // spec: MEDIA-011
     #[test]
     fn opening_the_output_without_a_sound_card_is_an_error_not_a_panic() {
@@ -90,5 +112,27 @@ mod tests {
             Ok(o) => assert!(o.shared.rate > 0 && o.shared.channels > 0),
             Err(e) => assert!(!e.is_empty()),
         }
+    }
+
+    // spec: MEDIA-011
+    #[test]
+    fn the_pretend_card_keeps_real_time_when_its_sleeps_run_long() {
+        let shared = Shared::new(48_000, 2);
+        shared.set_playing(true);
+        let stop = Arc::new(AtomicBool::new(false));
+        // a slow runner: every sleep of the card takes 60 ms
+        let card = pretend_card(shared.clone(), stop.clone(), Duration::from_millis(60));
+        let epoch = shared.epoch();
+        let silence = vec![0.0f32; 480 * 2];
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_millis(600) {
+            while shared.push(epoch, &silence) == crate::media::engine::Pushed::Accepted {}
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (pos, wall) = (shared.position_secs(), start.elapsed().as_secs_f64());
+        stop.store(true, Ordering::Relaxed);
+        card.join().unwrap();
+        assert!(pos >= wall - 0.15, "the clock ran at the speed of sound: {pos} s of {wall} s");
+        assert!(pos <= wall + 0.05, "and not ahead of it: {pos} s of {wall} s");
     }
 }
