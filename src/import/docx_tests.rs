@@ -455,6 +455,8 @@ print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496
     assert!(body.contains("a ==yellow highlight=="), "plain yellow stays pandoc's own mark: {body}");
     assert!(body.contains("**<span style=\"color: #0000FF;\">bold blue</span>** and on"), "white space stays outside, so the emphasis works: {body}");
     assert!(body.contains("<span style=\"color: #00B050;\"><mark style=\"background: #FFC000;\">green on orange</mark></span>"), "{body}");
+    assert!(body.contains("<span style=\"color: #7030A0;\">purple by style</span> and on"), "a colour from a character style: {body}");
+    assert!(body.contains("<span style=\"color: #0F4761;\">shaded accent</span> and <span style=\"color: #E97132;\">plain accent</span>"), "theme colours with and without a shade: {body}");
     assert!(!body.chars().any(|c| ('\u{E000}'..='\u{E003}').contains(&c)), "no sentinel is left");
     // the original is kept as it is, without the tags
     let kept = std::fs::read(v.root.join(format!("{folder}/styled.docx"))).unwrap();
@@ -470,6 +472,27 @@ fn a_file_made_by_pandoc_alone_has_its_properties_and_a_heading_for_its_title() 
     assert!(!props.iter().any(|p| p.starts_with("source")), "the block is there although the original is not kept: {props:?}");
     assert_eq!(props[props.len() - 2..], ["print-title: false", "print-toc: false"], "{props:?}");
     assert!(body.starts_with("# Sample\n\n# Heading one\n"), "the title of the file is a heading: {body}");
+}
+
+/// A Word table of contents is not imported as text and an ordinary list of links stays.
+// spec: IMP-043, IMP-037, IMP-039
+#[test]
+fn a_word_table_of_contents_is_dropped_with_its_title_and_headings_stay_but_other_links_stay() {
+    let Some((v, done)) = import_fixture("toc", "toc.docx", false) else { return };
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let (props, body) = split_props(&text);
+    assert!(!props.iter().any(|p| p.starts_with("print-toc")), "the export makes its own contents: {props:?}");
+    assert!(!body.contains("Inhaltsverzeichnis"), "no title of the contents: {body}");
+    assert!(!body.contains("Einleitung 2") && !body.contains("Details 2"), "no entries: {body}");
+    assert_eq!(body, "# Einleitung\n\nErster Absatz.\n\n# Details\n\nZweiter Absatz.\n");
+
+    // one link alone, a link in a list: not a contents, so they are kept (as their text)
+    let Some((v, done)) = import_fixture("toclinks", "toclinks.docx", false) else { return };
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let body = split_props(&text).1;
+    assert!(body.contains("\nAlpha\n\nText between the two links.\n\nBeta\n"), "{body}");
+    assert!(body.contains("- Alpha\n- Beta\n"), "{body}");
 }
 
 /// A real (small) Word file with one red run, as a path in `dir`.
