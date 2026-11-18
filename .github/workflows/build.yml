@@ -221,7 +221,7 @@ jobs:
         run: cargo test --release --locked
 
       # BUILD-024: the download, packed like the Linux one (same files, no desktop file) after the
-      # tests passed; not signed (the arm64 linker only ad-hoc-signs the binary)
+      # tests passed, as a zip (7-Zip is on the runner); not signed (SmartScreen warns once)
       - name: Package
         shell: bash
         run: |
@@ -236,7 +236,7 @@ jobs:
           cp -r docs dist/shale/
           # DEV-020: the guide is in the archive once, as docs/userguide, without what Shale writes into a vault
           rm -rf dist/shale/docs/userguide
-          scripts/userguide-dist.sh dist/shale/docs/userguide
+          sh scripts/userguide-dist.sh dist/shale/docs/userguide
           ASSET="shale-${LABEL}-windows-x86_64.zip"
           (cd dist && 7z a -tzip -bso0 "../release/$ASSET" shale)
           cd release
