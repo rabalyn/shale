@@ -1,5 +1,6 @@
 # TU Darmstadt, report: the minimal tudapub setup without an accent colour, no margin column. The
 # writer maps the headings by nesting: # to \section, ## to \subsection (mapping "article").
+# The department logo (Settings → LaTeX) goes into the title box, under the TU logo (\addTitleBoxLogo*).
 name = "Report"
 description = "Reports without accent colour and margin column (class tudapub, type=intern)"
 mapping = "article"
@@ -7,6 +8,7 @@ class = "tudapub"
 options = ["{language}", "accentcolor={accent}", "type=intern", "marginpar=false"]
 preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
 logo = true
+department_logo = ["\\ExplSyntaxOn", "\\addTitleBoxLogo*{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{{department_logo}}}", "\\ExplSyntaxOff"]
 
 [[fields]]
 key = "title"

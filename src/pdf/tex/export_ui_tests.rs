@@ -286,6 +286,50 @@ fn the_logo_warning_is_shown_while_the_set_has_no_logo() {
     assert!(!has(&t, "logo-warning") && !t.shows("The set's logo is missing"));
 }
 
+/// A department logo in the slot of the set `tuda` of the window's vault (TEX-035).
+fn put_department_logo(t: &T) {
+    let logo = t.dir.join("templates/tex/tuda/logo");
+    std::fs::create_dir_all(&logo).unwrap();
+    std::fs::write(logo.join("mylogo.pdf"), super::sets::placeholder_logo_pdf()).unwrap();
+    std::fs::write(logo.join("department_logo.png"), super::sets_tests::PNG).unwrap();
+}
+
+// spec: TEX-016, TEX-035
+#[test]
+fn the_department_logo_box_is_there_when_the_set_has_one_on_by_default_and_greyed_for_a_kind_without_a_place() {
+    let mut t = T::new("dlg-dept", usable());
+    put_set(&t);
+    open_on(&mut t, "Plan.md", "# Plan\n");
+    click(&mut t, "engine:latex");
+    // no department logo in the set: no box and no warning about it
+    assert!(!has(&t, "department-logo") && !t.shows("Department logo"), "{:?}", t.painted());
+    put_department_logo(&t);
+    t.app.open_export_dialog(Path::new("Plan.md"));
+    t.hl.frames(&mut t.app, 3);
+    click(&mut t, "engine:latex");
+    click(&mut t, "kind");
+    click(&mut t, "kind:pub");
+    assert!(has(&t, "department-logo") && t.shows("Department logo") && dialog(&t).opts.department_logo, "on by default: {:?}", t.painted());
+    click(&mut t, "department-logo");
+    assert!(!dialog(&t).opts.department_logo);
+    click(&mut t, "department-logo");
+    assert!(dialog(&t).opts.department_logo);
+    // a kind with no place for it: the box shows off and a click changes nothing
+    for k in ["announcement", "exercise"] {
+        click(&mut t, "kind");
+        click(&mut t, &format!("kind:{k}"));
+        assert!(!dialog(&t).tex.as_ref().unwrap().kind_shows_department_logo() && has(&t, "department-logo"), "{k}");
+        let before = dialog(&t).opts.department_logo;
+        click(&mut t, "department-logo");
+        assert_eq!(dialog(&t).opts.department_logo, before, "{k}: the box is greyed and a click changes nothing");
+    }
+    for k in ["letter", "poster", "beamer", "thesis"] {
+        click(&mut t, "kind");
+        click(&mut t, &format!("kind:{k}"));
+        assert!(dialog(&t).tex.as_ref().unwrap().kind_shows_department_logo(), "{k}");
+    }
+}
+
 /// A LuaLaTeX that keeps the document it was given and makes a PDF.
 #[cfg(unix)]
 fn recording_tex(tag: &str) -> (crate::pdf::tex::compile_tests::fake::Fake, PathBuf) {
@@ -332,6 +376,33 @@ mod fake {
         t.app.open_export_dialog(Path::new("Report.md"));
         t.hl.frames(&mut t.app, 3);
         assert_eq!(dialog(&t).engine, ExportEngine::Builtin);
+    }
+
+    // spec: TEX-016, TEX-035
+    #[test]
+    fn export_writes_the_department_logo_lines_only_while_the_box_is_on_and_the_slot_is_filled() {
+        let mut t = T::new("dlg-dept-run", usable());
+        put_set(&t);
+        let (f, keep) = recording_tex("dept-run");
+        t.app.tex.detection = Some(found(Ok(f.engine()), Err("not installed"), None));
+        let export = |t: &mut T, name: &str, department_logo: bool| {
+            open_on(t, name, "---\nauthor: Ada\n---\n# Report\n");
+            click(t, "engine:latex");
+            click(t, "kind");
+            click(t, "kind:pub");
+            if has(t, "department-logo") && dialog(t).opts.department_logo != department_logo {
+                click(t, "department-logo");
+            }
+            click(t, "export");
+            until(t, "the export is done", |t| t.app.modal.is_none());
+            std::fs::read_to_string(keep.join("main.tex")).unwrap()
+        };
+        // an empty slot: nothing, and no box
+        assert!(!export(&mut t, "A.md", true).contains("department_logo"));
+        put_department_logo(&t);
+        let on = export(&mut t, "B.md", true);
+        assert!(on.contains("\\addTitleBoxLogo*{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{department_logo}}"), "{on}");
+        assert!(!export(&mut t, "C.md", false).contains("department_logo"), "the box is off");
     }
 
     // spec: BOOK-013, BOOK-014, BOOK-016

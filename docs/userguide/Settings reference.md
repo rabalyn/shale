@@ -198,6 +198,7 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 | `department` | empty (used when a note gives no department) | `settings.toml` of the set, the guided setup (Settings → LaTeX → Set up LaTeX export…) |
 | `author` | empty (used for the author field when a note gives none) | `settings.toml` of the set, the guided setup |
 | `logo` | none, set by Settings → LaTeX → Template sets → Choose logo… | `settings.toml` of the set |
+| `department_logo` | none, set by Settings → LaTeX → Template sets → Choose department logo… (cleared by Remove department logo); the logo of your department, shown under the TU logo | `settings.toml` of the set, the guided setup (logo step) |
 
 ### Data and troubleshooting ([[Data usage and caches]])
 

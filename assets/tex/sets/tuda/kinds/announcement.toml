@@ -1,5 +1,7 @@
 # TU Darmstadt, announcement of a final thesis defence or a talk (class tudaposter, type=announcement), A4.
 # The note is text with \section*, \subsection*, ... by nesting (mapping "poster").
+# No department logo (Settings → LaTeX): the title area of an A4 announcement has no room for a second logo
+# (the class warns that the info box is too high), so this kind does not show it.
 name = "Announcement"
 description = "Announcements, for example of a thesis defence (class tudaposter, type=announcement)"
 mapping = "poster"

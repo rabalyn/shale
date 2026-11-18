@@ -192,7 +192,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   **Test page** compiles a small document of the set and opens the PDF; **Remove set…** moves it to the
   trash. The university's logo may not be redistributed: **Choose logo…** copies yours into the set, and
   until then exports use a placeholder and the set says "logo missing: exports are not CI-conformant"
-  (TEX-005 to TEX-007, TEX-024 to TEX-027).
+  (TEX-005 to TEX-007, TEX-024 to TEX-027). A **department logo** (**Choose department logo…**, **Remove
+  department logo**) is an optional second slot: documents show it below the TU logo, right-aligned and
+  as high, where the class has room for it (not on exercise sheets and announcements), and the export
+  dialog has a **Department logo** box for it (TEX-035).
 
   ![Template sets in Settings → LaTeX](userguide/z_media/screenshots/settings-latex-sets.png)
 
@@ -204,7 +207,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   download and 330 MB on disk, with progress and Cancel; the built-in export needs nothing of this),
   **Templates** (TU Darmstadt, the tested version, the newest from CTAN, a file, a folder or GitHub, or a set
   you have), **Logo** (the university's logo may not be shipped: the step says where members get it; give it
-  by **dropping the file onto the window** or by its path, or choose Later and exports carry a placeholder),
+  by **dropping the file onto the window** or by its path, or choose Later and exports carry a placeholder; an
+  optional second field takes your department's logo),
   **Your details** (the accent colour as swatches `0a` to `11d`, the language, your department and name, kept in
   the set's `settings.toml`) and a **Test page** that is made with your choices and opened, or, if it fails,
   explained in words with **Save the .tex**. While the setup or Settings → LaTeX is open, files dropped on the
