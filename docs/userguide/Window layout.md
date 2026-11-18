@@ -33,8 +33,8 @@ of **views**.
 ## The app icon
 
 The Shale icon (stacked slate plates) shows in the title bar and taskbar, and in the Dock on
-macOS. On Linux with Wayland the taskbar takes it from a desktop file: the download has
-`shale.desktop` and `shale.svg`, and the README says how to install them.
+macOS. On Linux with Wayland the taskbar takes it from a desktop file: `install.sh` in the download installs
+the desktop file and the icons (see Start here).
 
 ## Dialogs
 

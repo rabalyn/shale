@@ -416,7 +416,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ## The ribbon and the sidebars
 
 - **App icon**: three slate plates stacked on a dark square. The window shows it in the title
-  bar, taskbar or Dock; the Linux download has `shale.desktop` and `shale.svg` for the app menu
+  bar, taskbar or Dock; the Linux download's `install.sh` puts the desktop file and icons in place for the app menu
   and the Wayland taskbar (see the README).
 - The icons of the ribbon (the narrow bar on the left) can be dragged into any order. A line
   between two icons shows where the icon lands; Esc, or letting go anywhere else, cancels. The
