@@ -59,6 +59,13 @@ also has the guide as `shale-userguide-<version>.zip`, to unpack anywhere and op
 and as one PDF to print or read anywhere, `shale-userguide-<version>.pdf` (made from this vault
 as a book).
 
+## Installing on Linux
+
+The Linux download unpacks to a folder `shale/` with an `install.sh`. Run `./install.sh` in it to
+put Shale in `~/.local/bin` with its app menu entry and icons, or `sudo ./install.sh --prefix /usr/local`
+for all users; `./install.sh --uninstall` removes what it installed (your vaults and settings stay).
+Running it again upgrades. If a library is missing, the script names it.
+
 ## How to read this guide
 
 Each note names the setting or key you need, and every picture was made by the app itself

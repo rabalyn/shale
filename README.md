@@ -126,13 +126,20 @@ Released versions are on the [Releases page](https://github.com/rabalyn/shale/re
 with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`
 (Linux), `shale-<version>-macos-arm64.tar.gz` (macOS, Apple silicon) or `shale-<version>-windows-x86_64.zip` (Windows),
 unpack it and run `./shale/shale` (`shale\shale.exe` on Windows). (The user guide is in the archive as `shale/docs/userguide/`, and
-alone as `shale-userguide-<version>.zip` and as a PDF, `shale-userguide-<version>.pdf`.) To start Shale from the app menu with its icon (on Wayland the
-taskbar needs this to show the icon), install the desktop file and the icon from the unpacked folder:
+alone as `shale-userguide-<version>.zip` and as a PDF, `shale-userguide-<version>.pdf`.) On Linux, `shale/install.sh` installs the program, the app menu entry and the icons (on Wayland the
+taskbar needs the entry to show the icon), on any distribution:
 
 ```sh
-install -Dm644 shale/shale.svg ~/.local/share/icons/hicolor/scalable/apps/shale.svg
-sed "s|^Exec=shale|Exec=$PWD/shale/shale|" shale/shale.desktop > ~/.local/share/applications/shale.desktop
+cd shale
+./install.sh                     # for you: ~/.local/bin and ~/.local/share
+sudo ./install.sh --prefix /usr/local   # for all users: /usr/local/bin and /usr/local/share
+./install.sh --uninstall         # removes what it installed (add the same --prefix); your vaults stay
 ```
+
+It works from any folder, runs again to upgrade, warns when the program's folder is not on your `PATH`
+and names libraries your system lacks (with the package names for Arch, Debian and Fedora). There is
+no AppImage and no Flatpak: an AppImage needs FUSE 2 and brings no menu entry, and a Flatpak sandbox
+would block your vault folders and the programs Shale starts (git, gpg, ffmpeg, curl, pandoc).
 
 The macOS and Windows downloads are not signed or notarised, so the system warns before the first start:
 

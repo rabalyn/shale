@@ -456,7 +456,7 @@ mod tests {
         }
         assert_eq!(window([1360.0, 840.0]).app_id.as_deref(), Some("shale"), "the app id is what Wayland matches the desktop file by");
         let build = std::fs::read_to_string(".github/workflows/build.yml").unwrap();
-        assert!(build.contains("cp assets/icon/shale.desktop assets/icon/shale.svg dist/shale/"), "the release tarball has the desktop file and the icon");
+        assert!(build.contains("cp assets/icon/shale.desktop assets/icon/shale.svg scripts/install.sh dist/shale/"), "the release tarball has the desktop file and the icon");
     }
 
     // spec: DEV-013
