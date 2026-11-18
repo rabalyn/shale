@@ -87,8 +87,10 @@ fn the_toolbar_is_above_the_text_of_a_note_and_the_setting_and_the_reading_view_
         "Strikethrough: ~~text~~",
         "Highlight: ==text==",
         "Inline code: `code`",
-        "Highlight colour",
-        "Font colour",
+        "Highlight colour: #FFFF00",
+        "Highlight colours…",
+        "Font colour: #E53E3E",
+        "Font colours…",
         "Heading level",
         "Bullet list: - item",
         "Numbered list: 1. item",
@@ -118,7 +120,7 @@ fn the_toolbar_is_above_the_text_of_a_note_and_the_setting_and_the_reading_view_
     fx.app.cfg.format_toolbar = false;
     fx.hl.frames(&mut fx.app, 3);
     assert!(!fx.has("Bold: **text**"), "Show formatting toolbar off");
-    assert!(!fx.has("Highlight colour"));
+    assert!(!fx.has("Highlight colours…"));
 }
 
 // spec: EDIT-027
@@ -232,29 +234,29 @@ fn the_embed_button_opens_the_file_picker() {
 fn the_colour_palettes_write_canonical_tags_and_replace_the_colour_of_a_marked_text() {
     let mut fx = Fx::new("palette", "one two three\n");
     fx.select(4, 7);
-    fx.click("Highlight colour");
+    fx.click("Highlight colours…");
     fx.click("Highlight colour #39FF14");
     assert_eq!(fx.text(), "one <mark style=\"background: #39FF14;\">two</mark> three\n");
     assert_eq!(fx.selected(), "two");
     // another colour replaces it
-    fx.click("Highlight colour");
+    fx.click("Highlight colours…");
     fx.click("Highlight colour #FF00FF");
     assert_eq!(fx.text(), "one <mark style=\"background: #FF00FF;\">two</mark> three\n", "no nesting");
     // the font colour of the same text, from the presets of the settings
-    fx.click("Font colour");
+    fx.click("Font colours…");
     let first = crate::colour_tags::hex(fx.app.cfg.font_colours[0]);
     fx.click(&format!("Font colour {first}"));
     assert_eq!(fx.text(), format!("one <mark style=\"background: #FF00FF;\"><span style=\"color: {first};\">two</span></mark> three\n"), "the span goes inside the mark");
     // no highlight, and default colour
-    fx.click("Highlight colour");
+    fx.click("Highlight colours…");
     fx.click("No highlight");
     assert_eq!(fx.text(), format!("one <span style=\"color: {first};\">two</span> three\n"));
-    fx.click("Font colour");
+    fx.click("Font colours…");
     fx.click("Default colour");
     assert_eq!(fx.text(), "one two three\n");
     // a changed preset in the settings is what the palette offers
     fx.app.cfg.highlight_colours = vec![[1, 2, 3]];
-    fx.click("Highlight colour");
+    fx.click("Highlight colours…");
     fx.click("Highlight colour #010203");
     assert_eq!(fx.text(), "one <mark style=\"background: #010203;\">two</mark> three\n");
 }
@@ -264,18 +266,82 @@ fn the_colour_palettes_write_canonical_tags_and_replace_the_colour_of_a_marked_t
 fn a_custom_colour_from_the_picker_is_written_in_the_canonical_form() {
     let mut fx = Fx::new("custom", "one two three\n");
     fx.select(4, 7);
-    fx.click("Highlight colour");
+    fx.click("Highlight colours…");
     fx.click("Custom colour…");
     assert!(fx.has("Apply"), "the colour picker is open");
     fx.click("Apply");
     assert_eq!(fx.text(), "one <mark style=\"background: #FFA500;\">two</mark> three\n", "the picker's start colour, as #RRGGBB");
-    fx.click("Font colour");
+    fx.click("Font colours…");
     fx.click("Custom colour…");
     fx.click("Apply");
     assert_eq!(fx.text(), "one <mark style=\"background: #FFA500;\"><span style=\"color: #DC143C;\">two</span></mark> three\n");
     // Esc-free: the palette closed after the pick, and a click on the button opens it again
-    fx.click("Highlight colour");
+    fx.click("Highlight colours…");
     assert!(fx.has("No highlight"));
+}
+
+// spec: EDIT-054
+#[test]
+fn the_main_part_of_a_colour_button_applies_the_current_colour_as_one_undo_step() {
+    let mut fx = Fx::new("split-main", "one two three\n");
+    fx.select(4, 7);
+    fx.click("Highlight colour: #FFFF00");
+    assert_eq!(fx.text(), "one <mark style=\"background: #FFFF00;\">two</mark> three\n", "the colour at the start of the run");
+    assert!(!fx.has("No highlight"), "a click on the main part opens no palette");
+    let rel = PathBuf::from(NOTE);
+    let mut text = fx.text();
+    assert!(fx.app.undo.of(&rel).undo(&mut text).is_some());
+    assert_eq!(text, "one two three\n", "one undo step");
+    // a colour picked from the palette is the current colour, in the tooltip and for the main part
+    fx.click("Highlight colours…");
+    fx.click("Highlight colour #39FF14");
+    let at = fx.text().chars().count() - "three\n".len();
+    fx.select(at, at + 5);
+    assert!(fx.has("Highlight colour: #39FF14"));
+    fx.click("Highlight colour: #39FF14");
+    assert_eq!(fx.text(), "one <mark style=\"background: #39FF14;\">two</mark> <mark style=\"background: #39FF14;\">three</mark>\n");
+    // the font colour is the same
+    let at = fx.text().find("two").unwrap();
+    fx.select(at, at + 3);
+    fx.click("Font colour: #E53E3E");
+    assert!(fx.text().contains("<span style=\"color: #E53E3E;\">two</span>"), "{}", fx.text());
+}
+
+// spec: EDIT-054
+#[test]
+fn the_caret_part_of_a_colour_button_opens_the_palette_and_applies_nothing() {
+    let mut fx = Fx::new("split-caret", "one two three\n");
+    fx.select(4, 7);
+    fx.click("Font colours…");
+    assert!(fx.has("Default colour"), "the font palette is open");
+    assert_eq!(fx.text(), "one two three\n");
+}
+
+// spec: EDIT-054
+#[test]
+fn no_highlight_and_default_colour_leave_the_current_colour_as_it_was() {
+    let mut fx = Fx::new("split-none", "one two three\n");
+    fx.select(4, 7);
+    fx.click("Highlight colours…");
+    fx.click("Highlight colour #39FF14");
+    fx.click("Highlight colours…");
+    fx.click("No highlight");
+    assert_eq!(fx.text(), "one two three\n");
+    assert!(fx.has("Highlight colour: #39FF14"), "still the current colour");
+    fx.click("Font colours…");
+    fx.click("Default colour");
+    assert!(fx.has("Font colour: #E53E3E"));
+}
+
+// spec: EDIT-054, EDIT-030
+#[test]
+fn in_a_cell_the_main_part_of_a_colour_button_colours_the_cell_text() {
+    let mut fx = Fx::table("split-cell");
+    fx.edit_cell("one two");
+    fx.select_in_cell(4, 7);
+    fx.click("Font colour: #E53E3E");
+    assert_eq!(fx.text(), "before\n\n| A | B |\n|---|---|\n| one <span style=\"color: #E53E3E;\">two</span> | x |\n");
+    assert_eq!(fx.editor().editing_cell(), Some((1, 0)), "the cell is still edited");
 }
 
 /// The Bold and the Clear button of the toolbar drawn alone in a window `width` wide (a few frames,
