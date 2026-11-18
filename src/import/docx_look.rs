@@ -124,8 +124,66 @@ fn theme_colour(theme: &Document, name: &str) -> Option<String> {
     let scheme = theme.descendants().find(|n| n.is_element() && n.tag_name().name() == "clrScheme")?;
     let entry = scheme.children().find(|n| n.is_element() && n.tag_name().name() == slot)?;
     let c = entry.children().find(|n| n.is_element())?;
-    let hex = c.attribute("val").or_else(|| c.attribute("lastClr"))?;
+    // a system colour (`sysClr`) has a name in `val` and its colour in `lastClr`
+    let hex = c.attribute("lastClr").or_else(|| c.attribute("val"))?;
     hex6(hex)
+}
+
+/// `hex` (`RRGGBB`) as hue, saturation and lightness, each in 0..=1.
+fn to_hsl(hex: &str) -> (f64, f64, f64) {
+    let ch = |i: usize| f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0)) / 255.0;
+    let (r, g, b) = (ch(0), ch(2), ch(4));
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (max + min) / 2.0;
+    let d = max - min;
+    if d == 0.0 {
+        return (0.0, 0.0, l);
+    }
+    let s = d / (1.0 - (2.0 * l - 1.0).abs());
+    let h = if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    (h / 6.0, s, l)
+}
+
+/// Hue, saturation and lightness (0..=1) as `RRGGBB`; a channel is cut down to its whole value,
+/// which is how Word's own values come out (accent1 `156082` with shade `BF` is `0F4761`).
+fn from_hsl(h: f64, s: f64, l: f64) -> String {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h * 6.0).rem_euclid(2.0) - 1.0).abs());
+    let m = l - c / 2.0;
+    let (r, g, b) = match (h * 6.0).floor() as i32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let byte = |v: f64| ((v + m) * 255.0 + 1e-6).floor().clamp(0.0, 255.0) as u8;
+    format!("{:02X}{:02X}{:02X}", byte(r), byte(g), byte(b))
+}
+
+/// A theme colour lightened or darkened as Word does (IMP-041): in HSL, `w:themeTint` (`t`, a hex
+/// byte, `t / 255` of the colour is kept) lifts the lightness towards white, `L = L * t + (1 - t)`,
+/// and `w:themeShade` (`s`) pulls it towards black, `L = L * s`; hue and saturation stay.
+fn tint_shade(hex: &str, tint: Option<u8>, shade: Option<u8>) -> String {
+    if tint.is_none() && shade.is_none() {
+        return hex.to_string();
+    }
+    let (h, s, mut l) = to_hsl(hex);
+    if let Some(t) = tint {
+        let t = f64::from(t) / 255.0;
+        l = l * t + (1.0 - t);
+    }
+    if let Some(sh) = shade {
+        l *= f64::from(sh) / 255.0;
+    }
+    from_hsl(h, s, l)
 }
 
 /// `hex` as upper case `RRGGBB` when it is six hex digits.
@@ -270,11 +328,9 @@ pub fn read(document: &str, styles: Option<&str>, theme: Option<&str>) -> Look {
     };
     look.paragraph_spacing = base.after.map(|a| trim_num(a / 20.0));
     look.align = Some(if matches!(base.jc.as_deref(), Some("both" | "distribute")) { "justify" } else { "left" });
-    look.heading_color = style("Heading1").and_then(|h| child(h, "rPr")).and_then(|r| child(r, "color")).and_then(|c| {
-        let by_val = val(c, "val").and_then(hex6);
-        by_val.or_else(|| val(c, "themeColor").and_then(|t| theme.as_ref().and_then(|th| theme_colour(th, t))))
-    });
-    look.heading_color = look.heading_color.filter(|c| c != "000000").map(|c| format!("#{c}"));
+    let palette = Palette { styles: Some(&styles), theme: theme.as_ref() };
+    look.heading_color = palette.of_style("Heading1").and_then(|(c, _)| c);
+    look.heading_color = look.heading_color.map(|c| format!("#{c}"));
     look
 }
 
@@ -322,18 +378,114 @@ struct Edit {
     with: String,
 }
 
-/// The text of `document` with sentinels around the text of every run that has its own text colour
-/// or a highlight other than plain yellow (which pandoc keeps as `==`), and that highlight's
+/// The colours of a file: its styles and its theme (either may be missing).
+struct Palette<'a, 'i> {
+    styles: Option<&'a Document<'i>>,
+    theme: Option<&'a Document<'i>>,
+}
+
+/// The style chain is followed at most this far (a loop in `w:basedOn` ends there).
+const CHAIN: usize = 24;
+
+/// Heading 1 to 9, Title and Subtitle: their colour is the look of the heading (IMP-040), not a span.
+fn is_heading_like(style: Node) -> bool {
+    let named = |s: &str| {
+        let n = s.to_lowercase().replace(' ', "");
+        n == "title" || n == "subtitle" || n.strip_prefix("heading").is_some_and(|d| d.len() == 1 && d.chars().all(|c| ('1'..='9').contains(&c)))
+    };
+    val(style, "styleId").is_some_and(named) || child(style, "name").and_then(|n| val(n, "val")).is_some_and(named)
+}
+
+/// The style Hyperlink, which the app styles itself.
+fn is_hyperlink(style: Node) -> bool {
+    val(style, "styleId").is_some_and(|i| i.eq_ignore_ascii_case("hyperlink")) || child(style, "name").and_then(|n| val(n, "val")).is_some_and(|n| n.eq_ignore_ascii_case("hyperlink"))
+}
+
+/// `w:val` of the child `tag` of `holder`.
+fn style_of<'a>(holder: Option<Node<'a, '_>>, tag: &str) -> Option<&'a str> {
+    holder.and_then(|h| child(h, tag)).and_then(|s| val(s, "val"))
+}
+
+impl<'a, 'i> Palette<'a, 'i> {
+    fn style(&self, id: &str) -> Option<Node<'a, 'i>> {
+        self.styles?.descendants().find(|n| is_w(*n, "style") && val(*n, "styleId") == Some(id))
+    }
+
+    /// The colour of a `w:color` as `RRGGBB`: `w:themeColor`, when it is there and the theme has
+    /// it, wins over `w:val` (as in Word), with `w:themeTint` and `w:themeShade` applied
+    /// ([`tint_shade`]); else `w:val`. `auto`, black and what cannot be read are `None`.
+    fn resolve(&self, c: Node) -> Option<String> {
+        let byte = |a: &str| val(c, a).and_then(|v| u8::from_str_radix(v, 16).ok());
+        let themed = val(c, "themeColor").and_then(|t| theme_colour(self.theme?, t)).map(|hex| tint_shade(&hex, byte("themeTint"), byte("themeShade")));
+        themed.or_else(|| val(c, "val").and_then(hex6)).filter(|c| c != "000000")
+    }
+
+    /// The colour a `w:rPr` sets: `None` when it sets none, `Some(None)` when it sets auto or black.
+    fn of_rpr(&self, rpr: Node) -> Option<Option<String>> {
+        child(rpr, "color").map(|c| self.resolve(c))
+    }
+
+    /// The colour of a style or the nearest style it is based on that sets one, and that style.
+    fn of_style(&self, id: &str) -> Option<(Option<String>, Node<'a, 'i>)> {
+        let mut at = id.to_string();
+        for _ in 0..CHAIN {
+            let style = self.style(&at)?;
+            if let Some(c) = child(style, "rPr").and_then(|r| self.of_rpr(r)) {
+                return Some((c, style));
+            }
+            at = child(style, "basedOn").and_then(|b| val(b, "val"))?.to_string();
+        }
+        None
+    }
+
+    /// The colour of the body text: the document defaults with the style Normal over them.
+    fn body(&self) -> Option<String> {
+        let defaults = self.styles?.descendants().find(|n| is_w(*n, "rPrDefault")).and_then(|d| child(d, "rPr")).and_then(|r| self.of_rpr(r)).flatten();
+        match self.of_style("Normal") {
+            Some((c, _)) => c,
+            None => defaults,
+        }
+    }
+
+    /// The colour a run gets, to be written as a span (IMP-041): its own, else that of its
+    /// character style, else that of its paragraph's style, else that of its table's style; each
+    /// style with the styles it is based on. Not the colour of the body, not a colour that a
+    /// heading style or the style Hyperlink gives, and not a colour a heading's text has by itself.
+    fn of_run(&self, run: Node) -> Option<String> {
+        let para = run.ancestors().find(|n| is_w(*n, "p"));
+        let para_style = style_of(para.and_then(|p| child(p, "pPr")), "pStyle").and_then(|id| self.of_style(id));
+        let direct = child(run, "rPr").and_then(|r| self.of_rpr(r));
+        let colour = if let Some(own) = direct {
+            let in_heading = para_style.as_ref().filter(|(_, s)| is_heading_like(*s));
+            own.filter(|c| in_heading.is_none_or(|(h, _)| h.as_ref() != Some(c)))
+        } else if let Some((c, s)) = style_of(child(run, "rPr"), "rStyle").and_then(|id| self.of_style(id)) {
+            c.filter(|_| !is_hyperlink(s))
+        } else if let Some((c, s)) = para_style {
+            c.filter(|_| !is_heading_like(s))
+        } else {
+            let table = run.ancestors().find(|n| is_w(*n, "tbl"));
+            style_of(table.and_then(|t| child(t, "tblPr")), "tblStyle").and_then(|id| self.of_style(id)).and_then(|(c, _)| c)
+        };
+        colour.filter(|c| self.body().as_ref() != Some(c))
+    }
+}
+
+/// The text of `document` with sentinels around the text of every run that has a text colour of
+/// its own, from a style or from a table (`styles` and `theme` are the text of `word/styles.xml`
+/// and `word/theme/theme1.xml`, when there are such parts), or a highlight other than plain
+/// yellow (which pandoc keeps as `==`), and that highlight's
 /// element taken out so that pandoc does not also mark it. Whitespace at the ends of a text stays
 /// outside, so that Markdown emphasis still works. `None` when there is nothing to tag or the text
 /// does not parse.
-pub fn tag_runs(document: &str) -> Option<String> {
+pub fn tag_runs(document: &str, styles: Option<&str>, theme: Option<&str>) -> Option<String> {
     let doc = Document::parse(document).ok()?;
+    let (styles, theme) = (styles.and_then(|s| Document::parse(s).ok()), theme.and_then(|t| Document::parse(t).ok()));
+    let palette = Palette { styles: styles.as_ref(), theme: theme.as_ref() };
     let mut edits: Vec<Edit> = Vec::new();
     for run in doc.descendants().filter(|n| is_w(*n, "r")) {
-        let Some(pr) = child(run, "rPr") else { continue };
-        let colour = child(pr, "color").and_then(|c| val(c, "val")).and_then(hex6).filter(|c| c != "000000");
-        let named = child(pr, "highlight").and_then(|h| val(h, "val").map(|v| (h, v)));
+        let pr = child(run, "rPr");
+        let colour = palette.of_run(run);
+        let named = pr.and_then(|p| child(p, "highlight")).and_then(|h| val(h, "val").map(|v| (h, v)));
         let highlight = match named {
             // plain yellow stays pandoc's own `==`
             Some((_, "yellow")) => None,
@@ -341,7 +493,7 @@ pub fn tag_runs(document: &str) -> Option<String> {
                 edits.push(Edit { start: h.range().start, end: h.range().end, with: String::new() });
                 highlight_hex(name).map(String::from)
             }
-            _ => child(pr, "shd").and_then(|s| val(s, "fill")).and_then(hex6),
+            _ => pr.and_then(|p| child(p, "shd")).and_then(|s| val(s, "fill")).and_then(hex6),
         };
         let (mut open, mut close) = (String::new(), String::new());
         if let Some(c) = &colour {
@@ -567,8 +719,9 @@ pub fn analyse(docx: &Path, work: &Path) -> Analysis {
     }
     let part = |p: &str| crate::fsutil::read_to_string(dir.join(p)).ok();
     let Some(document) = part("word/document.xml") else { return none };
-    let look = read(&document, part("word/styles.xml").as_deref(), part("word/theme/theme1.xml").as_deref());
-    let tagged = tag_runs(&document).and_then(|tagged| {
+    let (styles, theme) = (part("word/styles.xml"), part("word/theme/theme1.xml"));
+    let look = read(&document, styles.as_deref(), theme.as_deref());
+    let tagged = tag_runs(&document, styles.as_deref(), theme.as_deref()).and_then(|tagged| {
         crate::fsutil::write_atomic(&dir.join("word/document.xml"), tagged.as_bytes()).ok()?;
         let to = work.join("tagged.docx");
         write_zip(&dir, &to).ok()?;

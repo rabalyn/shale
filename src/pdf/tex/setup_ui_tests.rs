@@ -8,8 +8,8 @@ use super::engine::Kind;
 use super::import::TUDA;
 use super::install::{Handle, Progress, Stage};
 use super::sets::load_settings;
-use super::sets_tests::{make_set, META};
-use super::sets_ui::Form;
+use super::sets_tests::{make_set, META, PNG};
+use super::sets_ui::{Form, Slot};
 use super::settings_ui::{Notice, Task, TaskKind};
 use super::settings_ui_tests::{found, good, nothing_found, T};
 use super::setup::*;
@@ -573,7 +573,7 @@ fn the_author_of_the_settings_is_in_the_author_field_of_the_export_dialog_unless
     }
 }
 
-// spec: TEX-017
+// spec: TEX-017, TEX-028, TEX-035
 #[test]
 fn a_logo_dropped_on_the_logo_step_goes_into_the_set_and_not_into_the_vault() {
     let mut t = T::new("su-drop-logo", usable());
@@ -586,6 +586,8 @@ fn a_logo_dropped_on_the_logo_step_goes_into_the_set_and_not_into_the_vault() {
     t.hl.frame_with(&mut t.app, vec![], |_, raw| raw.dropped_files.push(std::sync::Arc::new(crate::app::ScriptDrop(logo.clone()))));
     t.hl.frames(&mut t.app, 3);
     assert!(is_open(&t), "no Import dialog: the setup keeps the drop");
+    assert!(t.app.toasts.iter().any(|(m, _)| m.contains("taken as the university's logo")), "a toast says which logo it became: {:?}", t.app.toasts.iter().map(|x| &x.0).collect::<Vec<_>>());
+    assert!(!dir.join("logo/department_logo.pdf").exists());
     assert!(dir.join("logo/mylogo.pdf").is_file() && load_settings(&dir).unwrap().logo.as_deref() == Some("mylogo.pdf"), "the logo is in the set and in settings.toml");
     assert!(t.shows("The logo is there: mylogo.pdf ✓"), "{:?}", t.painted());
     let vault_files: Vec<String> = t.app.vault.as_ref().unwrap().files.iter().map(|f| f.rel.to_string_lossy().into_owned()).collect();
@@ -600,12 +602,73 @@ fn a_logo_dropped_on_the_logo_step_goes_into_the_set_and_not_into_the_vault() {
     #[cfg(target_os = "linux")]
     {
         std::fs::remove_file(dir.join("logo/mylogo.pdf")).unwrap();
+        t.app.tex.sets.dirty = true;
+        t.hl.frames(&mut t.app, 2);
         let other = a_logo(&outside, "other.png.pdf");
         let list = format!("{}\r\n", crate::import::file_uri(&other));
         t.app.drag.fake_drops.push(crate::import::wl_drop::DropEvent::Drop { x: 10.0, y: 10.0, parts: vec![("text/uri-list".into(), list.into_bytes())], offered: vec!["text/uri-list".into()], report: vec![] });
         t.hl.frames(&mut t.app, 4);
         assert!(is_open(&t) && dir.join("logo/mylogo.pdf").is_file(), "the logo of the drop from another program is in the set");
     }
+    let _ = std::fs::remove_dir_all(outside);
+}
+
+// spec: TEX-017, TEX-028, TEX-035
+#[test]
+fn a_second_logo_dropped_on_the_logo_step_is_the_department_logo_and_a_toast_says_which() {
+    let mut t = T::new("su-drop-dept", usable());
+    let dir = tuda(&t, META);
+    open(&mut t, Some(Step::Logo));
+    // the optional field is there beside the university's, with its own button
+    for want in ["Department logo (optional)", "Use this department logo", "Use this logo"] {
+        assert!(t.shows(want), "{want:?} in {:?}", t.painted());
+    }
+    let outside = std::env::temp_dir().join(format!("shale-su-drop-dept-{}", std::process::id()));
+    std::fs::create_dir_all(&outside).unwrap();
+    let drop = |t: &mut T, f: &Path| {
+        let f = f.to_path_buf();
+        t.hl.frame_with(&mut t.app, vec![], |_, raw| raw.dropped_files.push(std::sync::Arc::new(crate::app::ScriptDrop(f.clone()))));
+        t.hl.frames(&mut t.app, 3);
+    };
+    let toasts = |t: &T| t.app.toasts.iter().map(|x| x.0.clone()).collect::<Vec<_>>();
+    // the university's slot is empty: the file goes there
+    drop(&mut t, &a_logo(&outside, "first.pdf"));
+    assert!(dir.join("logo/mylogo.pdf").is_file() && !dir.join("logo/department_logo.pdf").exists(), "{:?}", toasts(&t));
+    assert!(toasts(&t).iter().any(|m| m.contains("taken as the university's logo")), "{:?}", toasts(&t));
+    // now it is filled: the next one is the department's
+    let second = a_logo(&outside, "second.pdf");
+    drop(&mut t, &second);
+    assert!(dir.join("logo/department_logo.pdf").is_file() && dir.join("logo/mylogo.pdf").is_file());
+    assert_eq!(load_settings(&dir).unwrap().department_logo.as_deref(), Some("department_logo.pdf"));
+    assert!(toasts(&t).iter().any(|m| m.contains("taken as the department logo")), "{:?}", toasts(&t));
+    assert!(is_open(&t) && t.shows("department logo: department_logo.pdf ✓") && t.shows("The logo is there: mylogo.pdf ✓"), "{:?}", t.painted());
+    // not imported into the vault as a media file
+    let vault_files: Vec<String> = t.app.vault.as_ref().unwrap().files.iter().map(|f| f.rel.to_string_lossy().into_owned()).collect();
+    assert!(!vault_files.iter().any(|f| f.contains("second.pdf")), "{vault_files:?}");
+    // a typed path replaces it, and a file that is no logo is refused with the slot as it was
+    let png = outside.join("hrz.png");
+    std::fs::write(&png, PNG).unwrap();
+    t.app.tex.setup.department_logo_path = png.to_string_lossy().into_owned();
+    t.click("Use this department logo");
+    assert_eq!(load_settings(&dir).unwrap().department_logo.as_deref(), Some("department_logo.png"));
+    assert!(dir.join("logo/department_logo.png").is_file() && !dir.join("logo/department_logo.pdf").exists());
+    let text = outside.join("note.txt");
+    std::fs::write(&text, "no logo").unwrap();
+    t.app.tex.setup.department_logo_path = text.to_string_lossy().into_owned();
+    t.click("Use this department logo");
+    assert!(t.shows("The department logo was not copied: the logo must be a PDF or a PNG file") && dir.join("logo/department_logo.png").is_file(), "{:?}", t.painted());
+    // the department logo does not decide whether the step is done: Later is for the university's logo alone
+    let mut t = T::new("su-dept-only", usable());
+    let dir = tuda(&t, META);
+    open(&mut t, Some(Step::Logo));
+    t.app.tex.setup.department_logo_path = a_logo(&outside, "only.pdf").to_string_lossy().into_owned();
+    t.click("Use this department logo");
+    assert!(dir.join("logo/department_logo.pdf").is_file() && t.shows("Later") && !t.app.tex.step_done(&t.app.cfg.tex, Step::Logo), "{:?}", t.painted());
+    // a set that needs no university logo still has the department's field
+    let mut t = T::new("su-dept-nologo", usable());
+    make_set(&t.dir, "plain", &META.replace("logo_file = \"mylogo\"\n", ""), &[("article", "name = \"A\"\nmapping = \"article\"\nclass = \"my\"\n")]);
+    open(&mut t, Some(Step::Logo));
+    assert!(t.shows("“Test set” needs no logo ✓") && t.shows("Department logo (optional)") && t.shows("Use this department logo"), "{:?}", t.painted());
     let _ = std::fs::remove_dir_all(outside);
 }
 
@@ -634,7 +697,7 @@ fn a_folder_dropped_on_the_templates_step_is_imported_as_a_set() {
     let _ = std::fs::remove_dir_all(src);
 }
 
-// spec: TEX-017, TEX-024
+// spec: TEX-017, TEX-024, TEX-028, TEX-035
 #[test]
 fn drops_on_settings_latex_import_an_archive_and_give_a_pdf_to_the_set_whose_logo_is_asked_for() {
     let mut t = T::new("su-drop-settings", usable());
@@ -657,10 +720,16 @@ fn drops_on_settings_latex_import_an_archive_and_give_a_pdf_to_the_set_whose_log
     t.hl.frame_with(&mut t.app, vec![], |_, raw| raw.dropped_files.push(std::sync::Arc::new(crate::app::ScriptDrop(logo.clone()))));
     t.hl.frames(&mut t.app, 3);
     assert!(!dir.join("logo/tuda_logo.pdf").exists() && t.app.toasts.iter().any(|(m, _)| m.contains("Press “Choose logo…” of the set the logo is for")));
-    t.app.tex.sets.form = Form::Logo { set: "other".into(), path: String::new() };
+    t.app.tex.sets.form = Form::Logo { set: "other".into(), slot: Slot::University, path: String::new() };
     t.hl.frame_with(&mut t.app, vec![], |_, raw| raw.dropped_files.push(std::sync::Arc::new(crate::app::ScriptDrop(logo.clone()))));
     t.hl.frames(&mut t.app, 3);
     assert!(t.dir.join("templates/tex/other/logo/mylogo.pdf").is_file() && t.app.tex.sets.form == Form::None);
+    // the form of "Choose department logo…" takes it as the department logo (TEX-035)
+    t.app.tex.sets.form = Form::Logo { set: "other".into(), slot: Slot::Department, path: String::new() };
+    t.hl.frame_with(&mut t.app, vec![], |_, raw| raw.dropped_files.push(std::sync::Arc::new(crate::app::ScriptDrop(logo.clone()))));
+    t.hl.frames(&mut t.app, 3);
+    assert!(t.dir.join("templates/tex/other/logo/department_logo.pdf").is_file() && t.app.tex.sets.form == Form::None);
+    assert!(load_settings(&t.dir.join("templates/tex/other")).unwrap().department_logo.as_deref() == Some("department_logo.pdf") && t.dir.join("templates/tex/other/logo/mylogo.pdf").is_file(), "the TU logo is still there");
     // a file that is neither is said
     let junk = t.dir.join("junk.txt");
     std::fs::write(&junk, "x").unwrap();

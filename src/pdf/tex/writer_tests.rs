@@ -40,7 +40,7 @@ pub(super) fn rich_assets() -> Vec<(&'static str, Vec<u8>)> {
 pub(super) fn tuda_set(settings: SetSettings) -> SetInfo {
     let kinds = TUDA.kinds.iter().map(|(id, text)| (id.to_string(), KindManifest::parse(text).unwrap())).collect();
     let meta = SetMeta { name: "TU Darmstadt".into(), version: Some("4.06".into()), imported_at: "2026-11-17".into(), source: Source::Local { path: "x".into() }, logo_file: Some("tuda_logo".into()) };
-    SetInfo { id: "tuda".into(), dir: PathBuf::from("/nowhere/tuda"), meta, settings, kinds, problems: vec![], logo: LogoStatus::Missing }
+    SetInfo { id: "tuda".into(), dir: PathBuf::from("/nowhere/tuda"), meta, settings, kinds, problems: vec![], logo: LogoStatus::Missing, department_logo: None }
 }
 
 pub(super) fn kind<'a>(set: &'a SetInfo, id: &str) -> &'a KindManifest {
@@ -271,6 +271,47 @@ fn numbered_headings_follow_the_note_and_the_setting_and_unnumbered_ones_stay_in
     // without a table of contents there is nothing to add the heading to
     let no_toc = ExportOptions { numbered_headings: false, toc: false, ..ExportOptions::for_note() };
     assert!(!go(note, &no_toc).contains("addcontentsline"));
+}
+
+/// The lines the tuda manifest of a kind has for the department logo, as the writer writes them.
+fn department_lines(kind_id: &str) -> String {
+    let set = tuda_set(SetSettings::default());
+    format!("{}\n", kind(&set, kind_id).department_logo_lines(&set.settings).join("\n"))
+}
+
+/// A note written as a kind of a tuda set whose department logo slot is filled or empty.
+fn doc_department(kind_id: &str, filled: bool, wanted: bool) -> String {
+    let (v, dir) = temp_vault("dept", &[("Plan.md", b"# Plan\ntext\n")]);
+    let mut set = tuda_set(SetSettings { accent: "9c".into(), ..SetSettings::default() });
+    set.department_logo = filled.then(|| "department_logo.png".to_string());
+    let opts = ExportOptions { department_logo: wanted, ..ExportOptions::for_note() };
+    let out = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: "# Plan\ntext\n", opts: &opts, set: &set, kind: kind(&set, kind_id), fields: &fields(&[("author", "Ada"), ("recipient", "R")]) });
+    let _ = std::fs::remove_dir_all(dir);
+    out.unwrap_or_else(|e| panic!("{e}")).tex
+}
+
+// spec: TEX-035
+#[test]
+fn the_department_logo_lines_are_written_after_the_preamble_only_when_the_slot_is_filled_the_box_is_on_and_the_kind_has_a_place() {
+    for id in ["pub", "report", "thesis", "phd", "beamer", "letter", "poster", "sciposter", "leaflet"] {
+        let lines = department_lines(id);
+        let tex = doc_department(id, true, true);
+        let at = tex.find(&lines).unwrap_or_else(|| panic!("{id}: the lines are not in\n{tex}"));
+        // after the class and the preamble of the manifest, before the helpers and the document
+        assert!(tex[..at].contains("\\usepackage[autostyle]{csquotes}\n") && tex[at..].contains("\\usepackage{graphicx}") && at < tex.find("\\begin{document}").unwrap(), "{id}: {tex}");
+        assert!(tex.contains("{department_logo}") && !tex.contains("{{department_logo}"), "{id}: the placeholder is the file's name, with the braces of the command");
+        // an empty slot, or the box off: nothing is written, the document is the one without a department logo
+        for (filled, wanted) in [(false, true), (true, false), (false, false)] {
+            let none = doc_department(id, filled, wanted);
+            assert!(!none.contains("department_logo") && none == doc_department(id, false, false), "{id} (slot filled {filled}, box {wanted})");
+        }
+    }
+    // a kind with no place for it never gets it
+    for id in ["announcement", "exercise"] {
+        assert_eq!(doc_department(id, true, true), doc_department(id, false, false), "{id}");
+    }
+    // pub: exactly the lines of the manifest
+    assert!(doc_department("pub", true, true).contains("\\ExplSyntaxOn\n\\addTitleBoxLogo*{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{department_logo}}\n\\ExplSyntaxOff\n"));
 }
 
 // spec: TEX-009

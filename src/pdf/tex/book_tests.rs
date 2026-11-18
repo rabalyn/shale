@@ -114,6 +114,28 @@ fn an_article_kind_starts_the_same_structure_at_sections() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+// spec: TEX-035
+#[test]
+fn the_department_logo_is_in_a_book_too_when_the_slot_is_filled_and_the_box_is_on() {
+    let (v, dir) = handbook("dept");
+    let set_with = |filled: bool| {
+        let mut set = tuda_set(SetSettings::default());
+        set.department_logo = filled.then(|| "department_logo.png".to_string());
+        set
+    };
+    let tex = |filled: bool, wanted: bool| {
+        let set = set_with(filled);
+        let plan = book::plan(&v, Path::new("Book")).unwrap();
+        let opts = ExportOptions { department_logo: wanted, ..ExportOptions::for_note() };
+        write_book(&BookRequest { vault: &v, plan: &plan, opts: &opts, set: &set, kind: kind(&set, "thesis"), fields: &fields(&[("author", "Ada")]) }).unwrap().tex
+    };
+    assert!(tex(true, true).contains("\\addTitleBoxLogo*{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{department_logo}}"));
+    for (filled, wanted) in [(false, true), (true, false)] {
+        assert!(!tex(filled, wanted).contains("department_logo"), "slot filled {filled}, box {wanted}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 // spec: BOOK-014, BOOK-006
 #[test]
 fn the_books_numbering_and_contents_decide_and_a_notes_own_switch_does_not() {

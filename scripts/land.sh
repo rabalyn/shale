@@ -19,7 +19,8 @@
 #
 # The worktree and the build folder stay in `<git dir>/land/`, so the next landing builds only
 # what changed. Environment, for the test of this script: LAND_REMOTE (default origin),
-# LAND_CHECK_CMD (a shell command run in the worktree instead of the checks above).
+# LAND_CHECK_CMD (a shell command run in the worktree instead of the checks above),
+# SHALE_LAND_LOCK_HELD=<pid of the parent> (the parent holds the lock already: release scripts).
 set -euo pipefail
 
 REMOTE=${LAND_REMOTE:-origin}
@@ -46,10 +47,17 @@ WT="$HOME_DIR/worktree"
 mkdir -p "$HOME_DIR"
 export CARGO_TARGET_DIR="${LAND_TARGET_DIR:-$HOME_DIR/target}"
 
-exec 9>"$HOME_DIR/lock"
-if ! flock -n 9; then
-  echo "Another landing is running; waiting for it…"
-  flock 9
+# scripts/make-tag.sh and make-release.sh hold this lock for their whole run (FORGE-013, FORGE-014,
+# #348) and start land.sh as their own child with SHALE_LAND_LOCK_HELD set to their PID: that is
+# trusted only when it is this script's parent, so a stale or inherited value never skips the lock.
+if [ "${SHALE_LAND_LOCK_HELD:-}" = "$PPID" ]; then
+  echo "(the landing lock is held by the release script that started this)"
+else
+  exec 9>"$HOME_DIR/lock"
+  if ! flock -n 9; then
+    echo "Another landing is running; waiting for it…"
+    flock 9
+  fi
 fi
 
 remove_worktree() {

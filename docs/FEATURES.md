@@ -41,7 +41,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   and the ribbon has an Alt key (Alt+B bold, Alt+V reading view, Alt+1 … Alt+0 ribbon items, Alt+, and Alt+.
   sidebars, see Keyboard below), shown as a badge at the button while Alt is held; after a button or key that
   only changes the view, the editor has the keyboard again with the cursor and selection unchanged.
-- **Colours.** The toolbar's highlight and font colour buttons open a palette (four neon highlights, a
+- **Colours.** The toolbar's highlight and font colour buttons are split buttons: a click on the colour applies the
+  current colour at once, the ▾ beside it opens a palette (four neon highlights, a
   "No highlight" entry and a colour picker; font colours you set in Settings → Editor) and write plain
   HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
   `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
@@ -192,7 +193,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   **Test page** compiles a small document of the set and opens the PDF; **Remove set…** moves it to the
   trash. The university's logo may not be redistributed: **Choose logo…** copies yours into the set, and
   until then exports use a placeholder and the set says "logo missing: exports are not CI-conformant"
-  (TEX-005 to TEX-007, TEX-024 to TEX-027).
+  (TEX-005 to TEX-007, TEX-024 to TEX-027). A **department logo** (**Choose department logo…**, **Remove
+  department logo**) is an optional second slot: documents show it below the TU logo, right-aligned and
+  as high, where the class has room for it (not on exercise sheets and announcements), and the export
+  dialog has a **Department logo** box for it (TEX-035).
 
   ![Template sets in Settings → LaTeX](userguide/z_media/screenshots/settings-latex-sets.png)
 
@@ -204,7 +208,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   download and 330 MB on disk, with progress and Cancel; the built-in export needs nothing of this),
   **Templates** (TU Darmstadt, the tested version, the newest from CTAN, a file, a folder or GitHub, or a set
   you have), **Logo** (the university's logo may not be shipped: the step says where members get it; give it
-  by **dropping the file onto the window** or by its path, or choose Later and exports carry a placeholder),
+  by **dropping the file onto the window** or by its path, or choose Later and exports carry a placeholder; an
+  optional second field takes your department's logo),
   **Your details** (the accent colour as swatches `0a` to `11d`, the language, your department and name, kept in
   the set's `settings.toml`) and a **Test page** that is made with your choices and opened, or, if it fails,
   explained in words with **Save the .tex**. While the setup or Settings → LaTeX is open, files dropped on the
@@ -693,6 +698,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   `gpg --import backup.asc`; the keys of others the same way, or by hand with `gpg --locate-keys name@example.org`
   (also WKD). S/MIME: Thunderbird's certificate manager, Backup, then `gpgsm --import backup.p12` and the
   issuer's fingerprint in `~/.gnupg/trustlist.txt`. The Encryption settings say all this too.
+- **Keeping the key unlocked.** Without a `gpg-agent.conf`, GnuPG forgets a passphrase after 10 minutes
+  without use and after 2 hours at the latest. Accounts…, Encryption, "Keeping the key unlocked" shows the
+  agent's times in words (read with `gpgconf --list-options gpg-agent`, in the background) and warns when
+  `no-allow-external-cache` blocks the keyring. The choice "Ask for the passphrase again after" (8 hours, 1 day,
+  1 week) and "Change with gpgconf…" show exactly what would be written (`gpg-agent.conf`, the two lines, the
+  marked block gpgconf makes, nothing else) and write only after "Write with gpgconf" (then the agent is
+  reloaded); Cancel writes nothing. The same lines and the reload command are shown for doing it by hand, with a
+  Copy button, plus the keyring tip of the platform ("Save in password manager" on Linux, "Save in Keychain" on
+  macOS; Gpg4win has none). Shale still never handles a passphrase.
 
 ## Importing e-mails, events and files (for project tracking)
 
@@ -717,12 +731,12 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   highlights and pictures with their captions come through (IMP-037). Everything one file brings
   goes into one folder, `z_media/YYYY/MM/import_docx_<name>/`: the pictures in `media/` and, when
   "Keep the original .docx" is ticked, the original, which the note names in its properties
-  (IMP-038). Word's look comes along: text and highlight colours become `<span>` and `<mark>`
+  (IMP-038). Word's look comes along: text colours (direct, from character, paragraph and table styles, and theme colours with tint and shade) and highlight colours become `<span>` and `<mark>`
   colours (IMP-041), a Title and Subtitle become a heading and an italic line (IMP-042), and the
   note's properties hold the page setup (`print-paper`, `print-margins`), the body font, size,
   line and paragraph spacing, alignment and the colour of Heading 1 (`print-*`, IMP-040), which
   the PDF export uses (rabalyn/shale#338). Centred and right-aligned paragraphs are not kept
-  (rabalyn/shale#340). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
+  (rabalyn/shale#340). A Word table of contents is left out (the export makes its own, IMP-043). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
   without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
 
   ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)
@@ -928,7 +942,7 @@ Text editing keys and vim keys are fixed.
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
-| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
+| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette, the ▾ part of the split button), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
 | Alt+V, Alt+P, Alt+D, Alt+N | The buttons of the view header and tab bar of a note: edit / reading view, Markdown preview, the ⋯ menu (opens it), New tab |
 | Alt+1, Alt+2, Alt+3, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0 | The ribbon items by position: the first ten icons of the ribbon, as shown (also after you reordered or removed some) |
 | Alt+, / Alt+. | Show or hide the left / right sidebar |

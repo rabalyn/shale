@@ -1,6 +1,7 @@
 # TU Darmstadt, scientific poster (class tudasciposter, boxes of tcolorbox's poster library).
 # The writer puts every heading of the shallowest level of the note (# or ##) into a posterboxenv
 # of a tcbposter, in two columns (mapping "poster", and a class named *sciposter).
+# The department logo (Settings → LaTeX) is the class's \titlegraphic: under the TU logo, right-aligned.
 name = "Scientific poster"
 description = "Scientific posters with boxes (class tudasciposter)"
 mapping = "poster"
@@ -8,6 +9,7 @@ class = "tudasciposter"
 options = ["{language}", "accentcolor={accent}"]
 preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
 logo = true
+department_logo = ["\\ExplSyntaxOn", "\\titlegraphic{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{{department_logo}}}", "\\ExplSyntaxOff"]
 
 [[fields]]
 key = "title"
