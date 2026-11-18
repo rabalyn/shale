@@ -604,6 +604,53 @@ mod tests {
 
     // spec: MAIL-125
     #[test]
+    fn a_display_name_with_a_cr_or_lf_is_an_error_in_words_and_never_a_panic() {
+        for brk in ["\r", "\n", "\r\n"] {
+            let name = format!("\"Ada{brk}Lovelace\" <ada@x.de>");
+            for field in ["to", "cc", "bcc", "from_name"] {
+                let mut d = draft();
+                match field {
+                    "to" => d.to = name.clone(),
+                    "cc" => d.cc = name.clone(),
+                    "bcc" => d.bcc = name.clone(),
+                    _ => d.from_name = format!("Ada{brk}Lovelace"),
+                }
+                let e = build(&d, &opts()).unwrap_err();
+                assert!(e.0.contains("may not contain a line break"), "{field} {brk:?}: {e}");
+                let named = if field == "from_name" { "from" } else { field };
+                assert!(e.0.to_lowercase().contains(named), "{field} {brk:?}: {e}");
+                // a draft saved incomplete builds without a panic and without a bare CR or LF in a header line
+                let lenient = BuildOptions { lenient: true, ..opts() };
+                let b = build(&d, &lenient).unwrap_or_else(|e| panic!("{field} {brk:?}: {e}"));
+                let h = header_block(&b.bytes);
+                for line in h.split("\r\n") {
+                    assert!(!line.contains(['\r', '\n']), "{field} {brk:?}: {h:?}");
+                }
+            }
+        }
+        // lettre 0.11.24 writes a line break in a display name as a space (it panicked before)
+        let addr: lettre::Address = "ada@x.de".parse().unwrap();
+        let shown = lettre::message::Mailbox::new(Some("Ada\r\nBcc: x@y.z".into()), addr).to_string();
+        let m = lettre::Message::builder().from("a@x.de".parse().unwrap()).to(shown.parse().unwrap()).subject("s").body(String::from("b")).unwrap();
+        let text = String::from_utf8_lossy(&m.formatted()).into_owned();
+        assert!(!text.lines().any(|l| l.to_lowercase().starts_with("bcc:")), "{text}");
+    }
+
+    // spec: MAIL-125
+    #[test]
+    fn a_quoted_local_part_is_never_sent_to_a_different_address() {
+        // lettre 0.11.24 keeps a quoted local part as written; it used to cut `"d "@example.com` down to `d@example.com`
+        for (to, quoted) in [("\"d \"@example.com", "\"d \"@example.com"), ("\"d e\"@example.com", "\"d e\"@example.com")] {
+            let mut d = draft();
+            d.to = to.into();
+            let b = build(&d, &opts()).unwrap_or_else(|e| panic!("{to}: {e}"));
+            assert_eq!(b.recipients, vec![quoted.to_string()], "{to}");
+            assert!(header_block(&b.bytes).contains(&format!("To: {quoted}")), "{to}");
+        }
+    }
+
+    // spec: MAIL-125
+    #[test]
     fn addresses_must_parse_and_a_recipient_is_needed() {
         let mut d = draft();
         d.to = "bob@x.de, not an address".into();

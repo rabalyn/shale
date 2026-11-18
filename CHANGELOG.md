@@ -10,6 +10,32 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-18
+
+### Added
+
+- **Install script for Linux** (#330). The Linux download now has `shale/install.sh`, which works on
+  any distribution: `./install.sh` installs the program to `~/.local/bin` and the app menu entry and
+  icons (all sizes) to `~/.local/share`, `--prefix /usr/local` installs for all users,
+  `--uninstall` removes exactly what it installed. It runs again to upgrade, warns when the program's
+  folder is not on `PATH` and names missing libraries with the package names for Arch, Debian and
+  Fedora (BUILD-025). There is no AppImage (it needs FUSE 2 and has no menu entry) and no Flatpak
+  (its sandbox would block vault folders and the programs Shale starts).
+- **Arch Linux package** (#337). `packaging/aur/shale-bin/` has a PKGBUILD for the AUR package
+  `shale-bin`, built from the Linux download of a release: the program, the app menu entry, the
+  icons, the licence and the documentation are installed system-wide, and the optional programs
+  (git, git-lfs, curl, ffmpeg, gnupg, pandoc) are named as optional dependencies. `scripts/aur-update.sh`
+  moves it to a new release (version, checksum, `.SRCINFO`) (BUILD-026).
+
+### Security
+
+- **lettre updated to 0.11.24** (#331 to #336, RUSTSEC-2026-0560 to 0565): STARTTLS response
+  injection (#331), missing dot-stuffing after a bare CR or LF (#332), a panic on a white-space EHLO
+  line (#333), a quoted local part sent to a different address (#334), a panic on a CR or LF in a
+  display name (#335) and unbounded buffering of SMTP replies (#336). Shale sends through its own
+  SMTP client, which already refuses bare line breaks and dot-stuffs, so only the message builder
+  fixes (#334, #335) touched Shale's path; both are now covered by tests (MAIL-125).
+
 ## [0.6.0] - 2026-11-18
 
 ### Added
@@ -1342,7 +1368,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/rabalyn/shale/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/rabalyn/shale/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rabalyn/shale/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rabalyn/shale/compare/v0.4.0...v0.5.0

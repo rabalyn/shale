@@ -712,7 +712,12 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   highlights and pictures with their captions come through (IMP-037). Everything one file brings
   goes into one folder, `z_media/YYYY/MM/import_docx_<name>/`: the pictures in `media/` and, when
   "Keep the original .docx" is ticked, the original, which the note names in its properties
-  (IMP-038). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
+  (IMP-038). Word's look comes along: text and highlight colours become `<span>` and `<mark>`
+  colours (IMP-041), a Title and Subtitle become a heading and an italic line (IMP-042), and the
+  note's properties hold the page setup (`print-paper`, `print-margins`), the body font, size,
+  line and paragraph spacing, alignment and the colour of Heading 1 (`print-*`, IMP-040), which
+  the PDF export uses (rabalyn/shale#338). Centred and right-aligned paragraphs are not kept
+  (rabalyn/shale#340). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
   without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
 
   ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)
