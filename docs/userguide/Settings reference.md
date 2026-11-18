@@ -212,6 +212,14 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 | `caches.debug_log_mb` | 10 | same |
 | `caches.undo_days` | 30 (undo steps of notes, days) | same |
 
+## Properties of a note
+
+Some behaviour is decided by a note's own properties (front matter) instead of a setting; they are not stored in any settings file.
+`numbered-headings` (`true` or `false`) overrides the setting `numbered_headings` for the note ([[Notes and links]]). The PDF export reads
+`print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align`,
+`print-heading-color`, `print-title` and `print-toc`; each has its values, default and effect in the table of
+[[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
+
 ## Vault settings (`<vault>/.shale/settings.json`)
 
 | Key | Default | Where |
