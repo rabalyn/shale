@@ -82,6 +82,10 @@ impl ShaleApp {
                 self.mail.detect_gnupg();
                 false
             }
+            MailDialogAction::WriteAgentCache(choice) => {
+                self.mail.write_agent(choice);
+                false
+            }
             MailDialogAction::CancelSignIn(i) => {
                 if let Some(a) = d.accounts.get(i) {
                     self.mail.cancel_sign_in(&a.id);

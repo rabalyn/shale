@@ -194,7 +194,7 @@ mod fake {
         std::fs::remove_dir_all(src.parent().unwrap()).unwrap();
     }
 
-    // spec: TEX-006
+    // spec: TEX-006, TEX-035
     #[test]
     fn a_re_import_updates_the_files_keeps_settings_and_logo_and_trashes_the_old_set() {
         let f = Fake::new("imp-again");
@@ -204,10 +204,11 @@ mod fake {
         assert!(!run(&request(&v, What::Local(src.clone()), Some(engine.clone()))).unwrap().replaced);
         let dir = v.join("templates/tex/tuda");
         // the person's work: settings, a logo, a changed kind, a changed class file
-        let mine = "accent = \"3b\"\nlanguage = \"de\"\ndepartment = \"Mathematik\"\nlogo = \"tuda_logo.pdf\"\n# my note\n";
+        let mine = "accent = \"3b\"\nlanguage = \"de\"\ndepartment = \"Mathematik\"\nlogo = \"tuda_logo.pdf\"\ndepartment_logo = \"department_logo.png\"\n# my note\n";
         std::fs::write(dir.join("settings.toml"), mine).unwrap();
         std::fs::create_dir_all(dir.join("logo")).unwrap();
         std::fs::write(dir.join("logo/tuda_logo.pdf"), "my logo").unwrap();
+        std::fs::write(dir.join("logo/department_logo.png"), "my department logo").unwrap();
         std::fs::write(dir.join("kinds/pub.toml"), "# edited by hand\nname = \"Mine\"\nmapping = \"article\"\nclass = \"tudapub\"\n").unwrap();
         std::fs::write(dir.join("tex/tudapub.cls"), "edited class").unwrap();
         // the source has a new file
@@ -220,6 +221,9 @@ mod fake {
         assert_eq!(std::fs::read_to_string(dir.join("tex/tudacolors.def")).unwrap(), "\\new colors", "the files are the new ones");
         assert!(std::fs::read_to_string(dir.join("kinds/pub.toml")).unwrap().contains("Publication"), "the shipped kinds are back");
         assert_eq!(scan(&v)[0].info.as_ref().unwrap().logo, LogoStatus::Present("tuda_logo.pdf".into()));
+        // the department logo is kept too (TEX-035)
+        assert_eq!(std::fs::read(dir.join("logo/department_logo.png")).unwrap(), b"my department logo");
+        assert_eq!(scan(&v)[0].info.as_ref().unwrap().department_logo.as_deref(), Some("department_logo.png"));
         // the old set, with the hand edits, is in the trash and nothing is lost
         let day = std::fs::read_dir(v.join(".trash")).unwrap().next().unwrap().unwrap().path();
         let old = day.join("templates/tex/tuda");

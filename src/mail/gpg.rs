@@ -31,13 +31,15 @@ pub struct Gnupg {
     pub home: Option<PathBuf>,
     pub gpg: String,
     pub gpgsm: String,
+    /// `gpgconf`, which reads and changes the agent's cache times (MAIL-235, MAIL-236).
+    pub gpgconf: String,
 }
 
 impl Gnupg {
     /// The machine's `gpg` and `gpgsm` against the person's own GnuPG home. Only the app itself
     /// (through `Default`) and the test kit's `TestHome` (with a home of its own) call it.
     pub fn system() -> Self {
-        Gnupg { home: None, gpg: "gpg".into(), gpgsm: "gpgsm".into() }
+        Gnupg { home: None, gpg: "gpg".into(), gpgsm: "gpgsm".into(), gpgconf: "gpgconf".into() }
     }
 }
 
@@ -47,7 +49,7 @@ impl Default for Gnupg {
     fn default() -> Self {
         #[cfg(test)]
         {
-            Gnupg { home: None, gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into() }
+            Gnupg { home: None, gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), gpgconf: "/nonexistent/gpgconf".into() }
         }
         #[cfg(not(test))]
         {
@@ -125,6 +127,8 @@ impl Status {
 pub struct Run {
     pub stdout: Vec<u8>,
     pub status: Vec<Status>,
+    /// Everything the program wrote to stderr (for programs without status lines, like `gpgconf`).
+    pub stderr: Vec<u8>,
     pub code: i32,
 }
 
@@ -197,17 +201,28 @@ impl Gnupg {
     /// Run the program with `args` (after the fixed options), `input` on stdin. Ends when it exits, after `limit`
     /// (the child is killed) or when `cancel` is set (the child is killed).
     pub fn run(&self, s: CryptoStandard, args: &[&str], input: &[u8], limit: Duration, cancel: &AtomicBool) -> Result<Run, GpgError> {
-        let mut cmd = Command::new(self.program(s));
-        cmd.args(["--batch", "--no-tty", "--status-fd", "2"]);
+        let mut fixed = vec!["--batch", "--no-tty", "--status-fd", "2"];
         if s == CryptoStandard::OpenPgp {
-            cmd.args(["--no-auto-key-retrieve", "--no-auto-key-locate", "--no-greeting"]);
+            fixed.extend(["--no-auto-key-retrieve", "--no-auto-key-locate", "--no-greeting"]);
         }
+        self.exec((self.program(s), GpgError::Missing(s), &fixed), args, input, limit, cancel)
+    }
+
+    /// Run `gpgconf` (no fixed options) with `args`; `Missing` is reported as an `Io` error that names it.
+    pub fn run_gpgconf(&self, args: &[&str], input: &[u8], limit: Duration, cancel: &AtomicBool) -> Result<Run, GpgError> {
+        self.exec((&self.gpgconf, GpgError::Io("gpgconf was not found on this computer".into()), &[]), args, input, limit, cancel)
+    }
+
+    /// `(program, the error for "not installed", the fixed options before `args`)`.
+    fn exec(&self, (program, missing, fixed): (&str, GpgError, &[&str]), args: &[&str], input: &[u8], limit: Duration, cancel: &AtomicBool) -> Result<Run, GpgError> {
+        let mut cmd = Command::new(program);
+        cmd.args(fixed);
         cmd.args(args);
         if let Some(h) = &self.home {
             cmd.env("GNUPGHOME", home_text(h));
         }
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = crate::program::spawn(&mut cmd).map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { GpgError::Missing(s) } else { GpgError::Io(e.to_string()) })?;
+        let mut child = crate::program::spawn(&mut cmd).map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { missing } else { GpgError::Io(e.to_string()) })?;
         let stdin = child.stdin.take();
         let mut stdout = child.stdout.take().ok_or_else(|| GpgError::Io("no stdout".into()))?;
         let mut stderr = child.stderr.take().ok_or_else(|| GpgError::Io("no stderr".into()))?;
@@ -260,7 +275,7 @@ impl Gnupg {
         if too_big {
             return Err(GpgError::TooBig);
         }
-        Ok(Run { stdout, status: parse_status(&stderr), code })
+        Ok(Run { stdout, status: parse_status(&stderr), stderr, code })
     }
 
     /// Is the program there? Its version line, or why not.
@@ -1272,7 +1287,7 @@ mod tests {
     // spec: MAIL-170
     #[test]
     fn a_missing_program_is_reported_in_words() {
-        let g = Gnupg { gpg: "/nonexistent/gpg-for-shale-tests".into(), gpgsm: "/nonexistent/gpgsm-for-shale-tests".into(), home: None };
+        let g = Gnupg { gpg: "/nonexistent/gpg-for-shale-tests".into(), gpgsm: "/nonexistent/gpgsm-for-shale-tests".into(), gpgconf: "/nonexistent/gpgconf-for-shale-tests".into(), home: None };
         let e = g.list_keys(CryptoStandard::OpenPgp, false, None, &no_cancel()).unwrap_err();
         assert_eq!(e, GpgError::Missing(CryptoStandard::OpenPgp));
         assert!(e.to_string().contains("not installed"), "{e}");
@@ -1311,7 +1326,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         let program = script.to_string_lossy().into_owned();
-        let g = Gnupg { gpg: program.clone(), gpgsm: program, home: Some(dir.path.clone()) };
+        let g = Gnupg { gpg: program.clone(), gpgsm: program, gpgconf: "gpgconf".into(), home: Some(dir.path.clone()) };
         for s in [CryptoStandard::OpenPgp, CryptoStandard::Smime] {
             assert_eq!(g.version(s).unwrap(), format!("home:{}", dir.path.display()));
         }
@@ -1455,7 +1470,7 @@ mod tests {
     }
 
     fn run_of(status: &[(&str, &str)], code: i32) -> Run {
-        Run { stdout: Vec::new(), status: status.iter().map(|(k, a)| st(k, a)).collect(), code }
+        Run { stdout: Vec::new(), stderr: Vec::new(), status: status.iter().map(|(k, a)| st(k, a)).collect(), code }
     }
 
     // spec: MAIL-174, MAIL-193

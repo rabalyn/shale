@@ -205,6 +205,11 @@ Settings → LaTeX.
    a PNG), or type or paste where it is. **Later** skips the step: exports then carry a grey
    placeholder and are not CI-conformant, and you can add the logo any time in Settings → LaTeX.
 
+   Below it is an optional second field, **Department logo**: if your department or institution (the
+   HRZ, a faculty, …) has a logo of its own, give it the same way (**Use this department logo**). A file
+   dropped on this step is the university's logo while that is still missing, and the department logo
+   after that; a message says which. See "The department logo" below.
+
    ![[setup-logo.png]]
 
    ![[setup-logo-drop.webm]]
@@ -230,10 +235,10 @@ Settings → LaTeX.
    ![[setup-test-failed.png]]
 
 The files you drop on the window while the setup is open belong to it: on the logo step a PDF or PNG
-becomes the logo, on the templates step a `.zip`, a `.tar.gz` or a folder is imported as the templates; they
+becomes the university's logo (the department logo once that is there), on the templates step a `.zip`, a `.tar.gz` or a folder is imported as the templates; they
 are never imported into the vault as notes. The same works in Settings → LaTeX: a dropped archive or
 folder is imported, a dropped PDF or PNG becomes the logo of the only set that has a logo slot (or of the
-set whose **Choose logo…** is open).
+set whose **Choose logo…** or **Choose department logo…** is open, for that logo).
 
 The setup opens by itself only once per vault (finishing or cancelling it both count); run it again from
 Settings → LaTeX whenever you like. The steps are the buttons of Settings → LaTeX (below), put in order.
@@ -293,15 +298,16 @@ the generic packages. A set looks like this:
 ```
 templates/tex/tuda/
   set.toml            what the set is: name, version, where it came from and when
-  settings.toml       your choices: accent colour, language, department, logo (kept when you update)
+  settings.toml       your choices: accent colour, language, department, logo, department logo (kept when you update)
   tex/                the class and package files (tudapub.cls, tudabeamer.cls, ...)
   kinds/pub.toml      one file per document kind (publication, thesis, slides, letter, ...)
-  logo/               the logo you supply (kept when you update)
+  logo/               the logos you supply: tuda_logo.pdf and department_logo.png (kept when you update)
   README.md           a note for people browsing the vault
 ```
 
 **Settings → LaTeX → Template sets** lists the sets of the open vault with their name, version,
-source, number of document kinds and the state of the logo, and has these buttons:
+source, number of document kinds and the state of the logo (and "department logo: department_logo.png"
+when there is one), and has these buttons:
 
 - **Import TU Darmstadt templates** imports the corporate design of the TU Darmstadt
   ([tuda-ci](https://github.com/tudace/tuda_latex_templates), 11 kinds: publication, report,
@@ -320,7 +326,9 @@ source, number of document kinds and the state of the logo, and has these button
   whole archive.
 - **Update set** imports the set again from where it came from. The old folder of the set is
   moved to the vault's `.trash` (so changes you made by hand to a class or a kind are not lost),
-  the new files are put in place, and your `settings.toml` and your logo are kept.
+  the new files are put in place, and your `settings.toml` and your logos are kept.
+- **Choose department logo…** and **Remove department logo** are for the optional logo of your department
+  (see "The department logo").
 - **Test page** compiles a small document of the set's publication kind (`pub`) with your TeX and
   opens the PDF, or shows the readable errors ("package x is missing", `file:line` and the message)
   and the end of the log.
@@ -341,6 +349,33 @@ logo step) does the same; you can also put `tuda_logo.pdf` there yourself. Until
 slides, letters and posters still compile; the placeholder lives only in the temporary folder of the
 compile, never in your vault. Documents with the placeholder must not be used as official documents.
 
+### The department logo
+
+Departments and institutions have a logo of their own, which documents show together with the
+university's. Every set has an optional second slot for it, `logo/department_logo.pdf` or `.png`.
+**Choose department logo…** (Settings → LaTeX → Template sets) takes the path of a PDF or PNG of at most
+5 MB and copies it there (a PDF or PNG dropped on the window while its form is open does the same, and so
+does the second field of the logo step of the guided setup); a logo that was there goes to the vault's
+trash. **Remove department logo** moves it to the trash and clears the setting. The set's status says
+**department logo: department_logo.png** when there is one; an empty slot is no warning and gets no placeholder.
+Like the university's logo it is not redistributable by Shale, so it is yours to supply.
+
+The placement follows the TU Darmstadt rule for a second logo (the HRZ's "Howto – HRZ-Logo"): **below**
+the TU logo, right-aligned with it, as high as the TU logo (the clear space is part of the logo files),
+about 5 mm apart. Where the class puts it:
+
+| Kind | The department logo |
+|---|---|
+| publication, report, thesis, doctoral thesis, leaflet | in the title box under the TU logo |
+| letter | in the letter head, under the TU logo, on the first page |
+| poster | in the title's info box under the TU logo |
+| scientific poster | as the class's title graphic, under the TU logo |
+| slides | as the class's sublogo, under the TU logo on every slide |
+| exercise sheet, announcement | not shown: the class has no room for a second logo under the TU logo |
+
+In the export dialog a **Department logo** box appears when the set has a department logo: it is on by
+default and greyed out (off) for a kind that does not show it. The test page of the set shows it too.
+
 ### Your choices: `settings.toml`
 
 Each set has its own `settings.toml`, which a re-import keeps:
@@ -352,6 +387,7 @@ Each set has its own `settings.toml`, which a re-import keeps:
 | `department` | used for the `department` field of a kind when a note and the dialog give none |
 | `author` | used for the `author` field of a kind when a note and the dialog give none |
 | `logo` | the logo file in `logo/`, set by **Choose logo…** |
+| `department_logo` | the department logo file in `logo/` (`department_logo.pdf` or `.png`), set by **Choose department logo…** |
 
 ### Adding or changing a document kind: `kinds/<kind>.toml`
 
@@ -368,6 +404,7 @@ does not know you write them yourself (the README of the set has an example):
 | `options` | the class options; `{accent}` and `{language}` are filled in from `settings.toml`, and an option whose `{accent}` is empty is left out |
 | `preamble` | lines of LaTeX after `\documentclass` (`{language}` and `{lang}` are filled in too) |
 | `logo` | `true` when the kind needs the set's logo |
+| `department_logo` | lines of LaTeX written after the preamble, only when the set has a department logo and the export dialog's **Department logo** box is on; `{department_logo}` stands for the file's name without extension (`logo/` is searched). Without the key the kind does not show a department logo |
 | `columns` | `poster` kinds: the text of the note in this many columns (the poster has 2) |
 | `[[fields]]` | one table per value: `key` (the property of the note), `label`, `command` (the LaTeX command that gets it, `title` for `\title{…}`) or `komavar` (`\setkomavar{…}` of a letter), `required`, `default` (LaTeX code used when the note has none) |
 
@@ -389,7 +426,8 @@ always exported with the built-in engine.
   with a star must have a value. The page size, margins, text size, title and page numbers are not
   in the dialog: the template decides them. **Table of contents** is there for the kinds that have
   one (publication, report, exercise sheet, thesis, doctoral thesis) and greyed out for the others;
-  the box for embedded pictures stays.
+  the box for embedded pictures stays. **Department logo** appears when the set has one (see "The
+  department logo"): on by default, greyed out for a kind that does not show it.
 - A line under the fields says which TeX is used, or **No TeX: install it in Settings → LaTeX**
   (**Export** is off then). A red warning says that the set's logo is missing: the PDF then has a grey
   placeholder where the logo goes and is not CI-conformant (see "The logo"). Next to the hints for a

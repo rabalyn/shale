@@ -9,6 +9,7 @@ use super::import::{PRESET_COMMIT, PRESET_REPO};
 use super::install::{self, DISK_MB, DOWNLOAD_MB};
 use super::sets::{Language, LogoStatus};
 use super::sets_ui::expand_home;
+use super::sets_ui::Slot;
 use super::settings_ui::{consent_text, Notice, TaskKind, TexState};
 use super::setup::{Choice, Outcome, Step, TexFact};
 use crate::app::muted;
@@ -37,6 +38,7 @@ pub enum Act {
     CancelJob,
     Import,
     UseLogo,
+    UseDepartmentLogo,
     OpenLogoPage,
     RunTest,
     SaveTex,
@@ -205,11 +207,10 @@ fn logo_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
     match &status {
         LogoStatus::NotNeeded => {
             done_line(ui, format!("“{name}” needs no logo ✓"));
-            return;
         }
         LogoStatus::Present(f) => {
             done_line(ui, format!("The logo is there: {f} ✓"));
-            crate::theme::hint(ui, "To use another one, drop it onto this window.");
+            crate::theme::hint(ui, "To use another one, choose it in Settings → LaTeX → Template sets.");
         }
         LogoStatus::Missing => {
             crate::theme::paragraph(ui, "The templates put the university's logo on the title page. The logo may not be shipped with Shale or with the templates, so you need to get it yourself.");
@@ -234,10 +235,32 @@ fn logo_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
             crate::theme::hint(ui, "Not now? Press Later: exports then carry a grey placeholder and are not CI-conformant. You can add the logo any time in Settings → LaTeX.");
         }
     }
+    ui.add_space(8.0);
+    department_logo(ui, st, acts);
     if let Some(n) = &st.setup.message {
         ui.add_space(4.0);
         notice(ui, n);
     }
+}
+
+/// The optional second field of the logo step: the logo of the person's department (TEX-035).
+fn department_logo(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
+    let Some(set) = st.chosen_set() else { return };
+    ui.label(egui::RichText::new("Department logo (optional)").strong());
+    match set.department_logo_text() {
+        Some(text) => {
+            ui.label(format!("{text} ✓"));
+        }
+        None => {
+            ui.label(muted("Your department or institution may have a logo of its own: documents show it under the university's logo.").size(12.0));
+        }
+    }
+    ui.horizontal(|ui| {
+        ui.add(egui::TextEdit::singleline(&mut st.setup.department_logo_path).hint_text("~/Downloads/department_logo.png").desired_width(320.0));
+        if ui.add_enabled(!st.setup.department_logo_path.trim().is_empty(), egui::Button::new("Use this department logo")).clicked() {
+            acts.push(Act::UseDepartmentLogo);
+        }
+    });
 }
 
 /// Black or white, whichever reads on this colour.
@@ -399,7 +422,11 @@ pub fn apply(st: &mut TexState, ctx: &Context, cfg: &TexConfig, acts: Vec<Act>) 
             Act::Import => st.setup_import(ctx, cfg),
             Act::UseLogo => {
                 let p = expand_home(&st.setup.logo_path);
-                st.setup_logo(&p);
+                st.setup_logo(Slot::University, &p);
+            }
+            Act::UseDepartmentLogo => {
+                let p = expand_home(&st.setup.department_logo_path);
+                st.setup_logo(Slot::Department, &p);
             }
             Act::OpenLogoPage => {
                 if let Err(e) = crate::opener::open_url(LOGO_PAGE) {

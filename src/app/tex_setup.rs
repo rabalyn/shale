@@ -149,7 +149,7 @@ impl ShaleApp {
         }
     }
 
-    /// Take dropped files for the setup or for Settings → LaTeX; a toast says when nothing was taken.
+    /// Take dropped files for the setup or for Settings → LaTeX; a toast says when nothing was taken, and which logo a dropped file became.
     pub(crate) fn tex_drop(&mut self, target: TexDrop, ctx: &egui::Context, paths: &[PathBuf]) {
         self.bind_tex_sets();
         let told = match target {

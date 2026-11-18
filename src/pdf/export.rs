@@ -78,6 +78,8 @@ pub struct ExportOptions {
     pub page_numbers: bool,
     /// notes: include embedded pictures, drawings and PDF pages
     pub embeds: bool,
+    /// notes, LaTeX template: show the set's department logo (TEX-035)
+    pub department_logo: bool,
     /// notes: print tables as plain text lines instead of a grid (EDIT-024)
     pub plain_tables: bool,
     /// notes: a *Contents* page with the `#`–`###` headings and the pages they start on (PDF-008)
@@ -119,6 +121,7 @@ impl ExportOptions {
             title: true,
             page_numbers: true,
             embeds: true,
+            department_logo: true,
             plain_tables: false,
             toc: true,
             numbered_headings: true,
@@ -144,6 +147,7 @@ impl ExportOptions {
             title: false,
             page_numbers: false,
             embeds: true,
+            department_logo: false,
             plain_tables: false,
             toc: false,
             numbered_headings: false,

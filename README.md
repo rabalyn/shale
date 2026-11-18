@@ -52,6 +52,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   text lie unencrypted in the mail folder, next to the encrypted original). Without that switch nothing
   is decrypted. To use your Thunderbird keys, export them there and import them into GnuPG
   (`gpg --import backup.asc`; S/MIME: `gpgsm --import backup.p12`), see below.
+  To stay unlocked longer, Accounts…, Encryption can lengthen GnuPG's passphrase cache with `gpgconf`
+  (shown first, written only on a second click) or shows the lines to put in `gpg-agent.conf` yourself.
   Sign in with a password or with OAuth2 (Google, Microsoft). Shale has no OAuth2 client IDs of
   its own yet, so you register one (about five minutes, free):
   - *Google:* Cloud console, new project, OAuth consent screen (External, Testing, add yourself as
@@ -282,7 +284,7 @@ Text editing keys and vim keys are fixed.
 | Drag a tab | Reorder tabs; a marker shows where it lands |
 | Right-click a tab | Pin tab / Unpin tab (pinned tabs sit at the left with a pin and keep their place between starts); Open in split right |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
-| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
+| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette, the ▾ part of the split button), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
 | Alt+V, Alt+P, Alt+D, Alt+N | The buttons of the view header and tab bar of a note: edit / reading view, Markdown preview, the ⋯ menu (opens it), New tab |
 | Alt+1, Alt+2, Alt+3, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0 | The ribbon items by position: the first ten icons of the ribbon, as shown (also after you reordered or removed some) |
 | Alt+, / Alt+. | Show or hide the left / right sidebar |
