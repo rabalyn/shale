@@ -84,7 +84,7 @@ context menu brings the last item back.
 
 ## Go back and forward
 
-Mouse side buttons or Alt+← / Alt+→. Sort the file list by name, date modified or date
+Mouse side buttons or Alt+← / Alt+→ (macOS: Cmd+[ / Cmd+]). Sort the file list by name, date modified or date
 created (the sort icon above the list).
 
 Next: [[Editor]], [[Tabs]], [[Search and pickers]].

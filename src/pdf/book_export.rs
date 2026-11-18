@@ -168,7 +168,7 @@ impl Writer<'_> {
     fn begin(&mut self, header: String) {
         self.running = Some(header);
         let fresh = self.opts.new_page_each;
-        if fresh && self.y > self.m + 0.5 {
+        if fresh && self.y > self.top + 0.5 {
             self.new_page();
         } else if !fresh {
             self.y += self.opts.font_pt * 2.0;
@@ -184,7 +184,7 @@ impl Writer<'_> {
     fn title(&mut self, level: usize, number: Option<&str>, title: &str) -> Dest {
         let base = self.opts.font_pt;
         let size = base * book_scale(level);
-        let at_top = self.y <= self.m + 0.5;
+        let at_top = self.y <= self.top + 0.5;
         self.y += if at_top { base * [0.0, 3.5, 2.5, 1.5, 1.0, 1.0][level.min(5)] } else { base * 1.2 };
         let mut ps = vec![Piece::plain(title, size, BLACK, true)];
         if let Some(n) = number {
@@ -192,7 +192,7 @@ impl Writer<'_> {
         }
         self.need(size * 3.0);
         let dest = Dest { page: self.page, y: self.y };
-        let (x, cw) = (self.m, self.cw());
+        let (x, cw) = (self.left, self.cw());
         self.paragraph(&ps, x, cw);
         if level <= 2 {
             let y = self.y + size * 0.05;
@@ -204,16 +204,16 @@ impl Writer<'_> {
 
     /// The small grey header at the top right of a page of a chapter, with a thin line under it (BOOK-008).
     fn running_headers(&mut self) {
-        let (m, size) = (self.m, 8.5);
+        let (left, right, size) = (self.left, self.right, 8.5);
         for i in 0..self.doc.pages.len() {
             let Some(title) = self.heads[i].title.clone().filter(|_| !self.heads[i].first) else { continue };
             let width = self.doc.pages[i].width;
-            let room = width - 2.0 * m;
-            let text = fit_text(&title, size, room);
-            let base = m * 0.55;
+            let room = width - left - right;
+            let text = fit_text(FontKind::Sans, &title, size, room);
+            let base = self.top * 0.55;
             let page = self.doc.page(i);
-            page.text(TextStyle::plain(FontKind::Sans, size, GREY), width - m - text_width(FontKind::Sans, size, &text), base, &text);
-            page.line([m, base + 4.0], [width - m, base + 4.0], Rgba(205, 205, 210, 255), 0.5);
+            page.text(TextStyle::plain(FontKind::Sans, size, GREY), width - right - text_width(FontKind::Sans, size, &text), base, &text);
+            page.line([left, base + 4.0], [width - right, base + 4.0], Rgba(205, 205, 210, 255), 0.5);
         }
     }
 }

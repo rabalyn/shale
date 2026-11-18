@@ -66,7 +66,11 @@ pub enum Background {
 pub struct ExportOptions {
     pub paper: Paper,
     pub landscape: bool,
-    pub margin_mm: f32,
+    /// the margins in millimetres: top, right, bottom, left (PDF-018)
+    pub margins_mm: [f32; 4],
+    /// notes: a paper size of the note's own, in millimetres, portrait (width <= height); it
+    /// takes the place of `paper` (a note's `print-paper: 215.9x279.4mm`, PDF-018)
+    pub custom_mm: Option<[f32; 2]>,
     /// notes: body text size in points
     pub font_pt: f32,
     /// notes: print the note's name as a title
@@ -84,6 +88,18 @@ pub struct ExportOptions {
     /// (`NoteEditor::column`); embeds are as big in proportion to the text as there (PDF-005).
     /// None: the column of `embed_size::DEFAULT_COLUMN`.
     pub column: Option<f32>,
+    /// notes: the font of the text (a note's `print-font`, PDF-014): Sans, Serif or Mono
+    pub font: FontKind,
+    /// notes: the line height as a factor of the font's natural line height (`print-line-spacing`,
+    /// PDF-015); None: the look of the export before this option, 1.45 text sizes
+    pub line_spacing: Option<f32>,
+    /// notes: the space in points between paragraphs, in place of the usual 0.6 text sizes
+    /// (`print-paragraph-spacing`, PDF-015)
+    pub paragraph_spacing: Option<f32>,
+    /// notes: justified text (`print-align: justify`, PDF-016)
+    pub justify: bool,
+    /// notes: the colour of headings (`print-heading-color`, PDF-017); None: black
+    pub heading_color: Option<Rgba>,
     /// a book (BOOK-005): every part and chapter starts on a new page
     pub new_page_each: bool,
     /// drawings
@@ -97,7 +113,8 @@ impl ExportOptions {
         ExportOptions {
             paper: Paper::A4,
             landscape: false,
-            margin_mm: 20.0,
+            margins_mm: [20.0; 4],
+            custom_mm: None,
             font_pt: 11.0,
             title: true,
             page_numbers: true,
@@ -106,6 +123,11 @@ impl ExportOptions {
             toc: true,
             numbered_headings: true,
             column: None,
+            font: FontKind::Sans,
+            line_spacing: None,
+            paragraph_spacing: None,
+            justify: false,
+            heading_color: None,
             new_page_each: true,
             background: Background::White,
             fill_page: true,
@@ -116,7 +138,8 @@ impl ExportOptions {
         ExportOptions {
             paper: Paper::FitDrawing,
             landscape: wide,
-            margin_mm: 10.0,
+            margins_mm: [10.0; 4],
+            custom_mm: None,
             font_pt: 11.0,
             title: false,
             page_numbers: false,
@@ -125,6 +148,11 @@ impl ExportOptions {
             toc: false,
             numbered_headings: false,
             column: None,
+            font: FontKind::Sans,
+            line_spacing: None,
+            paragraph_spacing: None,
+            justify: false,
+            heading_color: None,
             new_page_each: false,
             background: Background::White,
             fill_page: true,
@@ -135,12 +163,174 @@ impl ExportOptions {
         self.column.unwrap_or(crate::embed_size::DEFAULT_COLUMN)
     }
     pub(super) fn page_size(&self) -> [f32; 2] {
-        let [w, h] = self.paper.size().unwrap_or([595.0, 842.0]);
+        let [w, h] = match self.custom_mm {
+            Some([w, h]) => [w * MM, h * MM],
+            None => self.paper.size().unwrap_or([595.0, 842.0]),
+        };
         if self.landscape {
             [h, w]
         } else {
             [w, h]
         }
+    }
+}
+
+impl ExportOptions {
+    /// The margins in points: top, right, bottom, left.
+    pub(super) fn margins(&self) -> [f32; 4] {
+        self.margins_mm.map(|m| m * MM)
+    }
+
+    /// These options with what the note's front matter says (PDF-013): the paper (`print-paper`,
+    /// also a size of its own, wider than high meaning landscape), `print-margins`,
+    /// `print-font-size`, `print-title`, `print-toc` and the properties of
+    /// [`ExportOptions::with_note_text_properties`]. A property that is missing or has a bad value
+    /// leaves the option as it was. The export dialog starts from this; what the dialog then holds
+    /// is what is exported.
+    pub fn with_note_properties(self, text: &str) -> Self {
+        let props = print_properties(text);
+        let mut o = self.with_note_text_properties(text);
+        if let Some(paper) = props.get("print-paper").and_then(|v| parse_paper(v)) {
+            match paper {
+                NotePaper::Standard(p) => {
+                    o.paper = p;
+                    o.custom_mm = None;
+                }
+                NotePaper::Custom([w, h]) => {
+                    o.custom_mm = Some([w.min(h), w.max(h)]);
+                    o.landscape = w > h;
+                }
+            }
+        }
+        if let Some(m) = props.get("print-margins").and_then(|v| parse_margins(v)) {
+            o.margins_mm = m;
+        }
+        if let Some(size) = props.get("print-font-size").and_then(|v| number(v)).filter(|v| (4.0..=72.0).contains(v)) {
+            o.font_pt = size;
+        }
+        if let Some(b) = props.get("print-title").and_then(|v| parse_bool(v)) {
+            o.title = b;
+        }
+        if let Some(b) = props.get("print-toc").and_then(|v| parse_bool(v)) {
+            o.toc = b;
+        }
+        o
+    }
+
+    /// The properties of the note that are not choices of the export dialog (PDF-013): `print-font`,
+    /// `print-line-spacing`, `print-paragraph-spacing`, `print-align` and `print-heading-color`.
+    /// [`export_note`] reads them from the note itself, so they hold with or without the dialog.
+    pub fn with_note_text_properties(mut self, text: &str) -> Self {
+        let props = print_properties(text);
+        if let Some(f) = props.get("print-font").and_then(|v| match v.to_lowercase().as_str() {
+            "serif" => Some(FontKind::Serif),
+            "sans" => Some(FontKind::Sans),
+            "mono" => Some(FontKind::Mono),
+            _ => None,
+        }) {
+            self.font = f;
+        }
+        if let Some(f) = props.get("print-line-spacing").and_then(|v| number(v)).filter(|v| (0.8..=3.0).contains(v)) {
+            self.line_spacing = Some(f);
+        }
+        if let Some(pt) = props.get("print-paragraph-spacing").and_then(|v| number(v)).filter(|v| (0.0..=72.0).contains(v)) {
+            self.paragraph_spacing = Some(pt);
+        }
+        match props.get("print-align").map(|v| v.to_lowercase()).as_deref() {
+            Some("justify") => self.justify = true,
+            Some("left") => self.justify = false,
+            _ => {}
+        }
+        if let Some(c) = props.get("print-heading-color").and_then(|v| parse_hex_colour(v)) {
+            self.heading_color = Some(c);
+        }
+        self
+    }
+
+    /// What the note sets that the dialog does not show as a control, for a line of the dialog
+    /// ("serif, justified, line spacing 1.15"); none when the note sets nothing of it.
+    pub fn text_properties_label(&self) -> Option<String> {
+        let mut parts: Vec<String> = Vec::new();
+        match self.font {
+            FontKind::Serif => parts.push("serif".into()),
+            FontKind::Mono => parts.push("mono".into()),
+            _ => {}
+        }
+        if self.justify {
+            parts.push("justified".into());
+        }
+        if let Some(f) = self.line_spacing {
+            parts.push(format!("line spacing {f}"));
+        }
+        if let Some(p) = self.paragraph_spacing {
+            parts.push(format!("paragraph spacing {p} pt"));
+        }
+        if let Some(Rgba(r, g, b, _)) = self.heading_color {
+            parts.push(format!("headings #{r:02x}{g:02x}{b:02x}"));
+        }
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+}
+
+/// The `print-*` properties of a note's front matter (key in lower case, its values joined by spaces).
+fn print_properties(text: &str) -> HashMap<String, String> {
+    markdown::front_matter_values(text).into_iter().filter(|(k, _)| k.starts_with("print-")).map(|(k, v)| (k, v.join(" ").trim().to_string())).collect()
+}
+
+enum NotePaper {
+    Standard(Paper),
+    Custom([f32; 2]),
+}
+
+/// A number, with a unit (`pt`, `mm`) after it.
+fn number(v: &str) -> Option<f32> {
+    let v = v.trim();
+    let v = v.strip_suffix("pt").or_else(|| v.strip_suffix("mm")).unwrap_or(v);
+    v.trim().parse::<f32>().ok().filter(|n| n.is_finite())
+}
+
+fn parse_bool(v: &str) -> Option<bool> {
+    match v.to_lowercase().as_str() {
+        "true" | "yes" => Some(true),
+        "false" | "no" => Some(false),
+        _ => None,
+    }
+}
+
+/// `A4`, `Letter`… or `<W>x<H>mm` (50 to 2000 mm a side).
+fn parse_paper(v: &str) -> Option<NotePaper> {
+    match v.to_lowercase().as_str() {
+        "a3" => return Some(NotePaper::Standard(Paper::A3)),
+        "a4" => return Some(NotePaper::Standard(Paper::A4)),
+        "a5" => return Some(NotePaper::Standard(Paper::A5)),
+        "letter" => return Some(NotePaper::Standard(Paper::Letter)),
+        "legal" => return Some(NotePaper::Standard(Paper::Legal)),
+        _ => {}
+    }
+    let (w, h) = v.to_lowercase().split_once(['x', '×']).map(|(w, h)| (w.to_string(), h.to_string()))?;
+    let (w, h) = (number(&w)?, number(&h)?);
+    let ok = |n: f32| (50.0..=2000.0).contains(&n);
+    (ok(w) && ok(h)).then_some(NotePaper::Custom([w, h]))
+}
+
+/// Four numbers in mm: top, right, bottom, left (0 to 100 each).
+fn parse_margins(v: &str) -> Option<[f32; 4]> {
+    let parts: Vec<f32> = v.split(|c: char| c.is_whitespace() || c == ',').filter(|p| !p.is_empty()).map(number).collect::<Option<_>>()?;
+    let m: [f32; 4] = parts.try_into().ok()?;
+    m.iter().all(|n| (0.0..=100.0).contains(n)).then_some(m)
+}
+
+/// `#RRGGBB` or `#RGB`.
+fn parse_hex_colour(v: &str) -> Option<Rgba> {
+    let h = v.strip_prefix('#')?;
+    if !h.is_ascii() || !h.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let digit = |i: usize, n: usize| u8::from_str_radix(&h[i..i + n], 16).ok();
+    match h.len() {
+        6 => Some(Rgba(digit(0, 2)?, digit(2, 2)?, digit(4, 2)?, 255)),
+        3 => Some(Rgba(digit(0, 1)? * 17, digit(1, 1)? * 17, digit(2, 1)? * 17, 255)),
+        _ => None,
     }
 }
 
@@ -325,6 +515,18 @@ pub(super) fn wrap_pieces(pieces: &[Piece], avail: f32) -> Vec<Vec<Piece>> {
     lines
 }
 
+/// The extra space in points to put after each blank but the last of a line to fill `avail`
+/// (PDF-016); 0 when the line has no gap to spread it over or is already full.
+fn justify_gap(line: &[Piece], avail: f32) -> f32 {
+    let Some((last, init)) = line.split_last() else { return 0.0 };
+    let used: f32 = init.iter().map(piece_width).sum::<f32>() + trimmed_width(last);
+    let gaps = init.iter().filter(|p| p.math.is_none() && p.text.ends_with(' ')).count();
+    if gaps == 0 {
+        return 0.0;
+    }
+    ((avail - used) / gaps as f32).max(0.0)
+}
+
 /// The height of a line of the *Contents* list, in text sizes.
 const CONTENTS_LINE: f32 = 1.7;
 
@@ -338,12 +540,12 @@ pub(super) struct Entry {
 }
 
 /// `text` shortened with an ellipsis to fit `room` points.
-pub(super) fn fit_text(text: &str, size: f32, room: f32) -> String {
+pub(super) fn fit_text(kind: FontKind, text: &str, size: f32, room: f32) -> String {
     let mut out = text.to_string();
-    if crate::pdf::write::text_width(FontKind::Sans, size, &out) <= room {
+    if crate::pdf::write::text_width(kind, size, &out) <= room {
         return out;
     }
-    while !out.is_empty() && crate::pdf::write::text_width(FontKind::Sans, size, &format!("{out}…")) > room {
+    while !out.is_empty() && crate::pdf::write::text_width(kind, size, &format!("{out}…")) > room {
         out.pop();
     }
     format!("{}…", out.trim_end())
@@ -376,7 +578,11 @@ pub(super) struct Writer<'a> {
     pub(super) opts: &'a ExportOptions,
     pub(super) w: f32,
     pub(super) h: f32,
-    pub(super) m: f32,
+    /// the margins in points
+    pub(super) top: f32,
+    pub(super) right: f32,
+    pub(super) bottom: f32,
+    pub(super) left: f32,
     pub(super) page: usize,
     pub(super) y: f32,
     /// a book: the notes in it; a link to one of them is a link inside the PDF (BOOK-009)
@@ -394,23 +600,23 @@ impl<'a> Writer<'a> {
         let [w, h] = opts.page_size();
         let mut doc = Doc::new(title);
         let page = doc.add_page(w, h);
-        let m = opts.margin_mm * MM;
-        Writer { doc, opts, w, h, m, page, y: m, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new() }
+        let [top, right, bottom, left] = opts.margins();
+        Writer { doc, opts, w, h, top, right, bottom, left, page, y: top, members: None, book_links: vec![], heads: vec![PageHead::default()], running: None, jumps: Vec::new() }
     }
     pub(super) fn cw(&self) -> f32 {
-        self.w - 2.0 * self.m
+        self.w - self.left - self.right
     }
     pub(super) fn p(&mut self) -> &mut Page {
         self.doc.page(self.page)
     }
     pub(super) fn new_page(&mut self) {
         self.page = self.doc.add_page(self.w, self.h);
-        self.y = self.m;
+        self.y = self.top;
         self.heads.push(PageHead { title: self.running.clone(), first: false });
     }
     /// Make room for `height`; start a new page if it doesn't fit (unless the page is empty).
     pub(super) fn need(&mut self, height: f32) {
-        if self.y + height > self.h - self.m && self.y > self.m + 0.5 {
+        if self.y + height > self.h - self.bottom && self.y > self.top + 0.5 {
             self.new_page();
         }
     }
@@ -427,17 +633,17 @@ impl<'a> Writer<'a> {
     /// [`Writer::reserve_contents`] with some more room above each line (in points).
     pub(super) fn reserve_contents_gapped(&mut self, gaps: &[f32]) -> Vec<(usize, f32)> {
         let base = self.opts.font_pt;
-        if self.y > self.m + 0.5 {
+        if self.y > self.top + 0.5 {
             self.y += base * 0.8;
         }
         let head =
-            vec![Piece { text: "Contents".into(), kind: FontKind::Sans, size: base * 1.5, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None, math: None }];
-        let (x, cw) = (self.m, self.cw());
+            vec![Piece { text: "Contents".into(), kind: self.opts.font, size: base * 1.5, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None, math: None }];
+        let (x, cw) = (self.left, self.cw());
         self.paragraph(&head, x, cw);
         self.y += base * 0.6;
         let mut slots = Vec::with_capacity(gaps.len());
         for gap in gaps {
-            if self.y + gap + base * CONTENTS_LINE > self.h - self.m {
+            if self.y + gap + base * CONTENTS_LINE > self.h - self.bottom {
                 self.new_page();
             } else {
                 self.y += gap;
@@ -454,20 +660,21 @@ impl<'a> Writer<'a> {
     /// right-aligned; the whole line is a link to that page.
     pub(super) fn draw_contents(&mut self, entries: &[Entry], slots: &[(usize, f32)]) {
         let size = self.opts.font_pt;
+        let kind = self.opts.font;
         let ink = Rgba(30, 30, 30, 255);
         let grey = Rgba(120, 120, 120, 255);
-        let (left, right) = (self.m, self.m + self.cw());
+        let (left, right) = (self.left, self.left + self.cw());
         let shallowest = entries.iter().map(|e| e.level).min().unwrap_or(1);
         for (e, (page, top)) in entries.iter().zip(slots) {
             let x = left + (e.level - shallowest) as f32 * size * 1.4;
             let number = e.dest.map(|d| (d.page + 1).to_string()).unwrap_or_default();
-            let nw = crate::pdf::write::text_width(FontKind::Sans, size, &number);
-            let style = |c| TextStyle { bold: e.bold, ..TextStyle::plain(FontKind::Sans, size, c) };
+            let nw = crate::pdf::write::text_width(kind, size, &number);
+            let style = |c| TextStyle { bold: e.bold, ..TextStyle::plain(kind, size, c) };
             let room = right - x - nw - size * 1.5;
-            let label = fit_text(&e.label, size, room);
-            let lw = crate::pdf::write::text_width(FontKind::Sans, size, &label) + if e.bold { size * 0.3 } else { 0.0 };
+            let label = fit_text(kind, &e.label, size, room);
+            let lw = crate::pdf::write::text_width(kind, size, &label) + if e.bold { size * 0.3 } else { 0.0 };
             let base = top + size * 1.08;
-            let unit = crate::pdf::write::text_width(FontKind::Sans, size, ". ");
+            let unit = crate::pdf::write::text_width(kind, size, ". ");
             let dots = (((right - nw - size * 0.5) - (x + lw + size * 0.5)) / unit).floor().max(0.0) as usize;
             let p = self.doc.page(*page);
             p.text(style(ink), x, base, &label);
@@ -483,11 +690,20 @@ impl<'a> Writer<'a> {
 
     /// Lay out pieces from `x0` with width `avail`; moves `y`.
     pub(super) fn paragraph(&mut self, pieces: &[Piece], x0: f32, avail: f32) {
-        for line in wrap_pieces(pieces, avail) {
-            let lh = self.line_height(&line);
+        self.paragraph_aligned(pieces, x0, avail, false);
+    }
+
+    /// [`Writer::paragraph`], justified when `justify` and the note asks for it (PDF-016): the
+    /// space left at the end of every line but the last is spread over the gaps between its words.
+    pub(super) fn paragraph_aligned(&mut self, pieces: &[Piece], x0: f32, avail: f32, justify: bool) {
+        let lines = wrap_pieces(pieces, avail);
+        let last = lines.len().saturating_sub(1);
+        for (n, line) in lines.iter().enumerate() {
+            let lh = self.line_height(line);
             self.need(lh);
-            let base = self.y + self.line_ascent(&line);
-            self.draw_line(&line, x0, base);
+            let base = self.y + self.line_ascent(line);
+            let gap = if justify && self.opts.justify && n < last { justify_gap(line, avail) } else { 0.0 };
+            self.draw_line_spread(line, x0, base, gap);
             self.y += lh;
         }
     }
@@ -498,7 +714,7 @@ impl<'a> Writer<'a> {
     /// rest of the page goes on at the next page between two rows, with the header row again.
     fn table(&mut self, vault: &Vault, rel: &Path, t: &crate::table::Table, sizes: &crate::table::Sizes, ink: Color32) {
         let base = self.opts.font_pt;
-        let x0 = self.m;
+        let x0 = self.left;
         let ncols = t.header.len();
         let rows: Vec<Vec<Vec<Piece>>> = std::iter::once(&t.header)
             .chain(&t.rows)
@@ -549,7 +765,7 @@ impl<'a> Writer<'a> {
         let widths: Vec<f32> = text_w.iter().map(|w| w + 2.0 * CELL_PAD_X).collect();
         self.need(heights[0] + heights.get(1).copied().unwrap_or(0.0));
         for r in 0..lines.len() {
-            if r > 0 && self.y + heights[r] > self.h - self.m && self.y > self.m + 0.5 {
+            if r > 0 && self.y + heights[r] > self.h - self.bottom && self.y > self.top + 0.5 {
                 self.new_page();
                 self.table_row(x0, &widths, &t.aligns, &lines[0], heights[0], true);
             }
@@ -647,7 +863,7 @@ impl<'a> Writer<'a> {
             }
             let (off, line) = lines[i];
             let trimmed = line.trim();
-            let x0 = self.m;
+            let x0 = self.left;
             let cw = self.cw();
             // a formula on lines of its own: centred, or printed as code when it cannot be typeset (PDF-012)
             if let Some(m) = formulas.iter().find(|m| m.block && m.lines.start == i) {
@@ -724,7 +940,7 @@ impl<'a> Writer<'a> {
                 }
             }
             if trimmed.is_empty() {
-                self.y += base * 0.6;
+                self.y += opts.paragraph_spacing.unwrap_or(base * 0.6);
             } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {
                 self.need(base);
                 let y = self.y + base * 0.5;
@@ -750,16 +966,16 @@ impl<'a> Writer<'a> {
                 let mut ps = self.pieces(vault, rel, line[level..].trim_start(), base * scale, theme::HEADING, false);
                 for p in &mut ps {
                     p.bold = true;
-                    p.color = Rgba(0, 0, 0, 255);
+                    p.color = opts.heading_color.unwrap_or(Rgba(0, 0, 0, 255));
                 }
                 if let Some(n) = numbers.get(&i) {
                     ps.insert(
                         0,
                         Piece {
                             text: format!("{n} "),
-                            kind: FontKind::Sans,
+                            kind: opts.font,
                             size: base * scale,
-                            color: Rgba(130, 130, 130, 255),
+                            color: opts.heading_color.unwrap_or(Rgba(130, 130, 130, 255)),
                             bg: None,
                             italic: false,
                             bold: false,
@@ -791,17 +1007,17 @@ impl<'a> Writer<'a> {
                 let (rest, n) = gather(i, rest, true);
                 extra = n;
                 let ps = self.pieces(vault, rel, &rest, size, ink, done);
-                self.paragraph(&ps, bx + box_s + size * 0.5, cw - ind - box_s - size * 0.5);
+                self.paragraph_aligned(&ps, bx + box_s + size * 0.5, cw - ind - box_s - size * 0.5, true);
             } else if let Some((marker, rest_off)) = list_marker(line) {
                 let ind = (line.len() - line.trim_start().len()) as f32 * 4.0;
                 self.need(base * 1.45);
                 let y = self.y;
-                self.p().text(TextStyle::plain(FontKind::Sans, base, Rgba(105, 65, 198, 255)), x0 + ind + 2.0, y + base * 1.08, &marker);
+                self.p().text(TextStyle::plain(opts.font, base, Rgba(105, 65, 198, 255)), x0 + ind + 2.0, y + base * 1.08, &marker);
                 let (rest, n) = gather(i, &line[rest_off..], true);
                 extra = n;
                 let ps = self.pieces(vault, rel, &rest, base, ink, false);
                 let indent = ind + base * 1.6;
-                self.paragraph(&ps, x0 + indent, cw - indent);
+                self.paragraph_aligned(&ps, x0 + indent, cw - indent, true);
             } else if trimmed.starts_with('>') {
                 let mut content = line[line.find('>').unwrap() + 1..].trim_start().to_string();
                 // the lines of a quote that go on, with or without their own `>`
@@ -819,7 +1035,7 @@ impl<'a> Writer<'a> {
                 let start_y = self.y;
                 let start_page = self.page;
                 let ps = self.pieces(vault, rel, &content, base, theme::QUOTE, false);
-                self.paragraph(&ps, x0 + 12.0, cw - 12.0);
+                self.paragraph_aligned(&ps, x0 + 12.0, cw - 12.0, true);
                 let end_y = self.y;
                 if self.page == start_page {
                     self.p().line([x0 + 2.0, start_y + 2.0], [x0 + 2.0, end_y - 2.0], Rgba(105, 65, 198, 180), 2.5);
@@ -828,7 +1044,7 @@ impl<'a> Writer<'a> {
                 let (text, n) = gather(i, line, false);
                 extra = n;
                 let ps = self.pieces(vault, rel, &text, base, ink, false);
-                self.paragraph(&ps, x0, cw);
+                self.paragraph_aligned(&ps, x0, cw, true);
             }
             let _ = off;
             i += 1 + extra;
@@ -849,18 +1065,31 @@ impl<'a> Writer<'a> {
     /// How far the baseline of a line is below its top: the text's, or what a formula needs above
     /// its baseline (PDF-012).
     fn line_ascent(&self, line: &[Piece]) -> f32 {
-        line.iter().filter_map(|p| p.math.as_ref()).map(|f| f.layout.ascent + 1.0).fold(self.line_size(line) * 1.08, f32::max)
+        line.iter().filter_map(|p| p.math.as_ref()).map(|f| f.layout.ascent + 1.0).fold(self.line_size(line) * 1.08 * self.line_scale(), f32::max)
     }
 
     pub(super) fn line_height(&self, line: &[Piece]) -> f32 {
-        let below = line.iter().filter_map(|p| p.math.as_ref()).map(|f| f.layout.descent + 1.0).fold(self.line_size(line) * 0.37, f32::max);
+        let below = line.iter().filter_map(|p| p.math.as_ref()).map(|f| f.layout.descent + 1.0).fold(self.line_size(line) * 0.37 * self.line_scale(), f32::max);
         self.line_ascent(line) + below
+    }
+
+    /// How much the usual line (1.45 text sizes) is stretched for the note's line spacing
+    /// (PDF-015): 1 without one, else the font's natural line height times the spacing.
+    fn line_scale(&self) -> f32 {
+        self.opts.line_spacing.map_or(1.0, |f| crate::pdf::write::natural_height(self.opts.font) * f / 1.45)
     }
 
     /// One wrapped line with its baseline at `base`, starting at `x`.
     pub(super) fn draw_line(&mut self, line: &[Piece], x: f32, base: f32) {
+        self.draw_line_spread(line, x, base, 0.0);
+    }
+
+    /// [`Writer::draw_line`] with `gap` more points after every blank but the last (justified text, PDF-016).
+    fn draw_line_spread(&mut self, line: &[Piece], x: f32, base: f32, gap: f32) {
         let mut x = x;
-        for p in line {
+        let end = line.len().saturating_sub(1);
+        for (n, p) in line.iter().enumerate() {
+            let spread = if n < end && p.math.is_none() && p.text.ends_with(' ') { gap } else { 0.0 };
             let pw = piece_width(p);
             if let Some(f) = &p.math {
                 self.p().math(&f.layout, x, base, p.color);
@@ -879,7 +1108,7 @@ impl<'a> Writer<'a> {
                 self.p().rect(x - pad * 0.5, base - p.size * 0.95, pw + pad, p.size * 1.25, Some(bg), None);
             }
             self.p().text(TextStyle { kind: p.kind, size: p.size, color: p.color, italic: p.italic, bold: p.bold }, x, base, &p.text);
-            let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) { pw } else { trimmed_width(p) };
+            let tw = if p.text.ends_with(' ') && p.link.is_some() || p.text.ends_with(' ') && p.underline && line.last().map(|l| !std::ptr::eq(l, p)).unwrap_or(false) { pw + spread } else { trimmed_width(p) };
             if p.underline {
                 self.p().line([x, base + p.size * 0.15], [x + tw, base + p.size * 0.15], p.color, p.size * 0.06);
             }
@@ -898,7 +1127,7 @@ impl<'a> Writer<'a> {
                 let page = self.page;
                 self.jumps.push((page, [x, base - p.size, tw, p.size * 1.3], label.clone()));
             }
-            x += pw;
+            x += pw + spread;
         }
     }
 
@@ -923,6 +1152,15 @@ impl<'a> Writer<'a> {
     fn cell_pieces(&self, vault: &Vault, rel: &Path, text: &str, size: f32, color: Color32) -> Vec<Piece> {
         let links = Self::links_of(vault, rel, text);
         self.pieces_from(vault, rel, crate::reader::cell_painted(text, &links, size, color), size)
+    }
+
+    /// The font of text the reading view sets in `family`: the note's font (`print-font`) for text,
+    /// Hack for code, Virgil for hand-drawn text (PDF-014).
+    fn kind_of(&self, family: &egui::FontFamily) -> FontKind {
+        match font_kind(family) {
+            FontKind::Sans => self.opts.font,
+            other => other,
+        }
     }
 
     /// The pieces of a laid-out line of the reading view; `size` is the size of its text.
@@ -971,7 +1209,7 @@ impl<'a> Writer<'a> {
             let (face_bold, face_italic) = crate::fonts::bold_italic_of(&f.font_id.family);
             out.push(Piece {
                 text: job.text[r.clone()].to_string(),
-                kind: font_kind(&f.font_id.family),
+                kind: self.kind_of(&f.font_id.family),
                 size: f.font_id.size,
                 color: if paint.is_some() || on_code { rgba(f.color) } else { print_color(f.color) },
                 bg: match paint.and_then(|p| p.1) {
@@ -1006,7 +1244,7 @@ impl<'a> Writer<'a> {
             Ok(f) => {
                 let l = &f.layout;
                 self.need(l.height() + base * 0.8);
-                let x = self.m + ((self.cw() - l.width) / 2.0).max(0.0);
+                let x = self.left + ((self.cw() - l.width) / 2.0).max(0.0);
                 let y = self.y + base * 0.4 + l.ascent;
                 let ink = print_color(theme::TEXT);
                 self.p().math(l, x, y, ink);
@@ -1024,7 +1262,7 @@ impl<'a> Writer<'a> {
     /// background, each piece in the colour of its kind (`syntax::highlight`; plain without a
     /// known language), long lines wrapped by characters.
     fn code_block(&mut self, word: &str, lines: &[&str], size: f32) {
-        let (x0, cw) = (self.m, self.cw());
+        let (x0, cw) = (self.left, self.cw());
         let lh = size * 1.4;
         let plain = rgba(theme::CODE);
         let text = lines.join("\n");
@@ -1075,14 +1313,14 @@ impl<'a> Writer<'a> {
 
     /// What an embed that is `editor_size` big in the editor is in the PDF (PDF-005).
     fn page_size(&self, editor_size: Vec2) -> Vec2 {
-        crate::embed_size::to_page(editor_size, self.opts.column(), self.cw(), (self.h - 2.0 * self.m) * 0.8)
+        crate::embed_size::to_page(editor_size, self.opts.column(), self.cw(), (self.h - self.top - self.bottom) * 0.8)
     }
 
     /// A picture `size` big (PDF points) at the left margin, with its caption below it (PDF-004).
     fn image(&mut self, img: &image::RgbaImage, size: Vec2, caption: Option<&str>) {
         let idx = self.doc.add_image(pdf_image(img));
         self.need(size.y + 6.0 + self.caption_room(caption));
-        let (x, y) = (self.m, self.y);
+        let (x, y) = (self.left, self.y);
         self.p().image(idx, x, y, size.x, size.y);
         self.y += size.y;
         self.picture_end(caption);
@@ -1100,7 +1338,7 @@ impl<'a> Writer<'a> {
         let k = size.x / card.x;
         let geo = widget::geometry(abs, card.x);
         self.need(size.y + 6.0 + self.caption_room(caption));
-        let (ox, oy) = (self.m, self.y);
+        let (ox, oy) = (self.left, self.y);
         let at = |r: egui::Rect| [ox + r.left() * k, oy + r.top() * k, r.width() * k, r.height() * k];
         let name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         let ink = Rgba(30, 30, 30, 255);
@@ -1155,7 +1393,7 @@ impl<'a> Writer<'a> {
         if let Some(text) = caption {
             let size = crate::caption::size(self.opts.font_pt);
             let shown = crate::caption::fit(text, self.cw(), |s| crate::pdf::write::text_width(FontKind::Sans, size, s));
-            let (x, y) = (self.m, self.y + crate::caption::GAP);
+            let (x, y) = (self.left, self.y + crate::caption::GAP);
             self.p().text(TextStyle::plain(FontKind::Sans, size, Rgba(105, 105, 110, 255)), x, y + size * 1.08, &shown);
             self.y += self.caption_room(caption);
         }
@@ -1176,7 +1414,13 @@ fn natural_size(w: u32, h: u32) -> Vec2 {
 }
 
 /// Export a note (its current text) to PDF bytes.
+///
+/// The note's `print-font`, `print-line-spacing`, `print-paragraph-spacing`, `print-align` and
+/// `print-heading-color` are read from `text` here (PDF-013); its paper, margins, text size, title
+/// and contents are the dialog's choices in `opts`, which start from the note's
+/// ([`ExportOptions::with_note_properties`]).
 pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
+    let opts = &opts.clone().with_note_text_properties(text);
     // the title line's text: no `.md`, no date prefix (VAULT-025)
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
     let mut w = Writer::new(&name, opts);
@@ -1185,8 +1429,8 @@ pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) 
     // a first heading `# Title` that says the same as the title makes the title a second print of it (PDF-008)
     let said_by_heading = heads.first().is_some_and(|(_, level, title, _)| *level == 1 && markdown::heading_plain(title).to_lowercase() == markdown::heading_plain(&name).to_lowercase());
     if opts.title && !said_by_heading {
-        let pieces = vec![Piece { text: name.clone(), kind: FontKind::Sans, size: base * 2.0, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None, math: None }];
-        let x = w.m;
+        let pieces = vec![Piece { text: name.clone(), kind: opts.font, size: base * 2.0, color: Rgba(0, 0, 0, 255), bg: None, italic: false, bold: true, underline: false, strike: false, link: None, script: 0, jump: None, math: None }];
+        let x = w.left;
         let cw = w.cw();
         w.paragraph(&pieces, x, cw);
         w.y += base * 0.6;
@@ -1235,8 +1479,8 @@ pub(super) fn finish_from(mut doc: Doc, opts: &ExportOptions, first: usize) -> R
         for i in first..n {
             let (pw, ph) = (doc.pages[i].width, doc.pages[i].height);
             let label = format!("{} / {n}", i + 1);
-            let tw = crate::pdf::write::text_width(FontKind::Sans, 9.0, &label);
-            doc.page(i).text(TextStyle::plain(FontKind::Sans, 9.0, Rgba(120, 120, 120, 255)), (pw - tw) / 2.0, ph - opts.margin_mm * MM * 0.5, &label);
+            let tw = crate::pdf::write::text_width(opts.font, 9.0, &label);
+            doc.page(i).text(TextStyle::plain(opts.font, 9.0, Rgba(120, 120, 120, 255)), (pw - tw) / 2.0, ph - (opts.margins()[2] * 0.5).max(12.0), &label);
         }
     }
     Ok(doc.finish())
@@ -1374,13 +1618,13 @@ fn draw_text_element(page: &mut Page, e: &Element, view: &View, dark: bool) {
 /// Export a drawing to PDF bytes. `pictures`: its pictures by fileId (`drawing::pictures::images`).
 pub fn export_drawing(scene: &Scene, title: &str, opts: &ExportOptions, pictures: &HashMap<String, image::RgbaImage>) -> Result<Vec<u8>, String> {
     let b = scene.bounds().ok_or("The drawing is empty")?.expand(20.0);
-    let m = opts.margin_mm * MM;
+    let [top, right, bottom, left] = opts.margins();
     let natural = Vec2::new(b.width(), b.height()) * 0.75; // 100% = screen pixels at 96 dpi
     let [pw, ph] = match opts.paper {
-        Paper::FitDrawing => [natural.x + 2.0 * m, natural.y + 2.0 * m],
+        Paper::FitDrawing => [natural.x + left + right, natural.y + top + bottom],
         _ => opts.page_size(),
     };
-    let (aw, ah) = (pw - 2.0 * m, ph - 2.0 * m);
+    let (aw, ah) = (pw - left - right, ph - top - bottom);
     let k = if opts.paper == Paper::FitDrawing {
         1.0
     } else if opts.fill_page {
@@ -1400,7 +1644,7 @@ pub fn export_drawing(scene: &Scene, title: &str, opts: &ExportOptions, pictures
         doc.page(p).rect(0.0, 0.0, pw, ph, Some(bg), None);
     }
     let pics = add_pictures(&mut doc, pictures);
-    draw_scene(doc.page(p), scene, [m + (aw - dw) / 2.0, m + (ah - dh) / 2.0, dw, dh], dark, None, &pics);
+    draw_scene(doc.page(p), scene, [left + (aw - dw) / 2.0, top + (ah - dh) / 2.0, dw, dh], dark, None, &pics);
     finish(doc, &ExportOptions { page_numbers: false, ..opts.clone() })
 }
 
@@ -1749,7 +1993,7 @@ pub(crate) mod tests {
     /// The text width of the pages of a default note export.
     fn text_width() -> f32 {
         let o = ExportOptions::for_note();
-        o.page_size()[0] - 2.0 * o.margin_mm * MM
+        o.page_size()[0] - o.margins()[1] - o.margins()[3]
     }
 
     fn sized(v: &Vault, link: &str) -> Vec<(f32, f32)> {
@@ -1788,9 +2032,9 @@ pub(crate) mod tests {
         near(s.1, 420.0 * cw / col, "the height limit of the editor");
         near(s.0, s.1 / 10.0, "tall shape");
         // a narrower page keeps the share: landscape A5 with small margins
-        let o = ExportOptions { paper: Paper::A5, margin_mm: 10.0, ..ExportOptions::for_note() };
+        let o = ExportOptions { paper: Paper::A5, margins_mm: [10.0; 4], ..ExportOptions::for_note() };
         let bytes = export_note(&v, Path::new("Welcome.md"), "![[wide.png|360]]\n", &o).unwrap();
-        near(image_sizes(&bytes)[0].0, (o.page_size()[0] - 2.0 * o.margin_mm * MM) * 0.5, "half of a smaller page");
+        near(image_sizes(&bytes)[0].0, (o.page_size()[0] - o.margins()[1] - o.margins()[3]) * 0.5, "half of a smaller page");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -2356,6 +2600,297 @@ pub(crate) mod tests {
         let y = page_h - y_of(&c, "one");
         let (l, r) = ink_columns(&page, y - 14.0..y + 8.0).unwrap();
         assert!(ink(&page, (l + (r - l) / 2.0 + 2.0)..r - 2.0, y - 12.0..y + 6.0) > 15, "the formula is drawn in the second cell: {l} {r}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // ---------------------------------------------------------------- print-* properties (PDF-013…PDF-019)
+
+    /// The pieces of text drawn, in order: (x, y from the page's bottom, the text).
+    fn drawn(content: &str) -> Vec<(f32, f32, String)> {
+        let mut out = Vec::new();
+        let mut from = 0;
+        while let Some(at) = content[from..].find("> Tj").map(|i| i + from) {
+            let open = content[..at].rfind('<').unwrap();
+            let toks: Vec<&str> = content[..open].split_whitespace().collect();
+            let text: String = (open + 1..at).step_by(2).map(|i| u8::from_str_radix(&content[i..i + 2], 16).unwrap() as char).collect();
+            out.push((toks[toks.len() - 3].parse().unwrap(), toks[toks.len() - 2].parse().unwrap(), text));
+            from = at + 4;
+        }
+        out
+    }
+    fn front(props: &str, body: &str) -> String {
+        format!("---\n{props}\n---\n{body}")
+    }
+    fn plain_options() -> ExportOptions {
+        ExportOptions { title: false, toc: false, page_numbers: false, ..ExportOptions::for_note() }
+    }
+    fn words(n: usize) -> String {
+        (0..n).map(|i| ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "kilo"][i % 10].to_string() + &"x".repeat(i % 4)).collect::<Vec<_>>().join(" ")
+    }
+
+    // spec: PDF-013
+    #[test]
+    fn print_properties_are_read_from_the_front_matter_pdf_013() {
+        let text = front(
+                "print-paper: Legal\nprint-margins: 25.4 20 25.4 20\nprint-font: Serif\nprint-font-size: 11.5\nprint-line-spacing: 1.15\nprint-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: #1F3864\nprint-title: no\nprint-toc: false",
+                "x\n",
+            );
+        let o = ExportOptions::for_note().with_note_properties(&text);
+        assert_eq!((o.paper, o.custom_mm, o.landscape), (Paper::Legal, None, false));
+        assert_eq!(o.margins_mm, [25.4, 20.0, 25.4, 20.0]);
+        assert_eq!((o.font, o.font_pt, o.line_spacing, o.paragraph_spacing, o.justify), (FontKind::Serif, 11.5, Some(1.15), Some(8.0), true));
+        assert_eq!(o.heading_color, Some(Rgba(0x1f, 0x38, 0x64, 255)));
+        assert!(!o.title && !o.toc);
+        // a size of its own: wider than high is landscape
+        let o = ExportOptions::for_note().with_note_properties(&front("print-paper: 279.4x215.9mm", ""));
+        assert_eq!((o.custom_mm, o.landscape), (Some([215.9, 279.4]), true));
+        let o = ExportOptions::for_note().with_note_properties(&front("print-paper: 215.9X279.4MM", ""));
+        assert_eq!((o.custom_mm, o.landscape), (Some([215.9, 279.4]), false));
+        assert_eq!(ExportOptions::for_note().with_note_properties(&front("print-paper: letter", "")).paper, Paper::Letter);
+        assert_eq!(ExportOptions::for_note().with_note_properties(&front("print-heading-color: #c00", "")).heading_color, Some(Rgba(204, 0, 0, 255)));
+        assert_eq!(ExportOptions::for_note().with_note_properties(&front("print-font: mono\nprint-align: left", "")).font, FontKind::Mono);
+        // any note may carry them, and without them nothing changes
+        assert_eq!(format!("{:?}", ExportOptions::for_note().with_note_properties("# Just a note\n")), format!("{:?}", ExportOptions::for_note()));
+    }
+
+    // spec: PDF-013
+    #[test]
+    fn bad_print_values_are_ignored_pdf_013() {
+        let base = format!("{:?}", ExportOptions::for_note());
+        for bad in [
+            "print-paper: A9",
+            "print-paper: 40x300mm",
+            "print-paper: 300x2500mm",
+            "print-paper: widexhigh",
+            "print-margins: 20 20 20",
+            "print-margins: 20 20 20 101",
+            "print-margins: 20 -1 20 20",
+            "print-margins: a b c d",
+            "print-font: comic",
+            "print-font-size: 3",
+            "print-font-size: 73",
+            "print-font-size: big",
+            "print-line-spacing: 0.5",
+            "print-line-spacing: 3.5",
+            "print-paragraph-spacing: -1",
+            "print-paragraph-spacing: 80",
+            "print-align: center",
+            "print-heading-color: red",
+            "print-heading-color: #12345",
+            "print-heading-color: #12345g",
+            "print-title: maybe",
+            "print-toc: 2",
+        ] {
+            let o = ExportOptions::for_note().with_note_properties(&front(bad, "x"));
+            assert_eq!(format!("{o:?}"), base, "{bad} is ignored like a missing value");
+        }
+        // the edges of the ranges are valid
+        let o = ExportOptions::for_note().with_note_properties(&front("print-margins: 0 100 0 100\nprint-font-size: 4\nprint-line-spacing: 3\nprint-paragraph-spacing: 72\nprint-paper: 50x2000mm", ""));
+        assert_eq!((o.margins_mm, o.font_pt, o.line_spacing, o.paragraph_spacing, o.custom_mm), ([0.0, 100.0, 0.0, 100.0], 4.0, Some(3.0), Some(72.0), Some([50.0, 2000.0])));
+        // one bad value does not spoil the others
+        let o = ExportOptions::for_note().with_note_properties(&front("print-margins: x\nprint-font-size: 14", ""));
+        assert_eq!((o.margins_mm, o.font_pt), ([20.0; 4], 14.0));
+        // no front matter, no properties: the lines of the body are not properties
+        let o = ExportOptions::for_note().with_note_properties("print-font-size: 14\n");
+        assert_eq!(o.font_pt, 11.0);
+    }
+
+    // spec: PDF-013
+    #[test]
+    fn the_text_properties_come_from_the_note_at_export_and_the_dialogs_values_win_for_the_rest_pdf_013() {
+        let (v, d) = vault();
+        let text = front("print-paper: Letter\nprint-font: serif\nprint-margins: 30 30 30 30", "Some words here.\n");
+        // the options of the dialog (not read from the note) win for the paper and margins ...
+        let bytes = export_note(&v, Path::new("Welcome.md"), &text, &ExportOptions::for_note()).unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("/MediaBox [0 0 595.00 842.00]"), "the paper is the dialog's A4");
+        let c = contents(&bytes);
+        assert!((x_of(&c, "Some ") - 20.0 * MM).abs() < 0.01, "the margin is the dialog's 20 mm");
+        // ... while the font is the note's even though the dialog does not know it
+        assert!(String::from_utf8_lossy(&bytes).contains("/BaseFont /LiberationSerif"));
+        // and options prefilled from the note are what is used
+        let bytes = export_note(&v, Path::new("Welcome.md"), &text, &ExportOptions::for_note().with_note_properties(&text)).unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("/MediaBox [0 0 612.00 792.00]"));
+        assert!((x_of(&contents(&bytes), "Some ") - 30.0 * MM).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-019
+    #[test]
+    fn the_front_matter_is_not_printed_and_the_title_and_contents_follow_the_note_pdf_019() {
+        let (v, d) = vault();
+        let text = front("print-font-size: 12\nprint-toc: false\nprint-title: false", "# Head\n\nBody.\n");
+        let o = ExportOptions::for_note().with_note_properties(&text);
+        let c = contents(&export_note(&v, Path::new("Welcome.md"), &text, &o).unwrap());
+        assert!(c.contains(&hex("Body.")));
+        for hidden in ["print-", "---"] {
+            assert!(!c.contains(&hex(hidden)), "{hidden} of the front matter is not printed");
+        }
+        assert!(!c.contains(&hex("Contents")), "print-toc: false");
+        assert!(!c.contains(&hex("Welcome")), "print-title: false");
+        // the dialog's own choices stay choices: a title asked for is printed
+        let c = contents(&export_note(&v, Path::new("Welcome.md"), &text, &ExportOptions { title: true, ..o.clone() }).unwrap());
+        assert!(c.contains(&hex("Welcome")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-018
+    #[test]
+    fn a_custom_paper_and_landscape_set_the_media_box_pdf_018() {
+        let (v, d) = vault();
+        let page = |props: &str| {
+            let text = front(props, "Some words here.\n");
+            let o = ExportOptions { page_numbers: false, ..ExportOptions::for_note().with_note_properties(&text) };
+            let bytes = export_note(&v, Path::new("Welcome.md"), &text, &o).unwrap();
+            let s = String::from_utf8_lossy(&bytes).into_owned();
+            let at = s.find("/MediaBox [0 0 ").expect("a page") + 15;
+            let size: Vec<f32> = s[at..s[at..].find(']').unwrap() + at].split(' ').map(|n| n.parse().unwrap()).collect();
+            (size[0], size[1])
+        };
+        let close = |got: (f32, f32), want: (f32, f32)| assert!((got.0 - want.0).abs() < 0.01 && (got.1 - want.1).abs() < 0.01, "{got:?} is not {want:?}");
+        close(page("print-paper: 215.9x279.4mm"), (215.9 * MM, 279.4 * MM));
+        close(page("print-paper: 279.4x215.9mm"), (279.4 * MM, 215.9 * MM));
+        close(page("print-paper: Letter"), (612.0, 792.0));
+        close(page("print-paper: legal"), (612.0, 1008.0));
+        close(page("print-paper: A5"), (420.0, 595.0));
+        close(page("print-paper: nonsense"), (595.0, 842.0));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-018
+    #[test]
+    fn per_side_margins_place_the_text_and_wrap_it_inside_them_pdf_018() {
+        let (v, d) = vault();
+        let text = front("print-margins: 30 10 25 15", &format!("{}\n", words(900)));
+        let o = ExportOptions { title: false, toc: false, page_numbers: false, ..ExportOptions::for_note().with_note_properties(&text) };
+        let bytes = export_note(&v, Path::new("Welcome.md"), &text, &o).unwrap();
+        let c = contents(&bytes);
+        let all = drawn(&c);
+        let first = &all[0];
+        assert!((first.0 - 15.0 * MM).abs() < 0.01, "left margin: {}", first.0);
+        assert!((first.1 - (842.0 - 30.0 * MM - 11.0 * 1.08)).abs() < 0.05, "top margin: {}", first.1);
+        let right = all.iter().map(|(x, _, t)| x + crate::pdf::write::text_width(FontKind::Sans, 11.0, t.trim_end())).fold(0.0, f32::max);
+        assert!(right <= 595.0 - 10.0 * MM + 0.01 && right > 595.0 - 10.0 * MM - 40.0, "right margin: {right}");
+        let lowest = all.iter().map(|(_, y, _)| *y).fold(f32::MAX, f32::min);
+        assert!(lowest >= 25.0 * MM, "bottom margin: {lowest}");
+        assert!(render(&bytes).len() > 1, "the text goes on at a second page");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The lines of text of the first page: each the pieces drawn at one baseline.
+    fn text_lines(c: &str) -> Vec<Vec<(f32, f32, String)>> {
+        let mut lines: Vec<Vec<(f32, f32, String)>> = Vec::new();
+        for p in drawn(c) {
+            match lines.last_mut() {
+                Some(l) if (l[0].1 - p.1).abs() < 0.01 => l.push(p),
+                _ => lines.push(vec![p]),
+            }
+        }
+        lines
+    }
+
+    // spec: PDF-016
+    #[test]
+    fn justified_lines_end_at_the_right_margin_and_the_last_line_stays_left_pdf_016() {
+        let (v, d) = vault();
+        let body = format!("{}\\\nA second paragraph that is short.\n", words(120));
+        let end = |l: &Vec<(f32, f32, String)>| {
+            let (x, _, t) = l.last().unwrap();
+            x + crate::pdf::write::text_width(FontKind::Sans, 11.0, t.trim_end())
+        };
+        let right = 595.0 - 20.0 * MM;
+        let lines_of = |props: &str| {
+            let text = front(props, &body);
+            text_lines(&contents(&export_note(&v, Path::new("Welcome.md"), &text, &plain_options()).unwrap()))
+        };
+        let ragged = lines_of("print-align: left");
+        assert!(ragged.len() > 4);
+        assert!(ragged[..ragged.len() - 2].iter().any(|l| (end(l) - right).abs() > 2.0), "left-aligned lines end at different places");
+        let justified = lines_of("print-align: justify");
+        assert_eq!(justified.len(), ragged.len(), "the same lines break the same way");
+        // the lines of the first paragraph but its last (the hard break ends it) fill the width
+        let last_of_first = justified.len() - 2;
+        for l in &justified[..last_of_first] {
+            assert!((end(l) - right).abs() < 0.5, "a justified line ends at the margin: {} of {right}", end(l));
+            assert!((l[0].0 - 20.0 * MM).abs() < 0.01, "and starts at the left one");
+        }
+        assert!(end(&justified[last_of_first]) < right - 5.0, "the last line of a paragraph is not stretched");
+        assert!(end(&justified[last_of_first + 1]) < right - 5.0, "nor is the one of the next");
+        assert_eq!(justified[last_of_first][0].0, ragged[last_of_first][0].0);
+        // headings, code and table cells are not justified
+        let text = front("print-align: justify", &format!("# {}\n\n```\n{}\n```\n", words(30), words(30)));
+        let lines = text_lines(&contents(&export_note(&v, Path::new("Welcome.md"), &text, &plain_options()).unwrap()));
+        assert!(lines.iter().take(lines.len() - 1).any(|l| (end(l) - right).abs() > 5.0) || lines.len() < 2);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-014
+    #[test]
+    fn the_note_picks_the_font_of_the_text_and_the_serif_is_embedded_only_when_asked_pdf_014() {
+        let (v, d) = vault();
+        let export = |props: &str| {
+            let text = front(props, "# Head\n\n- item\n\nalpha beta gamma\n");
+            export_note(&v, Path::new("Welcome.md"), &text, &ExportOptions::for_note().with_note_properties(&text)).unwrap()
+        };
+        let has = |b: &[u8], name: &str| String::from_utf8_lossy(b).contains(&format!("/BaseFont /{name}"));
+        let plain = export("print-align: left");
+        assert!(has(&plain, "UbuntuLight") && !has(&plain, "LiberationSerif") && !has(&plain, "Hack"), "the default is Ubuntu Light");
+        let serif = export("print-font: serif");
+        assert!(has(&serif, "LiberationSerif") && !has(&serif, "UbuntuLight"), "serif is Liberation Serif all through: title, headings, contents, numbers");
+        let mono = export("print-font: mono");
+        assert!(has(&mono, "Hack") && !has(&mono, "UbuntuLight"), "mono is Hack");
+        assert!(has(&export("print-font: sans"), "UbuntuLight") && !has(&export("print-font: sans"), "LiberationSerif"));
+        // the glyphs and their widths are those of the font: Times-like text is narrower than Ubuntu Light
+        let (a, b) = (contents(&plain), contents(&serif));
+        let wide = |c: &str| x_of(c, "beta ") - x_of(c, "alpha ");
+        let (ws, wt) = (wide(&a), wide(&b));
+        assert!((ws - crate::pdf::write::text_width(FontKind::Sans, 11.0, "alpha ")).abs() < 0.01);
+        assert!((wt - crate::pdf::write::text_width(FontKind::Serif, 11.0, "alpha ")).abs() < 0.01);
+        assert!(wt < ws);
+        // a character Liberation Serif lacks comes from another bundled font
+        assert!(crate::pdf::write::char_width(FontKind::Serif, 10.0, '→') > 0.0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-015
+    #[test]
+    fn line_spacing_is_a_factor_of_the_natural_line_and_paragraph_spacing_is_the_space_after_pdf_015() {
+        let (v, d) = vault();
+        let body = format!("{}\n\nsecondparagraph word\n", words(60));
+        let lines_of = |props: &str| {
+            let text = front(props, &body);
+            text_lines(&contents(&export_note(&v, Path::new("Welcome.md"), &text, &plain_options()).unwrap()))
+        };
+        let step = |l: &[Vec<(f32, f32, String)>], n: usize| l[n][0].1 - l[n + 1][0].1;
+        // without properties: today's 1.45 text sizes and 0.6 for a blank line
+        let plain = lines_of("print-align: left");
+        assert!((step(&plain, 0) - 11.0 * 1.45).abs() < 0.02, "{}", step(&plain, 0));
+        let last = plain.len() - 2;
+        assert!((step(&plain, last) - (11.0 * 1.45 + 11.0 * 0.6)).abs() < 0.02, "{}", step(&plain, last));
+        // 1.15 of Liberation Serif's own line (about 1.149 text sizes)
+        let natural = crate::pdf::write::natural_height(FontKind::Serif);
+        assert!((natural - 1.149).abs() < 0.01, "{natural}");
+        let spaced = lines_of("print-font: serif\nprint-line-spacing: 1.15");
+        assert!((step(&spaced, 0) - 11.0 * natural * 1.15).abs() < 0.02, "{}", step(&spaced, 0));
+        // 8 points after the paragraph, in place of 0.6 text sizes
+        let after = lines_of("print-line-spacing: 1\nprint-font: serif\nprint-paragraph-spacing: 8");
+        let last = after.len() - 2;
+        assert!((step(&after, last) - (11.0 * natural + 8.0)).abs() < 0.02, "{}", step(&after, last));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-017
+    #[test]
+    fn the_heading_colour_is_for_headings_only_pdf_017() {
+        let (v, d) = vault();
+        let text = front("print-heading-color: #C00", "# Head\n\nBody words\n\n## Sub\n");
+        let o = ExportOptions { numbered_headings: false, toc: false, ..ExportOptions::for_note() };
+        let c = contents(&export_note(&v, Path::new("Welcome.md"), &text, &o).unwrap());
+        assert_eq!(colour_of(&c, "Head"), "0.800 0.000 0.000 rg");
+        assert_eq!(colour_of(&c, "Sub"), "0.800 0.000 0.000 rg");
+        assert_ne!(colour_of(&c, "Body "), "0.800 0.000 0.000 rg", "the text keeps its colour");
+        assert_eq!(c.matches("0.800 0.000 0.000 rg").count(), 2, "only the two headings, not the title");
+        let none = contents(&export_note(&v, Path::new("Welcome.md"), &front("print-font: serif", "# Head\n"), &o).unwrap());
+        assert_eq!(colour_of(&none, "Head"), "0.000 0.000 0.000 rg", "without the property headings are black");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
