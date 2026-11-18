@@ -39,6 +39,9 @@ pub struct Host {
     pub cpu: String,
     pub cores: usize,
     pub os: String,
+    /// the one-minute load average at the end of the run (Linux): a busy computer makes every time larger
+    #[serde(default)]
+    pub load: Option<f64>,
 }
 
 /// A whole run: what `--bench <out.json>` writes.
@@ -144,7 +147,8 @@ pub fn peak_rss_kb() -> Option<u64> {
 pub fn host() -> Host {
     let cpu = std::fs::read_to_string("/proc/cpuinfo").ok().and_then(|t| t.lines().find_map(|l| l.strip_prefix("model name").and_then(|r| r.split_once(':')).map(|(_, v)| v.trim().to_string()))).unwrap_or_else(|| "unknown".into());
     let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").map(|k| format!(" {}", k.trim())).unwrap_or_default();
-    Host { cpu, cores: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1), os: format!("{} {}{kernel}", std::env::consts::OS, std::env::consts::ARCH) }
+    let load = std::fs::read_to_string("/proc/loadavg").ok().and_then(|t| t.split_whitespace().next()?.parse().ok());
+    Host { load, cpu, cores: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1), os: format!("{} {}{kernel}", std::env::consts::OS, std::env::consts::ARCH) }
 }
 
 /// `2026-11-18T10:00:00Z` for a count of seconds since 1970.
@@ -241,7 +245,7 @@ mod tests {
             commit: "abc".into(),
             describe: "v1".into(),
             date: iso_date(0),
-            host: Host { cpu: "c".into(), cores: 2, os: "linux".into() },
+            host: Host { cpu: "c".into(), cores: 2, os: "linux".into(), load: Some(0.5) },
             profile: "release".into(),
             skipped: vec![Skipped { id: "m".into(), reason: "r".into() }],
             run: "full".into(),
@@ -272,7 +276,7 @@ mod tests {
             commit: String::new(),
             describe: String::new(),
             date: String::new(),
-            host: Host { cpu: String::new(), cores: 1, os: String::new() },
+            host: Host { cpu: String::new(), cores: 1, os: String::new(), load: None },
             profile: String::new(),
             scenarios: vec![],
             skipped: vec![],

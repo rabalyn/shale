@@ -198,7 +198,7 @@ mod tests {
                 commit: "abcdef0123456789".into(),
                 describe: label.into(),
                 date: date.into(),
-                host: Host { cpu: "cpu".into(), cores: 4, os: "linux".into() },
+                host: Host { cpu: "cpu".into(), cores: 4, os: "linux".into(), load: None },
                 profile: "release".into(),
                 scenarios: vec![sc],
                 skipped: vec![],

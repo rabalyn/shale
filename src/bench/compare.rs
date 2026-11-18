@@ -28,6 +28,10 @@ pub struct Side {
     pub commit: String,
     pub describe: String,
     pub date: String,
+    /// the load average of the computer at the end of the run, when it was written
+    #[serde(default)]
+    pub load: Option<f64>,
+    pub cores: usize,
 }
 
 /// One scenario of the comparison. `status` is `both`, `added` (only in Y) or `removed` (only in X).
@@ -163,7 +167,7 @@ pub fn compare(x: &Report, y: &Report, t: Thresholds) -> Comparison {
             }
         }
     }
-    let side = |r: &Report| Side { commit: r.commit.clone(), describe: r.describe.clone(), date: r.date.clone() };
+    let side = |r: &Report| Side { commit: r.commit.clone(), describe: r.describe.clone(), date: r.date.clone(), load: r.host.load, cores: r.host.cores };
     Comparison { schema: 1, x: side(x), y: side(y), threshold_time_pct: t.time_pct, threshold_bytes_pct: t.bytes_pct, rows, regressions, summary: sum }
 }
 
@@ -178,6 +182,17 @@ pub fn summary_line(c: &Comparison) -> String {
         "{} scenarios compared ({} -> {}): {} regressions, {} slower, {} faster, {} added, {} removed (thresholds: time {}%, peak bytes {}%)",
         s.compared, c.x.describe, c.y.describe, s.regressions, s.slower, s.faster, s.added, s.removed, c.threshold_time_pct, c.threshold_bytes_pct
     )
+}
+
+/// A warning when a computer was busy during one of the runs: its times are larger and less steady.
+pub fn busy_note(c: &Comparison) -> Option<String> {
+    let busy = |s: &Side| s.load.is_some_and(|l| l > s.cores as f64 / 2.0);
+    (busy(&c.x) || busy(&c.y)).then(|| {
+        format!(
+            "note: the computer was busy during a run (load average {:?} for X, {:?} for Y, {} and {} cores): differences below 30 % may be noise; run again on a quiet computer before trusting a regression",
+            c.x.load, c.y.load, c.x.cores, c.y.cores
+        )
+    })
 }
 
 pub fn markdown(c: &Comparison) -> String {
@@ -198,6 +213,9 @@ pub fn markdown(c: &Comparison) -> String {
         out.push_str(&format!("| `{}` | {} | {} | {} | {} | {} | {} | {} | {} |\n", r.id, d(r.x_median_ns), d(r.y_median_ns), pct(r.time_delta_pct), tv, b(r.x_peak_bytes), b(r.y_peak_bytes), pct(r.bytes_delta_pct), bv));
     }
     out.push_str(&format!("\n{}\n", summary_line(c)));
+    if let Some(note) = busy_note(c) {
+        out.push_str(&format!("\n{note}\n"));
+    }
     out
 }
 
@@ -217,6 +235,9 @@ pub fn run(x: &Path, y: &Path, t: Thresholds, out_dir: &Path) -> i32 {
     match go() {
         Ok(c) => {
             println!("{}", summary_line(&c));
+            if let Some(note) = busy_note(&c) {
+                println!("{note}");
+            }
             for r in &c.regressions {
                 println!("REGRESSION {} {} {:+.1}%", r.id, r.metric, r.delta_pct);
             }
@@ -244,7 +265,7 @@ mod tests {
             commit: format!("{name}0000"),
             describe: name.into(),
             date: "2026-01-01T00:00:00Z".into(),
-            host: Host { cpu: "c".into(), cores: 1, os: "o".into() },
+            host: Host { cpu: "c".into(), cores: 1, os: "o".into(), load: None },
             profile: "release".into(),
             scenarios: s,
             peak_rss_kb: None,
@@ -294,6 +315,12 @@ mod tests {
         let x = w("x.json", &report("x", vec![sc("a", 100, 1000)]));
         let ok = w("ok.json", &report("ok", vec![sc("a", 101, 1000)]));
         let bad = w("bad.json", &report("bad", vec![sc("a", 150, 1000)]));
+        let mut busy = report("busy", vec![sc("a", 101, 1000)]);
+        busy.host.load = Some(40.0);
+        busy.host.cores = 4;
+        let c = compare(&report("x", vec![sc("a", 100, 1000)]), &busy, T);
+        assert!(markdown(&c).contains("the computer was busy"), "a busy run is said in compare.md");
+        assert!(busy_note(&compare(&report("x", vec![]), &report("y", vec![]), T)).is_none());
         assert_eq!(run(&x, &ok, T, &d.join("o1")), 0);
         let md = std::fs::read_to_string(d.join("o1/compare.md")).unwrap();
         assert!(md.contains("| `a` |") && md.trim_end().ends_with(")"), "{md}");

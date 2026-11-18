@@ -19,16 +19,21 @@ use std::path::{Path, PathBuf};
 /// Put `n` messages into the INBOX of a store at `root` the way a sync does: each message is saved
 /// as a file with its search fields, and the index is written in batches of 500.
 pub fn fill_mail(root: &Path, n: usize) -> Result<(), String> {
+    fill_mail_with(root, &(0..n).map(gen::eml).collect::<Vec<_>>())
+}
+
+/// [`fill_mail`] with the messages made already (so that their making is not in a measurement).
+pub fn fill_mail_with(root: &Path, messages: &[(Vec<u8>, i64)]) -> Result<(), String> {
+    let n = messages.len();
     let store = MailStore::open(root).map_err(|e| e.0)?;
     let account = crate::mail::demo::ACCOUNT;
     let inbox = store.ensure_folder(account, "Bench mail", "INBOX", Some("/"), None, true).map_err(|e| e.0)?;
     store.ensure_folder(account, "Bench mail", "Sent", Some("/"), Some("\\Sent"), true).map_err(|e| e.0)?;
     let f = crate::mail::db::FolderRow { uidvalidity: Some(1), ..inbox };
     let mut ops = Vec::with_capacity(501);
-    for i in 0..n {
-        let (raw, date) = gen::eml(i);
+    for (i, (raw, date)) in messages.iter().enumerate() {
         let flags = if i % 3 == 0 { "" } else { "\\Seen" };
-        ops.push(Op::message(store.save_message(&f, 1, i as u32 + 1, &raw, flags, Some(date)).map_err(|e| e.0)?));
+        ops.push(Op::message(store.save_message(&f, 1, i as u32 + 1, raw, flags, Some(*date)).map_err(|e| e.0)?));
         if ops.len() == 500 || i + 1 == n {
             ops.push(Op::FolderState { folder: f.id, uidvalidity: Some(1), uidnext: Some(i as u32 + 2), highestmodseq: None, last_sync: 1 });
             store.commit(std::mem::take(&mut ops)).map_err(|e| e.0)?;
@@ -47,11 +52,11 @@ fn inbox_id(store: &MailStore) -> i64 {
 }
 
 fn mail_sync_store(fx: &mut Fixtures) -> Body {
-    let (base, n) = (fx.scratch("mail-sync"), fx.scale.mail);
+    let (base, messages) = (fx.scratch("mail-sync"), (0..fx.scale.mail).map(gen::eml).collect::<Vec<_>>());
     let mut run = 0;
     Box::new(move || {
         run += 1;
-        fill_mail(&base.join(format!("run{run}")), n).expect("the mail is stored");
+        fill_mail_with(&base.join(format!("run{run}")), &messages).expect("the mail is stored");
     })
 }
 
