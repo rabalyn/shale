@@ -42,6 +42,8 @@ pub struct MailDialog {
     pub error: Option<String>,
     /// Is there a system keyring to keep passwords in?
     pub keyring: bool,
+    /// The choice and the plan of "Keep the key unlocked" (MAIL-236).
+    pub agent: crate::mail::agent_cache::AgentDialog,
     pub rects: Vec<(String, Rect)>,
 }
 
@@ -57,6 +59,8 @@ pub enum MailDialogAction {
     CancelSignIn(usize),
     /// Look again for GnuPG and its keys (MAIL-191).
     DetectGnupg,
+    /// "Write with gpgconf": change the agent's cache times (MAIL-236).
+    WriteAgentCache(crate::mail::agent_cache::Choice),
     /// Tick or untick a folder.
     ToggleFolder {
         folder: i64,
@@ -89,6 +93,7 @@ impl MailDialog {
             scroll_keys: false,
             error: None,
             keyring,
+            agent: Default::default(),
             rects: vec![],
         }
     }
@@ -720,6 +725,8 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
             }
         });
         ui.add_space(6.0);
+        agent_block(ui, d, mail, rects, out);
+        ui.add_space(6.0);
         ui.label(RichText::new("Bringing your keys here").color(theme::TEXT));
         ui.label(
             muted(
@@ -732,12 +739,102 @@ fn encryption_section(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &
     if head.header_response.clicked() {
         d.scroll_enc = true;
     }
-    if let (true, Some(body)) = (d.scroll_enc, &head.body_response) {
+    // only when the section is fully open: its body grows while it opens, and a scroll to a short body is cut off
+    if let (true, Some(body), true) = (d.scroll_enc, &head.body_response, head.openness >= 1.0) {
         // the form scrolls; bring the opened section to the top of what is visible
         ui.scroll_to_rect(body.rect, Some(egui::Align::Min));
         d.scroll_enc = false;
     }
 }
+
+/// "Keep the key unlocked" (MAIL-235, MAIL-236, MAIL-237): how long the agent keeps a passphrase, a change with gpgconf that
+/// is shown first and written only by the second click, the same by hand, and the keyring tip. Shale never sees a passphrase.
+fn agent_block(ui: &mut Ui, d: &mut MailDialog, mail: &MailView, rects: &mut Vec<(String, Rect)>, out: &mut Option<MailDialogAction>) {
+    use crate::mail::agent_cache::{keyring_tip, manual_lines, Choice, Os, Plan, RELOAD_COMMAND};
+    ui.label(RichText::new("Keeping the key unlocked").color(theme::TEXT));
+    ui.label(muted("GnuPG's agent asks for the passphrase again after a while, and always after it is restarted. Shale never sees the passphrase: the times are GnuPG's own setting.").size(12.0));
+    // fixed height like the answer above, so nothing moves when the times arrive
+    let room = AGENT_STATUS_LINES * (ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y);
+    egui::ScrollArea::vertical().id_salt("agent-status").max_height(room).min_scrolled_height(room).auto_shrink([false, false]).show(ui, |ui| match &mail.agent.info {
+        None => {
+            ui.label(muted("Looking…"));
+        }
+        Some(Err(e)) => {
+            ui.label(RichText::new(format!("The cache times could not be read: {e}")).color(theme::LINK_MISSING).size(12.5));
+        }
+        Some(Ok(info)) => {
+            ui.label(RichText::new(info.words()).color(theme::TEXT).size(12.5));
+            if let Some(note) = info.external_cache_note() {
+                ui.label(RichText::new(note).color(theme::LINK_MISSING).size(12.0));
+            }
+        }
+    });
+    let info = mail.agent.info.as_ref().and_then(|i| i.as_ref().ok());
+    ui.horizontal(|ui| {
+        ui.label("Ask for the passphrase again after:");
+        let r = egui::ComboBox::from_id_salt("agent-choice").selected_text(d.agent.choice.label()).show_ui(ui, |ui| {
+            for c in Choice::ALL {
+                let r = ui.selectable_label(d.agent.choice == c, c.label());
+                rects.push((format!("md:agent-choice:{}", c.key()), r.rect));
+                if r.clicked() {
+                    d.agent.choice = c;
+                }
+            }
+        });
+        rects.push(("md:agent-choice".into(), r.response.rect));
+        let r = ui.add_enabled(info.is_some() && !mail.agent.writing && !d.agent.plan_open, egui::Button::new("Change with gpgconf…"));
+        rects.push(("md:agent-change".into(), r.rect));
+        if r.clicked() {
+            d.agent.plan_open = true;
+        }
+    });
+    if let (true, Some(info)) = (d.agent.plan_open, info) {
+        let plan = Plan::new(&info.homedir, d.agent.choice);
+        let r = egui::Frame::new().stroke(egui::Stroke::new(1.0, theme::TEXT)).corner_radius(egui::CornerRadius::same(4)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(plan.describe()).color(theme::TEXT).size(12.5));
+            ui.horizontal(|ui| {
+                let r = ui.button("Write with gpgconf");
+                rects.push(("md:agent-write".into(), r.rect));
+                if r.clicked() {
+                    d.agent.plan_open = false;
+                    *out = Some(MailDialogAction::WriteAgentCache(d.agent.choice));
+                }
+                let r = ui.button("Cancel");
+                rects.push(("md:agent-cancel".into(), r.rect));
+                if r.clicked() {
+                    d.agent.plan_open = false;
+                }
+            });
+        });
+        rects.push(("md:agent-plan".into(), r.response.rect));
+    }
+    if mail.agent.writing {
+        ui.label(muted("Writing…").size(12.0));
+    }
+    match &mail.agent.written {
+        Some(Ok(())) => {
+            ui.label(RichText::new("Written, and the agent was told to reload. The times above are read again from GnuPG.").color(theme::TAG).size(12.5));
+        }
+        Some(Err(e)) => {
+            ui.label(RichText::new(format!("Not changed: {e}")).color(theme::LINK_MISSING).size(12.5));
+        }
+        None => {}
+    }
+    ui.label(RichText::new("The same by hand").color(theme::TEXT).size(12.5));
+    let file = info.map(|i| i.homedir.join("gpg-agent.conf").display().to_string()).unwrap_or_else(|| "gpg-agent.conf in GnuPG's home folder (gpgconf --list-dirs)".into());
+    let lines = manual_lines(d.agent.choice.seconds());
+    ui.label(muted(format!("Put these lines into {file}, then run   {RELOAD_COMMAND}")).size(12.0));
+    ui.label(RichText::new(lines.trim_end()).monospace().size(12.0).color(theme::TEXT));
+    let r = ui.small_button("Copy lines");
+    rects.push(("md:agent-copy".into(), r.rect));
+    if r.clicked() {
+        ui.ctx().copy_text(lines);
+    }
+    ui.label(muted(format!("Keep it in the keyring instead: {}", keyring_tip(Os::current()))).size(12.0));
+}
+
+const AGENT_STATUS_LINES: f32 = 3.0;
 
 /// Lines of height of GnuPG's answer in the Encryption section: the two versions and a few keys; more scroll.
 const GNUPG_RESULT_LINES: f32 = 5.0;

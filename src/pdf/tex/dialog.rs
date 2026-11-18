@@ -200,6 +200,11 @@ impl TexExport {
         self.current_kind().is_some_and(|k| matches!(k.mapping, Mapping::Article | Mapping::Book))
     }
 
+    /// Whether the kind has a place for the set's department logo (TEX-035).
+    pub fn kind_shows_department_logo(&self) -> bool {
+        self.current_kind().is_some_and(|k| !k.department_logo.is_empty())
+    }
+
     pub fn working(&self) -> bool {
         self.job.is_some()
     }
@@ -309,6 +314,15 @@ impl TexExport {
                     });
                     crate::pdf::export_dialog::break_before_box(ui, opts, toc, rec);
                     rec("embeds", ui.checkbox(&mut opts.embeds, "Embedded pictures, drawings and PDFs"));
+                    // the set's department logo (TEX-035): off and greyed for a kind that has no place for it
+                    if self.current_set().is_some_and(|s| s.department_logo.is_some()) {
+                        let shows = self.kind_shows_department_logo();
+                        ui.add_enabled_ui(shows, |ui| {
+                            let mut off = false;
+                            let on = if shows { &mut opts.department_logo } else { &mut off };
+                            rec("department-logo", ui.checkbox(on, "Department logo")).on_disabled_hover_text("This kind does not show a department logo");
+                        });
+                    }
                 });
                 ui.end_row();
             }

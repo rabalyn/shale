@@ -104,7 +104,7 @@ fn a_manifest_has_defaults_and_refuses_what_could_break_the_document() {
     }
 }
 
-// spec: TEX-005
+// spec: TEX-005, TEX-035
 #[test]
 fn the_settings_have_defaults_are_checked_and_survive_a_save() {
     let v = vault("settings");
@@ -112,10 +112,12 @@ fn the_settings_have_defaults_are_checked_and_survive_a_save() {
     std::fs::create_dir_all(&d).unwrap();
     assert_eq!(load_settings(&d).unwrap(), SetSettings::default(), "no file: the defaults");
     assert_eq!((SetSettings::default().language, SetSettings::default().accent.as_str(), SetSettings::default().logo), (Language::En, "", None));
-    let s = SetSettings { accent: "9c".into(), language: Language::De, department: "Fachbereich Informatik".into(), author: "Ada Lovelace".into(), logo: Some("tuda_logo.pdf".into()) };
+    assert_eq!(SetSettings::default().department_logo, None);
+    let s = SetSettings { accent: "9c".into(), language: Language::De, department: "Fachbereich Informatik".into(), author: "Ada Lovelace".into(), logo: Some("tuda_logo.pdf".into()), department_logo: Some("department_logo.png".into()) };
     save_settings(&d, &s).unwrap();
     assert_eq!(load_settings(&d).unwrap(), s);
     let text = std::fs::read_to_string(d.join("settings.toml")).unwrap();
+    assert!(text.contains("department_logo = \"department_logo.png\""), "{text}");
     assert!(text.starts_with('#') && text.contains("accent = \"9c\"") && text.contains("language = \"de\"") && text.contains("author = \"Ada Lovelace\""), "{text}");
     std::fs::write(d.join("settings.toml"), "accent = \"9c\"\n").unwrap();
     assert_eq!(load_settings(&d).unwrap().language, Language::En, "a missing key is its default");
@@ -124,6 +126,7 @@ fn the_settings_have_defaults_are_checked_and_survive_a_save() {
         ("accent = \"{x}\"\n", "accent colour"),
         ("logo = \"../x.pdf\"\n", "plain file name"),
         ("logo = \".hidden\"\n", "plain file name"),
+        ("department_logo = \"../x.png\"\n", "plain file name"),
         ("language = \"fr\"\n", "settings.toml"),
         ("not toml [", "settings.toml"),
     ] {
@@ -197,13 +200,13 @@ fn text_for_tex_has_its_special_characters_escaped() {
 #[test]
 fn a_sample_document_of_every_mapping_has_its_class_options_fields_and_body() {
     let s = SetSettings { accent: "9c".into(), department: "R&D".into(), ..SetSettings::default() };
-    let doc = |id: &str| sample_document(&KindManifest::parse(TUDA.kinds.iter().find(|(i, _)| *i == id).unwrap().1).unwrap(), &s);
+    let doc = |id: &str| sample_document(&KindManifest::parse(TUDA.kinds.iter().find(|(i, _)| *i == id).unwrap().1).unwrap(), &s, false);
     let pubd = doc("pub");
     assert!(
         pubd.starts_with("\\RequirePackage{pdfmanagement}\n\\SetKeys[document/metadata]{pdfstandard=a-2b,pdfversion=1.7,lang=en}\n\\documentclass[english,accentcolor=9c]{tudapub}\n") && pubd.contains("\\usepackage[english]{babel}\n"),
         "{pubd}"
     );
-    assert!(sample_document(&KindManifest::parse(TUDA.kinds[0].1).unwrap(), &SetSettings { language: Language::De, ..s.clone() }).contains("lang=de}\n"), "the language code of the PDF metadata");
+    assert!(sample_document(&KindManifest::parse(TUDA.kinds[0].1).unwrap(), &SetSettings { language: Language::De, ..s.clone() }, false).contains("lang=de}\n"), "the language code of the PDF metadata");
     assert!(pubd.contains("\\title{Shale test page}\n") && pubd.contains("\\author{Shale}\n") && !pubd.contains("\\date"), "{pubd}");
     assert!(pubd.contains("\\begin{document}\n\\maketitle\n\\section{First section}") && pubd.trim_end().ends_with("\\end{document}"));
     let thesis = doc("thesis");
@@ -217,9 +220,9 @@ fn a_sample_document_of_every_mapping_has_its_class_options_fields_and_body() {
     assert!(doc("sciposter").contains("\\begin{tcbposter}") && doc("sciposter").contains("\\begin{posterboxenv}"));
     assert!(doc("poster").contains("\\maketitle") && !doc("poster").contains("tcbposter"));
     assert!(doc("announcement").starts_with("\\documentclass[english,accentcolor=9c,paper=a4,type=announcement,footer=true]{tudaposter}"));
-    let no_accent = sample_document(&KindManifest::parse(TUDA.kinds[0].1).unwrap(), &SetSettings::default());
+    let no_accent = sample_document(&KindManifest::parse(TUDA.kinds[0].1).unwrap(), &SetSettings::default(), false);
     assert!(no_accent.contains("\\documentclass[english]{tudapub}"));
-    let no_options = sample_document(&KindManifest::parse("name=\"x\"\nmapping=\"article\"\nclass=\"c\"\n").unwrap(), &s);
+    let no_options = sample_document(&KindManifest::parse("name=\"x\"\nmapping=\"article\"\nclass=\"c\"\n").unwrap(), &s, false);
     assert!(no_options.starts_with("\\documentclass{c}\n"), "{no_options}");
 }
 
@@ -255,7 +258,7 @@ fn a_pdf() -> Vec<u8> {
     placeholder_logo_pdf()
 }
 
-const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
+pub(super) const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
 
 // spec: TEX-007
 #[test]
@@ -313,6 +316,117 @@ fn a_logo_that_is_not_a_pdf_or_png_or_too_big_or_for_a_set_without_a_slot_is_ref
     std::fs::write(&pdf, a_pdf()).unwrap();
     assert!(choose_logo(&v, &plain, &pdf).unwrap_err().contains("no logo slot"));
     std::fs::remove_dir_all(&v).unwrap();
+}
+
+// spec: TEX-035
+#[test]
+fn a_department_logo_is_chosen_removed_and_refused_like_the_tu_logo_and_in_a_set_that_needs_none() {
+    let v = vault("dept-logo");
+    // every set has the slot, one that needs no TU logo too
+    let dir = make_set(&v, "plain", &META.replace("logo_file = \"mylogo\"\n", ""), &[("article", MINIMAL_KIND)]);
+    let set = || read_set("plain", &dir).unwrap();
+    assert_eq!((set().department_logo, set().department_logo_text()), (None, None), "an empty slot says nothing and is no warning");
+    let from = v.join("Downloads").join("any name.pdf");
+    std::fs::create_dir_all(from.parent().unwrap()).unwrap();
+    std::fs::write(&from, a_pdf()).unwrap();
+    assert_eq!(choose_department_logo(&v, &set(), &from).unwrap(), "department_logo.pdf");
+    assert_eq!(std::fs::read(dir.join("logo/department_logo.pdf")).unwrap(), a_pdf());
+    assert_eq!(set().department_logo.as_deref(), Some("department_logo.pdf"));
+    assert_eq!(set().settings.department_logo.as_deref(), Some("department_logo.pdf"), "recorded in settings.toml");
+    assert_eq!(set().settings.logo, None, "the TU logo's setting is not touched");
+    assert_eq!(set().department_logo_text().as_deref(), Some("department logo: department_logo.pdf"));
+    // the same file again changes nothing and trashes nothing
+    choose_department_logo(&v, &set(), &from).unwrap();
+    assert!(!v.join(".trash").exists());
+    // a PNG replaces the PDF, which goes to the vault's trash
+    let png = v.join("hrz.png");
+    std::fs::write(&png, PNG).unwrap();
+    assert_eq!(choose_department_logo(&v, &set(), &png).unwrap(), "department_logo.png");
+    assert!(!dir.join("logo/department_logo.pdf").exists() && dir.join("logo/department_logo.png").is_file());
+    let day = std::fs::read_dir(v.join(".trash")).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(std::fs::read(day.join("templates/tex/plain/logo/department_logo.pdf")).unwrap(), a_pdf());
+    // the TU logo's slot is another file: choosing one leaves the department logo, and the other way round
+    let with_slot = make_set(&v, "mine", META, &[("article", MINIMAL_KIND)]);
+    let mine = read_set("mine", &with_slot).unwrap();
+    choose_logo(&v, &mine, &from).unwrap();
+    choose_department_logo(&v, &read_set("mine", &with_slot).unwrap(), &png).unwrap();
+    let both = read_set("mine", &with_slot).unwrap();
+    assert_eq!((both.logo.clone(), both.department_logo.as_deref()), (LogoStatus::Present("mylogo.pdf".into()), Some("department_logo.png")));
+    // refused: not a PDF or PNG, a folder, too big; the slot stays as it was
+    let text = v.join("logo.txt");
+    std::fs::write(&text, "not a picture").unwrap();
+    assert!(choose_department_logo(&v, &set(), &text).unwrap_err().contains("PDF or a PNG"));
+    assert!(choose_department_logo(&v, &set(), &v.join("missing.pdf")).is_err());
+    assert!(choose_department_logo(&v, &set(), &v).unwrap_err().contains("not a file"));
+    let big = v.join("big.pdf");
+    std::fs::write(&big, vec![b'%'; (MAX_LOGO + 1) as usize]).unwrap();
+    assert!(choose_department_logo(&v, &set(), &big).unwrap_err().contains("at most 5 MB"));
+    assert_eq!(set().department_logo.as_deref(), Some("department_logo.png"));
+    // removed: to the vault's trash, the setting cleared
+    remove_department_logo(&v, &set()).unwrap();
+    assert!(!dir.join("logo/department_logo.png").exists() && set().department_logo.is_none() && set().settings.department_logo.is_none());
+    assert_eq!(std::fs::read(day.join("templates/tex/plain/logo/department_logo.png")).unwrap(), PNG);
+    remove_department_logo(&v, &set()).unwrap();
+    std::fs::remove_dir_all(&v).unwrap();
+}
+
+// spec: TEX-035
+#[test]
+fn the_tuda_kinds_say_where_their_class_puts_the_department_logo_and_two_have_no_place() {
+    let kind = |id: &str| KindManifest::parse(TUDA.kinds.iter().find(|(i, _)| *i == id).unwrap().1).unwrap();
+    let s = SetSettings::default();
+    let lines = |id: &str| kind(id).department_logo_lines(&s);
+    // the file's name replaces {department_logo}, and the lines are in expl3's syntax
+    assert_eq!(lines("pub"), ["\\ExplSyntaxOn", "\\addTitleBoxLogo*{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{department_logo}}", "\\ExplSyntaxOff"]);
+    for id in ["report", "thesis", "phd", "leaflet"] {
+        assert_eq!(lines(id), lines("pub"), "{id}: the title box under the TU logo");
+    }
+    assert!(lines("poster")[1].starts_with("\\seq_gput_right:Nn\\g_ptxcd_title_info_seq{") && lines("poster")[1].contains("{department_logo}}"));
+    assert_eq!(lines("sciposter")[1], "\\titlegraphic{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{department_logo}}");
+    assert_eq!(lines("beamer")[1], "\\sublogo{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{department_logo}}");
+    assert!(lines("letter")[1].starts_with("\\setkomavar{firsthead}{") && lines("letter")[1].contains("\\vspace{5mm}\\includegraphics[height=\\c_ptxcd_logoheight_dim]{department_logo}}}}"));
+    for (id, text) in TUDA.kinds {
+        let k = KindManifest::parse(text).unwrap();
+        let l = k.department_logo_lines(&s);
+        if ["announcement", "exercise"].contains(id) {
+            assert!(l.is_empty(), "{id}: no place for a second logo");
+        } else {
+            assert!(l.first().is_some_and(|f| f == "\\ExplSyntaxOn") && l.last().is_some_and(|f| f == "\\ExplSyntaxOff") && !l.iter().any(|x| x.contains("{{") || x.contains("{department_logo}}}}}}")), "{id}: {l:?}");
+        }
+        // the lines are balanced: every brace they open is closed
+        let all = l.join("");
+        assert_eq!(all.matches('{').count(), all.matches('}').count(), "{id}");
+    }
+}
+
+// spec: TEX-035
+#[test]
+fn the_department_logo_lines_are_written_after_the_preamble_only_when_asked_for_and_the_kind_has_a_place() {
+    let s = SetSettings { accent: "9c".into(), ..SetSettings::default() };
+    let kind = |id: &str| KindManifest::parse(TUDA.kinds.iter().find(|(i, _)| *i == id).unwrap().1).unwrap();
+    let with = sample_document(&kind("pub"), &s, true);
+    let without = sample_document(&kind("pub"), &s, false);
+    assert!(!without.contains("department_logo"), "{without}");
+    let at = with.find("\\ExplSyntaxOn\n").unwrap();
+    assert!(
+        with[..at].ends_with("\\usepackage[autostyle]{csquotes}\n") && with[at..].starts_with("\\ExplSyntaxOn\n\\addTitleBoxLogo*{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{department_logo}}\n\\ExplSyntaxOff\n\\title"),
+        "{with}"
+    );
+    // a kind without a place does not get one, and a manifest without the key is as before
+    assert_eq!(sample_document(&kind("announcement"), &s, true), sample_document(&kind("announcement"), &s, false));
+    let bare = KindManifest::parse(MINIMAL_KIND).unwrap();
+    assert!(bare.department_logo.is_empty() && sample_document(&bare, &s, true) == sample_document(&bare, &s, false));
+    // the settings are filled into the lines like into the others; a line with an empty accent is dropped
+    let k = KindManifest::parse(
+        r#"name = "x"
+mapping = "article"
+class = "c"
+department_logo = ["\\x{department_logo}-{lang}", "\\a{accent}"]
+"#,
+    )
+    .unwrap();
+    assert_eq!(k.department_logo_lines(&s), ["\\xdepartment_logo-en", "\\a9c"]);
+    assert_eq!(k.department_logo_lines(&SetSettings::default()), ["\\xdepartment_logo-en"]);
 }
 
 #[cfg(unix)]

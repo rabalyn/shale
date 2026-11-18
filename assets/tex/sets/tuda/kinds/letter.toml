@@ -2,6 +2,8 @@
 # the letter environment; the fields with a komavar are set with \setkomavar{name}{value}
 # (mapping "letter"): headings are bold lines. The subject is the note's name when the note gives
 # none. The sender's address data can be put in an .lco file in tex/.
+# The department logo (Settings → LaTeX) goes into the letter head (firsthead), 5 mm under the TU logo,
+# right-aligned, on the first page.
 name = "Letter"
 description = "Letters (class tudaletter)"
 mapping = "letter"
@@ -10,6 +12,7 @@ before_class = ["\\RequirePackage{pdfmanagement}", "\\SetKeys[document/metadata]
 options = ["{language}", "accentcolor={accent}", "premium=true"]
 preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
 logo = true
+department_logo = ["\\ExplSyntaxOn", "\\setkomavar{firsthead}{\\raisebox{0pt}[\\height][0pt]{\\parbox[t]{\\useplength{firstheadwidth}}{\\raggedleft\\smash{\\ptxcd_LetterheadRule}\\par\\vspace{.5\\c_ptxcd_logoheight_dim}\\makebox[\\__ptxcd_logowidth:][l]{\\__ptxcd_insert_logo:}\\par\\vspace{5mm}\\includegraphics[height=\\c_ptxcd_logoheight_dim]{{department_logo}}}}}", "\\ExplSyntaxOff"]
 
 [[fields]]
 key = "recipient"

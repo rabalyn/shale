@@ -9,6 +9,7 @@ use super::compile_tests::container_engine;
 use super::engine::Engine;
 use super::import::*;
 use super::install::Handle;
+use super::pdf_text::pictures_drawn;
 use super::sets::*;
 use crate::gitsync::TreeLock;
 use std::path::{Path, PathBuf};
@@ -56,6 +57,34 @@ pub(super) fn the_set() -> SetInfo {
     scan(vault).into_iter().find(|e| e.id == "tuda").expect("the set tuda").info.unwrap_or_else(|e| panic!("{e}"))
 }
 
+/// A small blue PNG, the stand-in for a department's logo: no real logo is in the repository.
+pub(super) fn a_department_logo_png() -> Vec<u8> {
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(120, 40, image::Rgb([0, 90, 160])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    png.into_inner()
+}
+
+/// The imported set with a department logo in its slot (TEX-035), a copy of the vault's set in a
+/// vault of its own, made once for all tests of the run.
+pub(super) fn the_set_with_a_department_logo() -> SetInfo {
+    static VAULT: OnceLock<PathBuf> = OnceLock::new();
+    let own = VAULT.get_or_init(|| {
+        let (vault, _) = imported_vault();
+        let own = mounted_root().join(format!("vault-dept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&own);
+        std::fs::create_dir_all(own.join("templates")).unwrap();
+        crate::pdf::tex::archive::copy_folder(&vault.join("templates"), &own.join("templates")).unwrap();
+        let logo = own.join("department-source.png");
+        std::fs::write(&logo, a_department_logo_png()).unwrap();
+        let set = read_set("tuda", &own.join("templates/tex/tuda")).unwrap();
+        assert_eq!(choose_department_logo(&own, &set, &logo).unwrap(), "department_logo.png");
+        own
+    });
+    let set = read_set("tuda", &own.join("templates/tex/tuda")).unwrap();
+    assert_eq!(set.department_logo.as_deref(), Some("department_logo.png"));
+    set
+}
+
 /// A logo that is not the placeholder (another grey).
 fn a_real_logo() -> Vec<u8> {
     String::from_utf8(placeholder_logo_pdf()).unwrap().replace("0.75 g", "0.20 g").into_bytes()
@@ -97,11 +126,16 @@ fn tex_env_the_pinned_tuda_ci_archive_is_imported_with_docstrip_and_every_class_
 
 /// Compile every kind of the set and say what failed.
 fn compile_every_kind(set: &SetInfo, expect_placeholder: bool) {
+    compile_every_kind_with(set, expect_placeholder, false);
+}
+
+/// The same, with or without the department logo in the sample documents.
+fn compile_every_kind_with(set: &SetInfo, expect_placeholder: bool, department_logo: bool) {
     let root = mounted_root();
     let engine = container_engine(&root);
     let mut failed = vec![];
     for (id, kind) in &set.kinds {
-        let doc = sample_document(kind, &set.settings);
+        let doc = sample_document(kind, &set.settings, department_logo);
         match compile_with_set(&engine, set, "page.tex", &doc, &[], patient()) {
             Err(e) => failed.push(format!("{id}: {e}\n{}\n--- the document:\n{doc}", e.log_tail)),
             Ok(out) => {
@@ -152,9 +186,45 @@ fn tex_env_every_kind_of_the_imported_tuda_set_compiles_with_a_logo_in_the_slot_
     assert_eq!(choose_logo(&own, &set, &logo).unwrap(), "tuda_logo.pdf");
     let mut set = read_set("tuda", &own.join("templates/tex/tuda")).unwrap();
     assert_eq!(set.logo, LogoStatus::Present("tuda_logo.pdf".into()));
-    set.settings = SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik & Co".into(), author: "Ada & Bob".into(), logo: set.settings.logo.clone() };
+    set.settings = SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik & Co".into(), author: "Ada & Bob".into(), logo: set.settings.logo.clone(), department_logo: None };
     compile_every_kind(&set, false);
     let _ = std::fs::remove_dir_all(&own);
+}
+
+// spec: TEX-035, TEX-027
+#[test]
+#[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
+fn tex_env_every_kind_with_a_department_logo_compiles_and_the_pdf_shows_the_logo_where_the_kind_has_a_place() {
+    let set = the_set_with_a_department_logo();
+    // an empty slot is no warning and no placeholder (the TU logo's is still the placeholder)
+    let empty = the_set();
+    assert!(empty.department_logo.is_none() && empty.department_logo_text().is_none());
+    let engine = container_engine(&mounted_root());
+    let mut failed = vec![];
+    for (id, kind) in &set.kinds {
+        let pictures = |department_logo: bool| {
+            let doc = sample_document(kind, &set.settings, department_logo);
+            match compile_with_set(&engine, &set, "page.tex", &doc, &[], patient()) {
+                Ok(out) => Ok(pictures_drawn(out.output.pdf)),
+                Err(e) => Err(format!("{id} (department logo {department_logo}): {e}\n{}\n--- the document:\n{doc}", e.log_tail)),
+            }
+        };
+        match (pictures(false), pictures(true)) {
+            (Ok(without), Ok(with)) => {
+                let has_place = !kind.department_logo.is_empty();
+                eprintln!("kind {id}: {without} picture(s) without, {with} with the department logo");
+                if has_place && with <= without || !has_place && with != without {
+                    failed.push(format!("{id}: {without} pictures without the department logo and {with} with it (the kind has a place: {has_place})"));
+                }
+            }
+            (a, b) => failed.extend([a.err(), b.err()].into_iter().flatten()),
+        }
+    }
+    assert!(failed.is_empty(), "{} of {} kinds failed:\n{}", failed.len(), set.kinds.len(), failed.join("\n=====\n"));
+    // the same, in German with another accent colour and a TeX special character in the settings
+    let mut german = set.clone();
+    german.settings = SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik & Co".into(), author: "Ada & Bob".into(), ..set.settings.clone() };
+    compile_every_kind_with(&german, true, true);
 }
 
 // spec: TEX-006
@@ -216,7 +286,7 @@ fn tex_import_the_newest_tuda_ci_from_ctan_is_imported_and_its_test_page_compile
     assert_eq!(set.meta.source, Source::Ctan { url: CTAN_URL.into() });
     assert_eq!(super::sets_ui::what_for(&set.meta.source), What::Ctan);
     let (id, kind) = test_kind(&set).unwrap();
-    let out = compile_with_set(&engine, &set, "page.tex", &sample_document(kind, &set.settings), &[], patient()).unwrap_or_else(|e| panic!("kind {id}: {e}\n{}", e.log_tail));
+    let out = compile_with_set(&engine, &set, "page.tex", &sample_document(kind, &set.settings, false), &[], patient()).unwrap_or_else(|e| panic!("kind {id}: {e}\n{}", e.log_tail));
     assert!(out.placeholder_logo && out.output.pdf.starts_with(b"%PDF"));
     let _ = std::fs::remove_dir_all(&vault);
 }

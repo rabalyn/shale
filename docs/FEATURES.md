@@ -41,7 +41,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   and the ribbon has an Alt key (Alt+B bold, Alt+V reading view, Alt+1 … Alt+0 ribbon items, Alt+, and Alt+.
   sidebars, see Keyboard below), shown as a badge at the button while Alt is held; after a button or key that
   only changes the view, the editor has the keyboard again with the cursor and selection unchanged.
-- **Colours.** The toolbar's highlight and font colour buttons open a palette (four neon highlights, a
+- **Colours.** The toolbar's highlight and font colour buttons are split buttons: a click on the colour applies the
+  current colour at once, the ▾ beside it opens a palette (four neon highlights, a
   "No highlight" entry and a colour picker; font colours you set in Settings → Editor) and write plain
   HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
   `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
@@ -201,7 +202,10 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   **Test page** compiles a small document of the set and opens the PDF; **Remove set…** moves it to the
   trash. The university's logo may not be redistributed: **Choose logo…** copies yours into the set, and
   until then exports use a placeholder and the set says "logo missing: exports are not CI-conformant"
-  (TEX-005 to TEX-007, TEX-024 to TEX-027).
+  (TEX-005 to TEX-007, TEX-024 to TEX-027). A **department logo** (**Choose department logo…**, **Remove
+  department logo**) is an optional second slot: documents show it below the TU logo, right-aligned and
+  as high, where the class has room for it (not on exercise sheets and announcements), and the export
+  dialog has a **Department logo** box for it (TEX-035).
 
   ![Template sets in Settings → LaTeX](userguide/z_media/screenshots/settings-latex-sets.png)
 
@@ -213,7 +217,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   download and 330 MB on disk, with progress and Cancel; the built-in export needs nothing of this),
   **Templates** (TU Darmstadt, the tested version, the newest from CTAN, a file, a folder or GitHub, or a set
   you have), **Logo** (the university's logo may not be shipped: the step says where members get it; give it
-  by **dropping the file onto the window** or by its path, or choose Later and exports carry a placeholder),
+  by **dropping the file onto the window** or by its path, or choose Later and exports carry a placeholder; an
+  optional second field takes your department's logo),
   **Your details** (the accent colour as swatches `0a` to `11d`, the language, your department and name, kept in
   the set's `settings.toml`) and a **Test page** that is made with your choices and opened, or, if it fails,
   explained in words with **Save the .tex**. While the setup or Settings → LaTeX is open, files dropped on the
@@ -418,6 +423,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the text (below), not a heading, so a `#` is numbered like the others. The numbers are only drawn (muted), never written into the file: in the editor, the Markdown preview, the reading view, the outline, the link preview and
   the PDF. Settings → Editor → "Number headings" (on by default) switches it for every note; a note's front matter
   `numbered-headings: true` or `false` (also `yes` / `no`) overrides it for that note.
+- **Properties as a summary and a card** (EDIT-060 to EDIT-064, CFG-050 to CFG-053): the reading view draws the front matter as a card by the type of the note instead of raw
+  lines: an e-mail as a mail header (sender, date, to / cc, subject, tag chips), an event with its time, place, attendees and a repeats badge, a Word import as one page chip
+  (`A4 · 2.5 cm margins · 11 pt`), any other note as key and value rows. Ids and `print-*` settings are left out, a ▸ toggle shows every property, and people with a contact
+  note are links. `properties::summary` gives the one line for a folded view (`email · Anna Müller · 2026-11-12 · #work #mail`). Settings → Appearance → "Properties in the editor"
+  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). Dates are not links yet: the calendar has no entry point for a day.
 - **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
   leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale
@@ -697,6 +707,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   `gpg --import backup.asc`; the keys of others the same way, or by hand with `gpg --locate-keys name@example.org`
   (also WKD). S/MIME: Thunderbird's certificate manager, Backup, then `gpgsm --import backup.p12` and the
   issuer's fingerprint in `~/.gnupg/trustlist.txt`. The Encryption settings say all this too.
+- **Keeping the key unlocked.** Without a `gpg-agent.conf`, GnuPG forgets a passphrase after 10 minutes
+  without use and after 2 hours at the latest. Accounts…, Encryption, "Keeping the key unlocked" shows the
+  agent's times in words (read with `gpgconf --list-options gpg-agent`, in the background) and warns when
+  `no-allow-external-cache` blocks the keyring. The choice "Ask for the passphrase again after" (8 hours, 1 day,
+  1 week) and "Change with gpgconf…" show exactly what would be written (`gpg-agent.conf`, the two lines, the
+  marked block gpgconf makes, nothing else) and write only after "Write with gpgconf" (then the agent is
+  reloaded); Cancel writes nothing. The same lines and the reload command are shown for doing it by hand, with a
+  Copy button, plus the keyring tip of the platform ("Save in password manager" on Linux, "Save in Keychain" on
+  macOS; Gpg4win has none). Shale still never handles a passphrase.
 
 ## Importing e-mails, events and files (for project tracking)
 
@@ -932,7 +951,7 @@ Text editing keys and vim keys are fixed.
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
-| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Page break, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
+| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette, the ▾ part of the split button), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
 | Alt+V, Alt+P, Alt+D, Alt+N | The buttons of the view header and tab bar of a note: edit / reading view, Markdown preview, the ⋯ menu (opens it), New tab |
 | Alt+1, Alt+2, Alt+3, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0 | The ribbon items by position: the first ten icons of the ribbon, as shown (also after you reordered or removed some) |
 | Alt+, / Alt+. | Show or hide the left / right sidebar |

@@ -12,6 +12,20 @@ GH=${RELEASE_GH:-gh}
 GH_REPO=${RELEASE_REPO:-rabalyn/shale}
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# take_land_lock: the lock of scripts/land.sh (<git dir>/land/lock), held until this script ends
+# (the file descriptor closes with it), so no other landing slips in between the cut of the
+# release branch and the tag (#348). A second landing or release waits, as land.sh does.
+take_land_lock() {
+  local common
+  common=$(git rev-parse --path-format=absolute --git-common-dir)
+  mkdir -p "$common/land"
+  exec 8>"$common/land/lock"
+  if ! flock -n 8; then
+    echo "Another landing is running; waiting for it…"
+    flock 8
+  fi
+}
+
 # the worktree and branch of a run that has not landed yet, removed when the run stops
 CLEAN_WT=""
 CLEAN_BRANCH=""
@@ -158,7 +172,7 @@ has_entries() {
 # tag_and_push <kind: check|release> <version> <issue|""> <dry-run: yes|no>
 # The whole run of FORGE-013 / FORGE-014 once the version is known.
 tag_and_push() {
-  local kind=$1 v=$2 issue=$3 dry=$4 tag="v$2" common wt branch base bump_commit merge landed msg
+  local kind=$1 v=$2 issue=$3 dry=$4 tag="v$2" common wt branch base bump_commit merge msg
   is_semver "$v" || die "$v is not a semver version (x.y.z or x.y.z-rc.n)"
   if [ "$kind" = check ]; then
     is_pre "$v" || die "a check tag is a pre-release (x.y.z-rc.n); a release is scripts/make-release.sh"
@@ -169,6 +183,18 @@ tag_and_push() {
   [ -z "$(git ls-remote --tags "$REMOTE" "refs/tags/$tag")" ] || die "the tag $tag exists on $REMOTE already"
   local main prev
   main=$(git rev-parse "refs/remotes/$REMOTE/main")
+  if [ "$(version_at "$main")" = "$v" ]; then
+    # the bump of an earlier run landed but was not tagged (its check failed, #348): tag it now
+    echo "$kind tag: $tag (the version $v is on $REMOTE/main already, an earlier run landed it without a tag; this run checks and tags $(git rev-parse --short "$main"))"
+    if [ "$dry" = yes ]; then
+      echo "(--dry-run: nothing was changed)"
+      return 0
+    fi
+    [ -n "$issue" ] || issue=$(release_issue "$(core "$v")")
+    [[ $issue =~ ^[0-9]+$ ]] || die "the release issue \"$issue\" is not a number"
+    finish_tag "$kind" "$v" "$issue" "$main"
+    return 0
+  fi
   if [ "$kind" = check ]; then
     # a check tag needs a changelog change since the previous tag
     prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$main" 2>/dev/null || true)
@@ -214,15 +240,50 @@ tag_and_push() {
   git worktree remove --force "$wt"
   CLEAN_WT=""
 
-  if ! bash "$LIB_DIR/land.sh" --release "$branch"; then
+  # the lock is ours (take_land_lock): land.sh must not wait for it, but only when we are its parent
+  if ! SHALE_LAND_LOCK_HELD=$$ bash "$LIB_DIR/land.sh" --release "$branch"; then
     die "landing the version bump failed, so main itself does not pass the checks (or it moved meanwhile); nothing was tagged. Fix main (a branch, landed) and run this again."
   fi
 
   git fetch -q "$REMOTE"
   merge=$(git log --merges --format='%H %P' "$base..refs/remotes/$REMOTE/main" | awk -v c="$bump_commit" '$3 == c { print $1 }' | head -n 1)
   [ -n "$merge" ] || die "the landed merge of $branch is not on $REMOTE/main"
+  finish_tag "$kind" "$v" "$issue" "$merge"
+}
+
+# finish_tag <kind> <version> <issue> <commit>: checks the commit that is on `origin/main` as the
+# CI will (BUILD-013, in a worktree of it), and only then tags it and pushes the tag (#348). A
+# release also needs docs/changelog-pending/ empty in it. When something is missing nothing is
+# tagged and the way out is printed: the version is on main already, so the entry is added in a
+# branch, landed, and the script run again for the same version (it then tags `origin/main`).
+finish_tag() {
+  local kind=$1 v=$2 issue=$3 merge=$4 tag="v$2" common chk landed out pending="" problems=""
   landed=$(version_at "$merge")
-  [ "$landed" = "$v" ] || die "the landed merge $merge has version $landed, not $v; nothing was tagged"
+  [ "$landed" = "$v" ] || die "$merge has version $landed, not $v; nothing was tagged"
+  common=$(git rev-parse --path-format=absolute --git-common-dir)
+  chk="$common/release/check"
+  mkdir -p "$common/release"
+  if [ -e "$chk" ]; then git worktree remove --force "$chk" >/dev/null 2>&1 || rm -rf "$chk"; fi
+  git worktree prune
+  git worktree add -q --detach "$chk" "$merge"
+  CLEAN_WT=$chk
+  out=$(cd "$chk" && sh .github/check-release.sh "$v" 2>&1) || problems=$out
+  if [ "$kind" = release ]; then
+    pending=$(git ls-tree --name-only "$merge" docs/changelog-pending/ | command grep '\.md$' || true)
+    [ -z "$pending" ] || problems="$problems
+docs/changelog-pending/ still has files in the landed commit (landed while this ran?): $(tr '\n' ' ' <<< "$pending")"
+  fi
+  if [ -n "$problems" ]; then
+    echo "$problems" >&2
+    echo >&2
+    echo "$(basename "$0"): $tag was NOT tagged: the landed commit $(git rev-parse --short "$merge") on $REMOTE/main does not pass the release check (BUILD-013)." >&2
+    echo "The version $v is on $REMOTE/main now. To recover, in a branch from $REMOTE/main add what is missing to the section of $v in CHANGELOG.md" >&2
+    echo "(and git rm what is left in docs/changelog-pending/), land it with scripts/land.sh, then run $(basename "$0") $v again: it tags $REMOTE/main." >&2
+    cleanup
+    exit 1
+  fi
+  git worktree remove --force "$chk"
+  CLEAN_WT=""
   if [ "$kind" = release ]; then
     git tag -a "$tag" -m "Shale $v" "$merge"
   else
