@@ -155,6 +155,10 @@ jobs:
         run: |
           mkdir -p dist/shale
           cp "$CARGO_TARGET_DIR/release/shale" LICENSE README.md CHANGELOG.md dist/shale/
+          cp assets/icon/shale.desktop assets/icon/shale.svg scripts/install.sh dist/shale/
+          # BUILD-025: install.sh puts the icon sizes in the hicolor theme
+          mkdir -p dist/shale/assets/icon
+          cp assets/icon/shale-*.png dist/shale/assets/icon/
           cp -r docs dist/shale/
           # DEV-020: the guide is in the archive once, as docs/userguide (FEATURES.md links into it),
           # without what Shale writes into a vault; and as a zip of its own
