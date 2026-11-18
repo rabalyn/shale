@@ -903,14 +903,63 @@ fn large_note_timing() {
     };
     let t = text.clone();
     println!("find_blocks: {:?}", avg(20, Box::new(move || drop(crate::fold::find_blocks(&t)))));
+    // an unchanged frame (the cache), and a frame after an edit that keeps the length (the text alternates)
+    let edited = text.replacen("## Section 1\n", "## Section 2\n", 1);
+    let mut state = crate::fold_ui::FoldUi::default();
+    let (t, e) = (text.clone(), edited.clone());
+    let mut flip = false;
+    println!("FoldUi::begin, nothing folded, unchanged text: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, false)))));
     let mut state = crate::fold_ui::FoldUi::default();
     let t = text.clone();
-    println!("FoldUi::begin (find_blocks, folds, view), nothing folded: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, false)))));
+    println!(
+        "FoldUi::begin, nothing folded, after an edit: {:?}",
+        avg(
+            20,
+            Box::new(move || {
+                flip = !flip;
+                drop(state.begin(Path::new("A.md"), if flip { &t } else { &e }, false))
+            })
+        )
+    );
     let mut state = crate::fold_ui::FoldUi::default();
     let frame = state.begin(Path::new("A.md"), &text, false);
     state.apply(Path::new("A.md"), &frame, crate::fold::FoldCmd::FoldAll, 0);
     let t = text.clone();
-    println!("FoldUi::begin, everything folded: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, false)))));
+    let mut again = crate::fold_ui::FoldUi::default();
+    again.apply(Path::new("A.md"), &frame, crate::fold::FoldCmd::FoldAll, 0);
+    println!("FoldUi::begin, everything folded, unchanged text: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, false)))));
+    let (t, e) = (text.clone(), edited.clone());
+    let mut flip = false;
+    println!(
+        "FoldUi::begin, everything folded, after an edit: {:?}",
+        avg(
+            20,
+            Box::new(move || {
+                flip = !flip;
+                drop(again.begin(Path::new("A.md"), if flip { &t } else { &e }, false))
+            })
+        )
+    );
+    // what the editor's layouter builds for the text each frame (the link list is empty here)
+    let t = text.clone();
+    println!("editor::highlight_with_math (the job the layouter builds per frame): {:?}", avg(5, Box::new(move || drop(crate::editor::highlight_with_math(&t, &[], &crate::fonts::EditorFonts::uniform(15.0), &[], Some(0..0))))));
+    let t = text.clone();
+    println!("syntax::fences alone: {:?}", avg(20, Box::new(move || drop(crate::syntax::fences(&crate::markdown::lines_with_offsets(&t).into_iter().map(|(_, l)| l).collect::<Vec<_>>())))));
+    // the whole window: the editor and the reading view drawing the note, per frame
+    for reading in [false, true] {
+        let mut w = W::new("timing", &text, true);
+        if reading {
+            w.reading();
+        }
+        let t = Instant::now();
+        w.hl.frames(&mut w.app, 10);
+        println!("whole frame, {} view, 20 000 lines, nothing folded: {:?}", if reading { "reading" } else { "editor" }, t.elapsed() / 10);
+        w.app.tabbar.tabs[w.app.tabbar.active].editor.fold.request = Some(crate::fold::FoldCmd::FoldAll);
+        w.hl.frames(&mut w.app, 3);
+        let t = Instant::now();
+        w.hl.frames(&mut w.app, 10);
+        println!("whole frame, {} view, everything folded: {:?}", if reading { "reading" } else { "editor" }, t.elapsed() / 10);
+    }
     // the code boxes over a laid-out text
     let ctx = egui::Context::default();
     crate::theme::apply(&ctx);
@@ -934,4 +983,85 @@ fn large_note_timing() {
         }
         println!("code_box::shapes, clip somewhere in the middle: {:?} ({n} shapes)", s.elapsed() / 20);
     });
+}
+
+// spec: EDIT-100
+#[test]
+fn edit_100_an_unchanged_text_reuses_the_blocks_and_any_change_of_the_text_finds_them_again() {
+    use crate::fold::{find_blocks, FoldCmd, View};
+    use std::sync::Arc;
+    let rel = Path::new("A.md");
+    let text = "# One\nfirst\n## Sub\nsecond\n# Two\nthird\n```rust\nlet a = 1;\n```\n";
+    let mut ui = crate::fold_ui::FoldUi::default();
+    let a = ui.begin(rel, text, false);
+    let b = ui.begin(rel, text, false);
+    assert!(Arc::ptr_eq(&a.blocks, &b.blocks), "the same text parses nothing");
+    // the same length, one byte different: found again
+    let edited = text.replace("# Two", "# Tw0");
+    assert_eq!(edited.len(), text.len());
+    let c = ui.begin(rel, &edited, false);
+    assert!(!Arc::ptr_eq(&a.blocks, &c.blocks));
+    assert_eq!(*c.blocks, find_blocks(&edited));
+    assert_eq!(c.blocks[2].title, "# Tw0");
+    // a change at the very end, a longer and a shorter text
+    for t in [format!("{edited}x"), text.to_string(), text[..text.len() - 1].to_string(), String::new()] {
+        let f = ui.begin(rel, &t, false);
+        assert_eq!(*f.blocks, find_blocks(&t), "{t:?}");
+        assert!(Arc::ptr_eq(&f.blocks, &ui.begin(rel, &t, false).blocks));
+    }
+    // a command changes the folds of the same text: the frame follows, from the cached blocks, and equals the uncached one
+    let frame = ui.begin(rel, text, false);
+    ui.apply(rel, &frame, FoldCmd::FoldAll, 0);
+    let folded = ui.begin(rel, text, false);
+    assert!(Arc::ptr_eq(&frame.blocks, &folded.blocks) && folded.folded.len() == folded.blocks.len());
+    assert_eq!(folded.view, View::of(&find_blocks(text), &folded.folded));
+    // folds survive an edit of another line, and a fresh state with the same folds gives the same frame
+    let moved = text.replace("first", "1st!!");
+    let after = ui.begin(rel, &moved, false);
+    let mut fresh = crate::fold_ui::FoldUi::default();
+    let f0 = fresh.begin(rel, &moved, false);
+    fresh.apply(rel, &f0, FoldCmd::FoldAll, 0);
+    let expected = fresh.begin(rel, &moved, false);
+    assert_eq!((&after.folded, &after.view), (&expected.folded, &expected.view));
+    ui.apply(rel, &after, FoldCmd::UnfoldAll, 0);
+    assert!(ui.begin(rel, &moved, false).folded.is_empty());
+}
+
+// spec: EDIT-103
+#[test]
+fn edit_103_a_folded_code_block_in_the_reading_view_has_its_badge_in_the_row_of_its_box() {
+    let note = "text\n\n```rust\nlet x = 1;\nlet y = 2;\n```\n\nafter";
+    let mut w = W::new("reader-code-badge", note, false);
+    w.reading();
+    let top = w.at("rust");
+    w.hover(Pos2::new(top.x - 60.0, top.y + 4.0));
+    let m = w.editor().fold.widgets.iter().find(|x| x.line == 2).and_then(|x| x.marker).expect("the code block has a marker");
+    w.click(m.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(!w.hl.text.iter().any(|(t, _)| t.contains("let x")), "{:?}", w.hl.text);
+    let badge = w.reader_badge(2).expect("the badge");
+    let (lang, after) = (w.at("rust"), w.at("after"));
+    assert!(badge.center().y > lang.y && badge.center().y < lang.y + 24.0 && badge.max.x < lang.x, "in the row of the language badge, left of it: {badge:?} {lang:?}");
+    // the box ends just under the row: "after" follows at once, no empty body and no row of its own for the badge
+    assert!(after.y - lang.y < 60.0, "after {after:?} lang {lang:?}");
+    w.click(badge.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.painted("let x = 1;\nlet y = 2;") || w.hl.text.iter().any(|(t, _)| t.contains("let x = 1;")), "{:?}", w.hl.text);
+}
+
+// spec: EDIT-102
+#[test]
+fn edit_102_a_very_large_note_draws_only_what_is_near_and_a_jump_still_reaches_its_line() {
+    let note: String = (0..1500).map(|n| format!("# Head {n}\nparagraph number {n}\n")).collect();
+    let mut w = W::new("reader-cull", &note, false);
+    w.reading();
+    w.hl.frames(&mut w.app, 3);
+    let paragraphs = w.hl.text.iter().filter(|(t, _)| t.starts_with("paragraph number")).count();
+    assert!(w.painted("paragraph number 0") && !w.painted("paragraph number 1400"), "{paragraphs} painted");
+    assert!(paragraphs < 300, "{paragraphs} painted of 1500");
+    // a jump to a far line draws and shows it
+    w.app.tabbar.tabs[w.app.tabbar.active].reader_line = Some(2800);
+    w.hl.frames(&mut w.app, 80);
+    assert!(w.painted("Head 1400") && w.painted("paragraph number 1400"), "{:?}", w.hl.text.iter().filter(|(t, p)| p.y > 0.0 && p.y < 900.0 && t.contains("1")).take(12).collect::<Vec<_>>());
+    assert!(!w.painted("paragraph number 0"));
 }

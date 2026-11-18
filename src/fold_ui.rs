@@ -7,18 +7,18 @@ use crate::fold::{find_blocks, Block, FoldCmd, FoldKind, NoteFolds, View};
 use crate::theme;
 use eframe::egui::{self, text::CCursor, Galley, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use std::borrow::Cow;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// The folds of one frame: the blocks of the text, which of them are folded, and what is hidden.
 #[derive(Clone)]
 pub struct Frame {
     hash: u64,
-    pub blocks: Vec<Block>,
-    folds: NoteFolds,
+    /// shared with the cache of [`FoldUi`] (EDIT-100): an unchanged frame does not copy them
+    pub blocks: Arc<Vec<Block>>,
+    folds: Arc<NoteFolds>,
     pub folded: Vec<usize>,
     pub view: View,
     /// a mail note (EDIT-082): its quotes are "quoted lines"
@@ -27,18 +27,32 @@ pub struct Frame {
     pub summary: bool,
 }
 
-fn hash_of(text: &str) -> u64 {
-    let mut h = DefaultHasher::new();
-    text.hash(&mut h);
-    h.finish()
+/// A fast hash of a text, to tell whether it is the one the folds were found in (EDIT-100): eight bytes
+/// at a time, the length in it; a megabyte takes about 0.2 ms.
+pub(crate) fn hash_of(text: &str) -> u64 {
+    const K: u64 = 0x517c_c1b7_2722_0a95;
+    let bytes = text.as_bytes();
+    let mut h = bytes.len() as u64;
+    let (chunks, rest) = bytes.as_chunks::<8>();
+    for c in chunks {
+        h = (h.rotate_left(5) ^ u64::from_le_bytes(*c)).wrapping_mul(K);
+    }
+    for &b in rest {
+        h = (h.rotate_left(5) ^ u64::from(b)).wrapping_mul(K);
+    }
+    h
 }
 
 impl Frame {
-    fn new(text: &str, blocks: Vec<Block>, folds: NoteFolds, summary: bool) -> Frame {
+    fn new(hash: u64, blocks: Arc<Vec<Block>>, mail: bool, folds: Arc<NoteFolds>, summary: bool) -> Frame {
         let folded = folds.folded(&blocks);
         let view = View::of(&blocks, &folded);
-        let mail = blocks.iter().any(|b| b.kind == FoldKind::Quote) && crate::fold::is_mail(text);
-        Frame { hash: hash_of(text), blocks, folds, folded, view, mail, summary }
+        Frame { hash, blocks, folds, folded, view, mail, summary }
+    }
+
+    /// Is `text` a mail note whose quotes say "quoted lines" (EDIT-082)?
+    fn mail_of(text: &str, blocks: &[Block]) -> bool {
+        blocks.iter().any(|b| b.kind == FoldKind::Quote) && crate::fold::is_mail(text)
     }
 
     /// The folded front matter's block, when its first line is shown as a summary (EDIT-081).
@@ -56,10 +70,13 @@ impl Frame {
     /// The same folds on `text`: this frame when the text is the one it was made for, else the folds
     /// found again in it (the text box changed it in the middle of the frame).
     pub fn at(&self, text: &str) -> Cow<'_, Frame> {
-        if hash_of(text) == self.hash {
+        let hash = hash_of(text);
+        if hash == self.hash {
             Cow::Borrowed(self)
         } else {
-            Cow::Owned(Frame::new(text, find_blocks(text), self.folds.clone(), self.summary))
+            let blocks = find_blocks(text);
+            let mail = Frame::mail_of(text, &blocks);
+            Cow::Owned(Frame::new(hash, Arc::new(blocks), mail, self.folds.clone(), self.summary))
         }
     }
 }
@@ -92,6 +109,9 @@ pub struct Widget {
 #[derive(Default)]
 pub struct FoldUi {
     notes: HashMap<PathBuf, NoteFolds>,
+    /// the last frame of each note: while the text and the folds are the same, `begin` hands it out
+    /// again and parses nothing (EDIT-100)
+    last: HashMap<PathBuf, Frame>,
     /// a command (a key, vim's `za`…) to do at the start of the next frame
     pub request: Option<FoldCmd>,
     pub widgets: Vec<Widget>,
@@ -106,6 +126,9 @@ pub struct FoldUi {
     /// a click on the summary line asks the editor for the cursor in this line
     pub goto: Option<usize>,
 }
+
+/// How many notes keep their last frame (EDIT-100).
+const MAX_CACHED: usize = 16;
 
 /// Where the markers sit left of the text, and their size.
 pub const MARKER: f32 = 12.0;
@@ -136,12 +159,32 @@ impl FoldUi {
     /// The first time a note is shown it gets the folds it starts with (EDIT-081, EDIT-082); `summary`
     /// is the setting that folds the front matter (Folded and Card; Raw leaves it open).
     pub fn begin(&mut self, rel: &Path, text: &str, summary: bool) -> Frame {
-        let blocks = find_blocks(text);
+        let hash = hash_of(text);
+        // the blocks of the last frame while the text is the same (EDIT-100)
+        let same = self.last.get(rel).filter(|f| f.hash == hash && f.summary == summary);
+        let (blocks, mail) = match same {
+            Some(f) => (f.blocks.clone(), f.mail),
+            None => {
+                let blocks = find_blocks(text);
+                let mail = Frame::mail_of(text, &blocks);
+                (Arc::new(blocks), mail)
+            }
+        };
         if !self.seen.contains(rel) {
             self.seen.insert(rel.to_path_buf());
             let start = NoteFolds::defaults(&blocks, crate::fold::is_mail(text), summary);
             if !start.is_empty() {
                 self.notes.insert(rel.to_path_buf(), start);
+            }
+        }
+        // the folds are the ones of that frame as well: nothing to follow
+        if let Some(f) = same {
+            let unchanged = match self.notes.get(rel) {
+                Some(n) => *f.folds == *n,
+                None => f.folds.is_empty(),
+            };
+            if unchanged {
+                return f.clone();
             }
         }
         let folds = match self.notes.get_mut(rel) {
@@ -154,7 +197,12 @@ impl FoldUi {
         if folds.is_empty() {
             self.notes.remove(rel);
         }
-        Frame::new(text, blocks, folds, summary)
+        let frame = Frame::new(hash, blocks, mail, Arc::new(folds), summary);
+        if self.last.len() >= MAX_CACHED {
+            self.last.clear();
+        }
+        self.last.insert(rel.to_path_buf(), frame.clone());
+        frame
     }
 
     /// Do a command with the cursor in `line`; the answer is the line the cursor has to go to when
@@ -250,9 +298,9 @@ impl FoldUi {
             Rect::from_min_max(pos + r.min.to_vec2(), pos + r.max.to_vec2())
         };
         let mut clicked: Option<(usize, FoldCmd)> = None;
-        let folded_lines: Vec<usize> = frame.folded.iter().map(|&i| frame.blocks[i].header).collect();
+        let folded_lines: HashSet<usize> = frame.folded.iter().map(|&i| frame.blocks[i].header).collect();
         let mut last = None;
-        for b in &frame.blocks {
+        for b in frame.blocks.iter() {
             if last == Some(b.header) || frame.view.is_hidden(b.header) || b.header >= lines.len() {
                 continue;
             }
@@ -295,9 +343,10 @@ impl FoldUi {
             if resp.on_hover_text("Unfold").clicked() {
                 clicked = Some((header, FoldCmd::Unfold));
             }
-            match self.widgets.iter_mut().find(|w| w.line == header) {
-                Some(w) => w.badge = Some(rect),
-                None => self.widgets.push(Widget { line: header, marker: None, badge: Some(rect), copy: None }),
+            // the widgets are in the order of their lines, like the badges
+            match self.widgets.binary_search_by_key(&header, |w| w.line) {
+                Ok(i) => self.widgets[i].badge = Some(rect),
+                Err(i) => self.widgets.insert(i, Widget { line: header, marker: None, badge: Some(rect), copy: None }),
             }
         }
         // the folded front matter: its summary line in place of `---`, a click opens it (EDIT-081)

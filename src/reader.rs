@@ -617,13 +617,42 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
     }
     let tables = crate::table::find_tables(text);
     let formulas = markdown::find_math(text);
+    // a very large note: what is far from the visible part is not drawn, a space of the height it had is left (EDIT-102)
+    let heights = (lines.len() >= CULL_LINES).then(|| {
+        let key = HeightsKey { text: crate::fold_ui::hash_of(text), width: ui.available_width().to_bits(), base: base.to_bits(), badges: frame.as_ref().map(|f| f.view.badges.clone()).unwrap_or_default() };
+        let id = ui.scope_id().with(("reader-heights", rel));
+        let shared = ui.data_mut(|d| d.get_temp::<std::sync::Arc<std::sync::Mutex<Heights>>>(id)).unwrap_or_default();
+        {
+            let mut h = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if h.key.as_ref() != Some(&key) {
+                *h = Heights { key: Some(key), segs: HashMap::new() };
+            }
+        }
+        ui.data_mut(|d| d.insert_temp(id, shared.clone()));
+        shared
+    });
+    let wanted: Vec<usize> = target.into_iter().chain(extras.scroll_to).collect();
     while i < lines.len() {
-        if let Some(h) = frame.as_ref().and_then(|f| f.view.hidden.iter().find(|h| h.contains(&i))) {
+        if let Some(h) = frame.as_ref().and_then(|f| f.view.hidden_at(i)) {
             // what a fold hides is not drawn (EDIT-095)
             i = h.end;
             continue;
         }
         let (start, top) = (i, ui.cursor().min.y);
+        if let Some(h) = &heights {
+            let known = h.lock().unwrap_or_else(|e| e.into_inner()).segs.get(&i).copied();
+            if let Some((end, height)) = known {
+                let clip = ui.clip_rect();
+                let far = top + height < clip.min.y - clip.height() || top > clip.max.y + clip.height();
+                if far && !wanted.iter().any(|t| (i..end).contains(t)) {
+                    ui.add_space((height - ui.spacing().item_spacing.y).max(0.0));
+                    i = end;
+                    continue;
+                }
+            }
+        }
+        // the badge of a folded code block, drawn in its box (EDIT-098): where it is and whether it was clicked
+        let mut in_box: Option<(egui::Rect, bool)> = None;
         'line: {
             let span = tables.iter().find(|b| b.lines.start == i).map_or(i + 1, |b| b.lines.end);
             if target.is_some_and(|t| (i..span).contains(&t)) {
@@ -642,8 +671,10 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 break 'line;
             }
             let (off, line) = lines[i];
-            let line_links: Vec<(LinkSpan, bool)> = all_links
+            // the links are in the order of the text: only the ones from this line on
+            let line_links: Vec<(LinkSpan, bool)> = all_links[all_links.partition_point(|(l, _)| l.range.start < off)..]
                 .iter()
+                .take_while(|(l, _)| l.range.start <= off + line.len())
                 .filter(|(l, _)| l.range.start >= off && l.range.end <= off + line.len())
                 .map(|(l, ok)| {
                     let mut l = l.clone();
@@ -664,21 +695,40 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 }
                 i += 1;
                 // the box of EDIT-080: a border, and the language (or "code") in a badge at the top right
+                let folded = frame.as_ref().and_then(|f| f.view.badges.binary_search_by_key(&open, |b| b.0).ok().map(|k| (f.view.badges[k].1, f.mail)));
                 egui::Frame::new().fill(theme::CODE_BG).stroke(egui::Stroke::new(1.0, theme::BORDER)).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let badge = syntax::badge_language(&word).unwrap_or_else(|| "code".to_string());
                     let box_rect = ui.max_rect();
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                        let badge = ui.label(egui::RichText::new(badge).monospace().size((base * 0.75).max(9.0)).color(theme::FAINT));
-                        // the copy button (EDIT-093): left of the badge, while the pointer is over the box
-                        let id = crate::code_box::copy_id(ui.scope_id(), rel, open);
-                        let shown = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| box_rect.expand(10.0).contains(p));
-                        let all: Vec<&str> = lines.iter().map(|l| l.1).collect();
-                        crate::code_box::copy_button(ui, id, badge.rect.left() - 6.0, badge.rect.center().y, shown, || crate::code_box::code_of(&all, open).unwrap_or_default());
-                    });
-                    // a folded block is its box with the badge only (EDIT-095)
-                    if !frame.as_ref().is_some_and(|f| f.view.badges.iter().any(|(h, _)| *h == open)) {
-                        ui.label(code_job(&word, code.trim_end(), base * 0.9));
+                    let row_y = ui
+                        .with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                            let badge = ui.label(egui::RichText::new(badge).monospace().size((base * 0.75).max(9.0)).color(theme::FAINT));
+                            // the copy button (EDIT-093): left of the badge, while the pointer is over the box
+                            let id = crate::code_box::copy_id(ui.scope_id(), rel, open);
+                            let shown = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| box_rect.expand(10.0).contains(p));
+                            crate::code_box::copy_button(ui, id, badge.rect.left() - 6.0, badge.rect.center().y, shown, || {
+                                let all: Vec<&str> = lines.iter().map(|l| l.1).collect();
+                                crate::code_box::code_of(&all, open).unwrap_or_default()
+                            });
+                            badge.rect.center().y
+                        })
+                        .inner;
+                    match folded {
+                        // a folded block is its first line in the box: the badge in the row, no body (EDIT-095, EDIT-098)
+                        Some((n, mail)) => {
+                            let g = ui.painter().layout_no_wrap(crate::fold::badge_label(FoldKind::Code, mail, n), FontId::proportional((base * 0.8).max(9.0)), theme::MUTED);
+                            let rect = egui::Rect::from_min_size(Pos2::new(box_rect.left(), row_y - (g.size().y + 2.0) / 2.0), g.size() + Vec2::new(10.0, 2.0));
+                            let resp = ui.interact(rect, ui.scope_id().with(("fold-badge-in-box", rel, open)), Sense::click());
+                            ui.painter().rect_filled(rect, 4.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY });
+                            ui.painter().galley(rect.center() - g.size() / 2.0, g, theme::MUTED);
+                            if resp.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            in_box = Some((rect, resp.on_hover_text("Unfold").clicked()));
+                        }
+                        None => {
+                            ui.label(code_job(&word, code.trim_end(), base * 0.9));
+                        }
                     }
                 });
                 ui.add_space(6.0);
@@ -773,23 +823,49 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             i += 1;
         }
         if let (Some(f), Some(fr)) = (folds.as_mut(), frame.as_ref()) {
-            fold_widgets(ui, f.ui, rel, fr, start, top, base);
+            fold_widgets(ui, f.ui, rel, fr, (start, top), base, in_box);
+        }
+        if let Some(h) = &heights {
+            h.lock().unwrap_or_else(|e| e.into_inner()).segs.insert(start, (i, ui.cursor().min.y - top));
         }
     }
     out
 }
 
+/// From this many lines on, the reading view does not draw what is far from the visible part (EDIT-102).
+const CULL_LINES: usize = 2000;
+
+/// What the heights of a note's parts were drawn for: they are valid for the same text, width, size and folds.
+#[derive(Clone, PartialEq)]
+struct HeightsKey {
+    text: u64,
+    width: u32,
+    base: u32,
+    badges: Vec<(usize, usize)>,
+}
+
+/// The height of each part of the reading view (a line, a table, a code block...) by the line it starts at,
+/// and the line after it.
+#[derive(Default)]
+struct Heights {
+    key: Option<HeightsKey>,
+    segs: HashMap<usize, (usize, f32)>,
+}
+
 /// The marker and the badge of the foldable blocks that start at `line` of the reading view (EDIT-096), drawn
-/// after the line: `top` is where the line began. The front matter is the properties card, with its own toggle
-/// (EDIT-063), and has none.
-fn fold_widgets(ui: &mut Ui, folds: &mut FoldUi, rel: &Path, frame: &Frame, line: usize, top: f32, base: f32) {
-    let here: Vec<usize> = (0..frame.blocks.len()).filter(|&i| frame.blocks[i].header == line && frame.blocks[i].kind != FoldKind::Front).collect();
+/// after the line: `at` is the line and `top`, where it began. The front matter is the properties card, with its own toggle
+/// (EDIT-063), and has none. A folded code block drew its badge in its box (`in_box`, EDIT-098).
+fn fold_widgets(ui: &mut Ui, folds: &mut FoldUi, rel: &Path, frame: &Frame, at: (usize, f32), base: f32, in_box: Option<(egui::Rect, bool)>) {
+    let (line, top) = at;
+    // the blocks are in the order of their headers
+    let first = frame.blocks.partition_point(|b| b.header < line);
+    let here: Vec<usize> = (first..frame.blocks.len()).take_while(|&i| frame.blocks[i].header == line).filter(|&i| frame.blocks[i].kind != FoldKind::Front).collect();
     if here.is_empty() {
         return;
     }
     let col = ui.max_rect();
     let bottom = ui.cursor().min.y;
-    let folded = here.iter().any(|i| frame.folded.contains(i));
+    let folded = here.iter().any(|i| frame.folded.binary_search(i).is_ok());
     let hover = ui.input(|i| i.pointer.hover_pos());
     let hot = hover.is_some_and(|p| p.y >= top && p.y <= bottom && p.x >= col.left() - 24.0 && p.x <= col.right());
     let mut clicked = None;
@@ -808,16 +884,22 @@ fn fold_widgets(ui: &mut Ui, folds: &mut FoldUi, rel: &Path, frame: &Frame, line
         }
         widget.marker = Some(rect);
     }
-    if let Some(&(_, n)) = frame.view.badges.iter().find(|(h, _)| *h == line) {
-        let kind = frame.folded.iter().map(|&i| &frame.blocks[i]).filter(|b| b.header == line).max_by_key(|b| b.end).map_or(FoldKind::Heading, |b| b.kind);
-        let g = ui.painter().layout_no_wrap(crate::fold::badge_label(kind, frame.mail, n), FontId::proportional((base * 0.8).max(9.0)), theme::MUTED);
-        let (rect, resp) = ui.allocate_exact_size(g.size() + Vec2::new(10.0, 2.0), Sense::click());
-        ui.painter().rect_filled(rect, 4.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY });
-        ui.painter().galley(rect.center() - g.size() / 2.0, g, theme::MUTED);
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        if resp.on_hover_text("Unfold").clicked() {
+    if let Some(&(_, n)) = frame.view.badges.binary_search_by_key(&line, |b| b.0).ok().map(|i| &frame.view.badges[i]) {
+        let (rect, clicked_badge) = match in_box {
+            Some(drawn) => drawn,
+            None => {
+                let kind = frame.folded.iter().map(|&i| &frame.blocks[i]).filter(|b| b.header == line).max_by_key(|b| b.end).map_or(FoldKind::Heading, |b| b.kind);
+                let g = ui.painter().layout_no_wrap(crate::fold::badge_label(kind, frame.mail, n), FontId::proportional((base * 0.8).max(9.0)), theme::MUTED);
+                let (rect, resp) = ui.allocate_exact_size(g.size() + Vec2::new(10.0, 2.0), Sense::click());
+                ui.painter().rect_filled(rect, 4.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY });
+                ui.painter().galley(rect.center() - g.size() / 2.0, g, theme::MUTED);
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                (rect, resp.on_hover_text("Unfold").clicked())
+            }
+        };
+        if clicked_badge {
             clicked = Some(FoldCmd::Unfold);
         }
         widget.badge = Some(rect);

@@ -41,9 +41,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   (`type: email`) the quotes (`… n quoted lines`) and the signature start folded too.
 - **Folding in the reading view** (EDIT-095 to EDIT-099, rabalyn/shale#364): the reading view folds the same blocks with
   the same folds as the editor of the note (fold in one, it is folded in the other; session only, never written).
-  Hover a block's first line and click the ▾ marker left of it, or the `… n lines` badge under a folded block;
+  Hover a block's first line and click the ▾ marker left of it, or the `… n lines` badge under a folded block (a folded code block is one row with its badge in the box, EDIT-103);
   **Ctrl+Shift+O** / **Ctrl+Shift+I** fold and unfold all there (fold and unfold at the cursor are editor keys). A footnote
   jump or a click in the outline on a heading that a fold hides opens the fold. The front matter card keeps its own toggle.
+  Large notes stay quick (EDIT-099 to EDIT-102, rabalyn/shale#369): the folds of an unchanged text are not found again, and
+  from 2 000 lines on the reading view draws only what is near the visible part.
 
 ![Folded code blocks, quote and signature in the reading view](userguide/z_media/screenshots/reading-folds.png)
 - **Code blocks as boxes** (EDIT-080, EDIT-086, rabalyn/shale#356): with the Markdown preview on, a fenced code block is a

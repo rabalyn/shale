@@ -11,6 +11,7 @@
 //! markers and the badge) works for every kind.
 
 use crate::markdown;
+use std::collections::HashMap;
 use std::ops::Range;
 
 /// What a foldable block is.
@@ -100,13 +101,14 @@ pub fn find_blocks(text: &str) -> Vec<Block> {
     let doc = Doc::new(text);
     let mut raw: Vec<Raw> = FINDERS.iter().flat_map(|f| f(&doc)).filter(|r| r.end > r.header + 1).collect();
     raw.sort_by_key(|a| (a.header, std::cmp::Reverse(a.end)));
-    let mut seen: Vec<(FoldKind, String)> = Vec::new();
+    let mut seen: HashMap<(FoldKind, &str), usize> = HashMap::new();
     raw.into_iter()
         .map(|r| {
-            let title = doc.lines[r.header].trim().to_string();
-            let nth = seen.iter().filter(|(k, t)| *k == r.kind && *t == title).count();
-            seen.push((r.kind, title.clone()));
-            Block { kind: r.kind, header: r.header, end: r.end, title, nth }
+            let title = doc.lines[r.header].trim();
+            let count = seen.entry((r.kind, title)).or_insert(0);
+            let nth = *count;
+            *count += 1;
+            Block { kind: r.kind, header: r.header, end: r.end, title: title.to_string(), nth }
         })
         .collect()
 }
@@ -267,6 +269,9 @@ impl Key {
     }
 }
 
+/// Up to this many keys [`NoteFolds::folded`] scans the blocks for each; more build a lookup first.
+const SCAN_KEYS: usize = 8;
+
 /// The folded blocks of one note, for this session only: never written into the file.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct NoteFolds {
@@ -282,11 +287,27 @@ impl NoteFolds {
     /// it is what a key remembers (kind, title and number among equal ones), or else the block of that
     /// kind whose header is on the remembered line (the header is being edited).
     pub fn folded(&self, blocks: &[Block]) -> Vec<usize> {
+        let mut taken = vec![false; blocks.len()];
         let mut out: Vec<usize> = Vec::new();
-        for k in &self.keys {
-            let found = blocks.iter().position(|b| b.kind == k.kind && b.title == k.title && b.nth == k.nth).or_else(|| blocks.iter().position(|b| b.kind == k.kind && b.header == k.line));
-            if let Some(i) = found.filter(|i| !out.contains(i)) {
+        let mut keep = |found: Option<usize>| {
+            if let Some(i) = found.filter(|&i| !std::mem::replace(&mut taken[i], true)) {
                 out.push(i);
+            }
+        };
+        if self.keys.len() <= SCAN_KEYS {
+            for k in &self.keys {
+                keep(blocks.iter().position(|b| b.kind == k.kind && b.title == k.title && b.nth == k.nth).or_else(|| blocks.iter().position(|b| b.kind == k.kind && b.header == k.line)));
+            }
+        } else {
+            // many keys (everything folded in a large note): look the blocks up instead of scanning for each (EDIT-101)
+            let mut by_name: HashMap<(FoldKind, &str, usize), usize> = HashMap::new();
+            let mut by_line: HashMap<(FoldKind, usize), usize> = HashMap::new();
+            for (i, b) in blocks.iter().enumerate() {
+                by_name.entry((b.kind, b.title.as_str(), b.nth)).or_insert(i);
+                by_line.entry((b.kind, b.header)).or_insert(i);
+            }
+            for k in &self.keys {
+                keep(by_name.get(&(k.kind, k.title.as_str(), k.nth)).or_else(|| by_line.get(&(k.kind, k.line))).copied());
             }
         }
         out.sort_unstable();
@@ -385,7 +406,8 @@ impl View {
         let mut view = View::default();
         for b in ranges {
             let body = b.body();
-            if view.hidden.iter().any(|h| h.contains(&b.header)) {
+            // the blocks come by header and the ranges are in that order: only the last can hold the header
+            if view.hidden.last().is_some_and(|h| h.contains(&b.header)) {
                 // inside a folded block: its header is hidden, so its lines are too
                 if let Some(last) = view.hidden.last_mut() {
                     last.end = last.end.max(body.end);
@@ -402,7 +424,13 @@ impl View {
     }
 
     pub fn is_hidden(&self, line: usize) -> bool {
-        self.hidden.iter().any(|h| h.contains(&line))
+        self.hidden_at(line).is_some()
+    }
+
+    /// The hidden lines that include `line`. The ranges are in order and apart: the first that ends after
+    /// the line is the only one that can hold it.
+    pub fn hidden_at(&self, line: usize) -> Option<&Range<usize>> {
+        self.hidden.get(self.hidden.partition_point(|h| h.end <= line)).filter(|h| h.start <= line)
     }
 
     /// Do any hidden lines overlap these lines?
@@ -678,5 +706,40 @@ mod tests {
         assert_eq!(badge_label(FoldKind::Quote, false, 2), "\u{2026} 2 lines");
         assert_eq!(badge_label(FoldKind::Quote, true, 2), "\u{2026} 2 quoted lines");
         assert_eq!(badge_label(FoldKind::Quote, true, 1), "\u{2026} 1 quoted line");
+    }
+
+    // spec: EDIT-101
+    #[test]
+    fn edit_101_many_folded_blocks_are_found_as_the_scan_finds_them() {
+        // the first matching block by kind, title and number, else the one of that kind at the remembered line
+        fn by_scan(keys: &[Key], blocks: &[Block]) -> Vec<usize> {
+            let mut out: Vec<usize> = Vec::new();
+            for k in keys {
+                let found = blocks.iter().position(|b| b.kind == k.kind && b.title == k.title && b.nth == k.nth).or_else(|| blocks.iter().position(|b| b.kind == k.kind && b.header == k.line));
+                if let Some(i) = found.filter(|i| !out.contains(i)) {
+                    out.push(i);
+                }
+            }
+            out.sort_unstable();
+            out
+        }
+        // twenty sections with equal titles, quotes and a list under each
+        let text: String = (0..20).map(|n| format!("## Same\ntext {n}\n> quote\n> more\n- a\n- b\n\n")).collect();
+        let blocks = find_blocks(&text);
+        assert!(blocks.len() > SCAN_KEYS + 8);
+        assert_eq!(blocks.iter().filter(|b| b.kind == FoldKind::Heading).map(|b| b.nth).collect::<Vec<_>>(), (0..20).collect::<Vec<_>>());
+        let mut folds = NoteFolds::default();
+        folds.apply(&blocks, FoldCmd::FoldAll, 0);
+        assert!(folds.keys.len() > SCAN_KEYS);
+        assert_eq!(folds.folded(&blocks), by_scan(&folds.keys, &blocks));
+        assert_eq!(folds.folded(&blocks).len(), blocks.len());
+        // after edits: a header edited (the line is the fall-back), a section removed (its key matches nothing), two keys for one block
+        for edited in [text.replacen("## Same", "## Other", 1), text.replacen("## Same\ntext 3\n> quote\n> more\n- a\n- b\n\n", "", 1), text.replace("- b", "- c")] {
+            let now = find_blocks(&edited);
+            assert_eq!(folds.folded(&now), by_scan(&folds.keys, &now), "{edited:?}");
+        }
+        let mut twice = folds.clone();
+        twice.keys.extend(folds.keys.clone());
+        assert_eq!(twice.folded(&blocks), by_scan(&twice.keys, &blocks));
     }
 }
