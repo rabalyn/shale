@@ -672,6 +672,15 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   `gpg --import backup.asc`; the keys of others the same way, or by hand with `gpg --locate-keys name@example.org`
   (also WKD). S/MIME: Thunderbird's certificate manager, Backup, then `gpgsm --import backup.p12` and the
   issuer's fingerprint in `~/.gnupg/trustlist.txt`. The Encryption settings say all this too.
+- **Keeping the key unlocked.** Without a `gpg-agent.conf`, GnuPG forgets a passphrase after 10 minutes
+  without use and after 2 hours at the latest. Accounts…, Encryption, "Keeping the key unlocked" shows the
+  agent's times in words (read with `gpgconf --list-options gpg-agent`, in the background) and warns when
+  `no-allow-external-cache` blocks the keyring. The choice "Ask for the passphrase again after" (8 hours, 1 day,
+  1 week) and "Change with gpgconf…" show exactly what would be written (`gpg-agent.conf`, the two lines, the
+  marked block gpgconf makes, nothing else) and write only after "Write with gpgconf" (then the agent is
+  reloaded); Cancel writes nothing. The same lines and the reload command are shown for doing it by hand, with a
+  Copy button, plus the keyring tip of the platform ("Save in password manager" on Linux, "Save in Keychain" on
+  macOS; Gpg4win has none). Shale still never handles a passphrase.
 
 ## Importing e-mails, events and files (for project tracking)
 

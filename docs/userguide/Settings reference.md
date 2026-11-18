@@ -132,6 +132,8 @@ size of the two editor areas when you updated.
 | `mail_undo_secs` | 10 (0 = send at once) | Accounts…, Sending, "Undo send" |
 | `mail_encryption_consent` | none (nothing is decrypted); the date you typed the consent sentence | Accounts…, Encryption |
 
+How long GnuPG keeps a passphrase is not a Shale setting: it is `default-cache-ttl` (default 600 seconds) and `max-cache-ttl` (default 7200) in GnuPG's `gpg-agent.conf`. Accounts…, Encryption, "Keeping the key unlocked" shows them and can change them with `gpgconf` (see Mail, "Keep the key unlocked").
+
 Fields of each entry of `mail_accounts`, all in Accounts… (passwords and secrets are in the
 system keyring, never in this file):
 

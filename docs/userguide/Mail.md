@@ -78,4 +78,25 @@ in Accounts…, Encryption. Without it nothing is decrypted.
 The subject and addresses of an encrypted mail are not encrypted. Without GnuPG installed Shale
 says so and everything else works.
 
+### Keep the key unlocked
+
+GnuPG's agent forgets a passphrase after 10 minutes without use and after 2 hours at the latest, and
+always when it is restarted, so a signing key has to be unlocked again and again. Shale never handles
+the passphrase; the times are GnuPG's own setting (`gpg-agent.conf`), not a Shale setting. Accounts…,
+Encryption, "Keeping the key unlocked" shows the current times in words. Two ways to make them longer:
+
+- **With Shale.** Choose "Ask for the passphrase again after" (8 hours, 1 day or 1 week) and click
+  "Change with gpgconf…". Shale shows the file, the two lines and what GnuPG's `gpgconf` does with them
+  (a marked block; older lines for these two options are commented out; nothing else changes) and writes
+  nothing yet. "Write with gpgconf" writes and reloads the agent; Cancel writes nothing.
+- **By hand**, if you do not want an app to edit your configs: put `default-cache-ttl N` and
+  `max-cache-ttl N` (in seconds) into `gpg-agent.conf` in GnuPG's home folder (the section shows the
+  lines for your choice, with a Copy button) and run `gpgconf --reload gpg-agent`.
+
+To keep the passphrase across restarts, let the passphrase dialog save it in the system keyring: on Linux
+tick "Save in password manager" (Qt and GNOME pinentry; KWallet or GNOME Keyring), on macOS "Save in
+Keychain" (pinentry-mac). Gpg4win's dialog on Windows has no such option: use the longer times. If
+`no-allow-external-cache` is set in `gpg-agent.conf`, the section says so: the dialog then cannot save to
+the keyring.
+
 #userguide #mail
