@@ -10,6 +10,8 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-18
+
 ### Added
 
 - **A folder as one PDF through a LaTeX template** (#309). The export dialog of a folder has the same
@@ -68,6 +70,14 @@ its section from this file.
   at once, but the entry is re-read from disk before the send job's answer adds the notice; on the
   slower Windows runner the check came in between. The test now waits for both. Shale itself
   was not affected: the mail was classified correctly.
+- **Release tags and the weekly run check the current TeX Live; check tags do not** (#325). The
+  refresh of the TeX Live image, the real TeX Live install and the template import run only in the
+  weekly run and for release tags (`vX.Y.Z`), not for check tags (`vX.Y.Z-rc.N`, ADR-0021), which
+  build the TeX image from its cache and run the CalDAV, mail and TeX compile tests. This replaces
+  the earlier note that only the weekly run did.
+- **Tag runs of the `env-tests` job reuse the TeX image** (#325). Podman's storage of the job is kept on
+  a volume of the homelab runner (ADR-0022), so a check tag run no longer builds the TeX Live image and pulls
+  the CalDAV and mail images again; unused images are pruned after every run.
 
 ### Tests
 
@@ -1320,7 +1330,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/rabalyn/shale/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rabalyn/shale/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rabalyn/shale/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rabalyn/shale/compare/v0.2.0...v0.3.0
