@@ -95,6 +95,63 @@ pub fn set_text_styles(ctx: &egui::Context, font: &AreaFont) {
     ctx.global_style_mut(|s| s.text_styles = text_styles(font));
 }
 
+// ---- the spacing raster of dialogs and Settings (NAV-038, NAV-039)
+//
+// All on a 4-point grid, and each step clearly bigger than the one below it, so a reader sees
+// what belongs together: the lines of one wrapped paragraph are closest, the items (rows,
+// paragraphs, steps) of a page are further apart, and a new section is the furthest.
+// They apply inside [`crate::dialog::Dialog`] only (through [`dialog_spacing`]); the main
+// window keeps egui's tighter spacing.
+
+/// The unit of the raster.
+pub const GRID: f32 = 4.0;
+/// Extra space between the wrapped lines of one paragraph or item, on top of the font's own
+/// row height.
+pub const LINE_GAP: f32 = GRID;
+/// Space between two items one below the other: settings rows, paragraphs, steps.
+pub const ITEM_GAP: f32 = 2.0 * GRID;
+/// Space above a heading that starts a new section (the heading then sits closer to its own
+/// items than to the section before it).
+pub const SECTION_GAP: f32 = 6.0 * GRID;
+
+/// The raster of dialogs for `ui` and everything inside it: the gap between items and the extra
+/// line gap of plain text and of text edits.
+pub fn dialog_spacing(ui: &mut egui::Ui) {
+    let spacing = ui.spacing_mut();
+    spacing.item_spacing.y = ITEM_GAP;
+    spacing.extra_text_line_spacing = LINE_GAP;
+}
+
+/// `rich` with the line height of its font plus [`LINE_GAP`]. egui's `extra_text_line_spacing`
+/// ([`dialog_spacing`] sets it) reaches the text of buttons, checkboxes and text edits, but not
+/// a `Label`'s, so a paragraph that wraps gets its line gap through this (or [`prose`],
+/// [`paragraph`], [`hint`]).
+pub fn spaced(ui: &egui::Ui, rich: egui::RichText) -> egui::RichText {
+    let row = ui.ctx().fonts_mut(|f| rich.font_height(f, ui.style()));
+    rich.line_height(Some(row + LINE_GAP))
+}
+
+/// A paragraph of styled text with [`LINE_GAP`] between its lines.
+pub fn prose(ui: &mut egui::Ui, rich: egui::RichText) -> egui::Response {
+    let rich = spaced(ui, rich);
+    ui.label(rich)
+}
+
+/// A paragraph of plain text in the normal text colour, with [`LINE_GAP`] between its lines.
+pub fn paragraph(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
+    prose(ui, egui::RichText::new(text))
+}
+
+/// A paragraph in the colour of problems and errors, with [`LINE_GAP`] between its lines.
+pub fn problem(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
+    prose(ui, egui::RichText::new(text).color(LINK_MISSING))
+}
+
+/// A grey 12-point hint or explanation, with [`LINE_GAP`] between its lines.
+pub fn hint(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
+    prose(ui, egui::RichText::new(text).color(MUTED).size(12.0))
+}
+
 pub fn apply(ctx: &egui::Context) {
     install_fonts(ctx);
     ctx.set_visuals(egui::Visuals::dark());
@@ -131,4 +188,87 @@ pub fn apply(ctx: &egui::Context) {
     v.widgets.open.corner_radius = CornerRadius::same(5);
     v.text_cursor.stroke = Stroke::new(2.0, ACCENT);
     ctx.set_global_style(style);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::{Context, FontId, Label, RawInput, RichText, Vec2};
+
+    const LONG: &str = "A long hint that wraps over several lines in a narrow column, so that the space between its lines can be measured.";
+
+    /// Run `f` in a ui of width `width` with the font at its defaults.
+    fn in_ui(width: f32, f: impl FnOnce(&mut egui::Ui)) {
+        let ctx = Context::default();
+        let raw = RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 600.0))), ..Default::default() };
+        let mut f = Some(f);
+        let mut out = ctx.run_ui(raw, |ui| {
+            ui.set_max_width(width);
+            (f.take().expect("one frame"))(ui);
+        });
+        out.textures_delta.clear();
+    }
+
+    // spec: NAV-038
+    #[test]
+    fn nav_038_the_raster_is_on_the_grid_and_each_step_is_bigger_than_the_one_below() {
+        for gap in [LINE_GAP, ITEM_GAP, SECTION_GAP] {
+            assert_eq!(gap % GRID, 0.0, "{gap} is on the {GRID}-point grid");
+        }
+        const { assert!(LINE_GAP < ITEM_GAP && ITEM_GAP < SECTION_GAP, "line gap < item gap < section gap") };
+        const { assert!(ITEM_GAP >= 2.0 * LINE_GAP, "the gap between items is clearly bigger than the one inside an item") };
+    }
+
+    // spec: NAV-038
+    #[test]
+    fn nav_038_dialog_spacing_sets_the_item_gap_and_the_line_gap_on_one_ui_only() {
+        in_ui(300.0, |ui| {
+            let before = (ui.spacing().item_spacing.y, ui.spacing().extra_text_line_spacing);
+            ui.scope(|ui| {
+                dialog_spacing(ui);
+                assert_eq!((ui.spacing().item_spacing.y, ui.spacing().extra_text_line_spacing), (ITEM_GAP, LINE_GAP));
+            });
+            assert_eq!((ui.spacing().item_spacing.y, ui.spacing().extra_text_line_spacing), before, "outside the scope nothing changed");
+        });
+    }
+
+    /// The distance between the first two rows of `label` laid out in `ui`, and the row height
+    /// of its font.
+    fn pitch(ui: &mut egui::Ui, label: Label, font: &FontId) -> (f32, f32) {
+        let (_, galley, _) = label.layout_in_ui(ui);
+        assert!(galley.rows.len() >= 3, "the text wraps: {} rows", galley.rows.len());
+        (galley.rows[1].pos.y - galley.rows[0].pos.y, ui.fonts_mut(|f| f.row_height(font)))
+    }
+
+    // spec: NAV-039
+    #[test]
+    fn nav_039_a_hint_has_the_line_gap_between_its_lines_and_rich_text_without_it_has_none() {
+        in_ui(200.0, |ui| {
+            let font = FontId::proportional(12.0);
+            let rich = || RichText::new(LONG).color(MUTED).size(12.0);
+            let (plain_pitch, row) = pitch(ui, Label::new(rich()), &font);
+            assert!((plain_pitch - row).abs() < 0.6, "rich text keeps the font's row height: {plain_pitch} vs {row}");
+            let (spaced_pitch, _) = pitch(ui, Label::new(spaced(ui, rich())), &font);
+            assert!((spaced_pitch - (row + LINE_GAP)).abs() < 0.6, "row + LINE_GAP: {spaced_pitch} vs {row} + {LINE_GAP}");
+        });
+    }
+
+    // spec: NAV-039
+    #[test]
+    fn nav_039_hint_and_prose_draw_the_text_taller_by_the_line_gap_of_each_row() {
+        in_ui(200.0, |ui| {
+            let plain = ui.label(RichText::new(LONG).color(MUTED).size(12.0)).rect.height();
+            let hint = hint(ui, LONG).rect.height();
+            let row = ui.fonts_mut(|f| f.row_height(&FontId::proportional(12.0)));
+            let rows = (plain / row).round();
+            assert!(rows >= 3.0);
+            assert!((hint - plain - rows * LINE_GAP).abs() < 1.5, "{rows} rows: plain {plain}, hint {hint}");
+            let big = prose(ui, RichText::new(LONG).size(18.0)).rect.height();
+            let plain_big = ui.label(RichText::new(LONG).size(18.0)).rect.height();
+            assert!(big > plain_big + 2.0 * LINE_GAP, "prose of another size too: {big} vs {plain_big}");
+            let plain_text = ui.label(LONG).rect.height();
+            let paragraph = paragraph(ui, LONG).rect.height();
+            assert!(paragraph > plain_text + 2.0 * LINE_GAP, "a paragraph of plain text too: {paragraph} vs {plain_text}");
+        });
+    }
 }

@@ -1193,7 +1193,7 @@ impl MailView {
         let (mut yes, mut no) = (false, false);
         let title = format!("Delete {n} message{} forever?", if n == 1 { "" } else { "s" });
         let resp = crate::dialog::Dialog::new("mail-forever", title).width(380.0).non_modal().show(ui.ctx(), |ui| {
-            ui.label(muted("They are removed from the server and cannot be brought back from there. Shale keeps its own local copy of each, in the folder “.trash” of its mail folder.").size(crate::fonts::px(12.5)));
+            crate::theme::prose(ui, muted("They are removed from the server and cannot be brought back from there. Shale keeps its own local copy of each, in the folder “.trash” of its mail folder.").size(crate::fonts::px(12.5)));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let r = ui.button(RichText::new(format!("Delete {n} forever")).color(theme::LINK_MISSING));

@@ -1,7 +1,7 @@
 //! The Vault tab: the folder, closing it and the people folder.
 
 use super::{section, Asks};
-use crate::app::{muted, Action, ShaleApp};
+use crate::app::{Action, ShaleApp};
 use eframe::egui::{self, Ui};
 use std::path::PathBuf;
 
@@ -21,7 +21,7 @@ impl ShaleApp {
                 }
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(crate::theme::SECTION_GAP - crate::theme::ITEM_GAP);
         if ui.button("Close this vault (back to the start screen)").clicked() {
             self.flush_all();
             self.remember_open_files();
@@ -41,7 +41,7 @@ impl ShaleApp {
                 .on_hover_text("Contact notes live here. Type [[p and a name to link a person; imported e-mails and events find their people here.")
                 .changed();
         });
-        ui.label(muted("Type [[p followed by a name to pick a person from this folder (or make a new contact note).").size(12.0));
+        crate::theme::hint(ui, "Type [[p followed by a name to pick a person from this folder (or make a new contact note).");
         self.names_check_ui(ui);
         changed
     }
@@ -59,16 +59,16 @@ impl ShaleApp {
             }
             if running {
                 ui.spinner();
-                ui.label(muted("Checking…").size(12.0));
+                crate::theme::hint(ui, "Checking…");
             }
         });
         if let Some(r) = self.vault_check.report.clone() {
-            ui.label(muted(r).size(12.0));
+            crate::theme::hint(ui, r);
         }
         let found = match &self.vault_check.result {
             None => return,
             Some(Err(e)) => {
-                ui.colored_label(crate::theme::LINK_MISSING, e.as_str());
+                crate::theme::problem(ui, e.as_str());
                 return;
             }
             Some(Ok(found)) if found.is_empty() => {
@@ -100,10 +100,10 @@ impl ShaleApp {
                         one = Some(i);
                     }
                     ui.label(crate::vault::rel_to_string(&f.rel) + if f.is_dir { "/" } else { "" });
-                    ui.label(muted(f.reasons.join("; ")).size(12.0));
+                    crate::theme::hint(ui, f.reasons.join("; "));
                     match &f.proposed {
                         Some(p) => ui.label(format!("→ {p}")),
-                        None => ui.label(muted("no name fits: shorten the folders above it").size(12.0)),
+                        None => crate::theme::hint(ui, "no name fits: shorten the folders above it"),
                     };
                 });
             }

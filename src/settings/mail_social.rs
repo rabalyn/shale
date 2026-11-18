@@ -1,7 +1,7 @@
 //! The Mail tab and the Feeds tab: the simple settings, and a button to each account dialog.
 
 use super::{section, Asks};
-use crate::app::{muted, ShaleApp};
+use crate::app::ShaleApp;
 use eframe::egui::{self, Ui};
 
 impl ShaleApp {
@@ -11,7 +11,7 @@ impl ShaleApp {
             if ui.button("Mail accounts…").on_hover_text("Add IMAP accounts, sending, encryption").clicked() {
                 asks.mail = true;
             }
-            ui.label(muted(format!("{} configured", self.cfg.mail_accounts.len())).size(12.0));
+            crate::theme::hint(ui, format!("{} configured", self.cfg.mail_accounts.len()));
         });
         section(ui, "Reading");
         ui.horizontal(|ui| {
@@ -36,14 +36,14 @@ impl ShaleApp {
             if ui.button("Feed accounts…").on_hover_text("Mastodon and Bluesky accounts").clicked() {
                 asks.social = true;
             }
-            ui.label(muted(format!("{} configured", self.cfg.social_accounts.len())).size(12.0));
+            crate::theme::hint(ui, format!("{} configured", self.cfg.social_accounts.len()));
         });
         ui.horizontal(|ui| {
             ui.label("Look for new posts every");
             changed |= ui.add(egui::DragValue::new(&mut self.cfg.social_check_minutes).range(0..=1440)).changed();
             ui.label("minutes (0: never)");
         });
-        ui.add_space(6.0);
+        ui.add_space(crate::theme::SECTION_GAP - crate::theme::ITEM_GAP);
         self.post_index_settings(ui);
         changed
     }

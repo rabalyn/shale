@@ -29,7 +29,6 @@ impl ShaleApp {
             }
             changed = true;
         }
-        ui.add_space(6.0);
         let (families, searching) = (self.fonts.system.families().to_vec(), !self.fonts.system.ready());
         let fonts = &mut self.fonts;
         egui::Grid::new("fonts-grid").num_columns(4).spacing([12.0, 6.0]).show(ui, |ui| {
@@ -44,8 +43,7 @@ impl ShaleApp {
             }
         });
         if self.cfg.fonts.same_everywhere {
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("The size is that of dialogs and menus; the text of the editor is drawn a little larger, as before.").small().color(theme::MUTED));
+            theme::prose(ui, egui::RichText::new("The size is that of dialogs and menus; the text of the editor is drawn a little larger, as before.").small().color(theme::MUTED));
         }
         changed
     }

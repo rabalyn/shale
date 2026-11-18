@@ -2088,6 +2088,9 @@ fn a_mail_that_may_have_been_sent_waits_for_the_person_and_a_failed_one_can_be_r
 #[test]
 fn the_account_settings_have_the_sending_section_with_presets_and_test_connection_signs_in_to_smtp() {
     let mut w = W::new("smtp-dialog", false);
+    // the account form with its Sending section is taller than 900 points since the dialogs have
+    // more room between their items (NAV-038): the window is taller, so its buttons are not scrolled out
+    w.size = Vec2::new(1500.0, 1300.0);
     let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
     let (settings, user) = {
         let g = smtp.state();

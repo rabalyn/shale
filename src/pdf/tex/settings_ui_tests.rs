@@ -41,6 +41,9 @@ impl T {
         app.vdata.state.latex_export.setup_seen = true;
         app.open_settings(SettingsTab::Latex);
         let mut t = T { app, hl: Headless::new(), dir };
+        // the LaTeX page with its forms is longer than the 900 points of the usual window since the
+        // dialogs have more room between their lines and items (NAV-038); it would scroll
+        t.hl.set_size(eframe::egui::Vec2::new(1500.0, 1400.0));
         t.hl.frames(&mut t.app, 4);
         t
     }

@@ -600,7 +600,8 @@ fn set_002_settings_open_on_a_short_page() {
     }
     let rect = |l: &str| shown.iter().find(|(_, t, _)| t.starts_with(l)).map(|x| x.2).unwrap_or_else(|| panic!("no {l:?}"));
     let height = rect("Type [[p followed").bottom() - rect("Vault folder").top();
-    assert!(height < 200.0, "the first page is {height} points high");
+    // 200 points before the raster of NAV-038 (more room between the lines and the items)
+    assert!(height < 240.0, "the first page is {height} points high");
     p.app.open_settings(SettingsTab::Editor);
     let shown = p.look(Show::Modals);
     let rect = |l: &str| shown.iter().find(|(_, t, _)| t.starts_with(l)).map(|x| x.2).unwrap_or_else(|| panic!("no {l:?}"));

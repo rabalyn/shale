@@ -74,7 +74,7 @@ fn notice(ui: &mut Ui, n: &Notice) {
     if n.ok {
         ui.label(&n.text);
     } else {
-        ui.colored_label(theme::LINK_MISSING, &n.text);
+        crate::theme::problem(ui, &n.text);
     }
 }
 
@@ -95,7 +95,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
 }
 
 fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>) {
-    ui.label("To make a PDF from a template, Shale needs a program called TeX.");
+    crate::theme::paragraph(ui, "To make a PDF from a template, Shale needs a program called TeX.");
     ui.add_space(4.0);
     // the install runs: its progress and Cancel
     if let Some(t) = st.task.as_ref().filter(|t| t.kind == TaskKind::Install) {
@@ -115,21 +115,21 @@ fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
         }
         TexFact::Found(what) => {
             done_line(ui, format!("Found: {what} ✓"));
-            ui.label(muted("There is nothing to install.").size(12.0));
+            crate::theme::hint(ui, "There is nothing to install.");
         }
         TexFact::Missing(why) => {
-            ui.label("It is not on this computer yet. Shale can install its own copy: it lives in a folder of its own and changes nothing else on your computer.");
+            crate::theme::paragraph(ui, "It is not on this computer yet. Shale can install its own copy: it lives in a folder of its own and changes nothing else on your computer.");
             ui.add_space(4.0);
             match &st.data {
                 None => {
-                    ui.colored_label(theme::LINK_MISSING, "This computer has no data folder to keep TeX in, so Shale cannot install it.");
+                    crate::theme::problem(ui, "This computer has no data folder to keep TeX in, so Shale cannot install it.");
                 }
                 Some(data) => {
                     let folder = engine::managed_root(data);
-                    ui.label(muted(consent_text(cfg.repository.trim_end_matches('/'), &folder.to_string_lossy())).size(12.0));
+                    crate::theme::hint(ui, consent_text(cfg.repository.trim_end_matches('/'), &folder.to_string_lossy()));
                     let perl = st.setup.perl.get_or_insert_with(install::perl_problem).clone();
                     if let Some(p) = &perl {
-                        ui.colored_label(theme::LINK_MISSING, p);
+                        crate::theme::problem(ui, p);
                     }
                     ui.add_space(4.0);
                     let label = format!("Install (about {DOWNLOAD_MB} MB download, {DISK_MB} MB on disk)");
@@ -138,7 +138,7 @@ fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
                     }
                 }
             }
-            ui.label(muted(format!("(Details: {why})")).size(11.0));
+            crate::theme::prose(ui, muted(format!("(Details: {why})")).size(11.0));
         }
     }
     if let Some(n) = &st.notice {
@@ -148,10 +148,10 @@ fn tex_step(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, acts: &mut Vec<Act>
 }
 
 fn templates_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
-    ui.label("The templates give your PDFs the look of your university: the title page, the colours, the fonts. They are kept in your vault, so they are backed up and synced with your notes.");
+    crate::theme::paragraph(ui, "The templates give your PDFs the look of your university: the title page, the colours, the fonts. They are kept in your vault, so they are backed up and synced with your notes.");
     ui.add_space(4.0);
     if st.sets.vault.is_none() {
-        ui.colored_label(theme::LINK_MISSING, "Open a vault first: the templates are kept in it.");
+        crate::theme::problem(ui, "Open a vault first: the templates are kept in it.");
         return;
     }
     // an import runs: its progress and Cancel
@@ -172,13 +172,13 @@ fn templates_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
         ui.radio_value(&mut st.setup.choice, Choice::Existing(id), format!("Use “{name}” (already in your vault)"));
     }
     ui.radio_value(&mut st.setup.choice, Choice::Preset, "TU Darmstadt (tested version)  — recommended");
-    ui.label(muted(format!("tuda-ci 4.06 from GitHub ({PRESET_REPO} at {}), the version Shale was tested with.", PRESET_COMMIT.chars().take(7).collect::<String>())).size(12.0));
+    crate::theme::hint(ui, format!("tuda-ci 4.06 from GitHub ({PRESET_REPO} at {}), the version Shale was tested with.", PRESET_COMMIT.chars().take(7).collect::<String>()));
     ui.radio_value(&mut st.setup.choice, Choice::Ctan, "The newest version from CTAN");
-    ui.label(muted("Whatever CTAN has today: newer, but Shale was not tested with it.").size(12.0));
+    crate::theme::hint(ui, "Whatever CTAN has today: newer, but Shale was not tested with it.");
     ui.radio_value(&mut st.setup.choice, Choice::File, "From a file or a folder (a .zip or .tar.gz, or a folder of templates)");
     if st.setup.choice == Choice::File {
         ui.add(egui::TextEdit::singleline(&mut st.setup.file).hint_text("~/Downloads/templates.zip").desired_width(380.0));
-        ui.label(muted("You can also drag the file or folder onto this window.").size(12.0));
+        crate::theme::hint(ui, "You can also drag the file or folder onto this window.");
     }
     ui.radio_value(&mut st.setup.choice, Choice::Github, "From a GitHub repository");
     if st.setup.choice == Choice::Github {
@@ -198,7 +198,7 @@ fn templates_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
 
 fn logo_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
     let Some(set) = st.chosen_set() else {
-        ui.colored_label(theme::LINK_MISSING, "Choose the templates first.");
+        crate::theme::problem(ui, "Choose the templates first.");
         return;
     };
     let (status, name) = (set.logo.clone(), set.meta.name.clone());
@@ -209,29 +209,29 @@ fn logo_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
         }
         LogoStatus::Present(f) => {
             done_line(ui, format!("The logo is there: {f} ✓"));
-            ui.label(muted("To use another one, drop it onto this window.").size(12.0));
+            crate::theme::hint(ui, "To use another one, drop it onto this window.");
         }
         LogoStatus::Missing => {
-            ui.label("The templates put the university's logo on the title page. The logo may not be shipped with Shale or with the templates, so you need to get it yourself.");
-            ui.label("Members of the TU Darmstadt can get it from the university library's page about LaTeX at the corporate design of the university (in the university network, or through its VPN):");
+            crate::theme::paragraph(ui, "The templates put the university's logo on the title page. The logo may not be shipped with Shale or with the templates, so you need to get it yourself.");
+            crate::theme::paragraph(ui, "Members of the TU Darmstadt can get it from the university library's page about LaTeX at the corporate design of the university (in the university network, or through its VPN):");
             ui.horizontal(|ui| {
-                ui.label(muted(LOGO_PAGE).size(11.0));
+                crate::theme::prose(ui, muted(LOGO_PAGE).size(11.0));
             });
             ui.horizontal(|ui| {
                 if ui.button("Open that page").clicked() {
                     acts.push(Act::OpenLogoPage);
                 }
-                ui.label(muted(format!("Direct download in the university network: {LOGO_DOWNLOAD}")).size(11.0));
+                crate::theme::prose(ui, muted(format!("Direct download in the university network: {LOGO_DOWNLOAD}")).size(11.0));
             });
             ui.add_space(4.0);
-            ui.label("Then give the file to Shale: drag it onto this window, or type or paste where it is.");
+            crate::theme::paragraph(ui, "Then give the file to Shale: drag it onto this window, or type or paste where it is.");
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut st.setup.logo_path).hint_text("~/Downloads/tuda_logo.pdf").desired_width(320.0));
                 if ui.add_enabled(!st.setup.logo_path.trim().is_empty(), egui::Button::new("Use this logo")).clicked() {
                     acts.push(Act::UseLogo);
                 }
             });
-            ui.label(muted("Not now? Press Later: exports then carry a grey placeholder and are not CI-conformant. You can add the logo any time in Settings → LaTeX.").size(12.0));
+            crate::theme::hint(ui, "Not now? Press Later: exports then carry a grey placeholder and are not CI-conformant. You can add the logo any time in Settings → LaTeX.");
         }
     }
     if let Some(n) = &st.setup.message {
@@ -252,11 +252,11 @@ fn contrast(rgb: [u8; 3]) -> Color32 {
 
 fn details_step(ui: &mut Ui, st: &mut TexState) {
     let Some(set) = st.chosen_set() else {
-        ui.colored_label(theme::LINK_MISSING, "Choose the templates first.");
+        crate::theme::problem(ui, "Choose the templates first.");
         return;
     };
     let id = set.id.clone();
-    ui.label("These choices are used for every PDF you make with these templates. You can run this setup again from Settings → LaTeX whenever you want to change them.");
+    crate::theme::paragraph(ui, "These choices are used for every PDF you make with these templates. You can run this setup again from Settings → LaTeX whenever you want to change them.");
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Accent colour").color(theme::MUTED));
     if st.setup.accents.is_empty() {
@@ -281,7 +281,7 @@ fn details_step(ui: &mut Ui, st: &mut TexState) {
                 }
             }
         });
-        ui.label(muted(format!("Chosen: {}", if st.setup.details.accent.is_empty() { "none".to_string() } else { st.setup.details.accent.clone() })).size(12.0));
+        crate::theme::hint(ui, format!("Chosen: {}", if st.setup.details.accent.is_empty() { "none".to_string() } else { st.setup.details.accent.clone() }));
     }
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Language of your documents").color(theme::MUTED));
@@ -294,7 +294,7 @@ fn details_step(ui: &mut Ui, st: &mut TexState) {
     ui.add(egui::TextEdit::singleline(&mut st.setup.details.department).hint_text("for example your department's name").desired_width(300.0));
     ui.label(egui::RichText::new("Your name (optional)").color(theme::MUTED));
     ui.add(egui::TextEdit::singleline(&mut st.setup.details.author).hint_text("filled in as the author of your documents").desired_width(300.0));
-    ui.label(muted(format!("Saved in templates/tex/{id}/settings.toml when you press Next.")).size(12.0));
+    crate::theme::hint(ui, format!("Saved in templates/tex/{id}/settings.toml when you press Next."));
     if let Some(n) = &st.setup.message {
         ui.add_space(4.0);
         notice(ui, n);
@@ -302,12 +302,12 @@ fn details_step(ui: &mut Ui, st: &mut TexState) {
 }
 
 fn test_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
-    ui.label("Shale now makes a small PDF with your templates and your details, to show that everything works.");
+    crate::theme::paragraph(ui, "Shale now makes a small PDF with your templates and your details, to show that everything works.");
     ui.add_space(4.0);
     if st.setup.job.is_some() || st.setup.run_test {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label("Making the test page… The first time can take a minute or two while TeX prepares its fonts.");
+            crate::theme::paragraph(ui, "Making the test page… The first time can take a minute or two while TeX prepares its fonts.");
         });
         return;
     }
@@ -316,19 +316,19 @@ fn test_step(ui: &mut Ui, st: &mut TexState, acts: &mut Vec<Act>) {
         Some(Outcome::Made { placeholder, opened, warnings }) => {
             done_line(ui, "All set. Export a note with its ⋯ menu → Export to PDF… → Engine: LaTeX template. ✓");
             match opened {
-                Ok(()) => ui.label(muted("The test page was opened in your PDF viewer.").size(12.0)),
-                Err(e) => ui.colored_label(theme::LINK_MISSING, format!("The test page could not be opened: {e}")),
+                Ok(()) => crate::theme::hint(ui, "The test page was opened in your PDF viewer."),
+                Err(e) => crate::theme::problem(ui, format!("The test page could not be opened: {e}")),
             };
             if *placeholder {
-                ui.colored_label(theme::LINK_MISSING, "It carries a grey placeholder instead of the logo, so it is not CI-conformant. You can add the logo any time in Settings → LaTeX.");
+                crate::theme::problem(ui, "It carries a grey placeholder instead of the logo, so it is not CI-conformant. You can add the logo any time in Settings → LaTeX.");
             }
             for w in warnings {
-                ui.label(muted(w).size(12.0));
+                crate::theme::hint(ui, w);
             }
         }
         Some(Outcome::Failed(f)) => {
-            ui.colored_label(theme::LINK_MISSING, "The test page did not work.");
-            ui.colored_label(theme::LINK_MISSING, &f.headline);
+            crate::theme::problem(ui, "The test page did not work.");
+            crate::theme::problem(ui, &f.headline);
             for p in f.problems.iter().take(6) {
                 ui.label(egui::RichText::new(p).monospace().size(12.0));
             }

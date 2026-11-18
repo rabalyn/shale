@@ -759,6 +759,11 @@ fn nav_028_export_to_pdf_keeps_export_and_cancel_in_view_in_a_short_window() {
     assert!(p.app.modal.is_none() && !p.dir.join("exports/Ideas.pdf").exists());
 }
 
+/// The most that may lie between the last line of a dialog's content and its footer's buttons:
+/// the separator with an item gap (NAV-038) on each side, and the line gap of the last line. It
+/// was 20 points before the raster (4-point item gaps, no line gap).
+const FOOTER_GAP_MAX: f32 = 30.0;
+
 // spec: NAV-028
 #[test]
 fn nav_028_import_has_no_empty_band_between_its_content_and_its_footer() {
@@ -776,7 +781,7 @@ fn nav_028_import_has_no_empty_band_between_its_content_and_its_footer() {
         let last = p.find(Show::Modals, None, "Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more.");
         let import = p.find(Show::Modals, Some(Role::Button), "Import 1 item");
         let gap = import.top() - last.bottom();
-        assert!(gap < 20.0, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?}");
+        assert!(gap < FOOTER_GAP_MAX, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?}");
     }
     // and the content is not a pixel taller than the room it has, so it does not scroll (and
     // shows no scroll bar): a turn of the wheel moves nothing
@@ -825,7 +830,7 @@ fn nav_028_import_opened_again_with_one_item_has_no_empty_band_left_from_many() 
         let last = p.find(Show::Modals, None, last_line);
         let import = p.find(Show::Modals, Some(Role::Button), "Import 1 item");
         let gap = import.top() - last.bottom();
-        assert!(gap < 20.0, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?} (the dialog was {tall:?} with many lines)");
+        assert!(gap < FOOTER_GAP_MAX, "frame {n}: {gap} px between the last line {last:?} and the buttons {import:?} (the dialog was {tall:?} with many lines)");
     }
     let short = p.dialog_area("import");
     assert!(short.height() < tall.height() - 100.0, "{tall:?} with many lines, {short:?} with one");

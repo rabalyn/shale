@@ -16,7 +16,7 @@ mod sync_calendar;
 mod vault;
 mod vim;
 
-use crate::app::{muted, ShaleApp};
+use crate::app::ShaleApp;
 use crate::keys_ui::KeyDialog;
 use crate::theme;
 use eframe::egui::{self, Context, Id, Ui};
@@ -249,7 +249,7 @@ impl ShaleApp {
     /// whole dialog (add them in a `right_to_left` layout here).
     fn settings_header(&mut self, ui: &mut Ui, tab: SettingsTab, asks: &mut Asks) {
         ui.horizontal(|ui| {
-            ui.label(muted(tab.about()).size(12.0));
+            crate::theme::hint(ui, tab.about());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Open settings file").on_hover_text("Edit all settings as text, with a description of each").clicked() {
                     self.open_settings_file();
@@ -262,7 +262,8 @@ impl ShaleApp {
 
 /// A grey section heading inside a page.
 pub(crate) fn section(ui: &mut Ui, title: &str) {
-    ui.add_space(6.0);
+    // the item gap before it is already there: SECTION_GAP in all
+    ui.add_space(theme::SECTION_GAP - theme::ITEM_GAP);
     ui.label(egui::RichText::new(title).color(theme::MUTED));
 }
 
@@ -283,6 +284,26 @@ mod tests {
         });
         out.textures_delta.clear();
         (auto, keys, appearance)
+    }
+
+    // spec: NAV-038
+    #[test]
+    fn nav_038_a_section_heading_has_the_section_gap_above_it_and_the_item_gap_below_it() {
+        let ctx = Context::default();
+        let mut gaps = (0.0, 0.0);
+        let mut out = ctx.run_ui(RawInput::default(), |ui| {
+            theme::dialog_spacing(ui);
+            let item = ui.label("An item");
+            section(ui, "A section");
+            let next = ui.label("Its first item");
+            let heading_height = ui.label(egui::RichText::new("A section").color(theme::MUTED)).rect.height();
+            // item, SECTION_GAP, heading, ITEM_GAP, next item
+            let rest = next.rect.top() - item.rect.bottom() - heading_height;
+            gaps = (rest - theme::ITEM_GAP, theme::ITEM_GAP);
+        });
+        out.textures_delta.clear();
+        assert!((gaps.0 - theme::SECTION_GAP).abs() < 0.6, "the gap above the heading: {} of {}", gaps.0, theme::SECTION_GAP);
+        assert!(gaps.0 > gaps.1, "the heading is closer to its own items than to the section before it");
     }
 
     // spec: CFG-041

@@ -238,7 +238,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     // ---- the list
     if accounts.is_empty() {
-        ui.label(muted("No account yet. Add a Mastodon or Bluesky account below to read its feeds here."));
+        crate::theme::prose(ui, muted("No account yet. Add a Mastodon or Bluesky account below to read its feeds here."));
     }
     let mut start_edit = None;
     for (i, e) in accounts.iter().enumerate() {
@@ -274,11 +274,14 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
     if let Some(a) = &d.editing {
         ui.label(egui::RichText::new(format!("Sign in again as @{}", a.handle)).size(14.0).color(theme::TEXT));
         ui.add(
-            egui::Label::new(muted(&format!(
-                "{} account on {}. The network, server and handle stay as they are; a successful sign-in replaces the saved secret, and the account keeps its feeds and posts. Cancel leaves this form.",
-                a.network.label(),
-                a.server
-            )))
+            egui::Label::new(crate::theme::spaced(
+                ui,
+                muted(&format!(
+                    "{} account on {}. The network, server and handle stay as they are; a successful sign-in replaces the saved secret, and the account keeps its feeds and posts. Cancel leaves this form.",
+                    a.network.label(),
+                    a.server
+                )),
+            ))
             .wrap(),
         );
     } else {
@@ -329,7 +332,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
             if rec("use-token".into(), ui.checkbox(&mut d.use_token, "I already have an access token")).changed() {
                 d.error = None;
             }
-            ui.label(muted("Shale only asks for permission to read. The code or token is not kept; the access token goes to your system keyring."));
+            crate::theme::prose(ui, muted("Shale only asks for permission to read. The code or token is not kept; the access token goes to your system keyring."));
         }
         Network::Bluesky => {
             egui::Grid::new("social-bluesky").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {

@@ -183,7 +183,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
     // ---- what
     if d.items.is_empty() {
-        ui.label(muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
+        crate::theme::prose(ui, muted("Nothing to import yet. Drop e-mails, calendar events, pictures or other files on the window, or add a file below."));
     }
     for (i, it) in d.items.iter_mut().enumerate() {
         egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(6).inner_margin(8).show(ui, |ui| {
@@ -346,7 +346,7 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
         };
         rec("link".into(), ui.checkbox(&mut d.link_on, format!("Add links to the new {new} in “{name}”")));
     }
-    ui.label(muted("Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more."));
+    crate::theme::prose(ui, muted("Drag messages from your mail program, events from a calendar (also Shale's own), or any files onto the window to add more."));
     d.rects = rects;
     action
 }

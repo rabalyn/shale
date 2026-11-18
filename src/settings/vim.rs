@@ -3,7 +3,7 @@
 
 use super::editor::cursor_combo;
 use super::{section, SettingsTab};
-use crate::app::{muted, ShaleApp};
+use crate::app::ShaleApp;
 use crate::link_preview::{DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH};
 use crate::vim::EscCursor;
 use eframe::egui::{self, Ui};
@@ -12,7 +12,7 @@ impl ShaleApp {
     pub(super) fn vim_tab(&mut self, ui: &mut Ui, tab: &mut SettingsTab) -> bool {
         let mut changed = false;
         changed |= ui.checkbox(&mut self.cfg.vim_mode, "Vim-style editing").changed();
-        ui.label(muted("Notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back.").size(12.0));
+        crate::theme::hint(ui, "Notes open in normal mode (h j k l w b, :line, /search, v / V, d y p); i a o to type, Esc back.");
         section(ui, "Cursor");
         ui.add_enabled_ui(self.cfg.vim_mode, |ui| {
             changed |= cursor_combo(ui, "Cursor in normal mode", "normal-cursor-shape", &mut self.cfg.normal_cursor_shape);
@@ -36,9 +36,9 @@ impl ShaleApp {
                 changed = true;
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(crate::theme::SECTION_GAP - crate::theme::ITEM_GAP);
         ui.horizontal(|ui| {
-            ui.label(muted("The keys of normal mode (Space Tab, Space f f, Space f g, Shift+K) are set in the").size(12.0));
+            crate::theme::hint(ui, "The keys of normal mode (Space Tab, Space f f, Space f g, Shift+K) are set in the");
             if ui.link("Keybindings tab").clicked() {
                 *tab = SettingsTab::Keybindings;
             }

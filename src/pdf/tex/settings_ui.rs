@@ -6,7 +6,6 @@
 use super::compile::compile_test_document;
 use super::engine::{self, Detection, Engine, Kind, TexChoice, TexConfig};
 use super::install::{self, Env, Handle, DISK_MB, DOWNLOAD_MB};
-use crate::app::muted;
 use crate::theme;
 use eframe::egui::{self, Context, Ui};
 use std::ffi::OsString;
@@ -215,12 +214,12 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     if st.detection.is_none() && st.detecting.is_none() && st.task.is_none() {
         st.check_again(&ctx);
     }
-    ui.label(muted("Notes can be exported to PDF through LaTeX templates. That needs LuaLaTeX and biber: Shale uses the ones of this computer when they are new enough, or installs its own TeX Live.").size(12.0));
+    crate::theme::hint(ui, "Notes can be exported to PDF through LaTeX templates. That needs LuaLaTeX and biber: Shale uses the ones of this computer when they are new enough, or installs its own TeX Live.");
     ui.horizontal(|ui| {
         if ui.button("Set up LaTeX export…").on_hover_text("A guided setup: TeX, the templates, the logo and your details, step by step").clicked() {
             st.setup_requested = true;
         }
-        ui.label(muted("Not firm in TeX? This takes you through it.").size(12.0));
+        crate::theme::hint(ui, "Not firm in TeX? This takes you through it.");
     });
 
     ui.add_space(6.0);
@@ -236,13 +235,13 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
             Ok(e) => {
                 let size = if e.kind == Kind::Managed { d.managed_bytes.map(|b| format!(", {} on disk", crate::data_usage::human_bytes(b))).unwrap_or_default() } else { String::new() };
                 ui.label(format!("Using {} (LaTeX kernel {}){size}", engine_name(e), e.kernel));
-                ui.label(muted(e.bin_dir.to_string_lossy()).size(12.0));
+                crate::theme::hint(ui, e.bin_dir.to_string_lossy());
                 if !e.missing.is_empty() {
-                    ui.colored_label(theme::LINK_MISSING, format!("It misses these packages: {}. Use the TeX Live that Shale installs.", e.missing.join(", ")));
+                    crate::theme::problem(ui, format!("It misses these packages: {}. Use the TeX Live that Shale installs.", e.missing.join(", ")));
                 }
             }
             Err(why) => {
-                ui.colored_label(theme::LINK_MISSING, format!("No TeX can be used: {why}"));
+                crate::theme::problem(ui, format!("No TeX can be used: {why}"));
             }
         },
     }
@@ -250,7 +249,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
         if cfg.engine == TexChoice::Auto {
             let reason = d.system_reason();
             if d.managed.is_ok() && !reason.is_empty() {
-                ui.label(muted(reason).size(12.0));
+                crate::theme::hint(ui, reason);
             }
         }
     }
@@ -282,12 +281,12 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     super::sets_ui::show(ui, st, cfg);
 
     egui::CollapsingHeader::new("Download address").id_salt("tex-repository").show(ui, |ui| {
-        ui.label(muted("The TeX Live repository the install and the update download from.").size(12.0));
+        crate::theme::hint(ui, "The TeX Live repository the install and the update download from.");
         if ui.add(egui::TextEdit::singleline(&mut cfg.repository).desired_width(360.0)).changed() {
             changed = true;
         }
         if let Err(e) = install::check_repository(&cfg.repository) {
-            ui.colored_label(theme::LINK_MISSING, e);
+            crate::theme::problem(ui, e);
         }
         if ui.button("Use the default").clicked() && cfg.repository != engine::DEFAULT_REPOSITORY {
             cfg.repository = engine::DEFAULT_REPOSITORY.to_string();
@@ -300,7 +299,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
         if n.ok {
             ui.label(&n.text);
         } else {
-            ui.colored_label(theme::LINK_MISSING, &n.text);
+            crate::theme::problem(ui, &n.text);
         }
         if let Some(d) = &n.details {
             egui::CollapsingHeader::new("The end of the log").id_salt("tex-log").show(ui, |ui| {
@@ -314,7 +313,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
 /// Install, update and remove of the managed TeX Live.
 fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Context) {
     let Some(data) = st.data.clone() else {
-        ui.label("This computer has no data folder to keep a TeX Live in.");
+        crate::theme::paragraph(ui, "This computer has no data folder to keep a TeX Live in.");
         return;
     };
     let folder = engine::managed_root(&data);
@@ -354,7 +353,7 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
         }
         if st.consent {
             ui.group(|ui| {
-                ui.label(consent_text(cfg.repository.trim_end_matches('/'), &folder.to_string_lossy()));
+                crate::theme::paragraph(ui, consent_text(cfg.repository.trim_end_matches('/'), &folder.to_string_lossy()));
                 ui.horizontal(|ui| {
                     if ui.button("Download and install").clicked() {
                         st.consent = false;
@@ -375,7 +374,7 @@ fn managed_section(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig, ctx: &Contex
     ui.label(format!("{} ({size})", folder.display()));
     if st.confirm_remove {
         ui.group(|ui| {
-            ui.label(format!("This deletes the folder {} and everything in it ({size}). Nothing else is removed. You can install it again later.", folder.display()));
+            crate::theme::paragraph(ui, format!("This deletes the folder {} and everything in it ({size}). Nothing else is removed. You can install it again later.", folder.display()));
             ui.horizontal(|ui| {
                 if ui.button("Remove the TeX Live folder").clicked() {
                     st.confirm_remove = false;

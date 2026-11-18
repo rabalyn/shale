@@ -1,7 +1,7 @@
 //! The Data and caches tab.
 
 use super::Asks;
-use crate::app::{muted, ShaleApp};
+use crate::app::ShaleApp;
 use eframe::egui::{self, Ui};
 
 impl ShaleApp {
@@ -12,7 +12,7 @@ impl ShaleApp {
                 asks.usage = true;
             }
             let total = self.usage.total().map(|t| format!("caches: {}", crate::data_usage::human_bytes(t))).unwrap_or_else(|| "caches: not counted yet".into());
-            ui.label(muted(total).size(12.0));
+            crate::theme::hint(ui, total);
         });
         egui::CollapsingHeader::new("How long caches are kept").id_salt("settings-retention").show(ui, |ui| {
             for id in crate::data_usage::CacheId::ALL.into_iter().filter(|id| !id.kept_current()) {

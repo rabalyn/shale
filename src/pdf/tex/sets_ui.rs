@@ -8,7 +8,6 @@ use super::engine::{Engine, TexConfig};
 use super::import::{self, Request, What};
 use super::sets::{self, SetEntry, SetInfo, Source};
 use super::settings_ui::{Notice, TaskKind, TexState};
-use crate::app::muted;
 use crate::gitsync::TreeLock;
 use crate::theme;
 use eframe::egui::{self, Context, Ui};
@@ -158,7 +157,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig) {
     st.sets.refresh();
     ui.add_space(6.0);
     ui.label(egui::RichText::new("Template sets").color(theme::MUTED));
-    ui.label(muted("The templates a PDF is made with live in your vault, in templates/tex, so they are synced and backed up with your notes. TeX Live supplies only the engine and the generic packages.").size(12.0));
+    crate::theme::hint(ui, "The templates a PDF is made with live in your vault, in templates/tex, so they are synced and backed up with your notes. TeX Live supplies only the engine and the generic packages.");
     if st.sets.vault.is_none() {
         ui.label("Open a vault to import template sets.");
         return;
@@ -185,7 +184,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig) {
     let idle = st.task.is_none();
     let entries = st.sets.sets.clone().unwrap_or_default();
     if entries.is_empty() {
-        ui.label("There are no template sets in this vault yet.");
+        crate::theme::paragraph(ui, "There are no template sets in this vault yet.");
     }
     let mut action: Option<(String, SetAction)> = None;
     for e in &entries {
@@ -211,7 +210,7 @@ fn set_row(ui: &mut Ui, e: &SetEntry, idle: bool, action: &mut Option<(String, S
     match &e.info {
         Err(why) => {
             ui.label(egui::RichText::new(format!("templates/tex/{}", e.id)).strong());
-            ui.colored_label(theme::LINK_MISSING, format!("This folder cannot be read as a set: {why}"));
+            crate::theme::problem(ui, format!("This folder cannot be read as a set: {why}"));
             if ui.add_enabled(idle, egui::Button::new("Remove set…")).clicked() {
                 *action = Some((e.id.clone(), SetAction::Remove));
             }
@@ -219,7 +218,7 @@ fn set_row(ui: &mut Ui, e: &SetEntry, idle: bool, action: &mut Option<(String, S
         Ok(s) => {
             let version = s.meta.version.as_ref().map(|v| format!("  {v}")).unwrap_or_default();
             ui.label(egui::RichText::new(format!("{}{version}", s.meta.name)).strong());
-            ui.label(muted(format!("{} · imported {} · templates/tex/{}", s.meta.source.describe(), s.meta.imported_at, s.id)).size(12.0));
+            crate::theme::hint(ui, format!("{} · imported {} · templates/tex/{}", s.meta.source.describe(), s.meta.imported_at, s.id));
             let kinds = match s.kinds.len() {
                 0 => "no document kinds".to_string(),
                 1 => "1 document kind".to_string(),
@@ -227,16 +226,16 @@ fn set_row(ui: &mut Ui, e: &SetEntry, idle: bool, action: &mut Option<(String, S
             };
             ui.label(kinds);
             if s.kinds.is_empty() {
-                ui.label(muted("Shale has no document kinds for these templates: add them by hand in the folder kinds (see README.md in the set's folder).").size(12.0));
+                crate::theme::hint(ui, "Shale has no document kinds for these templates: add them by hand in the folder kinds (see README.md in the set's folder).");
             }
             let logo = s.logo.text();
             if s.logo == sets::LogoStatus::Missing {
-                ui.colored_label(theme::LINK_MISSING, logo);
+                crate::theme::problem(ui, logo);
             } else {
                 ui.label(logo);
             }
             for p in &s.problems {
-                ui.colored_label(theme::LINK_MISSING, p);
+                crate::theme::problem(ui, p);
             }
             ui.horizontal(|ui| {
                 for (label, tip, a) in [
@@ -295,7 +294,7 @@ fn import_buttons(ui: &mut Ui, st: &mut TexState, ctx: &Context, cfg: &TexConfig
         if ui.add_enabled(idle, egui::Button::new("Newest TU Darmstadt templates from CTAN")).clicked() {
             st.start_import(ctx, cfg, What::Ctan);
         }
-        ui.label(muted("Not pinned and without a checksum: whatever CTAN has today, which Shale was not tested with.").size(12.0));
+        crate::theme::hint(ui, "Not pinned and without a checksum: whatever CTAN has today, which Shale was not tested with.");
     });
 }
 
@@ -308,7 +307,7 @@ fn forms(ui: &mut Ui, st: &mut TexState, ctx: &Context, cfg: &TexConfig, entries
                 ui.add(egui::TextEdit::singleline(&mut url).hint_text("https://github.com/owner/repository").desired_width(380.0));
                 ui.label("Branch, tag or commit (empty: the default branch)");
                 ui.add(egui::TextEdit::singleline(&mut reference).desired_width(380.0));
-                ui.label(muted("Sets Shale does not know get no document kinds: add them by hand (see the README of the set).").size(12.0));
+                crate::theme::hint(ui, "Sets Shale does not know get no document kinds: add them by hand (see the README of the set).");
                 let (go, cancel) = form_buttons(ui, "Import set");
                 if go {
                     st.start_import(ctx, cfg, What::Github { url: url.clone(), reference: reference.clone() });
@@ -351,7 +350,7 @@ fn forms(ui: &mut Ui, st: &mut TexState, ctx: &Context, cfg: &TexConfig, entries
         Form::Remove(id) => {
             let name = entries.iter().find(|e| e.id == id).and_then(|e| e.info.as_ref().ok()).map_or(id.clone(), |s| s.meta.name.clone());
             ui.group(|ui| {
-                ui.label(format!("Move the set “{name}” (templates/tex/{id}) to the vault's .trash folder? Its settings and logo go with it. You can restore it from there."));
+                crate::theme::paragraph(ui, format!("Move the set “{name}” (templates/tex/{id}) to the vault's .trash folder? Its settings and logo go with it. You can restore it from there."));
                 ui.horizontal(|ui| {
                     if ui.button("Move set to trash").clicked() {
                         st.sets.trash = Some(Path::new(sets::SETS_DIR).join(&id));

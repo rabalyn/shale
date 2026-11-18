@@ -375,16 +375,16 @@ impl ShaleApp {
         ui.label(egui::RichText::new("Git sync").color(theme::MUTED));
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return false };
         if self.git_version().is_none() {
-            ui.label("git is not installed. Install git to sync this vault with a git repository.");
+            crate::theme::paragraph(ui, "git is not installed. Install git to sync this vault with a git repository.");
             return false;
         }
         let repo = gitsync::is_repo(&root);
         if !repo {
-            ui.label(muted("This vault is not a git repository yet. Enter the URL of a remote repository, or run “git init” in the vault folder; Shale then syncs it on its own.").size(12.0));
+            crate::theme::hint(ui, "This vault is not a git repository yet. Enter the URL of a remote repository, or run “git init” in the vault folder; Shale then syncs it on its own.");
         } else {
             match &self.sync.remote {
-                Some(u) => ui.label(muted(format!("Remote: {u}")).size(12.0)),
-                None => ui.label(muted("No remote: changes are committed in the vault's own history only.").size(12.0)),
+                Some(u) => crate::theme::hint(ui, format!("Remote: {u}")),
+                None => crate::theme::hint(ui, "No remote: changes are committed in the vault's own history only."),
             };
         }
         ui.horizontal(|ui| {
@@ -431,7 +431,7 @@ impl ShaleApp {
                 ui.label("suffix");
                 changed |= ui.add(egui::TextEdit::singleline(&mut s.commit_suffix).desired_width(120.0)).changed();
             });
-            ui.label(muted(format!("Commits look like: {}Sync from {}: 3 file(s){}", s.commit_prefix, gitsync::host_name(), s.commit_suffix)).size(12.0));
+            crate::theme::hint(ui, format!("Commits look like: {}Sync from {}: 3 file(s){}", s.commit_prefix, gitsync::host_name(), s.commit_suffix));
             let mut rects = vec![("enabled", enabled_rect), ("prefix", prefix_rect)];
             if lfs_installed {
                 // SYNC-020: `sync.lfs_download`
@@ -469,11 +469,11 @@ impl ShaleApp {
     /// Git LFS: installed or not, and the button that stores media with it (SYNC-016, SYNC-017).
     fn lfs_settings_ui(&mut self, ui: &mut Ui) {
         let Some(version) = self.sync.lfs.version.clone() else {
-            ui.label(muted(format!("Git LFS is not installed, so media files (audio, video) are stored like any other file. {}", lfs::INSTALL_HINT)).size(12.0));
+            crate::theme::hint(ui, format!("Git LFS is not installed, so media files (audio, video) are stored like any other file. {}", lfs::INSTALL_HINT));
             return;
         };
         if self.sync.lfs.stores_media {
-            ui.label(muted(format!("Media files (audio, video) of this repository are stored with Git LFS ({version}).")).size(12.0));
+            crate::theme::hint(ui, format!("Media files (audio, video) of this repository are stored with Git LFS ({version})."));
             return;
         }
         ui.horizontal(|ui| {
@@ -483,7 +483,7 @@ impl ShaleApp {
             if b.clicked() {
                 self.start_lfs_setup();
             }
-            ui.label(muted(if self.sync.lfs_job.is_some() { "Setting up…".to_string() } else { format!("Audio and video go to the LFS store of the remote instead of the history ({version}).") }).size(12.0));
+            crate::theme::hint(ui, if self.sync.lfs_job.is_some() { "Setting up…".to_string() } else { format!("Audio and video go to the LFS store of the remote instead of the history ({version}).") });
         });
     }
 }
