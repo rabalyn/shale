@@ -222,7 +222,7 @@ fn key_030_the_fold_keys_fold_and_unfold_at_the_cursor_and_all() {
     assert_eq!(w.hidden(), 0, "unfold");
     // fold all, from a line inside a block: the cursor goes to the header that stays
     w.cursor_in("second");
-    w.press(Key::U, CTRL_SHIFT);
+    w.press(Key::O, CTRL_SHIFT);
     assert_eq!(w.numbers(), vec![1, 6], "only the two # headings stay");
     assert_eq!(w.cursor_line(), 0, "the cursor is on the header of the fold that hid its line");
     assert_eq!(w.cursor(), "# One".len());
@@ -248,7 +248,7 @@ fn edit_075_the_cursor_moving_into_a_folded_block_unfolds_it() {
     assert_eq!(w.cursor_line(), 4, "the cursor is on the line that was hidden");
     // a jump to a line in a fold (a link, a search) unfolds what hides it, and only that
     w.cursor_in("# One");
-    w.press(Key::U, CTRL_SHIFT);
+    w.press(Key::O, CTRL_SHIFT);
     assert_eq!(w.numbers(), vec![1, 6]);
     let text = w.text();
     w.app.tabbar.tabs[w.app.tabbar.active].editor.pending_cursor = Some(crate::markdown::byte_to_char(&text, text.find("third").unwrap()));

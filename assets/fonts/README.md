@@ -8,3 +8,10 @@
   (EDIT-047). It is licensed under the SIL Open Font License 1.1 (see `STIXTwoMath-LICENSE.txt`,
   Reserved Font Name "TM Math"). The file is `fonts/static_otf/STIXTwoMath-Regular.otf` of release
   v2.13 b171 of the official repository (stipub/stixfonts on GitHub), unchanged.
+- `LiberationSerif-Regular.ttf`: the serif font of the Liberation fonts 2.x (Red Hat, formerly
+  Google's digitized data), metric-compatible with Times New Roman, so a Word document set in
+  Times keeps its line breaks. It is used for a note's `print-font: serif` in the PDF export
+  (PDF-014) and as the last fallback for characters no other bundled font has (PDF-010). It is
+  licensed under the SIL Open Font License 1.1 (see `LiberationSerif-LICENSE.txt`, Reserved Font
+  Name "Liberation"). The file is `LiberationSerif-Regular.ttf` of the `ttf-liberation` package,
+  unchanged. Only the regular face is bundled: bold and italic are imitated by the PDF writer.

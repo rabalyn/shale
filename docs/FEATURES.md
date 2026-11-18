@@ -31,7 +31,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   folded away: a folded block shows its first line and a muted `… n lines` badge; the rest is hidden (no line
   numbers for it), with the Markdown preview on and off. Hover a line that starts a block and click the ▾ marker left of
   it (a folded block always shows ▸) to fold it; click the marker or the badge to unfold. Keys (Settings →
-  Keybindings → Note view): **Ctrl+Shift+K** fold, **Ctrl+Shift+J** unfold, **Ctrl+Shift+U** fold all,
+  Keybindings → Note view): **Ctrl+Shift+K** fold, **Ctrl+Shift+J** unfold, **Ctrl+Shift+O** fold all,
   **Ctrl+Shift+I** unfold all; with Vim-style editing `za` `zc` `zo` `zM` `zR`. The cursor never stays in hidden
   text: moving into a fold (or a link or search jumping there) opens it. Folds are kept for the session only and
   are never written into the file. Also foldable (EDIT-080 to EDIT-085): **code blocks**, the **front matter** and a
@@ -95,7 +95,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![Moving a note into a folder](userguide/z_media/screenshots/tree-drag.png)
 
-- Back and forward with the mouse side buttons or Alt+←/→. You can sort the file list by name,
+- Back and forward with the mouse side buttons or Alt+←/→ (macOS: Cmd+[ / Cmd+]). You can sort the file list by name,
   date modified or date created.
 
 ![Suggestions while typing](userguide/z_media/screenshots/link-suggestions.png)
@@ -146,13 +146,29 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   its definition), underline, sub and superscript, `<br>` in table cells and math (vector outlines); a **Contents** page after the title lists the
   `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
-  heading is a `#` that says the same as the title, the separate title is left out, PDF-008), insert a
+  heading is a `#` that says the same as the title, the separate title is left out, PDF-008; a note's
+  properties set how it is printed, see below), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
   the last item you trashed back.
 
   ![The PDF export dialog](userguide/z_media/screenshots/pdf-export-dialog.png)
+
+- **Print properties of a note** (#339): the front matter of a note can say how its PDF is printed; all
+  keys are optional and a bad value is ignored. The export dialog opens with the note's paper, margins,
+  text size, title and contents filled in (and they can be changed there); the font, the spacing, the
+  alignment and the heading colour are read from the note at export time. Word imports write them.
+  - `print-paper`: `A4`, `A5`, `Letter`, `Legal` or `<W>x<H>mm` (a width larger than the height is landscape)
+  - `print-margins`: four numbers in mm, `top right bottom left`
+  - `print-font`: `serif` (Liberation Serif, Times-compatible), `sans` (Ubuntu Light) or `mono` (Hack)
+  - `print-font-size`: the body text in points
+  - `print-line-spacing`: a factor, 1.0 being the font's own single line height
+  - `print-paragraph-spacing`: the space after a body paragraph in points
+  - `print-align`: `left` or `justify`
+  - `print-heading-color`: `#RRGGBB`
+  - `print-title`: `true` or `false`, the note's name as a title
+  - `print-toc`: `true` or `false`, the contents page
 
 - **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
   or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
@@ -264,12 +280,12 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - The middle area splits into any number of **panes** side by side, each with its own tab bar,
   tabs, open tab and back / forward history. **Ctrl+\** (or **Open in split right** in the
   right-click menu of a tab) opens the tab in a new pane to the right of the focused one.
-- One pane has the focus: click into it (tab bar or content) or press **Ctrl+Alt+→ / Ctrl+Alt+←**.
+- One pane has the focus: click into it (tab bar or content) or press **F6 / Shift+F6**.
   Its tab bar has an accent line. Opening notes and links, the quick switcher, new notes, closing
   and switching tabs, back / forward and the reading view all work on the focused pane; renaming,
   moving or deleting a file updates its tabs in every pane.
 - Drag the border between two panes to resize them (neither gets narrower than 240 points).
-  Closing the last tab of a pane (or **Ctrl+Alt+W**) removes the pane; the last pane stays.
+  Closing the last tab of a pane (or **Ctrl+Shift+W**) removes the pane; the last pane stays.
 - The panes, their tabs, the open tab of each, the focused pane and the widths come back at the
   next start. All the keys can be changed in Settings, Keybindings.
 
@@ -296,7 +312,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![The Keybindings tab of the settings](userguide/z_media/screenshots/keybindings.png)
 
-- Ctrl+H puts the keyboard one place to the left (with split panes: into the pane on the left,
+- Ctrl+H (macOS: Cmd+Shift+H) puts the keyboard one place to the left (with split panes: into the pane on the left,
   from the first pane into the left sidebar), Ctrl+L one place to the right (from the sidebar into
   the first pane, then pane by pane; it stays in the last one). Ctrl+Shift+B opens
   the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from
@@ -305,7 +321,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   action already uses asks “Overwrite it?” (Yes takes it from that action and leaves it without a key, No
   changes nothing; Enter answers No), and a binding can be a sequence of keys. While you record, a note
   under the keys says which action they would clash with.
-- Ctrl+Alt+H / Ctrl+Alt+L switch to the previous / next tab, also from the file list and from
+- Ctrl+PageUp / Ctrl+PageDown (macOS: Cmd+Opt+← / Cmd+Opt+→) switch to the previous / next tab, also from the file list and from
   mail, calendar and Feeds; after the last tab comes the first.
 - In the search results j / k go from hit to hit and Ctrl+J / Ctrl+K from file to file.
 - **Markdown preview** (Settings → Editor, or the eye icon in the top right of the editor;
@@ -588,7 +604,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   recognised, and nothing is written until you press Import. Mark several mails (Space or
   Ctrl+click) to import them together.
 - **Keyboard first.** One of the three panes has the keyboard and is framed in the accent
-  colour; Ctrl+H / Ctrl+L (the keys that go between the file list and the editor) move it between
+  colour; Ctrl+H / Ctrl+L (Cmd+Shift+H / Cmd+Shift+L on macOS; the keys that go between the file list and the editor) move it between
   folders, list and message, and from the folders on into the left sidebar. The three panes keep
   a least width (170, 220 and 280 points): in a window too narrow for them the panes scroll
   sideways and the pane that has the keyboard is scrolled into view. j / k act in that pane
@@ -621,7 +637,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 ### Writing and sending (phase 3)
 
 - **Compose** with `c` (or the Compose button), **Reply** `r`, **Reply all** `Shift+R`, **Forward**
-  `Shift+F` (also buttons under the message, which also answer to Alt+R, Alt+A, Alt+F and, for the others, Alt+I, Alt+C, Alt+U, Alt+G, Alt+M, Alt+D; hold Alt to see the letter underlined; `f` is still the flag key). Mail is plain text. To, Cc
+  `Shift+F` (also buttons under the message, which also answer to Alt+R, Alt+A, Alt+F and, for the others, Alt+I, Alt+C, Alt+U, Alt+G, Alt+M, Alt+D (not on macOS, where you can bind them); hold Alt to see the letter underlined; `f` is still the flag key). Mail is plain text. To, Cc
   and Bcc complete from the addresses in your people notes and in the mail you already have (↑ ↓,
   Tab or a click); the subject, the text and the attachments are below. Attach a file by its path,
   a file of the vault (also from the media folder) or a **note** (its markdown, as a `.md`
@@ -909,7 +925,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ## Keyboard
 
-The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
+Ctrl is Cmd on macOS. No default key is one that the system reserves (the app menu's Cmd+H, AltGr on Windows, the workspace keys of the Linux desktops), so macOS has other keys for six actions, named in the rows below; a key you set yourself is never refused for that reason. The keys below are the defaults of the shortcuts that can be changed in **Settings → Keybindings** (Change replaces the keys of an action, Add gives it one more, Clear leaves it without a key)
 (everywhere, file list, search results, mail view, note view, vim normal mode; a key that another action uses asks whether to overwrite it: Yes takes it from that action, No changes nothing).
 Text editing keys and vim keys are fixed.
 
@@ -924,23 +940,23 @@ Text editing keys and vim keys are fixed.
 | Ctrl+S | Save now (notes also save automatically) |
 | Ctrl+W | Close tab |
 | Ctrl+Shift+F | Search all notes |
-| Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane |
-| Ctrl+Alt+H / Ctrl+Alt+L | Previous / next tab (from the last tab on to the first), wherever the keyboard is |
+| Ctrl+H / Ctrl+L | Keyboard one place left / right: through the split panes in screen order, left of the first pane into the left sidebar, from there into the first pane (macOS: Cmd+Shift+H / Cmd+Shift+L, because Cmd+H hides the app) |
+| Ctrl+PageUp / Ctrl+PageDown | Previous / next tab (from the last tab on to the first), wherever the keyboard is (macOS: Cmd+Opt+← / Cmd+Opt+→) |
 | Ctrl+\ | Split right: open this tab in a new pane to the right (panes sit side by side, each with its own tabs) |
-| Ctrl+Alt+→ / Ctrl+Alt+← | Focus the next / previous pane |
-| Ctrl+Alt+W | Close the pane with all its tabs |
+| F6 / Shift+F6 | Focus the next / previous pane |
+| Ctrl+Shift+W | Close the pane with all its tabs (macOS: Cmd+Shift+W) |
 | Ctrl+Shift+B | File list with the keyboard in it: j / k (or ↓ / ↑) next / previous file, Ctrl+J / Ctrl+K next / previous folder, Space opens or closes a folder, Enter opens, Esc back |
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
-| Alt+← / Alt+→ | Back / forward |
+| Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
 | Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
 | Ctrl+Shift+K / Ctrl+Shift+J | Fold / unfold the block at the cursor (a heading section, quote, list item or list; again on a folded line folds the block around it); the cursor then goes to the block's first line |
-| Ctrl+Shift+U / Ctrl+Shift+I | Fold all / unfold all blocks of the note |
+| Ctrl+Shift+O / Ctrl+Shift+I | Fold all / unfold all blocks of the note |
 | Ctrl+Shift+C | Copy the code of the code block at the cursor (no fences, no newline at the end) |
 | Alt+V, Alt+P, Alt+D, Alt+N | The buttons of the view header and tab bar of a note: edit / reading view, Markdown preview, the ⋯ menu (opens it), New tab |
 | Alt+1, Alt+2, Alt+3, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0 | The ribbon items by position: the first ten icons of the ribbon, as shown (also after you reordered or removed some) |
 | Alt+, / Alt+. | Show or hide the left / right sidebar |
-| Hold Alt | A small badge with its key appears at the corner of each of these buttons that has an Alt key (it follows a key you changed). On macOS, where Option+letter types characters, these actions have no key until you give them one in Settings → Keybindings (scope Note view and Everywhere) |
+| Hold Alt | A small badge with its key appears at the corner of each of these buttons that has an Alt key (it follows a key you changed). On macOS, where Option+letter types characters, these actions, and the Alt keys of the open mail, have no key until you give them one in Settings → Keybindings (scope Note view, Mail view and Everywhere) |
 | Ctrl+6 | Alternate view, in every view (also mail and drawings, where Space is taken): swap with the view this tab showed just before; again: back |
 | Space Tab | Vim-style editing, normal mode: back to the view this tab showed just before (note, calendar, Feeds, …); again: forward to this one |
 | Space … | A started key sequence (e.g. `Space f`) shows in the status bar and is dropped after 1.5 s without a key |
@@ -954,7 +970,7 @@ Text editing keys and vim keys are fixed.
 ### Mail view keys
 
 In the mail view (Ctrl+Shift+M) one of the three panes (folders, message list, message) has the
-keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** move it one pane left / right (from
+keyboard; it has an accent-coloured frame. **Ctrl+H / Ctrl+L** (macOS: Cmd+Shift+H / Cmd+Shift+L) move it one pane left / right (from
 the folder pane Ctrl+H goes on into the pane on the left, or the left sidebar, from there Ctrl+L comes back). Letters work
 only while no text field has the keyboard. Every key can be changed in Settings → Keybindings
 (scope Mail view); Enter and Esc are fixed.
@@ -974,7 +990,7 @@ only while no text field has the keyboard. Every key can be changed in Settings 
 | m | Move to a folder |
 | c | Write a new mail |
 | r, Shift+R, Shift+F | Reply, reply all, forward |
-| Alt+I, Alt+C, Alt+R, Alt+A, Alt+F, Alt+U, Alt+G, Alt+M, Alt+D | The buttons of the open mail: Import to vault, Close, Reply, Reply all, Forward, Mark read / unread, Flag, Move…, Delete (the letter is underlined on the button while Alt is held) |
+| Alt+I, Alt+C, Alt+R, Alt+A, Alt+F, Alt+U, Alt+G, Alt+M, Alt+D | The buttons of the open mail: Import to vault, Close, Reply, Reply all, Forward, Mark read / unread, Flag, Move…, Delete (the letter is underlined on the button while Alt is held; not on macOS, where Option+letter types characters: bind them in Settings → Keybindings) |
 | Ctrl+R | Sync, or cancel the sync |
 | a | Account settings |
 | Shift+L | Load the open message (or the list of a folder that is not synced) from the server |

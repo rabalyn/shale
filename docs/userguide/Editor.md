@@ -36,7 +36,7 @@ line numbers). Click it to fold; a folded block always shows ▸, and clicking i
 |---|---|
 | Ctrl+Shift+K | fold the block at the cursor (on a line inside a block: that block, and the cursor goes to its first line; on an already folded line: the block around it) |
 | Ctrl+Shift+J | unfold the block at the cursor (folds inside it stay folded) |
-| Ctrl+Shift+U, Ctrl+Shift+I | fold all, unfold all |
+| Ctrl+Shift+O, Ctrl+Shift+I | fold all, unfold all |
 | `za` `zc` `zo`, `zM` `zR` | vim-style editing, normal mode: toggle, fold, unfold, fold all, unfold all |
 
 The keys can be changed in Settings → Keybindings (Note view), see [[Keyboard shortcuts]]. The text is never
@@ -338,7 +338,7 @@ again to return. **Space f f** and **Space f g** open the pickers of [[Search an
 
 ![[keybindings.png]]
 
-Ctrl+H puts the keyboard one place to the left (with split panes: into the pane on the left,
+Ctrl+H (macOS: Cmd+Shift+H) puts the keyboard one place to the left (with split panes: into the pane on the left,
 from the first pane into the left sidebar), Ctrl+L one place to the right (from the sidebar into
 the first pane, then pane by pane; it stays in the last one). Ctrl+Shift+B opens
 the file list with the open note selected: j / k go from file to file, Ctrl+J / Ctrl+K from

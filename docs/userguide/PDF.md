@@ -48,6 +48,41 @@ the dialog opens, so nothing is stored in the settings.
 
 ![[pdf-export-dialog.png]]
 
+## Print properties of a note
+
+A note can say how it is printed, in its properties (front matter, see [[Notes and links]]). The export dialog opens with the note's
+paper, margins, text size, title and contents already filled in, and you can still change them there; the keys that
+the dialog has no box for (the font, the line and paragraph spacing, the alignment and the heading colour) are read from the note
+when you export. Every key is optional, and a value Shale cannot read is ignored, so the default stays. Any note can carry these keys; a Word file imported with
+[[Import]] gets them from the document's page setup and styles.
+
+| Key | Values | Default | Effect |
+| --- | --- | --- | --- |
+| `print-paper` | `A4`, `A5`, `Letter`, `Legal`, or `<W>x<H>mm` such as `148x210mm`; a width larger than the height is landscape | `A4` | The paper size, and so its orientation. |
+| `print-margins` | four numbers in mm: `top right bottom left` | `20 20 20 20` | The white space around the text. |
+| `print-font` | `serif`, `sans`, `mono` | `sans` | The body font: `serif` is Liberation Serif (metric-compatible with Times New Roman), `sans` is Ubuntu Light, `mono` is Hack. |
+| `print-font-size` | the body size in points, such as `12` | `11` | The size of the body text; headings and code keep their proportion to it. |
+| `print-line-spacing` | a factor, such as `1.3` | built-in (1.45 of the text size) | The distance between lines; `1.0` is the font's own single line height. |
+| `print-paragraph-spacing` | points, such as `8` | the built-in gap | The space after a body paragraph. |
+| `print-align` | `left`, `justify` | `left` | Ragged right, or justified text. |
+| `print-heading-color` | `#RRGGBB`, such as `#1F4E79` | black | The colour of the headings. |
+| `print-title` | `true`, `false` | `true` | Whether the note's name is printed as a title. |
+| `print-toc` | `true`, `false` | `true` | Whether a *Contents* page is printed. |
+
+```
+---
+print-paper: A5
+print-margins: 25 20 25 20
+print-font: serif
+print-font-size: 12
+print-line-spacing: 1.3
+print-align: justify
+print-heading-color: "#1F4E79"
+---
+```
+
+The properties apply to the export of a single note; a book ([[PDF#A folder as one PDF]]) uses the dialog's choices for all its notes.
+
 ## A folder as one PDF
 
 A folder of the vault, up to the vault itself, is exported as **one PDF**, a book: right-click the

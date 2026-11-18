@@ -242,7 +242,7 @@ impl<'a> Body<'a> {
             let name = match named {
                 Some(n) => n,
                 None => {
-                    let opts = ExportOptions { margin_mm: 20.0 * 25.4 / 72.0, background: crate::pdf::export::Background::None, ..ExportOptions::for_drawing(&scene) };
+                    let opts = ExportOptions { margins_mm: [20.0 * 25.4 / 72.0; 4], background: crate::pdf::export::Background::None, ..ExportOptions::for_drawing(&scene) };
                     let pdf = crate::pdf::export::export_drawing(&scene, &link.target, &opts, &crate::drawing::pictures::images(&scene, vault, &rel));
                     let Ok(pdf) = pdf else { return self.placeholder(&format!("not readable: {}", link.target)) };
                     self.keep(&rel, "drawing", "pdf", pdf)

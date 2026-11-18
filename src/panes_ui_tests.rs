@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 const CTRL: Modifiers = Modifiers::COMMAND;
 const CTRL_ALT: Modifiers = Modifiers { alt: true, ctrl: true, shift: false, mac_cmd: false, command: true };
+const CTRL_SHIFT: Modifiers = Modifiers { alt: false, ctrl: true, shift: true, mac_cmd: false, command: true };
 
 /// A point with no widget: the top left corner of the window lies in the inner margin of the ribbon
 /// panel (6 points left, 8 points top, layout.rs `ribbon`), where no icon button is drawn. (5, 5) is
@@ -30,6 +31,8 @@ impl W {
         let _ = std::fs::remove_dir_all(&dir);
         crate::vault::write_sample_vault(&dir).unwrap();
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
+        // these tests drive the Linux/Windows defaults; macOS has other keys for six actions (KEY-019)
+        app.keymap = crate::keys::Keymap::from_overrides_for(&app.cfg.keybindings, false);
         app.open(Path::new("Ideas.md"), true);
         let mut w = W { app, hl: Headless::new(), dir };
         w.frames(4);
@@ -176,24 +179,24 @@ fn the_keys_move_the_focus_between_the_panes_and_close_one() {
     w.split("Daily log.md");
     w.split("Ideas.md");
     assert_eq!((w.app.panes.len(), w.app.panes.focused), (3, 2));
-    let ca = CTRL_ALT;
-    w.key(Key::ArrowLeft, ca);
+    let (prev, next) = (Modifiers::SHIFT, Modifiers::NONE);
+    w.key(Key::F6, prev);
     assert_eq!(w.app.panes.focused, 1);
-    w.key(Key::ArrowLeft, ca);
-    w.key(Key::ArrowLeft, ca);
+    w.key(Key::F6, prev);
+    w.key(Key::F6, prev);
     assert_eq!(w.app.panes.focused, 2, "wraps around to the last pane");
-    w.key(Key::ArrowRight, ca);
+    w.key(Key::F6, next);
     assert_eq!(w.app.panes.focused, 0);
     // the keys are definable like the others
-    assert_eq!(w.app.keymap.bindings(KeyAction::NextPane), vec![Binding::parse("Ctrl+Alt+Right").unwrap()]);
+    assert_eq!(w.app.keymap.bindings(KeyAction::NextPane), vec![Binding::parse("F6").unwrap()]);
     w.app.keymap.set(KeyAction::NextPane, Binding::parse("Ctrl+Alt+J").unwrap()).unwrap();
-    w.key(Key::ArrowRight, ca);
+    w.key(Key::F6, next);
     assert_eq!(w.app.panes.focused, 0, "the old key is gone");
-    w.key(Key::J, ca);
+    w.key(Key::J, CTRL_ALT);
     assert_eq!(w.app.panes.focused, 1, "the new one works");
-    // Ctrl+Alt+W closes the focused pane with its tabs; the focus goes to the left neighbour
+    // Ctrl+Shift+W closes the focused pane with its tabs; the focus goes to the left neighbour
     w.app.focus_pane(1);
-    w.key(Key::W, ca);
+    w.key(Key::W, CTRL_SHIFT);
     assert_eq!((w.app.panes.len(), w.app.panes.focused), (2, 0));
     assert_eq!((w.names(0), w.names(1)), (strs(&["Welcome", "Ideas"]), strs(&["Ideas"])));
     // the last pane stays
@@ -506,7 +509,7 @@ fn nav_037_close_pane_keeps_the_keyboard_in_the_neighbour() {
     w.split("Daily log.md");
     w.app.focus_editor();
     w.frames(2);
-    w.key(Key::W, CTRL_ALT);
+    w.key(Key::W, CTRL_SHIFT);
     w.frames(2);
     assert_eq!((w.app.panes.len(), w.keyboard_pane()), (1, Some(0)));
     w.type_text("QQ");
