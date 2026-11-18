@@ -191,6 +191,10 @@ pub fn read_report(path: &std::path::Path) -> Result<Report, String> {
     Ok(r)
 }
 
+/// The counters of the allocator are the process's: a test that reads what stays alive must not run beside one that frees much.
+#[cfg(test)]
+pub(super) static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,6 +214,7 @@ mod tests {
     // spec: BUILD-028
     #[test]
     fn a_scenario_is_run_once_to_warm_up_and_then_measured_with_its_allocations() {
+        let _alone = super::SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let mut runs = 0;
         let mut keep: Vec<Vec<u8>> = vec![];
         let r = measure("x", 4, true, None, &mut || {

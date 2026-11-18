@@ -340,6 +340,8 @@ fn editor_layout_long(fx: &mut Fixtures) -> Body {
         let mut job = crate::editor::highlight_preview(&text, &links, &fonts, &[], Some(0..0));
         job.wrap.max_width = 700.0;
         black_box(ctx.fonts_mut(|f| f.layout_job(job)));
+        // a frame goes by, as in the window: egui frees the galleys that the last frames did not use
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
     })
 }
 
@@ -594,6 +596,7 @@ mod tests {
     // spec: BUILD-028
     #[test]
     fn every_scenario_runs_or_says_why_it_is_skipped_on_tiny_data() {
+        let _alone = runner::SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         for profile in [Profile::Full, Profile::Worst] {
             let mut seen = vec![];
             let report = run(Scale::TINY, profile, None, Some(1), None, &mut |r| seen.push(r.id.clone())).unwrap();

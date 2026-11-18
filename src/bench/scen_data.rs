@@ -118,7 +118,8 @@ pub fn mail_rig(fx: &mut Fixtures) -> Result<Rig, String> {
     rig.show(View::Mail);
     // the store opens and the folder and message lists load in jobs of their own
     rig.wait("opening the mail store", |app| app.mail.ready_store().is_some())?;
-    rig.run_for(400);
+    rig.wait("the list of the inbox", |app| app.mail.total > 0)?;
+    rig.run_for(300);
     Ok(rig)
 }
 

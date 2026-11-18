@@ -210,6 +210,28 @@ fn ui_code_note(fx: &mut Fixtures) -> Body {
     frame_body(rig_with_note(fx, "Code.md", &text))
 }
 
+fn ui_reading_long(fx: &mut Fixtures) -> Body {
+    let g = fx.vault(Size::Large);
+    let mut rig = Rig::new(&g).open_note(&g.long_note);
+    let tab = rig.app.tabbar.active;
+    rig.app.tabbar.tabs[tab].reading = true;
+    rig.fr.settle(&mut rig.app, 4);
+    frame_body(rig)
+}
+
+/// The quick switcher: every name of the vault scored against what was typed so far.
+fn picker_fuzzy_large(fx: &mut Fixtures) -> Body {
+    let v = super::scenarios::open(&fx.vault(Size::Large));
+    let names: Vec<String> = v.files.iter().map(|f| f.display_name()).collect();
+    Box::new(move || {
+        let mut found = 0;
+        for q in ["n", "note 42", "note 42 gar"] {
+            found += names.iter().filter(|n| crate::markdown::fuzzy_score(q, n).is_some()).count();
+        }
+        black_box(found);
+    })
+}
+
 fn ui_vim_long(fx: &mut Fixtures) -> Body {
     let g = fx.vault(Size::Large);
     let mut rig = Rig::new(&g).open_note(&g.long_note);
@@ -274,6 +296,8 @@ pub fn list() -> Vec<Scenario> {
         p("ui.frame.tables.note", 20, false, ui_tables_note),
         p("ui.frame.code.note", 20, false, ui_code_note),
         p("ui.type.vim.long", 20, false, ui_vim_long),
+        p("ui.frame.reading.long", 20, false, ui_reading_long),
+        p("picker.fuzzy.large", 20, false, picker_fuzzy_large),
         Scenario::maybe("media.audio.decode", 5, false, media_audio_decode),
         Scenario::maybe("recorder.encode", 3, false, recorder_encode),
     ]
