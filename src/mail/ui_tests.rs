@@ -124,6 +124,8 @@ impl W {
         let server = FakeServer::start(MailSecurity::ImplicitTls);
         seed(&server);
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
+        // these tests drive the Linux/Windows defaults (Ctrl+H, the Alt keys of the buttons); macOS has other ones (KEY-019, MAIL-229)
+        app.keymap = crate::keys::Keymap::from_overrides_for(&app.cfg.keybindings, false);
         app.cfg.mail_sync_minutes = 0;
         // the watched folders have their own tests; here they would add connections that other tests count
         app.mail.watch.enabled = false;
@@ -2523,7 +2525,7 @@ fn a_gnupg_call_that_waits_for_a_dialog_never_blocks_the_window_and_cancel_stops
     std::fs::write(&script, "#!/bin/sh\nexec sleep 60\n").unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut w = W::new("slow-gpg", true);
-    w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: script.to_string_lossy().into_owned(), gpgsm: script.to_string_lossy().into_owned(), home: None };
+    w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: script.to_string_lossy().into_owned(), gpgsm: script.to_string_lossy().into_owned(), gpgconf: "/nonexistent/gpgconf".into(), home: None };
     w.app.cfg.mail_encryption_consent = Some("2026-11-14 12:00".into());
     let alice = TestHome::new();
     let signed = testmail::pgp_signed(&alice, &alice.gen_pgp("Alice Test", "alice@example.org", "never", None), testmail::ENTITY);
@@ -2610,7 +2612,10 @@ fn encryption_layouts(height: f32) -> [Vec<(String, Rect)>; 3] {
     w.app.open_mail_settings();
     w.settle();
     w.click("md:enc-header");
-    w.settle();
+    // the section opens, then the dialog scrolls to it (smoothly): let both end before the first layout is taken
+    for _ in 0..20 {
+        w.frame(vec![]);
+    }
     assert!(w.app.mail.gnupg_info.is_none() && w.shows("Looking…"), "the result is still on its way");
     let pending = settings_layout(&w);
     assert!(pending.iter().any(|r| r.0 == "md:enc-detect") && pending.iter().any(|r| r.0 == "md:done"));
@@ -2646,6 +2651,66 @@ fn the_controls_of_the_encryption_section_and_the_dialog_stay_put_in_a_window_of
             }
         }
     }
+}
+
+// spec: MAIL-235, MAIL-236, MAIL-237
+#[test]
+fn mail_236_the_first_click_only_shows_what_gpgconf_will_write_cancel_writes_nothing_and_the_second_click_writes() {
+    if !have_gnupg() {
+        return;
+    }
+    let mut w = W::new("agent-cache", true);
+    w.size = Vec2::new(1500.0, 1600.0);
+    let home = TestHome::new();
+    let conf = home.dir.join("gpg-agent.conf");
+    let original = std::fs::read_to_string(&conf).unwrap();
+    w.app.mail.gnupg = crate::mail::gpg::Gnupg { gpg: "/nonexistent/gpg".into(), gpgsm: "/nonexistent/gpgsm".into(), ..home.g.clone() };
+    w.app.open_mail_settings();
+    w.settle();
+    w.click("md:enc-header");
+    w.until("the cache times were read", |a| a.mail.agent.info.is_some());
+    w.settle();
+    assert!(w.shows("GnuPG asks for the passphrase again 10 minutes after the last use, at the latest 2 hours"), "the times are said in words");
+    assert!(w.shows("default-cache-ttl 28800") && w.shows(&format!("{}", conf.display())), "the manual way is always shown, for the chosen value");
+    assert!(w.has("md:agent-copy"));
+    assert!(!w.has("md:agent-write"), "nothing to write before the first click");
+
+    // the first click shows the plan and writes nothing
+    w.click("md:agent-change");
+    w.settle();
+    assert!(w.has("md:agent-write") && w.shows("Write with gpgconf") && w.shows("comments out earlier lines"));
+    assert_eq!(std::fs::read_to_string(&conf).unwrap(), original, "the plan is only shown");
+    // Cancel writes nothing either
+    w.click("md:agent-cancel");
+    w.settle();
+    assert!(!w.has("md:agent-write"));
+    std::thread::sleep(Duration::from_millis(300));
+    w.settle();
+    assert_eq!(std::fs::read_to_string(&conf).unwrap(), original, "Cancel writes nothing");
+
+    // another choice, the plan again, the second click writes
+    w.click("md:agent-choice");
+    w.click("md:agent-choice:1w");
+    w.settle();
+    w.click("md:agent-change");
+    w.settle();
+    assert!(w.shows("default-cache-ttl 604800"));
+    assert_eq!(std::fs::read_to_string(&conf).unwrap(), original);
+    w.click("md:agent-write");
+    w.until("the write ended", |a| a.mail.agent.written.is_some() && !a.mail.agent.writing);
+    w.settle();
+    let text = std::fs::read_to_string(&conf).unwrap();
+    assert!(text.starts_with(&original) && text.contains("default-cache-ttl 604800\nmax-cache-ttl 604800\n"), "{text}");
+    assert!(w.shows("Written, and the agent was told to reload"));
+    assert!(w.shows("GnuPG asks for the passphrase again 1 week after the last use, at the latest 1 week"), "the times are read again");
+    assert!(!w.has("md:agent-write"), "the plan is closed after the write");
+
+    // a failure is said in gpgconf's words and the times stay readable
+    std::fs::write(&conf, "this-is-not-an-option\n").unwrap();
+    w.app.mail.write_agent(crate::mail::agent_cache::Choice::Day1);
+    w.until("the second write ended", |a| a.mail.agent.written.as_ref().is_some_and(|r| r.is_err()));
+    w.settle();
+    assert!(w.shows("Not changed: gpgconf --change-options gpg-agent failed"));
 }
 
 // spec: NAV-013
@@ -3666,6 +3731,31 @@ fn holding_alt_underlines_the_letter_of_each_button_and_it_follows_a_rebound_key
     // releasing Alt takes the underline away
     w.frame(vec![]);
     assert!(w.underlined.is_empty());
+}
+
+// spec: MAIL-229, KEY-019
+#[test]
+fn on_macos_the_alt_keys_of_the_open_mail_do_nothing_and_underline_nothing_until_one_is_bound() {
+    use crate::keys::{Action as KeyAction, Binding, Keymap};
+    let mut w = inbox_with_cursor("altmac");
+    w.app.keymap = Keymap::from_overrides_for(&w.app.cfg.keybindings, true);
+    w.open_mail("Lunch plans");
+    w.frame(vec![]);
+    w.frame_held(vec![], Modifiers::ALT);
+    w.frame_held(vec![], Modifiers::ALT);
+    assert!(w.underlined.is_empty(), "no key, no underline: {:?}", w.underlined);
+    alt(&mut w, Key::D, "d");
+    w.settle_ops();
+    assert_eq!(w.server_uids("INBOX"), vec![1, 2, 3], "Option+D is no delete key on a Mac");
+    alt(&mut w, Key::C, "c");
+    assert!(w.app.mail.open.is_some(), "Option+C does not close the mail");
+    // bound by hand, the key works and its letter is underlined
+    w.app.keymap.set(KeyAction::MailBtnDelete, Binding::parse("Alt+D").unwrap()).unwrap();
+    w.frame_held(vec![], Modifiers::ALT);
+    assert!(w.underlined.contains(&"Delete=D".to_string()), "{:?}", w.underlined);
+    alt(&mut w, Key::D, "d");
+    w.settle_ops();
+    assert_eq!(w.server_uids("INBOX"), vec![1, 3], "the bound key deletes");
 }
 
 // spec: MAIL-229

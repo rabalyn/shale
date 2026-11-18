@@ -220,9 +220,10 @@ pub(super) fn drop_title_heading(blocks: &mut Vec<Block>, title: &str) {
 }
 
 /// The whole document around `main` (what is between `\begin{document}` and `\end{document}`): the
-/// kind's lines, the writer's helpers, the depth of the contents when there are any, the fields.
-pub(super) fn document(kind: &KindManifest, settings: &SetSettings, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], main: &str) -> String {
-    let mut tex = class_and_preamble(kind, settings);
+/// kind's lines (`head`, from `class_and_preamble`), the writer's helpers, the depth of the
+/// contents when there are any, the fields.
+pub(super) fn document(head: String, long_tables: bool, columns: bool, toc_depth: Option<usize>, values: &[(&Field, Option<String>)], main: &str) -> String {
+    let mut tex = head;
     tex.push_str(&helpers(long_tables, columns));
     if let Some(depth) = toc_depth {
         tex.push_str(&format!("\\setcounter{{tocdepth}}{{{depth}}}\n"));
@@ -323,7 +324,8 @@ pub fn write(req: &Request) -> Result<Document, String> {
         }
     }
 
-    let tex = document(kind, &req.set.settings, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &main);
+    let head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
+    let tex = document(head, long_tables, family == Family::Poster && kind.columns > 1, toc.then(|| toc_depth(family == Family::Book)), &values, &main);
     drop(body);
     let files = files.into_inner();
     Ok(Document { tex, files: files.list, warnings: files.warnings })

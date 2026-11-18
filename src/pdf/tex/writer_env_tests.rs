@@ -7,7 +7,7 @@
 use super::compile_tests::container_engine;
 use super::pdf_text::{fills_with, links_inside, outline_entries, page_texts, pictures_drawn, squashed};
 use super::sets::*;
-use super::sets_env_tests::{mounted_root, patient, the_set};
+use super::sets_env_tests::{mounted_root, patient, the_set, the_set_with_a_department_logo};
 use super::writer::*;
 use super::writer_tests::{fields, rich_assets, temp_vault, RICH_NOTE};
 use crate::pdf::export::ExportOptions;
@@ -105,6 +105,38 @@ kind_tests! {
     tex_env_rich_note_as_leaflet_de: "leaflet", De;
     tex_env_rich_note_as_announcement_en: "announcement", En;
     tex_env_rich_note_as_announcement_de: "announcement", De;
+}
+
+// spec: TEX-035, TEX-027
+#[test]
+#[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
+fn tex_env_a_note_exported_with_a_department_logo_shows_it_in_every_kind_that_has_a_place_and_not_when_switched_off() {
+    let set = the_set_with_a_department_logo();
+    let engine = container_engine(&mounted_root());
+    let note = "# A note\n\nSome text.\n\n## A part\n\nMore text.\n";
+    let mut failed = vec![];
+    for (id, kind) in &set.kinds {
+        let (v, dir) = temp_vault("dept", &[("Plan.md", note.as_bytes())]);
+        let pictures = |wanted: bool| {
+            let opts = ExportOptions { department_logo: wanted, ..ExportOptions::for_note() };
+            let doc = write(&Request { vault: &v, rel: Path::new("Plan.md"), text: note, opts: &opts, set: &set, kind, fields: &fields(&[AUTHOR, &[("reviewer", "Prof. Grace Hopper")]].concat()) })
+                .unwrap_or_else(|e| panic!("kind {id}: the writer failed: {e}"));
+            assert_eq!(doc.tex.contains("department_logo"), wanted && !kind.department_logo.is_empty(), "kind {id}: the lines are written only when asked for and when the kind has a place");
+            let owned: Vec<(&str, &[u8])> = doc.files.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+            compile_with_set(&engine, &set, "main.tex", &doc.tex, &owned, patient()).map(|out| pictures_drawn(out.output.pdf)).map_err(|e| format!("kind {id} (department logo {wanted}): {e}\n{}\n--- main.tex:\n{}", e.log_tail, doc.tex))
+        };
+        match (pictures(false), pictures(true)) {
+            (Ok(without), Ok(with)) => {
+                let has_place = !kind.department_logo.is_empty();
+                if has_place && with <= without || !has_place && with != without {
+                    failed.push(format!("{id}: {without} pictures without the department logo and {with} with it (the kind has a place: {has_place})"));
+                }
+            }
+            (a, b) => failed.extend([a.err(), b.err()].into_iter().flatten()),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    assert!(failed.is_empty(), "{} of {} kinds failed:\n{}", failed.len(), set.kinds.len(), failed.join("\n=====\n"));
 }
 
 // spec: TEX-012, TEX-027

@@ -47,17 +47,20 @@ fn vault_ref(root: &Path) -> VaultRef {
     VaultRef { root: root.to_path_buf(), tree: TreeLock::default() }
 }
 
-// spec: TEX-017
+// spec: TEX-017, TEX-035
 #[test]
-fn the_details_go_to_settings_toml_and_keep_the_logo_and_a_bad_accent_changes_nothing() {
+fn the_details_go_to_settings_toml_and_keep_the_logos_and_a_bad_accent_changes_nothing() {
     let v = vault("details");
     let dir = make_set(&v, "tuda", META, &[("article", "name = \"A\"\nmapping = \"article\"\nclass = \"my\"\n")]);
-    std::fs::write(dir.join("settings.toml"), "accent = \"9c\"\nlogo = \"mylogo.pdf\"\n").unwrap();
+    std::fs::write(dir.join("settings.toml"), "accent = \"9c\"\nlogo = \"mylogo.pdf\"\ndepartment_logo = \"department_logo.png\"\n").unwrap();
     let set = read_set("tuda", &dir).unwrap();
     let d = Details { accent: " 3b ".into(), language: Language::De, department: " Fachbereich Informatik ".into(), author: "Ada Lovelace".into() };
     save_details(&vault_ref(&v), &set, &d).unwrap();
     let back = load_settings(&dir).unwrap();
-    assert_eq!(back, SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik".into(), author: "Ada Lovelace".into(), logo: Some("mylogo.pdf".into()) });
+    assert_eq!(
+        back,
+        SetSettings { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik".into(), author: "Ada Lovelace".into(), logo: Some("mylogo.pdf".into()), department_logo: Some("department_logo.png".into()) }
+    );
     assert_eq!(Details::from_settings(&back), Details { accent: "3b".into(), language: Language::De, department: "Fachbereich Informatik".into(), author: "Ada Lovelace".into() });
     // an accent that could end a command is refused and the file is as it was
     let before = std::fs::read_to_string(dir.join("settings.toml")).unwrap();

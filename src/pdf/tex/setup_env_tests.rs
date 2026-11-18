@@ -10,7 +10,7 @@ use super::install::Handle;
 use super::pdf_text::{page_texts, squashed};
 use super::sets::{compile_with_set, Language, LogoStatus};
 use super::sets_env_tests::{cached_archive, mounted_root, patient, request};
-use super::sets_ui::VaultRef;
+use super::sets_ui::{Slot, VaultRef};
 use super::settings_ui::TexState;
 use super::setup::*;
 use crate::gitsync::TreeLock;
@@ -44,7 +44,7 @@ fn tex_env_the_setup_imports_the_cached_archive_takes_a_logo_and_the_details_and
     // the logo step: a file that is not the placeholder
     let logo = root.join(format!("logo-{}.pdf", std::process::id()));
     std::fs::write(&logo, String::from_utf8(super::sets::placeholder_logo_pdf()).unwrap().replace("0.75 g", "0.20 g")).unwrap();
-    st.setup_logo(&logo);
+    st.setup_logo(Slot::University, &logo);
     assert!(st.setup.message.as_ref().is_some_and(|n| n.ok), "{:?}", st.setup.message);
     assert_eq!(st.chosen_set().unwrap().logo, LogoStatus::Present("tuda_logo.pdf".into()));
     // the details step: the accent colours of the set, then the choices

@@ -629,10 +629,12 @@ impl ShaleApp {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            if icon_button(ui, Icon::Back, 26.0, false, "Back (Alt+←)").clicked() && can_back {
+            let tip = |name: &str, action| self.keymap.hint(action).map_or_else(|| name.to_string(), |k| format!("{name} ({k})"));
+            let (back_tip, fwd_tip) = (tip("Back", crate::keys::Action::Back), tip("Forward", crate::keys::Action::Forward));
+            if icon_button(ui, Icon::Back, 26.0, false, &back_tip).clicked() && can_back {
                 self.go_back();
             }
-            if icon_button(ui, Icon::Forward, 26.0, false, "Forward (Alt+→)").clicked() && can_fwd {
+            if icon_button(ui, Icon::Forward, 26.0, false, &fwd_tip).clicked() && can_fwd {
                 self.go_forward();
             }
             ui.add_space(6.0);
@@ -867,7 +869,7 @@ impl ShaleApp {
                     }
                     if reading {
                         let text = doc.text.clone();
-                        let extras = reader::Extras { numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings), scroll_to: tab.reader_line.take() };
+                        let extras = reader::Extras { numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings), scroll_to: tab.reader_line.take(), properties: self.cfg.properties_in_reader };
                         let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, (base, dark), &extras));
                         if let Some(a) = shown {
                             handle_reader_action(&mut self.actions, a, &rel);

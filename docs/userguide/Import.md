@@ -16,6 +16,8 @@ Turn mails, events and files into notes. Back to [[Start here]].
   Import → Import Word files as notes** and pandoc is installed (see below). Otherwise it is saved as an
   attachment, as before; if the box is ticked but pandoc is missing, the dialog says "pandoc was not found
   (Settings → Import)".
+- Imported notes keep their details (sender, date, event time, Word page setup, tags) as properties at the
+  top. The reading view shows them as a card, not as raw lines (see [[Reading view]]).
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off. Nothing is written until you
   press Import.
@@ -48,15 +50,17 @@ several lines is shown with line breaks), quotes, footnotes, math (written as `$
 becomes an embed with its caption in italics below it. A box "Lift headings" does what it does for a Markdown
 file, for a document without a `#` heading.
 
-The look of the document comes along as far as Shale can show it: the colour of text (`<span style="color: …">`)
+The look of the document comes along as far as Shale can show it: the colour of text (`<span style="color: …">`; also when it comes from a character, paragraph or table
+style or from a theme colour, but not the body colour, a heading's or a link's)
 and of highlights other than plain yellow (`<mark style="background: …">`, see [[Editor]]), a title and
 subtitle (a `#` heading and an italic line) and the page breaks: a manual page break, a paragraph with "page break before" and a section break that starts a new page each become a line `<div style="page-break-after: always;"></div>` where the new page begins (a break at the very start or end is left out). When Heading 1 (or Heading 2 …) starts a new page in Word, the note gets `print-break-before: 1` instead of a line before each heading. The page and the body are written into the note's properties
 for the [[PDF]] export: `print-paper` (A4, A5, Letter, Legal or `<width>x<height>mm`, wider than tall is
 landscape), `print-margins` (top, right, bottom, left in mm), `print-font` (serif, sans or mono),
 `print-font-size` (pt), `print-line-spacing` (a factor such as 1.15), `print-paragraph-spacing` (pt after a
 paragraph), `print-align` (left or justify), `print-heading-color`, `print-break-before` (the heading level that starts a page, when Word's style says so), `print-title` (always `false`, the title
-is in the text) and `print-toc` (`false` unless the document has a table of contents). Edit them like any
-property. Centred and right-aligned paragraphs are not kept (issue 340).
+is in the text) and `print-toc` (`false`, left out when the document has a table of contents). Edit them like any
+property. Page breaks come along: a manual page break, a paragraph with "page break before" and a section break that starts a new page each become a line `<div style="page-break-after: always;"></div>` where the new page begins (a break at the very start or end is left out). When Heading 1 (or Heading 2 …) starts a new page in Word, the note gets `print-break-before: 1` instead of a line before each heading. A Word table of contents (its title and the lines of entries) is not imported as text, because the
+PDF export makes its own contents page. Centred and right-aligned paragraphs are not kept (issue 340).
 
 Everything one Word file brings goes into one folder, `z_media/<year>/<month>/import_docx_<name>/`, named
 after the file (spaces become `-`; a number is added when the name is taken): the pictures in `media/` and, with
