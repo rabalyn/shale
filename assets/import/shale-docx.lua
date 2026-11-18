@@ -91,8 +91,24 @@ local function deflist(dl)
   end
   return out
 end
+-- Word's Title and Subtitle styles end up in the metadata, which Markdown without a header drops:
+-- the title becomes a `#` heading and the subtitle an italic paragraph below it (author and date are left out)
+local function title(doc)
+  local front = pandoc.Blocks({})
+  local function inlines(m)
+    if pandoc.utils.type(m) == 'Inlines' then return m end
+    return pandoc.Inlines({pandoc.Str(pandoc.utils.stringify(m))})
+  end
+  if doc.meta.title then front:insert(pandoc.Header(1, inlines(doc.meta.title))) end
+  if doc.meta.subtitle then front:insert(pandoc.Para({pandoc.Emph(inlines(doc.meta.subtitle))})) end
+  if #front == 0 then return nil end
+  front:extend(doc.blocks)
+  doc.blocks = front
+  return doc
+end
 return {
   {Meta = function(m) if m['shale-media'] then media = pandoc.utils.stringify(m['shale-media']) end end},
   {Figure = figure, Table = tbl, DefinitionList = deflist},
   {Image = image, Header = header, Span = span, SmallCaps = smallcaps, Div = div, Link = link, Math = math, LineBreak = linebreak},
+  {Pandoc = title},
 }

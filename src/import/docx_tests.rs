@@ -80,6 +80,13 @@ fn loose_tables(text: &str) -> String {
         .join("\n")
 }
 
+/// The note without its properties block, and the lines of that block.
+fn split_props(text: &str) -> (Vec<&str>, &str) {
+    let inner = text.strip_prefix("---\n").unwrap_or_else(|| panic!("no properties in {text}"));
+    let (head, body) = inner.split_once("\n---\n\n").unwrap_or_else(|| panic!("no end of the properties in {text}"));
+    (head.lines().collect(), body)
+}
+
 // spec: IMP-039
 #[test]
 fn tables_are_compared_by_their_cells_whatever_the_padding_and_alignment() {
@@ -94,7 +101,9 @@ fn a_word_file_with_text_becomes_a_note_with_the_markdown_of_the_filter() {
     assert!(done.errors.is_empty(), "{:?}", done.errors);
     assert_eq!(done.notes, vec![PathBuf::from("In/text.md")]);
     let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
-    let expected = "# Heading one\n\n## Bold heading\n\n\
+    let (props, body) = split_props(&text);
+    assert!(props.contains(&"print-title: false") && !props.iter().any(|p| p.starts_with("source")), "the look is there, the original is not kept: {props:?}");
+    let expected = "# Sample\n\n# Heading one\n\n## Bold heading\n\n\
 Plain text with **bold**, *italic*, <u>under</u>, ~~gone~~, H<sub>2</sub>O, x<sup>2</sup> and `code`.\n\n\
 A line\nbreak, small caps and ==marked== text.\n\n\
 A [web link](https://example.com), a link to the heading and a footnote.[^1]\n\n\
@@ -105,7 +114,7 @@ A [web link](https://example.com), a link to the heading and a footnote.[^1]\n\n
 **Term**\n\nIts definition.\n\n\
 Math inline $E = mc^{2}$ and display:\n\n$$\\int_{0}^{1}x^{2}\\, dx$$\n\n\
 [^1]: The footnote text.\n";
-    assert_eq!(loose_tables(&text), loose_tables(expected));
+    assert_eq!(loose_tables(body), loose_tables(expected));
     assert!(!v.root.join("z_media").exists(), "nothing but the note: no pictures, the original is not kept");
 }
 
@@ -121,7 +130,7 @@ fn a_table_with_merged_cells_and_a_list_in_a_cell_is_a_pipe_table() {
 | Top                | Item list<br>• apple<br>• pear |\n\
 | Tall               | Plain                          |\n\
 |                    | Last                           |\n";
-    assert_eq!(loose_tables(&text), loose_tables(expected), "no HTML table: the merged cell is followed by an empty one, the row span by one in the next row");
+    assert_eq!(loose_tables(split_props(&text).1), loose_tables(expected), "no HTML table: the merged cell is followed by an empty one, the row span by one in the next row");
 }
 
 // spec: IMP-035, IMP-037, IMP-038, IMP-039
@@ -137,7 +146,8 @@ fn a_picture_is_saved_in_the_import_folder_and_embedded_with_its_vault_path_and_
     let bytes = std::fs::read(v.root.join(inner)).expect("the embedded file is there, where the link says");
     assert_eq!(&bytes[..4], b"\x89PNG");
     assert!(text.contains("\n*A red square*\n"), "the caption follows in italics: {text}");
-    assert!(text.starts_with(&format!("---\nsource: \"[[{folder}/picture.docx]]\"\n---\n\n# Picture\n")), "{text}");
+    assert!(text.starts_with(&format!("---\nsource: \"[[{folder}/picture.docx]]\"\n")), "{text}");
+    assert!(split_props(&text).1.starts_with("# Picture\n"), "{text}");
     assert_eq!(std::fs::read(v.root.join(format!("{folder}/picture.docx"))).unwrap(), std::fs::read(fixture("picture.docx")).unwrap(), "the original is kept");
     // nothing else is in the month folder: the hidden temp folder is gone
     let names: Vec<String> = std::fs::read_dir(v.root.join(month_dir())).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
@@ -152,7 +162,7 @@ fn a_name_with_spaces_and_letters_beyond_ascii_gives_a_safe_folder_and_note_name
     assert_eq!(done.notes, vec![PathBuf::from("In/Bericht Übersicht (Entwurf) 2026.md")]);
     let folder = format!("{}/import_docx_Bericht-Übersicht-(Entwurf)-2026", month_dir());
     let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
-    assert!(text.starts_with(&format!("---\nsource: \"[[{folder}/Bericht Übersicht (Entwurf) 2026.docx]]\"\n---\n")), "{text}");
+    assert!(text.starts_with(&format!("---\nsource: \"[[{folder}/Bericht Übersicht (Entwurf) 2026.docx]]\"\n")), "{text}");
     assert!(v.root.join(&folder).join("Bericht Übersicht (Entwurf) 2026.docx").is_file());
 }
 
@@ -422,4 +432,81 @@ fn a_note_that_cannot_be_written_takes_the_import_folder_out_again() {
     assert!(done.notes.is_empty() && done.errors.len() == 1 && done.errors[0].starts_with("could not write the note for “a.docx”"), "{:?}", done.errors);
     assert!(!v.root.join(format!("{}/import_docx_a", month_dir())).exists(), "the folder was taken out again");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: IMP-040, IMP-041, IMP-042, IMP-039
+#[test]
+fn a_styled_word_file_keeps_its_page_its_body_its_colours_and_its_title() {
+    let Some((v, done)) = import_fixture("styled", "styled.docx", true) else { return };
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let folder = format!("{}/import_docx_styled", month_dir());
+    let expected_props = format!(
+        "---\nsource: \"[[{folder}/styled.docx]]\"\nprint-paper: Letter\nprint-margins: 20 25 20 30\nprint-font: serif\nprint-font-size: 12\nprint-line-spacing: 1.15\n\
+print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496\"\nprint-title: false\nprint-toc: false\n---\n\n"
+    );
+    assert!(text.starts_with(&expected_props), "{text}");
+    let body = &text[expected_props.len()..];
+    // IMP-042: the title and the subtitle of Word's styles
+    assert!(body.starts_with("# Styled report\n\n*A look to keep*\n\n# Heading one\n"), "{body}");
+    // IMP-041
+    assert!(body.contains("<span style=\"color: #C00000;\">red text</span>"), "{body}");
+    assert!(body.contains("<mark style=\"background: #00FF00;\">green highlight</mark>"), "{body}");
+    assert!(body.contains("a ==yellow highlight=="), "plain yellow stays pandoc's own mark: {body}");
+    assert!(body.contains("**<span style=\"color: #0000FF;\">bold blue</span>** and on"), "white space stays outside, so the emphasis works: {body}");
+    assert!(body.contains("<span style=\"color: #00B050;\"><mark style=\"background: #FFC000;\">green on orange</mark></span>"), "{body}");
+    assert!(!body.chars().any(|c| ('\u{E000}'..='\u{E003}').contains(&c)), "no sentinel is left");
+    // the original is kept as it is, without the tags
+    let kept = std::fs::read(v.root.join(format!("{folder}/styled.docx"))).unwrap();
+    assert_eq!(kept, std::fs::read(fixture("styled.docx")).unwrap());
+}
+
+// spec: IMP-040, IMP-042, IMP-039
+#[test]
+fn a_file_made_by_pandoc_alone_has_its_properties_and_a_heading_for_its_title() {
+    let Some((v, done)) = import_fixture("plainprops", "text.docx", false) else { return };
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let (props, body) = split_props(&text);
+    assert!(!props.iter().any(|p| p.starts_with("source")), "the block is there although the original is not kept: {props:?}");
+    assert_eq!(props[props.len() - 2..], ["print-title: false", "print-toc: false"], "{props:?}");
+    assert!(body.starts_with("# Sample\n\n# Heading one\n"), "the title of the file is a heading: {body}");
+}
+
+/// A real (small) Word file with one red run, as a path in `dir`.
+#[cfg(unix)]
+fn red_word_file(dir: &Path) -> PathBuf {
+    let parts = dir.join("parts");
+    let document = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:rPr><w:color w:val="C00000"/></w:rPr><w:t>red</w:t></w:r></w:p></w:body></w:document>"#;
+    for (name, text) in [("[Content_Types].xml", "<Types/>"), ("word/document.xml", document)] {
+        std::fs::create_dir_all(parts.join(name).parent().unwrap()).unwrap();
+        std::fs::write(parts.join(name), text).unwrap();
+    }
+    let docx = dir.join("red.docx");
+    super::docx_look::write_zip(&parts, &docx).unwrap();
+    docx
+}
+
+// spec: IMP-041
+#[cfg(unix)]
+#[test]
+fn pandoc_gets_the_tagged_copy_and_when_it_cannot_read_that_the_original() {
+    let dir = temp_dir("fake-tagged");
+    let root = temp_dir("fake-tagged-vault");
+    let docx = red_word_file(&dir);
+    let cancel = AtomicBool::new(false);
+    // the note says which file pandoc was given
+    let names = r#"while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; -f|-t|-M) shift;; -*) ;; *) input="$1";; esac; shift; done"#;
+    let says = fake::script(&dir, "pandoc-says", &format!("{names}\nprintf '%s\\n' \"$(basename \"$input\")\" > \"$out\""));
+    let p = docx::prepare(&convert(&says, &docx, &root, false, docx::TIMEOUT, &cancel), &mut HashSet::new()).unwrap();
+    assert_eq!(p.text, "tagged.docx\n", "the copy with the colours tagged");
+    // it cannot read the copy: the original is tried, and nothing of the copy is left
+    let picky = fake::script(&dir, "pandoc-picky", &format!("{names}\ncase \"$input\" in *tagged.docx) echo 'Error: the copy is damaged' >&2; exit 64;; esac\nprintf '%s\\n' \"$(basename \"$input\")\" > \"$out\""));
+    let p = docx::prepare(&convert(&picky, &docx, &root, false, docx::TIMEOUT, &cancel), &mut HashSet::new()).unwrap();
+    assert_eq!(p.text, "red.docx\n");
+    // and when the original fails too, its error is the one reported
+    let broken = fake::script(&dir, "pandoc-broken", "echo 'Error: cannot read it' >&2; exit 64");
+    let e = docx::prepare(&convert(&broken, &docx, &root, false, docx::TIMEOUT, &cancel), &mut HashSet::new()).unwrap_err();
+    assert_eq!(e, "pandoc could not read “red.docx”: Error: cannot read it");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&root);
 }
