@@ -110,4 +110,20 @@ expect "a local main that is not checked out anywhere moves as a ref" 0 "local m
 check "the ref of local main is the landed commit" '[ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ]'
 check "no landing worktree is left behind" '! git worktree list | grep -Fq land/worktree'
 
+# the lock held by a release script (FORGE-011, #348): trusted only from the parent that names itself
+LOCK="$(git rev-parse --path-format=absolute --git-common-dir)/land/lock"
+branch locked j.txt j
+N=$((N + 1))
+if (exec 7>"$LOCK"; flock 7; SHALE_LAND_LOCK_HELD=bogus timeout 3 bash "$LAND" locked 8>&- 9>&- > "$TMP/wait.out" 2>&1; [ $? = 124 ] && grep -Fq "waiting" "$TMP/wait.out"); then
+  echo "ok $N - a held lock is waited for, whatever SHALE_LAND_LOCK_HELD says"
+else
+  echo "not ok $N - a held lock is waited for, whatever SHALE_LAND_LOCK_HELD says"; FAILED=1
+fi
+N=$((N + 1))
+if (exec 7>"$LOCK"; flock 7; SHALE_LAND_LOCK_HELD=$BASHPID bash "$LAND" locked 7>&- > "$TMP/held.out" 2>&1; [ $? = 0 ] && grep -Fq "landed locked" "$TMP/held.out"); then
+  echo "ok $N - the parent that holds the lock lands without waiting for it"
+else
+  echo "not ok $N - the parent that holds the lock lands without waiting for it"; FAILED=1
+fi
+
 exit "$FAILED"
