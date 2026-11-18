@@ -89,11 +89,11 @@ and `shale-userguide-<version>.pdf`, the same guide as one book to print or read
 
 | System | Tested | Notes |
 |---|---|---|
-| Linux (Wayland and X11), x86_64 | before every change lands, for every check tag (Forgejo) and for every release | the release download is for this system |
-| macOS (Apple silicon, arm64) | built, linted and tested on GitHub (`macos-latest`) for every release; clippy before every change lands | build it from source for now |
-| Windows 10 and 11 (x86_64) | built, linted and tested on GitHub (`windows-latest`) for every release; clippy before every change lands | build it from source for now |
+| Linux (Wayland and X11), x86_64 | before every change lands, for every check tag (Forgejo) and for every release | release download: `shale-<version>-linux-x86_64.tar.gz` |
+| macOS (Apple silicon, arm64) | built, linted and tested on GitHub (`macos-latest`) for every release; clippy before every change lands | release download: `shale-<version>-macos-arm64.tar.gz`, not signed (see Download) |
+| Windows 10 and 11 (x86_64) | built, linted and tested on GitHub (`windows-latest`) for every release; clippy before every change lands | release download: `shale-<version>-windows-x86_64.zip`, not signed (see Download) |
 
-Release downloads for macOS and Windows do not exist yet. What differs from Linux:
+What differs from Linux:
 
 - **Passwords** and tokens go to the macOS Keychain and the Windows Credential Manager (on Linux to
   the Secret Service through `secret-tool`). If the store cannot be used, or you cancel its unlock
@@ -123,8 +123,9 @@ Release downloads for macOS and Windows do not exist yet. What differs from Linu
 ## Download
 
 Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
-with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`,
-unpack it and run `./shale/shale`. (The user guide is in the archive as `shale/docs/userguide/`, and
+with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`
+(Linux), `shale-<version>-macos-arm64.tar.gz` (macOS, Apple silicon) or `shale-<version>-windows-x86_64.zip` (Windows),
+unpack it and run `./shale/shale` (`shale\shale.exe` on Windows). (The user guide is in the archive as `shale/docs/userguide/`, and
 alone as `shale-userguide-<version>.zip` and as a PDF, `shale-userguide-<version>.pdf`.) To start Shale from the app menu with its icon (on Wayland the
 taskbar needs this to show the icon), install the desktop file and the icon from the unpacked folder:
 
@@ -133,12 +134,22 @@ install -Dm644 shale/shale.svg ~/.local/share/icons/hicolor/scalable/apps/shale.
 sed "s|^Exec=shale|Exec=$PWD/shale/shale|" shale/shale.desktop > ~/.local/share/applications/shale.desktop
 ```
 
+The macOS and Windows downloads are not signed or notarised, so the system warns before the first start:
+
+- **macOS** (Gatekeeper) blocks a downloaded unsigned program. In the folder with the unpacked `shale/`, run
+  `xattr -dr com.apple.quarantine shale/` once (or `xattr -d com.apple.quarantine shale/shale` for the program only),
+  or allow it in System Settings, Privacy & Security.
+- **Windows** (SmartScreen) shows "Windows protected your PC": choose More info, then Run anyway.
+
 Releases are built by GitHub Actions
 (`.github/workflows/build.yml`); there are no builds between releases. To try an unreleased
 version, build it from source (below).
 
 Each download has a `.sha256` file next to it; to check the download, put both files in one folder and run
 `sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256` (the same for `shale-userguide-<version>.zip` and `shale-userguide-<version>.pdf`).
+On macOS use `shasum -a 256 -c shale-<version>-macos-arm64.tar.gz.sha256`; on Windows run
+`certutil -hashfile shale-<version>-windows-x86_64.zip SHA256` (or PowerShell `Get-FileHash`) and compare the hash with the
+one in the `.sha256` file.
 This catches a damaged download, not a compromised release page.
 
 To check that a download was built by Shale's release workflow from its version tag, use the
@@ -150,7 +161,8 @@ gh attestation verify shale-<version>-linux-x86_64.tar.gz --repo rabalyn/shale \
 ```
 
 Add `--bundle shale-<version>-linux-x86_64.tar.gz.sigstore.json` to use the attestation file from
-the release page instead of asking GitHub for it. This shows where and from what the file was
+the release page instead of asking GitHub for it (one file attests the downloads of all three systems; use the same
+command with the macOS or Windows file name). This shows where and from what the file was
 built; it does not show that a person checked the build.
 
 ### Making a release
