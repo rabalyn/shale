@@ -61,7 +61,7 @@ impl GraphView {
         }
     }
 
-    fn rebuild(&mut self, vault: &Vault) {
+    pub(crate) fn rebuild(&mut self, vault: &Vault) {
         let (mut nodes, mut edges) = vault.graph(self.show_missing);
         if let Some(f) = &self.focus {
             let key = crate::vault::rel_to_string(f);
@@ -121,7 +121,7 @@ impl GraphView {
         self.energy = 1.0;
     }
 
-    fn step(&mut self) {
+    pub(crate) fn step(&mut self) {
         let n = self.pos.len();
         if n == 0 {
             return;

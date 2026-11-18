@@ -4,7 +4,7 @@
 //! writer and the dialog come with #281 and #282; the test stack is `tests/tex-env/`.
 
 mod archive;
-mod blocks;
+pub(crate) mod blocks;
 mod body;
 pub mod book;
 pub mod compile;

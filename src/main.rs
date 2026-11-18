@@ -13,6 +13,8 @@
 //! An unknown option or a missing value is an error (exit code 2), never a vault folder.
 
 mod app;
+#[cfg(feature = "bench")]
+mod bench;
 mod calendar;
 mod caption;
 mod colour_tags;
@@ -213,6 +215,17 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
 }
 
 fn main() -> eframe::Result {
+    // the benchmark harness (BUILD-027): modes of their own, before the process is hardened (perf cannot attach to an undumpable one)
+    #[cfg(feature = "bench")]
+    if let Some(parsed) = bench::cli::parse(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        match parsed {
+            Ok(command) => std::process::exit(bench::run(command)),
+            Err(message) => {
+                eprintln!("shale: {message}\n{}", bench::cli::USAGE);
+                std::process::exit(2);
+            }
+        }
+    }
     // release builds: no core dumps, no memory reads by other processes (SEC-019)
     if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {
         eprintln!("shale: could not make the process undumpable: {e}");

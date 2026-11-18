@@ -87,7 +87,7 @@ impl Source {
 
     /// The next decoded sound as interleaved f32 in `buf`, with its rate and channel count;
     /// None at the end of the file.
-    fn next(&mut self, buf: &mut Vec<f32>) -> Result<Option<(u32, usize)>, String> {
+    pub(crate) fn next(&mut self, buf: &mut Vec<f32>) -> Result<Option<(u32, usize)>, String> {
         loop {
             let packet = match self.format.next_packet() {
                 Ok(Some(p)) => p,
