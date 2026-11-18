@@ -455,6 +455,8 @@ print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496
     assert!(body.contains("a ==yellow highlight=="), "plain yellow stays pandoc's own mark: {body}");
     assert!(body.contains("**<span style=\"color: #0000FF;\">bold blue</span>** and on"), "white space stays outside, so the emphasis works: {body}");
     assert!(body.contains("<span style=\"color: #00B050;\"><mark style=\"background: #FFC000;\">green on orange</mark></span>"), "{body}");
+    assert!(body.contains("<span style=\"color: #7030A0;\">purple by style</span> and on"), "a colour from a character style: {body}");
+    assert!(body.contains("<span style=\"color: #0F4761;\">shaded accent</span> and <span style=\"color: #E97132;\">plain accent</span>"), "theme colours with and without a shade: {body}");
     assert!(!body.chars().any(|c| ('\u{E000}'..='\u{E003}').contains(&c)), "no sentinel is left");
     // the original is kept as it is, without the tags
     let kept = std::fs::read(v.root.join(format!("{folder}/styled.docx"))).unwrap();

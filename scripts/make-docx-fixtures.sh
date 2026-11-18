@@ -7,7 +7,8 @@
 #
 # styled.md is made with a reference document (made here from pandoc's own) that sets the page
 # (Letter, margins 20, 25, 20, 30 mm), the body (Times New Roman 12 pt, justified, line spacing 1.15,
-# 8 pt after) and the colour of Heading 1 (2F5496), for the look tests (IMP-040).
+# 8 pt after), the colour of Heading 1 (2F5496) and a character style "Emphasis red" (7030A0), for
+# the look tests (IMP-040, IMP-041).
 #
 # Needs pandoc and python3 (for the picture and the reference document). The dates inside the
 # files are fixed so that a second run gives the same files.
@@ -46,6 +47,9 @@ with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as out:
             s = s.replace('<w:spacing w:before="180" w:after="180" />', '<w:spacing w:before="0" w:after="160" />', 1)
             # Heading 1: a fixed colour
             s = re.sub(r'<w:color w:val="0F4761"[^>]*/>', '<w:color w:val="2F5496" />', s, count=1)
+            # a character style with a colour, for the span "Emphasis red" of styled.md (IMP-041)
+            style = '<w:style w:type="character" w:customStyle="1" w:styleId="EmphasisRed"><w:name w:val="Emphasis red" /><w:basedOn w:val="DefaultParagraphFont" /><w:qFormat /><w:rPr><w:color w:val="7030A0" /></w:rPr></w:style>'
+            s = s.replace("</w:styles>", style + "</w:styles>", 1)
             data = s.encode("utf-8")
         elif info.filename == "word/document.xml":
             s = data.decode("utf-8")

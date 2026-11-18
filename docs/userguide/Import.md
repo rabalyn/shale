@@ -48,7 +48,8 @@ several lines is shown with line breaks), quotes, footnotes, math (written as `$
 becomes an embed with its caption in italics below it. A box "Lift headings" does what it does for a Markdown
 file, for a document without a `#` heading.
 
-The look of the document comes along as far as Shale can show it: the colour of text (`<span style="color: …">`)
+The look of the document comes along as far as Shale can show it: the colour of text (`<span style="color: …">`; also when it comes from a character, paragraph or table
+style or from a theme colour, but not the body colour, a heading's or a link's)
 and of highlights other than plain yellow (`<mark style="background: …">`, see [[Editor]]), a title and
 subtitle (a `#` heading and an italic line). The page and the body are written into the note's properties
 for the [[PDF]] export: `print-paper` (A4, A5, Letter, Legal or `<width>x<height>mm`, wider than tall is

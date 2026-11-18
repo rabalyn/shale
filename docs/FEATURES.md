@@ -696,7 +696,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   highlights and pictures with their captions come through (IMP-037). Everything one file brings
   goes into one folder, `z_media/YYYY/MM/import_docx_<name>/`: the pictures in `media/` and, when
   "Keep the original .docx" is ticked, the original, which the note names in its properties
-  (IMP-038). Word's look comes along: text and highlight colours become `<span>` and `<mark>`
+  (IMP-038). Word's look comes along: text colours (direct, from character, paragraph and table styles, and theme colours with tint and shade) and highlight colours become `<span>` and `<mark>`
   colours (IMP-041), a Title and Subtitle become a heading and an italic line (IMP-042), and the
   note's properties hold the page setup (`print-paper`, `print-margins`), the body font, size,
   line and paragraph spacing, alignment and the colour of Heading 1 (`print-*`, IMP-040), which
