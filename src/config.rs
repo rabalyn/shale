@@ -32,6 +32,33 @@ impl FileSort {
     }
 }
 
+/// How the properties (front matter) of a note are shown (CFG-050).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PropertiesView {
+    /// one line: the type, the most telling properties and the tags (EDIT-060)
+    Folded,
+    /// a card by the type of the note (EDIT-062)
+    #[default]
+    Card,
+    /// the raw lines of the front matter
+    Raw,
+}
+
+impl PropertiesView {
+    pub const ALL: [PropertiesView; 3] = [PropertiesView::Folded, PropertiesView::Card, PropertiesView::Raw];
+    pub fn label(self) -> &'static str {
+        match self {
+            PropertiesView::Folded => "Folded (one line)",
+            PropertiesView::Card => "Card",
+            PropertiesView::Raw => "Raw (all lines)",
+        }
+    }
+}
+
+fn folded() -> PropertiesView {
+    PropertiesView::Folded
+}
+
 /// How a mail account signs in.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum MailAuth {
@@ -294,6 +321,12 @@ pub struct Config {
     pub inline_images: bool,
     /// Show a gutter with line numbers in the editor (EDIT-018).
     pub line_numbers: bool,
+    /// How the editor shows the properties of a note (CFG-050); folded by default.
+    #[serde(default = "folded")]
+    pub properties_in_editor: PropertiesView,
+    /// How the reading view shows the properties of a note (CFG-050); a card by default.
+    #[serde(default)]
+    pub properties_in_reader: PropertiesView,
     /// Number the headings of a note: `#` and deeper, as 1, 1.1, 1.2 (LINK-014, CFG-042).
     pub numbered_headings: bool,
     /// Name new notes `YYMMDD_<name>` with today's date (VAULT-025, CFG-043).
@@ -419,6 +452,8 @@ impl Default for Config {
             file_sort: FileSort::NameAsc,
             inline_images: true,
             line_numbers: true,
+            properties_in_editor: PropertiesView::Folded,
+            properties_in_reader: PropertiesView::Card,
             numbered_headings: true,
             date_prefix_new_notes: true,
             format_toolbar: true,
@@ -759,6 +794,11 @@ mod tests {
         assert!(c.numbered_headings, "headings are numbered by default");
         let c: Config = serde_json::from_str(r#"{"numbered_headings": false}"#).unwrap();
         assert!(!c.numbered_headings);
+        // spec: CFG-050, CFG-053
+        assert_eq!((c.properties_in_editor, c.properties_in_reader), (PropertiesView::Folded, PropertiesView::Card));
+        let c: Config = serde_json::from_str(r#"{"properties_in_editor": "Raw", "properties_in_reader": "Folded"}"#).unwrap();
+        let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!((back.properties_in_editor, back.properties_in_reader), (PropertiesView::Raw, PropertiesView::Folded));
         // spec: CFG-043
         let c: Config = serde_json::from_str("{}").unwrap();
         assert!(c.date_prefix_new_notes, "new notes get a date prefix by default");

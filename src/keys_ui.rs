@@ -302,6 +302,8 @@ mod tests {
             std::fs::create_dir_all(dir.join("projects")).unwrap();
             std::fs::write(dir.join("projects/Roadmap.md"), "# Roadmap\nbanana\n").unwrap();
             let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
+            // these tests drive the Linux/Windows defaults; macOS has other keys for six actions (KEY-019)
+            app.keymap = crate::keys::Keymap::from_overrides_for(&app.cfg.keybindings, false);
             app.open(Path::new("A.md"), false);
             let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir, texts: vec![], text_pos: vec![], size: Vec2::new(900.0, 1600.0) };
             w.frame(vec![]);
@@ -628,51 +630,51 @@ mod tests {
 
     // spec: NAV-018
     #[test]
-    fn ctrl_alt_h_and_l_switch_tabs_and_wrap() {
+    fn ctrl_page_up_and_down_switch_tabs_and_wrap() {
         let mut w = W::new("tabs");
         // a single tab: nothing happens
-        w.press(Key::L, CTRL_ALT);
-        w.press(Key::H, CTRL_ALT);
+        w.press(Key::PageDown, CTRL);
+        w.press(Key::PageUp, CTRL);
         assert_eq!((w.app.tabbar.tabs.len(), w.app.tabbar.active), (1, 0));
         w.app.open(Path::new("B.md"), true);
         w.app.show_view(View::Calendar, true);
         assert_eq!((views(&w), w.app.tabbar.active), (vec!["A.md".into(), "B.md".into(), "calendar".into()], 2));
         // Next from the last tab wraps to the first, Previous from the first to the last
-        w.press(Key::L, CTRL_ALT);
+        w.press(Key::PageDown, CTRL);
         assert_eq!(w.app.tabbar.active, 0);
-        w.press(Key::L, CTRL_ALT);
+        w.press(Key::PageDown, CTRL);
         assert_eq!(w.app.tabbar.active, 1);
-        w.press(Key::H, CTRL_ALT);
+        w.press(Key::PageUp, CTRL);
         assert_eq!(w.app.tabbar.active, 0);
-        w.press(Key::H, CTRL_ALT);
+        w.press(Key::PageUp, CTRL);
         assert_eq!(w.app.tabbar.active, 2, "wraps to the last tab, a sub-app");
         // from a sub-app (calendar is open now) and with the keyboard in the file list
-        w.press(Key::H, CTRL_ALT);
+        w.press(Key::PageUp, CTRL);
         assert_eq!(w.app.tabbar.active, 1);
         w.press(Key::H, CTRL);
         assert!(w.app.tree.sel.is_some(), "Ctrl+H: the file list has the keyboard");
-        w.press(Key::L, CTRL_ALT);
+        w.press(Key::PageDown, CTRL);
         assert_eq!(w.app.tabbar.active, 2, "works from the file list too, and Ctrl+L did not take it");
         // the order is the order the tabs are shown in (pinned and dragged tabs sit in `tabs`)
         w.app.tabbar.tabs.swap(0, 2);
         w.app.tabbar.active = 0;
         assert_eq!(views(&w)[0], "calendar");
-        w.press(Key::L, CTRL_ALT);
+        w.press(Key::PageDown, CTRL);
         assert_eq!(views(&w)[w.app.tabbar.active], "B.md");
         // a pinned tab sits first, and so it comes first in the order
         let a = w.app.tabbar.tabs.iter().position(|t| t.view == View::Note("A.md".into())).unwrap();
         w.app.set_tab_pinned(a, true);
         assert_eq!(views(&w), ["A.md", "calendar", "B.md"]);
         w.app.tabbar.active = 0;
-        w.press(Key::H, CTRL_ALT);
+        w.press(Key::PageUp, CTRL);
         assert_eq!(views(&w)[w.app.tabbar.active], "B.md", "Previous from the pinned first tab wraps to the last");
-        w.press(Key::L, CTRL_ALT);
-        w.press(Key::L, CTRL_ALT);
+        w.press(Key::PageDown, CTRL);
+        w.press(Key::PageDown, CTRL);
         assert_eq!(views(&w)[w.app.tabbar.active], "calendar");
         w.app.tabbar.active = views(&w).iter().position(|v| v == "B.md").unwrap();
         // another binding: the old key does nothing
         w.app.keymap.set(Action::NextTab, Binding::parse("Ctrl+Alt+N").unwrap()).unwrap();
-        w.press(Key::L, CTRL_ALT);
+        w.press(Key::PageDown, CTRL);
         assert_eq!(views(&w)[w.app.tabbar.active], "B.md", "the old key is gone");
         w.press(Key::N, CTRL_ALT);
         assert_eq!(views(&w)[w.app.tabbar.active], "A.md", "the new one works");

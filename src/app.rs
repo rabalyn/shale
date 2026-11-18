@@ -1864,7 +1864,8 @@ impl ShaleApp {
             let scene = self.drawings.get(rel).map(|d| d.scene.clone()).or_else(|| crate::drawing::Scene::read_file(&v.abs(rel)).ok()).unwrap_or_default();
             crate::pdf::export::ExportOptions::for_drawing(&scene)
         } else {
-            crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }
+            // the dialog starts with what the note's `print-*` properties say (PDF-013, PDF-019)
+            crate::pdf::export::ExportOptions { numbered_headings: self.cfg.numbered_headings, ..crate::pdf::export::ExportOptions::for_note() }.with_note_properties(&self.note_text(rel))
         };
         let path = v.root.join("exports").join(format!("{name}.pdf"));
         let mut dialog = crate::pdf::export_dialog::ExportDialog::new(rel.to_path_buf(), drawing, name, opts, path);
@@ -3422,6 +3423,29 @@ mod export_tests {
         assert!((a / b - 2.0).abs() < 0.05, "half a 600 column is twice a quarter of a 1200 one: {a} {b}");
         let none = page_w(&mut app, None);
         assert!((none / a - 600.0 / 720.0).abs() < 0.05, "no column known: 720 is used: {none} {a}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-013, PDF-019
+    #[test]
+    fn the_export_dialog_opens_with_the_print_properties_of_the_note_and_what_it_holds_is_exported() {
+        let (mut app, d) = test_app("print-props");
+        let note = d.join("Printed.md");
+        std::fs::write(&note, "---\nprint-paper: Letter\nprint-margins: 30 10 25 15\nprint-font-size: 12\nprint-title: false\nprint-toc: false\n---\n# Head\n\nBody text.\n").unwrap();
+        app.vault.as_mut().unwrap().rescan();
+        app.open_export_dialog(Path::new("Printed.md"));
+        let Some(Modal::Export(mut dialog)) = app.modal.take() else { panic!("the export dialog opens") };
+        let o = &dialog.opts;
+        assert_eq!((o.paper, o.margins_mm, o.font_pt, o.title, o.toc), (crate::pdf::export::Paper::Letter, [30.0, 10.0, 25.0, 15.0], 12.0, false, false));
+        // a note without properties gets the usual dialog
+        app.open_export_dialog(Path::new("Ideas.md"));
+        let Some(Modal::Export(plain)) = app.modal.take() else { panic!() };
+        assert_eq!((plain.opts.paper, plain.opts.margins_mm, plain.opts.title, plain.opts.toc), (crate::pdf::export::Paper::A4, [20.0; 4], true, true));
+        // what the dialog holds is what is exported: A4 chosen in it wins over the note's Letter
+        dialog.opts.paper = crate::pdf::export::Paper::A4;
+        let out = app.run_export(&dialog).unwrap();
+        let bytes = std::fs::read(out).unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("/MediaBox [0 0 595.00 842.00]"));
         let _ = std::fs::remove_dir_all(&d);
     }
 

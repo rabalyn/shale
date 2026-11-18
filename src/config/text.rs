@@ -70,6 +70,8 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("inline_images", "true: pictures show inside the editor; the link shows while the cursor is on it."),
     ("line_numbers", "true: a column with line numbers sits left of the text in the editor."),
     ("date_prefix_new_notes", "true: a note made by Shale (new note, red link, quick switcher) is named YYMMDD_name.md with today's date; its title line shows the name without the prefix."),
+    ("properties_in_editor", "How the editor shows the properties (front matter) of a note: Folded (one line), Card or Raw."),
+    ("properties_in_reader", "How the reading view shows the properties (front matter) of a note: Folded (one line), Card or Raw."),
     ("numbered_headings", "true: the headings of a note (# and deeper) are shown with numbers 1, 1.1, 1.2; a note's front matter numbered-headings: true or false overrides it."),
     ("format_toolbar", "true: the formatting toolbar is shown above the text of a note."),
     ("toolbar_size", "The size of the toolbar's buttons in percent of the base size, 80 to 200."),

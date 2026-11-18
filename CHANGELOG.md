@@ -10,6 +10,24 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-18
+
+### Added
+
+- **Word import keeps the look** (#338). A Word file's page setup, body font family and size, line and
+  paragraph spacing, alignment and the colour of Heading 1 are written into the note's properties
+  (`print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`,
+  `print-paragraph-spacing`, `print-align`, `print-heading-color`, `print-title`, `print-toc`), so the
+  PDF export looks like the Word document. Text colours and highlight colours (other than yellow)
+  become `<span style="color: …">` and `<mark style="background: …">`. Centred and right-aligned
+  paragraphs are not kept yet (#340).
+
+### Changed
+
+- **A Word import writes a properties block every time**, not only when the original is kept
+  (`source` is still there only with the original). A Word file's Title and Subtitle now become a
+  `#` heading and an italic line instead of being dropped.
+
 ## [0.6.1] - 2026-11-18
 
 ### Added
@@ -1368,7 +1386,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/rabalyn/shale/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/rabalyn/shale/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/rabalyn/shale/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rabalyn/shale/compare/v0.5.0...v0.5.1
