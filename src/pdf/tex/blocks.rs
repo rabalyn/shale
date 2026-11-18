@@ -56,6 +56,8 @@ pub enum Block {
     /// An embed alone on its line.
     Embed(markdown::LinkSpan),
     Rule,
+    /// A page-break marker line (TEX-035).
+    PageBreak,
 }
 
 /// How far a line is indented, a tab counting four.
@@ -71,6 +73,7 @@ pub fn parse(text: &str) -> Vec<Block> {
     let tables = crate::table::find_tables(text);
     let maths = markdown::find_math(text);
     let notes = markdown::find_footnotes(text);
+    let page_breaks = markdown::page_break_lines(text);
     let mut out: Vec<Block> = Vec::new();
     let mut i = markdown::front_matter_lines(text);
     // lines of a paragraph, of a list and of a quote that are not yet closed
@@ -113,6 +116,12 @@ pub fn parse(text: &str) -> Vec<Block> {
         }
         let line = lines[i].1;
         let trimmed = line.trim();
+        if page_breaks.contains(&i) {
+            close!();
+            out.push(Block::PageBreak);
+            i += 1;
+            continue;
+        }
         if fenced.get(i).copied().unwrap_or(false) {
             close!();
             let lang = crate::syntax::fence_language(line);

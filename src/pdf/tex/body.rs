@@ -13,6 +13,9 @@ use crate::table::Col;
 use crate::vault::FileKind;
 use eframe::egui::{Color32, Vec2};
 
+/// A new page (TEX-035, TEX-036).
+pub const NEW_PAGE: &str = "\\newpage\n\n";
+
 /// The most pages of an embedded PDF that are included (as in the native export).
 const MAX_PDF_PAGES: usize = 40;
 
@@ -50,6 +53,7 @@ impl<'a> Body<'a> {
             Block::Math(tex) => format!("\\[\n{}\n\\]\n\n", one_line(tex)),
             Block::Embed(link) => self.embed(link),
             Block::Rule => "\\par\\medskip\\noindent\\hrulefill\\par\\medskip\n\n".into(),
+            Block::PageBreak => NEW_PAGE.into(),
         }
     }
 

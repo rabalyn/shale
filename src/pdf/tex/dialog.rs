@@ -307,6 +307,7 @@ impl TexExport {
                         let on = if toc { &mut opts.toc } else { &mut off };
                         rec("toc", ui.checkbox(on, "Table of contents")).on_disabled_hover_text("This kind of document has no table of contents");
                     });
+                    crate::pdf::export_dialog::break_before_box(ui, opts, toc, rec);
                     rec("embeds", ui.checkbox(&mut opts.embeds, "Embedded pictures, drawings and PDFs"));
                 });
                 ui.end_row();

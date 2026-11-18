@@ -57,6 +57,8 @@ mod media;
 #[cfg(test)]
 mod notes_vault_tests;
 mod opener;
+#[cfg(test)]
+mod page_break_ui_tests;
 mod panels;
 #[cfg(test)]
 mod panes_ui_tests;

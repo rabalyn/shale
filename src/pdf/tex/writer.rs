@@ -5,7 +5,7 @@
 //! by block (`body.rs`). The front matter is never printed.
 
 use super::blocks::{self, Block};
-use super::body::Body;
+use super::body::{Body, NEW_PAGE};
 use super::inline::{anchor, Files, Look};
 use super::sets::{class_and_preamble, tex_escape, Field, KindManifest, Mapping, SetInfo, SetSettings};
 use crate::markdown;
@@ -262,6 +262,10 @@ pub fn write(req: &Request) -> Result<Document, String> {
     // the blocks, without the heading that only says the title again (PDF-008)
     let mut blocks = blocks::parse(req.text);
     drop_title_heading(&mut blocks, &title);
+    // a page break means nothing in slides and boxes, where the frames and boxes are the pages (TEX-035)
+    if matches!(family, Family::Beamer | Family::Boxes) {
+        blocks.retain(|b| *b != Block::PageBreak);
+    }
     let numbered = markdown::headings_numbered(req.text, req.opts.numbered_headings);
     let has_headings = blocks.iter().any(|b| matches!(b, Block::Heading { .. }));
     let toc = req.opts.toc && matches!(family, Family::Article | Family::Book) && has_headings;
@@ -286,8 +290,14 @@ pub fn write(req: &Request) -> Result<Document, String> {
             if family == Family::Poster && kind.columns > 1 {
                 main.push_str(&format!("\\begin{{multicols}}{{{}}}\n", kind.columns));
             }
-            for b in &blocks {
+            for (n, b) in blocks.iter().enumerate() {
+                // a heading of the level asked for starts a page, but not the first thing of the note (TEX-036)
+                let breaks = matches!(b, Block::Heading { level, .. } if family != Family::Poster && (1..=req.opts.break_before as usize).contains(level)) && n > 0;
+                if (breaks || *b == Block::PageBreak) && !main.ends_with(NEW_PAGE) {
+                    main.push_str(NEW_PAGE);
+                }
                 match b {
+                    Block::PageBreak => {}
                     Block::Heading { text, line, .. } => {
                         let level = nested.next().unwrap_or(1);
                         main.push_str(&match family {

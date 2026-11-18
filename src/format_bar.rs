@@ -27,7 +27,7 @@ pub enum Menu {
 }
 
 /// The buttons that run a command, with their Alt keys (KEY-015).
-pub const BUTTON_KEYS: [(Action, Cmd); 16] = [
+pub const BUTTON_KEYS: [(Action, Cmd); 17] = [
     (Action::NoteBold, Cmd::Bold),
     (Action::NoteItalic, Cmd::Italic),
     (Action::NoteStrike, Cmd::Strike),
@@ -39,6 +39,7 @@ pub const BUTTON_KEYS: [(Action, Cmd); 16] = [
     (Action::NoteQuote, Cmd::Quote),
     (Action::NoteCodeBlock, Cmd::CodeBlock),
     (Action::NoteRule, Cmd::Rule),
+    (Action::NotePageBreak, Cmd::PageBreak),
     (Action::NoteTable, Cmd::Table),
     (Action::NoteWikiLink, Cmd::WikiLink),
     (Action::NoteWebLink, Cmd::WebLink),
@@ -194,6 +195,13 @@ fn draw_rule(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
     p.line_segment([Pos2::new(r.left() + 6.0 * s, r.center().y), Pos2::new(r.right() - 6.0 * s, r.center().y)], Stroke::new(1.6 * s, c));
 }
 
+/// A sheet with a dashed line through it: the page break.
+fn draw_page_break(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
+    let b = Rect::from_center_size(r.center(), Vec2::new(11.0, 14.0) * s);
+    p.rect_stroke(b, s, Stroke::new(1.2 * s, c), egui::StrokeKind::Inside);
+    p.extend(egui::Shape::dashed_line(&[Pos2::new(b.left() - 3.0 * s, b.center().y), Pos2::new(b.right() + 3.0 * s, b.center().y)], Stroke::new(1.4 * s, c), 2.5 * s, 1.8 * s));
+}
+
 fn draw_table(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
     let b = Rect::from_center_size(r.center(), Vec2::new(14.0, 12.0) * s);
     p.rect_stroke(b, s, Stroke::new(1.2 * s, c), egui::StrokeKind::Inside);
@@ -283,6 +291,7 @@ impl FormatBar {
                 separator(ui, sc);
                 cmds.push(text_cmd(ui, bar, false, Cmd::CodeBlock, "{ }", mono, "Code block: ``` fence"));
                 cmds.push(draw_cmd(ui, bar, false, Cmd::Rule, "Horizontal rule: ---", draw_rule));
+                cmds.push(draw_cmd(ui, bar, false, Cmd::PageBreak, "Page break: a new page in the PDF", draw_page_break));
                 cmds.push(draw_cmd(ui, bar, false, Cmd::Table, "Table: 2 columns, 2 rows", draw_table));
                 separator(ui, sc);
                 cmds.push(text_cmd(ui, bar, false, Cmd::WikiLink, "[[ ]]", mono, "Link to a note: [[Note]]"));
