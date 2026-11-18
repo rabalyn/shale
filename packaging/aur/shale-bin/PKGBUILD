@@ -18,9 +18,7 @@ optdepends=('git: git sync of a vault'
             'ffmpeg: playing videos in notes and recording clips'
             'gnupg: signed and encrypted mail'
             'pandoc: importing Word (.docx) files as notes'
-            'libsecret: secret-tool, to keep passwords in the system keyring'
-            'mesa: OpenGL driver for AMD and Intel graphics'
-            'nvidia-utils: OpenGL driver for NVIDIA graphics')
+            'libsecret: secret-tool, to keep passwords in the system keyring')
 provides=('shale')
 conflicts=('shale')
 source=("${pkgname}-${pkgver}.tar.gz::https://github.com/rabalyn/shale/releases/download/v${pkgver}/shale-${pkgver}-linux-x86_64.tar.gz")
