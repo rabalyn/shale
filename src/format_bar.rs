@@ -118,12 +118,17 @@ fn rgb(c: [u8; 3]) -> Color32 {
 /// colour that goes with the state. Its tooltip is also its accessibility label (and the hint of scripts).
 /// `width` and everything `draw` paints are at scale 1; the button and the drawing are `s` times as big.
 fn tool(ui: &mut Ui, s: f32, width: f32, on: bool, enabled: bool, tip: &str, draw: impl FnOnce(&egui::Painter, Rect, Color32, f32)) -> Response {
+    tool_part(ui, (s, width), CornerRadius::same(5), on, enabled, tip, draw)
+}
+
+/// `tool` with the rounding of the background given: the two parts of a split button are round on their outer corners only.
+fn tool_part(ui: &mut Ui, (s, width): (f32, f32), round: CornerRadius, on: bool, enabled: bool, tip: &str, draw: impl FnOnce(&egui::Painter, Rect, Color32, f32)) -> Response {
     let (r, resp) = ui.allocate_exact_size(Vec2::new(width, BUTTON) * s, if enabled { Sense::click() } else { Sense::hover() });
     let hovered = enabled && resp.hovered();
     if on {
-        ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_ACTIVE);
+        ui.painter().rect_filled(r, round, theme::BG_ACTIVE);
     } else if hovered {
-        ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_HOVER);
+        ui.painter().rect_filled(r, round, theme::BG_HOVER);
     }
     let c = if !enabled {
         theme::FAINT
@@ -296,13 +301,18 @@ impl FormatBar {
         (resp.response.rect.size(), out)
     }
 
-    /// One of the two colour buttons (0: highlight, 1: font colour) with its palette popup.
+    /// One of the two colour buttons (0: highlight, 1: font colour), a split button (EDIT-054): the main part
+    /// applies the current colour, the ▾ part toggles the palette popup.
     fn palette(&mut self, ui: &mut Ui, which: usize, palettes: &Palettes, open_now: bool) -> Option<Cmd> {
         let mark = which == 0;
         let (tip, none_label) = if mark { ("Highlight colour", "No highlight") } else { ("Font colour", "Default colour") };
         let last = if mark { self.last_mark } else { self.last_font };
-        let resp = tool(ui, palettes.scale, BUTTON + 10.0, false, true, tip, |p, r, c, s| {
-            let g = Rect::from_center_size(r.center() + Vec2::new(-4.0, -1.0) * s, Vec2::splat(15.0 * s));
+        let sc = palettes.scale;
+        let main_tip = format!("{tip}: {}", crate::colour_tags::hex(last));
+        // the two parts of the split button sit side by side without a gap, with a divider between them
+        let gap = std::mem::replace(&mut ui.spacing_mut().item_spacing.x, 0.0);
+        let main = tool_part(ui, (sc, BUTTON), CornerRadius { nw: 5, sw: 5, ne: 0, se: 0 }, false, true, &main_tip, |p, r, c, s| {
+            let g = Rect::from_center_size(r.center() + Vec2::new(0.0, -1.0) * s, Vec2::splat(15.0 * s));
             if mark {
                 p.rect_filled(g.shrink2(Vec2::new(0.0, s)), 3.0 * s, rgb(last));
                 let t = text_galley(p, "A", Label { bold: true, ..Default::default() }, 12.5 * s, if colour_dark(last) { Color32::BLACK } else { Color32::WHITE });
@@ -312,9 +322,13 @@ impl FormatBar {
                 p.galley(g.center() - t.size() / 2.0 - Vec2::new(0.0, 1.5 * s), t, c);
                 p.rect_filled(Rect::from_min_size(Pos2::new(g.left() + s, g.bottom() - s), Vec2::new(g.width() - 2.0 * s, 3.0 * s)), s, rgb(last));
             }
-            caret(p, Pos2::new(r.right() - 6.0 * s, r.center().y), c, s);
         });
-        palettes.badges.paint(ui, resp.rect, if mark { Action::NoteHighlightColour } else { Action::NoteFontColour });
+        let menu_tip = format!("{tip}s…");
+        let resp = tool_part(ui, (sc, 13.0), CornerRadius { nw: 0, sw: 0, ne: 5, se: 5 }, false, true, &menu_tip, |p, r, c, s| caret(p, r.center(), c, s));
+        ui.spacing_mut().item_spacing.x = gap;
+        let (m, r) = (main.rect, resp.rect);
+        ui.painter().line_segment([Pos2::new(r.left(), r.top() + 4.0 * sc), Pos2::new(r.left(), r.bottom() - 4.0 * sc)], Stroke::new(1.0, theme::BORDER));
+        palettes.badges.paint(ui, m.union(r), if mark { Action::NoteHighlightColour } else { Action::NoteFontColour });
         if open_now {
             egui::Popup::toggle_id(ui.ctx(), egui::Popup::default_response_id(&resp));
         }
@@ -355,6 +369,9 @@ impl FormatBar {
                 ui.close();
             }
         });
+        if main.clicked() {
+            return Some(if mark { Cmd::HighlightColour(Some(last)) } else { Cmd::FontColour(Some(last)) });
+        }
         let colour = pick?;
         if let Some(c) = colour {
             *(if mark { &mut self.last_mark } else { &mut self.last_font }) = c;
