@@ -117,21 +117,23 @@ family() { printf '# HELP %s %s\n# TYPE %s %s\n' "$1" "$3" "$1" "$2"; }
   done
 
   # --- landing ------------------------------------------------------------------------------
+  # running: the lock is held (a land.sh from before FORGE-015 writes no `current`)
   running=0
-  if [ -e "$LAND/current" ] && [ -d "$LAND" ]; then
+  if [ -d "$LAND" ] && [ -e "$LAND/lock" ]; then
     if ! flock -n "$LAND/lock" true 2>/dev/null; then running=1; fi
   fi
   family shale_land_running gauge "1 while a landing holds the lock."
   echo "shale_land_running $running"
 
-  pids=$(pgrep -f 'scripts/land.sh' 2>/dev/null || true)
+  # only `bash …scripts/land.sh` processes, not the shells of agents that mention it
+  pids=$(pgrep -f '^[^ ]*bash [^ ]*scripts/land\.sh( |$)' 2>/dev/null || true)
   top=0
   if [ -n "$pids" ]; then
-    list=$(echo "$pids" | tr '\n' ' ')
+    list=$(echo "$pids" | paste -sd, -)
     # only top-level land.sh processes: the checks run in a subshell of the same script
-    top=$(ps -o pid= -o ppid= -p "${list// /,}" 2>/dev/null | awk -v pl=" $list" '
-      { pid[NR] = $1; ppid[NR] = $2 }
-      END { n = 0; for (i = 1; i <= NR; i++) if (index(pl, " " ppid[i] " ") == 0) n++; print n }' || true)
+    top=$(ps -o pid= -o ppid= -p "$list" 2>/dev/null | awk -v pl=",$list," '
+      { n++; if (index(pl, "," $2 ",") == 0) top++ }
+      END { print top + 0 }' || true)
     top=$((${top:-0} + 0))
   fi
   waiting=$((top - running))
@@ -139,7 +141,7 @@ family() { printf '# HELP %s %s\n# TYPE %s %s\n' "$1" "$3" "$1" "$2"; }
   family shale_land_queue_waiting gauge "land.sh processes waiting for the lock."
   echo "shale_land_queue_waiting $waiting"
 
-  if [ "$running" = 1 ]; then
+  if [ -e "$LAND/current" ]; then
     IFS=$'\t' read -r cstart cbranch cstep cstepstart < "$LAND/current" || true
     awk -v b="$cbranch" -v s="$cstep" "$AWKLIB"'BEGIN {
       h("shale_land_current_info", "gauge", "The running landing: branch and step.")

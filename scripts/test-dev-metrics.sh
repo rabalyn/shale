@@ -5,7 +5,7 @@
 set -u
 SRC="$(cd "$(dirname "$0")" && pwd)/dev-metrics.sh"
 TMP=$(mktemp -d)
-cleanup() { [ -z "${HOLD:-}" ] || kill "$HOLD" 2>/dev/null; rm -rf "$TMP"; }
+cleanup() { [ -z "${HOLD:-}" ] || { pkill -P "$HOLD" 2>/dev/null; kill "$HOLD" 2>/dev/null; }; rm -rf "$TMP"; }
 trap cleanup EXIT
 FAILED=0
 N=0
@@ -20,7 +20,7 @@ PROM="$TMP/out/shale.prom"
 # has <sample line>: the metric file holds exactly this line
 has() {
   N=$((N + 1))
-  if grep -Fxq -- "$1" "$PROM"; then echo "ok $N - $1"; else echo "not ok $N - $1"; FAILED=1; fi
+  if grep -Fxq -- "$1" "$PROM"; then echo "ok $N - $1"; else echo "not ok $N - $1 (got: $(grep -F -- "${1%%[ {]*}" "$PROM" | head -n 3 | tr '\n' '|'))"; FAILED=1; fi
 }
 hasnot() {
   N=$((N + 1))
@@ -82,7 +82,8 @@ SH
 cat > "$FAKE/bin/pgrep" <<'SH'
 #!/bin/sh
 if [ "$1" = -x ]; then cat "$FAKE/pgrep.$2" 2>/dev/null; exit 0; fi
-cat "$FAKE/pgrep.land" 2>/dev/null
+# -f <pattern>: the pids of the lines of procs.txt ("pid command line") that match it
+awk -v re="$2" '{ pid = $1; sub(/^[0-9]+ /, ""); if ($0 ~ re) print pid }' "$FAKE/procs.txt" 2>/dev/null
 exit 0
 SH
 cat > "$FAKE/bin/ps" <<'SH'
@@ -94,7 +95,7 @@ export FAKE
 printf 'rustc\nrustc\nrustc\n' > "$FAKE/pgrep.rustc"
 printf 'cargo\n' > "$FAKE/pgrep.cargo"
 printf '1\n2\n3\n4\n' > "$FAKE/pgrep.claude"
-: > "$FAKE/pgrep.land"
+: > "$FAKE/procs.txt"
 : > "$FAKE/ps.txt"
 # state<TAB>createdAt<TAB>closedAt<TAB>labels; NOW is 2000-01-02T00:00:00Z-ish below
 NOW=946771200 # 2000-01-02T00:00:00Z
@@ -223,28 +224,45 @@ mv "$TMP/remote.gone" "$TMP/remote.git"
 # --- a running landing and its queue ---------------------------------------------------------------------------
 printf '1000\tfeature/x"y\tcargo test\t1030\n' > "$LAND/current"
 run $((NOW + 4000)) >/dev/null
-has 'shale_land_running 0'; hasnot 'shale_land_current_info'
+has 'shale_land_running 0'
+rm -f "$LAND/current"
 flock "$LAND/lock" sleep 60 >/dev/null 2>&1 &
 HOLD=$!
 sleep 0.3
-# three processes: the running land.sh, its subshell (parent is a land.sh), and one waiting
-printf '11\n12\n13\n' > "$FAKE/pgrep.land"
-printf '11 1\n12 11\n13 1\n' > "$FAKE/ps.txt"
+# the running land.sh (11), its subshell (12, parent 11), two waiting ones (13, 14), and shells
+# of agents that only mention land.sh (zsh wrapper, grep, an editor): those must not count
+cat > "$FAKE/procs.txt" <<PROCS
+11 /bin/bash scripts/land.sh claude/a
+12 /bin/bash scripts/land.sh claude/a
+13 bash ./scripts/land.sh --release claude/b
+14 /bin/bash /home/x/app/scripts/land.sh claude/c
+21 /bin/zsh -c while pgrep -f "^/bin/bash scripts/land.sh" >/dev/null; do sleep 5; done
+22 grep scripts/land.sh docs
+23 vim scripts/land.sh
+PROCS
+printf '11 1\n12 11\n13 1\n14 1\n' > "$FAKE/ps.txt"
 run $((NOW + 4001)) >/dev/null
 has 'shale_land_running 1'
-has 'shale_land_queue_waiting 1'
+has 'shale_land_queue_waiting 2'
+hasnot 'shale_land_current_info'
+hasnot 'shale_land_current_started_timestamp_seconds'
+# with `current` (FORGE-015)
+printf '1000\tfeature/x"y\tcargo test\t1030\n' > "$LAND/current"
+run $((NOW + 4002)) >/dev/null
+has 'shale_land_running 1'
+has 'shale_land_queue_waiting 2'
 has 'shale_land_current_info{branch="feature/x\"y",step="cargo test"} 1'
 has 'shale_land_current_started_timestamp_seconds 1000'
 has 'shale_land_current_step_started_timestamp_seconds 1030'
-kill "$HOLD" 2>/dev/null; wait "$HOLD" 2>/dev/null; HOLD=
+pkill -P "$HOLD" 2>/dev/null; kill "$HOLD" 2>/dev/null; wait "$HOLD" 2>/dev/null; HOLD=
 rm -f "$LAND/current"
-run $((NOW + 4002)) >/dev/null
+run $((NOW + 4003)) >/dev/null
 has 'shale_land_running 0'
-has 'shale_land_queue_waiting 2'
+has 'shale_land_queue_waiting 3'
 
 # --- an empty landing folder ------------------------------------------------------------------------------------------
 rm -f "$LAND/history.tsv"
-run $((NOW + 4003)) >/dev/null
+run $((NOW + 4004)) >/dev/null
 has 'shale_land_total{result="landed"} 0'
 hasnot 'shale_land_last_info'
 
