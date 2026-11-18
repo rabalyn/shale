@@ -95,7 +95,7 @@ size of the two editor areas when you updated.
 | `normal_cursor_shape` | `block` (the same four words) | Vim, "Cursor in normal mode"; used only with Vim-style editing |
 | `cursor_blink` | on | Editor, "Blinking cursor"; off keeps the cursor steady |
 | `esc_cursor` | `stay` (`stay` or `step_back`; another word is `stay`) | Vim, "Esc from insert mode": where the cursor lands when Esc leaves insert mode, on the character after the typing or one back like Vim; used only with Vim-style editing |
-| `keybindings` | empty (the defaults of [[Keyboard shortcuts]]) | Settings → Keybindings; only the actions you changed are stored |
+| `keybindings` | empty (the defaults of [[Keyboard shortcuts]]; macOS has other defaults for some actions) | Settings → Keybindings; only the actions you changed are stored |
 
 ### Window and vault
 

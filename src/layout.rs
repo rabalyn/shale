@@ -629,10 +629,12 @@ impl ShaleApp {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            if icon_button(ui, Icon::Back, 26.0, false, "Back (Alt+←)").clicked() && can_back {
+            let tip = |name: &str, action| self.keymap.hint(action).map_or_else(|| name.to_string(), |k| format!("{name} ({k})"));
+            let (back_tip, fwd_tip) = (tip("Back", crate::keys::Action::Back), tip("Forward", crate::keys::Action::Forward));
+            if icon_button(ui, Icon::Back, 26.0, false, &back_tip).clicked() && can_back {
                 self.go_back();
             }
-            if icon_button(ui, Icon::Forward, 26.0, false, "Forward (Alt+→)").clicked() && can_fwd {
+            if icon_button(ui, Icon::Forward, 26.0, false, &fwd_tip).clicked() && can_fwd {
                 self.go_forward();
             }
             ui.add_space(6.0);

@@ -124,6 +124,8 @@ impl W {
         let server = FakeServer::start(MailSecurity::ImplicitTls);
         seed(&server);
         let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
+        // these tests drive the Linux/Windows defaults (Ctrl+H, the Alt keys of the buttons); macOS has other ones (KEY-019, MAIL-229)
+        app.keymap = crate::keys::Keymap::from_overrides_for(&app.cfg.keybindings, false);
         app.cfg.mail_sync_minutes = 0;
         // the watched folders have their own tests; here they would add connections that other tests count
         app.mail.watch.enabled = false;
@@ -3666,6 +3668,31 @@ fn holding_alt_underlines_the_letter_of_each_button_and_it_follows_a_rebound_key
     // releasing Alt takes the underline away
     w.frame(vec![]);
     assert!(w.underlined.is_empty());
+}
+
+// spec: MAIL-229, KEY-019
+#[test]
+fn on_macos_the_alt_keys_of_the_open_mail_do_nothing_and_underline_nothing_until_one_is_bound() {
+    use crate::keys::{Action as KeyAction, Binding, Keymap};
+    let mut w = inbox_with_cursor("altmac");
+    w.app.keymap = Keymap::from_overrides_for(&w.app.cfg.keybindings, true);
+    w.open_mail("Lunch plans");
+    w.frame(vec![]);
+    w.frame_held(vec![], Modifiers::ALT);
+    w.frame_held(vec![], Modifiers::ALT);
+    assert!(w.underlined.is_empty(), "no key, no underline: {:?}", w.underlined);
+    alt(&mut w, Key::D, "d");
+    w.settle_ops();
+    assert_eq!(w.server_uids("INBOX"), vec![1, 2, 3], "Option+D is no delete key on a Mac");
+    alt(&mut w, Key::C, "c");
+    assert!(w.app.mail.open.is_some(), "Option+C does not close the mail");
+    // bound by hand, the key works and its letter is underlined
+    w.app.keymap.set(KeyAction::MailBtnDelete, Binding::parse("Alt+D").unwrap()).unwrap();
+    w.frame_held(vec![], Modifiers::ALT);
+    assert!(w.underlined.contains(&"Delete=D".to_string()), "{:?}", w.underlined);
+    alt(&mut w, Key::D, "d");
+    w.settle_ops();
+    assert_eq!(w.server_uids("INBOX"), vec![1, 3], "the bound key deletes");
 }
 
 // spec: MAIL-229
