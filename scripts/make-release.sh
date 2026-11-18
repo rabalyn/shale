@@ -3,7 +3,7 @@
 # CI checks it; when it is green, its `mirror` job pushes `main` and the tag to GitHub, which
 # builds and publishes the release (BUILD-012, BUILD-016).
 #
-#   scripts/make-release.sh [--dry-run] [--issue N] [patch|minor|major|X.Y.Z]
+#   scripts/make-release.sh [--dry-run] [--issue N] [--skip-bench] [--allow-perf-regression] [patch|minor|major|X.Y.Z]
 #
 # Without a version it releases the pre-release in Cargo.toml of `origin/main` (0.4.0-rc.2 →
 # 0.4.0, the version the check tags of scripts/make-tag.sh led up to); `patch`, `minor` or
@@ -12,18 +12,25 @@
 # `## [X.Y.Z] - <date>`, runs the release check (BUILD-013), commits naming the issue
 # "Release X.Y.Z" (made with gh when there is none; --issue N names another), lands it with
 # `scripts/land.sh --release`, tags the landed merge and pushes the tag to `origin`.
+# Before the commit it runs scripts/bench-release.sh (BUILD-034): the full and the worst benchmark
+# profiles, stored under docs/perf/ with their comparison against the last release; a regression
+# stops the release unless --allow-perf-regression; --skip-bench leaves the step out.
 # --dry-run prints the tag and stops. Without entries in [Unreleased] or docs/changelog-pending/
 # it stops with "the changelog needs an update first".
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/release-lib.sh"
 
 DRY=no
+BENCH_SKIP=no
+BENCH_ALLOW=
 ISSUE=""
 WANT=""
 while [ $# -gt 0 ]; do
   case $1 in
     --dry-run) DRY=yes ;;
     --issue) shift; ISSUE=${1:-} ;;
+    --skip-bench) BENCH_SKIP=yes ;;
+    --allow-perf-regression) BENCH_ALLOW=yes ;;
     -h|--help) sed -n '2,/^set -euo/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) die "unknown option $1" ;;
     *) [ -z "$WANT" ] || die "one version only"; WANT=$1 ;;

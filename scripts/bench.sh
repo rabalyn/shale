@@ -1,0 +1,96 @@
+#!/bin/bash
+# Runs the benchmark harness (BUILD-027…BUILD-033, raba/shale#343) and, with --flamegraph, makes a
+# flamegraph of every scenario. See docs/perf/README.md.
+#
+#   scripts/bench.sh [--profile quick|full|worst] [--filter SUBSTRING] [--iters N]
+#                    [--out FILE] [--flamegraph] [--flame-dir DIR] [--no-build]
+#
+# Builds `cargo build --profile bench-release --features bench` (the release profile with line
+# tables; the shipped release is unchanged), runs `shale --bench` headless and writes
+# target/bench/<short commit>.json (`-quick` or `-worst` added for those profiles; --out says
+# another file). With --flamegraph each scenario of the profile (or those of --filter) runs
+# on its own under `perf record -F 999 --call-graph dwarf`, only the measured loop is kept, and
+# docs/perf/flamegraphs/<id>.svg is made with inferno (`cargo install inferno`). Without perf, or
+# without the permission to use it (kernel.perf_event_paranoid), or without inferno it says so and
+# goes on without flamegraphs. Environment: CARGO_TARGET_DIR, FLAME_MIN_MS (how long a scenario
+# is measured for its flamegraph, default 3000).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PROFILE=full FILTER="" ITERS="" OUT="" FLAME=no FLAME_DIR=docs/perf/flamegraphs BUILD=yes
+while [ $# -gt 0 ]; do
+  case $1 in
+    --profile) shift; PROFILE=${1:-} ;;
+    --filter) shift; FILTER=${1:-} ;;
+    --iters) shift; ITERS=${1:-} ;;
+    --out) shift; OUT=${1:-} ;;
+    --flamegraph) FLAME=yes ;;
+    --flame-dir) shift; FLAME_DIR=${1:-} ;;
+    --no-build) BUILD=no ;;
+    -h|--help) sed -n '2,/^set -euo/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "bench.sh: unknown option $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+case $PROFILE in quick|full|worst) ;; *) echo "bench.sh: --profile is quick, full or worst, not $PROFILE" >&2; exit 2 ;; esac
+
+TARGET=${CARGO_TARGET_DIR:-target}
+BIN="$TARGET/bench-release/shale"
+if [ "$BUILD" = yes ]; then
+  cargo build --profile bench-release --features bench --locked
+fi
+[ -x "$BIN" ] || { echo "bench.sh: $BIN is missing (build it: cargo build --profile bench-release --features bench)" >&2; exit 1; }
+
+SHORT=$(git rev-parse --short HEAD)
+export SHALE_BENCH_COMMIT=$(git rev-parse HEAD)
+export SHALE_BENCH_DESCRIBE=$(git describe --tags --always --dirty)
+export SHALE_BENCH_PROFILE=bench-release
+if [ -z "$OUT" ]; then
+  suffix=""
+  [ "$PROFILE" = full ] || suffix="-$PROFILE"
+  OUT="target/bench/$SHORT$suffix.json"
+fi
+mkdir -p "$(dirname "$OUT")"
+
+args=(--bench "$OUT" --profile "$PROFILE")
+[ -z "$FILTER" ] || args+=(--filter "$FILTER")
+[ -z "$ITERS" ] || args+=(--iters "$ITERS")
+"$BIN" "${args[@]}"
+echo "result: $OUT"
+
+[ "$FLAME" = yes ] || exit 0
+
+# ---- flamegraphs ----
+command -v perf >/dev/null || { echo "bench.sh: perf is not installed: no flamegraphs" >&2; exit 0; }
+for tool in inferno-collapse-perf inferno-flamegraph; do
+  command -v "$tool" >/dev/null || { echo "bench.sh: $tool is missing: cargo install inferno (no flamegraphs)" >&2; exit 0; }
+done
+paranoid=$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo 0)
+if [ "$paranoid" -gt 2 ]; then
+  echo "bench.sh: kernel.perf_event_paranoid is $paranoid: perf may not profile this process (sysctl kernel.perf_event_paranoid=2); no flamegraphs" >&2
+  exit 0
+fi
+mkdir -p "$FLAME_DIR"
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+MIN_MS=${FLAME_MIN_MS:-3000}
+ids=$("$BIN" --bench-list | awk -v p="$PROFILE" -v f="$FILTER" '$1 == p && index($2, f) { print $2 }')
+made=0
+for id in $ids; do
+  echo "-- flamegraph $id"
+  if ! perf record -q -F 999 -g --call-graph dwarf -o "$TMP/perf.data" -- \
+      "$BIN" --bench "$TMP/run.json" --profile "$PROFILE" --filter "=$id" --min-ms "$MIN_MS" >/dev/null 2>"$TMP/perf.err"; then
+    echo "bench.sh: perf could not profile $id: $(tail -n 1 "$TMP/perf.err")" >&2
+    continue
+  fi
+  # only the stacks through the measured loop: not the setup, not the vault generation
+  perf script -i "$TMP/perf.data" 2>/dev/null | inferno-collapse-perf 2>/dev/null \
+    | grep 'measured_region' | sed -E 's/^.*;([^;]*measured_region)/\1/' > "$TMP/folded.txt" || true
+  if [ ! -s "$TMP/folded.txt" ]; then
+    echo "bench.sh: no samples of the measured loop for $id (too short or skipped)" >&2
+    continue
+  fi
+  inferno-flamegraph --title "$id" --subtitle "$SHALE_BENCH_DESCRIBE, perf 999 Hz" < "$TMP/folded.txt" > "$FLAME_DIR/$id.svg" 2>/dev/null
+  made=$((made + 1))
+done
+echo "flamegraphs: $made in $FLAME_DIR"
