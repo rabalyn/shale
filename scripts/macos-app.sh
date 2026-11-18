@@ -3,13 +3,34 @@
 # be tested on Linux. Signing and the dmg are done by the `macos` job of the release workflow.
 #
 #   sh scripts/macos-app.sh <binary> <out-dir> <version> [icon.icns]
+#   sh scripts/macos-app.sh --iconset <dir>
 #
 # Writes <out-dir>/Shale.app: Contents/MacOS/shale, Contents/Info.plist, Contents/Resources/ with
 # LICENSE, README.md, CHANGELOG.md and shale.icns. Without an icns file it is made from
 # assets/icon/shale-*.png with `iconutil` (macOS only); where there is no iconutil the icon is
-# left out with a warning, but on macOS (Darwin) a missing icon is an error.
+# left out with a warning, but on macOS (Darwin) a missing icon is an error. `--iconset <dir>` only
+# writes the ten pictures of the iconset into <dir> (what the test checks on Linux).
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
+
+# the iconset iconutil expects: all ten entries, each from the PNG of assets/icon of that pixel
+# size (1024 is 512@2x); a missing PNG is an error, no entry is left out
+make_iconset() {
+  mkdir -p "$1"
+  for pair in 16:icon_16x16 32:icon_16x16@2x 32:icon_32x32 64:icon_32x32@2x 128:icon_128x128 \
+              256:icon_128x128@2x 256:icon_256x256 512:icon_256x256@2x 512:icon_512x512 \
+              1024:icon_512x512@2x; do
+    png="$here/assets/icon/shale-${pair%%:*}.png"
+    [ -f "$png" ] || { echo "macos-app.sh: $png is missing" >&2; return 1; }
+    cp "$png" "$1/${pair#*:}.png"
+  done
+}
+
+if [ "${1:-}" = --iconset ]; then
+  [ $# -eq 2 ] || { echo "usage: macos-app.sh --iconset <dir>" >&2; exit 2; }
+  make_iconset "$2"
+  exit
+fi
 
 [ $# -ge 3 ] && [ $# -le 4 ] || { echo "usage: macos-app.sh <binary> <out-dir> <version> [icon.icns]" >&2; exit 2; }
 binary=$1
@@ -33,16 +54,11 @@ for f in LICENSE README.md CHANGELOG.md; do
   cp "$here/$f" "$app/Contents/Resources/$f"
 done
 
-# the icon: the sizes of assets/icon (16 to 512); the 1024 pixel one (512@2x) does not exist, and
-# nothing is scaled up, so the iconset has none (iconutil accepts that)
+# the icon: the full iconset of assets/icon (16 to 1024)
 if [ -z "$icns" ]; then
   if command -v iconutil >/dev/null 2>&1; then
     set_dir=$(mktemp -d)/shale.iconset
-    mkdir -p "$set_dir"
-    for pair in 16:icon_16x16 32:icon_16x16@2x 32:icon_32x32 64:icon_32x32@2x 128:icon_128x128 \
-                256:icon_128x128@2x 256:icon_256x256 512:icon_256x256@2x 512:icon_512x512; do
-      cp "$here/assets/icon/shale-${pair%%:*}.png" "$set_dir/${pair#*:}.png"
-    done
+    make_iconset "$set_dir"
     iconutil -c icns -o "$out/shale.icns" "$set_dir"
     icns="$out/shale.icns"
   elif [ "$(uname -s)" = Darwin ]; then

@@ -115,6 +115,26 @@ fn build_024_the_app_bundle_has_the_layout_and_the_info_plist_of_a_mac_app() {
         assert!(!out.join("Shale.app/Contents/Resources/shale.icns").exists());
         assert!(!fs::read_to_string(app.join("Info.plist")).unwrap().contains("CFBundleIconFile"));
     }
+    // the iconset has all ten entries iconutil expects, 1024 as 512x512@2x, each from its own PNG
+    let set = dir.join("shale.iconset");
+    let iconset = Command::new("sh").arg(root.join("scripts/macos-app.sh")).arg("--iconset").arg(&set).output().unwrap();
+    assert!(iconset.status.success(), "{}", String::from_utf8_lossy(&iconset.stderr));
+    for (pixels, name) in [
+        (16, "icon_16x16"),
+        (32, "icon_16x16@2x"),
+        (32, "icon_32x32"),
+        (64, "icon_32x32@2x"),
+        (128, "icon_128x128"),
+        (256, "icon_128x128@2x"),
+        (256, "icon_256x256"),
+        (512, "icon_256x256@2x"),
+        (512, "icon_512x512"),
+        (1024, "icon_512x512@2x"),
+    ] {
+        let want = fs::read(root.join(format!("assets/icon/shale-{pixels}.png"))).unwrap();
+        assert_eq!(fs::read(set.join(format!("{name}.png"))).unwrap(), want, "{name}.png is not shale-{pixels}.png");
+    }
+    assert_eq!(fs::read_dir(&set).unwrap().count(), 10);
     // a dev label is no bundle version number
     let dev = Command::new("sh").arg(root.join("scripts/macos-app.sh")).arg(&program).arg(&out).arg("dev-1a2b3c4").arg(&icns).output().unwrap();
     assert!(dev.status.success());
