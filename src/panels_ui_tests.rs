@@ -336,6 +336,20 @@ fn cfg_042_number_headings_is_a_setting_of_the_editor_tab_and_on_by_default() {
     assert!(p.app.cfg.numbered_headings);
 }
 
+// spec: CFG-051
+#[test]
+fn cfg_051_the_appearance_tab_chooses_how_properties_show_in_the_editor_and_the_reading_view() {
+    use crate::config::PropertiesView;
+    let mut p = P::new("properties-setting", &[]);
+    p.app.open_settings(SettingsTab::Appearance);
+    assert!(p.shows(Show::Modals, "Properties in the editor") && p.shows(Show::Modals, "Properties in the reading view"));
+    assert_eq!((p.app.cfg.properties_in_editor, p.app.cfg.properties_in_reader), (PropertiesView::Folded, PropertiesView::Card), "defaults");
+    p.click(Show::Modals, "Card");
+    p.click(Show::Modals, "Raw (all lines)");
+    assert_eq!(p.app.cfg.properties_in_reader, PropertiesView::Raw);
+    assert_eq!(p.app.cfg.properties_in_editor, PropertiesView::Folded, "the other setting is untouched");
+}
+
 // spec: EDIT-038
 #[test]
 fn edit_038_the_lift_dialog_pastes_lifted_or_as_it_is_and_esc_pastes_as_it_is() {

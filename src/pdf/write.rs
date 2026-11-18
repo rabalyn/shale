@@ -21,6 +21,8 @@ pub enum FontKind {
     Mono,
     /// Virgil (hand-drawn) — drawn as outlines.
     Hand,
+    /// Liberation Serif — embedded, selectable text (a note's `print-font: serif`, PDF-014).
+    Serif,
 }
 
 /// A bundled font, parsed once: the charmap, the horizontal advances and the outlines in font
@@ -52,10 +54,12 @@ fn font(kind: FontKind) -> &'static LoadedFont {
     static SANS: OnceLock<LoadedFont> = OnceLock::new();
     static MONO: OnceLock<LoadedFont> = OnceLock::new();
     static HAND: OnceLock<LoadedFont> = OnceLock::new();
+    static SERIF: OnceLock<LoadedFont> = OnceLock::new();
     let (cell, data): (&OnceLock<LoadedFont>, &'static [u8]) = match kind {
         FontKind::Sans => (&SANS, epaint_default_fonts::UBUNTU_LIGHT),
         FontKind::Mono => (&MONO, epaint_default_fonts::HACK_REGULAR),
         FontKind::Hand => (&HAND, include_bytes!("../../assets/fonts/Virgil.otf")),
+        FontKind::Serif => (&SERIF, include_bytes!("../../assets/fonts/LiberationSerif-Regular.ttf")),
     };
     cell.get_or_init(|| LoadedFont::parse(data))
 }
@@ -76,10 +80,11 @@ fn substitute(c: char) -> char {
     }
 }
 
-/// The font that actually has a glyph for `c`: the text's own, else Sans, Hack, then the symbols.
+/// The font that actually has a glyph for `c`: the text's own, else Sans, Hack, the symbols, and
+/// last Liberation Serif (so the characters the others had keep their look, PDF-010).
 fn face_for(kind: FontKind, c: char) -> (&'static LoadedFont, GlyphId) {
     let c = substitute(c);
-    for f in [font(kind), font(FontKind::Sans), font(FontKind::Mono), symbols()] {
+    for f in [font(kind), font(FontKind::Sans), font(FontKind::Mono), symbols(), font(FontKind::Serif)] {
         if let Some(g) = f.glyph_index(c) {
             return (f, g);
         }
@@ -108,6 +113,13 @@ pub fn text_width(kind: FontKind, size: f32, s: &str) -> f32 {
 pub fn ascent(kind: FontKind) -> f32 {
     let f = font(kind);
     f.metrics.ascent / f.units_per_em()
+}
+
+/// The natural height of a line of the font as a fraction of the size: ascent, descent and line
+/// gap (Liberation Serif: about 1.149). A line spacing of 1.0 is this much (PDF-015).
+pub fn natural_height(kind: FontKind) -> f32 {
+    let f = font(kind);
+    (f.metrics.ascent - f.metrics.descent + f.metrics.leading) / f.units_per_em()
 }
 
 /// WinAnsiEncoding byte for a character, if it has one.
@@ -427,6 +439,7 @@ fn font_res(k: FontKind) -> &'static str {
         FontKind::Sans => "F1",
         FontKind::Mono => "F2",
         FontKind::Hand => "F3",
+        FontKind::Serif => "F4",
     }
 }
 
@@ -567,6 +580,7 @@ impl Doc {
                 FontKind::Sans => "UbuntuLight",
                 FontKind::Mono => "Hack",
                 FontKind::Hand => "Virgil",
+                FontKind::Serif => "LiberationSerif",
             };
             let s = |v: f32| (v * 1000.0 / upem).round() as i32;
             objs[desc_id - 1] = format!(
@@ -787,5 +801,20 @@ mod tests {
         assert!(text.contains("/FontBBox [-466 -295 662 990] /ItalicAngle 0 /Ascent 928 /Descent -236 /CapHeight 729"), "descriptor");
         // "a" (0x61) is 1233 / 2048 em = 602
         assert!(text.contains(" 602 "), "widths");
+    }
+
+    // spec: PDF-014, PDF-010
+    #[test]
+    fn liberation_serif_is_bundled_embeds_under_its_name_and_is_the_last_fallback_pdf_014() {
+        assert!((char_width(FontKind::Serif, 2048.0, 'a') - 909.0).abs() < 0.01, "Times-compatible advance of a");
+        assert!((natural_height(FontKind::Serif) - 1.149).abs() < 0.001);
+        // Ubuntu Light and Hack come before it, so the characters they have keep their look
+        assert!(std::ptr::eq(face_for(FontKind::Sans, 'a').0, font(FontKind::Sans)) && std::ptr::eq(face_for(FontKind::Serif, 'a').0, font(FontKind::Serif)));
+        assert!(!std::ptr::eq(face_for(FontKind::Sans, '→').0, font(FontKind::Serif)));
+        let mut d = Doc::new("t");
+        let p = d.add_page(200.0, 200.0);
+        d.page(p).text(TextStyle::plain(FontKind::Serif, 12.0, Rgba::BLACK), 10.0, 50.0, "Times");
+        let bytes = d.finish();
+        assert!(String::from_utf8_lossy(&bytes).contains("/BaseFont /LiberationSerif"));
     }
 }

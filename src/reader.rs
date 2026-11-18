@@ -33,6 +33,8 @@ pub enum ReaderAction {
 pub struct Extras {
     pub numbers: HashMap<usize, String>,
     pub scroll_to: Option<usize>,
+    /// how the front matter is drawn (CFG-050)
+    pub properties: crate::config::PropertiesView,
 }
 
 impl Extras {
@@ -579,12 +581,8 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
     // front matter
     if lines.first().map(|(_, l)| l.trim() == "---").unwrap_or(false) {
         if let Some(end) = lines.iter().skip(1).position(|(_, l)| l.trim() == "---") {
-            egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(CornerRadius::same(6)).inner_margin(8).show(ui, |ui| {
-                ui.label(egui::RichText::new("Properties").small().color(theme::MUTED));
-                for (_, l) in &lines[1..end + 1] {
-                    ui.label(egui::RichText::new(*l).monospace().color(theme::TEXT));
-                }
-            });
+            let raw: Vec<&str> = lines[1..end + 1].iter().map(|(_, l)| *l).collect();
+            crate::properties_ui::show(ui, text, &raw, extras.properties, vault, rel, &mut out);
             ui.add_space(8.0);
             i = end + 2;
         }
@@ -973,7 +971,7 @@ mod tests {
             let mut out = ctx.run_ui(raw, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     // the target is asked for in the first frame only, as the app does
-                    let e = Extras { numbers: extras.numbers.clone(), scroll_to: extras.scroll_to.filter(|_| n == 0) };
+                    let e = Extras { numbers: extras.numbers.clone(), scroll_to: extras.scroll_to.filter(|_| n == 0), properties: extras.properties };
                     action = show(ui, text, v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, (15.0, true), &e);
                 });
             });
@@ -991,14 +989,14 @@ mod tests {
         crate::vault::write_sample_vault(&d).unwrap();
         let v = Vault::open(&d).unwrap();
         let text = "# Title\n## Plan\n### Step\n## Next\n";
-        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, true), scroll_to: None }, vec![vec![]]);
+        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, true), scroll_to: None, ..Default::default() }, vec![vec![]]);
         for (n, title) in [("1", "Title"), ("1.1", "Plan"), ("1.1.1", "Step"), ("1.2", "Next")] {
             let number = painted.iter().find(|(t, _)| t == n).unwrap_or_else(|| panic!("{n} is painted: {painted:?}")).1;
             let title = painted.iter().find(|(t, _)| t == title).unwrap().1;
             assert!(number.max.x <= title.min.x + 0.5 && (number.center().y - title.center().y).abs() < 6.0, "{n} is left of {title:?} on its row: {number:?}");
         }
         assert!(!painted.iter().any(|(t, _)| t == "0"), "no heading is numbered 0");
-        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, false), scroll_to: None }, vec![vec![]]);
+        let (_, painted) = read(&v, text, &Extras { numbers: Extras::numbers_of(text, false), scroll_to: None, ..Default::default() }, vec![vec![]]);
         assert!(!painted.iter().any(|(t, _)| t == "1" || t == "1.1"), "numbering off: {painted:?}");
         let on = "---\nnumbered-headings: yes\n---\n## Plan\n";
         assert_eq!(Extras::numbers_of(on, false).get(&3).map(String::as_str), Some("1"), "front matter turns it on (line 3, after the properties)");
@@ -1026,7 +1024,7 @@ mod tests {
         let line = text.lines().position(|l| l == "## Down here").unwrap();
         let (_, before) = read(&v, &text, &Extras::default(), vec![vec![]]);
         assert!(before.iter().find(|(t, _)| t == "Down here").unwrap().1.min.y > 1000.0, "far below the window");
-        let (_, after) = read(&v, &text, &Extras { numbers: Default::default(), scroll_to: Some(line) }, vec![vec![]]);
+        let (_, after) = read(&v, &text, &Extras { numbers: Default::default(), scroll_to: Some(line), ..Default::default() }, vec![vec![]]);
         let y = after.iter().find(|(t, _)| t == "Down here").unwrap().1.min.y;
         assert!((0.0..40.0).contains(&y), "the heading is at the top of the view: {y}");
         let _ = std::fs::remove_dir_all(&d);

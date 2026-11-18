@@ -80,6 +80,8 @@ Inside each of these tables: `family` and `size`. The old `font_size` of earlier
 size of the two editor areas when you updated.
 | `line_numbers` | on | Editor, "Show line numbers in the editor" |
 | `date_prefix_new_notes` | on | Editor, "Date prefix for new notes": a note Shale makes (new note, red link, quick switcher, new drawing) is named `YYMMDD_name.md` with today's date; the title line shows the name without the prefix (see [[Editor]]) |
+| `properties_in_editor` | Folded | Appearance, "Properties in the editor": how the properties (the lines between the two `---` at the top of a note) show: `Folded` (one line), `Card` or `Raw` (all lines) |
+| `properties_in_reader` | Card | Appearance, "Properties in the reading view": the same choice for the reading view; a card is made for the type of the note (see [[Reading view]]) |
 | `numbered_headings` | on | Editor, "Number headings": `#` and deeper show 1, 1.1, 1.2 before their text; a note's front matter `numbered-headings: true` or `false` overrides it for that note (see [[Notes and links]]) |
 | `format_toolbar` | on | Settings → Editor → Editing, "Show formatting toolbar above the text of a note" |
 | `toolbar_size` | 110 | Editing, "Toolbar button size": the size of the toolbar's buttons in percent, 80 to 200 in steps of 10 |
@@ -95,7 +97,7 @@ size of the two editor areas when you updated.
 | `normal_cursor_shape` | `block` (the same four words) | Vim, "Cursor in normal mode"; used only with Vim-style editing |
 | `cursor_blink` | on | Editor, "Blinking cursor"; off keeps the cursor steady |
 | `esc_cursor` | `stay` (`stay` or `step_back`; another word is `stay`) | Vim, "Esc from insert mode": where the cursor lands when Esc leaves insert mode, on the character after the typing or one back like Vim; used only with Vim-style editing |
-| `keybindings` | empty (the defaults of [[Keyboard shortcuts]]) | Settings → Keybindings; only the actions you changed are stored |
+| `keybindings` | empty (the defaults of [[Keyboard shortcuts]]; macOS has other defaults for some actions) | Settings → Keybindings; only the actions you changed are stored |
 
 ### Window and vault
 
@@ -211,6 +213,14 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 | `caches.broken_days` | forever (damaged mail index copies) | same |
 | `caches.debug_log_mb` | 10 | same |
 | `caches.undo_days` | 30 (undo steps of notes, days) | same |
+
+## Properties of a note
+
+Some behaviour is decided by a note's own properties (front matter) instead of a setting; they are not stored in any settings file.
+`numbered-headings` (`true` or `false`) overrides the setting `numbered_headings` for the note ([[Notes and links]]). The PDF export reads
+`print-paper`, `print-margins`, `print-font`, `print-font-size`, `print-line-spacing`, `print-paragraph-spacing`, `print-align`,
+`print-heading-color`, `print-title` and `print-toc`; each has its values, default and effect in the table of
+[[PDF#Print properties of a note]]. Every one is optional, and a value that cannot be read is ignored.
 
 ## Vault settings (`<vault>/.shale/settings.json`)
 
