@@ -10,6 +10,18 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-18
+
+### Added
+
+- **Downloads for macOS and Windows** (#71). Every release page now has `shale-<version>-macos-arm64.tar.gz`
+  (Apple silicon) and `shale-<version>-windows-x86_64.zip` next to the Linux tarball, built, tested and
+  packed the same way (the program, the licence, the README, the changelog, the icon and the docs with the
+  user guide), each with a `.sha256` file and covered by the release's build attestation. They are not
+  signed or notarised: the release notes and the README say how to start them past macOS Gatekeeper and
+  Windows SmartScreen. The release is published only when the Linux, macOS and Windows builds all passed
+  (BUILD-024).
+
 ## [0.5.1] - 2026-11-18
 
 ### Added
@@ -1330,7 +1342,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rabalyn/shale/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rabalyn/shale/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rabalyn/shale/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rabalyn/shale/compare/v0.3.0...v0.4.0
