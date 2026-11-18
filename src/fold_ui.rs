@@ -108,7 +108,28 @@ pub struct FoldUi {
 }
 
 /// Where the markers sit left of the text, and their size.
-const MARKER: f32 = 12.0;
+pub const MARKER: f32 = 12.0;
+
+/// What the reading view gets of a note's folds (EDIT-095): the state it shares with the editor, and the
+/// setting that folds a note's front matter when the note is first shown (EDIT-081).
+pub struct ReaderFolds<'a> {
+    pub ui: &'a mut FoldUi,
+    pub summary: bool,
+}
+
+/// The ▸ / ▾ marker in `rect`: drawn, with its hand cursor and its hint; true when it was clicked.
+pub fn marker_button(ui: &mut Ui, id: egui::Id, rect: Rect, folded: bool) -> bool {
+    let painter = ui.painter().with_clip_rect(ui.clip_rect());
+    let resp = ui.interact(rect, id, Sense::click());
+    let colour = if resp.hovered() { theme::TEXT } else { theme::MUTED };
+    let c = rect.center();
+    let tri = if folded { vec![c + Vec2::new(-2.5, -4.0), c + Vec2::new(-2.5, 4.0), c + Vec2::new(3.5, 0.0)] } else { vec![c + Vec2::new(-4.0, -2.5), c + Vec2::new(4.0, -2.5), c + Vec2::new(0.0, 3.5)] };
+    painter.add(Shape::convex_polygon(tri, colour, Stroke::NONE));
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp.on_hover_text(if folded { "Unfold" } else { "Fold" }).clicked()
+}
 
 impl FoldUi {
     /// The folds of `text` of the note `rel` for this frame; forgets the folds whose block is gone.
@@ -147,6 +168,20 @@ impl FoldUi {
             self.notes.remove(rel);
         }
         moved
+    }
+
+    /// Unfold what hides `line` (a footnote jump or the outline goes there, EDIT-097); true when something
+    /// was unfolded.
+    pub fn reveal_line(&mut self, rel: &Path, frame: &Frame, line: usize) -> bool {
+        if !frame.view.is_hidden(line) {
+            return false;
+        }
+        let Some(folds) = self.notes.get_mut(rel) else { return false };
+        let changed = folds.reveal(&frame.blocks, line);
+        if folds.is_empty() {
+            self.notes.remove(rel);
+        }
+        changed
     }
 
     /// The cursor (byte `primary`, in the selection `sel`) is in text that a fold hides: unfold what
@@ -231,16 +266,7 @@ impl FoldUi {
             let mut w = Widget { line: b.header, marker: None, badge: None, copy: None };
             if folded || hot {
                 let rect = Rect::from_center_size(Pos2::new(pos.x - MARKER / 2.0 - 2.0, row.center().y), Vec2::splat(MARKER));
-                let resp = ui.interact(rect, id.with(("fold-marker", b.header)), Sense::click());
-                let colour = if resp.hovered() { theme::TEXT } else { theme::MUTED };
-                let c = rect.center();
-                let tri = if folded { vec![c + Vec2::new(-2.5, -4.0), c + Vec2::new(-2.5, 4.0), c + Vec2::new(3.5, 0.0)] } else { vec![c + Vec2::new(-4.0, -2.5), c + Vec2::new(4.0, -2.5), c + Vec2::new(0.0, 3.5)] };
-                painter.add(Shape::convex_polygon(tri, colour, Stroke::NONE));
-                if resp.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                let resp = resp.on_hover_text(if folded { "Unfold" } else { "Fold" });
-                if resp.clicked() {
+                if marker_button(ui, id.with(("fold-marker", b.header)), rect, folded) {
                     clicked = Some((b.header, FoldCmd::Toggle));
                 }
                 w.marker = Some(rect);

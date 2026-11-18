@@ -1722,15 +1722,14 @@ impl ShaleApp {
                 ctx.data_mut(|d| d.insert_temp(egui::Id::unique(("note-menu-key", tab_id)), true));
                 ctx.request_repaint();
             }
-            KeyAction::NoteFold | KeyAction::NoteUnfold | KeyAction::NoteFoldAll | KeyAction::NoteUnfoldAll if !reading => {
+            // fold all and unfold all work in the reading view too; the others act on the cursor, which it has not (EDIT-098)
+            KeyAction::NoteFoldAll | KeyAction::NoteUnfoldAll => {
                 use crate::fold::FoldCmd;
-                let cmd = match a {
-                    KeyAction::NoteFold => FoldCmd::Fold,
-                    KeyAction::NoteUnfold => FoldCmd::Unfold,
-                    KeyAction::NoteFoldAll => FoldCmd::FoldAll,
-                    _ => FoldCmd::UnfoldAll,
-                };
-                self.tabbar.tabs[active].editor.key_fold(cmd);
+                self.tabbar.tabs[active].editor.key_fold(if a == KeyAction::NoteFoldAll { FoldCmd::FoldAll } else { FoldCmd::UnfoldAll });
+            }
+            KeyAction::NoteFold | KeyAction::NoteUnfold if !reading => {
+                use crate::fold::FoldCmd;
+                self.tabbar.tabs[active].editor.key_fold(if a == KeyAction::NoteFold { FoldCmd::Fold } else { FoldCmd::Unfold });
             }
             KeyAction::NoteCopyCode if !reading => self.tabbar.tabs[active].editor.key_copy_code(),
             KeyAction::NoteHighlightColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Highlight),

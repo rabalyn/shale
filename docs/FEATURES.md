@@ -39,6 +39,13 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded or card; raw leaves it
   open); the cursor moving into it opens the YAML and folds it again when it leaves. In a **mail note**
   (`type: email`) the quotes (`… n quoted lines`) and the signature start folded too.
+- **Folding in the reading view** (EDIT-095 to EDIT-099, rabalyn/shale#364): the reading view folds the same blocks with
+  the same folds as the editor of the note (fold in one, it is folded in the other; session only, never written).
+  Hover a block's first line and click the ▾ marker left of it, or the `… n lines` badge under a folded block;
+  **Ctrl+Shift+O** / **Ctrl+Shift+I** fold and unfold all there (fold and unfold at the cursor are editor keys). A footnote
+  jump or a click in the outline on a heading that a fold hides opens the fold. The front matter card keeps its own toggle.
+
+![Folded code blocks, quote and signature in the reading view](userguide/z_media/screenshots/reading-folds.png)
 - **Code blocks as boxes** (EDIT-080, EDIT-086, rabalyn/shale#356): with the Markdown preview on, a fenced code block is a
   rounded box on the code background with a thin border and a badge at its top right with the language (`code` when there is
   none); the ``` lines are hidden and show again when the cursor is in the block. The reading view draws the same box.
@@ -951,7 +958,7 @@ Text editing keys and vim keys are fixed.
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
 | Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
 | Ctrl+Shift+K / Ctrl+Shift+J | Fold / unfold the block at the cursor (a heading section, quote, list item or list; again on a folded line folds the block around it); the cursor then goes to the block's first line |
-| Ctrl+Shift+O / Ctrl+Shift+I | Fold all / unfold all blocks of the note |
+| Ctrl+Shift+O / Ctrl+Shift+I | Fold all / unfold all blocks of the note (also in the reading view) |
 | Ctrl+Shift+C | Copy the code of the code block at the cursor (no fences, no newline at the end) |
 | Alt+V, Alt+P, Alt+D, Alt+N | The buttons of the view header and tab bar of a note: edit / reading view, Markdown preview, the ⋯ menu (opens it), New tab |
 | Alt+1, Alt+2, Alt+3, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0 | The ribbon items by position: the first ten icons of the ribbon, as shown (also after you reordered or removed some) |

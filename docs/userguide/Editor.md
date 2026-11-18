@@ -42,7 +42,7 @@ line numbers). Click it to fold; a folded block always shows ▸, and clicking i
 The keys can be changed in Settings → Keybindings (Note view), see [[Keyboard shortcuts]]. The text is never
 changed by folding, and undo, selection and copy work as always. The cursor never stays in hidden text: if you move into a folded block
 with the arrow keys, or a link or a search result jumps there, it opens. Select all (Ctrl+A) leaves folds alone.
-Folds are remembered while Shale runs and are never written into the note. The reading view does not fold yet.
+Folds are remembered while Shale runs and are never written into the note. The [[Reading view]] folds the same blocks, with the same folds: what you fold in one is folded in the other.
 
 ### Properties
 

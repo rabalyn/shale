@@ -662,3 +662,276 @@ fn key_037_the_copy_key_does_nothing_in_the_reading_view() {
     w.hl.frames(&mut w.app, 4);
     assert!(w.key_copied(Key::C).is_empty());
 }
+
+/// The reading view of the open note (EDIT-095…EDIT-099): the same folds as the editor's.
+impl W {
+    fn reading(&mut self) {
+        if !self.app.tabbar.tabs[self.app.tabbar.active].reading {
+            self.app.toggle_reading_view();
+        }
+        self.hl.frames(&mut self.app, 4);
+    }
+
+    /// Where the reading view painted `text` (a whole text of a line).
+    fn at(&self, text: &str) -> Pos2 {
+        self.hl.text.iter().find(|(t, _)| t == text).unwrap_or_else(|| panic!("{text:?} is not painted: {:?}", self.hl.text)).1
+    }
+
+    /// The marker of the line `line` in the reading view, with the pointer over the text `text` painted there.
+    fn reader_marker(&mut self, text: &str, line: usize) -> Rect {
+        let p = self.at(text);
+        self.hover(Pos2::new(p.x + 6.0, p.y + 6.0));
+        self.editor().fold.widgets.iter().find(|w| w.line == line).and_then(|w| w.marker).unwrap_or_else(|| panic!("no marker at line {line}: {:?}", self.editor().fold.widgets))
+    }
+
+    fn reader_badge(&self, line: usize) -> Option<Rect> {
+        self.editor().fold.widgets.iter().find(|w| w.line == line).and_then(|w| w.badge)
+    }
+}
+
+// spec: EDIT-095, EDIT-096
+#[test]
+fn edit_096_a_marker_in_the_reading_view_folds_a_section_to_its_first_line_and_a_badge_and_the_badge_unfolds_it() {
+    let mut w = W::new("reader-marker", SECTIONS, false);
+    w.reading();
+    assert!(w.painted("first") && w.painted("second") && w.painted("third"), "{:?}", w.hl.text);
+    // no marker while the pointer is elsewhere
+    w.hover(Pos2::new(1400.0, 800.0));
+    assert!(w.editor().fold.widgets.iter().all(|x| x.marker.is_none()), "{:?}", w.editor().fold.widgets);
+    // over a header there is one, left of the text
+    let m = w.reader_marker("One", 0);
+    assert!(m.max.x < w.at("One").x, "left of the text: {m:?}");
+    w.click(m.center());
+    w.hl.frames(&mut w.app, 2);
+    for gone in ["first", "second", "Sub", "third"] {
+        assert!(!w.painted(gone), "{gone:?} is hidden: {:?}", w.hl.text);
+    }
+    assert!(w.painted("One") && w.painted("Two") && w.painted("fourth"), "the header and what follows stay");
+    assert!(w.painted("\u{2026} 4 lines"), "the badge: {:?}", w.hl.text);
+    // the folded block keeps its marker without hovering; the text of the note is untouched
+    w.hover(Pos2::new(1400.0, 800.0));
+    assert!(w.editor().fold.widgets.iter().any(|x| x.line == 0 && x.marker.is_some()));
+    assert_eq!(w.text(), SECTIONS);
+    assert_eq!(std::fs::read_to_string(w.dir.join(NOTE)).unwrap(), SECTIONS);
+    // the badge unfolds it
+    let badge = w.reader_badge(0).unwrap();
+    w.click(badge.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.painted("second") && w.painted("third") && !w.painted("\u{2026} 4 lines"), "{:?}", w.hl.text);
+    // and the marker of a folded block does as well
+    let m = w.reader_marker("Sub", 3);
+    w.click(m.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(!w.painted("third") && w.painted("\u{2026} 1 line"), "{:?}", w.hl.text);
+    let m = w.reader_marker("Sub", 3);
+    w.click(m.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.painted("third"));
+}
+
+// spec: EDIT-095
+#[test]
+fn edit_095_the_reading_view_and_the_editor_share_the_folds_of_the_note() {
+    let mut w = W::new("reader-shared", SECTIONS, false);
+    // folded in the editor: folded in the reading view
+    w.cursor_in("## Sub");
+    w.press(Key::K, CTRL_SHIFT);
+    w.reading();
+    assert!(!w.painted("third") && w.painted("Sub") && w.painted("second") && w.painted("\u{2026} 1 line"), "{:?}", w.hl.text);
+    // folded in the reading view: folded in the editor (the cursor goes where it is not hidden: EDIT-075)
+    w.app.toggle_reading_view();
+    w.cursor_in("# Two");
+    w.reading();
+    let m = w.reader_marker("One", 0);
+    w.click(m.center());
+    w.hl.frames(&mut w.app, 2);
+    w.app.toggle_reading_view();
+    w.hl.frames(&mut w.app, 4);
+    assert_eq!(w.hidden(), 4, "# One is folded in the editor too (## Sub inside it stays folded)");
+    // and back again: unfold all in the editor, the reading view shows everything
+    w.press(Key::I, CTRL_SHIFT);
+    w.reading();
+    assert!(w.painted("second") && w.painted("third"), "{:?}", w.hl.text);
+}
+
+// spec: EDIT-096
+#[test]
+fn edit_096_quotes_lists_code_and_signatures_fold_in_the_reading_view_and_the_front_matter_has_no_marker() {
+    let note = "---\ntitle: T\n---\n\n> q1\n> q2\n> q3\n\n- item\n    - child\n- next\n\n```rust\nlet x = 1;\nlet y = 2;\n```\n\nafter";
+    let mut w = W::new("reader-kinds", note, false);
+    w.reading();
+    // the quote
+    let m = w.reader_marker("q1", 4);
+    w.click(m.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.painted("q1") && !w.painted("q2") && !w.painted("q3") && w.painted("\u{2026} 2 lines"), "{:?}", w.hl.text);
+    // the list item with its child
+    let m = w.reader_marker("item", 8);
+    w.click(m.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(!w.painted("child") && w.painted("next") && w.painted("\u{2026} 1 line"), "{:?}", w.hl.text);
+    // the code block: its box stays, with the badge, without its code
+    assert!(w.painted("rust") && w.hl.text.iter().any(|(t, _)| t.contains("let x = 1;")), "{:?}", w.hl.text);
+    let top = w.hl.text.iter().find(|(t, _)| t == "rust").unwrap().1;
+    w.hover(Pos2::new(top.x - 60.0, top.y + 4.0));
+    let m = w.editor().fold.widgets.iter().find(|x| x.line == 12).and_then(|x| x.marker).expect("the code block has a marker");
+    w.click(m.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.painted("rust") && !w.hl.text.iter().any(|(t, _)| t.contains("let x = 1;")) && w.painted("\u{2026} 3 lines"), "{:?}", w.hl.text);
+    assert!(w.painted("after"));
+    // the front matter is the card with its own toggle: no marker of ours
+    w.hover(Pos2::new(1400.0, 800.0));
+    assert!(w.editor().fold.widgets.iter().all(|x| x.line != 0), "{:?}", w.editor().fold.widgets);
+}
+
+// spec: EDIT-096, EDIT-082
+#[test]
+fn edit_096_a_mail_note_shows_its_quotes_folded_in_the_reading_view_with_the_quote_badge() {
+    let note = "---\ntype: email\nsubject: S\n---\n\nHello\n\n> old one\n> old two\n> old three\n\n-- \nAnna\nAnna's phone\n";
+    let mut w = W::new("reader-mail", note, false);
+    w.reading();
+    assert!(w.painted("Hello") && !w.painted("old two") && !w.painted("old three"), "{:?}", w.hl.text);
+    assert!(w.painted("\u{2026} 2 quoted lines"), "{:?}", w.hl.text);
+    assert!(!w.painted("Anna's phone") && w.painted("\u{2026} 2 lines"), "the signature is folded too: {:?}", w.hl.text);
+    let badge = w.reader_badge(7).unwrap();
+    w.click(badge.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(w.painted("old two") && w.painted("old three"), "{:?}", w.hl.text);
+}
+
+// spec: EDIT-098, KEY-031
+#[test]
+fn edit_098_fold_all_and_unfold_all_work_in_the_reading_view_and_the_keys_at_the_cursor_do_not() {
+    let mut w = W::new("reader-keys", SECTIONS, false);
+    w.cursor_in("# Two");
+    w.reading();
+    w.press(Key::O, CTRL_SHIFT);
+    assert!(w.painted("One") && w.painted("Two") && w.painted("\u{2026} 4 lines") && w.painted("\u{2026} 1 line"), "{:?}", w.hl.text);
+    assert!(!w.painted("first") && !w.painted("fourth") && !w.painted("Sub"), "{:?}", w.hl.text);
+    w.press(Key::I, CTRL_SHIFT);
+    assert!(w.painted("first") && w.painted("Sub") && w.painted("fourth"), "{:?}", w.hl.text);
+    // fold and unfold at the cursor are for the editor
+    w.press(Key::K, CTRL_SHIFT);
+    assert!(w.painted("first") && w.painted("fourth"), "{:?}", w.hl.text);
+    assert_eq!(w.text(), SECTIONS);
+    // the same folds in the editor
+    w.press(Key::O, CTRL_SHIFT);
+    w.app.toggle_reading_view();
+    w.hl.frames(&mut w.app, 4);
+    assert_eq!(w.numbers(), vec![1, 6]);
+}
+
+// spec: EDIT-097
+#[test]
+fn edit_097_the_outline_and_footnote_jumps_unfold_what_hides_their_target() {
+    let note = "Claim[^1] here.\n\n# Part\nbody\n## Inner\ninner text\n# Notes\n\n[^1]: The body\n";
+    let mut w = W::new("reader-jump", note, false);
+    w.reading();
+    w.press(Key::O, CTRL_SHIFT);
+    assert!(!w.painted("inner text") && !w.painted("The body"), "{:?}", w.hl.text);
+    // a click in the outline on "Inner", which sits in the folded "# Part"
+    w.app.goto_heading(Path::new(NOTE), 4);
+    w.hl.frames(&mut w.app, 4);
+    assert!(w.painted("body") && w.painted("Inner") && !w.painted("inner text"), "# Part is open, # Inner (the target) is a folded line: {:?}", w.hl.text);
+    assert!(!w.painted("The body"), "the folds around the footnote stay: {:?}", w.hl.text);
+    // a click on the footnote mark in the text goes to the definition in the folded "# Notes"
+    let claim = w.at("Claim1 here.");
+    let mark = {
+        let _defined = crate::markdown::DefinedFootnotes::set(["1".to_string()].into());
+        let (job, _, _, _) = crate::reader::inline_painted("Claim[^1] here.", &[], 15.0, crate::theme::TEXT, false);
+        let galley = w.hl.ctx().fonts_mut(|f| f.layout_job(job));
+        claim + galley.pos_from_cursor(egui::text::CCursor::new(5)).center().to_vec2() + egui::Vec2::new(2.0, 0.0)
+    };
+    w.click(mark);
+    w.hl.frames(&mut w.app, 6);
+    assert!(w.painted("1 The body"), "# Notes is open now: {:?}", w.hl.text);
+}
+
+// spec: EDIT-095
+#[test]
+fn edit_095_a_table_and_a_formula_inside_a_fold_are_not_drawn_in_the_reading_view() {
+    let note = "# H\n\n| Alpha | Beta |\n|---|---|\n| one | two |\n\n$$\nx^2\n$$\n\nafter\n\n# Other\n\n| Gamma | Delta |\n|---|---|\n| three | four |\n";
+    let mut w = W::new("reader-table", note, false);
+    w.reading();
+    assert!(w.painted("Alpha") && w.painted("Gamma"), "{:?}", w.hl.text);
+    let m = w.reader_marker("H", 0);
+    w.click(m.center());
+    w.hl.frames(&mut w.app, 2);
+    assert!(!w.painted("Alpha") && !w.painted("Beta") && !w.painted("after"), "no grid over the hidden lines: {:?}", w.hl.text);
+    assert!(w.painted("Gamma") && w.painted("Delta"), "the table of the other section is there");
+}
+
+/// A generated large note (#364): 20 000 lines with a heading every 40 lines, a list, a quote and 300 code blocks.
+fn large_note() -> String {
+    let mut t = String::new();
+    let mut lines = 0;
+    let mut code = 0;
+    let mut round = 0;
+    while lines < 20_000 {
+        if round % 6 == 0 {
+            t.push_str(&format!("## Section {}\n\n", round / 6));
+            lines += 2;
+        }
+        t.push_str("Some text of a paragraph that is neither short nor long, with a [[link]] and **bold**.\n- an item\n    - a child\n> a quote\n> goes on\n\n");
+        lines += 6;
+        if code < 300 && round % 3 == 0 {
+            code += 1;
+            t.push_str("```rust\nfn main() {\n    let x = 1;\n    println!(\"{x}\");\n}\n```\n\n");
+            lines += 7;
+        }
+        round += 1;
+    }
+    t
+}
+
+/// Timing of the fold engine and the code boxes on a large note (#364). Not a check of anything and not part
+/// of `cargo test`: `cargo test --release large_note_timing -- --ignored --nocapture`.
+#[test]
+#[ignore = "a timing, run it by hand: cargo test --release large_note_timing -- --ignored --nocapture"]
+fn large_note_timing() {
+    use std::time::Instant;
+    let text = large_note();
+    let blocks = crate::fold::find_blocks(&text);
+    let codes = blocks.iter().filter(|b| b.kind == crate::fold::FoldKind::Code).count();
+    println!("note: {} lines, {} bytes, {} blocks, {} code blocks", text.lines().count(), text.len(), blocks.len(), codes);
+    let avg = |n: u32, mut f: Box<dyn FnMut()>| {
+        let t = Instant::now();
+        for _ in 0..n {
+            f();
+        }
+        t.elapsed() / n
+    };
+    let t = text.clone();
+    println!("find_blocks: {:?}", avg(20, Box::new(move || drop(crate::fold::find_blocks(&t)))));
+    let mut state = crate::fold_ui::FoldUi::default();
+    let t = text.clone();
+    println!("FoldUi::begin (find_blocks, folds, view), nothing folded: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, false)))));
+    let mut state = crate::fold_ui::FoldUi::default();
+    let frame = state.begin(Path::new("A.md"), &text, false);
+    state.apply(Path::new("A.md"), &frame, crate::fold::FoldCmd::FoldAll, 0);
+    let t = text.clone();
+    println!("FoldUi::begin, everything folded: {:?}", avg(20, Box::new(move || drop(state.begin(Path::new("A.md"), &t, false)))));
+    // the code boxes over a laid-out text
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx);
+    let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::Vec2::new(900.0, 700.0))), ..Default::default() };
+    let mut folds = crate::fold_ui::FoldUi::default();
+    let frame = folds.begin(Path::new("A.md"), &text, false);
+    let _ = ctx.run_ui(raw, |ui| {
+        let s = Instant::now();
+        let galley = ui.painter().layout(text.clone(), egui::FontId::monospace(14.0), egui::Color32::WHITE, 800.0);
+        println!("layout of the whole text as one galley (egui's, not ours): {:?}", s.elapsed());
+        let s = Instant::now();
+        let mut n = 0;
+        for _ in 0..20 {
+            n = crate::code_box::shapes(ui, &frame, &galley, Pos2::new(40.0, 0.0), 840.0, 14.0).len();
+        }
+        println!("code_box::shapes, clip is the screen (the top of the note on it): {:?} ({n} shapes)", s.elapsed() / 20);
+        ui.set_clip_rect(Rect::from_min_size(Pos2::new(0.0, 100_000.0), egui::Vec2::new(900.0, 700.0)));
+        let s = Instant::now();
+        for _ in 0..20 {
+            n = crate::code_box::shapes(ui, &frame, &galley, Pos2::new(40.0, 0.0), 840.0, 14.0).len();
+        }
+        println!("code_box::shapes, clip somewhere in the middle: {:?} ({n} shapes)", s.elapsed() / 20);
+    });
+}

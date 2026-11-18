@@ -869,7 +869,12 @@ impl ShaleApp {
                     }
                     if reading {
                         let text = doc.text.clone();
-                        let extras = reader::Extras { numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings), scroll_to: tab.reader_line.take(), properties: self.cfg.properties_in_reader };
+                        let extras = reader::Extras {
+                            numbers: reader::Extras::numbers_of(&text, self.cfg.numbered_headings),
+                            scroll_to: tab.reader_line.take(),
+                            properties: self.cfg.properties_in_reader,
+                            folds: Some(std::cell::RefCell::new(crate::fold_ui::ReaderFolds { ui: &mut tab.editor.fold, summary: self.cfg.properties_in_editor != crate::config::PropertiesView::Raw })),
+                        };
                         let shown = crate::fonts::with_area(ui, &fonts.rendered, |ui| reader::show(ui, &text, vault, &rel, &mut reader::Caches { scenes: &mut self.scenes, media: &self.media }, (base, dark), &extras));
                         if let Some(a) = shown {
                             handle_reader_action(&mut self.actions, a, &rel);
