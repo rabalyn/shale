@@ -32,6 +32,11 @@ written the same way: start, end, place, calendar, repeat rule, organizer, atten
 link are properties, the text is its title and its notes. Notes you imported earlier keep their
 list of **From:** / **Date:** lines.
 
+The text of a mail is tidied while it is imported: blank lines in long runs become one, a very long
+tracking link becomes a short link with the host as its text, and the pictures among the attachments
+are shown small (200 points wide: `![[photo.jpg|200]]`; change the number to make one bigger). The signature of the mail starts
+at a line that is exactly `-- ` and earlier messages stay quoted with `>`, as in the mail.
+
 If you read your notes in a program that does not show properties, tick **Header list in the note
 body** in the Import dialog: the list of From, To, Date (event: When, Where, Attendees, …) is then also
 written below the title. **Settings → Import → Header list in the note body** sets whether the box starts

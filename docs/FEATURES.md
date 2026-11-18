@@ -727,6 +727,11 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   The tag list counts the tags too. For programs that do not show properties, the box **Header list
   in the note body** (Import dialog; its start value is in Settings → Import) also writes the old list
   of From / To / Date / When / Where … below the title (IMP-052).
+- The text of an imported e-mail is tidied: runs of three or more blank lines become one, trailing
+  spaces go, and a long tracking URL (more than 80 characters, with a query string) becomes a short
+  link `[host](url)` (IMP-053). A picture among the attachments is an embed 200 points wide
+  (`![[file.jpg|200]]`), other attachments stay links (IMP-054). The signature starts at a line that
+  is exactly `-- ` and quoted replies are runs of `>` lines (IMP-055).
 
 ## Feeds: read Mastodon and Bluesky, save posts to the vault
 

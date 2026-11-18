@@ -22,6 +22,9 @@ pub(crate) mod docx_tests;
 /// Thunderbird lookups): only Wayland delivers those kinds (IMP-011); `wl_drop.rs` is their one source.
 #[cfg(target_os = "linux")]
 mod from_programs;
+pub mod mail_text;
+#[cfg(test)]
+mod mail_text_tests;
 pub mod people;
 pub mod tagwords;
 #[cfg(all(test, target_os = "linux"))]
@@ -492,6 +495,19 @@ fn link_line(rel: &Path) -> String {
     format!("- {}", media::link_for(rel))
 }
 
+/// One attachment line: a picture is embedded small (IMP-054), anything else is a link.
+fn attachment_line(rel: &Path) -> String {
+    if media::is_image(rel) {
+        format!("- ![[{}|{PICTURE_WIDTH}]]", rel_to_string(rel))
+    } else {
+        link_line(rel)
+    }
+}
+
+/// The width of a picture among the attachments of an e-mail (IMP-054), in the size syntax of the
+/// embeds (`![[file|200]]`, `embed_size.rs`).
+pub const PICTURE_WIDTH: u32 = 200;
+
 /// The note for an e-mail (attachment links already made). The properties are the one record of
 /// the header (IMP-050, IMP-051); `header_list` also writes them as a list below the title (IMP-052).
 pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], original: Option<&Path>, people: &[String], header_list: bool) -> String {
@@ -531,7 +547,7 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
         }
         s.push_str("## Attachments\n\n");
         for a in attachments {
-            s.push_str(&link_line(a));
+            s.push_str(&attachment_line(a));
             s.push('\n');
         }
         if let Some(o) = original_line {
@@ -540,7 +556,7 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
         s.push('\n');
     }
     s.push_str("## Message\n\n");
-    s.push_str(mail.text.trim());
+    s.push_str(&mail_text::tidy(&mail.text));
     s.push('\n');
     s
 }
@@ -596,7 +612,7 @@ pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&
         if header_list {
             s.push_str("\n## Notes\n\n");
         }
-        s.push_str(e.description.trim());
+        s.push_str(&mail_text::tidy(&e.description));
         s.push('\n');
     }
     s
@@ -868,7 +884,7 @@ mod tests {
             uid: "ev-2@x".into(),
             summary: "Jour fixe".into(),
             location: "Raum 1.12".into(),
-            description: "Agenda\n\nPunkt 1".into(),
+            description: "Agenda\n\n\n\n\nPunkt 1  ".into(),
             url: "https://meet.example.org/j".into(),
             organizer: "Anna Beispiel".into(),
             attendees: vec!["Müller, Hans".into(), "B".into()],
@@ -925,15 +941,15 @@ mod tests {
         assert!(listed.starts_with(&note[..note.find("\n# ").unwrap()]), "the properties are the same");
     }
 
-    // spec: IMP-050, IMP-052
+    // spec: IMP-050, IMP-052, IMP-054
     #[test]
     fn an_email_goes_from_its_properties_to_the_title_the_attachments_and_the_message() {
-        let mail = Mail { subject: "Plan".into(), from: "A <a@x>".into(), to: "B <b@x>".into(), date_raw: "Thu, 13 Nov 2026 10:22:33 +0100".into(), text: "Hallo\n\nWelt\n-- \nAnna\n".into(), ..Default::default() };
+        let mail = Mail { subject: "Plan".into(), from: "A <a@x>".into(), to: "B <b@x>".into(), date_raw: "Thu, 13 Nov 2026 10:22:33 +0100".into(), text: "Hallo  \r\n\r\n\r\n\r\nWelt\n-- \nAnna\n".into(), ..Default::default() };
         let atts = [PathBuf::from("z_media/2026/11/261113_foto.jpg"), PathBuf::from("z_media/2026/11/261113_plan.pdf")];
         let orig = PathBuf::from("z_media/2026/11/261113_Plan.eml");
         let note = email_note(&mail, &[], &atts, Some(&orig), &[], false);
         assert!(note.contains("date: \"Thu, 13 Nov 2026 10:22:33 +0100\"\n"), "an unreadable date is kept as written: {note}");
-        assert!(note.ends_with("\n---\n\n# Plan\n\n## Attachments\n\n- ![[z_media/2026/11/261113_foto.jpg]]\n- [[z_media/2026/11/261113_plan.pdf]]\n\n## Message\n\nHallo\n\nWelt\n-- \nAnna\n"), "{note}");
+        assert!(note.ends_with("\n---\n\n# Plan\n\n## Attachments\n\n- ![[z_media/2026/11/261113_foto.jpg|200]]\n- [[z_media/2026/11/261113_plan.pdf]]\n\n## Message\n\nHallo\n\nWelt\n\n-- \nAnna\n"), "{note}");
         assert!(!note.contains("**"), "{note}");
         let listed = email_note(&mail, &[], &atts, Some(&orig), &["[[A]]".into()], true);
         assert!(listed.contains("\n# Plan\n\n- **From:** A <a@x>\n- **To:** B <b@x>\n- **Date:** Thu, 13 Nov 2026 10:22:33 +0100\n- **People:** [[A]]\n\n## Attachments\n\n"), "{listed}");
