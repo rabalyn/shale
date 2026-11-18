@@ -1,5 +1,7 @@
 # TU Darmstadt, poster (class tudaposter), A0 by default (paper=a1, a2, ... for others). The text of
 # the note is set in two columns (columns); its headings are \section*, \subsection*, ... by nesting.
+# The department logo (Settings → LaTeX) goes into the title's info box, under the TU logo, right-aligned
+# (the class's own \addTitleBoxLogo is broken in tudaposter, so the logo is added to the info box directly).
 name = "Poster"
 description = "Posters (class tudaposter)"
 mapping = "poster"
@@ -7,6 +9,7 @@ class = "tudaposter"
 options = ["{language}", "accentcolor={accent}", "paper=a0", "logo=body", "footer=true"]
 preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}", "\\usepackage{multicol}"]
 logo = true
+department_logo = ["\\ExplSyntaxOn", "\\seq_gput_right:Nn\\g_ptxcd_title_info_seq{\\makebox[\\__ptxcd_logowidth:][r]{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{{department_logo}}}}", "\\ExplSyntaxOff"]
 columns = 2
 
 [[fields]]

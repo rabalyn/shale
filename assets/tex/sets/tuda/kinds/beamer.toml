@@ -1,6 +1,7 @@
 # TU Darmstadt, slides (class tudabeamer). The title slide comes from the fields; the writer maps
 # # to a section and every ## to a frame; a note with only # headings has a frame for each
 # (mapping "beamer").
+# The department logo (Settings → LaTeX) is the class's \sublogo: under the TU logo, right-aligned, on every slide.
 name = "Slides"
 description = "Presentation slides (class tudabeamer)"
 mapping = "beamer"
@@ -8,6 +9,7 @@ class = "tudabeamer"
 options = ["{language}", "accentcolor={accent}"]
 preamble = ["\\usepackage[{language}]{babel}", "\\usepackage[autostyle]{csquotes}"]
 logo = true
+department_logo = ["\\ExplSyntaxOn", "\\sublogo{\\includegraphics[height=\\c_ptxcd_logoheight_dim]{{department_logo}}}", "\\ExplSyntaxOff"]
 
 [[fields]]
 key = "title"

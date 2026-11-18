@@ -1,5 +1,7 @@
 # TU Darmstadt, exercise sheet (class tudaexercise): a sheet with a term and a sheet number. The
 # writer maps the headings by nesting: # to \section, ## to \subsection (mapping "article").
+# No department logo (Settings → LaTeX): the class has no place for a second logo under the TU logo, so this
+# kind does not show it.
 name = "Exercise sheet"
 description = "Exercise sheets (class tudaexercise)"
 mapping = "article"

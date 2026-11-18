@@ -23,6 +23,10 @@ pub const SETS_DIR: &str = "templates/tex";
 /// The most bytes a logo file may have.
 pub const MAX_LOGO: u64 = 5 << 20;
 
+/// The name of the department logo's file without its extension (TEX-035): the slot every set has,
+/// `logo/department_logo.pdf` or `.png`, and what `{department_logo}` in a kind's lines stands for.
+pub const DEPARTMENT_LOGO: &str = "department_logo";
+
 /// `<vault>/templates/tex`.
 pub fn sets_root(vault: &Path) -> PathBuf {
     vault.join(SETS_DIR)
@@ -138,6 +142,9 @@ pub struct SetSettings {
     pub department: String,
     /// The logo file in `logo/` (`tuda_logo.pdf`), set by "Choose logo…".
     pub logo: Option<String>,
+    /// The department logo file in `logo/` (`department_logo.png`), set by "Choose department
+    /// logo…" (TEX-035).
+    pub department_logo: Option<String>,
     /// The name that fills a kind's `author` field when the note and the dialog give none (the
     /// guided setup asks for it, TEX-017).
     pub author: String,
@@ -149,9 +156,9 @@ impl SetSettings {
         if self.accent.len() > 20 || !self.accent.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c)) {
             return Err(format!("the accent colour {:?} may have only letters, digits, - and _", self.accent));
         }
-        if let Some(l) = &self.logo {
-            if !plain_file_name(l) {
-                return Err(format!("the logo {l:?} must be a plain file name"));
+        for (what, file) in [("logo", &self.logo), ("department_logo", &self.department_logo)] {
+            if let Some(l) = file.iter().find(|l| !plain_file_name(l)) {
+                return Err(format!("the {what} {l:?} must be a plain file name"));
             }
         }
         Ok(())
@@ -178,7 +185,7 @@ pub fn load_settings(set_dir: &Path) -> Result<SetSettings, String> {
 /// Write `settings.toml` (atomically).
 pub fn save_settings(set_dir: &Path, s: &SetSettings) -> Result<(), String> {
     let text = toml::to_string_pretty(s).map_err(|e| e.to_string())?;
-    let text = format!("# The choices for this template set. Shale keeps this file when the set is updated.\n# accent: the accent colour of the templates (tuda-ci: 0a to 9d); language: en or de;\n# department and author: used when a note does not name one; logo: set by \"Choose logo…\".\n{text}");
+    let text = format!("# The choices for this template set. Shale keeps this file when the set is updated.\n# accent: the accent colour of the templates (tuda-ci: 0a to 9d); language: en or de;\n# department and author: used when a note does not name one; logo and department_logo: set by\n# \"Choose logo…\" and \"Choose department logo…\".\n{text}");
     crate::fsutil::write_atomic(&set_dir.join("settings.toml"), text.as_bytes()).map_err(|e| format!("settings.toml could not be written ({e})"))
 }
 
@@ -249,6 +256,12 @@ pub struct KindManifest {
     /// export says it is not conformant.
     #[serde(default)]
     pub logo: bool,
+    /// Lines of LaTeX after the preamble that put the department logo (TEX-035) where the class
+    /// shows it: written only when the set's department logo slot is filled and the export asks for
+    /// it. `{department_logo}` is the file's name without extension (`logo/` is on `TEXINPUTS`).
+    /// Empty: the kind does not show a department logo.
+    #[serde(default)]
+    pub department_logo: Vec<String>,
     /// Poster kinds: the text of the note is set in this many columns (0 and 1: one).
     #[serde(default)]
     pub columns: u8,
@@ -305,14 +318,27 @@ impl KindManifest {
     pub fn preamble_lines(&self, s: &SetSettings) -> Vec<String> {
         self.preamble.iter().filter_map(|l| fill(l, s)).collect()
     }
+
+    /// The lines that put the department logo in (TEX-035), `{department_logo}` filled in.
+    pub fn department_logo_lines(&self, s: &SetSettings) -> Vec<String> {
+        self.department_logo.iter().filter_map(|l| fill(l, s)).map(|l| l.replace("{department_logo}", DEPARTMENT_LOGO)).collect()
+    }
+
+    /// Whether a document of this kind shows the set's department logo: the kind has a place for
+    /// it, the slot is filled and the export asks for it (TEX-035).
+    pub fn shows_department_logo(&self, set: &SetInfo, wanted: bool) -> bool {
+        wanted && set.department_logo.is_some() && !self.department_logo.is_empty()
+    }
 }
 
-/// The lines before the class, `\documentclass[options]{class}` and the preamble of a kind.
-pub(super) fn class_and_preamble(k: &KindManifest, s: &SetSettings) -> String {
+/// The lines before the class, `\documentclass[options]{class}` and the preamble of a kind, and
+/// the lines of the department logo when `department_logo` (TEX-035).
+pub(super) fn class_and_preamble(k: &KindManifest, s: &SetSettings, department_logo: bool) -> String {
     let opts = k.class_options(s).join(",");
     let mut t: String = k.before_class_lines(s).iter().map(|l| format!("{l}\n")).collect();
     t.push_str(&if opts.is_empty() { format!("\\documentclass{{{}}}\n", k.class) } else { format!("\\documentclass[{opts}]{{{}}}\n", k.class) });
-    for l in k.preamble_lines(s) {
+    let logo = if department_logo { k.department_logo_lines(s) } else { Vec::new() };
+    for l in k.preamble_lines(s).into_iter().chain(logo) {
         t.push_str(&l);
         t.push('\n');
     }
@@ -372,9 +398,10 @@ fn sample_value(f: &Field, s: &SetSettings) -> String {
 }
 
 /// A small document of a kind for the test page of a set: every field with a sample value, a few
-/// paragraphs, in the shape of the kind's mapping. The writer of #281 makes the real documents.
-pub fn sample_document(k: &KindManifest, s: &SetSettings) -> String {
-    let mut t = class_and_preamble(k, s);
+/// paragraphs, in the shape of the kind's mapping, with the department logo when `department_logo`
+/// and the kind has a place for it (TEX-035). The writer makes the real documents.
+pub fn sample_document(k: &KindManifest, s: &SetSettings, department_logo: bool) -> String {
+    let mut t = class_and_preamble(k, s, department_logo);
     for f in &k.fields {
         // no \date: the class puts in today's
         if let Some(c) = f.command.as_ref().filter(|_| f.key != "date") {
@@ -443,6 +470,16 @@ pub struct SetInfo {
     pub kinds: Vec<(String, KindManifest)>,
     pub problems: Vec<String>,
     pub logo: LogoStatus,
+    /// The department logo file in `logo/` (TEX-035); none: the slot is empty.
+    pub department_logo: Option<String>,
+}
+
+impl SetInfo {
+    /// "department logo: department_logo.png" for the list of sets; none when the slot is empty
+    /// (which is no warning).
+    pub fn department_logo_text(&self) -> Option<String> {
+        self.department_logo.as_ref().map(|f| format!("department logo: {f}"))
+    }
 }
 
 /// A folder of `templates/tex`: the set, or why it could not be read.
@@ -452,9 +489,9 @@ pub struct SetEntry {
     pub info: Result<SetInfo, String>,
 }
 
-/// The logo file of a set: the one the settings name, else `<stem>.pdf` or `<stem>.png`.
-fn find_logo(dir: &Path, stem: &str, s: &SetSettings) -> Option<String> {
-    let named = s.logo.iter().cloned();
+/// The logo file of a set: the one the settings name (`named`), else `<stem>.pdf` or `<stem>.png`.
+fn find_logo(dir: &Path, stem: &str, named: &Option<String>) -> Option<String> {
+    let named = named.iter().cloned();
     let guessed = ["pdf", "png"].map(|e| format!("{stem}.{e}"));
     named.chain(guessed).find(|f| plain_file_name(f) && std::fs::symlink_metadata(dir.join("logo").join(f)).is_ok_and(|m| m.is_file()))
 }
@@ -478,9 +515,10 @@ pub fn read_set(id: &str, dir: &Path) -> Result<SetInfo, String> {
     }
     let logo = match &meta.logo_file {
         None => LogoStatus::NotNeeded,
-        Some(stem) => find_logo(dir, stem, &settings).map_or(LogoStatus::Missing, LogoStatus::Present),
+        Some(stem) => find_logo(dir, stem, &settings.logo).map_or(LogoStatus::Missing, LogoStatus::Present),
     };
-    Ok(SetInfo { id: id.to_string(), dir: dir.to_path_buf(), meta, settings, kinds, problems, logo })
+    let department_logo = find_logo(dir, DEPARTMENT_LOGO, &settings.department_logo);
+    Ok(SetInfo { id: id.to_string(), dir: dir.to_path_buf(), meta, settings, kinds, problems, logo, department_logo })
 }
 
 /// The sets of a vault, by folder name. A folder with a hidden name (a half-made import) is left out.
@@ -537,11 +575,10 @@ fn logo_extension(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// "Choose logo…": copy a PDF or PNG into `logo/` of the set (named `<logo_file>.pdf` or `.png`, as
-/// the classes look for it) and record it in `settings.toml`. A logo that was there is moved to
-/// the vault's trash, not overwritten. Returns the file name in `logo/`.
-pub fn choose_logo(vault: &Path, set: &SetInfo, from: &Path) -> Result<String, String> {
-    let stem = set.meta.logo_file.as_deref().ok_or("this set has no logo slot")?;
+/// Copy a PDF or PNG into `logo/` of the set as `<stem>.pdf` or `.png` (as the classes look for
+/// it, at most [`MAX_LOGO`] bytes, recognised by its first bytes). A logo that was there, of either
+/// kind, is moved to the vault's trash, not overwritten. Returns the file name in `logo/`.
+fn put_logo(vault: &Path, set: &SetInfo, stem: &str, from: &Path) -> Result<String, String> {
     let meta = std::fs::metadata(from).map_err(|e| format!("{} cannot be read ({e})", from.display()))?;
     if !meta.is_file() || meta.len() > MAX_LOGO {
         return Err(format!("{} is not a file of at most {} MB", from.display(), MAX_LOGO >> 20));
@@ -552,17 +589,46 @@ pub fn choose_logo(vault: &Path, set: &SetInfo, from: &Path) -> Result<String, S
     let dir = set.dir.join("logo");
     std::fs::create_dir_all(&dir).map_err(|e| format!("the logo folder could not be made ({e})"))?;
     // whatever file the classes could pick instead is moved away first, so exactly one logo is there
-    let rel_dir = Path::new(SETS_DIR).join(&set.id).join("logo");
     for old in ["pdf", "png"].map(|e| format!("{stem}.{e}")) {
         if std::fs::symlink_metadata(dir.join(&old)).is_ok() && !(old == name && crate::fsutil::read(dir.join(&old)).is_ok_and(|b| b == bytes)) {
-            crate::vault::move_to_trash(vault, &rel_dir.join(&old)).map_err(|e| format!("the logo that is there could not be moved to the trash ({e})"))?;
+            trash_logo(vault, set, &old)?;
         }
     }
     crate::fsutil::write_atomic(&dir.join(&name), &bytes).map_err(|e| format!("the logo could not be written ({e})"))?;
-    let mut settings = set.settings.clone();
-    settings.logo = Some(name.clone());
-    save_settings(&set.dir, &settings)?;
     Ok(name)
+}
+
+/// Move a file of the set's `logo/` to the vault's trash.
+fn trash_logo(vault: &Path, set: &SetInfo, file: &str) -> Result<(), String> {
+    crate::vault::move_to_trash(vault, &Path::new(SETS_DIR).join(&set.id).join("logo").join(file)).map(|_| ()).map_err(|e| format!("the logo that is there could not be moved to the trash ({e})"))
+}
+
+/// "Choose logo…": copy a PDF or PNG into `logo/` of the set (named `<logo_file>.pdf` or `.png`, as
+/// the classes look for it) and record it in `settings.toml`. A logo that was there is moved to
+/// the vault's trash, not overwritten. Returns the file name in `logo/`.
+pub fn choose_logo(vault: &Path, set: &SetInfo, from: &Path) -> Result<String, String> {
+    let stem = set.meta.logo_file.as_deref().ok_or("this set has no logo slot")?;
+    let name = put_logo(vault, set, stem, from)?;
+    save_settings(&set.dir, &SetSettings { logo: Some(name.clone()), ..set.settings.clone() })?;
+    Ok(name)
+}
+
+/// "Choose department logo…" (TEX-035): the same for the department logo slot every set has,
+/// `logo/department_logo.pdf` or `.png`, recorded as `department_logo`.
+pub fn choose_department_logo(vault: &Path, set: &SetInfo, from: &Path) -> Result<String, String> {
+    let name = put_logo(vault, set, DEPARTMENT_LOGO, from)?;
+    save_settings(&set.dir, &SetSettings { department_logo: Some(name.clone()), ..set.settings.clone() })?;
+    Ok(name)
+}
+
+/// "Remove department logo" (TEX-035): the file goes to the vault's trash and the setting is cleared.
+pub fn remove_department_logo(vault: &Path, set: &SetInfo) -> Result<(), String> {
+    for old in ["pdf", "png"].map(|e| format!("{DEPARTMENT_LOGO}.{e}")) {
+        if std::fs::symlink_metadata(set.dir.join("logo").join(&old)).is_ok() {
+            trash_logo(vault, set, &old)?;
+        }
+    }
+    save_settings(&set.dir, &SetSettings { department_logo: None, ..set.settings.clone() })
 }
 
 // ---------------------------------------------------------------- compiling against a set
