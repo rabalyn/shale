@@ -48,6 +48,16 @@ several lines is shown with line breaks), quotes, footnotes, math (written as `$
 becomes an embed with its caption in italics below it. A box "Lift headings" does what it does for a Markdown
 file, for a document without a `#` heading.
 
+The look of the document comes along as far as Shale can show it: the colour of text (`<span style="color: …">`)
+and of highlights other than plain yellow (`<mark style="background: …">`, see [[Editor]]), a title and
+subtitle (a `#` heading and an italic line). The page and the body are written into the note's properties
+for the [[PDF]] export: `print-paper` (A4, A5, Letter, Legal or `<width>x<height>mm`, wider than tall is
+landscape), `print-margins` (top, right, bottom, left in mm), `print-font` (serif, sans or mono),
+`print-font-size` (pt), `print-line-spacing` (a factor such as 1.15), `print-paragraph-spacing` (pt after a
+paragraph), `print-align` (left or justify), `print-heading-color`, `print-title` (always `false`, the title
+is in the text) and `print-toc` (`false` unless the document has a table of contents). Edit them like any
+property. Centred and right-aligned paragraphs are not kept (issue 340).
+
 Everything one Word file brings goes into one folder, `z_media/<year>/<month>/import_docx_<name>/`, named
 after the file (spaces become `-`; a number is added when the name is taken): the pictures in `media/` and, with
 "Keep the original .docx" ticked, the original, which the note names in its properties as `source`. If pandoc

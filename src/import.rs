@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 
 pub mod dialog;
 pub mod docx;
+mod docx_look;
+#[cfg(test)]
+mod docx_look_tests;
 #[cfg(test)]
 pub(crate) mod docx_tests;
 /// What another program hands over in a drop (a whole message, calendar data, links, text,

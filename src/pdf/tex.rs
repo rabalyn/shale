@@ -3,7 +3,7 @@
 //! (`settings_ui`), the template sets in the vault (`sets`, `import`, `archive`, `sets_ui`). The
 //! writer and the dialog come with #281 and #282; the test stack is `tests/tex-env/`.
 
-mod archive;
+pub(crate) mod archive;
 mod blocks;
 mod body;
 pub mod book;
