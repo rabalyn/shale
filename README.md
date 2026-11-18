@@ -52,6 +52,8 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   text lie unencrypted in the mail folder, next to the encrypted original). Without that switch nothing
   is decrypted. To use your Thunderbird keys, export them there and import them into GnuPG
   (`gpg --import backup.asc`; S/MIME: `gpgsm --import backup.p12`), see below.
+  To stay unlocked longer, Accounts…, Encryption can lengthen GnuPG's passphrase cache with `gpgconf`
+  (shown first, written only on a second click) or shows the lines to put in `gpg-agent.conf` yourself.
   Sign in with a password or with OAuth2 (Google, Microsoft). Shale has no OAuth2 client IDs of
   its own yet, so you register one (about five minutes, free):
   - *Google:* Cloud console, new project, OAuth consent screen (External, Testing, add yourself as

@@ -4,6 +4,7 @@
 
 use crate::calendar::time as t;
 
+pub(crate) mod agent_cache;
 pub(crate) mod compose;
 pub(crate) mod compose_ui;
 pub(crate) mod crypto;
