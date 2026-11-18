@@ -518,3 +518,34 @@ fn imp_035_a_word_file_is_converted_in_a_job_while_the_dialog_waits_and_then_bec
     w.frames(2);
     assert!(w.painted("pandoc was not found (Settings → Import)"));
 }
+
+// spec: IMP-052, CFG-060
+#[test]
+fn imp_052_the_dialog_starts_with_the_setting_and_a_ticked_box_writes_the_list() {
+    let mut w = W::new("header-list");
+    std::fs::write(w.file("Plan.eml"), crate::mail::tests::sample_eml()).unwrap();
+    let nowhere = w.nowhere();
+    // off: the box is empty and the note has the properties only
+    w.drop_files(nowhere, &[w.file("Plan.eml")]);
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    assert!(!w.dialog().header_list);
+    let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
+    d.folder = "Sub".into();
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    let root = w.app.vault.as_ref().unwrap().root.clone();
+    let name = "Sub/2026-11-13 Neubau Hörsaal B – Pläne Stand 3.md";
+    let plain = std::fs::read_to_string(root.join(name)).unwrap();
+    assert!(plain.contains("from: ") && !plain.contains("**From:**"), "{plain}");
+    std::fs::remove_file(root.join(name)).unwrap();
+    // the setting on: the box starts ticked, and the list is written
+    w.app.cfg.import_header_list = true;
+    w.drop_files(nowhere, &[w.file("Plan.eml")]);
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    assert!(w.dialog().header_list);
+    let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
+    d.folder = "Sub".into();
+    d.items.iter_mut().for_each(|i| i.include = true);
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    let listed = std::fs::read_to_string(root.join(name)).unwrap();
+    assert!(listed.contains("\n- **From:** ") && listed.contains("\n- **Date:** 2026-11-13 10:22\n"), "{listed}");
+}

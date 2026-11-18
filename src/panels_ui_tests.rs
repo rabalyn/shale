@@ -589,6 +589,18 @@ fn imp_036_the_import_tab_has_the_word_setting_and_says_where_pandoc_is_or_how_t
     }
 }
 
+// spec: CFG-060
+#[test]
+fn cfg_060_the_import_tab_has_the_header_list_setting() {
+    let mut p = P::new("settings-header-list", &[]);
+    assert!(!p.app.cfg.import_header_list, "off by default");
+    p.app.open_settings(SettingsTab::Import);
+    p.click(Show::Modals, "Header list in the note body");
+    assert!(p.app.cfg.import_header_list);
+    p.click(Show::Modals, "Header list in the note body");
+    assert!(!p.app.cfg.import_header_list);
+}
+
 // spec: CFG-021
 #[test]
 fn set_002_settings_open_on_a_short_page() {

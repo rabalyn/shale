@@ -364,6 +364,8 @@ pub struct Config {
     pub docx_import: bool,
     /// The pandoc program for the Word import; empty: search `PATH` and the usual places.
     pub pandoc_path: String,
+    /// Imported e-mails and events also get their properties as a list below the title (IMP-052).
+    pub import_header_list: bool,
     /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
     pub social_accounts: Vec<crate::social::SocialAccountEntry>,
     /// The account and feed shown last in the feed view.
@@ -448,6 +450,7 @@ impl Default for Config {
             auto_convert_canvas: false,
             docx_import: false,
             pandoc_path: String::new(),
+            import_header_list: false,
             social_accounts: vec![],
             social_last: None,
             social_replies: false,
@@ -827,6 +830,16 @@ mod tests {
         let (back, _) = Config::parse_text(&text).unwrap();
         assert!(back.docx_import);
         assert_eq!(back.pandoc_path, "/opt/pandoc/bin/pandoc");
+    }
+
+    // spec: CFG-060, CFG-001
+    #[test]
+    fn the_header_list_setting_is_off_by_default_loads_from_old_files_and_round_trips() {
+        let (c, _) = crate::vault_state::parse::<Config>(br#"{"toolbar_size": 120}"#).unwrap();
+        assert!(!c.import_header_list, "an old file: off");
+        let text = text::to_toml(&Config { import_header_list: true, ..Config::default() });
+        assert!(text.contains("import_header_list = true"), "{text}");
+        assert!(Config::parse_text(&text).unwrap().0.import_header_list);
     }
 
     // spec: MEDIA-004, MEDIA-006, CFG-001

@@ -451,10 +451,19 @@ pub(crate) fn yaml(s: &str) -> String {
     format!("\"{}\"", one_line.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// A property that is a list, written as a block (`key:` and one `  - "item"` line each), so that
+/// an item may hold commas. Empty list → an empty value (the property is left out by `front`).
+pub(crate) fn list(items: &[String]) -> String {
+    items.iter().map(|i| format!("\n  - {}", yaml(i))).collect()
+}
+
 pub(crate) fn front(lines: &[(&str, String)], tags: &[String]) -> String {
     let mut s = String::from("---\n");
     for (k, v) in lines {
-        if !v.is_empty() {
+        if v.starts_with('\n') {
+            // a block list: the value brings its own lines (`list`)
+            s.push_str(&format!("{k}:{v}\n"));
+        } else if !v.is_empty() {
             s.push_str(&format!("{k}: {v}\n"));
         }
     }
@@ -475,14 +484,17 @@ pub struct Options {
     pub keep_docx: bool,
     /// where contact notes are (and new ones are made)
     pub people_dir: String,
+    /// also write the properties of an e-mail / event as a list in the note's text (IMP-052)
+    pub header_list: bool,
 }
 
 fn link_line(rel: &Path) -> String {
     format!("- {}", media::link_for(rel))
 }
 
-/// The note for an e-mail (attachment links already made).
-pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], original: Option<&Path>, people: &[String]) -> String {
+/// The note for an e-mail (attachment links already made). The properties are the one record of
+/// the header (IMP-050, IMP-051); `header_list` also writes them as a list below the title (IMP-052).
+pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], original: Option<&Path>, people: &[String], header_list: bool) -> String {
     let subject = if mail.subject.trim().is_empty() { "(no subject)" } else { mail.subject.trim() };
     let date = mail.date.map(|d| local_stamp(d, false)).unwrap_or_default();
     let mut s = front(
@@ -492,39 +504,48 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
             ("from", yaml(&mail.from)),
             ("to", if mail.to.is_empty() { String::new() } else { yaml(&mail.to) }),
             ("cc", if mail.cc.is_empty() { String::new() } else { yaml(&mail.cc) }),
-            ("date", date.clone()),
+            ("date", if date.is_empty() && !mail.date_raw.is_empty() { yaml(&mail.date_raw) } else { date.clone() }),
             ("message-id", if mail.message_id.is_empty() { String::new() } else { yaml(&mail.message_id) }),
+            ("people", list(people)),
+            ("original", original.map(|o| yaml(&format!("[[{}]]", rel_to_string(o)))).unwrap_or_default()),
         ],
         tags,
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(subject)));
-    s.push_str(&format!("- **From:** {}\n", mail.from));
-    for (k, v) in [("To", &mail.to), ("Cc", &mail.cc)] {
-        if !v.is_empty() {
-            s.push_str(&format!("- **{k}:** {v}\n"));
+    if header_list {
+        s.push_str(&format!("- **From:** {}\n", mail.from));
+        for (k, v) in [("To", &mail.to), ("Cc", &mail.cc)] {
+            if !v.is_empty() {
+                s.push_str(&format!("- **{k}:** {v}\n"));
+            }
+        }
+        s.push_str(&format!("- **Date:** {}\n", if date.is_empty() { mail.date_raw.clone() } else { date }));
+        if !people.is_empty() {
+            s.push_str(&format!("- **People:** {}\n", people.join(", ")));
         }
     }
-    s.push_str(&format!("- **Date:** {}\n", if date.is_empty() { mail.date_raw.clone() } else { date }));
-    if !people.is_empty() {
-        s.push_str(&format!("- **People:** {}\n", people.join(", ")));
-    }
-    if !attachments.is_empty() || original.is_some() {
-        s.push_str("\n## Attachments\n\n");
+    let original_line = original.filter(|_| header_list);
+    if !attachments.is_empty() || original_line.is_some() {
+        if header_list {
+            s.push('\n');
+        }
+        s.push_str("## Attachments\n\n");
         for a in attachments {
             s.push_str(&link_line(a));
             s.push('\n');
         }
-        if let Some(o) = original {
+        if let Some(o) = original_line {
             s.push_str(&format!("- Original message: [[{}]]\n", rel_to_string(o)));
         }
+        s.push('\n');
     }
-    s.push_str("\n## Message\n\n");
+    s.push_str("## Message\n\n");
     s.push_str(mail.text.trim());
     s.push('\n');
     s
 }
 
-pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&Path>, people: &[String]) -> String {
+pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&Path>, people: &[String], header_list: bool) -> String {
     let stamp = |v: i64| if e.all_day { ymd_text(t::civil_from_days(v.div_euclid(86_400))) } else { local_stamp(v, false) };
     let end = if e.all_day { e.end - 86_400 } else { e.end };
     let mut s = front(
@@ -537,33 +558,44 @@ pub fn event_note(e: &Event, calendar: &str, tags: &[String], original: Option<&
             ("location", if e.location.is_empty() { String::new() } else { yaml(&e.location) }),
             ("calendar", yaml(calendar)),
             ("event-uid", if e.uid.is_empty() { String::new() } else { yaml(&event_key(e)) }),
+            ("repeats", e.rrule.as_ref().map(|r| yaml(&crate::calendar::ui::rrule_text(r))).unwrap_or_default()),
+            ("organizer", if e.organizer.is_empty() { String::new() } else { yaml(&e.organizer) }),
+            ("attendees", list(&e.attendees)),
+            ("status", if e.status.is_empty() { String::new() } else { yaml(&e.status.to_lowercase()) }),
+            ("url", if e.url.is_empty() { String::new() } else { yaml(&e.url) }),
+            ("people", list(people)),
+            ("original", original.map(|o| yaml(&format!("[[{}]]", rel_to_string(o)))).unwrap_or_default()),
         ],
         tags,
     );
     s.push_str(&format!("\n# {}\n\n", safe_title(if e.summary.is_empty() { "Event" } else { &e.summary })));
-    s.push_str(&format!("- **When:** {}\n", crate::calendar::ui::when_text(&occ_of(e))));
-    if !people.is_empty() {
-        s.push_str(&format!("- **People:** {}\n", people.join(", ")));
-    }
-    if let Some(r) = &e.rrule {
-        s.push_str(&format!("- **Repeats:** {}\n", crate::calendar::ui::rrule_text(r)));
-    }
-    for (k, v) in [("Where", &e.location), ("Calendar", &calendar.to_string()), ("Organizer", &e.organizer), ("Status", &e.status.to_lowercase())] {
-        if !v.is_empty() {
-            s.push_str(&format!("- **{k}:** {v}\n"));
+    if header_list {
+        s.push_str(&format!("- **When:** {}\n", crate::calendar::ui::when_text(&occ_of(e))));
+        if !people.is_empty() {
+            s.push_str(&format!("- **People:** {}\n", people.join(", ")));
+        }
+        if let Some(r) = &e.rrule {
+            s.push_str(&format!("- **Repeats:** {}\n", crate::calendar::ui::rrule_text(r)));
+        }
+        for (k, v) in [("Where", &e.location), ("Calendar", &calendar.to_string()), ("Organizer", &e.organizer), ("Status", &e.status.to_lowercase())] {
+            if !v.is_empty() {
+                s.push_str(&format!("- **{k}:** {v}\n"));
+            }
+        }
+        if !e.attendees.is_empty() {
+            s.push_str(&format!("- **Attendees:** {}\n", e.attendees.join(", ")));
+        }
+        if !e.url.is_empty() {
+            s.push_str(&format!("- **Link:** {}\n", e.url));
+        }
+        if let Some(o) = original {
+            s.push_str(&format!("- Calendar file: [[{}]]\n", rel_to_string(o)));
         }
     }
-    if !e.attendees.is_empty() {
-        s.push_str(&format!("- **Attendees:** {}\n", e.attendees.join(", ")));
-    }
-    if !e.url.is_empty() {
-        s.push_str(&format!("- **Link:** {}\n", e.url));
-    }
-    if let Some(o) = original {
-        s.push_str(&format!("- Calendar file: [[{}]]\n", rel_to_string(o)));
-    }
     if !e.description.trim().is_empty() {
-        s.push_str("\n## Notes\n\n");
+        if header_list {
+            s.push_str("\n## Notes\n\n");
+        }
         s.push_str(e.description.trim());
         s.push('\n');
     }
@@ -664,14 +696,14 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                         }
                     }
                     let orig = if o.keep_original { Some(media::save_bytes(&root, &original.0, &original.1, date).map_err(|e| format!("could not save the message file: {e}"))?) } else { None };
-                    email_note(mail, &o.tags, &atts, orig.as_deref(), &people)
+                    email_note(mail, &o.tags, &atts, orig.as_deref(), &people, o.header_list)
                 }
                 Source::Event { event, calendar, original } => {
                     let orig = match (o.keep_original, original) {
                         (true, Some((name, data))) => Some(media::save_bytes(&root, name, data, event_ymd(event)).map_err(|e| format!("could not save the calendar file: {e}"))?),
                         _ => None,
                     };
-                    event_note(event, calendar, &o.tags, orig.as_deref(), &people)
+                    event_note(event, calendar, &o.tags, orig.as_deref(), &people, o.header_list)
                 }
                 Source::Files(paths) => files_note(&root, paths, &title, &o.tags)?,
                 Source::Docx { path, .. } => files_note(&root, std::slice::from_ref(path), &title, &o.tags)?,
@@ -748,7 +780,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "2026-11-13 Neubau Hörsaal B – Pläne Stand 3");
         assert_eq!(items[0].att_on, vec![false, true, true], "the tiny inline logo is left out");
-        let o = Options { folder: PathBuf::from("Projekte/Neubau B"), tags: parse_tags("neubau-b, plaene"), keep_original: true, keep_docx: true, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("Projekte/Neubau B"), tags: parse_tags("neubau-b, plaene"), keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made, vec![PathBuf::from("Projekte/Neubau B/2026-11-13 Neubau Hörsaal B – Pläne Stand 3.md")]);
@@ -758,7 +790,10 @@ mod tests {
         assert!(text.contains("tags: [neubau-b, plaene]\n"));
         assert!(text.contains("- [[z_media/2026/11/261113_Grundriß EG.pdf]]\n"), "{text}");
         assert!(text.contains("- [[z_media/2026/11/261113_Alte Mail.eml]]\n"));
-        assert!(text.contains("- Original message: [[z_media/2026/11/261113_Neubau Hörsaal B.eml]]\n"));
+        // the header is written once, as properties (IMP-050, IMP-051)
+        assert!(text.contains("original: \"[[z_media/2026/11/261113_Neubau Hörsaal B.eml]]\"\n"), "{text}");
+        assert!(!text.contains("**From:**") && !text.contains("**Date:**") && !text.contains("Original message:"), "{text}");
+        assert!(text.contains("\n---\n\n# Neubau Hörsaal B – Pläne Stand 3\n\n## Attachments\n\n- [[z_media"), "properties, title, attachments: {text}");
         assert!(!text.contains("inline-1.png"));
         assert!(text.contains("## Message\n\nHallo zusammen,"));
         assert!(v.root.join("z_media/2026/11/261113_Grundriß EG.pdf").exists());
@@ -771,7 +806,8 @@ mod tests {
         let Imported { notes: made2, errors: errs, .. } = import(&mut v, &again, &o);
         assert!(errs.is_empty(), "{errs:?}");
         let text2 = std::fs::read_to_string(v.abs(&made2[0])).unwrap();
-        assert!(text2.contains("- **People:** [[Hans Müller]]\n"), "{text2}");
+        assert!(text2.contains("people:\n  - \"[[Hans Müller]]\"\n"), "{text2}");
+        assert!(!text2.contains("**People:**"), "{text2}");
         assert!(v.abs(std::path::Path::new("Adressbuch/Hans Müller.md")).exists());
         // the tags count in the vault (from the note's properties)
         v.rescan();
@@ -810,18 +846,101 @@ mod tests {
         std::fs::write(&txt, b"plan").unwrap();
         let (more, _) = items_from_paths(std::slice::from_ref(&txt));
         items.extend(more);
-        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["status".into()], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 2);
         let ev = std::fs::read_to_string(v.abs(&made[0])).unwrap();
         assert!(ev.contains("type: event\n") && ev.contains("start: 2026-12-02 10:00\n") && ev.contains("event-uid: \"ev-1@x\"\n"), "{ev}");
-        assert!(ev.contains("- **Where:** Raum 1.12\n") && ev.contains("- **Attendees:** A, B\n") && ev.contains("## Notes\n\nAgenda: Medientechnik"));
-        assert!(ev.contains("- Calendar file: [[z_media/2026/12/261202_x.ics]]"), "{ev}");
+        assert!(ev.contains("location: \"Raum 1.12\"\n") && ev.contains("attendees:\n  - \"A\"\n  - \"B\"\n"), "{ev}");
+        assert!(ev.contains("original: \"[[z_media/2026/12/261202_x.ics]]\"\n"), "{ev}");
+        assert!(ev.ends_with("---\n\n# Baubesprechung\n\nAgenda: Medientechnik\n"), "properties, title, notes: {ev}");
+        assert!(!ev.contains("**Where:**") && !ev.contains("## Notes") && !ev.contains("Calendar file:"), "{ev}");
         let f = std::fs::read_to_string(v.abs(&made[1])).unwrap();
         assert!(f.contains("type: files") && f.contains(".txt]]"), "{f}");
         let _ = std::fs::remove_file(&src);
         let _ = std::fs::remove_file(&txt);
+    }
+
+    fn full_event() -> Event {
+        let day = t::days_from_civil(2026, 12, 2);
+        Event {
+            uid: "ev-2@x".into(),
+            summary: "Jour fixe".into(),
+            location: "Raum 1.12".into(),
+            description: "Agenda\n\nPunkt 1".into(),
+            url: "https://meet.example.org/j".into(),
+            organizer: "Anna Beispiel".into(),
+            attendees: vec!["Müller, Hans".into(), "B".into()],
+            status: "CONFIRMED".into(),
+            rrule: Some("FREQ=WEEKLY".into()),
+            start: t::local_to_utc(day, 10 * 3600),
+            end: t::local_to_utc(day, 11 * 3600),
+            ..Default::default()
+        }
+    }
+
+    // spec: IMP-050, IMP-051, IMP-052
+    #[test]
+    fn the_header_of_an_event_is_written_once_as_properties_and_as_a_list_only_on_request() {
+        let e = full_event();
+        let people = vec!["[[Anna Beispiel]]".to_string()];
+        let orig = PathBuf::from("z_media/2026/12/261202_x.ics");
+        let note = event_note(&e, "Work", &["t".into()], Some(&orig), &people, false);
+        for line in [
+            "repeats: \"weekly\"\n",
+            "organizer: \"Anna Beispiel\"\n",
+            "attendees:\n  - \"Müller, Hans\"\n  - \"B\"\n",
+            "status: \"confirmed\"\n",
+            "url: \"https://meet.example.org/j\"\n",
+            "people:\n  - \"[[Anna Beispiel]]\"\n",
+            "original: \"[[z_media/2026/12/261202_x.ics]]\"\n",
+            "location: \"Raum 1.12\"\n",
+            "tags: [t]\n---\n",
+        ] {
+            assert!(note.contains(line), "{line:?} missing in {note}");
+        }
+        assert!(note.ends_with("\n# Jour fixe\n\nAgenda\n\nPunkt 1\n"), "title, then the notes, tidied: {note}");
+        assert!(!note.contains("**"), "no header list: {note}");
+        // the list is read back by the properties parser, an item may hold a comma
+        let values = crate::markdown::front_matter_values(&note);
+        let attendees = values.iter().find(|(k, _)| k == "attendees").unwrap();
+        assert_eq!(attendees.1, vec!["Müller, Hans", "B"]);
+        // on request the list comes back as it was
+        let listed = event_note(&e, "Work", &["t".into()], Some(&orig), &people, true);
+        for line in [
+            "- **When:** ",
+            "- **People:** [[Anna Beispiel]]\n",
+            "- **Repeats:** weekly\n",
+            "- **Where:** Raum 1.12\n",
+            "- **Organizer:** Anna Beispiel\n",
+            "- **Status:** confirmed\n",
+            "- **Attendees:** Müller, Hans, B\n",
+            "- **Link:** https://meet.example.org/j\n",
+            "- Calendar file: [[z_media/2026/12/261202_x.ics]]\n",
+            "\n## Notes\n\nAgenda",
+        ] {
+            assert!(listed.contains(line), "{line:?} missing in {listed}");
+        }
+        assert!(listed.starts_with(&note[..note.find("\n# ").unwrap()]), "the properties are the same");
+    }
+
+    // spec: IMP-050, IMP-052
+    #[test]
+    fn an_email_goes_from_its_properties_to_the_title_the_attachments_and_the_message() {
+        let mail = Mail { subject: "Plan".into(), from: "A <a@x>".into(), to: "B <b@x>".into(), date_raw: "Thu, 13 Nov 2026 10:22:33 +0100".into(), text: "Hallo\n\nWelt\n-- \nAnna\n".into(), ..Default::default() };
+        let atts = [PathBuf::from("z_media/2026/11/261113_foto.jpg"), PathBuf::from("z_media/2026/11/261113_plan.pdf")];
+        let orig = PathBuf::from("z_media/2026/11/261113_Plan.eml");
+        let note = email_note(&mail, &[], &atts, Some(&orig), &[], false);
+        assert!(note.contains("date: \"Thu, 13 Nov 2026 10:22:33 +0100\"\n"), "an unreadable date is kept as written: {note}");
+        assert!(note.ends_with("\n---\n\n# Plan\n\n## Attachments\n\n- ![[z_media/2026/11/261113_foto.jpg]]\n- [[z_media/2026/11/261113_plan.pdf]]\n\n## Message\n\nHallo\n\nWelt\n-- \nAnna\n"), "{note}");
+        assert!(!note.contains("**"), "{note}");
+        let listed = email_note(&mail, &[], &atts, Some(&orig), &["[[A]]".into()], true);
+        assert!(listed.contains("\n# Plan\n\n- **From:** A <a@x>\n- **To:** B <b@x>\n- **Date:** Thu, 13 Nov 2026 10:22:33 +0100\n- **People:** [[A]]\n\n## Attachments\n\n"), "{listed}");
+        assert!(listed.contains("- Original message: [[z_media/2026/11/261113_Plan.eml]]\n\n## Message"), "{listed}");
+        // without attachments there is no section
+        let bare = email_note(&mail, &[], &[], None, &[], false);
+        assert!(bare.contains("# Plan\n\n## Message\n\nHallo"), "{bare}");
     }
 
     // spec: SOC-011, SOC-012
@@ -843,7 +962,7 @@ mod tests {
         broken.failed_media.push(crate::social::note::FailedMedia { url: "https://x.test/a.jpg".into(), error: "gone".into(), post: 0, item: 0 });
         let w = social_item(broken, "Mastodon", false).warning().unwrap();
         assert!(w.contains("offline") && w.contains("1 picture or video could not be downloaded"), "{w}");
-        let o = Options { folder: PathBuf::from("Social"), tags: parse_tags("social, reading"), keep_original: false, keep_docx: true, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("Social"), tags: parse_tags("social, reading"), keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
         let Imported { notes: made, errors: errs, .. } = import(&mut v, &items, &o);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(made.len(), 2);
@@ -900,7 +1019,7 @@ mod tests {
         // the lift box is ticked for the one with headings but no #, and for it only
         let lifts: Vec<bool> = items.iter().take(3).map(|i| matches!(i.source, Source::Markdown { lift: true, .. })).collect();
         assert_eq!(lifts, vec![true, false, false]);
-        let o = Options { folder: PathBuf::from("In"), tags: vec!["ignored".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("In"), tags: vec!["ignored".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
         let Imported { notes: made, errors, .. } = import(&mut v, &items[..3], &o);
         assert!(errors.is_empty(), "{errors:?}");
         let read = |i: usize| std::fs::read_to_string(v.abs(&made[i])).unwrap();
@@ -937,7 +1056,7 @@ mod tests {
         // a renamed title keeps the extension; a file of the vault is linked where it is
         items[0].title = "A cat".into();
         items[1].title = "anim.gif".into();
-        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["x".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("Projekte"), tags: vec!["x".into()], keep_original: false, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
         items.truncate(5);
         let Imported { notes, files, errors } = import(&mut v, &items, &o);
         assert!(errors.is_empty() && notes.is_empty(), "no note for media: {errors:?} {notes:?}");
@@ -988,7 +1107,7 @@ mod tests {
             media_item(media::Kind::Pdf, "Plan: v2?.pdf".into(), MediaData::Bytes(b"%PDF".to_vec())),
         ];
         items.extend(items_from_paths(std::slice::from_ref(&file)).0);
-        let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into() };
+        let o = Options { folder: PathBuf::from("In"), tags: vec![], keep_original: true, keep_docx: true, people_dir: "Adressbuch".into(), header_list: false };
         let Imported { notes, files, errors } = import(&mut v, &items, &o);
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(notes.len(), 4, "{notes:?}");

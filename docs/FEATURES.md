@@ -719,9 +719,14 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 
 ![An imported e-mail](userguide/z_media/screenshots/imported-note.png)
 
-- Each e-mail becomes a note named "date subject" with the sender, recipients and date, the tags
-  in its properties, links to the attachments and the original message, and the text of the
-  message. The tag list counts these tags too.
+- Each e-mail becomes a note named "date subject". The sender, recipients, date, the people (as
+  links to their contact notes), a link to the original message and the tags are its properties; the
+  text starts with the subject as a heading, then the attachments and the message. The header is
+  written once, as properties (IMP-050, IMP-051). An event is the same: start, end, place, calendar,
+  repeat rule, organizer, attendees, status and link are properties, the text is its title and notes.
+  The tag list counts the tags too. For programs that do not show properties, the box **Header list
+  in the note body** (Import dialog; its start value is in Settings → Import) also writes the old list
+  of From / To / Date / When / Where … below the title (IMP-052).
 
 ## Feeds: read Mastodon and Bluesky, save posts to the vault
 
@@ -786,7 +791,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - When importing, the sender, recipients, organizer and attendees are found and matched to
   contact notes (by e-mail address anywhere in the note, else by name; "Müller, Hans" = "Hans
   Müller"). Known contacts and new senders are ticked; for ticked people without a note one is
-  made. The imported note gets a "People" line with links, so each contact note's backlinks show
+  made. The imported note gets a `people` property with links, so each contact note's backlinks show
   every mail and meeting with that person. Automatic senders like "noreply" are left out.
 
 ![Import with people and tags](userguide/z_media/screenshots/people-import.png)

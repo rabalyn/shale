@@ -25,8 +25,17 @@ Turn mails, events and files into notes. Back to [[Start here]].
 
 ![[drag-event.png]]
 
-Each e-mail becomes a note named "date subject" with sender, recipients and date, tags in its
-properties, links to the attachments and the original message, and the text.
+Each e-mail becomes a note named "date subject". The sender, recipients, date, people (links to their
+contact notes), the link to the original message and the tags are in its properties (see [[Editor]]);
+the text starts with the subject as a heading, then the attachments and the message. An event is
+written the same way: start, end, place, calendar, repeat rule, organizer, attendees, status and
+link are properties, the text is its title and its notes. Notes you imported earlier keep their
+list of **From:** / **Date:** lines.
+
+If you read your notes in a program that does not show properties, tick **Header list in the note
+body** in the Import dialog: the list of From, To, Date (event: When, Where, Attendees, …) is then also
+written below the title. **Settings → Import → Header list in the note body** sets whether the box starts
+ticked.
 
 ![[imported-note.png]]
 

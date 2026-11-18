@@ -139,6 +139,7 @@ impl ShaleApp {
         };
         let mut d = Box::new(ImportDialog::new(items, notes, folder, String::new(), link_into, link_on));
         d.people_dir = self.vdata.settings.people_dir.clone();
+        d.header_list = self.cfg.import_header_list;
         self.suggest_tags(&mut d);
         self.modal = Some(Modal::Import(d));
     }
@@ -212,7 +213,7 @@ impl ShaleApp {
                 };
                 let tags = import::parse_tags(&d.tags);
                 let social_only = d.items.iter().filter(|i| i.include).all(|i| matches!(i.source, import::Source::Social { .. }));
-                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, keep_docx: d.keep_docx, people_dir: self.vdata.settings.people_dir.clone() };
+                let opts = import::Options { folder: folder.clone(), tags: tags.clone(), keep_original: d.keep_original, keep_docx: d.keep_docx, people_dir: self.vdata.settings.people_dir.clone(), header_list: d.header_list };
                 let Some(v) = &mut self.vault else { return true };
                 // pandoc takes its time: the Word files are converted in a job first (IMP-035), and
                 // the dialog calls this again when it is done
