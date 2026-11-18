@@ -26,6 +26,8 @@ mod drawing;
 mod editor;
 mod editor_preview;
 mod embed_size;
+#[cfg(any(test, target_os = "macos"))]
+mod finder_path;
 mod fonts;
 #[cfg(test)]
 mod fonts_ui_tests;
@@ -217,6 +219,9 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
 }
 
 fn main() -> eframe::Result {
+    // started from Finder or the Dock, macOS gives no Homebrew folders on the PATH (BUILD-018); first, before any thread
+    #[cfg(target_os = "macos")]
+    finder_path::apply();
     // release builds: no core dumps, no memory reads by other processes (SEC-019)
     if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {
         eprintln!("shale: could not make the process undumpable: {e}");
