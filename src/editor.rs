@@ -880,11 +880,36 @@ impl NoteEditor {
         }
     }
 
-    /// The selection of the text box as bytes (a cursor is an empty range); the whole text's end when it has none yet.
-    pub fn selection_bytes(&self, ctx: &egui::Context, text: &str) -> Range<usize> {
+    /// The selection of the text box as char indices (the moving end first; a cursor has both equal):
+    /// the box's while it has the keyboard, else the one it had last; none before one was placed.
+    pub fn selection_chars(&self, ctx: &egui::Context) -> Option<(usize, usize)> {
         let focused = ctx.memory(|m| m.has_focus(self.id));
         let in_box = egui::text_edit::TextEditState::load(ctx, self.id).and_then(|st| st.cursor.char_range()).map(|r| (r.primary.index.0, r.secondary.index.0));
-        match if focused { in_box } else { self.last_selection.or(in_box) } {
+        if focused {
+            in_box
+        } else {
+            self.last_selection.or(in_box)
+        }
+    }
+
+    /// Put the selection of a note that is opened again (NAV-038) into the text box, as the one it
+    /// had last, without scrolling to it and without taking the keyboard: the text box shows it
+    /// when it gets the keyboard (EDIT-042). It is kept inside the text (`text` may be shorter now).
+    pub fn restore_selection_chars(&mut self, ctx: &egui::Context, text: &str, (a, b): (usize, usize)) {
+        let n = text.chars().count();
+        let (a, b) = (a.min(n), b.min(n));
+        let mut state = egui::text_edit::TextEditState::load(ctx, self.id).unwrap_or_default();
+        state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(a), CCursor::new(b))));
+        state.store(ctx, self.id);
+        self.last_selection = Some((a, b));
+        if self.vim_enabled {
+            self.vim.set_cursor(text, a);
+        }
+    }
+
+    /// The selection of the text box as bytes (a cursor is an empty range); the whole text's end when it has none yet.
+    pub fn selection_bytes(&self, ctx: &egui::Context, text: &str) -> Range<usize> {
+        match self.selection_chars(ctx) {
             Some((p, s)) => {
                 let (a, b) = (markdown::char_to_byte(text, p), markdown::char_to_byte(text, s));
                 a.min(b)..a.max(b)
@@ -895,13 +920,17 @@ impl NoteEditor {
 
     /// Draw the formatting toolbar (EDIT-026); a click is done to the text by the next `show`.
     /// While a table cell is edited in the grid the bar works on the text of the cell (EDIT-030).
-    pub fn toolbar(&mut self, ui: &mut Ui, text: &str, palettes: &crate::format_bar::Palettes) {
+    /// `colours` are the current colours of the two colour buttons, which the vault remembers (NAV-040): they
+    /// are put into the bar before it is drawn and taken back from it after.
+    pub fn toolbar(&mut self, ui: &mut Ui, text: &str, palettes: &crate::format_bar::Palettes, colours: &mut [[u8; 3]; 2]) {
         let in_cell = self.grid.cell.is_some();
         let (shown, sel) = match &self.grid.cell {
             Some(c) => (c.buf.as_str(), c.selection_bytes()),
             None => (text, self.selection_bytes(ui.ctx(), text)),
         };
+        self.bar.set_colours(*colours);
         let bar = ui.scope(|ui| self.bar.show(ui, shown, sel, in_cell, palettes));
+        *colours = self.bar.colours();
         // a press on the bar (or on its popups) takes the keyboard from the cell's box: that does not end the editing
         let pressed = ui.input(|i| i.pointer.any_down() || i.pointer.any_released());
         self.grid.hold = in_cell && pressed && (ui.rect_contains_pointer(bar.response.rect) || egui::Popup::is_any_open(ui.ctx()));
