@@ -280,6 +280,13 @@ enum Event {
     },
     /// What GnuPG is and has on this computer.
     Gnupg(Result<GnupgInfo, String>),
+    /// The agent's cache times were read (MAIL-235).
+    Agent(Result<crate::mail::agent_cache::AgentInfo, String>),
+    /// The cache times were changed (or not) and read again (MAIL-236).
+    AgentWritten {
+        result: Result<(), String>,
+        info: Result<crate::mail::agent_cache::AgentInfo, String>,
+    },
     /// The keys found for the recipients of the mail being written (MAIL-192).
     Keys {
         sig: String,
@@ -422,6 +429,8 @@ pub struct MailView {
     /// What GnuPG is and has (read when the settings open).
     pub gnupg_info: Option<GnupgInfo>,
     gnupg_probing: bool,
+    /// How long the agent keeps a passphrase, and the write that changes it (MAIL-235, MAIL-236).
+    pub agent: crate::mail::agent_cache::AgentState,
     pub vault: Option<VaultInfo>,
     /// Drafts and outbox entries were announced once at start.
     announced_local: bool,
@@ -543,6 +552,7 @@ impl MailView {
             crypto_id: None,
             crypto_running: false,
             gnupg_info: None,
+            agent: Default::default(),
             gnupg_probing: false,
             vault: None,
             announced_local: false,
@@ -857,6 +867,15 @@ impl MailView {
                 if let Ok(info) = r {
                     self.gnupg_info = Some(info);
                 }
+            }
+            Event::Agent(r) => {
+                self.agent.reading = false;
+                self.agent.info = Some(r);
+            }
+            Event::AgentWritten { result, info } => {
+                self.agent.writing = false;
+                self.agent.written = Some(result);
+                self.agent.info = Some(info);
             }
             Event::Fetched { key, retry, result } => {
                 self.fetching.remove(&key);
@@ -1459,6 +1478,40 @@ impl MailView {
         self.gnupg_probing = true;
         let g = self.gnupg.clone();
         self.spawn(move || Ok::<_, String>(probe_gnupg(&g)), |r| Event::Gnupg(flatten(r)));
+        self.read_agent();
+    }
+
+    /// Read how long the agent keeps a passphrase (a job; MAIL-235).
+    fn read_agent(&mut self) {
+        if self.agent.reading {
+            return;
+        }
+        self.agent.reading = true;
+        let g = self.gnupg.clone();
+        self.spawn(move || crate::mail::agent_cache::read(&g, &AtomicBool::new(false)), |r| Event::Agent(flatten(r)));
+    }
+
+    /// Write the cache times with gpgconf and read them again (a job; MAIL-236). Only the second click calls this.
+    pub fn write_agent(&mut self, choice: crate::mail::agent_cache::Choice) {
+        use crate::mail::agent_cache::{apply, read, Plan};
+        let Some(Ok(info)) = self.agent.info.as_ref() else { return };
+        if self.agent.writing {
+            return;
+        }
+        self.agent.writing = true;
+        self.agent.written = None;
+        let (g, plan) = (self.gnupg.clone(), Plan::new(&info.homedir, choice));
+        self.spawn(
+            move || {
+                let cancel = AtomicBool::new(false);
+                let result = apply(&g, &plan, &cancel);
+                (result, read(&g, &cancel))
+            },
+            |r| match r {
+                Ok((result, info)) => Event::AgentWritten { result, info },
+                Err(e) => Event::AgentWritten { result: Err(e.clone()), info: Err(e) },
+            },
+        );
     }
 
     /// "Load this message": fetch the whole message from the server (MAIL-055).

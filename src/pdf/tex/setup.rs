@@ -10,7 +10,7 @@ use super::dialog::{self, Failure, Job, Made};
 use super::engine::TexConfig;
 use super::import::What;
 use super::sets::{self, KindManifest, Language, LogoStatus, SetInfo, SetSettings};
-use super::sets_ui::{expand_home, Form, VaultRef};
+use super::sets_ui::{expand_home, Form, Slot, VaultRef};
 use super::settings_ui::{Notice, TexState};
 use super::writer::{self, Document};
 use crate::vault::Vault;
@@ -150,9 +150,16 @@ impl Details {
         Details { accent: s.accent.clone(), language: s.language, department: s.department.clone(), author: s.author.clone() }
     }
 
-    /// The settings with these details put in; the logo stays.
+    /// The settings with these details put in; the logos stay.
     pub fn apply(&self, base: &SetSettings) -> SetSettings {
-        SetSettings { accent: self.accent.trim().to_string(), language: self.language, department: self.department.trim().to_string(), author: self.author.trim().to_string(), logo: base.logo.clone() }
+        SetSettings {
+            accent: self.accent.trim().to_string(),
+            language: self.language,
+            department: self.department.trim().to_string(),
+            author: self.author.trim().to_string(),
+            logo: base.logo.clone(),
+            department_logo: base.department_logo.clone(),
+        }
     }
 }
 
@@ -244,6 +251,8 @@ pub struct TexSetup {
     pub github_url: String,
     pub github_ref: String,
     pub logo_path: String,
+    /// The typed path of the department logo (TEX-035).
+    pub department_logo_path: String,
     pub details: Details,
     pub accents: Vec<Swatch>,
     /// What the last action of the step said (a logo copied, details that could not be saved).
@@ -406,10 +415,10 @@ impl TexState {
         }
     }
 
-    /// Copy a logo file into the chosen set and say how it went.
-    pub fn setup_logo(&mut self, from: &Path) {
+    /// Copy a logo file into a slot of the chosen set and say how it went.
+    pub fn setup_logo(&mut self, slot: Slot, from: &Path) {
         let Some(id) = self.chosen_set().map(|s| s.id.clone()) else { return };
-        self.setup.message = Some(self.sets.copy_logo_to(&id, from));
+        self.setup.message = Some(self.sets.copy_logo_to(&id, slot, from));
         self.sets.refresh();
     }
 
@@ -442,16 +451,23 @@ impl TexState {
         }
     }
 
-    /// Files dropped on the open setup: on the logo step a PDF or PNG becomes the logo, on the
-    /// templates step an archive or a folder is imported. Returns what to tell the person when
-    /// nothing was taken. The files are never imported into the vault as notes.
+    /// Files dropped on the open setup: on the logo step a PDF or PNG becomes the university's logo
+    /// while its slot is empty, else the department logo (a toast says which), on the
+    /// templates step an archive or a folder is imported. Returns what to tell the person: what was
+    /// not taken, or which logo a file became. The files are never imported into the vault as notes.
     pub fn setup_drop(&mut self, ctx: &eframe::egui::Context, cfg: &TexConfig, paths: &[PathBuf]) -> Option<String> {
         match self.setup.step {
             Step::Logo => match paths.iter().find(|p| classify(p) == Dropped::Logo) {
                 Some(p) => {
-                    self.setup.logo_path = p.to_string_lossy().into_owned();
-                    self.setup_logo(p);
-                    None
+                    // the university's logo while its slot is empty, then the department's (TEX-035)
+                    let slot = if self.chosen_set().is_some_and(|s| s.logo == LogoStatus::Missing) { Slot::University } else { Slot::Department };
+                    let (field, told) = match slot {
+                        Slot::University => (&mut self.setup.logo_path, "The dropped file was taken as the university's logo."),
+                        Slot::Department => (&mut self.setup.department_logo_path, "The dropped file was taken as the department logo."),
+                    };
+                    *field = p.to_string_lossy().into_owned();
+                    self.setup_logo(slot, p);
+                    Some(told.into())
                 }
                 None => Some("Drop the logo here as a PDF or a PNG file.".into()),
             },
@@ -470,8 +486,8 @@ impl TexState {
     }
 
     /// Files dropped on Settings → LaTeX: an archive or folder is imported as a set, a PDF or PNG
-    /// becomes the logo of the set whose "Choose logo…" is open, else of the only set that has a
-    /// logo slot. Returns what to tell the person when nothing was taken.
+    /// becomes the logo of the set whose "Choose logo…" or "Choose department logo…" is open (the
+    /// slot it asks for), else the logo of the only set that has a logo slot. Returns what to tell the person when nothing was taken.
     pub fn settings_drop(&mut self, ctx: &eframe::egui::Context, cfg: &TexConfig, paths: &[PathBuf]) -> Option<String> {
         if let Some(p) = paths.iter().find(|p| classify(p) == Dropped::Archive) {
             if self.task.is_some() {
@@ -483,14 +499,14 @@ impl TexState {
         let Some(logo) = paths.iter().find(|p| classify(p) == Dropped::Logo) else { return Some("Drop a .zip or .tar.gz file or a folder of templates, or a logo as a PDF or PNG file.".into()) };
         let with_slot: Vec<String> = self.sets.sets.iter().flatten().filter_map(|e| e.info.as_ref().ok()).filter(|s| s.meta.logo_file.is_some()).map(|s| s.id.clone()).collect();
         let target = match &self.sets.form {
-            Form::Logo { set, .. } => Some(set.clone()),
-            _ if with_slot.len() == 1 => with_slot.first().cloned(),
+            Form::Logo { set, slot, .. } => Some((set.clone(), *slot)),
+            _ if with_slot.len() == 1 => with_slot.first().map(|id| (id.clone(), Slot::University)),
             _ => None,
         };
         match target {
-            Some(id) => {
+            Some((id, slot)) => {
                 self.sets.form = Form::None;
-                self.notice = Some(self.sets.copy_logo_to(&id, logo));
+                self.notice = Some(self.sets.copy_logo_to(&id, slot, logo));
                 None
             }
             None => Some("Press “Choose logo…” of the set the logo is for, then drop it.".into()),

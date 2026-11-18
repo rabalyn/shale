@@ -9,7 +9,7 @@
 use super::blocks::{self, Block};
 use super::body::Body;
 use super::inline::{anchor_named, Files, Look, Targets};
-use super::sets::{tex_escape, KindManifest, Mapping, SetInfo};
+use super::sets::{class_and_preamble, tex_escape, KindManifest, Mapping, SetInfo};
 use super::writer::{document, drop_title_heading, field_values, heading, nested_levels, toc_depth, Document, SECTION};
 use crate::markdown;
 use crate::pdf::book::{Item, Plan};
@@ -190,7 +190,8 @@ pub fn write_book(req: &BookRequest) -> Result<Document, String> {
             }
         }
     }
-    let tex = document(kind, &req.set.settings, true, false, toc.then(|| toc_depth(book)), &values, &main);
+    let head = class_and_preamble(kind, &req.set.settings, kind.shows_department_logo(req.set, req.opts.department_logo));
+    let tex = document(head, true, false, toc.then(|| toc_depth(book)), &values, &main);
     let files = files.into_inner();
     Ok(Document { tex, files: files.list, warnings: files.warnings })
 }
