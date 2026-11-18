@@ -91,7 +91,7 @@ fn dev_020_both_release_workflows_pack_the_guide_with_the_script_and_check_the_z
     let gh = fs::read_to_string(root().join(".github/workflows/build.yml")).unwrap();
     assert!(gh.contains("shale-userguide-${LABEL}.zip"), "the release asset is versioned");
     assert!(gh.contains("steps.files.outputs.guide }}.sha256"), "the zip's checksum is attested");
-    assert!(gh.contains("sha256sum -c %s.sha256` (the same for the user guide") && gh.contains("The user guide zip"), "the release notes say how to check the zip (BUILD-011)");
+    assert!(gh.contains("The user guide files `%s` and `%s` are checked like the Linux file") && gh.contains("the user guide zip `%s`"), "the release notes say how to check the zip (BUILD-011)");
     assert!(gh.contains("\"$GUIDE\" \"$GUIDE.sha256\" "), "the zip and its checksum are verified against the attestation");
 }
 
@@ -113,11 +113,11 @@ fn build_023_every_release_has_the_guide_as_a_pdf_made_by_the_release_build() {
     // versioned next to the zip, with its checksum, attested, verified and named in the notes
     assert!(gh.contains(r#"PDF="shale-userguide-${LABEL}.pdf""#) && gh.contains(r#"cp shale-userguide.pdf "release/$PDF""#), "the release asset is not versioned");
     assert!(gh.contains(r#"for f in "$ASSET" "$GUIDE" "$PDF"; do sha256sum"#), "the PDF has no checked .sha256 file");
-    assert!(gh.contains(r#"echo "pdf=$PDF" >> "$GITHUB_OUTPUT""#), "the PDF's name is not passed on");
+    assert!(gh.contains(r#"echo "pdf=shale-userguide-${LABEL}.pdf" >> "$GITHUB_OUTPUT""#), "the PDF's name is not passed on to the release job");
     assert!(gh.contains("release/${{ steps.files.outputs.pdf }}\n") && gh.contains("steps.files.outputs.pdf }}.sha256"), "the PDF and its checksum are not attested");
     assert!(gh.contains(r#""$GUIDE" "$GUIDE.sha256" "$PDF" "$PDF.sha256"; do"#), "the PDF and its checksum are not verified against the attestation");
     assert_eq!(gh.matches("PDF: ${{ steps.files.outputs.pdf }}").count(), 2, "the verify and publish steps do not know the PDF");
-    assert!(gh.contains("and its PDF `%s` are attested") && gh.contains(r#""$GUIDE" "$PDF""#), "the release notes do not name the PDF (BUILD-011)");
+    assert!(gh.contains("and its PDF `%s`.") && gh.contains(r#""$GUIDE" "$PDF""#), "the release notes do not name the PDF (BUILD-011)");
     // the release uploads everything in release/, so the PDF goes with it
     assert!(gh.contains("gh release upload \"$GITHUB_REF_NAME\" release/*") && gh.contains("gh release create \"$GITHUB_REF_NAME\" release/*"), "the release does not upload the folder");
 }
