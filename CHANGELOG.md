@@ -59,6 +59,15 @@ its section from this file.
   not be read and had no **Update set** button. The test now writes `set.toml` the way an import does,
   and a new test checks that a Windows path of a local source is read back unchanged. Sets imported on
   Windows were not affected: the import always wrote the path escaped.
+- **Tag runs of the `env-tests` job are faster** (#325). Refreshing the TeX Live image, the real
+  TeX Live install and the template import now run only in the weekly scheduled run, not on every tag
+  (ADR-0021); a tag run builds the TeX image from its cache and runs the CalDAV, mail and TeX
+  compile tests.
+- **A mail UI test no longer races on slow machines** (#326). The test for a mail that may have
+  been sent waited for the Outbox entry to read "may have been sent" and then expected the notice
+  at once, but the entry is re-read from disk before the send job's answer adds the notice; on the
+  slower Windows runner the check came in between. The test now waits for both. Shale itself
+  was not affected: the mail was classified correctly.
 
 ### Tests
 

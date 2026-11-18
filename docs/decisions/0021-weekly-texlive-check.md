@@ -1,4 +1,4 @@
-# ADR-0021: The current TeX Live is checked weekly, not on every tag
+# ADR-0021: The current TeX Live is checked weekly and for releases, not on every tag
 
 - **Status**: Accepted (owner decision, 2026-11-18)
 - **Date**: 2026-11-18
@@ -23,16 +23,16 @@ ADR-0020 wants a change of the current TeX Live to be noticed; that does not nee
 ## Decision
 
 `SHALE_ENV_TESTS_TEX_REFRESH`, `SHALE_ENV_TESTS_TEX_INSTALL` and `SHALE_ENV_TESTS_TEX_IMPORT` are `yes`
-only in the weekly scheduled run (`github.event_name == 'schedule'`) of the `env-tests` job, and `no`
-in a tag run. A tag run builds the TeX image without `--refresh` and runs `calendar::env_tests`,
-`mail_env` and `tex_env`. `scripts/land.sh` is unchanged.
+in the weekly scheduled run and in release tags (`vX.Y.Z`, no pre-release part) of the `env-tests` job,
+and `no` in check tags (`vX.Y.Z-rc.N`). A check tag builds the TeX image without `--refresh` and runs
+only `calendar::env_tests`, `mail_env` and `tex_env`. The condition is
+`(github.event_name == 'schedule' || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))) && 'yes' || 'no'`. `scripts/land.sh` is unchanged.
 
 ## Consequences
 
 - A change of the current TeX Live (or of CTAN's templates) shows up within a week, as ADR-0020 meant,
-  not at the next tag. A tag may be cut in that week on a TeX Live that has not been checked since the
-  last scheduled run.
-- Tag runs are faster.
+  and always before a release, since release tags run the full check.
+- Check tags are fast.
 - Podman storage on a runner volume (for example in the runner's `valid_volumes`) would let images and
   layers survive between runs and would also drop the image build from tag runs. It needs the owner to
-  change the runner's configuration and is not part of this decision.
+  change the runner's configuration and is not part of this decision; it is a separate change.
