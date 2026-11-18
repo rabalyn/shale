@@ -710,6 +710,13 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   left out by default, and each attachment can be ticked on or off.
 - Drop onto a folder in the file list to import into that folder, or onto a note to also add
   links to the new notes there.
+- After an import of two or more items a window, **Import summary**, says what was made: the new
+  notes, each with its name, a line about it (an e-mail: the sender and the date; an event: the start
+  and the place; any other note: its first line) and an **Open** button, the files saved in the media
+  folder, and the errors. **Open all in tabs** opens every new note in a tab of its own; Close leaves
+  them closed. One item is opened right away as before (IMP-056, IMP-057).
+
+  ![The summary after an import](userguide/z_media/screenshots/import-summary.png)
 - Messages that were already imported are recognised and left out unless you tick them again.
 - On Wayland, Shale reads what Thunderbird hands over. When that is only a link to the message,
   Shale finds the message in Thunderbird's local copy (for IMAP accounts this needs "Keep

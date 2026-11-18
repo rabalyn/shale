@@ -549,3 +549,87 @@ fn imp_052_the_dialog_starts_with_the_setting_and_a_ticked_box_writes_the_list()
     let listed = std::fs::read_to_string(root.join(name)).unwrap();
     assert!(listed.contains("\n- **From:** ") && listed.contains("\n- **Date:** 2026-11-13 10:22\n"), "{listed}");
 }
+
+/// The titles of the tabs that are open, in order.
+fn tab_names(w: &W) -> Vec<String> {
+    w.app.tabbar.tabs.iter().map(|t| t.view.path().map(|p| p.file_stem().unwrap().to_string_lossy().into_owned()).unwrap_or_default()).collect()
+}
+
+/// Import the two Markdown files of the fixture and take the summary window.
+fn import_two(w: &mut W) -> Vec<String> {
+    let nowhere = w.nowhere();
+    w.drop_files(nowhere, &[w.file("first drop.md"), w.file("second.md")]);
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
+    d.folder = "Sub".into();
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    w.frames(4);
+    tab_names(w)
+}
+
+// spec: IMP-056
+#[test]
+fn imp_056_importing_two_items_shows_a_summary_with_open_buttons() {
+    use eframe::egui::PointerButton;
+    let mut w = W::new("summary");
+    let before = import_two(&mut w);
+    assert_eq!(before, vec!["Welcome"], "nothing is opened yet");
+    let Some(Modal::ImportSummary(s)) = &w.app.modal else { panic!("no summary") };
+    assert_eq!(s.title(), "Imported 2 notes");
+    assert_eq!(s.notes.iter().map(|e| (e.name.as_str(), e.line.as_str())).collect::<Vec<_>>(), vec![("first drop", "from outside"), ("second", "")]);
+    assert!(w.painted("Imported 2 notes") && w.painted("first drop") && w.painted("from outside") && w.painted("Open all in tabs"), "{:?}", w.hl.text);
+    // Open: that note in a tab, the window stays
+    let open = w.hl.find_label(&mut w.app, "Open");
+    w.hl.click(&mut w.app, open.center(), PointerButton::Primary);
+    assert_eq!(tab_names(&w), vec!["Welcome", "first drop"]);
+    assert!(matches!(w.app.modal, Some(Modal::ImportSummary(_))), "still there");
+    // Open all in tabs: each note in a tab of its own, the window closes
+    let all = w.hl.find_label(&mut w.app, "Open all in tabs");
+    w.hl.click(&mut w.app, all.center(), PointerButton::Primary);
+    assert!(w.app.modal.is_none());
+    let tabs = tab_names(&w);
+    assert!(tabs.contains(&"first drop".to_string()) && tabs.contains(&"second".to_string()), "{tabs:?}");
+    // Close just closes
+    let mut w = W::new("summary-close");
+    import_two(&mut w);
+    let close = w.hl.find_label(&mut w.app, "Close");
+    w.hl.click(&mut w.app, close.center(), PointerButton::Primary);
+    assert!(w.app.modal.is_none());
+    assert_eq!(tab_names(&w), vec!["Welcome"]);
+}
+
+// spec: IMP-056
+#[test]
+fn imp_056_one_result_opens_as_before_and_errors_of_several_are_in_the_summary() {
+    let mut w = W::new("summary-errors");
+    let nowhere = w.nowhere();
+    // a file that is there when it is dropped and gone when the import runs
+    let missing = w.file("gone.txt");
+    std::fs::write(&missing, "x").unwrap();
+    // one note and one failure: the note opens, the failure is a toast
+    w.drop_files(nowhere, &[w.file("first drop.md"), missing.clone()]);
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
+    std::fs::remove_file(&missing).unwrap();
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    w.frames(4);
+    assert!(w.app.modal.is_none());
+    assert_eq!(tab_names(&w).last().map(String::as_str), Some("first drop"));
+    assert!(w.app.toasts.iter().any(|(t, _)| t.contains("gone")), "{:?}", w.app.toasts);
+    // two notes and one failure: the summary lists all three, the failure is no toast
+    w.app.toasts.clear();
+    std::fs::write(&missing, "x").unwrap();
+    w.drop_files(nowhere, &[w.file("second.md"), w.file("first drop.md"), missing.clone()]);
+    w.until("the Import dialog", |a| matches!(a.modal, Some(Modal::Import(_))));
+    let Some(Modal::Import(mut d)) = w.app.modal.take() else { panic!("no dialog") };
+    std::fs::remove_file(&missing).unwrap();
+    d.items.iter_mut().for_each(|i| i.include = true);
+    assert!(w.app.import_action(&mut d, crate::import::dialog::ImportAction::Import));
+    w.frames(4);
+    let Some(Modal::ImportSummary(s)) = &w.app.modal else { panic!("no summary") };
+    assert_eq!(s.notes.len(), 2);
+    assert_eq!(s.errors.len(), 1, "{:?}", s.errors);
+    assert!(s.errors[0].contains("gone"), "{:?}", s.errors);
+    assert!(!w.app.toasts.iter().any(|(t, _)| t.contains("gone")), "{:?}", w.app.toasts);
+    assert!(w.painted("Went wrong") && w.painted(&s.errors[0]), "{:?}", w.hl.text);
+}

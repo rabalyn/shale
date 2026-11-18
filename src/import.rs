@@ -26,6 +26,7 @@ pub mod mail_text;
 #[cfg(test)]
 mod mail_text_tests;
 pub mod people;
+pub mod summary;
 pub mod tagwords;
 #[cfg(all(test, target_os = "linux"))]
 mod tb_fixture_tests;

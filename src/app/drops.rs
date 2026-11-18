@@ -268,8 +268,13 @@ impl ShaleApp {
                     n => format!("Saved {n} files to the media folder"),
                 };
                 self.toast([note_text, file_text].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(". "));
-                for e in errors {
-                    self.toast(e);
+                // two or more results: a window says what was made (IMP-056); else the one is opened
+                let summary = made.len() + files.len() >= 2;
+                let mut errors = errors;
+                if !summary {
+                    for e in errors.drain(..) {
+                        self.toast(e);
+                    }
                 }
                 // the folder of the notes, or the folder of the first file
                 let shown = if made.is_empty() { files[0].parent().unwrap_or(Path::new("")).to_path_buf() } else { folder.clone() };
@@ -282,7 +287,13 @@ impl ShaleApp {
                     p = x.parent();
                 }
                 self.actions.push(Action::Rescan);
-                self.actions.push(Action::Open { rel: made.first().or(files.first()).cloned().unwrap_or_default(), new_tab: false });
+                if summary {
+                    if let Some(v) = &self.vault {
+                        self.modal = Some(Modal::ImportSummary(Box::new(crate::import::summary::ImportSummary::new(v, &made, &files, errors, place))));
+                    }
+                } else {
+                    self.actions.push(Action::Open { rel: made.first().or(files.first()).cloned().unwrap_or_default(), new_tab: false });
+                }
                 true
             }
         }

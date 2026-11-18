@@ -892,7 +892,7 @@ impl ShaleApp {
                     keep = false;
                 }
             }
-            Modal::TexSetup | Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage => {}
+            Modal::TexSetup | Modal::Export(_) | Modal::Calendars(_) | Modal::Event(_) | Modal::Import(_) | Modal::ImportSummary(_) | Modal::MailAccounts(_) | Modal::Social(_) | Modal::DataUsage => {}
             Modal::ConvertCanvas { rel, new_tab, always, existing } => {
                 let resp = crate::dialog::Dialog::new("convert-canvas", "Convert to an editable drawing?").width(460.0).show(&ctx, |ui| {
                     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -1091,6 +1091,22 @@ impl ShaleApp {
                 }
             }
             if close_asked {
+                keep = false;
+            }
+        }
+        if let Modal::ImportSummary(s) = &modal {
+            let mut asked = None;
+            let resp = crate::dialog::Dialog::new("import-summary", "Import summary").width(560.0).show(&ctx, |ui| asked = crate::import::summary::show(ui, s));
+            match asked {
+                Some(crate::import::summary::SummaryAction::Open(rel)) => self.actions.push(Action::Open { rel, new_tab: true }),
+                Some(crate::import::summary::SummaryAction::OpenAll) => {
+                    self.actions.extend(s.notes.iter().map(|e| Action::Open { rel: e.rel.clone(), new_tab: true }));
+                    keep = false;
+                }
+                Some(crate::import::summary::SummaryAction::Close) => keep = false,
+                None => {}
+            }
+            if resp.should_close() {
                 keep = false;
             }
         }

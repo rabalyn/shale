@@ -22,6 +22,13 @@ Turn mails, events and files into notes. Back to [[Start here]].
 - Drop onto a folder in the file list to import into it, or onto a note to also add links to the
   new notes there.
 - Messages that were imported before are recognised and left out unless you tick them again.
+- After an import of two or more items the window **Import summary** lists what was made: each new
+  note with a line about it (an e-mail: sender and date; an event: time and place; other notes: their
+  first line) and an **Open** button, the files saved in the media folder, and anything that went
+  wrong. **Open all in tabs** opens every new note in a tab of its own ([[Tabs]]); **Close** leaves
+  them closed. One item is opened right away.
+
+![[import-summary.png]]
 
 ![[drag-event.png]]
 
