@@ -409,6 +409,11 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   the text (below), not a heading, so a `#` is numbered like the others. The numbers are only drawn (muted), never written into the file: in the editor, the Markdown preview, the reading view, the outline, the link preview and
   the PDF. Settings → Editor → "Number headings" (on by default) switches it for every note; a note's front matter
   `numbered-headings: true` or `false` (also `yes` / `no`) overrides it for that note.
+- **Properties as a summary and a card** (EDIT-060 to EDIT-064, CFG-050 to CFG-053): the reading view draws the front matter as a card by the type of the note instead of raw
+  lines: an e-mail as a mail header (sender, date, to / cc, subject, tag chips), an event with its time, place, attendees and a repeats badge, a Word import as one page chip
+  (`A4 · 2.5 cm margins · 11 pt`), any other note as key and value rows. Ids and `print-*` settings are left out, a ▸ toggle shows every property, and people with a contact
+  note are links. `properties::summary` gives the one line for a folded view (`email · Anna Müller · 2026-11-12 · #work #mail`). Settings → Appearance → "Properties in the editor"
+  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). Dates are not links yet: the calendar has no entry point for a day.
 - **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
   leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale
