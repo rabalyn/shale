@@ -40,6 +40,8 @@ struct Fmt {
     hidden: bool,
     /// > 0: this text is an image link shown as a picture; the row is this many points tall
     image_h: u16,
+    /// the text of a line that a fold hides: rows of no height (EDIT-071)
+    folded: bool,
     /// the background of `<mark style="background: …">` text (EDIT-028)
     bg: Option<[u8; 4]>,
     /// the colour of `<span style="color: …">` text
@@ -221,7 +223,8 @@ pub fn highlight(text: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob
 /// invisible text on a row tall enough for the picture that is painted there afterwards. With
 /// `raw_lines` (line numbers) the markdown preview is on (EDIT-016): the markup of every line
 /// outside that range is hidden (invisible, about one point wide); the text itself stays the
-/// same so that cursor, clicks and vim keep their indices.
+/// same so that cursor, clicks and vim keep their indices. A height of 0 in `images` is text that
+/// a fold hides: its rows have no height (EDIT-071).
 pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorFonts, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> LayoutJob {
     highlight_with_math(text, links, fonts, images, raw_lines).0
 }
@@ -423,7 +426,12 @@ pub(crate) fn highlight_with_math(text: &str, links: &[(LinkSpan, bool)], fonts:
     }
     for (r, h) in images {
         if r.end <= text.len() && text.is_char_boundary(r.start) && text.is_char_boundary(r.end) {
-            set(&mut fmts, r.clone(), |f| f.image_h = h.round().clamp(1.0, 30000.0) as u16);
+            // a height of 0 is text that a fold hides (EDIT-071)
+            if *h <= 0.0 {
+                set(&mut fmts, r.clone(), |f| f.folded = true);
+            } else {
+                set(&mut fmts, r.clone(), |f| f.image_h = h.round().clamp(1.0, 30000.0) as u16);
+            }
         }
     }
     // the formulas of the lines the preview draws: typeset, their TeX hidden with room for them in
@@ -518,9 +526,9 @@ pub(crate) fn make_room_for_numbers(ui: &Ui, job: &mut LayoutJob, fonts: &Editor
 
 /// Paint the numbers of the headings in the room [`make_room_for_numbers`] made, muted, on the
 /// baseline of the heading's text.
-fn paint_numbers(ui: &Ui, marks: &[NumberMark], galley: &Galley, galley_pos: Pos2) {
+fn paint_numbers(ui: &Ui, marks: &[NumberMark], galley: &Galley, galley_pos: Pos2, hidden: &[Range<usize>]) {
     let painter = ui.painter().with_clip_rect(ui.clip_rect());
-    for m in marks {
+    for m in marks.iter().filter(|m| !hidden.iter().any(|h| h.contains(&m.title))) {
         let c = markdown::byte_to_char(&galley.job.text, m.title.min(galley.job.text.len()));
         let r = galley.pos_from_cursor(CCursor::new(c));
         let mut first = 0;
@@ -605,6 +613,9 @@ pub fn outline_label(ui: &mut Ui, job: LayoutJob, base: f32) -> egui::Response {
 fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
     let area = if f.rendered { &fonts.rendered } else { &fonts.raw };
     let (family, base) = (area.family.clone(), area.size);
+    if f.folded {
+        return TextFormat { font_id: FontId::new(1.0, family), color: Color32::TRANSPARENT, line_height: Some(0.0), ..Default::default() };
+    }
     if f.image_h > 0 {
         return TextFormat { font_id: FontId::new(1.0, family), color: Color32::TRANSPARENT, line_height: Some(f.image_h as f32), ..Default::default() };
     }
@@ -833,6 +844,8 @@ pub struct NoteEditor {
     /// the text box had the keyboard before the pointer went down (a click on a table button takes
     /// it away, and it is given back)
     focus_before_press: bool,
+    /// the folded blocks of the notes this editor showed, and what is drawn for them (EDIT-070…EDIT-079)
+    pub(crate) fold: crate::fold_ui::FoldUi,
 }
 
 impl NoteEditor {
@@ -868,6 +881,7 @@ impl NoteEditor {
             grid: Default::default(),
             table_cell_edit: true,
             focus_before_press: false,
+            fold: Default::default(),
             vim_follow: false,
             vim_cursor_rect: None,
             cursor_style: crate::cursor_style::CursorStyle::default(),
@@ -934,6 +948,18 @@ impl NoteEditor {
             self.format_request = Some(cmd);
             self.request_focus = !in_cell;
         }
+    }
+
+    /// The key of a fold command (KEY-030…KEY-033): done to the folds at the start of the next frame.
+    pub fn key_fold(&mut self, cmd: crate::fold::FoldCmd) {
+        self.fold.request = Some(cmd);
+    }
+
+    /// The line (from 0) the cursor is in: vim's cursor in normal mode, else the text box's.
+    fn cursor_line(&self, ui: &Ui, text: &str) -> usize {
+        let normal = self.vim_enabled && self.vim.mode != crate::vim::Mode::Insert && !self.vim.visual();
+        let char = if normal { Some(self.vim.cursor) } else { self.text_cursor(ui).map(|c| c.0) };
+        crate::editor_preview::line_of(text, markdown::char_to_byte(text, char.unwrap_or(0)))
     }
 
     /// The key of a toolbar button that opens a popup (KEY-015); the heading menu is greyed out in a cell.
@@ -1175,6 +1201,9 @@ impl NoteEditor {
         }
         if fx.moved || fx.changed {
             self.vim_scroll = Some(self.vim.cursor);
+        }
+        if fx.fold.is_some() {
+            self.fold.request = fx.fold;
         }
         if self.vim.mode != Mode::Insert {
             // no input method outside insert mode: keys must arrive as they are
@@ -1593,6 +1622,19 @@ impl NoteEditor {
             }
         }
 
+        // the folds of this frame; a fold command first (EDIT-073): one that hides the cursor's line puts the cursor on the header
+        let mut fold = self.fold.begin(rel, text);
+        if let Some(cmd) = self.fold.request.take() {
+            let line = self.cursor_line(ui, text);
+            if let Some(header) = self.fold.apply(rel, &fold, cmd, line) {
+                let at = markdown::line_start_byte(text, header);
+                let end = text[at..].find('\n').map_or(text.len(), |p| at + p);
+                self.pending_cursor = Some(markdown::byte_to_char(text, end));
+            }
+            fold = self.fold.begin(rel, text);
+            ui.ctx().request_repaint();
+        }
+
         if let Some(c) = self.pending_cursor {
             let mut state = egui::text_edit::TextEditState::load(ui.ctx(), self.id).unwrap_or_default();
             state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(c))));
@@ -1638,7 +1680,7 @@ impl NoteEditor {
         if let Some(raw) = &preview {
             let width = (ui.available_width() - gutter - 8.0 - TABLE_SIDE).max(120.0);
             for (ordinal, b) in crate::table::find_tables(text).into_iter().enumerate() {
-                if lines_overlap(&b.lines, raw) {
+                if lines_overlap(&b.lines, raw) || fold.view.hides_any(&b.lines) {
                     continue;
                 }
                 let src = text[crate::table::byte_range(text, &b.lines)].to_string();
@@ -1661,8 +1703,9 @@ impl NoteEditor {
                     continue;
                 }
                 let inside = focused && sel.as_ref().map(|s| s.start <= l.range.end && s.end >= l.range.start).unwrap_or(false);
-                let raw_line = preview.as_ref().is_some_and(|r| r.contains(&crate::editor_preview::line_of(text, l.range.start)));
-                if inside || raw_line {
+                let line = crate::editor_preview::line_of(text, l.range.start);
+                let raw_line = preview.as_ref().is_some_and(|r| r.contains(&line));
+                if inside || raw_line || fold.view.is_hidden(line) {
                     continue;
                 }
                 let Some(p) = vault.resolve(&l.target, Some(rel)) else { continue };
@@ -1727,9 +1770,12 @@ impl NoteEditor {
                 &fresh
             };
             let mut ranges: Vec<(Range<usize>, f32)> = remap_images(s, &image_keys).into_iter().map(|(r, h, _)| (r, h)).collect();
+            // the lines a fold hides (EDIT-071): rows of no height
+            let folds = fold.at(s);
             if let Some(raw) = &preview {
-                ranges.extend(table_rows(s, &table_keys, raw).into_iter().flat_map(|g| g.rows));
+                ranges.extend(table_rows(s, &table_keys, raw, &folds.view).into_iter().flat_map(|g| g.rows));
             }
+            ranges.extend(folds.view.byte_ranges(s).into_iter().map(|r| (r, 0.0)));
             let (mut job, formulas) = highlight_with_math(s, use_links, fonts, &ranges, preview.clone());
             *formula_marks.borrow_mut() = formulas;
             *number_marks.borrow_mut() = make_room_for_numbers(ui, &mut job, fonts, numbered_default, preview.as_ref());
@@ -1763,7 +1809,9 @@ impl NoteEditor {
         }
 
         self.last_layout = Some((output.galley.clone(), output.galley_pos));
-        paint_numbers(ui, &number_marks.borrow(), &output.galley, output.galley_pos);
+        let shown_folds = fold.at(&output.galley.job.text);
+        let hidden_bytes = shown_folds.view.byte_ranges(&output.galley.job.text);
+        paint_numbers(ui, &number_marks.borrow(), &output.galley, output.galley_pos, &hidden_bytes);
         paint_math(ui, &formula_marks.borrow(), &output.galley, output.galley_pos, resp);
         if let Some(r) = output.cursor_range.filter(|_| resp.has_focus() && self.keep_selection.is_none()) {
             self.last_selection = Some((r.primary.index.0, r.secondary.index.0));
@@ -1853,7 +1901,7 @@ impl NoteEditor {
         if let Some(raw) = preview.as_ref().filter(|_| !tables.is_empty()) {
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
             let now_text = output.galley.job.text.clone();
-            for g in table_rows(&now_text, &table_keys, raw) {
+            for g in table_rows(&now_text, &table_keys, raw, &shown_folds.view) {
                 let c = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(&now_text, g.rows[0].0.start)));
                 let origin = output.galley_pos + Vec2::new(c.min.x, c.min.y + 1.0);
                 let t = &tables[g.key];
@@ -1931,6 +1979,19 @@ impl NoteEditor {
                 ui.scroll_to_rect(screen.expand(60.0), Some(egui::Align::Center));
             }
         }
+
+        // the cursor never stays in text a fold hides (EDIT-075): what hides it is unfolded, and the
+        // next frame scrolls to the cursor
+        if let Some(r) = output.cursor_range.filter(|_| resp.has_focus()) {
+            let now = &output.galley.job.text;
+            let (p, q) = (markdown::char_to_byte(now, r.primary.index.0), markdown::char_to_byte(now, r.secondary.index.0));
+            if self.fold.reveal(rel, &fold, now, p, p.min(q)..p.max(q)) {
+                self.vim_scroll = Some(r.primary.index.0);
+                ui.ctx().request_repaint();
+            }
+        }
+        // the markers and the badges of the folds (EDIT-071, EDIT-074)
+        self.fold.paint(ui, &fold, &crate::fold_ui::Painted { id: self.id, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size });
 
         // --- hover / click on links and checkboxes
         let hover = ui.input(|i| i.pointer.hover_pos());
@@ -2053,14 +2114,14 @@ struct GridTable {
 /// the whole height (less one point for every other line, which are one point tall), so the
 /// grid fits where the hidden text is; the line breaks belong to their lines, so no row is
 /// taller than that (EDIT-024).
-fn table_rows(text: &str, keys: &[(String, f32)], raw: &Range<usize>) -> Vec<GridTable> {
+fn table_rows(text: &str, keys: &[(String, f32)], raw: &Range<usize>, folds: &crate::fold::View) -> Vec<GridTable> {
     if keys.is_empty() {
         return vec![];
     }
     let all = markdown::lines_with_offsets(text);
     let mut out = Vec::new();
     for (ordinal, b) in crate::table::find_tables(text).into_iter().enumerate() {
-        if lines_overlap(&b.lines, raw) {
+        if lines_overlap(&b.lines, raw) || folds.hides_any(&b.lines) {
             continue;
         }
         let whole = crate::table::byte_range(text, &b.lines);

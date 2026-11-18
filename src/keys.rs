@@ -270,6 +270,11 @@ actions! {
     NotePreview => "note.preview", "Note: Markdown preview button", NoteView, ["Alt+P"];
     NoteMenu => "note.menu", "Note: ⋯ menu button (opens its menu)", NoteView, ["Alt+D"];
     NoteNewTab => "note.new_tab", "Note: New tab button", NoteView, ["Alt+N"];
+    // Folding (KEY-030…KEY-034): bound with Ctrl and Shift, so macOS has the same keys
+    NoteFold => "note.fold", "Fold the block at the cursor (again: the block around it)", NoteView, ["Ctrl+Shift+K"];
+    NoteUnfold => "note.unfold", "Unfold the block at the cursor", NoteView, ["Ctrl+Shift+J"];
+    NoteFoldAll => "note.fold_all", "Fold every block of the note", NoteView, ["Ctrl+Shift+U"];
+    NoteUnfoldAll => "note.unfold_all", "Unfold every block of the note", NoteView, ["Ctrl+Shift+I"];
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
     NormalSearchAll => "normal.search_all", "Search notes, mail and posts", EditorNormal, ["Space F G"];
@@ -340,7 +345,7 @@ impl Action {
     /// types characters, they have no default key.
     pub fn is_alt_key(self) -> bool {
         let d = self.def();
-        d.scope == Scope::NoteView || d.id.starts_with("global.ribbon_") || d.id.starts_with("global.sidebar_")
+        (d.scope == Scope::NoteView && d.defaults.iter().all(|k| k.starts_with("Alt+"))) || d.id.starts_with("global.ribbon_") || d.id.starts_with("global.sidebar_")
     }
 
     /// The place (0 to 9) of the ribbon item a `RibbonSlot` action opens.
@@ -670,8 +675,8 @@ mod tests {
             let on_mac = if d.action.is_alt_key() { "not set".to_string() } else { shown };
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
-        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 23);
-        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 23);
+        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 23 + 4);
+        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 23 + 4);
     }
 
     // spec: KEY-014
@@ -754,6 +759,20 @@ mod tests {
         assert_eq!(linux.alt_badge(Action::SidebarLeft).as_deref(), Some(","));
         assert_eq!(linux.alt_badge(Action::Save), None, "Ctrl+S is no Alt key");
         assert_eq!(mac.alt_badge(Action::NoteBold), None);
+    }
+
+    // spec: KEY-030, KEY-031, KEY-032, KEY-033, KEY-034
+    #[test]
+    fn the_fold_keys_have_the_same_defaults_on_every_system_and_clash_with_nothing() {
+        let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
+        for (a, key) in [(Action::NoteFold, "Ctrl+Shift+K"), (Action::NoteUnfold, "Ctrl+Shift+J"), (Action::NoteFoldAll, "Ctrl+Shift+U"), (Action::NoteUnfoldAll, "Ctrl+Shift+I")] {
+            assert!(!a.is_alt_key(), "{key} is no Alt key");
+            for k in [&linux, &mac] {
+                assert_eq!(k.bindings(a), vec![b(key)]);
+                assert_eq!(k.check(a, &b(key)), Ok(()));
+            }
+        }
+        assert_eq!(linux.check(Action::NoteFold, &b("Ctrl+Shift+F")), Err("Ctrl+Shift+F is already used by “Search all notes”".to_string()));
     }
 
     // spec: KEY-017

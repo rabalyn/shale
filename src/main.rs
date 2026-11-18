@@ -26,6 +26,10 @@ mod drawing;
 mod editor;
 mod editor_preview;
 mod embed_size;
+mod fold;
+mod fold_ui;
+#[cfg(test)]
+mod fold_ui_tests;
 mod fonts;
 #[cfg(test)]
 mod fonts_ui_tests;

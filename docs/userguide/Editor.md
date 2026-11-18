@@ -15,6 +15,32 @@ How you write in Shale. Back to [[Start here]]; the links and embeds are in [[No
   cursor (the default), a bar after it, a block or an underline. With vim-style editing the cursor in
   normal mode has its own choice (Settings → Vim, default: block). "Blinking cursor" turns the blinking off.
 
+## Folding
+
+Headings, quotes and lists can be folded away so that a long note is short again:
+
+- a **heading** folds everything up to the next heading of the same or a higher level (so folding `##` keeps its
+  `###` inside, and folding `#` takes all of them);
+- a **quote** folds its second and later `>` lines;
+- a **list item** folds its nested items and continued lines, and a **list** with two or more items folds all of
+  them (fold the first item once for the item, once more for the whole list).
+
+A folded block shows its first line and a muted badge such as `… 4 lines`; the hidden lines have no line number.
+Hover a line that starts such a block: a small ▾ appears left of the text (in the gutter, or left of the text without
+line numbers). Click it to fold; a folded block always shows ▸, and clicking it or the badge unfolds it.
+
+| Keys | What it does |
+|---|---|
+| Ctrl+Shift+K | fold the block at the cursor (on a line inside a block: that block, and the cursor goes to its first line; on an already folded line: the block around it) |
+| Ctrl+Shift+J | unfold the block at the cursor (folds inside it stay folded) |
+| Ctrl+Shift+U, Ctrl+Shift+I | fold all, unfold all |
+| `za` `zc` `zo`, `zM` `zR` | vim-style editing, normal mode: toggle, fold, unfold, fold all, unfold all |
+
+The keys can be changed in Settings → Keybindings (Note view), see [[Keyboard shortcuts]]. The text is never
+changed by folding, and undo, selection and copy work as always. The cursor never stays in hidden text: if you move into a folded block
+with the arrow keys, or a link or a search result jumps there, it opens. Select all (Ctrl+A) leaves folds alone.
+Folds are remembered while Shale runs and are never written into the note. The reading view does not fold yet.
+
 ## The title line and pasting
 
 Above the first line a note shows its **title line**: the file name without `.md` and without a
@@ -245,6 +271,7 @@ typing; "Esc from insert mode" can make it step back one character like Vim does
 | dd | delete the line (onto the clipboard; p puts it back below) |
 | u, Ctrl+R | undo, redo: up to 200 steps per note, an insert session is one step; kept in the vault for 30 days, so it works after a restart ([[Data usage and caches]]) |
 | gt | follow the link under the cursor like a click (a note link or a web address) |
+| za, zc, zo, zM, zR | toggle, fold, unfold, fold all, unfold all (see Folding above) |
 | Shift+K | preview the link under the cursor (see below) |
 
 **Link preview.** With the cursor on a link, **Shift+K** shows a floating window (640 x 480 points at first) below

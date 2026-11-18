@@ -764,8 +764,8 @@ mod tests {
         // a waiting Space types nothing and moves nothing; a key that does not continue it works as usual
         typed(&mut w, Key::Space, " ");
         assert_eq!(note_text(&w), "# A\n");
-        typed(&mut w, Key::Z, "z");
-        assert_eq!(note_text(&w), "# A\n", "z is no vim key either");
+        typed(&mut w, Key::Q, "q");
+        assert_eq!(note_text(&w), "# A\n", "q is no vim key either");
         typed(&mut w, Key::Space, " ");
         typed(&mut w, Key::I, "i");
         assert!(w.app.tabbar.tabs[0].editor.vim.mode == crate::vim::Mode::Insert, "i after a cancelled Space starts insert mode");

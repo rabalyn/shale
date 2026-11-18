@@ -1722,6 +1722,16 @@ impl ShaleApp {
                 ctx.data_mut(|d| d.insert_temp(egui::Id::unique(("note-menu-key", tab_id)), true));
                 ctx.request_repaint();
             }
+            KeyAction::NoteFold | KeyAction::NoteUnfold | KeyAction::NoteFoldAll | KeyAction::NoteUnfoldAll if !reading => {
+                use crate::fold::FoldCmd;
+                let cmd = match a {
+                    KeyAction::NoteFold => FoldCmd::Fold,
+                    KeyAction::NoteUnfold => FoldCmd::Unfold,
+                    KeyAction::NoteFoldAll => FoldCmd::FoldAll,
+                    _ => FoldCmd::UnfoldAll,
+                };
+                self.tabbar.tabs[active].editor.key_fold(cmd);
+            }
             KeyAction::NoteHighlightColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Highlight),
             KeyAction::NoteFontColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Font),
             KeyAction::NoteHeading if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Heading),
