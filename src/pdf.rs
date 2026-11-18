@@ -9,3 +9,5 @@ pub(crate) mod write;
 
 #[cfg(test)]
 mod book_tests;
+#[cfg(test)]
+mod compare_tests;

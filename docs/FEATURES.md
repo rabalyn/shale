@@ -125,13 +125,29 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   its definition), underline, sub and superscript, `<br>` in table cells and math (vector outlines); a **Contents** page after the title lists the
   `#`–`###` headings with their numbers and the pages they start on, each a link, with a checkbox to leave it
   out, and the PDF has bookmarks for its `#`–`######` headings; the title is printed once: when the note's first
-  heading is a `#` that says the same as the title, the separate title is left out, PDF-008), insert a
+  heading is a `#` that says the same as the title, the separate title is left out, PDF-008; a note's
+  properties set how it is printed, see below), insert a
   new drawing, rename the note (links in other notes are updated), or move it to the trash. The
   trash keeps the original folder (`.trash/<date>/<path>`) and nothing in it is replaced or
   emptied; right-click the empty space of the file list and choose "Restore last deleted" to put
   the last item you trashed back.
 
   ![The PDF export dialog](userguide/z_media/screenshots/pdf-export-dialog.png)
+
+- **Print properties of a note** (#339): the front matter of a note can say how its PDF is printed; all
+  keys are optional and a bad value is ignored. The export dialog opens with the note's paper, margins,
+  text size, title and contents filled in (and they can be changed there); the font, the spacing, the
+  alignment and the heading colour are read from the note at export time. Word imports write them.
+  - `print-paper`: `A4`, `A5`, `Letter`, `Legal` or `<W>x<H>mm` (a width larger than the height is landscape)
+  - `print-margins`: four numbers in mm, `top right bottom left`
+  - `print-font`: `serif` (Liberation Serif, Times-compatible), `sans` (Ubuntu Light) or `mono` (Hack)
+  - `print-font-size`: the body text in points
+  - `print-line-spacing`: a factor, 1.0 being the font's own single line height
+  - `print-paragraph-spacing`: the space after a body paragraph in points
+  - `print-align`: `left` or `justify`
+  - `print-heading-color`: `#RRGGBB`
+  - `print-title`: `true` or `false`, the note's name as a title
+  - `print-toc`: `true` or `false`, the contents page
 
 - **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
   or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
