@@ -1,6 +1,6 @@
 pkgbase = shale-bin
 	pkgdesc = Native notes app: a vault is a plain folder of Markdown files (prebuilt release)
-	pkgver = 0.5.1
+	pkgver = 0.6.0
 	pkgrel = 1
 	url = https://github.com/rabalyn/shale
 	arch = x86_64
@@ -24,7 +24,7 @@ pkgbase = shale-bin
 	optdepends = libsecret: secret-tool, to keep passwords in the system keyring
 	provides = shale
 	conflicts = shale
-	source = shale-bin-0.5.1.tar.gz::https://github.com/rabalyn/shale/releases/download/v0.5.1/shale-0.5.1-linux-x86_64.tar.gz
-	sha256sums = 74abed4af9864825232e87943894d05b79da4d89e883b59e8d56fd0454cd8cb3
+	source = shale-bin-0.6.0.tar.gz::https://github.com/rabalyn/shale/releases/download/v0.6.0/shale-0.6.0-linux-x86_64.tar.gz
+	sha256sums = 022cb03db646606afbc1addf64ac8735855c78b9be0620c8503314e2ad01c770
 
 pkgname = shale-bin

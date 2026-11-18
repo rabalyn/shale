@@ -2,7 +2,7 @@
 # The package is published to the AUR by hand; scripts/aur-update.sh bumps pkgver and sha256sums
 # for a new release (BUILD-026, raba/shale#337).
 pkgname=shale-bin
-pkgver=0.5.1
+pkgver=0.6.0
 pkgrel=1
 pkgdesc='Native notes app: a vault is a plain folder of Markdown files (prebuilt release)'
 arch=('x86_64')
@@ -22,7 +22,7 @@ optdepends=('git: git sync of a vault'
 provides=('shale')
 conflicts=('shale')
 source=("${pkgname}-${pkgver}.tar.gz::https://github.com/rabalyn/shale/releases/download/v${pkgver}/shale-${pkgver}-linux-x86_64.tar.gz")
-sha256sums=('74abed4af9864825232e87943894d05b79da4d89e883b59e8d56fd0454cd8cb3')
+sha256sums=('022cb03db646606afbc1addf64ac8735855c78b9be0620c8503314e2ad01c770')
 
 package() {
   cd "${srcdir}/shale"
