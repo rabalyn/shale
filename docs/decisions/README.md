@@ -28,7 +28,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0018](0018-tag-only-ci.md) | Forgejo CI runs for tags only; `make-tag.sh` makes pre-release check tags, `make-release.sh` releases; `land.sh` moves the local `main` | Accepted |
 | [0019](0019-latex-export-managed-texlive.md) | PDF export through LaTeX templates, with a managed TeX Live (LuaLaTeX), templates in the vault | Accepted, amended by 0020 |
 | [0020](0020-current-texlive.md) | The managed TeX Live and the test image follow the current TeX Live | Accepted, amended by 0021 |
-| [0021](0021-weekly-texlive-check.md) | The current TeX Live is checked weekly, not on every tag | Accepted |
+| [0021](0021-weekly-texlive-check.md) | The current TeX Live is checked weekly and for releases, not on every tag | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.
