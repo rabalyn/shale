@@ -40,7 +40,7 @@ folder you left is closed. The regular sync every 10 minutes still looks at all 
 ## Reading and keys
 
 Search with `/` (words, `"phrases"`, `from:`, `to:`, `subject:`, `body:`). One of the three
-panes has the keyboard and is framed; Ctrl+H / Ctrl+L move it. j / k, `u` read or unread, `s`
+panes has the keyboard and is framed; Ctrl+H / Ctrl+L (macOS: Cmd+Shift+H / Cmd+Shift+L) move it. j / k, `u` read or unread, `s`
 or `f` flag, `d` delete, `m` move, `i` import to the vault ([[Import]]). All mail keys are in
 [[Keyboard shortcuts]] and can be changed in Settings → Keybindings.
 
