@@ -701,7 +701,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   note's properties hold the page setup (`print-paper`, `print-margins`), the body font, size,
   line and paragraph spacing, alignment and the colour of Heading 1 (`print-*`, IMP-040), which
   the PDF export uses (rabalyn/shale#338). Centred and right-aligned paragraphs are not kept
-  (rabalyn/shale#340). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
+  (rabalyn/shale#340). A Word table of contents is left out (the export makes its own, IMP-043). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
   without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
 
   ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)

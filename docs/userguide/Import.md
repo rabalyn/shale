@@ -56,8 +56,9 @@ for the [[PDF]] export: `print-paper` (A4, A5, Letter, Legal or `<width>x<height
 landscape), `print-margins` (top, right, bottom, left in mm), `print-font` (serif, sans or mono),
 `print-font-size` (pt), `print-line-spacing` (a factor such as 1.15), `print-paragraph-spacing` (pt after a
 paragraph), `print-align` (left or justify), `print-heading-color`, `print-title` (always `false`, the title
-is in the text) and `print-toc` (`false` unless the document has a table of contents). Edit them like any
-property. Centred and right-aligned paragraphs are not kept (issue 340).
+is in the text) and `print-toc` (`false`, left out when the document has a table of contents). Edit them like any
+property. A Word table of contents (its title and the lines of entries) is not imported as text, because the
+PDF export makes its own contents page. Centred and right-aligned paragraphs are not kept (issue 340).
 
 Everything one Word file brings goes into one folder, `z_media/<year>/<month>/import_docx_<name>/`, named
 after the file (spaces become `-`; a number is added when the name is taken): the pictures in `media/` and, with

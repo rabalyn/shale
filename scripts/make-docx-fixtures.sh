@@ -10,6 +10,10 @@
 # 8 pt after), the colour of Heading 1 (2F5496) and a character style "Emphasis red" (7030A0), for
 # the look tests (IMP-040, IMP-041).
 #
+# toc.docx (IMP-043) is made from toc.fodt, a flat ODT with a table of contents, by LibreOffice
+# (`soffice --convert-to docx`). LibreOffice does not give the same bytes twice, so this step runs
+# only when soffice is installed, and the committed toc.docx is what the test uses.
+#
 # Needs pandoc and python3 (for the picture and the reference document). The dates inside the
 # files are fixed so that a second run gives the same files.
 set -eu
@@ -68,4 +72,10 @@ for md in "$dir"/*.md; do
     # shellcheck disable=SC2086
     pandoc "$md" -f markdown -t docx --resource-path="$tmp" $reference -o "${md%.md}.docx"
 done
+if command -v soffice >/dev/null 2>&1; then
+    soffice --headless --convert-to docx --outdir "$tmp/toc" "$dir/toc.fodt" >/dev/null
+    cp "$tmp/toc/toc.docx" "$dir/toc.docx"
+else
+    echo "soffice not found: toc.docx is left as it is"
+fi
 ls -l "$dir"
