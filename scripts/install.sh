@@ -148,10 +148,12 @@ if command -v ldd >/dev/null 2>&1; then
         {
             echo "Warning: Shale needs libraries this system does not have:"
             echo "$missing" | sed 's/^/  /'
-            echo "Install them with your package manager, for example:"
-            echo "  Arch:          sudo pacman -S libxkbcommon wayland libx11 libxcb vulkan-icd-loader mesa"
-            echo "  Debian/Ubuntu: sudo apt install libxkbcommon0 libwayland-client0 libx11-6 libxcb1 libvulkan1 libgl1"
-            echo "  Fedora:        sudo dnf install libxkbcommon wayland-libs-client libX11 libxcb vulkan-loader mesa-libGL"
+            # besides glibc the program links only ALSA (sound); the window libraries (Wayland,
+            # X11, xkbcommon, OpenGL) are loaded at start, so ldd does not see them
+            echo "Install them with your package manager (libasound.so.2 is ALSA):"
+            echo "  Arch:          sudo pacman -S alsa-lib"
+            echo "  Debian/Ubuntu: sudo apt install libasound2"
+            echo "  Fedora:        sudo dnf install alsa-lib"
         } >&2
     fi
 fi

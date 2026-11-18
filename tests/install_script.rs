@@ -215,12 +215,12 @@ fn build_025_missing_libraries_are_named_with_a_hint() {
     // and a cache tool that fails: ignored
     fs::write(tools.join("gtk-update-icon-cache"), "#!/bin/sh\nexit 1\n").unwrap();
     fs::set_permissions(tools.join("gtk-update-icon-cache"), fs::Permissions::from_mode(0o755)).unwrap();
-    fs::write(tools.join("ldd"), "#!/bin/sh\necho '\tlibxkbcommon.so.0 => not found'\necho '\tlibc.so.6 => /lib/libc.so.6 (0x1)'\n").unwrap();
+    fs::write(tools.join("ldd"), "#!/bin/sh\necho '\tlibasound.so.2 => not found'\necho '\tlibc.so.6 => /lib/libc.so.6 (0x1)'\n").unwrap();
     fs::set_permissions(tools.join("ldd"), fs::Permissions::from_mode(0o755)).unwrap();
     let out = Command::new("sh").arg(e.pkg().join("install.sh")).env("HOME", e.home()).env("XDG_DATA_HOME", e.data()).env("PATH", &tools).output().unwrap();
     assert!(out.status.success(), "a missing library is a warning");
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("libxkbcommon.so.0") && err.contains("pacman -S") && err.contains("apt install"), "{err}");
+    assert!(err.contains("libasound.so.2") && err.contains("pacman -S alsa-lib") && err.contains("apt install libasound2"), "{err}");
     assert!(!err.contains("libc.so.6"));
 }
 
