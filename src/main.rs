@@ -69,6 +69,10 @@ mod picker;
 #[cfg(test)]
 mod preview_ui_tests;
 mod program;
+mod properties;
+mod properties_ui;
+#[cfg(test)]
+mod properties_ui_tests;
 mod reader;
 mod recorder;
 mod recovery;

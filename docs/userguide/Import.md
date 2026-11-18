@@ -16,6 +16,8 @@ Turn mails, events and files into notes. Back to [[Start here]].
   Import → Import Word files as notes** and pandoc is installed (see below). Otherwise it is saved as an
   attachment, as before; if the box is ticked but pandoc is missing, the dialog says "pandoc was not found
   (Settings → Import)".
+- Imported notes keep their details (sender, date, event time, Word page setup, tags) as properties at the
+  top. The reading view shows them as a card, not as raw lines (see [[Reading view]]).
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off. Nothing is written until you
   press Import.
