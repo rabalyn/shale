@@ -1,4 +1,4 @@
-//! Folding in the editor (EDIT-070…EDIT-079, KEY-030…KEY-034) driven in the whole window with real
+//! Folding in the editor (EDIT-070…EDIT-086, KEY-030…KEY-034) driven in the whole window with real
 //! clicks and key presses.
 
 use crate::app::{Options, ShaleApp};
@@ -24,6 +24,11 @@ const CTRL_SHIFT: Modifiers = Modifiers { alt: false, ctrl: true, shift: true, m
 
 impl W {
     fn new(tag: &str, note: &str, preview: bool) -> W {
+        W::new_with(tag, note, preview, |_| {})
+    }
+
+    /// Like `new`, with a look at the app's settings before the note is opened.
+    fn new_with(tag: &str, note: &str, preview: bool, setup: impl FnOnce(&mut ShaleApp)) -> W {
         let dir = std::env::temp_dir().join(format!("shale-fold-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -35,6 +40,7 @@ impl W {
         app.cfg.line_numbers = true;
         app.cfg.live_preview = preview;
         app.keymap = crate::keys::Keymap::from_overrides_for(&app.cfg.keybindings, false);
+        setup(&mut app);
         app.open(Path::new(NOTE), false);
         let mut w = W { app, hl: Headless::new(), dir };
         w.hl.frames(&mut w.app, 4);
@@ -357,4 +363,193 @@ fn edit_078_vim_za_zc_zo_zm_zr_fold_and_unfold() {
     type_keys(&mut w, "zR");
     assert_eq!(w.hidden(), 0, "zR opens all");
     assert_eq!(w.text(), SECTIONS, "the text is not touched");
+}
+
+/// A note with a code block: lines 0 to 6.
+const CODE: &str = "intro\n\n```rust\nfn main() {}\nlet x = 1;\n```\n\nafter";
+
+impl W {
+    /// The rectangles painted with the code background (the boxes of the code blocks).
+    fn boxes(&self) -> Vec<Rect> {
+        self.hl.rects.iter().filter(|(_, c)| *c == crate::theme::CODE_BG).map(|(r, _)| *r).collect()
+    }
+}
+
+// spec: EDIT-080
+#[test]
+fn edit_080_a_code_block_in_the_preview_is_a_box_with_a_language_badge_and_without_its_fences() {
+    let mut w = W::new("code-box", CODE, true);
+    w.cursor_in("after");
+    // the closing fence has no row, the opening one keeps its row for the badge but shows no text
+    let h = w.heights();
+    assert!(h[5] < 1.0, "the closing fence is hidden: {h:?}");
+    assert!(h[2] > 1.0 && h[3] > 1.0, "the opening fence keeps its row: {h:?}");
+    let boxes = w.boxes();
+    assert_eq!(boxes.len(), 1, "one box: {boxes:?}");
+    let (top, last) = (w.row_of("```rust").min.y, w.row_of("let x").max.y);
+    assert!(boxes[0].min.y <= top + 0.5 && boxes[0].max.y >= last, "the box spans the block: {:?} {top} {last}", boxes[0]);
+    assert!(boxes[0].min.x < w.text_x() && boxes[0].max.x > w.text_x() + 200.0, "and the text width: {:?}", boxes[0]);
+    assert!(w.painted("rust"), "the badge names the language: {:?}", w.hl.text);
+    // the opening fence's text is not drawn: its glyphs are invisible
+    let (galley, _) = w.editor().last_layout.clone().unwrap();
+    let fence_row = &galley.rows[2];
+    assert!(fence_row.row.glyphs.iter().all(|g| g.size().x < 2.0), "hidden like other markup: {:?}", fence_row.row.glyphs.iter().map(|g| g.size().x).collect::<Vec<_>>());
+    // the cursor in the block shows the fences raw again, the box stays
+    w.cursor_in("let x");
+    assert_eq!(w.hidden(), 0, "both fences are there: {:?}", w.heights());
+    assert_eq!(w.boxes().len(), 1);
+    assert!(w.painted("rust"));
+    assert_eq!(w.text(), CODE, "the text is never touched");
+}
+
+// spec: EDIT-080
+#[test]
+fn edit_080_a_block_without_a_language_says_code_and_with_the_preview_off_there_is_no_box() {
+    let note = "```\nplain\n```\n\n~~~python\nx = 1\n~~~\n\nend";
+    let mut w = W::new("code-plain", note, true);
+    w.cursor_in("end");
+    assert_eq!(w.boxes().len(), 2);
+    assert!(w.painted("code") && w.painted("python"), "{:?}", w.hl.text);
+    let mut w = W::new("code-raw", note, false);
+    w.cursor_in("end");
+    assert!(w.boxes().is_empty(), "the raw drawing has no box");
+    assert_eq!(w.hidden(), 0, "and shows the fences");
+    assert!(!w.painted("code"));
+}
+
+// spec: EDIT-080
+#[test]
+fn edit_080_a_code_block_folds_to_its_opening_row_with_and_without_the_preview() {
+    for preview in [true, false] {
+        let mut w = W::new(&format!("code-fold-{preview}"), CODE, preview);
+        w.cursor_in("let x");
+        // Fold from a line inside the block: the block folds and the cursor goes to its header
+        w.press(Key::K, CTRL_SHIFT);
+        assert_eq!(w.cursor_line(), 2, "preview {preview}");
+        assert_eq!(w.numbers(), vec![1, 2, 3, 7, 8], "preview {preview}: the three lines under the fence have no number");
+        assert!(w.painted("\u{2026} 3 lines"), "preview {preview}: {:?}", w.hl.text);
+        if preview {
+            // the box is the opening row alone, with its badge
+            let b = w.boxes();
+            assert_eq!(b.len(), 1);
+            assert!(b[0].height() < 40.0, "{:?}", b[0]);
+            assert!(w.painted("rust"));
+        }
+        // the key and the badge unfold it again
+        w.press(Key::J, CTRL_SHIFT);
+        assert_eq!(w.hidden(), 0, "preview {preview}");
+        assert_eq!(w.numbers(), vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+}
+
+/// A mail note: the front matter is lines 0 to 3, a quote is lines 6 and 7, the signature lines 10 to 12.
+const MAIL: &str = "---\ntype: email\nfrom: Anna <anna@example.org>\nsubject: Hi\n---\nHello\n\n> q1\n> q2\n\nThanks\n-- \nAnna\nAcme";
+
+// spec: EDIT-081
+#[test]
+fn edit_081_a_note_opens_with_its_front_matter_folded_to_a_summary_line() {
+    let mut w = W::new("front", MAIL, true);
+    let n = w.numbers();
+    assert!(n.contains(&1) && n.contains(&6) && !n.contains(&2) && !n.contains(&5), "only the first line of the front matter stays: {n:?}");
+    assert!(w.painted("Properties \u{b7} email \u{b7} Anna"), "the summary line: {:?}", w.hl.text.iter().map(|t| &t.0).collect::<Vec<_>>());
+    assert!(w.editor().fold.widgets.iter().any(|x| x.line == 0 && x.marker.is_some()), "the ▸ marker shows");
+    assert_eq!(w.text(), MAIL, "the text is as it was");
+    // a click on the summary line opens the raw front matter, with the cursor in it
+    let row = w.row_of("---");
+    let x = w.text_x();
+    w.click(Pos2::new(x + 40.0, row.center().y));
+    assert!(w.painted("type: email") || w.numbers().contains(&2), "the lines are open: {:?}", w.numbers());
+    assert!(w.cursor_line() >= 1 && w.cursor_line() <= 4, "{}", w.cursor_line());
+    assert_eq!(std::fs::read_to_string(w.dir.join(NOTE)).unwrap(), MAIL);
+}
+
+// spec: EDIT-081
+#[test]
+fn edit_081_the_setting_raw_leaves_the_front_matter_open_and_a_note_without_one_is_not_affected() {
+    let mut w = W::new_with("front-raw", MAIL, true, |app| app.cfg.properties_in_editor = crate::config::PropertiesView::Raw);
+    assert!(w.numbers().contains(&3), "all the lines of the front matter show: {:?}", w.numbers());
+    assert!(!w.painted("Properties \u{b7} email"));
+    // it can still be folded by hand: a badge with the count, no summary
+    let m = w.marker("---");
+    w.click(m.center());
+    assert!(w.painted("\u{2026} 4 lines"), "{:?}", w.hl.text);
+    assert!(!w.painted("Properties \u{b7} email"));
+    let w = W::new("front-none", SECTIONS, true);
+    assert_eq!(w.hidden(), 0);
+}
+
+// spec: EDIT-084
+#[test]
+fn edit_084_the_cursor_entering_the_front_matter_opens_it_and_leaving_folds_it_again() {
+    let mut w = W::new("front-cursor", MAIL, false);
+    w.cursor_in("Hello");
+    assert!(!w.numbers().contains(&2), "folded: {:?}", w.numbers());
+    // Ctrl+Home goes to the first line: the raw front matter opens
+    w.press(Key::Home, Modifiers::CTRL);
+    assert_eq!(w.cursor_line(), 0);
+    assert!(w.numbers().contains(&2) && w.numbers().contains(&4), "opened: {:?}", w.numbers());
+    // moving on to the body folds it back
+    w.press(Key::End, Modifiers::CTRL);
+    assert!(!w.numbers().contains(&2), "folded again: {:?}", w.numbers());
+    // an Up arrow from the first line of the body goes into the hidden lines: they open and take the cursor
+    w.cursor_in("Hello");
+    w.press(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(w.cursor_line(), 4);
+    assert!(w.numbers().contains(&3), "{:?}", w.numbers());
+    w.press(Key::ArrowDown, Modifiers::NONE);
+    assert!(!w.numbers().contains(&3), "folded again after the cursor left: {:?}", w.numbers());
+}
+
+// spec: EDIT-084
+#[test]
+fn edit_084_what_the_user_opened_by_hand_stays_open_and_typing_on_the_folded_line_opens_it() {
+    let mut w = W::new("front-hand", MAIL, false);
+    let m = w.marker("---");
+    w.click(m.center());
+    assert!(w.numbers().contains(&3), "opened with the marker: {:?}", w.numbers());
+    w.cursor_in("subject");
+    w.cursor_in("Hello");
+    assert!(w.numbers().contains(&3), "the cursor leaving does not fold what the user opened: {:?}", w.numbers());
+    // fold by key, put the cursor on the folded line and type: the text goes into the front matter, which opens
+    w.cursor_in("---");
+    w.press(Key::K, CTRL_SHIFT);
+    assert!(!w.numbers().contains(&3));
+    w.hl.frame(&mut w.app, vec![Event::Text("x".into())]);
+    w.hl.frames(&mut w.app, 3);
+    assert!(w.numbers().contains(&3), "typing opens it: {:?}", w.numbers());
+}
+
+// spec: EDIT-082, EDIT-083
+#[test]
+fn edit_082_a_mail_note_opens_with_its_quotes_and_signature_folded_and_other_notes_do_not() {
+    let mut w = W::new("mail", MAIL, true);
+    // front matter 4 lines, the quote's second line, the signature's two lines
+    assert_eq!(w.hidden(), 4 + 1 + 2, "{:?}", w.heights());
+    assert!(w.painted("\u{2026} 1 quoted line"), "{:?}", w.hl.text.iter().map(|t| &t.0).collect::<Vec<_>>());
+    assert!(w.painted("\u{2026} 2 lines"), "the signature");
+    // the folds are not in the file, and a click on the quote's badge opens it
+    assert_eq!(std::fs::read_to_string(w.dir.join(NOTE)).unwrap(), MAIL);
+    let badge = w.badge(7).expect("a badge on the quote's first line");
+    w.click(badge.center());
+    assert_eq!(w.hidden(), 4 + 2);
+    // a note that is no mail keeps its quotes and signature open
+    let plain = MAIL.replace("type: email", "type: note");
+    let w = W::new("not-mail", &plain, true);
+    assert_eq!(w.hidden(), 4, "only the front matter: {:?}", w.heights());
+}
+
+// spec: EDIT-085
+#[test]
+fn edit_085_the_folds_a_note_starts_with_are_set_once_per_session_and_never_written() {
+    let mut w = W::new("start-once", MAIL, false);
+    let m = w.marker("---");
+    w.click(m.center());
+    assert!(w.numbers().contains(&3));
+    // another note and back: it is not folded by default a second time
+    w.app.open(Path::new("B.md"), false);
+    w.hl.frames(&mut w.app, 4);
+    w.app.open(Path::new(NOTE), false);
+    w.hl.frames(&mut w.app, 4);
+    assert!(w.numbers().contains(&3), "the user's unfold is remembered: {:?}", w.numbers());
+    assert_eq!(std::fs::read_to_string(w.dir.join(NOTE)).unwrap(), MAIL);
 }

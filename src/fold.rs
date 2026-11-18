@@ -1,9 +1,9 @@
-//! Folding (EDIT-070…EDIT-079): the blocks of a note that can be folded away, the fold state of an
+//! Folding (EDIT-070…EDIT-085): the blocks of a note that can be folded away, the fold state of an
 //! open note and the commands on it. No UI here; the editor (`editor.rs`) draws the result: a
 //! folded block shows its header line and a badge, its other lines are hidden text (one row of
 //! no height, like the text of a table drawn as a grid, EDIT-024).
 //!
-//! **To add a kind of block** (fenced code, front matter, a mail signature): add a variant to
+//! **To add a kind of block** (fenced code, front matter and a mail signature were added so): add a variant to
 //! [`FoldKind`], write a finder `fn(&Doc) -> Vec<Raw>` that returns the header line and the line
 //! after the block's last line for each block (a block needs at least one line besides its
 //! header; [`Doc`] has the lines and says which of them are fenced code or front matter), and put
@@ -24,6 +24,12 @@ pub enum FoldKind {
     Item,
     /// A run of two or more items of one level (a whole list, or a nested list).
     List,
+    /// A fenced code block: the opening fence line and everything to the closing fence (EDIT-080).
+    Code,
+    /// The front matter, `---` to `---` at the top of the note (EDIT-081).
+    Front,
+    /// A mail signature: a line `-- ` up to the next heading or the end (EDIT-083).
+    Signature,
 }
 
 /// The text a finder looks at: its lines and what is code or front matter in them.
@@ -66,7 +72,7 @@ pub struct Raw {
 }
 
 /// The finders of all kinds of blocks.
-const FINDERS: [fn(&Doc) -> Vec<Raw>; 3] = [find_headings, find_quotes, find_lists];
+const FINDERS: [fn(&Doc) -> Vec<Raw>; 6] = [find_headings, find_quotes, find_lists, find_code, find_front, find_signatures];
 
 /// A block that can be folded: its header line stays, the lines after it (up to `end`) are hidden.
 #[derive(Clone, Debug, PartialEq)]
@@ -133,6 +139,43 @@ fn find_quotes(doc: &Doc) -> Vec<Raw> {
         }
     }
     out
+}
+
+fn find_code(doc: &Doc) -> Vec<Raw> {
+    crate::syntax::fences(&doc.lines).into_iter().map(|f| Raw { kind: FoldKind::Code, header: f.open, end: if f.closed { f.end } else { doc.trim_blank(f.open, f.end) } }).collect()
+}
+
+fn find_front(doc: &Doc) -> Vec<Raw> {
+    if doc.front > 0 {
+        vec![Raw { kind: FoldKind::Front, header: 0, end: doc.front }]
+    } else {
+        Vec::new()
+    }
+}
+
+/// A line `-- ` (or `--`) up to the next heading, or the end of the note.
+fn find_signatures(doc: &Doc) -> Vec<Raw> {
+    let mut out: Vec<Raw> = Vec::new();
+    for l in 0..doc.lines.len() {
+        if doc.skip(l) || doc.lines[l].trim_end() != "--" || out.last().is_some_and(|r| l < r.end) {
+            continue;
+        }
+        let end = (l + 1..doc.lines.len()).find(|&n| !doc.skip(n) && markdown::heading_level(doc.lines[n]).is_some()).unwrap_or(doc.lines.len());
+        out.push(Raw { kind: FoldKind::Signature, header: l, end: doc.trim_blank(l, end) });
+    }
+    out
+}
+
+/// Is this a mail note: front matter with `type: email` (EDIT-082)?
+pub fn is_mail(text: &str) -> bool {
+    markdown::front_matter_values(text).iter().any(|(k, v)| k == "type" && v.first().is_some_and(|v| v.eq_ignore_ascii_case("email")))
+}
+
+/// The badge of a folded block that says how many lines it hides (EDIT-071; in a mail note a quote
+/// says "quoted lines", EDIT-082).
+pub fn badge_label(kind: FoldKind, mail: bool, n: usize) -> String {
+    let what = if kind == FoldKind::Quote && mail { "quoted line" } else { "line" };
+    format!("\u{2026} {n} {what}{}", if n == 1 { "" } else { "s" })
 }
 
 /// The width of a line's indentation (a tab counts as four).
@@ -255,7 +298,15 @@ impl NoteFolds {
         self.keys = self.folded(blocks).into_iter().map(|i| Key::of(&blocks[i])).collect();
     }
 
-    fn set(&mut self, blocks: &[Block], i: usize, fold: bool) {
+    /// The folds a note starts with when it is opened (EDIT-081, EDIT-082): its front matter when
+    /// `front`; in a mail note also its quotes and its signature.
+    pub fn defaults(blocks: &[Block], mail: bool, front: bool) -> NoteFolds {
+        let keys = blocks.iter().filter(|b| (front && b.kind == FoldKind::Front) || (mail && matches!(b.kind, FoldKind::Quote | FoldKind::Signature))).map(Key::of).collect();
+        NoteFolds { keys }
+    }
+
+    /// Fold or unfold block `i` of `blocks`.
+    pub fn set(&mut self, blocks: &[Block], i: usize, fold: bool) {
         let mut now = self.folded(blocks);
         now.retain(|n| *n != i);
         if fold {
@@ -389,16 +440,16 @@ mod tests {
     #[test]
     fn headings_in_code_fences_and_front_matter_are_ignored() {
         let t = "---\n# not a heading\nx: 1\n---\n# Real\n```\n# comment\n```\ntext\n# Next\nz";
-        assert_eq!(found(t), vec![(FoldKind::Heading, 4, 9), (FoldKind::Heading, 9, 11)]);
+        assert_eq!(found(t), vec![(FoldKind::Front, 0, 4), (FoldKind::Heading, 4, 9), (FoldKind::Code, 5, 8), (FoldKind::Heading, 9, 11)]);
         // a hash line in a fence does not end the section above it
-        assert_eq!(found("# A\n```\n# x\n```\nafter\n"), vec![(FoldKind::Heading, 0, 5)]);
+        assert_eq!(found("# A\n```\n# x\n```\nafter\n"), vec![(FoldKind::Heading, 0, 5), (FoldKind::Code, 1, 4)]);
     }
 
     // spec: EDIT-070
     #[test]
     fn quotes_are_runs_of_quote_lines_of_two_or_more() {
         let t = "intro\n> one\n> two\n>\n> four\n\n> lonely\n\n```\n> in code\n> in code\n```\n";
-        assert_eq!(found(t), vec![(FoldKind::Quote, 1, 5)]);
+        assert_eq!(found(t), vec![(FoldKind::Quote, 1, 5), (FoldKind::Code, 8, 12)], "the quote lines in the code are none");
         assert_eq!(found("   > indented\n   > quote"), vec![(FoldKind::Quote, 0, 2)]);
     }
 
@@ -557,5 +608,75 @@ mod tests {
         assert_eq!(v.hidden, vec![3..5, 6..7]);
         assert_eq!(v.badges, vec![(2, 2), (5, 1)]);
         assert_eq!(v.byte_ranges(t), vec![t.find("y").unwrap()..t.find("# C").unwrap(), t.find("w").unwrap()..t.len()]);
+    }
+
+    // spec: EDIT-080
+    #[test]
+    fn a_fenced_code_block_folds_from_its_opening_fence_to_the_closing_one_with_or_without_a_language() {
+        let t = "intro\n```rust\nfn main() {}\n```\n\n```\nplain\nmore\n```\n~~~py\nx\n~~~\n";
+        assert_eq!(found(t), vec![(FoldKind::Code, 1, 4), (FoldKind::Code, 5, 9), (FoldKind::Code, 9, 12)]);
+        assert_eq!(find_blocks(t)[0].title, "```rust");
+        // a fence with nothing in it is a block of its closing line
+        assert_eq!(found("```\n```\nafter"), vec![(FoldKind::Code, 0, 2)]);
+        // a heading inside the code is no block
+        assert_eq!(found("```\n# not\ncode\n```"), vec![(FoldKind::Code, 0, 4)]);
+    }
+
+    // spec: EDIT-080
+    #[test]
+    fn a_fence_in_a_list_item_is_a_block_inside_the_item_and_an_unclosed_one_runs_to_the_end() {
+        let t = "- item\n    ```sh\n    ls\n    ```\n- next";
+        let b = found(t);
+        assert!(b.contains(&(FoldKind::Code, 1, 4)), "{b:?}");
+        assert!(b.contains(&(FoldKind::Item, 0, 4)), "{b:?}");
+        // unclosed: to the end, the blank lines at the end stay out
+        assert_eq!(found("text\n```\ncode\nmore\n\n"), vec![(FoldKind::Code, 1, 4)]);
+        // a lone opening fence has nothing to hide
+        assert!(found("text\n```").is_empty());
+    }
+
+    // spec: EDIT-081
+    #[test]
+    fn the_front_matter_is_a_block_from_its_first_line_and_one_that_is_not_closed_is_none() {
+        let t = "---\ntype: email\nsubject: Hi\n---\n# Body\ntext";
+        assert_eq!(found(t), vec![(FoldKind::Front, 0, 4), (FoldKind::Heading, 4, 6)]);
+        assert_eq!(find_blocks(t)[0].title, "---");
+        assert!(found("---\ntype: email\nno end\n").iter().all(|(k, ..)| *k != FoldKind::Front));
+        assert!(found("text\n---\na: b\n---\n").iter().all(|(k, ..)| *k != FoldKind::Front), "only at the top");
+    }
+
+    // spec: EDIT-083
+    #[test]
+    fn a_signature_runs_from_its_dash_dash_line_to_the_next_heading_or_the_end() {
+        let t = "Hi\n\n-- \nAnna\nAcme\n\n# Next\ntext\n";
+        assert_eq!(found(t), vec![(FoldKind::Signature, 2, 5), (FoldKind::Heading, 6, 8)]);
+        // without the space, and to the end of the note
+        assert_eq!(found("Hi\n--\nAnna\nAcme"), vec![(FoldKind::Signature, 1, 4)]);
+        // not in code, not in a quote, not a longer rule
+        assert!(found("```\n-- \nx\n```\n> -- \n> quoted\n---\nz").iter().all(|(k, ..)| *k != FoldKind::Signature));
+        // a second one inside the first is part of it
+        assert_eq!(found("-- \na\n-- \nb").iter().filter(|(k, ..)| *k == FoldKind::Signature).count(), 1);
+    }
+
+    // spec: EDIT-081, EDIT-082
+    #[test]
+    fn a_note_starts_folded_by_its_front_matter_and_in_a_mail_note_by_its_quotes_and_signature() {
+        let mail = "---\ntype: email\n---\nHi\n> q1\n> q2\n\n-- \nAnna\n";
+        assert!(is_mail(mail) && !is_mail("---\ntype: note\n---\nHi") && !is_mail("type: email"));
+        let blocks = find_blocks(mail);
+        let kinds = |f: &NoteFolds| f.folded(&blocks).into_iter().map(|i| blocks[i].kind).collect::<Vec<_>>();
+        assert_eq!(kinds(&NoteFolds::defaults(&blocks, true, true)), vec![FoldKind::Front, FoldKind::Quote, FoldKind::Signature]);
+        assert_eq!(kinds(&NoteFolds::defaults(&blocks, true, false)), vec![FoldKind::Quote, FoldKind::Signature], "the front matter by its setting");
+        assert!(NoteFolds::defaults(&blocks, false, false).is_empty(), "a note that is no mail has no folds of its own");
+    }
+
+    // spec: EDIT-071, EDIT-082
+    #[test]
+    fn the_badge_counts_lines_and_a_quote_in_a_mail_note_counts_quoted_lines() {
+        assert_eq!(badge_label(FoldKind::Heading, false, 4), "\u{2026} 4 lines");
+        assert_eq!(badge_label(FoldKind::Heading, true, 1), "\u{2026} 1 line");
+        assert_eq!(badge_label(FoldKind::Quote, false, 2), "\u{2026} 2 lines");
+        assert_eq!(badge_label(FoldKind::Quote, true, 2), "\u{2026} 2 quoted lines");
+        assert_eq!(badge_label(FoldKind::Quote, true, 1), "\u{2026} 1 quoted line");
     }
 }

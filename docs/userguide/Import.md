@@ -17,7 +17,8 @@ Turn mails, events and files into notes. Back to [[Start here]].
   attachment, as before; if the box is ticked but pandoc is missing, the dialog says "pandoc was not found
   (Settings → Import)".
 - Imported notes keep their details (sender, date, event time, Word page setup, tags) as properties at the
-  top. The reading view shows them as a card, not as raw lines (see [[Reading view]]).
+  top. The reading view shows them as a card, not as raw lines (see [[Reading view]]); the editor folds
+  them to one line, and an imported mail also starts with its quoted replies and signature folded (see [[Editor]]).
 - Choose the folder (one per project, for example) and tags. Small pictures from signatures are
   left out by default, and each attachment can be ticked on or off. Nothing is written until you
   press Import.

@@ -619,7 +619,6 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         // fenced code block
         if fenced.get(i).copied().unwrap_or(false) {
             let mut code = String::new();
-            let lang = line.trim().trim_start_matches(['`', '~']).to_string();
             let word = syntax::fence_language(line);
             i += 1;
             while i < lines.len() && !(lines[i].1.trim_start().starts_with("```") || lines[i].1.trim_start().starts_with("~~~")) {
@@ -628,11 +627,13 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 i += 1;
             }
             i += 1;
-            egui::Frame::new().fill(theme::CODE_BG).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
+            // the box of EDIT-080: a border, and the language (or "code") in a badge at the top right
+            egui::Frame::new().fill(theme::CODE_BG).stroke(egui::Stroke::new(1.0, theme::BORDER)).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                if !lang.is_empty() {
-                    ui.label(egui::RichText::new(lang).small().color(theme::MUTED));
-                }
+                let badge = syntax::badge_language(&word).unwrap_or_else(|| "code".to_string());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                    ui.label(egui::RichText::new(badge).monospace().size((base * 0.75).max(9.0)).color(theme::FAINT));
+                });
                 ui.label(code_job(&word, code.trim_end(), base * 0.9));
             });
             ui.add_space(6.0);

@@ -10,7 +10,7 @@ use crate::markdown::{self, LinkSpan};
 use crate::syntax;
 use crate::theme;
 use crate::vault::Vault;
-use eframe::egui::{self, text::LayoutJob, Color32, FontFamily, FontId, Galley, Key, Modifiers, Pos2, Rect, Stroke, TextFormat, Ui, Vec2};
+use eframe::egui::{self, text::LayoutJob, Color32, FontFamily, FontId, Galley, Key, Modifiers, Pos2, Rect, Shape, Stroke, TextFormat, Ui, Vec2};
 use egui::text::{CCursor, CCursorRange};
 use egui::text_edit::TextEditState;
 use std::collections::hash_map::DefaultHasher;
@@ -26,6 +26,8 @@ struct Fmt {
     italic: bool,
     code: bool,
     fence: bool,
+    /// a line of a code block that the preview draws as a box (EDIT-080): no background of its own
+    boxed: bool,
     /// 0 none, 1 existing link, 2 missing link, 3 web link
     link: u8,
     dim: bool,
@@ -224,7 +226,7 @@ pub fn highlight(text: &str, links: &[(LinkSpan, bool)], base: f32) -> LayoutJob
 /// `raw_lines` (line numbers) the markdown preview is on (EDIT-016): the markup of every line
 /// outside that range is hidden (invisible, about one point wide); the text itself stays the
 /// same so that cursor, clicks and vim keep their indices. A height of 0 in `images` is text that
-/// a fold hides: its rows have no height (EDIT-071).
+/// a fold hides: its rows have no height (EDIT-071); a negative one is text that is hidden and keeps its row (EDIT-081).
 pub fn highlight_preview(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorFonts, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> LayoutJob {
     highlight_with_math(text, links, fonts, images, raw_lines).0
 }
@@ -424,10 +426,42 @@ pub(crate) fn highlight_with_math(text: &str, links: &[(LinkSpan, bool)], fonts:
             f.syn = false
         });
     }
+    // the code blocks the preview draws as boxes (EDIT-080): the lines have no background of their own;
+    // the fences are hidden, the closing one with its row, unless the cursor is in the block
+    if let Some(rl) = raw_lines.as_ref() {
+        let lines = markdown::lines_with_offsets(text);
+        let plain: Vec<&str> = lines.iter().map(|(_, l)| *l).collect();
+        for fence in syntax::fences(&plain) {
+            let raw = fence.open < rl.end && rl.start < fence.end;
+            for (n, &(off, line)) in lines.iter().enumerate().take(fence.end).skip(fence.open) {
+                let end = (off + line.len() + 1).min(text.len());
+                if n == fence.open && !raw {
+                    set(&mut fmts, off..end, |f| {
+                        f.boxed = true;
+                        f.hidden = true;
+                        f.rendered = true
+                    });
+                } else if n + 1 == fence.end && fence.closed && !raw {
+                    set(&mut fmts, off..end, |f| {
+                        f.boxed = true;
+                        f.folded = true
+                    });
+                } else {
+                    set(&mut fmts, off..end, |f| f.boxed = true);
+                }
+            }
+        }
+    }
     for (r, h) in images {
         if r.end <= text.len() && text.is_char_boundary(r.start) && text.is_char_boundary(r.end) {
+            if *h < 0.0 {
+                // a negative height is text that is hidden and keeps its row: a summary is painted over it (EDIT-081)
+                set(&mut fmts, r.clone(), |f| {
+                    f.hidden = true;
+                    f.rendered = true
+                });
             // a height of 0 is text that a fold hides (EDIT-071)
-            if *h <= 0.0 {
+            } else if *h == 0.0 {
                 set(&mut fmts, r.clone(), |f| f.folded = true);
             } else {
                 set(&mut fmts, r.clone(), |f| f.image_h = h.round().clamp(1.0, 30000.0) as u16);
@@ -673,7 +707,7 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
         };
     }
     let mut tf = TextFormat { font_id, color, italics: if mono { f.italic || f.quote } else { styled.fake_italic }, line_height: Some(size * 1.5 + f.math_extra as f32 / 4.0), ..Default::default() };
-    if f.fence || (f.code && !f.dim) {
+    if (f.fence && !f.boxed) || (f.code && !f.dim) {
         tf.background = theme::CODE_BG;
     }
     if f.highlight {
@@ -846,6 +880,9 @@ pub struct NoteEditor {
     focus_before_press: bool,
     /// the folded blocks of the notes this editor showed, and what is drawn for them (EDIT-070…EDIT-079)
     pub(crate) fold: crate::fold_ui::FoldUi,
+    /// a folded front matter shows a summary line, and a note opens with it folded: the setting
+    /// "properties in the editor" is not Raw (EDIT-081, set from the app's settings)
+    pub properties_summary: bool,
 }
 
 impl NoteEditor {
@@ -882,6 +919,7 @@ impl NoteEditor {
             table_cell_edit: true,
             focus_before_press: false,
             fold: Default::default(),
+            properties_summary: true,
             vim_follow: false,
             vim_cursor_rect: None,
             cursor_style: crate::cursor_style::CursorStyle::default(),
@@ -1623,15 +1661,17 @@ impl NoteEditor {
         }
 
         // the folds of this frame; a fold command first (EDIT-073): one that hides the cursor's line puts the cursor on the header
-        let mut fold = self.fold.begin(rel, text);
+        let mut fold = self.fold.begin(rel, text, self.properties_summary);
+        let mut had_cmd = false;
         if let Some(cmd) = self.fold.request.take() {
+            had_cmd = true;
             let line = self.cursor_line(ui, text);
             if let Some(header) = self.fold.apply(rel, &fold, cmd, line) {
                 let at = markdown::line_start_byte(text, header);
                 let end = text[at..].find('\n').map_or(text.len(), |p| at + p);
                 self.pending_cursor = Some(markdown::byte_to_char(text, end));
             }
-            fold = self.fold.begin(rel, text);
+            fold = self.fold.begin(rel, text, self.properties_summary);
             ui.ctx().request_repaint();
         }
 
@@ -1776,6 +1816,8 @@ impl NoteEditor {
                 ranges.extend(table_rows(s, &table_keys, raw, &folds.view).into_iter().flat_map(|g| g.rows));
             }
             ranges.extend(folds.view.byte_ranges(s).into_iter().map(|r| (r, 0.0)));
+            // a folded front matter: its first line hidden, the summary is painted over its row
+            ranges.extend(folds.veiled(s).map(|r| (r, -1.0)));
             let (mut job, formulas) = highlight_with_math(s, use_links, fonts, &ranges, preview.clone());
             *formula_marks.borrow_mut() = formulas;
             *number_marks.borrow_mut() = make_room_for_numbers(ui, &mut job, fonts, numbered_default, preview.as_ref());
@@ -1783,6 +1825,8 @@ impl NoteEditor {
             ui.ctx().fonts_mut(|f| f.layout_job(job))
         };
 
+        // the boxes of the code blocks go behind the text: their place in the layer is taken now, filled below
+        let box_slot = (preview.is_some() && fold.blocks.iter().any(|b| b.kind == crate::fold::FoldKind::Code)).then(|| ui.painter().add(Shape::Noop));
         let edit = egui::TextEdit::multiline(text)
             .id(self.id)
             .frame(egui::Frame::NONE)
@@ -1990,8 +2034,22 @@ impl NoteEditor {
                 ui.ctx().request_repaint();
             }
         }
+        // the front matter and the cursor (EDIT-081)
+        let typed = !had_cmd && ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Key { key: Key::Backspace | Key::Delete | Key::Enter, pressed: true, .. })));
+        let cursor_line = resp.has_focus().then(|| self.cursor_line(ui, &output.galley.job.text));
+        self.fold.follow_cursor(rel, &fold, cursor_line, typed);
+        // the boxes of the code blocks (EDIT-080)
+        if let Some(slot) = box_slot {
+            let shapes = crate::code_box::shapes(ui, &shown_folds, &output.galley, output.galley_pos, resp.rect.right(), base_size);
+            ui.painter().set(slot, Shape::Vec(shapes));
+        }
         // the markers and the badges of the folds (EDIT-071, EDIT-074)
         self.fold.paint(ui, &fold, &crate::fold_ui::Painted { id: self.id, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size });
+
+        if let Some(line) = self.fold.goto.take() {
+            let now = &output.galley.job.text;
+            self.pending_cursor = Some(markdown::byte_to_char(now, markdown::line_start_byte(now, line)));
+        }
 
         // --- hover / click on links and checkboxes
         let hover = ui.input(|i| i.pointer.hover_pos());
@@ -3555,7 +3613,13 @@ mod tests {
     #[test]
     fn preview_leaves_code_blocks_and_front_matter_alone() {
         let text = "---\ntitle: x\n---\n```\n**not bold** [[x]]\n```\n---";
-        assert!(!hidden_map(text, Some(100..100)).contains('_'));
+        let m = hidden_map(text, Some(100..100));
+        let lines: Vec<&str> = m.split('\n').collect();
+        // the front matter and the code are drawn as they are; only the fences of the code box are hidden (EDIT-080)
+        assert!(!lines[..3].concat().contains('_') && !lines[4].contains('_') && !lines[6].contains('_'), "{m}");
+        assert!(lines[3].chars().all(|c| c == '_'), "the opening fence is hidden: {m}");
+        // with the cursor in the block the fence is raw again
+        assert!(!hidden_map(text, Some(4..5)).contains('_'));
     }
 
     // spec: EDIT-016

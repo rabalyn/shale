@@ -23,7 +23,10 @@ Headings, quotes and lists can be folded away so that a long note is short again
   `###` inside, and folding `#` takes all of them);
 - a **quote** folds its second and later `>` lines;
 - a **list item** folds its nested items and continued lines, and a **list** with two or more items folds all of
-  them (fold the first item once for the item, once more for the whole list).
+  them (fold the first item once for the item, once more for the whole list);
+- a **code block** (see [[#Code blocks]]) folds from its opening fence to the closing one;
+- the **properties** at the top of the note (the front matter) fold to one line, see [[#Properties]];
+- a **signature**, a line that is exactly `-- ` (also `--`), folds up to the next heading or the end of the note.
 
 A folded block shows its first line and a muted badge such as `… 4 lines`; the hidden lines have no line number.
 Hover a line that starts such a block: a small ▾ appears left of the text (in the gutter, or left of the text without
@@ -40,6 +43,32 @@ The keys can be changed in Settings → Keybindings (Note view), see [[Keyboard 
 changed by folding, and undo, selection and copy work as always. The cursor never stays in hidden text: if you move into a folded block
 with the arrow keys, or a link or a search result jumps there, it opens. Select all (Ctrl+A) leaves folds alone.
 Folds are remembered while Shale runs and are never written into the note. The reading view does not fold yet.
+
+### Properties
+
+A note whose first line is `---` has properties (the front matter, see [[Notes and links]]). When you open it, the
+editor folds them to one muted line, `▸ Properties · email · Anna Müller · 2026-11-12 · #work`, so that an imported mail
+or a Word import starts with its text, not with a block of YAML. Click the line, or move the cursor into it (arrow
+keys, `gg`, Ctrl+Home), and the properties open as raw, editable lines; when the cursor leaves them again they fold
+again. If you opened them with the ▸ marker, the badge or a fold key, they stay open. **Settings → Appearance →
+Properties in the editor** is `Folded` (the default; `Card` looks the same in the editor, the card is for the reading
+view) or `Raw`, which opens a note with its properties unfolded.
+
+### Mail notes
+
+A note imported from a mail (its properties say `type: email`, see [[Import]]) also starts with its quoted replies
+(`> …` lines, shown as `… 12 quoted lines`) and its signature folded. Click the badge to read them.
+
+### Code blocks
+
+With the Markdown preview on, a fenced code block (three backticks or `~~~`) is drawn as a box: a rounded
+rectangle on the code colour with a thin border, and a small badge at its top right with the language you wrote
+after the fence (`code` when there is none). The fence lines themselves are hidden; put the cursor in the block and
+they show again. A code block folds like the other blocks: a folded one shows its opening row with the badge and
+`… n lines`. With the preview off the code is shown raw, without a box, but still folds. The reading view draws
+the same box.
+
+![[editor-code-box.png]]
 
 ## The title line and pasting
 

@@ -15,6 +15,7 @@
 mod app;
 mod calendar;
 mod caption;
+mod code_box;
 mod colour_tags;
 mod config;
 mod cursor_style;

@@ -34,7 +34,17 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   Keybindings → Note view): **Ctrl+Shift+K** fold, **Ctrl+Shift+J** unfold, **Ctrl+Shift+U** fold all,
   **Ctrl+Shift+I** unfold all; with Vim-style editing `za` `zc` `zo` `zM` `zR`. The cursor never stays in hidden
   text: moving into a fold (or a link or search jumping there) opens it. Folds are kept for the session only and
-  are never written into the file.
+  are never written into the file. Also foldable (EDIT-080 to EDIT-085): **code blocks**, the **front matter** and a
+  **signature** (a line `-- ` up to the next heading). A note's front matter starts folded to one muted line
+  `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded or card; raw leaves it
+  open); the cursor moving into it opens the YAML and folds it again when it leaves. In a **mail note**
+  (`type: email`) the quotes (`… n quoted lines`) and the signature start folded too.
+- **Code blocks as boxes** (EDIT-080, EDIT-086, rabalyn/shale#356): with the Markdown preview on, a fenced code block is a
+  rounded box on the code background with a thin border and a badge at its top right with the language (`code` when there is
+  none); the ``` lines are hidden and show again when the cursor is in the block. The reading view draws the same box.
+
+![Code boxes, folded properties, quote and signature](userguide/z_media/screenshots/editor-code-box.png)
+
 - The **text cursor** (Settings → Editor → Cursor) is one of four shapes: a bar before the character (default), a bar after it,
   a block or an underline; with Vim-style editing the cursor of normal mode has its own choice (default: block).
   "Blinking cursor" (on by default) makes it steady when off. The Vim tab (listed under Editor) holds the Vim settings: the switch, the cursor of normal mode, "Esc from insert mode" (the cursor stays after the typing by default, or steps back like Vim) and the link preview size. Exactly one cursor is drawn in every mode.
@@ -405,7 +415,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   lines: an e-mail as a mail header (sender, date, to / cc, subject, tag chips), an event with its time, place, attendees and a repeats badge, a Word import as one page chip
   (`A4 · 2.5 cm margins · 11 pt`), any other note as key and value rows. Ids and `print-*` settings are left out, a ▸ toggle shows every property, and people with a contact
   note are links. `properties::summary` gives the one line for a folded view (`email · Anna Müller · 2026-11-12 · #work #mail`). Settings → Appearance → "Properties in the editor"
-  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). Dates are not links yet: the calendar has no entry point for a day.
+  / "Properties in the reading view": folded, card or raw (defaults: folded in the editor, card in the reading view). In the editor a note's front matter starts folded to its summary line unless the setting is raw (EDIT-081, EDIT-084). Dates are not links yet: the calendar has no entry point for a day.
 - **Title line and date prefix** (VAULT-025, CFG-043): above line 1 a note shows its title line, its file name without `.md` and without a
   leading date prefix `YYMMDD_` (`261117_Plan.md` shows `Plan`); editing it renames the file and keeps the prefix. Tabs and the PDF title show the name without the prefix; the file
   list, the quick switcher and links keep the full name, so the list sorts by date. Settings → Editor → "Date prefix for new notes" (on by default) names a note made by Shale
