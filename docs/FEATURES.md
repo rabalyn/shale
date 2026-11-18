@@ -697,7 +697,7 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   goes into one folder, `z_media/YYYY/MM/import_docx_<name>/`: the pictures in `media/` and, when
   "Keep the original .docx" is ticked, the original, which the note names in its properties
   (IMP-038). Word's look comes along: text and highlight colours become `<span>` and `<mark>`
-  colours (IMP-041), a Title and Subtitle become a heading and an italic line (IMP-042), and the
+  colours (IMP-041), page breaks (manual, "page break before", section breaks; IMP-043), a Title and Subtitle become a heading and an italic line (IMP-042), and the
   note's properties hold the page setup (`print-paper`, `print-margins`), the body font, size,
   line and paragraph spacing, alignment and the colour of Heading 1 (`print-*`, IMP-040), which
   the PDF export uses (rabalyn/shale#338). Centred and right-aligned paragraphs are not kept

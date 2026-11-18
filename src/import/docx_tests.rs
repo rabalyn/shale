@@ -434,7 +434,7 @@ fn a_note_that_cannot_be_written_takes_the_import_folder_out_again() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// spec: IMP-040, IMP-041, IMP-042, IMP-039
+// spec: IMP-040, IMP-041, IMP-042, IMP-043, IMP-039
 #[test]
 fn a_styled_word_file_keeps_its_page_its_body_its_colours_and_its_title() {
     let Some((v, done)) = import_fixture("styled", "styled.docx", true) else { return };
@@ -443,7 +443,7 @@ fn a_styled_word_file_keeps_its_page_its_body_its_colours_and_its_title() {
     let folder = format!("{}/import_docx_styled", month_dir());
     let expected_props = format!(
         "---\nsource: \"[[{folder}/styled.docx]]\"\nprint-paper: Letter\nprint-margins: 20 25 20 30\nprint-font: serif\nprint-font-size: 12\nprint-line-spacing: 1.15\n\
-print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496\"\nprint-title: false\nprint-toc: false\n---\n\n"
+print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496\"\nprint-break-before: 1\nprint-title: false\nprint-toc: false\n---\n\n"
     );
     assert!(text.starts_with(&expected_props), "{text}");
     let body = &text[expected_props.len()..];
@@ -455,7 +455,11 @@ print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496
     assert!(body.contains("a ==yellow highlight=="), "plain yellow stays pandoc's own mark: {body}");
     assert!(body.contains("**<span style=\"color: #0000FF;\">bold blue</span>** and on"), "white space stays outside, so the emphasis works: {body}");
     assert!(body.contains("<span style=\"color: #00B050;\"><mark style=\"background: #FFC000;\">green on orange</mark></span>"), "{body}");
-    assert!(!body.chars().any(|c| ('\u{E000}'..='\u{E003}').contains(&c)), "no sentinel is left");
+    // IMP-043: Heading 1 starts a page by its style (the property), so no line before it; the rest are lines
+    let div = "<div style=\"page-break-after: always;\"></div>";
+    assert!(body.contains(&format!("Before a manual break\n\n{div}\n\nafter it.\n\n{div}\n\nStarts a page by itself.\n\nEnds a section.\n\n{div}\n\nEnds a continuous section.\n\nThe last paragraph.")), "{body}");
+    assert_eq!(body.matches(div).count(), 3, "{body}");
+    assert!(!body.chars().any(|c| ('\u{E000}'..='\u{E004}').contains(&c)), "no sentinel is left");
     // the original is kept as it is, without the tags
     let kept = std::fs::read(v.root.join(format!("{folder}/styled.docx"))).unwrap();
     assert_eq!(kept, std::fs::read(fixture("styled.docx")).unwrap());
