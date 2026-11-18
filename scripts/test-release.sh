@@ -55,7 +55,7 @@ git init -q --bare "$TMP/remote.git"
 git clone -q "$TMP/remote.git" "$TMP/work" 2>/dev/null
 cd "$TMP/work" || exit 1
 mkdir -p scripts .github docs/changelog-pending
-cp "$SRC"/scripts/{land.sh,release-lib.sh,make-tag.sh,make-release.sh,bench-release.sh} scripts/
+cp "$SRC"/scripts/{land.sh,release-lib.sh,make-tag.sh,make-release.sh,bench-release.sh,bench-env.sh} scripts/
 cp "$SRC"/.github/{check-release.sh,release-notes.sh,ai-notice.md} .github/
 printf '[package]\nname = "shale"\nversion = "0.3.0"\nedition = "2021"\n\n[dependencies]\nother = { version = "9.9.9" }\n' > Cargo.toml
 printf '[[package]]\nname = "other"\nversion = "9.9.9"\n\n[[package]]\nname = "shale"\nversion = "0.3.0"\n' > Cargo.lock

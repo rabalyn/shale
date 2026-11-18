@@ -68,7 +68,7 @@ pub struct Scale {
 
 impl Scale {
     pub const FULL: Scale =
-        Scale { vault: Sizes::STANDARD, mail: 20_000, events: 5_000, posts: 3_000, docx_files: 3, docx_kb: 1_500, lfs_files: 6, lfs_kb: 4_096, drawing: 2_000, leak_frames: 2_000, recovery_notes: 300, max_iters: usize::MAX };
+        Scale { vault: Sizes::STANDARD, mail: 20_000, events: 5_000, posts: 3_000, docx_files: 3, docx_kb: 1_500, lfs_files: 6, lfs_kb: 4_096, drawing: 2_000, leak_frames: 1_000, recovery_notes: 300, max_iters: usize::MAX };
     pub const QUICK: Scale = Scale { vault: Sizes { small: 60, large: 600 }, mail: 1_500, events: 400, posts: 300, docx_files: 1, docx_kb: 200, lfs_files: 2, lfs_kb: 512, drawing: 300, leak_frames: 200, recovery_notes: 40, max_iters: 5 };
     /// for the tests of the harness itself
     #[cfg(test)]

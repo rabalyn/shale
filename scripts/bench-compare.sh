@@ -44,6 +44,7 @@ cleanup() {
   rm -rf "$TMP"
 }
 trap cleanup EXIT
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bench-env.sh"
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$ROOT/target/bench-compare}
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)

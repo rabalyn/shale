@@ -41,7 +41,7 @@ pub struct Generated {
     pub root: PathBuf,
     /// a very long note (about 200 KB), in the root folder
     pub long_note: PathBuf,
-    /// the note most others link to
+    /// the note most others link to (the last of the generated ones; the first, which a window opens, has hardly any links to it)
     pub popular: PathBuf,
     /// a drawing (Excalidraw) with many elements, in the root folder
     pub drawing: PathBuf,
@@ -224,7 +224,8 @@ fn sentence(r: &mut Rng, titles: &[String], out: &mut String) {
             }
             3 | 4 => {
                 // a wiki link: plain, with an alias, to a heading, or to a note that does not exist
-                let t = &titles[r.skewed(titles.len())];
+                // the notes at the end of the list are the ones many link to, so the first note of the vault (the one a window opens) is not
+                let t = &titles[titles.len() - 1 - r.skewed(titles.len())];
                 match r.below(10) {
                     0 => {
                         let _ = write!(out, "[[{t}|{}]]", r.pick(WORDS));
@@ -347,7 +348,7 @@ pub fn generate(root: &Path, notes: usize, long_notes: usize, drawing_elements: 
     let mut popular = PathBuf::new();
     for (i, t) in titles.iter().enumerate() {
         let rel = PathBuf::from(format!("Area {:02}", i % folders)).join(format!("{t}.md"));
-        if i == 0 {
+        if i == notes - 1 {
             popular = rel.clone();
         }
         std::fs::write(root.join(&rel), note_text(&mut r, t, &titles, 0))?;

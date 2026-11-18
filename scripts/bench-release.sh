@@ -36,6 +36,7 @@ V=${POS[1]}
 [ -d "$WT" ] || { echo "bench-release.sh: $WT is not a folder" >&2; exit 2; }
 cd "$WT" || exit 2
 
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bench-env.sh"
 if [ -n "${BENCH_BIN:-}" ]; then
   BIN=$BENCH_BIN
 else

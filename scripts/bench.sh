@@ -3,21 +3,21 @@
 # flamegraph of every scenario. See docs/perf/README.md.
 #
 #   scripts/bench.sh [--profile quick|full|worst] [--filter SUBSTRING] [--iters N]
-#                    [--out FILE] [--flamegraph] [--flame-dir DIR] [--no-build]
+#                    [--out FILE] [--flamegraph | --flamegraph-only] [--flame-dir DIR] [--no-build]
 #
 # Builds `cargo build --profile bench-release --features bench` (the release profile with line
 # tables; the shipped release is unchanged), runs `shale --bench` headless and writes
 # target/bench/<short commit>.json (`-quick` or `-worst` added for those profiles; --out says
 # another file). With --flamegraph each scenario of the profile (or those of --filter) runs
-# on its own under `perf record -F 999 --call-graph dwarf`, only the measured loop is kept, and
+# on its own under `perf record -e cpu-clock:u -F 999 --call-graph fp --user-callchains`, only the measured loop is kept, and
 # docs/perf/flamegraphs/<id>.svg is made with inferno (`cargo install inferno`). Without perf, or
 # without the permission to use it (kernel.perf_event_paranoid), or without inferno it says so and
-# goes on without flamegraphs. Environment: CARGO_TARGET_DIR, FLAME_MIN_MS (how long a scenario
+# goes on without flamegraphs. --flamegraph-only makes the flamegraphs without the normal run. Environment: CARGO_TARGET_DIR, FLAME_MIN_MS (how long a scenario
 # is measured for its flamegraph, default 3000).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PROFILE=full FILTER="" ITERS="" OUT="" FLAME=no FLAME_DIR=docs/perf/flamegraphs BUILD=yes
+PROFILE=full FILTER="" ITERS="" OUT="" FLAME=no RUN=yes FLAME_DIR=docs/perf/flamegraphs BUILD=yes
 while [ $# -gt 0 ]; do
   case $1 in
     --profile) shift; PROFILE=${1:-} ;;
@@ -25,6 +25,7 @@ while [ $# -gt 0 ]; do
     --iters) shift; ITERS=${1:-} ;;
     --out) shift; OUT=${1:-} ;;
     --flamegraph) FLAME=yes ;;
+    --flamegraph-only) FLAME=yes RUN=no ;;
     --flame-dir) shift; FLAME_DIR=${1:-} ;;
     --no-build) BUILD=no ;;
     -h|--help) sed -n '2,/^set -euo/{/^#/p}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -34,6 +35,7 @@ while [ $# -gt 0 ]; do
 done
 case $PROFILE in quick|full|worst) ;; *) echo "bench.sh: --profile is quick, full or worst, not $PROFILE" >&2; exit 2 ;; esac
 
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bench-env.sh"
 TARGET=${CARGO_TARGET_DIR:-target}
 BIN="$TARGET/bench-release/shale"
 if [ "$BUILD" = yes ]; then
@@ -55,8 +57,10 @@ mkdir -p "$(dirname "$OUT")"
 args=(--bench "$OUT" --profile "$PROFILE")
 [ -z "$FILTER" ] || args+=(--filter "$FILTER")
 [ -z "$ITERS" ] || args+=(--iters "$ITERS")
-"$BIN" "${args[@]}"
-echo "result: $OUT"
+if [ "$RUN" = yes ]; then
+  "$BIN" "${args[@]}"
+  echo "result: $OUT"
+fi
 
 [ "$FLAME" = yes ] || exit 0
 
@@ -74,17 +78,22 @@ mkdir -p "$FLAME_DIR"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 MIN_MS=${FLAME_MIN_MS:-3000}
-ids=$("$BIN" --bench-list | awk -v p="$PROFILE" -v f="$FILTER" '$1 == p && index($2, f) { print $2 }')
+# --filter as the harness reads it: a part of the ID, or `=` and the whole ID
+exact=no
+[ "${FILTER:0:1}" != "=" ] || exact=yes
+ids=$("$BIN" --bench-list | awk -v p="$PROFILE" -v f="${FILTER#=}" -v exact="$exact" '$1 == p && (exact == "yes" ? $2 == f : index($2, f)) { print $2 }')
 made=0
 for id in $ids; do
   echo "-- flamegraph $id"
-  if ! perf record -q -F 999 -g --call-graph dwarf -o "$TMP/perf.data" -- \
+  if ! perf record -q -e cpu-clock:u -F 999 --call-graph fp --user-callchains -o "$TMP/perf.data" -- \
       "$BIN" --bench "$TMP/run.json" --profile "$PROFILE" --filter "=$id" --min-ms "$MIN_MS" >/dev/null 2>"$TMP/perf.err"; then
     echo "bench.sh: perf could not profile $id: $(tail -n 1 "$TMP/perf.err")" >&2
     continue
   fi
   # only the stacks through the measured loop: not the setup, not the vault generation
-  perf script -i "$TMP/perf.data" 2>/dev/null | inferno-collapse-perf 2>/dev/null \
+  # inferno cannot read a program path with a space in it (and the repository may be in one): only the file name is kept;
+  # inlined functions are left out (--no-inline; a call site is otherwise given the inlined code that follows it, and resolving them is slow)
+  perf script --no-inline -i "$TMP/perf.data" 2>/dev/null | sed -E 's#\((/[^)]*/)([^/)]*)\)$#(\2)#' | inferno-collapse-perf -q \
     | grep 'measured_region' | sed -E 's/^.*;([^;]*measured_region)/\1/' > "$TMP/folded.txt" || true
   if [ ! -s "$TMP/folded.txt" ]; then
     echo "bench.sh: no samples of the measured loop for $id (too short or skipped)" >&2
