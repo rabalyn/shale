@@ -66,6 +66,10 @@ put Shale in `~/.local/bin` with its app menu entry and icons, or `sudo ./instal
 for all users; `./install.sh --uninstall` removes what it installed (your vaults and settings stay).
 Running it again upgrades. If a library is missing, the script names it.
 
+On Arch Linux, the package `shale-bin` installs the same download system-wide: build it from
+`packaging/aur/shale-bin/` in the source with `makepkg -si`, or install it with `yay -S shale-bin` or
+`paru -S shale-bin` once it is on the AUR.
+
 ## How to read this guide
 
 Each note names the setting or key you need, and every picture was made by the app itself

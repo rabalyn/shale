@@ -136,6 +136,8 @@ sudo ./install.sh --prefix /usr/local   # for all users: /usr/local/bin and /usr
 ./install.sh --uninstall         # removes what it installed (add the same --prefix); your vaults stay
 ```
 
+On Arch Linux the same download is packaged as `shale-bin` (`packaging/aur/shale-bin/` has the PKGBUILD, BUILD-026): build it from that folder with `makepkg -si`, or once the owner has published it on the AUR, `yay -S shale-bin` or `paru -S shale-bin`.
+
 It works from any folder, runs again to upgrade, warns when the program's folder is not on your `PATH`
 and names libraries your system lacks (with the package names for Arch, Debian and Fedora). There is
 no AppImage and no Flatpak: an AppImage needs FUSE 2 and brings no menu entry, and a Flatpak sandbox
