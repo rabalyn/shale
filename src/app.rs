@@ -1732,6 +1732,7 @@ impl ShaleApp {
                 };
                 self.tabbar.tabs[active].editor.key_fold(cmd);
             }
+            KeyAction::NoteCopyCode if !reading => self.tabbar.tabs[active].editor.key_copy_code(),
             KeyAction::NoteHighlightColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Highlight),
             KeyAction::NoteFontColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Font),
             KeyAction::NoteHeading if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Heading),

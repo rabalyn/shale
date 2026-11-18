@@ -553,3 +553,112 @@ fn edit_085_the_folds_a_note_starts_with_are_set_once_per_session_and_never_writ
     assert!(w.numbers().contains(&3), "the user's unfold is remembered: {:?}", w.numbers());
     assert_eq!(std::fs::read_to_string(w.dir.join(NOTE)).unwrap(), MAIL);
 }
+
+impl W {
+    /// The texts that the frames of these events put on the clipboard, and three frames after them.
+    fn copied_by(&mut self, steps: Vec<Vec<Event>>) -> Vec<String> {
+        let mut out = vec![];
+        let mut take = |o: egui::FullOutput| {
+            out.extend(o.platform_output.commands.iter().filter_map(|c| match c {
+                egui::OutputCommand::CopyText(s) => Some(s.clone()),
+                _ => None,
+            }))
+        };
+        for events in steps {
+            take(self.hl.frame(&mut self.app, events));
+        }
+        for _ in 0..3 {
+            take(self.hl.frame(&mut self.app, vec![]));
+        }
+        out
+    }
+
+    fn click_copied(&mut self, p: Pos2) -> Vec<String> {
+        self.copied_by(vec![vec![Event::PointerMoved(p)], vec![crate::ui_test_support::Headless::button(p, PointerButton::Primary, true)], vec![crate::ui_test_support::Headless::button(p, PointerButton::Primary, false)]])
+    }
+
+    fn key_copied(&mut self, key: Key) -> Vec<String> {
+        self.copied_by(vec![vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: CTRL_SHIFT }]])
+    }
+
+    /// Where the copy button of the code block that opens at `line` is, if it is shown.
+    fn copy_button(&self, line: usize) -> Option<Rect> {
+        self.editor().fold.widgets.iter().find(|w| w.line == line).and_then(|w| w.copy)
+    }
+}
+
+// spec: EDIT-090, EDIT-091, EDIT-094
+#[test]
+fn edit_090_the_copy_button_shows_on_hover_and_a_click_copies_the_code_without_touching_cursor_or_text() {
+    let mut w = W::new("copy-click", CODE, true);
+    w.cursor_in("after");
+    w.hover(Pos2::new(700.0, 600.0));
+    assert!(w.copy_button(2).is_none(), "no button while the pointer and the cursor are elsewhere");
+    let row = w.row_of("let x");
+    let x = w.text_x();
+    w.hover(Pos2::new(x + 30.0, row.center().y));
+    let button = w.copy_button(2).expect("the pointer over the box shows the button");
+    let box_ = w.boxes()[0];
+    assert!(button.max.x < box_.max.x - 20.0 && button.center().y < row.min.y, "top right of the box, left of the badge: {button:?} {box_:?}");
+    let cursor = w.cursor();
+    let copied = w.click_copied(button.center());
+    assert_eq!(copied, vec!["fn main() {}\nlet x = 1;".to_string()], "the code only, no fences, no newline at the end");
+    assert_eq!(w.cursor(), cursor, "the click did not move the cursor into the block");
+    assert_eq!(w.hidden(), 1, "the closing fence is still hidden: the cursor is not in the block");
+    assert_eq!(w.text(), CODE);
+    assert!(w.painted("Copied"), "the button says so: {:?}", w.hl.text);
+    // after a moment it is the icon again
+    w.hl.frames(&mut w.app, 40);
+    assert!(!w.painted("Copied"));
+    // with the preview off there is no box and no button
+    let mut raw = W::new("copy-raw", CODE, false);
+    raw.cursor_in("let x");
+    assert!(raw.copy_button(2).is_none());
+}
+
+// spec: EDIT-090
+#[test]
+fn edit_090_the_button_shows_while_the_cursor_is_in_the_block_and_on_a_folded_block_and_does_not_unfold_it() {
+    let mut w = W::new("copy-cursor", CODE, true);
+    w.cursor_in("let x");
+    w.hover(Pos2::new(700.0, 600.0));
+    assert!(w.copy_button(2).is_some(), "the cursor is in the block");
+    w.press(Key::K, CTRL_SHIFT);
+    w.cursor_in("after");
+    w.hover(Pos2::new(700.0, 600.0));
+    let numbers = w.numbers();
+    assert_eq!(numbers, vec![1, 2, 3, 7, 8], "folded");
+    let button = w.copy_button(2).expect("a folded block shows it always");
+    let cursor = w.cursor();
+    assert_eq!(w.click_copied(button.center()), vec!["fn main() {}\nlet x = 1;".to_string()]);
+    assert_eq!(w.numbers(), numbers, "still folded");
+    assert_eq!(w.cursor(), cursor);
+}
+
+// spec: EDIT-092, KEY-035
+#[test]
+fn key_035_the_key_copies_the_block_at_the_cursor_and_does_nothing_outside_one() {
+    let mut w = W::new("copy-key", CODE, true);
+    w.cursor_in("let x");
+    assert_eq!(w.key_copied(Key::C), vec!["fn main() {}\nlet x = 1;".to_string()]);
+    assert!(w.painted("Copied"));
+    // on the opening fence too, and on a folded block
+    w.cursor_in("```rust");
+    assert_eq!(w.key_copied(Key::C).len(), 1);
+    w.press(Key::K, CTRL_SHIFT);
+    assert_eq!(w.key_copied(Key::C), vec!["fn main() {}\nlet x = 1;".to_string()]);
+    // outside a block: nothing, and the text stays
+    w.cursor_in("after");
+    assert!(w.key_copied(Key::C).is_empty());
+    assert_eq!(w.text(), CODE);
+}
+
+// spec: KEY-037
+#[test]
+fn key_037_the_copy_key_does_nothing_in_the_reading_view() {
+    let mut w = W::new("copy-reading", CODE, true);
+    w.cursor_in("let x");
+    w.app.toggle_reading_view();
+    w.hl.frames(&mut w.app, 4);
+    assert!(w.key_copied(Key::C).is_empty());
+}

@@ -68,6 +68,12 @@ they show again. A code block folds like the other blocks: a folded one shows it
 `… n lines`. With the preview off the code is shown raw, without a box, but still folds. The reading view draws
 the same box.
 
+To copy the code, point at the box: a small copy icon shows at its top right, left of the badge (also while the cursor
+is in the block, and always on a folded block). A click copies the code inside the block, without the fence lines and
+without a newline at the end, so a command you paste does not run at once; the icon turns into a tick and "Copied" for
+a moment. The click does not move the cursor or unfold the block. **Ctrl+Shift+C** copies the code block at the cursor;
+when the cursor is in no code block nothing happens.
+
 ![[editor-code-box.png]]
 
 ## The title line and pasting

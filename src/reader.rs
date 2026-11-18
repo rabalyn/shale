@@ -620,6 +620,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         if fenced.get(i).copied().unwrap_or(false) {
             let mut code = String::new();
             let word = syntax::fence_language(line);
+            let open = i;
             i += 1;
             while i < lines.len() && !(lines[i].1.trim_start().starts_with("```") || lines[i].1.trim_start().starts_with("~~~")) {
                 code.push_str(lines[i].1);
@@ -631,8 +632,14 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             egui::Frame::new().fill(theme::CODE_BG).stroke(egui::Stroke::new(1.0, theme::BORDER)).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 let badge = syntax::badge_language(&word).unwrap_or_else(|| "code".to_string());
+                let box_rect = ui.max_rect();
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                    ui.label(egui::RichText::new(badge).monospace().size((base * 0.75).max(9.0)).color(theme::FAINT));
+                    let badge = ui.label(egui::RichText::new(badge).monospace().size((base * 0.75).max(9.0)).color(theme::FAINT));
+                    // the copy button (EDIT-093): left of the badge, while the pointer is over the box
+                    let id = crate::code_box::copy_id(ui.scope_id(), rel, open);
+                    let shown = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| box_rect.expand(10.0).contains(p));
+                    let all: Vec<&str> = lines.iter().map(|l| l.1).collect();
+                    crate::code_box::copy_button(ui, id, badge.rect.left() - 6.0, badge.rect.center().y, shown, || crate::code_box::code_of(&all, open).unwrap_or_default());
                 });
                 ui.label(code_job(&word, code.trim_end(), base * 0.9));
             });

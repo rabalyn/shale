@@ -138,3 +138,37 @@ fn the_reading_view_draws_a_code_block_as_a_box_with_a_badge_at_its_top_right() 
     assert!(badge.max.y <= code.min.y + 1.0, "above the first line of code: {badge:?} {code:?}");
     assert!(texts(&painted).contains(&"code"), "a block without a language says code: {:?}", texts(&painted));
 }
+
+// spec: EDIT-093
+#[test]
+fn the_reading_view_has_a_copy_button_left_of_the_badge_that_copies_the_code() {
+    let v = vault("copy");
+    let text = "```rust\nlet a = 1;\nlet b = 2;\n```\n";
+    let (mut scenes, media) = (SceneCache::default(), crate::media::MediaPlayer::default());
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    let mut frame = |events: Vec<Event>| {
+        time += 0.05;
+        let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(700.0, 500.0))), time: Some(time), events, ..Default::default() };
+        let mut painted: Vec<(String, Rect)> = vec![];
+        let mut out = ctx.run_ui(raw, |ui| {
+            reader::show(ui, text, &v, Path::new("Welcome.md"), &mut Caches { scenes: &mut scenes, media: &media }, (15.0, true), &Extras::default());
+        });
+        out.textures_delta.clear();
+        out.shapes.iter().for_each(|c| walk(&c.shape, &mut painted));
+        let copied: Vec<String> = out.platform_output.commands.iter().filter_map(|c| if let egui::OutputCommand::CopyText(s) = c { Some(s.clone()) } else { None }).collect();
+        (painted, copied)
+    };
+    frame(vec![]);
+    let (painted, _) = frame(vec![]);
+    let badge = painted.iter().find(|(t, _)| t == "rust").unwrap().1;
+    let at = Pos2::new(badge.min.x - 6.0 - 8.0, badge.center().y);
+    frame(vec![Event::PointerMoved(at)]);
+    frame(vec![Event::PointerMoved(at)]);
+    let click = |pressed| vec![Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }];
+    let mut copied = frame(click(true)).1;
+    copied.extend(frame(click(false)).1);
+    assert_eq!(copied, vec!["let a = 1;\nlet b = 2;".to_string()]);
+    let (painted, _) = frame(vec![]);
+    assert!(texts(&painted).contains(&"Copied"), "{:?}", texts(&painted));
+}

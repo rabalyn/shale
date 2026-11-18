@@ -275,6 +275,8 @@ actions! {
     NoteUnfold => "note.unfold", "Unfold the block at the cursor", NoteView, ["Ctrl+Shift+J"];
     NoteFoldAll => "note.fold_all", "Fold every block of the note", NoteView, ["Ctrl+Shift+U"];
     NoteUnfoldAll => "note.unfold_all", "Unfold every block of the note", NoteView, ["Ctrl+Shift+I"];
+    // KEY-035…KEY-037
+    NoteCopyCode => "note.copy_code", "Copy the code of the code block at the cursor", NoteView, ["Ctrl+Shift+C"];
     NormalAlternate => "normal.alternate_view", "Back to the previous view of this tab (again: forward)", EditorNormal, ["Space Tab"];
     NormalFindFile => "normal.find_file", "Find a file by name", EditorNormal, ["Space F F"];
     NormalSearchAll => "normal.search_all", "Search notes, mail and posts", EditorNormal, ["Space F G"];
@@ -675,8 +677,8 @@ mod tests {
             let on_mac = if d.action.is_alt_key() { "not set".to_string() } else { shown };
             assert_eq!(mac.display(d.action), on_mac, "{}", d.id);
         }
-        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 23 + 4);
-        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 23 + 4);
+        assert_eq!(DEFS.iter().filter(|d| d.scope == Scope::NoteView).count(), 23 + 5);
+        assert_eq!(DEFS.len(), 29 + 36 + 6 + 12 + 23 + 5);
     }
 
     // spec: KEY-014
@@ -773,6 +775,17 @@ mod tests {
             }
         }
         assert_eq!(linux.check(Action::NoteFold, &b("Ctrl+Shift+F")), Err("Ctrl+Shift+F is already used by “Search all notes”".to_string()));
+    }
+
+    // spec: KEY-035, KEY-036
+    #[test]
+    fn the_copy_code_key_is_the_same_on_every_system_and_clashes_with_nothing() {
+        let (linux, mac) = (Keymap::for_os(false), Keymap::for_os(true));
+        assert!(!Action::NoteCopyCode.is_alt_key());
+        for k in [&linux, &mac] {
+            assert_eq!(k.bindings(Action::NoteCopyCode), vec![b("Ctrl+Shift+C")]);
+            assert_eq!(k.check(Action::NoteCopyCode, &b("Ctrl+Shift+C")), Ok(()));
+        }
     }
 
     // spec: KEY-017

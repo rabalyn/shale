@@ -84,6 +84,8 @@ pub struct Widget {
     pub line: usize,
     pub marker: Option<Rect>,
     pub badge: Option<Rect>,
+    /// the copy button of a code box (EDIT-090)
+    pub copy: Option<Rect>,
 }
 
 /// The fold state of the notes an editor has shown, and what it is asked to do with it.
@@ -93,6 +95,8 @@ pub struct FoldUi {
     /// a command (a key, vim's `za`…) to do at the start of the next frame
     pub request: Option<FoldCmd>,
     pub widgets: Vec<Widget>,
+    /// the key "copy the code block at the cursor" (KEY-035) asks for it at the next frame
+    pub copy_code: bool,
     /// the notes whose folds were set when they were first shown (EDIT-081, EDIT-082)
     seen: HashSet<PathBuf>,
     /// the notes whose front matter the cursor opened and that fold it again when it leaves (EDIT-081)
@@ -224,7 +228,7 @@ impl FoldUi {
             }
             let folded = folded_lines.contains(&b.header);
             let hot = hover.is_some_and(|p| p.y >= row.min.y && p.y <= row.max.y && p.x >= pos.x - MARKER - 6.0 && p.x <= area.right());
-            let mut w = Widget { line: b.header, marker: None, badge: None };
+            let mut w = Widget { line: b.header, marker: None, badge: None, copy: None };
             if folded || hot {
                 let rect = Rect::from_center_size(Pos2::new(pos.x - MARKER / 2.0 - 2.0, row.center().y), Vec2::splat(MARKER));
                 let resp = ui.interact(rect, id.with(("fold-marker", b.header)), Sense::click());
@@ -267,7 +271,7 @@ impl FoldUi {
             }
             match self.widgets.iter_mut().find(|w| w.line == header) {
                 Some(w) => w.badge = Some(rect),
-                None => self.widgets.push(Widget { line: header, marker: None, badge: Some(rect) }),
+                None => self.widgets.push(Widget { line: header, marker: None, badge: Some(rect), copy: None }),
             }
         }
         // the folded front matter: its summary line in place of `---`, a click opens it (EDIT-081)

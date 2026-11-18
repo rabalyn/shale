@@ -993,6 +993,11 @@ impl NoteEditor {
         self.fold.request = Some(cmd);
     }
 
+    /// The key "copy the code block at the cursor" (KEY-035): done at the next frame (EDIT-092).
+    pub fn key_copy_code(&mut self) {
+        self.fold.copy_code = true;
+    }
+
     /// The line (from 0) the cursor is in: vim's cursor in normal mode, else the text box's.
     fn cursor_line(&self, ui: &Ui, text: &str) -> usize {
         let normal = self.vim_enabled && self.vim.mode != crate::vim::Mode::Insert && !self.vim.visual();
@@ -2044,7 +2049,23 @@ impl NoteEditor {
             ui.painter().set(slot, Shape::Vec(shapes));
         }
         // the markers and the badges of the folds (EDIT-071, EDIT-074)
-        self.fold.paint(ui, &fold, &crate::fold_ui::Painted { id: self.id, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size });
+        let painted = crate::fold_ui::Painted { id: self.id, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size };
+        self.fold.paint(ui, &fold, &painted);
+        // the copy button of the code boxes (EDIT-090) and the key that copies the block at the cursor (EDIT-092)
+        if std::mem::take(&mut self.fold.copy_code) {
+            let all: Vec<&str> = output.galley.job.text.split('\n').collect();
+            if let Some((open, code)) = cursor_line.and_then(|l| crate::code_box::code_at(&all, l)) {
+                crate::code_box::copy(ui, crate::code_box::copy_id(self.id, rel, open), code);
+            }
+        }
+        if box_slot.is_some() {
+            for (line, rect) in crate::code_box::buttons(ui, &shown_folds, &painted, cursor_line) {
+                match self.fold.widgets.iter_mut().find(|w| w.line == line) {
+                    Some(w) => w.copy = Some(rect),
+                    None => self.fold.widgets.push(crate::fold_ui::Widget { line, marker: None, badge: None, copy: Some(rect) }),
+                }
+            }
+        }
 
         if let Some(line) = self.fold.goto.take() {
             let now = &output.galley.job.text;
