@@ -55,9 +55,11 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           # BUILD-013: the last release with a page here (none yet: unset); the notes and the check
           # cover every version since it, as Forgejo's tags can be ahead of GitHub's releases
-          if out=$(gh release view --json tagName -q .tagName 2>&1); then
+          # (the API, as a build job must not hold the text of a release command, BUILD-024;
+          # contents: read is enough for the published releases of a public repository)
+          if out=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" -q .tag_name 2>&1); then
             export SHALE_PREV_PUBLISHED="$out"
-          elif printf '%s' "$out" | grep -qi 'release not found'; then
+          elif printf '%s' "$out" | grep -q 'HTTP 404'; then
             echo "no release published yet"
           else
             echo "error: could not look up the last published release: $out" >&2
