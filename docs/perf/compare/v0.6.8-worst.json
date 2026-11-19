@@ -1,0 +1,173 @@
+{
+  "schema": 2,
+  "verdict": "ok",
+  "exit_code": 0,
+  "x": {
+    "commit": "fd6bdd29c5d544f61e185b7bada20c97c325934d",
+    "describe": "v0.6.7",
+    "date": "2026-11-19T20:00:55Z",
+    "load": 2.44,
+    "cores": 28,
+    "repeats": 1
+  },
+  "y": {
+    "commit": "2472a30f372c8d7115eec4085d4ee52b9ba5b89c",
+    "describe": "v0.6.8",
+    "date": "2026-11-19T21:26:56Z",
+    "load": 2.67,
+    "cores": 28,
+    "repeats": 1
+  },
+  "busy": false,
+  "threshold_time_pct": 10.0,
+  "threshold_bytes_pct": 15.0,
+  "threshold_allocs_pct": 10.0,
+  "rows": [
+    {
+      "id": "worst.startup",
+      "status": "both",
+      "x_median_ns": 757113532,
+      "y_median_ns": 750896633,
+      "time_delta_pct": -0.8211316714386766,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        752747779,
+        775395866
+      ],
+      "y_range_ns": [
+        750029977,
+        758879008
+      ],
+      "x_allocs": 5010032,
+      "y_allocs": 5006255,
+      "allocs_delta_pct": -0.07538874003199979,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 183203535,
+      "y_peak_bytes": 183283306,
+      "bytes_delta_pct": 0.04354228208533203,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.idle",
+      "status": "both",
+      "x_median_ns": 2219463,
+      "y_median_ns": 2272562,
+      "time_delta_pct": 2.392425555190602,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        2144124,
+        2395215
+      ],
+      "y_range_ns": [
+        2222957,
+        2481747
+      ],
+      "x_allocs": 10004,
+      "y_allocs": 10008,
+      "allocs_delta_pct": 0.03998400639744103,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19367768,
+      "y_peak_bytes": 19367768,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.typing",
+      "status": "both",
+      "x_median_ns": 23516909,
+      "y_median_ns": 23636125,
+      "time_delta_pct": 0.5069373700429763,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        23029002,
+        24184083
+      ],
+      "y_range_ns": [
+        23253689,
+        24274322
+      ],
+      "x_allocs": 145703,
+      "y_allocs": 145707,
+      "allocs_delta_pct": 0.002745310666218266,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 22299293,
+      "y_peak_bytes": 22299293,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.views.cycle",
+      "status": "both",
+      "x_median_ns": 138667359,
+      "y_median_ns": 142105155,
+      "time_delta_pct": 2.4791674297337702,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        138614379,
+        209221616
+      ],
+      "y_range_ns": [
+        141699693,
+        212027578
+      ],
+      "x_allocs": 397966,
+      "y_allocs": 397974,
+      "allocs_delta_pct": 0.002010221978762005,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 90851292,
+      "y_peak_bytes": 90851292,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.memory.growth",
+      "status": "both",
+      "x_median_ns": 26444087485,
+      "y_median_ns": 26602137477,
+      "time_delta_pct": 0.5976761046855991,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        26444087485,
+        26444087485
+      ],
+      "y_range_ns": [
+        26602137477,
+        26602137477
+      ],
+      "x_allocs": 114353813,
+      "y_allocs": 114459946,
+      "allocs_delta_pct": 0.0928110722464497,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 59368216,
+      "y_peak_bytes": 59368216,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    }
+  ],
+  "regressions": [],
+  "improvements": [],
+  "tradeoffs": [],
+  "noisy": [],
+  "changed": [],
+  "skipped": [],
+  "summary": {
+    "compared": 5,
+    "faster": 0,
+    "slower": 0,
+    "regressions": 0,
+    "noisy": 0,
+    "changed": 0,
+    "added": 0,
+    "removed": 0
+  }
+}
