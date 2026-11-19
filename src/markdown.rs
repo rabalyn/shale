@@ -1024,6 +1024,11 @@ pub fn find_ci(line: &str, query_lower: &str) -> Option<usize> {
     if query_lower.is_empty() {
         return Some(0);
     }
+    // the common case, without taking the line apart: plain ASCII on both sides
+    if query_lower.is_ascii() && line.is_ascii() {
+        let q = query_lower.as_bytes();
+        return line.as_bytes().windows(q.len()).position(|w| w.eq_ignore_ascii_case(q));
+    }
     line.char_indices().map(|(i, _)| i).find(|&i| {
         let mut rest = line[i..].chars().flat_map(char::to_lowercase);
         query_lower.chars().all(|q| rest.next() == Some(q))
@@ -1264,6 +1269,18 @@ a
         assert_eq!(find_ci("Die STRAẞE", "straße"), Some(4));
         assert_eq!(find_ci("nothing", "apple"), None);
         assert_eq!(find_ci("x", ""), Some(0));
+        // the ASCII shortcut finds what the general search finds
+        let general = |line: &str, q: &str| {
+            line.char_indices().map(|(i, _)| i).find(|&i| {
+                let mut rest = line[i..].chars().flat_map(char::to_lowercase);
+                q.chars().all(|c| rest.next() == Some(c))
+            })
+        };
+        for line in ["", "a", "Apple pie and APPLE jam", "xxapple", "applx", "The Kelvin K sign \u{212A} here", "İstanbul is", "plain text, no match"] {
+            for q in ["a", "apple", "k", "kelvin k", "i", "istanbul", "pie and", "zzz", "jam"] {
+                assert_eq!(find_ci(line, q), general(line, q), "{line:?} {q:?}");
+            }
+        }
     }
 
     #[test]

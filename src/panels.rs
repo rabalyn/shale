@@ -336,7 +336,7 @@ impl ShaleApp {
         }
         ui.add_space(6.0);
         let Some(v) = &self.vault else { return };
-        let results = v.search(&self.search.query);
+        let results = self.vault_cache.search(v, &self.search.query);
         // the stops the keyboard moves between: (result, found line or None for a name-only hit)
         let stops: Vec<(usize, Option<usize>)> = results.iter().enumerate().flat_map(|(fi, (_, lines))| if lines.is_empty() { vec![(fi, None)] } else { (0..lines.len()).map(|li| (fi, Some(li))).collect() }).collect();
         let entering = (down_from_box || enter_from_box) && !stops.is_empty();
@@ -511,19 +511,19 @@ impl ShaleApp {
         let name = v.file(&rel).map(|f| f.display_name()).unwrap_or_default();
         match panel {
             RightPanel::Backlinks => {
-                let bl = v.backlinks(&rel);
-                let um = v.unlinked_mentions(&rel);
+                let bl = self.vault_cache.backlinks(v, &rel);
+                let um = self.vault_cache.unlinked(v, &rel);
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     section_header(ui, &format!("Linked mentions  {}", bl.len()));
                     if bl.is_empty() {
                         ui.label(muted(format!("No notes link to “{name}” yet.")).size(12.5));
                     }
-                    for (src, lines) in &bl {
+                    for (src, lines) in bl.iter() {
                         self.mention_block(ui, src, lines);
                     }
                     ui.add_space(10.0);
                     section_header(ui, &format!("Unlinked mentions  {}", um.len()));
-                    for (src, lines) in &um {
+                    for (src, lines) in um.iter() {
                         self.mention_block(ui, src, lines);
                     }
                 });
@@ -641,8 +641,8 @@ impl ShaleApp {
 
     pub fn tasks_view(&mut self, ui: &mut Ui) {
         let Some(v) = &self.vault else { return };
-        let all = v.all_tasks();
-        let open = all.iter().filter(|(_, t)| !t.done).count();
+        let all = self.vault_cache.tasks(v);
+        let open = self.vault_cache.open_tasks(v);
         let done = all.len() - open;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let full = ui.available_width();

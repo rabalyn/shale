@@ -68,9 +68,19 @@ pub fn wildcard_find(line: &str, pat: &str) -> Option<usize> {
         return markdown::find_ci(line, pat);
     }
     let pat: Vec<char> = pat.chars().collect();
-    let chars: Vec<(usize, char)> = line.char_indices().take(MAX_LINE_CHARS).map(|(i, c)| (i, c.to_lowercase().next().unwrap_or(c))).collect();
-    let text: Vec<char> = chars.iter().map(|(_, c)| *c).collect();
-    (0..text.len()).find(|&i| matches_at(&pat, &text[i..])).map(|i| chars[i].0)
+    // the buffers of one line are kept for the next (a search looks at every line of the vault)
+    thread_local! {
+        static BUFFERS: std::cell::RefCell<(Vec<usize>, Vec<char>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+    }
+    BUFFERS.with_borrow_mut(|(offsets, text)| {
+        offsets.clear();
+        text.clear();
+        for (i, c) in line.char_indices().take(MAX_LINE_CHARS) {
+            offsets.push(i);
+            text.push(c.to_lowercase().next().unwrap_or(c));
+        }
+        (0..text.len()).find(|&i| matches_at(&pat, &text[i..])).map(|i| offsets[i])
+    })
 }
 
 /// The lines of notes that match, in the order of the vault's files (at most three per note): a

@@ -192,8 +192,11 @@ pub struct Vault {
     /// Path -> position in `files`, for [`Vault::file`] (PERF-002). Built with the name index, which
     /// is rebuilt whenever the set of files changes; a rescan that only changes times keeps the order.
     file_pos: HashMap<PathBuf, usize>,
-    /// Bumped whenever anything in the index changes; UI caches key off this.
+    /// Bumped whenever anything in the index changes; UI caches key off this (with `uid`, which
+    /// tells one opened vault from another).
     pub generation: u64,
+    /// A number of its own for every vault that was opened in this run.
+    pub uid: u64,
     /// Notes the last rename or move could not update: (path after the change, reason). Reset by
     /// every rename and move; the notes that were updated are the call's result (VAULT-016).
     pub failed_rewrites: Vec<(PathBuf, String)>,
@@ -366,7 +369,8 @@ impl Vault {
         if !root.is_dir() {
             fs::create_dir_all(root)?;
         }
-        let mut v = Vault { root: root.to_path_buf(), ..Default::default() };
+        static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let mut v = Vault { root: root.to_path_buf(), uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed), ..Default::default() };
         v.rescan();
         Ok(v)
     }
@@ -668,6 +672,10 @@ impl Vault {
         let mut out = Vec::new();
         for (src, n) in &self.notes {
             if src == rel {
+                continue;
+            }
+            // most notes do not have the name anywhere: one pass over an ASCII text finds that out
+            if n.text.is_ascii() && !n.text.to_ascii_lowercase().contains(&name) {
                 continue;
             }
             let link_ranges: Vec<_> = n.links.iter().map(|l| l.range.clone()).collect();

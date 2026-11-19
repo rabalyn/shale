@@ -948,7 +948,7 @@ impl ShaleApp {
                     let (chars, words) = self.status.counts(&rel, &doc.text);
                     ui.label(small(format!("{chars} characters")));
                     ui.label(small(format!("{words} words")));
-                    let bl = self.status.backlinks(v, &rel);
+                    let bl = self.vault_cache.backlinks(v, &rel).len();
                     ui.label(small(format!("{bl} backlink{}", if bl == 1 { "" } else { "s" })));
                     if doc.unreadable.is_some() {
                         ui.label(egui::RichText::new("Read-only: could not be read").size(11.5).color(theme::LINK_MISSING));
@@ -967,7 +967,7 @@ impl ShaleApp {
                 }
             }
             if let Some(v) = &self.vault {
-                let open = self.status.open_tasks(v);
+                let open = self.vault_cache.open_tasks(v);
                 ui.label(small(format!("{open} open tasks")));
             }
             if let Some(t) = self.mail.status(&self.cfg) {

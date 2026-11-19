@@ -6,7 +6,6 @@
 use crate::editor::{MathMark, NumberMark};
 use crate::fonts::EditorFonts;
 use crate::table::Block;
-use crate::vault::Vault;
 use eframe::egui::Galley;
 use std::collections::HashSet;
 use std::ops::Range;
@@ -109,17 +108,13 @@ impl LayoutCache {
     }
 }
 
-/// What the status bar says of the open note and the vault (EDIT-107): the counts of the text, which
-/// are not worked out again for a text that did not change, and the backlinks and open tasks, which
-/// are not for a vault that did not change.
+/// What the status bar says of the open note (EDIT-107): the counts of the text, which are not
+/// worked out again for a text that did not change. The backlinks and open tasks of the vault are in
+/// [`crate::vault_cache::VaultCache`].
 #[derive(Default)]
 pub struct StatusCache {
     /// the note, the text's length and fast hash, then its characters and words
     counts: Option<(PathBuf, usize, u64, usize, usize)>,
-    /// the vault's generation, the note, its backlinks
-    backlinks: Option<(u64, PathBuf, usize)>,
-    /// the vault's generation, the open tasks
-    open_tasks: Option<(u64, usize)>,
 }
 
 impl StatusCache {
@@ -132,30 +127,6 @@ impl StatusCache {
                 let counts = (text.chars().count(), text.split_whitespace().count());
                 self.counts = Some((rel.to_path_buf(), text.len(), hash, counts.0, counts.1));
                 counts
-            }
-        }
-    }
-
-    /// How many notes link to `rel`.
-    pub fn backlinks(&mut self, vault: &Vault, rel: &Path) -> usize {
-        match &self.backlinks {
-            Some((g, r, n)) if *g == vault.generation && r == rel => *n,
-            _ => {
-                let n = vault.backlinks(rel).len();
-                self.backlinks = Some((vault.generation, rel.to_path_buf(), n));
-                n
-            }
-        }
-    }
-
-    /// How many tasks of the vault are open.
-    pub fn open_tasks(&mut self, vault: &Vault) -> usize {
-        match self.open_tasks {
-            Some((g, n)) if g == vault.generation => n,
-            _ => {
-                let n = vault.all_tasks().iter().filter(|(_, t)| !t.done).count();
-                self.open_tasks = Some((vault.generation, n));
-                n
             }
         }
     }
@@ -238,22 +209,5 @@ mod tests {
         assert_eq!(status.counts(rel, "one two"), (7, 2));
         assert_eq!(status.counts(Path::new("B.md"), "one two"), (7, 2));
         assert_eq!(status.counts(rel, "ä ö"), (3, 2), "characters, not bytes");
-    }
-
-    // spec: EDIT-107
-    #[test]
-    fn edit_107_the_backlinks_and_open_tasks_follow_the_vault_not_the_frame() {
-        let dir = std::env::temp_dir().join(format!("shale-status-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("A.md"), "# A\n- [ ] one\n").unwrap();
-        std::fs::write(dir.join("B.md"), "# B\nsee [[A]]\n").unwrap();
-        let mut vault = Vault::open(&dir).unwrap();
-        let mut status = StatusCache::default();
-        let rel = Path::new("A.md");
-        assert_eq!((status.backlinks(&vault, rel), status.open_tasks(&vault)), (1, 1));
-        vault.set_note_text(Path::new("C.md"), "# C\n[[A]]\n- [ ] two\n- [x] done\n");
-        assert_eq!((status.backlinks(&vault, rel), status.open_tasks(&vault)), (2, 2), "an edit of the vault is seen");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
