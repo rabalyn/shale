@@ -1,0 +1,105 @@
+//! A pretend GitHub for the tests of the updates (UPD): plain HTTP on 127.0.0.1 that serves the
+//! newest release as JSON and the files it names, and counts the requests it gets.
+
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+pub struct FakeGithub {
+    pub port: u16,
+    routes: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    hits: Arc<Mutex<Vec<String>>>,
+    stop: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+fn serve(mut s: TcpStream, routes: &Mutex<HashMap<String, Vec<u8>>>, hits: &Mutex<Vec<String>>) {
+    let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+    let mut raw = Vec::new();
+    let mut buf = [0u8; 1024];
+    while !raw.windows(4).any(|w| w == b"\r\n\r\n") {
+        match s.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => raw.extend_from_slice(&buf[..n]),
+        }
+    }
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    let path = text.split_whitespace().nth(1).unwrap_or("/").to_string();
+    hits.lock().unwrap().push(path.clone());
+    let body = routes.lock().unwrap().get(&path).cloned();
+    let _ = match body {
+        Some(b) => {
+            let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", b.len());
+            s.write_all(&b)
+        }
+        None => write!(s, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+    };
+}
+
+impl FakeGithub {
+    pub fn start() -> FakeGithub {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let routes = Arc::new(Mutex::new(HashMap::new()));
+        let hits = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (r, h, sp) = (routes.clone(), hits.clone(), stop.clone());
+        let join = std::thread::spawn(move || {
+            while !sp.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((s, _)) => {
+                        let (r, h) = (r.clone(), h.clone());
+                        std::thread::spawn(move || {
+                            let _ = s.set_nonblocking(false);
+                            serve(s, &r, &h);
+                        });
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                }
+            }
+        });
+        FakeGithub { port, routes, hits, stop, join: Some(join) }
+    }
+
+    /// The address to give [`super::check::Source::pretend`].
+    pub fn base(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    pub fn serve(&self, path: &str, body: impl Into<Vec<u8>>) {
+        self.routes.lock().unwrap().insert(path.to_string(), body.into());
+    }
+
+    /// The paths asked for so far.
+    pub fn hits(&self) -> Vec<String> {
+        self.hits.lock().unwrap().clone()
+    }
+
+    /// Publish version `version` as the newest release with these files (name, bytes); each file
+    /// gets its `.sha256` (`<hex>  <name>`), unless `damage_checksums` makes the hash wrong.
+    pub fn publish(&self, version: &str, files: &[(&str, Vec<u8>)], damage_checksums: bool) {
+        let mut assets = vec![];
+        for (name, bytes) in files {
+            let hash = if damage_checksums { "0".repeat(64) } else { crate::pdf::tex::archive::sha256_hex(bytes) };
+            self.serve(&format!("/dl/{name}"), bytes.clone());
+            self.serve(&format!("/dl/{name}.sha256"), format!("{hash}  {name}\n"));
+            assets.push(serde_json::json!({"name": name, "browser_download_url": format!("{}/dl/{name}", self.base()), "size": bytes.len()}));
+            assets.push(serde_json::json!({"name": format!("{name}.sha256"), "browser_download_url": format!("{}/dl/{name}.sha256", self.base()), "size": 80}));
+        }
+        let release = serde_json::json!({"tag_name": format!("v{version}"), "draft": false, "prerelease": false, "body": format!("Notes of {version}"), "assets": assets});
+        self.serve("/repos/rabalyn/shale/releases/latest", release.to_string());
+    }
+}
+
+impl Drop for FakeGithub {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(j) = self.join.take() {
+            let _ = j.join();
+        }
+    }
+}

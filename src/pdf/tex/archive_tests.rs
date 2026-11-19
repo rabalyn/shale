@@ -14,7 +14,7 @@ fn temp(tag: &str) -> PathBuf {
 }
 
 /// One entry of a test zip, with the fields a hostile archive would lie in.
-pub(super) struct Z<'a> {
+pub(crate) struct Z<'a> {
     pub name: &'a str,
     pub data: &'a [u8],
     pub deflate: bool,
@@ -24,11 +24,11 @@ pub(super) struct Z<'a> {
     claimed_size: Option<u32>,
 }
 
-pub(super) fn z<'a>(name: &'a str, data: &'a [u8]) -> Z<'a> {
+pub(crate) fn z<'a>(name: &'a str, data: &'a [u8]) -> Z<'a> {
     Z { name, data, deflate: false, mode: None, flags: 0, claimed_size: None }
 }
 
-pub(super) fn zip(entries: &[Z]) -> Vec<u8> {
+pub(crate) fn zip(entries: &[Z]) -> Vec<u8> {
     let (mut body, mut dir) = (Vec::new(), Vec::new());
     for e in entries {
         let packed = if e.deflate { miniz_oxide::deflate::compress_to_vec(e.data, 6) } else { e.data.to_vec() };
@@ -73,7 +73,7 @@ pub(super) fn zip(entries: &[Z]) -> Vec<u8> {
 }
 
 /// A tar header + data.
-pub(super) fn tar_entry(name: &str, kind: u8, data: &[u8]) -> Vec<u8> {
+pub(crate) fn tar_entry(name: &str, kind: u8, data: &[u8]) -> Vec<u8> {
     let mut h = vec![0u8; 512];
     h[..name.len()].copy_from_slice(name.as_bytes());
     h[100..107].copy_from_slice(b"0000644");
@@ -90,7 +90,7 @@ pub(super) fn tar_entry(name: &str, kind: u8, data: &[u8]) -> Vec<u8> {
     out
 }
 
-pub(super) fn tar_gz(entries: &[Vec<u8>]) -> Vec<u8> {
+pub(crate) fn tar_gz(entries: &[Vec<u8>]) -> Vec<u8> {
     let mut tar: Vec<u8> = entries.concat();
     tar.extend(vec![0u8; 1024]);
     let mut gz = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3];

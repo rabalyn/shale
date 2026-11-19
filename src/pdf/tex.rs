@@ -24,7 +24,7 @@ pub mod writer;
 pub use engine::TexConfig;
 
 #[cfg(test)]
-mod archive_tests;
+pub(crate) mod archive_tests;
 #[cfg(test)]
 mod book_env_tests;
 #[cfg(test)]

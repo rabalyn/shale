@@ -441,6 +441,9 @@ pub struct Config {
     /// The TeX that exports notes to PDF through LaTeX templates (TEX-001, CFG-044).
     #[serde(deserialize_with = "lenient")]
     pub tex: crate::pdf::tex::TexConfig,
+    /// What Shale does about new releases (UPD-001).
+    #[serde(deserialize_with = "lenient")]
+    pub updates: crate::update::UpdateConfig,
     /// Keybindings the user changed: action id -> bindings as text (KEY-007). Missing = defaults.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub keybindings: std::collections::BTreeMap<String, Vec<String>>,
@@ -523,6 +526,7 @@ impl Default for Config {
             social_check_minutes: 5,
             caches: CacheRetention::default(),
             tex: Default::default(),
+            updates: Default::default(),
             keybindings: Default::default(),
             legacy_open_files: None,
             legacy_last_import_folder: None,

@@ -1,6 +1,6 @@
 Every setting you can change, its default, and where it lives. Back to [[Start here]]; how the
 files work is in [[Vault settings]]. Open the Settings window with **Ctrl+,** or the settings
-button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Import, Data, LaTeX, Help) and **Keybindings**, and the button
+button of the ribbon; it has a tab per domain (Vault, Editor, Appearance, Fonts, Sync, Calendar, Mail, Feeds, Import, Data, LaTeX, Updates, Help) and **Keybindings**, and the button
 **Open settings file** at the top right (see below). The tab list is as wide as its longest name at any font size; drag its border to change the width, double-click the border to make it automatic again.
 
 Two files hold settings:
@@ -209,6 +209,18 @@ The template sets of the vault ([[PDF]], "LaTeX export: template sets") have a s
 | `author` | empty (used for the author field when a note gives none) | `settings.toml` of the set, the guided setup |
 | `logo` | none, set by Settings → LaTeX → Template sets → Choose logo… | `settings.toml` of the set |
 | `department_logo` | none, set by Settings → LaTeX → Template sets → Choose department logo… (cleared by Remove department logo); the logo of your department, shown under the TU logo | `settings.toml` of the set, the guided setup (logo step) |
+
+### Updates ([[Updates]])
+
+Settings → Updates is the table `[updates]` in the settings file. `SHALE_UPDATES=off` in the environment switches updates off whatever is set here (no request, no notice).
+
+| Key | Default | Where |
+|---|---|---|
+| `updates` | the group of the four keys below | Settings → Updates |
+| `updates.mode` | `Ask` (not chosen yet: the first update found asks); `Off` (no request, no notice), `Notify`, `Download` or `Install` | Settings → Updates, "When an update is found"; or the question when the first update is found |
+| `updates.skipped_version` | empty | the notice's "Skip this version" |
+| `updates.last_check` | `0` (never; seconds since 1970 of the last successful check) | written by Shale after a check; shown in Settings → Updates |
+| `updates.install_on_start` | empty (a downloaded version to install at the next start) | the notice's "At next start" |
 
 ### Data and troubleshooting ([[Data usage and caches]])
 

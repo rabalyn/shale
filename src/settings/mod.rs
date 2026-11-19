@@ -37,6 +37,7 @@ pub enum SettingsTab {
     Import,
     Data,
     Latex,
+    Updates,
     Help,
     Keybindings,
 }
@@ -51,7 +52,7 @@ impl SettingsTab {
     }
 
     /// All tabs in the order of the list.
-    pub const ALL: [SettingsTab; 14] = [
+    pub const ALL: [SettingsTab; 15] = [
         SettingsTab::Vault,
         SettingsTab::Editor,
         SettingsTab::Vim,
@@ -64,6 +65,7 @@ impl SettingsTab {
         SettingsTab::Import,
         SettingsTab::Data,
         SettingsTab::Latex,
+        SettingsTab::Updates,
         SettingsTab::Help,
         SettingsTab::Keybindings,
     ];
@@ -82,6 +84,7 @@ impl SettingsTab {
             SettingsTab::Import => "Import",
             SettingsTab::Data => "Data",
             SettingsTab::Latex => "LaTeX",
+            SettingsTab::Updates => "Updates",
             SettingsTab::Help => "Help",
             SettingsTab::Keybindings => "Keybindings",
         }
@@ -104,6 +107,7 @@ impl SettingsTab {
             SettingsTab::Import => "What the Import takes in, such as Word files through pandoc",
             SettingsTab::Data => "What Shale keeps on disk, and for how long",
             SettingsTab::Latex => "The TeX that exports notes to PDF through LaTeX templates",
+            SettingsTab::Updates => "New releases: whether Shale looks for them, downloads them or installs them",
             SettingsTab::Help => "The user guide and tools to find problems",
             SettingsTab::Keybindings => "Which keys do what",
         }
@@ -227,6 +231,7 @@ impl ShaleApp {
                     SettingsTab::Import => self.import_tab(ui),
                     SettingsTab::Data => self.data_tab(ui, &mut asks),
                     SettingsTab::Latex => self.latex_tab(ui, &mut asks),
+                    SettingsTab::Updates => self.updates_tab(ui),
                     SettingsTab::Help => self.help_tab(ui, &mut asks),
                     SettingsTab::Keybindings => {
                         let edited = egui::ScrollArea::horizontal().auto_shrink([false, true]).show(ui, |ui| crate::keys_ui::show(ui, keys, &mut self.keymap)).inner;
