@@ -3287,7 +3287,7 @@ pub(crate) mod tests {
         assert!(app.vdata.state.last_import_folder.is_empty(), "posts have their own last folder");
         let rel = d.join("Social").read_dir().unwrap().flatten().find(|f| f.file_name().to_string_lossy().ends_with(".md")).unwrap().path();
         let text = std::fs::read_to_string(&rel).unwrap();
-        assert!(text.contains("## Thread") && text.contains("**Source:**") && text.contains("![[z_media/"), "{text}");
+        assert!(text.contains("## Thread") && text.contains("\nurl: ") && !text.contains("**Source:**") && text.contains("![[z_media/"), "{text}");
         assert!(app.actions.iter().any(|a| matches!(a, Action::Open { .. })), "the new note is opened");
         // the same post again: offered, but marked as imported before
         app.rescan();

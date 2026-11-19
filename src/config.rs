@@ -397,7 +397,7 @@ pub struct Config {
     pub docx_import: bool,
     /// The pandoc program for the Word import; empty: search `PATH` and the usual places.
     pub pandoc_path: String,
-    /// Imported e-mails and events also get their properties as a list below the title (IMP-052).
+    /// Imported e-mails, events and posts also get their properties as a list below the title (IMP-052).
     pub import_header_list: bool,
     /// Mastodon and Bluesky accounts for the feed view (secrets are in the keyring).
     pub social_accounts: Vec<crate::social::SocialAccountEntry>,

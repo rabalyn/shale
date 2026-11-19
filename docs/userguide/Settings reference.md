@@ -176,7 +176,7 @@ system keyring, never in this file):
 | Key | Default | Where |
 |---|---|---|
 | `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
-| `import_header_list` | off | Settings → Import, "Header list in the note body"; the start value of the box of the same name in the Import dialog |
+| `import_header_list` | off | Settings → Import, "Header list in the note body" (e-mails, events and saved posts); the start value of the box of the same name in the Import dialog |
 | `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" |
 
 To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,

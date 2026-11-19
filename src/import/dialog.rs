@@ -20,7 +20,7 @@ pub struct ImportDialog {
     pub keep_original: bool,
     /// keep the original .docx of a Word file in its import folder (IMP-038)
     pub keep_docx: bool,
-    /// also write the header of an e-mail / event as a list in the note (IMP-052)
+    /// also write the header of an e-mail / event / post as a list in the note (IMP-052)
     pub header_list: bool,
     /// pandoc runs for the Word files that are going on in a job (IMP-035)
     pub converting: Option<Receiver<Result<Vec<Converted>, String>>>,
@@ -320,8 +320,10 @@ pub fn show(ui: &mut Ui, d: &mut ImportDialog, folders: &[String], tag_choices: 
     });
     if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. })) {
         rec("keep".into(), ui.checkbox(&mut d.keep_original, "Keep the original message / calendar file with the attachments"));
+    }
+    if d.items.iter().any(|i| matches!(i.source, Source::Email { .. } | Source::Event { .. } | Source::Social { .. })) {
         rec("header-list".into(), ui.checkbox(&mut d.header_list, "Header list in the note body"))
-            .on_hover_text("From, To, Date, When, Where … are always in the note's properties; this also writes them as a list below the title, for programs that do not show properties");
+            .on_hover_text("From, To, Date, When, Where, Author, Source … are always in the note's properties; this also writes them as a list below the title, for programs that do not show properties");
     }
     if d.items.iter().any(|i| matches!(i.source, Source::Docx { pandoc: Some(_), .. })) {
         rec("keep-docx".into(), ui.checkbox(&mut d.keep_docx, "Keep the original .docx")).on_hover_text("Copies each Word file into its import folder and names it in the note's properties");
@@ -471,7 +473,7 @@ mod tests {
 
     // spec: IMP-052
     #[test]
-    fn the_header_list_box_is_off_and_only_there_for_messages_and_events() {
+    fn the_header_list_box_is_off_and_only_there_for_messages_events_and_posts() {
         let mut d = ImportDialog::new(vec![import::eml_item(crate::mail::tests::sample_eml(), None)], vec![], String::new(), String::new(), None, false);
         let mut h = H { ctx: egui::Context::default(), t: 0.0 };
         h.frame(vec![], &mut d, &[], &[]);
@@ -483,6 +485,11 @@ mod tests {
         let mut d = ImportDialog::new(vec![import::markdown_item("Top.md".into(), "# A\n".into())], vec![], String::new(), String::new(), None, false);
         h.frame(vec![], &mut d, &[], &[]);
         assert!(!d.rects.iter().any(|r| r.0 == "header-list"), "nothing to list for a Markdown note");
+        let post = crate::social::demo::saved(&crate::social::demo::posts()[0]);
+        let mut d = ImportDialog::new(vec![import::social_item(post, "Mastodon", false)], vec![], String::new(), String::new(), None, false);
+        h.frame(vec![], &mut d, &[], &[]);
+        assert!(d.rects.iter().any(|r| r.0 == "header-list"), "a post has a header list too");
+        assert!(!d.rects.iter().any(|r| r.0 == "keep"), "but no original file to keep");
     }
 
     // spec: IMP-034
