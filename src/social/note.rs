@@ -9,7 +9,7 @@
 use super::markup::{md_link, md_url, plain_text};
 use super::*;
 use crate::calendar::time as t;
-use crate::import::{front, local_stamp, safe_title, yaml};
+use crate::import::{front, header_item, list, local_stamp, safe_title, yaml};
 use crate::media;
 use std::path::{Path, PathBuf};
 
@@ -258,7 +258,9 @@ fn replies_section(saved: &SavedPost) -> String {
 
 /// The note for a saved post or thread. `media_rel_paths`: where each of `saved.media` was saved
 /// in the vault (same order). `tags` and `people_links` (e.g. `[[Ada Lovelace]]`) as for e-mails.
-pub fn post_note(saved: &SavedPost, media_rel_paths: &[PathBuf], tags: &[String], people_links: &[String]) -> String {
+/// The properties are the one record of the header (IMP-050, IMP-058); `header_list` also writes
+/// them as a list below the title (IMP-052).
+pub fn post_note(saved: &SavedPost, media_rel_paths: &[PathBuf], tags: &[String], people_links: &[String], header_list: bool) -> String {
     let first = &saved.thread[0];
     let n = saved.thread.len();
     let when = |p: &Post| if p.created_at == 0 { String::new() } else { local_stamp(p.created_at, false) };
@@ -269,36 +271,42 @@ pub fn post_note(saved: &SavedPost, media_rel_paths: &[PathBuf], tags: &[String]
             ("network", first.network.key().into()),
             ("author", yaml(&format!("@{}", first.author.handle))),
             ("author-name", if first.author.display_name.trim().is_empty() { String::new() } else { yaml(&first.author.display_name) }),
+            ("author-url", if first.author.profile_url.is_empty() { String::new() } else { yaml(&first.author.profile_url) }),
             ("date", when(first)),
             ("url", yaml(&first.url)),
             ("post-id", yaml(&first.id)),
             ("thread", if n > 1 { n.to_string() } else { String::new() }),
             ("replies", if saved.replies.is_empty() { String::new() } else { saved.replies.len().to_string() }),
             ("thread-ids", if n > 1 { format!("[{}]", saved.thread.iter().map(|p| yaml(&p.id)).collect::<Vec<_>>().join(", ")) } else { String::new() }),
+            ("reposted-by", saved.reposted_by.as_ref().map(|b| yaml(&format!("{} (@{})", b.name(), b.handle))).unwrap_or_default()),
+            ("people", list(people_links)),
         ],
         tags,
     );
     s.push_str(&format!("\n# {}\n\n", post_title(first)));
-    s.push_str(&format!("- **Author:** {}\n", md_link(&format!("{name} (@{})", first.author.handle), &first.author.profile_url)));
-    if first.created_at != 0 {
-        s.push_str(&format!("- **Posted:** {}\n", when(first)));
-    }
-    s.push_str(&format!("- **Source:** {}\n", if first.url.is_empty() { String::new() } else { md_link(&first.url, &first.url) }));
-    if n > 1 {
-        s.push_str(&format!("- **Thread:** {n} posts by @{}\n", first.author.handle));
-    }
-    if let Some(b) = &saved.reposted_by {
-        s.push_str(&format!("- **{} by:** {}\n", if first.network == Network::Mastodon { "Boosted" } else { "Reposted" }, md_link(&format!("{} (@{})", b.name(), b.handle), &b.profile_url)));
-    }
-    if !people_links.is_empty() {
-        s.push_str(&format!("- **People:** {}\n", people_links.join(", ")));
+    if header_list {
+        s.push_str(&header_item("Author", &md_link(&format!("{name} (@{})", first.author.handle), &first.author.profile_url)));
+        if first.created_at != 0 {
+            s.push_str(&header_item("Posted", &when(first)));
+        }
+        s.push_str(&header_item("Source", &if first.url.is_empty() { String::new() } else { md_link(&first.url, &first.url) }));
+        if n > 1 {
+            s.push_str(&header_item("Thread", &format!("{n} posts by @{}", first.author.handle)));
+        }
+        if let Some(b) = &saved.reposted_by {
+            s.push_str(&header_item(if first.network == Network::Mastodon { "Boosted by" } else { "Reposted by" }, &md_link(&format!("{} (@{})", b.name(), b.handle), &b.profile_url)));
+        }
+        if !people_links.is_empty() {
+            s.push_str(&header_item("People", &people_links.join(", ")));
+        }
+        s.push('\n');
     }
     if n == 1 {
-        s.push_str("\n## Post\n\n");
+        s.push_str("## Post\n\n");
         s.push_str(&post_body(saved, 0, media_rel_paths));
         s.push('\n');
     } else {
-        s.push_str("\n## Thread\n");
+        s.push_str("## Thread\n");
         for (i, p) in saved.thread.iter().enumerate() {
             if i > 0 {
                 s.push_str("\n---\n");
@@ -358,6 +366,30 @@ mod tests {
         assert!(post_title(&p).ends_with("– Grüße 😀 aus Köln"));
     }
 
+    // spec: IMP-050, IMP-052, IMP-058
+    #[test]
+    fn the_header_is_properties_and_a_list_only_on_request() {
+        let mut p = post("42", "ada", 1_715_941_800, None);
+        p.author.display_name = "Ada L.".into();
+        let mut saved = saved_of(vec![p, post("43", "ada", 1_715_941_900, Some("42"))]);
+        saved.reposted_by = Some(Author { handle: "cy@m.test".into(), display_name: "Cy".into(), profile_url: "https://m.test/@cy".into(), ..Default::default() });
+        let people = ["[[Ada]]".to_string(), "[[Bob, Jr.]]".to_string()];
+        let off = post_note(&saved, &[], &["social".into()], &people, false);
+        for line in ["author-url: \"https://m.test/@ada\"\n", "reposted-by: \"Cy (@cy@m.test)\"\n", "people:\n  - \"[[Ada]]\"\n  - \"[[Bob, Jr.]]\"\n", "thread: 2\n", "url: \"https://m.test/@ada/42\"\n"] {
+            assert!(off.contains(line), "missing {line:?} in\n{off}");
+        }
+        assert!(!off.contains("- **"), "no header list: {off}");
+        let (head, body) = off.split_once("\n# ").unwrap();
+        assert!(head.starts_with("---\n") && body.contains(" @ada@m.test – ") && body.contains("\n\n## Thread\n\n**1/2**"), "title, then the text directly: {off}");
+        assert!(note_has_post(&off, "43"), "the marker is still found");
+        let on = post_note(&saved, &[], &["social".into()], &people, true);
+        assert!(on.contains("\n\n- **Author:** [Ada L. (@ada@m.test)](https://m.test/@ada)\n- **Posted:** "), "{on}");
+        assert!(on.contains("- **Thread:** 2 posts by @ada@m.test\n- **Boosted by:** [Cy (@cy@m.test)](https://m.test/@cy)\n- **People:** [[Ada]], [[Bob, Jr.]]\n\n## Thread\n"), "{on}");
+        // the list is the only difference in the text
+        let strip = |t: &str| t.lines().filter(|l| !l.starts_with("- **")).collect::<Vec<_>>().join("\n").replace("\n\n\n", "\n\n");
+        assert_eq!(strip(&on), strip(&off));
+    }
+
     #[test]
     fn single_post_note() {
         let mut p = post("42", "ada", 1_715_941_800, None);
@@ -376,7 +408,7 @@ mod tests {
         saved.media = vec![SavedMedia { file_name: "a.png".into(), data: vec![1], post: 0, item: 0 }, SavedMedia { file_name: "v.mp4".into(), data: vec![2], post: 0, item: 1 }];
         saved.failed_media = vec![FailedMedia { url: "https://f.test/gone.jpg".into(), error: "404".into(), post: 0, item: 2 }];
         let paths = vec![PathBuf::from("z_media/2024/05/240517_ada-1.png"), PathBuf::from("z_media/2024/05/240517_ada-2.mp4")];
-        let n = post_note(&saved, &paths, &["social".into(), "recipes".into()], &["[[Ada]]".into()]);
+        let n = post_note(&saved, &paths, &["social".into(), "recipes".into()], &["[[Ada]]".into()], true);
         let (y, m, d) = local_day(1_715_941_800);
         let stamp = local_stamp(1_715_941_800, false);
         assert!(n.starts_with("---\ntype: social-post\nnetwork: mastodon\nauthor: \"@ada@m.test\"\nauthor-name: \"Ada \\\"Countess\\\" L.\"\n"), "{n}");
@@ -419,7 +451,7 @@ mod tests {
         let mut saved = saved_of(ps);
         saved.media = vec![SavedMedia { file_name: "b.jpg".into(), data: vec![], post: 1, item: 0 }];
         saved.reposted_by = Some(Author { handle: "cy.test".into(), ..Default::default() });
-        let n = post_note(&saved, &[PathBuf::from("z_media/b.jpg")], &[], &[]);
+        let n = post_note(&saved, &[PathBuf::from("z_media/b.jpg")], &[], &[], true);
         assert!(n.contains("network: bluesky\n") && n.contains("thread: 3\n") && n.contains("thread-ids: [\"p1\", \"p2\", \"p3\"]\n"), "{n}");
         assert!(n.contains("- **Thread:** 3 posts by @ada@m.test\n") && n.contains("- **Reposted by:** cy.test (@cy.test)\n"), "{n}");
         assert!(n.contains("## Thread\n\n**1/3** · ") && n.contains("\n---\n\n**2/3** · ") && n.contains("\n---\n\n**3/3** · "), "{n}");
@@ -442,26 +474,26 @@ mod tests {
         let mut saved = saved_of(vec![p]);
         saved.thread_error = Some("offline".into());
         saved.failed_media = vec![FailedMedia { url: "https://f.test/v.mp4".into(), error: "too big".into(), post: 0, item: 0 }];
-        let n = post_note(&saved, &[], &[], &[]);
+        let n = post_note(&saved, &[], &[], &[], true);
         assert!(n.contains("[video](https://f.test/v.mp4)\n*clip*") && n.contains("offline") && !n.contains("- **Posted:**") && !n.contains("\ndate:"), "{n}");
         // a saved file without a path (caller lost it) is a link too, never a panic
         saved.failed_media.clear();
         saved.media = vec![SavedMedia { file_name: "v.mp4".into(), data: vec![], post: 0, item: 0 }];
-        assert!(post_note(&saved, &[], &[], &[]).contains("[video](https://f.test/v.mp4)"));
+        assert!(post_note(&saved, &[], &[], &[], true).contains("[video](https://f.test/v.mp4)"));
     }
 
     // spec: SOC-020
     #[test]
     fn replies_are_a_quoted_section_only_when_there_are_some() {
         let mut saved = saved_of(vec![post("p1", "ada", 1_715_941_800, None)]);
-        let plain = post_note(&saved, &[], &[], &[]);
+        let plain = post_note(&saved, &[], &[], &[], true);
         assert!(!plain.contains("## Replies") && !plain.contains("replies:"), "{plain}");
         let mut r1 = post("c1", "cy", 1_715_941_900, Some("p1"));
         r1.media = vec![media(MediaKind::Image, "https://f.test/pic.jpg", "a cat")];
         let r2 = post("c2", "dee", 1_715_942_000, Some("c1"));
         let deep = post("c3", "eve", 1_715_942_100, Some("c2"));
         saved.replies = vec![Reply { post: r1, depth: 0 }, Reply { post: r2, depth: 1 }, Reply { post: deep, depth: 9 }];
-        let n = post_note(&saved, &[], &[], &[]);
+        let n = post_note(&saved, &[], &[], &[], true);
         assert!(n.contains("replies: 3\n") && n.contains("\n## Replies\n"), "{n}");
         assert!(n.contains("\n> **[CY (@cy@m.test)](https://m.test/@cy)** · ") && n.contains(" · [link](https://m.test/@cy/c1)\n>\n> text of c1\n> [image](https://f.test/pic.jpg) — a cat\n"), "{n}");
         assert!(n.contains("\n>> **[DEE") && n.contains("\n>> text of c2\n"), "{n}");

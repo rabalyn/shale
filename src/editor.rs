@@ -2,6 +2,10 @@
 //! blue (note exists) or red (note missing), follows links on click and suggests note
 //! names after `[[`.
 
+mod format;
+
+pub(crate) use format::FormatCache;
+
 use crate::colour_tags;
 use crate::fonts::EditorFonts;
 #[cfg(test)]
@@ -269,265 +273,10 @@ pub(crate) fn math_marks(text: &str, base: f32, images: &[(Range<usize>, f32)], 
     out
 }
 
-/// [`highlight_preview`] and the formulas it drew typeset, which are painted over their hidden TeX.
+/// [`highlight_preview`] and the formulas it drew typeset, which are painted over their hidden TeX. The text is
+/// formatted block by block (EDIT-109); this call has no blocks kept from an earlier text.
 pub(crate) fn highlight_with_math(text: &str, links: &[(LinkSpan, bool)], fonts: &EditorFonts, images: &[(Range<usize>, f32)], raw_lines: Option<Range<usize>>) -> (LayoutJob, Vec<MathMark>) {
-    let mut fmts = vec![Fmt::default(); text.len()];
-    let fenced = markdown::fenced_code_lines(text);
-    for block in syntax::fenced_blocks(text) {
-        let body = &text[block.body.clone()];
-        for (r, kind) in syntax::highlight(&block.lang, body).iter() {
-            set(&mut fmts, block.body.start + r.start..block.body.start + r.end, |f| f.syn_kind = Some(*kind));
-        }
-    }
-    let mut code_ranges: Vec<Range<usize>> = Vec::new();
-    let notes = markdown::find_footnotes(text);
-    let mut defined = notes.defined();
-    defined.extend(markdown::defined_footnotes_in_scope());
-    let mut in_front = false;
-    for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
-        let lr = off..off + line.len();
-        // YAML front matter at the top
-        if li == 0 && line.trim() == "---" {
-            in_front = true;
-            set(&mut fmts, lr, |f| f.dim = true);
-            continue;
-        }
-        if in_front {
-            set(&mut fmts, lr.clone(), |f| {
-                f.code = true;
-                f.dim = true
-            });
-            if line.trim() == "---" {
-                in_front = false;
-            }
-            continue;
-        }
-        if fenced.get(li).copied().unwrap_or(false) {
-            set(&mut fmts, lr, |f| f.fence = true);
-            continue;
-        }
-        if let Some(level) = markdown::heading_level(line) {
-            set(&mut fmts, lr.clone(), |f| f.heading = level as u8);
-            let gap = usize::from(line.as_bytes().get(level) == Some(&b' '));
-            set(&mut fmts, off..off + level + gap, |f| {
-                f.dim = true;
-                f.syn = true
-            });
-        }
-        let trimmed = line.trim_start();
-        let indent = line.len() - trimmed.len();
-        if trimmed.starts_with('>') {
-            set(&mut fmts, lr.clone(), |f| f.quote = true);
-            let gap = usize::from(trimmed.as_bytes().get(1) == Some(&b' '));
-            set(&mut fmts, off + indent..off + indent + 1 + gap, |f| {
-                f.dim = true;
-                f.syn = true
-            });
-        }
-        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-            set(&mut fmts, lr.clone(), |f| f.dim = true);
-        }
-        // a page-break marker is markup all through: the preview hides it for the dashed rule (EDIT-065)
-        if markdown::page_break_line(line) {
-            set(&mut fmts, lr.clone(), |f| {
-                f.dim = true;
-                f.syn = true
-            });
-        }
-        if let Some((check, done, _, _)) = markdown::parse_task_line(line) {
-            set(&mut fmts, off + indent..off + check + 2, |f| f.marker = true);
-            if done {
-                set(&mut fmts, off + check + 2..lr.end, |f| f.strike = true);
-            }
-        } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
-            set(&mut fmts, off + indent..off + indent + 1, |f| f.marker = true);
-        } else {
-            let digits = trimmed.bytes().take_while(|c| c.is_ascii_digit()).count();
-            if digits > 0 && trimmed[digits..].starts_with(". ") {
-                set(&mut fmts, off + indent..off + indent + digits + 1, |f| f.marker = true);
-            }
-        }
-        // inline code
-        let lb = line.as_bytes();
-        let mut i = 0;
-        let mut local_code = Vec::new();
-        while i < lb.len() {
-            if lb[i] == b'`' {
-                if let Some(e) = line[i + 1..].find('`') {
-                    let r = off + i..off + i + e + 2;
-                    set(&mut fmts, r.clone(), |f| f.code = true);
-                    set(&mut fmts, r.start..r.start + 1, |f| f.syn = true);
-                    set(&mut fmts, r.end - 1..r.end, |f| f.syn = true);
-                    let inner = off + i + 1;
-                    for (sr, kind) in syntax::highlight_inline(&line[i + 1..i + 1 + e]) {
-                        set(&mut fmts, inner + sr.start..inner + sr.end, |f| f.syn_kind = Some(kind));
-                    }
-                    local_code.push(r);
-                    i += e + 2;
-                    continue;
-                }
-            }
-            i += 1;
-        }
-        inline_pairs(line, off, &mut fmts, &local_code);
-        colour_pairs(line, off, &mut fmts);
-        footnote_pairs(line, off, &mut fmts, &defined, notes.is_continuation(li));
-        code_ranges.extend(local_code);
-    }
-    for (l, exists) in links {
-        set(&mut fmts, l.range.clone(), |f| {
-            f.dim = true;
-            f.syn = true;
-            f.italic = false;
-        });
-        let kind = if *exists { 1 } else { 2 };
-        // colour the shown part (target, or alias) strongly
-        let shown = if l.markdown_style {
-            // [label](target): colour the label
-            let start = l.range.start + if l.embed { 2 } else { 1 };
-            let label_end = text[start..l.range.end].find("](").map(|p| start + p).unwrap_or(l.range.end);
-            start..label_end
-        } else {
-            let inner_start = l.range.start + if l.embed { 3 } else { 2 };
-            let inner_end = l.range.end - 2;
-            let inner = &text[inner_start..inner_end];
-            match inner.find('|') {
-                Some(p) => inner_start + p + 1..inner_end,
-                None => inner_start..inner_end,
-            }
-        };
-        set(&mut fmts, l.range.clone(), |f| f.link = kind);
-        set(&mut fmts, shown, |f| {
-            f.dim = false;
-            f.syn = false
-        });
-    }
-    for w in crate::lists::find_web_links(text) {
-        if code_ranges.iter().any(|c| c.contains(&w.range.start)) {
-            continue;
-        }
-        set(&mut fmts, w.range.clone(), |f| {
-            f.dim = true;
-            f.syn = true;
-            f.link = 3;
-        });
-        set(&mut fmts, w.label_range.clone(), |f| {
-            f.dim = false;
-            f.syn = false
-        });
-    }
-    for (r, _) in markdown::find_tags(text) {
-        if !code_ranges.iter().any(|c| c.contains(&r.start)) {
-            set(&mut fmts, r, |f| f.tag = true);
-        }
-    }
-
-    // the preview: hide the markup of the lines that are not raw; the flag goes either way
-    for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
-        let raw = raw_lines.as_ref().is_none_or(|r| r.contains(&li));
-        // the line break belongs to the line, so that it does not make the row taller
-        let end = (off + line.len() + 1).min(text.len());
-        set(&mut fmts, off..end, |f| {
-            f.hidden = f.syn && !raw;
-            f.rendered = !raw;
-            f.syn = false
-        });
-    }
-    // the code blocks the preview draws as boxes (EDIT-080): the lines have no background of their own;
-    // the fences are hidden, the closing one with its row, unless the cursor is in the block
-    if let Some(rl) = raw_lines.as_ref() {
-        let lines = markdown::lines_with_offsets(text);
-        let plain: Vec<&str> = lines.iter().map(|(_, l)| *l).collect();
-        for fence in syntax::fences(&plain) {
-            let raw = fence.open < rl.end && rl.start < fence.end;
-            for (n, &(off, line)) in lines.iter().enumerate().take(fence.end).skip(fence.open) {
-                let end = (off + line.len() + 1).min(text.len());
-                if n == fence.open && !raw {
-                    set(&mut fmts, off..end, |f| {
-                        f.boxed = true;
-                        f.hidden = true;
-                        f.rendered = true
-                    });
-                } else if n + 1 == fence.end && fence.closed && !raw {
-                    set(&mut fmts, off..end, |f| {
-                        f.boxed = true;
-                        f.folded = true
-                    });
-                } else {
-                    set(&mut fmts, off..end, |f| f.boxed = true);
-                }
-            }
-        }
-    }
-    for (r, h) in images {
-        if r.end <= text.len() && text.is_char_boundary(r.start) && text.is_char_boundary(r.end) {
-            if *h < 0.0 {
-                // a negative height is text that is hidden and keeps its row: a summary is painted over it (EDIT-081)
-                set(&mut fmts, r.clone(), |f| {
-                    f.hidden = true;
-                    f.rendered = true
-                });
-            // a height of 0 is text that a fold hides (EDIT-071)
-            } else if *h == 0.0 {
-                set(&mut fmts, r.clone(), |f| f.folded = true);
-            } else {
-                set(&mut fmts, r.clone(), |f| f.image_h = h.round().clamp(1.0, 30000.0) as u16);
-            }
-        }
-    }
-    // the formulas of the lines the preview draws: typeset, their TeX hidden with room for them in
-    // the first row; one that cannot be typeset is shown as code (EDIT-047, EDIT-049)
-    let marks = math_marks(text, fonts.rendered.size, images, raw_lines.as_ref());
-    let line_starts = markdown::lines_with_offsets(text);
-    for (n, m) in marks.iter().enumerate() {
-        if let (Ok(f), false) = (&m.formula, m.block) {
-            let extra = crate::math::paint::room_for(f, m.em).0;
-            let (from, to) = (line_starts[m.lines.start].0, line_starts.get(m.lines.end).map_or(text.len(), |(o, _)| *o));
-            set(&mut fmts, from..to, |x| x.math_extra = x.math_extra.max((extra * 4.0).ceil() as u16));
-        }
-        if m.formula.is_ok() {
-            let first_end = if m.block { line_starts.get(m.lines.start + 1).map_or(text.len(), |(o, _)| *o) } else { m.range.end };
-            set(&mut fmts, m.range.start..first_end.min(m.range.end.max(first_end)), |f| *f = Fmt { math: n as u32 + 1, ..Fmt::default() });
-            if m.block {
-                let rest_end = line_starts.get(m.lines.end).map_or(text.len(), |(o, _)| *o);
-                set(&mut fmts, first_end..rest_end.max(first_end), |f| *f = Fmt { math_rest: true, ..Fmt::default() });
-            }
-        } else {
-            set(&mut fmts, m.range.clone(), |f| *f = Fmt { code: true, rendered: true, heading: f.heading, quote: f.quote, ..Fmt::default() });
-        }
-    }
-    let mut job = LayoutJob { text: text.to_string(), ..Default::default() };
-    let mut start = 0;
-    let mut cur: Option<&Fmt> = None;
-    // the formats are compared where a char starts, by reference: the table has a record for every byte of the note
-    for i in (0..=text.len()).filter(|&i| i == text.len() || text.is_char_boundary(i)) {
-        let f = fmts.get(i);
-        if f != cur || i == text.len() {
-            if let Some(&c) = cur {
-                if i > start {
-                    let (leading_space, format) = match marks.get((c.math as usize).wrapping_sub(1)).map(|m| (m, &m.formula)) {
-                        Some((m, Ok(f))) if m.block => (0.0, crate::math::paint::block_format(f, m.em)),
-                        Some((m, Ok(f))) => {
-                            // the first character is a section of its own; the room is before the rest
-                            let at = start + crate::math::paint::room_starts(&text[start..i]);
-                            job.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(at), format: crate::math::paint::hidden_format(f, m.em) });
-                            start = at;
-                            (f.layout.width, crate::math::paint::hidden_format(f, m.em))
-                        }
-                        _ if c.math_rest => (0.0, TextFormat { font_id: FontId::proportional(crate::math::paint::HIDDEN_SIZE), color: Color32::TRANSPARENT, line_height: Some(1.0), ..Default::default() }),
-                        _ => (0.0, to_format(c, fonts)),
-                    };
-                    job.sections.push(egui::text::LayoutSection { leading_space, byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(i), format });
-                }
-            }
-            start = i;
-            cur = f;
-        }
-    }
-    if job.sections.is_empty() {
-        job.sections.push(egui::text::LayoutSection { leading_space: 0.0, byte_range: egui::text::ByteIndex(0)..egui::text::ByteIndex(text.len()), format: to_format(Fmt::default(), fonts) });
-    }
-    (job, marks)
+    format::FormatCache::default().highlight(text, links, fonts, images, raw_lines)
 }
 
 /// A heading number to draw (LINK-014): where its title starts in the text, the number and the font.
@@ -1917,7 +1666,7 @@ impl NoteEditor {
                 raw: preview.clone(),
                 ranges,
             };
-            let laid = layout_cache.get(key, settled.is_some(), |key| {
+            let laid = layout_cache.get(key, settled.is_some(), |key, formats| {
                 // The cached links belong to the text from the start of the frame; if the text box
                 // changed it this frame, find them again (cheap for normal notes).
                 let fresh;
@@ -1933,7 +1682,7 @@ impl NoteEditor {
                         .collect::<Vec<_>>();
                     &fresh
                 };
-                let (mut job, formulas) = highlight_with_math(s, use_links, fonts, &key.ranges, preview.clone());
+                let (mut job, formulas) = formats.highlight(s, use_links, fonts, &key.ranges, preview.clone());
                 let numbers = make_room_for_numbers(ui, &mut job, fonts, numbered_default, preview.as_ref());
                 job.wrap.max_width = wrap_width;
                 let galley = ctx.fonts_mut(|f| f.layout_job(job));

@@ -11,11 +11,13 @@
 //! markers and the badge) works for every kind.
 
 use crate::markdown;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::Range;
 
 /// What a foldable block is.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum FoldKind {
     /// A heading and everything up to the next heading of the same or a higher level.
     Heading,
@@ -254,9 +256,10 @@ pub enum FoldCmd {
 }
 
 /// A folded block as it is remembered: by what it is and says, so that edits above or below it
-/// leave it folded; the line is the fall-back when its header was edited.
-#[derive(Clone, Debug, PartialEq)]
-struct Key {
+/// leave it folded; the line is the fall-back when its header was edited. This is also what is
+/// written into the vault state (EDIT-079).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Key {
     kind: FoldKind,
     title: String,
     nth: usize,
@@ -281,6 +284,17 @@ pub struct NoteFolds {
 impl NoteFolds {
     pub fn is_empty(&self) -> bool {
         self.keys.is_empty()
+    }
+
+    /// The folds as they are written into the vault state (EDIT-079).
+    pub fn to_saved(&self) -> Vec<Key> {
+        self.keys.clone()
+    }
+
+    /// The folds read back from the vault state; a block that is gone drops out at the next
+    /// [`NoteFolds::sync`] (EDIT-079).
+    pub fn from_saved(keys: &[Key]) -> NoteFolds {
+        NoteFolds { keys: keys.to_vec() }
     }
 
     /// The indices of the folded blocks among `blocks` (of the current text): a block is folded when

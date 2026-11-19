@@ -69,7 +69,7 @@ impl WordProbe {
 impl ShaleApp {
     pub(super) fn import_tab(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
-        crate::theme::section(ui, "E-mails and events");
+        crate::theme::section(ui, "E-mails, events and posts");
         changed |= ui
             .checkbox(&mut self.cfg.import_header_list, "Header list in the note body")
             .on_hover_text("An imported e-mail or event always has its From, To, Date, When, Where … in the note's properties. Ticked: they are also written as a list below the title, for programs that do not show properties. The Import dialog starts with this choice")

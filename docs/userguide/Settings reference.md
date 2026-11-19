@@ -178,7 +178,7 @@ system keyring, never in this file):
 | Key | Default | Where |
 |---|---|---|
 | `docx_import` | off | Settings → Import, "Import Word files as notes (needs pandoc)"; global config |
-| `import_header_list` | off | Settings → Import, "Header list in the note body"; the start value of the box of the same name in the Import dialog |
+| `import_header_list` | off | Settings → Import, "Header list in the note body" (e-mails, events and saved posts); the start value of the box of the same name in the Import dialog |
 | `pandoc_path` | empty (search `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, and on Windows `%LOCALAPPDATA%\Pandoc` and `%ProgramFiles%\Pandoc`) | Settings → Import, "pandoc program" |
 
 To set it up: install pandoc (Linux `sudo pacman -S pandoc-cli` or `sudo apt install pandoc`, macOS `brew install pandoc`,
@@ -257,6 +257,7 @@ Kept by Shale as you work, so a vault opens as you left it ([[Tabs]], [[Import]]
 | `panes` | empty | the panes side by side, left to right ([[Tabs]]); each has `panes[].tabs` (as `tabs`), `panes[].active` (the open tab, an index into its tabs) and `panes[].weight` (its share of the width, 1); a file without `panes` loads as one pane made of `tabs`. `tabs` is also written as the tabs of the first pane |
 | `focused_pane` | 0 | the index of the pane that had the focus |
 | `highlight_colour`, `font_colour` | not written until a colour is picked (neon yellow `#FFFF00`, red `#E53E3E`) | the current colour of the highlight and font colour buttons of the toolbar as `#RRGGBB` ([[Editor]]); an unreadable value gives the default |
+| `folds` | empty | the folded blocks of your notes ([[Editor]], "Folding"): a note's path relative to the vault, each with its folds (`kind`, `title`, `nth`, `line`: what the block is and where its header was); a note with no entry has the folds it starts with, an empty list is a note whose folds were all opened; the entry of a note that is gone is dropped |
 | `last_import_folder` | empty | the folder of the last import |
 | `last_social_folder` | empty (the first save asks for `Social`) | the folder of the last saved post |
 | `recent_tags` | empty | tags used for imports, most recent first |

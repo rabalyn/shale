@@ -12,6 +12,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// A JSON settings file with a format version and explicit migrations.
@@ -256,6 +257,11 @@ pub struct VaultState {
     pub recent_tags: Vec<String>,
     /// What the note export dialog had last: the engine and the LaTeX set and kind (TEX-016).
     pub latex_export: LatexExport,
+    /// The folded blocks of the notes (vault-relative path), kept across restarts (EDIT-079); an
+    /// entry that cannot be read is dropped, and an empty list is a note whose folds were all
+    /// opened (so that its start folds do not come back).
+    #[serde(deserialize_with = "folds_lenient", skip_serializing_if = "BTreeMap::is_empty")]
+    pub folds: BTreeMap<String, Vec<crate::fold::Key>>,
     /// The current colour of the toolbar's highlight and font colour buttons as `#RRGGBB`
     /// (EDIT-054, NAV-040); absent or unreadable: the default.
     #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "text_or_none")]
@@ -271,6 +277,14 @@ fn text_or_none<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>
     Ok(match Value::deserialize(d)? {
         Value::String(s) => Some(s),
         _ => None,
+    })
+}
+
+/// The saved folds; a note whose entry is not a list of folds loses its folds, the state stays readable.
+fn folds_lenient<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, Vec<crate::fold::Key>>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::Object(m) => m.into_iter().filter_map(|(k, v)| serde_json::from_value(v).ok().map(|keys| (k, keys))).collect(),
+        _ => BTreeMap::new(),
     })
 }
 
@@ -326,6 +340,7 @@ impl Default for VaultState {
             last_social_folder: String::new(),
             recent_tags: vec![],
             latex_export: LatexExport::default(),
+            folds: BTreeMap::new(),
             highlight_colour: None,
             font_colour: None,
             other: Map::new(),
