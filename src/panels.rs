@@ -336,7 +336,7 @@ impl ShaleApp {
         }
         ui.add_space(6.0);
         let Some(v) = &self.vault else { return };
-        let results = v.search(&self.search.query);
+        let results = self.vault_cache.search(v, &self.search.query);
         // the stops the keyboard moves between: (result, found line or None for a name-only hit)
         let stops: Vec<(usize, Option<usize>)> = results.iter().enumerate().flat_map(|(fi, (_, lines))| if lines.is_empty() { vec![(fi, None)] } else { (0..lines.len()).map(|li| (fi, Some(li))).collect() }).collect();
         let entering = (down_from_box || enter_from_box) && !stops.is_empty();
@@ -511,19 +511,19 @@ impl ShaleApp {
         let name = v.file(&rel).map(|f| f.display_name()).unwrap_or_default();
         match panel {
             RightPanel::Backlinks => {
-                let bl = v.backlinks(&rel);
-                let um = v.unlinked_mentions(&rel);
+                let bl = self.vault_cache.backlinks(v, &rel);
+                let um = self.vault_cache.unlinked(v, &rel);
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     section_header(ui, &format!("Linked mentions  {}", bl.len()));
                     if bl.is_empty() {
                         ui.label(muted(format!("No notes link to “{name}” yet.")).size(12.5));
                     }
-                    for (src, lines) in &bl {
+                    for (src, lines) in bl.iter() {
                         self.mention_block(ui, src, lines);
                     }
                     ui.add_space(10.0);
                     section_header(ui, &format!("Unlinked mentions  {}", um.len()));
-                    for (src, lines) in &um {
+                    for (src, lines) in um.iter() {
                         self.mention_block(ui, src, lines);
                     }
                 });
@@ -642,8 +642,8 @@ impl ShaleApp {
 
     pub fn tasks_view(&mut self, ui: &mut Ui) {
         let Some(v) = &self.vault else { return };
-        let all = v.all_tasks();
-        let open = all.iter().filter(|(_, t)| !t.done).count();
+        let all = self.vault_cache.tasks(v);
+        let open = self.vault_cache.open_tasks(v);
         let done = all.len() - open;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let full = ui.available_width();
@@ -670,8 +670,7 @@ impl ShaleApp {
                     });
                     ui.add_space(10.0);
                     let q = self.tasks.query.to_lowercase();
-                    let mut shown = 0;
-                    let mut current_note: Option<PathBuf> = None;
+                    let mut current_note: Option<&PathBuf> = None;
                     let mut list: Vec<_> = all
                         .iter()
                         .filter(|(_, t)| self.tasks.show_done || !t.done)
@@ -681,44 +680,58 @@ impl ShaleApp {
                     if self.tasks.only_due {
                         list.sort_by(|a, b| a.1.due.cmp(&b.1.due));
                     }
+                    // the rows: a heading where the note changes, then its tasks
+                    let mut rows: Vec<(&PathBuf, Option<&markdown::Task>)> = Vec::with_capacity(list.len() * 2);
                     for (rel, t) in list {
-                        if !self.tasks.only_due && current_note.as_ref() != Some(rel) {
-                            current_note = Some(rel.clone());
+                        if !self.tasks.only_due && current_note != Some(rel) {
+                            current_note = Some(rel);
+                            rows.push((rel, None));
+                        }
+                        rows.push((rel, Some(t)));
+                    }
+                    let shown = rows.iter().filter(|r| r.1.is_some()).count();
+                    let only_due = self.tasks.only_due;
+                    let actions = &mut self.actions;
+                    self.tasks.rows.show(ui, rows.len(), 24.0, |ui, i| {
+                        let (rel, task) = rows[i];
+                        let Some(t) = task else {
                             ui.add_space(8.0);
                             let name = v.file(rel).map(|f| f.display_name()).unwrap_or_default();
                             let folder = rel.parent().map(rel_to_string).filter(|s| !s.is_empty());
                             ui.horizontal(|ui| {
                                 if ui.add(egui::Label::new(egui::RichText::new(&name).size(15.0).color(theme::palette().text_strong)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                                    self.actions.push(Action::Open { rel: rel.clone(), new_tab: false });
+                                    actions.push(Action::Open { rel: rel.clone(), new_tab: false });
                                 }
                                 if let Some(f) = folder {
                                     ui.label(muted(f).size(12.0));
                                 }
                             });
-                        }
-                        shown += 1;
-                        ui.horizontal(|ui| {
-                            ui.add_space(t.indent as f32 * 8.0);
-                            let mut d = t.done;
-                            if ui.checkbox(&mut d, "").on_hover_text("Tick off (saved to the note)").clicked() {
-                                self.actions.push(Action::ToggleTask { rel: rel.clone(), offset: t.check_offset });
-                            }
-                            let shown = strip_due(&t.text);
-                            let (link, plain) = crate::reader::inline_line(ui, &shown, v, rel, 14.0, t.done);
-                            if let Some(a) = link {
-                                crate::app::handle_reader_action(&mut self.actions, a, rel);
-                            } else if plain {
-                                self.actions.push(Action::GotoLine { rel: rel.clone(), line: t.line });
-                            }
-                            if let Some(due) = &t.due {
-                                let overdue = today().map(|d| due.as_str() < d.as_str()).unwrap_or(false) && !t.done;
-                                ui.label(egui::RichText::new(format!("due {due}")).size(12.0).color(if overdue { theme::palette().link_missing } else { theme::palette().accent }));
-                            }
-                            if self.tasks.only_due {
-                                ui.label(muted(v.file(rel).map(|f| f.display_name()).unwrap_or_default()).size(12.0));
-                            }
+                            return;
+                        };
+                        ui.push_id((rel, t.line), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(t.indent as f32 * 8.0);
+                                let mut d = t.done;
+                                if ui.checkbox(&mut d, "").on_hover_text("Tick off (saved to the note)").clicked() {
+                                    actions.push(Action::ToggleTask { rel: rel.clone(), offset: t.check_offset });
+                                }
+                                let shown = strip_due(&t.text);
+                                let (link, plain) = crate::reader::inline_line(ui, &shown, v, rel, 14.0, t.done);
+                                if let Some(a) = link {
+                                    crate::app::handle_reader_action(actions, a, rel);
+                                } else if plain {
+                                    actions.push(Action::GotoLine { rel: rel.clone(), line: t.line });
+                                }
+                                if let Some(due) = &t.due {
+                                    let overdue = today().map(|d| due.as_str() < d.as_str()).unwrap_or(false) && !t.done;
+                                    ui.label(egui::RichText::new(format!("due {due}")).size(12.0).color(if overdue { theme::palette().link_missing } else { theme::palette().accent }));
+                                }
+                                if only_due {
+                                    ui.label(muted(v.file(rel).map(|f| f.display_name()).unwrap_or_default()).size(12.0));
+                                }
+                            });
                         });
-                    }
+                    });
                     if shown == 0 {
                         ui.add_space(20.0);
                         ui.label(muted(if all.is_empty() { "No tasks yet. Write “- [ ] something” in any note." } else { "Nothing matches. Everything done? 🎉" }));

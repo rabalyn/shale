@@ -766,6 +766,18 @@ fn panel_task_list_filters_ticks_and_opens() {
     assert!(p.actions().iter().any(|a| matches!(a, Action::GotoLine { rel, line } if rel == Path::new("Plan.md") && *line == 5)));
 }
 
+// spec: PERF-001
+#[test]
+fn perf_001_the_task_view_of_a_big_vault_draws_only_the_rows_in_view() {
+    let notes: Vec<(String, String)> = (0..300).map(|n| (format!("Note {n:03}.md"), (0..10).map(|t| format!("- [ ] task {n}-{t}\n")).collect::<String>())).collect();
+    let files: Vec<(&str, &str)> = notes.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+    let mut p = P::with_files("tasksmany", &files);
+    assert!(p.shows(Show::Tasks, "3000 open · 0 done"), "the counts are of all the tasks");
+    assert!(p.shows(Show::Tasks, "task 0-0") && !p.shows(Show::Tasks, "task 299-9"), "the first rows, not the last");
+    let drawn = p.app.tasks.rows.drawn();
+    assert!((10..200).contains(&drawn), "{drawn} of 3300 rows drawn");
+}
+
 // spec: TASK-005
 #[test]
 fn panel_task_list_says_so_when_there_are_none() {

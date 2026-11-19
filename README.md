@@ -254,6 +254,10 @@ Other options:
 - `--size 1360x840` (with `--screenshot`) sets the window size, and `--keys 'step|step|…'` scripts typing,
   keys and the mouse (`click:@Sync`, `rclick:347,21`, `drag:@Ideas>@Projects`, `waitfor:@Reply`; the
   steps are listed at the top of `src/script.rs`).
+- Performance: a build with `--features bench` has `--bench`, which runs headless benchmarks of the
+  real code paths (and a worst case with everything loaded at once) and writes JSON; see
+  `docs/perf/README.md` for `scripts/bench.sh` (with flamegraphs), `scripts/bench-compare.sh` and the
+  report `docs/perf/index.html`. Releases store their results in `docs/perf/results/`.
 - An option Shale does not know, or one without its value, stops the start with an error and the
   usage line (exit code 2) instead of being skipped.
 - The pictures of the user guide (`docs/userguide/z_media/screenshots/`) are made by

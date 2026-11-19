@@ -15,6 +15,8 @@
 #[cfg(test)]
 mod align_ui_tests;
 mod app;
+#[cfg(feature = "bench")]
+mod bench;
 mod calendar;
 mod caption;
 mod code_box;
@@ -47,6 +49,7 @@ mod fsutil;
 mod galley_index;
 mod gitsync;
 mod graph;
+mod graph_tree;
 mod import;
 mod instance;
 mod jobs;
@@ -117,10 +120,12 @@ mod userguide_ui_tests;
 #[cfg(test)]
 mod utf8_tests;
 mod vault;
+mod vault_cache;
 mod vault_check;
 mod vault_path;
 mod vault_state;
 mod vim;
+mod virtual_list;
 
 use eframe::egui;
 use std::path::PathBuf;
@@ -231,6 +236,17 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
 }
 
 fn main() -> eframe::Result {
+    // the benchmark harness (BUILD-038): modes of their own, before the process is hardened (perf cannot attach to an undumpable one)
+    #[cfg(feature = "bench")]
+    if let Some(parsed) = bench::cli::parse(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        match parsed {
+            Ok(command) => std::process::exit(bench::run(command)),
+            Err(message) => {
+                eprintln!("shale: {message}\n{}", bench::cli::USAGE);
+                std::process::exit(2);
+            }
+        }
+    }
     // started from Finder or the Dock, macOS gives no Homebrew folders on the PATH (BUILD-018); first, before any thread
     #[cfg(target_os = "macos")]
     finder_path::apply();

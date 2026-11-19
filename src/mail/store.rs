@@ -728,14 +728,19 @@ fn index_unknown_files(conn: &mut Connection, root: &Path) -> Result<usize> {
             let mut folder: Option<FolderRow> = None;
             for (uvdir, uvpath) in sorted_dir(&fpath) {
                 let Ok(uv) = uvdir.parse::<u32>() else { continue };
+                // the uids this folder already has under this UIDVALIDITY: one query, not one per file
+                let mut known: Option<std::collections::HashSet<u32>> = None;
                 for (file, path) in sorted_dir(&uvpath) {
                     let Some(uid) = file.strip_suffix(".eml").and_then(|u| u.parse::<u32>().ok()) else { continue };
                     if folder.is_none() {
                         folder = Some(db::upsert_folder(conn, &account, &account, &name, None, None, true)?);
                     }
                     let f = folder.as_ref().ok_or("no folder")?;
-                    let known: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM messages WHERE folder = ?1 AND uidvalidity = ?2 AND uid = ?3)", rusqlite::params![f.id, uv, uid], |r| r.get(0))?;
-                    if known {
+                    if known.is_none() {
+                        let mut st = conn.prepare("SELECT uid FROM messages WHERE folder = ?1 AND uidvalidity = ?2").map_err(db::MailError::from)?;
+                        known = Some(st.query_map(rusqlite::params![f.id, uv], |r| r.get::<_, u32>(0)).map_err(db::MailError::from)?.collect::<rusqlite::Result<_>>().map_err(db::MailError::from)?);
+                    }
+                    if known.as_ref().is_some_and(|k| k.contains(&uid)) {
                         continue;
                     }
                     let Ok(raw) = fsutil::read(&path) else { continue };
@@ -1333,6 +1338,30 @@ mod tests {
         reader.join().unwrap();
         assert_eq!(count(&store), 30);
         drop(store);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: PERF-009
+    #[test]
+    fn perf_009_opening_indexes_the_files_without_a_row_and_only_those() {
+        let root = temp_root("reconcile-known");
+        let store = MailStore::open(&root).unwrap();
+        let inbox = store.ensure_folder("acct1", "A", "INBOX", Some("/"), None, true).unwrap();
+        put(&store, &inbox, 1, &sample("one", "a@x.de", "first"));
+        put(&store, &inbox, 2, &sample("two", "a@x.de", "second"));
+        // a file the index does not know (a copy put there by hand), next to the two it knows
+        let dir = root.join(format!("acct1/{}/7", std::fs::read_dir(root.join("acct1")).unwrap().flatten().find(|e| e.path().is_dir()).unwrap().file_name().to_string_lossy()));
+        std::fs::write(dir.join("3.eml"), sample("three", "a@x.de", "zebrafish")).unwrap();
+        drop(store);
+        let again = MailStore::open(&root).unwrap();
+        let r = again.reader().unwrap();
+        assert_eq!(r.count_messages().unwrap(), 3, "the new file has its row, the two others have no second one");
+        assert_eq!(r.search("zebrafish", None, 5, 0).unwrap().len(), 1);
+        drop(r);
+        drop(again);
+        let third = MailStore::open(&root).unwrap();
+        assert_eq!(third.reader().unwrap().count_messages().unwrap(), 3, "nothing is indexed twice");
+        drop(third);
         let _ = std::fs::remove_dir_all(&root);
     }
 

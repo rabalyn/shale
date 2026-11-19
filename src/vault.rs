@@ -189,11 +189,38 @@ pub struct Vault {
     name_index: HashMap<String, Vec<PathBuf>>,
     /// Lowercase vault path (`projects/plan.md` and `projects/plan`) -> file.
     path_index: HashMap<String, PathBuf>,
-    /// Bumped whenever anything in the index changes; UI caches key off this.
+    /// Path -> position in `files`, for [`Vault::file`] (PERF-002). Built with the name index, which
+    /// is rebuilt whenever the set of files changes; a rescan that only changes times keeps the order.
+    file_pos: HashMap<PathBuf, usize>,
+    /// Bumped whenever anything in the index changes; UI caches key off this (with `uid`, which
+    /// tells one opened vault from another).
     pub generation: u64,
+    /// A number of its own for every vault that was opened in this run.
+    pub uid: u64,
     /// Notes the last rename or move could not update: (path after the change, reason). Reset by
     /// every rename and move; the notes that were updated are the call's result (VAULT-016).
     pub failed_rewrites: Vec<(PathBuf, String)>,
+}
+
+/// From this many notes on, a vault is parsed on several threads.
+const PARALLEL_FROM: usize = 256;
+
+/// The index of one note's text, made apart from the vault so that notes can be parsed together.
+#[derive(Default)]
+struct Parsed {
+    links: Vec<LinkSpan>,
+    tasks: Vec<Task>,
+    tags: Vec<String>,
+    resolved: Vec<Option<PathBuf>>,
+}
+
+impl Parsed {
+    fn store(self, n: &mut NoteIndex) {
+        n.links = self.links;
+        n.tasks = self.tasks;
+        n.tags = self.tags;
+        n.resolved = self.resolved;
+    }
 }
 
 /// Replace the targets of links in `text`: each (old target text, new target text) pair.
@@ -214,6 +241,12 @@ pub struct LinkUpdate {
     pub changed: Vec<PathBuf>,
     /// canvases that still link to the old name or place (canvases are never written)
     pub canvases: Vec<PathBuf>,
+}
+
+/// The key the file tree and the lists sort paths by: the path in lower case. Sort with
+/// `sort_by_cached_key`, so the string is made once per element and not once per comparison.
+pub fn sort_key(p: &Path) -> String {
+    rel_to_string(p).to_lowercase()
 }
 
 pub fn rel_to_string(p: &Path) -> String {
@@ -357,7 +390,8 @@ impl Vault {
         if !root.is_dir() {
             fs::create_dir_all(root)?;
         }
-        let mut v = Vault { root: root.to_path_buf(), ..Default::default() };
+        static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let mut v = Vault { root: root.to_path_buf(), uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed), ..Default::default() };
         v.rescan();
         Ok(v)
     }
@@ -390,17 +424,15 @@ impl Vault {
                 (f.clone(), (m.as_ref().and_then(|m| m.created().ok()).or(modified), modified))
             })
             .collect();
-        files.sort_by_key(|f: &FileEntry| rel_to_string(&f.rel).to_lowercase());
-        folders.sort_by_key(|f| rel_to_string(f).to_lowercase());
+        files.sort_by_cached_key(|f: &FileEntry| sort_key(&f.rel));
+        folders.sort_by_cached_key(|f| sort_key(f));
         let mut changed = Vec::new();
         let mut seen = HashSet::new();
         let mut drawings_changed = Vec::new();
         let mut seen_drawings = HashSet::new();
-        let mut structure_changed = files.len() != self.files.len() || folders != self.folders;
+        // the same paths in the same places: the position index of `file` stays right
+        let mut structure_changed = files.len() != self.files.len() || folders != self.folders || files.iter().zip(&self.files).any(|(a, b)| a.rel != b.rel);
         for f in &files {
-            if !structure_changed && !self.files.iter().any(|o| o.rel == f.rel) {
-                structure_changed = true;
-            }
             if f.kind == FileKind::Drawing {
                 seen_drawings.insert(f.rel.clone());
                 if self.index_drawing(&f.rel) {
@@ -460,6 +492,7 @@ impl Vault {
     fn rebuild_name_index(&mut self) {
         self.name_index.clear();
         self.path_index.clear();
+        self.file_pos = self.files.iter().enumerate().map(|(i, f)| (f.rel.clone(), i)).collect();
         for f in &self.files {
             self.name_index.entry(f.link_name.to_lowercase()).or_default().push(f.rel.clone());
             // also allow the full file name (`Note.md`, `Plan.excalidraw.md`)
@@ -477,9 +510,23 @@ impl Vault {
     }
 
     fn reparse_all(&mut self) {
-        let keys: Vec<PathBuf> = self.notes.keys().cloned().collect();
-        for k in keys {
-            self.reparse(&k);
+        // the notes are independent: many of them are parsed on several threads (PERF-008)
+        let mut keys: Vec<&PathBuf> = self.notes.keys().collect();
+        let threads = if keys.len() >= PARALLEL_FROM { std::thread::available_parallelism().map_or(1, |n| n.get()).min(8) } else { 1 };
+        let chunk = keys.len().div_ceil(threads).max(1);
+        let this = &*self;
+        let parsed: Vec<(PathBuf, Parsed)> = if threads == 1 {
+            keys.iter().map(|k| ((*k).clone(), this.parse_note(k))).collect()
+        } else {
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = keys.chunks_mut(chunk).map(|part| scope.spawn(move || part.iter().map(|k| ((*k).clone(), this.parse_note(k))).collect::<Vec<_>>())).collect();
+                handles.into_iter().flat_map(|h| h.join().expect("a parsing thread")).collect()
+            })
+        };
+        for (rel, p) in parsed {
+            if let Some(n) = self.notes.get_mut(&rel) {
+                p.store(n);
+            }
         }
         let keys: Vec<PathBuf> = self.drawings.keys().cloned().collect();
         for k in keys {
@@ -518,7 +565,16 @@ impl Vault {
     }
 
     fn reparse(&mut self, rel: &Path) {
-        let Some(n) = self.notes.get(rel) else { return };
+        let parsed = self.parse_note(rel);
+        if let Some(n) = self.notes.get_mut(rel) {
+            parsed.store(n);
+        }
+    }
+
+    /// What the index holds of the text of the note `rel`: its links (and what they resolve to),
+    /// tasks and tags.
+    fn parse_note(&self, rel: &Path) -> Parsed {
+        let Some(n) = self.notes.get(rel) else { return Parsed::default() };
         let links = markdown::find_links(&n.text);
         let tasks = markdown::find_tasks(&n.text);
         let mut tags: Vec<String> = markdown::find_tags(&n.text).into_iter().map(|t| t.1).collect();
@@ -526,11 +582,7 @@ impl Vault {
         tags.sort();
         tags.dedup();
         let resolved = links.iter().map(|l| self.resolve(&l.target, Some(rel))).collect();
-        let n = self.notes.get_mut(rel).unwrap();
-        n.links = links;
-        n.tasks = tasks;
-        n.tags = tags;
-        n.resolved = resolved;
+        Parsed { links, tasks, tags, resolved }
     }
 
     /// Update the index from an editor buffer (the file itself is written separately).
@@ -545,7 +597,7 @@ impl Vault {
     }
 
     pub fn file(&self, rel: &Path) -> Option<&FileEntry> {
-        self.files.iter().find(|f| f.rel == rel)
+        self.file_pos.get(rel).and_then(|&i| self.files.get(i))
     }
 
     /// Find the file a link target points to. `from` is the note containing the link.
@@ -602,7 +654,7 @@ impl Vault {
         }
         let name = t.rsplit('/').next().unwrap_or(t);
         let mut c = self.name_index.get(&name.to_lowercase()).cloned().unwrap_or_default();
-        c.sort_by_key(|p| rel_to_string(p).to_lowercase());
+        c.sort_by_cached_key(|p| sort_key(p));
         c
     }
 
@@ -646,7 +698,7 @@ impl Vault {
                 out.push((src.clone(), lines));
             }
         }
-        out.sort_by_key(|(p, _)| rel_to_string(p).to_lowercase());
+        out.sort_by_cached_key(|(p, _)| sort_key(p));
         out
     }
 
@@ -660,6 +712,10 @@ impl Vault {
         let mut out = Vec::new();
         for (src, n) in &self.notes {
             if src == rel {
+                continue;
+            }
+            // most notes do not have the name anywhere: one pass over an ASCII text finds that out
+            if n.text.is_ascii() && !n.text.to_ascii_lowercase().contains(&name) {
                 continue;
             }
             let link_ranges: Vec<_> = n.links.iter().map(|l| l.range.clone()).collect();
@@ -687,7 +743,7 @@ impl Vault {
                 out.push((src.clone(), lines));
             }
         }
-        out.sort_by_key(|(p, _)| rel_to_string(p).to_lowercase());
+        out.sort_by_cached_key(|(p, _)| sort_key(p));
         out
     }
 
@@ -709,8 +765,14 @@ impl Vault {
 
     /// Every task in every note, sorted by note path.
     pub fn all_tasks(&self) -> Vec<(PathBuf, Task)> {
-        let mut out: Vec<(PathBuf, Task)> = self.notes.iter().flat_map(|(p, n)| n.tasks.iter().map(move |t| (p.clone(), t.clone()))).collect();
-        out.sort_by(|a, b| rel_to_string(&a.0).to_lowercase().cmp(&rel_to_string(&b.0).to_lowercase()).then(a.1.line.cmp(&b.1.line)));
+        let mut notes: Vec<(String, &PathBuf, &NoteIndex)> = self.notes.iter().filter(|(_, n)| !n.tasks.is_empty()).map(|(p, n)| (sort_key(p), p, n)).collect();
+        notes.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut out = Vec::with_capacity(notes.iter().map(|n| n.2.tasks.len()).sum());
+        for (_, p, n) in notes {
+            let first = out.len();
+            out.extend(n.tasks.iter().map(|t| (p.clone(), t.clone())));
+            out[first..].sort_by_key(|(_, t): &(PathBuf, Task)| t.line);
+        }
         out
     }
 
@@ -1936,6 +1998,81 @@ mod tests {
         let second = v.new_note_path_max(Path::new(""), &long, 127);
         assert_ne!(first, second);
         assert!(name(second.clone()).len() <= 127 && name(second).ends_with(" 1.md"));
+        let _ = fs::remove_dir_all(&d);
+    }
+    // spec: PERF-002
+    #[test]
+    fn perf_002_file_finds_what_the_linear_search_finds_through_every_change() {
+        let (mut v, d) = vault_with("perf2-file", &[("A.md", "a"), ("Folder/B.md", "b"), ("folder/c.md", "c"), ("z.png", "x")]);
+        let check = |v: &Vault| {
+            for f in &v.files {
+                assert_eq!(v.file(&f.rel).map(|e| e.rel.clone()), Some(f.rel.clone()), "{:?}", f.rel);
+            }
+            assert!(v.file(Path::new("nothing.md")).is_none());
+            assert!(v.file(Path::new("")).is_none());
+        };
+        check(&v);
+        // a new file in the middle moves the ones after it
+        fs::write(d.join("B2.md"), "new").unwrap();
+        v.rescan();
+        check(&v);
+        assert!(v.file(Path::new("B2.md")).is_some());
+        // a file that goes
+        fs::remove_file(d.join("A.md")).unwrap();
+        v.rescan();
+        check(&v);
+        assert!(v.file(Path::new("A.md")).is_none());
+        // a rename through the vault
+        v.rename(Path::new("B2.md"), Path::new("Folder/Moved.md"), true).unwrap();
+        check(&v);
+        assert!(v.file(Path::new("B2.md")).is_none() && v.file(Path::new("Folder/Moved.md")).is_some());
+        // an unchanged rescan changes nothing
+        let g = v.generation;
+        v.rescan();
+        assert_eq!(v.generation, g);
+        check(&v);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: PERF-002
+    #[test]
+    fn perf_002_the_file_list_and_the_lists_made_of_it_keep_their_order() {
+        let (v, d) = vault_with("perf2-order", &[("b.md", "- [ ] one\n- [x] two"), ("A.md", "- [ ] three"), ("Ä.md", "x"), ("c/D.md", "[[b]] [[A]]\n- [ ] four"), ("e.md", "[[b]]")]);
+        let names: Vec<String> = v.files.iter().map(|f| rel_to_string(&f.rel)).collect();
+        let mut expected = names.clone();
+        expected.sort_by_key(|n| n.to_lowercase());
+        assert_eq!(names, expected, "files sorted by their lower-case path");
+        let tasks: Vec<(String, usize, bool)> = v.all_tasks().into_iter().map(|(p, t)| (rel_to_string(&p), t.line, t.done)).collect();
+        assert_eq!(tasks, [("A.md".to_string(), 0, false), ("b.md".into(), 0, false), ("b.md".into(), 1, true), ("c/D.md".into(), 1, false)]);
+        let back: Vec<String> = v.backlinks(Path::new("b.md")).into_iter().map(|(p, _)| rel_to_string(&p)).collect();
+        assert_eq!(back, ["c/D.md", "e.md"]);
+        let _ = fs::remove_dir_all(&d);
+    }
+    // spec: PERF-008
+    #[test]
+    fn perf_008_a_big_vault_parsed_on_several_threads_has_the_index_of_one_note_at_a_time() {
+        let n = PARALLEL_FROM * 2 + 7;
+        let files: Vec<(String, String)> = (0..n)
+            .map(|i| (format!("d{}/Note {i}.md", i % 5), format!("---\ntags: [t{}]\n---\n# Note {i}\nSee [[Note {}]] and [[Note {}|x]] #tag{} and [[Missing {i}]]\n- [ ] task {i}\n- [x] done {i}\n", i % 3, (i + 1) % n, (i * 7) % n, i % 11)))
+            .collect();
+        let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        let (mut v, d) = vault_with("perf8-parse", &refs);
+        let snapshot = |v: &Vault| {
+            let mut all: Vec<_> =
+                v.notes.iter().map(|(k, n)| (k.clone(), n.links.iter().map(|l| l.target.clone()).collect::<Vec<_>>(), n.resolved.clone(), n.tasks.iter().map(|t| (t.line, t.done)).collect::<Vec<_>>(), n.tags.clone())).collect();
+            all.sort();
+            all
+        };
+        let parallel = snapshot(&v);
+        assert_eq!(parallel.len(), n);
+        assert!(parallel.iter().all(|(_, l, r, t, tags)| l.len() == 3 && r.len() == 3 && t.len() == 2 && !tags.is_empty()));
+        assert!(parallel.iter().all(|(_, _, r, _, _)| r.iter().filter(|x| x.is_none()).count() == 1), "one link of three is to a missing note");
+        // the same index one note at a time
+        let keys: Vec<PathBuf> = v.notes.keys().cloned().collect();
+        for k in &keys {
+            v.reparse(k);
+        }
+        assert_eq!(snapshot(&v), parallel);
         let _ = fs::remove_dir_all(&d);
     }
 }

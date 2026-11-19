@@ -34,6 +34,11 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-f
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
 fontdb = { version = "0.24", default-features = false, features = ["fs", "memmap", "fontconfig"] }
 
+[features]
+# The benchmark harness (BUILD-038): `shale --bench`, scenarios, a counting allocator, comparison and
+# report. Off by default, so no shipped build contains any of it.
+bench = []
+
 [dev-dependencies]
 # the time zone database that Windows builds bundle (below): the tests read it on every system
 jiff-tzdb = "1"
@@ -60,6 +65,12 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = "line-tables-only"
+
+# What scripts/bench.sh builds (BUILD-038): the release profile with line tables, so a flamegraph
+# names functions and lines. The shipped release profile is unchanged.
+[profile.bench-release]
+inherits = "release"
 debug = "line-tables-only"
 
 [target.'cfg(unix)'.dependencies]
