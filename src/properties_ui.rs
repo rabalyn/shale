@@ -100,6 +100,24 @@ fn person(ui: &mut Ui, p: &Person, strong: bool, vault: &Vault, rel: &Path, out:
     }
 }
 
+/// A date of a card (EDIT-108): `text` is drawn as a link that shows the day of `stamp`
+/// (`2026-11-12 14:30`) in the calendar; a stamp that is no date is plain text.
+fn date(ui: &mut Ui, text: &str, stamp: &str, strong: bool, out: &mut Option<ReaderAction>) {
+    let Some(day) = crate::calendar::time::parse_ymd(properties::date_part(stamp)) else {
+        let t = RichText::new(text);
+        ui.label(if strong { t.strong().color(theme::TEXT_STRONG) } else { t.color(theme::MUTED) });
+        return;
+    };
+    let mut t = RichText::new(text).color(theme::LINK);
+    if strong {
+        t = t.strong();
+    }
+    let r = ui.add(egui::Label::new(t).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Show this day in the calendar");
+    if r.clicked() {
+        *out = Some(ReaderAction::OpenDay(day));
+    }
+}
+
 fn muted(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).color(theme::MUTED));
 }
@@ -118,8 +136,7 @@ fn email(ui: &mut Ui, c: &Card, vault: &Vault, rel: &Path, out: &mut Option<Read
             people(ui, f, true, vault, rel, out);
         }
         if let Some(d) = c.get("date") {
-            // dates are text: nothing in the app opens the calendar on a day (EDIT-064)
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| muted(ui, d));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| date(ui, d, d, false, out));
         }
     });
     if let Some(t) = c.get("to") {
@@ -156,7 +173,7 @@ fn tags(ui: &mut Ui, c: &Card) {
 fn event(ui: &mut Ui, c: &Card, vault: &Vault, rel: &Path, out: &mut Option<ReaderAction>) {
     ui.horizontal_wrapped(|ui| {
         if let Some(w) = c.when() {
-            ui.label(RichText::new(w).strong().color(theme::TEXT_STRONG));
+            date(ui, &w, c.get("start").unwrap_or_default(), true, out);
         }
         if let Some(r) = c.get("repeats") {
             chip(ui, &format!("repeats {r}"), theme::TEXT, theme::BG_HOVER);

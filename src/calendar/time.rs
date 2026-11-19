@@ -18,6 +18,15 @@ pub fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
+/// The day number of `2026-11-12` (a valid civil date), else none.
+pub fn parse_ymd(s: &str) -> Option<i64> {
+    let mut it = s.trim().splitn(3, '-');
+    let y: i32 = it.next()?.trim().parse().ok()?;
+    let m: u32 = it.next()?.trim().parse().ok()?;
+    let d: u32 = it.next()?.trim().parse().ok()?;
+    ((1..=12).contains(&m) && d >= 1 && d <= days_in_month(y, m)).then(|| days_from_civil(y, m, d))
+}
+
 /// Civil date for a day number.
 pub fn civil_from_days(days: i64) -> (i32, u32, u32) {
     let z = days + 719_468;
