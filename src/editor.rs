@@ -1785,7 +1785,7 @@ impl NoteEditor {
                     }
                     Art::Audio(abs) => {
                         // the player is worked with the mouse alone: the keyboard stays with the text (MEDIA-004)
-                        let mut touched = crate::media::widget::paint(ui, rect, &self.media, abs, rel, id, crate::media::widget::Keyboard::Leaves);
+                        crate::media::widget::paint(ui, rect, &self.media, abs, rel, id, crate::media::widget::Keyboard::Leaves);
                         if crate::media::is_video(abs) {
                             let shown = crate::media::embed::Shown { rect, at: r.start, aspect: size.y / size.x, min_w: crate::media::widget::VIDEO_MIN_WIDTH, max_w, buttons: crate::media::widget::video_art_rect(rect) };
                             let did = self.embeds.controls(ui, id.with("embed"), self.media.opacity(), &shown);
@@ -1799,13 +1799,6 @@ impl NoteEditor {
                             if did.fullscreen {
                                 self.embeds.full = Some(crate::media::embed::Full::Video(abs.clone()));
                             }
-                            // its round buttons and edges lie over the card
-                            touched |= did.natural || did.fullscreen || self.embeds.dragging(r.start).is_some() || (ui.input(|i| i.pointer.any_down()) && ui.rect_contains_pointer(rect));
-                        }
-                        if touched && self.focus_before_press {
-                            // the text box dropped the keyboard with the press: it goes back, with its selection (EDIT-042)
-                            self.request_focus = true;
-                            ui.ctx().request_repaint();
                         }
                     }
                     Art::Download(abs) => {

@@ -95,9 +95,8 @@ pub enum Keyboard {
 }
 
 /// Draw the card for `abs` into `rect` and handle what it is given: `id` must be unique among the
-/// cards of a frame; `owner` is the note that shows it (closing its tab stops the sound). The result
-/// is true while the mouse is held on a part of the card and in the frame of its click or the end of a drag.
-pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path, id: Id, keyboard: Keyboard) -> bool {
+/// cards of a frame; `owner` is the note that shows it (closing its tab stops the sound).
+pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path, id: Id, keyboard: Keyboard) {
     let ctx = ui.ctx().clone();
     let v = media.view(&ctx, abs);
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -222,9 +221,8 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     painter.text(Pos2::new(vol_hit.right() + 8.0, vol_hit.center().y), egui::Align2::LEFT_CENTER, format!("{} %", (if v.muted { 0.0 } else { v.volume } * 100.0).round() as u32), times, theme::palette().muted);
 
     // --- toggling: the button, or Space while the card has the keyboard (MEDIA-004)
-    let parts = [&card, &button, &bar, &mute, &vol];
     // a click in the card gives it the keyboard, except in the editor, where it stays with the text
-    if keyboard == Keyboard::Takes && parts.iter().any(|r| r.clicked() || r.drag_stopped()) {
+    if keyboard == Keyboard::Takes && [&card, &button, &bar, &mute, &vol].iter().any(|r| r.clicked() || r.drag_stopped()) {
         card.request_focus();
     }
     let focused = card.has_focus() || bar.has_focus() || vol.has_focus();
@@ -238,7 +236,6 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     if button.hovered() {
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    parts.iter().any(|r| r.is_pointer_button_down_on() || r.clicked() || r.drag_stopped())
 }
 
 /// "— Download" after the "Not downloaded (12 MB)" text (SYNC-020); the link's response.
