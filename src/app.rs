@@ -65,9 +65,22 @@ pub struct Tab {
     pub reader_line: Option<usize>,
     /// Pinned tabs sit left of all others (NAV-016).
     pub pinned: bool,
+    /// Where the cursor and the scroll of the note are (NAV-038).
+    pub place: NotePlace,
     pub editor: NoteEditor,
     pub title_buf: String,
     pub title_for: Option<PathBuf>,
+}
+
+/// Where a note tab is looked at: the selection (char indices) and the scroll offset of the last frame
+/// it was shown, which are saved with the tab (NAV-038), and what a restored tab still has to put
+/// into its view when it is first shown (a tab that is never shown keeps what it was given).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NotePlace {
+    pub cursor: Option<(usize, usize)>,
+    pub scroll: Option<f32>,
+    pub restore_cursor: Option<(usize, usize)>,
+    pub restore_scroll: Option<f32>,
 }
 
 /// What the tab bar drew last frame besides the tabs themselves.
@@ -196,6 +209,8 @@ pub enum Modal {
     Calendars(Box<crate::calendar::dialog::CalendarDialog>),
     Event(Box<crate::calendar::dialog::EventDialog>),
     Import(Box<crate::import::dialog::ImportDialog>),
+    /// what an import of two or more items made (IMP-056)
+    ImportSummary(Box<crate::import::summary::ImportSummary>),
     MailAccounts(Box<crate::mail::dialog::MailDialog>),
     Social(Box<crate::social::accounts_ui::SocialDialog>),
     /// pasted text with headings, none of them `#`: lift them? (EDIT-038)
@@ -370,6 +385,9 @@ pub struct ShaleApp {
     /// What this session moved to the trash, newest last: where it is in `.trash/` (VAULT-020).
     pub trashed: Vec<PathBuf>,
     last_scan: Instant,
+    /// When the session state was last looked at for a change to write, and what the file was
+    /// then (NAV-041).
+    pub(crate) state_tick: (Instant, Option<crate::vault_state::VaultState>),
     pub welcome_path: String,
     /// screenshot mode: where the picture goes and whether it was saved
     shot: screenshot::ScreenshotRun,
@@ -567,6 +585,7 @@ impl ShaleApp {
             toasts: vec![],
             trashed: vec![],
             last_scan: Instant::now(),
+            state_tick: (Instant::now(), None),
             welcome_path: default_welcome.to_string_lossy().into_owned(),
             shot: screenshot::ScreenshotRun::new(screenshot),
             frames: 0,
@@ -827,7 +846,14 @@ impl ShaleApp {
                 }
             }
             if self.tabbar.tabs.len() > before {
-                self.tabbar.tabs[self.tabbar.active].pinned = st.pinned;
+                let tab = &mut self.tabbar.tabs[self.tabbar.active];
+                tab.pinned = st.pinned;
+                // the reading view, the cursor and the scroll as they were, put into the view when it is first shown (NAV-038, NAV-039)
+                if matches!(tab.view, View::Note(_)) {
+                    tab.reading = st.reading;
+                    let (cursor, scroll) = (st.cursor.map(|[a, b]| (a, b)), st.scroll.map(|y| y as f32));
+                    tab.place = NotePlace { cursor, scroll, restore_cursor: cursor, restore_scroll: scroll };
+                }
             }
             if k == sp.active && self.tabbar.tabs.len() > before {
                 open_id = self.tabbar.tabs.get(self.tabbar.active).map(|t| t.id);
@@ -985,6 +1011,21 @@ impl ShaleApp {
         self.vdata.state.focused_pane = self.panes.focused;
         // (the tabs of the first pane stay where a Shale without panes reads them)
         self.vdata.state.tabs = self.vdata.state.panes.first().map(|p| p.tabs.clone()).unwrap_or_default();
+    }
+
+    /// The session state is written when something in it changed, looked at every 5 seconds: the
+    /// cursor and scroll of a note change all the time and are not written at every frame (NAV-041).
+    /// A failed write is not told here (it is, at the next save of the config).
+    fn state_tick(&mut self) {
+        if self.vault.is_none() || !self.persist_config || self.state_tick.0.elapsed() < Duration::from_secs(5) {
+            return;
+        }
+        self.state_tick.0 = Instant::now();
+        self.remember_open_files();
+        if self.state_tick.1.as_ref() != Some(&self.vdata.state) {
+            let _ = self.vdata.save();
+            self.state_tick.1 = Some(self.vdata.state.clone());
+        }
     }
 
     pub fn current_path(&self) -> Option<PathBuf> {
@@ -2677,6 +2718,7 @@ impl ShaleApp {
         self.keyboard_guard(ui.ctx());
         self.shortcuts(ui);
         self.autosave();
+        self.state_tick();
         self.settings_file_tick(ui.ctx());
         if let Some(m) = self.fonts.sync(ui.ctx(), &self.cfg.fonts) {
             self.toast(m);

@@ -20,6 +20,8 @@ pub enum Cmd {
     Quote,
     CodeBlock,
     Rule,
+    /// the page-break marker line (EDIT-066)
+    PageBreak,
     WikiLink,
     WebLink,
     /// starts the `[!` file picker
@@ -55,6 +57,7 @@ pub fn apply(cmd: Cmd, text: &str, sel: Range<usize>) -> Option<Out> {
         Cmd::Quote => lines(text, sel, quote),
         Cmd::CodeBlock => code_block(text, sel),
         Cmd::Rule => rule(text, sel),
+        Cmd::PageBreak => Some(block_after(text, sel.end, PAGE_BREAK, None)),
         Cmd::Embed => Some(insert(text, sel.end, "[!", 2..2)),
         Cmd::Table => table(text, sel),
         Cmd::Clear => clear(text, sel),
@@ -815,6 +818,9 @@ fn rule(text: &str, sel: Range<usize>) -> Option<Out> {
     Some(block_after(text, sel.end, "---\n", None))
 }
 
+/// The marker line of a page break, in the form Obsidian writes (PDF-020).
+const PAGE_BREAK: &str = "<div style=\"page-break-after: always;\"></div>\n";
+
 const TABLE: &str = "| Column 1 | Column 2 |\n| --- | --- |\n|  |  |\n|  |  |\n";
 
 fn table(text: &str, sel: Range<usize>) -> Option<Out> {
@@ -1013,6 +1019,19 @@ mod tests {
         assert_eq!((tables[0].table.header.len(), tables[0].table.rows.len()), (2, 2));
     }
 
+    // spec: EDIT-066
+    #[test]
+    fn the_page_break_is_a_marker_line_of_its_own_after_the_line() {
+        let m = r#"<div style="page-break-after: always;"></div>"#;
+        assert_eq!(run(Cmd::PageBreak, "a|b\nc"), format!("ab\n\n{m}\n|c"));
+        assert_eq!(run(Cmd::PageBreak, "ab|"), format!("ab\n\n{m}\n|"));
+        assert_eq!(run(Cmd::PageBreak, "|\nc"), format!("{m}\n|c"));
+        let (t, _) = apply(Cmd::PageBreak, "intro", 5..5).unwrap();
+        assert_eq!(crate::markdown::page_break_lines(&t), vec![2], "Shale reads what it wrote as a page break");
+        assert!(!works_in_a_cell(Cmd::PageBreak));
+        assert!(!is_on(Cmd::PageBreak, &t, 7..7));
+    }
+
     // spec: EDIT-027
     #[test]
     fn links_wrap_the_selection_and_the_embed_starts_the_file_picker() {
@@ -1133,6 +1152,7 @@ mod tests {
             Cmd::Quote,
             Cmd::CodeBlock,
             Cmd::Rule,
+            Cmd::PageBreak,
             Cmd::Table,
             Cmd::WebLink,
             Cmd::WikiLink,
@@ -1179,7 +1199,7 @@ mod tests {
     #[test]
     fn only_the_inline_commands_work_in_a_table_cell() {
         let inline = [Cmd::Bold, Cmd::Italic, Cmd::Strike, Cmd::Highlight, Cmd::Code, Cmd::WikiLink, Cmd::WebLink, Cmd::HighlightColour(None), Cmd::FontColour(Some([1, 2, 3])), Cmd::Clear];
-        let other = [Cmd::Heading(0), Cmd::Heading(2), Cmd::Bullet, Cmd::Numbered, Cmd::Task, Cmd::Quote, Cmd::CodeBlock, Cmd::Rule, Cmd::Embed, Cmd::Table];
+        let other = [Cmd::Heading(0), Cmd::Heading(2), Cmd::Bullet, Cmd::Numbered, Cmd::Task, Cmd::Quote, Cmd::CodeBlock, Cmd::Rule, Cmd::PageBreak, Cmd::Embed, Cmd::Table];
         assert!(inline.into_iter().all(works_in_a_cell));
         assert!(!other.into_iter().any(works_in_a_cell));
     }

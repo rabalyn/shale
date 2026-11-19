@@ -290,7 +290,7 @@ fn doc_department(kind_id: &str, filled: bool, wanted: bool) -> String {
     out.unwrap_or_else(|e| panic!("{e}")).tex
 }
 
-// spec: TEX-035
+// spec: TEX-037
 #[test]
 fn the_department_logo_lines_are_written_after_the_preamble_only_when_the_slot_is_filled_the_box_is_on_and_the_kind_has_a_place() {
     for id in ["pub", "report", "thesis", "phd", "beamer", "letter", "poster", "sciposter", "leaflet"] {
@@ -690,4 +690,51 @@ fn a_link_to_a_heading_of_the_note_goes_there_and_links_to_other_notes_are_link_
     assert!(letter.contains("\\noindent\\shaleanchor{shale-h1}\\textbf{Goal}") && letter.contains("\\hyperlink{shale-h1}"), "{letter}");
     let slides = doc("# Part\ntext\n## Slide\n[[#Part]]\n", "beamer");
     assert!(slides.contains("\\section{Part}\n\n\\begin{frame}[allowframebreaks]{Part}\n\\shaleanchor{shale-h0}\n") && slides.contains("{Slide}\n\\shaleanchor{shale-h2}\n"), "a section's anchor is in its first frame: {slides}");
+}
+
+const BREAK: &str = "<div style=\"page-break-after: always;\"></div>";
+
+// spec: TEX-037
+#[test]
+fn a_page_break_marker_is_a_newpage_once_and_the_html_is_not_written() {
+    let note = format!("# One\n\nbefore\n\n{BREAK}\n\nafter\n\n<div style='break-before: page'></div>\n\n```\n{BREAK}\n```\n\nlast\n");
+    for kind in ["pub", "report"] {
+        let t = doc(&note, kind);
+        assert_eq!(t.matches("\\newpage").count(), 2, "{kind}: one for each marker, none for the one in the code: {t}");
+        assert_eq!(t.matches("<div").count(), 0, "{kind}: no raw HTML (the code's is escaped): {t}");
+        assert!(!t.contains("break-before"), "{kind}: {t}");
+        let b = body_of(&t);
+        let at = b.find("before").unwrap();
+        assert!(b[at..].starts_with("before\n\n\\newpage\n\nafter"), "{kind}: {b}");
+    }
+    // markers one after the other are one new page, and one at the very end is written too
+    let t = doc(&format!("a\n{BREAK}\n{BREAK}\n\n{BREAK}\nb\n{BREAK}\n"), "pub");
+    assert_eq!(t.matches("\\newpage").count(), 2, "{t}");
+    // in slides and boxes the frames and boxes are the pages
+    for kind in ["beamer", "sciposter"] {
+        let t = doc(&format!("# One\n\n## Frame\n\na\n\n{BREAK}\n\nb\n"), kind);
+        assert!(!t.contains("\\newpage") && !t.contains("<div"), "{kind}: {t}");
+    }
+    // the block is a block of its own that ends a paragraph
+    use super::blocks::{parse, Block};
+    let blocks = parse(&format!("a\n{BREAK}\nb\n"));
+    assert_eq!(blocks, [Block::Para(vec!["a".into()]), Block::PageBreak, Block::Para(vec!["b".into()])]);
+}
+
+// spec: TEX-038
+#[test]
+fn print_break_before_writes_a_newpage_before_the_headings_up_to_its_level_but_not_the_first_block() {
+    let note = "# One\n\ntext\n\n## Sub\n\ntext\n\n### Deep\n\n# Two\n\ntext\n";
+    let at = |level: u8, kind: &str| doc_with(note, kind, &ExportOptions { break_before: level, ..ExportOptions::for_note() }, &[("author", "Ada")], &[]).unwrap().tex;
+    assert_eq!(at(0, "pub").matches("\\newpage").count(), 0);
+    let one = at(1, "pub");
+    assert_eq!(one.matches("\\newpage").count(), 1, "before Two only: {one}");
+    assert!(one.find("\\newpage").unwrap() < one.find("Two").unwrap() && one.find("\\newpage").unwrap() > one.find("Deep").unwrap());
+    assert_eq!(at(2, "pub").matches("\\newpage").count(), 2, "before Sub and Two");
+    assert_eq!(at(6, "pub").matches("\\newpage").count(), 3);
+    // a marker right before such a heading does not double it
+    let t = doc_with(&format!("a\n{BREAK}\n# One\nb\n# Two\n"), "pub", &ExportOptions { break_before: 1, ..ExportOptions::for_note() }, &[("author", "Ada")], &[]).unwrap().tex;
+    assert_eq!(t.matches("\\newpage").count(), 2, "{t}");
+    // slides and the like have their own pages
+    assert_eq!(at(1, "beamer").matches("\\newpage").count(), 0);
 }

@@ -851,6 +851,38 @@ pub fn heading_level(line: &str) -> Option<usize> {
     }
 }
 
+/// Whether `line` is a page-break marker (PDF-020): a line of its own that holds an empty `<div>`
+/// whose `style` has `page-break-after: always` (the form Obsidian writes), `page-break-before:
+/// always`, `break-after: page` or `break-before: page`; case, spaces, either quote and a
+/// trailing `;` do not matter. Whether the line is inside a code fence or the front matter is
+/// [`page_break_lines`]'s to say.
+pub fn page_break_line(line: &str) -> bool {
+    let t = line.trim().to_ascii_lowercase();
+    let Some(rest) = t.strip_prefix("<div") else { return false };
+    let Some(rest) = rest.strip_prefix(char::is_whitespace) else { return false };
+    let Some(rest) = rest.trim_start().strip_prefix("style") else { return false };
+    let Some(rest) = rest.trim_start().strip_prefix('=') else { return false };
+    let rest = rest.trim_start();
+    let Some(quote) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') else { return false };
+    let Some((style, rest)) = rest[1..].split_once(quote) else { return false };
+    let Some(rest) = rest.trim_start().strip_prefix('>') else { return false };
+    if rest.trim() != "</div>" {
+        return false;
+    }
+    style.split(';').any(|decl| {
+        let Some((name, value)) = decl.split_once(':') else { return false };
+        matches!((name.trim(), value.trim()), ("page-break-after" | "page-break-before", "always") | ("break-after" | "break-before", "page"))
+    })
+}
+
+/// The lines (indices) of `text` that are page-break markers (PDF-020): not those in a code
+/// fence or the front matter.
+pub fn page_break_lines(text: &str) -> Vec<usize> {
+    let fenced = fenced_code_lines(text);
+    let front = front_matter_lines(text);
+    lines_with_offsets(text).iter().enumerate().filter(|(i, (_, l))| *i >= front && !fenced.get(*i).copied().unwrap_or(false) && page_break_line(l)).map(|(i, _)| i).collect()
+}
+
 /// The link's target as written in the text: `Projects/Old.md`, `../Old` (percent-decoded,
 /// without `<…>`, `#heading` or `|alias`). Unlike [`LinkSpan::target`] it keeps a `.md`.
 pub fn written_target(text: &str, link: &LinkSpan) -> String {
@@ -1043,6 +1075,54 @@ pub fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    // spec: PDF-020
+    #[test]
+    fn page_break_lines_are_the_obsidian_div_in_its_forms_and_near_misses_are_not() {
+        for yes in [
+            r#"<div style="page-break-after: always;"></div>"#,
+            r#"<div style="page-break-after: always"></div>"#,
+            r#"  <DIV  STYLE = 'Page-Break-Before:ALWAYS;' > </Div>  "#,
+            r#"<div style="break-after: page;"></div>"#,
+            r#"<div style='break-before:page'></div>"#,
+            r#"<div style="color: red; page-break-after: always;"></div>"#,
+        ] {
+            assert!(page_break_line(yes), "{yes}");
+        }
+        for no in [
+            r#"<div style="page-break-after: avoid;"></div>"#,
+            r#"<div style="break-after: always;"></div>"#,
+            r#"<div style="page-break-after: always;">text</div>"#,
+            r#"text <div style="page-break-after: always;"></div>"#,
+            r#"<div style="page-break-after: always;">"#,
+            r#"<div class="page-break-after: always;"></div>"#,
+            r#"<span style="page-break-after: always;"></span>"#,
+            r#"<div style="page-break-after: always;"></div> more"#,
+            "<div></div>",
+            "",
+        ] {
+            assert!(!page_break_line(no), "{no}");
+        }
+    }
+
+    // spec: PDF-020
+    #[test]
+    fn page_breaks_in_code_fences_and_front_matter_are_not_markers() {
+        let m = r#"<div style="page-break-after: always;"></div>"#;
+        let text = format!(
+            "---
+title: {m}
+{m}
+---
+a
+{m}
+```
+{m}
+```
+{m}"
+        );
+        assert_eq!(page_break_lines(&text), vec![5, 9]);
+    }
+
     // spec: EDIT-052
     #[test]
     fn an_embeds_width_is_its_last_numeric_alias_part() {
