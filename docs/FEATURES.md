@@ -126,8 +126,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - **Sound players.** `![[song.mp3]]` shows a small player instead of a link, in the editor, the
   markdown preview and the reading view (mp3, ogg, oga, flac, m4a, aac and wav play; opus files
   are recognised but cannot be played yet). It shows the cover from the file's tags (or a tile
-  with the file name), a round play/pause button over it (Space too, while the player has the
-  keyboard), a progress bar (click to jump, drag to choose and seek on release) with the time,
+  with the file name), a round play/pause button over it (in the reading view Space too, once a click gave the player
+  the keyboard; in the editor a click on the player leaves the keyboard and the cursor with the text), a progress bar (click to jump, drag to choose and seek on release) with the time,
   and a mute button and volume slider. Only one file plays at a time; it keeps playing while
   you scroll or switch between the editor, the preview and the reading view, and stops when
   the note's tab is closed or another vault is opened. Nothing ever starts by itself. In Settings →

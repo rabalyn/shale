@@ -150,7 +150,7 @@ impl Embeds {
                 }
                 Full::Video(abs) => {
                     let size = super::widget::video_card_fit(room.size());
-                    super::widget::paint(ui, Rect::from_center_size(screen.center(), size), media, abs, owner, id.with(("fullscreen-card", abs)));
+                    super::widget::paint(ui, Rect::from_center_size(screen.center(), size), media, abs, owner, id.with(("fullscreen-card", abs)), super::widget::Keyboard::Takes);
                 }
             }
             if round_button(ui, &painter, Pos2::new(screen.right() - 30.0, screen.top() + 30.0), id.with("fullscreen-close"), media.opacity(), "Close", paint_cross) || backdrop.clicked() {

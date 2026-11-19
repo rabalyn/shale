@@ -16,7 +16,7 @@ Embed a sound like a picture, with `![[file.mp3]]`. Here is one:
 - **The card.** It shows the cover from the file's tags, or a tile with the file name.
 - **Play and pause.** The round button over the card. It is half transparent and fully opaque
   when the mouse is over it; how opaque it is (60 % by default) is set in Settings →
-  Appearance (`media_play_button_opacity`). After you have clicked the card, Space does the same.
+  Appearance (`media_play_button_opacity`). In the reading view, after you have clicked the card, Space does the same. In the editor the player is worked with the mouse alone: a click on it does not take the keyboard from the text, so your cursor stays where it was and Space types a space.
 - **Progress.** The bar shows the time. Click it to jump there; drag it to choose a place and
   let go to seek.
 - **Volume.** The speaker button mutes, the slider sets the volume. It is one volume for all
