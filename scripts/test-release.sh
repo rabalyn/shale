@@ -42,6 +42,7 @@ case "$1" in
   --bench)
     mkdir -p "$(dirname "$2")"
     printf '{"schema":1,"commit":"%s","describe":"%s","date":"2026-01-01T00:00:00Z","host":{"cpu":"c","cores":1,"os":"o"},"profile":"bench-release","scenarios":[],"peak_rss_kb":null,"run":"%s"}\n' "$SHALE_BENCH_COMMIT" "$SHALE_BENCH_DESCRIBE" "$4" > "$2" ;;
+  --bench-merge) mkdir -p "$(dirname "$2")"; cp "$3" "$2" ;;
   --bench-compare)
     while [ $# -gt 0 ]; do [ "$1" = --out ] && dir=$2; shift; done
     mkdir -p "$dir"
@@ -258,6 +259,8 @@ FAKE_COMPARE_EXIT=1 expect "a performance regression stops the release" 1 "perfo
 check "nothing was landed or tagged after the regression" '! remote_tag v0.4.3 && [ "$(version_on_main)" = 0.4.2 ] && ! git rev-parse -q --verify refs/heads/release/v0.4.3 >/dev/null'
 FAKE_COMPARE_EXIT=1 expect "--allow-perf-regression lets a regression pass and says so" 0 "allowed by --allow-perf-regression" make-release.sh --allow-perf-regression patch
 check "the release compared with the last one and stored the comparison" 'remote_tag v0.4.3 && grep -Fq -- "--bench-compare docs/perf/results/v0.4.2.json docs/perf/results/v0.4.3.json" "$BENCH_LOG" && git show origin/main:docs/perf/compare/v0.4.3.md | grep -Fq compare && git show origin/main:docs/perf/compare/v0.4.3-worst.json | grep -Fq regressions'
+# spec: BUILD-037
+check "the full profile ran twice and the runs were merged, the worst profile once" '[ "$(grep -c -- "^--bench .* --profile full" "$BENCH_LOG")" -ge 2 ] && grep -Fq -- "--bench-merge docs/perf/results/v0.4.3.json" "$BENCH_LOG" && [ "$(grep -c -- "^--bench .* --profile worst" "$BENCH_LOG")" -eq "$(grep -c -- "--bench-merge docs/perf/results-worst/" "$BENCH_LOG")" ]'
 land perf2 docs/changelog-pending/I31.md $'### Fixed\n\n- Thirty-one (#31).'
 expect "--skip-bench leaves the performance step out" 0 "not measured" make-release.sh --skip-bench patch
 check "a skipped release has no result" 'remote_tag v0.4.4 && ! git cat-file -e origin/main:docs/perf/results/v0.4.4.json 2>/dev/null'

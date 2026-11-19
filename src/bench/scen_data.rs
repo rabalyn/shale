@@ -272,7 +272,8 @@ pub fn list() -> Vec<Scenario> {
         p("calendar.ics.parse.large", 10, true, ics_parse),
         p("calendar.ics.write.large", 10, false, ics_write),
         p("calendar.store.load.large", 10, false, calendar_load),
-        p("calendar.occurrences.year.large", 5, true, calendar_occurrences),
+        // version 2: the year shifts by a day each iteration (the store keeps the ranges it made), version 1 asked for one year again and again
+        p("calendar.occurrences.year.large", 5, true, calendar_occurrences).version(2),
         p("ui.frame.calendar.large", 30, false, ui_calendar),
         p("social.markup.html.large", 10, false, social_markup),
         p("social.mastodon.parse.large", 10, false, social_mastodon),

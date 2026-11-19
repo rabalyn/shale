@@ -10,6 +10,7 @@ pub mod cli;
 mod compare;
 mod content_gen;
 mod frames;
+mod merge;
 mod report;
 mod runner;
 mod scen_data;
@@ -34,7 +35,8 @@ pub fn run(command: Command) -> i32 {
             0
         }
         Command::Run { out, filter, iters, min_ms, profile } => finish(run_scenarios(&out, profile, filter.as_deref(), iters, min_ms)),
-        Command::Compare { x, y, time_pct, bytes_pct, out_dir } => compare::run(&x, &y, compare::Thresholds { time_pct, bytes_pct }, &out_dir),
+        Command::Compare { x, y, time_pct, bytes_pct, allocs_pct, changed, out_dir } => compare::run(&x, &y, compare::Thresholds { time_pct, bytes_pct, allocs_pct }, &changed, &out_dir),
+        Command::Merge { out, runs } => merge::run(&out, &runs),
         Command::Report { dir, out } => finish(report::write(&dir, &out)),
     }
 }

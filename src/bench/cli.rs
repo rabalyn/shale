@@ -1,11 +1,11 @@
-//! The command line of the benchmark harness (BUILD-027): four modes of their own, chosen by the
+//! The command line of the benchmark harness (BUILD-027): five modes of their own, chosen by the
 //! first argument, so they never mix with the options of the window (BUILD-019 style: an unknown
 //! option or a missing value is an error, exit code 2).
 
 use super::scenarios::Profile;
 use std::path::PathBuf;
 
-pub const USAGE: &str = "usage: shale --bench <out.json> [--profile quick|full|worst] [--filter <substring>] [--iters N] [--min-ms MS]\n       shale --bench-list\n       shale --bench-compare <x.json> <y.json> [--threshold PCT] [--bytes-threshold PCT] [--out DIR]\n       shale --bench-report <perf dir> <out.html>";
+pub const USAGE: &str = "usage: shale --bench <out.json> [--profile quick|full|worst] [--filter <substring>] [--iters N] [--min-ms MS]\n       shale --bench-list\n       shale --bench-merge <out.json> <run.json>...\n       shale --bench-compare <x.json> <y.json> [--threshold PCT] [--bytes-threshold PCT] [--allocs-threshold PCT] [--changed ID[,ID]] [--out DIR]\n       shale --bench-report <perf dir> <out.html>";
 
 /// What the benchmark options asked for.
 #[derive(Debug, PartialEq)]
@@ -15,7 +15,9 @@ pub enum Command {
     /// `--bench-list`: print the profile and ID of every scenario
     List,
     /// `--bench-compare x.json y.json`: X is the older run, Y the newer one
-    Compare { x: PathBuf, y: PathBuf, time_pct: f64, bytes_pct: f64, out_dir: PathBuf },
+    Compare { x: PathBuf, y: PathBuf, time_pct: f64, bytes_pct: f64, allocs_pct: f64, changed: Vec<String>, out_dir: PathBuf },
+    /// `--bench-merge out.json run.json...`: several runs of one commit as one result (BUILD-036)
+    Merge { out: PathBuf, runs: Vec<PathBuf> },
     /// `--bench-report <perf dir> <out.html>`: the static page of `docs/perf`
     Report { dir: PathBuf, out: PathBuf },
 }
@@ -24,12 +26,14 @@ pub enum Command {
 pub const DEFAULT_TIME_PCT: f64 = 10.0;
 /// A regression of the peak bytes above this many percent fails a comparison (BUILD-030).
 pub const DEFAULT_BYTES_PCT: f64 = 15.0;
+/// A regression of the allocation count above this many percent fails a comparison (BUILD-036).
+pub const DEFAULT_ALLOCS_PCT: f64 = 10.0;
 
 /// `None` when the arguments are not a benchmark mode (the window's own parser reads them), else
 /// the command or the message for stderr.
 pub fn parse(args: &[String]) -> Option<Result<Command, String>> {
     let first = args.first()?.as_str();
-    if !matches!(first, "--bench" | "--bench-list" | "--bench-compare" | "--bench-report") {
+    if !matches!(first, "--bench" | "--bench-list" | "--bench-compare" | "--bench-merge" | "--bench-report") {
         return None;
     }
     Some(read(first, &args[1..]))
@@ -43,7 +47,8 @@ fn read(mode: &str, rest: &[String]) -> Result<Command, String> {
     let mut it = rest.iter();
     let mut positional: Vec<&str> = vec![];
     let (mut filter, mut iters, mut out_dir, mut profile, mut min_ms) = (None, None, None, Profile::Full, None);
-    let (mut time_pct, mut bytes_pct) = (DEFAULT_TIME_PCT, DEFAULT_BYTES_PCT);
+    let (mut time_pct, mut bytes_pct, mut allocs_pct) = (DEFAULT_TIME_PCT, DEFAULT_BYTES_PCT, DEFAULT_ALLOCS_PCT);
+    let mut changed: Vec<String> = vec![];
     while let Some(a) = it.next() {
         let mut value = || it.next().map(String::as_str).ok_or_else(|| format!("{a} needs a value"));
         match (mode, a.as_str()) {
@@ -62,6 +67,8 @@ fn read(mode: &str, rest: &[String]) -> Result<Command, String> {
             }
             ("--bench-compare", "--threshold") => time_pct = pct("--threshold", value()?)?,
             ("--bench-compare", "--bytes-threshold") => bytes_pct = pct("--bytes-threshold", value()?)?,
+            ("--bench-compare", "--allocs-threshold") => allocs_pct = pct("--allocs-threshold", value()?)?,
+            ("--bench-compare", "--changed") => changed.extend(value()?.split(',').filter(|c| !c.is_empty()).map(str::to_string)),
             ("--bench-compare", "--out") => out_dir = Some(PathBuf::from(value()?)),
             (_, o) if o.starts_with('-') => return Err(format!("unknown option {o} for {mode}")),
             (_, word) => positional.push(word),
@@ -79,7 +86,13 @@ fn read(mode: &str, rest: &[String]) -> Result<Command, String> {
         }
         "--bench-compare" => {
             need(2, "two result files (x.json y.json)")?;
-            Ok(Command::Compare { x: positional[0].into(), y: positional[1].into(), time_pct, bytes_pct, out_dir: out_dir.unwrap_or_else(|| PathBuf::from(".")) })
+            Ok(Command::Compare { x: positional[0].into(), y: positional[1].into(), time_pct, bytes_pct, allocs_pct, changed, out_dir: out_dir.unwrap_or_else(|| PathBuf::from(".")) })
+        }
+        "--bench-merge" => {
+            if positional.len() < 2 {
+                return Err("--bench-merge needs the output file and at least one run (out.json run.json...)".into());
+            }
+            Ok(Command::Merge { out: positional[0].into(), runs: positional[1..].iter().map(PathBuf::from).collect() })
         }
         _ => {
             need(2, "the perf folder and the output file (docs/perf out.html)")?;
@@ -135,15 +148,23 @@ mod tests {
     // spec: BUILD-030
     #[test]
     fn compare_takes_two_files_thresholds_and_an_output_folder() {
-        assert_eq!(p(&["--bench-compare", "x.json", "y.json"]), Some(Ok(Command::Compare { x: "x.json".into(), y: "y.json".into(), time_pct: 10.0, bytes_pct: 15.0, out_dir: ".".into() })));
+        assert_eq!(p(&["--bench-compare", "x.json", "y.json"]), Some(Ok(Command::Compare { x: "x.json".into(), y: "y.json".into(), time_pct: 10.0, bytes_pct: 15.0, allocs_pct: 10.0, changed: vec![], out_dir: ".".into() })));
         assert_eq!(
-            p(&["--bench-compare", "x.json", "y.json", "--threshold", "5", "--bytes-threshold", "20.5", "--out", "d"]),
-            Some(Ok(Command::Compare { x: "x.json".into(), y: "y.json".into(), time_pct: 5.0, bytes_pct: 20.5, out_dir: "d".into() }))
+            p(&["--bench-compare", "x.json", "y.json", "--threshold", "5", "--bytes-threshold", "20.5", "--allocs-threshold", "3", "--changed", "a.b,c.d", "--changed", "e", "--out", "d"]),
+            Some(Ok(Command::Compare { x: "x.json".into(), y: "y.json".into(), time_pct: 5.0, bytes_pct: 20.5, allocs_pct: 3.0, changed: vec!["a.b".into(), "c.d".into(), "e".into()], out_dir: "d".into() }))
         );
         let bad = |a: &[&str]| p(a).unwrap().unwrap_err();
         assert_eq!(bad(&["--bench-compare", "x.json"]), "--bench-compare needs two result files (x.json y.json)");
         assert!(bad(&["--bench-compare", "x", "y", "--threshold", "-1"]).contains("percentage"));
         assert!(bad(&["--bench-compare", "x", "y", "--threshold", "abc"]).contains("not abc"));
+    }
+
+    // spec: BUILD-036
+    #[test]
+    fn merge_takes_an_output_file_and_runs() {
+        assert_eq!(p(&["--bench-merge", "m.json", "a.json", "b.json"]), Some(Ok(Command::Merge { out: "m.json".into(), runs: vec!["a.json".into(), "b.json".into()] })));
+        assert!(p(&["--bench-merge", "m.json"]).unwrap().unwrap_err().contains("at least one run"));
+        assert!(p(&["--bench-merge", "m.json", "a.json", "--filter", "x"]).unwrap().is_err());
     }
 
     // spec: BUILD-032

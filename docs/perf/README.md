@@ -15,10 +15,10 @@ Everything needs a build with the cargo feature `bench`; no shipped build has it
 | all scenarios (the `full` profile), result in `target/bench/<commit>.json` | `scripts/bench.sh` |
 | a minute of it, small data (for development) | `scripts/bench.sh --profile quick` |
 | the worst case (everything loaded at once) | `scripts/bench.sh --profile worst` |
-| only scenarios whose ID contains a text; `=id` for exactly one | `scripts/bench.sh --filter ui.frame` |
+| only scenarios whose ID contains a text; `=id` for exactly one; several, comma separated | `scripts/bench.sh --filter ui.frame` |
 | flamegraphs of every scenario of the profile (or of `--filter`) into `docs/perf/flamegraphs/` | `scripts/bench.sh --flamegraph` |
-| two commits, built and run in temporary worktrees, then compared | `scripts/bench-compare.sh <old> <new>` |
-| two result files | `shale --bench-compare old.json new.json --out dir` |
+| two commits, built and run in temporary worktrees (3 interleaved runs each), then compared | `scripts/bench-compare.sh <old> <new>` |
+| two result files; several runs of one commit as one result | `shale --bench-compare old.json new.json --out dir`; `shale --bench-merge out.json run1.json run2.json` |
 | the page `docs/perf/index.html` | `scripts/bench-report.sh` |
 
 `scripts/bench.sh` builds with `--profile bench-release` (the release profile plus line tables, so
@@ -143,17 +143,20 @@ out on purpose:
 
 ## The result files
 
-`shale --bench out.json` writes (schema 1; `docs/perf/results/*.json` are such files):
+`shale --bench out.json` writes (schema 2; `docs/perf/results/*.json` are such files; schema 1 files are read too: their scenarios are version 1, one run):
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "commit": "full sha",  "describe": "v0.6.0 or git describe", "date": "2026-11-18T10:00:00Z",
   "host": {"cpu": "…", "cores": 28, "os": "linux x86_64 6.x", "load": 3.2},   // load: one-minute load average at the end of the run, Linux
   "profile": "bench-release",           // the build profile (SHALE_BENCH_PROFILE), else release or debug
   "run": "full",                        // quick, full or worst
   "scenarios": [{"id": "vault.open.large", "iters": 5, "median_ns": 0, "p95_ns": 0, "min_ns": 0,
-                 "allocs": 0, "alloc_bytes": 0, "peak_bytes": 0, "retained_bytes": 0}],
+                 "allocs": 0, "alloc_bytes": 0, "peak_bytes": 0, "retained_bytes": 0,
+                 "version": 1,                  // bumped when the scenario's definition changes (see Comparing)
+                 "run_medians_ns": []}],        // only in a merged result: the median of each run
+  "repeats": 1,                         // how many runs the result merges (--bench-merge)
   "skipped": [{"id": "import.docx.big", "reason": "pandoc is not installed …"}],
   "peak_rss_kb": 123456                 // VmHWM of the process, null off Linux
 }
@@ -167,38 +170,138 @@ the repository.
 
 ## Comparing (for agents and releases)
 
-`shale --bench-compare x.json y.json [--threshold 10] [--bytes-threshold 15] [--out dir]`, X the
-older run, Y the newer one. Writes `dir/compare.md` (a table, the last line is the summary),
-`dir/compare.json`, prints the summary line and one `REGRESSION <id> <metric> <delta>` line per
-regression, and exits **0** (no regression), **1** (a regression above a threshold) or **2** (an
-error: a missing or unreadable file, a schema other than 1, results of two profiles). When a computer was busy during a run (load above
-half its cores) `compare.md` and the printed summary say so: times are then larger and less steady,
-and a regression under 30 % deserves a second run on a quiet computer.
+`shale --bench-compare x.json y.json [--threshold 10] [--bytes-threshold 15] [--allocs-threshold 10] [--changed ID[,ID]] [--out dir]`,
+X the older run, Y the newer one. Writes `dir/compare.md` and `dir/compare.json`, prints the summary
+line and one `REGRESSION <id> <metric> <delta>` line per regression (and a `NOISY` line per scenario
+to run again), and exits **0** (`ok` or `faster`), **1** (`regression`) or **2** (`error`: a missing
+or unreadable file, a schema this build does not read, results of two profiles; `compare.json` then
+holds `{"schema": 2, "verdict": "error", "exit_code": 2, "error": "…"}`).
+
+### How a verdict is made (BUILD-036)
+
+Two kinds of numbers, weighed differently:
+
+| Metric | Kind | Rule |
+|---|---|---|
+| allocations per iteration (`allocs`) | **exact**: the same on every run, busy computer or not | `REGRESSION` above +10 %; `more`/`fewer` beyond ±2 %; a difference under 500 allocations is `ok` |
+| peak bytes (`peak_bytes`) | **exact** | `REGRESSION` above +15 %; `larger`/`smaller` beyond ±5 %; under 64 KiB is `ok` |
+| median time (`median_ns`) | **noisy**: a busy computer only makes it larger | needs the difference above the noise band (5 %) and 20 µs **and** the *spreads of X and Y not to overlap*; then `REGRESSION` above +10 %, else `slower`/`faster`. A difference inside the spread is `noisy` |
+
+A side's spread is the range of the medians of its runs (`--runs`, merged by `--bench-merge`; the
+time of a merged side is its *smallest* median, the best the computer managed); a single run has
+the range from its fastest to its 95th percentile iteration. So repeated, interleaved runs make a
+time verdict trustworthy on a busy computer, and an allocation or peak regression is a clear signal
+without any repeat. A time regression under 30 % while a computer was busy (load above half its
+cores) has `confidence` `low`: run it again. More allocations or memory in a scenario that got clearly
+faster (a quadtree for the graph) is a `tradeoff`, listed, not a regression. A scenario whose `version` differs between X and Y
+(next section) is `changed`: no verdict. A scenario only one file has is `added` or `removed`.
+
+**Scenario versions.** Every scenario has a `version` in the result file (1 unless a file says
+otherwise; schema 1 files have none). When a change to the harness makes a scenario measure
+something else (`calendar.occurrences.year.large` is at version 2: it shifts its year every
+iteration, because the calendar store now keeps the ranges it made), the harness bumps the
+version in its definition (`Scenario::version`, `src/bench/scen_data.rs`), and every comparison across
+the change says `changed`. For results made before the field existed, name the scenarios:
+`--changed id[,id]` (also on `scripts/bench-compare.sh`).
+
+**Quiet threads.** The allocation counters are the process's. Before a scenario's warm-up and its
+measured loop the harness waits until no thread allocates (under 50 allocations in 100 ms, at most
+10 s): a background job that a dropped window left behind would otherwise be counted into the next
+scenario (`vault.check.large` showed three times its allocations after a fast graph frame).
+
+### compare.json
 
 ```json
-{"schema": 1, "x": {"commit": "", "describe": "", "date": "", "load": 3.2, "cores": 28}, "y": {…},
- "threshold_time_pct": 10, "threshold_bytes_pct": 15,
- "rows": [{"id": "", "status": "both|added|removed",
-           "x_median_ns": 0, "y_median_ns": 0, "time_delta_pct": 0.0, "time_verdict": "ok|faster|slower|REGRESSION|-",
-           "x_peak_bytes": 0, "y_peak_bytes": 0, "bytes_delta_pct": 0.0, "bytes_verdict": "…"}],
- "regressions": [{"id": "", "metric": "time|peak_bytes", "x": 0, "y": 0, "delta_pct": 0.0}],
- "summary": {"compared": 0, "faster": 0, "slower": 0, "regressions": 0, "added": 0, "removed": 0}}
+{"schema": 2, "verdict": "ok|faster|regression|error", "exit_code": 0,
+ "x": {"commit": "", "describe": "", "date": "", "load": 3.2, "cores": 28, "repeats": 3}, "y": {…},
+ "busy": false,                       // a computer was busy during a run: times are less steady
+ "threshold_time_pct": 10, "threshold_bytes_pct": 15, "threshold_allocs_pct": 10,
+ "regressions":  [{"id": "", "metric": "time|allocs|peak_bytes", "x": 0, "y": 0, "delta_pct": 0.0, "confidence": "high|low"}],  // the worst first
+ "improvements": [{…same…}],          // the best first
+ "tradeoffs": [{…same…}],             // more allocations/peak, but the time is clearly better: not a regression
+ "noisy": ["id"],                     // time moved more than the threshold, inside the spread: run again with --filter
+ "changed": [{"id": "", "reason": "version|--changed", "x_version": 1, "y_version": 2}],
+ "skipped": [{"id": "", "side": "x|y|both", "reason": ""}],
+ "summary": {"compared": 0, "faster": 0, "slower": 0, "regressions": 0, "noisy": 0, "changed": 0, "added": 0, "removed": 0},
+ "rows": [{"id": "", "status": "both|changed|added|removed",
+           "x_median_ns": 0, "y_median_ns": 0, "time_delta_pct": 0.0, "time_verdict": "ok|faster|slower|noisy|REGRESSION|changed|-",
+           "x_range_ns": [0, 0], "y_range_ns": [0, 0],
+           "x_allocs": 0, "y_allocs": 0, "allocs_delta_pct": 0.0, "allocs_verdict": "ok|fewer|more|REGRESSION|tradeoff|changed|-",
+           "x_peak_bytes": 0, "y_peak_bytes": 0, "bytes_delta_pct": 0.0, "bytes_verdict": "ok|smaller|larger|REGRESSION|tradeoff|changed|-",
+           "x_version": 1, "y_version": 1}]}
 ```
 
-Verdicts: within 5 % is `ok`, beyond it `faster` or `slower`, above the threshold `REGRESSION`;
-a change under 20 µs (time) or 64 KiB (peak) is `ok` whatever its percentage. A scenario only one
-file has is `added` or `removed`: not an error. `scripts/bench-compare.sh <old> <new>` does the
-whole round (worktrees, builds, runs, compare) and passes the exit code on; a commit older than
-the harness is exit 2 ("has no benchmark harness").
+`compare.md` is for people: the verdict, the regressions, the 15 best improvements, the noisy and
+changed scenarios, the skipped ones, then the table of every scenario; the last line is the summary.
 
-A scenario's body may change with the harness (a commit that changes what a scenario does shows
-as a difference in it, as `mail.sync.store.large` did when its message generation moved out of the
-timed part): compare two commits that have the same harness, or read such a row with that in mind.
+### scripts/bench-compare.sh
 
-To check a fix: `scripts/bench-compare.sh <commit before the fix> HEAD --profile quick` (or `full`
-for the scenarios `quick` does not have), then read `compare.md` for the scenario you changed and
-for anything that got slower. `shale --bench out.json --filter <id> --iters 20` measures one
-scenario quickly.
+`scripts/bench-compare.sh <X> <Y> [--profile quick|full|worst] [--runs N] [--filter IDS] [--changed IDS] [--max-load L] [--flamegraphs] [--out DIR]`
+does the whole round: a temporary worktree and a `bench-release` build per commit (the comparison
+itself is made by the harness of the checkout the script is in, so X and Y may be older than
+`--bench-merge`), then `--runs` runs of each side (default 3, `worst` 2) **interleaved** (X, Y, Y,
+X, X, Y …: a busy minute hits both sides alike), `--bench-merge` per side, `--bench-compare`. The
+output folder (default `target/bench-compare-out`) has `x.json`, `y.json`, `runs/`, `compare.md`,
+`compare.json`. `--max-load L` waits (at most `--max-wait`, default 600 s) before each run until
+the one-minute load average is below `L`. `--filter` takes IDs or parts of IDs, comma separated
+(`=id` for exactly one): measure only those. With `--flamegraphs` it renders, for the regressed,
+the noisy and the best improved scenarios (at most `--flame-max`, default 6), `flamegraphs/x/<id>.svg`,
+`flamegraphs/y/<id>.svg` and `flamegraphs/diff/<id>.svg` (`inferno-diff-folded`: red is more
+time in Y) in the output folder, never in git. The same exit codes as `--bench-compare`; a failure
+before the comparison (a commit without the harness, a failed build or run) writes
+`compare.json` with `verdict: "error"` and exits 2. Cost: three builds and `2 × runs` runs; the
+`full` profile takes about ten minutes a run on a quiet computer, so give the whole thing the better
+part of an hour (run it in the background).
+
+## Agent playbook: a performance check in a release or after a fix
+
+What an agent does, and in this order. Everything is a command; nothing needs a person.
+
+1. **A release does it for you.** `scripts/make-release.sh` runs `scripts/bench-release.sh` in the
+   release worktree: `full` twice (`BENCH_RUNS`, merged) and `worst` once (`BENCH_WORST_RUNS`),
+   compared with the last release's stored result into `docs/perf/compare/vX.Y.Z.{md,json}` and
+   `vX.Y.Z-worst.{md,json}` (the same `compare.json` as below). On a regression it ends with
+   "performance regression" and the lines `<id> <metric> <x> -> <y> (<delta> %, confidence …)`.
+   Go on at 4. `--allow-perf-regression` lets the release pass: only with the reason in the
+   release issue (step 6), `--skip-bench` leaves the step out and says so.
+2. **A fix or a branch** (is it faster, did it break something): `scripts/bench-compare.sh <before>
+   <after> --profile quick` (about 15 minutes with the three runs; `full` for what `quick` lacks,
+   `worst` for the worst case; `--max-load 12` on a shared computer).
+3. **Read `compare.json`, and only that**: `jq '{verdict, regressions, noisy, changed, busy}' compare.json`.
+   - `verdict` `ok` or `faster` and exit 0: done; `improvements` says what got better.
+   - `error` (exit 2): `error` says why; fix the cause (a commit older than the harness, a
+     failed build), do not retry blindly.
+   - `regression` (exit 1): `regressions` is sorted, the worst first. An `allocs` or `peak_bytes`
+     entry is certain (the numbers are exact). A `time` entry with `confidence` `high` has spreads
+     that do not overlap, so it is very probably real; `low` means a busy computer and less than
+     30 %: run it again (4).
+   - `noisy` lists scenarios whose time moved over the threshold *inside* the spread: not a regression, but
+     look at them again (4) before a release.
+   - `changed` scenarios have no verdict by design; `skipped` ones lacked a tool (pandoc, ffmpeg,
+     lualatex, git-lfs) on one side: not a failure.
+4. **Run the flagged scenarios again, alone**, quiet if you can:
+   `scripts/bench-compare.sh <X> <Y> --profile full --runs 5 --filter =id1,=id2 --max-load 8`
+   (the profile of the flagged scenario: `worst.*` is `worst`). A regression that stays is real.
+   A `noisy` one that vanishes was noise.
+5. **Find the cause.** The same command with `--flamegraphs` writes `flamegraphs/x`, `y` and
+   `diff` of the regressed scenarios into the output folder (needs perf, `inferno`, `jq`;
+   `kernel.perf_event_paranoid` 2 or less). Open `diff/<id>.svg` first: the red boxes are code that
+   takes more of the time in Y (read the flamegraph section above); then the Y flamegraph for the
+   whole stack and `git diff <X>..<Y> -- <file of that function>`. Do not commit these SVGs.
+6. **Open an issue with the numbers** (`gh issue create -R rabalyn/shale`, label `performance` when it
+   exists): the scenario, the metric, X and Y values and the delta (from `compare.json`), the two commits,
+   the number of runs and the load (`x.load`, `y.load`), what the diff flamegraph shows (function names,
+   `file:line`), and the command that reproduces it. For a release, say in it that and why the
+   release went on with `--allow-perf-regression`, or fix first and release again (a red check is
+   fixed in a branch, landed, then the next release is made; never tag by hand).
+7. **After the fix**, step 2 again against the commit before it; keep the numbers in the issue's
+   closing comment.
+
+Rules of thumb: trust `allocs` and `peak_bytes` anywhere; trust a `time` verdict from three or more
+interleaved runs; never trust a single run on a computer with a load average above half its cores;
+never compare across a `changed` scenario or across profiles.
+
+To check a fix quickly: `shale --bench out.json --filter <id> --iters 20` measures one scenario.
 
 ## Baseline: how it is now
 

@@ -4,8 +4,16 @@ use super::alloc;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
-/// The version of the result file's layout; a reader refuses another one.
-pub const SCHEMA: u32 = 1;
+/// The version of the result file's layout that is written. Schema 2 added a scenario's
+/// `version`, the `run_medians_ns` and `repeats` of merged runs (BUILD-036); a reader accepts
+/// schema 1 files too (every missing field has its schema 1 meaning) and refuses any other.
+pub const SCHEMA: u32 = 2;
+/// The oldest layout that is still read.
+pub const MIN_SCHEMA: u32 = 1;
+
+fn one() -> u32 {
+    1
+}
 
 /// One measured scenario.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -25,6 +33,15 @@ pub struct ScenarioResult {
     /// (a cache that only grows, a leak, an undo history); negative when the iterations freed memory
     #[serde(default)]
     pub retained_bytes: i64,
+    /// the version of what the scenario does (BUILD-036): the harness bumps it when a change makes
+    /// the numbers mean something else, so a comparison says `changed` and not a verdict; a file
+    /// of schema 1 has none, which is version 1
+    #[serde(default = "one")]
+    pub version: u32,
+    /// the median time of each run, when this result merges several runs of one commit
+    /// (`--bench-merge`): `median_ns` is the smallest of them; empty for a single run
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub run_medians_ns: Vec<u64>,
 }
 
 /// A scenario that did not run, and why.
@@ -64,6 +81,9 @@ pub struct Report {
     pub run: String,
     /// the process's peak resident memory (`VmHWM`), Linux only
     pub peak_rss_kb: Option<u64>,
+    /// how many runs of the commit this result merges (1 for a plain run)
+    #[serde(default = "one")]
+    pub repeats: u32,
 }
 
 /// The sample of one iteration.
@@ -110,10 +130,33 @@ fn sorted(mut v: Vec<u64>) -> Vec<u64> {
     v
 }
 
+/// Wait until no other thread is allocating (BUILD-036): the counters are the process's, so a
+/// background job that a dropped window left behind (an indexing or graph job that outlives its
+/// scenario) would be counted into the next scenario's allocations, peak and time. Quiet is fewer
+/// than 50 allocations in 100 ms; after 10 s it goes on and says so. Returns how long it waited.
+pub fn quiesce() -> std::time::Duration {
+    let start = Instant::now();
+    let mut last = alloc::snapshot().allocs;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let now = alloc::snapshot().allocs;
+        if now - last < 50 {
+            return start.elapsed();
+        }
+        last = now;
+        if start.elapsed().as_secs() >= 10 {
+            eprintln!("bench: other threads were still allocating after 10 s: the next scenario may count their work");
+            return start.elapsed();
+        }
+    }
+}
+
 /// Run `f` once as a warm-up (unless it is too costly to run twice: `warmup` false), then `iters` times measured.
 pub fn measure(id: &str, iters: usize, warmup: bool, min_ms: Option<u64>, f: &mut dyn FnMut()) -> ScenarioResult {
+    quiesce();
     if warmup {
         f();
+        quiesce();
     }
     let live_before = alloc::snapshot().live as i64;
     let mut samples = measured_region(iters, f);
@@ -135,6 +178,8 @@ pub fn measure(id: &str, iters: usize, warmup: bool, min_ms: Option<u64>, f: &mu
         alloc_bytes: percentile(&bytes, 50),
         peak_bytes: samples.iter().map(|s| s.peak).max().unwrap_or(0),
         retained_bytes,
+        version: 1,
+        run_medians_ns: vec![],
     }
 }
 
@@ -178,15 +223,16 @@ pub fn header(run: &str, scenarios: Vec<ScenarioResult>, skipped: Vec<Skipped>) 
         skipped,
         run: run.into(),
         peak_rss_kb: peak_rss_kb(),
+        repeats: 1,
     }
 }
 
-/// Read a result file; a file of another schema is an error.
+/// Read a result file; a file of a schema that is not read is an error.
 pub fn read_report(path: &std::path::Path) -> Result<Report, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let r: Report = serde_json::from_str(&text).map_err(|e| format!("{}: not a benchmark result ({e})", path.display()))?;
-    if r.schema != SCHEMA {
-        return Err(format!("{}: schema {} (this build reads schema {SCHEMA})", path.display(), r.schema));
+    if !(MIN_SCHEMA..=SCHEMA).contains(&r.schema) {
+        return Err(format!("{}: schema {} (this build reads schemas {MIN_SCHEMA} to {SCHEMA})", path.display(), r.schema));
     }
     Ok(r)
 }
@@ -233,6 +279,27 @@ mod tests {
         assert!(r.retained_bytes >= 150_000, "two of the four runs kept their buffer: {r:?}");
     }
 
+    // spec: BUILD-036
+    #[test]
+    fn a_scenario_starts_only_when_background_threads_have_stopped_allocating() {
+        let _alone = super::SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = stop.clone();
+        let t = std::thread::spawn(move || {
+            while !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                std::hint::black_box(vec![0u8; 64]);
+            }
+        });
+        let stopper = stop.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(450));
+            stopper.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        let waited = quiesce();
+        t.join().unwrap();
+        assert!(waited >= std::time::Duration::from_millis(400), "it waited for the busy thread: {waited:?}");
+    }
+
     // spec: BUILD-028
     #[test]
     fn a_minimum_time_keeps_the_rounds_going() {
@@ -254,8 +321,9 @@ mod tests {
             profile: "release".into(),
             skipped: vec![Skipped { id: "m".into(), reason: "r".into() }],
             run: "full".into(),
-            scenarios: vec![ScenarioResult { id: "a.b".into(), iters: 3, median_ns: 5, p95_ns: 6, min_ns: 4, allocs: 7, alloc_bytes: 8, peak_bytes: 9, retained_bytes: -1 }],
+            scenarios: vec![ScenarioResult { id: "a.b".into(), iters: 3, median_ns: 5, p95_ns: 6, min_ns: 4, allocs: 7, alloc_bytes: 8, peak_bytes: 9, retained_bytes: -1, version: 2, run_medians_ns: vec![5, 6] }],
             peak_rss_kb: Some(10),
+            repeats: 2,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert_eq!(serde_json::from_str::<Report>(&json).unwrap(), r);
@@ -263,9 +331,25 @@ mod tests {
         for k in ["schema", "commit", "describe", "date", "host", "profile", "scenarios", "peak_rss_kb"] {
             assert!(v.get(k).is_some(), "{k}");
         }
-        for k in ["id", "iters", "median_ns", "p95_ns", "min_ns", "allocs", "alloc_bytes", "peak_bytes"] {
+        for k in ["id", "iters", "median_ns", "p95_ns", "min_ns", "allocs", "alloc_bytes", "peak_bytes", "version"] {
             assert!(v["scenarios"][0].get(k).is_some(), "{k}");
         }
+    }
+
+    // spec: BUILD-036
+    #[test]
+    fn a_result_of_schema_1_is_still_read_with_its_missing_fields_as_they_were() {
+        let dir = std::env::temp_dir().join(format!("shale-bench-schema1-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("old.json");
+        std::fs::write(
+            &f,
+            r#"{"schema":1,"commit":"c","describe":"d","date":"2026-01-01T00:00:00Z","host":{"cpu":"c","cores":1,"os":"o"},"profile":"release","scenarios":[{"id":"a","iters":1,"median_ns":1,"p95_ns":1,"min_ns":1,"allocs":1,"alloc_bytes":1,"peak_bytes":1}],"peak_rss_kb":null}"#,
+        )
+        .unwrap();
+        let r = read_report(&f).unwrap();
+        assert_eq!((r.schema, r.repeats, r.scenarios[0].version, r.scenarios[0].run_medians_ns.len()), (1, 1, 1, 0));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: BUILD-028
@@ -274,10 +358,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("shale-bench-schema-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("r.json");
-        std::fs::write(&f, r#"{"schema":2}"#).unwrap();
+        std::fs::write(&f, r#"{"schema":3}"#).unwrap();
         assert!(read_report(&f).unwrap_err().contains("not a benchmark result"));
         let other = Report {
-            schema: 2,
+            schema: 3,
             commit: String::new(),
             describe: String::new(),
             date: String::new(),
@@ -287,9 +371,10 @@ mod tests {
             skipped: vec![],
             run: String::new(),
             peak_rss_kb: None,
+            repeats: 1,
         };
         std::fs::write(&f, serde_json::to_string(&other).unwrap()).unwrap();
-        assert!(read_report(&f).unwrap_err().contains("schema 2"));
+        assert!(read_report(&f).unwrap_err().contains("schema 3"));
         std::fs::write(&f, "not json").unwrap();
         assert!(read_report(&f).is_err());
         assert!(read_report(&dir.join("missing.json")).is_err());

@@ -190,7 +190,7 @@ mod tests {
     use super::*;
 
     fn run(label: &str, date: &str, median_ms: u64) -> Run {
-        let sc = ScenarioResult { id: "ui.frame.<x>".into(), iters: 3, median_ns: median_ms * 1_000_000, p95_ns: 0, min_ns: 0, allocs: 5, alloc_bytes: 6, peak_bytes: 2048, retained_bytes: 0 };
+        let sc = ScenarioResult { id: "ui.frame.<x>".into(), iters: 3, median_ns: median_ms * 1_000_000, p95_ns: 0, min_ns: 0, allocs: 5, alloc_bytes: 6, peak_bytes: 2048, retained_bytes: 0, version: 1, run_medians_ns: vec![] };
         Run {
             label: label.into(),
             report: Report {
@@ -204,6 +204,7 @@ mod tests {
                 skipped: vec![],
                 run: "full".into(),
                 peak_rss_kb: Some(2048),
+                repeats: 1,
             },
         }
     }

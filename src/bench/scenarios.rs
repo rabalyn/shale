@@ -96,17 +96,25 @@ pub struct Scenario {
     pub quick: bool,
     /// too costly to run twice: no warm-up run
     cold: bool,
+    /// bumped when a change makes the scenario measure something else (BUILD-036)
+    pub version: u32,
     prepare: Prepare,
 }
 
 impl Scenario {
     pub fn plain(id: &'static str, iters: usize, quick: bool, f: fn(&mut Fixtures) -> Body) -> Scenario {
-        Scenario { id, iters, quick, cold: false, prepare: Prepare::Plain(f) }
+        Scenario { id, iters, quick, cold: false, version: 1, prepare: Prepare::Plain(f) }
     }
 
     /// A scenario that may be skipped (a program is missing): its setup says why.
     pub fn maybe(id: &'static str, iters: usize, quick: bool, f: fn(&mut Fixtures) -> Prep) -> Scenario {
-        Scenario { id, iters, quick, cold: false, prepare: Prepare::Maybe(f) }
+        Scenario { id, iters, quick, cold: false, version: 1, prepare: Prepare::Maybe(f) }
+    }
+
+    /// This scenario's definition changed: its results of an older version are not comparable (BUILD-036).
+    pub fn version(mut self, version: u32) -> Scenario {
+        self.version = version;
+        self
     }
 
     /// Run once, without a warm-up, `iters` times.
@@ -496,7 +504,8 @@ pub fn all() -> Vec<Scenario> {
     v
 }
 
-/// The IDs and scenarios a profile and filter pick.
+/// The IDs and scenarios a profile and filter pick. A filter is parts of IDs (`ui.frame`) or
+/// `=id` for exactly one, several separated by commas (BUILD-036: running again what a comparison flagged).
 fn chosen(profile: Profile, filter: Option<&str>) -> Vec<Scenario> {
     all()
         .into_iter()
@@ -505,7 +514,7 @@ fn chosen(profile: Profile, filter: Option<&str>) -> Vec<Scenario> {
             Profile::Full => !s.worst(),
             Profile::Worst => s.worst(),
         })
-        .filter(|s| filter.is_none_or(|f| f.strip_prefix('=').map_or_else(|| s.id.contains(f), |exact| s.id == exact)))
+        .filter(|s| filter.is_none_or(|f| f.split(',').filter(|part| !part.is_empty()).any(|part| part.strip_prefix('=').map_or_else(|| s.id.contains(part), |exact| s.id == exact))))
         .collect()
 }
 
@@ -526,7 +535,8 @@ pub fn run(scale: Scale, profile: Profile, filter: Option<&str>, iters: Option<u
         match prepared {
             Ok(mut body) => {
                 let n = iters.unwrap_or(s.iters).min(scale.max_iters).max(1);
-                let r = runner::measure(s.id, n, !s.cold, min_ms, &mut *body);
+                let mut r = runner::measure(s.id, n, !s.cold, min_ms, &mut *body);
+                r.version = s.version;
                 drop(body);
                 progress(&r);
                 results.push(r);
@@ -581,6 +591,16 @@ mod tests {
         assert!(ids.iter().all(|id| id.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '_')), "an ID is lower case words with dots");
     }
 
+    // spec: BUILD-036
+    #[test]
+    fn a_filter_is_parts_of_ids_or_exact_ids_separated_by_commas() {
+        let picked = |f: &str| chosen(Profile::Full, Some(f)).iter().map(|s| s.id).collect::<Vec<_>>();
+        assert_eq!(picked("=vault.open.small,=markdown.scan.long"), ["vault.open.small", "markdown.scan.long"]);
+        assert_eq!(picked("=vault.open.small,graph.layout"), ["vault.open.small", "graph.layout.small", "graph.layout.large"]);
+        assert_eq!(picked("=vault.open"), Vec::<&str>::new(), "= means the whole ID");
+        assert_eq!(picked("vault.open.small,"), ["vault.open.small"], "an empty part is nothing");
+    }
+
     // spec: BUILD-031
     #[test]
     fn the_profiles_pick_their_scenarios() {
@@ -611,7 +631,12 @@ mod tests {
                 assert!(!k.reason.is_empty(), "{}", k.id);
                 eprintln!("skipped {}: {}", k.id, k.reason);
             }
-            assert_eq!((report.schema, report.run.as_str()), (1, profile.name()));
+            assert_eq!((report.schema, report.run.as_str()), (runner::SCHEMA, profile.name()));
+            // spec: BUILD-036
+            if let Some(s) = report.scenarios.iter().find(|s| s.id == "calendar.occurrences.year.large") {
+                assert_eq!(s.version, 2, "its definition changed with the range cache of the calendar store");
+            }
+            assert!(report.scenarios.iter().all(|s| s.version >= 1));
             assert!(!report.commit.is_empty() && report.host.cores >= 1);
         }
     }

@@ -5,12 +5,15 @@
 #   scripts/bench-release.sh <worktree> <X.Y.Z> [--allow-perf-regression]
 #
 # Builds the benchmark binary of the worktree (`--profile bench-release --features bench`), runs
-# the `full` profile and the `worst` profile and stores the results as docs/perf/results/vX.Y.Z.json
+# the `full` profile (BENCH_RUNS times, default 2, merged with `--bench-merge`: the best median of
+# the runs and their spread, BUILD-036) and the `worst` profile (BENCH_WORST_RUNS times, default 1)
+# and stores the results as docs/perf/results/vX.Y.Z.json
 # and docs/perf/results-worst/vX.Y.Z.json. Against the previous release's stored file (the highest
 # version below X.Y.Z; none: nothing is compared) it writes docs/perf/compare/vX.Y.Z.{md,json}
 # and docs/perf/compare/vX.Y.Z-worst.{md,json} (`shale --bench-compare`, thresholds 10 % median
 # time and 15 % peak bytes), and makes docs/perf/index.html. All of it goes into the release
-# commit. A regression stops the release (exit 1, the regressions on stderr) unless
+# commit. A regression stops the release (exit 1, the regressions on stderr, how to follow it up:
+# the agent playbook in docs/perf/README.md) unless
 # --allow-perf-regression is given (then they are printed and the release goes on); any other
 # failure ends with exit 2. Environment, for scripts/test-release.sh: BENCH_BIN (a program used
 # instead of building and running the worktree's), BENCH_TARGET_DIR (the build folder,
@@ -65,13 +68,22 @@ previous() {
 }
 
 REGRESSED=""
+RUNS_DIR=$(mktemp -d)
+trap 'rm -rf "$RUNS_DIR"' EXIT
+case ${BENCH_RUNS:-2} in ''|*[!0-9]*|0) echo "bench-release.sh: BENCH_RUNS needs a number of at least 1" >&2; exit 2 ;; esac
+case ${BENCH_WORST_RUNS:-1} in ''|*[!0-9]*|0) echo "bench-release.sh: BENCH_WORST_RUNS needs a number of at least 1" >&2; exit 2 ;; esac
 # run_set <profile> <results folder> <compare name suffix>
 run_set() {
-  local profile=$1 results=$2 suffix=$3 prev code
+  local profile=$1 results=$2 suffix=$3 runs=$4 prev code i
+  local parts=()
   mkdir -p "$results" docs/perf/compare
   prev=$(previous "$results")
-  echo "== benchmark: the $profile profile" >&2
-  "$BIN" --bench "$results/v$V.json" --profile "$profile" >&2 || { echo "bench-release.sh: the $profile run failed" >&2; exit 2; }
+  for i in $(seq 1 "$runs"); do
+    echo "== benchmark: the $profile profile, run $i of $runs" >&2
+    "$BIN" --bench "$RUNS_DIR/$profile.$i.json" --profile "$profile" >&2 || { echo "bench-release.sh: the $profile run failed" >&2; exit 2; }
+    parts+=("$RUNS_DIR/$profile.$i.json")
+  done
+  "$BIN" --bench-merge "$results/v$V.json" "${parts[@]}" >&2 || { echo "bench-release.sh: the $profile runs could not be merged" >&2; exit 2; }
   if [ -z "$prev" ]; then
     echo "no earlier release result in $results: nothing to compare the $profile run with" >&2
     return 0
@@ -90,8 +102,8 @@ run_set() {
   fi
 }
 
-run_set full docs/perf/results ""
-run_set worst docs/perf/results-worst "-worst"
+run_set full docs/perf/results "" "${BENCH_RUNS:-2}"
+run_set worst docs/perf/results-worst "-worst" "${BENCH_WORST_RUNS:-1}"
 "$BIN" --bench-report docs/perf docs/perf/index.html >&2 || { echo "bench-release.sh: the report could not be made" >&2; exit 2; }
 
 if [ -n "$REGRESSED" ]; then
@@ -100,6 +112,10 @@ if [ -n "$REGRESSED" ]; then
     exit 0
   fi
   echo "performance regression:$REGRESSED" >&2
+  for f in docs/perf/compare/v$V.json docs/perf/compare/v$V-worst.json; do
+    [ -f "$f" ] && command -v jq >/dev/null && jq -r '.regressions[] | "  \(.id) \(.metric) \(.x) -> \(.y) (\(.delta_pct * 10 | round / 10) %, confidence \(.confidence))"' "$f" >&2
+  done
+  echo "Follow it up as the agent playbook in docs/perf/README.md says: run the flagged scenarios again (--filter), flamegraphs of both versions, an issue with the numbers." >&2
   echo "Fix it, or run the release again with --allow-perf-regression (say why in the release issue)." >&2
   exit 1
 fi
