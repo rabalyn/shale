@@ -985,6 +985,26 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   day ago) and then daily, and 2 seconds after you change a setting. It never touches your notes,
   files or mail.
 
+## Updates
+
+- **Settings → Updates** (#421, ADR-0023): Shale looks on GitHub for a newer release a short while after it starts and
+  every 24 hours (**Check for updates now** does not wait), and, as you choose, only tells you (**Notify**), downloads
+  and checks it (**Download**) or installs it (**Install**). **Off**, and `SHALE_UPDATES=off` in the environment, mean no
+  request at all and no notice. Until you choose, the first update found asks. The notice has What's new (the release
+  notes), Skip this version (that version only) and Later; a downloaded update offers Install now or At next start, an
+  installed one **Restart now**, which saves everything like quitting and starts the new version (UPD-001 to UPD-010,
+  UPD-019, UPD-020).
+- The download is checked against the release's `.sha256` file and nothing is installed when it does not match. That
+  shows the file arrived whole, not who made it (authenticity is #422, UPD-022).
+- What an update does depends on how this copy was installed (UPD-011 to UPD-018): the Linux folder or an `install.sh`
+  install, the macOS app and the Windows folder update themselves and keep the previous program as `shale.old` until the
+  new one has run (on Windows `shale.exe.old` goes at the next start); a package-managed install (AUR `shale-bin`,
+  `/usr/bin`) and a development build are never touched and only get a notice; a folder that cannot be written gets
+  the command to run. The macOS and Windows installs are tested through their plans on Linux only (see the spec).
+  Settings shows the version, how this copy was installed and why it cannot update itself where that is so.
+
+  ![The Updates tab of Settings](userguide/z_media/screenshots/settings-updates.png)
+
 ## Git sync
 
 - Needs `git` installed. In Settings → Sync, enter the URL of a git repository

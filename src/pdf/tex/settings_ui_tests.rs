@@ -125,7 +125,7 @@ fn the_latex_tab_has_its_controls_and_says_why_no_tex_can_be_used() {
         assert!(t.shows(want), "{want:?} missing in {:?}", t.painted());
     }
     assert!(t.app.tex.task.is_none(), "looking at the page starts no job");
-    assert!(!t.shows("Remove…") && !t.shows("Update"), "nothing to remove or update while nothing is installed");
+    assert!(!t.shows("Remove…") && !t.painted().contains(&"Update"), "nothing to remove or update while nothing is installed");
 }
 
 // spec: NAV-048

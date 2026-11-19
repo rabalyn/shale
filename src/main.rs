@@ -27,6 +27,7 @@ mod cursor_style;
 mod cursor_ui_tests;
 mod data_usage;
 mod dialog;
+mod download;
 mod drawing;
 mod editor;
 mod editor_cache;
@@ -114,6 +115,7 @@ mod themes;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;
+mod update;
 mod userguide;
 #[cfg(test)]
 mod userguide_ui_tests;
@@ -169,6 +171,8 @@ struct Cli {
     size: [f32; 2],
     /// `--export-pdf <folder> <file.pdf>`: the folder as one PDF, no window (BOOK-011)
     export_pdf: Option<(PathBuf, PathBuf)>,
+    /// `--restarted`: started by an update's "Restart now"; waits for the old Shale to end (UPD-019)
+    restarted: bool,
 }
 
 /// The result of reading the command line.
@@ -189,7 +193,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Parsed {
 }
 
 fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
-    let mut cli = Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0], export_pdf: None };
+    let mut cli = Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0], export_pdf: None, restarted: false };
     let mut args = args.into_iter();
     while let Some(opt) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{opt} needs a value"));
@@ -210,6 +214,7 @@ fn read_args(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
                 }
                 cli.export_pdf = Some((PathBuf::from(folder), PathBuf::from(file)));
             }
+            "--restarted" => cli.restarted = true,
             "--vault" => cli.vault = Some(PathBuf::from(value()?)),
             "--view" => cli.view = Some(value()?),
             "--keys" => cli.keys = Some(value()?),
@@ -254,7 +259,7 @@ fn main() -> eframe::Result {
     if let Err(e) = secret::harden_process(cfg!(not(debug_assertions))) {
         eprintln!("shale: could not make the process undumpable: {e}");
     }
-    let Cli { screenshot, record, vault, view, keys, size, export_pdf } = match parse_args(std::env::args().skip(1)) {
+    let Cli { screenshot, record, vault, view, keys, size, export_pdf, restarted } = match parse_args(std::env::args().skip(1)) {
         Parsed::Run(cli) => cli,
         Parsed::Help => {
             println!("{USAGE}");
@@ -290,7 +295,7 @@ fn main() -> eframe::Result {
     let mut handover = None;
     let _instance_lock = if screenshot.is_none() {
         let dir = instance::default_dir();
-        match instance::claim(&dir) {
+        match instance::claim(&dir, if restarted { instance::RESTART_WAIT } else { instance::GRACE }) {
             instance::Claim::Owner(lock) => {
                 match instance::listen(&dir) {
                     Ok(h) => handover = Some(h),
@@ -374,6 +379,15 @@ mod tests {
         }
     }
 
+    // spec: UPD-019
+    #[test]
+    fn upd_019_restarted_is_a_flag_that_changes_nothing_else() {
+        assert!(!cli(parse(&[])).restarted);
+        assert!(cli(parse(&["--restarted"])).restarted);
+        let c = cli(parse(&["--restarted", "--vault", "/v"]));
+        assert!(c.restarted && c.vault == Some(PathBuf::from("/v")), "the vault folder is not eaten by the flag");
+    }
+
     // spec: BUILD-019 (#85: an old build skipped --size and opened "1360x840" as a new vault)
     #[test]
     fn an_unknown_option_is_an_error_not_a_vault() {
@@ -419,14 +433,14 @@ mod tests {
     // spec: DEV-013
     #[test]
     fn no_arguments_start_with_the_defaults() {
-        assert_eq!(cli(parse(&[])), Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0], export_pdf: None });
+        assert_eq!(cli(parse(&[])), Cli { screenshot: None, record: None, vault: None, view: None, keys: None, size: [1360.0, 840.0], export_pdf: None, restarted: false });
     }
 
     // spec: DEV-013
     #[test]
     fn every_option_is_read() {
         let c = cli(parse(&["--vault", "/v", "--screenshot", "out.png", "--view", "tasks", "--keys", "key:Down|key:Tab", "--size", "1400x900"]));
-        assert_eq!(c, Cli { screenshot: Some("out.png".into()), record: None, vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1400.0, 900.0], export_pdf: None });
+        assert_eq!(c, Cli { screenshot: Some("out.png".into()), record: None, vault: Some("/v".into()), view: Some("tasks".into()), keys: Some("key:Down|key:Tab".into()), size: [1400.0, 900.0], export_pdf: None, restarted: false });
     }
 
     // spec: DEV-013, BUILD-019
