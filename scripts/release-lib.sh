@@ -8,6 +8,8 @@
 # (the date of a changelog section, default today); LAND_* is passed on to land.sh. A release also
 # runs scripts/bench-release.sh (BUILD-034): BENCH_SKIP=yes leaves it out, BENCH_ALLOW=yes lets a
 # performance regression pass (make-release.sh --skip-bench, --allow-perf-regression).
+# SHALE_PREV_PUBLISHED, when set (also empty), is used instead of asking gh for the last published
+# release (published_release below).
 
 REMOTE=${RELEASE_REMOTE:-origin}
 GH=${RELEASE_GH:-gh}
@@ -81,6 +83,19 @@ set_version() {
     { print }
   ' "$dir/Cargo.lock" > "$dir/Cargo.lock.new"
   mv "$dir/Cargo.lock.new" "$dir/Cargo.lock"
+}
+
+# published_release: exports SHALE_PREV_PUBLISHED, the last release with a published GitHub release
+# page (empty when there is none yet), which .github/check-release.sh and .github/release-notes.sh
+# read (BUILD-013): GitHub publishes the notes of every version since it, so the local check must
+# look at the same text. A value already set in the environment is used as it is (the tests); a
+# gh that cannot answer stops the script: a guess could pass a check that GitHub then fails.
+published_release() {
+  [ -z "${SHALE_PREV_PUBLISHED+x}" ] || return 0
+  local tag
+  tag=$("$GH" release view -R "$GH_REPO" --json tagName -q .tagName) \
+    || die "gh could not tell the last published release of $GH_REPO (needed for the release check, BUILD-013); set SHALE_PREV_PUBLISHED=<tag> to name it"
+  export SHALE_PREV_PUBLISHED=$tag
 }
 
 # release_issue <x.y.z>: the number of the open issue "Release x.y.z", made when there is none
@@ -244,6 +259,7 @@ tag_and_push() {
   git -C "$wt" add -A
   git -C "$wt" commit -q -m "$msg" -m "Made by scripts/make-$([ "$kind" = check ] && echo tag || echo release).sh (FORGE-01$([ "$kind" = check ] && echo 3 || echo 4), ADR-0018)."
   # BUILD-013 before anything is landed: the same check Forgejo and GitHub run on the tag
+  [ "$kind" = check ] || published_release
   (cd "$wt" && sh .github/check-release.sh "$v") || die "the release check failed; nothing was landed or tagged"
   bump_commit=$(git -C "$wt" rev-parse HEAD)
   git worktree remove --force "$wt"
@@ -276,6 +292,7 @@ finish_tag() {
   git worktree prune
   git worktree add -q --detach "$chk" "$merge"
   CLEAN_WT=$chk
+  [ "$kind" = check ] || published_release
   out=$(cd "$chk" && sh .github/check-release.sh "$v" 2>&1) || problems=$out
   if [ "$kind" = release ]; then
     pending=$(git ls-tree --name-only "$merge" docs/changelog-pending/ | command grep '\.md$' || true)

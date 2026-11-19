@@ -1,9 +1,11 @@
 #!/bin/sh
-# Tests .github/check-release.sh on throwaway git repositories (spec BUILD-013).
+# Tests .github/check-release.sh and .github/release-notes.sh on throwaway git repositories (spec
+# BUILD-013).
 #   sh .github/test-check-release.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CHECK="$HERE/check-release.sh"
+NOTES_SH="$HERE/release-notes.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 FAILED=0
@@ -34,7 +36,7 @@ changelog() {
 # expect <name> <pass|fail> <text the error output must contain> <version>
 expect() {
   N=$((N + 1))
-  OUT=$(sh "$CHECK" "$4" 2>&1)
+  OUT=$(SHALE_PREV_PUBLISHED="${PUB:-}" sh "$CHECK" "$4" 2>&1)
   CODE=$?
   if [ "$2" = pass ] && [ "$CODE" = 0 ]; then
     echo "ok $N - $1"
@@ -45,6 +47,22 @@ expect() {
     FAILED=1
   fi
 }
+
+# expect_notes <name> <expected file content> [since tag] <version>: the release page text after the AI notice
+expect_notes() {
+  N=$((N + 1))
+  SINCE_ARG="$3"
+  VER="$4"
+  GOT=$(SHALE_PREV_PUBLISHED="$SINCE_ARG" sh "$NOTES_SH" "$VER" ./CHANGELOG.md 2>&1 | tail -n +"$((NOTICE_LINES + 1))" | sed -e "/./,\$!d")
+  if [ "$GOT" = "$2" ]; then
+    echo "ok $N - $1"
+  else
+    echo "not ok $N - $1: got:"
+    printf '%s\n' "$GOT"
+    FAILED=1
+  fi
+}
+NOTICE_LINES=$(wc -l < "$HERE/ai-notice.md")
 
 # first release: no previous tag, the comparisons that need one are skipped
 new_repo first 0.1.0 0.1.0
@@ -142,6 +160,77 @@ expect "a release counts issues since the previous release, not the pre-release"
 changelog 0.4.0 "- #40 and #41"
 git commit -q -am "notes"
 expect "a release after its pre-releases passes" pass "" 0.4.0
+
+# BUILD-013: the previous *published* release (SHALE_PREV_PUBLISHED): v0.1.0 has a release page,
+# v0.2.0 was tagged but never published, 0.3.0 is the release being checked
+new_repo pub 0.1.0 0.1.0
+git tag -a v0.1.0 -m x
+git commit -q --allow-empty -m "A" -m "Closes #10"
+git tag -a v0.2.0 -m x
+git commit -q --allow-empty -m "B" -m "Closes #20"
+sed -i 's/0.1.0/0.3.0/' Cargo.toml Cargo.lock
+cat > CHANGELOG.md <<'CL'
+# Changelog
+
+## [Unreleased]
+
+## [0.3.0] - 2026-03-03
+
+### Fixed
+
+- three (#20)
+
+## [0.2.0] - 2026-02-02
+
+### Added
+
+- two, without the issue
+
+## [0.1.0] - 2026-01-01
+
+### Added
+
+- one (#1)
+
+[Unreleased]: https://example.com/compare
+CL
+git commit -q -am "release"
+expect "unset: only the previous release tag counts, as before" pass "" 0.3.0
+PUB=v0.1.0
+expect "an issue closed since the published release that the older section does not name fails" fail "since v0.1.0: #10" 0.3.0
+PUB=v0.9.9
+expect "SHALE_PREV_PUBLISHED that is not a tag fails" fail "SHALE_PREV_PUBLISHED=v0.9.9 is not a tag" 0.3.0
+PUB=v0.1.0
+sed -i 's/two, without the issue/two (#10)/' CHANGELOG.md
+git commit -q -am "notes"
+expect "the older unpublished section naming the issue passes" pass "" 0.3.0
+# the check reads the same text as the page: an issue named only in the section of the published release does not count
+sed -i 's/- one (#1)/- one (#1) (#30)/' CHANGELOG.md
+git commit -q --allow-empty -m "C" -m "Closes #30"
+git commit -q -am "notes"
+expect "a section of the published release itself is not part of the notes" fail "since v0.1.0: #30" 0.3.0
+PUB=""
+
+expect_notes "notes span every section after the published release, newest first, with headings" "## 0.3.0 - 2026-03-03
+
+### Fixed
+
+- three (#20)
+
+## 0.2.0 - 2026-02-02
+
+### Added
+
+- two (#10)" v0.1.0 0.3.0
+expect_notes "a single section stays as it is, without heading" "### Fixed
+
+- three (#20)" "" 0.3.0
+expect_notes "no section between the published release and the version: one section" "### Added
+
+- two (#10)" v0.1.0 0.2.0
+expect_notes "the published release being the previous version gives the one section" "### Fixed
+
+- three (#20)" v0.2.0 0.3.0
 
 [ "$FAILED" = 0 ] && echo "all $N checks passed"
 exit "$FAILED"
