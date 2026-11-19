@@ -64,16 +64,76 @@ remove_worktree() {
   if [ -e "$WT" ]; then git worktree remove --force "$WT" >/dev/null 2>&1 || rm -rf "$WT"; fi
   git worktree prune
 }
-trap remove_worktree EXIT
+
+# Statistics of the landing (FORGE-015, #368): `current` says what runs now (start, branch, step,
+# step start; tab-separated, written atomically), `current.steps` collects `name<TAB>seconds<TAB>
+# status` of every step (the checks run in a subshell, so it is a file), and when a branch's
+# landing ends one line goes to `history.tsv`. None of this may fail a landing: errors are ignored.
+CURRENT="$HOME_DIR/current"
+STEPS="$HOME_DIR/current.steps"
+HISTORY="$HOME_DIR/history.tsv"
+CUR_BRANCH=""
+CUR_START=0
+RESULT=error
+STEP_NAME=""
+STEP_T0=0
+
+write_current() {
+  { printf '%s\t%s\t%s\t%s\n' "$CUR_START" "$CUR_BRANCH" "${1//$'\t'/ }" "$2" > "$CURRENT.tmp" && mv -f "$CURRENT.tmp" "$CURRENT"; } 2>/dev/null || true
+}
+record_step() {
+  { printf '%s\t%s\t%s\n' "${1//$'\t'/ }" "$(($(date +%s) - $2))" "$3" >> "$STEPS"; } 2>/dev/null || true
+}
+begin_step() {
+  STEP_NAME=$1
+  STEP_T0=$(date +%s)
+  write_current "$STEP_NAME" "$STEP_T0"
+}
+end_step() {
+  [ -n "$STEP_NAME" ] || return 0
+  record_step "$STEP_NAME" "$STEP_T0" "$1"
+  STEP_NAME=""
+}
+start_landing() {
+  CUR_BRANCH=$1
+  CUR_START=$(date +%s)
+  RESULT=error
+  STEP_NAME=""
+  { : > "$STEPS"; } 2>/dev/null || true
+}
+finish_landing() {
+  [ -n "$CUR_BRANCH" ] || return 0
+  end_step 1
+  {
+    local end load failed fields
+    end=$(date +%s)
+    load=$(awk '{print $1}' /proc/loadavg 2>/dev/null || true)
+    failed=""
+    [ "$RESULT" = failed ] && failed=$(awk -F'\t' '$3 != 0 { print $1; exit }' "$STEPS" 2>/dev/null)
+    fields=$(awk -F'\t' '{ printf "\t%s=%s", $1, $2 }' "$STEPS" 2>/dev/null)
+    printf '%s\t%s\t%s\t%s\t%s\t%s%s\n' "$CUR_START" "$end" "$CUR_BRANCH" "$RESULT" "$failed" "$load" "$fields" >> "$HISTORY"
+  } 2>/dev/null || true
+  CUR_BRANCH=""
+  rm -f "$CURRENT" "$CURRENT.tmp" "$STEPS" 2>/dev/null || true
+}
+on_exit() {
+  finish_landing
+  remove_worktree
+}
+trap on_exit EXIT
 
 # One check: its name, then the command. A failing one ends the checks with its name. Every
 # step returns its own status, so this holds without `set -e`, which bash ignores in a function
 # called from `if` (a failing `cargo test` once let a branch land).
 step() {
-  local name=$1
+  local name=$1 t0 rc=0
   shift
   echo "-- $name"
-  if ! "$@"; then
+  t0=$(date +%s)
+  write_current "$name" "$t0"
+  "$@" || rc=$?
+  record_step "$name" "$t0" "$rc"
+  if [ "$rc" != 0 ]; then
     echo "land.sh: check failed: $name" >&2
     return 1
   fi
@@ -165,6 +225,8 @@ update_local_main() {
 
 for b in "${BRANCHES[@]}"; do
   echo "== $b"
+  start_landing "$b"
+  begin_step merge
   git fetch -q "$REMOTE"
   if ! ref=$(resolve "$b"); then
     echo "land.sh: no branch or commit named $b" >&2
@@ -173,6 +235,9 @@ for b in "${BRANCHES[@]}"; do
   base=$(git rev-parse "refs/remotes/$REMOTE/main")
   if git merge-base --is-ancestor "$ref" "$base"; then
     echo "already on $REMOTE/main, nothing to land"
+    STEP_NAME=""
+    RESULT=nothing
+    finish_landing
     continue
   fi
   remove_worktree
@@ -181,16 +246,24 @@ for b in "${BRANCHES[@]}"; do
     echo "land.sh: $b conflicts with $REMOTE/main in:" >&2
     git -C "$WT" diff --name-only --diff-filter=U | sed 's/^/  /' >&2
     echo "Merge $REMOTE/main into $b, resolve the conflict there and run land.sh again. $REMOTE/main is unchanged." >&2
+    RESULT=conflict
     exit 1
   fi
+  end_step 0
   if ! (cd "$WT" && checks "$base"); then
     echo "land.sh: a check failed for $b; $REMOTE/main is unchanged." >&2
+    RESULT=failed
     exit 1
   fi
+  begin_step push
   if ! git -C "$WT" push -q "$REMOTE" HEAD:main; then
     echo "land.sh: $REMOTE/main moved while $b was checked (pushed by hand?); run land.sh again." >&2
+    RESULT=failed
     exit 1
   fi
+  end_step 0
   echo "landed $b as $(git -C "$WT" rev-parse --short HEAD) on $REMOTE/main"
+  RESULT=landed
   update_local_main "$(git -C "$WT" rev-parse HEAD)"
+  finish_landing
 done

@@ -105,6 +105,7 @@ jobs:
           sh .github/test-check-release.sh
           sh .forgejo/scripts/test-check-commit-issues.sh
           bash scripts/test-land.sh
+          bash scripts/test-dev-metrics.sh
           bash scripts/test-release.sh
 
       # BUILD-015: the README and every release page start with the AI-development notice

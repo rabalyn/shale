@@ -220,7 +220,8 @@ and were imported with their numbers, so `#N` in the history is the issue `#N` h
 merges a branch into `main`, runs fmt, clippy and the tests, and pushes only when they pass
 ([ADR-0016](docs/decisions/0016-local-landing.md)). The Forgejo runner checks again for every tag
 (`.forgejo/workflows/ci.yml`, [ADR-0018](docs/decisions/0018-tag-only-ci.md)); GitHub builds
-release tags (BUILD-012), also on macOS and Windows (BUILD-017).
+release tags (BUILD-012), also on macOS and Windows (BUILD-017). How landings, builds, agents,
+issues and releases are doing is exported for Prometheus and Grafana ([docs/dev-metrics.md](docs/dev-metrics.md)).
 
 ## Build and run
 
