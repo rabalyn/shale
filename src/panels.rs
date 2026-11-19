@@ -766,7 +766,6 @@ impl ShaleApp {
                     let n = items.len() + create as usize;
                     let keys = crate::picker::ListKeys::take(ui);
                     keys.select(sel, n);
-                    ui.add_space(6.0);
                     let mut pick: Option<usize> = if keys.enter && n > 0 { Some(*sel) } else { None };
                     for (i, (_, rel, name)) in items.iter().enumerate() {
                         let folder = rel.parent().map(rel_to_string).unwrap_or_default();
@@ -855,7 +854,6 @@ impl ShaleApp {
             Modal::ConfirmTrash { rel } => {
                 let resp = crate::dialog::Dialog::new("trash", "Move to trash?").width(400.0).show(&ctx, |ui| {
                     crate::theme::paragraph(ui, format!("“{}” will be moved to the .trash folder inside your vault. You can get it back from there.", rel_to_string(rel)));
-                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         if ui.button(egui::RichText::new("Move to trash").color(theme::LINK_MISSING)).clicked() {
                             let r = rel.clone();
@@ -874,7 +872,6 @@ impl ShaleApp {
             Modal::LiftPaste { text } => {
                 let resp = crate::dialog::Dialog::new("lift-paste", "Lift headings?").width(440.0).show(&ctx, |ui| {
                     crate::theme::paragraph(ui, "The pasted text has no # heading. Lift its headings?");
-                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         if ui.button(egui::RichText::new("Lift").strong()).on_hover_text("## becomes #, ### becomes ##, and so on").clicked() {
                             let lifted = markdown::lift_headings(text).unwrap_or_else(|| text.clone());
@@ -903,9 +900,7 @@ impl ShaleApp {
                             crate::theme::paragraph(ui, format!("Converting makes the drawing “{}” next to it (Obsidian opens it with the Excalidraw plugin). The canvas file is not changed.", crate::drawing::canvas::drawing_name_for(rel)))
                         }
                     };
-                    ui.add_space(6.0);
                     ui.checkbox(always, "Always convert canvases when opening them").on_hover_text("Also in Settings → Drawings");
-                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         let convert = if existing.is_some() { "Open the drawing" } else { "Convert" };
                         if ui.button(convert).clicked() {

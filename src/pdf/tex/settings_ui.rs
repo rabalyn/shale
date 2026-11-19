@@ -222,8 +222,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
         crate::theme::hint(ui, "Not firm in TeX? This takes you through it.");
     });
 
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new("Which TeX is used").color(theme::MUTED));
+    theme::section(ui, "Which TeX is used");
     match (&st.detection, st.detecting.is_some()) {
         (_, true) | (None, _) => {
             ui.horizontal(|ui| {
@@ -254,7 +253,6 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
         }
     }
 
-    ui.add_space(6.0);
     ui.label("TeX to use");
     for c in TexChoice::ALL {
         if ui.radio_value(&mut cfg.engine, c, c.label()).changed() {
@@ -274,8 +272,7 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
         }
     });
 
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new("Shale's own TeX Live").color(theme::MUTED));
+    theme::section(ui, "Shale's own TeX Live");
     managed_section(ui, st, cfg, &ctx);
 
     super::sets_ui::show(ui, st, cfg);
@@ -295,7 +292,6 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &mut TexConfig) -> bool {
     });
 
     if let Some(n) = &st.notice {
-        ui.add_space(6.0);
         if n.ok {
             ui.label(&n.text);
         } else {

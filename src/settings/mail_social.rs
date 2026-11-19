@@ -1,6 +1,6 @@
 //! The Mail tab and the Feeds tab: the simple settings, and a button to each account dialog.
 
-use super::{section, Asks};
+use super::Asks;
 use crate::app::ShaleApp;
 use eframe::egui::{self, Ui};
 
@@ -13,7 +13,7 @@ impl ShaleApp {
             }
             crate::theme::hint(ui, format!("{} configured", self.cfg.mail_accounts.len()));
         });
-        section(ui, "Reading");
+        crate::theme::section(ui, "Reading");
         ui.horizontal(|ui| {
             ui.label("Fetch new mail every");
             changed |= ui.add(egui::DragValue::new(&mut self.cfg.mail_sync_minutes).range(0..=1440)).changed();
@@ -43,7 +43,7 @@ impl ShaleApp {
             changed |= ui.add(egui::DragValue::new(&mut self.cfg.social_check_minutes).range(0..=1440)).changed();
             ui.label("minutes (0: never)");
         });
-        ui.add_space(crate::theme::SECTION_GAP - crate::theme::ITEM_GAP);
+        crate::theme::section_break(ui);
         self.post_index_settings(ui);
         changed
     }

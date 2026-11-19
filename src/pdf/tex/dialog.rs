@@ -330,7 +330,6 @@ impl TexExport {
         if self.folder {
             rec("folder-kinds", ui.label(muted(&format!("{ONLY_ARTICLES_AND_BOOKS}."))));
         }
-        ui.add_space(4.0);
         match &self.status {
             TexStatus::Checking => {
                 rec("tex-status", ui.label(muted("Looking for a TeX…")));
@@ -365,7 +364,6 @@ impl TexExport {
             });
         }
         if let Some(f) = &self.failure {
-            ui.add_space(4.0);
             crate::theme::problem(ui, &f.headline);
             for p in f.problems.iter().take(6) {
                 rec("problem", ui.label(egui::RichText::new(p).monospace().size(12.0)));

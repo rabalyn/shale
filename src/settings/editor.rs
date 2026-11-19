@@ -1,13 +1,13 @@
 //! The Editor tab: how notes are edited. The Vim keys are on the Vim tab (`vim.rs`).
 
-use super::{section, SettingsTab};
+use super::SettingsTab;
 use crate::app::ShaleApp;
 use eframe::egui::{self, Ui};
 
 impl ShaleApp {
     pub(super) fn editor_tab(&mut self, ui: &mut Ui, tab: &mut SettingsTab) -> bool {
         let mut changed = false;
-        section(ui, "Cursor");
+        crate::theme::section(ui, "Cursor");
         changed |= cursor_combo(ui, "Cursor while typing", "cursor-shape", &mut self.cfg.cursor_shape);
         changed |= ui.checkbox(&mut self.cfg.cursor_blink, "Blinking cursor").changed();
         ui.horizontal(|ui| {
@@ -36,16 +36,16 @@ impl ShaleApp {
             changed |=
                 ui.checkbox(&mut self.cfg.table_cell_edit, "Edit table cells in the grid").on_hover_text("Off: a click on a table shows its raw markdown. A single table can be switched by the button above its top right corner.").changed();
         });
-        section(ui, "Links");
+        crate::theme::section(ui, "Links");
         changed |= ui.checkbox(&mut self.cfg.ctrl_to_follow, "Follow links only with Ctrl+click (plain click places the cursor)").changed();
         changed |= ui.checkbox(&mut self.cfg.new_notes_next_to_current, "Create notes from red links next to the current note (instead of the vault root)").changed();
         changed |= ui.checkbox(&mut self.cfg.update_links_on_rename, "Update links in other notes when renaming").changed();
-        section(ui, "Drawings");
+        crate::theme::section(ui, "Drawings");
         changed |= ui
             .checkbox(&mut self.cfg.auto_convert_canvas, "Convert Obsidian canvases to editable drawings when opening them (instead of asking)")
             .on_hover_text("Off: Shale asks, and can show the canvas read-only. The canvas file is never changed.")
             .changed();
-        section(ui, "Editing");
+        crate::theme::section(ui, "Editing");
         changed |= ui.checkbox(&mut self.cfg.format_toolbar, "Show formatting toolbar above the text of a note").changed();
         ui.add_enabled_ui(self.cfg.format_toolbar, |ui| {
             ui.horizontal(|ui| {

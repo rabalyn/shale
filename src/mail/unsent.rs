@@ -93,7 +93,6 @@ impl MailView {
         let close_tip = self.tip("Close this window", KeyAction::MailUnsent);
         let resp = crate::dialog::Dialog::new("mail-unsent", "Sent mails only on this computer").width(620.0).non_modal().show(ui.ctx(), |ui| {
             crate::theme::prose(ui, muted("The server's Sent folder does not have these. “Upload again” sends a copy there; “Dismiss” keeps the mail in the local Sent folder and stops showing it here. Nothing is deleted.").size(12.5));
-            ui.add_space(6.0);
             egui::ScrollArea::vertical().max_height(300.0).id_salt("mail-unsent-list").show(ui, |ui| {
                 let sel = self.kbd.unsent_sel.min(list.len() - 1);
                 for (k, c) in list.iter().enumerate() {
