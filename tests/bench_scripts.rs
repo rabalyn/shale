@@ -35,11 +35,19 @@ fn build_030_bench_compare_sh_needs_two_commits_that_have_the_harness() {
     assert_eq!(code, 2, "{text}");
     let (code, text) = script("bench-compare.sh", &["not-a-commit-xyz", "HEAD"]);
     assert_eq!((code, text.contains("is not a commit")), (2, true), "{text}");
-    // the first commit of the repository is older than the harness; a shallow clone has no such commit to try
+    // the first commit of the repository is older than the harness. A shallow clone has no such commit: its oldest
+    // commit is the shallow boundary (HEAD in CI, which checks out at depth 1), not the real first commit, so the
+    // refusal cannot be tried there (HEAD against HEAD would run the full benchmarks)
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let first = Command::new("git").args(["rev-list", "--max-parents=0", "HEAD"]).current_dir(root).output().expect("git runs");
-    let first = String::from_utf8_lossy(&first.stdout).lines().next().unwrap_or("").to_string();
-    if first.is_empty() {
+    let git = |args: &[&str]| {
+        let out = Command::new("git").args(args).current_dir(root).output().expect("git runs");
+        String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_string()
+    };
+    if git(&["rev-parse", "--is-shallow-repository"]) == "true" {
+        return;
+    }
+    let first = git(&["rev-list", "--max-parents=0", "HEAD"]);
+    if first.is_empty() || first == git(&["rev-parse", "HEAD"]) {
         return;
     }
     let (code, text) = script("bench-compare.sh", &[&first, "HEAD", "--out", &std::env::temp_dir().join(format!("shale-bench-cmp-test-{}", std::process::id())).to_string_lossy()]);
