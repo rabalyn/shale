@@ -47,7 +47,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   Large notes stay quick (EDIT-099 to EDIT-102, rabalyn/shale#369): the folds of an unchanged text are not found again, and
   from 2 000 lines on the reading view draws only what is near the visible part. The editor keeps the laid-out note, the
   parsed tables and footnotes and the counts of the status bar while nothing changes (EDIT-104 to EDIT-107, rabalyn/shale#372),
-  so a frame of a 20 000-line note takes a few milliseconds.
+  so a frame of a 20 000-line note takes a few milliseconds, and the text is formatted block by block, so a typed key or a
+  move of the cursor to another line formats one or two blocks instead of the whole note (EDIT-109, rabalyn/shale#375).
 
 ![Folded code blocks, quote and signature in the reading view](userguide/z_media/screenshots/reading-folds.png)
 - **Code blocks as boxes** (EDIT-080, EDIT-086, rabalyn/shale#356): with the Markdown preview on, a fenced code block is a
