@@ -58,6 +58,8 @@ change within a second.
 | `media_play_button_opacity` | 0.6 (range 0 to 1) | Settings → Appearance, "Play button over the artwork of a sound or video"; global config; the 100% and fullscreen buttons over pictures and videos use it too |
 | `media_volume` | 0.8 (range 0 to 1) | the volume slider of any sound player; one volume for all players; global config |
 | `settings_tab_width` | left out (as wide as the longest tab name; 60 points at least, half of the window at most) | the border between the tab list and the page of the Settings window: drag it to set the width, double-click it to go back to automatic |
+| `left_sidebar_width` | left out (260 points; 170 at least, 520 at most) | the border between the left sidebar and the notes: drag it to set the width; it is kept after a restart; "Reset layout" in the ribbon's menu goes back to the default |
+| `right_sidebar_width` | left out (290 points; 200 at least, 560 at most) | the border between the notes and the right sidebar: drag it to set the width; it is kept after a restart; "Reset layout" goes back to the default |
 
 ### Fonts
 
