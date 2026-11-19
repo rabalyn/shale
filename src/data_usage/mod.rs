@@ -184,6 +184,8 @@ pub fn stats(id: CacheId, places: &Places) -> Result<CacheStats, String> {
 /// Empty a cache (USE-010…USE-017). The mail index needs its open store (it is rebuilt by
 /// the store's writer); the window resets what it holds in memory when the result arrives.
 pub fn clear(id: CacheId, places: &Places, mail: Option<&MailStore>) -> Result<Freed, String> {
+    let _flow = tracing::info_span!("flow.data_usage_clear", peer = "app").entered();
+    let _step = tracing::info_span!("flow.data_usage_clear.remove_files", peer = "disk").entered();
     match id {
         CacheId::SocialPictures => files::remove(&crate::social::images::cache_files(&places.pictures)),
         CacheId::PostIndex => match &places.post_index {
@@ -224,6 +226,8 @@ fn mb(n: Option<u32>) -> Option<u64> {
 
 /// Remove what the retention settings no longer allow (USE-022).
 pub fn prune(id: CacheId, places: &Places, r: &CacheRetention, now: i64) -> Result<Freed, String> {
+    let _flow = tracing::info_span!("flow.data_usage_prune", peer = "app").entered();
+    let _step = tracing::info_span!("flow.data_usage_prune.remove_files", peer = "disk").entered();
     match id {
         CacheId::SocialPictures => {
             let all = crate::social::images::cache_files(&places.pictures);

@@ -437,16 +437,16 @@ pub fn import(req: &Request, handle: &Handle, notify: &dyn Fn()) -> Result<Impor
     }
     let work = WorkDir::new().map_err(|e| format!("no temporary folder ({e})"))?;
     notify();
-    let (src, source, name) = fetch(req, handle, &work)?;
+    let (src, source, name) = tracing::info_span!("flow.tex_setup.fetch", peer = "source").in_scope(|| fetch(req, handle, &work))?;
     if handle.cancel.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("cancelled".into());
     }
     notify();
     let out = work.path().join("out");
     std::fs::create_dir(&out).map_err(|e| e.to_string())?;
-    let mut imported = build(&src, &out, source, name, req, handle, notify)?;
+    let mut imported = tracing::info_span!("flow.tex_setup.build", peer = "tex").in_scope(|| build(&src, &out, source, name, req, handle, notify))?;
     handle.stage(Stage::Place);
     notify();
-    place(req, &out, &mut imported, handle)?;
+    tracing::info_span!("flow.tex_setup.place", peer = "vault").in_scope(|| place(req, &out, &mut imported, handle))?;
     Ok(imported)
 }

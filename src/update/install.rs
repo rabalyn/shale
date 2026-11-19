@@ -287,19 +287,46 @@ fn unpack(kind: &InstallKind, staged: &Staged) -> Result<PathBuf, String> {
     Ok(root)
 }
 
+// The dataflow spans of an install (DEV-032): one flow for each kind the tests run on Linux. The
+// other kinds have none yet, so their spans are disabled.
+fn flow_span(kind: &InstallKind) -> tracing::Span {
+    match kind {
+        InstallKind::LinuxPortable { .. } => tracing::info_span!("flow.update_install_folder", peer = "app"),
+        InstallKind::LinuxInstalled { .. } => tracing::info_span!("flow.update_install_script", peer = "app"),
+        _ => tracing::Span::none(),
+    }
+}
+
+fn unpack_span(kind: &InstallKind) -> tracing::Span {
+    match kind {
+        InstallKind::LinuxPortable { .. } => tracing::info_span!("flow.update_install_folder.unpack", peer = "disk"),
+        InstallKind::LinuxInstalled { .. } => tracing::info_span!("flow.update_install_script.unpack", peer = "disk"),
+        _ => tracing::Span::none(),
+    }
+}
+
+fn run_span(kind: &InstallKind) -> tracing::Span {
+    match kind {
+        InstallKind::LinuxPortable { .. } => tracing::info_span!("flow.update_install_folder.replace_files", peer = "disk"),
+        InstallKind::LinuxInstalled { .. } => tracing::info_span!("flow.update_install_script.run_install_sh", peer = "installer"),
+        _ => tracing::Span::none(),
+    }
+}
+
 /// Put the verified download `staged` in place for an install of `kind`. On an error the old
 /// version is still in place.
 pub fn apply(kind: &InstallKind, staged: &Staged, cancel: &AtomicBool) -> Result<Installed, String> {
     let relaunch = relaunch_for(kind).ok_or("this install is never replaced by Shale")?;
+    let _flow = flow_span(kind).entered();
     let plan = if let InstallKind::MacApp { .. } = kind {
         let mount = staged.dir.join("mount");
         std::fs::create_dir_all(&mount).map_err(|e| io_err("could not make", &mount, e))?;
         plan(kind, &staged.archive, &[], &mount)?
     } else {
-        let root = unpack(kind, staged)?;
+        let root = unpack_span(kind).in_scope(|| unpack(kind, staged))?;
         plan(kind, &root, &list(&root)?, &staged.dir)?
     };
-    execute(&plan, cancel)?;
+    run_span(kind).in_scope(|| execute(&plan, cancel))?;
     let _ = std::fs::remove_dir_all(&staged.dir);
     Ok(Installed { version: staged.version.clone(), relaunch })
 }

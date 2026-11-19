@@ -148,6 +148,17 @@ fn serve(mut s: TcpStream, st: &Arc<Mutex<ServerState>>) {
                 respond(&mut s, 401, "application/json", r#"{"error":"The access token is invalid"}"#);
             }
         }
+        // the timelines of the dataflow test (DEV-029): one post each, for a signed-in account only
+        ("GET", "/api/v1/lists") if g.tokens.contains(&bearer) => respond(&mut s, 200, "application/json", &json!([{"id": "7", "title": "Friends"}]).to_string()),
+        ("GET", "/api/v1/timelines/home") if g.tokens.contains(&bearer) => {
+            let status = json!({"id": "101", "created_at": "2026-11-01T10:00:00.000Z", "content": "<p>Hello</p>", "account": {"id": "1", "acct": "ada", "display_name": "Ada L."}});
+            respond(&mut s, 200, "application/json", &json!([status]).to_string())
+        }
+        ("GET", "/xrpc/app.bsky.actor.getPreferences") if bearer == "access" => respond(&mut s, 200, "application/json", r#"{"preferences":[]}"#),
+        ("GET", "/xrpc/app.bsky.feed.getTimeline") if bearer == "access" => {
+            let post = json!({"uri": "at://did:plc:ada/app.bsky.feed.post/1", "cid": "c1", "author": {"did": "did:plc:ada", "handle": "ada.test"}, "record": {"text": "Hello", "createdAt": "2026-11-01T10:00:00.000Z"}});
+            respond(&mut s, 200, "application/json", &json!({"feed": [{"post": post}]}).to_string())
+        }
         ("POST", "/xrpc/com.atproto.server.createSession") => {
             if field("password") == g.app_password && field("identifier") == "ada.test" {
                 respond(&mut s, 200, "application/json", &json!({"accessJwt": "access", "refreshJwt": "refresh", "did": "did:plc:ada", "handle": "ada.test"}).to_string());

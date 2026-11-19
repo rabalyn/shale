@@ -3,7 +3,7 @@
 This file keeps track of the work so it can carry on across sessions. Update it whenever a
 feature lands, a gap is found or a test is added.
 
-_Last updated: 2026-11-16 (ShaleApp sub-states for search, file tree, graphs, screenshot mode and recovery, raba/shale#119)_
+_Last updated: 2026-11-19 (dataflow diagrams recorded from real runs, raba/shale#409)_
 
 ## Architecture
 
@@ -23,6 +23,7 @@ both pace by it.
 | File | What it does |
 |---|---|
 | `src/main.rs` | Reads the command-line options (`--vault`, `--screenshot`, `--view`, `--size`, `--keys`) and opens the window. |
+| `src/dataflow.rs` | Test-only (DEV-026): the recorder of `tracing` spans (`flow.<flow>.<step>`), their canonical tree and the Mermaid renderer behind the generated diagrams in `docs/dataflow/` (the first is `mail-sync.md`, written by the mail-env test); its unit tests are `src/dataflow_tests.rs`, `tests/dataflow_docs.rs` checks that every step is a span in `src/`; `docs/dataflow/README.md` is the index of all flows. |
 | `src/recorder.rs` | `--record` (DEV-019): the arguments of the system `ffmpeg`, the frames piped to it (raw RGBA on stdin, stdout and stderr read by threads), the finished clip moved into place, and the report of a missing ffmpeg (BUILD-018). `src/app/screenshot.rs` captures a frame per drawn frame for it. |
 | `src/script.rs` | The `--keys` script of screenshot runs (BUILD-007; `ScriptRun` is the run's state in `ShaleApp`): the step language and its parser (keys, text, pointer steps aimed at coordinates or at drawn texts, waits), and the tests that every picture of `docs/screenshots/` has a recipe shown in the docs (DEV-007). |
 | `src/app.rs` | App state (`ShaleApp`, with the sub-states above): history, open note buffers, autosave, outside-change detection, actions (open, follow link, create, rename, trash, toggle task), screenshot mode. Includes app-level tests. |

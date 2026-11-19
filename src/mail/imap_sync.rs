@@ -266,6 +266,7 @@ impl Drop for SyncGuard {
 /// [`start`] (a background job). Progress goes to `progress`; `cancel` is checked between batches.
 pub fn sync_account(store: &MailStore, account_id: &str, display: &str, connector: &dyn Connector, opts: &SyncOptions, progress: &Sender<Progress>, cancel: &AtomicBool) -> SyncSummary {
     let mut summary = SyncSummary::default();
+    let _flow = tracing::info_span!("flow.mail_sync", peer = "sync").entered();
     // a quick check of a watched folder (MAIL-232) is short: wait for it rather than run beside it
     let _guard = loop {
         if let Some(g) = SyncGuard::try_enter(store, account_id) {
@@ -277,7 +278,7 @@ pub fn sync_account(store: &MailStore, account_id: &str, display: &str, connecto
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     };
-    let first = match connector.connect() {
+    let first = match tracing::info_span!("flow.mail_sync.connect", peer = "imap").in_scope(|| connector.connect()) {
         Ok(c) => c,
         Err(e) => {
             summary.errors.push(err_text(&e));
@@ -298,9 +299,11 @@ pub fn sync_account(store: &MailStore, account_id: &str, display: &str, connecto
     let queue = Mutex::new(VecDeque::from(queue));
     let first = Mutex::new(Some(first));
     let result = Mutex::new(SyncSummary::default());
+    // the workers record under this sync's span, in this sync's dispatcher (DEV-026)
+    let (dispatch, flow) = (tracing::dispatcher::get_default(|d| d.clone()), tracing::Span::current());
     std::thread::scope(|s| {
         for _ in 0..workers {
-            s.spawn(|| worker(store, connector, opts, &WorkerShared { queue: &queue, first: &first, result: &result }, progress, cancel));
+            s.spawn(|| tracing::dispatcher::with_default(&dispatch, || flow.in_scope(|| worker(store, connector, opts, &WorkerShared { queue: &queue, first: &first, result: &result }, progress, cancel))));
         }
     });
     let mut done = result.into_inner().unwrap_or_else(|e| e.into_inner());
@@ -308,6 +311,7 @@ pub fn sync_account(store: &MailStore, account_id: &str, display: &str, connecto
     done.errors.extend(summary.errors);
     if done.errors.is_empty() && !done.cancelled {
         // a backup only after a sync that went well (MAIL-008)
+        let _backup = tracing::info_span!("flow.mail_sync.backup", peer = "store").entered();
         if let Err(e) = store.backup_if_due() {
             done.errors.push(format!("backup of the mail index failed: {e}"));
         }
@@ -319,11 +323,16 @@ pub fn sync_account(store: &MailStore, account_id: &str, display: &str, connecto
 /// choice, an old one keeps the person's) and return every selectable folder with its kind.
 fn record_folders(store: &MailStore, account_id: &str, display: &str, client: &mut Client) -> Result<Vec<(FolderRow, FolderKind)>, String> {
     let mut out = Vec::new();
-    for e in client.list_folders().map_err(err_text)? {
+    let listed = {
+        let _list = tracing::info_span!("flow.mail_sync.list_folders", peer = "imap").entered();
+        client.list_folders().map_err(err_text)?
+    };
+    for e in listed {
         if e.has_attr("\\Noselect") || e.has_attr("\\NonExistent") {
             continue;
         }
         let kind = classify(&e.attributes, &e.name);
+        let _record = tracing::info_span!("flow.mail_sync.record_folder", peer = "store").entered();
         let row = store.ensure_folder(account_id, display, &e.name, e.delimiter.as_deref(), special_use_of(&e).as_deref(), default_sync(kind)).map_err(err_text)?;
         out.push((row, kind));
     }
@@ -433,7 +442,7 @@ fn worker(store: &MailStore, connector: &dyn Connector, opts: &SyncOptions, shar
         };
         let _ = progress.send(Progress::FolderStarted { folder: shown.clone() });
         let mut c = c;
-        let outcome = crate::jobs::catch(|| sync_folder(store, &mut c, &folder, opts, progress, cancel)).unwrap_or_else(Err);
+        let outcome = tracing::info_span!("flow.mail_sync.folder", peer = "sync").in_scope(|| crate::jobs::catch(|| sync_folder(store, &mut c, &folder, opts, progress, cancel)).unwrap_or_else(Err));
         match outcome {
             Ok((added, _)) => {
                 client = Some(c); // the connection is still good: next folder
@@ -496,7 +505,10 @@ fn fetch_full(store: &MailStore, client: &mut Client, row: &FolderRow, uv: u32, 
             })
             .map_err(|e| failure.clone().unwrap_or_else(|| err_text(e)))?;
         stored += ops.len();
-        store.commit(ops).map_err(err_text)?;
+        {
+            let _span = tracing::info_span!("flow.mail_sync.store_messages", peer = "store").entered();
+            store.commit(ops).map_err(err_text)?;
+        }
         if !after_batch(stored) {
             break;
         }
@@ -509,13 +521,20 @@ fn fetch_full(store: &MailStore, client: &mut Client, row: &FolderRow, uv: u32, 
 fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts: &SyncOptions, progress: &Sender<Progress>, cancel: &AtomicBool) -> Result<(usize, usize), String> {
     let shown = decode_mutf7(&folder.name);
     let now = opts.now();
-    let sel = client.examine(&folder.name).map_err(err_text)?;
-    let row = adopt_validity(store, folder, &sel, now)?;
+    let sel = {
+        let _span = tracing::info_span!("flow.mail_sync.select_folder", peer = "imap").entered();
+        client.examine(&folder.name).map_err(err_text)?
+    };
+    let row = {
+        let _span = tracing::info_span!("flow.mail_sync.adopt_validity", peer = "store").entered();
+        adopt_validity(store, folder, &sel, now)?
+    };
     let uv = sel.uidvalidity;
     let reader = store.reader().map_err(err_text)?;
     let had_rows = !reader.flags_of(row.id, uv).map_err(err_text)?.is_empty();
 
     // what to fetch: the window on a first sync, everything from UIDNEXT on afterwards
+    let search = tracing::info_span!("flow.mail_sync.search_new", peer = "imap").entered();
     let candidates = match row.uidnext {
         Some(next) => client.uid_search(SearchKey::UidFrom(next)).map_err(err_text)?.into_iter().filter(|&u| u >= next).collect::<Vec<_>>(),
         None => {
@@ -523,11 +542,13 @@ fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts:
             client.uid_search(SearchKey::Since(y, m, d)).map_err(err_text)?
         }
     };
+    drop(search);
     let present = reader.present_uids(row.id, uv).map_err(err_text)?;
     let mut wanted: Vec<u32> = candidates.into_iter().filter(|u| !present.contains(u)).collect();
     wanted.sort_unstable_by(|a, b| b.cmp(a)); // newest first
     let total = wanted.len();
     let mut error: Option<String> = None;
+    let fetch = tracing::info_span!("flow.mail_sync.fetch", peer = "imap").entered();
     let stored = fetch_full(store, client, &row, uv, &wanted, opts, |done| {
         let _ = progress.send(Progress::Folder { folder: shown.clone(), done, total });
         !cancel.load(Ordering::SeqCst)
@@ -536,6 +557,7 @@ fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts:
         error = Some(e);
         0
     });
+    drop(fetch);
     if let Some(e) = error {
         return Err(e);
     }
@@ -544,12 +566,14 @@ fn sync_folder(store: &MailStore, client: &mut Client, folder: &FolderRow, opts:
 
     let mut changed = 0;
     if complete && had_rows {
+        let _compare = tracing::info_span!("flow.mail_sync.compare_with_server", peer = "imap").entered();
         changed = compare_with_server(store, client, &row, &sel, opts)?;
     }
     if complete {
         crate::mail::ops::drop_local_copies_seen_on_server(store, row.id, uv)?;
     }
     let keep = row.uidvalidity == Some(uv);
+    let _state = tracing::info_span!("flow.mail_sync.store_folder_state", peer = "store").entered();
     store
         .commit(vec![Op::FolderState {
             folder: row.id,

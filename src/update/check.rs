@@ -250,12 +250,15 @@ pub fn parse_checksum(text: &str, name: &str) -> Result<String, String> {
 
 /// The newest release as GitHub tells it (`None`: nothing that may be offered).
 pub fn fetch_latest(source: &Source, cancel: &AtomicBool) -> Result<Option<Release>, String> {
+    let _flow = tracing::info_span!("flow.update_check", peer = "app").entered();
     let dir = std::env::temp_dir().join(format!("shale-update-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
     std::fs::create_dir_all(&dir).map_err(|e| format!("no temporary folder ({e})"))?;
     let file = dir.join("latest.json");
     let url = source.latest_url();
     let request = Request { url: &url, max_bytes: MAX_API, timeout: Duration::from_secs(60), allow_http: source.allow_http, headers: &["Accept: application/vnd.github+json", "X-GitHub-Api-Version: 2022-11-28"] };
-    let got = download::to_file(cancel, &request, &file).and_then(|()| crate::fsutil::read_to_string(&file).map_err(|e| format!("the answer could not be read ({e})")));
+    let got = tracing::info_span!("flow.update_check.request", peer = "github")
+        .in_scope(|| download::to_file(cancel, &request, &file))
+        .and_then(|()| tracing::info_span!("flow.update_check.read_answer", peer = "disk").in_scope(|| crate::fsutil::read_to_string(&file)).map_err(|e| format!("the answer could not be read ({e})")));
     let _ = std::fs::remove_dir_all(&dir);
     parse_release(&got?)
 }
@@ -301,23 +304,26 @@ pub fn verify(archive: &Path, sum_file: &Path, name: &str) -> Result<(), String>
 /// Download the file of `release` for this system and its checksum into `<root>/<version>/` and
 /// verify it. A file that is already there and matches is not downloaded again.
 pub fn stage(source: &Source, release: &Release, os: &str, arch: &str, root: &Path, cancel: &AtomicBool) -> Result<Staged, String> {
+    let _flow = tracing::info_span!("flow.update_download", peer = "app").entered();
     let (file, sum) = asset_for(release, os, arch)?;
     for a in [file, sum] {
         if !source.accepts(&a.url) {
             return Err(format!("the release names the address {:?} for {}, which is not a download of Shale: refused", a.url, a.name));
         }
     }
-    clear_other_versions(root, &release.version);
-    let dir = root.join(&release.version);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{} could not be made ({e})", dir.display()))?;
+    let dir = tracing::info_span!("flow.update_download.prepare", peer = "disk").in_scope(|| {
+        clear_other_versions(root, &release.version);
+        let dir = root.join(&release.version);
+        std::fs::create_dir_all(&dir).map(|()| dir.clone()).map_err(|e| format!("{} could not be made ({e})", dir.display()))
+    })?;
     let (archive, sum_file) = (dir.join(&file.name), dir.join(&sum.name));
     let get = |a: &Asset, to: &Path, max: u64, secs: u64| download::to_file(cancel, &Request { url: &a.url, max_bytes: max, timeout: Duration::from_secs(secs), allow_http: source.allow_http, headers: &[] }, to);
     // the checksum is always fetched anew: a download that was kept is checked against the current one
-    get(sum, &sum_file, MAX_SUM, 120)?;
+    tracing::info_span!("flow.update_download.checksum_download", peer = "github").in_scope(|| get(sum, &sum_file, MAX_SUM, 120))?;
     if !(archive.is_file() && verify_quiet(&archive, &sum_file, &file.name)) {
         let _ = std::fs::remove_file(&archive);
-        get(file, &archive, MAX_ASSET, 30 * 60)?;
-        verify(&archive, &sum_file, &file.name)?;
+        tracing::info_span!("flow.update_download.archive_download", peer = "github").in_scope(|| get(file, &archive, MAX_ASSET, 30 * 60))?;
+        tracing::info_span!("flow.update_download.verify", peer = "disk").in_scope(|| verify(&archive, &sum_file, &file.name))?;
     }
     Ok(Staged { version: release.version.clone(), dir, archive })
 }

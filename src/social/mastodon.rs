@@ -40,6 +40,7 @@ fn base(server: &str) -> Result<String, String> {
 
 /// Step 1: tell the server that "Shale" wants to read the account (creates an app on that server).
 pub fn register_app(server: &str) -> Result<AppCredentials, String> {
+    let _step = tracing::info_span!("flow.social_mastodon.register_app", peer = "server").entered();
     let server = base(server)?;
     let body = json!({"client_name": "Shale", "redirect_uris": REDIRECT, "scopes": SCOPE});
     let mut v = api("POST", &format!("{server}/api/v1/apps"), None, Some(&body))?;
@@ -59,6 +60,7 @@ pub fn authorize_url(server: &str, app: &AppCredentials) -> Result<String, Strin
 
 /// Step 3: the code from the browser → the access token.
 pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<Secret, String> {
+    let _step = tracing::info_span!("flow.social_mastodon.exchange_code", peer = "server").entered();
     let server = base(server)?;
     let mut body = json!({"client_id": app.client_id, "client_secret": app.client_secret.expose(), "redirect_uri": REDIRECT, "grant_type": "authorization_code", "code": code.trim(), "scope": SCOPE});
     let answer = api("POST", &format!("{server}/oauth/token"), None, Some(&body));
@@ -75,6 +77,7 @@ pub fn exchange_code(server: &str, app: &AppCredentials, code: &str) -> Result<S
 
 /// Who the token belongs to; fails when the token or the server is wrong.
 pub fn verify(server: &str, token: &str) -> Result<Identity, String> {
+    let _step = tracing::info_span!("flow.social_mastodon.verify", peer = "server").entered();
     let server = base(server)?;
     let v = api("GET", &format!("{server}/api/v1/accounts/verify_credentials"), Some(token), None)?;
     let acct = text(&v["acct"]);
@@ -97,6 +100,7 @@ fn full_acct(acct: &str, server: &str) -> String {
 
 /// Home and the user's lists.
 pub fn feeds(server: &str, token: &str) -> Result<Vec<Feed>, String> {
+    let _step = tracing::info_span!("flow.social_mastodon.feeds", peer = "server").entered();
     let server = base(server)?;
     let mut out = vec![Feed { id: "home".into(), title: "Home".into() }];
     let lists = api("GET", &format!("{server}/api/v1/lists"), Some(token), None)?;
@@ -125,6 +129,7 @@ fn newest_id(items: &[Value]) -> Option<String> {
 
 /// One page of a timeline (20 posts). `cursor`: the last id of the page before.
 pub fn timeline(server: &str, token: &str, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
+    let _step = tracing::info_span!("flow.social_mastodon.timeline", peer = "server").entered();
     let server = base(server)?;
     let path = timeline_path(feed)?;
     let mut params = vec![("limit", PAGE_SIZE)];

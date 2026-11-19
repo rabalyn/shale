@@ -15,6 +15,8 @@ use std::path::Path;
 
 /// Export a note as a kind of the imported set, in a language, and compile it. Returns the PDF.
 fn export(note: &str, kind_id: &str, lang: Language, given: &[(&str, &str)], toc: bool) -> (Vec<u8>, Document) {
+    // the root of the flow is the caller (the export dialog, DEV-028)
+    let _flow = tracing::info_span!("flow.tex_export", peer = "export").entered();
     let what = format!("kind {kind_id}, {}", lang.code());
     let assets = rich_assets();
     let files: Vec<(&str, &[u8])> = assets.iter().map(|(n, b)| (*n, b.as_slice())).collect();
@@ -162,13 +164,19 @@ fn tex_env_slides_have_a_page_for_the_title_and_one_for_every_frame() {
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_letter_has_its_recipient_subject_and_text() {
     let note = "---\nrecipient: |\n  Dr. Grace Hopper\n  Navy Street 1\nsubject: About the compiler\nsender: Ada Lovelace\nsender_address: Analytical Street 2\nopening: Dear Dr. Hopper,\nclosing: Yours sincerely\ndate: 2026-11-17\n---\nThe body of the letter with a table:\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n";
-    for lang in [Language::En, Language::De] {
-        let (pdf, doc) = export(note, "letter", lang, &[], false);
-        let text = squashed(pdf);
-        for want in ["Dr.GraceHopper", "NavyStreet1", "Aboutthecompiler", "DearDr.Hopper,", "Yourssincerely", "Thebodyoftheletter"] {
-            assert!(text.contains(want), "{lang:?}: {want} is not in {text}\n{}", doc.tex);
+    // the precondition, outside the recording: the template set is imported once per run, by whichever
+    // test comes first, so the diagram must not depend on that order (DEV-026)
+    let _ = the_set();
+    let forest = crate::dataflow::record(|| {
+        for lang in [Language::En, Language::De] {
+            let (pdf, doc) = export(note, "letter", lang, &[], false);
+            let text = squashed(pdf);
+            for want in ["Dr.GraceHopper", "NavyStreet1", "Aboutthecompiler", "DearDr.Hopper,", "Yourssincerely", "Thebodyoftheletter"] {
+                assert!(text.contains(want), "{lang:?}: {want} is not in {text}\n{}", doc.tex);
+            }
         }
-    }
+    });
+    crate::dataflow::verify_flow(&forest, "tex_export", &crate::dataflow::doc("tex-export.md"));
 }
 
 // spec: TEX-009, TEX-011, TEX-027

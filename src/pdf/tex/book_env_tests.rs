@@ -21,6 +21,8 @@ fn png(rgb: [u8; 3]) -> Vec<u8> {
 /// The book as a kind of the imported set, compiled: the text of its PDF without spaces, its
 /// bookmarks, its links inside the book and the document.
 fn compile_book(kind_id: &str) -> (String, usize, usize, String) {
+    // the root of the flow is the caller (the export dialog, DEV-028)
+    let _flow = tracing::info_span!("flow.tex_book", peer = "export").entered();
     let (red, blue) = (png([200, 30, 30]), png([30, 30, 200]));
     let files: Vec<(&str, &[u8])> = vec![
         ("index.md", b"---\ntitle: The Book\nauthor: Ada Lovelace\nreviewer: [Prof. Babbage, Prof. Turing]\ndepartment: ce\n---\nIntroduction text of the book.\n"),
@@ -94,5 +96,9 @@ fn tex_env_a_folder_compiles_as_a_thesis_with_parts_and_chapters() {
 #[test]
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_folder_compiles_as_a_report_with_sections() {
-    check("report");
+    // the precondition, outside the recording: the template set is imported once per run, by whichever
+    // test comes first, so the diagram must not depend on that order (DEV-026)
+    let _ = the_set();
+    let forest = crate::dataflow::record(|| check("report"));
+    crate::dataflow::verify_flow(&forest, "tex_book", &crate::dataflow::doc("tex-book.md"));
 }

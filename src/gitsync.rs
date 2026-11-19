@@ -326,17 +326,21 @@ impl Drop for TreeGuard {
 /// Run one sync cycle (ADR-0008 §4). `tree` is held while files in the vault are changed,
 /// so the app cannot save a note meanwhile.
 pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<Report, String> {
+    let _flow = tracing::info_span!("flow.git_sync", peer = "sync").entered();
     if !is_repo(vault) {
         return Err("The vault is not a git repository".into());
     }
+    let inspect = tracing::info_span!("flow.git_sync.inspect", peer = "git").entered();
     let mut branch = ensure_idle(git, vault)?;
     let ident = identity(git, vault)?;
+    drop(inspect);
     let mut report = Report::default();
 
     // 0. media in LFS: set up, or stop before a media file lands in the history (SYNC-019)
-    lfs::guard(git, vault)?;
+    tracing::info_span!("flow.git_sync.lfs_guard", peer = "git").in_scope(|| lfs::guard(git, vault))?;
 
     // 1. commit everything (SYNC-006)
+    let commit_local = tracing::info_span!("flow.git_sync.commit_local", peer = "git").entered();
     git.ok(vault, args!["add", "-A", "--", ".", ":(exclude,glob)**/.shale-tmp-*", ":(exclude).shale/undo"])?;
     let staged = git.ok(vault, args!["diff", "--cached", "--name-only", "-z"])?;
     report.committed = staged.stdout.split(|b| *b == 0).filter(|s| !s.is_empty()).count();
@@ -344,6 +348,7 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
         let msg = opts.message(&format!("Sync from {}: {} file(s)", opts.host, report.committed));
         commit(git, vault, &ident, &["commit", "--quiet", "-m", &msg])?;
     }
+    drop(commit_local);
 
     // 2. with a remote: fetch, merge, push (SYNC-007), a few times if the remote moves on
     if !git.run(vault, args!["remote", "get-url", REMOTE])?.ok {
@@ -351,7 +356,7 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
     }
     report.remote = true;
     for attempt in 0..3 {
-        git.ok(vault, args!["fetch", "--quiet", "--no-tags", REMOTE])?;
+        tracing::info_span!("flow.git_sync.fetch", peer = "remote").in_scope(|| git.ok(vault, args!["fetch", "--quiet", "--no-tags", REMOTE]))?;
         if attempt == 0 {
             branch = align_branch(git, vault, &branch)?;
         }
@@ -359,9 +364,9 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
         let remote_ref = format!("refs/remotes/{REMOTE}/{branch}");
         if let Some(theirs) = rev(git, vault, &remote_ref)? {
             if local.as_deref() != Some(theirs.as_str()) {
-                integrate(git, vault, opts, &ident, Heads { local: local.as_deref(), theirs: &theirs }, tree, &mut report)?;
+                tracing::info_span!("flow.git_sync.integrate", peer = "git").in_scope(|| integrate(git, vault, opts, &ident, Heads { local: local.as_deref(), theirs: &theirs }, tree, &mut report))?;
                 // another machine may have set LFS up (SYNC-019)
-                lfs::guard(git, vault)?;
+                tracing::info_span!("flow.git_sync.lfs_guard", peer = "git").in_scope(|| lfs::guard(git, vault))?;
             }
         }
         if rev(git, vault, "HEAD")?.is_none() {
@@ -370,11 +375,11 @@ pub fn sync(git: &Git, vault: &Path, opts: &Options, tree: &TreeLock) -> Result<
         }
         // SYNC-021: the files first, so the pointers never reach the remote without them
         if lfs::in_use(vault) {
-            lfs::push(git, vault, &branch)?;
+            tracing::info_span!("flow.git_sync.lfs_push", peer = "remote").in_scope(|| lfs::push(git, vault, &branch))?;
         }
         let spec = format!("refs/heads/{branch}:refs/heads/{branch}");
         // SYNC-012: never forced
-        let push = git.run(vault, args!["push", "--quiet", "--set-upstream", REMOTE, spec])?;
+        let push = tracing::info_span!("flow.git_sync.push", peer = "remote").in_scope(|| git.run(vault, args!["push", "--quiet", "--set-upstream", REMOTE, spec]))?;
         if push.ok {
             report.pushed = true;
             return Ok(report);

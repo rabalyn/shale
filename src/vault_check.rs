@@ -37,6 +37,7 @@ pub struct Finding {
 /// of a walk through the folders. `.git`, `.shale` and `.trash` are skipped, and symbolic links are
 /// listed but not followed.
 pub fn check(root: &Path) -> io::Result<Vec<Finding>> {
+    let _flow = tracing::info_span!("flow.vault_check", peer = "page").entered();
     let mut out = Vec::new();
     walk(root, Path::new(""), &mut out)?;
     Ok(out)
@@ -44,7 +45,8 @@ pub fn check(root: &Path) -> io::Result<Vec<Finding>> {
 
 fn walk(root: &Path, dir: &Path, out: &mut Vec<Finding>) -> io::Result<()> {
     let mut entries: Vec<(String, bool)> = Vec::new();
-    for e in std::fs::read_dir(root.join(dir))? {
+    let listing = tracing::info_span!("flow.vault_check.read_folder", peer = "disk").in_scope(|| std::fs::read_dir(root.join(dir)))?;
+    for e in listing {
         let e = e?;
         // a name that is no text cannot be shown or renamed here
         let Ok(name) = e.file_name().into_string() else { continue };
@@ -542,6 +544,20 @@ mod tests {
         app.rename_findings(&[0]);
         assert!(d.join(format!("{c}.md")).exists());
         assert!(app.vault_check.report.clone().unwrap().starts_with("Renamed 0 files and folders"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // spec: DEV-031
+    #[test]
+    fn dataflow_vault_check() {
+        let d = temp("dataflow");
+        touch(&d, "Notes/Fine.md", "x");
+        touch(&d, "Notes/Deep/Also fine.md", "x");
+        touch(&d, "Other/bad name .md", "x");
+        let flow = crate::dataflow::record(|| {
+            check(&d).unwrap();
+        });
+        crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/vault-check.md"), "vault_check", &crate::dataflow::render_mermaid(&flow));
         let _ = fs::remove_dir_all(&d);
     }
 }

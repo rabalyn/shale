@@ -149,54 +149,58 @@ fn finish(store: &mut CalendarStore, job: &crate::calendar::store::Job, ids: &[&
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
 fn caldav_env_discovers_and_loads_the_seeded_calendars() {
     let _env = Env::start();
-    // discovery from the bare server address (it goes through /.well-known/caldav and its redirect)
-    let mut found = dav::discover(&acct_for(SERVER, PASSWORD)).expect("discovery");
-    found.sort_by(|a, b| a.name.cmp(&b.name));
-    let names: Vec<&str> = found.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["Moves", "Private", "Work"], "{found:?}");
-    assert!(found.iter().all(|c| !c.read_only && c.url.starts_with(SERVER)), "{found:?}");
-    assert_eq!(found.iter().find(|c| c.name == "Work").unwrap().color.as_deref(), Some("#1971c2"));
+    let forest = crate::dataflow::record(|| {
+        // discovery from the bare server address (it goes through /.well-known/caldav and its redirect)
+        let mut found = dav::discover(&acct_for(SERVER, PASSWORD)).expect("discovery");
+        found.sort_by(|a, b| a.name.cmp(&b.name));
+        let names: Vec<&str> = found.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Moves", "Private", "Work"], "{found:?}");
+        assert!(found.iter().all(|c| !c.read_only && c.url.starts_with(SERVER)), "{found:?}");
+        assert_eq!(found.iter().find(|c| c.name == "Work").unwrap().color.as_deref(), Some("#1971c2"));
 
-    let work = all("work");
-    let seed = |uid: &str| -> Vec<&Event> { work.iter().filter(|e| e.uid == format!("seed-{uid}@shale.test")).collect() };
-    assert_eq!(work.iter().filter(|e| e.uid.starts_with("seed-")).map(|e| e.uid.as_str()).collect::<std::collections::BTreeSet<_>>().len(), 6, "{:?}", work.iter().map(|e| &e.summary).collect::<Vec<_>>());
-    // single events, with their address and version tag
-    let standup = seed("standup")[0];
-    assert_eq!((standup.summary.as_str(), standup.location.as_str(), standup.end - standup.start), ("Standup", "Room 1", 1800));
-    assert!(standup.href.as_deref().is_some_and(|h| h.starts_with(&cal("work"))) && standup.etag.is_some());
-    assert_eq!(seed("umlaut")[0].summary, "Übergabe: Café & Größe");
-    // an event with a reminder
-    assert_eq!(seed("reminder")[0].alarms.iter().map(|a| a.before).collect::<Vec<_>>(), [Some(900)]);
-    // an all-day event
-    let allday = seed("allday")[0];
-    assert!(allday.all_day && allday.end - allday.start == 86_400, "{allday:?}");
-    // a repeating event with a skipped date and a changed one: both parts are in one file
-    let weekly = seed("weekly");
-    assert_eq!(weekly.len(), 2, "{weekly:?}");
-    let master = weekly.iter().find(|e| e.recurrence_id.is_none()).expect("master");
-    let moved = weekly.iter().find(|e| e.recurrence_id.is_some()).expect("changed date");
-    assert!(master.rrule.as_deref().is_some_and(|r| r.contains("WEEKLY")) && master.exdates.len() == 1, "{master:?}");
-    assert_eq!((moved.summary.as_str(), moved.start - moved.recurrence_id.unwrap()), ("Weekly sync (moved)", 2 * 3600));
-    assert_eq!(master.href, moved.href);
+        let work = all("work");
+        let seed = |uid: &str| -> Vec<&Event> { work.iter().filter(|e| e.uid == format!("seed-{uid}@shale.test")).collect() };
+        assert_eq!(work.iter().filter(|e| e.uid.starts_with("seed-")).map(|e| e.uid.as_str()).collect::<std::collections::BTreeSet<_>>().len(), 6, "{:?}", work.iter().map(|e| &e.summary).collect::<Vec<_>>());
+        // single events, with their address and version tag
+        let standup = seed("standup")[0];
+        assert_eq!((standup.summary.as_str(), standup.location.as_str(), standup.end - standup.start), ("Standup", "Room 1", 1800));
+        assert!(standup.href.as_deref().is_some_and(|h| h.starts_with(&cal("work"))) && standup.etag.is_some());
+        assert_eq!(seed("umlaut")[0].summary, "Übergabe: Café & Größe");
+        // an event with a reminder
+        assert_eq!(seed("reminder")[0].alarms.iter().map(|a| a.before).collect::<Vec<_>>(), [Some(900)]);
+        // an all-day event
+        let allday = seed("allday")[0];
+        assert!(allday.all_day && allday.end - allday.start == 86_400, "{allday:?}");
+        // a repeating event with a skipped date and a changed one: both parts are in one file
+        let weekly = seed("weekly");
+        assert_eq!(weekly.len(), 2, "{weekly:?}");
+        let master = weekly.iter().find(|e| e.recurrence_id.is_none()).expect("master");
+        let moved = weekly.iter().find(|e| e.recurrence_id.is_some()).expect("changed date");
+        assert!(master.rrule.as_deref().is_some_and(|r| r.contains("WEEKLY")) && master.exdates.len() == 1, "{master:?}");
+        assert_eq!((moved.summary.as_str(), moved.start - moved.recurrence_id.unwrap()), ("Weekly sync (moved)", 2 * 3600));
+        assert_eq!(master.href, moved.href);
 
-    let private: Vec<String> = all("private").into_iter().map(|e| e.summary).collect();
-    assert!(private.contains(&"Doctor".to_string()) && private.contains(&"Birthday".to_string()), "{private:?}");
-    assert!(all("moves").iter().all(|e| !e.uid.starts_with("seed-")), "the calendar for moves starts empty");
+        let private: Vec<String> = all("private").into_iter().map(|e| e.summary).collect();
+        assert!(private.contains(&"Doctor".to_string()) && private.contains(&"Birthday".to_string()), "{private:?}");
+        assert!(all("moves").iter().all(|e| !e.uid.starts_with("seed-")), "the calendar for moves starts empty");
 
-    // the version tag and write permission
-    let st = dav::calendar_state(&cal("work"), &acct("work")).unwrap();
-    assert!(st.tag.is_some() && st.read_only == Some(false), "{st:?}");
+        // the version tag and write permission
+        let st = dav::calendar_state(&cal("work"), &acct("work")).unwrap();
+        assert!(st.tag.is_some() && st.read_only == Some(false), "{st:?}");
 
-    // the same through the calendar store: the repeat is expanded with its skipped and changed date
-    let (dir, mut store) = store("load");
-    load(&mut store);
-    let today = t::today();
-    let occ = store.occurrences(today - 30, today + 60);
-    let weekly: Vec<_> = occ.iter().filter(|o| store.event(o).unwrap().uid == "seed-weekly@shale.test").collect();
-    assert_eq!(weekly.len(), 5, "6 weekly dates, one skipped, one of them changed but still there");
-    assert_eq!(weekly.iter().filter(|o| store.event(o).unwrap().summary == "Weekly sync (moved)").count(), 1);
-    assert!(store.status["work"].contains("events"), "{:?}", store.status);
-    let _ = std::fs::remove_dir_all(dir);
+        // the same through the calendar store: the repeat is expanded with its skipped and changed date
+        let (dir, mut store) = store("load");
+        load(&mut store);
+        let today = t::today();
+        let occ = store.occurrences(today - 30, today + 60);
+        let weekly: Vec<_> = occ.iter().filter(|o| store.event(o).unwrap().uid == "seed-weekly@shale.test").collect();
+        assert_eq!(weekly.len(), 5, "6 weekly dates, one skipped, one of them changed but still there");
+        assert_eq!(weekly.iter().filter(|o| store.event(o).unwrap().summary == "Weekly sync (moved)").count(), 1);
+        assert!(store.status["work"].contains("events"), "{:?}", store.status);
+        let _ = std::fs::remove_dir_all(dir);
+    });
+    crate::dataflow::verify_flow(&forest, "caldav_discover", &crate::dataflow::doc("caldav-load.md"));
+    crate::dataflow::verify_flow(&forest, "caldav_load", &crate::dataflow::doc("caldav-load.md"));
 }
 
 // spec: CALENV-002
@@ -204,38 +208,42 @@ fn caldav_env_discovers_and_loads_the_seeded_calendars() {
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
 fn caldav_env_creates_edits_and_deletes_an_event() {
     let _env = Env::start();
-    let (a, name) = (acct("private"), "private");
-    let mut e = new_event("crud", "Created by the test");
-    e.description = "first".into();
-    e.alarms = vec![crate::calendar::ics::Alarm::before_start(600)];
-    let (href, etag) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
-    assert!(href.starts_with(&cal(name)) && etag.is_some(), "{href} {etag:?}");
+    let forest = crate::dataflow::record(|| {
+        let (a, name) = (acct("private"), "private");
+        let mut e = new_event("crud", "Created by the test");
+        e.description = "first".into();
+        e.alarms = vec![crate::calendar::ics::Alarm::before_start(600)];
+        let (href, etag) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
+        assert!(href.starts_with(&cal(name)) && etag.is_some(), "{href} {etag:?}");
 
-    let on_server = find_one(name, &e.uid);
-    assert_eq!((on_server.summary.as_str(), on_server.description.as_str(), on_server.start, on_server.end), ("Created by the test", "first", e.start, e.end));
-    assert_eq!(on_server.alarms.iter().map(|x| x.before).collect::<Vec<_>>(), [Some(600)]);
-    assert_eq!((on_server.href.as_deref(), on_server.etag.as_deref()), (Some(href.as_str()), etag.as_deref()));
+        let on_server = find_one(name, &e.uid);
+        assert_eq!((on_server.summary.as_str(), on_server.description.as_str(), on_server.start, on_server.end), ("Created by the test", "first", e.start, e.end));
+        assert_eq!(on_server.alarms.iter().map(|x| x.before).collect::<Vec<_>>(), [Some(600)]);
+        assert_eq!((on_server.href.as_deref(), on_server.etag.as_deref()), (Some(href.as_str()), etag.as_deref()));
 
-    // the same UID can't be created twice
-    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).unwrap_err();
-    assert!(err.contains("already exists"), "{err}");
+        // the same UID can't be created twice
+        let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
 
-    // edit in place: same UID, same address, a new version tag
-    let mut edited = on_server.clone();
-    edited.summary = "Edited by the test".into();
-    edited.description = "second".into();
-    let (href2, etag2) = dav::put_event(&cal(name), &a, std::slice::from_ref(&edited), Some((&href, etag.as_deref())), std::slice::from_ref(&on_server)).expect("edit");
-    assert_eq!(href2, href);
-    assert!(etag2.is_some() && etag2 != etag, "{etag:?} {etag2:?}");
-    let after = find_one(name, &e.uid);
-    assert_eq!((after.summary.as_str(), after.description.as_str(), after.etag.as_deref()), ("Edited by the test", "second", etag2.as_deref()));
-    assert_eq!(after.alarms.len(), 1, "the reminder was kept");
+        // edit in place: same UID, same address, a new version tag
+        let mut edited = on_server.clone();
+        edited.summary = "Edited by the test".into();
+        edited.description = "second".into();
+        let (href2, etag2) = dav::put_event(&cal(name), &a, std::slice::from_ref(&edited), Some((&href, etag.as_deref())), std::slice::from_ref(&on_server)).expect("edit");
+        assert_eq!(href2, href);
+        assert!(etag2.is_some() && etag2 != etag, "{etag:?} {etag2:?}");
+        let after = find_one(name, &e.uid);
+        assert_eq!((after.summary.as_str(), after.description.as_str(), after.etag.as_deref()), ("Edited by the test", "second", etag2.as_deref()));
+        assert_eq!(after.alarms.len(), 1, "the reminder was kept");
 
-    // delete with the current version tag
-    dav::delete_event(&href, &a, etag2.as_deref(), std::slice::from_ref(&after)).expect("delete");
-    assert!(find(name, &e.uid).is_empty());
-    // an event that is already gone counts as removed
-    dav::delete_event(&href, &a, None, std::slice::from_ref(&after)).expect("delete again");
+        // delete with the current version tag
+        dav::delete_event(&href, &a, etag2.as_deref(), std::slice::from_ref(&after)).expect("delete");
+        assert!(find(name, &e.uid).is_empty());
+        // an event that is already gone counts as removed
+        dav::delete_event(&href, &a, None, std::slice::from_ref(&after)).expect("delete again");
+    });
+    crate::dataflow::verify_flow(&forest, "caldav_put", &crate::dataflow::doc("caldav-edit.md"));
+    crate::dataflow::verify_flow(&forest, "caldav_delete", &crate::dataflow::doc("caldav-edit.md"));
 }
 
 // spec: CALENV-002
@@ -283,31 +291,34 @@ fn caldav_env_edits_and_removes_one_date_of_a_repeating_event() {
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
 fn caldav_env_moves_an_event_to_another_calendar_and_deletes_it() {
     let _env = Env::start();
-    let e = new_event("move", "Moving test");
-    dav::put_event(&cal("work"), &acct("work"), std::slice::from_ref(&e), None, &[]).expect("create");
-    let (dir, mut store) = store("move");
-    load(&mut store);
-    let original = store.find("work", &e.uid).expect("loaded");
+    let forest = crate::dataflow::record(|| {
+        let e = new_event("move", "Moving test");
+        dav::put_event(&cal("work"), &acct("work"), std::slice::from_ref(&e), None, &[]).expect("create");
+        let (dir, mut store) = store("move");
+        load(&mut store);
+        let original = store.find("work", &e.uid).expect("loaded");
 
-    // moved: written to the new calendar first, then removed from the old one; a copy is kept (CAL-017)
-    let mut moved = original.clone();
-    moved.summary = "Moving test (moved)".into();
-    let job = store.save_event("moves", moved, Some(("work".into(), original)), None).expect("job");
-    let msg = finish(&mut store, &job, &["work", "moves"]).expect("move");
-    assert!(msg.starts_with("Moved to"), "{msg}");
-    assert!(find("work", &e.uid).is_empty(), "gone from the old calendar");
-    let there = find_one("moves", &e.uid);
-    assert_eq!(there.summary, "Moving test (moved)");
-    assert!(store.find("moves", &e.uid).is_some() && store.find("work", &e.uid).is_none());
-    let kept = std::fs::read_dir(store.trash_dir.join(crate::mail::store::today_string())).expect("the trash copy").count();
-    assert!(kept >= 1);
+        // moved: written to the new calendar first, then removed from the old one; a copy is kept (CAL-017)
+        let mut moved = original.clone();
+        moved.summary = "Moving test (moved)".into();
+        let job = store.save_event("moves", moved, Some(("work".into(), original)), None).expect("job");
+        let msg = finish(&mut store, &job, &["work", "moves"]).expect("move");
+        assert!(msg.starts_with("Moved to"), "{msg}");
+        assert!(find("work", &e.uid).is_empty(), "gone from the old calendar");
+        let there = find_one("moves", &e.uid);
+        assert_eq!(there.summary, "Moving test (moved)");
+        assert!(store.find("moves", &e.uid).is_some() && store.find("work", &e.uid).is_none());
+        let kept = std::fs::read_dir(store.trash_dir.join(crate::mail::store::today_string())).expect("the trash copy").count();
+        assert!(kept >= 1);
 
-    // delete through the store
-    let job = store.delete_event("moves", store.find("moves", &e.uid).unwrap(), None).expect("job");
-    let msg = finish(&mut store, &job, &["moves"]).expect("delete");
-    assert!(msg.starts_with("Event deleted"), "{msg}");
-    assert!(find("moves", &e.uid).is_empty());
-    let _ = std::fs::remove_dir_all(dir);
+        // delete through the store
+        let job = store.delete_event("moves", store.find("moves", &e.uid).unwrap(), None).expect("job");
+        let msg = finish(&mut store, &job, &["moves"]).expect("delete");
+        assert!(msg.starts_with("Event deleted"), "{msg}");
+        assert!(find("moves", &e.uid).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    });
+    crate::dataflow::verify_flow(&forest, "caldav_move", &crate::dataflow::doc("caldav-edit.md"));
 }
 
 // spec: CALENV-002
@@ -315,51 +326,57 @@ fn caldav_env_moves_an_event_to_another_calendar_and_deletes_it() {
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
 fn caldav_env_a_change_on_the_server_meanwhile_is_not_overwritten() {
     let _env = Env::start();
-    let (a, name) = (acct("work"), "work");
-    let e = new_event("conflict", "Original");
-    let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
-    let read = find_one(name, &e.uid);
+    let forest = crate::dataflow::record(|| {
+        let (a, name) = (acct("work"), "work");
+        let e = new_event("conflict", "Original");
+        let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
+        let read = find_one(name, &e.uid);
 
-    // somebody else changes the event after it was read
-    let mut theirs = read.clone();
-    theirs.summary = "Changed by somebody else".into();
-    let (_, their_tag) = dav::put_event(&cal(name), &a, std::slice::from_ref(&theirs), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).expect("their edit");
-    assert_ne!(their_tag, read.etag);
+        // somebody else changes the event after it was read
+        let mut theirs = read.clone();
+        theirs.summary = "Changed by somebody else".into();
+        let (_, their_tag) = dav::put_event(&cal(name), &a, std::slice::from_ref(&theirs), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).expect("their edit");
+        assert_ne!(their_tag, read.etag);
 
-    // our save with the old version tag is refused (HTTP 412) and the server keeps their version
-    let mut mine = read.clone();
-    mine.summary = "Changed by me".into();
-    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
-    assert!(err.contains("changed on the server meanwhile"), "{err}");
-    assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
-    // so is a delete with the old tag
-    let err = dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).unwrap_err();
-    assert!(err.contains("changed on the server meanwhile"), "{err}");
-    assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
+        // the refused writes are the flow `caldav_conflict` (DEV-028): its steps are those of `caldav_put` and `caldav_delete`, which the code of the write runs
+        let conflict = tracing::info_span!("flow.caldav_conflict", peer = "calendar").entered();
+        // our save with the old version tag is refused (HTTP 412) and the server keeps their version
+        let mut mine = read.clone();
+        mine.summary = "Changed by me".into();
+        let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
+        // so is a delete with the old tag
+        let err = dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
 
-    // without any version tag (a server that sends none): the event is compared with what was read (CAL-016)
-    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&read)).unwrap_err();
-    assert!(err.contains("changed on the server meanwhile"), "{err}");
-    let err = dav::delete_event(&href, &a, None, std::slice::from_ref(&read)).unwrap_err();
-    assert!(err.contains("changed on the server meanwhile"), "{err}");
-    assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
-    // …and goes through when the server still has what was read
-    let current = find_one(name, &e.uid);
-    let mut mine = current.clone();
-    mine.summary = "Changed by me, knowing theirs".into();
-    dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&current)).expect("save without a tag");
-    assert_eq!(find_one(name, &e.uid).summary, "Changed by me, knowing theirs");
-    let current = find_one(name, &e.uid);
-    dav::delete_event(&href, &a, None, std::slice::from_ref(&current)).expect("delete without a tag");
-    assert!(find(name, &e.uid).is_empty());
+        // without any version tag (a server that sends none): the event is compared with what was read (CAL-016)
+        let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&read)).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        let err = dav::delete_event(&href, &a, None, std::slice::from_ref(&read)).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
+        // …and goes through when the server still has what was read
+        let current = find_one(name, &e.uid);
+        let mut mine = current.clone();
+        mine.summary = "Changed by me, knowing theirs".into();
+        dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&current)).expect("save without a tag");
+        drop(conflict);
+        assert_eq!(find_one(name, &e.uid).summary, "Changed by me, knowing theirs");
+        let current = find_one(name, &e.uid);
+        dav::delete_event(&href, &a, None, std::slice::from_ref(&current)).expect("delete without a tag");
+        assert!(find(name, &e.uid).is_empty());
 
-    // an event somebody deleted meanwhile is not brought back by a save
-    let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create again");
-    let read = find_one(name, &e.uid);
-    dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).expect("their delete");
-    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&read), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
-    assert!(!err.is_empty());
-    assert!(find(name, &e.uid).is_empty());
+        // an event somebody deleted meanwhile is not brought back by a save
+        let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create again");
+        let read = find_one(name, &e.uid);
+        dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).expect("their delete");
+        let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&read), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
+        assert!(!err.is_empty());
+        assert!(find(name, &e.uid).is_empty());
+    });
+    crate::dataflow::verify_flow(&forest, "caldav_conflict", &crate::dataflow::doc("caldav-edit.md"));
 }
 
 // spec: CALENV-002

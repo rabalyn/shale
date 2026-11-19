@@ -148,7 +148,7 @@ fn targets(secs: &[Section]) -> Targets {
 /// person when the kind cannot hold a folder or a required field has no value.
 pub fn write_book(req: &BookRequest) -> Result<Document, String> {
     // the paper has Shale's colours, whatever the theme of the window (CFG-061)
-    crate::theme::with_palette(crate::theme::Palette::shale(), || write_book_in_shale(req))
+    tracing::info_span!("flow.tex_book.write", peer = "vault").in_scope(|| crate::theme::with_palette(crate::theme::Palette::shale(), || write_book_in_shale(req)))
 }
 
 fn write_book_in_shale(req: &BookRequest) -> Result<Document, String> {

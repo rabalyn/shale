@@ -76,6 +76,7 @@ fn pds_of_did_doc(doc: &Value) -> Option<String> {
 
 /// Sign in with the handle (or e-mail) and an app password (Settings → App passwords on bsky.app).
 pub fn create_session(server: &str, handle: &str, app_password: &str) -> Result<Session, String> {
+    let _step = tracing::info_span!("flow.social_bluesky.create_session", peer = "server").entered();
     let server = clean_server(server)?;
     let mut body = json!({"identifier": handle.trim().trim_start_matches('@'), "password": app_password});
     let answer = api("POST", &format!("{server}/xrpc/com.atproto.server.createSession"), None, Some(&body));
@@ -141,6 +142,7 @@ impl Api {
 
 /// "Following" and the saved / pinned feeds of the account.
 pub fn feeds(api: &mut Api) -> Result<Vec<Feed>, String> {
+    let _step = tracing::info_span!("flow.social_bluesky.feeds", peer = "server").entered();
     let mut out = vec![Feed { id: "timeline".into(), title: "Following".into() }];
     let prefs = api.get("app.bsky.actor.getPreferences", &[])?;
     let uris = saved_feed_uris(&prefs);
@@ -188,6 +190,7 @@ pub fn saved_feed_uris(prefs: &Value) -> Vec<String> {
 
 /// One page (30 posts) of "Following" or a custom feed.
 pub fn timeline(api: &mut Api, feed: &Feed, cursor: Option<&str>) -> Result<Page, String> {
+    let _step = tracing::info_span!("flow.social_bluesky.timeline", peer = "server").entered();
     let mut params: Vec<(&str, &str)> = vec![("limit", PAGE_SIZE)];
     if let Some(c) = cursor.filter(|c| !c.is_empty()) {
         params.push(("cursor", c));

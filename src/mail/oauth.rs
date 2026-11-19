@@ -631,8 +631,9 @@ impl TokenSource {
     }
 
     fn refresh_locked(&self, g: &mut Inner) -> Result<Secret, OAuthError> {
+        let _flow = tracing::info_span!("flow.mail_oauth_renew", peer = "mail").entered();
         if !g.loaded {
-            g.refresh = self.store.load();
+            g.refresh = tracing::info_span!("flow.mail_oauth_renew.load_refresh_token", peer = "keyring").in_scope(|| self.store.load());
             g.loaded = true;
         }
         let Some(rt) = g.refresh.clone() else { return Err(OAuthError::NotSignedIn) };
@@ -642,12 +643,12 @@ impl TokenSource {
             g.told = false;
         }
         self.refreshes.fetch_add(1, Ordering::SeqCst);
-        match refresh(&self.cfg, rt.expose()) {
+        match tracing::info_span!("flow.mail_oauth_renew.token_request", peer = "provider").in_scope(|| refresh(&self.cfg, rt.expose())) {
             Ok(t) => {
                 g.access = Some((t.access_token.clone(), Instant::now() + Duration::from_secs(t.expires_in)));
                 if let Some(new) = t.refresh_token.filter(|n| *n != rt) {
                     // the provider rotates refresh tokens: the old one is dead
-                    if self.store.save(new.expose()) {
+                    if tracing::info_span!("flow.mail_oauth_renew.save_refresh_token", peer = "keyring").in_scope(|| self.store.save(new.expose())) {
                         g.unsaved = false;
                         g.told = false;
                     } else {
@@ -662,7 +663,7 @@ impl TokenSource {
             Err(OAuthError::Revoked) => {
                 g.access = None;
                 g.refresh = None;
-                self.store.clear();
+                tracing::info_span!("flow.mail_oauth_renew.clear_refresh_token", peer = "keyring").in_scope(|| self.store.clear());
                 Err(OAuthError::Revoked)
             }
             Err(e) => Err(e),
@@ -763,22 +764,23 @@ pub struct SignedIn {
 /// The whole browser sign-in of an account. Blocks (up to `timeout`): run it as a job.
 /// `shown` gets the sign-in address (so it can be offered when no browser opens).
 pub fn sign_in(account: &MailAccount, client_secret: Option<Secret>, cancel: &AtomicBool, timeout: Duration, shown: &dyn Fn(&str)) -> Result<SignedIn, OAuthError> {
+    let _flow = tracing::info_span!("flow.mail_oauth", peer = "signin").entered();
     let cfg = OAuthConfig::for_account(account, client_secret)?;
-    let pending = begin(&cfg)?;
+    let pending = tracing::info_span!("flow.mail_oauth.begin", peer = "loopback").in_scope(|| begin(&cfg))?;
     shown(&pending.url);
     // a browser that cannot be opened is not the end: the address is shown, and the listener waits
-    let opened = crate::opener::open_signin_url(&pending.url, cfg.allow_local_http());
+    let opened = tracing::info_span!("flow.mail_oauth.open_browser", peer = "browser").in_scope(|| crate::opener::open_signin_url(&pending.url, cfg.allow_local_http()));
     if let Err(e) = &opened {
         if e.starts_with("The sign-in address") {
             return Err(OAuthError::Config(e.clone()));
         }
     }
-    let code = pending.wait_for_code(cancel, timeout)?;
-    let tokens = exchange_code(&cfg, &code, &pending.redirect_uri, &pending.verifier)?;
+    let code = tracing::info_span!("flow.mail_oauth.wait_for_code", peer = "browser").in_scope(|| pending.wait_for_code(cancel, timeout))?;
+    let tokens = tracing::info_span!("flow.mail_oauth.exchange_code", peer = "provider").in_scope(|| exchange_code(&cfg, &code, &pending.redirect_uri, &pending.verifier))?;
     if tokens.refresh_token.is_none() {
         return Err(OAuthError::Rejected("The provider sent no refresh token, so the sign-in could not be kept (with Microsoft the scope must include offline_access).".into()));
     }
-    let kept = shared_source(&account.id, cfg).adopt(&tokens);
+    let kept = tracing::info_span!("flow.mail_oauth.adopt", peer = "keyring").in_scope(|| shared_source(&account.id, cfg).adopt(&tokens));
     Ok(SignedIn { user: tokens.user, kept })
 }
 

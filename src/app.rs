@@ -758,7 +758,7 @@ impl ShaleApp {
     /// Load the vault's own settings and state; the first vault opened after an upgrade takes
     /// over the per-vault fields of the old global config (CFG-008).
     fn load_vault_data(&mut self, root: &Path) {
-        let (mut d, problems) = crate::vault_state::VaultData::load(root);
+        let (mut d, problems) = tracing::info_span!("flow.vault_open.load_state", peer = "disk").in_scope(|| crate::vault_state::VaultData::load(root));
         for p in problems {
             self.toast(p);
         }
@@ -781,13 +781,14 @@ impl ShaleApp {
             self.toast(format!("“{bad}” has changes that could not be saved, so the vault is not switched"));
             return;
         }
-        match Vault::open(path) {
+        let _flow = tracing::info_span!("flow.vault_open", peer = "app").entered();
+        match tracing::info_span!("flow.vault_open.scan", peer = "disk").in_scope(|| Vault::open(path)) {
             Ok(v) => {
                 let had_files = !v.files.is_empty();
                 // the vault being left keeps its open tabs
                 self.remember_open_files();
                 if self.persist_config {
-                    if let Err(e) = self.vdata.save() {
+                    if let Err(e) = tracing::info_span!("flow.vault_open.save_state", peer = "disk").in_scope(|| self.vdata.save()) {
                         self.toast(e);
                     }
                 }
@@ -3006,6 +3007,15 @@ pub(crate) mod tests {
         // most tests name the notes they make; those of the prefix switch it on
         app.cfg.date_prefix_new_notes = false;
         (app, d)
+    }
+
+    // spec: DEV-031
+    #[test]
+    fn dataflow_vault_open() {
+        let (mut app, d) = test_app("dataflow-vault-open");
+        let flow = crate::dataflow::record(|| app.open_vault(&d));
+        crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/vault-open.md"), "vault_open", &crate::dataflow::render_mermaid(&flow));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: USE-001, USE-006, USE-012, USE-015

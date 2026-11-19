@@ -195,6 +195,8 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
     static COUNT: AtomicU64 = AtomicU64::new(0);
     let file = c.docx.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let stem = c.docx.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // the dataflow of a Word import (DEV-030): the hidden folder, the look of the file, pandoc, the original
+    let folder_step = tracing::info_span!("flow.import_docx.prepare_folder", peer = "vault").entered();
     let (y, m, _) = c.date;
     let month = PathBuf::from(crate::media::MEDIA_DIR).join(format!("{y:04}")).join(format!("{m:02}"));
     let month_abs = c.root.join(&month);
@@ -215,8 +217,9 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
     let filter = dir.join("filter.lua");
     crate::fsutil::create_new(&filter, FILTER.as_bytes()).map_err(|e| format!("could not write the filter: {e}"))?;
     let out = dir.join("note.md");
+    drop(folder_step);
     // pandoc runs on a copy with the colours tagged (IMP-041), and on the original when there is none or it fails
-    let analysis = docx_look::analyse(c.docx, &dir.join("look"));
+    let analysis = tracing::info_span!("flow.import_docx.analyse", peer = "source").in_scope(|| docx_look::analyse(c.docx, &dir.join("look")));
     let absolute = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
     let mut inputs = vec![absolute(c.docx)];
     if let Some(t) = &analysis.tagged {
@@ -226,7 +229,7 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
     for input in &inputs {
         let mut cmd = Command::new(c.pandoc);
         cmd.args(args(input, &filter, &rel_to_string(&folder), &out)).current_dir(&files);
-        let run = proc::run(cmd, c.timeout, Some(c.cancel), |_| {}).map_err(|e| format!("pandoc could not be started: {e}"))?;
+        let run = tracing::info_span!("flow.import_docx.pandoc", peer = "pandoc").in_scope(|| proc::run(cmd, c.timeout, Some(c.cancel), |_| {})).map_err(|e| format!("pandoc could not be started: {e}"))?;
         match run.ending {
             Ending::Exited(Some(0)) => {
                 last = None;
@@ -246,7 +249,7 @@ pub fn prepare(c: &Convert, reserved: &mut HashSet<String>) -> Result<Prepared, 
     let kept = crate::fsutil::portable_name(&crate::markdown::link_safe_name(&kept), MAX_NAME);
     let kept = if kept.is_empty() || kept.starts_with('.') { "document.docx".to_string() } else { kept };
     if c.keep_original {
-        crate::fsutil::copy_new(c.docx, &files.join(&kept)).map_err(|e| format!("could not keep “{file}”: {e}"))?;
+        tracing::info_span!("flow.import_docx.keep_original", peer = "vault").in_scope(|| crate::fsutil::copy_new(c.docx, &files.join(&kept))).map_err(|e| format!("could not keep “{file}”: {e}"))?;
     }
     let any = std::fs::read_dir(&files).map(|mut d| d.next().is_some()).unwrap_or(false);
     reserved.insert(name);
@@ -272,6 +275,7 @@ pub fn note_text(p: &Prepared, lift: bool, tags: &[String]) -> String {
 /// is written; when that fails the folder is taken out again. Returns the note's path.
 pub fn import_item(vault: &mut Vault, it: &Item, o: &Options) -> Result<PathBuf, String> {
     let Source::Docx { name, path, pandoc: Some(pandoc), lift, ready } = &it.source else { unreachable!("only Word items with pandoc come here") };
+    let _flow = tracing::info_span!("flow.import_docx", peer = "import").entered();
     let prepared = match ready {
         Some(r) => r.clone()?,
         None => {
@@ -284,9 +288,9 @@ pub fn import_item(vault: &mut Vault, it: &Item, o: &Options) -> Result<PathBuf,
     let title = crate::fsutil::portable_name(&super::safe_title(&it.title), MAX_NAME - 3);
     let title = if title.is_empty() { "Imported".to_string() } else { title };
     let text = note_text(&prepared, *lift, &o.tags);
-    prepared.commit(&vault.root)?;
+    tracing::info_span!("flow.import_docx.commit", peer = "vault").in_scope(|| prepared.commit(&vault.root))?;
     let rel = vault.new_note_path_max(&o.folder, &title, crate::fsutil::MADE_NAME_MAX);
-    match vault.create_file(&rel, &text) {
+    match tracing::info_span!("flow.import_docx.write_note", peer = "vault").in_scope(|| vault.create_file(&rel, &text)) {
         Ok(r) => Ok(r),
         Err(e) => {
             if let Some(f) = &prepared.folder {

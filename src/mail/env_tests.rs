@@ -122,7 +122,7 @@ fn is_unseen(line: &str) -> bool {
     !line.contains("\\Seen")
 }
 
-// spec: MAIL-091, MAIL-092
+// spec: MAIL-091, MAIL-092, DEV-026
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server() {
@@ -151,7 +151,11 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
     }
     assert_eq!(folder(&found, "Trash").special_use.as_deref(), Some("\\Trash"));
 
-    let summary = sync(&store, "alice", &connector);
+    // the first sync is recorded: its steps are the dataflow diagram of docs/dataflow/mail-sync.md (DEV-026)
+    let mut summary = None;
+    let flow = crate::dataflow::record(|| summary = Some(sync(&store, "alice", &connector)));
+    crate::dataflow::verify(&env_dir().join("../../docs/dataflow/mail-sync.md"), "mail_sync", &crate::dataflow::render_mermaid(&flow));
+    let summary = summary.expect("the sync ran");
     assert!(summary.errors.is_empty(), "{:?}", summary.errors);
     assert_eq!(summary.folders_failed, 0);
     let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
@@ -244,60 +248,65 @@ fn sign_in_headless(acct: &MailAccount) -> Result<oauth::SignedIn, oauth::OAuthE
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_oauth_account_signs_in_syncs_renews_its_token_and_a_dead_sign_in_is_said_in_words() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    let acct = oauth_account();
-    secrets::clear_mail_secret(&acct.id, MailSecret::RefreshToken);
-    oauth::forget_source(&acct.id);
-    let (dir, store) = temp_store("oauth");
-    let files_before = maildir_files();
+    // the whole run is recorded; the sign-in and the token renewal are its two dataflow diagrams (DEV-028), the sync inside it is not
+    let forest = crate::dataflow::record(|| {
+        let acct = oauth_account();
+        secrets::clear_mail_secret(&acct.id, MailSecret::RefreshToken);
+        oauth::forget_source(&acct.id);
+        let (dir, store) = temp_store("oauth");
+        let files_before = maildir_files();
 
-    // not signed in yet
-    let cfg = OAuthConfig::for_account(&acct, None).unwrap();
-    let source = oauth::shared_source(&acct.id, cfg.clone());
-    let factory = Arc::new(OAuthFactory { user: acct.user.clone(), host: acct.host.clone(), port: acct.port, source: source.clone() });
-    let connector = EnvConnector { auth: factory.clone() };
-    assert!(matches!(connector.connect().err(), Some(ImapError::Auth(t)) if oauth::needs_sign_in(&t)));
+        // not signed in yet
+        let cfg = OAuthConfig::for_account(&acct, None).unwrap();
+        let source = oauth::shared_source(&acct.id, cfg.clone());
+        let factory = Arc::new(OAuthFactory { user: acct.user.clone(), host: acct.host.clone(), port: acct.port, source: source.clone() });
+        let connector = EnvConnector { auth: factory.clone() };
+        assert!(matches!(connector.connect().err(), Some(ImapError::Auth(t)) if oauth::needs_sign_in(&t)));
 
-    // the browser sign-in, with PKCE, against the provider's real login page
-    let who = sign_in_headless(&acct).expect("the sign-in");
-    assert_eq!(who.user.as_deref(), Some("oauth@shale.test"));
-    assert!(secrets::mail_secret(&acct.id, MailSecret::RefreshToken).is_some(), "the refresh token is in the keyring");
+        // the browser sign-in, with PKCE, against the provider's real login page
+        let who = sign_in_headless(&acct).expect("the sign-in");
+        assert_eq!(who.user.as_deref(), Some("oauth@shale.test"));
+        assert!(secrets::mail_secret(&acct.id, MailSecret::RefreshToken).is_some(), "the refresh token is in the keyring");
 
-    // Dovecot accepts the token (OAUTHBEARER or XOAUTH2) and the sync works
-    let summary = sync(&store, &acct.id, &connector);
-    assert!(summary.errors.is_empty(), "{:?}", summary.errors);
-    let rows = store.reader().unwrap().folders(Some(&acct.id)).unwrap();
-    assert_eq!(subjects(&store, &rows, "INBOX"), ["Hello from OAuth land", "Second mail"]);
-    assert_eq!(subjects(&store, &rows, "Sent"), ["Sent via OAuth"]);
-    assert!(messages(&store, &rows, "Trash").is_empty());
-    assert_eq!(maildir_files(), files_before, "the server's message files changed");
-    assert!(dovecot_view("oauth@shale.test", "INBOX").iter().any(|l| l.contains("Hello from OAuth land") && is_unseen(l)), "the unseen mail is still unseen");
+        // Dovecot accepts the token (OAUTHBEARER or XOAUTH2) and the sync works
+        let summary = sync(&store, &acct.id, &connector);
+        assert!(summary.errors.is_empty(), "{:?}", summary.errors);
+        let rows = store.reader().unwrap().folders(Some(&acct.id)).unwrap();
+        assert_eq!(subjects(&store, &rows, "INBOX"), ["Hello from OAuth land", "Second mail"]);
+        assert_eq!(subjects(&store, &rows, "Sent"), ["Sent via OAuth"]);
+        assert!(messages(&store, &rows, "Trash").is_empty());
+        assert_eq!(maildir_files(), files_before, "the server's message files changed");
+        assert!(dovecot_view("oauth@shale.test", "INBOX").iter().any(|l| l.contains("Hello from OAuth land") && is_unseen(l)), "the unseen mail is still unseen");
 
-    // the access token is dropped (as if the server had refused it): a new one is fetched by itself
-    let before = source.refresh_count();
-    source.reject();
-    connector.connect().expect("a new access token").logout();
-    assert_eq!(source.refresh_count(), before + 1);
+        // the access token is dropped (as if the server had refused it): a new one is fetched by itself
+        let before = source.refresh_count();
+        source.reject();
+        connector.connect().expect("a new access token").logout();
+        assert_eq!(source.refresh_count(), before + 1);
 
-    // a token for someone else's name is refused
-    let other = EnvConnector { auth: Arc::new(OAuthFactory { user: "alice@shale.test".into(), host: acct.host.clone(), port: acct.port, source: source.clone() }) };
-    assert!(matches!(other.connect().err(), Some(ImapError::Auth(_))));
+        // a token for someone else's name is refused
+        let other = EnvConnector { auth: Arc::new(OAuthFactory { user: "alice@shale.test".into(), host: acct.host.clone(), port: acct.port, source: source.clone() }) };
+        assert!(matches!(other.connect().err(), Some(ImapError::Auth(_))));
 
-    // the provider forgets everything it handed out (restart): the old tokens are dead
-    run("sh", &[env_dir().join("mail-env.sh").to_str().unwrap(), "revoke"]);
-    let err = connector.connect().err().expect("the sign-in is dead");
-    let ImapError::Auth(text) = &err else { panic!("{err}") };
-    // (this pretend provider hands out a token for a stranger on any refresh token, so what the
-    // person sees is the server's refusal of a fresh token; a real provider says invalid_grant,
-    // which `mail/oauth.rs` tests cover with its own pretend provider)
-    assert!(oauth::needs_sign_in(text) && text.contains("Authentication failed"), "{text}");
+        // the provider forgets everything it handed out (restart): the old tokens are dead
+        run("sh", &[env_dir().join("mail-env.sh").to_str().unwrap(), "revoke"]);
+        let err = connector.connect().err().expect("the sign-in is dead");
+        let ImapError::Auth(text) = &err else { panic!("{err}") };
+        // (this pretend provider hands out a token for a stranger on any refresh token, so what the
+        // person sees is the server's refusal of a fresh token; a real provider says invalid_grant,
+        // which `mail/oauth.rs` tests cover with its own pretend provider)
+        assert!(oauth::needs_sign_in(text) && text.contains("Authentication failed"), "{text}");
 
-    // signing in again works
-    sign_in_headless(&acct).expect("signing in again");
-    connector.connect().expect("works again").logout();
+        // signing in again works
+        sign_in_headless(&acct).expect("signing in again");
+        connector.connect().expect("works again").logout();
 
-    secrets::clear_mail_secret(&acct.id, MailSecret::RefreshToken);
-    oauth::forget_source(&acct.id);
-    let _ = std::fs::remove_dir_all(dir);
+        secrets::clear_mail_secret(&acct.id, MailSecret::RefreshToken);
+        oauth::forget_source(&acct.id);
+        let _ = std::fs::remove_dir_all(dir);
+    });
+    crate::dataflow::verify_flow(&forest, "mail_oauth", &crate::dataflow::doc("mail-oauth.md"));
+    crate::dataflow::verify_flow(&forest, "mail_oauth_renew", &crate::dataflow::doc("mail-oauth.md"));
 }
 
 // ------------------------------------------------------------ phase 2 (MAIL-113)
@@ -381,101 +390,104 @@ fn only_scratch_is_synced(store: &MailStore, connector: &dyn Connector) {
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_and_nothing_else() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    clean_scratch();
-    let (dir, store) = temp_store("ops");
-    let connector = EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) };
-    // what must not change: every seeded mailbox
-    let watched = ["INBOX", "Work", "Work/Projects", "Sent", "Drafts", "Junk", "Trash"];
-    let before: Vec<Vec<String>> = watched.iter().map(|m| server_view(m)).collect();
-    assert!(!before[0].is_empty() && !before[6].is_empty(), "the seed is there: {before:?}");
+    let forest = crate::dataflow::record(|| {
+        clean_scratch();
+        let (dir, store) = temp_store("ops");
+        let connector = EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) };
+        // what must not change: every seeded mailbox
+        let watched = ["INBOX", "Work", "Work/Projects", "Sent", "Drafts", "Junk", "Trash"];
+        let before: Vec<Vec<String>> = watched.iter().map(|m| server_view(m)).collect();
+        assert!(!before[0].is_empty() && !before[6].is_empty(), "the seed is there: {before:?}");
 
-    for mb in ["Scratch", "Scratch2"] {
-        doveadm(&["mailbox", "create", "-u", USER, mb], None).unwrap();
-    }
-    for s in ["Scratch one", "Scratch two", "Scratch three", "Scratch four"] {
-        put_message("Scratch", s);
-    }
-    only_scratch_is_synced(&store, &connector);
-    let sum = sync(&store, "alice", &connector);
-    assert!(sum.errors.is_empty() && sum.messages_added == 4, "{sum:?}");
-    let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
-    let by_subject = |name: &str, subject: &str| -> MessageSummary { messages(&store, &rows_now(&store), name).into_iter().find(|m| m.subject == subject).unwrap_or_else(|| panic!("{subject} not in {name}")) };
-    fn rows_now(store: &MailStore) -> Vec<FolderRow> {
-        store.reader().unwrap().folders(Some("alice")).unwrap()
-    }
-    let _ = rows;
-    let now = crate::calendar::time::now();
-    let flags = |add: &[MailFlag], remove: &[MailFlag]| Action::SetFlags { add: add.to_vec(), remove: remove.to_vec() };
+        for mb in ["Scratch", "Scratch2"] {
+            doveadm(&["mailbox", "create", "-u", USER, mb], None).unwrap();
+        }
+        for s in ["Scratch one", "Scratch two", "Scratch three", "Scratch four"] {
+            put_message("Scratch", s);
+        }
+        only_scratch_is_synced(&store, &connector);
+        let sum = sync(&store, "alice", &connector);
+        assert!(sum.errors.is_empty() && sum.messages_added == 4, "{sum:?}");
+        let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
+        let by_subject = |name: &str, subject: &str| -> MessageSummary { messages(&store, &rows_now(&store), name).into_iter().find(|m| m.subject == subject).unwrap_or_else(|| panic!("{subject} not in {name}")) };
+        fn rows_now(store: &MailStore) -> Vec<FolderRow> {
+            store.reader().unwrap().folders(Some("alice")).unwrap()
+        }
+        let _ = rows;
+        let now = crate::calendar::time::now();
+        let flags = |add: &[MailFlag], remove: &[MailFlag]| Action::SetFlags { add: add.to_vec(), remove: remove.to_vec() };
 
-    // read, flagged, and back
-    ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[MailFlag::Seen], &[]), now).unwrap();
-    ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[MailFlag::Flagged], &[]), now).unwrap();
-    assert_eq!(run_ops(&store, &connector).done, 2);
-    let v = server_view("Scratch");
-    assert!(line_of(&v, "Scratch one").unwrap().contains("\\Seen") && !line_of(&v, "Scratch one").unwrap().contains("\\Flagged"), "{v:?}");
-    assert!(line_of(&v, "Scratch two").unwrap().contains("\\Flagged") && !line_of(&v, "Scratch two").unwrap().contains("\\Seen"), "{v:?}");
-    assert!(!line_of(&v, "Scratch three").unwrap().contains("\\Seen"), "an untouched mail stays unseen: {v:?}");
-    // the local copy took the server's answer
-    assert!(by_subject("Scratch", "Scratch one").is_seen());
-    assert!(by_subject("Scratch", "Scratch two").is_flagged());
-    ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[], &[MailFlag::Seen]), now).unwrap();
-    ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[], &[MailFlag::Flagged]), now).unwrap();
-    run_ops(&store, &connector);
-    let v = server_view("Scratch");
-    assert!(!line_of(&v, "Scratch one").unwrap().contains("\\Seen") && !line_of(&v, "Scratch two").unwrap().contains("\\Flagged"), "{v:?}");
+        // read, flagged, and back
+        ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[MailFlag::Seen], &[]), now).unwrap();
+        ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[MailFlag::Flagged], &[]), now).unwrap();
+        assert_eq!(run_ops(&store, &connector).done, 2);
+        let v = server_view("Scratch");
+        assert!(line_of(&v, "Scratch one").unwrap().contains("\\Seen") && !line_of(&v, "Scratch one").unwrap().contains("\\Flagged"), "{v:?}");
+        assert!(line_of(&v, "Scratch two").unwrap().contains("\\Flagged") && !line_of(&v, "Scratch two").unwrap().contains("\\Seen"), "{v:?}");
+        assert!(!line_of(&v, "Scratch three").unwrap().contains("\\Seen"), "an untouched mail stays unseen: {v:?}");
+        // the local copy took the server's answer
+        assert!(by_subject("Scratch", "Scratch one").is_seen());
+        assert!(by_subject("Scratch", "Scratch two").is_flagged());
+        ops::enqueue(&store, &[by_subject("Scratch", "Scratch one")], &flags(&[], &[MailFlag::Seen]), now).unwrap();
+        ops::enqueue(&store, &[by_subject("Scratch", "Scratch two")], &flags(&[], &[MailFlag::Flagged]), now).unwrap();
+        run_ops(&store, &connector);
+        let v = server_view("Scratch");
+        assert!(!line_of(&v, "Scratch one").unwrap().contains("\\Seen") && !line_of(&v, "Scratch two").unwrap().contains("\\Flagged"), "{v:?}");
 
-    // move: the server has it in the other folder and not in this one; the row and file followed
-    let three = by_subject("Scratch", "Scratch three");
-    let old_file = store.abs_path(&three.path);
-    assert!(old_file.is_file());
-    ops::enqueue(&store, &[three], &Action::MoveTo { folder: "Scratch2".into() }, now).unwrap();
-    assert_eq!(run_ops(&store, &connector).done, 1);
-    assert!(line_of(&server_view("Scratch"), "Scratch three").is_none());
-    assert!(line_of(&server_view("Scratch2"), "Scratch three").is_some());
-    let moved = by_subject("Scratch2", "Scratch three");
-    assert!(moved.state == STATE_FULL && store.abs_path(&moved.path).is_file(), "the row in the new folder has a file");
-    assert!(!old_file.exists() && !store.read_raw(&moved).unwrap().is_empty());
+        // move: the server has it in the other folder and not in this one; the row and file followed
+        let three = by_subject("Scratch", "Scratch three");
+        let old_file = store.abs_path(&three.path);
+        assert!(old_file.is_file());
+        ops::enqueue(&store, &[three], &Action::MoveTo { folder: "Scratch2".into() }, now).unwrap();
+        assert_eq!(run_ops(&store, &connector).done, 1);
+        assert!(line_of(&server_view("Scratch"), "Scratch three").is_none());
+        assert!(line_of(&server_view("Scratch2"), "Scratch three").is_some());
+        let moved = by_subject("Scratch2", "Scratch three");
+        assert!(moved.state == STATE_FULL && store.abs_path(&moved.path).is_file(), "the row in the new folder has a file");
+        assert!(!old_file.exists() && !store.read_raw(&moved).unwrap().is_empty());
 
-    // delete: Dovecot has it in Trash (a move, no \Deleted)
-    let trash_before = server_view("Trash");
-    ops::enqueue(&store, &[by_subject("Scratch", "Scratch four")], &Action::Delete, now).unwrap();
-    assert_eq!(run_ops(&store, &connector).done, 1);
-    assert!(line_of(&server_view("Scratch"), "Scratch four").is_none());
-    let trash_now = server_view("Trash");
-    let four = line_of(&trash_now, "Scratch four").expect("in Trash");
-    assert!(!four.contains("\\Deleted"), "a delete is a move, not a flag: {four}");
-    assert_eq!(trash_now.len(), trash_before.len() + 1);
+        // delete: Dovecot has it in Trash (a move, no \Deleted)
+        let trash_before = server_view("Trash");
+        ops::enqueue(&store, &[by_subject("Scratch", "Scratch four")], &Action::Delete, now).unwrap();
+        assert_eq!(run_ops(&store, &connector).done, 1);
+        assert!(line_of(&server_view("Scratch"), "Scratch four").is_none());
+        let trash_now = server_view("Trash");
+        let four = line_of(&trash_now, "Scratch four").expect("in Trash");
+        assert!(!four.contains("\\Deleted"), "a delete is a move, not a flag: {four}");
+        assert_eq!(trash_now.len(), trash_before.len() + 1);
 
-    // delete forever: only the chosen mail; another program's \Deleted mail in Trash survives
-    put_message("Trash", "Scratch five");
-    doveadm(&["flags", "add", "-u", USER, "\\Deleted", "mailbox", "Trash", "header", "Subject", "Scratch five"], None).unwrap();
-    fetch_folder_listing(&store, &connector, "alice", "Trash", 100, &SyncOptions::default()).unwrap();
-    let rows = rows_now(&store);
-    let trash_row = messages(&store, &rows, "Trash").into_iter().find(|m| m.subject == "Scratch four").expect("listed");
-    ops::enqueue(&store, &[trash_row], &Action::DeleteForever(Confirmed::after_dialog(1)), now).unwrap();
-    assert_eq!(run_ops(&store, &connector).done, 1);
-    let trash_after = server_view("Trash");
-    assert!(line_of(&trash_after, "Scratch four").is_none(), "{trash_after:?}");
-    let five = line_of(&trash_after, "Scratch five").expect("the other program's \\Deleted mail survived");
-    assert!(five.contains("\\Deleted"), "{five}");
-    assert_eq!(trash_after.len(), trash_before.len() + 1, "the seeded Trash mails and the survivor");
-    // nothing local was deleted: the file of every handled mail is still in the store (in .trash for those that left)
-    let kept: Vec<String> = std::fs::read_dir(dir.join(".trash")).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
-    assert!(!kept.is_empty(), "the local trash has the old files");
+        // delete forever: only the chosen mail; another program's \Deleted mail in Trash survives
+        put_message("Trash", "Scratch five");
+        doveadm(&["flags", "add", "-u", USER, "\\Deleted", "mailbox", "Trash", "header", "Subject", "Scratch five"], None).unwrap();
+        fetch_folder_listing(&store, &connector, "alice", "Trash", 100, &SyncOptions::default()).unwrap();
+        let rows = rows_now(&store);
+        let trash_row = messages(&store, &rows, "Trash").into_iter().find(|m| m.subject == "Scratch four").expect("listed");
+        ops::enqueue(&store, &[trash_row], &Action::DeleteForever(Confirmed::after_dialog(1)), now).unwrap();
+        assert_eq!(run_ops(&store, &connector).done, 1);
+        let trash_after = server_view("Trash");
+        assert!(line_of(&trash_after, "Scratch four").is_none(), "{trash_after:?}");
+        let five = line_of(&trash_after, "Scratch five").expect("the other program's \\Deleted mail survived");
+        assert!(five.contains("\\Deleted"), "{five}");
+        assert_eq!(trash_after.len(), trash_before.len() + 1, "the seeded Trash mails and the survivor");
+        // nothing local was deleted: the file of every handled mail is still in the store (in .trash for those that left)
+        let kept: Vec<String> = std::fs::read_dir(dir.join(".trash")).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        assert!(!kept.is_empty(), "the local trash has the old files");
 
-    // a sync afterwards agrees with the server
-    let sum = sync(&store, "alice", &connector);
-    assert!(sum.errors.is_empty(), "{sum:?}");
-    let rows = rows_now(&store);
-    assert_eq!(subjects(&store, &rows, "Scratch"), ["Scratch one", "Scratch two"]);
-    assert_eq!(subjects(&store, &rows, "Scratch2"), ["Scratch three"]);
+        // a sync afterwards agrees with the server
+        let sum = sync(&store, "alice", &connector);
+        assert!(sum.errors.is_empty(), "{sum:?}");
+        let rows = rows_now(&store);
+        assert_eq!(subjects(&store, &rows, "Scratch"), ["Scratch one", "Scratch two"]);
+        assert_eq!(subjects(&store, &rows, "Scratch2"), ["Scratch three"]);
 
-    // nothing else changed anywhere
-    clean_scratch();
-    for (i, m) in watched.iter().enumerate() {
-        assert_eq!(server_view(m), before[i], "{m} was changed");
-    }
-    let _ = std::fs::remove_dir_all(dir);
+        // nothing else changed anywhere
+        clean_scratch();
+        for (i, m) in watched.iter().enumerate() {
+            assert_eq!(server_view(m), before[i], "{m} was changed");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    });
+    crate::dataflow::verify_flow(&forest, "mail_ops", &crate::dataflow::doc("mail-ops.md"));
 }
 
 // ------------------------------------------------------------ phase 3: sending (MAIL-160)
@@ -622,45 +634,48 @@ fn send_end_to_end(acct: &MailAccount, smtp: EnvSmtp, imap: EnvConnector, tag: &
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_and_oauth_accounts_send_with_an_attachment_and_dovecot_has_one_sent_copy_each() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    // the password account sends over STARTTLS (587): nothing, AUTH included, goes before the upgrade
-    let pw = MailAccount {
-        id: "mailenv-send-pw".into(),
-        name: "Alice".into(),
-        host: "localhost".into(),
-        port: IMAPS_PORT,
-        user: "alice@shale.test".into(),
-        smtp_host: "localhost".into(),
-        smtp_port: SUBMISSION_PORT,
-        smtp_security: MailSecurity::StartTls,
-        from_name: "Alice Ünïcode".into(),
-        from_address: "alice@shale.test".into(),
-        ..MailAccount::default()
-    };
-    let auth: Arc<dyn AuthFactory> = Arc::new(PasswordAuth { user: pw.user.clone(), password: "shale-test-pw".into() });
-    send_end_to_end(&pw, EnvSmtp { port: SUBMISSION_PORT, security: MailSecurity::StartTls, auth: auth.clone() }, EnvConnector { auth: auth.clone() }, &format!("pw{}", std::process::id()));
-    // a wrong password is an authentication error from the real submission service
-    let bad = EnvSmtp { port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, auth: Arc::new(PasswordAuth { user: pw.user.clone(), password: "nope".into() }) };
-    assert!(matches!(crate::mail::send::SmtpConnector::connect(&bad).err(), Some(crate::mail::smtp_client::SmtpError::Auth(_))));
-    // the production certificate check refuses the test CA, as for IMAP
-    let mut a = auth.authenticator().unwrap();
-    let settings = ConnectSettings { host: "localhost".into(), port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, limits: Limits::default() };
-    assert!(matches!(crate::mail::smtp_client::Smtp::connect(&settings, a.as_mut()).err(), Some(crate::mail::smtp_client::SmtpError::Tls(_))));
+    let forest = crate::dataflow::record(|| {
+        // the password account sends over STARTTLS (587): nothing, AUTH included, goes before the upgrade
+        let pw = MailAccount {
+            id: "mailenv-send-pw".into(),
+            name: "Alice".into(),
+            host: "localhost".into(),
+            port: IMAPS_PORT,
+            user: "alice@shale.test".into(),
+            smtp_host: "localhost".into(),
+            smtp_port: SUBMISSION_PORT,
+            smtp_security: MailSecurity::StartTls,
+            from_name: "Alice Ünïcode".into(),
+            from_address: "alice@shale.test".into(),
+            ..MailAccount::default()
+        };
+        let auth: Arc<dyn AuthFactory> = Arc::new(PasswordAuth { user: pw.user.clone(), password: "shale-test-pw".into() });
+        send_end_to_end(&pw, EnvSmtp { port: SUBMISSION_PORT, security: MailSecurity::StartTls, auth: auth.clone() }, EnvConnector { auth: auth.clone() }, &format!("pw{}", std::process::id()));
+        // a wrong password is an authentication error from the real submission service
+        let bad = EnvSmtp { port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, auth: Arc::new(PasswordAuth { user: pw.user.clone(), password: "nope".into() }) };
+        assert!(matches!(crate::mail::send::SmtpConnector::connect(&bad).err(), Some(crate::mail::smtp_client::SmtpError::Auth(_))));
+        // the production certificate check refuses the test CA, as for IMAP
+        let mut a = auth.authenticator().unwrap();
+        let settings = ConnectSettings { host: "localhost".into(), port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, limits: Limits::default() };
+        assert!(matches!(crate::mail::smtp_client::Smtp::connect(&settings, a.as_mut()).err(), Some(crate::mail::smtp_client::SmtpError::Tls(_))));
 
-    // the OAuth2 account sends over implicit TLS (465) with the token of its sign-in
-    let mut oa = oauth_account();
-    oa.id = "mailenv-send-oauth".into();
-    oa.smtp_host = "localhost".into();
-    oa.smtp_port = SUBMISSIONS_PORT;
-    oa.from_address = "oauth@shale.test".into();
-    secrets::clear_mail_secret(&oa.id, MailSecret::RefreshToken);
-    oauth::forget_source(&oa.id);
-    sign_in_headless(&oa).expect("the sign-in");
-    let source = oauth::shared_source(&oa.id, OAuthConfig::for_account(&oa, None).unwrap());
-    let factory: Arc<dyn AuthFactory> = Arc::new(OAuthFactory { user: oa.user.clone(), host: "localhost".into(), port: SUBMISSIONS_PORT, source: source.clone() });
-    let imap_factory: Arc<dyn AuthFactory> = Arc::new(OAuthFactory { user: oa.user.clone(), host: "localhost".into(), port: IMAPS_PORT, source });
-    send_end_to_end(&oa, EnvSmtp { port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, auth: factory }, EnvConnector { auth: imap_factory }, &format!("oauth{}", std::process::id()));
-    secrets::clear_mail_secret(&oa.id, MailSecret::RefreshToken);
-    oauth::forget_source(&oa.id);
+        // the OAuth2 account sends over implicit TLS (465) with the token of its sign-in
+        let mut oa = oauth_account();
+        oa.id = "mailenv-send-oauth".into();
+        oa.smtp_host = "localhost".into();
+        oa.smtp_port = SUBMISSIONS_PORT;
+        oa.from_address = "oauth@shale.test".into();
+        secrets::clear_mail_secret(&oa.id, MailSecret::RefreshToken);
+        oauth::forget_source(&oa.id);
+        sign_in_headless(&oa).expect("the sign-in");
+        let source = oauth::shared_source(&oa.id, OAuthConfig::for_account(&oa, None).unwrap());
+        let factory: Arc<dyn AuthFactory> = Arc::new(OAuthFactory { user: oa.user.clone(), host: "localhost".into(), port: SUBMISSIONS_PORT, source: source.clone() });
+        let imap_factory: Arc<dyn AuthFactory> = Arc::new(OAuthFactory { user: oa.user.clone(), host: "localhost".into(), port: IMAPS_PORT, source });
+        send_end_to_end(&oa, EnvSmtp { port: SUBMISSIONS_PORT, security: MailSecurity::ImplicitTls, auth: factory }, EnvConnector { auth: imap_factory }, &format!("oauth{}", std::process::id()));
+        secrets::clear_mail_secret(&oa.id, MailSecret::RefreshToken);
+        oauth::forget_source(&oa.id);
+    });
+    crate::dataflow::verify_flow(&forest, "mail_send", &crate::dataflow::doc("mail-send.md"));
 }
 
 // ------------------------------------------------------------ phase 4: signed and encrypted mail (MAIL-198)
@@ -794,11 +809,15 @@ fn crypto_end_to_end(std: crate::config::CryptoStandard, tag: &str) {
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_decrypts_and_the_sent_copy_decrypts() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    if !crate::mail::gpg::testkit::have_gnupg() {
-        panic!("gpg, gpgsm and gpgconf are needed for this test");
-    }
-    crypto_end_to_end(crate::config::CryptoStandard::OpenPgp, &format!("pgp{}", std::process::id()));
-    crypto_end_to_end(crate::config::CryptoStandard::Smime, &format!("smime{}", std::process::id()));
+    let forest = crate::dataflow::record(|| {
+        if !crate::mail::gpg::testkit::have_gnupg() {
+            panic!("gpg, gpgsm and gpgconf are needed for this test");
+        }
+        crypto_end_to_end(crate::config::CryptoStandard::OpenPgp, &format!("pgp{}", std::process::id()));
+        crypto_end_to_end(crate::config::CryptoStandard::Smime, &format!("smime{}", std::process::id()));
+    });
+    crate::dataflow::verify_flow(&forest, "mail_crypto_send", &crate::dataflow::doc("mail-crypto.md"));
+    crate::dataflow::verify_flow(&forest, "mail_crypto_read", &crate::dataflow::doc("mail-crypto.md"));
 }
 
 // ------------------------------------------------------------ watching a folder (MAIL-231)
@@ -809,43 +828,47 @@ fn mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_
 fn mail_env_a_flag_that_another_connection_sets_and_removes_shows_in_the_store_within_seconds_through_idle() {
     use crate::mail::watch::{Timing, Wanted, Watch};
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    clean_scratch();
-    let (dir, store) = temp_store("watch");
-    let store = Arc::new(store);
-    let connector = Arc::new(EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) });
-    doveadm(&["mailbox", "create", "-u", USER, "Scratch"], None).unwrap();
-    for s in ["Scratch one", "Scratch two"] {
-        put_message("Scratch", s);
-    }
-    only_scratch_is_synced(&store, connector.as_ref());
-    let sum = sync(&store, "alice", connector.as_ref());
-    assert!(sum.errors.is_empty() && sum.messages_added == 2, "{sum:?}");
-    let flagged = |subject: &str| -> bool {
-        let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
-        messages(&store, &rows, "Scratch").into_iter().find(|m| m.subject == subject).is_some_and(|m| m.is_flagged())
-    };
-    let wait = |what: &str, mut ok: Box<dyn FnMut() -> bool + '_>| {
-        let end = std::time::Instant::now() + Duration::from_secs(8);
-        while std::time::Instant::now() < end {
-            if ok() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
+    let forest = crate::dataflow::record(|| {
+        clean_scratch();
+        let (dir, store) = temp_store("watch");
+        let store = Arc::new(store);
+        let connector = Arc::new(EnvConnector { auth: Arc::new(PasswordAuth { user: USER.into(), password: "shale-test-pw".into() }) });
+        doveadm(&["mailbox", "create", "-u", USER, "Scratch"], None).unwrap();
+        for s in ["Scratch one", "Scratch two"] {
+            put_message("Scratch", s);
         }
-        panic!("within 8 seconds: {what}");
-    };
-    let mut watch = Watch::default();
-    watch.timing = Timing { idle_max: Duration::from_secs(60), ..Timing::default() };
-    let account = MailAccount { id: "alice".into(), name: "Alice".into(), host: "localhost".into(), port: IMAPS_PORT, user: USER.into(), ..MailAccount::default() };
-    let conn = connector.clone();
-    watch.update(&[Wanted { account, folder: "Scratch".into(), session_password: false }], &store, &move |_| conn.clone(), &SyncOptions::default(), None);
-    std::thread::sleep(Duration::from_secs(1)); // connected and idling
-                                                // another connection (doveadm, like Thunderbird) flags a mail and takes the flag off again
-    doveadm(&["flags", "add", "-u", USER, "\\Flagged", "mailbox", "Scratch", "header", "Subject", "Scratch one"], None).unwrap();
-    wait("the flag arrives", Box::new(|| flagged("Scratch one")));
-    doveadm(&["flags", "remove", "-u", USER, "\\Flagged", "mailbox", "Scratch", "header", "Subject", "Scratch one"], None).unwrap();
-    wait("the flag is gone again", Box::new(|| !flagged("Scratch one")));
-    watch.stop_all();
-    clean_scratch();
-    let _ = std::fs::remove_dir_all(dir);
+        only_scratch_is_synced(&store, connector.as_ref());
+        let sum = sync(&store, "alice", connector.as_ref());
+        assert!(sum.errors.is_empty() && sum.messages_added == 2, "{sum:?}");
+        let flagged = |subject: &str| -> bool {
+            let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
+            messages(&store, &rows, "Scratch").into_iter().find(|m| m.subject == subject).is_some_and(|m| m.is_flagged())
+        };
+        let wait = |what: &str, mut ok: Box<dyn FnMut() -> bool + '_>| {
+            let end = std::time::Instant::now() + Duration::from_secs(8);
+            while std::time::Instant::now() < end {
+                if ok() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            panic!("within 8 seconds: {what}");
+        };
+        let mut watch = Watch::default();
+        watch.timing = Timing { idle_max: Duration::from_secs(60), ..Timing::default() };
+        let account = MailAccount { id: "alice".into(), name: "Alice".into(), host: "localhost".into(), port: IMAPS_PORT, user: USER.into(), ..MailAccount::default() };
+        let conn = connector.clone();
+        watch.update(&[Wanted { account, folder: "Scratch".into(), session_password: false }], &store, &move |_| conn.clone(), &SyncOptions::default(), None);
+        std::thread::sleep(Duration::from_secs(1)); // the session is connected and idles after its first check; the watch exposes no such state, and a counter that only this test reads would be code for the test alone
+                                                    // another connection (doveadm, like Thunderbird) flags a mail and takes the flag off again
+        doveadm(&["flags", "add", "-u", USER, "\\Flagged", "mailbox", "Scratch", "header", "Subject", "Scratch one"], None).unwrap();
+        wait("the flag arrives", Box::new(|| flagged("Scratch one")));
+        doveadm(&["flags", "remove", "-u", USER, "\\Flagged", "mailbox", "Scratch", "header", "Subject", "Scratch one"], None).unwrap();
+        wait("the flag is gone again", Box::new(|| !flagged("Scratch one")));
+        std::thread::sleep(Duration::from_secs(1)); // the session checks again after the removal and idles again; the same reason as above, and stopping inside the check would record a different tree
+        watch.stop_all();
+        clean_scratch();
+        let _ = std::fs::remove_dir_all(dir);
+    });
+    crate::dataflow::verify_flow(&forest, "mail_watch", &crate::dataflow::doc("mail-watch.md"));
 }

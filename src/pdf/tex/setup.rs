@@ -168,7 +168,7 @@ pub fn save_details(vault: &VaultRef, set: &SetInfo, d: &Details) -> Result<(), 
     let s = d.apply(&set.settings);
     s.check()?;
     let _lock = vault.tree.hold_for(Duration::from_secs(5)).ok_or("The sync is still changing files in the vault: try again in a moment.")?;
-    sets::save_settings(&set.dir, &s)
+    tracing::info_span!("flow.tex_setup.save_details", peer = "vault").in_scope(|| sets::save_settings(&set.dir, &s))
 }
 
 /// The note of the test page.
@@ -213,7 +213,7 @@ pub fn test_page(vault: &Vault, set: &SetInfo) -> Result<(String, Document), Str
         }
     }
     let opts = crate::pdf::export::ExportOptions::for_note();
-    let doc = writer::write(&writer::Request { vault, rel: Path::new(TEST_NAME), text: TEST_NOTE, opts: &opts, set, kind, fields: &fields })?;
+    let doc = tracing::info_span!("flow.tex_setup.test_page", peer = "vault").in_scope(|| writer::write(&writer::Request { vault, rel: Path::new(TEST_NAME), text: TEST_NOTE, opts: &opts, set, kind, fields: &fields }))?;
     Ok((id.clone(), doc))
 }
 
@@ -418,7 +418,7 @@ impl TexState {
     /// Copy a logo file into a slot of the chosen set and say how it went.
     pub fn setup_logo(&mut self, slot: Slot, from: &Path) {
         let Some(id) = self.chosen_set().map(|s| s.id.clone()) else { return };
-        self.setup.message = Some(self.sets.copy_logo_to(&id, slot, from));
+        self.setup.message = Some(tracing::info_span!("flow.tex_setup.logo", peer = "vault").in_scope(|| self.sets.copy_logo_to(&id, slot, from)));
         self.sets.refresh();
     }
 

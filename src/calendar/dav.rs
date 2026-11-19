@@ -534,15 +534,16 @@ fn useful(body: &str) -> bool {
 /// Find the calendars of an account. The address may be a calendar, the calendar home, the
 /// principal, or just the server (then `/.well-known/caldav` is tried).
 pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
+    let _flow = tracing::info_span!("flow.caldav_discover", peer = "calendar").entered();
     let entered = acct.url.trim();
     if entered.is_empty() {
         return Err("enter the server address".into());
     }
     check_url(entered)?;
     let first_props = propfind_body(&format!("<d:current-user-principal/><c:calendar-home-set/>{CAL_PROPS}"));
-    let first = propfind_following(entered, "0", &first_props, acct)?;
+    let first = tracing::info_span!("flow.caldav_discover.probe", peer = "caldav").in_scope(|| propfind_following(entered, "0", &first_props, acct))?;
     let r = if matches!(first.status, 404 | 405) || (is_2xx(first.status) && !useful(&first.body)) {
-        let wk = propfind_following(&resolve(entered, "/.well-known/caldav"), "0", &first_props, acct)?;
+        let wk = tracing::info_span!("flow.caldav_discover.well_known", peer = "caldav").in_scope(|| propfind_following(&resolve(entered, "/.well-known/caldav"), "0", &first_props, acct))?;
         if is_2xx(wk.status) || !is_2xx(first.status) {
             wk
         } else {
@@ -563,14 +564,14 @@ pub fn discover(acct: &Account) -> Result<Vec<FoundCalendar>, String> {
     if home.is_none() {
         if let Some(p) = resps.iter().find_map(|x| x.prop_href(DAV, "current-user-principal")) {
             let purl = resolve(&r.url, &p);
-            let pr = propfind_following(&purl, "0", &propfind_body("<c:calendar-home-set/>"), acct)?;
+            let pr = tracing::info_span!("flow.caldav_discover.principal", peer = "caldav").in_scope(|| propfind_following(&purl, "0", &propfind_body("<c:calendar-home-set/>"), acct))?;
             check(&pr, &purl)?;
             let pdoc = parse(&pr.body)?;
             home = responses(&pdoc).iter().find_map(|x| x.prop_href(CALDAV, "calendar-home-set")).map(|h| resolve(&pr.url, &h));
         }
     }
     let home = home.unwrap_or_else(|| r.url.clone());
-    let hr = propfind_following(&home, "1", &propfind_body(CAL_PROPS), acct)?;
+    let hr = tracing::info_span!("flow.caldav_discover.calendars", peer = "caldav").in_scope(|| propfind_following(&home, "1", &propfind_body(CAL_PROPS), acct))?;
     check(&hr, &home)?;
     let hdoc = parse(&hr.body)?;
     let (found, refused2) = calendars_in(&responses(&hdoc), &hr.url);
@@ -710,6 +711,7 @@ const CHANGED_MEANWHILE: &str = "the event was changed on the server meanwhile; 
 /// Returns the address and the new version tag (if the server sent one).
 pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Option<(&str, Option<&str>)>, before: &[Event]) -> Result<(String, Option<String>), String> {
     let e = parts.first().ok_or("nothing to save")?;
+    let _flow = tracing::info_span!("flow.caldav_put", peer = "calendar").entered();
     let clean: Vec<Event> = parts.iter().map(|p| Event { href: None, etag: None, ..p.clone() }).collect();
     let body = ics::to_ics("", &clean);
     let creating = existing.is_none();
@@ -723,8 +725,8 @@ pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Optio
             let tag = match tag.and_then(clean_etag) {
                 Some(t) => Some(t),
                 None => {
-                    let now = current_etag(href, acct).ok().flatten();
-                    if !unchanged_on_server(href, acct, before)? {
+                    let now = tracing::info_span!("flow.caldav_put.fetch_etag", peer = "caldav").in_scope(|| current_etag(href, acct)).ok().flatten();
+                    if !tracing::info_span!("flow.caldav_put.check_server", peer = "caldav").in_scope(|| unchanged_on_server(href, acct, before))? {
                         return Err(CHANGED_MEANWHILE.into());
                     }
                     now
@@ -743,7 +745,7 @@ pub fn put_event(cal_url: &str, acct: &Account, parts: &[Event], existing: Optio
     if let Some(c) = &cond {
         headers.push(c);
     }
-    let r = request_with("PUT", &url, &headers, &body, acct)?;
+    let r = tracing::info_span!("flow.caldav_put.put", peer = "caldav").in_scope(|| request_with("PUT", &url, &headers, &body, acct))?;
     match r.status {
         200..=299 => Ok((url, r.etag)),
         401 => Err(check(&r, &url).unwrap_err()),
@@ -759,9 +761,10 @@ pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>, before: &[Ev
     if !same_server(href, &acct.url) {
         return Err(OTHER_SERVER.into());
     }
+    let _flow = tracing::info_span!("flow.caldav_delete", peer = "calendar").entered();
     let tag = etag.and_then(clean_etag);
     if tag.is_none() {
-        let r = request_with("GET", href, &[], "", acct)?;
+        let r = tracing::info_span!("flow.caldav_delete.check_server", peer = "caldav").in_scope(|| request_with("GET", href, &[], "", acct))?;
         match r.status {
             404 | 410 => return Ok(()),
             200..=299 if src_key(&ics::parse_ics(&r.body)) != src_key(before) => return Err(CHANGED_MEANWHILE.into()),
@@ -772,7 +775,7 @@ pub fn delete_event(href: &str, acct: &Account, etag: Option<&str>, before: &[Ev
     }
     let cond = tag.map(|t| format!("If-Match: {t}"));
     let headers: Vec<&str> = cond.iter().map(|s| s.as_str()).collect();
-    let r = request_with("DELETE", href, &headers, "", acct)?;
+    let r = tracing::info_span!("flow.caldav_delete.delete", peer = "caldav").in_scope(|| request_with("DELETE", href, &headers, "", acct))?;
     match r.status {
         200..=299 | 404 | 410 => Ok(()),
         401 => Err(check(&r, href).unwrap_err()),
