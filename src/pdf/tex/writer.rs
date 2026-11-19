@@ -253,6 +253,11 @@ pub(super) fn toc_depth(book: bool) -> usize {
 /// Write the note as a document of the kind. Fails with a sentence for the person when a required
 /// field has no value.
 pub fn write(req: &Request) -> Result<Document, String> {
+    // the paper has Shale's colours, whatever the theme of the window (CFG-061)
+    crate::theme::with_palette(crate::theme::Palette::shale(), || write_in_shale(req))
+}
+
+fn write_in_shale(req: &Request) -> Result<Document, String> {
     let (vault, kind) = (req.vault, req.kind);
     let family = family_of(kind);
     let fm = markdown::front_matter_values(req.text);
@@ -266,6 +271,8 @@ pub fn write(req: &Request) -> Result<Document, String> {
     // a page break means nothing in slides and boxes, where the frames and boxes are the pages (TEX-037)
     if matches!(family, Family::Beamer | Family::Boxes) {
         blocks.retain(|b| *b != Block::PageBreak);
+        // nor does an alignment wrapper, which could end in another frame than it began in (TEX-039)
+        blocks.retain(|b| !matches!(b, Block::AlignStart(_) | Block::AlignEnd(_)));
     }
     let numbered = markdown::headings_numbered(req.text, req.opts.numbered_headings);
     let has_headings = blocks.iter().any(|b| matches!(b, Block::Heading { .. }));

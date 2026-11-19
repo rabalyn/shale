@@ -12,3 +12,6 @@ lcov.info
 /docs/userguide/.shale/tag-words.json
 /docs/userguide/.trash/
 /tests/tex-env/cache/
+
+# flamegraphs of scripts/bench.sh --flamegraph: made again from any commit, attached to releases (#400)
+/docs/perf/flamegraphs/

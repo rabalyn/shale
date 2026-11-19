@@ -240,7 +240,7 @@ impl TexExport {
 
     /// Show the choices: set, kind, fields, contents, the state of TeX and of the export.
     pub fn show(&mut self, ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
-        let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+        let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
         if self.sets.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 rec("no-sets", crate::theme::problem(ui, "This vault has no template sets yet: import one in Settings → LaTeX → Template sets."));
@@ -330,7 +330,6 @@ impl TexExport {
         if self.folder {
             rec("folder-kinds", ui.label(muted(&format!("{ONLY_ARTICLES_AND_BOOKS}."))));
         }
-        ui.add_space(4.0);
         match &self.status {
             TexStatus::Checking => {
                 rec("tex-status", ui.label(muted("Looking for a TeX…")));
@@ -365,7 +364,6 @@ impl TexExport {
             });
         }
         if let Some(f) = &self.failure {
-            ui.add_space(4.0);
             crate::theme::problem(ui, &f.headline);
             for p in f.problems.iter().take(6) {
                 rec("problem", ui.label(egui::RichText::new(p).monospace().size(12.0)));

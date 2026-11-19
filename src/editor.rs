@@ -262,10 +262,10 @@ pub(crate) fn math_marks(text: &str, base: f32, images: &[(Range<usize>, f32)], 
         }
         let line = lines.get(m.lines.start).map_or("", |(_, l)| *l);
         let (em, color) = match markdown::heading_level(line) {
-            _ if m.block => (base * crate::math::DISPLAY_SCALE, theme::TEXT),
-            Some(level) => (base * heading_scale(level as u8), theme::HEADING),
-            _ if line.trim_start().starts_with('>') => (base, theme::QUOTE),
-            _ => (base, theme::TEXT),
+            _ if m.block => (base * crate::math::DISPLAY_SCALE, theme::palette().text),
+            Some(level) => (base * heading_scale(level as u8), theme::palette().heading),
+            _ if line.trim_start().starts_with('>') => (base, theme::palette().quote),
+            _ => (base, theme::palette().text),
         };
         let formula = crate::math::typeset(&text[m.tex.clone()], em, m.display);
         out.push(MathMark { range: m.range, block: m.block, lines: m.lines, em, color, formula });
@@ -357,10 +357,10 @@ fn paint_numbers(ui: &Ui, marks: &[NumberMark], (galley, index): (&Galley, &crat
             continue;
         };
         let baseline = row.row.glyphs.iter().filter(|g| g.font_height > 2.0).map(|g| g.pos.y).reduce(f32::max).unwrap_or(row.rect().height() * 0.78);
-        let number = painter.layout_no_wrap(m.number.clone(), m.font.clone(), theme::MUTED);
+        let number = painter.layout_no_wrap(m.number.clone(), m.font.clone(), theme::palette().muted);
         let ascent = number.rows.first().and_then(|r| r.row.glyphs.first()).map(|gl| gl.pos.y).unwrap_or(number.size().y * 0.8);
-        let room = painter.layout_no_wrap(format!("{} ", m.number), m.font.clone(), theme::MUTED).size().x;
-        painter.galley(galley_pos + Vec2::new(r.min.x - room, row.pos.y + baseline - ascent), number, theme::MUTED);
+        let room = painter.layout_no_wrap(format!("{} ", m.number), m.font.clone(), theme::palette().muted).size().x;
+        painter.galley(galley_pos + Vec2::new(r.min.x - room, row.pos.y + baseline - ascent), number, theme::palette().muted);
     }
 }
 
@@ -427,7 +427,7 @@ pub fn outline_label(ui: &mut Ui, job: LayoutJob, base: f32) -> egui::Response {
     job.wrap.max_width = ui.available_width();
     let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
     let (rect, resp) = ui.allocate_exact_size(galley.size(), egui::Sense::click());
-    ui.painter().galley(rect.min, galley.clone(), theme::TEXT);
+    ui.painter().galley(rect.min, galley.clone(), theme::palette().text);
     // a formula is two sections: its first character, and the rest with the room before it
     let sections = &galley.job.sections;
     for (n, s) in sections.iter().enumerate().filter(|(n, s)| *n > 0 && s.leading_space > 0.0 && crate::math::paint::is_hidden_formula(&s.format)) {
@@ -435,7 +435,7 @@ pub fn outline_label(ui: &mut Ui, job: LayoutJob, base: f32) -> egui::Response {
         let shown = &galley.job.text[start..s.byte_range.end.0];
         if let Ok(f) = crate::math::typeset(shown.trim_matches('$'), base, shown.starts_with("$$")) {
             let at = markdown::byte_to_char(&galley.job.text, start);
-            crate::math::paint::paint_in_galley(ui.painter(), &galley, rect.min, at, &f, theme::TEXT);
+            crate::math::paint::paint_in_galley(ui.painter(), &galley, rect.min, at, &f, theme::palette().text);
         }
     }
     resp
@@ -460,27 +460,27 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
     // bold and italic in the font's own faces where it has them (CFG-039)
     let styled = area.styled(f.bold, f.italic || f.quote);
     let font_id = if mono { FontId::new(base * 0.92 * heading_scale(f.heading), FontFamily::Monospace) } else { FontId::new(size, styled.family.clone()) };
-    let mut color = if f.heading > 0 { theme::HEADING } else { theme::TEXT };
+    let mut color = if f.heading > 0 { theme::palette().heading } else { theme::palette().text };
     if f.quote {
-        color = theme::QUOTE;
+        color = theme::palette().quote;
     }
     if f.bold {
-        color = theme::TEXT_STRONG;
+        color = theme::palette().text_strong;
     }
     if mono {
-        color = f.syn_kind.map_or(theme::CODE, theme::syntax_colour);
+        color = f.syn_kind.map_or(theme::palette().code, |k| theme::palette().syntax(k));
     }
     if f.marker {
-        color = theme::ACCENT;
+        color = theme::palette().accent;
     }
     if f.tag {
-        color = theme::TAG;
+        color = theme::palette().tag;
     }
     if f.fnote == 1 || f.fnote == 2 {
-        color = theme::LINK;
+        color = theme::palette().link;
     }
     if f.strike {
-        color = theme::DONE;
+        color = theme::palette().done;
     }
     // a font colour, or readable text on a coloured highlight (EDIT-029)
     if let Some(bg) = f.bg {
@@ -490,37 +490,37 @@ fn to_format(f: Fmt, fonts: &EditorFonts) -> TextFormat {
         color = Color32::from_rgba_unmultiplied(r, g, b, a);
     }
     match f.link {
-        1 | 3 => color = theme::LINK,
-        2 => color = theme::LINK_MISSING,
+        1 | 3 => color = theme::palette().link,
+        2 => color = theme::palette().link_missing,
         _ => {}
     }
     if f.dim {
         color = if f.link == 1 || f.link == 3 {
-            theme::LINK.gamma_multiply(0.45)
+            theme::palette().link.gamma_multiply(0.45)
         } else if f.link == 2 {
-            theme::LINK_MISSING.gamma_multiply(0.45)
+            theme::palette().link_missing.gamma_multiply(0.45)
         } else {
-            theme::FAINT
+            theme::palette().faint
         };
     }
     let mut tf = TextFormat { font_id, color, italics: if mono { f.italic || f.quote } else { styled.fake_italic }, line_height: Some(size * 1.5 + f.math_extra as f32 / 4.0), ..Default::default() };
     if (f.fence && !f.boxed) || (f.code && !f.dim) {
-        tf.background = theme::CODE_BG;
+        tf.background = theme::palette().code_bg;
     }
     if f.highlight {
-        tf.background = Color32::from_rgba_unmultiplied(200, 170, 40, 60);
+        tf.background = theme::palette().highlight_bg;
     }
     if let Some([r, g, b, a]) = f.bg {
         tf.background = Color32::from_rgba_unmultiplied(r, g, b, a);
     }
     if f.tag {
-        tf.background = theme::TAG_BG;
+        tf.background = theme::palette().tag_bg;
     }
     if f.link > 0 && !f.dim {
         tf.underline = Stroke::new(1.0, color.gamma_multiply(0.5));
     }
     if f.strike && !f.dim {
-        tf.strikethrough = Stroke::new(1.0, theme::DONE);
+        tf.strikethrough = Stroke::new(1.0, theme::palette().done);
     }
     if f.bold && (mono || styled.fake_bold) {
         tf.extra_letter_spacing = 0.3;
@@ -1198,7 +1198,7 @@ impl NoteEditor {
         let font = egui::FontId::proportional(size);
         let room = art.width().max(160.0).min(max_w);
         let shown = crate::caption::fit(&crate::caption::text(link), room, |t| ui.painter().layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x);
-        let galley = ui.painter().layout_no_wrap(shown, font, theme::MUTED);
+        let galley = ui.painter().layout_no_wrap(shown, font, theme::palette().muted);
         let rect = Rect::from_min_size(Pos2::new(art.min.x, art.max.y + crate::caption::GAP), galley.size());
         // click and drag, as the player's controls: the text box under it would take a plain click
         let resp = ui.interact(rect, id, egui::Sense::click_and_drag());
@@ -1206,7 +1206,7 @@ impl NoteEditor {
         if hovered {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        let colour = if hovered { theme::LINK } else { theme::MUTED };
+        let colour = if hovered { theme::palette().link } else { theme::palette().muted };
         ui.painter().with_clip_rect(ui.clip_rect()).galley(rect.min, galley, colour);
         resp.clicked().then(|| EditorAction::OpenLink { target: link.target.clone(), heading: link.heading.clone(), new_tab: false })
     }
@@ -1340,14 +1340,14 @@ impl NoteEditor {
         for (name, rect, glyph, tip, edit) in buttons {
             // click and drag: else the text box under the button would take the drag (and the cursor)
             let resp = ui.interact(rect, self.id.with(("table-button", ordinal, name)), egui::Sense::CLICK | egui::Sense::DRAG);
-            let fill = if edit.is_some() && resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY };
+            let fill = if edit.is_some() && resp.hovered() { theme::palette().bg_active } else { theme::palette().bg_secondary };
             let colour = match (edit.is_some(), glyph == "+") {
-                (false, _) => theme::FAINT,
-                (true, true) => theme::TEXT,
-                (true, false) => theme::LINK_MISSING,
+                (false, _) => theme::palette().faint,
+                (true, true) => theme::palette().text,
+                (true, false) => theme::palette().link_missing,
             };
             let painter = ui.painter();
-            painter.rect(rect, 3.0, fill, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+            painter.rect(rect, 3.0, fill, Stroke::new(1.0, theme::palette().border), egui::StrokeKind::Inside);
             painter.text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(13.0), colour);
             resp.clone().on_hover_text(tip);
             if (resp.is_pointer_button_down_on() || resp.clicked()) && self.focus_before_press {
@@ -1364,13 +1364,13 @@ impl NoteEditor {
         let rect = button(side, grid.top() - TABLE_BTN - 2.0);
         let resp = ui.interact(rect, self.id.with(("table-button", ordinal, "mode")), egui::Sense::CLICK | egui::Sense::DRAG);
         let painter = ui.painter();
-        painter.rect(rect, 3.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY }, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+        painter.rect(rect, 3.0, if resp.hovered() { theme::palette().bg_active } else { theme::palette().bg_secondary }, Stroke::new(1.0, theme::palette().border), egui::StrokeKind::Inside);
         if cells {
-            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "md", egui::FontId::proportional(9.0), theme::TEXT);
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "md", egui::FontId::proportional(9.0), theme::palette().text);
         } else {
             // a small grid
             let r = rect.shrink(4.0);
-            let line = Stroke::new(1.0, theme::TEXT);
+            let line = Stroke::new(1.0, theme::palette().text);
             painter.rect_stroke(r, 0.0, line, egui::StrokeKind::Inside);
             painter.line_segment([Pos2::new(r.center().x, r.top()), Pos2::new(r.center().x, r.bottom())], line);
             painter.line_segment([Pos2::new(r.left(), r.center().y), Pos2::new(r.right(), r.center().y)], line);
@@ -1546,7 +1546,7 @@ impl NoteEditor {
         let number_font = egui::FontId::monospace((base_size * 0.8).round());
         let gutter = if self.line_numbers {
             let digits = (text.matches('\n').count() + 1).to_string().len().max(2);
-            ui.painter().layout_no_wrap("0".repeat(digits), number_font.clone(), theme::FAINT).size().x + GUTTER_GAP
+            ui.painter().layout_no_wrap("0".repeat(digits), number_font.clone(), theme::palette().faint).size().x + GUTTER_GAP
         } else {
             0.0
         };
@@ -1793,7 +1793,7 @@ impl NoteEditor {
                     }
                     Art::Pdf(tex, total) => {
                         painter.image(tex.id(), rect, uv, Color32::WHITE);
-                        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Outside);
+                        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::palette().border), egui::StrokeKind::Outside);
                         let label = if *total > 1 { format!("PDF · page 1 of {total}") } else { "PDF".to_string() };
                         let g = painter.layout_no_wrap(label, egui::FontId::proportional(11.0), Color32::WHITE);
                         let tag = Rect::from_min_size(rect.min + Vec2::new(6.0, 6.0), g.size() + Vec2::new(10.0, 4.0));
@@ -1848,7 +1848,7 @@ impl NoteEditor {
                 if output.galley_pos.y + y < clip.min.y - 60.0 || output.galley_pos.y + y > clip.max.y + 60.0 {
                     continue;
                 }
-                let colour = if Some(n) == cursor_line { theme::MUTED } else { theme::FAINT };
+                let colour = if Some(n) == cursor_line { theme::palette().muted } else { theme::palette().faint };
                 let g = painter.layout_no_wrap(n.to_string(), number_font.clone(), colour);
                 let ascent = g.rows.first().and_then(|r| r.row.glyphs.first()).map(|gl| gl.pos.y).unwrap_or(g.size().y * 0.8);
                 let y = match at {
@@ -1963,8 +1963,8 @@ impl NoteEditor {
                     }
                     let hint = if ctrl_to_follow { "Ctrl+click to open in your browser" } else { "Click to open in your browser · Ctrl+click to edit" };
                     resp.clone().on_hover_ui_at_pointer(|ui| {
-                        ui.label(egui::RichText::new(&w.url).color(theme::LINK));
-                        ui.label(egui::RichText::new(hint).small().color(theme::MUTED));
+                        ui.label(egui::RichText::new(&w.url).color(theme::palette().link));
+                        ui.label(egui::RichText::new(hint).small().color(theme::palette().muted));
                     });
                 }
                 if let Some((l, exists)) = &link {
@@ -1973,7 +1973,7 @@ impl NoteEditor {
                     }
                     let tip = if *exists { format!("Open “{}”", l.target) } else { format!("Create note “{}”", l.target) };
                     let hint = if ctrl_to_follow { "Ctrl+click to follow" } else { "Ctrl+click to edit the link text" };
-                    let colour = if *exists { theme::LINK } else { theme::LINK_MISSING };
+                    let colour = if *exists { theme::palette().link } else { theme::palette().link_missing };
                     let image = vault.resolve(&l.target, Some(rel)).filter(|p| crate::media::is_image(p)).map(|p| vault.abs(&p));
                     // several files share the name, or a red path has several candidates (LINK-008, LINK-012)
                     let note = vault.link_hint(&l.target, Some(rel));
@@ -1983,9 +1983,9 @@ impl NoteEditor {
                         }
                         ui.label(egui::RichText::new(tip).color(colour));
                         if let Some(n) = &note {
-                            ui.label(egui::RichText::new(n).small().color(theme::TEXT));
+                            ui.label(egui::RichText::new(n).small().color(theme::palette().text));
                         }
-                        ui.label(egui::RichText::new(hint).small().color(theme::MUTED));
+                        ui.label(egui::RichText::new(hint).small().color(theme::palette().muted));
                     });
                 }
                 if resp.clicked() && (link.is_some() || web.is_some()) {
@@ -3424,9 +3424,9 @@ mod tests {
             .collect();
         let job = highlight(text, &links, 15.0);
         let color_at = |byte: usize| job.sections.iter().find(|s| s.byte_range.start.0 <= byte && byte < s.byte_range.end.0).unwrap().format.color;
-        assert_eq!(color_at(text.find("Yes").unwrap()), theme::LINK);
-        assert_eq!(color_at(text.find("No").unwrap()), theme::LINK_MISSING);
-        assert_eq!(color_at(0), theme::TEXT);
+        assert_eq!(color_at(text.find("Yes").unwrap()), theme::palette().link);
+        assert_eq!(color_at(text.find("No").unwrap()), theme::palette().link_missing);
+        assert_eq!(color_at(0), theme::palette().text);
         // sections cover the whole text without gaps
         let mut pos = 0;
         for s in &job.sections {
@@ -4525,7 +4525,7 @@ mod tests {
         assert_eq!(job.sections[0].format.background, Color32::from_rgb(255, 255, 0));
         assert_eq!(plain("**B** and *i* ~~s~~ `c` ==h==", &[]).text, "B and i s c h");
         let job = plain("**B** x", &[]);
-        assert_eq!(job.sections[0].format.color, theme::TEXT_STRONG);
+        assert_eq!(job.sections[0].format.color, theme::palette().text_strong);
         let job = plain("~~s~~", &[]);
         assert_eq!(job.sections[0].format.strikethrough.width, 1.0);
         let job = plain("`c`", &[]);
@@ -4536,7 +4536,7 @@ mod tests {
             assert_eq!(job.text, "See Alias now", "{t}");
             let at = job.text.find("Alias").unwrap();
             let f = &job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format;
-            assert_eq!(f.color, theme::LINK);
+            assert_eq!(f.color, theme::palette().link);
         }
     }
 
@@ -4566,7 +4566,7 @@ mod tests {
         // on a raw line the tags show, dimmed, and the text is still formatted
         let raw = highlight_preview(text, &[], &fonts, &[], Some(0..1));
         assert!(!is_hidden(format_of(&raw, text, "<u>")));
-        assert_eq!(format_of(&raw, text, "<u>").color, theme::FAINT);
+        assert_eq!(format_of(&raw, text, "<u>").color, theme::palette().faint);
         assert_eq!(format_of(&raw, text, "b").underline.width, 1.0);
         assert_eq!(format_of(&raw, text, "2</sup>").valign, egui::Align::TOP);
         // in code they are plain
@@ -4589,13 +4589,13 @@ mod tests {
         // the reference: `[^` and `]` hidden, the label raised and smaller in the link colour
         assert!(is_hidden(format_of(&job, text, "[^1]")) && is_hidden(&job.sections.iter().find(|s| s.byte_range.start.0 <= at("]") && at("]") < s.byte_range.end.0).unwrap().format));
         let label = format_of(&job, text, "1] b");
-        assert_eq!((label.valign, label.font_id.size, label.color, label.line_height), (egui::Align::TOP, 15.0 * SCRIPT_SCALE, theme::LINK, None));
+        assert_eq!((label.valign, label.font_id.size, label.color, label.line_height), (egui::Align::TOP, 15.0 * SCRIPT_SCALE, theme::palette().link, None));
         // a reference without a definition is shown as written
         let two = fmt("[^2]");
-        assert!(!is_hidden(&two) && two.valign != egui::Align::TOP && two.color == theme::TEXT);
+        assert!(!is_hidden(&two) && two.valign != egui::Align::TOP && two.color == theme::palette().text);
         // the definition: its label raised, its text and its continuation lines a little smaller
         let def = format_of(&job, text, "1]: Body");
-        assert_eq!((def.valign, def.color), (egui::Align::TOP, theme::LINK));
+        assert_eq!((def.valign, def.color), (egui::Align::TOP, theme::palette().link));
         assert_eq!(fmt("Body").font_id.size, 15.0 * FOOTNOTE_TEXT);
         assert_eq!(fmt("    more").font_id.size, 15.0 * FOOTNOTE_TEXT);
         assert_eq!(fmt("plain").font_id.size, 15.0);
@@ -4603,9 +4603,9 @@ mod tests {
         // with the cursor in the reference the text shows (EDIT-016): the brackets are dim and the label is not raised
         let raw = highlight_preview(text, &[], &fonts, &[], Some(0..1));
         assert!(!is_hidden(format_of(&raw, text, "[^1]")));
-        assert_eq!(format_of(&raw, text, "[^1]").color, theme::FAINT);
+        assert_eq!(format_of(&raw, text, "[^1]").color, theme::palette().faint);
         let label = format_of(&raw, text, "1] b");
-        assert_eq!((label.valign, label.font_id.size, label.color), (egui::Align::BOTTOM, 15.0, theme::LINK));
+        assert_eq!((label.valign, label.font_id.size, label.color), (egui::Align::BOTTOM, 15.0, theme::palette().link));
         // nothing happens in code
         let code = "`a[^1]` x\n[^1]: d\n";
         let job = highlight_preview(code, &[], &fonts, &[], Some(0..0));
@@ -4623,7 +4623,7 @@ mod tests {
         assert_eq!((sec("2").font_id.size, sec("2").valign), (14.0 * SCRIPT_SCALE, egui::Align::BOTTOM));
         assert_eq!(sec("x").underline.width, 1.0);
         let mark = job.sections.iter().find(|s| &job.text[s.byte_range.start.0..s.byte_range.end.0] == "1").unwrap();
-        assert_eq!((mark.format.valign, mark.format.color), (egui::Align::TOP, theme::LINK));
+        assert_eq!((mark.format.valign, mark.format.color), (egui::Align::TOP, theme::palette().link));
     }
 
     // spec: EDIT-032
@@ -4632,16 +4632,16 @@ mod tests {
         let js = "```js\nconsole.log(\"foooo\")\n```";
         let job = highlight(js, &[], 15.0);
         let string = format_of(&job, js, "\"foooo\"");
-        assert_eq!(string.color, theme::syntax_colour(syntax::Kind::String));
-        assert_eq!((string.background, string.font_id.family.clone()), (theme::CODE_BG, FontFamily::Monospace), "still a code block");
+        assert_eq!(string.color, theme::palette().syntax(syntax::Kind::String));
+        assert_eq!((string.background, string.font_id.family.clone()), (theme::palette().code_bg, FontFamily::Monospace), "still a code block");
         assert_ne!(format_of(&job, js, "console").color, string.color, "more than one colour in the block");
         for plain in ["```\nlet a = \"x\"\n```", "```klingon\nlet a = \"x\"\n```"] {
             let job = highlight(plain, &[], 15.0);
-            assert_eq!(format_of(&job, plain, "\"x\"").color, theme::CODE, "{plain}");
+            assert_eq!(format_of(&job, plain, "\"x\"").color, theme::palette().code, "{plain}");
         }
         // the markdown preview draws code blocks as they are
         let job = highlight_preview(js, &[], &crate::fonts::EditorFonts::uniform(15.0), &[], Some(5..5));
-        assert_eq!(format_of(&job, js, "\"foooo\"").color, theme::syntax_colour(syntax::Kind::String));
+        assert_eq!(format_of(&job, js, "\"foooo\"").color, theme::palette().syntax(syntax::Kind::String));
     }
 
     // spec: EDIT-032
@@ -4649,11 +4649,24 @@ mod tests {
     fn inline_code_colours_its_strings_numbers_and_calls_and_keeps_the_backticks_dim_code() {
         let text = "call `console.log(\"fooo\", 7)` now and `plain` too";
         let job = highlight(text, &[], 15.0);
-        assert_eq!(format_of(&job, text, "\"fooo\"").color, theme::syntax_colour(syntax::Kind::String));
-        assert_eq!(format_of(&job, text, "7)").color, theme::syntax_colour(syntax::Kind::Number));
-        assert_eq!(format_of(&job, text, "log").color, theme::syntax_colour(syntax::Kind::Function));
-        assert_eq!(format_of(&job, text, "plain").color, theme::CODE);
-        assert_eq!(format_of(&job, text, "\"fooo\"").background, theme::CODE_BG);
+        assert_eq!(format_of(&job, text, "\"fooo\"").color, theme::palette().syntax(syntax::Kind::String));
+        assert_eq!(format_of(&job, text, "7)").color, theme::palette().syntax(syntax::Kind::Number));
+        assert_eq!(format_of(&job, text, "log").color, theme::palette().syntax(syntax::Kind::Function));
+        assert_eq!(format_of(&job, text, "plain").color, theme::palette().code);
+        assert_eq!(format_of(&job, text, "\"fooo\"").background, theme::palette().code_bg);
+    }
+
+    // spec: EDIT-110
+    #[test]
+    fn the_lines_of_an_alignment_wrapper_are_dimmed_markup_and_the_heading_inside_is_still_a_heading() {
+        let text = "<div align=\"center\">\n\n## Middle\n\ntext\n\n</div>\n\n<div align=\"right\">\nlost\n";
+        let job = highlight(text, &[], 15.0);
+        assert_eq!(format_of(&job, text, "<div align=\"center\">").color, theme::palette().faint);
+        assert_eq!(format_of(&job, text, "</div>").color, theme::palette().faint);
+        assert_ne!(format_of(&job, text, "text").color, theme::palette().faint, "what is inside is text");
+        assert!(format_of(&job, text, "Middle").font_id.size > 15.0, "a heading in a wrapper has its size");
+        assert_ne!(format_of(&job, text, "<div align=\"right\">").color, theme::palette().faint, "an opening line without a closing one is text");
+        assert_eq!(crate::markdown::find_headings(text).iter().map(|h| h.2.as_str()).collect::<Vec<_>>(), ["Middle"], "the outline lists it");
     }
 
     // spec: EDIT-029
@@ -4667,13 +4680,13 @@ mod tests {
         let there = format_of(&job, text, "there");
         assert_eq!((there.background, there.color), (yellow, Color32::from_rgb(255, 0, 0)), "a span inside a mark: both, the font colour wins");
         for tag in ["<mark", "</span>", "</mark>", "<span"] {
-            assert_eq!(format_of(&job, text, tag).color, theme::FAINT, "{tag} is dimmed markup");
+            assert_eq!(format_of(&job, text, tag).color, theme::palette().faint, "{tag} is dimmed markup");
         }
         assert_eq!(format_of(&job, text, "<mark").background, Color32::TRANSPARENT, "the tag is not highlighted itself");
         let a = format_of(&job, text, "a ");
         assert_eq!(a.background, Color32::TRANSPARENT, "text outside has no colour");
         // the colour in the tag is no #tag
-        assert!(job.sections.iter().all(|s| s.format.background != theme::TAG_BG), "#FFFF00 is not a tag");
+        assert!(job.sections.iter().all(|s| s.format.background != theme::palette().tag_bg), "#FFFF00 is not a tag");
         // a dark highlight gets light text; a font colour with an alpha channel keeps it
         let text = "<mark style=\"background: #000080;\">Q</mark> <span style='color:#00FF0080'>G</span>";
         let job = highlight(text, &[], 15.0);
@@ -4736,7 +4749,7 @@ mod tests {
                     assert_eq!(f("bold").font_id.family, fam("system:X"));
                     assert!(f("bold").extra_letter_spacing > 0.0 && f("it").italics && f("quoted").italics, "imitated without the faces");
                 }
-                assert_eq!(f("bold").color, theme::TEXT_STRONG, "bold keeps its stronger colour");
+                assert_eq!(f("bold").color, theme::palette().text_strong, "bold keeps its stronger colour");
                 assert_eq!(f("code").font_id.family, FontFamily::Monospace, "code stays monospace");
             }
         }

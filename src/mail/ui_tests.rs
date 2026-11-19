@@ -533,6 +533,24 @@ fn without_a_keyring_the_password_stays_in_memory_and_the_dialog_says_so() {
     assert!(w.app.mail.syncs[&acct.id].errors.is_empty(), "{:?}", w.app.mail.syncs[&acct.id].errors);
 }
 
+// spec: NAV-048
+#[test]
+fn nav_048_the_mail_accounts_dialog_sets_its_sections_apart() {
+    let mut w = W::new("sections", true);
+    w.size = Vec2::new(1500.0, 1400.0);
+    w.app.open_mail_settings();
+    w.settle();
+    let gap = |w: &W, above: &str, below: &str| w.rect(below).top() - w.rect(above).bottom();
+    let want = crate::theme::SECTION_GAP - 0.6;
+    let (smtp, keys) = (gap(&w, "md:password", "md:smtp-header"), gap(&w, "md:test", "md:keys-header"));
+    assert!(smtp >= want, "the Sending part is {smtp} below the account form, the section gap is {}", crate::theme::SECTION_GAP);
+    assert!(keys >= want, "Signing and encrypting is {keys} below the test button, the section gap is {}", crate::theme::SECTION_GAP);
+    let settings = w.rect("md:minutes").top() - w.rect("md:remove").bottom();
+    assert!(settings >= want, "the settings under the account are {settings} below its list, the section gap is {}", crate::theme::SECTION_GAP);
+    let encryption = w.rect("md:enc-header").top() - w.rect("md:undo-secs").bottom();
+    assert!(encryption >= want, "Encryption is {encryption} below the last setting, the section gap is {}", crate::theme::SECTION_GAP);
+}
+
 // spec: MAIL-043
 #[test]
 fn removing_an_account_clears_its_password_and_keeps_its_mail() {
@@ -2336,6 +2354,8 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
         with_subject(&testmail::pgp_encrypted(&alice.pgp_encrypt(&[&b_fpr], None, entity.as_bytes())), subject)
     };
     let mut w = W::new("enc-ui", true);
+    // the dialog has more room between its sections (NAV-048): a taller window keeps the banner in view
+    w.size = Vec2::new(1500.0, 1400.0);
     w.app.mail.gnupg = bob.g.clone();
     add_inbox_mail(&w, "Zebra plans", enc("Zebra plans", "the zebrafish plan"));
     add_inbox_mail(&w, "Okapi plans", enc("Okapi plans", "the okapi plan"));
@@ -2772,7 +2792,8 @@ fn mail_236_the_first_click_only_shows_what_gpgconf_will_write_cancel_writes_not
     assert!(!w.has("md:agent-write"), "the plan is closed after the write");
 
     // a failure is said in gpgconf's words and the times stay readable
-    std::fs::write(&conf, "this-is-not-an-option\n").unwrap();
+    // (a home that is not there: an unknown option in the file is accepted by GnuPG 2.2, the CI image's)
+    w.app.mail.gnupg.home = Some(home.dir.join("gone"));
     w.app.mail.write_agent(crate::mail::agent_cache::Choice::Day1);
     w.until("the second write ended", |a| a.mail.agent.written.as_ref().is_some_and(|r| r.is_err()));
     w.settle();
@@ -3024,7 +3045,7 @@ impl W {
     /// Is the cursor colour painted over this control?
     fn cursor_painted_on(&self, key: &str) -> bool {
         let r = self.rect(key);
-        let c = crate::theme::ACCENT.gamma_multiply(0.25);
+        let c = crate::theme::palette().accent.gamma_multiply(0.25);
         self.fills.iter().any(|(f, col)| *col == c && f.intersects(r))
     }
 

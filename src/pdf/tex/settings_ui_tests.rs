@@ -128,6 +128,25 @@ fn the_latex_tab_has_its_controls_and_says_why_no_tex_can_be_used() {
     assert!(!t.shows("Remove…") && !t.shows("Update"), "nothing to remove or update while nothing is installed");
 }
 
+// spec: NAV-048
+#[test]
+fn nav_048_the_sections_of_the_latex_page_have_the_section_gap_above_their_headings() {
+    let mut t = T::new("sections", nothing_found());
+    t.hl.frames(&mut t.app, 4);
+    let at = |t: &T, text: &str| t.hl.text.iter().find(|(s, _)| s == text).map(|(_, p)| *p).unwrap_or_else(|| panic!("{text:?} missing in {:?}", t.painted()));
+    // a text row is at least 12 points high: the heading's top is at least that and the section
+    // gap below the top of the text before it
+    let row = 12.0;
+    for heading in ["Shale's own TeX Live", "Template sets"] {
+        let h = at(&t, heading);
+        let before = t.hl.text.iter().filter(|(_, p)| p.x >= h.x - 1.0 && p.y < h.y - 1.0).map(|(_, p)| p.y).fold(f32::MIN, f32::max);
+        assert!(h.y - before >= crate::theme::SECTION_GAP + row, "{heading:?} is {} below the text before it, the section gap is {}", h.y - before, crate::theme::SECTION_GAP);
+    }
+    // its first heading follows the hint and the setup button, also a section break
+    let (which, hint) = (at(&t, "Which TeX is used"), at(&t, "Set up LaTeX export…"));
+    assert!(which.y - hint.y >= crate::theme::SECTION_GAP + row, "{} below the setup button", which.y - hint.y);
+}
+
 // spec: TEX-023
 #[test]
 fn a_usable_tex_is_shown_with_its_kind_kernel_and_folder_and_a_system_tex_with_missing_packages_is_flagged() {
@@ -333,4 +352,21 @@ mod fake {
         assert!(!n.ok && n.text.contains("package roboto is missing") && n.details.as_deref().is_some_and(|d| d.contains("roboto.sty")), "{n:?}");
         assert!(t.shows("package roboto is missing") && t.shows("The end of the log"), "{:?}", t.painted());
     }
+}
+
+// spec: TEX-002, TEX-003
+#[test]
+fn the_end_of_an_install_or_update_says_which_mirror_it_came_from() {
+    use super::install::Done;
+    let done = |warning: Option<&str>, mirrors: &[&str]| Done { warning: warning.map(String::from), mirrors: mirrors.iter().map(|m| m.to_string()).collect() };
+    let n = done_notice(Ok(done(None, &["https://a.example/tlnet"])), "The install");
+    assert_eq!((n.text.as_str(), n.ok), ("The install is done, from the mirror https://a.example/tlnet.", true));
+    let n = done_notice(Ok(done(None, &["https://a.example/tlnet", "https://b.example/tlnet"])), "The update");
+    assert_eq!(n.text, "The update is done, from the mirrors https://a.example/tlnet and https://b.example/tlnet.");
+    assert_eq!(done_notice(Ok(done(None, &[])), "The update").text, "The update is done.");
+    // the warning already names the mirror
+    let n = done_notice(Ok(done(Some("TeX Live is installed from the mirror https://a.example/tlnet, but the test document did not compile: x"), &["https://a.example/tlnet"])), "The install");
+    assert!(!n.ok && n.text.contains("from the mirror https://a.example/tlnet, but the test document"), "{}", n.text);
+    assert_eq!(done_notice(Err("cancelled".into()), "The install").text, "The install was cancelled; nothing of it is left.");
+    assert_eq!(done_notice(Err("boom".into()), "The update").text, "The update failed: boom");
 }

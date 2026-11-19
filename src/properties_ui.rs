@@ -14,7 +14,7 @@ use std::path::Path;
 pub fn show(ui: &mut Ui, text: &str, raw: &[&str], view: PropertiesView, vault: &Vault, rel: &Path, out: &mut Option<ReaderAction>) {
     let card = Card::parse(text);
     let view = if card.is_none() { PropertiesView::Raw } else { view };
-    egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(CornerRadius::same(6)).inner_margin(8).show(ui, |ui| {
+    egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(CornerRadius::same(6)).inner_margin(8).show(ui, |ui| {
         ui.set_width(ui.available_width());
         let open_id = egui::Id::unique(("shale-properties-open", rel));
         let open: bool = ui.ctx().data(|d| d.get_temp(open_id)).unwrap_or(false);
@@ -24,7 +24,7 @@ pub fn show(ui: &mut Ui, text: &str, raw: &[&str], view: PropertiesView, vault: 
             (PropertiesView::Folded, Some(_)) => {
                 ui.horizontal(|ui| {
                     toggled = toggle(ui, open);
-                    ui.label(RichText::new(properties::summary(text).unwrap_or_else(|| "Properties".into())).color(theme::MUTED));
+                    ui.label(RichText::new(properties::summary(text).unwrap_or_else(|| "Properties".into())).color(theme::palette().muted));
                 });
             }
             (PropertiesView::Card, Some(c)) => {
@@ -37,7 +37,7 @@ pub fn show(ui: &mut Ui, text: &str, raw: &[&str], view: PropertiesView, vault: 
                 tags(ui, c);
                 ui.horizontal(|ui| {
                     toggled = toggle(ui, open);
-                    ui.label(RichText::new("All properties").small().color(theme::MUTED));
+                    ui.label(RichText::new("All properties").small().color(theme::palette().muted));
                 });
             }
         }
@@ -53,14 +53,14 @@ pub fn show(ui: &mut Ui, text: &str, raw: &[&str], view: PropertiesView, vault: 
 
 /// The ▸/▾ button; true when it was clicked.
 fn toggle(ui: &mut Ui, open: bool) -> bool {
-    let r = ui.add(egui::Label::new(RichText::new(if open { "▾" } else { "▸" }).color(theme::MUTED)).sense(Sense::click()));
+    let r = ui.add(egui::Label::new(RichText::new(if open { "▾" } else { "▸" }).color(theme::palette().muted)).sense(Sense::click()));
     r.on_hover_text(if open { "Hide all properties" } else { "Show all properties" }).clicked()
 }
 
 fn raw_lines(ui: &mut Ui, raw: &[&str]) {
-    ui.label(RichText::new("Properties").small().color(theme::MUTED));
+    ui.label(RichText::new("Properties").small().color(theme::palette().muted));
     for l in raw {
-        ui.label(RichText::new(*l).monospace().color(theme::TEXT));
+        ui.label(RichText::new(*l).monospace().color(theme::palette().text));
     }
 }
 
@@ -69,7 +69,7 @@ fn people(ui: &mut Ui, value: &str, strong: bool, vault: &Vault, rel: &Path, out
     let list = properties::people_in(value);
     for (i, p) in list.iter().enumerate() {
         if i > 0 {
-            ui.label(RichText::new(",").color(theme::MUTED));
+            ui.label(RichText::new(",").color(theme::palette().muted));
         }
         person(ui, p, strong, vault, rel, out);
     }
@@ -79,11 +79,11 @@ fn person(ui: &mut Ui, p: &Person, strong: bool, vault: &Vault, rel: &Path, out:
     let known = !p.name.is_empty() && vault.exists(&p.name, Some(rel));
     let mut t = RichText::new(p.label());
     t = if known {
-        t.color(theme::LINK)
+        t.color(theme::palette().link)
     } else if strong {
-        t.color(theme::TEXT_STRONG)
+        t.color(theme::palette().text_strong)
     } else {
-        t.color(theme::TEXT)
+        t.color(theme::palette().text)
     };
     if strong {
         t = t.strong();
@@ -105,10 +105,10 @@ fn person(ui: &mut Ui, p: &Person, strong: bool, vault: &Vault, rel: &Path, out:
 fn date(ui: &mut Ui, text: &str, stamp: &str, strong: bool, out: &mut Option<ReaderAction>) {
     let Some(day) = crate::calendar::time::parse_ymd(properties::date_part(stamp)) else {
         let t = RichText::new(text);
-        ui.label(if strong { t.strong().color(theme::TEXT_STRONG) } else { t.color(theme::MUTED) });
+        ui.label(if strong { t.strong().color(theme::palette().text_strong) } else { t.color(theme::palette().muted) });
         return;
     };
-    let mut t = RichText::new(text).color(theme::LINK);
+    let mut t = RichText::new(text).color(theme::palette().link);
     if strong {
         t = t.strong();
     }
@@ -119,7 +119,7 @@ fn date(ui: &mut Ui, text: &str, stamp: &str, strong: bool, out: &mut Option<Rea
 }
 
 fn muted(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).color(theme::MUTED));
+    ui.label(RichText::new(text).color(theme::palette().muted));
 }
 
 /// A row of people after a muted word: `to Bob, Carol`.
@@ -146,7 +146,7 @@ fn email(ui: &mut Ui, c: &Card, vault: &Vault, rel: &Path, out: &mut Option<Read
         people_row(ui, "cc", t, vault, rel, out);
     }
     if let Some(s) = c.get("subject") {
-        ui.label(RichText::new(s).color(theme::TEXT));
+        ui.label(RichText::new(s).color(theme::palette().text));
     }
 }
 
@@ -165,7 +165,7 @@ fn tags(ui: &mut Ui, c: &Card) {
     ui.add_space(2.0);
     ui.horizontal_wrapped(|ui| {
         for t in tags {
-            chip(ui, &format!("#{t}"), theme::TAG, theme::TAG_BG);
+            chip(ui, &format!("#{t}"), theme::palette().tag, theme::palette().tag_bg);
         }
     });
 }
@@ -176,13 +176,13 @@ fn event(ui: &mut Ui, c: &Card, vault: &Vault, rel: &Path, out: &mut Option<Read
             date(ui, &w, c.get("start").unwrap_or_default(), true, out);
         }
         if let Some(r) = c.get("repeats") {
-            chip(ui, &format!("repeats {r}"), theme::TEXT, theme::BG_HOVER);
+            chip(ui, &format!("repeats {r}"), theme::palette().text, theme::palette().bg_hover);
         }
     });
     if let Some(l) = c.get("location") {
         ui.horizontal_wrapped(|ui| {
             muted(ui, "at");
-            ui.label(RichText::new(l).color(theme::TEXT));
+            ui.label(RichText::new(l).color(theme::palette().text));
         });
     }
     for (word, key) in [("organizer", "organizer"), ("with", "attendees")] {
@@ -192,7 +192,7 @@ fn event(ui: &mut Ui, c: &Card, vault: &Vault, rel: &Path, out: &mut Option<Read
         }
     }
     if let Some(cal) = c.get("calendar") {
-        ui.label(RichText::new(cal).small().color(theme::MUTED));
+        ui.label(RichText::new(cal).small().color(theme::palette().muted));
     }
 }
 
@@ -200,7 +200,7 @@ fn word(ui: &mut Ui, c: &Card) {
     ui.horizontal_wrapped(|ui| {
         muted(ui, "Word document");
         if let Some(p) = c.page_chip() {
-            chip(ui, &p, theme::TEXT, theme::BG_HOVER);
+            chip(ui, &p, theme::palette().text, theme::palette().bg_hover);
         }
     });
     for (k, v) in c.rows() {
@@ -216,7 +216,7 @@ fn generic(ui: &mut Ui, c: &Card) {
 
 fn row(ui: &mut Ui, key: &str, value: &str) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(format!("{key}:")).color(theme::MUTED));
-        ui.label(RichText::new(value).color(theme::TEXT));
+        ui.label(RichText::new(format!("{key}:")).color(theme::palette().muted));
+        ui.label(RichText::new(value).color(theme::palette().text));
     });
 }

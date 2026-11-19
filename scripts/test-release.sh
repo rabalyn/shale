@@ -1,8 +1,9 @@
 #!/bin/bash
 # Tests scripts/make-tag.sh and scripts/make-release.sh (FORGE-013, FORGE-014, ADR-0018) on a
-# throwaway remote and clone. The cargo checks of land.sh are replaced by LAND_CHECK_CMD and the
-# GitHub CLI by a stub that records its calls, so the test is about versions, the changelog,
-# landing, tagging and refusing.
+# throwaway remote and clone. The cargo checks of land.sh are replaced by LAND_CHECK_CMD, the
+# GitHub CLI by a stub that records its calls and the benchmark program (BUILD-034) by a stub
+# that writes small result files, so the test is about versions, the changelog, landing, tagging,
+# the stored performance results and refusing.
 #   bash scripts/test-release.sh
 set -u
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,13 +34,33 @@ esac
 exit 0
 GH
 chmod +x "$TMP/bin/gh"
+# the benchmark program: `--bench` writes a result, `--bench-compare` exits with FAKE_COMPARE_EXIT
+cat > "$TMP/bin/fake-shale" <<'FAKE'
+#!/bin/sh
+echo "$*" >> "$BENCH_LOG"
+case "$1" in
+  --bench)
+    mkdir -p "$(dirname "$2")"
+    printf '{"schema":1,"commit":"%s","describe":"%s","date":"2026-01-01T00:00:00Z","host":{"cpu":"c","cores":1,"os":"o"},"profile":"bench-release","scenarios":[],"peak_rss_kb":null,"run":"%s"}\n' "$SHALE_BENCH_COMMIT" "$SHALE_BENCH_DESCRIBE" "$4" > "$2" ;;
+  --bench-merge) mkdir -p "$(dirname "$2")"; cp "$3" "$2" ;;
+  --bench-compare)
+    while [ $# -gt 0 ]; do [ "$1" = --out ] && dir=$2; shift; done
+    mkdir -p "$dir"
+    echo "# compare" > "$dir/compare.md"
+    echo '{"regressions":[]}' > "$dir/compare.json"
+    exit "${FAKE_COMPARE_EXIT:-0}" ;;
+  --bench-report) echo "<html></html>" > "$3" ;;
+esac
+FAKE
+chmod +x "$TMP/bin/fake-shale"
+export BENCH_BIN="$TMP/bin/fake-shale" BENCH_LOG="$TMP/bench.log"
 export RELEASE_GH="$TMP/bin/gh" GH_LOG="$TMP/gh.log" RELEASE_DATE=2026-11-17 LAND_CHECK_CMD=true
 
 git init -q --bare "$TMP/remote.git"
 git clone -q "$TMP/remote.git" "$TMP/work" 2>/dev/null
 cd "$TMP/work" || exit 1
 mkdir -p scripts .github docs/changelog-pending
-cp "$SRC"/scripts/{land.sh,release-lib.sh,make-tag.sh,make-release.sh} scripts/
+cp "$SRC"/scripts/{land.sh,release-lib.sh,make-tag.sh,make-release.sh,bench-release.sh,bench-env.sh} scripts/
 cp "$SRC"/.github/{check-release.sh,release-notes.sh,ai-notice.md} .github/
 printf '[package]\nname = "shale"\nversion = "0.3.0"\nedition = "2021"\n\n[dependencies]\nother = { version = "9.9.9" }\n' > Cargo.toml
 printf '[[package]]\nname = "other"\nversion = "9.9.9"\n\n[[package]]\nname = "shale"\nversion = "0.3.0"\n' > Cargo.lock
@@ -175,6 +196,10 @@ check "the changelog section merges [Unreleased] and the pending files by headin
 check "the pending files are gone" '[ -z "$(git ls-tree origin/main docs/changelog-pending/)" ]'
 check "the release commit names the issue" 'git log -1 --format=%s "origin/main^2" | grep -Fxq "Release 0.4.0 (Refs #77)"'
 check "the tag message names the version" '[ "$(git tag -l --format="%(contents:subject)" v0.4.0)" = "Shale 0.4.0" ]'
+# the performance step of a release (BUILD-034)
+check "the release stored the full and the worst result and the report" 'git show origin/main:docs/perf/results/v0.4.0.json | grep -Fq "\"describe\":\"v0.4.0\"" && git show origin/main:docs/perf/results-worst/v0.4.0.json | grep -Fq "\"run\":\"worst\"" && git show origin/main:docs/perf/index.html | grep -Fq html'
+check "the full profile ran with its name and the worst one too" 'grep -Fq -- "--profile full" "$BENCH_LOG" && grep -Fq -- "--profile worst" "$BENCH_LOG"'
+check "without an earlier release nothing is compared" '! grep -Fq -- "--bench-compare" "$BENCH_LOG" && [ -z "$(git ls-tree origin/main docs/perf/compare/)" ]'
 expect "a release needs changelog entries" 1 "the changelog needs an update first" make-release.sh patch
 land stray docs/changelog-pending/I11.md "- not under a heading"
 expect "a changelog line outside a heading is refused and named" 1 "outside a ### heading in docs/changelog-pending/I11.md" make-release.sh patch
@@ -227,6 +252,22 @@ bash scripts/land.sh fix13 >/dev/null 2>&1 || echo "setup: landing fix13 failed"
 expect "a dry run of the rerun says it tags main" 0 "on origin/main already" make-release.sh --dry-run 0.4.2
 expect "the same version again tags the landed main" 0 "pushed the tag to origin" make-release.sh 0.4.2
 check "the recovery tag points at main and passes" 'remote_tag v0.4.2 && [ "$(git rev-parse "v0.4.2^{commit}")" = "$(git rev-parse origin/main)" ]'
+
+# the performance step of later releases (BUILD-034)
+land perf1 docs/changelog-pending/I30.md $'### Fixed\n\n- Thirty (#30).'
+FAKE_COMPARE_EXIT=1 expect "a performance regression stops the release" 1 "performance regression" make-release.sh patch
+check "nothing was landed or tagged after the regression" '! remote_tag v0.4.3 && [ "$(version_on_main)" = 0.4.2 ] && ! git rev-parse -q --verify refs/heads/release/v0.4.3 >/dev/null'
+FAKE_COMPARE_EXIT=1 expect "--allow-perf-regression lets a regression pass and says so" 0 "allowed by --allow-perf-regression" make-release.sh --allow-perf-regression patch
+check "the release compared with the last one and stored the comparison" 'remote_tag v0.4.3 && grep -Fq -- "--bench-compare docs/perf/results/v0.4.2.json docs/perf/results/v0.4.3.json" "$BENCH_LOG" && git show origin/main:docs/perf/compare/v0.4.3.md | grep -Fq compare && git show origin/main:docs/perf/compare/v0.4.3-worst.json | grep -Fq regressions'
+# spec: BUILD-037
+check "the full profile ran twice and the runs were merged, the worst profile once" '[ "$(grep -c -- "^--bench .* --profile full" "$BENCH_LOG")" -ge 2 ] && grep -Fq -- "--bench-merge docs/perf/results/v0.4.3.json" "$BENCH_LOG" && [ "$(grep -c -- "^--bench .* --profile worst" "$BENCH_LOG")" -eq "$(grep -c -- "--bench-merge docs/perf/results-worst/" "$BENCH_LOG")" ]'
+land perf2 docs/changelog-pending/I31.md $'### Fixed\n\n- Thirty-one (#31).'
+expect "--skip-bench leaves the performance step out" 0 "not measured" make-release.sh --skip-bench patch
+check "a skipped release has no result" 'remote_tag v0.4.4 && ! git cat-file -e origin/main:docs/perf/results/v0.4.4.json 2>/dev/null'
+land perf3 docs/changelog-pending/I32.md $'### Fixed\n\n- Thirty-two (#32).'
+FAKE_COMPARE_EXIT=2 expect "a failing comparison stops the release too" 1 "the performance step failed" make-release.sh patch
+expect "the next release goes on" 0 "tagged" make-release.sh patch
+check "it compares with the last release that has a result" 'grep -Fq -- "--bench-compare docs/perf/results/v0.4.3.json docs/perf/results/v0.4.5.json" "$BENCH_LOG"'
 
 [ "$FAILED" = 0 ] && echo "all $N checks passed"
 exit "$FAILED"

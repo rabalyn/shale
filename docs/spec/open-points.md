@@ -22,7 +22,7 @@ FORGE-004, [ADR-0017](../decisions/0017-github-issues-forgejo-ci.md)). The table
 | 8 | ~~JOB-002~~ | ~~Panic-safe background jobs~~ (done) | Endless spinners | [0006](../decisions/0006-engineering-baseline.md) |
 | 9 | ~~SEC-006~~ | ~~Allowlist for `xdg-open`~~ (done) | Server- and mail-supplied URLs/files opened unchecked | 0006 |
 | 10 | ~~BUILD-004~~, BUILD-006 | ~~CI on PRs, clippy/fmt gates~~ (done), drop vendor/ | Zero-warnings rule enforced, security updates possible | 0006 |
-| 11 | PERF-001, PERF-002 | Cache derived data, fix O(n²) rescan | Big vaults | 0006 |
+| 11 | ~~PERF-001~~, ~~PERF-002~~ | ~~Cache derived data, fix O(n²) rescan~~ (done, #377, #378) | Big vaults | 0006 |
 | 12 | — | Docs restructure | Stop drift | [0002](../decisions/0002-documentation-structure.md) |
 
 ## Open questions (not decided)
@@ -58,5 +58,5 @@ auto-pairing brackets, find and replace in a note, spell check, paste images. Li
 links (`#^id`), heading scroll in reading view, hover previews. Tasks: priorities, recurring
 tasks, grouping. Graph: colour groups, filters, Barnes–Hut. Drawings: SVG/PDF pictures, frames, groups,
 elbow arrows, labels on arrows, rotation handles, PNG/SVG export, copy/paste between drawings.
-Other: command palette, daily notes, templates, light theme, split panes, packaging (.desktop,
+Other: command palette, daily notes, templates, split panes, packaging (.desktop,
 Flatpak), native folder picker.

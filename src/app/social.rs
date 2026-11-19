@@ -55,7 +55,7 @@ impl ShaleApp {
     /// The "Post search index" section of Settings → General (SOC-040): how many posts are
     /// indexed, Rebuild, and Clear with a question first.
     pub fn post_index_settings(&mut self, ui: &mut Ui) {
-        ui.label(eframe::egui::RichText::new("Post search index").color(crate::theme::MUTED));
+        ui.label(eframe::egui::RichText::new("Post search index").color(crate::theme::palette().muted));
         let n = self.social.index.count(None);
         crate::theme::hint(ui, format!("{n} posts from your feeds can be found by the search. It is a cache and fills again as feeds load."));
         if self.social.confirm_clear {

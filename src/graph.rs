@@ -2,9 +2,13 @@
 
 use crate::theme;
 use crate::vault::{FileKind, GraphNode, Vault};
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+/// How long the physics may take in one frame.
+const STEP_BUDGET: Duration = Duration::from_millis(6);
 
 pub struct GraphView {
     generation: u64,
@@ -61,7 +65,7 @@ impl GraphView {
         }
     }
 
-    fn rebuild(&mut self, vault: &Vault) {
+    pub(crate) fn rebuild(&mut self, vault: &Vault) {
         let (mut nodes, mut edges) = vault.graph(self.show_missing);
         if let Some(f) = &self.focus {
             let key = crate::vault::rel_to_string(f);
@@ -121,21 +125,13 @@ impl GraphView {
         self.energy = 1.0;
     }
 
-    fn step(&mut self) {
+    pub(crate) fn step(&mut self) {
         let n = self.pos.len();
         if n == 0 {
             return;
         }
-        let mut force = vec![Vec2::ZERO; n];
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let d = self.pos[i] - self.pos[j];
-                let dist2 = d.length_sq().max(25.0);
-                let f = d / dist2.sqrt() * (2600.0 / dist2);
-                force[i] += f;
-                force[j] -= f;
-            }
-        }
+        // every note pushes every other away: pair by pair for a small graph, by quadtree for a big one
+        let mut force = crate::graph_tree::forces(&self.pos);
         for (a, b) in &self.edges {
             let d = self.pos[*b] - self.pos[*a];
             let len = d.length().max(0.01);
@@ -157,6 +153,22 @@ impl GraphView {
             total += v.length();
         }
         self.energy = total / n as f32;
+    }
+
+    /// Up to three steps of the physics while it is moving, but not more once `budget` is used up
+    /// (at least one): a big graph takes a few frames more to settle instead of a slow frame
+    /// (PERF-007). Returns how many steps it made.
+    pub(crate) fn relax(&mut self, budget: Duration) -> usize {
+        let start = Instant::now();
+        let mut steps = 0;
+        while steps < 3 && (self.energy > 0.05 || self.dragging.is_some()) {
+            self.step();
+            steps += 1;
+            if start.elapsed() >= budget {
+                break;
+            }
+        }
+        steps
     }
 
     /// Returns a note to open when a node is clicked.
@@ -183,18 +195,14 @@ impl GraphView {
                 if ui.button("Fit").clicked() {
                     self.auto_fit = true;
                 }
-                ui.label(egui::RichText::new(format!("{} notes · {} links", self.nodes.len(), self.edges.len())).color(theme::MUTED));
+                ui.label(egui::RichText::new(format!("{} notes · {} links", self.nodes.len(), self.edges.len())).color(theme::palette().muted));
             });
         }
         let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, theme::BG_PRIMARY);
+        painter.rect_filled(rect, 0.0, theme::palette().bg_primary);
 
-        for _ in 0..3 {
-            if self.energy > 0.05 || self.dragging.is_some() {
-                self.step();
-            }
-        }
+        self.relax(STEP_BUDGET);
         if self.energy > 0.05 || self.dragging.is_some() {
             ui.ctx().request_repaint();
         }
@@ -265,11 +273,11 @@ impl GraphView {
         for (a, b) in &self.edges {
             let lit = highlight.map(|h| h == *a || h == *b).unwrap_or(false);
             let col = if lit {
-                theme::ACCENT
+                theme::palette().accent
             } else if highlight.is_some() {
-                Color32::from_gray(50)
+                theme::palette().graph_edge_dim
             } else {
-                Color32::from_gray(78)
+                theme::palette().graph_edge
             };
             painter.line_segment([to_screen(self.pos[*a]), to_screen(self.pos[*b])], Stroke::new(if lit { 1.6 } else { 1.0 }, col));
         }
@@ -280,12 +288,12 @@ impl GraphView {
             let is_current = current_key.as_deref() == Some(n.key.as_str());
             let dim = highlight.is_some() && highlight != Some(i) && !neighbours.contains(&i);
             let mut col = match (n.rel.is_some(), n.kind) {
-                (false, _) => theme::LINK_MISSING.gamma_multiply(0.7),
-                (true, FileKind::Drawing) => Color32::from_rgb(120, 190, 140),
-                _ => Color32::from_gray(170),
+                (false, _) => theme::palette().link_missing.gamma_multiply(0.7),
+                (true, FileKind::Drawing) => theme::palette().graph_node_drawing,
+                _ => theme::palette().graph_node,
             };
             if is_current || highlight == Some(i) {
-                col = theme::ACCENT;
+                col = theme::palette().accent;
             }
             if dim {
                 col = col.gamma_multiply(0.35);
@@ -293,12 +301,12 @@ impl GraphView {
             painter.circle_filled(p, r, col);
             let show_label = zoom > 0.55 || highlight == Some(i) || neighbours.contains(&i) || is_current;
             if show_label && !(compact && dim) {
-                let tc = if dim { theme::MUTED.gamma_multiply(0.5) } else { theme::TEXT };
+                let tc = if dim { theme::palette().muted.gamma_multiply(0.5) } else { theme::palette().text };
                 painter.text(p + Vec2::new(0.0, r + 3.0), Align2::CENTER_TOP, &n.label, FontId::proportional(if compact { 11.0 } else { 12.5 }), tc);
             }
         }
         if self.nodes.is_empty() {
-            painter.text(rect.center(), Align2::CENTER_CENTER, "No linked notes yet", FontId::proportional(13.0), theme::MUTED);
+            painter.text(rect.center(), Align2::CENTER_CENTER, "No linked notes yet", FontId::proportional(13.0), theme::palette().muted);
         }
 
         // interaction
@@ -354,4 +362,50 @@ fn filter(nodes: Vec<GraphNode>, edges: Vec<(usize, usize)>, keep: &[bool]) -> (
     }
     let e = edges.into_iter().filter(|(a, b)| keep[*a] && keep[*b]).map(|(a, b)| (map[a], map[b])).collect();
     (out, e)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vault(n: usize) -> (Vault, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("shale-graph-{n}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..n {
+            std::fs::write(dir.join(format!("N{i}.md")), format!("[[N{}]] [[N{}]]", (i + 1) % n, (i * 7 + 3) % n)).unwrap();
+        }
+        (Vault::open(&dir).unwrap(), dir)
+    }
+
+    // spec: PERF-007
+    #[test]
+    fn perf_007_a_frame_makes_up_to_three_steps_but_one_when_its_time_is_used_up() {
+        let (v, dir) = vault(40);
+        let mut g = GraphView::new(false);
+        g.rebuild(&v);
+        assert_eq!(g.relax(Duration::from_secs(60)), 3, "three steps while it moves");
+        assert_eq!(g.relax(Duration::ZERO), 1, "one step, however little time there is");
+        g.energy = 0.0;
+        assert_eq!(g.relax(Duration::from_secs(60)), 0, "nothing while it rests");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: PERF-003
+    #[test]
+    fn perf_003_a_big_graph_settles_into_a_spread_out_layout_like_a_small_one() {
+        let (v, dir) = vault(700);
+        let mut g = GraphView::new(false);
+        g.rebuild(&v);
+        for _ in 0..60 {
+            g.step();
+        }
+        // not collapsed on one spot, not flung away, and every position is a number
+        assert!(g.pos.iter().all(|p| p.x.is_finite() && p.y.is_finite()));
+        let mean_r = g.pos.iter().map(|p| p.length()).sum::<f32>() / g.pos.len() as f32;
+        assert!((50.0..5000.0).contains(&mean_r), "{mean_r}");
+        let near = g.pos.windows(2).filter(|w| (w[0] - w[1]).length() < 1.0).count();
+        assert!(near < 20, "{near} neighbours on top of each other");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

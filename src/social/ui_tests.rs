@@ -151,6 +151,26 @@ impl Drop for W {
     }
 }
 
+// spec: PERF-006
+#[test]
+fn perf_006_posts_far_from_the_view_are_not_laid_out_again_and_come_back_when_scrolled_to() {
+    let mut w = W::new("farposts");
+    let acct = home().account;
+    w.app.social.timelines.get_mut(&(acct, "home".to_string())).unwrap().posts = recent("p", 400);
+    w.frames(6);
+    let drawn = |w: &W| w.app.social.rects.iter().filter(|(k, _)| k.starts_with("save:")).count();
+    assert_eq!(w.app.social.post_rects.len(), 400, "every post has its place");
+    assert!(drawn(&w) > 0 && drawn(&w) < 40, "{} of 400 posts laid out", drawn(&w));
+    let before = w.app.social.post_rects[0].1.min.y;
+    // the heights of the posts far away are the ones measured: scrolling there draws them
+    w.scroll(6000.0);
+    w.frames(6);
+    assert!(w.app.social.rects.iter().any(|(k, _)| k.starts_with("save:") && k[5..].parse::<usize>().is_ok_and(|i| i > 20)), "posts further down are drawn now");
+    assert!(drawn(&w) < 40 && w.app.social.post_rects[0].1.min.y < before - 1000.0, "{} drawn", drawn(&w));
+    // the list is as long as before: the last post is at its place, 143 points for each post before it
+    assert!((w.app.social.post_rects[399].1.min.y - w.app.social.post_rects[0].1.min.y - 399.0 * 143.0).abs() < 2.0);
+}
+
 // spec: SOC-021, SOC-022, SOC-023
 #[test]
 fn two_feeds_open_in_two_tabs_each_with_its_own_scroll_and_title() {

@@ -8,7 +8,7 @@
 #
 # A branch is a local branch if one has the name, else `origin/<branch>`, else any commit.
 # The checks: every new commit names an issue (FORGE-008), `cargo fmt --check`, clippy with
-# `-D warnings` for Linux, and for macOS and Windows (`scripts/cross-check.sh`), `cargo test` (also `cargo test --release` with --release), and the real-server
+# `-D warnings` for Linux (also with `--features bench`), and for macOS and Windows (`scripts/cross-check.sh`), `cargo test` (also `cargo test --features bench bench::`, and also `cargo test --release` with --release), and the real-server
 # suites of tests/caldav-env and tests/mail-env and the LuaLaTeX suite of tests/tex-env when the
 # change touches the CalDAV, mail or TeX export code or the environments (`.forgejo/scripts/env-tests.sh wanted`); --no-env-tests skips them and
 # says so. A merge conflict is not resolved here: merge `origin/main` into the branch, resolve
@@ -21,6 +21,14 @@
 # what changed. Environment, for the test of this script: LAND_REMOTE (default origin),
 # LAND_CHECK_CMD (a shell command run in the worktree instead of the checks above),
 # SHALE_LAND_LOCK_HELD=<pid of the parent> (the parent holds the lock already: release scripts).
+#
+# A TeX Live mirror (DEV-025, #371): the real TeX Live install test and the TeX test image take TeX
+# Live from the public default unless a local setting names a mirror of `tlnet`: the environment
+# variable SHALE_TEX_MIRROR (a URL), else the first line of `<git dir>/land/tex-mirror` that is not
+# empty or a `#` comment. The file is in the git folder, so it is never committed and every worktree
+# shares it. The URL starts with https:// or http:// (else exit 2); a trailing / is dropped. It is
+# passed on as SHALE_TEX_INSTALL_REPOSITORY and SHALE_TEX_ENV_REPOSITORY (not when the person set
+# those already). The line "TeX Live: …" at the start says which one is used. CI does not read it.
 set -euo pipefail
 
 REMOTE=${LAND_REMOTE:-origin}
@@ -31,7 +39,7 @@ for a in "$@"; do
   case $a in
     --release) RELEASE=yes ;;
     --no-env-tests) ENV_TESTS=no ;;
-    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "land.sh: unknown option $a" >&2; exit 2 ;;
     *) BRANCHES+=("$a") ;;
   esac
@@ -46,6 +54,37 @@ HOME_DIR="$COMMON/land"
 WT="$HOME_DIR/worktree"
 mkdir -p "$HOME_DIR"
 export CARGO_TARGET_DIR="${LAND_TARGET_DIR:-$HOME_DIR/target}"
+
+# The TeX Live mirror (DEV-025, #371): SHALE_TEX_MIRROR, else the file `tex-mirror` in $HOME_DIR.
+# Nothing is exported when neither is set; a SHALE_TEX_INSTALL_REPOSITORY or
+# SHALE_TEX_ENV_REPOSITORY the person set is left alone.
+TEX_MIRROR_FILE="$HOME_DIR/tex-mirror"
+tex_mirror=""
+tex_mirror_from=""
+if [ -n "${SHALE_TEX_MIRROR:-}" ]; then
+  tex_mirror=$SHALE_TEX_MIRROR
+  tex_mirror_from="SHALE_TEX_MIRROR"
+elif [ -f "$TEX_MIRROR_FILE" ]; then
+  tex_mirror=$(sed -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$TEX_MIRROR_FILE" | awk 'NF && !/^#/ { print; exit }')
+  [ -z "$tex_mirror" ] || tex_mirror_from=$TEX_MIRROR_FILE
+fi
+if [ -n "$tex_mirror" ]; then
+  case $tex_mirror in
+    https://?*|http://?*) ;;
+    *) echo "land.sh: the TeX Live mirror (from $tex_mirror_from) must start with https:// or http://" >&2; exit 2 ;;
+  esac
+  tex_mirror=${tex_mirror%/}
+  echo "TeX Live: the mirror $tex_mirror (from $tex_mirror_from)"
+  for v in SHALE_TEX_INSTALL_REPOSITORY SHALE_TEX_ENV_REPOSITORY; do
+    if [ -n "${!v:-}" ]; then
+      echo "TeX Live: $v is set already, left as it is"
+    else
+      export "$v=$tex_mirror"
+    fi
+  done
+else
+  echo "TeX Live: the default repository (no mirror set: SHALE_TEX_MIRROR or $TEX_MIRROR_FILE)"
+fi
 
 # scripts/make-tag.sh and make-release.sh hold this lock for their whole run (FORGE-013, FORGE-014,
 # #348) and start land.sh as their own child with SHALE_LAND_LOCK_HELD set to their PID: that is
@@ -152,9 +191,12 @@ checks() {
   step "commits name an issue (FORGE-008)" sh .forgejo/scripts/check-commit-issues.sh "$base" HEAD || return 1
   step "cargo fmt --check" cargo fmt --check || return 1
   step "cargo clippy" cargo clippy -q --all-targets --locked -- -D warnings || return 1
+  # the benchmark harness is a cargo feature that no shipped build has: it must not rot (BUILD-035)
+  step "cargo clippy --features bench" cargo clippy -q --all-targets --locked --features bench -- -D warnings || return 1
   # code used only from Linux-only `cfg` code is dead on macOS and Windows (BUILD-004, DEV-015)
   step "macOS and Windows clippy (scripts/cross-check.sh)" sh scripts/cross-check.sh || return 1
   step "cargo test" cargo test -q --locked || return 1
+  step "cargo test --features bench bench::" cargo test -q --locked --features bench bench:: || return 1
   if [ "$RELEASE" = yes ]; then
     step "cargo test --release" cargo test -q --release --locked || return 1
   fi

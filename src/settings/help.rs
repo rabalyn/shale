@@ -1,6 +1,6 @@
 //! The Help tab: the user guide and the troubleshooting switches.
 
-use super::{section, Asks};
+use super::Asks;
 use crate::app::ShaleApp;
 use eframe::egui::Ui;
 
@@ -10,7 +10,7 @@ impl ShaleApp {
         if ui.button("Open user guide (F1)").on_hover_text("The guide is a vault: a copy of it is made in Shale's data folder, once per version, and opened").clicked() {
             asks.guide = true;
         }
-        section(ui, "Troubleshooting");
+        crate::theme::section(ui, "Troubleshooting");
         if ui.checkbox(&mut self.cfg.input_log, "Record keyboard input to a file (to find keyboard problems)").changed() {
             if self.cfg.input_log {
                 self.start_input_log();

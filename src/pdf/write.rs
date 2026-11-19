@@ -456,6 +456,20 @@ fn deflate(data: &[u8]) -> Vec<u8> {
     miniz_oxide::deflate::compress_to_vec_zlib(data, 6)
 }
 
+/// A bundled font file deflated: the same bytes for every document, so they are compressed once
+/// per run (PERF-010), not once per export.
+fn deflated_font(kind: FontKind, data: &'static [u8]) -> &'static [u8] {
+    use std::sync::OnceLock;
+    static CACHE: [OnceLock<Vec<u8>>; 4] = [const { OnceLock::new() }; 4];
+    let slot = match kind {
+        FontKind::Sans => 0,
+        FontKind::Mono => 1,
+        FontKind::Hand => 2,
+        FontKind::Serif => 3,
+    };
+    CACHE[slot].get_or_init(|| deflate(data))
+}
+
 fn esc(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -569,9 +583,9 @@ impl Doc {
             let m = &lf.metrics;
             let upem = lf.units_per_em();
             let file_id = reserve(&mut objs);
-            let compressed = deflate(lf.data);
+            let compressed = deflated_font(kind, lf.data);
             let mut fo = format!("<< /Length {} /Length1 {} /Filter /FlateDecode >>\nstream\n", compressed.len(), lf.data.len()).into_bytes();
-            fo.extend(compressed);
+            fo.extend_from_slice(compressed);
             fo.extend(b"\nendstream");
             objs[file_id - 1] = fo;
             let desc_id = reserve(&mut objs);
@@ -816,5 +830,27 @@ mod tests {
         d.page(p).text(TextStyle::plain(FontKind::Serif, 12.0, Rgba::BLACK), 10.0, 50.0, "Times");
         let bytes = d.finish();
         assert!(String::from_utf8_lossy(&bytes).contains("/BaseFont /LiberationSerif"));
+    }
+
+    // spec: PERF-010
+    #[test]
+    fn perf_010_a_bundled_font_is_deflated_once_and_comes_back_whole() {
+        for kind in [FontKind::Sans, FontKind::Mono, FontKind::Hand, FontKind::Serif] {
+            let raw = font(kind).data;
+            let (a, b) = (deflated_font(kind, raw), deflated_font(kind, raw));
+            assert!(std::ptr::eq(a, b), "the second export gets the same bytes");
+            assert_eq!(miniz_oxide::inflate::decompress_to_vec_zlib(a).unwrap(), raw, "{kind:?}");
+        }
+        // two documents with the same font have the same font stream
+        let one = |text: &str| {
+            let mut d = Doc::default();
+            let p = d.add_page(595.0, 842.0);
+            d.page(p).text(TextStyle::plain(FontKind::Serif, 12.0, Rgba::BLACK), 10.0, 50.0, text);
+            d.finish()
+        };
+        let (x, y) = (one("a"), one("b"));
+        let needle = deflated_font(FontKind::Serif, font(FontKind::Serif).data);
+        let has = |hay: &[u8]| hay.windows(needle.len().min(64)).any(|w| w == &needle[..w.len()]);
+        assert!(has(&x) && has(&y));
     }
 }

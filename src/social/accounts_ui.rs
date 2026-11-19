@@ -235,7 +235,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
     if d.busy() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(150));
     }
-    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
     // ---- the list
     if accounts.is_empty() {
         crate::theme::prose(ui, muted("No account yet. Add a Mastodon or Bluesky account below to read its feeds here."));
@@ -243,7 +243,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
     let mut start_edit = None;
     for (i, e) in accounts.iter().enumerate() {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(e.account.network.label()).size(11.0).color(theme::ACCENT));
+            ui.label(egui::RichText::new(e.account.network.label()).size(11.0).color(theme::palette().accent));
             let name = if e.account.display_name.trim().is_empty() { e.account.handle.clone() } else { format!("{} (@{})", e.account.display_name, e.account.handle) };
             ui.label(name);
             ui.label(muted(&e.account.server));
@@ -261,7 +261,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
     if let Some(a) = start_edit {
         d.start_edit(&a);
     }
-    ui.separator();
+    theme::section_break(ui);
     ui.horizontal(|ui| {
         ui.label(muted("Look for new posts every"));
         let mut m = check_minutes;
@@ -269,10 +269,9 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
             action = Some(DialogAction::CheckMinutes(m));
         }
     });
-    ui.separator();
     // ---- add
     if let Some(a) = &d.editing {
-        ui.label(egui::RichText::new(format!("Sign in again as @{}", a.handle)).size(14.0).color(theme::TEXT));
+        theme::section(ui, format!("Sign in again as @{}", a.handle));
         ui.add(
             egui::Label::new(crate::theme::spaced(
                 ui,
@@ -285,7 +284,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
             .wrap(),
         );
     } else {
-        ui.label(egui::RichText::new("Add an account").size(14.0).color(theme::TEXT));
+        theme::section(ui, "Add an account");
     }
     let (fixed, current) = (d.editing.is_some(), d.network);
     ui.horizontal(|ui| {
@@ -298,7 +297,6 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
             }
         }
     });
-    ui.add_space(2.0);
     let busy = d.busy();
     match d.network {
         Network::Mastodon => {
@@ -320,7 +318,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
                             d.open_sign_in(ui.ctx());
                         }
                         if d.app.is_some() {
-                            ui.label(egui::RichText::new("opened").size(12.0).color(theme::MUTED));
+                            ui.label(egui::RichText::new("opened").size(12.0).color(theme::palette().muted));
                         }
                     });
                     ui.end_row();
@@ -350,7 +348,7 @@ pub fn show(ui: &mut Ui, d: &mut SocialDialog, accounts: &[SocialAccountEntry], 
                 egui::Label::new(
                     egui::RichText::new("Use an app password, never your main password: Bluesky → Settings → Privacy and security → App passwords. It can be revoked there at any time. It goes to your system keyring.")
                         .size(12.0)
-                        .color(theme::LINK_MISSING.gamma_multiply(0.85)),
+                        .color(theme::palette().link_missing.gamma_multiply(0.85)),
                 )
                 .wrap(),
             );
@@ -366,11 +364,10 @@ pub fn footer(ui: &mut Ui, d: &mut SocialDialog) -> Option<DialogAction> {
     let mut action = None;
     let mut cancel_edit = false;
     let busy = d.busy();
-    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
     if let Some(e) = &d.error {
-        ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING)).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(e).color(theme::palette().link_missing)).wrap());
     }
-    ui.add_space(4.0);
     ui.horizontal(|ui| {
         let mut rec = |k: &str, r: egui::Response| -> egui::Response {
             d.rects.push((k.to_string(), r.rect));

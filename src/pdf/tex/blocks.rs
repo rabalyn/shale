@@ -58,6 +58,10 @@ pub enum Block {
     Rule,
     /// A page-break marker line (TEX-037).
     PageBreak,
+    /// The opening and the closing line of an alignment wrapper (TEX-039): what is between them
+    /// is the blocks in between.
+    AlignStart(markdown::Align),
+    AlignEnd(markdown::Align),
 }
 
 /// How far a line is indented, a tab counting four.
@@ -74,6 +78,7 @@ pub fn parse(text: &str) -> Vec<Block> {
     let maths = markdown::find_math(text);
     let notes = markdown::find_footnotes(text);
     let page_breaks = markdown::page_break_lines(text);
+    let wrappers = markdown::align_blocks(text);
     let mut out: Vec<Block> = Vec::new();
     let mut i = markdown::front_matter_lines(text);
     // lines of a paragraph, of a list and of a quote that are not yet closed
@@ -94,6 +99,13 @@ pub fn parse(text: &str) -> Vec<Block> {
         };
     }
     while i < lines.len() {
+        // the lines of an alignment wrapper are blocks of their own (TEX-039)
+        if let Some(b) = wrappers.iter().find(|b| b.is_edge(i)) {
+            close!();
+            out.push(if b.open == i { Block::AlignStart(b.align) } else { Block::AlignEnd(b.align) });
+            i += 1;
+            continue;
+        }
         // a formula on lines of its own (a `$$` block, a `math` fence): math when Shale can typeset it, else its text as code
         if let Some(m) = maths.iter().find(|m| m.block && m.lines.start == i) {
             close!();

@@ -174,8 +174,7 @@ impl TexState {
 pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig) {
     let ctx = ui.ctx().clone();
     st.sets.refresh();
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new("Template sets").color(theme::MUTED));
+    theme::section(ui, "Template sets");
     crate::theme::hint(ui, "The templates a PDF is made with live in your vault, in templates/tex, so they are synced and backed up with your notes. TeX Live supplies only the engine and the generic packages.");
     if st.sets.vault.is_none() {
         ui.label("Open a vault to import template sets.");
@@ -212,7 +211,6 @@ pub fn show(ui: &mut Ui, st: &mut TexState, cfg: &TexConfig) {
     if let Some((id, a)) = action {
         apply(st, &ctx, cfg, &entries, &id, a);
     }
-    ui.add_space(4.0);
     import_buttons(ui, st, &ctx, cfg, idle);
     forms(ui, st, &ctx, cfg, &entries);
 }

@@ -324,6 +324,8 @@ pub struct TasksFilter {
     pub show_done: bool,
     pub query: String,
     pub only_due: bool,
+    /// the heights of the rows of the list, which draws only those in view (PERF-001)
+    pub rows: crate::virtual_list::RowHeights,
 }
 
 pub struct ShaleApp {
@@ -356,6 +358,8 @@ pub struct ShaleApp {
     pub mail: crate::mail::ui::MailView,
     /// the counts of the status bar, kept for a note and a vault that did not change (EDIT-107)
     pub status: crate::editor_cache::StatusCache,
+    /// backlinks, unlinked mentions and tasks of the vault, kept while it does not change (PERF-001)
+    pub vault_cache: crate::vault_cache::VaultCache,
     /// the calendar views, the jobs of their popups and the default calendar for new events
     pub cal: crate::calendar::ui::CalendarUi,
     /// the feed view (Mastodon / Bluesky)
@@ -405,6 +409,8 @@ pub struct ShaleApp {
     pub sf: crate::settings_file::SettingsFile,
     /// The fonts of the areas of the window and the installed fonts (CFG-030).
     pub fonts: crate::fonts::FontState,
+    /// The themes there are and the one in use (CFG-062).
+    pub themes: crate::themes::ThemeState,
     /// the scripted input of tests of the real window (BUILD-007)
     script: crate::script::ScriptRun,
     /// where unsaved text is rescued to, and the rescues not dismissed yet (DATA-011)
@@ -415,7 +421,7 @@ pub struct ShaleApp {
 
 impl ShaleApp {
     pub fn new(cc: &eframe::CreationContext<'_>, opts: Options, handover: Option<crate::instance::Handover>) -> Self {
-        theme::apply(&cc.egui_ctx);
+        theme::use_palette(&cc.egui_ctx, theme::Palette::shale());
         if opts.screenshot.is_some() {
             // no fades, no scroll easing and a steady text cursor: a picture shows the end state,
             // whatever the speed of the machine (DEV-007: two runs give the same bytes)
@@ -489,6 +495,10 @@ impl ShaleApp {
         // screenshots and scripted checks of vim-lite: SHALE_VIM=1 turns it on
         if opts.screenshot.is_some() && std::env::var("SHALE_VIM").as_deref() == Ok("1") {
             cfg.vim_mode = true;
+        }
+        // screenshots only: SHALE_THEME=Catppuccin_Latte picks a theme (a `_` stands for a space)
+        if let (Some(_), Ok(name)) = (&opts.screenshot, std::env::var("SHALE_THEME")) {
+            cfg.theme.name = name.replace('_', " ");
         }
         // Which vault to open: --vault, else (normal start) the last one, else a demo for screenshots.
         let vault_path = match (&opts.vault, &screenshot) {
@@ -572,6 +582,7 @@ impl ShaleApp {
             },
             mail: crate::mail::ui::MailView::new(mail_root),
             status: Default::default(),
+            vault_cache: Default::default(),
             cal: crate::calendar::ui::CalendarUi::new(),
             social: {
                 let mut s = crate::social::state::SocialState::new(social_dir);
@@ -598,6 +609,7 @@ impl ShaleApp {
             cfg_error: None,
             sf: crate::settings_file::SettingsFile::new(),
             fonts: crate::fonts::FontState::new(),
+            themes: crate::themes::ThemeState::new(persist),
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             link_preview: Default::default(),
@@ -897,7 +909,7 @@ impl ShaleApp {
             }
             SavedTab::TASKS => {
                 if let Some(t) = &st.tasks {
-                    self.tasks = TasksFilter { show_done: t.show_done, query: t.query.clone(), only_due: t.only_due };
+                    self.tasks = TasksFilter { show_done: t.show_done, query: t.query.clone(), only_due: t.only_due, ..TasksFilter::default() };
                 }
                 View::Tasks
             }
@@ -2824,6 +2836,7 @@ impl ShaleApp {
         self.autosave();
         self.state_tick();
         self.settings_file_tick(ui.ctx());
+        self.themes.sync(ui.ctx(), &self.cfg.theme);
         if let Some(m) = self.fonts.sync(ui.ctx(), &self.cfg.fonts) {
             self.toast(m);
         }
@@ -2965,7 +2978,7 @@ pub fn graph_click(app_actions: &mut Vec<Action>, c: GraphClick) {
 }
 
 pub fn muted(t: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(t).color(theme::MUTED)
+    egui::RichText::new(t).color(theme::palette().muted)
 }
 
 #[cfg(test)]

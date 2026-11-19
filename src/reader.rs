@@ -165,11 +165,11 @@ fn code_job(word: &str, code: &str, size: f32) -> LayoutJob {
     let mut job = LayoutJob::default();
     let mut at = 0;
     for (r, kind) in syntax::highlight(word, code).iter() {
-        job.append(&code[at..r.start], 0.0, format(theme::CODE));
-        job.append(&code[r.clone()], 0.0, format(theme::syntax_colour(*kind)));
+        job.append(&code[at..r.start], 0.0, format(theme::palette().code));
+        job.append(&code[r.clone()], 0.0, format(theme::palette().syntax(*kind)));
         at = r.end;
     }
-    job.append(&code[at..], 0.0, format(theme::CODE));
+    job.append(&code[at..], 0.0, format(theme::palette().code));
     job
 }
 
@@ -214,9 +214,9 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
         let mut f = TextFormat {
             font_id: if st.code { FontId::new(size * 0.92, FontFamily::Monospace) } else { FontId::new(size, styled.family) },
             color: if st.code {
-                theme::CODE
+                theme::palette().code
             } else if st.bold {
-                theme::TEXT_STRONG
+                theme::palette().text_strong
             } else {
                 color
             },
@@ -225,14 +225,14 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
             ..Default::default()
         };
         if st.code {
-            f.background = theme::CODE_BG;
+            f.background = theme::palette().code_bg;
         }
         if st.highlight {
-            f.background = Color32::from_rgba_unmultiplied(200, 170, 40, 60);
+            f.background = theme::palette().highlight_bg;
         }
         if st.strike {
-            f.strikethrough = Stroke::new(1.0, theme::DONE);
-            f.color = theme::DONE;
+            f.strikethrough = Stroke::new(1.0, theme::palette().done);
+            f.color = theme::palette().done;
         }
         if st.bold && (st.code || styled.fake_bold) {
             f.extra_letter_spacing = 0.3;
@@ -283,8 +283,8 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
         if let Some((r, label)) = notes.iter().find(|(r, _)| r.start == i) {
             // the mark of a footnote: its label, raised, in the colour of links
             let start = job.text.len();
-            let mut f = fmt(&st, theme::LINK);
-            f.color = theme::LINK;
+            let mut f = fmt(&st, theme::palette().link);
+            f.color = theme::palette().link;
             job.append(label, 0.0, script_format(f, true));
             link_spans.push((start..job.text.len(), footnote_span(r.clone(), label, Foot::Reference), true));
             i = r.end;
@@ -318,9 +318,9 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
         if let Some((l, ok)) = links.iter().chain(web.iter()).find(|(l, _)| l.range.start == i) {
             let shown = l.display();
             let start = job.text.len();
-            let color = if *ok { theme::LINK } else { theme::LINK_MISSING };
+            let color = if *ok { theme::palette().link } else { theme::palette().link_missing };
             let mut f = fmt(&st, color);
-            f.color = if st.strike { theme::DONE } else { color };
+            f.color = if st.strike { theme::palette().done } else { color };
             f.underline = Stroke::new(1.0, color.gamma_multiply(0.5));
             job.append(&shown, 0.0, f);
             link_spans.push((start..job.text.len(), l.clone(), *ok));
@@ -328,8 +328,8 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
             continue;
         }
         if let Some((r, _)) = tags.iter().find(|(r, _)| r.start == i) {
-            let mut f = fmt(&st, theme::TAG);
-            f.background = theme::TAG_BG;
+            let mut f = fmt(&st, theme::palette().tag);
+            f.background = theme::palette().tag_bg;
             job.append(&line[r.clone()], 0.0, f);
             i = r.end;
             continue;
@@ -344,7 +344,7 @@ fn painted(line: &str, links: &[(LinkSpan, bool)], size: f32, base_color: Color3
                 let mut at = 0;
                 for (r, kind) in syntax::highlight_inline(code) {
                     job.append(&code[at..r.start], 0.0, plain.clone());
-                    job.append(&code[r.clone()], 0.0, TextFormat { color: theme::syntax_colour(kind), ..plain.clone() });
+                    job.append(&code[r.clone()], 0.0, TextFormat { color: theme::palette().syntax(kind), ..plain.clone() });
                     at = r.end;
                 }
                 job.append(&code[at..], 0.0, plain);
@@ -421,7 +421,7 @@ pub(crate) fn footnote_def_painted(line: &str, label: &str, marker: &Range<usize
     let lead = line[marker.end..].len() - line[marker.end..].trim_start().len();
     let by = marker.end + lead;
     let (job, spans, paints, maths) = inline_painted(&line[by..], &shift(links, by), size * FOOTNOTE_TEXT, color, false);
-    let mark = TextFormat { font_id: FontId::new(size * FOOTNOTE_TEXT, crate::fonts::styled(false, false).family), color: theme::LINK, ..Default::default() };
+    let mark = TextFormat { font_id: FontId::new(size * FOOTNOTE_TEXT, crate::fonts::styled(false, false).family), color: theme::palette().link, ..Default::default() };
     let gap = mark.clone();
     let mut out = LayoutJob::default();
     out.append(label, 0.0, script_format(mark, true));
@@ -447,14 +447,34 @@ pub(crate) fn footnote_text_painted(line: &str, links: &[(LinkSpan, bool)], size
 /// room they have in the text (EDIT-048), and one that failed says why on hover (EDIT-049).
 /// `hint` gives an extra tooltip line for a link target (LINK-008, LINK-012).
 fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], maths: &[MathAt], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) -> egui::Response {
+    inline_block_aligned(ui, job, spans, maths, hint, None, out)
+}
+
+/// [`inline_block`] laid out centred, to the right or justified over the width of the column when
+/// `align` says so (PDF-028, EDIT-110).
+fn inline_block_aligned(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], maths: &[MathAt], hint: &dyn Fn(&str) -> Option<String>, align: Option<markdown::Align>, out: &mut Option<ReaderAction>) -> egui::Response {
     let mut job = job;
     job.wrap.max_width = ui.available_width();
+    match align {
+        Some(markdown::Align::Center) => job.halign = egui::Align::Center,
+        Some(markdown::Align::Right) => job.halign = egui::Align::RIGHT,
+        Some(markdown::Align::Justify) => job.justify = true,
+        _ => {}
+    }
     let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
-    let (rect, resp) = ui.allocate_exact_size(galley.size(), Sense::click());
-    ui.painter().galley(rect.min, galley.clone(), theme::TEXT);
-    paint_maths(ui, &galley, rect.min, maths);
+    let aligned = matches!(align, Some(markdown::Align::Center | markdown::Align::Right | markdown::Align::Justify));
+    let size = if aligned { Vec2::new(ui.available_width().max(galley.size().x), galley.size().y) } else { galley.size() };
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    // where the galley's origin is: its middle or its right edge when it is laid out around them
+    let anchor = match align {
+        Some(markdown::Align::Center) => Pos2::new(rect.center().x, rect.min.y),
+        Some(markdown::Align::Right) => Pos2::new(rect.right(), rect.min.y),
+        _ => rect.min,
+    };
+    ui.painter().galley(anchor, galley.clone(), theme::palette().text);
+    paint_maths(ui, &galley, anchor, maths);
     if let Some(hp) = ui.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p)) {
-        if let Some(c) = char_under(&galley, rect.min, hp) {
+        if let Some(c) = char_under(&galley, anchor, hp) {
             let byte = markdown::char_to_byte(&galley.job.text, c);
             if let Some(Err(why)) = maths.iter().find(|m| m.range.contains(&byte)).map(|m| &m.formula) {
                 resp.clone().on_hover_text(format!("This formula cannot be typeset: {why}"));
@@ -485,10 +505,10 @@ fn math_block(ui: &mut Ui, tex: &str, base: f32) {
             let (rect, _) = ui.allocate_exact_size(Vec2::new(width.max(size.x), size.y + base * 0.8), Sense::hover());
             let left = rect.min.x + ((width - size.x) / 2.0).max(0.0);
             let pos = Pos2::new(left, rect.min.y + base * 0.4 + f.layout.ascent);
-            crate::math::paint::paint(&ui.painter().with_clip_rect(ui.clip_rect()), &f, pos, theme::TEXT);
+            crate::math::paint::paint(&ui.painter().with_clip_rect(ui.clip_rect()), &f, pos, theme::palette().text);
         }
         Err(why) => {
-            egui::Frame::new().fill(theme::CODE_BG).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
+            egui::Frame::new().fill(theme::palette().code_bg).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(code_job("", tex.trim_end(), base * 0.9)).on_hover_text(format!("This formula cannot be typeset: {why}"));
             });
@@ -511,8 +531,8 @@ fn follow_span(ui: &Ui, resp: &egui::Response, byte: usize, spans: &[(Range<usiz
     } else if let Some((_, l, _)) = spans.iter().find(|(r, l, _)| r.contains(&byte) && crate::lists::is_web_url(&l.target)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         resp.clone().on_hover_ui_at_pointer(|ui| {
-            ui.label(egui::RichText::new(&l.target).color(theme::LINK));
-            ui.label(egui::RichText::new("Opens in your browser").small().color(theme::MUTED));
+            ui.label(egui::RichText::new(&l.target).color(theme::palette().link));
+            ui.label(egui::RichText::new("Opens in your browser").small().color(theme::palette().muted));
         });
         if resp.clicked() || resp.middle_clicked() {
             *out = Some(ReaderAction::OpenUrl(l.target.clone()));
@@ -520,12 +540,12 @@ fn follow_span(ui: &Ui, resp: &egui::Response, byte: usize, spans: &[(Range<usiz
     } else if let Some((_, l, ok)) = spans.iter().find(|(r, _, _)| r.contains(&byte)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         let tip = if *ok { format!("Open “{}”", l.target) } else { format!("Create note “{}”", l.target) };
-        let colour = if *ok { theme::LINK } else { theme::LINK_MISSING };
+        let colour = if *ok { theme::palette().link } else { theme::palette().link_missing };
         let note = hint(&l.target);
         resp.clone().on_hover_ui_at_pointer(|ui| {
             ui.label(egui::RichText::new(tip).color(colour));
             if let Some(n) = &note {
-                ui.label(egui::RichText::new(n).small().color(theme::TEXT));
+                ui.label(egui::RichText::new(n).small().color(theme::palette().text));
             }
         });
         if resp.clicked() || resp.middle_clicked() {
@@ -545,7 +565,7 @@ pub fn inline_line(ui: &mut Ui, text: &str, vault: &Vault, from: &Path, base: f3
             (l, ok)
         })
         .collect();
-    let (job, spans, maths) = inline_job(text, &links, base, theme::TEXT, done);
+    let (job, spans, maths) = inline_job(text, &links, base, theme::palette().text, done);
     let mut out = None;
     let resp = inline_block(ui, job, &spans, &maths, &|t| vault.link_hint(t, Some(from)), &mut out);
     let plain_click = resp.clicked() && out.is_none();
@@ -570,15 +590,15 @@ fn jump_target(ctx: &egui::Context, notes: &markdown::Footnotes) -> Option<usize
 /// The thin dashed rule of a page-break marker with the small label "Page break" in its middle,
 /// from `x0` to `x1` at height `y` (EDIT-065); the reading view and the editor's preview draw it.
 pub(crate) fn paint_page_break(painter: &egui::Painter, x0: f32, x1: f32, y: f32) {
-    let label = painter.layout_no_wrap("Page break".to_string(), egui::FontId::proportional(11.0), theme::MUTED);
+    let label = painter.layout_no_wrap("Page break".to_string(), egui::FontId::proportional(11.0), theme::palette().muted);
     let (mid, gap) = ((x0 + x1) / 2.0, label.size().x / 2.0 + 8.0);
-    let stroke = egui::Stroke::new(1.0, theme::BORDER);
+    let stroke = egui::Stroke::new(1.0, theme::palette().border);
     for (a, b) in [(x0, mid - gap), (mid + gap, x1)] {
         if b > a {
             painter.extend(egui::Shape::dashed_line(&[Pos2::new(a, y), Pos2::new(b, y)], stroke, 5.0, 4.0));
         }
     }
-    painter.galley(Pos2::new(mid - label.size().x / 2.0, y - label.size().y / 2.0), label, theme::MUTED);
+    painter.galley(Pos2::new(mid - label.size().x / 2.0, y - label.size().y / 2.0), label, theme::palette().muted);
 }
 
 /// Draw a note. `look` is the text size and whether drawings get a dark canvas.
@@ -634,6 +654,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
     let tables = crate::table::find_tables(text);
     let formulas = markdown::find_math(text);
     let page_breaks = markdown::page_break_lines(text);
+    let wrappers = markdown::align_blocks(text);
     // a very large note: what is far from the visible part is not drawn, a space of the height it had is left (EDIT-102)
     let heights = (lines.len() >= CULL_LINES).then(|| {
         let key = HeightsKey { text: crate::fold_ui::hash_of(text), width: ui.available_width().to_bits(), base: base.to_bits(), badges: frame.as_ref().map(|f| f.view.badges.clone()).unwrap_or_default() };
@@ -713,13 +734,13 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 i += 1;
                 // the box of EDIT-080: a border, and the language (or "code") in a badge at the top right
                 let folded = frame.as_ref().and_then(|f| f.view.badges.binary_search_by_key(&open, |b| b.0).ok().map(|k| (f.view.badges[k].1, f.mail)));
-                egui::Frame::new().fill(theme::CODE_BG).stroke(egui::Stroke::new(1.0, theme::BORDER)).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
+                egui::Frame::new().fill(theme::palette().code_bg).stroke(egui::Stroke::new(1.0, theme::palette().border)).corner_radius(CornerRadius::same(6)).inner_margin(10).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let badge = syntax::badge_language(&word).unwrap_or_else(|| "code".to_string());
                     let box_rect = ui.max_rect();
                     let row_y = ui
                         .with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                            let badge = ui.label(egui::RichText::new(badge).monospace().size((base * 0.75).max(9.0)).color(theme::FAINT));
+                            let badge = ui.label(egui::RichText::new(badge).monospace().size((base * 0.75).max(9.0)).color(theme::palette().faint));
                             // the copy button (EDIT-093): left of the badge, while the pointer is over the box
                             let id = crate::code_box::copy_id(ui.scope_id(), rel, open);
                             let shown = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| box_rect.expand(10.0).contains(p));
@@ -733,11 +754,11 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                     match folded {
                         // a folded block is its first line in the box: the badge in the row, no body (EDIT-095, EDIT-098)
                         Some((n, mail)) => {
-                            let g = ui.painter().layout_no_wrap(crate::fold::badge_label(FoldKind::Code, mail, n), FontId::proportional((base * 0.8).max(9.0)), theme::MUTED);
+                            let g = ui.painter().layout_no_wrap(crate::fold::badge_label(FoldKind::Code, mail, n), FontId::proportional((base * 0.8).max(9.0)), theme::palette().muted);
                             let rect = egui::Rect::from_min_size(Pos2::new(box_rect.left(), row_y - (g.size().y + 2.0) / 2.0), g.size() + Vec2::new(10.0, 2.0));
                             let resp = ui.interact(rect, ui.scope_id().with(("fold-badge-in-box", rel, open)), Sense::click());
-                            ui.painter().rect_filled(rect, 4.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY });
-                            ui.painter().galley(rect.center() - g.size() / 2.0, g, theme::MUTED);
+                            ui.painter().rect_filled(rect, 4.0, if resp.hovered() { theme::palette().bg_active } else { theme::palette().bg_secondary });
+                            ui.painter().galley(rect.center() - g.size() / 2.0, g, theme::palette().muted);
                             if resp.hovered() {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                             }
@@ -770,8 +791,15 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                     }
                 }
             }
+            // how the paragraph or heading on this line is laid out (PDF-028): the wrapper it is in
+            let align = markdown::align_at(&wrappers, i);
             if trimmed.is_empty() {
-                ui.add_space(base * 0.6);
+                // the blank line a wrapper has inside, next to its tag, makes no gap (EDIT-110)
+                if !wrappers.iter().any(|b| b.holds(i) && (i == b.open + 1 || i + 1 == b.close)) {
+                    ui.add_space(base * 0.6);
+                }
+            } else if markdown::is_align_edge(&wrappers, i) {
+                // the tag of a wrapper is not shown (EDIT-110)
             } else if page_breaks.contains(&i) {
                 // a page-break marker: a dashed rule with its label (EDIT-065)
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), base * 1.6), egui::Sense::hover());
@@ -782,10 +810,10 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 ui.add_space(4.0);
             } else if let Some(def) = notes.def_at(i) {
                 // a footnote definition: its label raised, its text a little smaller (EDIT-050)
-                let (job, spans, _, maths) = footnote_def_painted(line, &def.label, &def.marker, &line_links, base, theme::TEXT);
+                let (job, spans, _, maths) = footnote_def_painted(line, &def.label, &def.marker, &line_links, base, theme::palette().text);
                 inline_block(ui, job, &spans, &maths, &hint, &mut out);
             } else if notes.is_continuation(i) {
-                let (job, spans, _, maths) = footnote_text_painted(line, &line_links, base, theme::TEXT);
+                let (job, spans, _, maths) = footnote_text_painted(line, &line_links, base, theme::palette().text);
                 ui.horizontal_top(|ui| {
                     ui.add_space(base * 1.2);
                     inline_block(ui, job, &spans, &maths, &hint, &mut out);
@@ -793,12 +821,12 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
             } else if let Some(level) = markdown::heading_level(line) {
                 ui.add_space(base * 0.5);
                 let size = base * heading_scale(level as u8);
-                let (job, spans, maths) = inline_job(line[level..].trim_start(), &shift(&line_links, level + (line[level..].len() - line[level..].trim_start().len())), size, theme::HEADING, false);
+                let (job, spans, maths) = inline_job(line[level..].trim_start(), &shift(&line_links, level + (line[level..].len() - line[level..].trim_start().len())), size, theme::palette().heading, false);
                 let shown = ui.horizontal_top(|ui| {
                     if let Some(n) = extras.numbers.get(&i) {
-                        ui.label(egui::RichText::new(n).size(size).color(theme::MUTED));
+                        ui.label(egui::RichText::new(n).size(size).color(theme::palette().muted));
                     }
-                    inline_block(ui, job, &spans, &maths, &hint, &mut out)
+                    inline_block_aligned(ui, job, &spans, &maths, &hint, align, &mut out)
                 });
                 if extras.scroll_to == Some(i) {
                     shown.response.scroll_to_me(Some(egui::Align::TOP));
@@ -811,20 +839,20 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                     let t = line.trim_start();
                     let digits = t.bytes().take_while(|c| c.is_ascii_digit()).count();
                     if digits > 0 {
-                        ui.label(egui::RichText::new(format!("{}.", &t[..digits])).size(base).color(theme::ACCENT));
+                        ui.label(egui::RichText::new(format!("{}.", &t[..digits])).size(base).color(theme::palette().accent));
                     }
                     let mut d = done;
                     if ui.checkbox(&mut d, "").clicked() {
                         out = Some(ReaderAction::ToggleTask(off + check));
                     }
-                    let (job, spans, maths) = inline_job(rest, &shift(&line_links, rest_off), base, theme::TEXT, done);
+                    let (job, spans, maths) = inline_job(rest, &shift(&line_links, rest_off), base, theme::palette().text, done);
                     inline_block(ui, job, &spans, &maths, &hint, &mut out);
                 });
             } else if let Some((marker, rest_off)) = list_marker(line) {
                 ui.horizontal_top(|ui| {
                     ui.add_space(indent + 4.0);
-                    ui.label(egui::RichText::new(marker).size(base).color(theme::ACCENT));
-                    let (job, spans, maths) = inline_job(&line[rest_off..], &shift(&line_links, rest_off), base, theme::TEXT, false);
+                    ui.label(egui::RichText::new(marker).size(base).color(theme::palette().accent));
+                    let (job, spans, maths) = inline_job(&line[rest_off..], &shift(&line_links, rest_off), base, theme::palette().text, false);
                     inline_block(ui, job, &spans, &maths, &hint, &mut out);
                 });
             } else if trimmed.starts_with('>') {
@@ -832,14 +860,14 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 let content = &line[content_off..];
                 let lead = content.len() - content.trim_start().len();
                 egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 4, top: 2, bottom: 2 }).show(ui, |ui| {
-                    let (job, spans, maths) = inline_job(content.trim_start(), &shift(&line_links, content_off + lead), base, theme::QUOTE, false);
+                    let (job, spans, maths) = inline_job(content.trim_start(), &shift(&line_links, content_off + lead), base, theme::palette().quote, false);
                     inline_block(ui, job, &spans, &maths, &hint, &mut out);
                     let r = ui.min_rect();
-                    ui.painter().line_segment([r.left_top() - Vec2::new(10.0, 0.0), r.left_bottom() - Vec2::new(10.0, 0.0)], Stroke::new(3.0, theme::ACCENT.gamma_multiply(0.7)));
+                    ui.painter().line_segment([r.left_top() - Vec2::new(10.0, 0.0), r.left_bottom() - Vec2::new(10.0, 0.0)], Stroke::new(3.0, theme::palette().accent.gamma_multiply(0.7)));
                 });
             } else {
-                let (job, spans, maths) = inline_job(line, &line_links, base, theme::TEXT, false);
-                inline_block(ui, job, &spans, &maths, &hint, &mut out);
+                let (job, spans, maths) = inline_job(line, &line_links, base, theme::palette().text, false);
+                inline_block_aligned(ui, job, &spans, &maths, &hint, align, &mut out);
             }
             i += 1;
         }
@@ -910,10 +938,10 @@ fn fold_widgets(ui: &mut Ui, folds: &mut FoldUi, rel: &Path, frame: &Frame, at: 
             Some(drawn) => drawn,
             None => {
                 let kind = frame.folded.iter().map(|&i| &frame.blocks[i]).filter(|b| b.header == line).max_by_key(|b| b.end).map_or(FoldKind::Heading, |b| b.kind);
-                let g = ui.painter().layout_no_wrap(crate::fold::badge_label(kind, frame.mail, n), FontId::proportional((base * 0.8).max(9.0)), theme::MUTED);
+                let g = ui.painter().layout_no_wrap(crate::fold::badge_label(kind, frame.mail, n), FontId::proportional((base * 0.8).max(9.0)), theme::palette().muted);
                 let (rect, resp) = ui.allocate_exact_size(g.size() + Vec2::new(10.0, 2.0), Sense::click());
-                ui.painter().rect_filled(rect, 4.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY });
-                ui.painter().galley(rect.center() - g.size() / 2.0, g, theme::MUTED);
+                ui.painter().rect_filled(rect, 4.0, if resp.hovered() { theme::palette().bg_active } else { theme::palette().bg_secondary });
+                ui.painter().galley(rect.center() - g.size() / 2.0, g, theme::palette().muted);
                 if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
@@ -985,11 +1013,11 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
     let (base, dark) = text;
     let kind = vault.file(target).map(|f| f.kind).unwrap_or(FileKind::Other);
     let name = vault.file(target).map(|f| f.display_name()).unwrap_or_default();
-    let frame = egui::Frame::new().fill(theme::BG_SECONDARY).stroke(Stroke::new(1.0, theme::BORDER)).corner_radius(CornerRadius::same(8)).inner_margin(8);
+    let frame = egui::Frame::new().fill(theme::palette().bg_secondary).stroke(Stroke::new(1.0, theme::palette().border)).corner_radius(CornerRadius::same(8)).inner_margin(8);
     frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(&name).color(theme::MUTED).small());
+            ui.label(egui::RichText::new(&name).color(theme::palette().muted).small());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("Open").clicked() {
                     *out = Some(ReaderAction::OpenFile(target.to_path_buf()));
@@ -1013,7 +1041,7 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
             FileKind::Note => {
                 let text = vault.notes.get(target).map(|n| n.text.clone()).unwrap_or_default();
                 let preview: String = text.lines().take(12).collect::<Vec<_>>().join("\n");
-                ui.label(egui::RichText::new(preview).size(base * 0.95).color(theme::TEXT));
+                ui.label(egui::RichText::new(preview).size(base * 0.95).color(theme::palette().text));
             }
             FileKind::Other if crate::pdf::view::is_pdf(target) => {
                 let w = ui.available_width();
@@ -1029,18 +1057,18 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
                             ui.add_space(4.0);
                         }
                         if total > pages.len() {
-                            ui.label(egui::RichText::new(format!("{} more pages — open the PDF to see them all", total - pages.len())).color(theme::MUTED));
+                            ui.label(egui::RichText::new(format!("{} more pages — open the PDF to see them all", total - pages.len())).color(theme::palette().muted));
                         }
                     }
                     crate::pdf::view::PdfState::Loading => {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label(egui::RichText::new("Rendering PDF…").color(theme::MUTED));
+                            ui.label(egui::RichText::new("Rendering PDF…").color(theme::palette().muted));
                         });
                         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
                     }
                     crate::pdf::view::PdfState::Failed(e) => {
-                        ui.label(egui::RichText::new(format!("This PDF can't be shown: {e}")).color(theme::MUTED));
+                        ui.label(egui::RichText::new(format!("This PDF can't be shown: {e}")).color(theme::palette().muted));
                     }
                 }
             }
@@ -1063,12 +1091,12 @@ fn embed(ui: &mut Ui, vault: &Vault, target: &Path, width: Option<f32>, caches: 
                         }
                     }
                     None => {
-                        ui.label(egui::RichText::new("This picture can't be shown (unsupported or damaged file).").color(theme::MUTED));
+                        ui.label(egui::RichText::new("This picture can't be shown (unsupported or damaged file).").color(theme::palette().muted));
                     }
                 }
             }
             FileKind::Other => {
-                ui.label(egui::RichText::new("This kind of file can't be shown here yet.").color(theme::MUTED));
+                ui.label(egui::RichText::new("This kind of file can't be shown here yet.").color(theme::palette().muted));
             }
         }
     });
@@ -1090,18 +1118,18 @@ mod tests {
         let code = "console.log(\"foooo\")";
         let job = code_job("js", code, 14.0);
         assert_eq!(job.text, code, "the text is the code, nothing else");
-        assert_eq!(colours(&job, "\"foooo\""), theme::syntax_colour(syntax::Kind::String));
+        assert_eq!(colours(&job, "\"foooo\""), theme::palette().syntax(syntax::Kind::String));
         assert_ne!(colours(&job, "\"foooo\""), colours(&job, "console"));
         let plain = code_job("klingon", code, 14.0);
-        assert_eq!((plain.text.as_str(), colours(&plain, "\"foooo\"")), (code, theme::CODE), "an unknown language is plain monospace");
+        assert_eq!((plain.text.as_str(), colours(&plain, "\"foooo\"")), (code, theme::palette().code), "an unknown language is plain monospace");
         assert_eq!(code_job("", "", 14.0).text, "", "an empty block");
 
         let line = "see `console.log(\"fooo\")` and `x`";
-        let (job, _, _) = inline_job(line, &[], 14.0, theme::TEXT, false);
+        let (job, _, _) = inline_job(line, &[], 14.0, theme::palette().text, false);
         assert_eq!(job.text, "see console.log(\"fooo\") and x", "the backticks are gone");
-        assert_eq!(colours(&job, "\"fooo\""), theme::syntax_colour(syntax::Kind::String));
-        assert_eq!(colours(&job, "log"), theme::syntax_colour(syntax::Kind::Function));
-        assert_eq!(colours(&job, "x"), theme::CODE);
+        assert_eq!(colours(&job, "\"fooo\""), theme::palette().syntax(syntax::Kind::String));
+        assert_eq!(colours(&job, "log"), theme::palette().syntax(syntax::Kind::Function));
+        assert_eq!(colours(&job, "x"), theme::palette().code);
     }
 
     fn shapes_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
@@ -1237,7 +1265,7 @@ mod tests {
     #[test]
     fn the_reading_view_colours_the_text_and_hides_the_tags() {
         let line = "a <mark style=\"background: #FFFF00;\">hi <span style=\"color: #FF0000;\">there</span></mark> **b** <mark style=\"background: #FFFF00\">open";
-        let (job, _, paints, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        let (job, _, paints, _) = inline_painted(line, &[], 15.0, theme::palette().text, false);
         assert_eq!(job.text, "a hi there b <mark style=\"background: #FFFF00\">open", "the tags are gone; an unclosed one is text");
         let at = |w: &str| {
             let b = job.text.find(w).unwrap();
@@ -1263,7 +1291,7 @@ mod tests {
     #[test]
     fn the_reading_view_underlines_lowers_and_raises_and_hides_the_tags() {
         let line = "Plain <u>under</u> H<sub>2</sub>O x<sup>2</sup> <U>a <SUP>b</SUP></U> <u>open `<sub>x</sub>`";
-        let (job, _, paints, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        let (job, _, paints, _) = inline_painted(line, &[], 15.0, theme::palette().text, false);
         assert_eq!(job.text, "Plain under H2O x2 a b <u>open <sub>x</sub>", "the tags are gone; an unclosed one and one in code are text");
         assert_eq!(format_at(&job, "under").underline.width, 1.0);
         assert_eq!(format_at(&job, "Plain").underline.width, 0.0);
@@ -1282,16 +1310,16 @@ mod tests {
     fn a_reference_with_a_definition_is_a_raised_mark_and_one_without_stays_as_written() {
         let line = "Note[^1] and[^2] and `[^1]`";
         let _defined = markdown::DefinedFootnotes::set(["1".to_string()].into());
-        let (job, spans, _, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        let (job, spans, _, _) = inline_painted(line, &[], 15.0, theme::palette().text, false);
         assert_eq!(job.text, "Note1 and[^2] and [^1]");
         let mark = format_at(&job, "1 and");
-        assert_eq!((mark.valign, mark.font_id.size, mark.color, mark.line_height), (egui::Align::TOP, 15.0 * SCRIPT_SCALE, theme::LINK, None));
+        assert_eq!((mark.valign, mark.font_id.size, mark.color, mark.line_height), (egui::Align::TOP, 15.0 * SCRIPT_SCALE, theme::palette().link, None));
         assert_eq!(spans.len(), 1);
         assert_eq!((spans[0].0.clone(), footnote_of(&spans[0].1)), (4..5, Some((Foot::Reference, "1"))));
         assert_eq!(format_at(&job, "[^2]").valign, egui::Align::BOTTOM);
         // the same line without any definition
         drop(_defined);
-        let (job, spans, _, _) = inline_painted(line, &[], 15.0, theme::TEXT, false);
+        let (job, spans, _, _) = inline_painted(line, &[], 15.0, theme::palette().text, false);
         assert_eq!(job.text, "Note[^1] and[^2] and [^1]");
         assert!(spans.is_empty());
     }
@@ -1304,16 +1332,16 @@ mod tests {
         let _defined = markdown::DefinedFootnotes::set(notes.defined());
         let links: Vec<(LinkSpan, bool)> = markdown::find_links(line).into_iter().map(|l| (l, true)).collect();
         let def = &notes.defs[0];
-        let (job, spans, _, _) = footnote_def_painted(line, &def.label, &def.marker, &links, 15.0, theme::TEXT);
+        let (job, spans, _, _) = footnote_def_painted(line, &def.label, &def.marker, &links, 15.0, theme::palette().text);
         assert_eq!(job.text, "a See bold Ideas anda");
         let label = format_at(&job, "a See");
-        assert_eq!((label.valign, label.color, label.font_id.size), (egui::Align::TOP, theme::LINK, 15.0 * FOOTNOTE_TEXT * SCRIPT_SCALE));
+        assert_eq!((label.valign, label.color, label.font_id.size), (egui::Align::TOP, theme::palette().link, 15.0 * FOOTNOTE_TEXT * SCRIPT_SCALE));
         assert_eq!(format_at(&job, "See").font_id.size, 15.0 * FOOTNOTE_TEXT);
-        assert_eq!(format_at(&job, "bold").color, theme::TEXT_STRONG);
+        assert_eq!(format_at(&job, "bold").color, theme::palette().text_strong);
         let kinds: Vec<(Range<usize>, Option<Foot>, String)> = spans.iter().map(|(r, l, _)| (r.clone(), footnote_of(l).map(|f| f.0), l.target.clone())).collect();
         assert_eq!(kinds, [(0..1, Some(Foot::Definition), "a".to_string()), (11..16, None, "Ideas".to_string()), (20..21, Some(Foot::Reference), "a".to_string())]);
         // an indented line that goes on with it is smaller text
-        let (job, _, _, _) = footnote_text_painted("    more *text*", &[], 15.0, theme::TEXT);
+        let (job, _, _, _) = footnote_text_painted("    more *text*", &[], 15.0, theme::palette().text);
         assert_eq!(job.text, "more text");
         assert_eq!(format_at(&job, "more").font_id.size, 15.0 * FOOTNOTE_TEXT);
     }
@@ -1323,13 +1351,13 @@ mod tests {
     fn br_in_a_table_cell_is_a_line_break_and_elsewhere_it_is_text() {
         for tag in ["<br>", "<br/>", "<br />", "<BR>", "<Br  / >"] {
             let line = format!("• a{tag}• b");
-            let (job, _, _, _) = cell_painted(&line, &[], 15.0, theme::TEXT);
+            let (job, _, _, _) = cell_painted(&line, &[], 15.0, theme::palette().text);
             let want = if tag == "<Br  / >" { line.clone() } else { "• a\n• b".to_string() };
             assert_eq!(job.text, want, "{tag}");
         }
-        let (job, _, _, _) = cell_painted("a `x<br>y` b<br>", &[], 15.0, theme::TEXT);
+        let (job, _, _, _) = cell_painted("a `x<br>y` b<br>", &[], 15.0, theme::palette().text);
         assert_eq!(job.text, "a x<br>y b\n", "not in code");
-        let (job, _, _, _) = inline_painted("a<br>b", &[], 15.0, theme::TEXT, false);
+        let (job, _, _, _) = inline_painted("a<br>b", &[], 15.0, theme::palette().text, false);
         assert_eq!(job.text, "a<br>b", "outside a table the tag is text");
         assert_eq!(br_len("<br>x"), Some(4));
         assert_eq!(br_len("<br />"), Some(6));
@@ -1375,7 +1403,7 @@ mod tests {
         let claim = find(&before, "Claim1 here.").unwrap_or_else(|| panic!("the paragraph is painted: {before:?}"));
         let mark = {
             let _defined = markdown::DefinedFootnotes::set(["1".to_string()].into());
-            let (job, _, _, _) = inline_painted("Claim[^1] here.", &[], 15.0, theme::TEXT, false);
+            let (job, _, _, _) = inline_painted("Claim[^1] here.", &[], 15.0, theme::palette().text, false);
             let galley = ctx.fonts_mut(|f| f.layout_job(job));
             claim.min + galley.pos_from_cursor(egui::text::CCursor::new(5)).center().to_vec2() + egui::Vec2::new(2.0, 0.0)
         };
@@ -1404,12 +1432,12 @@ mod tests {
             job.sections.iter().find(|s| s.byte_range.start.0 <= b && b < s.byte_range.end.0).unwrap().format.clone()
         };
         let font = AreaFont { family: fam("system:X"), size: 15.0, faces: Faces { bold: true, italic: true, bold_italic: false } };
-        let (job, _, _) = crate::fonts::with_family(&font, || inline_job(line, &[], 15.0, theme::TEXT, false));
+        let (job, _, _) = crate::fonts::with_family(&font, || inline_job(line, &[], 15.0, theme::palette().text, false));
         assert_eq!((at(&job, "bold").font_id.family, at(&job, "bold").extra_letter_spacing), (fam("system:X:bold"), 0.0));
         assert_eq!((at(&job, "it").font_id.family, at(&job, "it").italics), (fam("system:X:italic"), false));
         assert_eq!(at(&job, "code").font_id.family, FontFamily::Monospace);
         // Shale's own font has no faces: bold and italic are imitated as before
-        let (job, _, _) = inline_job(line, &[], 15.0, theme::TEXT, false);
+        let (job, _, _) = inline_job(line, &[], 15.0, theme::palette().text, false);
         assert_eq!(at(&job, "bold").font_id.family, FontFamily::Proportional);
         assert!(at(&job, "bold").extra_letter_spacing > 0.0 && at(&job, "it").italics);
     }

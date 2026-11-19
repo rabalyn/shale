@@ -52,6 +52,11 @@ change within a second.
 
 | Key | Default | Where |
 |---|---|---|
+| `theme` | the table of the four keys below | The colours of the window: Appearance, "Theme" (see [[Themes]]) |
+| `theme.name` | `"Shale"` | Appearance, "Theme": the theme by name, one of the built-in themes or a file of the themes folder (see [[Themes]]); an unknown name gives Shale |
+| `theme.follow_system` | off | Appearance, "Follow the system's light or dark mode": with it on, `theme.light` or `theme.dark` is used instead of `theme.name`, by the mode of the system |
+| `theme.light` | `"Catppuccin Latte"` | Appearance, "Light theme" (with follow system on) |
+| `theme.dark` | `"Shale"` | Appearance, "Dark theme" (with follow system on) |
 | `readable_width` | on | Appearance, "Readable line length" |
 | `dark_canvas` | on | Appearance, "Dark drawing canvas" |
 | `inline_images` | on | Appearance, "Show embedded images and players inside the editor" |

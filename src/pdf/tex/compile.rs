@@ -118,6 +118,19 @@ impl Problem {
     }
 }
 
+/// What TeX and luaotfload say when a font cannot be loaded although it is named right: the
+/// installation's fonts or its font names database are incomplete (#362). Compared in lower case.
+const FONT_LOADING: [&str; 2] = ["not loadable", "metric data not found"];
+
+impl Problem {
+    /// Whether this is a font that could not be loaded (`Font \TU/lmr/m/n/10.95=[lmroman10-regular]:+tlig;
+    /// not loadable: …`), not a font that does not exist (fontspec's "cannot be found").
+    pub fn is_font_loading(&self) -> bool {
+        let m = self.message.to_lowercase();
+        FONT_LOADING.iter().any(|p| m.contains(p))
+    }
+}
+
 /// "package foo is missing" for `foo.sty`.
 fn missing_text(file: &str) -> String {
     let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
@@ -142,7 +155,21 @@ impl std::fmt::Display for CompileError {
         for p in &self.problems {
             write!(f, "\n- {}", p.text())?;
         }
+        if self.font_problem() {
+            write!(f, "\n{FONT_HINT}")?;
+        }
         Ok(())
+    }
+}
+
+/// What a font-loading problem means, in plain words (#362).
+pub const FONT_HINT: &str =
+    "A font could not be loaded: the fonts of this TeX installation or its font names database look incomplete. `luaotfload-tool --update --force` rebuilds the database, and Settings → LaTeX can install TeX Live again.";
+
+impl CompileError {
+    /// Whether a problem is a font that could not be loaded (see [`Problem::is_font_loading`]).
+    pub fn font_problem(&self) -> bool {
+        self.problems.iter().any(Problem::is_font_loading)
     }
 }
 
@@ -289,9 +316,40 @@ fn hash_of(bytes: &[u8]) -> u64 {
     h.finish()
 }
 
+/// The debug setting `SHALE_TEX_FAILED_LOGS=<folder>`: a failed compile copies its full `.log` there
+/// before its work folder is removed (#327), so a failure that does not come again can still be read.
+pub const FAILED_LOGS_VAR: &str = "SHALE_TEX_FAILED_LOGS";
+
+/// Copy `<stem>.log` of the work folder `work` into `folder` as `<pid>-<n>-<stem>.log` (the folder is
+/// made when needed). Errors are ignored: keeping a log must never change what a compile reports.
+pub fn keep_failed_log(folder: &Path, work: &Path, main_tex: &str) {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let Some(stem) = main_tex.strip_suffix(".tex").filter(|_| valid_main_name(main_tex)) else { return };
+    if std::fs::create_dir_all(folder).is_err() {
+        return;
+    }
+    let to = folder.join(format!("{}-{}-{stem}.log", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst)));
+    let _ = std::fs::copy(work.join(format!("{stem}.log")), to);
+}
+
 /// Compile `main_tex` (a file in `work`) to a PDF: LuaLaTeX, biber when the run made a `.bcf`,
-/// and more runs while the log asks for them. The folder `work` is removed when this returns.
+/// and more runs while the log asks for them. The folder `work` is removed when this returns; after
+/// a failure its log is kept first when `SHALE_TEX_FAILED_LOGS` names a folder.
 pub fn compile(engine: &Engine, work: WorkDir, main_tex: &str, opts: &Options) -> Result<CompileOutput, CompileError> {
+    let folder = std::env::var_os(FAILED_LOGS_VAR).filter(|f| !f.is_empty()).map(PathBuf::from);
+    compile_keeping_logs(engine, work, main_tex, opts, folder.as_deref())
+}
+
+/// [`compile`], with the folder for the logs of failed compiles given (none: no log is kept).
+pub(super) fn compile_keeping_logs(engine: &Engine, work: WorkDir, main_tex: &str, opts: &Options, failed_logs: Option<&Path>) -> Result<CompileOutput, CompileError> {
+    let result = compile_in(engine, &work, main_tex, opts);
+    if let (Err(_), Some(folder)) = (&result, failed_logs) {
+        keep_failed_log(folder, work.path(), main_tex);
+    }
+    result
+}
+
+fn compile_in(engine: &Engine, work: &WorkDir, main_tex: &str, opts: &Options) -> Result<CompileOutput, CompileError> {
     let fail = |headline: String, problems: Vec<Problem>, log_tail: String| CompileError { headline, problems, log_tail };
     if !valid_main_name(main_tex) {
         return Err(fail(format!("{main_tex:?} is not a usable file name"), vec![], String::new()));

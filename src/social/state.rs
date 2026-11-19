@@ -185,6 +185,8 @@ pub struct SocialState {
     pub rects: Vec<(String, Rect)>,
     /// where the posts of the list shown are, by `post_key` (for tests)
     pub post_rects: Vec<(String, Rect)>,
+    /// how high each post was drawn at a width, and whether it came out the same twice (PERF-006): a post far from the view is not laid out again
+    pub card_heights: std::collections::HashMap<(String, u32), (f32, bool)>,
     /// where the post rows of the sidebar search are (for tests)
     pub hit_rects: Vec<(usize, Rect)>,
     /// the screen rectangle of the list's viewport (for tests)
@@ -238,6 +240,7 @@ impl SocialState {
             messages: vec![],
             rects: vec![],
             post_rects: vec![],
+            card_heights: Default::default(),
             hit_rects: vec![],
             list_rect: Rect::NOTHING,
             check_every: Duration::from_secs(300),

@@ -468,7 +468,7 @@ impl ShaleApp {
                     (Some((r, into, _)), Some(Ok(()))) => {
                         // the whole list stands for the top of the vault: no box around it
                         if !into.as_os_str().is_empty() {
-                            painter.rect_stroke(*r, CornerRadius::same(5), Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+                            painter.rect_stroke(*r, CornerRadius::same(5), Stroke::new(1.5, theme::palette().accent), egui::StrokeKind::Inside);
                         }
                         format!("Move “{name}” into {}", if into.as_os_str().is_empty() { "the top of the vault".to_string() } else { format!("“{}”", rel_to_string(into)) })
                     }
@@ -515,8 +515,8 @@ impl ShaleApp {
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("drop-hint")));
         let target = match zone {
             Some(z) => {
-                painter.rect_filled(z.rect, CornerRadius::same(4), theme::ACCENT.gamma_multiply(0.12));
-                painter.rect_stroke(z.rect, CornerRadius::same(4), Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+                painter.rect_filled(z.rect, CornerRadius::same(4), theme::palette().accent.gamma_multiply(0.12));
+                painter.rect_stroke(z.rect, CornerRadius::same(4), Stroke::new(1.5, theme::palette().accent), egui::StrokeKind::Inside);
                 let folder = if z.folder.as_os_str().is_empty() { "the vault".to_string() } else { format!("“{}”", rel_to_string(&z.folder)) };
                 match &z.note {
                     Some(n) => format!("into {folder}, linked from “{}”", crate::markdown::strip_md_ext(&n.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default())),
@@ -531,10 +531,10 @@ impl ShaleApp {
     fn paint_hint_text(&self, ctx: &egui::Context, p: Pos2, text: &str) {
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("drop-hint")));
         let text = text.to_string();
-        let galley = painter.layout_no_wrap(text, FontId::proportional(13.0), theme::TEXT_STRONG);
+        let galley = painter.layout_no_wrap(text, FontId::proportional(13.0), theme::palette().text_strong);
         let r = Rect::from_min_size(p + Vec2::new(16.0, 12.0), galley.size() + Vec2::new(16.0, 10.0));
-        painter.rect_filled(r, CornerRadius::same(6), theme::BG_SECONDARY);
-        painter.rect_stroke(r, CornerRadius::same(6), Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+        painter.rect_filled(r, CornerRadius::same(6), theme::palette().bg_secondary);
+        painter.rect_stroke(r, CornerRadius::same(6), Stroke::new(1.0, theme::palette().border), egui::StrokeKind::Inside);
         painter.galley(r.min + Vec2::new(8.0, 5.0), galley, Color32::WHITE);
     }
 }

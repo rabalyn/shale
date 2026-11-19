@@ -30,10 +30,10 @@ impl Badges {
         let Some(text) = self.0.get(&a) else { return };
         // on top of the neighbouring buttons and of what clips the bar
         let painter = ui.ctx().layer_painter(LayerId::new(Order::Tooltip, Id::unique("key-badges")));
-        let galley = painter.layout_no_wrap(text.clone(), FontId::proportional(FONT_SIZE), theme::TEXT_STRONG);
+        let galley = painter.layout_no_wrap(text.clone(), FontId::proportional(FONT_SIZE), theme::palette().text_strong);
         let size = galley.size() + Vec2::new(6.0, 2.0);
         let badge = Rect::from_min_size(Pos2::new(rect.right() - size.x + 2.0, rect.bottom() - size.y + 2.0), size);
-        painter.rect(badge, CornerRadius::same(3), theme::BG_ACTIVE, Stroke::new(1.0, theme::ACCENT), StrokeKind::Inside);
+        painter.rect(badge, CornerRadius::same(3), theme::palette().bg_active, Stroke::new(1.0, theme::palette().accent), StrokeKind::Inside);
         painter.galley(Align2::CENTER_CENTER.align_size_within_rect(galley.size(), badge).min, galley, Color32::PLACEHOLDER);
     }
 }

@@ -147,6 +147,11 @@ fn targets(secs: &[Section]) -> Targets {
 /// Write the book as one document of the kind (BOOK-014…BOOK-016). Fails with a sentence for the
 /// person when the kind cannot hold a folder or a required field has no value.
 pub fn write_book(req: &BookRequest) -> Result<Document, String> {
+    // the paper has Shale's colours, whatever the theme of the window (CFG-061)
+    crate::theme::with_palette(crate::theme::Palette::shale(), || write_book_in_shale(req))
+}
+
+fn write_book_in_shale(req: &BookRequest) -> Result<Document, String> {
     let (vault, plan, kind) = (req.vault, req.plan, req.kind);
     if !holds_a_folder(kind) {
         return Err(format!("“{}” cannot hold a folder. {ONLY_ARTICLES_AND_BOOKS}.", kind.name));

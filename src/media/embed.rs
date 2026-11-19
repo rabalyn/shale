@@ -85,7 +85,7 @@ impl Embeds {
             return did;
         }
         let painter = ui.painter().with_clip_rect(ui.clip_rect());
-        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::ACCENT), egui::StrokeKind::Outside);
+        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme::palette().accent), egui::StrokeKind::Outside);
         // eight handles: (x side, y side) each -1, 0 or 1; the corners win over the edges
         let zones: [(i8, i8); 8] = [(-1, -1), (1, -1), (-1, 1), (1, 1), (0, -1), (0, 1), (-1, 0), (1, 0)];
         for (n, (sx, sy)) in zones.into_iter().enumerate() {
@@ -113,7 +113,7 @@ impl Embeds {
                 }
             }
             if r.hovered() || r.dragged() {
-                painter.rect_filled(zone.intersect(rect.expand(EDGE)), 2.0, theme::ACCENT.gamma_multiply(0.5));
+                painter.rect_filled(zone.intersect(rect.expand(EDGE)), 2.0, theme::palette().accent.gamma_multiply(0.5));
             }
         }
         // the round buttons, in the corner of the picture

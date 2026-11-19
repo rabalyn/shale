@@ -487,6 +487,108 @@ fn breaks_in_tables_and_deleted_text_are_ignored() {
     assert_eq!(marked(&format!("<w:del>{br}</w:del>"), None), None);
 }
 
+const A: char = '\u{E005}';
+const A_END: char = '\u{E006}';
+
+/// The body of the document made by `mark_aligns`.
+fn aligned(body: &str, styles: Option<&str>, body_justify: bool) -> Option<String> {
+    mark_aligns(&doc(body), styles, body_justify).map(|m| m.replace(&format!(r#"<w:document {NS}><w:body>"#), "").replace("</w:body></w:document>", ""))
+}
+
+fn tag(letter: char) -> String {
+    format!("<w:r><w:t>{A}{letter}{A_END}</w:t></w:r>")
+}
+
+// spec: IMP-046
+#[test]
+fn a_paragraph_whose_alignment_differs_from_the_body_gets_a_sentinel_run_before_its_text() {
+    for (jc, letter) in [("center", 'c'), ("right", 'r'), ("end", 'r'), ("both", 'j')] {
+        let p = bpara(&format!(r#"<w:jc w:val="{jc}"/>"#), "x");
+        assert_eq!(aligned(&p, None, false).unwrap(), format!(r#"<w:p><w:pPr><w:jc w:val="{jc}"/></w:pPr>{}<w:r><w:t>x</w:t></w:r></w:p>"#, tag(letter)), "{jc}");
+    }
+    // the body's own alignment, left and start are nothing
+    for jc in ["left", "start"] {
+        assert_eq!(aligned(&bpara(&format!(r#"<w:jc w:val="{jc}"/>"#), "x"), None, false), None, "{jc}");
+    }
+    assert_eq!(aligned(&bpara(r#"<w:jc w:val="both"/>"#, "x"), None, true), None, "justified like the body");
+    // a paragraph without properties, and one without text
+    assert_eq!(aligned(r#"<w:p><w:r><w:t>x</w:t></w:r></w:p>"#, None, false), None);
+    assert_eq!(aligned(&bpara(r#"<w:jc w:val="center"/>"#, " "), None, false), None, "nothing to align");
+    assert_eq!(aligned(r#"<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing/></w:r></w:p>"#, None, false), None, "a picture alone");
+    assert_eq!(aligned("not xml", None, false), None);
+    assert_eq!(mark_aligns("<not xml", None, false), None);
+}
+
+// spec: IMP-046
+#[test]
+fn the_alignment_comes_from_the_style_chain_and_the_defaults_and_is_compared_with_the_body() {
+    let st = styles(
+        r#"<w:pPrDefault><w:pPr><w:jc w:val="both"/></w:pPr></w:pPrDefault>"#,
+        r#"<w:style w:type="paragraph" w:default="1" w:styleId="Normal"/>
+<w:style w:type="paragraph" w:styleId="Centred"><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:styleId="Child"><w:basedOn w:val="Centred"/></w:style>
+<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/></w:style>
+<w:style w:type="paragraph" w:styleId="TOC1"><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="right"/></w:pPr></w:style>"#,
+    );
+    let p = |style: &str, ppr: &str| bpara(&format!(r#"<w:pStyle w:val="{style}"/>{ppr}"#), "x");
+    let out = |body: &str| aligned(body, Some(&st), true);
+    // through the style and basedOn
+    assert!(out(&p("Centred", "")).unwrap().contains(&tag('c')));
+    assert!(out(&p("Child", "")).unwrap().contains(&tag('c')));
+    // the direct jc wins over the style
+    assert!(out(&p("Centred", r#"<w:jc w:val="right"/>"#)).unwrap().contains(&tag('r')));
+    // the defaults are justified: the body is, a normal paragraph is nothing
+    assert_eq!(out(r#"<w:p><w:r><w:t>x</w:t></w:r></w:p>"#), None);
+    assert_eq!(out(&p("Normal", "")), None);
+    // left in a justified body is marked, but not a heading, and not the lines of a contents
+    assert!(out(&p("Normal", r#"<w:jc w:val="left"/>"#)).unwrap().contains(&tag('l')));
+    assert_eq!(out(&p("Heading1", r#"<w:jc w:val="left"/>"#)), None);
+    assert!(out(&p("Heading1", r#"<w:jc w:val="center"/>"#)).unwrap().contains(&tag('c')), "a centred heading");
+    assert_eq!(out(&p("TOC1", "")), None);
+    // the same text with a left body: the justified paragraph is marked and the style's centre too
+    assert!(aligned(&p("Normal", r#"<w:jc w:val="both"/>"#), Some(&st), false).unwrap().contains(&tag('j')));
+    assert_eq!(aligned(&p("Normal", ""), Some(&st), false).map(|o| o.contains(&tag('j'))), Some(true), "the defaults are justified, the body is said to be left");
+}
+
+// spec: IMP-046
+#[test]
+fn paragraphs_in_tables_text_boxes_and_deleted_text_are_not_aligned() {
+    let p = bpara(r#"<w:jc w:val="center"/>"#, "x");
+    assert_eq!(aligned(&format!("<w:tbl><w:tr><w:tc>{p}</w:tc></w:tr></w:tbl>"), None, false), None);
+    assert_eq!(aligned(&format!("<w:txbxContent>{p}</w:txbxContent>"), None, false), None);
+    assert_eq!(aligned(&format!("<w:del>{p}</w:del>"), None, false), None);
+}
+
+// spec: IMP-046
+#[test]
+fn the_sentinels_become_wrappers_and_neighbours_with_the_same_alignment_share_one() {
+    let (c, r) = (|t: &str| format!("{A}c{A_END}{t}"), |t: &str| format!("{A}r{A_END}{t}"));
+    let text = format!("plain\n\n{}\n\n{}\n\n## {}\n\n{}\n\nplain again\n", c("one"), c("two"), r("Head"), r("tail"));
+    assert_eq!(aligns_to_html(&text), "plain\n\n<div align=\"center\">\n\none\n\ntwo\n\n</div>\n\n<div align=\"right\">\n\n## Head\n\ntail\n\n</div>\n\nplain again\n");
+    // the end of the note, a justified and a left paragraph
+    assert_eq!(aligns_to_html(&format!("{A}j{A_END}a\nb\n")), "<div align=\"justify\">\n\na\nb\n\n</div>\n");
+    assert_eq!(aligns_to_html(&format!("x\n\n{A}l{A_END}y")), "x\n\n<div align=\"left\">\n\ny\n\n</div>");
+    // emphasis in front of the sentinel, and a text without one
+    assert_eq!(aligns_to_html(&format!("*{A}c{A_END}sub*\n")), "<div align=\"center\">\n\n*sub*\n\n</div>\n");
+    assert_eq!(aligns_to_html("text\n"), "text\n");
+    // in a list, a quote or a table the sentinel is taken out and nothing is wrapped
+    assert_eq!(aligns_to_html(&format!("- {A}c{A_END}item\n\n> {A}c{A_END}q\n\n| {A}c{A_END}a |\n")), "- item\n\n> q\n\n| a |\n");
+    // the lines of a break and the wrappers go together
+    let both = crate::import::docx_look::breaks_to_html(&aligns_to_html(&format!("{}\n\n\u{E004}\n\nz\n", c("one"))));
+    assert_eq!(both, "<div align=\"center\">\n\none\n\n</div>\n\n<div style=\"page-break-after: always;\"></div>\n\nz\n");
+}
+
+// spec: IMP-046
+#[test]
+fn what_the_import_writes_is_read_back_as_wrappers() {
+    let c = format!("{A}c{A_END}");
+    let md = aligns_to_html(&format!("# {c}Title\n\n{c}Text with **bold**\nsecond line\n\nbody\n"));
+    let blocks = crate::markdown::align_blocks(&md);
+    assert_eq!(blocks.len(), 1, "{md}");
+    assert_eq!(blocks[0].align, crate::markdown::Align::Center);
+    assert_eq!(crate::markdown::find_headings(&md).len(), 1, "the heading is still a heading");
+}
+
 const RED: &str = r#"<w:color w:val="C00000"/>"#;
 
 fn style(kind: &str, id: &str, name: &str, based: &str, rpr: &str) -> String {

@@ -158,9 +158,9 @@ impl DrawingDoc {
         let mut on_mark = false;
         for (_, link, r) in self.links_on_screen(view) {
             let (colour, tip) = match &link {
-                ElementLink::Note { target, .. } if vault.exists(target, Some(&self.rel)) => (crate::theme::LINK, format!("Open “{target}”")),
-                ElementLink::Note { target, .. } => (crate::theme::LINK_MISSING, format!("Create note “{target}”")),
-                ElementLink::Url(url) => (crate::theme::LINK, url.clone()),
+                ElementLink::Note { target, .. } if vault.exists(target, Some(&self.rel)) => (crate::theme::palette().link, format!("Open “{target}”")),
+                ElementLink::Note { target, .. } => (crate::theme::palette().link_missing, format!("Create note “{target}”")),
+                ElementLink::Url(url) => (crate::theme::palette().link, url.clone()),
             };
             let hot = hover.is_some_and(|p| r.contains(p));
             painter.circle_filled(r.center(), r.width() / 2.0, if hot { colour } else { colour.gamma_multiply(0.85) });
@@ -170,7 +170,7 @@ impl DrawingDoc {
                 let hint = if self.read_only.is_some() { "Click to follow · Shift opens a new tab" } else { "Click to follow · Shift opens a new tab · Ctrl+click on the shape works too" };
                 resp.clone().on_hover_ui_at_pointer(|ui| {
                     ui.label(egui::RichText::new(&tip).color(colour));
-                    ui.label(egui::RichText::new(hint).small().color(crate::theme::MUTED));
+                    ui.label(egui::RichText::new(hint).small().color(crate::theme::palette().muted));
                 });
             }
         }
@@ -231,7 +231,7 @@ impl DrawingDoc {
         Self::panel_frame(dark).show(&mut child, |ui| {
             ui.horizontal(|ui| {
                 let why = self.read_only.clone().unwrap_or_default();
-                ui.label(egui::RichText::new(why).color(if dark { crate::theme::TEXT } else { Color32::from_gray(60) }));
+                ui.label(egui::RichText::new(why).color(if dark { crate::theme::palette().text } else { Color32::from_gray(60) }));
                 let b = ui.button("Convert to drawing…");
                 self.ui_rects.push(("convert".into(), b.rect));
                 if b.on_hover_text("Make an editable Excalidraw drawing next to it (the canvas file is not changed)").clicked() {

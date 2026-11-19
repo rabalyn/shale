@@ -245,11 +245,11 @@ fn edit_049_a_formula_that_cannot_be_typeset_is_shown_as_code_with_the_reason_on
     let (cells, _, _) = read(table, std::iter::once(vec![Event::PointerMoved(cell.center())]).chain(still).collect());
     assert!(cells.iter().any(|(t, _)| t.contains("cannot be typeset")), "the reason in a cell: {:?}", cells.iter().map(|p| &p.0).collect::<Vec<_>>());
     // the font is the code font
-    let (job, spans, maths) = crate::reader::inline_job("Try $\\unknown{x}$ here.", &[], 15.0, crate::theme::TEXT, false);
+    let (job, spans, maths) = crate::reader::inline_job("Try $\\unknown{x}$ here.", &[], 15.0, crate::theme::palette().text, false);
     assert!(spans.is_empty() && maths.len() == 1 && maths[0].formula.is_err());
     let s = job.sections.iter().find(|s| job.text[s.byte_range.start.0..s.byte_range.end.0].contains("unknown")).unwrap();
     assert_eq!(s.format.font_id.family, egui::FontFamily::Monospace);
-    assert_eq!(s.format.color, crate::theme::CODE);
+    assert_eq!(s.format.color, crate::theme::palette().code);
 }
 
 // spec: EDIT-048, EDIT-024

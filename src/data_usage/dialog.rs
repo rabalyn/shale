@@ -104,13 +104,13 @@ fn size_row(ui: &mut Ui, l: &scan::Line) {
     ui.end_row();
     if let Some(p) = &l.problem {
         ui.label("");
-        ui.label(RichText::new(p).color(theme::LINK_MISSING).size(12.0));
+        ui.label(RichText::new(p).color(theme::palette().link_missing).size(12.0));
         ui.end_row();
     }
 }
 
 fn saved_ui(ui: &mut Ui, u: &DataUsage, out: &mut Vec<Ask>) {
-    ui.label(RichText::new("Saved").strong());
+    theme::section(ui, "Saved");
     crate::theme::prose(ui, muted("Your notes, files and mail. Nothing here is deleted from this dialog.").size(12.0));
     let saved = match &u.saved {
         None => {
@@ -121,13 +121,13 @@ fn saved_ui(ui: &mut Ui, u: &DataUsage, out: &mut Vec<Ask>) {
             return;
         }
         Some(Err(e)) => {
-            ui.label(RichText::new(format!("Could not count: {e}")).color(theme::LINK_MISSING));
+            ui.label(RichText::new(format!("Could not count: {e}")).color(theme::palette().link_missing));
             return;
         }
         Some(Ok(s)) => s,
     };
     if u.places.vault.is_some() {
-        ui.label(muted("In the vault"));
+        theme::section(ui, "In the vault");
         egui::Grid::new("usage-vault").num_columns(3).striped(true).show(ui, |ui| {
             for l in &saved.vault {
                 size_row(ui, l);
@@ -154,8 +154,7 @@ fn saved_ui(ui: &mut Ui, u: &DataUsage, out: &mut Vec<Ask>) {
             }
         });
     }
-    ui.add_space(4.0);
-    ui.label(muted("Outside the vault"));
+    theme::section(ui, "Outside the vault");
     egui::Grid::new("usage-outside").num_columns(3).striped(true).show(ui, |ui| {
         for l in &saved.outside {
             size_row(ui, l);
@@ -174,10 +173,9 @@ pub fn clear_clicked(u: &mut DataUsage, id: CacheId) -> Option<Ask> {
 }
 
 fn cache_ui(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention, now: i64, out: &mut Vec<Ask>) {
-    ui.label(RichText::new("Caches").strong());
+    theme::section(ui, "Caches");
     crate::theme::prose(ui, muted("Shale can build these again or fetch them again.").size(12.0));
     for id in CacheId::ALL {
-        ui.add_space(6.0);
         ui.group(|ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -219,8 +217,6 @@ pub fn show(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention) -> Vec<Ask> 
     let mut out = vec![];
     let now = crate::calendar::time::now();
     saved_ui(ui, u, &mut out);
-    ui.add_space(10.0);
-    ui.separator();
     cache_ui(ui, u, r, now, &mut out);
     out
 }
@@ -232,7 +228,7 @@ pub fn footer(ui: &mut Ui, u: &mut DataUsage) -> Vec<Ask> {
     let mut out = vec![];
     if let Some(id) = u.confirm {
         if let Some(t) = id.confirm_text() {
-            ui.label(RichText::new(format!("{}: {t}", id.name())).color(theme::LINK_MISSING));
+            ui.label(RichText::new(format!("{}: {t}", id.name())).color(theme::palette().link_missing));
         }
         ui.horizontal(|ui| {
             if ui.button(format!("Yes, {}", id.clear_label().to_lowercase())).clicked() {

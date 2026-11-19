@@ -46,11 +46,11 @@ pub fn shapes(ui: &Ui, frame: &Frame, (galley, index): (&Galley, &GalleyIndex), 
             continue;
         }
         let rect = Rect::from_min_max(Pos2::new(pos.x - 4.0, head.min.y), Pos2::new(right - 2.0, tail.max.y.max(head.max.y) + 3.0));
-        shapes.push(Shape::rect_filled(rect, 6.0, theme::CODE_BG));
-        shapes.push(Shape::rect_stroke(rect, 6.0, Stroke::new(1.0, theme::BORDER), StrokeKind::Inside));
+        shapes.push(Shape::rect_filled(rect, 6.0, theme::palette().code_bg));
+        shapes.push(Shape::rect_stroke(rect, 6.0, Stroke::new(1.0, theme::palette().border), StrokeKind::Inside));
         let g = badge_galley(ui, &b.title, base);
         let at = Pos2::new(rect.right() - 8.0 - g.size().x, head.center().y - g.size().y / 2.0);
-        shapes.push(Shape::galley(at, g, theme::FAINT));
+        shapes.push(Shape::galley(at, g, theme::palette().faint));
     }
     shapes
 }
@@ -58,7 +58,7 @@ pub fn shapes(ui: &Ui, frame: &Frame, (galley, index): (&Galley, &GalleyIndex), 
 /// The badge text of a code block whose opening fence line is `title`: the language, or `code`.
 fn badge_galley(ui: &Ui, title: &str, base: f32) -> Arc<Galley> {
     let badge = crate::syntax::badge_language(&crate::syntax::fence_language(title)).unwrap_or_else(|| "code".to_string());
-    ui.painter().layout_no_wrap(badge, egui::FontId::monospace((base * 0.75).max(9.0)), theme::FAINT)
+    ui.painter().layout_no_wrap(badge, egui::FontId::monospace((base * 0.75).max(9.0)), theme::palette().faint)
 }
 
 /// The code of the fenced block that opens at line `open` of `lines` (EDIT-090): its lines as written,
@@ -127,11 +127,11 @@ pub fn copy_button(ui: &Ui, id: Id, right: f32, y: f32, shown: bool, code: impl 
     if !shown && !copied {
         return None;
     }
-    let label = copied.then(|| ui.painter().layout_no_wrap("Copied".to_string(), egui::FontId::proportional(11.0), theme::MUTED));
+    let label = copied.then(|| ui.painter().layout_no_wrap("Copied".to_string(), egui::FontId::proportional(11.0), theme::palette().muted));
     let width = 16.0 + label.as_ref().map_or(0.0, |g| g.size().x + 4.0);
     let rect = Rect::from_min_max(Pos2::new(right - width, y - 9.0), Pos2::new(right, y + 9.0));
     let resp = ui.interact(rect, id, Sense::click());
-    let colour = if resp.hovered() || copied { theme::TEXT } else { theme::MUTED };
+    let colour = if resp.hovered() || copied { theme::palette().text } else { theme::palette().muted };
     let painter = ui.painter();
     let c = Pos2::new(rect.right() - 8.0, y);
     if copied {

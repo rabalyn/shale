@@ -499,16 +499,16 @@ impl LinkAssist {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_min_width(260.0);
                 if self.ac_people {
-                    ui.label(egui::RichText::new(format!("People in “{}”", self.people_dir.trim().trim_matches('/'))).small().color(theme::MUTED));
+                    ui.label(egui::RichText::new(format!("People in “{}”", self.people_dir.trim().trim_matches('/'))).small().color(theme::palette().muted));
                 }
                 for (i, (_, exists)) in self.ac_items.iter().enumerate() {
                     let text = self.ac_labels.get(i).cloned().unwrap_or_default();
-                    let label = if *exists { egui::RichText::new(text).color(theme::TEXT) } else { egui::RichText::new(text).color(theme::LINK_MISSING) };
+                    let label = if *exists { egui::RichText::new(text).color(theme::palette().text) } else { egui::RichText::new(text).color(theme::palette().link_missing) };
                     if ui.selectable_label(i == self.ac_sel, label).clicked() {
                         clicked = Some(i);
                     }
                 }
-                ui.label(egui::RichText::new("↑↓ or Ctrl+J/K to move · Enter or click to pick · Esc to close").small().color(theme::FAINT));
+                ui.label(egui::RichText::new("↑↓ or Ctrl+J/K to move · Enter or click to pick · Esc to close").small().color(theme::palette().faint));
             });
         });
         clicked
@@ -522,7 +522,7 @@ impl LinkAssist {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_min_width(320.0);
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("Insert file from {shown_dir}")).small().color(theme::MUTED));
+                    ui.label(egui::RichText::new(format!("Insert file from {shown_dir}")).small().color(theme::palette().muted));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button("×").on_hover_text("Close (Esc)").clicked() {
                             close = true;
@@ -530,33 +530,33 @@ impl LinkAssist {
                     });
                 });
                 if nothing_typed {
-                    ui.label(egui::RichText::new("Type / for the vault or ~/ for your home folder").small().color(theme::FAINT));
+                    ui.label(egui::RichText::new("Type / for the vault or ~/ for your home folder").small().color(theme::palette().faint));
                 }
                 if self.media.items.is_empty() {
-                    ui.label(egui::RichText::new("Nothing matches here").color(theme::FAINT));
+                    ui.label(egui::RichText::new("Nothing matches here").color(theme::palette().faint));
                 }
                 let total = self.media.items.len();
                 let first = self.media.sel.saturating_sub(9).min(total.saturating_sub(12));
                 for (i, e) in self.media.items.iter().enumerate().skip(first).take(12) {
                     let label = if e.is_dir {
-                        egui::RichText::new(format!("▸ {}/", e.name)).color(theme::TEXT)
+                        egui::RichText::new(format!("▸ {}/", e.name)).color(theme::palette().text)
                     } else if crate::media::is_image(Path::new(&e.name)) {
-                        egui::RichText::new(format!("▣ {}", e.name)).color(theme::LINK)
+                        egui::RichText::new(format!("▣ {}", e.name)).color(theme::palette().link)
                     } else {
-                        egui::RichText::new(format!("  {}", e.name)).color(theme::TEXT)
+                        egui::RichText::new(format!("  {}", e.name)).color(theme::palette().text)
                     };
                     if ui.selectable_label(i == self.media.sel, label).clicked() {
                         clicked = Some(e.clone());
                     }
                 }
                 if total > 12 {
-                    ui.label(egui::RichText::new(format!("{total} matches")).small().color(theme::FAINT));
+                    ui.label(egui::RichText::new(format!("{total} matches")).small().color(theme::palette().faint));
                 }
                 if let Some(err) = &self.media.error {
-                    ui.colored_label(theme::LINK_MISSING, err);
+                    ui.colored_label(theme::palette().link_missing, err);
                 }
-                ui.label(egui::RichText::new("Tab completes the path · ↑↓ or Ctrl+J/K choose · Enter picks · Esc closes").small().color(theme::FAINT));
-                ui.label(egui::RichText::new("Files from outside the vault are copied to z_media/").small().color(theme::FAINT));
+                ui.label(egui::RichText::new("Tab completes the path · ↑↓ or Ctrl+J/K choose · Enter picks · Esc closes").small().color(theme::palette().faint));
+                ui.label(egui::RichText::new("Files from outside the vault are copied to z_media/").small().color(theme::palette().faint));
             });
         });
         (clicked, close)

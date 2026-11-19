@@ -18,7 +18,7 @@ fn hash_text(text: &str) -> u64 {
 
 /// The frame's line: thick and in the accent colour while the preview has the keyboard.
 fn stroke_of(focused: bool) -> egui::Stroke {
-    egui::Stroke::new(if focused { 2.0 } else { 1.0 }, if focused { theme::ACCENT } else { theme::MUTED })
+    egui::Stroke::new(if focused { 2.0 } else { 1.0 }, if focused { theme::palette().accent } else { theme::palette().muted })
 }
 
 impl ShaleApp {

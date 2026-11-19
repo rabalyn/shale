@@ -11,6 +11,7 @@
 //! classes, as the upstream `latexmkrc` does: from inside the examples, with graphicx' `demo`
 //! option (boxes instead of the TU logo, which cannot be redistributed, TEX-007).
 
+use super::compile::{keep_failed_log, FAILED_LOGS_VAR};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -44,6 +45,12 @@ fn compile(demo: &str) -> Result<Vec<u8>, String> {
     copy_dir(&cache.join("tex"), &work.join("tex"));
     let out = Command::new("sh").arg(env_dir().join("tex-env.sh")).args(["compile"]).arg(&work).arg(format!("{demo}.tex")).env("SHALE_TEX_PRE", PRE).output().map_err(|e| format!("cannot start tex-env.sh: {e}"))?;
     let pdf = std::fs::read(work.join(format!("{demo}.pdf")));
+    // the log of a failed demo is kept before its folder goes (SHALE_TEX_FAILED_LOGS, #327)
+    if !out.status.success() || pdf.is_err() {
+        if let Some(folder) = std::env::var_os(FAILED_LOGS_VAR).filter(|f| !f.is_empty()) {
+            keep_failed_log(Path::new(&folder), &work, &format!("{demo}.tex"));
+        }
+    }
     let _ = std::fs::remove_dir_all(&work);
     match (out.status.success(), pdf) {
         (true, Ok(pdf)) => Ok(pdf),

@@ -5,7 +5,9 @@
 # checks it and, when green, sends `main` (and a release tag) on to GitHub (BUILD-016).
 # Sourced, not run. Environment, for scripts/test-release.sh: RELEASE_REMOTE (default origin),
 # RELEASE_GH (the GitHub CLI, default gh), RELEASE_REPO (default rabalyn/shale), RELEASE_DATE
-# (the date of a changelog section, default today); LAND_* is passed on to land.sh.
+# (the date of a changelog section, default today); LAND_* is passed on to land.sh. A release also
+# runs scripts/bench-release.sh (BUILD-034): BENCH_SKIP=yes leaves it out, BENCH_ALLOW=yes lets a
+# performance regression pass (make-release.sh --skip-bench, --allow-perf-regression).
 
 REMOTE=${RELEASE_REMOTE:-origin}
 GH=${RELEASE_GH:-gh}
@@ -227,6 +229,13 @@ tag_and_push() {
   set_version "$wt" "$v"
   if [ "$kind" = release ]; then
     merge_changelog "$wt" "$v" "${RELEASE_DATE:-$(date +%F)}"
+    # the performance of the release: stored, compared with the last release, and in the release commit (BUILD-034)
+    if [ "${BENCH_SKIP:-no}" != yes ]; then
+      bash "$LIB_DIR/bench-release.sh" "$wt" "$v" ${BENCH_ALLOW:+--allow-perf-regression} \
+        || die "the performance step failed (see above); nothing was landed or tagged"
+    else
+      echo "note: --skip-bench: the performance of $v is not measured"
+    fi
     msg="Release $v (Refs #$issue)"
   else
     merge_changelog "$wt" "" ""

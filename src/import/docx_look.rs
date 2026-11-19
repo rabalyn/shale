@@ -29,6 +29,10 @@ const BREAK: char = '\u{E004}';
 /// What a break becomes in the note (the contract with the PDF export).
 const BREAK_HTML: &str = "<div style=\"page-break-after: always;\"></div>";
 
+/// Starts the sentinel of a paragraph's alignment (IMP-046): then a letter (`l`, `c`, `r`, `j`) and [`ALIGN_END`].
+const ALIGN: char = '\u{E005}';
+const ALIGN_END: char = '\u{E006}';
+
 /// Paper sizes in twips (portrait) and how close a page must be to match (IMP-040).
 const PAPERS: [(&str, u32, u32); 4] = [("A4", 11906, 16838), ("A5", 8391, 11906), ("Letter", 12240, 15840), ("Legal", 12240, 20160)];
 const PAPER_TOLERANCE: u32 = 20;
@@ -684,6 +688,144 @@ pub fn breaks_to_html(text: &str) -> String {
     out
 }
 
+/// How a paragraph is aligned in Word: the value of `w:jc`, by what Shale can show (IMP-046).
+fn jc_align(jc: &str) -> crate::markdown::Align {
+    use crate::markdown::Align;
+    match jc {
+        "center" => Align::Center,
+        "right" | "end" => Align::Right,
+        "both" | "distribute" | "thaiDistribute" => Align::Justify,
+        _ => Align::Left,
+    }
+}
+
+/// The letter that stands for an alignment in a sentinel, and back.
+fn align_letter(a: crate::markdown::Align) -> char {
+    use crate::markdown::Align;
+    match a {
+        Align::Left => 'l',
+        Align::Center => 'c',
+        Align::Right => 'r',
+        Align::Justify => 'j',
+    }
+}
+
+fn letter_align(c: char) -> Option<crate::markdown::Align> {
+    use crate::markdown::Align;
+    [Align::Left, Align::Center, Align::Right, Align::Justify].into_iter().find(|a| align_letter(*a) == c)
+}
+
+/// The alignment a paragraph has in Word: its own `w:jc`, else that of its style or the styles it
+/// is based on (the default paragraph style when it names none), else that of the document
+/// defaults, else left.
+fn paragraph_align(p: Node, styles: Option<&Document>) -> crate::markdown::Align {
+    let jc_of = |holder: Node| child(holder, "pPr").and_then(|pr| child(pr, "jc")).and_then(|j| val(j, "val")).map(jc_align);
+    if let Some(a) = jc_of(p) {
+        return a;
+    }
+    let Some(styles) = styles else { return crate::markdown::Align::Left };
+    let named = child(p, "pPr").and_then(|pr| child(pr, "pStyle")).and_then(|s| val(s, "val")).and_then(|id| styles.descendants().find(|n| is_w(*n, "style") && val(*n, "styleId") == Some(id)));
+    let style = named.or_else(|| styles.descendants().find(|n| is_w(*n, "style") && val(*n, "type") == Some("paragraph") && val(*n, "default") == Some("1")));
+    let from_style = style.and_then(|s| style_chain(styles, s).into_iter().find_map(jc_of));
+    let defaults = || styles.descendants().find(|n| is_w(*n, "pPrDefault")).and_then(|d| child(d, "pPr")).and_then(|pr| child(pr, "jc")).and_then(|j| val(j, "val")).map(jc_align);
+    from_style.or_else(defaults).unwrap_or(crate::markdown::Align::Left)
+}
+
+/// The text of `document` with a sentinel (`ALIGN`, a letter, `ALIGN_END`) as a run of its own at
+/// the start of each paragraph whose alignment differs from the body's (IMP-046): `body_justify`
+/// says the body is justified (else it is left). Only paragraphs with text count, not those in
+/// tables, text boxes and deleted text, the lines of a table of contents, nor a heading that is
+/// left in a justified body (a heading is never justified). `None` when there is none or the
+/// text does not parse.
+pub fn mark_aligns(document: &str, styles: Option<&str>, body_justify: bool) -> Option<String> {
+    use crate::markdown::Align;
+    let doc = Document::parse(document).ok()?;
+    let styles = styles.and_then(|s| Document::parse(s).ok());
+    let body = if body_justify { Align::Justify } else { Align::Left };
+    let mut edits: Vec<Edit> = Vec::new();
+    for p in doc.descendants().filter(|n| is_w(*n, "p")) {
+        if p.ancestors().any(|a| is_w(a, "tc") || is_w(a, "txbxContent") || is_w(a, "del")) {
+            continue;
+        }
+        let align = paragraph_align(p, styles.as_ref());
+        if align == body {
+            continue;
+        }
+        let style = child(p, "pPr").and_then(|pr| child(pr, "pStyle")).and_then(|s| val(s, "val"));
+        let style_node = style.and_then(|id| styles.as_ref()?.descendants().find(|n| is_w(*n, "style") && val(*n, "styleId") == Some(id)));
+        let heading = style_node.is_some_and(|s| heading_level(s).is_some());
+        if style.is_some_and(|id| id.to_lowercase().starts_with("toc")) || (heading && align == Align::Left) {
+            continue;
+        }
+        let has_text = p.descendants().any(|n| is_w(n, "t") && n.text().is_some_and(|t| !t.trim().is_empty()));
+        // the run goes after the paragraph's properties, before its first content
+        let Some(first) = p.children().find(|c| c.is_element() && !is_w(*c, "pPr")) else { continue };
+        if has_text {
+            edits.push(Edit { start: first.range().start, end: first.range().start, with: format!("<w:r><w:t>{ALIGN}{}{ALIGN_END}</w:t></w:r>", align_letter(align)) });
+        }
+    }
+    apply(document, edits)
+}
+
+/// The Markdown that pandoc made from a tagged copy with the sentinels of [`mark_aligns`] turned
+/// into wrappers (IMP-046): a paragraph or heading that starts with one is put between a
+/// `<div align="center">` (or `right`, `justify`, `left`) line and a `</div>` line, a blank line
+/// inside next to each; paragraphs side by side with the same alignment share one wrapper. A
+/// sentinel anywhere else (in a list, a table, a quote) is taken out and does nothing.
+pub fn aligns_to_html(text: &str) -> String {
+    use crate::markdown::Align;
+    if !text.contains(ALIGN) {
+        return text.to_string();
+    }
+    // the paragraphs and headings with the alignment that wraps them, in order
+    let mut blocks: Vec<(Option<Align>, String)> = Vec::new();
+    for block in text.trim_end_matches('\n').split("\n\n") {
+        let first = block.trim_start_matches('\n').lines().next().unwrap_or("");
+        let at = first.find(ALIGN).filter(|at| first[..*at].chars().all(|c| matches!(c, '#' | '*' | '_' | ' ')));
+        let align = at.and_then(|at| first[at + ALIGN.len_utf8()..].chars().next()).and_then(letter_align);
+        blocks.push((align, strip_aligns(block)));
+    }
+    let mut out = String::new();
+    let mut open: Option<Align> = None;
+    for (align, block) in &blocks {
+        if open.is_some() && open != *align {
+            out.push_str("\n\n</div>\n\n");
+            open = None;
+        } else if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        if let (Some(a), None) = (align, open) {
+            out.push_str(&format!("{}\n\n", a.open_line()));
+            open = Some(*a);
+        }
+        out.push_str(block);
+    }
+    if open.is_some() {
+        out.push_str("\n\n</div>");
+    }
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+/// `text` without the alignment sentinels.
+fn strip_aligns(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(ALIGN) {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at + ALIGN.len_utf8()..];
+        // the letter and the end
+        rest = match tail.find(ALIGN_END).filter(|e| *e <= 1) {
+            Some(e) => &tail[e + ALIGN_END.len_utf8()..],
+            None => tail,
+        };
+    }
+    out.push_str(rest);
+    out
+}
+
 /// One piece of text with sentinels.
 enum Piece<'a> {
     Text(&'a str),
@@ -875,6 +1017,8 @@ pub fn analyse(docx: &Path, work: &Path) -> Analysis {
     let (styles, theme) = (part("word/styles.xml"), part("word/theme/theme1.xml"));
     let look = read(&document, styles.as_deref(), theme.as_deref());
     let marked = mark_breaks(&document, styles.as_deref());
+    let aligned = mark_aligns(marked.as_deref().unwrap_or(&document), styles.as_deref(), look.align == Some("justify"));
+    let marked = aligned.or(marked);
     let tagged = tag_runs(marked.as_deref().unwrap_or(&document), styles.as_deref(), theme.as_deref()).or(marked).and_then(|tagged| {
         crate::fsutil::write_atomic(&dir.join("word/document.xml"), tagged.as_bytes()).ok()?;
         let to = work.join("tagged.docx");
