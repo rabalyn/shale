@@ -353,6 +353,128 @@ fn a_file_that_is_no_zip_gives_no_look_and_no_copy_and_a_real_one_gives_both() {
     assert_eq!(std::fs::read(&docx).unwrap(), before, "the original is untouched");
 }
 
+// ---------------------------------------------------------------- page breaks (IMP-044)
+
+const M: char = '\u{E004}';
+
+fn marker_para() -> String {
+    format!("<w:p><w:r><w:t>{M}</w:t></w:r></w:p>")
+}
+
+fn bpara(ppr: &str, text: &str) -> String {
+    format!("<w:p><w:pPr>{ppr}</w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>")
+}
+
+/// The body of the document made by `mark_breaks`.
+fn marked(body: &str, styles: Option<&str>) -> Option<String> {
+    mark_breaks(&doc(body), styles).map(|m| m.replace(&format!(r#"<w:document {NS}><w:body>"#), "").replace("</w:body></w:document>", ""))
+}
+
+// spec: IMP-044
+#[test]
+fn each_kind_of_break_gets_a_sentinel_paragraph_at_its_place() {
+    let st = styles("", r#"<w:style w:type="paragraph" w:styleId="Chapter"><w:pPr><w:pageBreakBefore/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="Sub"><w:basedOn w:val="Chapter"/></w:style>"#);
+    // a manual break in a paragraph of its own
+    let out = marked(r#"<w:p><w:r><w:br w:type="page"/></w:r></w:p>"#, None).unwrap();
+    assert!(out.contains(M) && !out.contains("w:br"), "{out}");
+    // pageBreakBefore: direct, through a style and through basedOn; the marker comes before
+    assert_eq!(marked(&bpara("<w:pageBreakBefore/>", "x"), None).unwrap(), format!("{}{}", marker_para(), bpara("<w:pageBreakBefore/>", "x")));
+    let styled = bpara(r#"<w:pStyle w:val="Chapter"/>"#, "x");
+    assert_eq!(marked(&styled, Some(&st)).unwrap(), format!("{}{styled}", marker_para()));
+    let based = bpara(r#"<w:pStyle w:val="Sub"/>"#, "x");
+    assert_eq!(marked(&based, Some(&st)).unwrap(), format!("{}{based}", marker_para()));
+    // a direct false overrides the style
+    assert_eq!(marked(&bpara(r#"<w:pStyle w:val="Chapter"/><w:pageBreakBefore w:val="0"/>"#, "x"), Some(&st)), None);
+    // a section break that starts a page, with the type or without: the marker comes after
+    for kind in ["", r#"<w:type w:val="nextPage"/>"#, r#"<w:type w:val="oddPage"/>"#, r#"<w:type w:val="evenPage"/>"#] {
+        let p = bpara(&format!("<w:sectPr>{kind}</w:sectPr>"), "x");
+        assert_eq!(marked(&p, None).unwrap(), format!("{p}{}", marker_para()), "{kind}");
+    }
+}
+
+// spec: IMP-044
+#[test]
+fn a_break_in_the_middle_of_a_paragraph_splits_the_run_and_keeps_its_formatting() {
+    let p = r#"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>before</w:t><w:br w:type="page"/><w:t>after</w:t></w:r></w:p>"#;
+    assert_eq!(marked(p, None).unwrap(), format!(r#"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>before</w:t></w:r><w:r><w:t>{M}</w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>after</w:t></w:r></w:p>"#));
+    // the colour tagging still works on the result
+    let coloured = r#"<w:p><w:r><w:rPr><w:color w:val="C00000"/></w:rPr><w:t>a</w:t><w:br w:type="page"/><w:t>b</w:t></w:r></w:p>"#;
+    let both = tag_runs(&mark_breaks(&doc(coloured), None).unwrap(), None, None).unwrap();
+    assert!(both.contains("\u{E000}c:C00000\u{E001}a\u{E002}") && both.contains("\u{E000}c:C00000\u{E001}b\u{E002}") && both.contains(M), "{both}");
+}
+
+// spec: IMP-044
+#[test]
+fn a_continuous_section_and_a_last_rendered_page_break_are_no_break() {
+    for body in [
+        bpara(r#"<w:sectPr><w:type w:val="continuous"/></w:sectPr>"#, "x"),
+        bpara(r#"<w:sectPr><w:type w:val="nextColumn"/></w:sectPr>"#, "x"),
+        r#"<w:p><w:r><w:lastRenderedPageBreak/><w:t>x</w:t></w:r></w:p>"#.to_string(),
+        r#"<w:p><w:r><w:br w:type="column"/><w:br/><w:t>x</w:t></w:r></w:p>"#.to_string(),
+        // the section of the body is the page setup, no break
+        sect(11906, 16838, ""),
+    ] {
+        assert_eq!(marked(&body, None), None, "{body}");
+    }
+    assert_eq!(mark_breaks("<not xml", None), None);
+}
+
+// spec: IMP-044
+#[test]
+fn a_heading_style_with_page_break_before_gives_the_property_and_no_markers() {
+    let st = |h1: &str, h2: &str| {
+        styles(
+            "",
+            &format!(
+                r#"<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/>{h1}</w:style>
+<w:style w:type="paragraph" w:styleId="Titel2"><w:name w:val="heading 2"/>{h2}</w:style>
+<w:style w:type="paragraph" w:styleId="H3"><w:basedOn w:val="Heading1"/></w:style>"#
+            ),
+        )
+    };
+    let pbb = "<w:pPr><w:pageBreakBefore/></w:pPr>";
+    let on = st(pbb, "");
+    let p = props(&read(&doc(""), Some(&on), None));
+    assert_eq!(p[p.len() - 3..], ["print-break-before: 1", "print-title: false", "print-toc: false"]);
+    // the style of level 2 alone gives its level, found by its name; the lowest level wins
+    assert!(props(&read(&doc(""), Some(&st("", pbb)), None)).contains(&"print-break-before: 2".to_string()));
+    assert!(props(&read(&doc(""), Some(&st(pbb, pbb)), None)).contains(&"print-break-before: 1".to_string()));
+    assert!(!props(&read(&doc(""), Some(&st(r#"<w:pPr><w:pageBreakBefore w:val="false"/></w:pPr>"#, "")), None)).iter().any(|p| p.starts_with("print-break-before")));
+    // the order: after the heading colour, before the title
+    let both = st(r#"<w:pPr><w:pageBreakBefore/></w:pPr><w:rPr><w:color w:val="2F5496"/></w:rPr>"#, "");
+    let p = props(&read(&doc(""), Some(&both), None));
+    let at = |k: &str| p.iter().position(|x| x.starts_with(k)).unwrap();
+    assert!(at("print-heading-color") < at("print-break-before") && at("print-break-before") < at("print-title"), "{p:?}");
+    // a heading of that style has no marker; a heading with its own, not the style's, has one
+    let h = |ppr: &str| bpara(&format!(r#"<w:pStyle w:val="Heading1"/>{ppr}"#), "x");
+    assert_eq!(marked(&h(""), Some(&on)), None);
+    assert_eq!(marked(&h("<w:pageBreakBefore/>"), Some(&on)), None, "the style says it already");
+    let plain = st("", "");
+    assert_eq!(marked(&h("<w:pageBreakBefore/>"), Some(&plain)).unwrap(), format!("{}{}", marker_para(), h("<w:pageBreakBefore/>")));
+    // a style based on a Heading style is no Heading style itself: its paragraphs get markers
+    let based = bpara(r#"<w:pStyle w:val="H3"/>"#, "x");
+    assert_eq!(marked(&based, Some(&on)).unwrap(), format!("{}{based}", marker_para()));
+}
+
+// spec: IMP-044
+#[test]
+fn breaks_at_the_start_and_the_end_are_dropped_and_neighbours_become_one() {
+    let div = "<div style=\"page-break-after: always;\"></div>";
+    assert_eq!(breaks_to_html("text\n"), "text\n");
+    assert_eq!(breaks_to_html(&format!("{M}\n\na\n\n{M}\n\n{M}\n\nb\n\n{M}\n")), format!("a\n\n{div}\n\nb\n"));
+    // in the middle of a paragraph the text before and after become paragraphs of their own
+    assert_eq!(breaks_to_html(&format!("**a** {M} **b**\n")), format!("**a**\n\n{div}\n\n**b**\n"));
+    assert_eq!(breaks_to_html(&format!("{M}\n")), "\n");
+}
+
+// spec: IMP-044
+#[test]
+fn breaks_in_tables_and_deleted_text_are_ignored() {
+    let br = r#"<w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:br w:type="page"/></w:r></w:p>"#;
+    assert_eq!(marked(&format!("<w:tbl><w:tr><w:tc>{br}</w:tc></w:tr></w:tbl>"), None), None);
+    assert_eq!(marked(&format!("<w:del>{br}</w:del>"), None), None);
+}
+
 const RED: &str = r#"<w:color w:val="C00000"/>"#;
 
 fn style(kind: &str, id: &str, name: &str, based: &str, rpr: &str) -> String {

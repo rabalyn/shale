@@ -53,13 +53,13 @@ file, for a document without a `#` heading.
 The look of the document comes along as far as Shale can show it: the colour of text (`<span style="color: …">`; also when it comes from a character, paragraph or table
 style or from a theme colour, but not the body colour, a heading's or a link's)
 and of highlights other than plain yellow (`<mark style="background: …">`, see [[Editor]]), a title and
-subtitle (a `#` heading and an italic line). The page and the body are written into the note's properties
+subtitle (a `#` heading and an italic line) and the page breaks: a manual page break, a paragraph with "page break before" and a section break that starts a new page each become a line `<div style="page-break-after: always;"></div>` where the new page begins (a break at the very start or end is left out). When Heading 1 (or Heading 2 …) starts a new page in Word, the note gets `print-break-before: 1` instead of a line before each heading. The page and the body are written into the note's properties
 for the [[PDF]] export: `print-paper` (A4, A5, Letter, Legal or `<width>x<height>mm`, wider than tall is
 landscape), `print-margins` (top, right, bottom, left in mm), `print-font` (serif, sans or mono),
 `print-font-size` (pt), `print-line-spacing` (a factor such as 1.15), `print-paragraph-spacing` (pt after a
-paragraph), `print-align` (left or justify), `print-heading-color`, `print-title` (always `false`, the title
+paragraph), `print-align` (left or justify), `print-heading-color`, `print-break-before` (the heading level that starts a page, when Word's style says so), `print-title` (always `false`, the title
 is in the text) and `print-toc` (`false`, left out when the document has a table of contents). Edit them like any
-property. A Word table of contents (its title and the lines of entries) is not imported as text, because the
+property. Page breaks come along: a manual page break, a paragraph with "page break before" and a section break that starts a new page each become a line `<div style="page-break-after: always;"></div>` where the new page begins (a break at the very start or end is left out). When Heading 1 (or Heading 2 …) starts a new page in Word, the note gets `print-break-before: 1` instead of a line before each heading. A Word table of contents (its title and the lines of entries) is not imported as text, because the
 PDF export makes its own contents page. Centred and right-aligned paragraphs are not kept (issue 340).
 
 Everything one Word file brings goes into one folder, `z_media/<year>/<month>/import_docx_<name>/`, named

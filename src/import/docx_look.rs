@@ -5,7 +5,8 @@
 //! through a tagged copy of the file: pandoc's reader drops direct run formatting and a Lua filter
 //! cannot read the file, so each coloured run gets private-use sentinels around its text in
 //! `word/document.xml`, which survive pandoc as plain characters and become HTML afterwards
-//! ([`colours_to_html`]). Nothing here fails the import: a file that cannot be read gives no look
+//! ([`colours_to_html`]). Page breaks (IMP-044) go the same way with a sentinel paragraph at the
+//! place of each break ([`mark_breaks`], [`breaks_to_html`]). Nothing here fails the import: a file that cannot be read gives no look
 //! and no colours.
 
 use crate::pdf::tex::archive;
@@ -23,6 +24,11 @@ const CLOSE_COLOUR: char = '\u{E002}';
 /// Ends a highlight.
 const CLOSE_MARK: char = '\u{E003}';
 
+/// Stands for a page break (IMP-044): in a paragraph of its own, or where a manual break was.
+const BREAK: char = '\u{E004}';
+/// What a break becomes in the note (the contract with the PDF export).
+const BREAK_HTML: &str = "<div style=\"page-break-after: always;\"></div>";
+
 /// Paper sizes in twips (portrait) and how close a page must be to match (IMP-040).
 const PAPERS: [(&str, u32, u32); 4] = [("A4", 11906, 16838), ("A5", 8391, 11906), ("Letter", 12240, 15840), ("Legal", 12240, 20160)];
 const PAPER_TOLERANCE: u32 = 20;
@@ -38,6 +44,8 @@ pub struct Look {
     paragraph_spacing: Option<String>,
     align: Option<&'static str>,
     heading_color: Option<String>,
+    /// the lowest level of a Heading style that starts a page (IMP-044)
+    break_before: Option<u8>,
     /// the document part was read: a Word import never prints a title of its own, and has a table of contents or not
     title_off: bool,
     toc: bool,
@@ -57,6 +65,7 @@ impl Look {
         put("print-align", self.align.map(String::from));
         // a colour starts with `#`, which YAML reads as a comment unless it is quoted
         put("print-heading-color", self.heading_color.as_deref().map(super::yaml));
+        put("print-break-before", self.break_before.map(|n| n.to_string()));
         put("print-title", self.title_off.then(|| "false".to_string()));
         put("print-toc", (self.title_off && !self.toc).then(|| "false".to_string()));
         out
@@ -331,6 +340,7 @@ pub fn read(document: &str, styles: Option<&str>, theme: Option<&str>) -> Look {
     let palette = Palette { styles: Some(&styles), theme: theme.as_ref() };
     look.heading_color = palette.of_style("Heading1").and_then(|(c, _)| c);
     look.heading_color = look.heading_color.map(|c| format!("#{c}"));
+    look.break_before = (1..=9).find(|n| styles.descendants().any(|s| is_w(s, "style") && heading_level(s) == Some(*n) && style_page_break(&styles, s) == Some(true)));
     look
 }
 
@@ -520,6 +530,11 @@ pub fn tag_runs(document: &str, styles: Option<&str>, theme: Option<&str>) -> Op
             edits.push(Edit { start: from, end: from + body.len(), with: format!("{open}{body}{close}") });
         }
     }
+    apply(document, edits)
+}
+
+/// `document` with the edits made, `None` when there are none.
+fn apply(document: &str, mut edits: Vec<Edit>) -> Option<String> {
     if edits.is_empty() {
         return None;
     }
@@ -529,6 +544,102 @@ pub fn tag_runs(document: &str, styles: Option<&str>, theme: Option<&str>) -> Op
         out.replace_range(e.start..e.end, &e.with);
     }
     Some(out)
+}
+
+/// The paragraph that stands for a break in the tagged copy.
+fn break_paragraph() -> String {
+    format!("<w:p><w:r><w:t>{BREAK}</w:t></w:r></w:p>")
+}
+
+/// Whether a `w:pageBreakBefore`-like toggle is on: no `w:val` means on.
+fn flag(n: Node) -> bool {
+    !matches!(val(n, "val"), Some("0" | "false" | "off"))
+}
+
+/// `Heading1` … `Heading9`, or `heading 1` … as a name: the level.
+fn level_of(s: &str) -> Option<u8> {
+    let rest = s.to_lowercase().strip_prefix("heading")?.trim().to_string();
+    rest.parse::<u8>().ok().filter(|n| (1..=9).contains(n) && rest.len() == 1)
+}
+
+/// The level of a style that is one of Word's Heading styles, by its id or its name.
+fn heading_level(style: Node) -> Option<u8> {
+    let named = child(style, "name").and_then(|n| val(n, "val")).and_then(level_of);
+    val(style, "styleId").and_then(level_of).or(named)
+}
+
+/// Whether a paragraph style has `pageBreakBefore`, itself or through `basedOn` (the nearest
+/// statement wins); `None` when no style on the way says.
+fn style_page_break(styles: &Document, style: Node) -> Option<bool> {
+    let mut at = style;
+    for _ in 0..16 {
+        if let Some(f) = child(at, "pPr").and_then(|p| child(p, "pageBreakBefore")) {
+            return Some(flag(f));
+        }
+        let parent = child(at, "basedOn").and_then(|b| val(b, "val"))?;
+        at = styles.descendants().find(|n| is_w(*n, "style") && val(*n, "styleId") == Some(parent))?;
+    }
+    None
+}
+
+/// The text of `document` with a sentinel paragraph at each place that starts a new page (IMP-044):
+/// a `w:br` of type page (the run is split so that the sentinel stands between two runs and keeps
+/// out of any emphasis), a paragraph with `w:pageBreakBefore` (directly or through its style, except
+/// a Heading style, which `print-break-before` covers) and a paragraph whose `w:pPr` holds the
+/// `w:sectPr` of a section that begins on a new page. Not in tables, text boxes and deleted text,
+/// which have no page of their own. `None` when there is none or the text does not parse.
+pub fn mark_breaks(document: &str, styles: Option<&str>) -> Option<String> {
+    let doc = Document::parse(document).ok()?;
+    let styles = styles.and_then(|s| Document::parse(s).ok());
+    let nested = |n: Node| n.ancestors().any(|a| is_w(a, "tc") || is_w(a, "txbxContent") || is_w(a, "del"));
+    let mut edits: Vec<Edit> = Vec::new();
+    for n in doc.descendants().filter(|n| is_w(*n, "br") && val(*n, "type") == Some("page")) {
+        let Some(run) = n.parent().filter(|r| is_w(*r, "r")) else { continue };
+        if nested(n) {
+            continue;
+        }
+        let rpr = child(run, "rPr").map(|p| document[p.range()].to_string()).unwrap_or_default();
+        edits.push(Edit { start: n.range().start, end: n.range().end, with: format!("</w:r>{}<w:r>{rpr}", break_paragraph_run()) });
+    }
+    for p in doc.descendants().filter(|n| is_w(*n, "p")) {
+        if nested(p) {
+            continue;
+        }
+        let ppr = child(p, "pPr");
+        let style = ppr.and_then(|pr| child(pr, "pStyle")).and_then(|s| val(s, "val")).and_then(|id| styles.as_ref()?.descendants().find(|n| is_w(*n, "style") && val(*n, "styleId") == Some(id)));
+        let from_style = style.and_then(|s| style_page_break(styles.as_ref()?, s));
+        let direct = ppr.and_then(|pr| child(pr, "pageBreakBefore")).map(flag);
+        // a Heading style that starts a page is the property `print-break-before`, not a marker each
+        let covered = from_style == Some(true) && style.and_then(heading_level).is_some();
+        if !covered && direct.or(from_style).unwrap_or(false) {
+            edits.push(Edit { start: p.range().start, end: p.range().start, with: break_paragraph() });
+        }
+        let new_page = ppr.and_then(|pr| child(pr, "sectPr")).is_some_and(|s| matches!(child(s, "type").and_then(|t| val(t, "val")), None | Some("nextPage" | "oddPage" | "evenPage")));
+        if new_page {
+            edits.push(Edit { start: p.range().end, end: p.range().end, with: break_paragraph() });
+        }
+    }
+    apply(document, edits)
+}
+
+/// The sentinel as a run of its own, for the middle of a paragraph.
+fn break_paragraph_run() -> String {
+    format!("<w:r><w:t>{BREAK}</w:t></w:r>")
+}
+
+/// The Markdown that pandoc made from a tagged copy with every sentinel of [`mark_breaks`] turned
+/// into a line `<div style="page-break-after: always;"></div>` of its own with a blank line before
+/// and after. Breaks side by side become one, and one at the very start or end is dropped.
+pub fn breaks_to_html(text: &str) -> String {
+    if !text.contains(BREAK) {
+        return text.to_string();
+    }
+    let parts: Vec<&str> = text.split(BREAK).map(str::trim).filter(|p| !p.is_empty()).collect();
+    let mut out = parts.join(&format!("\n\n{BREAK_HTML}\n\n"));
+    if text.ends_with('\n') {
+        out.push('\n');
+    }
+    out
 }
 
 /// One piece of text with sentinels.
@@ -707,7 +818,7 @@ pub struct Analysis {
     pub tagged: Option<PathBuf>,
 }
 
-/// Read the look of `docx` and, when it has coloured runs, write the tagged copy `tagged.docx`
+/// Read the look of `docx` and, when it has coloured runs or page breaks, write the tagged copy `tagged.docx`
 /// in `work` (an existing folder). The original is not touched. Never fails: what cannot be done
 /// is left out.
 pub fn analyse(docx: &Path, work: &Path) -> Analysis {
@@ -721,7 +832,8 @@ pub fn analyse(docx: &Path, work: &Path) -> Analysis {
     let Some(document) = part("word/document.xml") else { return none };
     let (styles, theme) = (part("word/styles.xml"), part("word/theme/theme1.xml"));
     let look = read(&document, styles.as_deref(), theme.as_deref());
-    let tagged = tag_runs(&document, styles.as_deref(), theme.as_deref()).and_then(|tagged| {
+    let marked = mark_breaks(&document, styles.as_deref());
+    let tagged = tag_runs(marked.as_deref().unwrap_or(&document), styles.as_deref(), theme.as_deref()).or(marked).and_then(|tagged| {
         crate::fsutil::write_atomic(&dir.join("word/document.xml"), tagged.as_bytes()).ok()?;
         let to = work.join("tagged.docx");
         write_zip(&dir, &to).ok()?;

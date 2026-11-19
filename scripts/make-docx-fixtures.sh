@@ -6,7 +6,7 @@
 #   sh scripts/make-docx-fixtures.sh
 #
 # styled.md is made with a reference document (made here from pandoc's own) that sets the page
-# (Letter, margins 20, 25, 20, 30 mm), the body (Times New Roman 12 pt, justified, line spacing 1.15,
+# (Letter, margins 20, 25, 20, 30 mm), a page break before Heading 1, the body (Times New Roman 12 pt, justified, line spacing 1.15,
 # 8 pt after), the colour of Heading 1 (2F5496) and a character style "Emphasis red" (7030A0), for
 # the look tests (IMP-040, IMP-041).
 #
@@ -51,6 +51,8 @@ with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as out:
             s = s.replace('<w:spacing w:before="180" w:after="180" />', '<w:spacing w:before="0" w:after="160" />', 1)
             # Heading 1: a fixed colour
             s = re.sub(r'<w:color w:val="0F4761"[^>]*/>', '<w:color w:val="2F5496" />', s, count=1)
+            # Heading 1 starts a page (print-break-before, IMP-043)
+            s = s.replace('<w:outlineLvl w:val="0" />', '<w:pageBreakBefore />\n      <w:outlineLvl w:val="0" />', 1)
             # a character style with a colour, for the span "Emphasis red" of styled.md (IMP-041)
             style = '<w:style w:type="character" w:customStyle="1" w:styleId="EmphasisRed"><w:name w:val="Emphasis red" /><w:basedOn w:val="DefaultParagraphFont" /><w:qFormat /><w:rPr><w:color w:val="7030A0" /></w:rPr></w:style>'
             s = s.replace("</w:styles>", style + "</w:styles>", 1)
