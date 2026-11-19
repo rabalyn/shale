@@ -81,13 +81,22 @@ fn video_art_height(card_w: f32) -> f32 {
 pub fn show(ui: &mut Ui, media: &MediaPlayer, abs: &Path, owner: &Path, width: Option<f32>) -> Response {
     let id = ui.auto_id_with(("media-card", abs));
     let (rect, resp) = ui.allocate_exact_size(card_size(abs, ui.available_width(), width), Sense::hover());
-    paint(ui, rect, media, abs, owner, id);
+    paint(ui, rect, media, abs, owner, id, Keyboard::Takes);
     resp
+}
+
+/// Whether a click in a card gives the card the keyboard (MEDIA-004).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Keyboard {
+    /// The reading view and the fullscreen view: a click gives the card the keyboard, so Space toggles it.
+    Takes,
+    /// The editor: the keyboard stays with the text, so Space types a space (rabalyn/shale#441).
+    Leaves,
 }
 
 /// Draw the card for `abs` into `rect` and handle what it is given: `id` must be unique among the
 /// cards of a frame; `owner` is the note that shows it (closing its tab stops the sound).
-pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path, id: Id) {
+pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path, id: Id, keyboard: Keyboard) {
     let ctx = ui.ctx().clone();
     let v = media.view(&ctx, abs);
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -212,8 +221,8 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     painter.text(Pos2::new(vol_hit.right() + 8.0, vol_hit.center().y), egui::Align2::LEFT_CENTER, format!("{} %", (if v.muted { 0.0 } else { v.volume } * 100.0).round() as u32), times, theme::palette().muted);
 
     // --- toggling: the button, or Space while the card has the keyboard (MEDIA-004)
-    // a click in the card gives it the keyboard
-    if card.clicked() || button.clicked() || bar.clicked() || vol.clicked() {
+    // a click in the card gives it the keyboard, except in the editor, where it stays with the text
+    if keyboard == Keyboard::Takes && [&card, &button, &bar, &mute, &vol].iter().any(|r| r.clicked() || r.drag_stopped()) {
         card.request_focus();
     }
     let focused = card.has_focus() || bar.has_focus() || vol.has_focus();

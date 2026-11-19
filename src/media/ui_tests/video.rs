@@ -220,3 +220,68 @@ fn the_settings_say_where_ffmpeg_is_or_that_it_is_missing_and_where_to_get_it() 
         assert!(texts(&fx).iter().any(|t| t.starts_with("Videos are played with ffmpeg")), "{:?}", texts(&fx));
     }
 }
+
+// spec: MEDIA-004
+#[test]
+fn in_the_editor_the_round_buttons_the_edge_and_the_picture_of_a_video_leave_the_keyboard_with_the_text() {
+    use eframe::egui::{
+        text::{CCursor, CCursorRange},
+        text_edit::TextEditState,
+        Event,
+    };
+    if !have_ffmpeg() {
+        return;
+    }
+    let mut fx = Fx::new("v-editor-keys", VIDEO_NOTE, &["clip.mp4"]);
+    fx.reading(false);
+    fx.app.cfg.live_preview = true;
+    fx.hl.frames(&mut fx.app, 3);
+    let abs = fx.dir.join("clip.mp4");
+    fx.until("the look is done", |a| a.media.thumbnail_size(&abs).is_some());
+    let a = fx.app.tabbar.active;
+    let id = fx.app.tabbar.tabs[a].editor.id;
+    fx.app.focus_editor();
+    fx.hl.frames(&mut fx.app, 3);
+    // the cursor in "after the video", between "af" and "ter"
+    let mut st = TextEditState::load(fx.hl.ctx(), id).unwrap_or_default();
+    st.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(26))));
+    st.store(fx.hl.ctx(), id);
+    fx.hl.frames(&mut fx.app, 3);
+    let note = |fx: &Fx| fx.app.notes[Path::new("Player.md")].text.clone();
+    let check = |fx: &mut Fx, what: &str, c: &str| {
+        fx.hl.frames(&mut fx.app, 3);
+        assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "{what}: the text keeps the keyboard");
+        fx.hl.frame(&mut fx.app, vec![Event::Text(c.into())]);
+        fx.hl.frames(&mut fx.app, 2);
+        // (a width written into the link moves the text after it, so only the letter is looked for)
+        assert!(note(fx).contains(c), "{what}: {:?}", note(fx));
+    };
+
+    // the picture of the video, beside the round play button
+    let play = fx.label("Play").center();
+    fx.hl.click(&mut fx.app, play + egui::vec2(40.0, 30.0), PointerButton::Primary);
+    check(&mut fx, "a click on the picture", "A");
+
+    // the round buttons appear under the mouse
+    fx.hl.frame(&mut fx.app, vec![Event::PointerMoved(play + egui::vec2(40.0, 30.0))]);
+    fx.hl.frames(&mut fx.app, 2);
+    fx.click_label("100 %");
+    check(&mut fx, "the 100 % button", "B");
+    let play = fx.label("Play").center();
+    fx.hl.frame(&mut fx.app, vec![Event::PointerMoved(play + egui::vec2(40.0, 30.0))]);
+    fx.hl.frames(&mut fx.app, 2);
+    fx.click_label("Fullscreen");
+    fx.hl.frames(&mut fx.app, 2);
+    fx.click_label("Close");
+    check(&mut fx, "the fullscreen view, closed again", "C");
+
+    // a drag on the right edge
+    let play = fx.label("Play").center();
+    let edge = Pos2::new(fx.label("Position").right() + 12.0, play.y);
+    fx.hl.press_and_move(&mut fx.app, edge, &crate::ui_test_support::Headless::steps(edge, edge - egui::vec2(30.0, 0.0), 4));
+    fx.hl.release(&mut fx.app, edge - egui::vec2(30.0, 0.0));
+    fx.hl.frames(&mut fx.app, 2);
+    assert!(fx.app.notes[Path::new("Player.md")].text.contains("clip.mp4|"), "the drag wrote the width: {:?}", note(&fx));
+    fx.hl.frames(&mut fx.app, 2);
+    check(&mut fx, "the drag on the edge", "D");
+}

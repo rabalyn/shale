@@ -1784,7 +1784,8 @@ impl NoteEditor {
                         crate::drawing::paint_thumbnail(&painter, scene, rect.shrink(4.0), self.dark_canvas, &pics);
                     }
                     Art::Audio(abs) => {
-                        crate::media::widget::paint(ui, rect, &self.media, abs, rel, id);
+                        // the player is worked with the mouse alone: the keyboard stays with the text (MEDIA-004)
+                        crate::media::widget::paint(ui, rect, &self.media, abs, rel, id, crate::media::widget::Keyboard::Leaves);
                         if crate::media::is_video(abs) {
                             let shown = crate::media::embed::Shown { rect, at: r.start, aspect: size.y / size.x, min_w: crate::media::widget::VIDEO_MIN_WIDTH, max_w, buttons: crate::media::widget::video_art_rect(rect) };
                             let did = self.embeds.controls(ui, id.with("embed"), self.media.opacity(), &shown);

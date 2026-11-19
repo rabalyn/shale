@@ -191,7 +191,7 @@ fn a_click_held_on_a_player_button_leaves_the_cursor_and_the_selection_where_the
         }
         fx.hl.frames(&mut fx.app, 3);
         let at = egui::text_edit::TextEditState::load(fx.hl.ctx(), id).and_then(|st| st.cursor.char_range()).map(|r| (r.primary.index.0, r.secondary.index.0));
-        // the card has the keyboard now, and a text box without it shows no selection; the cursor is where it was
+        // the text has kept the keyboard (MEDIA-004) and the cursor is where it was
         assert_eq!(at.map(|r| r.0), Some(to), "{name}: the cursor is where it was");
         // the keyboard goes back to the text at the same place
         fx.app.focus_editor();
@@ -271,6 +271,91 @@ fn space_toggles_while_the_player_has_the_keyboard() {
     fx.hl.frame(&mut fx.app, vec![space(false)]);
     fx.hl.frames(&mut fx.app, 2);
     fx.label("Play");
+}
+
+// spec: MEDIA-004, EDIT-112
+#[test]
+fn in_the_editor_the_player_is_worked_with_the_mouse_and_the_keyboard_stays_with_the_text() {
+    let mut fx = Fx::new("editor-keeps-keys", NOTE, &["tone-cover.mp3"]);
+    fx.reading(false);
+    fx.app.cfg.live_preview = true;
+    fx.hl.frames(&mut fx.app, 3);
+    let a = fx.app.tabbar.active;
+    let id = fx.app.tabbar.tabs[a].editor.id;
+    fx.app.focus_editor();
+    fx.hl.frames(&mut fx.app, 3);
+    // the cursor in "after the player", between "af" and "ter"
+    let mut st = egui::text_edit::TextEditState::load(fx.hl.ctx(), id).unwrap_or_default();
+    st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(33))));
+    st.store(fx.hl.ctx(), id);
+    fx.hl.frames(&mut fx.app, 3);
+    let note = |fx: &Fx| fx.app.notes[Path::new("Player.md")].text.clone();
+    let typed = |fx: &mut Fx, c: &str| {
+        fx.hl.frame(&mut fx.app, vec![Event::Text(c.into())]);
+        fx.hl.frames(&mut fx.app, 2);
+    };
+    assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "the text has the keyboard to begin with");
+
+    // play
+    fx.click_label("Play");
+    fx.until("the output is open", |a| a.media.position().is_some());
+    fx.hl.frames(&mut fx.app, 2);
+    assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "the text keeps the keyboard after a click on play");
+    fx.label("Pause");
+    typed(&mut fx, "X");
+    assert!(note(&fx).ends_with("afXter the player\n"), "{:?}", note(&fx));
+
+    // the seek bar: a click and a drag
+    let bar = fx.label("Position");
+    fx.hl.click(&mut fx.app, Pos2::new(bar.left() + bar.width() * 0.5, bar.center().y), PointerButton::Primary);
+    fx.hl.frames(&mut fx.app, 2);
+    assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "a click on the seek bar leaves the keyboard with the text");
+    typed(&mut fx, "Y");
+    let path = Headless::steps(Pos2::new(bar.left() + bar.width() * 0.2, bar.center().y), Pos2::new(bar.left() + bar.width() * 0.8, bar.center().y), 5);
+    fx.hl.press_and_move(&mut fx.app, Pos2::new(bar.left() + bar.width() * 0.2, bar.center().y), &path);
+    fx.hl.release(&mut fx.app, Pos2::new(bar.left() + bar.width() * 0.8, bar.center().y));
+    assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "a drag on the seek bar leaves the keyboard with the text");
+    typed(&mut fx, "Z");
+
+    // the volume slider (a drag) and the mute button
+    let vol = fx.label("Volume");
+    let from = Pos2::new(vol.left() + vol.width() * 0.3, vol.center().y);
+    fx.hl.press_and_move(&mut fx.app, from, &Headless::steps(from, from + egui::vec2(vol.width() * 0.3, 0.0), 4));
+    fx.hl.release(&mut fx.app, from + egui::vec2(vol.width() * 0.3, 0.0));
+    assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "the volume slider leaves the keyboard with the text");
+    typed(&mut fx, "V");
+    fx.click_label("Mute");
+    fx.label("Unmute");
+    assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "the mute button leaves the keyboard with the text");
+    typed(&mut fx, "M");
+
+    // a click on the card beside the button, then Space: it types a space and does not toggle
+    let c = fx.label("Pause").center();
+    fx.hl.click(&mut fx.app, c - egui::vec2(BUTTON_RADIUS * 2.0 + 4.0, 40.0), PointerButton::Primary);
+    fx.hl.frames(&mut fx.app, 2);
+    assert!(fx.hl.ctx().memory(|m| m.has_focus(id)), "a click on the card leaves the keyboard with the text");
+    let space = |pressed| Event::Key { key: Key::Space, physical_key: Some(Key::Space), pressed, repeat: false, modifiers: Modifiers::NONE };
+    fx.hl.frame(&mut fx.app, vec![space(true), Event::Text(" ".into())]);
+    fx.hl.frame(&mut fx.app, vec![space(false)]);
+    fx.hl.frames(&mut fx.app, 2);
+    fx.label("Pause");
+    assert!(note(&fx).ends_with("afXYZVM ter the player\n"), "the letters and the space went in at the cursor: {:?}", note(&fx));
+}
+
+// spec: MEDIA-004
+#[test]
+fn a_click_on_the_player_in_the_editor_does_not_take_the_keyboard_from_another_box() {
+    let mut fx = Fx::new("editor-other-box", NOTE, &["tone-cover.mp3"]);
+    fx.reading(false);
+    fx.hl.frames(&mut fx.app, 3);
+    let a = fx.app.tabbar.active;
+    let id = fx.app.tabbar.tabs[a].editor.id;
+    fx.hl.ctx().memory_mut(|m| m.surrender_focus(id));
+    fx.hl.frames(&mut fx.app, 3);
+    assert!(!fx.hl.ctx().memory(|m| m.has_focus(id)));
+    fx.click_label("Play");
+    fx.hl.frames(&mut fx.app, 3);
+    assert!(!fx.hl.ctx().memory(|m| m.has_focus(id)), "the text only keeps the keyboard it had");
 }
 
 // spec: MEDIA-005
