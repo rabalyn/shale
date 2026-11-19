@@ -69,7 +69,7 @@ impl MailView {
         ui.scope_builder(UiBuilder::new().max_rect(strip).layout(Layout::left_to_right(Align::Center)), |ui| {
             ui.set_clip_rect(strip.intersect(ui.clip_rect()));
             ui.add_space(10.0);
-            let l = ui.label(RichText::new(text).size(12.5).color(theme::TEXT));
+            let l = ui.label(RichText::new(text).size(12.5).color(theme::palette().text));
             rec(rects, "mail:unsent-notice", &l);
             let r = ui.small_button("Show…");
             rec(rects, "mail:unsent-open", &r);
@@ -100,7 +100,7 @@ impl MailView {
                         let subject = if c.subject.trim().is_empty() { "(no subject)" } else { c.subject.as_str() };
                         // the mail that Enter and d / Delete act on (MAIL-069)
                         if k == sel {
-                            let m = ui.label(RichText::new("▸").strong().color(theme::ACCENT));
+                            let m = ui.label(RichText::new("▸").strong().color(theme::palette().accent));
                             rec(rects, "mail:unsent-sel", &m);
                             m.scroll_to_me(None);
                         }

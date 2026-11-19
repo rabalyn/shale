@@ -253,6 +253,11 @@ pub(super) fn toc_depth(book: bool) -> usize {
 /// Write the note as a document of the kind. Fails with a sentence for the person when a required
 /// field has no value.
 pub fn write(req: &Request) -> Result<Document, String> {
+    // the paper has Shale's colours, whatever the theme of the window (CFG-061)
+    crate::theme::with_palette(crate::theme::Palette::shale(), || write_in_shale(req))
+}
+
+fn write_in_shale(req: &Request) -> Result<Document, String> {
     let (vault, kind) = (req.vault, req.kind);
     let family = family_of(kind);
     let fm = markdown::front_matter_values(req.text);

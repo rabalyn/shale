@@ -25,8 +25,8 @@ impl ShaleApp {
         });
         // videos are decoded by the system's ffmpeg (MEDIA-010)
         match self.media.ffmpeg() {
-            Some(p) => ui.label(egui::RichText::new(format!("Videos are played with ffmpeg ({})", p.display())).small().color(theme::MUTED)),
-            None => ui.label(egui::RichText::new(crate::media::ffmpeg::MISSING_HELP).small().color(theme::LINK_MISSING)),
+            Some(p) => ui.label(egui::RichText::new(format!("Videos are played with ffmpeg ({})", p.display())).small().color(theme::palette().muted)),
+            None => ui.label(egui::RichText::new(crate::media::ffmpeg::MISSING_HELP).small().color(theme::palette().link_missing)),
         };
         changed
     }

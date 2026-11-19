@@ -775,7 +775,7 @@ pub fn lift_headings(text: &str) -> Option<String> {
 /// The title of a heading as it reads: no inline markup, links by their shown text.
 pub fn heading_plain(title: &str) -> String {
     let links: Vec<(LinkSpan, bool)> = find_links(title).into_iter().map(|l| (l, true)).collect();
-    let (job, _, _) = crate::reader::inline_job(title, &links, 14.0, crate::theme::TEXT, false);
+    let (job, _, _) = crate::reader::inline_job(title, &links, 14.0, crate::theme::palette().text, false);
     job.text.trim().to_string()
 }
 

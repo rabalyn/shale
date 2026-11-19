@@ -79,7 +79,7 @@ impl MailView {
             ui.scope_builder(UiBuilder::new().max_rect(strip).layout(Layout::left_to_right(Align::Center)), |ui| {
                 ui.set_clip_rect(strip.intersect(ui.clip_rect()));
                 ui.add_space(10.0);
-                ui.label(RichText::new(format!("Not done: {last}")).size(crate::fonts::px(12.5)).color(theme::LINK_MISSING));
+                ui.label(RichText::new(format!("Not done: {last}")).size(crate::fonts::px(12.5)).color(theme::palette().link_missing));
                 let r = ui.small_button("Dismiss");
                 rects.push(("mail:problem-dismiss".into(), r.rect));
                 if r.clicked() {
@@ -96,7 +96,7 @@ impl MailView {
             ui.scope_builder(UiBuilder::new().max_rect(strip).layout(Layout::left_to_right(Align::Center)), |ui| {
                 ui.set_clip_rect(strip.intersect(ui.clip_rect()));
                 ui.add_space(10.0);
-                ui.label(RichText::new(text).size(crate::fonts::px(12.5)).color(theme::TEXT));
+                ui.label(RichText::new(text).size(crate::fonts::px(12.5)).color(theme::palette().text));
                 let r = ui.small_button("Undo send");
                 rects.push(("mail:undo-send".into(), r.rect));
                 if r.on_hover_text(undo_tip).clicked() {
@@ -113,7 +113,7 @@ impl MailView {
             StoreState::Failed(e) => {
                 let e = e.clone();
                 ui.scope_builder(UiBuilder::new().max_rect(body.shrink(20.0)), |ui| {
-                    ui.label(RichText::new("The local mail copy could not be opened.").color(theme::LINK_MISSING));
+                    ui.label(RichText::new("The local mail copy could not be opened.").color(theme::palette().link_missing));
                     ui.label(muted(e));
                 });
             }
@@ -130,7 +130,7 @@ impl MailView {
             StoreState::Ready(_) if cfg.mail_accounts.is_empty() => {
                 ui.scope_builder(UiBuilder::new().max_rect(body.shrink(30.0)), |ui| {
                     ui.add_space(40.0);
-                    ui.label(RichText::new("No mail account yet").size(crate::fonts::px(20.0)).color(theme::TEXT));
+                    ui.label(RichText::new("No mail account yet").size(crate::fonts::px(20.0)).color(theme::palette().text));
                     ui.label(muted("Shale reads your mail from your mail server and keeps a local copy. Syncing never changes anything on the server; only what you do yourself does (mark read, flag, move, delete)."));
                     ui.add_space(8.0);
                     let r = ui.button("Add an account…");
@@ -403,7 +403,7 @@ impl MailView {
         if self.searching || self.search_edited_pending() {
             ui.label(muted("Searching…").size(crate::fonts::px(12.0)));
         } else if let Some(e) = &self.search_error {
-            ui.label(RichText::new(format!("Search failed: {e}")).size(crate::fonts::px(12.0)).color(theme::LINK_MISSING));
+            ui.label(RichText::new(format!("Search failed: {e}")).size(crate::fonts::px(12.0)).color(theme::palette().link_missing));
         }
         // the state of the syncs
         let mut errs: Vec<String> = vec![];
@@ -440,7 +440,7 @@ impl MailView {
             } else {
                 first.chars().take(90).collect()
             };
-            ui.label(RichText::new(format!("Sync problem: {short}")).size(crate::fonts::px(12.0)).color(theme::LINK_MISSING)).on_hover_text(errs.join("\n"));
+            ui.label(RichText::new(format!("Sync problem: {short}")).size(crate::fonts::px(12.0)).color(theme::palette().link_missing)).on_hover_text(errs.join("\n"));
         } else if self.syncs.values().any(|r| r.finished.is_some()) {
             ui.label(muted(format!("Synced · {added} new")).size(crate::fonts::px(12.0)));
         }
@@ -491,7 +491,7 @@ impl MailView {
                 });
             });
         }
-        ui.painter().line_segment([body.left_top(), body.right_top()], Stroke::new(1.0, theme::BORDER));
+        ui.painter().line_segment([body.left_top(), body.right_top()], Stroke::new(1.0, theme::palette().border));
     }
 
     /// The three panes side by side in `strip` (as wide as the body, or `PANES_MIN_W` when that is
@@ -504,9 +504,9 @@ impl MailView {
         let mid = Rect::from_min_size(Pos2::new(left.max.x, strip.min.y), Vec2::new(mid_w, strip.height()));
         let right = Rect::from_min_max(Pos2::new(mid.max.x, strip.min.y), strip.max);
         let panes = [("folders", Pane::Folders, left), ("list", Pane::List, mid), ("message", Pane::Message, right)];
-        ui.painter().rect_filled(left, 0, theme::BG_SECONDARY);
-        ui.painter().line_segment([Pos2::new(left.max.x, left.min.y), Pos2::new(left.max.x, left.max.y)], Stroke::new(1.0, theme::BORDER));
-        ui.painter().line_segment([Pos2::new(mid.max.x, mid.min.y), Pos2::new(mid.max.x, mid.max.y)], Stroke::new(1.0, theme::BORDER));
+        ui.painter().rect_filled(left, 0, theme::palette().bg_secondary);
+        ui.painter().line_segment([Pos2::new(left.max.x, left.min.y), Pos2::new(left.max.x, left.max.y)], Stroke::new(1.0, theme::palette().border));
+        ui.painter().line_segment([Pos2::new(mid.max.x, mid.min.y), Pos2::new(mid.max.x, mid.max.y)], Stroke::new(1.0, theme::palette().border));
         // a click into a pane gives it the keyboard (choosing a folder then hands it on to the list)
         if let Some(at) = ui.input(|i| i.pointer.primary_pressed().then(|| i.pointer.press_origin()).flatten()).filter(|at| !self.dialog && body.contains(*at)) {
             for (_, pane, r) in panes {
@@ -538,7 +538,7 @@ impl MailView {
             rects.push((format!("mail:pane:{key}"), r));
             // the pane that has the keyboard is framed in the accent colour (MAIL-062)
             if self.pane == pane && !self.away {
-                ui.painter().rect_stroke(r.shrink(1.0), 0, Stroke::new(2.0, theme::ACCENT), egui::StrokeKind::Inside);
+                ui.painter().rect_stroke(r.shrink(1.0), 0, Stroke::new(2.0, theme::palette().accent), egui::StrokeKind::Inside);
                 rects.push(("mail:focus".into(), r));
             }
         }
@@ -551,14 +551,14 @@ impl MailView {
             for a in &cfg.mail_accounts {
                 let title = if a.name.is_empty() { a.host.clone() } else { a.name.clone() };
                 let folders = self.account_folders(&a.id);
-                egui::CollapsingHeader::new(RichText::new(title).color(theme::TEXT_STRONG)).id_salt(("mail-account", a.id.clone())).default_open(true).show(ui, |ui| {
+                egui::CollapsingHeader::new(RichText::new(title).color(theme::palette().text_strong)).id_salt(("mail-account", a.id.clone())).default_open(true).show(ui, |ui| {
                     if folders.is_empty() {
                         ui.label(muted("No folders yet. Press Sync, or “Test connection” in the account settings.").size(crate::fonts::px(12.0)));
                     }
                     for f in &folders {
                         let (total, unread) = self.counts.get(&f.id).copied().unwrap_or((0, 0));
                         let label = self.tree_entry(f).1;
-                        let text = if unread > 0 { RichText::new(format!("{label}  ({unread})")).strong().color(theme::TEXT_STRONG) } else { RichText::new(label).color(theme::TEXT) };
+                        let text = if unread > 0 { RichText::new(format!("{label}  ({unread})")).strong().color(theme::palette().text_strong) } else { RichText::new(label).color(theme::palette().text) };
                         let (depth, _) = self.tree_entry(f);
                         ui.horizontal(|ui| {
                             ui.add_space(depth as f32 * 12.0);
@@ -585,11 +585,11 @@ impl MailView {
                     for (key, label, view, n, warn) in [("drafts", "Drafts", LocalView::Drafts(a.id.clone()), drafts, false), ("outbox", "Outbox", LocalView::Outbox(a.id.clone()), out, attention)] {
                         let text = if n > 0 { format!("{label}  ({n})") } else { label.to_string() };
                         let rt = if warn {
-                            RichText::new(text).color(theme::LINK_MISSING).strong()
+                            RichText::new(text).color(theme::palette().link_missing).strong()
                         } else if n > 0 {
-                            RichText::new(text).strong().color(theme::TEXT_STRONG)
+                            RichText::new(text).strong().color(theme::palette().text_strong)
                         } else {
-                            RichText::new(text).color(theme::MUTED)
+                            RichText::new(text).color(theme::palette().muted)
                         };
                         let r = ui.selectable_label(self.local_view.as_ref() == Some(&view), rt);
                         rec(rects, format!("mail:{key}:{}", a.id), &r);
@@ -626,7 +626,7 @@ impl MailView {
         };
         ui.horizontal(|ui| {
             ui.add_space(10.0);
-            ui.label(RichText::new(title).size(crate::fonts::px(13.0)).color(theme::MUTED));
+            ui.label(RichText::new(title).size(crate::fonts::px(13.0)).color(theme::palette().muted));
         });
         // what is going on with a folder that is not synced
         let load_tip = self.tip("Load the list of this folder from the server", KeyAction::MailLoad);
@@ -643,7 +643,7 @@ impl MailView {
                     let e = e.clone();
                     ui.horizontal_wrapped(|ui| {
                         ui.add_space(10.0);
-                        ui.label(RichText::new(format!("Could not load the list: {e}")).size(crate::fonts::px(12.0)).color(theme::LINK_MISSING));
+                        ui.label(RichText::new(format!("Could not load the list: {e}")).size(crate::fonts::px(12.0)).color(theme::palette().link_missing));
                         let r = ui.small_button("Try again");
                         rec(rects, "mail:retry-list", &r);
                         if r.on_hover_text(load_tip.as_str()).clicked() {
@@ -794,39 +794,39 @@ impl MailView {
         let cursor = self.cursor == Some(i);
         let opened = self.open.as_ref().is_some_and(|o| o.msg.id == m.id);
         if cursor {
-            p.rect_filled(rect, 0, theme::ACCENT.gamma_multiply(0.25));
+            p.rect_filled(rect, 0, theme::palette().accent.gamma_multiply(0.25));
         } else if opened {
-            p.rect_filled(rect, 0, theme::BG_ACTIVE);
+            p.rect_filled(rect, 0, theme::palette().bg_active);
         } else if resp.hovered() {
-            p.rect_filled(rect, 0, theme::BG_HOVER);
+            p.rect_filled(rect, 0, theme::palette().bg_hover);
         }
         if self.marked.contains_key(&m.id) {
-            p.rect_filled(Rect::from_min_size(rect.min, Vec2::new(4.0, rect.height())), 0, theme::ACCENT);
+            p.rect_filled(Rect::from_min_size(rect.min, Vec2::new(4.0, rect.height())), 0, theme::palette().accent);
         }
-        p.line_segment([Pos2::new(rect.min.x, rect.max.y), Pos2::new(rect.max.x, rect.max.y)], Stroke::new(1.0, theme::BORDER));
+        p.line_segment([Pos2::new(rect.min.x, rect.max.y), Pos2::new(rect.max.x, rect.max.y)], Stroke::new(1.0, theme::palette().border));
         let leaving = m.pending.as_deref().is_some_and(|k| k != "flags" && k != "append");
         let dim = if m.gone_on_server || leaving { 0.45 } else { 1.0 };
         let unread = !m.is_seen() && m.state != STATE_TOO_LARGE;
         let strong = |c: Color32| c.gamma_multiply(dim);
         let from = if m.from.trim().is_empty() { "(unknown sender)".to_string() } else { display_name(&m.from) };
         let date = list_date(m.date, now);
-        let date_g = p.layout_no_wrap(date, crate::fonts::font(12.0), strong(theme::MUTED));
+        let date_g = p.layout_no_wrap(date, crate::fonts::font(12.0), strong(theme::palette().muted));
         let x0 = rect.min.x + 16.0;
         let date_x = rect.max.x - 10.0 - date_g.size().x;
         if unread {
-            p.circle_filled(Pos2::new(rect.min.x + 8.0, rect.min.y + 14.0), 3.0, theme::ACCENT);
+            p.circle_filled(Pos2::new(rect.min.x + 8.0, rect.min.y + 14.0), 3.0, theme::palette().accent);
             rects.push((format!("mail:unread:{i}"), Rect::from_center_size(Pos2::new(rect.min.x + 8.0, rect.min.y + 14.0), Vec2::splat(8.0))));
         }
         if m.is_flagged() {
             // a small flag: a pole and a pennant
             let (x, y) = (rect.min.x + 5.0, rect.min.y + 28.0);
-            let c = strong(theme::LINK_MISSING);
+            let c = strong(theme::palette().link_missing);
             p.line_segment([Pos2::new(x, y), Pos2::new(x, y + 12.0)], Stroke::new(1.4, c));
             p.add(egui::Shape::convex_polygon(vec![Pos2::new(x, y), Pos2::new(x + 8.0, y + 3.0), Pos2::new(x, y + 6.0)], c, Stroke::NONE));
             rects.push((format!("mail:flag-mark:{i}"), Rect::from_min_size(Pos2::new(x - 2.0, y), Vec2::new(11.0, 12.0))));
         }
         p.galley(Pos2::new(date_x, rect.min.y + 7.0), date_g, Color32::WHITE);
-        let from_g = p.layout_no_wrap(from, crate::fonts::font(14.0), strong(if unread { theme::TEXT_STRONG } else { theme::TEXT }));
+        let from_g = p.layout_no_wrap(from, crate::fonts::font(14.0), strong(if unread { theme::palette().text_strong } else { theme::palette().text }));
         let from_clip = p.with_clip_rect(Rect::from_min_max(Pos2::new(x0, rect.min.y), Pos2::new(date_x - 8.0, rect.max.y)));
         from_clip.galley(Pos2::new(x0, rect.min.y + 6.0), from_g.clone(), Color32::WHITE);
         if unread {
@@ -839,24 +839,24 @@ impl MailView {
         }
         let mut right_edge = rect.max.x - 10.0;
         if m.has_attachments {
-            paint_clip(&p, Pos2::new(right_edge - 6.0, rect.min.y + 33.0), strong(theme::MUTED));
+            paint_clip(&p, Pos2::new(right_edge - 6.0, rect.min.y + 33.0), strong(theme::palette().muted));
             right_edge -= 18.0;
         }
         if m.state == STATE_HEADER || m.state == STATE_TOO_LARGE {
-            let g = p.layout_no_wrap("not downloaded".into(), crate::fonts::font(11.0), strong(theme::FAINT));
+            let g = p.layout_no_wrap("not downloaded".into(), crate::fonts::font(11.0), strong(theme::palette().faint));
             right_edge -= g.size().x;
             p.galley(Pos2::new(right_edge, rect.min.y + 26.0), g, Color32::WHITE);
             right_edge -= 8.0;
         }
         if let Some(kind) = &m.pending {
-            let g = p.layout_no_wrap(pending_word(kind).into(), crate::fonts::font(11.0), strong(theme::ACCENT));
+            let g = p.layout_no_wrap(pending_word(kind).into(), crate::fonts::font(11.0), strong(theme::palette().accent));
             right_edge -= g.size().x;
             let at = Pos2::new(right_edge, rect.min.y + 26.0);
             rects.push((format!("mail:pending-mark:{i}"), Rect::from_min_size(at, g.size())));
             p.galley(at, g, Color32::WHITE);
             right_edge -= 8.0;
         }
-        let subj_g = p.layout_no_wrap(subject, crate::fonts::font(13.0), strong(if unread { theme::TEXT } else { theme::MUTED }));
+        let subj_g = p.layout_no_wrap(subject, crate::fonts::font(13.0), strong(if unread { theme::palette().text } else { theme::palette().muted }));
         let subj_clip = p.with_clip_rect(Rect::from_min_max(Pos2::new(x0, rect.min.y), Pos2::new(right_edge, rect.max.y)));
         subj_clip.galley(Pos2::new(x0, rect.min.y + 25.0), subj_g.clone(), Color32::WHITE);
         if unread {
@@ -904,13 +904,13 @@ impl MailView {
             if scroll != 0.0 {
                 ui.scroll_with_delta(Vec2::new(0.0, -scroll));
             }
-            ui.label(RichText::new(if msg.subject.trim().is_empty() { "(no subject)" } else { msg.subject.as_str() }).size(crate::fonts::px(19.0)).color(theme::TEXT_STRONG));
+            ui.label(RichText::new(if msg.subject.trim().is_empty() { "(no subject)" } else { msg.subject.as_str() }).size(crate::fonts::px(19.0)).color(theme::palette().text_strong));
             ui.add_space(4.0);
             let line = |ui: &mut Ui, k: &str, v: &str| {
                 if !v.trim().is_empty() {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(muted(format!("{k}:")));
-                        ui.add(egui::Label::new(RichText::new(v).color(theme::TEXT)).selectable(true));
+                        ui.add(egui::Label::new(RichText::new(v).color(theme::palette().text)).selectable(true));
                     });
                 }
             };
@@ -978,7 +978,7 @@ impl MailView {
                     }
                 }
                 if msg.is_flagged() {
-                    ui.label(RichText::new("Flagged").size(crate::fonts::px(12.0)).color(theme::LINK_MISSING));
+                    ui.label(RichText::new("Flagged").size(crate::fonts::px(12.0)).color(theme::palette().link_missing));
                 }
                 if let Some(k) = &msg.pending {
                     ui.label(muted(format!("{} waiting for the server", pending_word(k).trim_end_matches('…'))).size(crate::fonts::px(12.0)));
@@ -986,7 +986,7 @@ impl MailView {
             });
             if msg.gone_on_server {
                 ui.add_space(4.0);
-                ui.label(RichText::new("This mail was deleted on the server. This is the copy Shale kept.").color(theme::LINK_MISSING).size(crate::fonts::px(12.5)));
+                ui.label(RichText::new("This mail was deleted on the server. This is the copy Shale kept.").color(theme::palette().link_missing).size(crate::fonts::px(12.5)));
             }
             ui.separator();
             match &self.open.as_ref().map(|o| &o.body) {
@@ -997,7 +997,7 @@ impl MailView {
                     ui.label(muted("Downloading the message from the server…"));
                 }
                 Some(Body::Failed(e)) => {
-                    ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
+                    ui.label(RichText::new(e.as_str()).color(theme::palette().link_missing));
                     if e.contains(NO_PASSWORD) {
                         ui.label(muted("Type the password above, or save one in the account settings."));
                     } else if crate::mail::oauth::needs_sign_in(e) {
@@ -1028,9 +1028,9 @@ impl MailView {
                                 // the attachment the keys o and Shift+O work on (MAIL-065)
                                 let name = if a.name.is_empty() { "(unnamed)" } else { a.name.as_str() };
                                 if i == sel_att {
-                                    ui.label(RichText::new(format!("▸ {name}")).color(theme::ACCENT).strong());
+                                    ui.label(RichText::new(format!("▸ {name}")).color(theme::palette().accent).strong());
                                 } else {
-                                    ui.label(RichText::new(name).color(theme::TEXT));
+                                    ui.label(RichText::new(name).color(theme::palette().text));
                                 }
                                 ui.label(muted(size_text(a.data.len() as u64)).size(crate::fonts::px(12.0)));
                                 let o = ui.small_button("Open");
@@ -1047,7 +1047,7 @@ impl MailView {
                         }
                         ui.separator();
                     }
-                    ui.add(egui::Label::new(RichText::new(l.shown.as_str()).color(theme::TEXT)).selectable(true));
+                    ui.add(egui::Label::new(RichText::new(l.shown.as_str()).color(theme::palette().text)).selectable(true));
                     if l.cut {
                         ui.add_space(6.0);
                         ui.label(muted("The text is very long and is cut here. Import the mail to get all of it."));
@@ -1196,7 +1196,7 @@ impl MailView {
             crate::theme::prose(ui, muted("They are removed from the server and cannot be brought back from there. Shale keeps its own local copy of each, in the folder “.trash” of its mail folder.").size(crate::fonts::px(12.5)));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let r = ui.button(RichText::new(format!("Delete {n} forever")).color(theme::LINK_MISSING));
+                let r = ui.button(RichText::new(format!("Delete {n} forever")).color(theme::palette().link_missing));
                 rec(rects, "mail:forever-confirm", &r);
                 if r.clicked() {
                     yes = true;
@@ -1237,10 +1237,10 @@ fn security_strip(ui: &mut Ui, sec: &crate::mail::crypto::Security, rects: &mut 
     }
     for (i, (level, text)) in sec.describe().into_iter().enumerate() {
         let (color, fill) = match level {
-            Level::Good => (Color32::from_rgb(110, 205, 130), Color32::from_rgb(30, 52, 38)),
-            Level::Warn => (Color32::from_rgb(235, 185, 85), Color32::from_rgb(58, 48, 28)),
-            Level::Bad => (theme::LINK_MISSING, Color32::from_rgb(66, 32, 32)),
-            Level::Info => (theme::MUTED, theme::BG_SECONDARY),
+            Level::Good => (theme::palette().good, theme::palette().good_bg),
+            Level::Warn => (theme::palette().warn, theme::palette().warn_bg),
+            Level::Bad => (theme::palette().link_missing, theme::palette().bad_bg),
+            Level::Info => (theme::palette().muted, theme::palette().bg_secondary),
         };
         let r = egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, color)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
             ui.set_width(ui.available_width());

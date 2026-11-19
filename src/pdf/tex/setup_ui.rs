@@ -17,9 +17,6 @@ use crate::theme;
 use eframe::egui::{self, Color32, Context, Ui};
 use std::path::Path;
 
-/// The green of a step that is done.
-pub const GREEN: Color32 = Color32::from_rgb(110, 200, 130);
-
 /// The page of the university library that has the logo and the install scripts for it, as the
 /// README of tuda-ci says (the logo itself is for members of the university).
 pub const LOGO_PAGE: &str = "https://www.ulb.tu-darmstadt.de/finden_nutzen/medien_nutzen/dokumente_erstellen/latex/index.de.jsp";
@@ -55,11 +52,11 @@ fn indicator(ui: &mut Ui, st: &TexState, cfg: &TexConfig) {
             let text = format!("{} {}", if done { "✓".to_string() } else { (i + 1).to_string() }, s.title());
             let t = egui::RichText::new(text);
             ui.label(if s == st.setup.step {
-                t.strong().color(theme::TEXT_STRONG)
+                t.strong().color(theme::palette().text_strong)
             } else if done {
-                t.color(GREEN)
+                t.color(theme::palette().ok_text)
             } else {
-                t.color(theme::MUTED)
+                t.color(theme::palette().muted)
             });
         }
     });
@@ -68,7 +65,7 @@ fn indicator(ui: &mut Ui, st: &TexState, cfg: &TexConfig) {
 
 /// A line that says something is done.
 fn done_line(ui: &mut Ui, text: impl Into<String>) {
-    ui.label(egui::RichText::new(text).color(GREEN));
+    ui.label(egui::RichText::new(text).color(theme::palette().ok_text));
 }
 
 /// What the last job said, when it failed or when it has something to add.
@@ -286,7 +283,7 @@ fn details_step(ui: &mut Ui, st: &mut TexState) {
                 let on = st.setup.details.accent == s.code;
                 let colour = Color32::from_rgb(s.rgb[0], s.rgb[1], s.rgb[2]);
                 let text = egui::RichText::new(&s.code).size(11.0).color(contrast(s.rgb));
-                let stroke = if on { egui::Stroke::new(2.5, theme::ACCENT) } else { egui::Stroke::new(1.0, theme::BORDER) };
+                let stroke = if on { egui::Stroke::new(2.5, theme::palette().accent) } else { egui::Stroke::new(1.0, theme::palette().border) };
                 if ui.add(egui::Button::new(text).fill(colour).stroke(stroke).min_size(egui::vec2(34.0, 24.0))).on_hover_text(format!("{} (#{:02X}{:02X}{:02X})", s.code, s.rgb[0], s.rgb[1], s.rgb[2])).clicked() {
                     st.setup.details.accent = s.code.clone();
                 }

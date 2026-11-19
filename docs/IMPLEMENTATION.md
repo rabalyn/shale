@@ -94,7 +94,7 @@ both pace by it.
 | `src/graph.rs` | Force-directed graph used for the global graph and the local graph. |
 | `src/config.rs`, `src/config/text.rs` | Settings saved as commented TOML to `~/.config/shale/config.toml` (CFG-009). |
 | `src/settings_file.rs` | The settings file as a tab: editing, saving, picking up outside changes (CFG-011 to CFG-014). |
-| `src/theme.rs` | Colours and egui style. |
+| `src/theme.rs` | The palette of the theme (`Palette`, read with `palette()`) and the egui style built from it. |
 
 Data stays plain: notes are `.md` files and drawings are `.excalidraw` JSON files (the open
 Excalidraw scene format, `type: "excalidraw", version: 2`). Hidden folders (starting with `.`)

@@ -150,7 +150,7 @@ pub struct ReaderFolds<'a> {
 pub fn marker_button(ui: &mut Ui, id: egui::Id, rect: Rect, folded: bool) -> bool {
     let painter = ui.painter().with_clip_rect(ui.clip_rect());
     let resp = ui.interact(rect, id, Sense::click());
-    let colour = if resp.hovered() { theme::TEXT } else { theme::MUTED };
+    let colour = if resp.hovered() { theme::palette().text } else { theme::palette().muted };
     let c = rect.center();
     let tri = if folded { vec![c + Vec2::new(-2.5, -4.0), c + Vec2::new(-2.5, 4.0), c + Vec2::new(3.5, 0.0)] } else { vec![c + Vec2::new(-4.0, -2.5), c + Vec2::new(4.0, -2.5), c + Vec2::new(0.0, 3.5)] };
     painter.add(Shape::convex_polygon(tri, colour, Stroke::NONE));
@@ -401,11 +401,11 @@ impl FoldUi {
             }
             let kind = frame.folded.iter().map(|&i| &frame.blocks[i]).filter(|b| b.header == header).max_by_key(|b| b.end).map_or(FoldKind::Heading, |b| b.kind);
             let label = crate::fold::badge_label(kind, frame.mail, n);
-            let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.8).max(9.0)), theme::MUTED);
+            let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.8).max(9.0)), theme::palette().muted);
             let rect = Rect::from_center_size(Pos2::new(end.min.x + 10.0 + (g.size().x + 10.0) / 2.0, end.center().y), g.size() + Vec2::new(10.0, 2.0));
             let resp = ui.interact(rect, id.with(("fold-badge", header)), Sense::click());
-            painter.rect_filled(rect, 4.0, if resp.hovered() { theme::BG_ACTIVE } else { theme::BG_SECONDARY });
-            painter.galley(rect.center() - g.size() / 2.0, g, theme::MUTED);
+            painter.rect_filled(rect, 4.0, if resp.hovered() { theme::palette().bg_active } else { theme::palette().bg_secondary });
+            painter.galley(rect.center() - g.size() / 2.0, g, theme::palette().muted);
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
@@ -428,7 +428,7 @@ impl FoldUi {
                 };
                 let hit = Rect::from_min_max(Pos2::new(pos.x, row.min.y), Pos2::new(area.right(), row.max.y));
                 let resp = ui.interact(hit, id.with("fold-summary"), Sense::click());
-                let colour = if resp.hovered() { theme::TEXT } else { theme::MUTED };
+                let colour = if resp.hovered() { theme::palette().text } else { theme::palette().muted };
                 let g = painter.layout_no_wrap(label, egui::FontId::proportional((base * 0.9).max(9.0)), colour);
                 painter.with_clip_rect(hit.intersect(clip)).galley(Pos2::new(pos.x, row.center().y - g.size().y / 2.0), g, colour);
                 if resp.hovered() {

@@ -289,7 +289,7 @@ mod tests {
             let item = ui.label("An item");
             theme::section(ui, "A section");
             let next = ui.label("Its first item");
-            let heading_height = ui.label(egui::RichText::new("A section").color(theme::MUTED)).rect.height();
+            let heading_height = ui.label(egui::RichText::new("A section").color(theme::palette().muted)).rect.height();
             // item, SECTION_GAP, heading, ITEM_GAP, next item
             let rest = next.rect.top() - item.rect.bottom() - heading_height;
             gaps = (rest - theme::ITEM_GAP, theme::ITEM_GAP);

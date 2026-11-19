@@ -413,7 +413,7 @@ pub struct ShaleApp {
 
 impl ShaleApp {
     pub fn new(cc: &eframe::CreationContext<'_>, opts: Options, handover: Option<crate::instance::Handover>) -> Self {
-        theme::apply(&cc.egui_ctx);
+        theme::use_palette(&cc.egui_ctx, theme::Palette::shale());
         if opts.screenshot.is_some() {
             // no fades, no scroll easing and a steady text cursor: a picture shows the end state,
             // whatever the speed of the machine (DEV-007: two runs give the same bytes)
@@ -2946,7 +2946,7 @@ pub fn graph_click(app_actions: &mut Vec<Action>, c: GraphClick) {
 }
 
 pub fn muted(t: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(t).color(theme::MUTED)
+    egui::RichText::new(t).color(theme::palette().muted)
 }
 
 #[cfg(test)]

@@ -104,7 +104,7 @@ fn size_row(ui: &mut Ui, l: &scan::Line) {
     ui.end_row();
     if let Some(p) = &l.problem {
         ui.label("");
-        ui.label(RichText::new(p).color(theme::LINK_MISSING).size(12.0));
+        ui.label(RichText::new(p).color(theme::palette().link_missing).size(12.0));
         ui.end_row();
     }
 }
@@ -121,7 +121,7 @@ fn saved_ui(ui: &mut Ui, u: &DataUsage, out: &mut Vec<Ask>) {
             return;
         }
         Some(Err(e)) => {
-            ui.label(RichText::new(format!("Could not count: {e}")).color(theme::LINK_MISSING));
+            ui.label(RichText::new(format!("Could not count: {e}")).color(theme::palette().link_missing));
             return;
         }
         Some(Ok(s)) => s,
@@ -228,7 +228,7 @@ pub fn footer(ui: &mut Ui, u: &mut DataUsage) -> Vec<Ask> {
     let mut out = vec![];
     if let Some(id) = u.confirm {
         if let Some(t) = id.confirm_text() {
-            ui.label(RichText::new(format!("{}: {t}", id.name())).color(theme::LINK_MISSING));
+            ui.label(RichText::new(format!("{}: {t}", id.name())).color(theme::palette().link_missing));
         }
         ui.horizontal(|ui| {
             if ui.button(format!("Yes, {}", id.clear_label().to_lowercase())).clicked() {

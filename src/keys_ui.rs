@@ -181,7 +181,7 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
         crate::theme::prose(ui, muted(n));
     }
     if let Some(e) = &d.error {
-        ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
+        ui.label(RichText::new(e.as_str()).color(theme::palette().link_missing));
     }
     let r = ui.button("Reset all");
     d.rects.push(("reset-all".into(), r.rect));
@@ -210,11 +210,11 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
                 match &d.recording {
                     Some((a, chords)) if *a == def.action => {
                         let typed = Binding(chords.clone()).display();
-                        ui.label(RichText::new(if chords.is_empty() { "press the keys…".to_string() } else { typed }).color(theme::ACCENT));
+                        ui.label(RichText::new(if chords.is_empty() { "press the keys…".to_string() } else { typed }).color(theme::palette().accent));
                     }
                     _ => {
                         let text = keys.display(def.action);
-                        ui.label(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::ACCENT) });
+                        ui.label(if keys.is_default(def.action) { RichText::new(text) } else { RichText::new(format!("{text}  (changed)")).color(theme::palette().accent) });
                     }
                 }
                 ui.horizontal(|ui| {
@@ -264,7 +264,7 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
 }
 
 fn muted(t: impl Into<String>) -> RichText {
-    RichText::new(t).color(theme::MUTED)
+    RichText::new(t).color(theme::palette().muted)
 }
 
 #[cfg(test)]

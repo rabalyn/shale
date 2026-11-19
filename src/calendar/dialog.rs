@@ -149,7 +149,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
     }
     let mut action = None;
-    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
     // ---- the list
     if d.sources.is_empty() {
         crate::theme::prose(ui, muted("No calendars yet. Add a local one to try things out, or connect a CalDAV account."));
@@ -161,7 +161,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
     egui::Grid::new("cal-sources").num_columns(5).spacing([8.0, 6.0]).show(ui, |ui| {
         for (i, s) in d.sources.iter_mut().enumerate() {
             let (r, resp) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
-            ui.painter().circle_filled(r.center(), 7.0, crate::drawing::parse_color(&s.color).unwrap_or(theme::ACCENT));
+            ui.painter().circle_filled(r.center(), 7.0, crate::drawing::parse_color(&s.color).unwrap_or(theme::palette().accent));
             if rec(format!("color:{i}"), resp.on_hover_text("Click to change the colour")).clicked() {
                 let pos = PALETTE.iter().position(|c| c.eq_ignore_ascii_case(&s.color)).map(|p| p + 1).unwrap_or(0);
                 s.color = PALETTE[pos % PALETTE.len()].to_string();
@@ -300,7 +300,7 @@ pub fn show(ui: &mut Ui, d: &mut CalendarDialog, store: &CalendarStore) -> Optio
                 rec(format!("found:{i}"), ui.checkbox(on, &c.name)).on_hover_text(&c.url);
                 // the password goes wherever the calendar is: say so when that's another server
                 if !dav::same_server(&c.url, &entered) {
-                    ui.label(egui::RichText::new(format!("on {}", dav::host_of(&c.url))).size(12.0).color(theme::LINK_MISSING))
+                    ui.label(egui::RichText::new(format!("on {}", dav::host_of(&c.url))).size(12.0).color(theme::palette().link_missing))
                         .on_hover_text("This calendar is on another server than the address you entered; your user name and password will be sent there.");
                 }
                 if c.read_only {
@@ -923,7 +923,7 @@ fn date_picker(ui: &mut Ui, key: &str, text: &mut String, monday_first: bool, re
         egui::Grid::new(id.with("grid")).spacing([2.0, 2.0]).show(ui, |ui| {
             for c in 0..7 {
                 let wd = (c + if monday_first { 0 } else { 6 }) % 7;
-                ui.label(egui::RichText::new(t::WEEKDAYS[wd]).size(11.0).color(theme::MUTED));
+                ui.label(egui::RichText::new(t::WEEKDAYS[wd]).size(11.0).color(theme::palette().muted));
             }
             ui.end_row();
             for w in 0..6 {
@@ -936,7 +936,7 @@ fn date_picker(ui: &mut Ui, key: &str, text: &mut String, monday_first: bool, re
                         label = label.strong();
                     }
                     if !in_month {
-                        label = label.color(theme::MUTED);
+                        label = label.color(theme::palette().muted);
                     }
                     let r = ui.add_sized([28.0, 20.0], egui::Button::selectable(sel == Some(day), label));
                     found.push((format!("pick-day:{}", date_text(day)), r.rect));
@@ -983,7 +983,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
     if saving {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
-    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
     ui.add_enabled_ui(!saving, |ui| {
         egui::Grid::new("event-dialog").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
             ui.label(muted("Title"));
@@ -1008,7 +1008,7 @@ pub fn show_event(ui: &mut Ui, d: &mut EventDialog, store: &mut CalendarStore) -
                     } else {
                         "CalDAV"
                     };
-                    let label = egui::RichText::new(format!("● {}   ({kind})", s.name)).color(crate::drawing::parse_color(&s.color).unwrap_or(theme::TEXT));
+                    let label = egui::RichText::new(format!("● {}   ({kind})", s.name)).color(crate::drawing::parse_color(&s.color).unwrap_or(theme::palette().text));
                     if rec(&format!("cal:{}", s.name), ui.add_enabled((!read_only && !one_date) || d.calendar == s.id, egui::Button::selectable(d.calendar == s.id, label))).clicked() {
                         d.calendar = s.id.clone();
                         d.error = None;
@@ -1231,9 +1231,9 @@ pub fn event_footer(ui: &mut Ui, d: &mut EventDialog, store: &CalendarStore) -> 
     let saving = d.is_saving();
     let mut res = None;
     let mut save = false;
-    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
     if let Some(e) = &d.error {
-        ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING)).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(e).color(theme::palette().link_missing)).wrap());
     }
     ui.horizontal(|ui| {
         let label = if d.original.as_ref().map(|(s, _)| *s != d.calendar).unwrap_or(false) { "Move here" } else { "Save" };

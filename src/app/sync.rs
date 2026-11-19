@@ -372,7 +372,7 @@ impl ShaleApp {
     pub(crate) fn sync_settings_ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
         self.sync.rects.clear();
-        ui.label(egui::RichText::new("Git sync").color(theme::MUTED));
+        ui.label(egui::RichText::new("Git sync").color(theme::palette().muted));
         let Some(root) = self.vault.as_ref().map(|v| v.root.clone()) else { return false };
         if self.git_version().is_none() {
             crate::theme::paragraph(ui, "git is not installed. Install git to sync this vault with a git repository.");
@@ -457,7 +457,7 @@ impl ShaleApp {
             } else {
                 match &self.sync.last {
                     Some((t, Ok(s))) => muted(format!("Last sync {t}: {s}")),
-                    Some((t, Err(e))) => egui::RichText::new(format!("Last sync {t} failed: {e}")).color(theme::LINK_MISSING),
+                    Some((t, Err(e))) => egui::RichText::new(format!("Last sync {t} failed: {e}")).color(theme::palette().link_missing),
                     None => muted("Not synced yet in this session"),
                 }
             };

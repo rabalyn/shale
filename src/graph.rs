@@ -2,7 +2,7 @@
 
 use crate::theme;
 use crate::vault::{FileKind, GraphNode, Vault};
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -183,12 +183,12 @@ impl GraphView {
                 if ui.button("Fit").clicked() {
                     self.auto_fit = true;
                 }
-                ui.label(egui::RichText::new(format!("{} notes · {} links", self.nodes.len(), self.edges.len())).color(theme::MUTED));
+                ui.label(egui::RichText::new(format!("{} notes · {} links", self.nodes.len(), self.edges.len())).color(theme::palette().muted));
             });
         }
         let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, theme::BG_PRIMARY);
+        painter.rect_filled(rect, 0.0, theme::palette().bg_primary);
 
         for _ in 0..3 {
             if self.energy > 0.05 || self.dragging.is_some() {
@@ -265,11 +265,11 @@ impl GraphView {
         for (a, b) in &self.edges {
             let lit = highlight.map(|h| h == *a || h == *b).unwrap_or(false);
             let col = if lit {
-                theme::ACCENT
+                theme::palette().accent
             } else if highlight.is_some() {
-                Color32::from_gray(50)
+                theme::palette().graph_edge_dim
             } else {
-                Color32::from_gray(78)
+                theme::palette().graph_edge
             };
             painter.line_segment([to_screen(self.pos[*a]), to_screen(self.pos[*b])], Stroke::new(if lit { 1.6 } else { 1.0 }, col));
         }
@@ -280,12 +280,12 @@ impl GraphView {
             let is_current = current_key.as_deref() == Some(n.key.as_str());
             let dim = highlight.is_some() && highlight != Some(i) && !neighbours.contains(&i);
             let mut col = match (n.rel.is_some(), n.kind) {
-                (false, _) => theme::LINK_MISSING.gamma_multiply(0.7),
-                (true, FileKind::Drawing) => Color32::from_rgb(120, 190, 140),
-                _ => Color32::from_gray(170),
+                (false, _) => theme::palette().link_missing.gamma_multiply(0.7),
+                (true, FileKind::Drawing) => theme::palette().graph_node_drawing,
+                _ => theme::palette().graph_node,
             };
             if is_current || highlight == Some(i) {
-                col = theme::ACCENT;
+                col = theme::palette().accent;
             }
             if dim {
                 col = col.gamma_multiply(0.35);
@@ -293,12 +293,12 @@ impl GraphView {
             painter.circle_filled(p, r, col);
             let show_label = zoom > 0.55 || highlight == Some(i) || neighbours.contains(&i) || is_current;
             if show_label && !(compact && dim) {
-                let tc = if dim { theme::MUTED.gamma_multiply(0.5) } else { theme::TEXT };
+                let tc = if dim { theme::palette().muted.gamma_multiply(0.5) } else { theme::palette().text };
                 painter.text(p + Vec2::new(0.0, r + 3.0), Align2::CENTER_TOP, &n.label, FontId::proportional(if compact { 11.0 } else { 12.5 }), tc);
             }
         }
         if self.nodes.is_empty() {
-            painter.text(rect.center(), Align2::CENTER_CENTER, "No linked notes yet", FontId::proportional(13.0), theme::MUTED);
+            painter.text(rect.center(), Align2::CENTER_CENTER, "No linked notes yet", FontId::proportional(13.0), theme::palette().muted);
         }
 
         // interaction

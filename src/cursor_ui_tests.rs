@@ -41,8 +41,8 @@ impl W {
         fn walk(s: &Shape, rects: &mut Vec<Rect>, pipes: &mut usize) {
             match s {
                 Shape::Vec(v) => v.iter().for_each(|s| walk(s, rects, pipes)),
-                Shape::Rect(r) if r.fill == theme::ACCENT || r.fill == theme::ACCENT.gamma_multiply(0.45) => rects.push(r.rect),
-                Shape::LineSegment { points, stroke } if stroke.color == theme::ACCENT && stroke.width == 2.0 && points[0].x == points[1].x => *pipes += 1,
+                Shape::Rect(r) if r.fill == theme::palette().accent || r.fill == theme::palette().accent.gamma_multiply(0.45) => rects.push(r.rect),
+                Shape::LineSegment { points, stroke } if stroke.color == theme::palette().accent && stroke.width == 2.0 && points[0].x == points[1].x => *pipes += 1,
                 _ => {}
             }
         }

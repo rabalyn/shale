@@ -11,7 +11,7 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex, OnceLock};
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 
-/// What a piece of code is; the colour of each comes from `theme::syntax_colour`.
+/// What a piece of code is; the colour of each comes from `Palette::syntax`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Kind {
     Keyword,

@@ -92,10 +92,10 @@ impl ShaleApp {
                 crate::theme::prose(ui, muted(format!("{version}, found at {}", path.display())));
             }
             (Some(Probe::Broken { path, error }), false) => {
-                ui.add(egui::Label::new(egui::RichText::new(format!("{} does not work: {error}", path.display())).color(theme::LINK_MISSING)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new(format!("{} does not work: {error}", path.display())).color(theme::palette().link_missing)).wrap());
             }
             _ => {
-                ui.add(egui::Label::new(egui::RichText::new("pandoc was not found. Install it, then press Check again:").color(theme::LINK_MISSING)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new("pandoc was not found. Install it, then press Check again:").color(theme::palette().link_missing)).wrap());
             }
         }
         if !matches!(self.word.result, Some(Probe::Found { .. })) && !self.word.running() {

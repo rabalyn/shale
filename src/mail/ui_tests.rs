@@ -3045,7 +3045,7 @@ impl W {
     /// Is the cursor colour painted over this control?
     fn cursor_painted_on(&self, key: &str) -> bool {
         let r = self.rect(key);
-        let c = crate::theme::ACCENT.gamma_multiply(0.25);
+        let c = crate::theme::palette().accent.gamma_multiply(0.25);
         self.fills.iter().any(|(f, col)| *col == c && f.intersects(r))
     }
 
