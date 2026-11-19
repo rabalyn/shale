@@ -102,6 +102,16 @@ fn build_026_srcinfo_is_what_makepkg_prints() {
     assert_eq!(String::from_utf8(out.stdout).unwrap(), read("packaging/aur/shale-bin/.SRCINFO"));
 }
 
+// spec: BUILD-026
+#[test]
+fn build_026_update_script_uses_no_gnu_only_sed_in_place() {
+    // BSD sed (macOS) reads the word after `-i` as a backup suffix, so `sed -i -e` fails there
+    let script = read("scripts/aur-update.sh");
+    for l in script.lines().filter(|l| !l.trim_start().starts_with('#')) {
+        assert!(!l.contains("sed -i") && !l.contains("sed --in-place"), "GNU-only sed in scripts/aur-update.sh: {l}");
+    }
+}
+
 /// A copy of the script, Cargo.toml and PKGBUILD in a temp tree, and a PATH with fake tools.
 struct Env {
     base: PathBuf,
