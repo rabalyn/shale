@@ -191,6 +191,10 @@ file has is `added` or `removed`: not an error. `scripts/bench-compare.sh <old> 
 whole round (worktrees, builds, runs, compare) and passes the exit code on; a commit older than
 the harness is exit 2 ("has no benchmark harness").
 
+A scenario's body may change with the harness (a commit that changes what a scenario does shows
+as a difference in it, as `mail.sync.store.large` did when its message generation moved out of the
+timed part): compare two commits that have the same harness, or read such a row with that in mind.
+
 To check a fix: `scripts/bench-compare.sh <commit before the fix> HEAD --profile quick` (or `full`
 for the scenarios `quick` does not have), then read `compare.md` for the scenario you changed and
 for anything that got slower. `shale --bench out.json --filter <id> --iters 20` measures one
