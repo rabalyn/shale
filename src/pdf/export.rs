@@ -287,6 +287,9 @@ impl ExportOptions {
     /// ("serif, justified, line spacing 1.15"); none when the note sets nothing of it.
     pub fn text_properties_label(&self) -> Option<String> {
         let mut parts: Vec<String> = Vec::new();
+        if self.paper_look {
+            parts.push("paper look".into());
+        }
         match self.font {
             FontKind::Serif => parts.push("serif".into()),
             FontKind::Mono => parts.push("mono".into()),
@@ -303,6 +306,12 @@ impl ExportOptions {
         }
         if let Some(Rgba(r, g, b, _)) = self.heading_color {
             parts.push(format!("headings #{r:02x}{g:02x}{b:02x}"));
+        }
+        if !self.heading_bold {
+            parts.push("headings not bold".into());
+        }
+        if let Some(s) = self.heading_sizes {
+            parts.push(format!("heading sizes {}", s.map(|n| n.to_string()).join(" ")));
         }
         (!parts.is_empty()).then(|| parts.join(", "))
     }
@@ -810,10 +819,17 @@ impl<'a> Writer<'a> {
                 }
             }
         }
-        let text_w = match crate::table::stored_widths(&sizes.cols, ncols, self.cw()) {
+        let mut text_w: Vec<f32> = match crate::table::stored_widths(&sizes.cols, ncols, self.cw()) {
             Some(w) => w.iter().map(|w| (w - 2.0 * CELL_PAD_X).max(1.0)).collect(),
             None => crate::table::column_widths(&natural, &least, self.cw() - 2.0 * CELL_PAD_X * ncols as f32),
         };
+        // the paper look: a table spans the full text width like Word's, the columns scaled up in
+        // proportion when they are narrower (PDF-027)
+        let total: f32 = text_w.iter().map(|w| w + 2.0 * CELL_PAD_X).sum();
+        if self.opts.paper_look && total > 0.0 && total < self.cw() {
+            let k = self.cw() / total;
+            text_w.iter_mut().for_each(|w| *w = (*w + 2.0 * CELL_PAD_X) * k - 2.0 * CELL_PAD_X);
+        }
         let lines: Vec<Vec<Vec<Vec<Piece>>>> = rows.iter().map(|row| row.iter().enumerate().map(|(c, ps)| wrap_pieces(ps, text_w[c].max(1.0))).collect()).collect();
         let rows_fit = sizes.rows.len() == lines.len() && sizes.rows.iter().all(|h| h.is_finite());
         let heights: Vec<f32> = lines
@@ -844,9 +860,11 @@ impl<'a> Writer<'a> {
         let y = self.y;
         let mut x = x0;
         for (c, cell) in cells.iter().enumerate() {
-            // paper look: thin black lines and no fill (PDF-024)
-            let (fill, line) = if self.opts.paper_look { (None, (Rgba(0, 0, 0, 255), 0.5)) } else { (header.then_some(Rgba(236, 234, 246, 255)), (Rgba(150, 150, 150, 255), 0.6)) };
-            self.p().rect(x, y, widths[c], height, fill, Some(line));
+            // the paper look draws horizontal rules only, below (PDF-027)
+            if !self.opts.paper_look {
+                let fill = header.then_some(Rgba(236, 234, 246, 255));
+                self.p().rect(x, y, widths[c], height, fill, Some((Rgba(150, 150, 150, 255), 0.6)));
+            }
             let mut top = y + CELL_PAD_Y;
             for line in cell {
                 let size = self.line_size(line);
@@ -861,6 +879,14 @@ impl<'a> Writer<'a> {
                 top += self.line_height(line);
             }
             x += widths[c];
+        }
+        if self.opts.paper_look {
+            let rule = Rgba(0, 0, 0, 255);
+            let right = x0 + widths.iter().sum::<f32>();
+            if header {
+                self.p().line([x0, y], [right, y], rule, 0.5);
+            }
+            self.p().line([x0, y + height], [right, y + height], rule, 0.5);
         }
         self.y += height;
     }
@@ -3268,6 +3294,67 @@ pub(crate) mod tests {
         let plain = paper_page(LOOK_BODY);
         assert!(plain.contains("0.925 0.918 0.965 rg"), "the header fill of a note without print-* keys");
         assert!(plain.contains("0.588 0.588 0.588 RG 0.600 w") && !plain.contains("0.000 0.000 0.000 RG 0.500 w"));
+    }
+
+    // spec: PDF-024, PDF-023
+    #[test]
+    fn the_dialog_line_names_the_paper_look_and_the_heading_weight_and_sizes_pdf_024() {
+        let label = |props: &str| ExportOptions::for_note().with_note_properties(&front(props, "x")).text_properties_label();
+        assert_eq!(ExportOptions::for_note().with_note_properties("# Just a note\n").text_properties_label(), None);
+        assert_eq!(label("print-paper: A4").as_deref(), Some("paper look"));
+        assert_eq!(label("print-heading-weight: normal").as_deref(), Some("paper look, headings not bold"));
+        assert_eq!(label("print-heading-weight: bold").as_deref(), Some("paper look"));
+        assert_eq!(label("print-heading-sizes: \"16 13 12 11 11 11\"").as_deref(), Some("paper look, heading sizes 16 13 12 11 11 11"));
+        assert_eq!(label("print-heading-sizes: \"20 18 16 14 12.5 4\"").as_deref(), Some("paper look, heading sizes 20 18 16 14 12.5 4"));
+        assert_eq!(label("print-heading-sizes: 1 2 3").as_deref(), Some("paper look"), "a bad value is not shown");
+        assert_eq!(
+            label("print-font: serif\nprint-heading-color: \"#1F4E79\"\nprint-heading-weight: normal\nprint-heading-sizes: 16 13 12 11 11 11").as_deref(),
+            Some("paper look, serif, headings #1f4e79, headings not bold, heading sizes 16 13 12 11 11 11")
+        );
+    }
+
+    /// The straight two-point strokes of a page (`x y m x y l S`) as `[x1, y1, x2, y2]`.
+    fn strokes(c: &str) -> Vec<[f32; 4]> {
+        c.lines()
+            .filter(|l| l.ends_with(" l S Q"))
+            .filter_map(|l| {
+                let t: Vec<&str> = l.split_whitespace().collect();
+                let m = t.iter().position(|w| *w == "m")?;
+                let n: Vec<f32> = [t[m - 2], t[m - 1], t[m + 1], t[m + 2]].iter().filter_map(|w| w.parse().ok()).collect();
+                (n.len() == 4).then(|| [n[0], n[1], n[2], n[3]])
+            })
+            .collect()
+    }
+
+    fn text_width_of_page() -> f32 {
+        let o = ExportOptions::for_note();
+        o.page_size()[0] - (o.margins_mm[1] + o.margins_mm[3]) * 72.0 / 25.4
+    }
+
+    // spec: PDF-027
+    #[test]
+    fn a_table_spans_the_text_width_with_horizontal_rules_only_in_the_paper_look_pdf_027() {
+        let text_w = text_width_of_page();
+        let c = paper_page(&front("print-font: sans", "| Ha | Hb |\n|----|----|\n| ca | cb |\n| cc | cd |\n"));
+        let lines = strokes(&c);
+        assert_eq!(lines.len(), 4, "above, under the header, between the rows, at the bottom: {lines:?}");
+        assert!(lines.iter().all(|l| (l[1] - l[3]).abs() < 0.01), "no vertical line: {lines:?}");
+        assert!(lines.iter().all(|l| (l[2] - l[0] - text_w).abs() < 0.5 && (l[0] - lines[0][0]).abs() < 0.01), "full text width {text_w}: {lines:?}");
+        // without the paper look: a grid of boxes (closed paths), no rules
+        let plain = paper_page("| Ha | Hb |\n|----|----|\n| ca | cb |\n");
+        assert!(strokes(&plain).is_empty(), "the grid is boxes");
+        assert!(plain.contains("0.588 0.588 0.588 RG 0.600 w") && plain.contains("0.925 0.918 0.965 rg"));
+    }
+
+    // spec: PDF-027
+    #[test]
+    fn a_table_wider_than_the_text_keeps_its_width_in_the_paper_look_pdf_027() {
+        let text_w = text_width_of_page();
+        let long = words(60);
+        let c = paper_page(&front("print-font: sans", &format!("| Ha | Hb |\n|----|----|\n| {long} | {long} |\n")));
+        let rules = strokes(&c);
+        assert_eq!(rules.len(), 3);
+        assert!(rules.iter().all(|r| (r[2] - r[0] - text_w).abs() < 0.5), "{rules:?}");
     }
 }
 
