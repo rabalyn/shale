@@ -647,6 +647,7 @@ pub struct SetOutput {
 /// `opts` carry the timeout and the cancel flag (TEX-004); its `tex_inputs` are replaced by the set's.
 pub fn compile_with_set(engine: &Engine, set: &SetInfo, main_tex: &str, source: &str, files: &[(&str, &[u8])], opts: Options) -> Result<SetOutput, CompileError> {
     let fail = |m: String| CompileError { headline: m, problems: vec![], log_tail: String::new() };
+    let _stage = tracing::info_span!("flow.tex_export.stage", peer = "disk").entered();
     let work = WorkDir::new().map_err(|e| fail(format!("no temporary folder ({e})")))?;
     work.write(main_tex, source.as_bytes()).map_err(|e| fail(format!("{main_tex} could not be written ({e})")))?;
     for (name, bytes) in files {
@@ -663,7 +664,8 @@ pub fn compile_with_set(engine: &Engine, set: &SetInfo, main_tex: &str, source: 
     if set.dir.join("logo").is_dir() {
         tex_inputs.push(set.dir.join("logo"));
     }
-    let output = compile(engine, work, main_tex, &Options { tex_inputs, ..opts })?;
+    drop(_stage);
+    let output = tracing::info_span!("flow.tex_export.compile", peer = "tex").in_scope(|| compile(engine, work, main_tex, &Options { tex_inputs, ..opts }))?;
     Ok(SetOutput { output, placeholder_logo })
 }
 

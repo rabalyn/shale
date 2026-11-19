@@ -298,7 +298,8 @@ pub fn run_pending(store: &MailStore, connector: &dyn Connector, account: &str) 
     if all.is_empty() {
         return report;
     }
-    let mut client = match connector.connect() {
+    let _flow = tracing::info_span!("flow.mail_ops", peer = "ops").entered();
+    let mut client = match tracing::info_span!("flow.mail_ops.connect", peer = "imap").in_scope(|| connector.connect()) {
         Ok(c) => c,
         Err(e) => {
             let text = e.to_string();
@@ -310,6 +311,7 @@ pub fn run_pending(store: &MailStore, connector: &dyn Connector, account: &str) 
         }
     };
     for group in groups(&all) {
+        let _group = tracing::info_span!("flow.mail_ops.group", peer = "ops").entered();
         let result = crate::jobs::catch(|| exec_group(store, &mut client, &group, &all)).unwrap_or_else(|p| Err(Fail::Refused(format!("an internal error: {p}"))));
         let ids: Vec<i64> = group.iter().map(|p| p.id).collect();
         match result {
@@ -317,7 +319,7 @@ pub fn run_pending(store: &MailStore, connector: &dyn Connector, account: &str) 
                 let mut ops = d.ops;
                 let missing: Vec<Op> = ids.iter().filter(|id| !ops_mention(&ops, **id)).map(|id| Op::PendingDone { id: *id }).collect();
                 ops.extend(missing);
-                match store.commit(ops) {
+                match tracing::info_span!("flow.mail_ops.record_result", peer = "store").in_scope(|| store.commit(ops)) {
                     Ok(()) => {
                         let date = today_string();
                         for rel in &d.archive {
@@ -398,10 +400,10 @@ fn exec_group(store: &MailStore, client: &mut Client, group: &[PendingRow], all:
     uids.sort_unstable();
     uids.dedup();
     match first.kind.as_str() {
-        "flags" => exec_flags(client, &folder, group, &uids, all),
-        "move" | "delete" => exec_move(store, client, &folder, group, &uids),
-        "expunge" => exec_expunge(store, client, &folder, group, &uids),
-        "append" => exec_append(store, client, &folder, group),
+        "flags" => tracing::info_span!("flow.mail_ops.change_flags", peer = "imap").in_scope(|| exec_flags(client, &folder, group, &uids, all)),
+        "move" | "delete" => tracing::info_span!("flow.mail_ops.move", peer = "imap").in_scope(|| exec_move(store, client, &folder, group, &uids)),
+        "expunge" => tracing::info_span!("flow.mail_ops.expunge", peer = "imap").in_scope(|| exec_expunge(store, client, &folder, group, &uids)),
+        "append" => tracing::info_span!("flow.mail_ops.append", peer = "imap").in_scope(|| exec_append(store, client, &folder, group)),
         other => Err(Fail::Refused(format!("an action of kind {other:?} is not known to this version"))),
     }
 }

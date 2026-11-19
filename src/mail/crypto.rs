@@ -445,6 +445,7 @@ pub fn process(g: &Gnupg, raw: &[u8], consent: bool, cancel: &AtomicBool, now: i
     let e = split_raw(raw);
     let from = e.value("from").map(|f| mail::decode_words(&f)).and_then(|f| crate::mail::gpg::address_in(&f));
     let ctx = Ctx { g, consent, cancel, from_addr: from };
+    let _flow = tracing::info_span!("flow.mail_crypto_read", peer = "mail").entered();
     let mut sec = Security::new();
     sec.checked = now;
     let mut decrypted = false;
@@ -490,7 +491,7 @@ fn analyze(ctx: &Ctx<'_>, entity: &[u8], depth: usize, sec: &mut Security, decry
             None
         }
         Structure::Signed { standard, signed, signature, scope } => {
-            match ctx.g.verify_detached(standard, &signature, &signed, ctx.cancel) {
+            match tracing::info_span!("flow.mail_crypto_read.verify", peer = "gpg").in_scope(|| ctx.g.verify_detached(standard, &signature, &signed, ctx.cancel)) {
                 Ok(sigs) if sigs.is_empty() => sec.notes.push(format!("The {} signature could not be read, so it is not checked.", standard.label())),
                 Ok(sigs) => add_signatures(ctx, sec, standard, sigs, scope),
                 Err(e) => record_error(sec, &e),
@@ -507,7 +508,7 @@ fn analyze(ctx: &Ctx<'_>, entity: &[u8], depth: usize, sec: &mut Security, decry
                 sec.encryption = Encryption::NeedsConsent;
                 return None;
             }
-            match ctx.g.decrypt(standard, &data, ctx.cancel) {
+            match tracing::info_span!("flow.mail_crypto_read.decrypt", peer = "gpg").in_scope(|| ctx.g.decrypt(standard, &data, ctx.cancel)) {
                 Err(e) => {
                     sec.encryption = Encryption::Failed(gpg_words(&e));
                     if let GpgError::Missing(_) = e {
@@ -530,7 +531,7 @@ fn analyze(ctx: &Ctx<'_>, entity: &[u8], depth: usize, sec: &mut Security, decry
                 }
             }
         }
-        Structure::OpaqueSigned { data } => match ctx.g.extract_signed(CryptoStandard::Smime, &data, ctx.cancel) {
+        Structure::OpaqueSigned { data } => match tracing::info_span!("flow.mail_crypto_read.extract_signed", peer = "gpg").in_scope(|| ctx.g.extract_signed(CryptoStandard::Smime, &data, ctx.cancel)) {
             Err(e) => {
                 record_error(sec, &e);
                 None
@@ -547,7 +548,7 @@ fn analyze(ctx: &Ctx<'_>, entity: &[u8], depth: usize, sec: &mut Security, decry
             }
         },
         Structure::InlineSigned { block, outside_text } => {
-            match ctx.g.verify_inline(CryptoStandard::OpenPgp, &block, ctx.cancel) {
+            match tracing::info_span!("flow.mail_crypto_read.verify", peer = "gpg").in_scope(|| ctx.g.verify_inline(CryptoStandard::OpenPgp, &block, ctx.cancel)) {
                 Ok(sigs) => add_signatures(ctx, sec, CryptoStandard::OpenPgp, sigs, Scope::Inline),
                 Err(e) => record_error(sec, &e),
             }
@@ -561,7 +562,7 @@ fn analyze(ctx: &Ctx<'_>, entity: &[u8], depth: usize, sec: &mut Security, decry
                 sec.encryption = Encryption::NeedsConsent;
                 return None;
             }
-            match ctx.g.decrypt(CryptoStandard::OpenPgp, &block, ctx.cancel) {
+            match tracing::info_span!("flow.mail_crypto_read.decrypt", peer = "gpg").in_scope(|| ctx.g.decrypt(CryptoStandard::OpenPgp, &block, ctx.cancel)) {
                 Err(e) => {
                     sec.encryption = Encryption::Failed(gpg_words(&e));
                     None

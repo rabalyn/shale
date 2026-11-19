@@ -13,8 +13,33 @@ use super::writer_tests::{fields, rich_assets, temp_vault, RICH_NOTE};
 use crate::pdf::export::ExportOptions;
 use std::path::Path;
 
+/// Check the diagram of one flow against its block in `docs/dataflow/<doc>` (DEV-026, DEV-028): the
+/// spans named like the flow's root are found in a recording wherever they lie, and only the steps
+/// named after the flow itself stay (what other flows did meanwhile is their own diagram).
+pub(super) fn verify_flow(forest: &[crate::dataflow::Node], root: &str, flow: &str, doc: &str) {
+    use crate::dataflow::Node;
+    fn own(nodes: &[Node], prefix: &str) -> Vec<Node> {
+        nodes.iter().filter(|n| n.name.starts_with(prefix)).map(|n| Node { children: own(&n.children, prefix), ..n.clone() }).collect()
+    }
+    fn find(nodes: &[Node], root: &str, out: &mut Vec<Node>) {
+        for n in nodes {
+            if n.name == root {
+                out.push(Node { children: own(&n.children, &format!("{root}.")), ..n.clone() });
+            } else {
+                find(&n.children, root, out);
+            }
+        }
+    }
+    let mut mine = Vec::new();
+    find(forest, root, &mut mine);
+    assert!(!mine.is_empty(), "the run recorded no {root}");
+    crate::dataflow::verify(&Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow").join(doc), flow, &crate::dataflow::render_mermaid(&mine));
+}
+
 /// Export a note as a kind of the imported set, in a language, and compile it. Returns the PDF.
 fn export(note: &str, kind_id: &str, lang: Language, given: &[(&str, &str)], toc: bool) -> (Vec<u8>, Document) {
+    // the root of the flow is the caller (the export dialog, DEV-028)
+    let _flow = tracing::info_span!("flow.tex_export", peer = "export").entered();
     let what = format!("kind {kind_id}, {}", lang.code());
     let assets = rich_assets();
     let files: Vec<(&str, &[u8])> = assets.iter().map(|(n, b)| (*n, b.as_slice())).collect();
@@ -162,13 +187,16 @@ fn tex_env_slides_have_a_page_for_the_title_and_one_for_every_frame() {
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_letter_has_its_recipient_subject_and_text() {
     let note = "---\nrecipient: |\n  Dr. Grace Hopper\n  Navy Street 1\nsubject: About the compiler\nsender: Ada Lovelace\nsender_address: Analytical Street 2\nopening: Dear Dr. Hopper,\nclosing: Yours sincerely\ndate: 2026-11-17\n---\nThe body of the letter with a table:\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n";
-    for lang in [Language::En, Language::De] {
-        let (pdf, doc) = export(note, "letter", lang, &[], false);
-        let text = squashed(pdf);
-        for want in ["Dr.GraceHopper", "NavyStreet1", "Aboutthecompiler", "DearDr.Hopper,", "Yourssincerely", "Thebodyoftheletter"] {
-            assert!(text.contains(want), "{lang:?}: {want} is not in {text}\n{}", doc.tex);
+    let forest = crate::dataflow::record(|| {
+        for lang in [Language::En, Language::De] {
+            let (pdf, doc) = export(note, "letter", lang, &[], false);
+            let text = squashed(pdf);
+            for want in ["Dr.GraceHopper", "NavyStreet1", "Aboutthecompiler", "DearDr.Hopper,", "Yourssincerely", "Thebodyoftheletter"] {
+                assert!(text.contains(want), "{lang:?}: {want} is not in {text}\n{}", doc.tex);
+            }
         }
-    }
+    });
+    verify_flow(&forest, "flow.tex_export", "tex_export", "tex-export.md");
 }
 
 // spec: TEX-009, TEX-011, TEX-027

@@ -143,14 +143,16 @@ pub struct SendTiming<'a> {
 /// outbox: the draft stays as it was.
 pub fn queue_with(ob: &Outbox, g: &crate::mail::gpg::Gnupg, a: &MailAccount, draft: &Draft, timing: SendTiming, cancel: &std::sync::atomic::AtomicBool) -> Result<Item, String> {
     let SendTiming { undo_secs, now, date } = timing;
-    let plan = crypto_plan(g, a, draft, cancel)?;
+    // only a signed or encrypted mail is a flow of its own (DEV-028)
+    let _flow = (draft.sign || draft.encrypt).then(|| tracing::info_span!("flow.mail_crypto_send", peer = "mail").entered());
+    let plan = tracing::info_span!("flow.mail_crypto_send.plan", peer = "gpg").in_scope(|| crypto_plan(g, a, draft, cancel))?;
     let opts = BuildOptions { now, user_agent: a.user_agent_header, safe_transfer: plan.is_some(), ..BuildOptions::default() };
     let built = crate::mail::compose::finalize(draft, &opts, &|b| match &plan {
-        Some(p) => crate::mail::crypto::apply(g, p, b, cancel),
+        Some(p) => tracing::info_span!("flow.mail_crypto_send.apply", peer = "gpg").in_scope(|| crate::mail::crypto::apply(g, p, b, cancel)),
         None => crate::mail::compose::identity(b),
     })
     .map_err(|e| e.0)?;
-    ob.queue(draft, &built, now, now + i64::from(undo_secs), date)
+    tracing::info_span!("flow.mail_crypto_send.queue", peer = "outbox").in_scope(|| ob.queue(draft, &built, now, now + i64::from(undo_secs), date))
 }
 
 /// What a run of [`send_due`] did.
@@ -179,14 +181,16 @@ pub fn send_due(ob: &Outbox, store: &MailStore, a: &MailAccount, connector: &dyn
         if item.state != State::Queued || item.send_after > now {
             continue;
         }
-        let (item, bytes) = match ob.begin_send(&a.id, &item.id, now) {
+        // one flow per mail that is up for sending (DEV-028)
+        let _flow = tracing::info_span!("flow.mail_send", peer = "send").entered();
+        let (item, bytes) = match tracing::info_span!("flow.mail_send.begin_send", peer = "outbox").in_scope(|| ob.begin_send(&a.id, &item.id, now)) {
             Ok(x) => x,
             Err(_) => continue, // taken back, or another run has it
         };
         // from here on the entry says `Sending`; whatever happens, it ends in a state (or the program dies and the next start says Unsure)
         let result = crate::jobs::catch(|| -> Result<String, SmtpError> {
-            let mut smtp = connector.connect()?;
-            let r = smtp.send(&item.from, &item.recipients, &bytes);
+            let mut smtp = tracing::info_span!("flow.mail_send.connect", peer = "smtp").in_scope(|| connector.connect())?;
+            let r = tracing::info_span!("flow.mail_send.deliver", peer = "smtp").in_scope(|| smtp.send(&item.from, &item.recipients, &bytes));
             if r.is_ok() {
                 smtp.quit();
             }
@@ -194,7 +198,7 @@ pub fn send_due(ob: &Outbox, store: &MailStore, a: &MailAccount, connector: &dyn
         })
         .unwrap_or_else(|p| Err(SmtpError::Unsure(format!("an internal error while sending: {p}"))));
         match result {
-            Ok(_) => match ob.finish(&a.id, &item.id, Outcome::Sent, now) {
+            Ok(_) => match tracing::info_span!("flow.mail_send.finish", peer = "outbox").in_scope(|| ob.finish(&a.id, &item.id, Outcome::Sent, now)) {
                 Ok(done) => {
                     report.sent.push(done.id.clone());
                     copy_to_sent(ob, store, a, &done, &bytes, now, &mut report);
@@ -218,7 +222,7 @@ pub fn send_due(ob: &Outbox, store: &MailStore, a: &MailAccount, connector: &dyn
 /// After a send: the local Sent copy and the append (MAIL-141). Accounts whose server keeps sent mail itself skip it.
 fn copy_to_sent(ob: &Outbox, store: &MailStore, a: &MailAccount, item: &Item, bytes: &[u8], now: i64, report: &mut SendReport) {
     if !a.server_stores_sent {
-        match ops::record_sent_copy(store, &a.id, bytes, now) {
+        match tracing::info_span!("flow.mail_send.record_sent_copy", peer = "store").in_scope(|| ops::record_sent_copy(store, &a.id, bytes, now)) {
             Ok(Some(_)) => {}
             Ok(None) => report.notes.push("The mail was sent. This account has no Sent folder that Shale knows of, so no copy was saved (sync the account or use “Test connection” so that its folders are known).".into()),
             Err(e) => {
@@ -228,7 +232,7 @@ fn copy_to_sent(ob: &Outbox, store: &MailStore, a: &MailAccount, item: &Item, by
             }
         }
     }
-    if let Err(e) = ob.mark_copy_done(&a.id, &item.id) {
+    if let Err(e) = tracing::info_span!("flow.mail_send.mark_copy_done", peer = "outbox").in_scope(|| ob.mark_copy_done(&a.id, &item.id)) {
         report.notes.push(format!("the Sent copy was recorded, but the outbox could not say so: {e}"));
     }
 }
