@@ -121,6 +121,7 @@ mod vault_check;
 mod vault_path;
 mod vault_state;
 mod vim;
+mod virtual_list;
 
 use eframe::egui;
 use std::path::PathBuf;

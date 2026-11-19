@@ -669,8 +669,7 @@ impl ShaleApp {
                     });
                     ui.add_space(10.0);
                     let q = self.tasks.query.to_lowercase();
-                    let mut shown = 0;
-                    let mut current_note: Option<PathBuf> = None;
+                    let mut current_note: Option<&PathBuf> = None;
                     let mut list: Vec<_> = all
                         .iter()
                         .filter(|(_, t)| self.tasks.show_done || !t.done)
@@ -680,44 +679,58 @@ impl ShaleApp {
                     if self.tasks.only_due {
                         list.sort_by(|a, b| a.1.due.cmp(&b.1.due));
                     }
+                    // the rows: a heading where the note changes, then its tasks
+                    let mut rows: Vec<(&PathBuf, Option<&markdown::Task>)> = Vec::with_capacity(list.len() * 2);
                     for (rel, t) in list {
-                        if !self.tasks.only_due && current_note.as_ref() != Some(rel) {
-                            current_note = Some(rel.clone());
+                        if !self.tasks.only_due && current_note != Some(rel) {
+                            current_note = Some(rel);
+                            rows.push((rel, None));
+                        }
+                        rows.push((rel, Some(t)));
+                    }
+                    let shown = rows.iter().filter(|r| r.1.is_some()).count();
+                    let only_due = self.tasks.only_due;
+                    let actions = &mut self.actions;
+                    self.tasks.rows.show(ui, rows.len(), 24.0, |ui, i| {
+                        let (rel, task) = rows[i];
+                        let Some(t) = task else {
                             ui.add_space(8.0);
                             let name = v.file(rel).map(|f| f.display_name()).unwrap_or_default();
                             let folder = rel.parent().map(rel_to_string).filter(|s| !s.is_empty());
                             ui.horizontal(|ui| {
                                 if ui.add(egui::Label::new(egui::RichText::new(&name).size(15.0).color(theme::TEXT_STRONG)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                                    self.actions.push(Action::Open { rel: rel.clone(), new_tab: false });
+                                    actions.push(Action::Open { rel: rel.clone(), new_tab: false });
                                 }
                                 if let Some(f) = folder {
                                     ui.label(muted(f).size(12.0));
                                 }
                             });
-                        }
-                        shown += 1;
-                        ui.horizontal(|ui| {
-                            ui.add_space(t.indent as f32 * 8.0);
-                            let mut d = t.done;
-                            if ui.checkbox(&mut d, "").on_hover_text("Tick off (saved to the note)").clicked() {
-                                self.actions.push(Action::ToggleTask { rel: rel.clone(), offset: t.check_offset });
-                            }
-                            let shown = strip_due(&t.text);
-                            let (link, plain) = crate::reader::inline_line(ui, &shown, v, rel, 14.0, t.done);
-                            if let Some(a) = link {
-                                crate::app::handle_reader_action(&mut self.actions, a, rel);
-                            } else if plain {
-                                self.actions.push(Action::GotoLine { rel: rel.clone(), line: t.line });
-                            }
-                            if let Some(due) = &t.due {
-                                let overdue = today().map(|d| due.as_str() < d.as_str()).unwrap_or(false) && !t.done;
-                                ui.label(egui::RichText::new(format!("due {due}")).size(12.0).color(if overdue { theme::LINK_MISSING } else { theme::ACCENT }));
-                            }
-                            if self.tasks.only_due {
-                                ui.label(muted(v.file(rel).map(|f| f.display_name()).unwrap_or_default()).size(12.0));
-                            }
+                            return;
+                        };
+                        ui.push_id((rel, t.line), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(t.indent as f32 * 8.0);
+                                let mut d = t.done;
+                                if ui.checkbox(&mut d, "").on_hover_text("Tick off (saved to the note)").clicked() {
+                                    actions.push(Action::ToggleTask { rel: rel.clone(), offset: t.check_offset });
+                                }
+                                let shown = strip_due(&t.text);
+                                let (link, plain) = crate::reader::inline_line(ui, &shown, v, rel, 14.0, t.done);
+                                if let Some(a) = link {
+                                    crate::app::handle_reader_action(actions, a, rel);
+                                } else if plain {
+                                    actions.push(Action::GotoLine { rel: rel.clone(), line: t.line });
+                                }
+                                if let Some(due) = &t.due {
+                                    let overdue = today().map(|d| due.as_str() < d.as_str()).unwrap_or(false) && !t.done;
+                                    ui.label(egui::RichText::new(format!("due {due}")).size(12.0).color(if overdue { theme::LINK_MISSING } else { theme::ACCENT }));
+                                }
+                                if only_due {
+                                    ui.label(muted(v.file(rel).map(|f| f.display_name()).unwrap_or_default()).size(12.0));
+                                }
+                            });
                         });
-                    }
+                    });
                     if shown == 0 {
                         ui.add_space(20.0);
                         ui.label(muted(if all.is_empty() { "No tasks yet. Write “- [ ] something” in any note." } else { "Nothing matches. Everything done? 🎉" }));

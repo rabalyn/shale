@@ -322,6 +322,8 @@ pub struct TasksFilter {
     pub show_done: bool,
     pub query: String,
     pub only_due: bool,
+    /// the heights of the rows of the list, which draws only those in view (PERF-001)
+    pub rows: crate::virtual_list::RowHeights,
 }
 
 pub struct ShaleApp {
