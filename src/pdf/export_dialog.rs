@@ -248,7 +248,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
 pub fn footer(ui: &mut Ui, d: &mut ExportDialog) -> DialogResult {
     let mut result = DialogResult::Open;
     if let Some(e) = &d.error {
-        ui.colored_label(theme::LINK_MISSING, e);
+        crate::theme::problem(ui, e);
     }
     ui.add_space(4.0);
     // LaTeX needs a TeX, a kind and no export running (TEX-016)

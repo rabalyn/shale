@@ -57,7 +57,7 @@ impl ShaleApp {
     pub fn post_index_settings(&mut self, ui: &mut Ui) {
         ui.label(eframe::egui::RichText::new("Post search index").color(crate::theme::MUTED));
         let n = self.social.index.count(None);
-        ui.label(super::muted(format!("{n} posts from your feeds can be found by the search. It is a cache and fills again as feeds load.")).size(12.0));
+        crate::theme::hint(ui, format!("{n} posts from your feeds can be found by the search. It is a cache and fills again as feeds load."));
         if self.social.confirm_clear {
             ui.label("Clear the post search index?");
             ui.horizontal(|ui| {

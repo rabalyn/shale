@@ -1,7 +1,7 @@
 //! The Sync tab (git) and the Calendar tab.
 
 use super::Asks;
-use crate::app::{muted, ShaleApp};
+use crate::app::ShaleApp;
 use eframe::egui::Ui;
 
 impl ShaleApp {
@@ -14,7 +14,7 @@ impl ShaleApp {
             if ui.button("Calendars…").on_hover_text("Add local calendars or CalDAV accounts").clicked() {
                 asks.calendars = true;
             }
-            ui.label(muted(format!("{} configured", self.cfg.calendars.len())).size(12.0));
+            crate::theme::hint(ui, format!("{} configured", self.cfg.calendars.len()));
         });
         ui.checkbox(&mut self.cfg.week_starts_monday, "Calendar weeks start on Monday (otherwise Sunday)").changed()
     }

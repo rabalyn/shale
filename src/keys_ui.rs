@@ -176,10 +176,10 @@ pub fn show(ui: &mut Ui, d: &mut KeyDialog, keys: &mut Keymap) -> bool {
         let clashes = if keys.check_rules(*a, &b).is_ok() { keys.clashes_of(*a, &b) } else { vec![] };
         (!clashes.is_empty()).then(|| format!("{} would clash with {}. Enter then asks whether to overwrite it.", b.display(), names(&clashes)))
     });
-    ui.label(muted("Press Change (replaces the keys) or Add (one more), then the keys: one key or chord, or several in a row (a sequence). Enter saves, Esc cancels."));
+    crate::theme::prose(ui, muted("Press Change (replaces the keys) or Add (one more), then the keys: one key or chord, or several in a row (a sequence). Enter saves, Esc cancels."));
     if let Some(n) = note {
         ui.add_space(4.0);
-        ui.label(muted(n));
+        crate::theme::prose(ui, muted(n));
     }
     if let Some(e) = &d.error {
         ui.add_space(4.0);
