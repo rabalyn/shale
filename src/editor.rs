@@ -420,6 +420,12 @@ pub fn outline_job(title: &str, links: &[(LinkSpan, bool)], base: f32) -> Layout
     out
 }
 
+/// The selection `(moving end, other end)` as the text box keeps it, so that the keyboard coming back
+/// to the text leaves the cursor at the end it was (`CCursorRange::two` takes the smaller end first).
+fn moving_first(moving: usize, other: usize) -> CCursorRange {
+    CCursorRange { primary: CCursor::new(moving), secondary: CCursor::new(other), h_pos: None }
+}
+
 /// A heading as the outline shows it: [`outline_job`] laid out as a clickable label, with its
 /// formulas painted typeset over the room their hidden TeX has (EDIT-048).
 pub fn outline_label(ui: &mut Ui, job: LayoutJob, base: f32) -> egui::Response {
@@ -757,7 +763,7 @@ impl NoteEditor {
         let n = text.chars().count();
         let (a, b) = (a.min(n), b.min(n));
         let mut state = egui::text_edit::TextEditState::load(ctx, self.id).unwrap_or_default();
-        state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(a), CCursor::new(b))));
+        state.cursor.set_char_range(Some(moving_first(a, b)));
         state.store(ctx, self.id);
         self.last_selection = Some((a, b));
         if self.vim_enabled {
@@ -809,7 +815,7 @@ impl NoteEditor {
         if let Some((a, b)) = self.last_selection {
             let n = text.chars().count();
             let mut state = egui::text_edit::TextEditState::load(ctx, self.id).unwrap_or_default();
-            state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(a.min(n)), CCursor::new(b.min(n)))));
+            state.cursor.set_char_range(Some(moving_first(a.min(n), b.min(n))));
             state.store(ctx, self.id);
         }
     }
@@ -840,6 +846,12 @@ impl NoteEditor {
         crate::editor_preview::line_of(text, markdown::char_to_byte(text, char.unwrap_or(0)))
     }
 
+    /// The key of the main part of a colour button (KEY-015): its current colour is applied as a click on it does (EDIT-054).
+    pub fn key_colour(&mut self, highlight: bool) {
+        let [mark, font] = self.bar.colours();
+        self.key_format(if highlight { crate::format::Cmd::HighlightColour(Some(mark)) } else { crate::format::Cmd::FontColour(Some(font)) });
+    }
+
     /// The key of a toolbar button that opens a popup (KEY-015); the heading menu is greyed out in a cell.
     pub fn key_menu(&mut self, menu: crate::format_bar::Menu) {
         if menu != crate::format_bar::Menu::Heading || self.grid.cell.is_none() {
@@ -866,7 +878,7 @@ impl NoteEditor {
         let normal = self.vim_enabled && self.vim.mode != crate::vim::Mode::Insert;
         // normal mode has a cursor, not a selection
         let sel = if normal { (cs, cs) } else { (cs, ce) };
-        self.last_selection = Some(sel);
+        self.last_selection = Some((sel.1, sel.0));
         self.keep_selection = Some((sel, 3));
         if normal {
             self.vim.reset(text, cs);

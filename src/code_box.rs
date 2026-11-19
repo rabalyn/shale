@@ -130,7 +130,9 @@ pub fn copy_button(ui: &Ui, id: Id, right: f32, y: f32, shown: bool, code: impl 
     let label = copied.then(|| ui.painter().layout_no_wrap("Copied".to_string(), egui::FontId::proportional(11.0), theme::palette().muted));
     let width = 16.0 + label.as_ref().map_or(0.0, |g| g.size().x + 4.0);
     let rect = Rect::from_min_max(Pos2::new(right - width, y - 9.0), Pos2::new(right, y + 9.0));
-    let resp = ui.interact(rect, id, Sense::click());
+    // it takes drags too: a button that only senses clicks leaves the drag to the text box under it, which then
+    // moves its cursor to the pointer for as long as the button is held (EDIT-094)
+    let resp = ui.interact(rect, id, Sense::click_and_drag());
     let colour = if resp.hovered() || copied { theme::palette().text } else { theme::palette().muted };
     let painter = ui.painter();
     let c = Pos2::new(rect.right() - 8.0, y);

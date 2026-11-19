@@ -1867,8 +1867,11 @@ impl ShaleApp {
                 self.tabbar.tabs[active].editor.key_fold(if a == KeyAction::NoteFold { FoldCmd::Fold } else { FoldCmd::Unfold });
             }
             KeyAction::NoteCopyCode if !reading => self.tabbar.tabs[active].editor.key_copy_code(),
-            KeyAction::NoteHighlightColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Highlight),
-            KeyAction::NoteFontColour if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Font),
+            // the main part of a colour button applies its current colour, the ▾ opens the palette (EDIT-054)
+            KeyAction::NoteHighlightColour if bar => self.tabbar.tabs[active].editor.key_colour(true),
+            KeyAction::NoteFontColour if bar => self.tabbar.tabs[active].editor.key_colour(false),
+            KeyAction::NoteHighlightPalette if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Highlight),
+            KeyAction::NoteFontPalette if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Font),
             KeyAction::NoteHeading if bar => self.tabbar.tabs[active].editor.key_menu(crate::format_bar::Menu::Heading),
             _ => {
                 if let Some(cmd) = crate::format_bar::cmd_of(a).filter(|_| bar) {

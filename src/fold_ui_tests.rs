@@ -1290,3 +1290,73 @@ fn edit_079_an_unreadable_entry_in_the_state_file_loses_only_its_folds() {
     let again = crate::vault_state::parse::<crate::vault_state::VaultState>(&crate::vault_state::to_bytes(&state)).unwrap().0;
     assert_eq!(again.folds, state.folds);
 }
+
+impl W {
+    /// The selection as two char indices (moving end, other end).
+    fn selection(&self) -> (usize, usize) {
+        let r = egui::text_edit::TextEditState::load(self.hl.ctx(), self.editor().id).and_then(|s| s.cursor.char_range()).unwrap();
+        (r.primary.index.0, r.secondary.index.0)
+    }
+
+    /// Select `from..to` (chars) with the keyboard in the editor.
+    fn select(&mut self, from: usize, to: usize) {
+        self.cursor_in("intro");
+        let id = self.editor().id;
+        let mut st = egui::text_edit::TextEditState::load(self.hl.ctx(), id).unwrap_or_default();
+        st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(from), egui::text::CCursor::new(to))));
+        st.store(self.hl.ctx(), id);
+        self.hl.frames(&mut self.app, 2);
+    }
+
+    /// A click as a person makes it: the pointer is over the spot, the button is held for a few frames
+    /// (the pointer shakes a little) and let go. The clipboard texts of it.
+    fn held_click_copied(&mut self, p: Pos2) -> Vec<String> {
+        let b = |down| crate::ui_test_support::Headless::button(p, PointerButton::Primary, down);
+        let steps = vec![vec![Event::PointerMoved(p), b(true)], vec![], vec![], vec![], vec![Event::PointerMoved(p + egui::vec2(1.0, 0.0))], vec![b(false)]];
+        self.copied_by(steps)
+    }
+}
+
+// spec: EDIT-112, EDIT-094
+#[test]
+fn edit_112_a_click_held_on_the_copy_button_leaves_the_cursor_and_the_selection_where_they_were() {
+    // the selection outside the block, inside it, and a plain cursor
+    for (from, to) in [(0, 5), (13, 20), (44, 44), (28, 28)] {
+        let mut w = W::new("copy-held", CODE, true);
+        w.select(from, to);
+        let row = w.row_of("let x");
+        let x = w.text_x();
+        w.hover(Pos2::new(x + 30.0, row.center().y));
+        let button = w.copy_button(2).expect("the pointer over the box shows the button");
+        let before = w.selection();
+        let copied = w.held_click_copied(button.center());
+        assert_eq!(copied, vec!["fn main() {}\nlet x = 1;".to_string()], "the button worked");
+        assert_eq!(w.selection(), before, "the selection {from}..{to} is as it was");
+        assert_eq!(w.text(), CODE);
+    }
+}
+
+// spec: EDIT-112, EDIT-074
+#[test]
+fn edit_112_a_click_held_on_a_fold_marker_or_badge_leaves_the_cursor_where_it_was() {
+    let mut w = W::new("marker-held", SECTIONS, true);
+    w.cursor_in("# Two");
+    let at = w.selection();
+    let m = w.marker("# One");
+    let b = |down| crate::ui_test_support::Headless::button(m.center(), PointerButton::Primary, down);
+    for events in [vec![Event::PointerMoved(m.center()), b(true)], vec![], vec![], vec![Event::PointerMoved(m.center() + egui::vec2(1.0, 0.0))], vec![b(false)]] {
+        w.hl.frame(&mut w.app, events);
+    }
+    w.hl.frames(&mut w.app, 3);
+    assert_eq!(w.hidden(), 4, "the marker folded the block");
+    assert_eq!(w.selection(), at, "the marker did not move the cursor");
+    // the badge of the folded block unfolds it, the same way
+    let badge = w.badge(0).expect("a folded block has a badge");
+    let b = |down| crate::ui_test_support::Headless::button(badge.center(), PointerButton::Primary, down);
+    for events in [vec![Event::PointerMoved(badge.center()), b(true)], vec![], vec![], vec![Event::PointerMoved(badge.center() + egui::vec2(1.0, 0.0))], vec![b(false)]] {
+        w.hl.frame(&mut w.app, events);
+    }
+    w.hl.frames(&mut w.app, 3);
+    assert_eq!(w.hidden(), 0, "the badge unfolded it");
+    assert_eq!(w.selection(), at, "the badge did not move the cursor");
+}

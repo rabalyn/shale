@@ -17,6 +17,8 @@ pub struct Palettes<'a> {
     pub font: &'a [[u8; 3]],
     /// the buttons' size as a factor of the base size (the setting "Toolbar button size", EDIT-026)
     pub scale: f32,
+    /// the text box of the note: while a palette is open, the digit keys pick unless another text field has the keyboard
+    pub text: egui::Id,
 }
 
 /// A button with a popup that a key opens (KEY-015).
@@ -387,7 +389,10 @@ impl FormatBar {
         ui.spacing_mut().item_spacing.x = gap;
         let (m, r) = (main.rect, resp.rect);
         ui.painter().line_segment([Pos2::new(r.left(), r.top() + 4.0 * sc), Pos2::new(r.left(), r.bottom() - 4.0 * sc)], Stroke::new(1.0, theme::palette().border));
-        palettes.badges.paint(ui, m.union(r), if mark { Action::NoteHighlightColour } else { Action::NoteFontColour });
+        // the key of the main part sits at its corner, left of the key of the ▾ part (KEY-016)
+        let (apply_key, palette_key) = if mark { (Action::NoteHighlightColour, Action::NoteHighlightPalette) } else { (Action::NoteFontColour, Action::NoteFontPalette) };
+        palettes.badges.paint(ui, Rect::from_min_max(m.min, m.right_bottom() - Vec2::new(8.0 * sc, 0.0)), apply_key);
+        palettes.badges.paint(ui, r, palette_key);
         if open_now {
             egui::Popup::toggle_id(ui.ctx(), egui::Popup::default_response_id(&resp));
         }
@@ -396,11 +401,20 @@ impl FormatBar {
         egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             ui.set_min_width(190.0);
             ui.label(egui::RichText::new(tip).small().color(theme::palette().muted));
+            let presets = if mark { palettes.highlight } else { palettes.font };
+            // the digit keys pick: 1 to 8 the swatches in order, 0 the none button (EDIT-113)
+            match take_digit(ui, palettes.text) {
+                Some(0) => pick = Some(None),
+                Some(n) => pick = presets.get(n - 1).map(|c| Some(*c)).or(pick),
+                None => {}
+            }
             ui.horizontal_wrapped(|ui| {
-                for c in if mark { palettes.highlight } else { palettes.font } {
+                for (n, c) in presets.iter().enumerate().take(MAX_PRESETS) {
                     let (r, sw) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
                     ui.painter().rect_filled(r.shrink(1.0), 4.0, rgb(*c));
                     ui.painter().rect_stroke(r.shrink(1.0), 4.0, Stroke::new(1.0, if sw.hovered() { theme::palette().text_strong } else { theme::palette().border }), egui::StrokeKind::Inside);
+                    let digit = text_galley(ui.painter(), &(n + 1).to_string(), Label::default(), 9.5, if colour_dark(*c) { Color32::BLACK } else { Color32::WHITE });
+                    ui.painter().galley(r.left_top() + Vec2::new(4.0, 2.0), digit, Color32::PLACEHOLDER);
                     let hex = crate::colour_tags::hex(*c);
                     let label = format!("{tip} {hex}");
                     crate::script::hint(&label, r);
@@ -410,7 +424,10 @@ impl FormatBar {
                     }
                 }
             });
-            if ui.button(none_label).clicked() {
+            let none = ui.add(egui::Button::new(none_label).shortcut_text("0"));
+            // the label of the button is its name, without the 0 of its key
+            none.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, none_label));
+            if none.clicked() {
                 pick = Some(None);
             }
             let open = &mut self.picker_open[which];
@@ -437,6 +454,32 @@ impl FormatBar {
         }
         Some(if mark { Cmd::HighlightColour(colour) } else { Cmd::FontColour(colour) })
     }
+}
+
+/// A digit key (0 to 9) pressed this frame without a modifier, taken out of the input together with the
+/// character it types, so that neither the note nor vim-lite gets it. Nothing is taken while a text
+/// field other than the note's own text box has the keyboard (the colour picker's fields, EDIT-113).
+fn take_digit(ui: &Ui, text: egui::Id) -> Option<usize> {
+    let ctx = ui.ctx();
+    // the note's own text boxes: the text, and the box of a table cell being edited (EDIT-030)
+    if ctx.text_edit_focused() && !ctx.memory(|m| m.focused()).is_some_and(|f| f == text || f == crate::table_grid::TableGrid::cell_id(text)) {
+        return None;
+    }
+    ui.input_mut(|i| {
+        let mut digit = None;
+        i.events.retain(|e| match e {
+            egui::Event::Key { key, pressed: true, modifiers, .. } if modifiers.is_none() && key.symbol_or_name().len() == 1 && key.symbol_or_name().as_bytes()[0].is_ascii_digit() => {
+                digit.get_or_insert((key.symbol_or_name().as_bytes()[0] - b'0') as usize);
+                false
+            }
+            _ => true,
+        });
+        let typed = digit?.to_string();
+        if let Some(at) = i.events.iter().position(|e| matches!(e, egui::Event::Text(t) if *t == typed)) {
+            i.events.remove(at);
+        }
+        digit
+    })
 }
 
 fn colour_dark(c: [u8; 3]) -> bool {

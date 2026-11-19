@@ -411,7 +411,7 @@ fn bar_ends(width: f32, scale: f32) -> (egui::Rect, egui::Rect) {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     let mut bar = crate::format_bar::FormatBar::default();
-    let palettes = crate::format_bar::Palettes { badges: &Default::default(), highlight: &[[255, 255, 0]], font: &[[255, 0, 0]], scale };
+    let palettes = crate::format_bar::Palettes { badges: &Default::default(), highlight: &[[255, 255, 0]], font: &[[255, 0, 0]], scale, text: egui::Id::NULL };
     let mut nodes = vec![];
     for _ in 0..3 {
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 400.0))), ..Default::default() };
@@ -814,7 +814,16 @@ use eframe::egui::{Key, Modifiers, Pos2};
 impl Fx {
     /// Press Alt and this key (with the character a system types for it) and let the window settle.
     fn alt_key(&mut self, key: Key, typed: &str) {
-        let events = vec![Event::ModifiersChanged(Modifiers::ALT), Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::ALT }, Event::Text(typed.to_string())];
+        self.chord(Modifiers::ALT, key, typed);
+    }
+
+    /// Alt and Shift and this key (typing its capital).
+    fn alt_shift_key(&mut self, key: Key, typed: &str) {
+        self.chord(Modifiers::ALT | Modifiers::SHIFT, key, typed);
+    }
+
+    fn chord(&mut self, modifiers: Modifiers, key: Key, typed: &str) {
+        let events = vec![Event::ModifiersChanged(modifiers), Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }, Event::Text(typed.to_string())];
         self.hl.frame(&mut self.app, events);
         self.hl.frame(&mut self.app, vec![Event::ModifiersChanged(Modifiers::NONE)]);
         self.hl.frames(&mut self.app, 3);
@@ -921,10 +930,10 @@ fn the_keys_of_the_menu_buttons_open_their_popups_and_new_tab_and_the_menu_key_w
     assert!(fx.has("Heading 2"), "Alt+E opens the heading menu");
     fx.click("Heading 2");
     assert_eq!(fx.text(), "## one two three\n");
-    fx.alt_key(Key::Y, "y");
-    assert!(fx.has("No highlight"), "Alt+Y opens the highlight palette");
-    fx.alt_key(Key::F, "f");
-    assert!(fx.has("Default colour") && !fx.has("No highlight"), "Alt+F opens the font palette instead");
+    fx.alt_shift_key(Key::Y, "Y");
+    assert!(fx.has("No highlight"), "Alt+Shift+Y opens the highlight palette");
+    fx.alt_shift_key(Key::F, "F");
+    assert!(fx.has("Default colour") && !fx.has("No highlight"), "Alt+Shift+F opens the font palette instead");
     egui::Popup::close_all(fx.hl.ctx());
     fx.hl.frames(&mut fx.app, 2);
     fx.alt_key(Key::D, "d");
@@ -1063,4 +1072,187 @@ fn after_a_view_button_or_a_toolbar_button_the_editor_has_the_keyboard_and_the_s
     assert!(fx.has_focus() && fx.selected() == "two");
     fx.alt_key(Key::I, "i");
     assert!(fx.has_focus() && fx.selected() == "two");
+}
+
+// spec: KEY-015, EDIT-054, EDIT-042, EDIT-030
+#[test]
+fn alt_y_and_alt_f_apply_the_current_colour_and_alt_shift_y_and_alt_shift_f_open_the_palettes() {
+    let mut fx = Fx::new("alt-colour", "one two three\n");
+    fx.select(4, 7);
+    fx.alt_key(Key::Y, "y");
+    assert_eq!(fx.text(), "one <mark style=\"background: #FFFF00;\">two</mark> three\n", "what a click on the main part does, and no y typed");
+    assert!(!fx.has("No highlight"), "no palette opened");
+    assert!(fx.has_focus(), "EDIT-042: the keyboard is back in the text");
+    let rel = PathBuf::from(NOTE);
+    let mut text = fx.text();
+    assert!(fx.app.undo.of(&rel).undo(&mut text).is_some());
+    assert_eq!(text, "one two three\n", "one undo step");
+    // a colour picked from the palette is the current colour for the key too
+    fx.select(4, 7);
+    fx.alt_shift_key(Key::Y, "Y");
+    assert!(fx.has("No highlight"), "Alt+Shift+Y opens the palette");
+    assert_eq!(fx.text(), "one <mark style=\"background: #FFFF00;\">two</mark> three\n", "and applies nothing");
+    fx.click("Highlight colour #39FF14");
+    fx.select(0, 3);
+    fx.alt_key(Key::Y, "y");
+    assert!(fx.text().starts_with("<mark style=\"background: #39FF14;\">one</mark>"), "{}", fx.text());
+    // the font colour
+    fx.select(4, 7);
+    fx.alt_key(Key::F, "f");
+    assert!(fx.text().contains("<span style=\"color: #E53E3E;\">"), "{}", fx.text());
+    assert!(!fx.has("Default colour"), "Alt+F opened no palette");
+    fx.alt_shift_key(Key::F, "F");
+    assert!(fx.has("Default colour") && !fx.has("No highlight"), "Alt+Shift+F opens the font palette");
+    // the key of a button that is not there does nothing
+    egui::Popup::close_all(fx.hl.ctx());
+    fx.hl.frames(&mut fx.app, 2);
+    fx.app.cfg.format_toolbar = false;
+    fx.hl.frames(&mut fx.app, 2);
+    let before = fx.text();
+    fx.alt_key(Key::Y, "y");
+    fx.alt_shift_key(Key::Y, "Y");
+    assert_eq!(fx.text(), before);
+    assert!(!egui::Popup::is_any_open(fx.hl.ctx()));
+}
+
+// spec: KEY-015, EDIT-054, EDIT-030
+#[test]
+fn in_a_cell_alt_f_colours_the_cell_text_and_the_palette_key_opens_the_palette() {
+    let mut fx = Fx::table("alt-colour-cell");
+    fx.edit_cell("one two");
+    fx.select_in_cell(4, 7);
+    fx.alt_key(Key::F, "f");
+    assert_eq!(fx.text(), "before\n\n| A | B |\n|---|---|\n| one <span style=\"color: #E53E3E;\">two</span> | x |\n");
+    assert_eq!(fx.editor().editing_cell(), Some((1, 0)), "the cell is still edited");
+    fx.alt_shift_key(Key::Y, "Y");
+    assert!(fx.has("No highlight"), "the palette opens in a cell too");
+    fx.digit(Key::Num2, "2");
+    let second = crate::colour_tags::hex(fx.app.cfg.highlight_colours[1]);
+    assert!(fx.text().contains(&format!("<mark style=\"background: {second};\">")), "a digit picks in a cell too: {}", fx.text());
+    assert!(fx.text().contains("two"), "{}", fx.text());
+    assert_eq!(fx.editor().editing_cell(), Some((1, 0)));
+}
+
+impl Fx {
+    /// A digit key pressed without a modifier, with the character it types.
+    fn digit(&mut self, key: Key, typed: &str) {
+        self.hl.frame(&mut self.app, vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }, Event::Text(typed.to_string())]);
+        self.hl.frames(&mut self.app, 3);
+    }
+}
+
+// spec: EDIT-113, EDIT-054, EDIT-042
+#[test]
+fn in_an_open_palette_the_digit_keys_pick_a_swatch_or_none_and_type_nothing() {
+    let mut fx = Fx::new("digits", "one two three\n");
+    let presets = fx.app.cfg.highlight_colours.clone();
+    assert!(presets.len() >= 3);
+    fx.select(4, 7);
+    // opened by the key: 2 is the second swatch
+    fx.alt_shift_key(Key::Y, "Y");
+    let digits: Vec<String> = fx.hl.text.iter().map(|(t, _)| t.clone()).filter(|t| t.len() == 1 && t.chars().all(|c| c.is_ascii_digit())).collect();
+    for n in 1..=presets.len() {
+        assert!(digits.contains(&n.to_string()), "swatch {n} shows its digit: {digits:?}");
+    }
+    let second = crate::colour_tags::hex(presets[1]);
+    fx.digit(Key::Num2, "2");
+    assert_eq!(fx.text(), format!("one <mark style=\"background: {second};\">two</mark> three\n"), "the second preset, and no 2 typed");
+    assert!(!fx.has("No highlight"), "the palette is closed");
+    assert!(fx.has(&format!("Highlight colour: {second}")), "the swatch is the current colour now");
+    assert!(fx.has_focus(), "EDIT-042");
+    let rel = PathBuf::from(NOTE);
+    let mut text = fx.text();
+    assert!(fx.app.undo.of(&rel).undo(&mut text).is_some());
+    assert_eq!(text, "one two three\n", "one undo step");
+    // 0 takes the colour off and leaves the current colour
+    fx.select(4, 7);
+    fx.alt_shift_key(Key::Y, "Y");
+    fx.digit(Key::Num3, "3");
+    fx.alt_shift_key(Key::Y, "Y");
+    fx.digit(Key::Num0, "0");
+    assert_eq!(fx.text(), "one two three\n", "no highlight");
+    assert!(fx.has(&format!("Highlight colour: {}", crate::colour_tags::hex(presets[2]))), "0 leaves the current colour as it was");
+    // opened by a click, the font palette: 1 is its first swatch
+    fx.click("Font colours…");
+    let first = crate::colour_tags::hex(fx.app.cfg.font_colours[0]);
+    fx.digit(Key::Num1, "1");
+    assert!(fx.text().contains(&format!("<span style=\"color: {first};\">two</span>")), "{}", fx.text());
+    assert!(!fx.has("Default colour"));
+    // a digit no swatch has is taken and does nothing, the palette stays
+    let before = fx.text();
+    fx.click("Font colours…");
+    fx.digit(Key::Num8, "8");
+    assert_eq!(fx.text(), before, "no 8 typed");
+    assert!(fx.has("Default colour"), "still open");
+    egui::Popup::close_all(fx.hl.ctx());
+    fx.hl.frames(&mut fx.app, 2);
+    // with no palette open a digit is typed as ever
+    fx.select(0, 0);
+    fx.digit(Key::Num5, "5");
+    assert!(fx.text().starts_with('5'), "{}", fx.text());
+}
+
+// spec: EDIT-113, EDIT-027
+#[test]
+fn a_digit_picked_in_the_palette_is_no_count_of_vim_lite() {
+    let mut fx = Fx::new("digits-vim", "one two three\n");
+    fx.app.cfg.vim_mode = true;
+    fx.hl.frames(&mut fx.app, 3);
+    fx.select(4, 4);
+    fx.hl.frame(&mut fx.app, vec![Event::Text("0".into())]);
+    fx.hl.frames(&mut fx.app, 2);
+    fx.alt_shift_key(Key::Y, "Y");
+    assert!(fx.has("No highlight"));
+    fx.digit(Key::Num1, "1");
+    assert!(!fx.has("No highlight"), "closed by the pick");
+    let n = fx.text().len();
+    fx.hl.frame(&mut fx.app, vec![Event::Text("x".into())]);
+    fx.hl.frames(&mut fx.app, 2);
+    assert_eq!(fx.text().len(), n - 1, "x deletes one character: the 1 was no count");
+}
+
+// spec: EDIT-113
+#[test]
+fn a_digit_in_the_custom_colour_fields_is_left_to_them() {
+    let mut fx = Fx::new("digits-field", "one two three\n");
+    fx.select(4, 7);
+    fx.click("Highlight colours…");
+    fx.click("Custom colour…");
+    assert!(fx.has("Apply"));
+    // a click on the red field of the picker starts editing it: it has the keyboard
+    let (_, at) = fx.hl.text.iter().find(|(t, _)| t.starts_with("R ")).cloned().expect("the picker shows the red field");
+    fx.hl.click(&mut fx.app, at + egui::vec2(6.0, 6.0), PointerButton::Primary);
+    assert!(fx.hl.ctx().text_edit_focused(), "the field is being edited");
+    fx.digit(Key::Num2, "2");
+    assert_eq!(fx.text(), "one two three\n", "nothing was picked");
+    assert!(fx.has("Apply"), "the palette is still open");
+    assert!(fx.hl.ctx().text_edit_focused(), "the field kept the keyboard and got the digit");
+}
+
+// spec: KEY-016, EDIT-054
+#[test]
+fn the_colour_buttons_show_the_apply_key_at_the_main_part_and_the_shift_key_at_the_caret() {
+    let mut fx = Fx::new("badges-colour", "one two three\n");
+    for mods in [Modifiers::ALT, Modifiers::ALT | Modifiers::SHIFT] {
+        let shown = fx.badges(mods);
+        let at = |t: &str| shown.iter().find(|(s, _)| s == t).unwrap_or_else(|| panic!("no badge {t}: {shown:?}")).1;
+        let main = fx.hl.find_label(&mut fx.app, "Highlight colour: #FFFF00");
+        let caret = fx.hl.find_label(&mut fx.app, "Highlight colours…");
+        assert!(main.expand2(egui::vec2(4.0, 8.0)).contains(at("Y")) && at("Y").x < caret.left() + 2.0, "Y at the main part: {:?} {main:?}", at("Y"));
+        assert!(caret.expand(8.0).contains(at("\u{21e7}Y")) && at("\u{21e7}Y").x > at("Y").x, "⇧Y at the caret: {:?} {caret:?}", at("\u{21e7}Y"));
+        let font_main = fx.hl.find_label(&mut fx.app, "Font colour: #E53E3E");
+        assert!(font_main.expand2(egui::vec2(4.0, 8.0)).contains(at("F")));
+        at("\u{21e7}F");
+        // the other badges stay what they were: the letter only
+        assert!(shown.iter().any(|(t, _)| t == "B") && !shown.iter().any(|(t, _)| t == "\u{21e7}B"));
+    }
+    // the sign of Shift is in a font the badge uses
+    let ctx = fx.hl.ctx().clone();
+    assert!(ctx.fonts_mut(|f| f.has_glyph(&egui::FontId::monospace(crate::key_badges::FONT_SIZE), crate::keys::SHIFT_MARK)));
+    // a rebound key follows, and one without Alt has none
+    fx.app.keymap.set(crate::keys::Action::NoteHighlightPalette, crate::keys::Binding::parse("Alt+Shift+Z").unwrap()).unwrap();
+    let texts: Vec<String> = fx.badges(Modifiers::ALT).into_iter().map(|(t, _)| t).collect();
+    assert!(texts.contains(&"\u{21e7}Z".to_string()) && !texts.contains(&"\u{21e7}Y".to_string()), "{texts:?}");
+    fx.app.keymap.clear(crate::keys::Action::NoteHighlightPalette);
+    assert!(!fx.badges(Modifiers::ALT).iter().any(|(t, _)| t.starts_with('\u{21e7}') && t.ends_with('Z')));
 }

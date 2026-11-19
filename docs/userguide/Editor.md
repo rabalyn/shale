@@ -126,6 +126,12 @@ colour off and keep the button's colour. The **font colour** palette does the sa
 with your own preset colours: edit them under "Font colours" in Settings → Editor → Editing (the
 highlight presets are there too). A new colour on text that already has one replaces it.
 
+With the keyboard: **Alt+Y** (highlight) and **Alt+F** (font colour) apply the button's current colour, like
+a click on its coloured part; **Alt+Shift+Y** and **Alt+Shift+F** open the palette, like the ▾. While a
+palette is open, the digit keys pick: **1** to **8** the swatches in order (each swatch shows its digit),
+**0** "No highlight" / "Default colour". A pick works like a click on it and closes the palette; the digit
+is not typed into the note. Hold Alt to see the keys on the buttons (`Y` on the coloured part, `⇧Y` on the ▾).
+
 The colours are stored in the note as plain HTML, the way Obsidian's colour plugins write it, so
 other editors and renderers show them too:
 
