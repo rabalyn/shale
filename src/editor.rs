@@ -4656,6 +4656,19 @@ mod tests {
         assert_eq!(format_of(&job, text, "\"fooo\"").background, theme::CODE_BG);
     }
 
+    // spec: EDIT-110
+    #[test]
+    fn the_lines_of_an_alignment_wrapper_are_dimmed_markup_and_the_heading_inside_is_still_a_heading() {
+        let text = "<div align=\"center\">\n\n## Middle\n\ntext\n\n</div>\n\n<div align=\"right\">\nlost\n";
+        let job = highlight(text, &[], 15.0);
+        assert_eq!(format_of(&job, text, "<div align=\"center\">").color, theme::FAINT);
+        assert_eq!(format_of(&job, text, "</div>").color, theme::FAINT);
+        assert_ne!(format_of(&job, text, "text").color, theme::FAINT, "what is inside is text");
+        assert!(format_of(&job, text, "Middle").font_id.size > 15.0, "a heading in a wrapper has its size");
+        assert_ne!(format_of(&job, text, "<div align=\"right\">").color, theme::FAINT, "an opening line without a closing one is text");
+        assert_eq!(crate::markdown::find_headings(text).iter().map(|h| h.2.as_str()).collect::<Vec<_>>(), ["Middle"], "the outline lists it");
+    }
+
     // spec: EDIT-029
     #[test]
     fn marks_and_spans_colour_the_text_between_their_dimmed_tags() {

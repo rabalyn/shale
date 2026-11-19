@@ -228,6 +228,11 @@ fn cuts(text: &str, links: &[(LinkSpan, bool)], min: usize) -> Vec<Cut> {
     if text.contains("$$") {
         inside.extend(markdown::find_math(text).into_iter().filter(|m| m.lines.len() > 1).map(|m| m.range));
     }
+    // an alignment wrapper is kept whole in a block (PDF-028): its two lines are formatted together
+    if text.contains("<div") {
+        let lines = markdown::lines_with_offsets(text);
+        inside.extend(markdown::align_blocks(text).into_iter().map(|w| lines[w.open].0..lines[w.close].0 + lines[w.close].1.len()));
+    }
     inside.sort_by_key(|r| r.start);
     let (mut next, mut reach) = (0, 0);
     let (mut in_front, mut in_code, mut after_blank) = (false, false, false);
@@ -304,6 +309,7 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
     let notes = if input.footnotes { markdown::find_footnotes(text) } else { Footnotes::default() };
     let mut in_front = false;
+    let wrappers = markdown::align_blocks(text);
     for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
         let lr = off..off + line.len();
         // YAML front matter at the top
@@ -353,6 +359,10 @@ fn format_chunk(text: &str, input: &Input, defined: &HashSet<String>, fonts: &Ed
                 f.dim = true;
                 f.syn = true
             });
+        }
+        // the lines of an alignment wrapper are markup (PDF-028): dimmed like a rule
+        if markdown::is_align_edge(&wrappers, li) {
+            set(&mut fmts, lr.clone(), |f| f.dim = true);
         }
         if let Some((check, done, _, _)) = markdown::parse_task_line(line) {
             set(&mut fmts, off + indent..off + check + 2, |f| f.marker = true);
@@ -618,6 +628,10 @@ mod tests {
         out.push(NOTE.replacen("tags: [a, b]\n", "tags: [a, b]\n```\n", 1));
         out.push(NOTE.replacen("---\ntitle", "title", 1));
         out.push(format!("intro\n\n{NOTE}"));
+        // an alignment wrapper over several blocks of a note, one with its closing line lost, one in a fence
+        out.push(NOTE.replacen("# Heading one\n", "<div align=\"center\">\n\n# Heading one\n", 1) + "\n</div>\n");
+        out.push(NOTE.replacen("# Heading one\n", "<div align=\"right\">\n\n# Heading one\n", 1));
+        out.push(NOTE.replacen("# Heading one\n", "```\n<div align=\"center\">\n</div>\n```\n# Heading one\n", 1));
         // footnotes: the definition changed or lost, a reference in another block
         out.push(NOTE.replacen("[^1]: The note,", "[^2]: The note,", 1));
         out.push(NOTE.replacen("Heading one\n\nA paragraph", "Heading one\n\nA paragraph[^1]", 1));
@@ -669,6 +683,27 @@ mod tests {
         }
         // and the note really is cut into blocks when they are small
         assert!(cuts(NOTE, &[], 0).len() > 8);
+    }
+
+    // spec: PDF-028, EDIT-109
+    #[test]
+    fn a_wrapper_longer_than_a_block_is_kept_whole_and_both_its_lines_are_dimmed() {
+        let text = format!("intro\n\n<div align=\"center\">\n\n{}</div>\n\nafter\n", "paragraph in the wrapper\n\n".repeat(10));
+        let (links, _) = inputs(&text);
+        let lines = markdown::lines_with_offsets(&text);
+        let close = lines.iter().position(|l| l.1 == "</div>").unwrap();
+        // with blocks of one line, no cut falls between the two lines of the wrapper; the ones around are cut
+        let found = cuts(&text, &links, 0);
+        assert!(found.iter().all(|c| !(2 < c.line && c.line <= close)), "a cut inside the wrapper");
+        assert!(found.len() > 1);
+        // and a cache of the smallest blocks formats like the whole text: both lines dimmed, the text between not
+        let mut cache = FormatCache::with_min_block(0);
+        let (job, _) = cache.highlight(&text, &links, &fonts(), &[], Some(0..0));
+        let dim = |at: usize| job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format.color;
+        assert_eq!(dim(lines[2].0), crate::theme::FAINT, "the opening line");
+        assert_eq!(dim(lines[close].0), crate::theme::FAINT, "the closing line");
+        assert_ne!(dim(lines[4].0), crate::theme::FAINT);
+        check(&mut cache, &text, Some(0..0));
     }
 
     // spec: EDIT-109

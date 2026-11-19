@@ -445,14 +445,34 @@ pub(crate) fn footnote_text_painted(line: &str, links: &[(LinkSpan, bool)], size
 /// room they have in the text (EDIT-048), and one that failed says why on hover (EDIT-049).
 /// `hint` gives an extra tooltip line for a link target (LINK-008, LINK-012).
 fn inline_block(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], maths: &[MathAt], hint: &dyn Fn(&str) -> Option<String>, out: &mut Option<ReaderAction>) -> egui::Response {
+    inline_block_aligned(ui, job, spans, maths, hint, None, out)
+}
+
+/// [`inline_block`] laid out centred, to the right or justified over the width of the column when
+/// `align` says so (PDF-028, EDIT-110).
+fn inline_block_aligned(ui: &mut Ui, job: LayoutJob, spans: &[(Range<usize>, LinkSpan, bool)], maths: &[MathAt], hint: &dyn Fn(&str) -> Option<String>, align: Option<markdown::Align>, out: &mut Option<ReaderAction>) -> egui::Response {
     let mut job = job;
     job.wrap.max_width = ui.available_width();
+    match align {
+        Some(markdown::Align::Center) => job.halign = egui::Align::Center,
+        Some(markdown::Align::Right) => job.halign = egui::Align::RIGHT,
+        Some(markdown::Align::Justify) => job.justify = true,
+        _ => {}
+    }
     let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
-    let (rect, resp) = ui.allocate_exact_size(galley.size(), Sense::click());
-    ui.painter().galley(rect.min, galley.clone(), theme::TEXT);
-    paint_maths(ui, &galley, rect.min, maths);
+    let aligned = matches!(align, Some(markdown::Align::Center | markdown::Align::Right | markdown::Align::Justify));
+    let size = if aligned { Vec2::new(ui.available_width().max(galley.size().x), galley.size().y) } else { galley.size() };
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    // where the galley's origin is: its middle or its right edge when it is laid out around them
+    let anchor = match align {
+        Some(markdown::Align::Center) => Pos2::new(rect.center().x, rect.min.y),
+        Some(markdown::Align::Right) => Pos2::new(rect.right(), rect.min.y),
+        _ => rect.min,
+    };
+    ui.painter().galley(anchor, galley.clone(), theme::TEXT);
+    paint_maths(ui, &galley, anchor, maths);
     if let Some(hp) = ui.input(|i| i.pointer.hover_pos()).filter(|p| rect.contains(*p)) {
-        if let Some(c) = char_under(&galley, rect.min, hp) {
+        if let Some(c) = char_under(&galley, anchor, hp) {
             let byte = markdown::char_to_byte(&galley.job.text, c);
             if let Some(Err(why)) = maths.iter().find(|m| m.range.contains(&byte)).map(|m| &m.formula) {
                 resp.clone().on_hover_text(format!("This formula cannot be typeset: {why}"));
@@ -632,6 +652,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
     let tables = crate::table::find_tables(text);
     let formulas = markdown::find_math(text);
     let page_breaks = markdown::page_break_lines(text);
+    let wrappers = markdown::align_blocks(text);
     // a very large note: what is far from the visible part is not drawn, a space of the height it had is left (EDIT-102)
     let heights = (lines.len() >= CULL_LINES).then(|| {
         let key = HeightsKey { text: crate::fold_ui::hash_of(text), width: ui.available_width().to_bits(), base: base.to_bits(), badges: frame.as_ref().map(|f| f.view.badges.clone()).unwrap_or_default() };
@@ -768,8 +789,15 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                     }
                 }
             }
+            // how the paragraph or heading on this line is laid out (PDF-028): the wrapper it is in
+            let align = markdown::align_at(&wrappers, i);
             if trimmed.is_empty() {
-                ui.add_space(base * 0.6);
+                // the blank line a wrapper has inside, next to its tag, makes no gap (EDIT-110)
+                if !wrappers.iter().any(|b| b.holds(i) && (i == b.open + 1 || i + 1 == b.close)) {
+                    ui.add_space(base * 0.6);
+                }
+            } else if markdown::is_align_edge(&wrappers, i) {
+                // the tag of a wrapper is not shown (EDIT-110)
             } else if page_breaks.contains(&i) {
                 // a page-break marker: a dashed rule with its label (EDIT-065)
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), base * 1.6), egui::Sense::hover());
@@ -796,7 +824,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                     if let Some(n) = extras.numbers.get(&i) {
                         ui.label(egui::RichText::new(n).size(size).color(theme::MUTED));
                     }
-                    inline_block(ui, job, &spans, &maths, &hint, &mut out)
+                    inline_block_aligned(ui, job, &spans, &maths, &hint, align, &mut out)
                 });
                 if extras.scroll_to == Some(i) {
                     shown.response.scroll_to_me(Some(egui::Align::TOP));
@@ -837,7 +865,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
                 });
             } else {
                 let (job, spans, maths) = inline_job(line, &line_links, base, theme::TEXT, false);
-                inline_block(ui, job, &spans, &maths, &hint, &mut out);
+                inline_block_aligned(ui, job, &spans, &maths, &hint, align, &mut out);
             }
             i += 1;
         }

@@ -12,6 +12,8 @@
 //!
 //! An unknown option or a missing value is an error (exit code 2), never a vault folder.
 
+#[cfg(test)]
+mod align_ui_tests;
 mod app;
 mod calendar;
 mod caption;

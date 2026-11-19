@@ -721,6 +721,35 @@ fn a_page_break_marker_is_a_newpage_once_and_the_html_is_not_written() {
     assert_eq!(blocks, [Block::Para(vec!["a".into()]), Block::PageBreak, Block::Para(vec!["b".into()])]);
 }
 
+// spec: TEX-039
+#[test]
+fn an_alignment_wrapper_is_a_center_or_flushright_environment_and_the_html_is_not_written() {
+    let note = "# One\n\nplain\n\n<div align=\"center\">\n\n## Middle\n\ncentred text\n\n</div>\n\n<div align=\"right\">\n\nright text\n\n</div>\n\n<div align=\"justify\">\n\njustified text\n\n</div>\n\n<div align=\"center\">\n\nlost\n";
+    for kind in ["pub", "report"] {
+        let t = doc(note, kind);
+        let b = body_of(&t);
+        assert_eq!(b.matches("\\begin{center}").count(), 1, "{kind}: {b}");
+        assert_eq!(b.matches("\\end{center}").count(), 1, "{kind}: {b}");
+        assert_eq!((b.matches("\\begin{flushright}").count(), b.matches("\\end{flushright}").count()), (1, 1), "{kind}: {b}");
+        let (begin, end) = (b.find("\\begin{center}").unwrap(), b.find("\\end{center}").unwrap());
+        assert!(b[begin..end].contains("Middle") && b[begin..end].contains("centred text") && !b[begin..end].contains("plain"), "{kind}: {b}");
+        let (begin, end) = (b.find("\\begin{flushright}").unwrap(), b.find("\\end{flushright}").unwrap());
+        assert!(b[begin..end].contains("right text") && !b[begin..end].contains("centred"), "{kind}: {b}");
+        assert!(b.contains("justified text"), "justified is what LaTeX sets: {b}");
+        assert_eq!((t.matches("<div").count(), t.matches("textless{}div").count()), (0, 1), "{kind}: only the opening line without a closing one is text, and it is escaped: {t}");
+    }
+    // in slides and boxes the frames and boxes are the units: no environment
+    for kind in ["beamer", "sciposter"] {
+        let t = doc("# One\n\n## Frame\n\na\n\n<div align=\"center\">\n\nb\n\n</div>\n", kind);
+        assert!(!t.contains("\\begin{center}") && !t.contains("flushright") && !t.contains("<div"), "{kind}: {t}");
+    }
+    // the blocks
+    use super::blocks::{parse, Block};
+    use crate::markdown::Align;
+    let blocks = parse("a\n<div align=\"center\">\nb\n</div>\nc\n");
+    assert_eq!(blocks, [Block::Para(vec!["a".into()]), Block::AlignStart(Align::Center), Block::Para(vec!["b".into()]), Block::AlignEnd(Align::Center), Block::Para(vec!["c".into()])]);
+}
+
 // spec: TEX-038
 #[test]
 fn print_break_before_writes_a_newpage_before_the_headings_up_to_its_level_but_not_the_first_block() {
