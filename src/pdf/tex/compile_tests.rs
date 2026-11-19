@@ -578,7 +578,7 @@ fn tex_env_a_tex_error_has_file_and_line() {
 fn tex_env_a_document_with_biblatex_runs_biber_and_resolves_the_citation() {
     let out = container_compile(&[("test.tex", TEST_DOCUMENT), ("test.bib", TEST_BIB)], "test.tex", &Options::default()).unwrap_or_else(|e| panic!("{e}\n{}", e.log_tail));
     assert!(out.runs >= 2, "LuaLaTeX, biber, LuaLaTeX: {} runs", out.runs);
-    assert!(out.font_cache_built, "a fresh container builds the font names database");
+    assert!(!out.font_cache_built, "the image has the font names database, a fresh container does not build it (#327)");
 }
 
 // spec: TEX-004

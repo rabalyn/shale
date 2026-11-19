@@ -79,16 +79,36 @@ build_fonts() {
   done
 }
 
+# the font packages again from a freshly resolved mirror (in $fresh); a mirror older than the installation is left for
+# another one, three runs at most, as above
+reinstall_fonts() {
+  fresh=$(resolve) || { echo "no fresh mirror could be chosen to install the fonts again" >&2; return 1; }
+  fonts_run=1
+  while :; do
+    echo "installing $font_packages again from $fresh (the packages came from $mirror)" >&2
+    # shellcheck disable=SC2086
+    if tlmgr --repository "$fresh" install --reinstall $font_packages >/tmp/tlmgr-fonts.log 2>&1; then
+      cat /tmp/tlmgr-fonts.log
+      return 0
+    fi
+    cat /tmp/tlmgr-fonts.log
+    if [ "$fonts_run" -ge "$tries" ] || ! grep -q 'older than the local installation' /tmp/tlmgr-fonts.log; then
+      echo "the fonts could not be installed again from $fresh" >&2
+      return 1
+    fi
+    fonts_run=$((fonts_run + 1))
+    fresh=$(resolve) || return 1
+  done
+}
+
 fonts_note="font names database built"
 if ! build_fonts; then
-  fresh=$(resolve) || { echo "the fonts are not found, and no fresh mirror could be chosen to install them again (the packages came from $mirror)" >&2; exit 1; }
-  echo "the fonts are not found: installing $font_packages again from $fresh (the packages came from $mirror)" >&2
-  # shellcheck disable=SC2086
-  tlmgr --repository "$fresh" install --reinstall $font_packages
+  echo "the fonts are not found: the packages came incomplete from $mirror?" >&2
+  reinstall_fonts || { echo "the fonts are not found and could not be installed again (the packages came from $mirror)" >&2; exit 1; }
   build_fonts || { echo "the fonts are still not found after installing them again from $fresh (the packages came from $mirror)" >&2; exit 1; }
   fonts_note="font names database built after the fonts were installed again from $fresh"
 fi
-rm -f /tmp/luaotfload.log
+rm -f /tmp/tlmgr-fonts.log rm -f /tmp/luaotfload.log
 
 # which TeX Live this image is: year, repository, mirror, build date, fonts (`tex-env.sh status` prints it)
 echo "TeX Live $(head -n 1 /opt/texlive/release-texlive.txt | sed 's/.*version //') from $repo (mirror $mirror), built $(date -u +%Y-%m-%d), $fonts_note" > /etc/shale-tex-build

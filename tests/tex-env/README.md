@@ -6,6 +6,8 @@ export against a real TeX (TEX-020, TEX-021, [ADR-0019](../../docs/decisions/001
 Nothing runs in the background: the image is built once, each compile is a short-lived container.
 
 Needs `podman` (or Docker: `SHALE_TEX_ENV_ENGINE=docker`), `curl` and `sha256sum` (or `shasum`).
+The image is called `shale-tex-env` for every checkout of Shale on the machine, so a `build` in one checkout replaces the image
+under a test that runs in another: `SHALE_TEX_ENV_IMAGE=<name>` gives a checkout its own image.
 The base image is pinned (`docker.io/library/debian:bookworm-20260112-slim`).
 
 ## Use

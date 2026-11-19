@@ -443,11 +443,14 @@ fn fonts(engine: &Engine, handle: &Handle, notify: &dyn Fn(), repo: &str, mirror
         return Err(with_note(first.to_string(), update_failed));
     }
     let mut repair = || -> Result<(), String> {
+        // a fresh mirror may be older than the installation as well: tried like the packages are (#320)
         let mirror = resolve_mirror(handle, repo)?;
-        add_mirror(mirrors, &mirror);
-        let mut tlmgr = engine.command(tlmgr_name());
-        tlmgr.args(["--repository", &mirror, "install", "--reinstall"]).args(FONT_PACKAGES);
-        step(handle, notify, Stage::Fonts, "tlmgr", tlmgr)?;
+        let used = tlmgr_on_mirror(handle, notify, Stage::Fonts, repo, mirror, |m| {
+            let mut tlmgr = engine.command(tlmgr_name());
+            tlmgr.args(["--repository", m, "install", "--reinstall"]).args(FONT_PACKAGES);
+            tlmgr
+        })?;
+        add_mirror(mirrors, &used);
         let mut rebuild = engine.command("luaotfload-tool");
         rebuild.args(["--update", "--force"]);
         step(handle, notify, Stage::Fonts, "luaotfload-tool", rebuild)

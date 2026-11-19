@@ -503,6 +503,24 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
 
     // spec: TEX-002
     #[test]
+    fn the_font_repair_leaves_a_mirror_older_than_the_install_for_a_fresh_one_like_the_packages_do() {
+        let data = temp("font-older");
+        let (old, _) = serve(vec![]);
+        let (new, _) = serve(vec![]);
+        // tlmgr refuses to install anything again from the old mirror
+        let tlmgr = format!("case \"$*\" in *{old}*--reinstall*) {OLDER} ;; esac\n{GOOD_TLMGR}");
+        let (first, _) = serve(installer("font-older", &install_tl_with(&font_fails(1), &tlmgr, LUALATEX_OK, LUAOTFLOAD_OK)));
+        let (redirect, _) = redirector(vec![first.clone(), old.clone(), new.clone()]);
+        let done = install(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(done, Done { warning: None, mirrors: vec![first, new.clone()] }, "the old mirror was left, and is not named: no file came from it");
+        let calls = tlmgr_calls(&managed_root(&data));
+        assert_eq!(calls.len(), 3, "{calls:?}");
+        assert_eq!((calls[1].clone(), calls[2].clone()), (reinstall_line(&old), reinstall_line(&new)));
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    // spec: TEX-002
+    #[test]
     fn a_font_that_stays_unloadable_after_the_repair_is_a_warning_naming_both_mirrors_and_the_install_stays() {
         let data = temp("font-stays");
         let body = installer("font-stays", &install_tl_with(&font_fails(99), GOOD_TLMGR, LUALATEX_OK, LUAOTFLOAD_OK));
