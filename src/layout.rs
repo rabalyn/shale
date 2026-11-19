@@ -933,11 +933,10 @@ impl ShaleApp {
             }
             if let (Some(rel), Some(v)) = (self.current_path(), &self.vault) {
                 if let Some(doc) = self.notes.get(&rel) {
-                    let words = doc.text.split_whitespace().count();
-                    let chars = doc.text.chars().count();
+                    let (chars, words) = self.status.counts(&rel, &doc.text);
                     ui.label(small(format!("{chars} characters")));
                     ui.label(small(format!("{words} words")));
-                    let bl = v.backlinks(&rel).len();
+                    let bl = self.status.backlinks(v, &rel);
                     ui.label(small(format!("{bl} backlink{}", if bl == 1 { "" } else { "s" })));
                     if doc.unreadable.is_some() {
                         ui.label(egui::RichText::new("Read-only: could not be read").size(11.5).color(theme::LINK_MISSING));
@@ -956,7 +955,7 @@ impl ShaleApp {
                 }
             }
             if let Some(v) = &self.vault {
-                let open = v.all_tasks().iter().filter(|(_, t)| !t.done).count();
+                let open = self.status.open_tasks(v);
                 ui.label(small(format!("{open} open tasks")));
             }
             if let Some(t) = self.mail.status(&self.cfg) {

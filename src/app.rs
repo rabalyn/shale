@@ -337,6 +337,8 @@ pub struct ShaleApp {
     pub calendar: crate::calendar::store::CalendarStore,
     /// The mail view (ADR-0007 phase 1b).
     pub mail: crate::mail::ui::MailView,
+    /// the counts of the status bar, kept for a note and a vault that did not change (EDIT-107)
+    pub status: crate::editor_cache::StatusCache,
     /// the calendar views, the jobs of their popups and the default calendar for new events
     pub cal: crate::calendar::ui::CalendarUi,
     /// the feed view (Mastodon / Bluesky)
@@ -549,6 +551,7 @@ impl ShaleApp {
                 c
             },
             mail: crate::mail::ui::MailView::new(mail_root),
+            status: Default::default(),
             cal: crate::calendar::ui::CalendarUi::new(),
             social: {
                 let mut s = crate::social::state::SocialState::new(social_dir);

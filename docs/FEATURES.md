@@ -45,7 +45,9 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   **Ctrl+Shift+O** / **Ctrl+Shift+I** fold and unfold all there (fold and unfold at the cursor are editor keys). A footnote
   jump or a click in the outline on a heading that a fold hides opens the fold. The front matter card keeps its own toggle.
   Large notes stay quick (EDIT-099 to EDIT-102, rabalyn/shale#369): the folds of an unchanged text are not found again, and
-  from 2 000 lines on the reading view draws only what is near the visible part.
+  from 2 000 lines on the reading view draws only what is near the visible part. The editor keeps the laid-out note, the
+  parsed tables and footnotes and the counts of the status bar while nothing changes (EDIT-104 to EDIT-107, rabalyn/shale#372),
+  so a frame of a 20 000-line note takes a few milliseconds.
 
 ![Folded code blocks, quote and signature in the reading view](userguide/z_media/screenshots/reading-folds.png)
 - **Code blocks as boxes** (EDIT-080, EDIT-086, rabalyn/shale#356): with the Markdown preview on, a fenced code block is a

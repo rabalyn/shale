@@ -491,11 +491,12 @@ pub(crate) fn highlight_with_math(text: &str, links: &[(LinkSpan, bool)], fonts:
     }
     let mut job = LayoutJob { text: text.to_string(), ..Default::default() };
     let mut start = 0;
-    let mut cur: Option<Fmt> = None;
-    for (i, _) in text.char_indices().chain(std::iter::once((text.len(), ' '))) {
-        let f = if i < text.len() { Some(fmts[i]) } else { None };
+    let mut cur: Option<&Fmt> = None;
+    // the formats are compared where a char starts, by reference: the table has a record for every byte of the note
+    for i in (0..=text.len()).filter(|&i| i == text.len() || text.is_char_boundary(i)) {
+        let f = fmts.get(i);
         if f != cur || i == text.len() {
-            if let Some(c) = cur {
+            if let Some(&c) = cur {
                 if i > start {
                     let (leading_space, format) = match marks.get((c.math as usize).wrapping_sub(1)).map(|m| (m, &m.formula)) {
                         Some((m, Ok(f))) if m.block => (0.0, crate::math::paint::block_format(f, m.em)),
@@ -538,38 +539,65 @@ pub(crate) fn make_room_for_numbers(ui: &Ui, job: &mut LayoutJob, fonts: &Editor
     if !markdown::headings_numbered(&job.text, vault_default) {
         return marks;
     }
+    let offsets = markdown::lines_with_offsets(&job.text);
+    // where each title starts and the room its number takes, in the order of the text
+    let mut rooms: Vec<(usize, f32)> = Vec::new();
     for (line, level, _, number) in markdown::heading_numbers(&job.text) {
         let Some(number) = number else { continue };
-        let at = markdown::line_start_byte(&job.text, line) + level + 1;
-        let line_end = job.text[at..].find('\n').map_or(job.text.len(), |p| at + p);
-        let Some(i) = job.sections.iter().position(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).filter(|_| at < line_end) else { continue };
-        if job.sections[i].byte_range.start.0 < at {
-            let mut tail = job.sections[i].clone();
-            tail.byte_range.start = egui::text::ByteIndex(at);
-            job.sections[i].byte_range.end = egui::text::ByteIndex(at);
-            job.sections.insert(i + 1, tail);
+        let at = offsets[line].0 + level + 1;
+        let line_end = offsets.get(line + 1).map_or(job.text.len(), |(o, _)| o - 1);
+        if at >= line_end {
+            continue;
         }
         let raw = raw_lines.is_none_or(|r| r.contains(&line));
         let font = to_format(Fmt { heading: level as u8, rendered: !raw, ..Fmt::default() }, fonts).font_id;
-        let i = if job.sections[i].byte_range.start.0 == at { i } else { i + 1 };
-        job.sections[i].leading_space = ui.painter().layout_no_wrap(format!("{number} "), font.clone(), Color32::WHITE).size().x;
+        rooms.push((at, ui.painter().layout_no_wrap(format!("{number} "), font.clone(), Color32::WHITE).size().x));
         marks.push(NumberMark { title: at, number, font });
     }
+    // the sections are cut at the titles in one pass (EDIT-105): a note of thousands of headings is not searched for each
+    let mut sections = Vec::with_capacity(job.sections.len() + rooms.len());
+    let mut next = 0;
+    for mut section in std::mem::take(&mut job.sections) {
+        while next < rooms.len() && rooms[next].0 < section.byte_range.end.0 {
+            let (at, room) = rooms[next];
+            next += 1;
+            if at < section.byte_range.start.0 {
+                continue;
+            }
+            if at > section.byte_range.start.0 {
+                let mut head = section.clone();
+                head.byte_range.end = egui::text::ByteIndex(at);
+                sections.push(head);
+                section.byte_range.start = egui::text::ByteIndex(at);
+            }
+            section.leading_space = room;
+        }
+        sections.push(section);
+    }
+    job.sections = sections;
     marks
 }
 
 /// Paint the numbers of the headings in the room [`make_room_for_numbers`] made, muted, on the
 /// baseline of the heading's text.
-fn paint_numbers(ui: &Ui, marks: &[NumberMark], galley: &Galley, galley_pos: Pos2, hidden: &[Range<usize>]) {
+fn paint_numbers(ui: &Ui, marks: &[NumberMark], (galley, index): (&Galley, &crate::galley_index::GalleyIndex), galley_pos: Pos2, hidden: &[Range<usize>]) {
     let painter = ui.painter().with_clip_rect(ui.clip_rect());
-    for m in marks.iter().filter(|m| !hidden.iter().any(|h| h.contains(&m.title))) {
-        let c = markdown::byte_to_char(&galley.job.text, m.title.min(galley.job.text.len()));
+    let clip = ui.clip_rect();
+    let (top, bottom) = (clip.min.y - galley_pos.y, clip.max.y - galley_pos.y);
+    let text = &galley.job.text;
+    // the marks are in the order of their headings: the char index of each is found going on from the last (EDIT-105)
+    let (mut byte, mut chars) = (0, 0);
+    for m in marks {
+        let title = m.title.min(text.len());
+        let Some(between) = text.get(byte..title) else { continue };
+        chars += between.chars().count();
+        byte = title;
+        let c = chars;
+        if hidden.iter().any(|h| h.contains(&m.title)) || index.off_screen(c, top, bottom) {
+            continue;
+        }
         let r = galley.pos_from_cursor(CCursor::new(c));
-        let mut first = 0;
-        let Some(row) = galley.rows.iter().find(|row| {
-            first += row.char_count_including_newline().0;
-            c < first
-        }) else {
+        let Some(row) = index.row_of_char(c).and_then(|i| galley.rows.get(i)) else {
             continue;
         };
         let baseline = row.row.glyphs.iter().filter(|g| g.font_height > 2.0).map(|g| g.pos.y).reduce(f32::max).unwrap_or(row.rect().height() * 0.78);
@@ -804,6 +832,12 @@ pub struct NoteEditor {
     /// sizes embeds in proportion to it (PDF-005).
     pub column: Option<f32>,
     cache: Cache,
+    /// the footnotes and tables of the text, found once for each version of it (EDIT-104)
+    parse: crate::editor_cache::Parse,
+    /// the laid-out note, kept while nothing it depends on changes (EDIT-105)
+    pub(crate) layout: crate::editor_cache::LayoutCache,
+    /// the lines and rows of the last galley the editor painted over (EDIT-105)
+    index: Option<(Arc<Galley>, Arc<crate::galley_index::GalleyIndex>)>,
     /// `[[`, `[[p ` and `[!` helpers of the text box
     pub assist: crate::link_assist::LinkAssist,
     /// Put the cursor here (char index) on the next frame and scroll to it.
@@ -891,6 +925,9 @@ impl NoteEditor {
             id,
             column: None,
             cache: Cache::default(),
+            parse: Default::default(),
+            layout: Default::default(),
+            index: None,
             assist: crate::link_assist::LinkAssist::new(id),
             pending_cursor: None,
             scroll_to_top: false,
@@ -1349,9 +1386,9 @@ impl NoteEditor {
 
     /// The wiki link (with whether its note exists) or else the web link at a byte of the text;
     /// embedded images (`is_image` says which ranges are drawn as one) are not links.
-    fn link_at(&self, text: &str, byte: usize, is_image: &dyn Fn(&Range<usize>) -> bool) -> (Option<(LinkSpan, bool)>, Option<crate::lists::WebLink>) {
+    fn link_at(&mut self, text: &str, byte: usize, is_image: &dyn Fn(&Range<usize>) -> bool) -> (Option<(LinkSpan, bool)>, Option<crate::lists::WebLink>) {
         let link = self.cache.links.iter().find(|(l, _)| l.range.contains(&byte) && !is_image(&l.range)).cloned();
-        let web = if link.is_none() { crate::lists::find_web_links(text).into_iter().find(|w| w.range.contains(&byte)) } else { None };
+        let web = if link.is_none() { self.parse.web_links(text).iter().find(|w| w.range.contains(&byte)).cloned() } else { None };
         (link, web)
     }
 
@@ -1560,7 +1597,7 @@ impl NoteEditor {
         let mut action = None;
         let mut changed = false;
         // the footnotes with a definition are marks in the grids of tables too (EDIT-050)
-        let _defined = markdown::DefinedFootnotes::set(markdown::find_footnotes(text).defined());
+        let _defined = markdown::DefinedFootnotes::set((*self.parse.defined(text)).clone());
         let focused = ui.ctx().memory(|m| m.has_focus(self.id));
         if focused || !ui.input(|i| i.pointer.any_down()) {
             self.focus_before_press = focused;
@@ -1724,7 +1761,8 @@ impl NoteEditor {
         let mut tables: Vec<Shown> = Vec::new();
         if let Some(raw) = &preview {
             let width = (ui.available_width() - gutter - 8.0 - TABLE_SIDE).max(120.0);
-            for (ordinal, b) in crate::table::find_tables(text).into_iter().enumerate() {
+            let found = self.parse.tables(text);
+            for (ordinal, b) in found.iter().enumerate() {
                 if lines_overlap(&b.lines, raw) || fold.view.hides_any(&b.lines) {
                     continue;
                 }
@@ -1732,7 +1770,7 @@ impl NoteEditor {
                 let sizes = self.grid.sizes(ordinal, &b.meta.sizes);
                 let laid = crate::table::layout(ui.ctx(), &b.table, sizes, base_size, width, &|l| vault.exists(&l.target, Some(rel)));
                 let cells = b.meta.cells.unwrap_or(self.table_cell_edit);
-                tables.push(Shown { height: laid.size().y + TABLE_GAP, src, laid, cells, block: b });
+                tables.push(Shown { height: laid.size().y + TABLE_GAP, src, laid, cells, block: b.clone() });
             }
         }
         let table_keys: Vec<(String, f32)> = tables.iter().map(|t| (t.src.clone(), t.height)).collect();
@@ -1794,40 +1832,67 @@ impl NoteEditor {
         let links = self.cache.links.clone();
         let links_text = text.clone();
         let numbered_default = self.numbered_headings;
-        let number_marks = std::cell::RefCell::new(Vec::new());
-        let formula_marks = std::cell::RefCell::new(Vec::new());
+        let number_marks = std::cell::RefCell::new(Arc::new(Vec::new()));
+        let formula_marks = std::cell::RefCell::new(Arc::new(Vec::new()));
         self.assist.arm(text, media_handled);
+        let links_key = {
+            let mut h = DefaultHasher::new();
+            vault.generation.hash(&mut h);
+            rel.hash(&mut h);
+            h.finish()
+        };
+        let (parse, layout_cache) = (&mut self.parse, &mut self.layout);
         let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| -> Arc<Galley> {
             let s = buf.as_str();
-            // The cached links belong to the text from the start of the frame; if the text box
-            // changed it this frame, find them again (cheap for normal notes).
-            let fresh;
-            let use_links: &[(LinkSpan, bool)] = if s == links_text {
-                &links
-            } else {
-                fresh = markdown::find_links(s)
-                    .into_iter()
-                    .map(|l| {
-                        let ok = vault.exists(&l.target, Some(rel));
-                        (l, ok)
-                    })
-                    .collect::<Vec<_>>();
-                &fresh
-            };
             let mut ranges: Vec<(Range<usize>, f32)> = remap_images(s, &image_keys).into_iter().map(|(r, h, _)| (r, h)).collect();
             // the lines a fold hides (EDIT-071): rows of no height
             let folds = fold.at(s);
             if let Some(raw) = &preview {
-                ranges.extend(table_rows(s, &table_keys, raw, &folds.view).into_iter().flat_map(|g| g.rows));
+                ranges.extend(table_rows(s, &parse.tables(s), &table_keys, raw, &folds.view).into_iter().flat_map(|g| g.rows));
             }
             ranges.extend(folds.view.byte_ranges(s).into_iter().map(|r| (r, 0.0)));
             // a folded front matter: its first line hidden, the summary is painted over its row
             ranges.extend(folds.veiled(s).map(|r| (r, -1.0)));
-            let (mut job, formulas) = highlight_with_math(s, use_links, fonts, &ranges, preview.clone());
-            *formula_marks.borrow_mut() = formulas;
-            *number_marks.borrow_mut() = make_room_for_numbers(ui, &mut job, fonts, numbered_default, preview.as_ref());
-            job.wrap.max_width = wrap_width;
-            ui.ctx().fonts_mut(|f| f.layout_job(job))
+            // what the layout depends on, the cursor only by the raw lines it makes (EDIT-105)
+            let ctx = ui.ctx();
+            let settled = crate::fonts::settled(ctx);
+            let key = crate::editor_cache::LayoutKey {
+                text: s.to_string(),
+                links: links_key,
+                fonts: fonts.clone(),
+                font_set: settled.unwrap_or(0),
+                pixels_per_point: ctx.pixels_per_point().to_bits(),
+                wrap_width: wrap_width.to_bits(),
+                numbered_default,
+                scope: markdown::defined_footnotes_in_scope(),
+                raw: preview.clone(),
+                ranges,
+            };
+            let laid = layout_cache.get(key, settled.is_some(), |key| {
+                // The cached links belong to the text from the start of the frame; if the text box
+                // changed it this frame, find them again (cheap for normal notes).
+                let fresh;
+                let use_links: &[(LinkSpan, bool)] = if s == links_text {
+                    &links
+                } else {
+                    fresh = markdown::find_links(s)
+                        .into_iter()
+                        .map(|l| {
+                            let ok = vault.exists(&l.target, Some(rel));
+                            (l, ok)
+                        })
+                        .collect::<Vec<_>>();
+                    &fresh
+                };
+                let (mut job, formulas) = highlight_with_math(s, use_links, fonts, &key.ranges, preview.clone());
+                let numbers = make_room_for_numbers(ui, &mut job, fonts, numbered_default, preview.as_ref());
+                job.wrap.max_width = wrap_width;
+                let galley = ctx.fonts_mut(|f| f.layout_job(job));
+                crate::editor_cache::Laid { galley, formulas: Arc::new(formulas), numbers: Arc::new(numbers) }
+            });
+            *formula_marks.borrow_mut() = laid.formulas;
+            *number_marks.borrow_mut() = laid.numbers;
+            laid.galley
         };
 
         // the boxes of the code blocks go behind the text: their place in the layer is taken now, filled below
@@ -1860,7 +1925,15 @@ impl NoteEditor {
         self.last_layout = Some((output.galley.clone(), output.galley_pos));
         let shown_folds = fold.at(&output.galley.job.text);
         let hidden_bytes = shown_folds.view.byte_ranges(&output.galley.job.text);
-        paint_numbers(ui, &number_marks.borrow(), &output.galley, output.galley_pos, &hidden_bytes);
+        let index = match &self.index {
+            Some((galley, index)) if Arc::ptr_eq(galley, &output.galley) => index.clone(),
+            _ => {
+                let index = Arc::new(crate::galley_index::GalleyIndex::new(&output.galley));
+                self.index = Some((output.galley.clone(), index.clone()));
+                index
+            }
+        };
+        paint_numbers(ui, &number_marks.borrow(), (&output.galley, &index), output.galley_pos, &hidden_bytes);
         paint_math(ui, &formula_marks.borrow(), &output.galley, output.galley_pos, resp);
         if let Some(r) = output.cursor_range.filter(|_| resp.has_focus() && self.keep_selection.is_none()) {
             self.last_selection = Some((r.primary.index.0, r.secondary.index.0));
@@ -1950,7 +2023,7 @@ impl NoteEditor {
         if let Some(raw) = preview.as_ref().filter(|_| !tables.is_empty()) {
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
             let now_text = output.galley.job.text.clone();
-            for g in table_rows(&now_text, &table_keys, raw, &shown_folds.view) {
+            for g in table_rows(&now_text, &self.parse.tables(&now_text), &table_keys, raw, &shown_folds.view) {
                 let c = output.galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(&now_text, g.rows[0].0.start)));
                 let origin = output.galley_pos + Vec2::new(c.min.x, c.min.y + 1.0);
                 let t = &tables[g.key];
@@ -1969,7 +2042,13 @@ impl NoteEditor {
                 now_text[..b].matches('\n').count() + 1
             });
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            let clip = ui.clip_rect();
             for (n, at) in gutter_numbers(&output.galley) {
+                // a number far off the screen is not laid out (EDIT-105)
+                let (NumberAt::Baseline(y) | NumberAt::Top(y)) = at;
+                if output.galley_pos.y + y < clip.min.y - 60.0 || output.galley_pos.y + y > clip.max.y + 60.0 {
+                    continue;
+                }
                 let colour = if Some(n) == cursor_line { theme::MUTED } else { theme::FAINT };
                 let g = painter.layout_no_wrap(n.to_string(), number_font.clone(), colour);
                 let ascent = g.rows.first().and_then(|r| r.row.glyphs.first()).map(|gl| gl.pos.y).unwrap_or(g.size().y * 0.8);
@@ -2045,11 +2124,11 @@ impl NoteEditor {
         self.fold.follow_cursor(rel, &fold, cursor_line, typed);
         // the boxes of the code blocks (EDIT-080)
         if let Some(slot) = box_slot {
-            let shapes = crate::code_box::shapes(ui, &shown_folds, &output.galley, output.galley_pos, resp.rect.right(), base_size);
+            let shapes = crate::code_box::shapes(ui, &shown_folds, (&output.galley, &index), output.galley_pos, resp.rect.right(), base_size);
             ui.painter().set(slot, Shape::Vec(shapes));
         }
         // the markers and the badges of the folds (EDIT-071, EDIT-074)
-        let painted = crate::fold_ui::Painted { id: self.id, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size };
+        let painted = crate::fold_ui::Painted { id: self.id, index: &index, rel, galley: &output.galley, pos: output.galley_pos, area: resp.rect, base: base_size };
         self.fold.paint(ui, &fold, &painted);
         // the copy button of the code boxes (EDIT-090) and the key that copies the block at the cursor (EDIT-092)
         if std::mem::take(&mut self.fold.copy_code) {
@@ -2193,13 +2272,13 @@ struct GridTable {
 /// the whole height (less one point for every other line, which are one point tall), so the
 /// grid fits where the hidden text is; the line breaks belong to their lines, so no row is
 /// taller than that (EDIT-024).
-fn table_rows(text: &str, keys: &[(String, f32)], raw: &Range<usize>, folds: &crate::fold::View) -> Vec<GridTable> {
+fn table_rows(text: &str, tables: &[crate::table::Block], keys: &[(String, f32)], raw: &Range<usize>, folds: &crate::fold::View) -> Vec<GridTable> {
     if keys.is_empty() {
         return vec![];
     }
     let all = markdown::lines_with_offsets(text);
     let mut out = Vec::new();
-    for (ordinal, b) in crate::table::find_tables(text).into_iter().enumerate() {
+    for (ordinal, b) in tables.iter().enumerate() {
         if lines_overlap(&b.lines, raw) || folds.hides_any(&b.lines) {
             continue;
         }

@@ -85,6 +85,8 @@ impl Frame {
 #[derive(Clone, Copy)]
 pub struct Painted<'a> {
     pub id: egui::Id,
+    /// the lines and rows of the galley (EDIT-105)
+    pub index: &'a crate::galley_index::GalleyIndex,
     pub rel: &'a Path,
     pub galley: &'a Galley,
     /// where the galley is on the screen
@@ -285,14 +287,16 @@ impl FoldUi {
 
     /// Draw the markers and the badges over the laid-out text and do what a click on one asks.
     pub fn paint(&mut self, ui: &mut Ui, frame: &Frame, at: &Painted) {
-        let Painted { id, rel, galley, pos, area, base } = *at;
+        let Painted { id, index, rel, galley, pos, area, base } = *at;
         self.widgets.clear();
         let text = galley.job.text.as_str();
         let frame = frame.at(text);
         let painter = ui.painter().with_clip_rect(ui.clip_rect());
         let clip = ui.clip_rect();
         let hover = ui.input(|i| i.pointer.hover_pos());
-        let lines = line_chars(text);
+        let lines = &index.lines;
+        // what is far off the screen is skipped without asking the galley where it is (EDIT-105)
+        let (top, bottom) = (clip.min.y - pos.y, clip.max.y - pos.y);
         let row_of = |line: usize, offset: usize| {
             let r = galley.pos_from_cursor(CCursor::new(lines[line].0 + offset));
             Rect::from_min_max(pos + r.min.to_vec2(), pos + r.max.to_vec2())
@@ -305,6 +309,9 @@ impl FoldUi {
                 continue;
             }
             last = Some(b.header);
+            if index.off_screen(lines[b.header].0, top, bottom) {
+                continue;
+            }
             let row = row_of(b.header, 0);
             if row.max.y < clip.min.y || row.min.y > clip.max.y {
                 continue;
@@ -324,6 +331,9 @@ impl FoldUi {
         let summary_header = frame.front_summary().map(|b| b.header);
         for &(header, n) in &frame.view.badges {
             if header >= lines.len() || summary_header == Some(header) {
+                continue;
+            }
+            if index.off_screen(lines[header].0 + lines[header].1, top, bottom) {
                 continue;
             }
             let end = row_of(header, lines[header].1);

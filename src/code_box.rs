@@ -5,7 +5,8 @@
 //! Also the copy button of a box and the code it copies (EDIT-090…EDIT-094).
 
 use crate::fold::FoldKind;
-use crate::fold_ui::{line_chars, Frame, Painted};
+use crate::fold_ui::{Frame, Painted};
+use crate::galley_index::GalleyIndex;
 use crate::theme;
 use eframe::egui::{self, epaint::StrokeKind, text::CCursor, Galley, Id, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2};
 use std::path::Path;
@@ -16,15 +17,15 @@ const FLASH: f64 = 1.5;
 
 /// The shapes of the boxes of the code blocks of `frame` that are on the screen, over the laid-out
 /// text at `pos` and up to `right`.
-pub fn shapes(ui: &Ui, frame: &Frame, galley: &Galley, pos: Pos2, right: f32, base: f32) -> Vec<Shape> {
+pub fn shapes(ui: &Ui, frame: &Frame, (galley, index): (&Galley, &GalleyIndex), pos: Pos2, right: f32, base: f32) -> Vec<Shape> {
     let mut shapes = Vec::new();
     let blocks: Vec<_> = frame.blocks.iter().filter(|b| b.kind == FoldKind::Code).collect();
     if blocks.is_empty() {
         return shapes;
     }
-    let text = galley.job.text.as_str();
-    let lines = line_chars(text);
+    let lines = &index.lines;
     let clip = ui.clip_rect();
+    let (top, bottom) = (clip.min.y - pos.y, clip.max.y - pos.y);
     let row_of = |line: usize, offset: usize| {
         let r = galley.pos_from_cursor(CCursor::new(lines[line].0 + offset));
         Rect::from_min_max(pos + r.min.to_vec2(), pos + r.max.to_vec2())
@@ -35,6 +36,10 @@ pub fn shapes(ui: &Ui, frame: &Frame, galley: &Galley, pos: Pos2, right: f32, ba
             continue;
         }
         let last = if frame.view.is_hidden(b.header + 1) { b.header } else { (b.end - 1).min(lines.len() - 1) };
+        // far off the screen: no need to ask the galley where the rows are (EDIT-105)
+        if index.span_of_char(lines[last].0 + lines[last].1).1 < top || index.span_of_char(lines[b.header].0).0 > bottom {
+            continue;
+        }
         let head = row_of(b.header, 0);
         let tail = row_of(last, lines[last].1);
         if tail.max.y < clip.min.y || head.min.y > clip.max.y {
@@ -157,9 +162,10 @@ pub fn copy_button(ui: &Ui, id: Id, right: f32, y: f32, shown: bool, code: impl 
 pub fn buttons(ui: &Ui, frame: &Frame, at: &Painted, cursor: Option<usize>) -> Vec<(usize, Rect)> {
     let mut out = Vec::new();
     let text = at.galley.job.text.as_str();
-    let lines = line_chars(text);
+    let lines = &at.index.lines;
     let hover = ui.input(|i| i.pointer.hover_pos());
     let clip = ui.clip_rect();
+    let (top, bottom) = (clip.min.y - at.pos.y, clip.max.y - at.pos.y);
     let row_of = |line: usize, offset: usize| {
         let r = at.galley.pos_from_cursor(CCursor::new(lines[line].0 + offset));
         Rect::from_min_max(at.pos + r.min.to_vec2(), at.pos + r.max.to_vec2())
@@ -170,6 +176,9 @@ pub fn buttons(ui: &Ui, frame: &Frame, at: &Painted, cursor: Option<usize>) -> V
         }
         let folded = frame.view.is_hidden(b.header + 1);
         let last = if folded { b.header } else { (b.end - 1).min(lines.len() - 1) };
+        if at.index.span_of_char(lines[last].0 + lines[last].1).1 < top || at.index.span_of_char(lines[b.header].0).0 > bottom {
+            continue;
+        }
         let head = row_of(b.header, 0);
         let tail = row_of(last, lines[last].1);
         if tail.max.y < clip.min.y || head.min.y > clip.max.y {

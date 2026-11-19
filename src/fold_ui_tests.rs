@@ -940,9 +940,9 @@ fn large_note_timing() {
             })
         )
     );
-    // what the editor's layouter builds for the text each frame (the link list is empty here)
+    // what the editor's layouter builds for the text when it changes (the link list is empty here)
     let t = text.clone();
-    println!("editor::highlight_with_math (the job the layouter builds per frame): {:?}", avg(5, Box::new(move || drop(crate::editor::highlight_with_math(&t, &[], &crate::fonts::EditorFonts::uniform(15.0), &[], Some(0..0))))));
+    println!("editor::highlight_with_math (the job the layouter builds when the text changes): {:?}", avg(5, Box::new(move || drop(crate::editor::highlight_with_math(&t, &[], &crate::fonts::EditorFonts::uniform(15.0), &[], Some(0..0))))));
     let t = text.clone();
     println!("syntax::fences alone: {:?}", avg(20, Box::new(move || drop(crate::syntax::fences(&crate::markdown::lines_with_offsets(&t).into_iter().map(|(_, l)| l).collect::<Vec<_>>())))));
     // the whole window: the editor and the reading view drawing the note, per frame
@@ -954,6 +954,21 @@ fn large_note_timing() {
         let t = Instant::now();
         w.hl.frames(&mut w.app, 10);
         println!("whole frame, {} view, 20 000 lines, nothing folded: {:?}", if reading { "reading" } else { "editor" }, t.elapsed() / 10);
+        if !reading {
+            // the frames that matter (#372): the pointer moves over the note (nothing changed), and a key is typed
+            w.app.focus_editor();
+            w.hl.frames(&mut w.app, 3);
+            let t = Instant::now();
+            for i in 0..10 {
+                w.hl.frame(&mut w.app, vec![Event::PointerMoved(Pos2::new(300.0 + i as f32, 300.0))]);
+            }
+            println!("whole frame, editor view, the pointer moving over the note: {:?}", t.elapsed() / 10);
+            let t = Instant::now();
+            for _ in 0..10 {
+                w.hl.frame(&mut w.app, vec![Event::Text("x".into())]);
+            }
+            println!("whole frame, editor view, a key typed: {:?}", t.elapsed() / 10);
+        }
         w.app.tabbar.tabs[w.app.tabbar.active].editor.fold.request = Some(crate::fold::FoldCmd::FoldAll);
         w.hl.frames(&mut w.app, 3);
         let t = Instant::now();
@@ -970,16 +985,17 @@ fn large_note_timing() {
         let s = Instant::now();
         let galley = ui.painter().layout(text.clone(), egui::FontId::monospace(14.0), egui::Color32::WHITE, 800.0);
         println!("layout of the whole text as one galley (egui's, not ours): {:?}", s.elapsed());
+        let index = crate::galley_index::GalleyIndex::new(&galley);
         let s = Instant::now();
         let mut n = 0;
         for _ in 0..20 {
-            n = crate::code_box::shapes(ui, &frame, &galley, Pos2::new(40.0, 0.0), 840.0, 14.0).len();
+            n = crate::code_box::shapes(ui, &frame, (&galley, &index), Pos2::new(40.0, 0.0), 840.0, 14.0).len();
         }
         println!("code_box::shapes, clip is the screen (the top of the note on it): {:?} ({n} shapes)", s.elapsed() / 20);
         ui.set_clip_rect(Rect::from_min_size(Pos2::new(0.0, 100_000.0), egui::Vec2::new(900.0, 700.0)));
         let s = Instant::now();
         for _ in 0..20 {
-            n = crate::code_box::shapes(ui, &frame, &galley, Pos2::new(40.0, 0.0), 840.0, 14.0).len();
+            n = crate::code_box::shapes(ui, &frame, (&galley, &index), Pos2::new(40.0, 0.0), 840.0, 14.0).len();
         }
         println!("code_box::shapes, clip somewhere in the middle: {:?} ({n} shapes)", s.elapsed() / 20);
     });
@@ -1064,4 +1080,75 @@ fn edit_102_a_very_large_note_draws_only_what_is_near_and_a_jump_still_reaches_i
     w.hl.frames(&mut w.app, 80);
     assert!(w.painted("Head 1400") && w.painted("paragraph number 1400"), "{:?}", w.hl.text.iter().filter(|(t, p)| p.y > 0.0 && p.y < 900.0 && t.contains("1")).take(12).collect::<Vec<_>>());
     assert!(!w.painted("paragraph number 0"));
+}
+
+/// A note of three paragraphs for the tests of the kept layout (#372).
+const LAYOUT_NOTE: &str = "# Title\n\nFirst paragraph with a [[B]] link in it.\n\nSecond paragraph of the note, long enough to move inside.\n\nThird paragraph.\n";
+
+impl W {
+    /// How many times the editor built and laid out the note.
+    fn layouts(&self) -> u32 {
+        self.editor().layout.builds
+    }
+
+    /// The galley of the last frame.
+    fn galley(&self) -> std::sync::Arc<egui::Galley> {
+        self.editor().last_layout.clone().unwrap().0
+    }
+}
+
+// spec: EDIT-105
+#[test]
+fn edit_105_the_laid_out_note_is_kept_until_the_text_the_raw_lines_or_the_preview_change() {
+    let mut w = W::new("layout-kept", LAYOUT_NOTE, true);
+    w.cursor_in("Second");
+    let (builds, galley) = (w.layouts(), w.galley());
+    assert!(builds > 0);
+    // the pointer moves, frames go by: nothing is built again, the galley is the same one
+    for i in 0..4 {
+        w.hover(Pos2::new(300.0 + i as f32, 200.0));
+    }
+    assert_eq!(w.layouts(), builds, "an unchanged frame builds nothing");
+    assert!(std::sync::Arc::ptr_eq(&galley, &w.galley()), "and shows the same galley");
+    // the cursor moves inside the same line: the raw lines are the same
+    w.press(Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(w.layouts(), builds, "a cursor that stays in its line builds nothing");
+    // into another line: it is raw now, the old one is rendered
+    w.cursor_in("Third");
+    let moved = w.layouts();
+    assert!(moved > builds, "the cursor in another raw line lays out again");
+    w.hl.frames(&mut w.app, 3);
+    assert_eq!(w.layouts(), moved, "once");
+    // an edit
+    w.hl.frame(&mut w.app, vec![Event::Text("x".into())]);
+    w.hl.frames(&mut w.app, 3);
+    let edited = w.layouts();
+    assert!(edited > moved, "an edit lays out again");
+    assert!(w.text().contains('x'), "the key was typed: {:?}", w.text());
+    w.hl.frames(&mut w.app, 3);
+    assert_eq!(w.layouts(), edited, "and once");
+    // the preview toggled off and on
+    w.app.toggle_live_preview();
+    w.hl.frames(&mut w.app, 3);
+    let off = w.layouts();
+    assert!(off > edited, "the preview off lays out again");
+    w.app.toggle_live_preview();
+    w.hl.frames(&mut w.app, 3);
+    assert!(w.layouts() > off, "and on again");
+}
+
+// spec: EDIT-105
+#[test]
+fn edit_105_a_note_with_numbered_headings_and_the_kept_layout_shows_the_same_as_before() {
+    // the numbers of the headings are room in the job (LINK-014): the kept layout has them too
+    let note = "---\nnumbered-headings: true\n---\n# One\ntext\n## Two\ntext\n# Three\n";
+    let mut w = W::new("layout-numbers", note, true);
+    w.cursor_in("text");
+    let first: Vec<String> = w.hl.text.iter().map(|t| t.0.clone()).collect();
+    assert!(first.iter().any(|t| t == "1") && first.iter().any(|t| t == "1.1") && first.iter().any(|t| t == "2"), "{first:?}");
+    let builds = w.layouts();
+    w.hl.frames(&mut w.app, 3);
+    assert_eq!(w.layouts(), builds);
+    let again: Vec<String> = w.hl.text.iter().map(|t| t.0.clone()).collect();
+    assert!(again.iter().any(|t| t == "1.1"), "the numbers are painted from the kept layout: {again:?}");
 }

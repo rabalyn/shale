@@ -25,6 +25,7 @@ mod data_usage;
 mod dialog;
 mod drawing;
 mod editor;
+mod editor_cache;
 mod editor_preview;
 mod embed_size;
 mod fold;
@@ -39,6 +40,7 @@ mod format_bar;
 #[cfg(test)]
 mod format_bar_ui_tests;
 mod fsutil;
+mod galley_index;
 mod gitsync;
 mod graph;
 mod import;
