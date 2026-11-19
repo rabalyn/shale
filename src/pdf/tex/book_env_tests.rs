@@ -97,5 +97,5 @@ fn tex_env_a_folder_compiles_as_a_thesis_with_parts_and_chapters() {
 #[ignore = "needs the container: tests/tex-env/tex-env.sh build"]
 fn tex_env_a_folder_compiles_as_a_report_with_sections() {
     let forest = crate::dataflow::record(|| check("report"));
-    super::writer_env_tests::verify_flow(&forest, "flow.tex_book", "tex_book", "tex-book.md");
+    crate::dataflow::verify_flow(&forest, "tex_book", &crate::dataflow::doc("tex-book.md"));
 }

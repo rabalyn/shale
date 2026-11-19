@@ -4,6 +4,8 @@ These diagrams show how data moves through Shale where it crosses a boundary (ne
 
 To regenerate a diagram after a change to its flow, run its driving test (the table below names it) with `SHALE_UPDATE_DATAFLOW=1`, and commit the result. A test in `tests/dataflow_docs.rs` checks that every generated block is listed here and every listed flow has its block.
 
+A flow shows every step under its root, also spans of other flows that its code calls (shared code), labelled with that flow's name (`other.step`): the book export through TeX shows `tex_export.compile`.
+
 One row per flow, one row per line; the flow is the name in the begin marker of its block.
 
 | Flow | Doc | Driving test | Drift checked by |
@@ -41,6 +43,7 @@ One row per flow, one row per line; the flow is the name in the begin marker of 
 | caldav_load | [caldav-load.md](caldav-load.md) | `calendar/env_tests.rs::caldav_env_discovers_and_loads_the_seeded_calendars` | caldav-env suite (land.sh, when calendar code changes) |
 | caldav_edit | [caldav-edit.md](caldav-edit.md) | `calendar/env_tests.rs::caldav_env_creates_edits_and_deletes_an_event` | caldav-env suite (land.sh, when calendar code changes) |
 | caldav_move | [caldav-edit.md](caldav-edit.md) | `calendar/env_tests.rs::caldav_env_moves_an_event_to_another_calendar_and_deletes_it` | caldav-env suite (land.sh, when calendar code changes) |
+| caldav_conflict | [caldav-edit.md](caldav-edit.md) | `calendar/env_tests.rs::caldav_env_a_change_on_the_server_meanwhile_is_not_overwritten` | caldav-env suite (land.sh, when calendar code changes) |
 | tex_export | [tex-export.md](tex-export.md) | `pdf/tex/writer_env_tests.rs::tex_env_a_letter_has_its_recipient_subject_and_text` | tex-env suite (land.sh, when TeX code changes) |
 | tex_book | [tex-book.md](tex-book.md) | `pdf/tex/book_env_tests.rs::tex_env_a_folder_compiles_as_a_report_with_sections` | tex-env suite (land.sh, when TeX code changes) |
 | tex_setup | [tex-setup.md](tex-setup.md) | `pdf/tex/setup_env_tests.rs::tex_env_the_setup_imports_the_cached_archive_takes_a_logo_and_the_details_and_makes_a_test_page_with_the_department` | tex-env suite (land.sh, when TeX code changes) |

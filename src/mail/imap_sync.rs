@@ -641,8 +641,7 @@ pub fn check_folder(store: &MailStore, client: &mut Client, account_id: &str, fo
     let row = folder_row(store, account_id, folder_name)?;
     let (tx, _rx) = channel();
     let never = AtomicBool::new(false);
-    // the watch shows a check as one step: the steps of syncing a folder belong to the diagram of the sync (DEV-028)
-    tracing::dispatcher::with_default(&tracing::Dispatch::none(), || crate::jobs::catch(|| sync_folder(store, client, &row, opts, &tx, &never)).unwrap_or_else(Err).map(Some))
+    crate::jobs::catch(|| sync_folder(store, client, &row, opts, &tx, &never)).unwrap_or_else(Err).map(Some)
 }
 
 // ---------------------------------------------------------------- browsing Trash and Junk

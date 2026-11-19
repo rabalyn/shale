@@ -40,6 +40,24 @@ fn dev_026_steps_come_from_arrows_blocks_and_notes() {
     assert_eq!(steps_of(block), ["a", "b", "c", "d", "e"]);
 }
 
+/// A label of the diagram of `flow` is a span: `flow.<flow>.<label>` for a step of its own,
+/// `flow.<label>` for a step of another flow (`other.step` is `flow.other.step`, a bare `other`
+/// is the root `flow.other`).
+fn is_span(code: &str, flow: &str, label: &str) -> bool {
+    code.contains(&format!("\"flow.{flow}.{label}\"")) || code.contains(&format!("\"flow.{label}\""))
+}
+
+// spec: DEV-026
+#[test]
+fn dev_026_a_label_is_a_step_of_the_flow_or_a_step_or_root_of_another_flow() {
+    let code = "info_span!(\"flow.mine.own\") info_span!(\"flow.other.step\") info_span!(\"flow.nested\")";
+    assert!(is_span(code, "mine", "own"));
+    assert!(is_span(code, "mine", "other.step"));
+    assert!(is_span(code, "mine", "nested"));
+    assert!(!is_span(code, "mine", "step"));
+    assert!(!is_span(code, "mine", "other.missing"));
+}
+
 // spec: DEV-026
 #[test]
 fn dev_026_every_step_of_a_dataflow_diagram_is_a_span_in_the_code() {
@@ -63,8 +81,7 @@ fn dev_026_every_step_of_a_dataflow_diagram_is_a_span_in_the_code() {
             let labels = steps_of(block);
             assert!(!labels.is_empty(), "{}: the diagram of {flow} has no steps", path.display());
             for label in labels {
-                let name = format!("\"flow.{flow}.{label}\"");
-                assert!(code.contains(&name), "{}: the step {label} of {flow} is not a span ({name}) in src/", path.display());
+                assert!(is_span(&code, flow, label), "{}: the step {label} of {flow} is not a span (\"flow.{flow}.{label}\" or \"flow.{label}\") in src/", path.display());
             }
             diagrams += 1;
             rest = next;

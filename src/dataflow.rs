@@ -170,9 +170,68 @@ fn merge_order<'a>(sequences: &[Vec<&'a str>]) -> Vec<&'a str> {
     out
 }
 
-/// The step label of a span name: `flow.mail_sync.fetch` shows as `fetch`.
-fn label(name: &str) -> &str {
-    name.strip_prefix("flow.").and_then(|rest| rest.split_once('.')).map_or(name, |(_, step)| step)
+/// The step label of a span name inside the diagram of `flow`: `flow.<flow>.fetch` shows as
+/// `fetch`; a span of another flow that the code called (shared code) keeps that flow's name,
+/// `flow.other.step` shows as `other.step` and a nested root `flow.other` as `other`.
+fn label<'a>(name: &'a str, flow: &str) -> &'a str {
+    let Some(rest) = name.strip_prefix("flow.") else { return name };
+    match rest.split_once('.') {
+        Some((f, step)) if f == flow => step,
+        Some(_) | None => rest,
+    }
+}
+
+/// The steps of the flow `flow` out of a recorded forest: every occurrence of its root
+/// `flow.<flow>`, at any depth, is an instance of one root; the instances are merged like the
+/// siblings of `canonical` and all their descendants stay, also the spans of other flows that the
+/// code of this flow called (DEV-026). Empty when the run recorded no such root.
+pub fn flow_tree(forest: &[Node], flow: &str) -> Vec<Node> {
+    fn find<'a>(nodes: &'a [Node], root: &str, out: &mut Vec<&'a Node>) {
+        for n in nodes {
+            if n.name == root {
+                out.push(n);
+            } else {
+                find(&n.children, root, out);
+            }
+        }
+    }
+    let root = format!("flow.{flow}");
+    let mut found = Vec::new();
+    find(forest, &root, &mut found);
+    if found.is_empty() {
+        return Vec::new();
+    }
+    let peer = found.iter().map(|n| n.peer.as_str()).min().unwrap_or("").to_string();
+    let children: Vec<&[Node]> = found.iter().map(|n| n.children.as_slice()).collect();
+    vec![Node { name: root, peer, looped: found.iter().any(|n| n.looped), opt: found.iter().any(|n| n.opt), children: merge_nodes(&children) }]
+}
+
+/// The merged children of several instances of one parent that are canonical already.
+fn merge_nodes(instances: &[&[Node]]) -> Vec<Node> {
+    if let [only] = instances {
+        return only.to_vec();
+    }
+    let mut groups: BTreeMap<&str, Vec<&Node>> = BTreeMap::new();
+    let sequences: Vec<Vec<&str>> = instances.iter().map(|children| children.iter().map(|c| c.name.as_str()).collect()).collect();
+    for children in instances {
+        for c in *children {
+            groups.entry(&c.name).or_default().push(c);
+        }
+    }
+    merge_order(&sequences)
+        .into_iter()
+        .map(|name| {
+            let members = &groups[name];
+            let inner: Vec<&[Node]> = members.iter().map(|m| m.children.as_slice()).collect();
+            Node {
+                name: name.into(),
+                peer: members.iter().map(|m| m.peer.as_str()).min().unwrap_or("").to_string(),
+                looped: members.iter().any(|m| m.looped),
+                opt: members.iter().any(|m| m.opt) || members.len() < instances.len(),
+                children: merge_nodes(&inner),
+            }
+        })
+        .collect()
 }
 
 /// A Mermaid sequence diagram of a canonical tree: one participant per peer (in order of first
@@ -191,11 +250,11 @@ pub fn render_mermaid(forest: &[Node]) -> String {
             peers(&n.children, out);
         }
     }
-    fn steps(out: &mut String, nodes: &[Node], caller: &str, depth: usize) {
+    fn steps(out: &mut String, nodes: &[Node], caller: &str, flow: &str, depth: usize) {
         for n in nodes {
             let (mut d, pad) = (depth, |d: usize| "    ".repeat(d));
             let block = n.peer == caller;
-            let (opt, looped) = if block { (format!("opt {}", label(&n.name)), format!("loop {}", label(&n.name))) } else { ("opt sometimes".into(), "loop repeated".into()) };
+            let (opt, looped) = if block { (format!("opt {}", label(&n.name, flow)), format!("loop {}", label(&n.name, flow))) } else { ("opt sometimes".into(), "loop repeated".into()) };
             if n.opt {
                 out.push_str(&format!("{}{opt}\n", pad(d)));
                 d += 1;
@@ -205,11 +264,11 @@ pub fn render_mermaid(forest: &[Node]) -> String {
                 d += 1;
             }
             if !block {
-                out.push_str(&format!("{}{caller}->>{}: {}\n", pad(d), n.peer, label(&n.name)));
+                out.push_str(&format!("{}{caller}->>{}: {}\n", pad(d), n.peer, label(&n.name, flow)));
             } else if !n.opt && !n.looped {
-                out.push_str(&format!("{}Note over {caller}: {}\n", pad(d), label(&n.name)));
+                out.push_str(&format!("{}Note over {caller}: {}\n", pad(d), label(&n.name, flow)));
             }
-            steps(out, &n.children, caller, d);
+            steps(out, &n.children, caller, flow, d);
             for closing in (depth..d).rev() {
                 out.push_str(&format!("{}end\n", pad(closing)));
             }
@@ -222,7 +281,7 @@ pub fn render_mermaid(forest: &[Node]) -> String {
         out.push_str(&format!("    participant {p}\n"));
     }
     for root in forest {
-        steps(&mut out, &root.children, &root.peer, 1);
+        steps(&mut out, &root.children, &root.peer, root.name.strip_prefix("flow.").unwrap_or(&root.name), 1);
     }
     out
 }
@@ -256,6 +315,19 @@ pub fn current_block<'a>(doc: &'a str, flow: &str) -> Option<&'a str> {
 pub fn update_block(doc: &str, flow: &str, rendered: &str) -> String {
     let range = block_range(doc, flow).unwrap_or_else(|| panic!("the document needs the markers {} and {}", begin_marker(flow).trim_end(), end_marker(flow)));
     format!("{}{}{}", &doc[..range.start], fenced(rendered), &doc[range.end..])
+}
+
+/// The path of a dataflow document of the repository.
+pub fn doc(name: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow").join(name)
+}
+
+/// Check the diagram of `flow` out of a whole recording against its block in `doc_path`
+/// ([`flow_tree`], [`render_mermaid`], [`verify`]).
+pub fn verify_flow(forest: &[Node], flow: &str, doc_path: &Path) {
+    let tree = flow_tree(forest, flow);
+    assert!(!tree.is_empty(), "the run recorded no flow.{flow}");
+    verify(doc_path, flow, &render_mermaid(&tree));
 }
 
 /// Compare the rendered diagram with the committed block of `path`; with `SHALE_UPDATE_DATAFLOW=1`

@@ -144,29 +144,6 @@ fn finish(store: &mut CalendarStore, job: &crate::calendar::store::Job, ids: &[&
     r
 }
 
-/// Check the diagram of one flow against its block in `docs/dataflow/<doc>` (DEV-026, DEV-028): the
-/// spans named like the flow's root are found in a recording wherever they lie, and only the steps
-/// named after the flow itself stay (what other flows did meanwhile is their own diagram).
-fn verify_flow(forest: &[crate::dataflow::Node], root: &str, flow: &str, doc: &str) {
-    use crate::dataflow::Node;
-    fn own(nodes: &[Node], prefix: &str) -> Vec<Node> {
-        nodes.iter().filter(|n| n.name.starts_with(prefix)).map(|n| Node { children: own(&n.children, prefix), ..n.clone() }).collect()
-    }
-    fn find(nodes: &[Node], root: &str, out: &mut Vec<Node>) {
-        for n in nodes {
-            if n.name == root {
-                out.push(Node { children: own(&n.children, &format!("{root}.")), ..n.clone() });
-            } else {
-                find(&n.children, root, out);
-            }
-        }
-    }
-    let mut mine = Vec::new();
-    find(forest, root, &mut mine);
-    assert!(!mine.is_empty(), "the run recorded no {root}");
-    crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow").join(doc), flow, &crate::dataflow::render_mermaid(&mine));
-}
-
 // spec: CALENV-002
 #[test]
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
@@ -222,8 +199,8 @@ fn caldav_env_discovers_and_loads_the_seeded_calendars() {
         assert!(store.status["work"].contains("events"), "{:?}", store.status);
         let _ = std::fs::remove_dir_all(dir);
     });
-    verify_flow(&forest, "flow.caldav_discover", "caldav_discover", "caldav-load.md");
-    verify_flow(&forest, "flow.caldav_load", "caldav_load", "caldav-load.md");
+    crate::dataflow::verify_flow(&forest, "caldav_discover", &crate::dataflow::doc("caldav-load.md"));
+    crate::dataflow::verify_flow(&forest, "caldav_load", &crate::dataflow::doc("caldav-load.md"));
 }
 
 // spec: CALENV-002
@@ -265,7 +242,7 @@ fn caldav_env_creates_edits_and_deletes_an_event() {
         // an event that is already gone counts as removed
         dav::delete_event(&href, &a, None, std::slice::from_ref(&after)).expect("delete again");
     });
-    verify_flow(&forest, "flow.caldav_edit", "caldav_edit", "caldav-edit.md");
+    crate::dataflow::verify_flow(&forest, "caldav_edit", &crate::dataflow::doc("caldav-edit.md"));
 }
 
 // spec: CALENV-002
@@ -340,7 +317,7 @@ fn caldav_env_moves_an_event_to_another_calendar_and_deletes_it() {
         assert!(find("moves", &e.uid).is_empty());
         let _ = std::fs::remove_dir_all(dir);
     });
-    verify_flow(&forest, "flow.caldav_move", "caldav_move", "caldav-edit.md");
+    crate::dataflow::verify_flow(&forest, "caldav_move", &crate::dataflow::doc("caldav-edit.md"));
 }
 
 // spec: CALENV-002
@@ -348,51 +325,57 @@ fn caldav_env_moves_an_event_to_another_calendar_and_deletes_it() {
 #[ignore = "needs the containers: tests/caldav-env/caldav-env.sh up"]
 fn caldav_env_a_change_on_the_server_meanwhile_is_not_overwritten() {
     let _env = Env::start();
-    let (a, name) = (acct("work"), "work");
-    let e = new_event("conflict", "Original");
-    let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
-    let read = find_one(name, &e.uid);
+    let forest = crate::dataflow::record(|| {
+        let (a, name) = (acct("work"), "work");
+        let e = new_event("conflict", "Original");
+        let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create");
+        let read = find_one(name, &e.uid);
 
-    // somebody else changes the event after it was read
-    let mut theirs = read.clone();
-    theirs.summary = "Changed by somebody else".into();
-    let (_, their_tag) = dav::put_event(&cal(name), &a, std::slice::from_ref(&theirs), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).expect("their edit");
-    assert_ne!(their_tag, read.etag);
+        // somebody else changes the event after it was read
+        let mut theirs = read.clone();
+        theirs.summary = "Changed by somebody else".into();
+        let (_, their_tag) = dav::put_event(&cal(name), &a, std::slice::from_ref(&theirs), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).expect("their edit");
+        assert_ne!(their_tag, read.etag);
 
-    // our save with the old version tag is refused (HTTP 412) and the server keeps their version
-    let mut mine = read.clone();
-    mine.summary = "Changed by me".into();
-    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
-    assert!(err.contains("changed on the server meanwhile"), "{err}");
-    assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
-    // so is a delete with the old tag
-    let err = dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).unwrap_err();
-    assert!(err.contains("changed on the server meanwhile"), "{err}");
-    assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
+        // the refused writes are the flow `caldav_conflict` (DEV-028): its steps are those of `caldav_edit`, which the code of the write runs
+        let conflict = tracing::info_span!("flow.caldav_conflict", peer = "calendar").entered();
+        // our save with the old version tag is refused (HTTP 412) and the server keeps their version
+        let mut mine = read.clone();
+        mine.summary = "Changed by me".into();
+        let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
+        // so is a delete with the old tag
+        let err = dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
 
-    // without any version tag (a server that sends none): the event is compared with what was read (CAL-016)
-    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&read)).unwrap_err();
-    assert!(err.contains("changed on the server meanwhile"), "{err}");
-    let err = dav::delete_event(&href, &a, None, std::slice::from_ref(&read)).unwrap_err();
-    assert!(err.contains("changed on the server meanwhile"), "{err}");
-    assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
-    // …and goes through when the server still has what was read
-    let current = find_one(name, &e.uid);
-    let mut mine = current.clone();
-    mine.summary = "Changed by me, knowing theirs".into();
-    dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&current)).expect("save without a tag");
-    assert_eq!(find_one(name, &e.uid).summary, "Changed by me, knowing theirs");
-    let current = find_one(name, &e.uid);
-    dav::delete_event(&href, &a, None, std::slice::from_ref(&current)).expect("delete without a tag");
-    assert!(find(name, &e.uid).is_empty());
+        // without any version tag (a server that sends none): the event is compared with what was read (CAL-016)
+        let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&read)).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        let err = dav::delete_event(&href, &a, None, std::slice::from_ref(&read)).unwrap_err();
+        assert!(err.contains("changed on the server meanwhile"), "{err}");
+        assert_eq!(find_one(name, &e.uid).summary, "Changed by somebody else");
+        // …and goes through when the server still has what was read
+        let current = find_one(name, &e.uid);
+        let mut mine = current.clone();
+        mine.summary = "Changed by me, knowing theirs".into();
+        dav::put_event(&cal(name), &a, std::slice::from_ref(&mine), Some((&href, None)), std::slice::from_ref(&current)).expect("save without a tag");
+        drop(conflict);
+        assert_eq!(find_one(name, &e.uid).summary, "Changed by me, knowing theirs");
+        let current = find_one(name, &e.uid);
+        dav::delete_event(&href, &a, None, std::slice::from_ref(&current)).expect("delete without a tag");
+        assert!(find(name, &e.uid).is_empty());
 
-    // an event somebody deleted meanwhile is not brought back by a save
-    let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create again");
-    let read = find_one(name, &e.uid);
-    dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).expect("their delete");
-    let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&read), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
-    assert!(!err.is_empty());
-    assert!(find(name, &e.uid).is_empty());
+        // an event somebody deleted meanwhile is not brought back by a save
+        let (href, _) = dav::put_event(&cal(name), &a, std::slice::from_ref(&e), None, &[]).expect("create again");
+        let read = find_one(name, &e.uid);
+        dav::delete_event(&href, &a, read.etag.as_deref(), std::slice::from_ref(&read)).expect("their delete");
+        let err = dav::put_event(&cal(name), &a, std::slice::from_ref(&read), Some((&href, read.etag.as_deref())), std::slice::from_ref(&read)).unwrap_err();
+        assert!(!err.is_empty());
+        assert!(find(name, &e.uid).is_empty());
+    });
+    crate::dataflow::verify_flow(&forest, "caldav_conflict", &crate::dataflow::doc("caldav-edit.md"));
 }
 
 // spec: CALENV-002

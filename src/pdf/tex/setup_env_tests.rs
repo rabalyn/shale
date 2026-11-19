@@ -74,5 +74,5 @@ fn tex_env_the_setup_imports_the_cached_archive_takes_a_logo_and_the_details_and
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_file(&logo);
     });
-    super::writer_env_tests::verify_flow(&forest, "flow.tex_setup", "tex_setup", "tex-setup.md");
+    crate::dataflow::verify_flow(&forest, "tex_setup", &crate::dataflow::doc("tex-setup.md"));
 }

@@ -243,29 +243,6 @@ fn sign_in_headless(acct: &MailAccount) -> Result<oauth::SignedIn, oauth::OAuthE
     oauth::sign_in(acct, None, &AtomicBool::new(false), Duration::from_secs(60), &|_| {})
 }
 
-/// Check the diagram of one flow against its block in `docs/dataflow/<doc>` (DEV-026, DEV-028): the
-/// spans named like the flow's root are found in a recording wherever they lie, and only the steps
-/// named after the flow itself stay (what other flows did meanwhile is their own diagram).
-fn verify_flow(forest: &[crate::dataflow::Node], root: &str, flow: &str, doc: &str) {
-    use crate::dataflow::Node;
-    fn own(nodes: &[Node], prefix: &str) -> Vec<Node> {
-        nodes.iter().filter(|n| n.name.starts_with(prefix)).map(|n| Node { children: own(&n.children, prefix), ..n.clone() }).collect()
-    }
-    fn find(nodes: &[Node], root: &str, out: &mut Vec<Node>) {
-        for n in nodes {
-            if n.name == root {
-                out.push(Node { children: own(&n.children, &format!("{root}.")), ..n.clone() });
-            } else {
-                find(&n.children, root, out);
-            }
-        }
-    }
-    let mut mine = Vec::new();
-    find(forest, root, &mut mine);
-    assert!(!mine.is_empty(), "the run recorded no {root}");
-    crate::dataflow::verify(&env_dir().join("../../docs/dataflow").join(doc), flow, &crate::dataflow::render_mermaid(&mine));
-}
-
 // spec: MAIL-091
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
@@ -328,8 +305,8 @@ fn mail_env_oauth_account_signs_in_syncs_renews_its_token_and_a_dead_sign_in_is_
         oauth::forget_source(&acct.id);
         let _ = std::fs::remove_dir_all(dir);
     });
-    verify_flow(&forest, "flow.mail_oauth", "mail_oauth", "mail-oauth.md");
-    verify_flow(&forest, "flow.mail_oauth_renew", "mail_oauth_renew", "mail-oauth.md");
+    crate::dataflow::verify_flow(&forest, "mail_oauth", &crate::dataflow::doc("mail-oauth.md"));
+    crate::dataflow::verify_flow(&forest, "mail_oauth_renew", &crate::dataflow::doc("mail-oauth.md"));
 }
 
 // ------------------------------------------------------------ phase 2 (MAIL-113)
@@ -510,7 +487,7 @@ fn mail_env_flag_unflag_move_delete_and_delete_forever_change_dovecot_as_asked_a
         }
         let _ = std::fs::remove_dir_all(dir);
     });
-    verify_flow(&forest, "flow.mail_ops", "mail_ops", "mail-ops.md");
+    crate::dataflow::verify_flow(&forest, "mail_ops", &crate::dataflow::doc("mail-ops.md"));
 }
 
 // ------------------------------------------------------------ phase 3: sending (MAIL-160)
@@ -698,7 +675,7 @@ fn mail_env_password_and_oauth_accounts_send_with_an_attachment_and_dovecot_has_
         secrets::clear_mail_secret(&oa.id, MailSecret::RefreshToken);
         oauth::forget_source(&oa.id);
     });
-    verify_flow(&forest, "flow.mail_send", "mail_send", "mail-send.md");
+    crate::dataflow::verify_flow(&forest, "mail_send", &crate::dataflow::doc("mail-send.md"));
 }
 
 // ------------------------------------------------------------ phase 4: signed and encrypted mail (MAIL-198)
@@ -839,8 +816,8 @@ fn mail_env_signed_and_encrypted_openpgp_and_smime_mail_arrives_intact_verifies_
         crypto_end_to_end(crate::config::CryptoStandard::OpenPgp, &format!("pgp{}", std::process::id()));
         crypto_end_to_end(crate::config::CryptoStandard::Smime, &format!("smime{}", std::process::id()));
     });
-    verify_flow(&forest, "flow.mail_crypto_send", "mail_crypto_send", "mail-crypto.md");
-    verify_flow(&forest, "flow.mail_crypto_read", "mail_crypto_read", "mail-crypto.md");
+    crate::dataflow::verify_flow(&forest, "mail_crypto_send", &crate::dataflow::doc("mail-crypto.md"));
+    crate::dataflow::verify_flow(&forest, "mail_crypto_read", &crate::dataflow::doc("mail-crypto.md"));
 }
 
 // ------------------------------------------------------------ watching a folder (MAIL-231)
@@ -882,16 +859,16 @@ fn mail_env_a_flag_that_another_connection_sets_and_removes_shows_in_the_store_w
         let account = MailAccount { id: "alice".into(), name: "Alice".into(), host: "localhost".into(), port: IMAPS_PORT, user: USER.into(), ..MailAccount::default() };
         let conn = connector.clone();
         watch.update(&[Wanted { account, folder: "Scratch".into(), session_password: false }], &store, &move |_| conn.clone(), &SyncOptions::default(), None);
-        std::thread::sleep(Duration::from_secs(1)); // connected and idling
+        std::thread::sleep(Duration::from_secs(1)); // the session is connected and idles after its first check; the watch exposes no such state, and a counter that only this test reads would be code for the test alone
                                                     // another connection (doveadm, like Thunderbird) flags a mail and takes the flag off again
         doveadm(&["flags", "add", "-u", USER, "\\Flagged", "mailbox", "Scratch", "header", "Subject", "Scratch one"], None).unwrap();
         wait("the flag arrives", Box::new(|| flagged("Scratch one")));
         doveadm(&["flags", "remove", "-u", USER, "\\Flagged", "mailbox", "Scratch", "header", "Subject", "Scratch one"], None).unwrap();
         wait("the flag is gone again", Box::new(|| !flagged("Scratch one")));
-        std::thread::sleep(Duration::from_secs(1)); // idling again before it is stopped, so that the recorded steps are the same every run
+        std::thread::sleep(Duration::from_secs(1)); // the session checks again after the removal and idles again; the same reason as above, and stopping inside the check would record a different tree
         watch.stop_all();
         clean_scratch();
         let _ = std::fs::remove_dir_all(dir);
     });
-    verify_flow(&forest, "flow.mail_watch", "mail_watch", "mail-watch.md");
+    crate::dataflow::verify_flow(&forest, "mail_watch", &crate::dataflow::doc("mail-watch.md"));
 }

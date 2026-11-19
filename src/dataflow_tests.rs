@@ -1,6 +1,6 @@
 //! Tests of the dataflow recorder, canonical form and renderer (DEV-026). No containers needed.
 
-use crate::dataflow::{canonical, current_block, record, render_mermaid, update_block, verify_with, Node, Raw};
+use crate::dataflow::{canonical, current_block, flow_tree, record, render_mermaid, update_block, verify_with, Node, Raw};
 
 fn leaf(name: &str, peer: &str) -> Raw {
     Raw::new(name, peer, vec![])
@@ -267,4 +267,44 @@ fn dev_026_two_flows_updated_in_one_doc_at_the_same_time_both_keep_their_block()
         assert_eq!(current_block(&got, "b"), Some(format!("```mermaid\n{two}```\n").as_str()), "round {round}");
     }
     std::fs::remove_file(&path).unwrap();
+}
+
+fn raw_flow(root: &str, children: Vec<Raw>) -> Raw {
+    Raw::new(root, "sync", children)
+}
+
+// spec: DEV-026
+#[test]
+fn dev_026_a_root_below_another_root_is_found() {
+    let forest = canonical(&[raw_flow("flow.outer", vec![Raw::new("flow.outer.a", "imap", vec![raw_flow("flow.t", vec![leaf("flow.t.x", "store")])])])]);
+    let tree = flow_tree(&forest, "t");
+    assert_eq!(names(&tree), ["flow.t"]);
+    assert_eq!(names(&tree[0].children), ["flow.t.x"]);
+    assert!(flow_tree(&forest, "missing").is_empty());
+}
+
+// spec: DEV-026
+#[test]
+fn dev_026_two_instances_of_a_root_merge_like_siblings() {
+    let forest = canonical(&[raw_flow("flow.t", vec![leaf("flow.t.a", "imap"), leaf("flow.t.b", "store")]), raw_flow("flow.x", vec![raw_flow("flow.t", vec![leaf("flow.t.a", "imap"), leaf("flow.t.c", "imap")])])]);
+    let tree = flow_tree(&forest, "t");
+    assert_eq!(tree.len(), 1);
+    let kids = &tree[0].children;
+    assert_eq!(names(kids), ["flow.t.a", "flow.t.b", "flow.t.c"]);
+    assert!(!kids[0].opt && kids[1].opt && kids[2].opt);
+}
+
+// spec: DEV-026
+#[test]
+fn dev_026_a_step_of_another_flow_is_labelled_with_that_flows_name() {
+    let forest = canonical(&[raw_flow("flow.t", vec![leaf("flow.t.own", "store"), leaf("flow.other.step", "imap")])]);
+    assert_eq!(render_mermaid(&flow_tree(&forest, "t")), "sequenceDiagram\n    participant sync\n    participant store\n    participant imap\n    sync->>store: own\n    sync->>imap: other.step\n");
+}
+
+// spec: DEV-026
+#[test]
+fn dev_026_a_nested_root_of_another_flow_is_labelled_with_its_name() {
+    let forest = canonical(&[raw_flow("flow.t", vec![Raw::new("flow.other", "imap", vec![leaf("flow.other.step", "store")])])]);
+    let text = render_mermaid(&flow_tree(&forest, "t"));
+    assert!(text.contains("sync->>imap: other\n") && text.contains("sync->>store: other.step\n"), "{text}");
 }

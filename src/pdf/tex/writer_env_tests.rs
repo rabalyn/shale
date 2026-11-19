@@ -13,29 +13,6 @@ use super::writer_tests::{fields, rich_assets, temp_vault, RICH_NOTE};
 use crate::pdf::export::ExportOptions;
 use std::path::Path;
 
-/// Check the diagram of one flow against its block in `docs/dataflow/<doc>` (DEV-026, DEV-028): the
-/// spans named like the flow's root are found in a recording wherever they lie, and only the steps
-/// named after the flow itself stay (what other flows did meanwhile is their own diagram).
-pub(super) fn verify_flow(forest: &[crate::dataflow::Node], root: &str, flow: &str, doc: &str) {
-    use crate::dataflow::Node;
-    fn own(nodes: &[Node], prefix: &str) -> Vec<Node> {
-        nodes.iter().filter(|n| n.name.starts_with(prefix)).map(|n| Node { children: own(&n.children, prefix), ..n.clone() }).collect()
-    }
-    fn find(nodes: &[Node], root: &str, out: &mut Vec<Node>) {
-        for n in nodes {
-            if n.name == root {
-                out.push(Node { children: own(&n.children, &format!("{root}.")), ..n.clone() });
-            } else {
-                find(&n.children, root, out);
-            }
-        }
-    }
-    let mut mine = Vec::new();
-    find(forest, root, &mut mine);
-    assert!(!mine.is_empty(), "the run recorded no {root}");
-    crate::dataflow::verify(&Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow").join(doc), flow, &crate::dataflow::render_mermaid(&mine));
-}
-
 /// Export a note as a kind of the imported set, in a language, and compile it. Returns the PDF.
 fn export(note: &str, kind_id: &str, lang: Language, given: &[(&str, &str)], toc: bool) -> (Vec<u8>, Document) {
     // the root of the flow is the caller (the export dialog, DEV-028)
@@ -196,7 +173,7 @@ fn tex_env_a_letter_has_its_recipient_subject_and_text() {
             }
         }
     });
-    verify_flow(&forest, "flow.tex_export", "tex_export", "tex-export.md");
+    crate::dataflow::verify_flow(&forest, "tex_export", &crate::dataflow::doc("tex-export.md"));
 }
 
 // spec: TEX-009, TEX-011, TEX-027
