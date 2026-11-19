@@ -575,14 +575,18 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
     let mut seen: Vec<PathBuf> = Vec::new();
     let mut not_offline = false;
     let saw_deleted = Cell::new(false);
+    // the dataflow of the Thunderbird store (DEV-030): its only caller is the drop from another program
+    let _flow = tracing::info_span!("flow.import_thunderbird", peer = "import").entered();
     for r in &refs {
         let mut places: Vec<PathBuf> = r.file.iter().cloned().collect();
+        let find_folder = tracing::info_span!("flow.import_thunderbird.find_folder", peer = "profile").entered();
         for d in server_dirs(roots, r) {
             match folder_path(&d, &r.folder) {
                 Some(p) => places.push(p),
                 None => why.push(format!("no folder “{}” in {}", r.folder.join("/"), d.display())),
             }
         }
+        drop(find_folder);
         for p in places {
             if seen.contains(&p) {
                 continue;
@@ -590,13 +594,14 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
             seen.push(p.clone());
             // local folders: the link holds the message's position
             if !r.imap && p.is_file() {
-                if let Some(raw) = r.key.and_then(|k| read_at(&p, k)) {
+                if let Some(raw) = r.key.and_then(|k| tracing::info_span!("flow.import_thunderbird.read_at_position", peer = "profile").in_scope(|| read_at(&p, k))) {
                     return Ok(vec![raw]);
                 }
             }
             // the folder's index knows each message by its key (IMAP: UID)
             let mut index_subject = None;
             if let Some(k) = r.key {
+                let _index = tracing::info_span!("flow.import_thunderbird.read_index", peer = "profile").entered();
                 let idx = index_of(&p);
                 match crate::fsutil::read(&idx) {
                     Ok(bytes) => match mork_rows(&bytes).get(&k) {
@@ -615,7 +620,7 @@ pub fn find_in(roots: &[PathBuf], links: &[String], file_name: Option<&str>) -> 
             }
             // last resort: the subject
             for s in subject.iter().chain(index_subject.iter()) {
-                let found = scan(&p, &|h| has_subject(h, s), &saw_deleted);
+                let found = tracing::info_span!("flow.import_thunderbird.scan_folder", peer = "profile").in_scope(|| scan(&p, &|h| has_subject(h, s), &saw_deleted));
                 if !found.is_empty() {
                     return Ok(found);
                 }
@@ -719,5 +724,7 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod dataflow_tests;
 #[cfg(test)]
 mod fixture_tests;

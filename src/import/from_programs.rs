@@ -122,7 +122,7 @@ fn media_from_parts(parts: &[(String, Vec<u8>)], download: Download) -> Option<R
     // an address of a file
     let offered_image = parts.iter().any(|(m, _)| norm(m).starts_with("image/") || norm(m).starts_with("video/"));
     let url = urls.iter().find(|u| url_file_name(u).is_some_and(|n| media::media_kind(Path::new(&n)).is_some()) || offered_image || promise_url.contains(u))?;
-    let (data, content_type) = match download(url) {
+    let (data, content_type) = match tracing::info_span!("flow.import_programs_web", peer = "import").in_scope(|| tracing::info_span!("flow.import_programs_web.download", peer = "web").in_scope(|| download(url))) {
         Ok(r) => r,
         Err(e) => return Some(Err(format!("Could not download “{url}”: {e}"))),
     };
@@ -224,7 +224,8 @@ pub fn items_from_drop(mime: &str, data: &[u8]) -> (Vec<Item>, Vec<String>) {
     let text = text_of(data);
     let uris = |text: &str| -> (Vec<Item>, Vec<String>) {
         let (paths, mut notes) = uri_list(text);
-        let (items, more) = items_from_paths(&paths);
+        // the dataflow of dropped files (DEV-030)
+        let (items, more) = tracing::info_span!("flow.import_programs_files", peer = "import").in_scope(|| tracing::info_span!("flow.import_programs_files.read_files", peer = "source").in_scope(|| items_from_paths(&paths)));
         notes.extend(more);
         (items, notes)
     };
@@ -480,3 +481,6 @@ mod tests {
         assert_eq!(media_of(&items[0]), ("dot.png".into(), b"PNG!".to_vec()), "{notes:?}");
     }
 }
+
+#[cfg(test)]
+mod dataflow_tests;
