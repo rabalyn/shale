@@ -102,6 +102,14 @@ pub struct ExportOptions {
     pub justify: bool,
     /// notes: the colour of headings (`print-heading-color`, PDF-017); None: black
     pub heading_color: Option<Rgba>,
+    /// notes: headings in bold (`print-heading-weight`, PDF-023); false: the weight of the text
+    pub heading_bold: bool,
+    /// notes: the sizes of the headings of levels 1 to 6 in points (`print-heading-sizes`,
+    /// PDF-023), in place of the proportional scale; None: the scale
+    pub heading_sizes: Option<[f32; 6]>,
+    /// notes: the plain paper look of a note with `print-*` properties (PDF-024): lists, quotes,
+    /// code and tables without the app's colours and boxes
+    pub paper_look: bool,
     /// notes: the deepest heading level that starts a new page (`print-break-before`, PDF-021):
     /// 1 is every `#`, 2 every `#` and `##`, …; 0 none
     pub break_before: u8,
@@ -134,6 +142,9 @@ impl ExportOptions {
             paragraph_spacing: None,
             justify: false,
             heading_color: None,
+            heading_bold: true,
+            heading_sizes: None,
+            paper_look: false,
             break_before: 0,
             new_page_each: true,
             background: Background::White,
@@ -161,6 +172,9 @@ impl ExportOptions {
             paragraph_spacing: None,
             justify: false,
             heading_color: None,
+            heading_bold: true,
+            heading_sizes: None,
+            paper_look: false,
             break_before: 0,
             new_page_each: false,
             background: Background::White,
@@ -256,6 +270,16 @@ impl ExportOptions {
         if let Some(c) = props.get("print-heading-color").and_then(|v| parse_hex_colour(v)) {
             self.heading_color = Some(c);
         }
+        match props.get("print-heading-weight").map(|v| v.to_lowercase()).as_deref() {
+            Some("normal") => self.heading_bold = false,
+            Some("bold") => self.heading_bold = true,
+            _ => {}
+        }
+        if let Some(sizes) = props.get("print-heading-sizes").and_then(|v| parse_heading_sizes(v)) {
+            self.heading_sizes = Some(sizes);
+        }
+        // any print-* property of the list switches the paper look on (PDF-024)
+        self.paper_look |= KNOWN_PRINT_KEYS.iter().any(|k| props.contains_key(*k));
         self
     }
 
@@ -282,6 +306,36 @@ impl ExportOptions {
         }
         (!parts.is_empty()).then(|| parts.join(", "))
     }
+}
+
+/// The `print-*` properties the export knows (PDF-013, PDF-023): one of them in a note switches the
+/// paper look on (PDF-024); an unknown `print-*` key does not.
+const KNOWN_PRINT_KEYS: [&str; 13] = [
+    "print-paper",
+    "print-margins",
+    "print-font",
+    "print-font-size",
+    "print-line-spacing",
+    "print-paragraph-spacing",
+    "print-align",
+    "print-heading-color",
+    "print-heading-weight",
+    "print-heading-sizes",
+    "print-title",
+    "print-toc",
+    "print-break-before",
+];
+
+/// The text colour of the paper look (PDF-024): the ink of the note's text.
+const PAPER_INK: Rgba = Rgba(30, 30, 30, 255);
+/// The light grey box of a code block in the paper look.
+const PAPER_CODE_BG: Rgba = Rgba(245, 245, 245, 255);
+
+/// Six sizes in pt for the heading levels 1 to 6, separated by spaces or commas (each 4 to 72).
+fn parse_heading_sizes(v: &str) -> Option<[f32; 6]> {
+    let parts: Vec<f32> = v.split(|c: char| c.is_whitespace() || c == ',').filter(|p| !p.is_empty()).map(number).collect::<Option<_>>()?;
+    let sizes: [f32; 6] = parts.try_into().ok()?;
+    sizes.iter().all(|n| (4.0..=72.0).contains(n)).then_some(sizes)
 }
 
 /// The `print-*` properties of a note's front matter (key in lower case, its values joined by spaces).
@@ -790,8 +844,9 @@ impl<'a> Writer<'a> {
         let y = self.y;
         let mut x = x0;
         for (c, cell) in cells.iter().enumerate() {
-            let fill = header.then_some(Rgba(236, 234, 246, 255));
-            self.p().rect(x, y, widths[c], height, fill, Some((Rgba(150, 150, 150, 255), 0.6)));
+            // paper look: thin black lines and no fill (PDF-024)
+            let (fill, line) = if self.opts.paper_look { (None, (Rgba(0, 0, 0, 255), 0.5)) } else { (header.then_some(Rgba(236, 234, 246, 255)), (Rgba(150, 150, 150, 255), 0.6)) };
+            self.p().rect(x, y, widths[c], height, fill, Some(line));
             let mut top = y + CELL_PAD_Y;
             for line in cell {
                 let size = self.line_size(line);
@@ -995,11 +1050,14 @@ impl<'a> Writer<'a> {
                 self.y += base * 0.5;
                 let scale = match levels.and_then(|l| l.get(&i)) {
                     Some(printed) => book_scale(*printed),
-                    None => crate::editor::heading_scale(level as u8),
+                    None => match opts.heading_sizes {
+                        Some(sizes) => sizes[level - 1] / base,
+                        None => crate::editor::heading_scale(level as u8),
+                    },
                 };
                 let mut ps = self.pieces(vault, rel, line[level..].trim_start(), base * scale, theme::HEADING, false);
                 for p in &mut ps {
-                    p.bold = true;
+                    p.bold = opts.heading_bold || p.bold;
                     p.color = opts.heading_color.unwrap_or(Rgba(0, 0, 0, 255));
                 }
                 if let Some(n) = numbers.get(&i) {
@@ -1036,7 +1094,8 @@ impl<'a> Writer<'a> {
                 let by = y + size * 0.35;
                 self.p().rect(bx, by, box_s, box_s, None, Some((Rgba(90, 90, 90, 255), 0.8)));
                 if done {
-                    self.p().path(&[[bx + box_s * 0.2, by + box_s * 0.55], [bx + box_s * 0.42, by + box_s * 0.78], [bx + box_s * 0.82, by + box_s * 0.22]], false, None, Some((Rgba(105, 65, 198, 255), 1.2)));
+                    let tick = if opts.paper_look { PAPER_INK } else { Rgba(105, 65, 198, 255) };
+                    self.p().path(&[[bx + box_s * 0.2, by + box_s * 0.55], [bx + box_s * 0.42, by + box_s * 0.78], [bx + box_s * 0.82, by + box_s * 0.22]], false, None, Some((tick, 1.2)));
                 }
                 let (rest, n) = gather(i, rest, true);
                 extra = n;
@@ -1046,7 +1105,8 @@ impl<'a> Writer<'a> {
                 let ind = (line.len() - line.trim_start().len()) as f32 * 4.0;
                 self.need(base * 1.45);
                 let y = self.y;
-                self.p().text(TextStyle::plain(opts.font, base, Rgba(105, 65, 198, 255)), x0 + ind + 2.0, y + base * 1.08, &marker);
+                let mark = if opts.paper_look { PAPER_INK } else { Rgba(105, 65, 198, 255) };
+                self.p().text(TextStyle::plain(opts.font, base, mark), x0 + ind + 2.0, y + base * 1.08, &marker);
                 let (rest, n) = gather(i, &line[rest_off..], true);
                 extra = n;
                 let ps = self.pieces(vault, rel, &rest, base, ink, false);
@@ -1068,10 +1128,10 @@ impl<'a> Writer<'a> {
                 }
                 let start_y = self.y;
                 let start_page = self.page;
-                let ps = self.pieces(vault, rel, &content, base, theme::QUOTE, false);
+                let ps = self.pieces(vault, rel, &content, base, if opts.paper_look { ink } else { theme::QUOTE }, false);
                 self.paragraph_aligned(&ps, x0 + 12.0, cw - 12.0, true);
                 let end_y = self.y;
-                if self.page == start_page {
+                if self.page == start_page && !opts.paper_look {
                     self.p().line([x0 + 2.0, start_y + 2.0], [x0 + 2.0, end_y - 2.0], Rgba(105, 65, 198, 180), 2.5);
                 }
             } else {
@@ -1245,9 +1305,16 @@ impl<'a> Writer<'a> {
                 text: job.text[r.clone()].to_string(),
                 kind: self.kind_of(&f.font_id.family),
                 size: f.font_id.size,
-                color: if paint.is_some() || on_code { rgba(f.color) } else { print_color(f.color) },
+                color: if on_code && self.opts.paper_look && paint.is_none() {
+                    PAPER_INK
+                } else if paint.is_some() || on_code {
+                    rgba(f.color)
+                } else {
+                    print_color(f.color)
+                },
                 bg: match paint.and_then(|p| p.1) {
                     Some([r, g, b, a]) => Some(over_white([r, g, b, a])),
+                    None if on_code && self.opts.paper_look => None,
                     None if on_code => Some(rgba(theme::CODE_BG)),
                     None => print_bg(f.background),
                 },
@@ -1298,9 +1365,10 @@ impl<'a> Writer<'a> {
     fn code_block(&mut self, word: &str, lines: &[&str], size: f32) {
         let (x0, cw) = (self.left, self.cw());
         let lh = size * 1.4;
-        let plain = rgba(theme::CODE);
+        let paper = self.opts.paper_look;
+        let plain = if paper { PAPER_INK } else { rgba(theme::CODE) };
         let text = lines.join("\n");
-        let spans = crate::syntax::highlight(word, &text);
+        let spans = if paper { Default::default() } else { crate::syntax::highlight(word, &text) };
         let mut span = spans.iter().peekable();
         let mut at = 0;
         for line in lines {
@@ -1327,7 +1395,7 @@ impl<'a> Writer<'a> {
                 let (now, later) = rest.split_at(cut);
                 self.need(lh);
                 let y = self.y;
-                self.p().rect(x0, y, cw, lh, Some(rgba(theme::CODE_BG)), None);
+                self.p().rect(x0, y, cw, lh, Some(if paper { PAPER_CODE_BG } else { rgba(theme::CODE_BG) }), None);
                 let mut x = x0 + 6.0;
                 let mut n = 0;
                 while n < now.len() {
@@ -2719,7 +2787,8 @@ pub(crate) mod tests {
             "print-break-before: -1",
             "print-break-before: 1.5",
         ] {
-            let o = ExportOptions::for_note().with_note_properties(&front(bad, "x"));
+            // the key is still there: the paper look (PDF-024) is on, the values are as without it
+            let o = ExportOptions { paper_look: false, ..ExportOptions::for_note().with_note_properties(&front(bad, "x")) };
             assert_eq!(format!("{o:?}"), base, "{bad} is ignored like a missing value");
         }
         // the edges of the ranges are valid
@@ -3033,6 +3102,172 @@ pub(crate) mod tests {
         let none = contents(&export_note(&v, Path::new("Welcome.md"), &front("print-font: serif", "# Head\n"), &o).unwrap());
         assert_eq!(colour_of(&none, "Head"), "0.000 0.000 0.000 rg", "without the property headings are black");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // ---------------------------------------------------------------- the paper look (PDF-023…PDF-027)
+
+    const PURPLE: &str = "0.412 0.255 0.776 rg";
+    const INK: &str = "0.118 0.118 0.118 rg";
+
+    /// The content of the first page of `text` exported with the note's own properties.
+    fn paper_page(text: &str) -> String {
+        let (v, d) = vault();
+        let o = ExportOptions { numbered_headings: false, ..plain_options() };
+        let bytes = export_note(&v, Path::new("Welcome.md"), text, &o).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+        contents(&bytes)
+    }
+
+    /// The operators of the text run drawn as `word`: its font, size and render mode.
+    fn run_of(c: &str, word: &str) -> String {
+        let at = c.find(&format!("<{}> Tj", hex(word))).unwrap_or_else(|| panic!("{word} is not drawn"));
+        c[c[..at].rfind("q BT").unwrap()..at].to_string()
+    }
+
+    const LOOK_BODY: &str = "- bulletword\n1. numberword\n\n> quotedword\n\nCall `inlineword` now.\n\n```js\nconst codeword = \"s\";\n```\n\n| Ha | Hb |\n|----|----|\n| ca | cb |\n\n# Headword\n";
+
+    // spec: PDF-023
+    #[test]
+    fn heading_sizes_and_weight_are_read_and_bad_values_are_ignored_pdf_023() {
+        let read = |props: &str| ExportOptions::for_note().with_note_properties(&front(props, "x"));
+        assert_eq!(read("print-heading-sizes: \"16 13 12 11 11 11\"").heading_sizes, Some([16.0, 13.0, 12.0, 11.0, 11.0, 11.0]));
+        assert_eq!(read("print-heading-sizes: 20, 18, 16, 14, 12.5, 4").heading_sizes, Some([20.0, 18.0, 16.0, 14.0, 12.5, 4.0]));
+        assert_eq!(read("print-heading-sizes: 16pt 13pt 12pt 11pt 11pt 72pt").heading_sizes, Some([16.0, 13.0, 12.0, 11.0, 11.0, 72.0]));
+        for bad in ["16 13 12 11 11", "16 13 12 11 11 11 11", "3 13 12 11 11 11", "16 13 12 11 11 73", "a b c d e f", ""] {
+            assert_eq!(read(&format!("print-heading-sizes: \"{bad}\"")).heading_sizes, None, "{bad:?} is ignored");
+        }
+        assert!(read("print-heading-weight: bold").heading_bold && read("print-heading-weight: BOLD").heading_bold);
+        assert!(!read("print-heading-weight: normal").heading_bold && !read("print-heading-weight: Normal").heading_bold);
+        for bad in ["heavy", "", "600"] {
+            assert!(read(&format!("print-heading-weight: {bad}")).heading_bold, "{bad:?} is ignored: bold stays");
+        }
+        let plain = ExportOptions::for_note();
+        assert!(plain.heading_bold && plain.heading_sizes.is_none());
+    }
+
+    // spec: PDF-023
+    #[test]
+    fn heading_weight_normal_draws_headings_not_bold_and_the_sizes_replace_the_scale_pdf_023() {
+        let body = "# One\n\n## Two\n\n### Three\n\n###### Six\n\ntext\n";
+        let bold = paper_page(&front("print-heading-weight: bold", body));
+        assert!(run_of(&bold, "One").contains(" 2 Tr"), "bold headings: {}", run_of(&bold, "One"));
+        let normal = paper_page(&front("print-heading-weight: normal", body));
+        for h in ["One", "Two", "Three", "Six"] {
+            assert!(run_of(&normal, h).contains(" 0 Tr"), "{h} is not bold: {}", run_of(&normal, h));
+        }
+        // without the key headings are bold and as big as the scale says
+        let none = paper_page(&front("print-font: sans", body));
+        assert!(run_of(&none, "Two").contains(" 2 Tr"));
+        let size = |c: &str, w: &str| -> f32 { run_of(c, w).split(" Tf").next().unwrap().rsplit(' ').next().unwrap().parse().unwrap() };
+        assert!((size(&none, "One") - 11.0 * crate::editor::heading_scale(1)).abs() < 0.01);
+        let sized = paper_page(&front("print-heading-sizes: \"24 18 15 13 12 9\"", body));
+        for (h, pt) in [("One", 24.0), ("Two", 18.0), ("Three", 15.0), ("Six", 9.0)] {
+            assert!((size(&sized, h) - pt).abs() < 0.01, "{h} is {pt} pt: {}", size(&sized, h));
+        }
+        assert!((size(&sized, "text") - 11.0).abs() < 0.01, "the text keeps its size");
+        // too few sizes: ignored, the scale holds
+        let few = paper_page(&front("print-heading-sizes: \"24 18 15\"", body));
+        assert!((size(&few, "One") - 11.0 * crate::editor::heading_scale(1)).abs() < 0.01);
+    }
+
+    // spec: PDF-024
+    #[test]
+    fn a_known_print_property_switches_the_paper_look_on_pdf_024() {
+        let on = |props: &str| ExportOptions::for_note().with_note_properties(&front(props, "x")).paper_look;
+        for key in KNOWN_PRINT_KEYS {
+            assert!(on(&format!("{key}: whatever")), "{key} switches it on, even with a bad value");
+        }
+        assert!(!on("print-colour: red"), "an unknown print-* key does not");
+        assert!(!on("title: x"));
+        assert!(!ExportOptions::for_note().with_note_properties("# Just a note\n").paper_look);
+        // export_note reads it from the note itself: no dialog needed
+        let c = paper_page(&front("print-toc: no", LOOK_BODY));
+        assert!(!c.contains(PURPLE), "no accent purple on the page");
+        let plain = paper_page(LOOK_BODY);
+        assert!(plain.contains(PURPLE), "the same note without print-* keys keeps it");
+    }
+
+    // spec: PDF-024
+    #[test]
+    fn a_note_without_print_properties_prints_as_before_pdf_024() {
+        let (v, d) = vault();
+        let o = ExportOptions { numbered_headings: false, ..plain_options() };
+        let text = format!("{LOOK_BODY}\n> quote again\n");
+        let as_is = export_note(&v, Path::new("Welcome.md"), &text, &o).unwrap();
+        let off = export_note(&v, Path::new("Welcome.md"), &text, &ExportOptions { paper_look: false, heading_bold: true, heading_sizes: None, ..o.clone() }).unwrap();
+        assert_eq!(contents(&as_is), contents(&off), "the page content is the same with the paper look forced off");
+        // an unknown print-* key changes nothing either
+        let unknown = export_note(&v, Path::new("Welcome.md"), &front("print-colour: red", &text), &o).unwrap();
+        assert_eq!(contents(&as_is).len(), contents(&unknown).len());
+        // and it is the look of the app: purple marks, the dark code box, the screen palette
+        let c = contents(&as_is);
+        assert_eq!(colour_of(&c, "•"), PURPLE);
+        assert!(c.contains(&rg(theme::CODE_BG)) && !c.contains("0.961 0.961 0.961 rg"));
+        let on = export_note(&v, Path::new("Welcome.md"), &text, &ExportOptions { paper_look: true, ..o }).unwrap();
+        assert_ne!(contents(&on), c, "forced on it differs");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-025
+    #[test]
+    fn list_marks_are_in_the_text_colour_and_a_quote_is_indented_without_a_bar_pdf_025() {
+        let plain = paper_page(LOOK_BODY);
+        assert_eq!(colour_of(&plain, "•"), PURPLE);
+        assert_eq!(colour_of(&plain, "1."), PURPLE);
+        assert!(plain.contains("0.412 0.255 0.776 rg") && plain.contains(" RG 2.500 w"), "the bar of the quote");
+        let c = paper_page(&front("print-font: sans", LOOK_BODY));
+        assert_eq!(colour_of(&c, "•"), INK, "the bullet");
+        assert_eq!(colour_of(&c, "1."), INK, "the number");
+        assert!(!c.contains(" RG 2.500 w"), "no bar at the quote");
+        assert_eq!(colour_of(&c, "quotedword"), INK, "the quote is in the ink of the text");
+        assert_ne!(colour_of(&plain, "quotedword"), INK, "it was dimmed");
+        assert!((x_of(&c, "quotedword") - x_of(&c, "bulletword")).abs() > 0.0);
+        let margin = x_of(&c, "Call ");
+        assert!((x_of(&c, "quotedword") - margin - 12.0).abs() < 0.01, "indented by 12 pt: {} {}", x_of(&c, "quotedword"), margin);
+        // a task's tick is in the ink too
+        let t = paper_page(&front("print-font: sans", "- [x] donetask\n"));
+        assert!(!t.contains(PURPLE));
+    }
+
+    // spec: PDF-026
+    #[test]
+    fn code_is_mono_on_light_grey_with_dark_text_and_no_syntax_colours_pdf_026() {
+        let c = paper_page(&front("print-font: sans", LOOK_BODY));
+        // the block: light grey box, dark text, the mono font, one colour
+        assert!(c.contains("0.961 0.961 0.961 rg"), "light grey box");
+        assert!(!c.contains(&rg(theme::CODE_BG)), "not the dark screen box");
+        let w = "const codeword = \"s\";";
+        assert_eq!(colour_of(&c, w), INK, "{w}: dark text in one run");
+        assert!(run_of(&c, w).contains("/F2 "), "{w}: the mono font");
+        // inline code: mono, the colour of the text, no box
+        assert_eq!(colour_of(&c, "inlineword"), INK);
+        assert!(run_of(&c, "inlineword").contains("/F2 "), "{}", run_of(&c, "inlineword"));
+        assert!(run_of(&c, "Call ").contains("/F1 "), "the text around it is not mono");
+        // the screen look of a note without print-* keys
+        let plain = paper_page(LOOK_BODY);
+        assert!(plain.contains(&rg(theme::CODE_BG)) && !plain.contains("0.961 0.961 0.961 rg"));
+        assert_ne!(colour_of(&plain, "inlineword"), INK);
+        // the inline box: the paper look has fewer filled rectangles
+        let boxes = |s: &str| s.matches(&rg(theme::CODE_BG)).count();
+        assert!(boxes(&plain) > boxes(&c));
+        // a syntax-coloured inline span is plain too
+        let hl = paper_page(&front("print-font: sans", "Call `log(\"hi\", 42)` now.\n"));
+        assert_eq!(colour_of(&hl, "log"), INK);
+        assert_eq!(colour_of(&hl, "42"), INK);
+        assert!(!hl.contains(&rg(theme::CODE_BG)));
+    }
+
+    // spec: PDF-027
+    #[test]
+    fn tables_have_thin_black_lines_and_a_bold_header_without_fill_pdf_027() {
+        let c = paper_page(&front("print-font: sans", LOOK_BODY));
+        assert!(c.contains("0.000 0.000 0.000 RG 0.500 w"), "thin black lines");
+        assert!(!c.contains("0.925 0.918 0.965 rg"), "no header fill");
+        assert!(run_of(&c, "Ha").contains(" 2 Tr"), "bold header");
+        assert!(run_of(&c, "ca").contains(" 0 Tr"), "plain cells");
+        let plain = paper_page(LOOK_BODY);
+        assert!(plain.contains("0.925 0.918 0.965 rg"), "the header fill of a note without print-* keys");
+        assert!(plain.contains("0.588 0.588 0.588 RG 0.600 w") && !plain.contains("0.000 0.000 0.000 RG 0.500 w"));
     }
 }
 

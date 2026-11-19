@@ -66,6 +66,8 @@ when you export. Every key is optional, and a value Shale cannot read is ignored
 | `print-paragraph-spacing` | points, such as `8` | the built-in gap | The space after a body paragraph. |
 | `print-align` | `left`, `justify` | `left` | Ragged right, or justified text. |
 | `print-heading-color` | `#RRGGBB`, such as `#1F4E79` | black | The colour of the headings. |
+| `print-heading-weight` | `normal`, `bold` | `bold` | `normal` prints the headings not bold. |
+| `print-heading-sizes` | six sizes in points for the levels 1 to 6, such as `"16 13 12 11 11 11"` (each 4 to 72; spaces or commas) | the usual proportions of the body size | The size of each heading level. Fewer or more than six numbers, or one out of range, and the whole value is ignored. |
 | `print-title` | `true`, `false` | `true` | Whether the note's name is printed as a title. |
 | `print-toc` | `true`, `false` | `true` | Whether a *Contents* page is printed. |
 | `print-break-before` | a heading level, `1` to `6` | none | Every heading up to that level starts a new page: `1` is every `#` heading, `2` every `#` and `##`. The export dialog shows it as the box "Start each # heading on a new page" with the level next to it. |
@@ -81,6 +83,11 @@ print-align: justify
 print-heading-color: "#1F4E79"
 ---
 ```
+
+**The paper look.** A note with any of these keys is printed like a document on paper, not in the app's colours: the bullets and
+numbers of lists are in the text colour, a quote is indented without a bar, inline code is in the mono font without a dark box, a code block is on a light
+grey box with dark text and no syntax colours, and a table has thin black lines and a bold header row without a fill. A note without any of the keys
+prints as before. A key that Shale does not know (a typo such as `print-colour`) does not count. The LaTeX export has its own styling and ignores this.
 
 The properties apply to the export of a single note; a book ([[PDF#A folder as one PDF]]) uses the dialog's choices for all its notes.
 

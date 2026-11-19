@@ -138,7 +138,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - **Print properties of a note** (#339): the front matter of a note can say how its PDF is printed; all
   keys are optional and a bad value is ignored. The export dialog opens with the note's paper, margins,
   text size, title and contents filled in (and they can be changed there); the font, the spacing, the
-  alignment and the heading colour are read from the note at export time. Word imports write them.
+  alignment, the heading colour, weight and sizes are read from the note at export time. Word imports write them.
   - `print-paper`: `A4`, `A5`, `Letter`, `Legal` or `<W>x<H>mm` (a width larger than the height is landscape)
   - `print-margins`: four numbers in mm, `top right bottom left`
   - `print-font`: `serif` (Liberation Serif, Times-compatible), `sans` (Ubuntu Light) or `mono` (Hack)
@@ -147,10 +147,17 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   - `print-paragraph-spacing`: the space after a body paragraph in points
   - `print-align`: `left` or `justify`
   - `print-heading-color`: `#RRGGBB`
+  - `print-heading-weight`: `normal` or `bold` (the default), the weight of headings
+  - `print-heading-sizes`: six sizes in pt for the heading levels 1 to 6, such as `"16 13 12 11 11 11"` (4 to 72
+    each; anything else is ignored); they replace the usual proportions
   - `print-title`: `true` or `false`, the note's name as a title
   - `print-toc`: `true` or `false`, the contents page
   - `print-break-before`: a heading level 1 to 6; every heading up to that level starts a new page
     (`1`: every `#`; the dialog has a box "Start each # heading on a new page" for it)
+  - **Paper look** (#367): a note with any of these keys is printed plainly: list marks and quotes in the text
+    colour (a quote indented, without a bar), inline code and code blocks in the mono font without the app's
+    colours (a code block on light grey), tables with thin black lines and a bold header without fill. A
+    note without any of the keys prints as before.
 
 - **Page breaks** (#359): a line `<div style="page-break-after: always;"></div>` (the form Obsidian writes;
   `page-break-before: always`, `break-after: page` and `break-before: page` work too) is a page break:
