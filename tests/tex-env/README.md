@@ -31,7 +31,7 @@ sets the number (the demos test starts four compiles itself; #370). `tex_import`
 `--build-arg TL_REPO=<url>` to the engine, and `SHALE_TEX_INSTALL_REPOSITORY=<url>` makes the `tex_install` test install
 from it; both unset keeps the default repository. `scripts/land.sh` sets both for you from `SHALE_TEX_MIRROR` or the first
 line of `<git dir>/land/tex-mirror` (`git rev-parse --git-common-dir`; not committed; the variable wins; `https://` or `http://`,
-for example `https://texlive.example.test/tlnet`). CI does not read it. `scripts/test-tex-env.sh` tests the pass-on.
+for example `https://texlive.example.test/tlnet`). CI does not read it: the `env-tests` job of `.forgejo/workflows/ci.yml` sets both variables from the Forgejo Actions repository variable `SHALE_TEX_MIRROR` for `v*` tags only (release and check tags, #424), and the weekly run keeps the public default. `scripts/test-tex-env.sh` tests the pass-on.
 
 **Failed compiles keep their log** (#327): `SHALE_TEX_FAILED_LOGS=<folder>` makes every failed compile of the tests (Shale's
 own `compile` and the demos of `tex_env`) copy its full `.log` into that folder as `<pid>-<n>-<name>.log` before its work
