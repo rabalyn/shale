@@ -262,8 +262,11 @@ pub struct CalendarStore {
 #[derive(Default)]
 struct RangeCache {
     generation: u64,
-    ranges: Vec<((i64, i64), Arc<Vec<Occ>>)>,
+    ranges: Vec<(DayRange, Arc<Vec<Occ>>)>,
 }
+
+/// The first and last local day of a range of occurrences.
+type DayRange = (i64, i64);
 
 /// More than a month view, a week and a day at a time are not kept.
 const RANGES_KEPT: usize = 6;
