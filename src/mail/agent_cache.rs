@@ -379,9 +379,10 @@ mod tests {
         let home = TestHome::new();
         std::fs::write(home.dir.join("gpg-agent.conf"), "no-allow-external-cache\n").unwrap();
         assert!(read(&home.g, &no_cancel()).unwrap().no_external_cache);
-        // an option file gpg-agent cannot read: gpgconf's message comes back
-        std::fs::write(home.dir.join("gpg-agent.conf"), "this-is-not-an-option\n").unwrap();
-        let e = apply(&home.g, &Plan::new(&home.dir, Choice::Day1), &no_cancel()).unwrap_err();
+        // a home that is not there: gpgconf cannot write its file and its message comes back (not an unknown option
+        // in the file, which GnuPG 2.2 of Debian bookworm, the CI image, accepts)
+        let gone = Gnupg { home: Some(home.dir.join("gone")), ..home.g.clone() };
+        let e = apply(&gone, &Plan::new(&home.dir, Choice::Day1), &no_cancel()).unwrap_err();
         assert!(e.starts_with("gpgconf --change-options gpg-agent failed"), "{e}");
         // no gpgconf at all
         let none = Gnupg { gpgconf: "/nonexistent/gpgconf".into(), ..home.g.clone() };
