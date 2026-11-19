@@ -10,6 +10,122 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-11-19
+
+### Added
+
+- **Centred, right-aligned and justified paragraphs** (#340). A paragraph or heading between a line
+  `<div align="center">` and a line `</div>` (also `align="right"` and `align="justify"`, the HTML that
+  Obsidian shows too) is aligned that way in the reading view, the PDF export and the LaTeX export
+  (`center` and `flushright`); the editor shows the two lines dimmed and the outline still lists a
+  heading inside. Three new toolbar buttons (left, centre, right) put the paragraphs under the cursor
+  or the selection into a wrapper, change it or take it off. The user guide's PDF note describes it.
+- **Performance benchmarks** (#343). A build with the cargo feature `bench` (never a shipped build)
+  runs `shale --bench <file.json>`: headless scenarios for opening and checking a vault, search, the
+  link index, the graph, frames of the window, Word import, PDF export, mail, calendars, social
+  feeds, git and git-LFS sync, and a worst case with everything loaded at once, each with time,
+  allocations and peak memory, and flamegraphs through `scripts/bench.sh --flamegraph`.
+  `scripts/bench-compare.sh` compares two commits (exit code 1 on a regression) from several
+  interleaved runs of each, so a busy computer does not make false alarms: a time counts only
+  beyond the spread of the runs, allocation counts and peak memory count on their own, and a scenario
+  whose definition changed is marked `changed` instead of judged. It writes `compare.json` for an
+  agent (with an agent playbook in `docs/perf/README.md`) and, with `--flamegraphs`, flamegraphs of
+  both commits and their difference for what got slower. Every release stores its results in
+  `docs/perf/results/`, compares them with the last release and stops on a regression
+  (`--allow-perf-regression`, `--skip-bench`). `docs/perf/README.md` has the baseline and the weak
+  spots it found (BUILD-028 to BUILD-038).
+- **Folds are remembered across restarts** (#364). The folded blocks of a note come back the next time you
+  start Shale, in the editor and in the reading view. They are kept per note in the vault's `.shale/state.json`,
+  never in the note. A fold whose block you deleted is forgotten, a deleted note loses its entry, and a renamed
+  or moved note keeps its folds.
+- **Light and dark themes** (#401). Settings → Appearance has a **Theme** list: Shale (as before), Dracula,
+  Nord, Catppuccin Mocha and Gruvbox Dark, and the light Catppuccin Latte, Solarized Light, GitHub
+  Light and Gruvbox Light; a change applies at once. **Follow the system's light or dark mode** takes
+  a light and a dark theme and switches with the system. Themes are Alacritty terminal colour
+  files, read as they are: put any `.toml` of the alacritty-theme collection into the themes folder
+  (Open themes folder, Reload themes) and it is listed by its file name; an optional `[shale]` table sets
+  any colour exactly, and a broken file is skipped with its error listed (CFG-062 to CFG-065).
+
+### Changed
+
+- **Word import keeps the alignment of paragraphs** (#340). A paragraph or heading that is centred, flush
+  right or justified in Word (directly or by its style) while the body text is not is written between
+  `<div align="…">` lines; a left-aligned paragraph in a justified document gets `align="left"`.
+  Notes imported earlier keep what they have until they are imported again.
+- **A big vault is much faster** (#343). The benchmarks found the slow places and each one is fixed below. The
+  timings come from the benchmark harness on large test vaults and are approximate; your computer will differ.
+  The before and after of every area is in `docs/perf/README.md`.
+- **Finding a file in the vault is a lookup** (#378). A file is found through a hash instead of a search, so
+  a rescan of a large vault went from about 513 ms to 42 ms.
+- **Backlinks, unlinked mentions, tasks and the sidebar search are kept** (#379). They are worked out once for
+  a state of the vault and not again in every frame: an idle frame of a large vault went from about 60 ms to
+  1.4 ms, and the backlinks view from 372 ms to 34 ms.
+- **The task view draws only the rows in view** (#377). Rows far from the view are not laid out, so a
+  task-view frame of a large vault went from about 727 ms (211 ms after the #379 change) to 2.9 ms.
+- **The calendar remembers the occurrences it shows** (#380). The occurrences of a range are computed once
+  until the events change; a calendar frame went from about 16 ms to 2 ms.
+- **The social feed lays out only the posts near the view** (#381). Posts far from the view keep their space
+  without being laid out; a feed frame went from about 46 ms to 0.9 ms.
+- **The graph of a big vault moves faster** (#382). Above 300 notes the graph uses a quadtree for the
+  repulsion and a time budget for its physics, and a graph frame went from about 373 ms to 30 ms. A graph of
+  fewer than 300 notes is laid out as before.
+- **A big vault opens faster** (#384). Its notes are parsed on several threads when it opens; opening went
+  from about 140 ms to 74 ms.
+- **The PDF export compresses its fonts once** (#386). The bundled fonts are compressed once per run
+  and not once per document; exporting a long note went from about 113 ms to 98 ms. The compression
+  level stays at 6, because levels 3 and 1 were measured and saved little time for larger files.
+- **Every section heading in Settings and the dialogs has the same room above it** (#357). The mail accounts,
+  LaTeX settings and setup, calendars, social accounts, data usage and import summary dialogs now set their
+  sections apart by 24 points like the Settings pages, except the first heading at the top of a page, and the
+  small hand-made gaps between related items are gone.
+- **Saved posts write their header once, too** (#361). A note from a post or a thread has the
+  author, date, link and the rest in its properties only, then goes straight to the text, as
+  e-mails and events do. What the old list held and had no property gets one: `author-url`,
+  `reposted-by` and `people`. The box **Header list in the note body** (Import dialog, Settings →
+  Import) now also brings the Author / Posted / Source list back for posts. Notes saved before stay
+  as they are.
+- **Landing can take TeX Live from a local mirror** (#371, developers only). `scripts/land.sh` reads
+  `SHALE_TEX_MIRROR` or the file `land/tex-mirror` in the git folder (never committed) and passes the
+  mirror to the TeX Live install test and to the TeX test image; without a setting, and in CI, the public
+  default is used.
+- **Typing in a very large note is quicker** (#375). The editor formats the text of a note block by block
+  (blocks of whole lines between blank lines, never cut inside a code fence, the front matter, a formula
+  or a link) and keeps each block's format under its text, so a typed key formats the one block it is in
+  and a cursor move to another line (Markdown preview) formats the two blocks it leaves and enters, instead
+  of the whole note. On a note of 20 000 lines this took 25 ms of a key's 60 to 70 ms; the result is the
+  same as before. Ordinary notes are not affected.
+- **PDF paper look: tables like Word's** (#388, #389). In the plain paper look a table spans the full text width and has horizontal rules only (above, under the header, between rows, at the bottom), no vertical lines. The export dialog's "From the note" line now names the paper look and a note's heading weight and sizes.
+- **The dev build keeps line tables only** (#390). The `dev` profile and its dependencies are built with
+  `debug = "line-tables-only"` (BUILD-027): backtraces still show function names and `file:line`, and a
+  worktree's `target/debug` becomes much smaller and links faster. A debugger no longer sees locals and
+  types; `CARGO_PROFILE_DEV_DEBUG=true cargo build` brings them back for a debugging session.
+- **The widths of the sidebars are kept** (#393). The widths the left and the right sidebar were dragged to come back after a restart (`left_sidebar_width`, `right_sidebar_width` in the settings). "Reset layout" in the ribbon's menu also resets them.
+- **The colours of the window come from a palette** (#401). Every colour is read from the palette of the
+  current theme instead of from constants (CFG-061); Shale's own palette has exactly the colours of
+  before, so nothing looks different. The PDF export always prints with Shale's palette.
+
+### Fixed
+
+- **TeX Live install and update repair a font that cannot be loaded** (#362, #327). After an install or update Shale builds
+  the font list of TeX once and compiles the test document; if a font cannot be loaded (the install once stopped at
+  `lmroman10-regular`), it installs the font packages again from another mirror, rebuilds the list and tries once more.
+  The message that ends an install or update names the mirror it came from, and a warning names it too. A compile that
+  stops at such a font says in plain words that the fonts or the font list of the TeX look incomplete.
+- **A mirror that hands out damaged packages is left for another one** (#362, #327). `tlmgr` skips packages whose checksums
+  differ (a mirror in the middle of a sync) and still reports success; the install, the update, the font repair and the
+  test image now notice that, try a fresh mirror (three runs at most) and otherwise say which packages and mirrors failed.
+- **Mail, Calendar, Tasks, Graph and Settings-file tabs come back after a restart** (#387). They were
+  dropped; now every tab returns in its pane and position, pinned as before. The mail tab comes back on
+  its folder and open message (the first folder when they are gone), the calendar on its mode and day,
+  Tasks with its filter and the graph with its switches. Nothing is asked when they come back.
+- **The tag CI is green again on its Linux image** (#391). Three tests depended on the machine: one
+  expected the local hour of an imported mail (the CI container runs in UTC), two expected GnuPG to
+  refuse an unknown option in `gpg-agent.conf` (GnuPG 2.2 of the CI image accepts it). They no longer
+  depend on the timezone or the GnuPG version. No change for users.
+- **The media tests no longer fail now and then under load** (#392). The tests for a damaged video, a missing
+  ffmpeg and the seek in the progress bar wait for their condition instead of a fixed pause. This changes
+  tests only, not the app.
+
 ## [0.6.3] - 2026-11-19
 
 ### Added
@@ -1572,7 +1688,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/rabalyn/shale/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/rabalyn/shale/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/rabalyn/shale/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/rabalyn/shale/compare/v0.6.0...v0.6.1
