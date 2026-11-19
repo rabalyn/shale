@@ -399,7 +399,7 @@ mod tests {
         assert!(d.rects.iter().any(|r| r.0 == "paper:custom"), "the custom size is listed");
         h.click(&mut d, &format!("paper:{}", Paper::A5.label()));
         assert_eq!((d.opts.paper, d.opts.custom_mm), (Paper::A5, None));
-        assert_eq!(d.opts.text_properties_label().as_deref(), Some("serif, justified, line spacing 1.15"));
+        assert_eq!(d.opts.text_properties_label().as_deref(), Some("paper look, serif, justified, line spacing 1.15"));
     }
 
     // spec: PDF-021

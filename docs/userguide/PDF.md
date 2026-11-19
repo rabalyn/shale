@@ -86,7 +86,7 @@ print-heading-color: "#1F4E79"
 
 **The paper look.** A note with any of these keys is printed like a document on paper, not in the app's colours: the bullets and
 numbers of lists are in the text colour, a quote is indented without a bar, inline code is in the mono font without a dark box, a code block is on a light
-grey box with dark text and no syntax colours, and a table has thin black lines and a bold header row without a fill. A note without any of the keys
+grey box with dark text and no syntax colours, and a table looks like Word's: the full text width, thin black rules above it, under the bold header row, between the rows and at the bottom, no vertical lines and no fill. The export dialog's "From the note" line says "paper look" when it is on, and names the heading weight and sizes the note sets. A note without any of the keys
 prints as before. A key that Shale does not know (a typo such as `print-colour`) does not count. The LaTeX export has its own styling and ignores this.
 
 The properties apply to the export of a single note; a book ([[PDF#A folder as one PDF]]) uses the dialog's choices for all its notes.
