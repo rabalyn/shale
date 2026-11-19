@@ -266,6 +266,8 @@ fn upd_020_every_kind_is_described_and_a_manual_command_is_given_where_one_helps
     );
     let user = manual_command(&InstallKind::LinuxInstalled { prefix: "/home/a/.local".into(), user_default: true }, archive, staging);
     assert!(!user.contains("--prefix"), "{user}");
+    assert!(!user.contains("sudo") && user.contains("&& sh \""), "a user install needs no root: {user}");
+    assert!(cmd.contains("&& sudo sh "), "{cmd}");
     assert!(manual_command(&InstallKind::LinuxPortable { dir: "/x".into(), whole: true }, archive, staging).contains("--strip-components=1"));
     assert!(manual_command(&InstallKind::MacApp { bundle: "/Applications/Shale.app".into() }, archive, staging).starts_with("open "));
     assert!(manual_command(&InstallKind::Windows { dir: "C:/s".into() }, archive, staging).contains("unpack"));

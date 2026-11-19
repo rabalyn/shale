@@ -183,7 +183,9 @@ pub fn manual_command(kind: &InstallKind, archive: &Path, staging: &Path) -> Str
     match kind {
         InstallKind::LinuxInstalled { prefix, user_default } => {
             let prefix_arg = if *user_default { String::new() } else { format!(" --prefix {}", q(prefix)) };
-            format!("tar -xzf {} -C {} && sudo sh {}{prefix_arg}", q(archive), q(staging), q(&staging.join("shale").join("install.sh")))
+            // root only for a --prefix install: sudo without --prefix would install into root's home
+            let sudo = if *user_default { "" } else { "sudo " };
+            format!("tar -xzf {} -C {} && {sudo}sh {}{prefix_arg}", q(archive), q(staging), q(&staging.join("shale").join("install.sh")))
         }
         InstallKind::LinuxPortable { dir, .. } => format!("tar -xzf {} -C {} --strip-components=1", q(archive), q(dir)),
         InstallKind::MacApp { .. } => format!("open {}   (then drag Shale.app to the Applications folder)", q(archive)),
