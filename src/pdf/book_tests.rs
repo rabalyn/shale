@@ -528,14 +528,6 @@ fn a_folder_note_path_joined_with_the_os_separator_reads_as_a_vault_path_with_sl
     assert_eq!(rel_to_string(Path::new(r"T\A\Index.md")), "T/A/Index.md");
 }
 
-/// Keeps a second dispatcher alive while a flow is recorded. With only one live dispatcher
-/// `tracing` computes the interest of a new span callsite from the dispatcher of the thread that
-/// first reaches it, so another test's thread (which has none) could switch the spans off for the
-/// recording thread; with two or more it asks every registered dispatcher.
-fn hold_callsites() -> tracing::Dispatch {
-    tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default())
-}
-
 fn dataflow_doc(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow").join(name)
 }
@@ -544,7 +536,6 @@ fn dataflow_doc(name: &str) -> PathBuf {
 #[test]
 fn dev_029_dataflow_of_a_book_export() {
     let (v, d) = handbook("dataflow-book");
-    let _hold = hold_callsites();
     let flow = crate::dataflow::record(|| {
         export_book(&v, Path::new("Handbook"), &opts(), None).unwrap();
     });
@@ -558,7 +549,6 @@ fn dev_029_dataflow_of_a_note_export() {
     let (v, d) = handbook("dataflow-note");
     let rel = Path::new("Handbook/Getting started.md");
     let text = std::fs::read_to_string(d.join(rel)).unwrap();
-    let _hold = hold_callsites();
     let flow = crate::dataflow::record(|| {
         crate::pdf::export::export_note(&v, rel, &text, &opts()).unwrap();
     });

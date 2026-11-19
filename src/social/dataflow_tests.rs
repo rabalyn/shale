@@ -10,14 +10,6 @@ fn has_curl() -> bool {
     std::process::Command::new("curl").arg("--version").output().is_ok()
 }
 
-/// Keeps a second dispatcher alive while a flow is recorded. With only one live dispatcher
-/// `tracing` computes the interest of a new span callsite from the dispatcher of the thread that
-/// first reaches it, so another test's thread (which has none) could switch the spans off for the
-/// recording thread; with two or more it asks every registered dispatcher.
-fn hold_callsites() -> tracing::Dispatch {
-    tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default())
-}
-
 fn doc(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow").join(name)
 }
@@ -30,7 +22,6 @@ fn dev_029_dataflow_of_a_mastodon_sign_in_and_timeline() {
     }
     let server = FakeServer::start();
     let address = server.address();
-    let _hold = hold_callsites();
     let flow = crate::dataflow::record(|| {
         let _flow = tracing::info_span!("flow.social_mastodon", peer = "app").entered();
         let app = mastodon::register_app(&address).unwrap();
@@ -56,7 +47,6 @@ fn dev_029_dataflow_of_a_bluesky_sign_in_and_timeline() {
     }
     let server = FakeServer::start();
     let address = server.address();
-    let _hold = hold_callsites();
     let flow = crate::dataflow::record(|| {
         let _flow = tracing::info_span!("flow.social_bluesky", peer = "app").entered();
         let session = bluesky::create_session(&address, "ada.test", "abcd-efgh-ijkl-mnop").unwrap();
