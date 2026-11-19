@@ -97,7 +97,7 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
         rects.push((k.to_string(), r.rect));
         r
     };
-    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+    let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
     if d.tex.is_some() {
         let busy = d.tex.as_ref().is_some_and(|t| t.working()) || d.book.as_ref().is_some_and(|b| b.working());
         ui.horizontal(|ui| {

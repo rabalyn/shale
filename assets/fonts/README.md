@@ -15,3 +15,6 @@
   licensed under the SIL Open Font License 1.1 (see `LiberationSerif-LICENSE.txt`, Reserved Font
   Name "Liberation"). The file is `LiberationSerif-Regular.ttf` of the `ttf-liberation` package,
   unchanged. Only the regular face is bundled: bold and italic are imitated by the PDF writer.
+
+The colour themes that are bundled the same way are in `assets/themes/`; their authors and
+licences are in `assets/themes/LICENSES.md`.

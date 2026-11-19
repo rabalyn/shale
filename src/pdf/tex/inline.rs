@@ -79,7 +79,7 @@ impl Files {
     /// The red italic text that stands where a file could not be used, and its warning.
     pub fn missing(&mut self, what: &str) -> String {
         self.warnings.push(what.to_string());
-        let c = theme::LINK_MISSING;
+        let c = theme::Palette::shale().link_missing;
         format!("\\textcolor[RGB]{{{},{},{}}}{{\\textit{{[{}]}}}}", c.r(), c.g(), c.b(), tex_escape(what))
     }
 }
@@ -235,7 +235,7 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
     }
     let _defined = markdown::DefinedFootnotes::set(look.notes.keys().cloned().collect());
     let links: Vec<(markdown::LinkSpan, bool)> = markdown::find_links(text).into_iter().map(|l| (look.vault.exists(&l.target, Some(look.rel)), l)).map(|(ok, l)| (l, ok)).collect();
-    let (job, spans, paints, maths) = if in_cell { crate::reader::cell_painted(text, &links, 14.0, theme::TEXT) } else { crate::reader::inline_painted(text, &links, 14.0, theme::TEXT, false) };
+    let (job, spans, paints, maths) = if in_cell { crate::reader::cell_painted(text, &links, 14.0, theme::Palette::shale().text) } else { crate::reader::inline_painted(text, &links, 14.0, theme::Palette::shale().text, false) };
     let mut out = String::new();
     // the end of the footnote or the formula that was written: what is inside it is not written again
     let mut skip_to = 0;
@@ -302,7 +302,7 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
             // a link of the vault has the colour of links on paper, as in the built-in export:
             // a missing note the colour of missing links (TEX-032); else the colour the note gives
             if let Some((_, _, ok)) = wiki {
-                let c = print_color(if *ok { theme::LINK } else { theme::LINK_MISSING });
+                let c = print_color(if *ok { theme::Palette::shale().link } else { theme::Palette::shale().link_missing });
                 t = format!("\\textcolor[RGB]{{{}}}{{{t}}}", rgb([c.0, c.1, c.2]));
             } else if let Some((_, _, Some([r, g, b, _]))) = paint {
                 t = format!("\\textcolor[RGB]{{{}}}{{{t}}}", rgb([*r, *g, *b]));
@@ -310,7 +310,7 @@ fn write_line(look: &Look, text: &str, in_cell: bool) -> String {
             // a highlight: the colour the note asks for, else the reading view's (over white paper)
             let bg = match paint.and_then(|p| p.1) {
                 Some(c) => Some(over_white(c)),
-                None if code || f.background == Color32::TRANSPARENT || f.background == theme::TAG_BG => None,
+                None if code || f.background == Color32::TRANSPARENT || f.background == theme::Palette::shale().tag_bg => None,
                 None => print_bg(f.background),
             };
             if let Some(c) = bg {

@@ -387,8 +387,8 @@ impl TableGrid {
         }
         let resp = out.response.response;
         let shown = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.max.y.max(resp.rect.bottom() + 3.0))).shrink(1.0);
-        ui.painter().set(back, egui::Shape::rect_filled(shown, 0.0, theme::BG_PRIMARY));
-        ui.painter().rect_stroke(shown, 0.0, egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+        ui.painter().set(back, egui::Shape::rect_filled(shown, 0.0, theme::palette().bg_primary));
+        ui.painter().rect_stroke(shown, 0.0, egui::Stroke::new(1.5, theme::palette().accent), egui::StrokeKind::Inside);
         if resp.changed() {
             // a pasted line break becomes a blank (set_cell does it in the note as well)
             if c.buf.contains(['\n', '\r']) {
@@ -457,12 +457,12 @@ impl TableGrid {
             }
         }
         let (top, bottom) = (b.top_left(), b.bottom_right());
-        let tint = theme::ACCENT.gamma_multiply(0.3);
+        let tint = theme::palette().accent.gamma_multiply(0.3);
         for (row, col) in b.cells() {
             ui.painter().rect_filled(s.laid.cell_rect(s.origin, row, col).shrink(1.0), 0.0, tint);
         }
         let outline = s.laid.cell_rect(s.origin, top.0, top.1).union(s.laid.cell_rect(s.origin, bottom.0, bottom.1)).shrink(1.0);
-        ui.painter().rect_stroke(outline, 0.0, egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(outline, 0.0, egui::Stroke::new(1.5, theme::palette().accent), egui::StrokeKind::Inside);
         // the box that holds the keyboard: empty, one point wide, its cursor not drawn
         let at = s.laid.cell_rect(s.origin, b.anchor.0, b.anchor.1).min;
         let mut holder = String::new();

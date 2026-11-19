@@ -100,7 +100,7 @@ fn dev_018_every_setting_is_in_the_settings_reference() {
     let reference = fs::read_to_string(guide().join("Settings reference.md")).unwrap();
     let mut missing = vec![];
     let mut seen = 0;
-    for (file, structs) in [("src/config.rs", &["Config", "MailAccount", "CacheRetention", "SidebarCfg", "RightViewCfg"][..]), ("src/vault_state.rs", &["VaultSettings", "SyncSettings", "VaultState", "SavedTab"][..])] {
+    for (file, structs) in [("src/config.rs", &["Config", "MailAccount", "CacheRetention", "ThemeCfg", "SidebarCfg", "RightViewCfg"][..]), ("src/vault_state.rs", &["VaultSettings", "SyncSettings", "VaultState", "SavedTab"][..])] {
         let source = fs::read_to_string(root().join(file)).unwrap();
         for s in structs {
             for f in fields_of(&source, s) {

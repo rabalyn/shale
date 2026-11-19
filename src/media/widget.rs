@@ -91,7 +91,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     let ctx = ui.ctx().clone();
     let v = media.view(&ctx, abs);
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    painter.rect(rect, CornerRadius::same(8), theme::BG_SECONDARY, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+    painter.rect(rect, CornerRadius::same(8), theme::palette().bg_secondary, Stroke::new(1.0, theme::palette().border), egui::StrokeKind::Inside);
     let card = ui.interact(rect, id, Sense::click_and_drag());
 
     // --- artwork and the round button
@@ -121,14 +121,14 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     let x0 = rect.left() + geo.text_x;
     let x1 = rect.right() - 12.0;
     let width = (x1 - x0).max(40.0);
-    let mut name = egui::text::LayoutJob::simple(v.file_name.clone(), egui::FontId::proportional(14.0), theme::TEXT_STRONG, width);
+    let mut name = egui::text::LayoutJob::simple(v.file_name.clone(), egui::FontId::proportional(14.0), theme::palette().text_strong, width);
     name.wrap.max_rows = 1;
     name.wrap.break_anywhere = true;
-    painter.galley(Pos2::new(x0, top + 10.0), painter.layout_job(name), theme::TEXT_STRONG);
+    painter.galley(Pos2::new(x0, top + 10.0), painter.layout_job(name), theme::palette().text_strong);
     let mut download_link = None;
     if let Some(m) = &v.message {
         let failed = v.download.as_ref().is_some_and(|d| d.error.is_some());
-        let colour = if v.unplayable || failed { theme::LINK_MISSING } else { theme::MUTED };
+        let colour = if v.unplayable || failed { theme::palette().link_missing } else { theme::palette().muted };
         let mut job = egui::text::LayoutJob::simple(m.clone(), egui::FontId::proportional(12.0), colour, width);
         job.wrap.max_rows = 1;
         let galley = painter.layout_job(job);
@@ -174,17 +174,17 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     let shown = preview.zip(v.duration).map(|(f, d)| f * d).unwrap_or(v.position);
     let frac = v.duration.map(|d| (shown / d).clamp(0.0, 1.0) as f32).unwrap_or(0.0);
     let track = Rect::from_center_size(bar_hit.center(), Vec2::new(width, 4.0));
-    painter.rect_filled(track, CornerRadius::same(2), theme::FAINT.gamma_multiply(0.6));
+    painter.rect_filled(track, CornerRadius::same(2), theme::palette().faint.gamma_multiply(0.6));
     let mut filled = track;
     filled.set_right(track.left() + track.width() * frac);
-    painter.rect_filled(filled, CornerRadius::same(2), theme::ACCENT);
+    painter.rect_filled(filled, CornerRadius::same(2), theme::palette().accent);
     if v.duration.is_some() && (bar.hovered() || preview.is_some()) {
-        painter.circle_filled(Pos2::new(filled.right(), track.center().y), 5.0, theme::TEXT_STRONG);
+        painter.circle_filled(Pos2::new(filled.right(), track.center().y), 5.0, theme::palette().text_strong);
     }
     let times = egui::FontId::proportional(11.0);
-    painter.text(Pos2::new(x0, top + 66.0), egui::Align2::LEFT_TOP, clock(shown), times.clone(), theme::MUTED);
+    painter.text(Pos2::new(x0, top + 66.0), egui::Align2::LEFT_TOP, clock(shown), times.clone(), theme::palette().muted);
     let total = v.duration.map(clock).unwrap_or_else(|| "–:––".into());
-    painter.text(Pos2::new(x1, top + 66.0), egui::Align2::RIGHT_TOP, total, times.clone(), theme::MUTED);
+    painter.text(Pos2::new(x1, top + 66.0), egui::Align2::RIGHT_TOP, total, times.clone(), theme::palette().muted);
 
     // volume: mute toggle and slider
     let mute_rect = Rect::from_min_size(Pos2::new(x0, top + 82.0), Vec2::splat(20.0));
@@ -194,7 +194,7 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
     if mute.clicked() {
         media.set_muted(!v.muted);
     }
-    let icon_colour = if mute.hovered() { theme::TEXT_STRONG } else { theme::MUTED };
+    let icon_colour = if mute.hovered() { theme::palette().text_strong } else { theme::palette().muted };
     paint_speaker(&painter, mute_rect.shrink(1.0), v.muted || v.volume <= 0.0, icon_colour);
     let vol_hit = Rect::from_min_size(Pos2::new(mute_rect.right() + 6.0, top + 82.0), Vec2::new((width * 0.4).clamp(60.0, 120.0), 20.0));
     let vol = ui.interact(vol_hit, id.with("volume"), Sense::click_and_drag());
@@ -205,11 +205,11 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
         }
     }
     let vtrack = Rect::from_center_size(vol_hit.center(), Vec2::new(vol_hit.width(), 4.0));
-    painter.rect_filled(vtrack, CornerRadius::same(2), theme::FAINT.gamma_multiply(0.6));
+    painter.rect_filled(vtrack, CornerRadius::same(2), theme::palette().faint.gamma_multiply(0.6));
     let mut vfill = vtrack;
     vfill.set_right(vtrack.left() + vtrack.width() * if v.muted { 0.0 } else { v.volume });
-    painter.rect_filled(vfill, CornerRadius::same(2), theme::MUTED);
-    painter.text(Pos2::new(vol_hit.right() + 8.0, vol_hit.center().y), egui::Align2::LEFT_CENTER, format!("{} %", (if v.muted { 0.0 } else { v.volume } * 100.0).round() as u32), times, theme::MUTED);
+    painter.rect_filled(vfill, CornerRadius::same(2), theme::palette().muted);
+    painter.text(Pos2::new(vol_hit.right() + 8.0, vol_hit.center().y), egui::Align2::LEFT_CENTER, format!("{} %", (if v.muted { 0.0 } else { v.volume } * 100.0).round() as u32), times, theme::palette().muted);
 
     // --- toggling: the button, or Space while the card has the keyboard (MEDIA-004)
     // a click in the card gives it the keyboard
@@ -231,11 +231,11 @@ pub fn paint(ui: &Ui, rect: Rect, media: &MediaPlayer, abs: &Path, owner: &Path,
 
 /// "— Download" after the "Not downloaded (12 MB)" text (SYNC-020); the link's response.
 fn paint_download_link(ui: &Ui, painter: &Painter, at: Pos2, right: f32, id: Id) -> Response {
-    let galley = painter.layout_no_wrap("— Download".into(), egui::FontId::proportional(12.0), theme::ACCENT);
+    let galley = painter.layout_no_wrap("— Download".into(), egui::FontId::proportional(12.0), theme::palette().accent);
     let rect = Rect::from_min_size(at, galley.size()).intersect(Rect::everything_left_of(right.max(at.x + 1.0)));
     let link = ui.interact(rect, id.with("download"), Sense::click_and_drag());
     link.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Download"));
-    painter.galley(at, galley, theme::ACCENT);
+    painter.galley(at, galley, theme::palette().accent);
     if link.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -251,7 +251,7 @@ pub fn show_not_downloaded(ui: &mut Ui, media: &MediaPlayer, abs: &Path) -> Opti
     let mut clicked = false;
     let r = ui
         .horizontal(|ui| {
-            ui.label(egui::RichText::new(format!("{name}: {}", n.line())).color(if failed { theme::LINK_MISSING } else { theme::MUTED }));
+            ui.label(egui::RichText::new(format!("{name}: {}", n.line())).color(if failed { theme::palette().link_missing } else { theme::palette().muted }));
             if n.running {
                 ui.spinner();
             } else {
@@ -269,7 +269,7 @@ pub fn show_not_downloaded(ui: &mut Ui, media: &MediaPlayer, abs: &Path) -> Opti
 }
 
 fn paint_art(painter: &Painter, art: Rect, v: &View) {
-    painter.rect_filled(art, CornerRadius::same(6), if v.cover.is_some() { Color32::from_rgb(20, 20, 20) } else { theme::BG_HOVER });
+    painter.rect_filled(art, CornerRadius::same(6), if v.cover.is_some() { Color32::from_rgb(20, 20, 20) } else { theme::palette().bg_hover });
     match &v.cover {
         Some(tex) => {
             let [w, h] = tex.size_vec2().into();
@@ -279,13 +279,13 @@ fn paint_art(painter: &Painter, art: Rect, v: &View) {
         }
         None => {
             // no cover: a neutral tile with the file name
-            let mut job = egui::text::LayoutJob::simple(v.file_name.clone(), egui::FontId::proportional(11.0), theme::FAINT, ART - 12.0);
+            let mut job = egui::text::LayoutJob::simple(v.file_name.clone(), egui::FontId::proportional(11.0), theme::palette().faint, ART - 12.0);
             job.wrap.max_rows = 4;
             job.wrap.break_anywhere = true;
             job.halign = egui::Align::Center;
             let galley = painter.layout_job(job);
             let pos = Pos2::new(art.center().x - galley.size().x / 2.0, art.bottom() - galley.size().y - 8.0);
-            painter.galley(pos, galley, theme::FAINT);
+            painter.galley(pos, galley, theme::palette().faint);
         }
     }
 }

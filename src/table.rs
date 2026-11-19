@@ -560,16 +560,16 @@ fn halign(c: Col) -> Align {
 
 /// One cell as a layout job (the inline formatting of the reading view); the header is bold.
 fn cell_job(text: &str, links: &[(LinkSpan, bool)], base: f32, header: bool) -> (LayoutJob, Spans, Vec<crate::reader::MathAt>) {
-    let (mut job, spans, _, mut maths) = crate::reader::cell_painted(text, links, base, theme::TEXT);
+    let (mut job, spans, _, mut maths) = crate::reader::cell_painted(text, links, base, theme::palette().text);
     if header {
         for s in &mut job.sections {
-            if s.format.color == theme::TEXT {
-                s.format.color = theme::TEXT_STRONG;
+            if s.format.color == theme::palette().text {
+                s.format.color = theme::palette().text_strong;
                 s.format.extra_letter_spacing = 0.3;
             }
         }
-        for m in maths.iter_mut().filter(|m| m.color == theme::TEXT) {
-            m.color = theme::TEXT_STRONG;
+        for m in maths.iter_mut().filter(|m| m.color == theme::palette().text) {
+            m.color = theme::palette().text_strong;
         }
     }
     (job, spans, maths)
@@ -674,9 +674,9 @@ pub fn layout(ctx: &egui::Context, table: &Table, sizes: &Sizes, base: f32, avai
 /// all cells, the text clipped to its cell.
 pub fn paint(painter: &egui::Painter, origin: Pos2, laid: &Laid) {
     let size = laid.size();
-    let line = Stroke::new(1.0, theme::FAINT.gamma_multiply(0.6));
+    let line = Stroke::new(1.0, theme::palette().faint.gamma_multiply(0.6));
     let head = Rect::from_min_size(origin, Vec2::new(size.x, laid.heights[0]));
-    painter.rect_filled(head, 0.0, theme::BG_ACTIVE.gamma_multiply(0.6));
+    painter.rect_filled(head, 0.0, theme::palette().bg_active.gamma_multiply(0.6));
     let mut y = origin.y;
     for (r, row) in laid.cells.iter().enumerate() {
         let mut x = origin.x;
@@ -837,8 +837,8 @@ mod tests {
         assert_eq!(cell.spans.len(), 1);
         assert_eq!(cell.spans[0].1.target, "Target");
         let head = &l.cells[0][0].galley.job.sections[0].format;
-        assert_eq!(head.color, theme::TEXT_STRONG, "the header is strong");
-        assert_eq!(cell.galley.job.sections[0].format.color, theme::CODE);
+        assert_eq!(head.color, theme::palette().text_strong, "the header is strong");
+        assert_eq!(cell.galley.job.sections[0].format.color, theme::palette().code);
     }
 
     // spec: EDIT-045

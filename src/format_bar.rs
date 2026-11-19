@@ -136,18 +136,18 @@ fn tool_part(ui: &mut Ui, (s, width): (f32, f32), round: CornerRadius, on: bool,
     let (r, resp) = ui.allocate_exact_size(Vec2::new(width, BUTTON) * s, if enabled { Sense::click() } else { Sense::hover() });
     let hovered = enabled && resp.hovered();
     if on {
-        ui.painter().rect_filled(r, round, theme::BG_ACTIVE);
+        ui.painter().rect_filled(r, round, theme::palette().bg_active);
     } else if hovered {
-        ui.painter().rect_filled(r, round, theme::BG_HOVER);
+        ui.painter().rect_filled(r, round, theme::palette().bg_hover);
     }
     let c = if !enabled {
-        theme::FAINT
+        theme::palette().faint
     } else if on {
-        theme::ACCENT
+        theme::palette().accent
     } else if hovered {
-        theme::TEXT_STRONG
+        theme::palette().text_strong
     } else {
-        theme::TEXT
+        theme::palette().text
     };
     draw(ui.painter(), r, c, s);
     crate::script::hint(tip, r);
@@ -166,7 +166,7 @@ fn text_galley(painter: &egui::Painter, text: &str, l: Label, size: f32, c: Colo
 /// A button with a text on it.
 fn text_tool(ui: &mut Ui, s: f32, text: &str, l: Label, on: bool, enabled: bool, tip: &str) -> Response {
     let size = if l.mono { 12.0 } else { 14.5 };
-    let w = text_galley(ui.painter(), text, l, size, theme::TEXT).size().x + 12.0;
+    let w = text_galley(ui.painter(), text, l, size, theme::palette().text).size().x + 12.0;
     tool(ui, s, w.max(BUTTON), on, enabled, tip, |p, r, c, s| {
         let g = text_galley(p, text, l, size * s, c);
         let pos = r.center() - g.size() / 2.0;
@@ -272,7 +272,7 @@ fn draw_cmd(ui: &mut Ui, b: Look, on: bool, cmd: Cmd, tip: &str, draw: fn(&egui:
 
 fn separator(ui: &mut Ui, s: f32) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(7.0, BUTTON) * s, Sense::hover());
-    ui.painter().line_segment([Pos2::new(r.center().x, r.top() + 5.0 * s), Pos2::new(r.center().x, r.bottom() - 5.0 * s)], Stroke::new(1.0, theme::BORDER));
+    ui.painter().line_segment([Pos2::new(r.center().x, r.top() + 5.0 * s), Pos2::new(r.center().x, r.bottom() - 5.0 * s)], Stroke::new(1.0, theme::palette().border));
 }
 
 impl FormatBar {
@@ -319,7 +319,7 @@ impl FormatBar {
         let open = self.open_request.take();
         let bar = Look { scale: palettes.scale, cell, badges: palettes.badges };
         let sc = bar.scale;
-        let resp = egui::Frame::new().fill(theme::BG_SECONDARY).corner_radius(CornerRadius::same(6)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+        let resp = egui::Frame::new().fill(theme::palette().bg_secondary).corner_radius(CornerRadius::same(6)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(1.0, 2.0);
                 let mono = Label { mono: true, ..Default::default() };
@@ -386,7 +386,7 @@ impl FormatBar {
         let resp = tool_part(ui, (sc, 13.0), CornerRadius { nw: 0, sw: 0, ne: 5, se: 5 }, false, true, &menu_tip, |p, r, c, s| caret(p, r.center(), c, s));
         ui.spacing_mut().item_spacing.x = gap;
         let (m, r) = (main.rect, resp.rect);
-        ui.painter().line_segment([Pos2::new(r.left(), r.top() + 4.0 * sc), Pos2::new(r.left(), r.bottom() - 4.0 * sc)], Stroke::new(1.0, theme::BORDER));
+        ui.painter().line_segment([Pos2::new(r.left(), r.top() + 4.0 * sc), Pos2::new(r.left(), r.bottom() - 4.0 * sc)], Stroke::new(1.0, theme::palette().border));
         palettes.badges.paint(ui, m.union(r), if mark { Action::NoteHighlightColour } else { Action::NoteFontColour });
         if open_now {
             egui::Popup::toggle_id(ui.ctx(), egui::Popup::default_response_id(&resp));
@@ -395,12 +395,12 @@ impl FormatBar {
         let mut pick: Option<Option<[u8; 3]>> = None;
         egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             ui.set_min_width(190.0);
-            ui.label(egui::RichText::new(tip).small().color(theme::MUTED));
+            ui.label(egui::RichText::new(tip).small().color(theme::palette().muted));
             ui.horizontal_wrapped(|ui| {
                 for c in if mark { palettes.highlight } else { palettes.font } {
                     let (r, sw) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
                     ui.painter().rect_filled(r.shrink(1.0), 4.0, rgb(*c));
-                    ui.painter().rect_stroke(r.shrink(1.0), 4.0, Stroke::new(1.0, if sw.hovered() { theme::TEXT_STRONG } else { theme::BORDER }), egui::StrokeKind::Inside);
+                    ui.painter().rect_stroke(r.shrink(1.0), 4.0, Stroke::new(1.0, if sw.hovered() { theme::palette().text_strong } else { theme::palette().border }), egui::StrokeKind::Inside);
                     let hex = crate::colour_tags::hex(*c);
                     let label = format!("{tip} {hex}");
                     crate::script::hint(&label, r);
@@ -465,7 +465,7 @@ fn heading_menu(ui: &mut Ui, b: Look, text: &str, sel: &Range<usize>, open_now: 
         for n in 0..=6u8 {
             let label = if n == 0 { "Normal text".to_string() } else { format!("Heading {n}") };
             let size = 13.0 + (crate::editor::heading_scale(n) - 1.0) * 6.0;
-            let b = ui.add(egui::Button::new(egui::RichText::new(label.clone()).size(size).color(if n == level { theme::ACCENT } else { theme::TEXT })).frame(false).min_size(Vec2::new(120.0, 22.0)));
+            let b = ui.add(egui::Button::new(egui::RichText::new(label.clone()).size(size).color(if n == level { theme::palette().accent } else { theme::palette().text })).frame(false).min_size(Vec2::new(120.0, 22.0)));
             crate::script::hint(&label, b.rect);
             b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label.clone()));
             if b.clicked() {

@@ -125,7 +125,7 @@ pub fn show(ui: &mut Ui, s: &ImportSummary) -> Option<SummaryAction> {
         if !s.errors.is_empty() {
             theme::section(ui, "Went wrong");
             for e in &s.errors {
-                ui.add(egui::Label::new(egui::RichText::new(e).color(theme::LINK_MISSING).size(12.5)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new(e).color(theme::palette().link_missing).size(12.5)).wrap());
             }
         }
     });

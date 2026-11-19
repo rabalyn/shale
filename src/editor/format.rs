@@ -700,9 +700,9 @@ mod tests {
         let mut cache = FormatCache::with_min_block(0);
         let (job, _) = cache.highlight(&text, &links, &fonts(), &[], Some(0..0));
         let dim = |at: usize| job.sections.iter().find(|s| s.byte_range.start.0 <= at && at < s.byte_range.end.0).unwrap().format.color;
-        assert_eq!(dim(lines[2].0), crate::theme::FAINT, "the opening line");
-        assert_eq!(dim(lines[close].0), crate::theme::FAINT, "the closing line");
-        assert_ne!(dim(lines[4].0), crate::theme::FAINT);
+        assert_eq!(dim(lines[2].0), crate::theme::palette().faint, "the opening line");
+        assert_eq!(dim(lines[close].0), crate::theme::palette().faint, "the closing line");
+        assert_ne!(dim(lines[4].0), crate::theme::palette().faint);
         check(&mut cache, &text, Some(0..0));
     }
 

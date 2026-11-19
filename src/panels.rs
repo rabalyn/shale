@@ -107,7 +107,7 @@ impl ShaleApp {
         });
         ui.separator();
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(format!("▣  {vault_name}")).color(theme::TEXT).size(13.0)).on_hover_text(self.vault.as_ref().map(|v| v.root.to_string_lossy().into_owned()).unwrap_or_default());
+            ui.label(egui::RichText::new(format!("▣  {vault_name}")).color(theme::palette().text).size(13.0)).on_hover_text(self.vault.as_ref().map(|v| v.root.to_string_lossy().into_owned()).unwrap_or_default());
         });
     }
 
@@ -201,7 +201,7 @@ impl ShaleApp {
     /// Outline the row selected by the keyboard (and scroll to it once after it changed).
     fn mark_tree_sel(&mut self, ui: &Ui, rel: &Path, resp: &egui::Response) {
         if self.tree.sel.as_deref() == Some(rel) {
-            ui.painter().rect_stroke(resp.rect, CornerRadius::same(4), egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(resp.rect, CornerRadius::same(4), egui::Stroke::new(1.5, theme::palette().accent), egui::StrokeKind::Inside);
             if std::mem::take(&mut self.tree.scroll) {
                 resp.scroll_to_me(Some(egui::Align::Center));
             }
@@ -215,7 +215,7 @@ impl ShaleApp {
         for f in folders {
             let open = self.tree.expanded.contains(&f);
             let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let resp = tree_row(ui, depth, &name, Some(open), false, theme::TEXT, "");
+            let resp = tree_row(ui, depth, &name, Some(open), false, theme::palette().text, "");
             self.mark_tree_sel(ui, &f, &resp);
             self.drag.add_drop_zone(resp.rect.intersect(ui.clip_rect()), f.clone(), None);
             self.drag.tree_targets.push((resp.rect.intersect(ui.clip_rect()), f.clone(), !open));
@@ -268,7 +268,7 @@ impl ShaleApp {
                 FileKind::Other => rel.extension().and_then(|e| e.to_str()).unwrap_or(""),
                 FileKind::Note => "",
             };
-            let color = if kind == FileKind::Other { theme::MUTED } else { theme::TEXT };
+            let color = if kind == FileKind::Other { theme::palette().muted } else { theme::palette().text };
             let resp = tree_row(ui, depth, &name, None, active, color, badge);
             self.mark_tree_sel(ui, &rel, &resp);
             // dropping on a file puts the dragged thing next to it
@@ -312,7 +312,7 @@ impl ShaleApp {
     }
 
     pub(crate) fn search_panel(&mut self, ui: &mut Ui) {
-        ui.label(egui::RichText::new("Search").size(13.0).color(theme::MUTED));
+        ui.label(egui::RichText::new("Search").size(13.0).color(theme::palette().muted));
         let id = egui::Id::unique("search-input");
         if std::mem::take(&mut self.search.focus) {
             // Ctrl+Shift+F: always into the box, with the old search selected (type to replace it,
@@ -409,12 +409,12 @@ impl ShaleApp {
         let scroll = std::mem::take(&mut self.search.scroll);
         let posts = if self.search.query.trim().is_empty() { vec![] } else { self.social.index.search(&self.search.query, 20) };
         let mark = |ui: &Ui, rect: egui::Rect| {
-            ui.painter().rect_stroke(rect.expand(1.0), CornerRadius::same(4), egui::Stroke::new(1.5, theme::ACCENT), egui::StrokeKind::Outside);
+            ui.painter().rect_stroke(rect.expand(1.0), CornerRadius::same(4), egui::Stroke::new(1.5, theme::palette().accent), egui::StrokeKind::Outside);
         };
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (fi, (rel, lines)) in results.iter().enumerate() {
                 let name = v.file(rel).map(|f| f.display_name()).unwrap_or_default();
-                let head = ui.add(egui::Label::new(egui::RichText::new(&name).color(theme::TEXT_STRONG)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand);
+                let head = ui.add(egui::Label::new(egui::RichText::new(&name).color(theme::palette().text_strong)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand);
                 if head.clicked() {
                     self.actions.push(Action::Open { rel: rel.clone(), new_tab: false });
                 }
@@ -426,9 +426,9 @@ impl ShaleApp {
                 }
                 for (li, (line, col, text)) in lines.iter().enumerate() {
                     let shown: String = text.chars().take(120).collect();
-                    let resp = egui::Frame::new().fill(theme::BG_PRIMARY).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+                    let resp = egui::Frame::new().fill(theme::palette().bg_primary).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.add(egui::Label::new(egui::RichText::new(shown).size(12.5).color(theme::MUTED)).wrap())
+                        ui.add(egui::Label::new(egui::RichText::new(shown).size(12.5).color(theme::palette().muted)).wrap())
                     });
                     if selected == Some((fi, Some(li))) {
                         mark(ui, resp.response.rect);
@@ -449,11 +449,11 @@ impl ShaleApp {
             let now = crate::calendar::time::now();
             self.social.hit_rects.clear();
             for (i, h) in posts.iter().enumerate() {
-                let resp = egui::Frame::new().fill(theme::BG_PRIMARY).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+                let resp = egui::Frame::new().fill(theme::palette().bg_primary).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let who = format!("{} · @{} · {}", h.author_name, h.author_handle, crate::social::feed_ui::age_text(h.created_at, now));
-                    ui.add(egui::Label::new(egui::RichText::new(who).size(12.5).color(theme::TEXT_STRONG)).truncate());
-                    ui.add(egui::Label::new(egui::RichText::new(&h.snippet).size(12.5).color(theme::MUTED)).wrap());
+                    ui.add(egui::Label::new(egui::RichText::new(who).size(12.5).color(theme::palette().text_strong)).truncate());
+                    ui.add(egui::Label::new(egui::RichText::new(&h.snippet).size(12.5).color(theme::palette().muted)).wrap());
                 });
                 self.social.hit_rects.push((i, resp.response.rect));
                 if resp.response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
@@ -465,7 +465,7 @@ impl ShaleApp {
     }
 
     fn tags_panel(&mut self, ui: &mut Ui) {
-        ui.label(egui::RichText::new("Tags").size(13.0).color(theme::MUTED));
+        ui.label(egui::RichText::new("Tags").size(13.0).color(theme::palette().muted));
         ui.add_space(4.0);
         let Some(v) = &self.vault else { return };
         let tags = v.all_tags();
@@ -475,7 +475,7 @@ impl ShaleApp {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for (tag, n) in tags {
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Label::new(egui::RichText::new(format!("#{tag}")).color(theme::TAG)).sense(Sense::click())).on_hover_text("Search for this tag").clicked() {
+                    if ui.add(egui::Label::new(egui::RichText::new(format!("#{tag}")).color(theme::palette().tag)).sense(Sense::click())).on_hover_text("Search for this tag").clicked() {
                         self.search.query = format!("#{tag}");
                         self.side.left = LeftPanel::Search;
                     }
@@ -535,7 +535,7 @@ impl ShaleApp {
                     section_header(ui, &format!("Links  {}", ok.len()));
                     for (display, _target, r) in ok {
                         if let Some(r) = r {
-                            let resp = ui.add(egui::Label::new(egui::RichText::new(display).color(theme::LINK)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand);
+                            let resp = ui.add(egui::Label::new(egui::RichText::new(display).color(theme::palette().link)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand);
                             if resp.clicked() {
                                 self.actions.push(Action::Open { rel: r, new_tab: false });
                             }
@@ -547,7 +547,8 @@ impl ShaleApp {
                         // a path link whose name exists in other places: offer them (LINK-012)
                         let candidates = v.fix_candidates(&target, Some(&rel));
                         ui.horizontal_wrapped(|ui| {
-                            let resp = ui.add(egui::Label::new(egui::RichText::new(display).color(theme::LINK_MISSING)).sense(Sense::click())).on_hover_text("Click to create this note").on_hover_cursor(egui::CursorIcon::PointingHand);
+                            let resp =
+                                ui.add(egui::Label::new(egui::RichText::new(display).color(theme::palette().link_missing)).sense(Sense::click())).on_hover_text("Click to create this note").on_hover_cursor(egui::CursorIcon::PointingHand);
                             if resp.clicked() {
                                 self.actions.push(Action::OpenLink { target: target.clone(), heading: None, from: Some(rel.clone()), new_tab: false });
                             }
@@ -623,14 +624,14 @@ impl ShaleApp {
     fn mention_block(&mut self, ui: &mut Ui, src: &Path, lines: &[(usize, String)]) {
         let Some(v) = &self.vault else { return };
         let name = v.file(src).map(|f| f.display_name()).unwrap_or_default();
-        if ui.add(egui::Label::new(egui::RichText::new(&name).color(theme::TEXT_STRONG)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        if ui.add(egui::Label::new(egui::RichText::new(&name).color(theme::palette().text_strong)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             self.actions.push(Action::Open { rel: src.to_path_buf(), new_tab: false });
         }
         for (line, text) in lines.iter().take(5) {
             let shown: String = text.chars().take(160).collect();
-            let resp = egui::Frame::new().fill(theme::BG_PRIMARY).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
+            let resp = egui::Frame::new().fill(theme::palette().bg_primary).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.add(egui::Label::new(egui::RichText::new(shown).size(12.5).color(theme::MUTED)).wrap());
+                ui.add(egui::Label::new(egui::RichText::new(shown).size(12.5).color(theme::palette().muted)).wrap());
             });
             if resp.response.interact(Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Go to this line").clicked() {
                 self.actions.push(Action::GotoLine { rel: src.to_path_buf(), line: *line });
@@ -653,14 +654,14 @@ impl ShaleApp {
                 ui.vertical(|ui| {
                     ui.set_width(col - 16.0);
                     ui.add_space(14.0);
-                    ui.label(egui::RichText::new("Tasks").size(28.0).color(theme::TEXT_STRONG));
+                    ui.label(egui::RichText::new("Tasks").size(28.0).color(theme::palette().text_strong));
                     ui.label(muted(format!("{open} open · {done} done · from every note in the vault")));
                     ui.add_space(10.0);
                     // progress bar
                     let frac = if all.is_empty() { 0.0 } else { done as f32 / all.len() as f32 };
                     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 6.0), Sense::hover());
-                    ui.painter().rect_filled(r, CornerRadius::same(3), theme::BG_HOVER);
-                    ui.painter().rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width() * frac, r.height())), CornerRadius::same(3), theme::ACCENT);
+                    ui.painter().rect_filled(r, CornerRadius::same(3), theme::palette().bg_hover);
+                    ui.painter().rect_filled(Rect::from_min_size(r.min, Vec2::new(r.width() * frac, r.height())), CornerRadius::same(3), theme::palette().accent);
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut self.tasks.query).hint_text("Filter tasks or #tags…").desired_width(260.0));
@@ -687,7 +688,7 @@ impl ShaleApp {
                             let name = v.file(rel).map(|f| f.display_name()).unwrap_or_default();
                             let folder = rel.parent().map(rel_to_string).filter(|s| !s.is_empty());
                             ui.horizontal(|ui| {
-                                if ui.add(egui::Label::new(egui::RichText::new(&name).size(15.0).color(theme::TEXT_STRONG)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                if ui.add(egui::Label::new(egui::RichText::new(&name).size(15.0).color(theme::palette().text_strong)).sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                     self.actions.push(Action::Open { rel: rel.clone(), new_tab: false });
                                 }
                                 if let Some(f) = folder {
@@ -711,7 +712,7 @@ impl ShaleApp {
                             }
                             if let Some(due) = &t.due {
                                 let overdue = today().map(|d| due.as_str() < d.as_str()).unwrap_or(false) && !t.done;
-                                ui.label(egui::RichText::new(format!("due {due}")).size(12.0).color(if overdue { theme::LINK_MISSING } else { theme::ACCENT }));
+                                ui.label(egui::RichText::new(format!("due {due}")).size(12.0).color(if overdue { theme::palette().link_missing } else { theme::palette().accent }));
                             }
                             if self.tasks.only_due {
                                 ui.label(muted(v.file(rel).map(|f| f.display_name()).unwrap_or_default()).size(12.0));
@@ -774,7 +775,7 @@ impl ShaleApp {
                             pick = Some(i);
                         }
                     }
-                    if create && ui.selectable_label(*sel == items.len(), egui::RichText::new(format!("＋ Create “{}”", query.trim())).color(theme::LINK_MISSING)).clicked() {
+                    if create && ui.selectable_label(*sel == items.len(), egui::RichText::new(format!("＋ Create “{}”", query.trim())).color(theme::palette().link_missing)).clicked() {
                         pick = Some(items.len());
                     }
                     crate::theme::prose(ui, muted("↑↓ to move · Enter to open · Esc to close").size(11.5));
@@ -855,7 +856,7 @@ impl ShaleApp {
                 let resp = crate::dialog::Dialog::new("trash", "Move to trash?").width(400.0).show(&ctx, |ui| {
                     crate::theme::paragraph(ui, format!("“{}” will be moved to the .trash folder inside your vault. You can get it back from there.", rel_to_string(rel)));
                     ui.horizontal(|ui| {
-                        if ui.button(egui::RichText::new("Move to trash").color(theme::LINK_MISSING)).clicked() {
+                        if ui.button(egui::RichText::new("Move to trash").color(theme::palette().link_missing)).clicked() {
                             let r = rel.clone();
                             self.trash(&r);
                             keep = false;
@@ -1204,7 +1205,7 @@ impl ShaleApp {
 }
 
 fn section_header(ui: &mut Ui, t: &str) {
-    ui.label(egui::RichText::new(t).size(12.5).color(theme::MUTED).strong());
+    ui.label(egui::RichText::new(t).size(12.5).color(theme::palette().muted).strong());
     ui.add_space(2.0);
 }
 
@@ -1240,33 +1241,33 @@ fn tree_row(ui: &mut Ui, depth: usize, name: &str, open: Option<bool>, active: b
     // click to open, drag to move into another folder
     let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click_and_drag());
     if active {
-        ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_ACTIVE);
+        ui.painter().rect_filled(r, CornerRadius::same(5), theme::palette().bg_active);
     } else if resp.hovered() {
-        ui.painter().rect_filled(r, CornerRadius::same(5), theme::BG_HOVER);
+        ui.painter().rect_filled(r, CornerRadius::same(5), theme::palette().bg_hover);
     }
     let x = r.min.x + 6.0 + depth as f32 * 16.0;
     // indent guides
     for d in 0..depth {
         let gx = r.min.x + 13.0 + d as f32 * 16.0;
-        ui.painter().line_segment([Pos2::new(gx, r.min.y), Pos2::new(gx, r.max.y)], egui::Stroke::new(1.0, theme::BORDER));
+        ui.painter().line_segment([Pos2::new(gx, r.min.y), Pos2::new(gx, r.max.y)], egui::Stroke::new(1.0, theme::palette().border));
     }
     let mut tx = x;
     if let Some(o) = open {
         let c = Pos2::new(x + 6.0, r.center().y);
         let pts = if o { vec![c + Vec2::new(-4.0, -2.0), c + Vec2::new(0.0, 2.5), c + Vec2::new(4.0, -2.0)] } else { vec![c + Vec2::new(-2.0, -4.0), c + Vec2::new(2.5, 0.0), c + Vec2::new(-2.0, 4.0)] };
-        ui.painter().add(egui::Shape::line(pts, egui::Stroke::new(1.4, theme::MUTED)));
+        ui.painter().add(egui::Shape::line(pts, egui::Stroke::new(1.4, theme::palette().muted)));
         tx += 16.0;
     } else {
         tx += 4.0;
     }
-    let fg = if active { theme::TEXT_STRONG } else { color };
+    let fg = if active { theme::palette().text_strong } else { color };
     let galley = ui.painter().layout_no_wrap(name.to_string(), FontId::proportional(13.5), fg);
     let clip = Rect::from_min_max(Pos2::new(tx, r.min.y), Pos2::new(r.max.x - if badge.is_empty() { 4.0 } else { 60.0 }, r.max.y));
     ui.painter().with_clip_rect(clip).galley(Pos2::new(tx, r.center().y - galley.size().y / 2.0), galley, fg);
     if !badge.is_empty() {
         let br = Rect::from_min_max(Pos2::new(r.max.x - 58.0, r.center().y - 8.0), Pos2::new(r.max.x - 4.0, r.center().y + 8.0));
-        ui.painter().rect_filled(br, CornerRadius::same(4), theme::BG_HOVER);
-        ui.painter().text(br.center(), egui::Align2::CENTER_CENTER, badge, FontId::proportional(10.5), theme::MUTED);
+        ui.painter().rect_filled(br, CornerRadius::same(4), theme::palette().bg_hover);
+        ui.painter().text(br.center(), egui::Align2::CENTER_CENTER, badge, FontId::proportional(10.5), theme::palette().muted);
     }
     let _ = paint_icon;
     resp

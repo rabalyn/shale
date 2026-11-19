@@ -193,7 +193,7 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx) -> Outcome {
             if h.group != last {
                 last = h.group;
                 if let Some((_, text)) = headers.iter().find(|(g, _)| *g == last) {
-                    ui.label(RichText::new(text).color(theme::MUTED).size(12.0));
+                    ui.label(RichText::new(text).color(theme::palette().muted).size(12.0));
                 }
             }
             let label = if h.detail.is_empty() { h.title.clone() } else { format!("{}    {}", h.title, h.detail) };
@@ -206,9 +206,9 @@ pub fn show(ctx: &Context, p: &mut Picker, data: &Ctx) -> Outcome {
             }
         }
         if p.hits.is_empty() && p.made_for.is_some() {
-            ui.label(RichText::new("Nothing found").color(theme::MUTED).size(12.5));
+            ui.label(RichText::new("Nothing found").color(theme::palette().muted).size(12.5));
         }
-        ui.label(RichText::new("↑↓ or Ctrl+J / Ctrl+K to move · Enter to open · Esc to close").color(theme::MUTED).size(11.5));
+        ui.label(RichText::new("↑↓ or Ctrl+J / Ctrl+K to move · Enter to open · Esc to close").color(theme::palette().muted).size(11.5));
         out.pick = pick.map(|i| p.hits.swap_remove(i));
         out.close = keys.esc;
     });

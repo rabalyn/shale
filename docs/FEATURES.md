@@ -353,6 +353,30 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 
 ![The Fonts tab of Settings, one row per area](userguide/z_media/screenshots/settings-fonts.png)
 
+## Themes
+
+- Settings → Appearance → Theme sets the colours of the whole window. Nine themes come with Shale: the dark
+  **Shale** (the default, as the app always looked), **Dracula**, **Nord**, **Catppuccin Mocha** and
+  **Gruvbox Dark**, and the light **Catppuccin Latte**, **Solarized Light**, **GitHub Light** and
+  **Gruvbox Light**. A change shows at once, also when you edit `[theme]` in the settings file.
+- "Follow the system's light or dark mode" swaps the one list for two, a light theme and a dark theme,
+  and Shale uses the one that matches the system (the dark one when the mode is not known). The
+  settings are `[theme]` `name`, `follow_system`, `light` and `dark`.
+- A theme is a terminal colour scheme in the Alacritty TOML format, read as it is: put a `.toml` file
+  of the alacritty-theme collection (or your own) into the themes folder next to the settings file
+  ("Open themes folder"; "Reload themes") and it is listed by its file name. A file named like a
+  built-in theme replaces it. A file that cannot be read is skipped and the reason is listed.
+  Shale makes its greys, accent, links, code and status colours from the terminal colours and
+  keeps them readable (a contrast of 3 to 1, text 4.5 to 1); an optional `[shale]` table in the
+  file sets any colour of the window exactly (CFG-062 to CFG-065).
+- Colours set in a note (`<mark>`, `<span>`) are kept as written, the drawing canvas keeps its own
+  switch and the PDF export prints with Shale's colours. The bundled themes' authors and licences
+  are in `assets/themes/LICENSES.md`.
+
+![The Appearance tab of Settings with the theme list open](userguide/z_media/screenshots/settings-appearance.png)
+
+![The window in the light theme Catppuccin Latte](userguide/z_media/screenshots/theme-latte.png)
+
 ## Keyboard only: sidebar, file list and vim-style editing
 
 ![The Keybindings tab of the settings](userguide/z_media/screenshots/keybindings.png)

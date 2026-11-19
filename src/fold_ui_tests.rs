@@ -371,7 +371,7 @@ const CODE: &str = "intro\n\n```rust\nfn main() {}\nlet x = 1;\n```\n\nafter";
 impl W {
     /// The rectangles painted with the code background (the boxes of the code blocks).
     fn boxes(&self) -> Vec<Rect> {
-        self.hl.rects.iter().filter(|(_, c)| *c == crate::theme::CODE_BG).map(|(r, _)| *r).collect()
+        self.hl.rects.iter().filter(|(_, c)| *c == crate::theme::palette().code_bg).map(|(r, _)| *r).collect()
     }
 }
 
@@ -838,7 +838,7 @@ fn edit_097_the_outline_and_footnote_jumps_unfold_what_hides_their_target() {
     let claim = w.at("Claim1 here.");
     let mark = {
         let _defined = crate::markdown::DefinedFootnotes::set(["1".to_string()].into());
-        let (job, _, _, _) = crate::reader::inline_painted("Claim[^1] here.", &[], 15.0, crate::theme::TEXT, false);
+        let (job, _, _, _) = crate::reader::inline_painted("Claim[^1] here.", &[], 15.0, crate::theme::palette().text, false);
         let galley = w.hl.ctx().fonts_mut(|f| f.layout_job(job));
         claim + galley.pos_from_cursor(egui::text::CCursor::new(5)).center().to_vec2() + egui::Vec2::new(2.0, 0.0)
     };

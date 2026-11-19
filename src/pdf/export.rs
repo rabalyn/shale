@@ -419,14 +419,14 @@ fn rgba(c: Color32) -> Rgba {
 /// Screen (dark theme) colours → colours that print well on white paper.
 pub(crate) fn print_color(c: Color32) -> Rgba {
     let map = [
-        (theme::LINK, Rgba(26, 95, 180, 255)),
-        (theme::LINK_MISSING, Rgba(192, 28, 40, 255)),
-        (theme::TAG, Rgba(105, 65, 198, 255)),
-        (theme::CODE, Rgba(150, 70, 0, 255)),
-        (theme::DONE, Rgba(140, 140, 140, 255)),
-        (theme::QUOTE, Rgba(85, 85, 85, 255)),
-        (theme::MUTED, Rgba(100, 100, 100, 255)),
-        (theme::ACCENT, Rgba(105, 65, 198, 255)),
+        (theme::Palette::shale().link, Rgba(26, 95, 180, 255)),
+        (theme::Palette::shale().link_missing, Rgba(192, 28, 40, 255)),
+        (theme::Palette::shale().tag, Rgba(105, 65, 198, 255)),
+        (theme::Palette::shale().code, Rgba(150, 70, 0, 255)),
+        (theme::Palette::shale().done, Rgba(140, 140, 140, 255)),
+        (theme::Palette::shale().quote, Rgba(85, 85, 85, 255)),
+        (theme::Palette::shale().muted, Rgba(100, 100, 100, 255)),
+        (theme::Palette::shale().accent, Rgba(105, 65, 198, 255)),
     ];
     for (k, v) in map {
         if c == k {
@@ -450,7 +450,7 @@ pub(crate) fn over_white([r, g, b, a]: [u8; 4]) -> Rgba {
 pub(crate) fn print_bg(c: Color32) -> Option<Rgba> {
     if c == Color32::TRANSPARENT {
         None
-    } else if c == theme::TAG_BG {
+    } else if c == theme::Palette::shale().tag_bg {
         Some(Rgba(236, 232, 251, 255))
     } else {
         Some(Rgba(255, 241, 168, 255))
@@ -1108,7 +1108,7 @@ impl<'a> Writer<'a> {
                         None => crate::editor::heading_scale(level as u8),
                     },
                 };
-                let mut ps = self.pieces(vault, rel, line[level..].trim_start(), base * scale, theme::HEADING, false);
+                let mut ps = self.pieces(vault, rel, line[level..].trim_start(), base * scale, theme::Palette::shale().heading, false);
                 for p in &mut ps {
                     p.bold = opts.heading_bold || p.bold;
                     p.color = opts.heading_color.unwrap_or(Rgba(0, 0, 0, 255));
@@ -1181,7 +1181,7 @@ impl<'a> Writer<'a> {
                 }
                 let start_y = self.y;
                 let start_page = self.page;
-                let ps = self.pieces(vault, rel, &content, base, if opts.paper_look { ink } else { theme::QUOTE }, false);
+                let ps = self.pieces(vault, rel, &content, base, if opts.paper_look { ink } else { theme::Palette::shale().quote }, false);
                 self.paragraph_aligned(&ps, x0 + 12.0, cw - 12.0, true);
                 let end_y = self.y;
                 if self.page == start_page && !opts.paper_look {
@@ -1351,7 +1351,7 @@ impl<'a> Writer<'a> {
                 self.members.as_ref()?.contains(&target).then(|| Link::Book(target, l.heading.clone()))
             });
             // inline code keeps its screen colours on the code background (PDF-007)
-            let on_code = f.background == theme::CODE_BG;
+            let on_code = f.background == theme::Palette::shale().code_bg;
             // a bold or italic face of a chosen font has no imitation that says so (CFG-039)
             let (face_bold, face_italic) = crate::fonts::bold_italic_of(&f.font_id.family);
             out.push(Piece {
@@ -1368,7 +1368,7 @@ impl<'a> Writer<'a> {
                 bg: match paint.and_then(|p| p.1) {
                     Some([r, g, b, a]) => Some(over_white([r, g, b, a])),
                     None if on_code && self.opts.paper_look => None,
-                    None if on_code => Some(rgba(theme::CODE_BG)),
+                    None if on_code => Some(rgba(theme::Palette::shale().code_bg)),
                     None => print_bg(f.background),
                 },
                 italic: f.italics || face_italic,
@@ -1400,7 +1400,7 @@ impl<'a> Writer<'a> {
                 self.need(l.height() + base * 0.8);
                 let x = self.left + ((self.cw() - l.width) / 2.0).max(0.0);
                 let y = self.y + base * 0.4 + l.ascent;
-                let ink = print_color(theme::TEXT);
+                let ink = print_color(theme::Palette::shale().text);
                 self.p().math(l, x, y, ink);
                 self.y += l.height() + base * 0.8;
             }
@@ -1419,7 +1419,7 @@ impl<'a> Writer<'a> {
         let (x0, cw) = (self.left, self.cw());
         let lh = size * 1.4;
         let paper = self.opts.paper_look;
-        let plain = if paper { PAPER_INK } else { rgba(theme::CODE) };
+        let plain = if paper { PAPER_INK } else { rgba(theme::Palette::shale().code) };
         let text = lines.join("\n");
         let spans = if paper { Default::default() } else { crate::syntax::highlight(word, &text) };
         let mut span = spans.iter().peekable();
@@ -1430,7 +1430,7 @@ impl<'a> Writer<'a> {
             for (bi, c) in line.char_indices() {
                 let pos = at + bi;
                 while span.next_if(|(r, _)| r.end <= pos).is_some() {}
-                let colour = span.peek().filter(|(r, _)| r.start <= pos).map_or(plain, |(_, k)| rgba(theme::syntax_colour(*k)));
+                let colour = span.peek().filter(|(r, _)| r.start <= pos).map_or(plain, |(_, k)| rgba(theme::Palette::shale().syntax(*k)));
                 chars.extend(std::iter::repeat_n((if c == '\t' { ' ' } else { c }, colour), if c == '\t' { 4 } else { 1 }));
             }
             at += line.len() + 1;
@@ -1448,7 +1448,7 @@ impl<'a> Writer<'a> {
                 let (now, later) = rest.split_at(cut);
                 self.need(lh);
                 let y = self.y;
-                self.p().rect(x0, y, cw, lh, Some(if paper { PAPER_CODE_BG } else { rgba(theme::CODE_BG) }), None);
+                self.p().rect(x0, y, cw, lh, Some(if paper { PAPER_CODE_BG } else { rgba(theme::Palette::shale().code_bg) }), None);
                 let mut x = x0 + 6.0;
                 let mut n = 0;
                 while n < now.len() {
@@ -1575,6 +1575,11 @@ fn natural_size(w: u32, h: u32) -> Vec2 {
 /// and contents are the dialog's choices in `opts`, which start from the note's
 /// ([`ExportOptions::with_note_properties`]).
 pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
+    // the paper always has Shale's colours, whatever the theme of the window (CFG-061, PDF-007)
+    theme::with_palette(theme::Palette::shale(), || export_note_in_shale(vault, rel, text, opts))
+}
+
+fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
     let opts = &opts.clone().with_note_text_properties(text);
     // the title line's text: no `.md`, no date prefix (VAULT-025)
     let name = vault.file(rel).map(|f| f.title()).unwrap_or_else(|| crate::vault::title_of(&rel.to_string_lossy()).to_string());
@@ -2598,24 +2603,24 @@ pub(crate) mod tests {
         let o = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
         let js = export_note(&v, rel, "```js\nconst x = \"hi\"; // note\n```\n", &o).unwrap();
         let c = contents(&js);
-        assert!(c.contains(&rg(theme::CODE_BG)), "the lines are filled with the code background");
-        assert_eq!(colour_of(&c, "const"), rg(theme::syntax_colour(Kind::Keyword)));
-        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::syntax_colour(Kind::String)));
-        assert_eq!(colour_of(&c, "// note"), rg(theme::syntax_colour(Kind::Comment)));
+        assert!(c.contains(&rg(theme::Palette::shale().code_bg)), "the lines are filled with the code background");
+        assert_eq!(colour_of(&c, "const"), rg(theme::Palette::shale().syntax(Kind::Keyword)));
+        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::Palette::shale().syntax(Kind::String)));
+        assert_eq!(colour_of(&c, "// note"), rg(theme::Palette::shale().syntax(Kind::Comment)));
         let colours: std::collections::HashSet<String> = ["const", "\"hi\"", "// note"].iter().map(|w| colour_of(&c, w)).collect();
         assert!(colours.len() >= 3, "several distinct colours for the code text");
         // no language, an unknown one: plain code colour, still on the code background
         for fence in ["```", "```klingon"] {
             let plain = export_note(&v, rel, &format!("{fence}\nconst x = \"hi\";\n```\n"), &o).unwrap();
             let c = contents(&plain);
-            assert!(c.contains(&rg(theme::CODE_BG)), "{fence}: code background");
-            assert_eq!(colour_of(&c, "const x = \"hi\";"), rg(theme::CODE), "{fence}: one plain run in the code colour");
+            assert!(c.contains(&rg(theme::Palette::shale().code_bg)), "{fence}: code background");
+            assert_eq!(colour_of(&c, "const x = \"hi\";"), rg(theme::Palette::shale().code), "{fence}: one plain run in the code colour");
         }
         // a long line wraps and keeps its colours; a tab is four spaces
         let long = format!("```js\n\tconst s = \"{}\";\n```\n", "x".repeat(300));
         let c = contents(&export_note(&v, rel, &long, &o).unwrap());
         assert!(c.contains(&format!("<{}> Tj", hex("    "))), "the tab is four spaces");
-        assert!(c.matches(&rg(theme::syntax_colour(Kind::String))).count() >= 2, "the string goes on in its colour on the next row");
+        assert!(c.matches(&rg(theme::Palette::shale().syntax(Kind::String))).count() >= 2, "the string goes on in its colour on the next row");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -2626,11 +2631,11 @@ pub(crate) mod tests {
         let (v, d) = vault();
         let o = ExportOptions { title: false, page_numbers: false, ..ExportOptions::for_note() };
         let c = contents(&export_note(&v, Path::new("Ideas.md"), "Call `log(\"hi\", 42)` now and `plain` too.\n", &o).unwrap());
-        assert!(c.contains(&rg(theme::CODE_BG)), "a code background behind the run");
-        assert_eq!(colour_of(&c, "log"), rg(theme::syntax_colour(Kind::Function)));
-        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::syntax_colour(Kind::String)));
-        assert_eq!(colour_of(&c, "42"), rg(theme::syntax_colour(Kind::Number)));
-        assert_eq!(colour_of(&c, "plain"), rg(theme::CODE), "a span without such parts is code-coloured");
+        assert!(c.contains(&rg(theme::Palette::shale().code_bg)), "a code background behind the run");
+        assert_eq!(colour_of(&c, "log"), rg(theme::Palette::shale().syntax(Kind::Function)));
+        assert_eq!(colour_of(&c, "\"hi\""), rg(theme::Palette::shale().syntax(Kind::String)));
+        assert_eq!(colour_of(&c, "42"), rg(theme::Palette::shale().syntax(Kind::Number)));
+        assert_eq!(colour_of(&c, "plain"), rg(theme::Palette::shale().code), "a span without such parts is code-coloured");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -3296,7 +3301,7 @@ pub(crate) mod tests {
         // and it is the look of the app: purple marks, the dark code box, the screen palette
         let c = contents(&as_is);
         assert_eq!(colour_of(&c, "•"), PURPLE);
-        assert!(c.contains(&rg(theme::CODE_BG)) && !c.contains("0.961 0.961 0.961 rg"));
+        assert!(c.contains(&rg(theme::Palette::shale().code_bg)) && !c.contains("0.961 0.961 0.961 rg"));
         let on = export_note(&v, Path::new("Welcome.md"), &text, &ExportOptions { paper_look: true, ..o }).unwrap();
         assert_ne!(contents(&on), c, "forced on it differs");
         let _ = std::fs::remove_dir_all(&d);
@@ -3329,7 +3334,7 @@ pub(crate) mod tests {
         let c = paper_page(&front("print-font: sans", LOOK_BODY));
         // the block: light grey box, dark text, the mono font, one colour
         assert!(c.contains("0.961 0.961 0.961 rg"), "light grey box");
-        assert!(!c.contains(&rg(theme::CODE_BG)), "not the dark screen box");
+        assert!(!c.contains(&rg(theme::Palette::shale().code_bg)), "not the dark screen box");
         let w = "const codeword = \"s\";";
         assert_eq!(colour_of(&c, w), INK, "{w}: dark text in one run");
         assert!(run_of(&c, w).contains("/F2 "), "{w}: the mono font");
@@ -3339,16 +3344,16 @@ pub(crate) mod tests {
         assert!(run_of(&c, "Call ").contains("/F1 "), "the text around it is not mono");
         // the screen look of a note without print-* keys
         let plain = paper_page(LOOK_BODY);
-        assert!(plain.contains(&rg(theme::CODE_BG)) && !plain.contains("0.961 0.961 0.961 rg"));
+        assert!(plain.contains(&rg(theme::Palette::shale().code_bg)) && !plain.contains("0.961 0.961 0.961 rg"));
         assert_ne!(colour_of(&plain, "inlineword"), INK);
         // the inline box: the paper look has fewer filled rectangles
-        let boxes = |s: &str| s.matches(&rg(theme::CODE_BG)).count();
+        let boxes = |s: &str| s.matches(&rg(theme::Palette::shale().code_bg)).count();
         assert!(boxes(&plain) > boxes(&c));
         // a syntax-coloured inline span is plain too
         let hl = paper_page(&front("print-font: sans", "Call `log(\"hi\", 42)` now.\n"));
         assert_eq!(colour_of(&hl, "log"), INK);
         assert_eq!(colour_of(&hl, "42"), INK);
-        assert!(!hl.contains(&rg(theme::CODE_BG)));
+        assert!(!hl.contains(&rg(theme::Palette::shale().code_bg)));
     }
 
     // spec: PDF-027

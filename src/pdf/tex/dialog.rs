@@ -240,7 +240,7 @@ impl TexExport {
 
     /// Show the choices: set, kind, fields, contents, the state of TeX and of the export.
     pub fn show(&mut self, ui: &mut Ui, opts: &mut ExportOptions, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
-        let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::MUTED);
+        let muted = |t: &str| egui::RichText::new(t).size(12.0).color(theme::palette().muted);
         if self.sets.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 rec("no-sets", crate::theme::problem(ui, "This vault has no template sets yet: import one in Settings → LaTeX → Template sets."));

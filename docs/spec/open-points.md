@@ -58,5 +58,5 @@ auto-pairing brackets, find and replace in a note, spell check, paste images. Li
 links (`#^id`), heading scroll in reading view, hover previews. Tasks: priorities, recurring
 tasks, grouping. Graph: colour groups, filters, Barnes–Hut. Drawings: SVG/PDF pictures, frames, groups,
 elbow arrows, labels on arrows, rotation handles, PNG/SVG export, copy/paste between drawings.
-Other: command palette, daily notes, templates, light theme, split panes, packaging (.desktop,
+Other: command palette, daily notes, templates, split panes, packaging (.desktop,
 Flatpak), native folder picker.

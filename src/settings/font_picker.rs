@@ -96,10 +96,10 @@ pub fn show(ui: &mut Ui, salt: &str, current: &mut Option<String>, families: &[S
             }
         }
         if searching {
-            ui.label(egui::RichText::new("Looking for the installed fonts…").small().color(crate::theme::MUTED));
+            ui.label(egui::RichText::new("Looking for the installed fonts…").small().color(crate::theme::palette().muted));
         }
         if list.is_empty() {
-            ui.label(egui::RichText::new("No font matches").small().color(crate::theme::MUTED));
+            ui.label(egui::RichText::new("No font matches").small().color(crate::theme::palette().muted));
         }
         let row_h = ui.text_style_height(&egui::TextStyle::Button) + ui.spacing().item_spacing.y + ui.spacing().button_padding.y * 2.0;
         let mut area = egui::ScrollArea::vertical().id_salt(id.with("list")).max_height(LIST_HEIGHT).auto_shrink([false, true]);
