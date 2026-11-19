@@ -93,6 +93,12 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for RecorderLayer {
 
 /// Run `f` under a fresh recorder and return what it recorded, as a canonical tree.
 pub fn record(f: impl FnOnce()) -> Vec<Node> {
+    // With a single live dispatcher, tracing-core decides a span site's interest from the dispatcher
+    // of whichever thread reaches it first (`Dispatchers::rebuilder`, the "just one" case), so a
+    // parallel thread without a recorder could switch the site off for the recording thread. A
+    // second dispatcher, alive for the whole process, makes it rebuild over all of them.
+    static HOLD: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
+    HOLD.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default()));
     let arena = Arc::new(Mutex::new(Arena::default()));
     tracing::subscriber::with_default(Registry::default().with(RecorderLayer(arena.clone())), f);
     let arena = arena.lock().unwrap_or_else(|e| e.into_inner());
@@ -255,8 +261,16 @@ pub fn update_block(doc: &str, flow: &str, rendered: &str) -> String {
 /// Compare the rendered diagram with the committed block of `path`; with `SHALE_UPDATE_DATAFLOW=1`
 /// write the block instead of failing.
 pub fn verify(path: &Path, flow: &str, rendered: &str) {
+    verify_with(path, flow, rendered, std::env::var("SHALE_UPDATE_DATAFLOW").is_ok_and(|v| v == "1"));
+}
+
+/// `verify` with the decision to update as a parameter. Updating reads and rewrites the whole
+/// document, so two flows of one doc updating in parallel would lose a block: one lock serialises them.
+pub(crate) fn verify_with(path: &Path, flow: &str, rendered: &str, update: bool) {
+    static UPDATE: Mutex<()> = Mutex::new(());
+    let _guard = update.then(|| UPDATE.lock().unwrap_or_else(|e| e.into_inner()));
     let doc = crate::fsutil::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    if std::env::var("SHALE_UPDATE_DATAFLOW").is_ok_and(|v| v == "1") {
+    if update {
         crate::fsutil::write_atomic(path, update_block(&doc, flow, rendered).as_bytes()).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         return;
     }

@@ -1,6 +1,6 @@
 //! Tests of the dataflow recorder, canonical form and renderer (DEV-026). No containers needed.
 
-use crate::dataflow::{canonical, current_block, record, render_mermaid, update_block, Node, Raw};
+use crate::dataflow::{canonical, current_block, record, render_mermaid, update_block, verify_with, Node, Raw};
 
 fn leaf(name: &str, peer: &str) -> Raw {
     Raw::new(name, peer, vec![])
@@ -233,4 +233,38 @@ fn dev_026_a_step_of_the_callers_own_peer_is_a_block_and_arrows_start_at_the_cal
     let tree = canonical(&flow(vec![Raw::new("flow.t.a", "imap", vec![folder(vec![]), folder(vec![])]), Raw::new("flow.t.a", "imap", vec![])]));
     let text = render_mermaid(&tree);
     assert!(text.contains("        opt folder\n            loop folder\n            end\n        end\n"), "{text}");
+}
+
+fn hold_step() {
+    tracing::info_span!("flow.test_hold.step", peer = "imap").in_scope(|| {});
+}
+
+// spec: DEV-026
+#[test]
+fn dev_026_a_span_site_first_reached_by_a_thread_without_a_recorder_is_still_recorded() {
+    let tree = record(|| {
+        // The site is first reached by a thread that has no dispatcher, while the recorder is live.
+        std::thread::spawn(hold_step).join().unwrap();
+        hold_step();
+    });
+    assert_eq!(names(&tree), ["flow.test_hold.step"]);
+}
+
+// spec: DEV-026
+#[test]
+fn dev_026_two_flows_updated_in_one_doc_at_the_same_time_both_keep_their_block() {
+    let path = std::env::temp_dir().join(format!("shale-dataflow-update-{}.md", std::process::id()));
+    let doc = "<!-- dataflow:begin a -->\n```mermaid\nold\n```\n<!-- dataflow:end a -->\n<!-- dataflow:begin b -->\n```mermaid\nold\n```\n<!-- dataflow:end b -->\n";
+    for round in 0..50 {
+        std::fs::write(&path, doc).unwrap();
+        let (one, two) = (format!("one {round}\n"), format!("two {round}\n"));
+        std::thread::scope(|s| {
+            s.spawn(|| verify_with(&path, "a", &one, true));
+            s.spawn(|| verify_with(&path, "b", &two, true));
+        });
+        let got = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(current_block(&got, "a"), Some(format!("```mermaid\n{one}```\n").as_str()), "round {round}");
+        assert_eq!(current_block(&got, "b"), Some(format!("```mermaid\n{two}```\n").as_str()), "round {round}");
+    }
+    std::fs::remove_file(&path).unwrap();
 }
