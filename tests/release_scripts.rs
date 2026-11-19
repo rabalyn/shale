@@ -68,3 +68,15 @@ fn dev_025_test_tex_env_script_passes() {
 fn dev_011_test_env_tests_script_passes() {
     run("scripts/test-env-tests.sh");
 }
+
+// spec: BUILD-025: BSD install (macOS) has no `-D` (create the leading folders), so the installer
+// makes them with `mkdir -p` (#439)
+#[test]
+fn build_025_install_script_uses_no_gnu_only_install_d() {
+    let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install.sh")).unwrap();
+    for l in text.lines().filter(|l| !l.trim_start().starts_with('#')) {
+        let words: Vec<&str> = l.split_whitespace().collect();
+        let gnu = words.windows(2).any(|w| w[0] == "install" && w[1].starts_with('-') && !w[1].starts_with("--") && w[1].contains('D')) || l.contains("install --directory") || l.contains("install --create-leading");
+        assert!(!gnu, "GNU-only `install -D` in scripts/install.sh: {l}");
+    }
+}

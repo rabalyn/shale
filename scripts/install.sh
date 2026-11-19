@@ -104,12 +104,19 @@ for f in shale.desktop shale.svg; do
     fi
 done
 
-install -Dm755 "$src/shale" "$program"
-install -Dm644 "$src/shale.svg" "$svg"
+# put MODE FILE DEST: copies FILE to DEST with MODE, making the folders of DEST first. No
+# `install -D`: BSD install (macOS) has no such option.
+put() {
+    mkdir -p "$(dirname "$3")"
+    install -m "$1" "$2" "$3"
+}
+
+put 755 "$src/shale" "$program"
+put 644 "$src/shale.svg" "$svg"
 for n in $sizes; do
     png=$src/assets/icon/shale-$n.png
     if [ -f "$png" ]; then
-        install -Dm644 "$png" "$datadir/icons/hicolor/${n}x${n}/apps/shale.png"
+        put 644 "$png" "$datadir/icons/hicolor/${n}x${n}/apps/shale.png"
     fi
 done
 
