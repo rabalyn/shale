@@ -1152,3 +1152,102 @@ fn edit_105_a_note_with_numbered_headings_and_the_kept_layout_shows_the_same_as_
     let again: Vec<String> = w.hl.text.iter().map(|t| t.0.clone()).collect();
     assert!(again.iter().any(|t| t == "1.1"), "the numbers are painted from the kept layout: {again:?}");
 }
+
+/// A second app on the vault of `w`, with the vault state `w` wrote (through its file format) and the note opened.
+fn restarted(w: &mut W) -> W {
+    w.app.remember_open_files();
+    let bytes = crate::vault_state::to_bytes(&w.app.vdata.state);
+    let (state, _) = crate::vault_state::parse::<crate::vault_state::VaultState>(&bytes).unwrap();
+    let dir = w.dir.clone();
+    let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(dir.clone()), view: None, keys: None }, false);
+    app.cfg.cursor_blink = false;
+    app.cfg.line_numbers = true;
+    app.cfg.live_preview = true;
+    app.vdata.state.folds = state.folds;
+    app.open(Path::new(NOTE), false);
+    let mut second = W { app, hl: Headless::new(), dir };
+    second.hl.frames(&mut second.app, 4);
+    second
+}
+
+// spec: EDIT-079
+#[test]
+fn edit_079_folds_survive_a_restart_in_the_editor_and_the_reading_view() {
+    let mut w = W::new("persist", SECTIONS, true);
+    w.cursor_in("## Sub");
+    w.press(Key::K, CTRL_SHIFT);
+    assert_eq!(w.hidden(), 1);
+    let mut second = restarted(&mut w);
+    assert_eq!(second.hidden(), 1, "## Sub is folded again after the restart");
+    assert_eq!(second.numbers(), vec![1, 2, 3, 4, 6, 7]);
+    assert_eq!(second.text(), SECTIONS, "the note file is untouched");
+    // the reading view shows the same folds (EDIT-095)
+    let active = second.app.tabbar.active;
+    second.app.tabbar.tabs[active].reading = true;
+    second.hl.frames(&mut second.app, 4);
+    assert!(second.painted("\u{2026} 1 line"), "{:?}", second.hl.text);
+    // unfolding everything is remembered as well
+    second.app.tabbar.tabs[active].reading = false;
+    second.hl.frames(&mut second.app, 2);
+    second.cursor_in("# One");
+    second.press(Key::I, CTRL_SHIFT);
+    assert_eq!(second.hidden(), 0);
+    let third = restarted(&mut second);
+    assert_eq!(third.hidden(), 0, "an unfolded note stays unfolded");
+}
+
+// spec: EDIT-079
+#[test]
+fn edit_079_a_fold_whose_block_is_gone_is_dropped_and_a_note_that_is_gone_loses_its_entry() {
+    let mut w = W::new("stale", SECTIONS, true);
+    let key = |kind: &str, title: &str, nth: usize, line: usize| serde_json::from_value(serde_json::json!({"kind": kind, "title": title, "nth": nth, "line": line})).unwrap();
+    let saved = vec![key("heading", "Sub", 0, 3), key("heading", "Gone", 0, 40)];
+    let mut app = ShaleApp::build(Options { screenshot: None, vault: Some(w.dir.clone()), view: None, keys: None }, false);
+    app.cfg.live_preview = true;
+    app.vdata.state.folds.insert(NOTE.to_string(), saved.clone());
+    app.vdata.state.folds.insert("Missing.md".to_string(), saved);
+    app.open(Path::new(NOTE), false);
+    let mut hl = Headless::new();
+    hl.frames(&mut app, 4);
+    w.app = app;
+    w.hl = hl;
+    assert_eq!(w.hidden(), 1, "the block that is still there is folded");
+    w.app.remember_open_files();
+    let kept = &w.app.vdata.state.folds;
+    assert_eq!(kept.get(NOTE).map(Vec::len), Some(1), "the fold of the gone block is dropped: {kept:?}");
+    assert!(!kept.contains_key("Missing.md"), "a note that is not in the vault has no entry: {kept:?}");
+}
+
+// spec: EDIT-079
+#[test]
+fn edit_079_a_renamed_note_keeps_its_folds() {
+    let mut w = W::new("renamed", SECTIONS, true);
+    w.cursor_in("## Sub");
+    w.press(Key::K, CTRL_SHIFT);
+    w.app.remember_open_files();
+    assert!(w.app.vdata.state.folds.contains_key(NOTE));
+    w.app.rename(Path::new(NOTE), "C").unwrap();
+    w.hl.frames(&mut w.app, 4);
+    assert_eq!(w.hidden(), 1, "still folded under the new name");
+    w.app.remember_open_files();
+    let kept = &w.app.vdata.state.folds;
+    assert!(kept.contains_key("C.md") && !kept.contains_key(NOTE), "{kept:?}");
+}
+
+// spec: EDIT-079
+#[test]
+fn edit_079_folds_that_are_what_a_note_starts_with_are_not_written() {
+    let mut w = W::new("defaults", "---\ntitle: x\n---\n# One\nfirst", true);
+    w.app.remember_open_files();
+    assert!(w.app.vdata.state.folds.is_empty(), "{:?}", w.app.vdata.state.folds);
+}
+
+// spec: EDIT-079
+#[test]
+fn edit_079_an_unreadable_entry_in_the_state_file_loses_only_its_folds() {
+    let json = br#"{"folds": {"A.md": [{"kind": "heading", "title": "x", "nth": 0, "line": 1}], "B.md": "oops", "C.md": [{"kind": "nonsense"}]}}"#;
+    let (state, _) = crate::vault_state::parse::<crate::vault_state::VaultState>(json).unwrap();
+    assert_eq!(state.folds.keys().collect::<Vec<_>>(), vec!["A.md"]);
+    let again = crate::vault_state::parse::<crate::vault_state::VaultState>(&crate::vault_state::to_bytes(&state)).unwrap().0;
+    assert_eq!(again.folds, state.folds);
+}

@@ -933,6 +933,10 @@ impl ShaleApp {
                     }
                 }
                 self.show_view(View::Note(rel.to_path_buf()), new_tab);
+                // the folds it had when it was left (EDIT-079)
+                if let (Some(saved), Some(t)) = (self.vdata.state.folds.get(&rel_to_string(rel)), self.tabbar.tabs.get_mut(self.tabbar.active)) {
+                    t.editor.fold.restore(rel, saved);
+                }
             }
             FileKind::Drawing if crate::drawing::canvas::is_canvas_path(rel) && !self.drawings.contains_key(rel) => {
                 // a canvas: open the copy converted earlier, convert it, or ask
@@ -1011,9 +1015,25 @@ impl ShaleApp {
             return;
         }
         self.vdata.state.panes = self.saved_panes();
+        self.remember_folds();
         self.vdata.state.focused_pane = self.panes.focused;
         // (the tabs of the first pane stay where a Shale without panes reads them)
         self.vdata.state.tabs = self.vdata.state.panes.first().map(|p| p.tabs.clone()).unwrap_or_default();
+    }
+
+    /// Take the folds of the notes the editors showed into the vault state, and drop the ones of
+    /// notes that are gone (EDIT-079). A note kept as it starts has no entry.
+    fn remember_folds(&mut self) {
+        let shown: Vec<(PathBuf, Option<Vec<crate::fold::Key>>)> = self.all_tabs().flat_map(|t| t.editor.fold.snapshot()).collect();
+        for (rel, keys) in shown {
+            match keys {
+                Some(keys) => self.vdata.state.folds.insert(rel_to_string(&rel), keys),
+                None => self.vdata.state.folds.remove(&rel_to_string(&rel)),
+            };
+        }
+        if let Some(v) = &self.vault {
+            self.vdata.state.folds.retain(|k, _| v.file(Path::new(k)).is_some());
+        }
     }
 
     /// The session state is written when something in it changed, looked at every 5 seconds: the
@@ -1540,6 +1560,15 @@ impl ShaleApp {
             }
         };
         self.undo.moved(remap);
+        // the folds of the moved notes follow (EDIT-079)
+        for t in self.all_tabs_mut() {
+            t.editor.fold.moved(remap);
+        }
+        for k in self.vdata.state.folds.keys().cloned().collect::<Vec<_>>() {
+            if let (Some(nk), Some(v)) = (remap(Path::new(&k)), self.vdata.state.folds.remove(&k)) {
+                self.vdata.state.folds.insert(rel_to_string(&nk), v);
+            }
+        }
         let keys: Vec<PathBuf> = self.notes.keys().cloned().collect();
         for k in keys {
             if let Some(nk) = remap(&k) {
