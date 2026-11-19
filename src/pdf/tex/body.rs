@@ -13,7 +13,7 @@ use crate::table::Col;
 use crate::vault::FileKind;
 use eframe::egui::{Color32, Vec2};
 
-/// A new page (TEX-035, TEX-036).
+/// A new page (TEX-037, TEX-038).
 pub const NEW_PAGE: &str = "\\newpage\n\n";
 
 /// The most pages of an embedded PDF that are included (as in the native export).

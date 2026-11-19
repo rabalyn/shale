@@ -290,7 +290,7 @@ fn doc_department(kind_id: &str, filled: bool, wanted: bool) -> String {
     out.unwrap_or_else(|e| panic!("{e}")).tex
 }
 
-// spec: TEX-035
+// spec: TEX-037
 #[test]
 fn the_department_logo_lines_are_written_after_the_preamble_only_when_the_slot_is_filled_the_box_is_on_and_the_kind_has_a_place() {
     for id in ["pub", "report", "thesis", "phd", "beamer", "letter", "poster", "sciposter", "leaflet"] {
@@ -694,7 +694,7 @@ fn a_link_to_a_heading_of_the_note_goes_there_and_links_to_other_notes_are_link_
 
 const BREAK: &str = "<div style=\"page-break-after: always;\"></div>";
 
-// spec: TEX-035
+// spec: TEX-037
 #[test]
 fn a_page_break_marker_is_a_newpage_once_and_the_html_is_not_written() {
     let note = format!("# One\n\nbefore\n\n{BREAK}\n\nafter\n\n<div style='break-before: page'></div>\n\n```\n{BREAK}\n```\n\nlast\n");
@@ -721,7 +721,7 @@ fn a_page_break_marker_is_a_newpage_once_and_the_html_is_not_written() {
     assert_eq!(blocks, [Block::Para(vec!["a".into()]), Block::PageBreak, Block::Para(vec!["b".into()])]);
 }
 
-// spec: TEX-036
+// spec: TEX-038
 #[test]
 fn print_break_before_writes_a_newpage_before_the_headings_up_to_its_level_but_not_the_first_block() {
     let note = "# One\n\ntext\n\n## Sub\n\ntext\n\n### Deep\n\n# Two\n\ntext\n";

@@ -56,7 +56,7 @@ pub enum Block {
     /// An embed alone on its line.
     Embed(markdown::LinkSpan),
     Rule,
-    /// A page-break marker line (TEX-035).
+    /// A page-break marker line (TEX-037).
     PageBreak,
 }
 

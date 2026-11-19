@@ -322,7 +322,7 @@ pub(crate) fn highlight_with_math(text: &str, links: &[(LinkSpan, bool)], fonts:
         if trimmed == "---" || trimmed == "***" || trimmed == "___" {
             set(&mut fmts, lr.clone(), |f| f.dim = true);
         }
-        // a page-break marker is markup all through: the preview hides it for the dashed rule (EDIT-054)
+        // a page-break marker is markup all through: the preview hides it for the dashed rule (EDIT-065)
         if markdown::page_break_line(line) {
             set(&mut fmts, lr.clone(), |f| {
                 f.dim = true;
@@ -569,7 +569,7 @@ fn paint_math(ui: &Ui, marks: &[MathMark], galley: &Galley, pos: Pos2, resp: &eg
     }
 }
 
-/// Draw the page-break markers of the preview (EDIT-054) as the dashed rule with its label in the
+/// Draw the page-break markers of the preview (EDIT-065) as the dashed rule with its label in the
 /// row their hidden HTML leaves; a marker on a raw line is the HTML as written.
 fn paint_page_breaks(ui: &Ui, galley: &Galley, pos: Pos2, right: f32, raw_lines: Option<&Range<usize>>) {
     let Some(raw) = raw_lines else { return };

@@ -263,7 +263,7 @@ pub fn write(req: &Request) -> Result<Document, String> {
     // the blocks, without the heading that only says the title again (PDF-008)
     let mut blocks = blocks::parse(req.text);
     drop_title_heading(&mut blocks, &title);
-    // a page break means nothing in slides and boxes, where the frames and boxes are the pages (TEX-035)
+    // a page break means nothing in slides and boxes, where the frames and boxes are the pages (TEX-037)
     if matches!(family, Family::Beamer | Family::Boxes) {
         blocks.retain(|b| *b != Block::PageBreak);
     }
@@ -292,7 +292,7 @@ pub fn write(req: &Request) -> Result<Document, String> {
                 main.push_str(&format!("\\begin{{multicols}}{{{}}}\n", kind.columns));
             }
             for (n, b) in blocks.iter().enumerate() {
-                // a heading of the level asked for starts a page, but not the first thing of the note (TEX-036)
+                // a heading of the level asked for starts a page, but not the first thing of the note (TEX-038)
                 let breaks = matches!(b, Block::Heading { level, .. } if family != Family::Poster && (1..=req.opts.break_before as usize).contains(level)) && n > 0;
                 if (breaks || *b == Block::PageBreak) && !main.ends_with(NEW_PAGE) {
                     main.push_str(NEW_PAGE);

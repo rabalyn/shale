@@ -1,4 +1,4 @@
-//! The page-break marker on the screen (EDIT-054): the reading view and the editor's Markdown
+//! The page-break marker on the screen (EDIT-065): the reading view and the editor's Markdown
 //! preview draw a dashed rule with the label "Page break" where the HTML line is; the line with the
 //! cursor and the editor without the preview show the HTML as written, and the text never changes.
 
@@ -68,7 +68,7 @@ fn read(text: &str) -> (Vec<(String, Rect)>, usize) {
     last
 }
 
-// spec: EDIT-054
+// spec: EDIT-065
 #[test]
 fn the_reading_view_draws_a_dashed_rule_with_its_label_instead_of_the_html() {
     let (painted, dashes) = read(&format!("before\n\n{MARK}\n\nafter\n\n```\n{MARK}\n```\n"));
@@ -131,7 +131,7 @@ impl Drop for W {
     }
 }
 
-// spec: EDIT-054
+// spec: EDIT-065
 #[test]
 fn the_preview_draws_the_rule_away_from_the_cursor_and_shows_the_html_on_the_cursor_line() {
     let note = format!("intro\n\n{MARK}\n\nlast line\n");

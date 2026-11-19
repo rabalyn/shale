@@ -561,7 +561,7 @@ fn jump_target(ctx: &egui::Context, notes: &markdown::Footnotes) -> Option<usize
 }
 
 /// The thin dashed rule of a page-break marker with the small label "Page break" in its middle,
-/// from `x0` to `x1` at height `y` (EDIT-054); the reading view and the editor's preview draw it.
+/// from `x0` to `x1` at height `y` (EDIT-065); the reading view and the editor's preview draw it.
 pub(crate) fn paint_page_break(painter: &egui::Painter, x0: f32, x1: f32, y: f32) {
     let label = painter.layout_no_wrap("Page break".to_string(), egui::FontId::proportional(11.0), theme::MUTED);
     let (mid, gap) = ((x0 + x1) / 2.0, label.size().x / 2.0 + 8.0);
@@ -675,7 +675,7 @@ pub fn show(ui: &mut Ui, text: &str, vault: &Vault, rel: &Path, caches: &mut Cac
         if trimmed.is_empty() {
             ui.add_space(base * 0.6);
         } else if page_breaks.contains(&i) {
-            // a page-break marker: a dashed rule with its label (EDIT-054)
+            // a page-break marker: a dashed rule with its label (EDIT-065)
             let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), base * 1.6), egui::Sense::hover());
             paint_page_break(ui.painter(), rect.left(), rect.right(), rect.center().y);
         } else if trimmed == "---" || trimmed == "***" || trimmed == "___" {

@@ -20,7 +20,7 @@ pub enum Cmd {
     Quote,
     CodeBlock,
     Rule,
-    /// the page-break marker line (EDIT-055)
+    /// the page-break marker line (EDIT-066)
     PageBreak,
     WikiLink,
     WebLink,
@@ -1019,7 +1019,7 @@ mod tests {
         assert_eq!((tables[0].table.header.len(), tables[0].table.rows.len()), (2, 2));
     }
 
-    // spec: EDIT-055
+    // spec: EDIT-066
     #[test]
     fn the_page_break_is_a_marker_line_of_its_own_after_the_line() {
         let m = r#"<div style="page-break-after: always;"></div>"#;
