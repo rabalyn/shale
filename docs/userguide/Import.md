@@ -24,11 +24,32 @@ Turn mails, events and files into notes. Back to [[Start here]].
 - Drop onto a folder in the file list to import into it, or onto a note to also add links to the
   new notes there.
 - Messages that were imported before are recognised and left out unless you tick them again.
+- After an import of two or more items the window **Import summary** lists what was made: each new
+  note with a line about it (an e-mail: sender and date; an event: time and place; other notes: their
+  first line) and an **Open** button, the files saved in the media folder, and anything that went
+  wrong. **Open all in tabs** opens every new note in a tab of its own ([[Tabs]]); **Close** leaves
+  them closed. One item is opened right away.
+
+![[import-summary.png]]
 
 ![[drag-event.png]]
 
-Each e-mail becomes a note named "date subject" with sender, recipients and date, tags in its
-properties, links to the attachments and the original message, and the text.
+Each e-mail becomes a note named "date subject". The sender, recipients, date, people (links to their
+contact notes), the link to the original message and the tags are in its properties (see [[Editor]]);
+the text starts with the subject as a heading, then the attachments and the message. An event is
+written the same way: start, end, place, calendar, repeat rule, organizer, attendees, status and
+link are properties, the text is its title and its notes. Notes you imported earlier keep their
+list of **From:** / **Date:** lines.
+
+The text of a mail is tidied while it is imported: blank lines in long runs become one, a very long
+tracking link becomes a short link with the host as its text, and the pictures among the attachments
+are shown small (200 points wide: `![[photo.jpg|200]]`; change the number to make one bigger). The signature of the mail starts
+at a line that is exactly `-- ` and earlier messages stay quoted with `>`, as in the mail.
+
+If you read your notes in a program that does not show properties, tick **Header list in the note
+body** in the Import dialog: the list of From, To, Date (event: When, Where, Attendees, …) is then also
+written below the title. **Settings → Import → Header list in the note body** sets whether the box starts
+ticked.
 
 ![[imported-note.png]]
 

@@ -209,6 +209,8 @@ pub enum Modal {
     Calendars(Box<crate::calendar::dialog::CalendarDialog>),
     Event(Box<crate::calendar::dialog::EventDialog>),
     Import(Box<crate::import::dialog::ImportDialog>),
+    /// what an import of two or more items made (IMP-056)
+    ImportSummary(Box<crate::import::summary::ImportSummary>),
     MailAccounts(Box<crate::mail::dialog::MailDialog>),
     Social(Box<crate::social::accounts_ui::SocialDialog>),
     /// pasted text with headings, none of them `#`: lift them? (EDIT-038)

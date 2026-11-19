@@ -407,7 +407,7 @@ fn dialogs_export_writes_the_pdf_where_asked_and_says_when_it_cannot() {
     assert!(p.app.modal.is_none() && !p.dir.join("in-the-way/out.pdf").exists());
 }
 
-// spec: IMP-002
+// spec: IMP-002, IMP-056
 #[test]
 fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     let mut p = P::new("import", &[]);
@@ -436,6 +436,10 @@ fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     fill(&mut p, "folder", "Imported/Inbox");
     fill(&mut p, "tags", "from-outside");
     p.click(Show::Modals, "Import 2 items");
+    // two notes: the summary says what was made (IMP-056); Close ends it
+    assert!(matches!(&p.app.modal, Some(Modal::ImportSummary(s)) if s.notes.len() == 2));
+    assert!(p.shows(Show::Modals, "Imported 2 notes"));
+    p.click(Show::Modals, "Close");
     assert!(p.app.modal.is_none());
     let a = p.dir.join("Imported/Inbox");
     let mut made: Vec<String> = std::fs::read_dir(&a).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
@@ -453,7 +457,7 @@ fn dialogs_import_makes_the_notes_and_stays_open_on_a_wrong_folder() {
     assert!(p.app.tree.expanded.contains(Path::new("Imported/Inbox")) && p.app.tree.expanded.contains(Path::new("Imported")));
     let acts = p.actions();
     assert!(acts.iter().any(|a| matches!(a, Action::Rescan)));
-    assert_eq!(opened(&acts).len(), 1);
+    assert!(opened(&acts).is_empty(), "the summary opens nothing by itself");
     // Cancel makes nothing
     let (items, notes) = crate::import::items_from_paths(&[outside.join("More.md")]);
     p.app.open_import(items, notes, None);
