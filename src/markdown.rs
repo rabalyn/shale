@@ -883,7 +883,7 @@ pub fn page_break_lines(text: &str) -> Vec<usize> {
     lines_with_offsets(text).iter().enumerate().filter(|(i, (_, l))| *i >= front && !fenced.get(*i).copied().unwrap_or(false) && page_break_line(l)).map(|(i, _)| i).collect()
 }
 
-/// How a paragraph is aligned (PDF-023). `Left` is no wrapper at all in what Shale writes.
+/// How a paragraph is aligned (PDF-028). `Left` is no wrapper at all in what Shale writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Align {
     Left,
@@ -909,7 +909,7 @@ impl Align {
     }
 }
 
-/// The alignment an opening wrapper line asks for (PDF-023): a line of its own that holds
+/// The alignment an opening wrapper line asks for (PDF-028): a line of its own that holds
 /// `<div align="center">` (also `right`, `justify` and `left`). Case, spaces around `=` and either
 /// quote kind do not matter; another attribute, another tag, another value or text before or after
 /// it on the line is no wrapper.
@@ -935,7 +935,7 @@ pub fn align_close_line(line: &str) -> bool {
     line.trim().eq_ignore_ascii_case("</div>")
 }
 
-/// A wrapper that aligns the paragraphs and headings between its two lines (PDF-023): the lines
+/// A wrapper that aligns the paragraphs and headings between its two lines (PDF-028): the lines
 /// (indices) of its opening and closing line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlignBlock {
@@ -956,7 +956,7 @@ impl AlignBlock {
     }
 }
 
-/// The wrappers of `text` (PDF-023), in order: an opening line with the next `</div>` line after
+/// The wrappers of `text` (PDF-028), in order: an opening line with the next `</div>` line after
 /// it, as long as no other opening line comes first. An opening line without a closing one is
 /// text; so is anything in a code fence or the front matter.
 pub fn align_blocks(text: &str) -> Vec<AlignBlock> {
@@ -985,7 +985,7 @@ pub fn align_blocks(text: &str) -> Vec<AlignBlock> {
     out
 }
 
-/// The alignment of line `line` of a note with these wrappers (PDF-023): that of the wrapper that
+/// The alignment of line `line` of a note with these wrappers (PDF-028): that of the wrapper that
 /// holds it, `None` outside every wrapper (and on the wrapper lines).
 pub fn align_at(blocks: &[AlignBlock], line: usize) -> Option<Align> {
     blocks.iter().find(|b| b.holds(line)).map(|b| b.align)
