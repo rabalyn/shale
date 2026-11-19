@@ -220,8 +220,9 @@ impl Writer<'_> {
 
 /// The PDF of the book of `dir` (BOOK-005…BOOK-009). `progress` counts the notes laid out and can stop it.
 pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Option<&Progress>) -> Result<Vec<u8>, String> {
-    let plan = book::plan(vault, dir)?;
-    let secs = sections(vault, &plan, opts.numbered_headings);
+    let _flow = tracing::info_span!("flow.book_export", peer = "export").entered();
+    let plan = tracing::info_span!("flow.book_export.plan", peer = "vault").in_scope(|| book::plan(vault, dir))?;
+    let secs = tracing::info_span!("flow.book_export.read_notes", peer = "vault").in_scope(|| sections(vault, &plan, opts.numbered_headings));
     if let Some(p) = progress {
         p.total.store(secs.len(), Ordering::SeqCst);
     }
@@ -256,6 +257,7 @@ pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Op
             }
             p.done.store(i, Ordering::SeqCst);
         }
+        let _chapter = tracing::info_span!("flow.book_export.layout_chapter", peer = "vault").entered();
         if s.kind != Kind::Intro {
             w.begin(s.label());
             starts[i] = Some(w.title(s.level, s.number.as_deref(), &s.title));
@@ -314,7 +316,7 @@ pub fn export_book(vault: &Vault, dir: &Path, opts: &ExportOptions, progress: Op
     if let Some(p) = progress {
         p.done.store(secs.len(), Ordering::SeqCst);
     }
-    finish_from(w.doc, opts, usize::from(opts.title))
+    tracing::info_span!("flow.book_export.write_pdf", peer = "pdf").in_scope(|| finish_from(w.doc, opts, usize::from(opts.title)))
 }
 
 /// `shale --export-pdf <folder> <file.pdf>` (BOOK-011): the folder, opened as a vault, as one PDF with the

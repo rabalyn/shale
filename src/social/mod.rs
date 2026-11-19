@@ -16,6 +16,8 @@
 
 pub mod accounts_ui;
 pub mod bluesky;
+#[cfg(test)]
+mod dataflow_tests;
 pub mod demo;
 #[cfg(test)]
 pub(crate) mod fake_server;

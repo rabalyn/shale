@@ -247,6 +247,7 @@ pub fn pull_args(rel: &Path) -> Result<Vec<OsString>, String> {
 pub fn download(git: &Git, vault: &Path, rel: &Path, tree: &TreeLock) -> Result<(), String> {
     let args = pull_args(rel)?;
     let abs = vault.join(rel);
+    let _flow = tracing::info_span!("flow.git_lfs_download", peer = "sync").entered();
     let _tree = tree.hold();
     if !is_repo(vault) {
         return Err("The vault is not a git repository, so there is nothing to download from".into());
@@ -255,7 +256,7 @@ pub fn download(git: &Git, vault: &Path, rel: &Path, tree: &TreeLock) -> Result<
         return Err(missing());
     }
     let list: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
-    git.ok(vault, &list).map_err(|e| format!("{e} (is the computer online, and does the remote's LFS store hold this file?)"))?;
+    tracing::info_span!("flow.git_lfs_download.pull", peer = "remote").in_scope(|| git.ok(vault, &list)).map_err(|e| format!("{e} (is the computer online, and does the remote's LFS store hold this file?)"))?;
     match crate::fsutil::read(&abs) {
         Ok(b) if parse_pointer(&b).is_some() => Err(format!("Git LFS did not bring the file “{}”: it is still a pointer. Has the other computer synced it, so it is uploaded to the remote?", rel.display())),
         _ => Ok(()),

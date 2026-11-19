@@ -834,3 +834,40 @@ fn a_pointer_is_downloaded_on_demand_from_the_remote_and_only_that_file() {
     let e = lfs::download(&env.git, &b, Path::new("Ghost.mp3"), &tree).unwrap_err();
     assert!(!e.is_empty(), "{e}");
 }
+
+// spec: DEV-026, DEV-029
+#[test]
+fn dev_029_dataflow_of_a_first_sync_a_pull_and_an_incremental_sync_with_lfs() {
+    let Some(env) = Env::lfs("dataflow-sync") else { return };
+    let remote = env.bare();
+    let a = env.vault("a", &remote);
+    let b = env.vault("b", &remote);
+    crate::fsutil::write_atomic(&a.join("Song.mp3"), &media(21)).unwrap();
+    write(&a, "Note.md", "from a\n");
+    let flow = crate::dataflow::record(|| {
+        // a's first sync commits and pushes, b's first sync fast-forwards from the remote
+        assert!(env.sync(&a).pushed);
+        env.sync(&b);
+        // b edits and pushes, a pulls it, and a sync with nothing new changes nothing
+        write(&b, "Note.md", "from b\n");
+        env.sync(&b);
+        env.sync(&a);
+        assert_eq!(env.sync(&a).committed, 0);
+    });
+    crate::dataflow::verify(&Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/git-sync.md"), "git_sync", &crate::dataflow::render_mermaid(&flow));
+}
+
+// spec: DEV-026, DEV-029
+#[test]
+fn dev_029_dataflow_of_an_lfs_download_on_demand() {
+    let Some(env) = Env::lfs("dataflow-lfs-dl") else { return };
+    let remote = env.bare();
+    let a = env.vault("a", &remote);
+    crate::fsutil::write_atomic(&a.join("One.mp3"), &media(22)).unwrap();
+    assert!(env.sync(&a).pushed);
+    let b = env.vault("b", &remote);
+    env.sync(&b);
+    let tree = TreeLock::default();
+    let flow = crate::dataflow::record(|| lfs::download(&env.git, &b, Path::new("One.mp3"), &tree).unwrap());
+    crate::dataflow::verify(&Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/git-lfs-download.md"), "git_lfs_download", &crate::dataflow::render_mermaid(&flow));
+}

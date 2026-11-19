@@ -1575,6 +1575,7 @@ fn natural_size(w: u32, h: u32) -> Vec2 {
 /// and contents are the dialog's choices in `opts`, which start from the note's
 /// ([`ExportOptions::with_note_properties`]).
 pub fn export_note(vault: &Vault, rel: &Path, text: &str, opts: &ExportOptions) -> Result<Vec<u8>, String> {
+    let _flow = tracing::info_span!("flow.pdf_export", peer = "export").entered();
     // the paper always has Shale's colours, whatever the theme of the window (CFG-061, PDF-007)
     theme::with_palette(theme::Palette::shale(), || export_note_in_shale(vault, rel, text, opts))
 }
@@ -1599,7 +1600,7 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
     let numbers = crate::reader::Extras::numbers_of(text, opts.numbered_headings);
     let contents: Vec<&(usize, usize, String, Option<String>)> = heads.iter().filter(|h| opts.toc && (1..=3).contains(&h.1)).collect();
     let slots = if contents.is_empty() { vec![] } else { w.reserve_contents(contents.len()) };
-    let places = w.note_body(vault, rel, text, &numbers, None);
+    let places = tracing::info_span!("flow.pdf_export.layout", peer = "vault").in_scope(|| w.note_body(vault, rel, text, &numbers, None));
     let label = |line: usize, title: &str| match numbers.get(&line) {
         Some(n) => format!("{n} {}", markdown::heading_plain(title)),
         None => markdown::heading_plain(title),
@@ -1612,7 +1613,7 @@ fn export_note_in_shale(vault: &Vault, rel: &Path, text: &str, opts: &ExportOpti
             w.doc.bookmarks.push(Bookmark { level: *level, title: label(*line, title), to: *to });
         }
     }
-    finish(w.doc, opts)
+    tracing::info_span!("flow.pdf_export.write_pdf", peer = "pdf").in_scope(|| finish(w.doc, opts))
 }
 
 pub(crate) fn list_marker(line: &str) -> Option<(String, usize)> {

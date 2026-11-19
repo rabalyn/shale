@@ -527,3 +527,31 @@ fn a_folder_note_path_joined_with_the_os_separator_reads_as_a_vault_path_with_sl
     #[cfg(windows)]
     assert_eq!(rel_to_string(Path::new(r"T\A\Index.md")), "T/A/Index.md");
 }
+
+fn dataflow_doc(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow").join(name)
+}
+
+// spec: DEV-026, DEV-029
+#[test]
+fn dev_029_dataflow_of_a_book_export() {
+    let (v, d) = handbook("dataflow-book");
+    let flow = crate::dataflow::record(|| {
+        export_book(&v, Path::new("Handbook"), &opts(), None).unwrap();
+    });
+    clean(&d);
+    crate::dataflow::verify(&dataflow_doc("book-export.md"), "book_export", &crate::dataflow::render_mermaid(&flow));
+}
+
+// spec: DEV-026, DEV-029
+#[test]
+fn dev_029_dataflow_of_a_note_export() {
+    let (v, d) = handbook("dataflow-note");
+    let rel = Path::new("Handbook/Getting started.md");
+    let text = std::fs::read_to_string(d.join(rel)).unwrap();
+    let flow = crate::dataflow::record(|| {
+        crate::pdf::export::export_note(&v, rel, &text, &opts()).unwrap();
+    });
+    clean(&d);
+    crate::dataflow::verify(&dataflow_doc("pdf-export.md"), "pdf_export", &crate::dataflow::render_mermaid(&flow));
+}
