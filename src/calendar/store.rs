@@ -254,7 +254,19 @@ pub struct CalendarStore {
     pub local_dir: PathBuf,
     /// where a copy of every deleted event is kept (CAL-017); inside `local_dir` unless set (the app sets the data dir)
     pub trash_dir: PathBuf,
+    /// the ranges asked for since the last change of the events (PERF-005)
+    ranges: Mutex<RangeCache>,
 }
+
+/// The occurrences of the day ranges the views asked for, valid for one `generation`.
+#[derive(Default)]
+struct RangeCache {
+    generation: u64,
+    ranges: Vec<((i64, i64), Arc<Vec<Occ>>)>,
+}
+
+/// More than a month view, a week and a day at a time are not kept.
+const RANGES_KEPT: usize = 6;
 
 impl CalendarStore {
     pub fn new(sources: Vec<CalendarSource>, local_dir: PathBuf) -> Self {
@@ -272,6 +284,7 @@ impl CalendarStore {
             generation: 0,
             trash_dir: local_dir.join(".calendar-trash"),
             local_dir,
+            ranges: Default::default(),
         };
         s.reload_local();
         s
@@ -446,8 +459,26 @@ impl CalendarStore {
         !self.inflight.is_empty()
     }
 
-    /// Occurrences touching the local days [from_day, to_day], all-day first, then by start.
+    /// Occurrences touching the local days [from_day, to_day], all-day first, then by start. Made
+    /// once for a range until the events change (PERF-005), not for every frame of a view.
     pub fn occurrences(&self, from_day: i64, to_day: i64) -> Vec<Occ> {
+        let mut cache = self.ranges.lock().unwrap_or_else(|e| e.into_inner());
+        if cache.generation != self.generation {
+            cache.ranges.clear();
+            cache.generation = self.generation;
+        }
+        if let Some((_, found)) = cache.ranges.iter().find(|(r, _)| *r == (from_day, to_day)) {
+            return found.as_ref().clone();
+        }
+        let made = Arc::new(self.compute_occurrences(from_day, to_day));
+        if cache.ranges.len() >= RANGES_KEPT {
+            cache.ranges.remove(0);
+        }
+        cache.ranges.push(((from_day, to_day), made.clone()));
+        made.as_ref().clone()
+    }
+
+    fn compute_occurrences(&self, from_day: i64, to_day: i64) -> Vec<Occ> {
         let mut out = Vec::new();
         for (si, s) in self.sources.iter().enumerate().filter(|(_, s)| s.enabled) {
             let Some(evs) = self.events.get(&s.id) else { continue };
@@ -463,7 +494,8 @@ impl CalendarStore {
                 }
             }
         }
-        out.sort_by(|a, b| b.all_day.cmp(&a.all_day).then(a.start_day().cmp(&b.start_day())).then(a.start.cmp(&b.start)));
+        // all-day first, then by day and start; the day (a time-zone lookup) is worked out once per occurrence
+        out.sort_by_cached_key(|o| (!o.all_day, o.start_day(), o.start));
         out
     }
 
@@ -723,6 +755,43 @@ pub(crate) mod tests {
         let d = std::env::temp_dir().join(format!("shale-cal-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    // spec: PERF-005
+    #[test]
+    fn perf_005_a_range_is_made_once_until_the_events_change_and_few_ranges_are_kept() {
+        let dir = tmp("ranges");
+        let mut store = CalendarStore::new(vec![], dir.clone());
+        let src = store.new_local_source("Test", &[]);
+        store.set_sources(vec![src.clone()]);
+        store.fill_sample(&src.id).unwrap();
+        let today = t::today();
+        let first = store.occurrences(today, today + 6);
+        assert!(!first.is_empty());
+        let key = |c: &CalendarStore| c.ranges.lock().unwrap().ranges.iter().map(|(_, a)| Arc::as_ptr(a) as usize).collect::<Vec<_>>();
+        let kept = key(&store);
+        assert_eq!(store.occurrences(today, today + 6), first, "the same answer");
+        assert_eq!(key(&store), kept, "from the cache: nothing was made again");
+        // sorted: all-day first, then by day and start
+        let order: Vec<(bool, i64, i64)> = first.iter().map(|o| (!o.all_day, o.start_day(), o.start)).collect();
+        assert!(order.windows(2).all(|w| w[0] <= w[1]));
+        // a change of the events is seen
+        let e = Event { uid: "new".into(), summary: "Extra".into(), start: t::local_to_utc(today, 3 * 3600), end: t::local_to_utc(today, 4 * 3600), ..Default::default() };
+        wait(&store.save_event(&src.id, e, None, None).unwrap()).unwrap();
+        store.after_write(std::slice::from_ref(&src.id));
+        let second = store.occurrences(today, today + 6);
+        assert_eq!(second.len(), first.len() + 1);
+        // hiding the calendar is seen
+        let mut off = src.clone();
+        off.enabled = false;
+        store.set_sources(vec![off]);
+        assert!(store.occurrences(today, today + 6).is_empty());
+        // the number of ranges kept is bounded
+        for d in 0..20 {
+            store.occurrences(today + d, today + d);
+        }
+        assert_eq!(store.ranges.lock().unwrap().ranges.len(), RANGES_KEPT);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: CAL-001

@@ -162,8 +162,11 @@ fn calendar_occurrences(fx: &mut Fixtures) -> Body {
     let dir = fx.scratch("calendar-occ");
     let store = CalendarStore::new(vec![calendar_source(&dir, fx.scale.events)], dir);
     let from = crate::calendar::time::days_from_civil(2026, 1, 1);
+    // a year that shifts by a day each time: the store keeps the ranges it made, this measures making one
+    let mut shift = 0;
     Box::new(move || {
-        black_box(store.occurrences(from, from + 365));
+        shift = (shift + 1) % 300;
+        black_box(store.occurrences(from + shift, from + shift + 365));
     })
 }
 
