@@ -334,3 +334,20 @@ mod fake {
         assert!(t.shows("package roboto is missing") && t.shows("The end of the log"), "{:?}", t.painted());
     }
 }
+
+// spec: TEX-002, TEX-003
+#[test]
+fn the_end_of_an_install_or_update_says_which_mirror_it_came_from() {
+    use super::install::Done;
+    let done = |warning: Option<&str>, mirrors: &[&str]| Done { warning: warning.map(String::from), mirrors: mirrors.iter().map(|m| m.to_string()).collect() };
+    let n = done_notice(Ok(done(None, &["https://a.example/tlnet"])), "The install");
+    assert_eq!((n.text.as_str(), n.ok), ("The install is done, from the mirror https://a.example/tlnet.", true));
+    let n = done_notice(Ok(done(None, &["https://a.example/tlnet", "https://b.example/tlnet"])), "The update");
+    assert_eq!(n.text, "The update is done, from the mirrors https://a.example/tlnet and https://b.example/tlnet.");
+    assert_eq!(done_notice(Ok(done(None, &[])), "The update").text, "The update is done.");
+    // the warning already names the mirror
+    let n = done_notice(Ok(done(Some("TeX Live is installed from the mirror https://a.example/tlnet, but the test document did not compile: x"), &["https://a.example/tlnet"])), "The install");
+    assert!(!n.ok && n.text.contains("from the mirror https://a.example/tlnet, but the test document"), "{}", n.text);
+    assert_eq!(done_notice(Err("cancelled".into()), "The install").text, "The install was cancelled; nothing of it is left.");
+    assert_eq!(done_notice(Err("boom".into()), "The update").text, "The update failed: boom");
+}

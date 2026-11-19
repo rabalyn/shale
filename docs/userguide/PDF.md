@@ -305,6 +305,14 @@ the TeX and checks it:
   once which mirror to use and then downloads everything from that one mirror. If that mirror is
   behind your installation (mirrors catch up within a day or two), the update tries another mirror,
   three times at most.
+- After an install or update Shale builds TeX's font list once and compiles the test document. If
+  that fails because a font cannot be loaded (a mirror that handed out a package incompletely),
+  Shale installs the font packages again from another mirror and tries once more. The message that
+  ends the install or update names the mirror (or mirrors) the files came from. If the test document
+  still does not compile, the message says so and names the mirror; TeX Live is installed anyway,
+  and **Install TeX Live…** again, after **Remove…**, starts afresh from another mirror. A compile
+  that stops at a font that cannot be loaded says in a line that the fonts or the font list of the TeX
+  look incomplete.
 
 Shale runs the programs without a shell, in a temporary folder that is removed afterwards, with
 each run limited to two minutes; a document cannot start programs (`\write18` is off) and cannot

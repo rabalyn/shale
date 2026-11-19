@@ -226,7 +226,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   updates and removes the managed TeX Live. It shows the sizes (about 100 MB to download, 330 MB on
   disk) before anything is downloaded, shows the progress, and can be cancelled; the compile that
   the export will use runs LuaLaTeX and biber in a temporary folder with a timeout and turns the log
-  into readable errors (TEX-001 to TEX-004).
+  into readable errors (TEX-001 to TEX-004). After an install or update the font list of TeX is built once, a font that cannot be loaded is repaired by installing the font packages again from another mirror, and the result names the mirror (#362).
 
   ![The LaTeX tab of Settings with the question before the install](userguide/z_media/screenshots/settings-latex.png)
 

@@ -167,10 +167,10 @@ impl TexState {
 }
 
 /// The notice for what an install or update ended with.
-fn done_notice(r: Result<install::Done, String>, what: &str) -> Notice {
+pub(super) fn done_notice(r: Result<install::Done, String>, what: &str) -> Notice {
     match r {
         Ok(d) => match d.warning {
-            None => Notice::new(format!("{what} is done."), true),
+            None => Notice::new(if d.mirrors.is_empty() { format!("{what} is done.") } else { format!("{what} is done, {}.", d.source_text()) }, true),
             Some(w) => Notice::new(w, false),
         },
         Err(e) if e == "cancelled" => Notice::new(format!("{what} was cancelled; nothing of it is left."), false),

@@ -143,6 +143,51 @@ fn the_work_folder_is_private_and_removed_when_dropped() {
 
 // ---------------------------------------------------------------- fake engines (Unix)
 
+// What the font loading says in the install that failed once (#362) and what a missing font says.
+const FONT_NOT_LOADABLE: &str =
+    "(/opt/texlive/texmf-dist/tex/latex/koma-script/scrsize11pt.clo)\nkoma-script/scrsize11pt.clo:100: Font \\TU/lmr/m/n/10.95=[lmroman10-regular]:+tlig; not loadable: Metric (TFM) file or installed font not found.\n! Emergency stop.\n";
+
+// spec: TEX-004
+#[test]
+fn a_font_that_cannot_be_loaded_is_a_font_problem_with_a_plain_words_line_and_a_missing_font_is_not() {
+    let p = problems(FONT_NOT_LOADABLE);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert!(p[0].is_font_loading(), "{p:?}");
+    let e = CompileError { headline: "LuaLaTeX stopped with an error".into(), problems: p, log_tail: String::new() };
+    assert!(e.font_problem());
+    let shown = e.to_string();
+    assert!(shown.contains("lmroman10-regular") && shown.ends_with(FONT_HINT), "{shown}");
+    assert!(FONT_HINT.contains("font names database") && FONT_HINT.contains("luaotfload-tool --update --force"));
+    let metric = Problem { message: "Package luaotfload Error: Metric data not found".into(), file: None, line: None, missing: None };
+    assert!(metric.is_font_loading(), "the other wording of a font that is there but cannot be used");
+    let missing = CompileError { headline: "x".into(), problems: problems("./main.tex:9: Package fontspec Error: The font \"Foo\" cannot be found.\n! Undefined control sequence.\n"), log_tail: String::new() };
+    assert!(!missing.font_problem() && !missing.to_string().contains("font names database"), "a font that does not exist is another problem: {missing}");
+}
+
+// spec: TEX-004
+#[test]
+fn the_log_of_a_failed_compile_is_kept_under_a_unique_name_and_a_missing_log_or_a_bad_name_keeps_nothing() {
+    let root = std::env::temp_dir().join(format!("shale-failed-logs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let folder = root.join("kept").join("logs");
+    let work = WorkDir::new().unwrap();
+    work.write("main.tex", b"x").unwrap();
+    work.write("main.log", b"the whole log\n").unwrap();
+    keep_failed_log(&folder, work.path(), "main.tex");
+    keep_failed_log(&folder, work.path(), "main.tex");
+    let mut names: Vec<String> = std::fs::read_dir(&folder).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    assert_eq!(names.len(), 2, "two failures, two files: {names:?}");
+    assert!(names.iter().all(|n| n.starts_with(&format!("{}-", std::process::id())) && n.ends_with("-main.log")), "{names:?}");
+    assert_eq!(std::fs::read_to_string(folder.join(&names[0])).unwrap(), "the whole log\n");
+    // no log in the folder, a name that is no file name, or a folder that cannot be made: nothing, and no panic
+    keep_failed_log(&folder, work.path(), "other.tex");
+    keep_failed_log(&folder, work.path(), "../main.tex");
+    keep_failed_log(&root.join("kept").join("logs").join(&names[0]).join("sub"), work.path(), "main.tex");
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[cfg(unix)]
 pub(super) mod fake {
     use super::*;
@@ -437,6 +482,29 @@ if [ -f "$S/toc.$n" ]; then cp "$S/toc.$n" "$stem.toc"; fi"#,
         assert!(f.get("args").contains("test.tex"));
         assert!(TEST_DOCUMENT.contains("biblatex") && TEST_DOCUMENT.contains("test.bib") && TEST_BIB.contains("@book{shale"));
     }
+
+    // spec: TEX-004
+    #[test]
+    fn a_failed_compile_keeps_its_log_when_a_folder_is_given_and_a_good_one_keeps_nothing() {
+        let kept = std::env::temp_dir().join(format!("shale-failed-logs-compile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&kept);
+        let f = Fake::new("keep");
+        f.lualatex();
+        f.put("log.last", MISSING_PACKAGE);
+        f.put("exit", "1");
+        let e = compile_keeping_logs(&f.engine(), work_with_main(), "main.tex", &Options::default(), Some(&kept)).unwrap_err();
+        assert_eq!(e.headline, "LuaLaTeX stopped with an error");
+        let files: Vec<PathBuf> = std::fs::read_dir(&kept).unwrap().map(|e| e.unwrap().path()).collect();
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert_eq!(std::fs::read_to_string(&files[0]).unwrap(), MISSING_PACKAGE, "the whole log, not its tail");
+        // without a folder nothing is kept; a compile that works keeps nothing either
+        compile_keeping_logs(&f.engine(), work_with_main(), "main.tex", &Options::default(), None).unwrap_err();
+        std::fs::remove_file(f.state().join("exit")).unwrap();
+        f.put("log.last", "all done\n");
+        compile_keeping_logs(&f.engine(), work_with_main(), "main.tex", &Options::default(), Some(&kept)).unwrap();
+        assert_eq!(std::fs::read_dir(&kept).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&kept);
+    }
 }
 
 // ---------------------------------------------------------------- the real LuaLaTeX (container)
@@ -467,6 +535,7 @@ fn tex_env_a_small_article_compiles_to_a_pdf() {
     let out = container_compile(&[("main.tex", "\\documentclass{article}\n\\begin{document}\nHello \\LaTeX.\n\\end{document}\n")], "main.tex", &Options::default()).unwrap_or_else(|e| panic!("{e}\n{}", e.log_tail));
     assert!(out.pdf.starts_with(b"%PDF"), "a PDF");
     assert_eq!(out.runs, 1);
+    assert!(!out.font_cache_built, "the image has the font names database (#327)");
 }
 
 // spec: TEX-004
@@ -509,7 +578,7 @@ fn tex_env_a_tex_error_has_file_and_line() {
 fn tex_env_a_document_with_biblatex_runs_biber_and_resolves_the_citation() {
     let out = container_compile(&[("test.tex", TEST_DOCUMENT), ("test.bib", TEST_BIB)], "test.tex", &Options::default()).unwrap_or_else(|e| panic!("{e}\n{}", e.log_tail));
     assert!(out.runs >= 2, "LuaLaTeX, biber, LuaLaTeX: {} runs", out.runs);
-    assert!(out.font_cache_built, "a fresh container builds the font names database");
+    assert!(!out.font_cache_built, "the image has the font names database, a fresh container does not build it (#327)");
 }
 
 // spec: TEX-004

@@ -6,6 +6,8 @@ export against a real TeX (TEX-020, TEX-021, [ADR-0019](../../docs/decisions/001
 Nothing runs in the background: the image is built once, each compile is a short-lived container.
 
 Needs `podman` (or Docker: `SHALE_TEX_ENV_ENGINE=docker`), `curl` and `sha256sum` (or `shasum`).
+The image is called `shale-tex-env` for every checkout of Shale on the machine, so a `build` in one checkout replaces the image
+under a test that runs in another: `SHALE_TEX_ENV_IMAGE=<name>` gives a checkout its own image.
 The base image is pinned (`docker.io/library/debian:bookworm-20260112-slim`).
 
 ## Use
@@ -24,6 +26,15 @@ cargo test -- --ignored tex_install # not this image: installs TeX Live for real
 The `tex_env` tests share nothing (own work folders, a fresh container per compile), so they can run in parallel:
 `.forgejo/scripts/env-tests.sh run` (and so `scripts/land.sh`) uses four test threads, `SHALE_ENV_TESTS_TEX_THREADS`
 sets the number (the demos test starts four compiles itself; #370). `tex_import` and `tex_install` run with one thread.
+
+**Failed compiles keep their log** (#327): `SHALE_TEX_FAILED_LOGS=<folder>` makes every failed compile of the tests (Shale's
+own `compile` and the demos of `tex_env`) copy its full `.log` into that folder as `<pid>-<n>-<name>.log` before its work
+folder is removed, so a failure that does not come again can still be read. `.forgejo/scripts/env-tests.sh run` (and so
+`scripts/land.sh`) sets it to `target/tex-failed-logs` (emptied at the start) and lists the kept logs at the end.
+When `tex_env` fails with a font that could not be loaded, `env-tests.sh` says it looks like a TeX environment problem,
+not a code error, prints `tex-env.sh status`, rebuilds the image with `build --refresh` (a freshly resolved mirror) and
+runs `tex_env` once more; the second run decides, and any other failure is not retried
+(`scripts/test-env-tests.sh` tests that).
 
 `exec` is how `src/pdf/tex/compile_tests.rs` runs Shale's compile code against the real LuaLaTeX: the test's `Engine`
 has a command prefix `sh tex-env.sh exec <work folder> --`, so `lualatex`, `biber` and `kpsewhich` run in the
@@ -52,6 +63,19 @@ upstream `latexmkrc`).
 - **A stand-in logo**: the TU logo cannot be redistributed, and the classes look for
   `tuda_logo.pdf` while the theme loads, before the `demo` option takes effect. `build` makes a grey
   bar of that name in `cache/tuda-ci/tex/`.
+
+- **The font names database**, built once in the image: after the packages `install-texlive.sh` runs
+  `luaotfload-tool --update --force` and looks `lmroman10-regular`, `XCharter` and `Roboto` up in it. Without that, every
+  compile (a fresh `--rm` container each, up to 16 at once) would build the database itself in its first LuaLaTeX run,
+  slowly, and that is where the lookups of fonts failed once (#327, #362). When a font is not found, the font packages
+  (`lm lm-math xcharter roboto`) are installed again from a freshly resolved mirror and the database is built again; when
+  that does not help the build fails and names the mirrors. `/etc/shale-tex-build` (and `status`) says so. The
+  `tex_env` compile test asserts that no run builds the database.
+- **Damaged mirrors**: a mirror in the middle of a sync makes `tlmgr` skip packages ("checksums differ", "downloading did
+  not succeed") and still exit 0 (#362). `install-texlive.sh` greps its log, retries on a fresh mirror (three runs at most,
+  like an older mirror), fails naming the skipped packages and the mirrors, and checks at the end that every package of
+  `packages.txt` is installed. The retry of `env-tests.sh` stays on the font signature only: "package x is missing" is also
+  what a real error in a template looks like, and the image can no longer come out incomplete unnoticed.
 
 ## The first build
 
