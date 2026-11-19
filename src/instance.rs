@@ -42,9 +42,12 @@ pub enum Claim {
     Unchecked(std::io::Error),
 }
 
-/// `acquire` as `main` uses it: every outcome is a way to go on.
-pub fn claim(dir: &Path) -> Claim {
-    match acquire(dir, GRACE) {
+/// How long a start after an update's "Restart now" waits for the old Shale to end (UPD-019).
+pub const RESTART_WAIT: Duration = Duration::from_secs(20);
+
+/// `acquire` as `main` uses it (waiting up to `grace` for a Shale that is ending): every outcome is a way to go on.
+pub fn claim(dir: &Path, grace: Duration) -> Claim {
+    match acquire(dir, grace) {
         Ok(Some(lock)) => Claim::Owner(lock),
         Ok(None) => Claim::AlreadyRunning,
         Err(e) => Claim::Unchecked(e),
@@ -220,23 +223,23 @@ mod tests {
     #[cfg(unix)]
     fn the_first_start_owns_and_the_second_is_told_another_is_running() {
         let dir = Dir::new();
-        let Claim::Owner(first) = claim(&dir.0) else { panic!("the first start must be the owner") };
-        assert!(matches!(claim(&dir.0), Claim::AlreadyRunning), "a second start while the first runs");
-        assert!(matches!(claim(&dir.0), Claim::AlreadyRunning), "and a third");
+        let Claim::Owner(first) = claim(&dir.0, GRACE) else { panic!("the first start must be the owner") };
+        assert!(matches!(claim(&dir.0, GRACE), Claim::AlreadyRunning), "a second start while the first runs");
+        assert!(matches!(claim(&dir.0, GRACE), Claim::AlreadyRunning), "and a third");
         // two folders are two users: they do not disturb each other
         let other = Dir::new();
-        assert!(matches!(claim(&other.0), Claim::Owner(_)));
+        assert!(matches!(claim(&other.0, GRACE), Claim::Owner(_)));
         drop(first);
-        assert!(matches!(claim(&dir.0), Claim::Owner(_)), "the lock is free when the owner has ended");
+        assert!(matches!(claim(&dir.0, GRACE), Claim::Owner(_)), "the lock is free when the owner has ended");
     }
 
     // spec: DATA-012
     #[test]
     fn a_lock_that_is_still_held_after_the_grace_time_means_already_running() {
         let dir = Dir::new();
-        let Claim::Owner(_first) = claim(&dir.0) else { panic!("the first start must be the owner") };
+        let Claim::Owner(_first) = claim(&dir.0, GRACE) else { panic!("the first start must be the owner") };
         let t = Instant::now();
-        assert!(matches!(claim(&dir.0), Claim::AlreadyRunning));
+        assert!(matches!(claim(&dir.0, GRACE), Claim::AlreadyRunning));
         assert!(t.elapsed() >= GRACE, "the second start tried for the whole grace time");
     }
 
@@ -244,12 +247,12 @@ mod tests {
     #[test]
     fn a_lock_given_back_within_the_grace_time_is_taken() {
         let dir = Dir::new();
-        let Claim::Owner(first) = claim(&dir.0) else { panic!("the first start must be the owner") };
+        let Claim::Owner(first) = claim(&dir.0, GRACE) else { panic!("the first start must be the owner") };
         let ender = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(40));
             drop(first);
         });
-        assert!(matches!(claim(&dir.0), Claim::Owner(_)), "the second start waited for the end of the first");
+        assert!(matches!(claim(&dir.0, GRACE), Claim::Owner(_)), "the second start waited for the end of the first");
         ender.join().unwrap();
     }
 
@@ -261,12 +264,12 @@ mod tests {
         std::fs::create_dir_all(&dir.0).unwrap();
         // what a crash leaves: the file, with a process number in it, and nobody holding the lock
         std::fs::write(dir.0.join("instance.lock"), "4194303\n").unwrap();
-        assert!(matches!(claim(&dir.0), Claim::Owner(_)), "a stale file does not keep anyone out");
+        assert!(matches!(claim(&dir.0, GRACE), Claim::Owner(_)), "a stale file does not keep anyone out");
         // and a crash of a real owner: its process ends without cleaning up
         let exe = std::env::current_exe().unwrap();
         let crashed = std::process::Command::new(&exe).args(["--exact", "instance::tests::helper_that_takes_the_lock_and_dies", "--nocapture"]).env("SHALE_TEST_LOCK_DIR", &dir.0).status().unwrap();
         assert!(crashed.success(), "the helper process ran");
-        assert!(matches!(claim(&dir.0), Claim::Owner(_)), "the lock went away with the process");
+        assert!(matches!(claim(&dir.0, GRACE), Claim::Owner(_)), "the lock went away with the process");
     }
 
     /// Not a test by itself: the helper process of the test above takes the lock and ends without
@@ -285,10 +288,10 @@ mod tests {
     fn a_data_folder_that_cannot_be_used_does_not_keep_shale_from_starting() {
         let dir = Dir::new();
         std::fs::write(&dir.0, "a file where the folder should be").unwrap();
-        let Claim::Unchecked(e) = claim(&dir.0) else { panic!("the lock cannot be checked in a file") };
+        let Claim::Unchecked(e) = claim(&dir.0, GRACE) else { panic!("the lock cannot be checked in a file") };
         assert!(!e.to_string().is_empty());
         // the same when the folder is below a file
-        assert!(matches!(claim(&dir.0.join("deeper")), Claim::Unchecked(_)));
+        assert!(matches!(claim(&dir.0.join("deeper"), GRACE), Claim::Unchecked(_)));
     }
 
     /// A message from a second start, as the running one gets it.
@@ -311,7 +314,7 @@ mod tests {
     #[test]
     fn a_second_start_hands_its_paths_to_the_running_one_in_order() {
         let dir = Dir::new();
-        let Claim::Owner(_lock) = claim(&dir.0) else { panic!("owner") };
+        let Claim::Owner(_lock) = claim(&dir.0, GRACE) else { panic!("owner") };
         let h = listen(&dir.0).unwrap();
         assert!(deliver(&dir, &["/vault/a", "/vault/a/Note ü.md"]));
         assert!(deliver(&dir, &[]));

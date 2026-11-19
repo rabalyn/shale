@@ -379,6 +379,8 @@ pub struct ShaleApp {
     pub vault_check: crate::vault_check::VaultCheck,
     /// the LaTeX page of the settings: the TeX found, the managed TeX Live and its jobs (TEX-001)
     pub tex: crate::pdf::tex::settings_ui::TexState,
+    /// the check for new releases, their download and install (UPD)
+    pub update: crate::update::UpdateState,
     /// Where pandoc is, for Settings → Import (IMP-036).
     pub word: crate::settings::import::WordProbe,
     /// where the user guide comes from and where its copy goes (DEV-020)
@@ -616,6 +618,7 @@ impl ShaleApp {
             usage: crate::data_usage::DataUsage::new(places),
             vault_check: Default::default(),
             tex: crate::pdf::tex::settings_ui::TexState::new(persist, &tag),
+            update: if persist { crate::update::UpdateState::for_running_program() } else { Default::default() },
             word: Default::default(),
             guide: if persist { crate::userguide::Places::system() } else { crate::userguide::Places::none() },
             handover: None,
@@ -2817,6 +2820,8 @@ impl eframe::App for ShaleApp {
         self.save_mail_draft_at_exit();
         self.remember_open_files();
         self.save_config();
+        // "Restart now" of an update: the new program starts when everything is saved (UPD-019)
+        self.update.start_restart();
     }
 }
 
@@ -2855,6 +2860,7 @@ impl ShaleApp {
         let ctx = ui.ctx().clone();
         self.media_tick(&ctx);
         self.tex.poll(&ctx);
+        self.update_tick(&ctx);
         self.take_handover(&ctx);
         self.sync_tick(&ctx);
         self.mail_tick(&ctx);
@@ -2901,11 +2907,13 @@ impl ShaleApp {
         self.social_tick(ui.ctx());
         self.link_preview_ui(ui);
         self.modals(ui);
+        self.update_dialogs(ui.ctx());
         self.handle_drops(ui);
         self.learn_tags_tick();
         self.usage_tick();
         self.paint_toasts(ui);
         self.paint_recovery_notice(ui);
+        self.paint_update_notice(ui);
         if !self.script.steps.is_empty() {
             self.script.note_texts(ui.ctx());
         }

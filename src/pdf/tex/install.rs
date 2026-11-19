@@ -332,16 +332,7 @@ fn step(handle: &Handle, notify: &dyn Fn(), stage: Stage, what: &str, cmd: Comma
 /// Download a file with `curl` (the way the CalDAV client does its HTTP): https only, no
 /// `.curlrc`, redirects only to https, a size limit.
 pub(super) fn download(handle: &Handle, url: &str, to: &Path) -> Result<(), String> {
-    let protos = if url.starts_with("http://") { "=http,https" } else { "=https" };
-    let mut c = Command::new("curl");
-    c.args(["-q", "-sS", "-f", "-L", "--max-redirs", "5", "--proto", protos, "--proto-redir", "=https", "--connect-timeout", "20", "--max-filesize", "52428800", "-o"]).arg(to).arg(url);
-    let run = proc::run(c, STEP_TIMEOUT, Some(&handle.cancel), |_| {}).map_err(|e| format!("could not run curl ({e}) — is curl installed?"))?;
-    match run.ending {
-        Ending::Cancelled => Err("cancelled".into()),
-        Ending::TimedOut => Err("the download took too long and was stopped".into()),
-        Ending::Exited(Some(0)) => Ok(()),
-        Ending::Exited(_) => Err(format!("the download of {url} failed: {}", run.tail_text())),
-    }
+    crate::download::to_file(&handle.cancel, &crate::download::Request { url, max_bytes: 52_428_800, timeout: STEP_TIMEOUT, allow_http: url.starts_with("http://"), headers: &[] }, to)
 }
 
 /// One concrete mirror for the repository `repo` (#320). A redirector such as `mirror.ctan.org`

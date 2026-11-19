@@ -484,12 +484,13 @@ fn edit_084_the_cursor_entering_the_front_matter_opens_it_and_leaving_folds_it_a
     let mut w = W::new("front-cursor", MAIL, false);
     w.cursor_in("Hello");
     assert!(!w.numbers().contains(&2), "folded: {:?}", w.numbers());
-    // Ctrl+Home goes to the first line: the raw front matter opens
-    w.press(Key::Home, Modifiers::CTRL);
+    // Cmd/Ctrl+Up goes to the first line (egui: `command` + ArrowUp is the start of the text on every
+    // platform, while Ctrl+Home does nothing on macOS): the raw front matter opens
+    w.press(Key::ArrowUp, Modifiers::COMMAND);
     assert_eq!(w.cursor_line(), 0);
     assert!(w.numbers().contains(&2) && w.numbers().contains(&4), "opened: {:?}", w.numbers());
     // moving on to the body folds it back
-    w.press(Key::End, Modifiers::CTRL);
+    w.press(Key::ArrowDown, Modifiers::COMMAND);
     assert!(!w.numbers().contains(&2), "folded again: {:?}", w.numbers());
     // an Up arrow from the first line of the body goes into the hidden lines: they open and take the cursor
     w.cursor_in("Hello");

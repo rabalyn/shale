@@ -6,6 +6,8 @@
 # the stored performance results and refusing.
 #   bash scripts/test-release.sh
 set -u
+# a release that runs land.sh and its cargo test must not leak its value in here (#406); the cases set it
+unset SHALE_PREV_PUBLISHED
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -272,7 +274,10 @@ expect "--skip-bench leaves the performance step out" 0 "not measured" make-rele
 check "a skipped release has no result" 'remote_tag v0.4.4 && ! git cat-file -e origin/main:docs/perf/results/v0.4.4.json 2>/dev/null'
 land perf3 docs/changelog-pending/I32.md $'### Fixed\n\n- Thirty-two (#32).'
 FAKE_COMPARE_EXIT=2 expect "a failing comparison stops the release too" 1 "the performance step failed" make-release.sh patch
-GH_RELEASE_TAG=v0.3.0 expect "a release with the last published release named by gh goes on (BUILD-013)" 0 "tagged" make-release.sh patch
+# spec: BUILD-013, FORGE-014: the last published release is for the release check only (#406): land.sh and
+# its checks (cargo test runs the tests of these scripts) must not see it
+LAND_CHECK_CMD="echo ran >> $TMP/land-env.log; env | grep ^SHALE_PREV_PUBLISHED= >> $TMP/land-env.log; true" GH_RELEASE_TAG=v0.3.0 expect "a release with the last published release named by gh goes on (BUILD-013)" 0 "tagged" make-release.sh patch
+check "the checks of land.sh did not see SHALE_PREV_PUBLISHED (#406)" '[ "$(command grep -c ^ran "$TMP/land-env.log")" -ge 1 ] && [ "$(command grep -c ^SHALE_PREV "$TMP/land-env.log")" = 0 ]'
 check "it compares with the last release that has a result" 'grep -Fq -- "--bench-compare docs/perf/results/v0.4.3.json docs/perf/results/v0.4.5.json" "$BENCH_LOG"'
 
 [ "$FAILED" = 0 ] && echo "all $N checks passed"

@@ -30,6 +30,7 @@ way it is. They are append-only. *What* Shale does today is in the living specs 
 | [0020](0020-current-texlive.md) | The managed TeX Live and the test image follow the current TeX Live | Accepted, amended by 0021 |
 | [0021](0021-weekly-texlive-check.md) | The current TeX Live is checked weekly and for releases, not on every tag | Accepted, amended by 0022 |
 | [0022](0022-env-tests-podman-storage.md) | The env-tests job keeps podman's storage on a runner volume | Accepted |
+| [0023](0023-auto-update.md) | Shale checks GitHub releases and updates itself (notify, download or install) when the person wants it; package-managed installs are never touched | Accepted |
 
 Format: Context, Decision, Consequences (and Alternatives if any). Statuses: *Proposed* →
 *Accepted* → (*Superseded by NNNN*). An accepted ADR is not edited; a new one supersedes it.

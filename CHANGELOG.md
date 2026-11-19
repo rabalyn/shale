@@ -10,6 +10,32 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-11-19
+
+### Fixed
+
+- **Tests that failed on the Windows and macOS builds** (#415): the Finder `PATH` logic splits on `:` on every platform, and the tests for the GnuPG plan text and for Ctrl+Home / Ctrl+End in the front matter fold use the platform's own path separator and command key. No change to the app.
+
+## [0.6.5] - 2026-11-19
+
+### Added
+
+- **Dates on property cards open the calendar** (#358). The date of an e-mail card and the time of an event card
+  are links in the reading view: a click shows that day in the calendar of the sidebar (or the calendar tab when the
+  panel is not in a sidebar view).
+
+### Fixed
+
+- **The bench-compare script test no longer runs the benchmarks in a shallow CI checkout** (#404). A shallow clone has
+  no commit older than the harness to refuse, so the test skips that part there.
+- **The GitHub release page lists every version since the last published one** (#406). Versions that were tagged on
+  Forgejo but never reached GitHub (a red run is not mirrored) are no longer left out of the next release page: it
+  shows the notes of each of them under its own version heading, and the release check checks the same text, so the
+  GitHub build no longer fails for issues that an unpublished version already described.
+- **A release no longer breaks its own landing** (#406). `make-release.sh` handed the last published release to
+  everything it started, so the tests that `land.sh` runs failed on it; it now reaches only the release check, and
+  the script tests ignore a value from the environment.
+
 ## [0.6.4] - 2026-11-19
 
 ### Added
@@ -1688,7 +1714,9 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.4...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/rabalyn/shale/compare/v0.6.5...v0.6.6
+[0.6.5]: https://github.com/rabalyn/shale/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/rabalyn/shale/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/rabalyn/shale/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/rabalyn/shale/compare/v0.6.1...v0.6.2

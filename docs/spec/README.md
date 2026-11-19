@@ -11,6 +11,7 @@ How they work: [ADR-0001](../decisions/0001-spec-driven-development.md).
 | [tex-export.md](tex-export.md) | PDF export through LaTeX templates, the managed TeX Live, template sets, the test stack | TEX |
 | [book-export.md](book-export.md) | A folder, up to the vault, as one PDF: the folder convention, the book layout, the dialog and `--export-pdf` | BOOK |
 | [social.md](social.md) | Mastodon and Bluesky feeds, saving posts as notes | SOC |
+| [updates.md](updates.md) | Checking GitHub releases, the checksum, notify / download / install, the install kinds, restart | UPD |
 | [engineering.md](engineering.md) | Forge and work tracking, development rules, build and release, background jobs, performance | FORGE, DEV, BUILD, JOB, PERF |
 | [mail.md](mail.md) | Local mail store, IMAP account and sync, flags and moves, sending, signing and encrypting | MAIL |
 | [open-points.md](open-points.md) | Undecided questions (open work: GitHub issues) | OPEN |

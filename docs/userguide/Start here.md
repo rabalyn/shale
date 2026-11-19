@@ -45,6 +45,7 @@ Keeping it safe and tidy:
 - [[Git sync]]: the same vault on several computers.
 - [[Vault settings]]: what travels with a vault.
 - [[Data usage and caches]]: what Shale keeps on disk.
+- [[Updates]]: new releases: notify, download or install, and what is checked.
 - [[Settings reference]]: every setting, its default, and where it lives.
 - [[Fonts]]: the font and text size of the editor, dialogs, mail, calendar and feeds.
 - [[Themes]]: light and dark colour themes, your own Alacritty theme files.

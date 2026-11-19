@@ -514,8 +514,10 @@ fn sync_dir(dir: &Path) {
 /// Rename `from` over `to` (the replacing rename of an atomic save, DATA-013). On Windows the
 /// target can be held open for a moment by a program that reads it (a virus scanner, the search
 /// indexer, another reader of Shale): the rename then fails with "access denied" or "sharing
-/// violation" and works a moment later, so it is tried again for about a second.
-fn rename_replace(from: &Path, to: &Path) -> io::Result<()> {
+/// violation" and works a moment later, so it is tried again for about a second. Also the way an
+/// update puts the program files in place (UPD-014 to UPD-017; a running program can be replaced
+/// like this on Linux and macOS).
+pub fn rename_replace(from: &Path, to: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
         let mut tries = 0;

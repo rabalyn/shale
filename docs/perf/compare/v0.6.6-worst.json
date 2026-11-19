@@ -1,0 +1,173 @@
+{
+  "schema": 2,
+  "verdict": "ok",
+  "exit_code": 0,
+  "x": {
+    "commit": "7c5c20f4b0ec647c0214cb51d5ed98df1ca98a2f",
+    "describe": "v0.6.5",
+    "date": "2026-11-19T16:30:15Z",
+    "load": 1.71,
+    "cores": 28,
+    "repeats": 1
+  },
+  "y": {
+    "commit": "72a1e58636a875178c55ac06cafec27550b3cc0e",
+    "describe": "v0.6.6",
+    "date": "2026-11-19T18:04:33Z",
+    "load": 5.48,
+    "cores": 28,
+    "repeats": 1
+  },
+  "busy": false,
+  "threshold_time_pct": 10.0,
+  "threshold_bytes_pct": 15.0,
+  "threshold_allocs_pct": 10.0,
+  "rows": [
+    {
+      "id": "worst.startup",
+      "status": "both",
+      "x_median_ns": 755017416,
+      "y_median_ns": 757407422,
+      "time_delta_pct": 0.3165497840648486,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        752384783,
+        755483291
+      ],
+      "y_range_ns": [
+        752934459,
+        759206594
+      ],
+      "x_allocs": 5006978,
+      "y_allocs": 5007645,
+      "allocs_delta_pct": 0.013321408642099087,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 183198139,
+      "y_peak_bytes": 183192328,
+      "bytes_delta_pct": -0.0031719754533095995,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.idle",
+      "status": "both",
+      "x_median_ns": 2250623,
+      "y_median_ns": 2204917,
+      "time_delta_pct": -2.0308154675394325,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        2147335,
+        2496950
+      ],
+      "y_range_ns": [
+        2131332,
+        2330666
+      ],
+      "x_allocs": 10004,
+      "y_allocs": 10004,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19367768,
+      "y_peak_bytes": 19367768,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.typing",
+      "status": "both",
+      "x_median_ns": 23627583,
+      "y_median_ns": 23599503,
+      "time_delta_pct": -0.11884414923016035,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        23070639,
+        25558307
+      ],
+      "y_range_ns": [
+        23171399,
+        24799892
+      ],
+      "x_allocs": 145703,
+      "y_allocs": 145703,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 22299293,
+      "y_peak_bytes": 22299293,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.views.cycle",
+      "status": "both",
+      "x_median_ns": 140979868,
+      "y_median_ns": 140770868,
+      "time_delta_pct": -0.14824811724181783,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        140152320,
+        208557785
+      ],
+      "y_range_ns": [
+        139115092,
+        208612615
+      ],
+      "x_allocs": 397966,
+      "y_allocs": 397966,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 90851292,
+      "y_peak_bytes": 90851292,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.memory.growth",
+      "status": "both",
+      "x_median_ns": 26054378645,
+      "y_median_ns": 28086995097,
+      "time_delta_pct": 7.801438981505214,
+      "time_verdict": "slower",
+      "x_range_ns": [
+        26054378645,
+        26054378645
+      ],
+      "y_range_ns": [
+        28086995097,
+        28086995097
+      ],
+      "x_allocs": 114353885,
+      "y_allocs": 114455585,
+      "allocs_delta_pct": 0.08893445115572593,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 59368216,
+      "y_peak_bytes": 59368216,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    }
+  ],
+  "regressions": [],
+  "improvements": [],
+  "tradeoffs": [],
+  "noisy": [],
+  "changed": [],
+  "skipped": [],
+  "summary": {
+    "compared": 5,
+    "faster": 0,
+    "slower": 1,
+    "regressions": 0,
+    "noisy": 0,
+    "changed": 0,
+    "added": 0,
+    "removed": 0
+  }
+}

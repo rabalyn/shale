@@ -3,6 +3,8 @@
 # BUILD-013).
 #   sh .github/test-check-release.sh
 set -u
+# a release that runs land.sh and its cargo test must not leak its value in here (#406); the cases set it
+unset SHALE_PREV_PUBLISHED
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CHECK="$HERE/check-release.sh"
 NOTES_SH="$HERE/release-notes.sh"

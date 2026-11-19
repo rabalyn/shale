@@ -12,6 +12,18 @@ use std::path::{Component, Path, PathBuf};
 /// The most bytes an archive may unpack to, in all and per file.
 pub const MAX_TOTAL: u64 = 256 << 20;
 pub const MAX_FILE: u64 = 64 << 20;
+/// What an archive may unpack to: the most bytes in all and per file.
+#[derive(Clone, Copy)]
+pub struct Limits {
+    pub total: u64,
+    pub file: u64,
+}
+
+impl Limits {
+    /// The limits of a template archive.
+    pub const TEMPLATES: Limits = Limits { total: MAX_TOTAL, file: MAX_FILE };
+}
+
 /// The most entries (files and folders) of an archive or a folder.
 pub const MAX_ENTRIES: usize = 20_000;
 
@@ -84,7 +96,7 @@ fn inflate(raw: &[u8], size: u64, what: &str) -> Result<Vec<u8>, String> {
 // ---------------------------------------------------------------- zip
 
 /// The entries of a zip: central directory first, then each file's data (stored or deflated).
-fn read_zip(b: &[u8]) -> Result<Vec<Entry>, String> {
+fn read_zip(b: &[u8], lim: Limits) -> Result<Vec<Entry>, String> {
     let broken = || "the zip file is damaged".to_string();
     let from = b.len().saturating_sub(22 + 65535);
     let eocd = (from..=b.len().saturating_sub(22)).rev().find(|&i| b.get(i..i + 4) == Some(&[0x50, 0x4b, 0x05, 0x06])).ok_or_else(broken)?;
@@ -121,12 +133,12 @@ fn read_zip(b: &[u8]) -> Result<Vec<Entry>, String> {
         if flags & 1 != 0 {
             return Err(format!("{raw_name:?} is encrypted: refused"));
         }
-        if usize_ > MAX_FILE {
-            return Err(format!("{raw_name:?} is larger than {} MB: refused", MAX_FILE >> 20));
+        if usize_ > lim.file {
+            return Err(format!("{raw_name:?} is larger than {} MB: refused", lim.file >> 20));
         }
         total += usize_;
-        if total > MAX_TOTAL {
-            return Err(format!("the archive unpacks to more than {} MB: refused", MAX_TOTAL >> 20));
+        if total > lim.total {
+            return Err(format!("the archive unpacks to more than {} MB: refused", lim.total >> 20));
         }
         if b.get(local..local + 4) != Some(&[0x50, 0x4b, 0x03, 0x04]) {
             return Err(broken());
@@ -149,7 +161,7 @@ fn read_zip(b: &[u8]) -> Result<Vec<Entry>, String> {
 // ---------------------------------------------------------------- tar.gz
 
 /// The deflated part of a gzip file (one member), checked against its trailer.
-fn gunzip(b: &[u8]) -> Result<Vec<u8>, String> {
+fn gunzip(b: &[u8], lim: Limits) -> Result<Vec<u8>, String> {
     let broken = || "the gzip file is damaged".to_string();
     if b.len() < 18 || b[0] != 0x1f || b[1] != 0x8b || b[2] != 8 {
         return Err(broken());
@@ -168,7 +180,7 @@ fn gunzip(b: &[u8]) -> Result<Vec<u8>, String> {
         at += 2;
     }
     let body = b.get(at..b.len() - 8).ok_or_else(broken)?;
-    let data = inflate(body, MAX_TOTAL, "the gzip file")?;
+    let data = inflate(body, lim.total, "the gzip file")?;
     let (crc, size) = (u32_at(b, b.len() - 8).ok_or_else(broken)?, u32_at(b, b.len() - 4).ok_or_else(broken)?);
     if crc32(&data) as u64 != crc || data.len() as u64 & 0xFFFF_FFFF != size {
         return Err("the gzip file is damaged (its checksum is wrong)".into());
@@ -206,7 +218,7 @@ fn pax_path(data: &[u8]) -> Option<String> {
 }
 
 /// The entries of an (uncompressed) tar.
-fn read_tar(b: &[u8]) -> Result<Vec<Entry>, String> {
+fn read_tar(b: &[u8], lim: Limits) -> Result<Vec<Entry>, String> {
     let broken = || "the tar file is damaged".to_string();
     let (mut at, mut total, mut entries) = (0usize, 0u64, Vec::new());
     let mut long_name: Option<String> = None;
@@ -246,12 +258,12 @@ fn read_tar(b: &[u8]) -> Result<Vec<Entry>, String> {
         match kind {
             b'5' => entries.push(Entry { path: safe_path(&name)?, data: None }),
             b'0' | 0 | b'7' => {
-                if size > MAX_FILE {
-                    return Err(format!("{name:?} is larger than {} MB: refused", MAX_FILE >> 20));
+                if size > lim.file {
+                    return Err(format!("{name:?} is larger than {} MB: refused", lim.file >> 20));
                 }
                 total += size;
-                if total > MAX_TOTAL {
-                    return Err(format!("the archive unpacks to more than {} MB: refused", MAX_TOTAL >> 20));
+                if total > lim.total {
+                    return Err(format!("the archive unpacks to more than {} MB: refused", lim.total >> 20));
                 }
                 entries.push(Entry { path: safe_path(&name)?, data: Some(body.to_vec()) });
             }
@@ -269,10 +281,15 @@ fn read_tar(b: &[u8]) -> Result<Vec<Entry>, String> {
 /// Unpack `bytes` (a zip or a gzipped tar, told apart by their first bytes) into `dest`, a folder
 /// that exists and is empty. Nothing is written when any entry is refused.
 pub fn extract(bytes: &[u8], dest: &Path) -> Result<(), String> {
+    extract_with(bytes, dest, Limits::TEMPLATES)
+}
+
+/// [`extract`] with other size limits (the program of an update is larger than a template).
+pub fn extract_with(bytes: &[u8], dest: &Path, lim: Limits) -> Result<(), String> {
     let entries = if bytes.starts_with(b"PK") {
-        read_zip(bytes)?
+        read_zip(bytes, lim)?
     } else if bytes.starts_with(&[0x1f, 0x8b]) {
-        read_tar(&gunzip(bytes)?)?
+        read_tar(&gunzip(bytes, lim)?, lim)?
     } else {
         return Err("that is neither a zip file nor a .tar.gz file".into());
     };

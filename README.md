@@ -31,6 +31,7 @@ markdown files. Notes link to each other with `[[wiki links]]`.
 - **To-do list for the whole vault**: every `- [ ] task` from every note in one list.
   Tick tasks off there (the change is saved to the note), filter them, and sort by due date
   (`📅 2026-12-01` or `due:2026-12-01`).
+- **Updates**: Shale can look for a new release on GitHub, check its download against the release's SHA-256 file and notify, download or install it, as you choose (Settings → Updates; off by `SHALE_UPDATES=off`). A package-managed install (AUR `shale-bin`) is never touched. See `docs/userguide/Updates.md`.
 - **Feeds**: read your Mastodon and Bluesky timelines in Shale and save a post (or a whole
   thread by one author) as a note, with its pictures and a link back to the post.
 - **Linked notes**: backlinks, unlinked mentions, outgoing links, outline, a local graph per note

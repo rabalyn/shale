@@ -169,6 +169,11 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("tex", "The TeX that exports notes to PDF through LaTeX templates."),
     ("tex.engine", "Which TeX is used: Auto (the managed TeX Live when it is installed, else the lualatex of PATH when it is new enough), System (the lualatex of PATH) or Managed (the TeX Live Shale installs)."),
     ("tex.repository", "The TeX Live repository the managed install and update download from."),
+    ("updates", "What Shale does about new releases on GitHub. SHALE_UPDATES=off in the environment switches it off whatever is set here."),
+    ("updates.mode", "Ask (not chosen yet: the first update found asks), Off (no request, no notice), Notify (say a new version is out), Download (download and check it in the background) or Install (download, check and install it; you restart when you like)."),
+    ("updates.skipped_version", "The version you chose Skip this version for; it is not announced again (empty: none)."),
+    ("updates.last_check", "When the last check for a new release succeeded, in seconds since 1970 (0: never)."),
+    ("updates.install_on_start", "A downloaded version that is installed at the next start (empty: none)."),
     ("keybindings", "Keys you changed: the id of an action and its keys. An empty list unbinds the action; an action not listed keeps its default."),
     ("keybindings.*", "The keys of this action, such as [\"Ctrl+Shift+P\"]; an empty list leaves the action without a key."),
 ];

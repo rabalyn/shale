@@ -1,0 +1,1208 @@
+{
+  "schema": 2,
+  "commit": "7c5c20f4b0ec647c0214cb51d5ed98df1ca98a2f",
+  "describe": "v0.6.5",
+  "date": "2026-11-19T16:29:00Z",
+  "host": {
+    "cpu": "Intel(R) Core(TM) i7-14700KF",
+    "cores": 28,
+    "os": "linux x86_64 7.3.4-1-cachyos",
+    "load": 3.46
+  },
+  "profile": "bench-release",
+  "scenarios": [
+    {
+      "id": "vault.open.small",
+      "iters": 20,
+      "median_ns": 6350662,
+      "p95_ns": 6532679,
+      "min_ns": 6321975,
+      "allocs": 39532,
+      "alloc_bytes": 6936612,
+      "peak_bytes": 2408666,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        6485737,
+        6350662
+      ]
+    },
+    {
+      "id": "vault.open.large",
+      "iters": 5,
+      "median_ns": 71169456,
+      "p95_ns": 72281561,
+      "min_ns": 70409691,
+      "allocs": 857793,
+      "alloc_bytes": 146887347,
+      "peak_bytes": 51661633,
+      "retained_bytes": 160,
+      "version": 1,
+      "run_medians_ns": [
+        71169456,
+        72340087
+      ]
+    },
+    {
+      "id": "vault.rescan.large",
+      "iters": 10,
+      "median_ns": 8104954,
+      "p95_ns": 9279257,
+      "min_ns": 7850337,
+      "allocs": 100855,
+      "alloc_bytes": 5584142,
+      "peak_bytes": 1438133,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        8146621,
+        8104954
+      ]
+    },
+    {
+      "id": "markdown.scan.long",
+      "iters": 20,
+      "median_ns": 1705475,
+      "p95_ns": 1721461,
+      "min_ns": 1678689,
+      "allocs": 4434,
+      "alloc_bytes": 1741644,
+      "peak_bytes": 240415,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        1716907,
+        1705475
+      ]
+    },
+    {
+      "id": "editor.highlight.long",
+      "iters": 20,
+      "median_ns": 4859589,
+      "p95_ns": 4976616,
+      "min_ns": 4769298,
+      "allocs": 15458,
+      "alloc_bytes": 20682683,
+      "peak_bytes": 5707054,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        4859589,
+        4891500
+      ]
+    },
+    {
+      "id": "editor.layout.long",
+      "iters": 10,
+      "median_ns": 72540025,
+      "p95_ns": 79632356,
+      "min_ns": 71438870,
+      "allocs": 298873,
+      "alloc_bytes": 163683363,
+      "peak_bytes": 46725153,
+      "retained_bytes": 4126424,
+      "version": 1,
+      "run_medians_ns": [
+        73173488,
+        72540025
+      ]
+    },
+    {
+      "id": "search.sidebar.large",
+      "iters": 10,
+      "median_ns": 20114727,
+      "p95_ns": 20936794,
+      "min_ns": 19705850,
+      "allocs": 34622,
+      "alloc_bytes": 5330345,
+      "peak_bytes": 4554285,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        20114727,
+        20378556
+      ]
+    },
+    {
+      "id": "search.all.large",
+      "iters": 10,
+      "median_ns": 19447952,
+      "p95_ns": 19837130,
+      "min_ns": 19152468,
+      "allocs": 5007,
+      "alloc_bytes": 115443,
+      "peak_bytes": 33,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        19663788,
+        19447952
+      ]
+    },
+    {
+      "id": "search.all.hit.large",
+      "iters": 10,
+      "median_ns": 23885,
+      "p95_ns": 45643,
+      "min_ns": 22065,
+      "allocs": 126,
+      "alloc_bytes": 14988,
+      "peak_bytes": 8734,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        24254,
+        23885
+      ]
+    },
+    {
+      "id": "search.all.wild.large",
+      "iters": 5,
+      "median_ns": 165258915,
+      "p95_ns": 165498248,
+      "min_ns": 163569577,
+      "allocs": 559483,
+      "alloc_bytes": 13422867,
+      "peak_bytes": 65,
+      "retained_bytes": 160,
+      "version": 1,
+      "run_medians_ns": [
+        165258915,
+        165697665
+      ]
+    },
+    {
+      "id": "search.all.wild.hit.large",
+      "iters": 10,
+      "median_ns": 123152,
+      "p95_ns": 143593,
+      "min_ns": 120273,
+      "allocs": 610,
+      "alloc_bytes": 26604,
+      "peak_bytes": 8734,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        125367,
+        123152
+      ]
+    },
+    {
+      "id": "index.backlinks.large",
+      "iters": 10,
+      "median_ns": 16934467,
+      "p95_ns": 19139173,
+      "min_ns": 16631195,
+      "allocs": 23727,
+      "alloc_bytes": 2607594,
+      "peak_bytes": 1903421,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        16934467,
+        17164064
+      ]
+    },
+    {
+      "id": "index.unlinked.large",
+      "iters": 5,
+      "median_ns": 17014085,
+      "p95_ns": 17505707,
+      "min_ns": 16885897,
+      "allocs": 127622,
+      "alloc_bytes": 40264936,
+      "peak_bytes": 205288,
+      "retained_bytes": 160,
+      "version": 1,
+      "run_medians_ns": [
+        17014085,
+        17347426
+      ]
+    },
+    {
+      "id": "index.tasks.large",
+      "iters": 10,
+      "median_ns": 4300703,
+      "p95_ns": 5027979,
+      "min_ns": 4229732,
+      "allocs": 93395,
+      "alloc_bytes": 5450770,
+      "peak_bytes": 4145318,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        4580837,
+        4300703
+      ]
+    },
+    {
+      "id": "graph.build.large",
+      "iters": 10,
+      "median_ns": 21594735,
+      "p95_ns": 22420952,
+      "min_ns": 21106636,
+      "allocs": 404612,
+      "alloc_bytes": 26490215,
+      "peak_bytes": 6291466,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        21594735,
+        21988283
+      ]
+    },
+    {
+      "id": "graph.layout.small",
+      "iters": 10,
+      "median_ns": 6346654,
+      "p95_ns": 6535344,
+      "min_ns": 6319656,
+      "allocs": 29584,
+      "alloc_bytes": 2750227,
+      "peak_bytes": 286972,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        6347569,
+        6346654
+      ]
+    },
+    {
+      "id": "graph.layout.large",
+      "iters": 3,
+      "median_ns": 158936943,
+      "p95_ns": 160024695,
+      "min_ns": 158398373,
+      "allocs": 565962,
+      "alloc_bytes": 57300279,
+      "peak_bytes": 6291466,
+      "retained_bytes": 96,
+      "version": 1,
+      "run_medians_ns": [
+        158936943,
+        159993630
+      ]
+    },
+    {
+      "id": "ui.frame.idle.large",
+      "iters": 60,
+      "median_ns": 754343,
+      "p95_ns": 774865,
+      "min_ns": 739351,
+      "allocs": 2816,
+      "alloc_bytes": 1122673,
+      "peak_bytes": 701576,
+      "retained_bytes": 1920,
+      "version": 1,
+      "run_medians_ns": [
+        754343,
+        776414
+      ]
+    },
+    {
+      "id": "ui.frame.sidebar.large",
+      "iters": 30,
+      "median_ns": 17169249,
+      "p95_ns": 17578591,
+      "min_ns": 16883962,
+      "allocs": 61812,
+      "alloc_bytes": 4220405,
+      "peak_bytes": 1642376,
+      "retained_bytes": 960,
+      "version": 1,
+      "run_medians_ns": [
+        17169249,
+        17331722
+      ]
+    },
+    {
+      "id": "ui.frame.editor.long",
+      "iters": 30,
+      "median_ns": 2107948,
+      "p95_ns": 2366489,
+      "min_ns": 2074837,
+      "allocs": 9930,
+      "alloc_bytes": 22314531,
+      "peak_bytes": 19284256,
+      "retained_bytes": 960,
+      "version": 1,
+      "run_medians_ns": [
+        2162304,
+        2107948
+      ]
+    },
+    {
+      "id": "ui.frame.backlinks.large",
+      "iters": 30,
+      "median_ns": 9758720,
+      "p95_ns": 10285011,
+      "min_ns": 9427953,
+      "allocs": 52625,
+      "alloc_bytes": 7356055,
+      "peak_bytes": 1245496,
+      "retained_bytes": 960,
+      "version": 1,
+      "run_medians_ns": [
+        9758720,
+        9939979
+      ]
+    },
+    {
+      "id": "ui.type.editor.long",
+      "iters": 30,
+      "median_ns": 23249996,
+      "p95_ns": 24612038,
+      "min_ns": 22381887,
+      "allocs": 145581,
+      "alloc_bytes": 71579533,
+      "peak_bytes": 22215093,
+      "retained_bytes": 4981681,
+      "version": 1,
+      "run_medians_ns": [
+        23249996,
+        23273898
+      ]
+    },
+    {
+      "id": "ui.scroll.editor.long",
+      "iters": 30,
+      "median_ns": 2191286,
+      "p95_ns": 2434264,
+      "min_ns": 2146447,
+      "allocs": 10054,
+      "alloc_bytes": 22351950,
+      "peak_bytes": 19295395,
+      "retained_bytes": 17316,
+      "version": 1,
+      "run_medians_ns": [
+        2191286,
+        2228996
+      ]
+    },
+    {
+      "id": "ui.frame.graph.small",
+      "iters": 30,
+      "median_ns": 2481361,
+      "p95_ns": 2544034,
+      "min_ns": 2435268,
+      "allocs": 5455,
+      "alloc_bytes": 9158353,
+      "peak_bytes": 4529776,
+      "retained_bytes": 960,
+      "version": 1,
+      "run_medians_ns": [
+        2511942,
+        2481361
+      ]
+    },
+    {
+      "id": "ui.frame.graph.large",
+      "iters": 5,
+      "median_ns": 27845711,
+      "p95_ns": 30689214,
+      "min_ns": 26233185,
+      "allocs": 17934,
+      "alloc_bytes": 73798319,
+      "peak_bytes": 50184072,
+      "retained_bytes": -44760740,
+      "version": 1,
+      "run_medians_ns": [
+        28017526,
+        27845711
+      ]
+    },
+    {
+      "id": "ui.frame.tasks.large",
+      "iters": 30,
+      "median_ns": 1172939,
+      "p95_ns": 1211916,
+      "min_ns": 1148772,
+      "allocs": 4235,
+      "alloc_bytes": 1736940,
+      "peak_bytes": 515336,
+      "retained_bytes": 960,
+      "version": 1,
+      "run_medians_ns": [
+        1177395,
+        1172939
+      ]
+    },
+    {
+      "id": "vault.check.large",
+      "iters": 10,
+      "median_ns": 2989948,
+      "p95_ns": 3841569,
+      "min_ns": 2969632,
+      "allocs": 56621,
+      "alloc_bytes": 2529682,
+      "peak_bytes": 27554,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        2989948,
+        3006611
+      ]
+    },
+    {
+      "id": "vault.check.problems",
+      "iters": 20,
+      "median_ns": 601680,
+      "p95_ns": 623600,
+      "min_ns": 595643,
+      "allocs": 13659,
+      "alloc_bytes": 815491,
+      "peak_bytes": 349545,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        601680,
+        602632
+      ]
+    },
+    {
+      "id": "startup.recovery.rescue",
+      "iters": 5,
+      "median_ns": 2131213,
+      "p95_ns": 2257235,
+      "min_ns": 2074214,
+      "allocs": 6931,
+      "alloc_bytes": 2882090,
+      "peak_bytes": 6464,
+      "retained_bytes": 160,
+      "version": 1,
+      "run_medians_ns": [
+        2149052,
+        2131213
+      ]
+    },
+    {
+      "id": "startup.recovery.unseen",
+      "iters": 20,
+      "median_ns": 546892,
+      "p95_ns": 597883,
+      "min_ns": 543014,
+      "allocs": 1857,
+      "alloc_bytes": 120237,
+      "peak_bytes": 19673,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        556174,
+        546892
+      ]
+    },
+    {
+      "id": "startup.app.large",
+      "iters": 3,
+      "median_ns": 128691721,
+      "p95_ns": 149895367,
+      "min_ns": 116989353,
+      "allocs": 1662134,
+      "alloc_bytes": 273081337,
+      "peak_bytes": 85687098,
+      "retained_bytes": 74046165,
+      "version": 1,
+      "run_medians_ns": [
+        128691721,
+        134266689
+      ]
+    },
+    {
+      "id": "startup.app.recovery.large",
+      "iters": 3,
+      "median_ns": 132391803,
+      "p95_ns": 157811504,
+      "min_ns": 118008911,
+      "allocs": 1669362,
+      "alloc_bytes": 275189235,
+      "peak_bytes": 85923325,
+      "retained_bytes": 74785091,
+      "version": 1,
+      "run_medians_ns": [
+        132391803,
+        135493418
+      ]
+    },
+    {
+      "id": "syntax.highlight.long",
+      "iters": 5,
+      "median_ns": 1906457,
+      "p95_ns": 2073395,
+      "min_ns": 1883550,
+      "allocs": 36087,
+      "alloc_bytes": 1179850,
+      "peak_bytes": 16582,
+      "retained_bytes": 10832,
+      "version": 1,
+      "run_medians_ns": [
+        1906457,
+        1910092
+      ]
+    },
+    {
+      "id": "math.typeset.formulas",
+      "iters": 10,
+      "median_ns": 863725,
+      "p95_ns": 929436,
+      "min_ns": 826664,
+      "allocs": 13570,
+      "alloc_bytes": 913735,
+      "peak_bytes": 347160,
+      "retained_bytes": 1366221,
+      "version": 1,
+      "run_medians_ns": [
+        871435,
+        863725
+      ]
+    },
+    {
+      "id": "table.parse.long",
+      "iters": 20,
+      "median_ns": 2704997,
+      "p95_ns": 2743036,
+      "min_ns": 2666768,
+      "allocs": 31978,
+      "alloc_bytes": 14622532,
+      "peak_bytes": 132624,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        2704997,
+        2713000
+      ]
+    },
+    {
+      "id": "vim.keys.long",
+      "iters": 20,
+      "median_ns": 2543196,
+      "p95_ns": 2564656,
+      "min_ns": 2533939,
+      "allocs": 77,
+      "alloc_bytes": 35902348,
+      "peak_bytes": 820624,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        2543196,
+        2567154
+      ]
+    },
+    {
+      "id": "drawing.scene.large",
+      "iters": 10,
+      "median_ns": 2020926,
+      "p95_ns": 2131023,
+      "min_ns": 2006902,
+      "allocs": 13029,
+      "alloc_bytes": 5662382,
+      "peak_bytes": 2894926,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        2020926,
+        2040040
+      ]
+    },
+    {
+      "id": "ui.frame.drawing.large",
+      "iters": 20,
+      "median_ns": 4804529,
+      "p95_ns": 5134226,
+      "min_ns": 4632394,
+      "allocs": 21353,
+      "alloc_bytes": 20014294,
+      "peak_bytes": 8889160,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        4804529,
+        4947060
+      ]
+    },
+    {
+      "id": "ui.frame.math.note",
+      "iters": 20,
+      "median_ns": 281852,
+      "p95_ns": 477057,
+      "min_ns": 273707,
+      "allocs": 2637,
+      "alloc_bytes": 2433414,
+      "peak_bytes": 1770488,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        290413,
+        281852
+      ]
+    },
+    {
+      "id": "ui.frame.tables.note",
+      "iters": 20,
+      "median_ns": 203936,
+      "p95_ns": 236751,
+      "min_ns": 201536,
+      "allocs": 1918,
+      "alloc_bytes": 1216945,
+      "peak_bytes": 769152,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        203936,
+        208745
+      ]
+    },
+    {
+      "id": "ui.frame.code.note",
+      "iters": 20,
+      "median_ns": 255612,
+      "p95_ns": 282939,
+      "min_ns": 253745,
+      "allocs": 2700,
+      "alloc_bytes": 1817655,
+      "peak_bytes": 1121968,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        255612,
+        272049
+      ]
+    },
+    {
+      "id": "ui.type.vim.long",
+      "iters": 20,
+      "median_ns": 2806977,
+      "p95_ns": 3320494,
+      "min_ns": 2686639,
+      "allocs": 9998,
+      "alloc_bytes": 24386960,
+      "peak_bytes": 19330743,
+      "retained_bytes": 11206,
+      "version": 1,
+      "run_medians_ns": [
+        2814141,
+        2806977
+      ]
+    },
+    {
+      "id": "ui.frame.reading.long",
+      "iters": 20,
+      "median_ns": 4409763,
+      "p95_ns": 4632944,
+      "min_ns": 4375847,
+      "allocs": 44473,
+      "alloc_bytes": 12278996,
+      "peak_bytes": 607373,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        4471602,
+        4409763
+      ]
+    },
+    {
+      "id": "picker.fuzzy.large",
+      "iters": 20,
+      "median_ns": 1104829,
+      "p95_ns": 1111424,
+      "min_ns": 1097516,
+      "allocs": 30036,
+      "alloc_bytes": 441428,
+      "peak_bytes": 39,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        1127864,
+        1104829
+      ]
+    },
+    {
+      "id": "media.audio.decode",
+      "iters": 5,
+      "median_ns": 66051095,
+      "p95_ns": 66250841,
+      "min_ns": 65934727,
+      "allocs": 2452,
+      "alloc_bytes": 10807447,
+      "peak_bytes": 159714,
+      "retained_bytes": 160,
+      "version": 1,
+      "run_medians_ns": [
+        67473400,
+        66051095
+      ]
+    },
+    {
+      "id": "recorder.encode",
+      "iters": 3,
+      "median_ns": 160047843,
+      "p95_ns": 160365327,
+      "min_ns": 157900262,
+      "allocs": 112,
+      "alloc_bytes": 109973,
+      "peak_bytes": 104421,
+      "retained_bytes": 96,
+      "version": 1,
+      "run_medians_ns": [
+        160744813,
+        160047843
+      ]
+    },
+    {
+      "id": "mail.sync.store.large",
+      "iters": 1,
+      "median_ns": 1225927765,
+      "p95_ns": 1225927765,
+      "min_ns": 1225927765,
+      "allocs": 2777280,
+      "alloc_bytes": 317236471,
+      "peak_bytes": 1019822,
+      "retained_bytes": 80,
+      "version": 1,
+      "run_medians_ns": [
+        1225927765,
+        1230454832
+      ]
+    },
+    {
+      "id": "mail.open.large",
+      "iters": 5,
+      "median_ns": 183829023,
+      "p95_ns": 185173763,
+      "min_ns": 183278671,
+      "allocs": 160130,
+      "alloc_bytes": 12759245,
+      "peak_bytes": 4542952,
+      "retained_bytes": 160,
+      "version": 1,
+      "run_medians_ns": [
+        183829023,
+        185437962
+      ]
+    },
+    {
+      "id": "mail.list.large",
+      "iters": 20,
+      "median_ns": 9172260,
+      "p95_ns": 9283933,
+      "min_ns": 9130606,
+      "allocs": 3093,
+      "alloc_bytes": 374915,
+      "peak_bytes": 108483,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        9488268,
+        9172260
+      ]
+    },
+    {
+      "id": "mail.search.large",
+      "iters": 10,
+      "median_ns": 23377011,
+      "p95_ns": 23831428,
+      "min_ns": 23315822,
+      "allocs": 809,
+      "alloc_bytes": 94058,
+      "peak_bytes": 27168,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        23567783,
+        23377011
+      ]
+    },
+    {
+      "id": "mail.read.message",
+      "iters": 10,
+      "median_ns": 656700,
+      "p95_ns": 829709,
+      "min_ns": 645568,
+      "allocs": 12563,
+      "alloc_bytes": 1542959,
+      "peak_bytes": 18052,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        656700,
+        660316
+      ]
+    },
+    {
+      "id": "mail.index.rebuild.large",
+      "iters": 1,
+      "median_ns": 409194557,
+      "p95_ns": 409194557,
+      "min_ns": 409194557,
+      "allocs": 697785,
+      "alloc_bytes": 89623783,
+      "peak_bytes": 1351698,
+      "retained_bytes": 4752,
+      "version": 1,
+      "run_medians_ns": [
+        411710149,
+        409194557
+      ]
+    },
+    {
+      "id": "ui.frame.mail.large",
+      "iters": 30,
+      "median_ns": 234970,
+      "p95_ns": 354143,
+      "min_ns": 231228,
+      "allocs": 2327,
+      "alloc_bytes": 714287,
+      "peak_bytes": 407416,
+      "retained_bytes": 960,
+      "version": 1,
+      "run_medians_ns": [
+        234970,
+        239501
+      ]
+    },
+    {
+      "id": "calendar.ics.parse.large",
+      "iters": 10,
+      "median_ns": 8238042,
+      "p95_ns": 8858605,
+      "min_ns": 8183515,
+      "allocs": 210677,
+      "alloc_bytes": 18695925,
+      "peak_bytes": 10534524,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        8461022,
+        8238042
+      ]
+    },
+    {
+      "id": "calendar.ics.write.large",
+      "iters": 10,
+      "median_ns": 14901158,
+      "p95_ns": 15317375,
+      "min_ns": 14820941,
+      "allocs": 434295,
+      "alloc_bytes": 23976547,
+      "peak_bytes": 4070937,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        14901158,
+        15179805
+      ]
+    },
+    {
+      "id": "calendar.store.load.large",
+      "iters": 10,
+      "median_ns": 8651438,
+      "p95_ns": 8915027,
+      "min_ns": 8329461,
+      "allocs": 210690,
+      "alloc_bytes": 20288469,
+      "peak_bytes": 12126814,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        8669695,
+        8651438
+      ]
+    },
+    {
+      "id": "calendar.occurrences.year.large",
+      "iters": 5,
+      "median_ns": 15340865,
+      "p95_ns": 15706761,
+      "min_ns": 15146310,
+      "allocs": 139056,
+      "alloc_bytes": 14355093,
+      "peak_bytes": 5206920,
+      "retained_bytes": 13107656,
+      "version": 2,
+      "run_medians_ns": [
+        15528832,
+        15340865
+      ]
+    },
+    {
+      "id": "ui.frame.calendar.large",
+      "iters": 30,
+      "median_ns": 809029,
+      "p95_ns": 839430,
+      "min_ns": 795114,
+      "allocs": 3154,
+      "alloc_bytes": 1876715,
+      "peak_bytes": 790096,
+      "retained_bytes": 960,
+      "version": 1,
+      "run_medians_ns": [
+        809029,
+        810961
+      ]
+    },
+    {
+      "id": "social.markup.html.large",
+      "iters": 10,
+      "median_ns": 7643221,
+      "p95_ns": 7823327,
+      "min_ns": 7620848,
+      "allocs": 231912,
+      "alloc_bytes": 12358478,
+      "peak_bytes": 2210,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        7706760,
+        7643221
+      ]
+    },
+    {
+      "id": "social.mastodon.parse.large",
+      "iters": 10,
+      "median_ns": 6752738,
+      "p95_ns": 7180941,
+      "min_ns": 6704751,
+      "allocs": 200854,
+      "alloc_bytes": 11455584,
+      "peak_bytes": 2526,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        6752738,
+        6837528
+      ]
+    },
+    {
+      "id": "social.bluesky.parse.large",
+      "iters": 10,
+      "median_ns": 1364218,
+      "p95_ns": 1601826,
+      "min_ns": 1352748,
+      "allocs": 39000,
+      "alloc_bytes": 2620833,
+      "peak_bytes": 1346,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        1364218,
+        1391988
+      ]
+    },
+    {
+      "id": "social.index.add.large",
+      "iters": 3,
+      "median_ns": 80477406,
+      "p95_ns": 80719437,
+      "min_ns": 80373012,
+      "allocs": 169921,
+      "alloc_bytes": 25058904,
+      "peak_bytes": 4880,
+      "retained_bytes": 96,
+      "version": 1,
+      "run_medians_ns": [
+        81566268,
+        80477406
+      ]
+    },
+    {
+      "id": "social.index.search.large",
+      "iters": 10,
+      "median_ns": 3125921,
+      "p95_ns": 3357226,
+      "min_ns": 3106124,
+      "allocs": 1540,
+      "alloc_bytes": 312936,
+      "peak_bytes": 79374,
+      "retained_bytes": 320,
+      "version": 1,
+      "run_medians_ns": [
+        3189114,
+        3125921
+      ]
+    },
+    {
+      "id": "ui.frame.social.large",
+      "iters": 30,
+      "median_ns": 823322,
+      "p95_ns": 985262,
+      "min_ns": 810167,
+      "allocs": 11065,
+      "alloc_bytes": 1984431,
+      "peak_bytes": 641144,
+      "retained_bytes": 960,
+      "version": 1,
+      "run_medians_ns": [
+        849414,
+        823322
+      ]
+    },
+    {
+      "id": "import.docx.big",
+      "iters": 2,
+      "median_ns": 4616388720,
+      "p95_ns": 4622352028,
+      "min_ns": 4607705306,
+      "allocs": 127542,
+      "alloc_bytes": 193608097,
+      "peak_bytes": 10699268,
+      "retained_bytes": 64,
+      "version": 1,
+      "run_medians_ns": [
+        4618753843,
+        4616388720
+      ]
+    },
+    {
+      "id": "pdf.export.note.long",
+      "iters": 5,
+      "median_ns": 94771102,
+      "p95_ns": 95623570,
+      "min_ns": 93094060,
+      "allocs": 771289,
+      "alloc_bytes": 91932100,
+      "peak_bytes": 9297386,
+      "retained_bytes": 160,
+      "version": 1,
+      "run_medians_ns": [
+        94771102,
+        94906894
+      ]
+    },
+    {
+      "id": "pdf.export.book.large",
+      "iters": 3,
+      "median_ns": 158330832,
+      "p95_ns": 159432188,
+      "min_ns": 158013147,
+      "allocs": 1321311,
+      "alloc_bytes": 169878035,
+      "peak_bytes": 17142619,
+      "retained_bytes": 96,
+      "version": 1,
+      "run_medians_ns": [
+        158330832,
+        160208424
+      ]
+    },
+    {
+      "id": "pdf.export.book.docx",
+      "iters": 3,
+      "median_ns": 1041375819,
+      "p95_ns": 1042499708,
+      "min_ns": 1036778676,
+      "allocs": 9672951,
+      "alloc_bytes": 1013914978,
+      "peak_bytes": 83580063,
+      "retained_bytes": 96,
+      "version": 1,
+      "run_medians_ns": [
+        1041375819,
+        1042115140
+      ]
+    },
+    {
+      "id": "pdf.render.book",
+      "iters": 3,
+      "median_ns": 10180997,
+      "p95_ns": 10855473,
+      "min_ns": 10154943,
+      "allocs": 10867,
+      "alloc_bytes": 53399860,
+      "peak_bytes": 17683876,
+      "retained_bytes": 96,
+      "version": 1,
+      "run_medians_ns": [
+        10180997,
+        10379395
+      ]
+    },
+    {
+      "id": "pdf.tex.blocks.long",
+      "iters": 20,
+      "median_ns": 3502937,
+      "p95_ns": 3568486,
+      "min_ns": 3433802,
+      "allocs": 44959,
+      "alloc_bytes": 11956675,
+      "peak_bytes": 752503,
+      "retained_bytes": 640,
+      "version": 1,
+      "run_medians_ns": [
+        3502937,
+        3515057
+      ]
+    },
+    {
+      "id": "git.sync.initial.large",
+      "iters": 1,
+      "median_ns": 593269232,
+      "p95_ns": 593269232,
+      "min_ns": 593269232,
+      "allocs": 12058,
+      "alloc_bytes": 1694375,
+      "peak_bytes": 294235,
+      "retained_bytes": 32,
+      "version": 1,
+      "run_medians_ns": [
+        593269232,
+        700101190
+      ]
+    },
+    {
+      "id": "git.sync.incremental.large",
+      "iters": 5,
+      "median_ns": 91930986,
+      "p95_ns": 92595273,
+      "min_ns": 91454408,
+      "allocs": 13655,
+      "alloc_bytes": 1802779,
+      "peak_bytes": 34135,
+      "retained_bytes": 160,
+      "version": 1,
+      "run_medians_ns": [
+        91930986,
+        94562832
+      ]
+    },
+    {
+      "id": "git.sync.pull.large",
+      "iters": 1,
+      "median_ns": 224457802,
+      "p95_ns": 224457802,
+      "min_ns": 224457802,
+      "allocs": 20380,
+      "alloc_bytes": 2579153,
+      "peak_bytes": 629629,
+      "retained_bytes": 32,
+      "version": 1,
+      "run_medians_ns": [
+        224457802,
+        224926247
+      ]
+    },
+    {
+      "id": "git.lfs.sync.media",
+      "iters": 1,
+      "median_ns": 1182801521,
+      "p95_ns": 1182801521,
+      "min_ns": 1182801521,
+      "allocs": 12053,
+      "alloc_bytes": 1186469,
+      "peak_bytes": 40281,
+      "retained_bytes": 32,
+      "version": 1,
+      "run_medians_ns": [
+        1219467401,
+        1182801521
+      ]
+    }
+  ],
+  "skipped": [
+    {
+      "id": "pdf.tex.engine",
+      "reason": "no TeX for the engine run: the TeX of this computer: no lualatex in PATH"
+    }
+  ],
+  "run": "full",
+  "peak_rss_kb": 558328,
+  "repeats": 2
+}
