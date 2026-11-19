@@ -127,6 +127,35 @@ fn a_person_with_a_contact_note_is_a_link_and_one_without_is_text() {
     assert!(action.is_none(), "Bob has no note, so no link");
 }
 
+// spec: EDIT-108
+#[test]
+fn the_date_of_an_email_and_an_event_card_is_a_link_that_asks_for_that_day() {
+    let v = vault("dates");
+    let day = crate::calendar::time::days_from_civil(2026, 11, 12);
+    let (_, action) = run(&v, MAIL, PropertiesView::Card, &["2026-11-12 14:30"]);
+    assert!(matches!(action, Some(ReaderAction::OpenDay(d)) if d == day), "the email date");
+    let event = "---\ntype: event\ntitle: Standup\nstart: 2026-11-12 14:30\nend: 2026-11-12 15:00\n---\n";
+    let (_, action) = run(&v, event, PropertiesView::Card, &["2026-11-12 14:30 – 15:00"]);
+    assert!(matches!(action, Some(ReaderAction::OpenDay(d)) if d == day), "the event time");
+    let odd = MAIL.replace("date: 2026-11-12 14:30", "date: yesterday");
+    let (_, action) = run(&v, &odd, PropertiesView::Card, &[]);
+    assert!(action.is_none(), "no click, no action");
+}
+
+// spec: EDIT-108
+#[test]
+fn the_open_day_action_selects_the_day_in_the_calendar_of_the_sidebar() {
+    let (mut app, _) = crate::app::tests::test_app("open-day");
+    let day = crate::calendar::time::days_from_civil(2031, 3, 9);
+    let mut actions = vec![];
+    crate::app::handle_reader_action(&mut actions, ReaderAction::OpenDay(day), Path::new("a.md"));
+    assert!(matches!(actions.as_slice(), [crate::app::Action::OpenCalendarDay(d)] if *d == day));
+    app.cfg.show_right = false;
+    app.actions = actions;
+    app.process_actions();
+    assert_eq!((app.cal.side.anchor, app.cal.side.selected, app.cfg.show_right), (day, day, true));
+}
+
 // spec: EDIT-086
 #[test]
 fn the_reading_view_draws_a_code_block_as_a_box_with_a_badge_at_its_top_right() {

@@ -277,6 +277,8 @@ pub enum Action {
     },
     ShowView(View),
     ShowViewInNewTab(View),
+    /// show a day (a day number) in the calendar: the sidebar's, else the big one (EDIT-108)
+    OpenCalendarDay(i64),
     /// open a post found by the search in its feed, in a new tab (SOC-035)
     OpenPost(Box<crate::social::post_index::PostHit>),
     /// open a mail found by the search in the mail view (NAV-025)
@@ -1882,6 +1884,21 @@ impl ShaleApp {
         }
     }
 
+    /// Show `day` in the calendar (EDIT-108): the panel of the sidebar when a view has it (the sidebar
+    /// is shown), else the calendar tab; its month grid selects the day.
+    pub fn open_calendar_day(&mut self, day: i64) {
+        let side = self.side.layout.show_panel(RightPanel::Calendar);
+        let view = if side { &mut self.cal.side } else { &mut self.cal.main };
+        view.mode = crate::calendar::ui::Mode::Month;
+        view.anchor = day;
+        view.selected = day;
+        if side {
+            self.cfg.show_right = true;
+        } else {
+            self.show_view(View::Calendar, false);
+        }
+    }
+
     /// Do what the calendar panel asked for.
     pub fn calendar_action(&mut self, a: crate::calendar::ui::CalAction) {
         use crate::calendar::ui::CalAction;
@@ -2329,6 +2346,7 @@ impl ShaleApp {
                 Action::GotoMatch { rel, line, col } => self.goto_match(&rel, line, col),
                 Action::ShowView(v) => self.show_view(v, false),
                 Action::ShowViewInNewTab(v) => self.show_view(v, true),
+                Action::OpenCalendarDay(day) => self.open_calendar_day(day),
                 Action::OpenPost(hit) => self.open_post_hit(&hit),
                 Action::OpenMail(msg) => self.open_mail_hit(*msg),
                 Action::CloseTab(i) => self.close_tab(i),
@@ -2948,6 +2966,7 @@ pub fn handle_reader_action(app_actions: &mut Vec<Action>, a: ReaderAction, from
         ReaderAction::ToggleTask(offset) => app_actions.push(Action::ToggleTask { rel: from.to_path_buf(), offset }),
         ReaderAction::OpenFile(rel) => app_actions.push(Action::Open { rel, new_tab: false }),
         ReaderAction::OpenUrl(url) => app_actions.push(Action::OpenUrl(url)),
+        ReaderAction::OpenDay(day) => app_actions.push(Action::OpenCalendarDay(day)),
     }
 }
 

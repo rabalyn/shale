@@ -28,6 +28,8 @@ pub enum ReaderAction {
     OpenFile(PathBuf),
     /// A web link: open in the default browser.
     OpenUrl(String),
+    /// A date of a property card: show this day (a day number, `calendar::time`) in the calendar (EDIT-108).
+    OpenDay(i64),
 }
 
 /// What the reading view shows besides the text: the numbers of the headings by line (LINK-014)

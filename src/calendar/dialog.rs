@@ -515,14 +515,6 @@ fn date_text(day: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-fn parse_date(s: &str) -> Option<i64> {
-    let mut it = s.trim().splitn(3, '-');
-    let y: i32 = it.next()?.trim().parse().ok()?;
-    let m: u32 = it.next()?.trim().parse().ok()?;
-    let d: u32 = it.next()?.trim().parse().ok()?;
-    ((1..=12).contains(&m) && d >= 1 && d <= t::days_in_month(y, m)).then(|| t::days_from_civil(y, m, d))
-}
-
 /// "9", "09", "9:30", "09:30", "0930" → seconds after midnight.
 /// For tests: the time field's parser.
 #[cfg(test)]
@@ -622,7 +614,7 @@ impl EventDialog {
 
     /// The start the fields hold now, if it is complete (an all-day event has no time).
     fn start_now(&self) -> Option<(bool, i64, i64)> {
-        let sd = parse_date(&self.start_date)?;
+        let sd = t::parse_ymd(&self.start_date)?;
         Some((self.all_day, sd, if self.all_day { 0 } else { parse_time(&self.start_time)? }))
     }
 
@@ -633,7 +625,7 @@ impl EventDialog {
         if was == now || was.0 != now.0 {
             return;
         }
-        let end = parse_date(&self.end_date).zip(if self.all_day { Some(0) } else { parse_time(&self.end_time) });
+        let end = t::parse_ymd(&self.end_date).zip(if self.all_day { Some(0) } else { parse_time(&self.end_time) });
         if let Some(end) = end {
             let (ed, es) = moved_end((was.1, was.2), (now.1, now.2), end);
             self.end_date = date_text(ed);
@@ -699,7 +691,7 @@ impl EventDialog {
         let end = match self.end {
             EndMode::Never => RepeatEnd::Never,
             EndMode::Until => {
-                let day = parse_date(&self.until).ok_or("The last date of the repeat must look like 2026-12-31")?;
+                let day = t::parse_ymd(&self.until).ok_or("The last date of the repeat must look like 2026-12-31")?;
                 if day < start_day {
                     return Err("The repeat ends before the event starts".into());
                 }
@@ -715,8 +707,8 @@ impl EventDialog {
     }
 
     fn start_end(&self) -> Result<(i64, i64), String> {
-        let sd = parse_date(&self.start_date).ok_or("The start date must look like 2026-11-13")?;
-        let ed = parse_date(&self.end_date).ok_or("The end date must look like 2026-11-13")?;
+        let sd = t::parse_ymd(&self.start_date).ok_or("The start date must look like 2026-11-13")?;
+        let ed = t::parse_ymd(&self.end_date).ok_or("The end date must look like 2026-11-13")?;
         if self.all_day {
             if ed < sd {
                 return Err("The event ends before it starts".into());
@@ -818,7 +810,7 @@ impl EventDialog {
 
     /// Add the date in the "Skip" field to the dates the repeat leaves out.
     pub fn skip(&mut self) {
-        match parse_date(&self.skip_date) {
+        match t::parse_ymd(&self.skip_date) {
             Some(day) => {
                 if !self.skipped.iter().any(|r| r.day == day) {
                     self.skipped.push(SkipRow { day, original: None });
@@ -899,7 +891,7 @@ fn date_picker(ui: &mut Ui, key: &str, text: &mut String, monday_first: bool, re
     // only a click on a day closes it, so "‹" and "›" must not
     let config = egui::containers::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
     let (button, inner) = egui::containers::menu::MenuButton::new("📅").config(config).ui(ui, |ui| {
-        let sel = parse_date(text);
+        let sel = t::parse_ymd(text);
         let today = t::today();
         let (mut y, mut m) = ui.data(|d| d.get_temp::<(i32, u32)>(id)).unwrap_or_else(|| {
             let (y, m, _) = t::civil_from_days(sel.unwrap_or(today));
@@ -954,7 +946,7 @@ fn date_picker(ui: &mut Ui, key: &str, text: &mut String, monday_first: bool, re
     rects.push((format!("pick:{key}"), button.rect));
     if button.clicked() {
         // open on the month of the date in the field
-        let (y, m, _) = t::civil_from_days(parse_date(text).unwrap_or_else(t::today));
+        let (y, m, _) = t::civil_from_days(t::parse_ymd(text).unwrap_or_else(t::today));
         ui.data_mut(|d| d.insert_temp(id, (y, m)));
     }
     if let Some(inner) = inner {
