@@ -2,6 +2,8 @@
 # Checks the macOS and Windows code (`cfg`) on a Linux machine before it is pushed (DEV-015):
 # clippy for both targets, and with --wine the Windows tests under Wine. GitHub (BUILD-017) stays
 # the real check: it builds with MSVC, runs real Windows, and runs the macOS tests.
+# Note (FORGE-011, #415): the tests for macOS and Windows run only on GitHub, when it builds a
+# release; land.sh runs just clippy for them, so a test that fails there shows up at release time.
 #
 #   sh scripts/cross-check.sh                  clippy for Windows and macOS
 #   sh scripts/cross-check.sh windows          clippy for Windows only (or: macos)

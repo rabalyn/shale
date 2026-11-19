@@ -322,7 +322,9 @@ mod tests {
         assert_eq!(plan.lines(), "default-cache-ttl 86400\nmax-cache-ttl 86400\n");
         assert_eq!(plan.input(), "default-cache-ttl:0:86400\nmax-cache-ttl:0:86400\n");
         let text = plan.describe();
-        for part in ["/home/x/.gnupg/gpg-agent.conf", "default-cache-ttl 86400", "max-cache-ttl 86400", "###+++--- GPGConf ---+++###", "comments out earlier lines", "changes nothing else", "gpgconf --reload gpg-agent"] {
+        // the file is shown as `Path::join` builds it, with the separator of the platform
+        let file = Path::new("/home/x/.gnupg").join("gpg-agent.conf").display().to_string();
+        for part in [file.as_str(), "default-cache-ttl 86400", "max-cache-ttl 86400", "###+++--- GPGConf ---+++###", "comments out earlier lines", "changes nothing else", "gpgconf --reload gpg-agent"] {
             assert!(text.contains(part), "{part} in {text}");
         }
         assert_eq!([Choice::Hours8, Choice::Day1, Choice::Week1].map(|c| Plan::new(Path::new("/h"), c).seconds), [28800, 86400, 604800]);

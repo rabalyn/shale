@@ -6,20 +6,26 @@
 //! an entry, so a `PATH` from a terminal start stays as it is.
 
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
 
 /// Homebrew's folders: Apple silicon, then Intel.
 const HOMEBREW: [&str; 3] = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"];
 
 /// `current` (the value of `PATH`, if set) with the missing Homebrew folders appended.
+///
+/// A macOS `PATH` is always `:`-separated, so this splits and joins on `:` itself instead of with
+/// `std::env::split_paths`, which uses `;` on Windows; the result is the same on every platform
+/// (and the tests run everywhere). A `PATH` that is not valid UTF-8 is returned unchanged.
 pub fn extended_path(current: Option<&OsStr>) -> OsString {
-    let mut dirs: Vec<PathBuf> = current.map(|p| std::env::split_paths(p).collect()).unwrap_or_default();
+    let Some(text) = current.map_or(Some(""), OsStr::to_str) else {
+        return current.map(OsStr::to_os_string).unwrap_or_default();
+    };
+    let mut dirs: Vec<&str> = text.split(':').filter(|d| !d.is_empty()).collect();
     for extra in HOMEBREW {
-        if !dirs.iter().any(|d| d == std::path::Path::new(extra)) {
-            dirs.push(PathBuf::from(extra));
+        if !dirs.contains(&extra) {
+            dirs.push(extra);
         }
     }
-    std::env::join_paths(dirs).unwrap_or_else(|_| current.map(OsStr::to_os_string).unwrap_or_default())
+    OsString::from(dirs.join(":"))
 }
 
 /// Puts the extended path into this process's environment.
@@ -36,7 +42,7 @@ mod tests {
     use super::*;
 
     fn paths(p: &OsStr) -> Vec<String> {
-        std::env::split_paths(p).map(|d| d.to_string_lossy().into_owned()).collect()
+        p.to_str().unwrap().split(':').map(str::to_owned).collect()
     }
 
     // spec: BUILD-018
