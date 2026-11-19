@@ -6,20 +6,24 @@
 //! an entry, so a `PATH` from a terminal start stays as it is.
 
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
 
 /// Homebrew's folders: Apple silicon, then Intel.
 const HOMEBREW: [&str; 3] = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"];
 
+/// macOS PATH entries are separated by `:`. Use it explicitly rather than
+/// `std::env::split_paths`/`join_paths`: those use the host's separator (`;` on
+/// Windows), which would treat a `:`-separated macOS PATH as a single entry.
+const PATH_SEPARATOR: char = ':';
+
 /// `current` (the value of `PATH`, if set) with the missing Homebrew folders appended.
 pub fn extended_path(current: Option<&OsStr>) -> OsString {
-    let mut dirs: Vec<PathBuf> = current.map(|p| std::env::split_paths(p).collect()).unwrap_or_default();
+    let mut dirs: Vec<String> = current.map(|p| p.to_string_lossy().split(PATH_SEPARATOR).map(str::to_owned).collect()).unwrap_or_default();
     for extra in HOMEBREW {
-        if !dirs.iter().any(|d| d == std::path::Path::new(extra)) {
-            dirs.push(PathBuf::from(extra));
+        if !dirs.iter().any(|d| d == extra) {
+            dirs.push((*extra).to_owned());
         }
     }
-    std::env::join_paths(dirs).unwrap_or_else(|_| current.map(OsStr::to_os_string).unwrap_or_default())
+    dirs.join(&PATH_SEPARATOR.to_string()).into()
 }
 
 /// Puts the extended path into this process's environment.
@@ -36,7 +40,7 @@ mod tests {
     use super::*;
 
     fn paths(p: &OsStr) -> Vec<String> {
-        std::env::split_paths(p).map(|d| d.to_string_lossy().into_owned()).collect()
+        p.to_string_lossy().split(PATH_SEPARATOR).map(str::to_owned).collect()
     }
 
     // spec: BUILD-018
@@ -57,5 +61,12 @@ mod tests {
     #[test]
     fn build_018_an_unset_path_becomes_the_homebrew_folders() {
         assert_eq!(paths(&extended_path(None)), HOMEBREW);
+    }
+
+    // spec: BUILD-018
+    #[test]
+    fn build_018_the_colon_separator_is_used_on_every_host() {
+        let got = extended_path(Some(OsStr::new("/a:/b")));
+        assert_eq!(got.to_string_lossy(), "/a:/b:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin");
     }
 }
