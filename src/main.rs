@@ -47,6 +47,7 @@ mod fsutil;
 mod galley_index;
 mod gitsync;
 mod graph;
+mod graph_tree;
 mod import;
 mod instance;
 mod jobs;
