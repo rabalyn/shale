@@ -105,7 +105,7 @@ fn a_word_file_with_text_becomes_a_note_with_the_markdown_of_the_filter() {
     assert!(props.contains(&"print-title: false") && !props.iter().any(|p| p.starts_with("source")), "the look is there, the original is not kept: {props:?}");
     let expected = "# Sample\n\n# Heading one\n\n## Bold heading\n\n\
 Plain text with **bold**, *italic*, <u>under</u>, ~~gone~~, H<sub>2</sub>O, x<sup>2</sup> and `code`.\n\n\
-A line\nbreak, small caps and ==marked== text.\n\n\
+A line\nbreak, small caps and <mark style=\"background: #FFFF00;\">marked</mark> text.\n\n\
 A [web link](https://example.com), a link to the heading and a footnote.[^1]\n\n\
 > A block quote over two lines.\n\n\
 - first\n  - nested\n  - nested too\n- second\n\n\
@@ -443,7 +443,7 @@ fn a_styled_word_file_keeps_its_page_its_body_its_colours_and_its_title() {
     let folder = format!("{}/import_docx_styled", month_dir());
     let expected_props = format!(
         "---\nsource: \"[[{folder}/styled.docx]]\"\nprint-paper: Letter\nprint-margins: 20 25 20 30\nprint-font: serif\nprint-font-size: 12\nprint-line-spacing: 1.15\n\
-print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496\"\nprint-break-before: 1\nprint-title: false\nprint-toc: false\n---\n\n"
+print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496\"\nprint-heading-weight: bold\nprint-heading-sizes: \"20 16 14 12 12 12\"\nprint-break-before: 1\nprint-title: false\nprint-toc: false\nnumbered-headings: false\n---\n\n"
     );
     assert!(text.starts_with(&expected_props), "{text}");
     let body = &text[expected_props.len()..];
@@ -452,7 +452,8 @@ print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496
     // IMP-041
     assert!(body.contains("<span style=\"color: #C00000;\">red text</span>"), "{body}");
     assert!(body.contains("<mark style=\"background: #00FF00;\">green highlight</mark>"), "{body}");
-    assert!(body.contains("a ==yellow highlight=="), "plain yellow stays pandoc's own mark: {body}");
+    assert!(body.contains("a <mark style=\"background: #FFFF00;\">yellow highlight</mark>"), "yellow is Word's FFFF00 too: {body}");
+    assert!(!body.contains("=="), "no pandoc mark is left: {body}");
     assert!(body.contains("**<span style=\"color: #0000FF;\">bold blue</span>** and on"), "white space stays outside, so the emphasis works: {body}");
     assert!(body.contains("<span style=\"color: #00B050;\"><mark style=\"background: #FFC000;\">green on orange</mark></span>"), "{body}");
     assert!(body.contains("<span style=\"color: #7030A0;\">purple by style</span> and on"), "a colour from a character style: {body}");
@@ -474,7 +475,9 @@ fn a_file_made_by_pandoc_alone_has_its_properties_and_a_heading_for_its_title() 
     let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
     let (props, body) = split_props(&text);
     assert!(!props.iter().any(|p| p.starts_with("source")), "the block is there although the original is not kept: {props:?}");
-    assert_eq!(props[props.len() - 2..], ["print-title: false", "print-toc: false"], "{props:?}");
+    assert_eq!(props[props.len() - 3..], ["print-title: false", "print-toc: false", "numbered-headings: false"], "{props:?}");
+    // the body font is the theme font Aptos (minorHAnsi in the theme of the file), which is sans (#366)
+    assert!(props.contains(&"print-font: sans"), "{props:?}");
     assert!(body.starts_with("# Sample\n\n# Heading one\n"), "the title of the file is a heading: {body}");
 }
 

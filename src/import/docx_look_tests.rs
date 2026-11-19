@@ -48,10 +48,16 @@ fn a_full_look_gives_the_properties_in_the_order_of_the_contract() {
             "print-paragraph-spacing: 8",
             "print-align: justify",
             "print-heading-color: \"#0F4761\"",
+            "print-heading-weight: normal",
             "print-title: false",
             "print-toc: false",
+            "numbered-headings: false",
         ]
     );
+    // a Heading 1 that is bold, with a size for every level: the two keys after the colour
+    let rest: String = (1..=6).map(|n| format!(r#"<w:style w:type="paragraph" w:styleId="Heading{n}"><w:rPr>{}<w:sz w:val="{}"/></w:rPr></w:style>"#, if n == 1 { "<w:b/>" } else { "" }, 32 - n * 2)).collect();
+    let all = props(&read(&doc(&sect(11906, 16838, "")), Some(&styles("", &rest)), None));
+    assert_eq!(all[all.len() - 5..], ["print-heading-weight: bold", "print-heading-sizes: \"15 14 13 12 11 10\"", "print-title: false", "print-toc: false", "numbered-headings: false"]);
 }
 
 // spec: IMP-040
@@ -120,6 +126,10 @@ fn theme_fonts_are_resolved_and_a_theme_font_wins_over_a_name() {
     assert_eq!(font(&s(r#"<w:rFonts w:asciiTheme="majorHAnsi"/>"#, "")).as_deref(), Some("print-font: serif"));
     assert_eq!(font(&s(r#"<w:rFonts w:hAnsiTheme="minorBidi"/>"#, "")).as_deref(), Some("print-font: sans"));
     assert_eq!(font(&s(r#"<w:rFonts w:ascii="Courier New" w:asciiTheme="minorHAnsi"/>"#, "")).as_deref(), Some("print-font: sans"));
+    // a theme whose minor font is Cambria (the font of Word 2007 to 2010 files, #366) is a serif
+    let cambria = THEME.replace(r#"<a:latin typeface="Aptos"/>"#, r#"<a:latin typeface="Cambria"/>"#);
+    let serif = props(&read(&doc(""), Some(&s(r#"<w:rFonts w:asciiTheme="minorHAnsi"/>"#, "")), Some(&cambria)));
+    assert!(serif.contains(&"print-font: serif".to_string()), "{serif:?}");
     // Normal overrides the defaults
     let normal = r#"<w:style w:type="paragraph" w:styleId="Normal"><w:rPr><w:rFonts w:ascii="Courier New"/></w:rPr></w:style>"#;
     assert_eq!(font(&s(r#"<w:rFonts w:asciiTheme="minorHAnsi"/>"#, normal)).as_deref(), Some("print-font: mono"));
@@ -231,7 +241,7 @@ fn a_coloured_run_gets_sentinels_around_its_text_with_the_white_space_outside() 
 // spec: IMP-041
 #[test]
 fn runs_without_a_colour_or_with_auto_black_or_no_text_are_left_alone() {
-    for rpr in [r#"<w:b/>"#, r#"<w:color w:val="auto"/>"#, r#"<w:color w:val="000000"/>"#, r#"<w:color w:val="zzzzzz"/>"#, r#"<w:highlight w:val="yellow"/>"#, r#"<w:highlight w:val="none"/>"#] {
+    for rpr in [r#"<w:b/>"#, r#"<w:color w:val="auto"/>"#, r#"<w:color w:val="000000"/>"#, r#"<w:color w:val="zzzzzz"/>"#, r#"<w:highlight w:val="none"/>"#] {
         assert_eq!(tag_one(&doc(&format!("<w:p>{}</w:p>", run(rpr, "x")))), None, "{rpr}");
     }
     assert_eq!(tag_one(&doc("<w:p><w:r><w:t>no properties</w:t></w:r></w:p>")), None);
@@ -241,16 +251,18 @@ fn runs_without_a_colour_or_with_auto_black_or_no_text_are_left_alone() {
 
 // spec: IMP-041
 #[test]
-fn a_highlight_other_than_yellow_is_tagged_and_its_element_taken_out_but_yellow_stays_for_pandoc() {
+fn every_highlight_yellow_too_is_tagged_in_its_real_colour_and_its_element_taken_out() {
     let d = doc(&format!("<w:p>{}</w:p>", run(r#"<w:highlight w:val="darkGreen"/>"#, "marked")));
     let tagged = tag_one(&d).unwrap();
     assert!(tagged.contains("\u{E000}h:008000\u{E001}marked\u{E003}") && !tagged.contains("w:highlight"), "{tagged}");
     // a colour and a highlight: the colour outside
     let both = tag_one(&doc(&format!("<w:p>{}</w:p>", run(r#"<w:color w:val="0000FF"/><w:highlight w:val="red"/>"#, "x")))).unwrap();
     assert!(both.contains("\u{E000}c:0000FF\u{E001}\u{E000}h:FF0000\u{E001}x\u{E003}\u{E002}") && !both.contains("w:highlight"), "{both}");
-    // yellow: the run keeps its highlight, but its colour is tagged
+    // yellow is Word's FFFF00 like the others, and its element is taken out as well (#366)
     let yellow = tag_one(&doc(&format!("<w:p>{}</w:p>", run(r#"<w:color w:val="0000FF"/><w:highlight w:val="yellow"/>"#, "x")))).unwrap();
-    assert!(yellow.contains(r#"<w:highlight w:val="yellow"/>"#) && !yellow.contains("h:"), "{yellow}");
+    assert!(yellow.contains("\u{E000}c:0000FF\u{E001}\u{E000}h:FFFF00\u{E001}x\u{E003}\u{E002}") && !yellow.contains("w:highlight"), "{yellow}");
+    let plain_yellow = tag_one(&doc(&format!("<w:p>{}</w:p>", run(r#"<w:highlight w:val="yellow"/>"#, "y")))).unwrap();
+    assert!(plain_yellow.contains("\u{E000}h:FFFF00\u{E001}y\u{E003}") && !plain_yellow.contains("w:highlight"), "{plain_yellow}");
     // shading is a highlight colour
     let shaded = tag_one(&doc(&format!("<w:p>{}</w:p>", run(r#"<w:shd w:val="clear" w:color="auto" w:fill="ffc000"/>"#, "x")))).unwrap();
     assert!(shaded.contains("\u{E000}h:FFC000\u{E001}x\u{E003}"), "{shaded}");
@@ -435,7 +447,7 @@ fn a_heading_style_with_page_break_before_gives_the_property_and_no_markers() {
     let pbb = "<w:pPr><w:pageBreakBefore/></w:pPr>";
     let on = st(pbb, "");
     let p = props(&read(&doc(""), Some(&on), None));
-    assert_eq!(p[p.len() - 3..], ["print-break-before: 1", "print-title: false", "print-toc: false"]);
+    assert_eq!(p[p.len() - 5..], ["print-heading-weight: normal", "print-break-before: 1", "print-title: false", "print-toc: false", "numbered-headings: false"]);
     // the style of level 2 alone gives its level, found by its name; the lowest level wins
     assert!(props(&read(&doc(""), Some(&st("", pbb)), None)).contains(&"print-break-before: 2".to_string()));
     assert!(props(&read(&doc(""), Some(&st(pbb, pbb)), None)).contains(&"print-break-before: 1".to_string()));
@@ -628,4 +640,91 @@ fn tint_lifts_the_lightness_towards_white_and_shade_pulls_it_towards_black() {
     assert_eq!(r(r#"<w:color w:themeColor="accent2" w:themeShade="80"/>"#), "800000:x");
     assert_eq!(r(r#"<w:color w:themeColor="accent2" w:themeTint="FF"/>"#), "FF0000:x", "tint FF keeps the colour");
     assert_eq!(r(r#"<w:color w:themeColor="accent2" w:themeTint="00"/>"#), "FFFFFF:x", "tint 00 is white");
+}
+
+fn h_styles(rest: &str) -> String {
+    styles(r#"<w:rPrDefault><w:rPr><w:sz w:val="22"/></w:rPr></w:rPrDefault>"#, rest)
+}
+
+fn get(p: &[String], key: &str) -> Option<String> {
+    p.iter().find_map(|x| x.strip_prefix(&format!("{key}: ")).map(String::from))
+}
+
+// spec: IMP-040
+#[test]
+fn the_heading_weight_is_bold_when_heading_1_is_bold_through_its_style_its_base_or_the_defaults() {
+    let weight = |defaults: &str, rest: &str| get(&props(&read(&doc(""), Some(&styles(defaults, rest)), None)), "print-heading-weight");
+    let h1 = |rpr: &str, based: &str| format!(r#"<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/>{based}<w:rPr>{rpr}</w:rPr></w:style>"#);
+    assert_eq!(weight("", &h1("<w:b/>", "")).as_deref(), Some("bold"));
+    assert_eq!(weight("", &h1(r#"<w:b w:val="1"/>"#, "")).as_deref(), Some("bold"));
+    for off in ["0", "false", "off"] {
+        assert_eq!(weight("", &h1(&format!(r#"<w:b w:val="{off}"/>"#), "")).as_deref(), Some("normal"), "{off}");
+    }
+    assert_eq!(weight("", &h1("", "")).as_deref(), Some("normal"));
+    // through basedOn; the nearest statement wins
+    let base = r#"<w:style w:type="paragraph" w:styleId="Base"><w:rPr><w:b/></w:rPr></w:style>"#;
+    assert_eq!(weight("", &format!("{}{base}", h1("", r#"<w:basedOn w:val="Base"/>"#))).as_deref(), Some("bold"));
+    assert_eq!(weight("", &format!("{}{base}", h1(r#"<w:b w:val="0"/>"#, r#"<w:basedOn w:val="Base"/>"#))).as_deref(), Some("normal"));
+    // the document defaults
+    assert_eq!(weight("<w:rPrDefault><w:rPr><w:b/></w:rPr></w:rPrDefault>", &h1("", "")).as_deref(), Some("bold"));
+    // a loop in basedOn ends the chain
+    let looped = r#"<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Heading1"/></w:style>"#;
+    assert_eq!(weight("", looped).as_deref(), Some("normal"));
+    // no Heading 1, no styles: no key
+    assert_eq!(weight("", ""), None);
+    assert_eq!(get(&props(&read(&doc(""), None, None)), "print-heading-weight"), None);
+}
+
+// spec: IMP-040
+#[test]
+fn the_heading_sizes_are_in_points_for_levels_one_to_six_through_based_on_and_left_out_when_one_is_missing() {
+    let level = |n: u8, based: &str, sz: Option<&str>| {
+        let rpr = sz.map(|z| format!(r#"<w:rPr><w:sz w:val="{z}"/></w:rPr>"#)).unwrap_or_default();
+        format!(r#"<w:style w:type="paragraph" w:styleId="Heading{n}"><w:name w:val="heading {n}"/>{based}{rpr}</w:style>"#)
+    };
+    let sizes = |rest: &str| get(&props(&read(&doc(""), Some(&h_styles(rest)), None)), "print-heading-sizes");
+    let all: String = [("32", 1), ("26", 2), ("24", 3), ("22", 4), ("23", 5), ("21", 6)].iter().map(|(z, n)| level(*n, "", Some(z))).collect();
+    assert_eq!(sizes(&all).as_deref(), Some("\"16 13 12 11 11.5 10.5\""), "numbers without trailing .0, quoted");
+    // a size through basedOn (the nearest wins) and the size of the document defaults for a level with none
+    let based = format!(
+        "{}{}{}{}{}{}{}",
+        level(1, "", Some("32")),
+        level(2, r#"<w:basedOn w:val="Heading1"/>"#, None),
+        level(3, r#"<w:basedOn w:val="Heading2"/>"#, Some("24")),
+        level(4, "", None),
+        level(5, "", None),
+        level(6, "", None),
+        r#"<w:style w:type="paragraph" w:styleId="Other"/>"#
+    );
+    assert_eq!(sizes(&based).as_deref(), Some("\"16 16 12 11 11 11\""));
+    // a level that is not there, or no size anywhere: the whole key is left out
+    let missing: String = (1..=5).map(|n| level(n, "", Some("24"))).collect();
+    assert_eq!(sizes(&missing), None);
+    let no_default = styles("", &(1..=6).map(|n| level(n, "", if n == 6 { None } else { Some("24") })).collect::<String>());
+    assert_eq!(get(&props(&read(&doc(""), Some(&no_default), None)), "print-heading-sizes"), None);
+    // the key sits after the weight
+    let p = props(&read(&doc(""), Some(&h_styles(&all)), None));
+    let at = |k: &str| p.iter().position(|x| x.starts_with(k)).unwrap();
+    assert!(at("print-heading-weight") < at("print-heading-sizes") && at("print-heading-sizes") < at("print-title"), "{p:?}");
+}
+
+// spec: IMP-040
+#[test]
+fn headings_are_not_numbered_unless_heading_1_has_a_numbering_through_its_style_or_its_base() {
+    let h1 = |ppr: &str, based: &str| format!(r#"<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/>{based}<w:pPr>{ppr}</w:pPr></w:style>"#);
+    let num = |rest: &str| get(&props(&read(&doc(""), Some(&styles("", rest)), None)), "numbered-headings");
+    assert_eq!(num(&h1("", "")).as_deref(), Some("false"));
+    assert_eq!(num(&h1(r#"<w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr>"#, "")), None, "numbered: the key is not written");
+    assert_eq!(num(&h1(r#"<w:numPr><w:numId w:val="0"/></w:numPr>"#, "")).as_deref(), Some("false"), "numId 0 is no numbering");
+    assert_eq!(num(&h1(r#"<w:numPr><w:ilvl w:val="0"/></w:numPr>"#, "")).as_deref(), Some("false"), "no numId");
+    let base = |ppr: &str| format!(r#"<w:style w:type="paragraph" w:styleId="Base"><w:pPr>{ppr}</w:pPr></w:style>"#);
+    let based = r#"<w:basedOn w:val="Base"/>"#;
+    assert_eq!(num(&format!("{}{}", h1("", based), base(r#"<w:numPr><w:numId w:val="2"/></w:numPr>"#))), None, "through basedOn");
+    assert_eq!(num(&format!("{}{}", h1(r#"<w:numPr><w:numId w:val="0"/></w:numPr>"#, based), base(r#"<w:numPr><w:numId w:val="2"/></w:numPr>"#))).as_deref(), Some("false"), "the nearest statement wins");
+    // no Heading 1 at all: not numbered; no styles to tell: nothing written
+    assert_eq!(num("").as_deref(), Some("false"));
+    assert_eq!(get(&props(&read(&doc(""), None, None)), "numbered-headings"), None);
+    // it is the last property, after print-toc
+    let p = props(&read(&doc(""), Some(&styles("", &h1("", ""))), None));
+    assert_eq!(p.last().map(String::as_str), Some("numbered-headings: false"));
 }
