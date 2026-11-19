@@ -420,6 +420,72 @@ Skipped here (no failure):
 `worst.memory.growth` runs 1000 frames after one warm-up run of the same 1000; its `Kept` is what
 the second run left behind.
 
+## Before/after (phase 2)
+
+Three results: the **baseline** (`4ec690f`, above, a single run), **X** = `c82f693` (the harness
+merged with the then-current `main`, before the fixes of #377 to #386; it already had the editor
+cache of #372) and **Y** = `4858dc5` (the fixes, plus the benchmark tooling of BUILD-036/037). X and Y
+were run three times each (`worst`: twice), interleaved, with `scripts/bench-compare.sh c82f693
+4858dc5` on a shared 28-thread computer (load average 3 to 11 before a run; 22.9 and 16.7 at the end
+of the `full` runs of X and Y, so the times carry the spread of the runs: the full tables are
+[`compare/c82f693-4858dc5.md`](compare/c82f693-4858dc5.md) and `-worst.md`; `.json` for tools; stored
+results `results/c82f693.json`, `results/4858dc5.json` and the same in `results-worst/`). Medians
+(the best of the runs); allocations per iteration; the verdict is that of `compare.json`.
+
+| Scenario | Baseline | X | Y | Allocations X -> Y | Verdict (time / allocs) |
+|---|---:|---:|---:|---:|---|
+| `ui.frame.idle.large` | 110.59 ms | 30.64 ms | **0.75 ms** | 208,909 -> 2,698 | faster / fewer |
+| `ui.frame.sidebar.large` | 131.95 ms | 47.47 ms | 17.38 ms | 267,905 -> 61,694 | faster / fewer |
+| `ui.frame.editor.long` | 189.95 ms | 31.72 ms | **1.57 ms** | 208,033 -> 3,845 | faster / fewer |
+| `ui.type.editor.long` | 161.28 ms | 124.73 ms | 30.51 ms | 2,835,784 -> 150,303 | faster / fewer |
+| `ui.scroll.editor.long` | 133.81 ms | 31.75 ms | **1.60 ms** | 208,162 -> 3,969 | faster / fewer |
+| `ui.frame.backlinks.large` | 470.61 ms | 357.18 ms | **10.07 ms** | 606,655 -> 52,527 | faster / fewer |
+| `ui.frame.tasks.large` | 566.46 ms | 485.71 ms | **1.15 ms** | 3,491,247 -> 4,235 | faster / fewer |
+| `ui.frame.graph.small` | 3.80 ms | 1.71 ms | **2.43 ms** | 2,449 -> 5,455 | REGRESSION / REGRESSION |
+| `ui.frame.graph.large` | 312.91 ms | 230.13 ms | 25.25 ms | 2,328 -> 17,934 | faster / tradeoff |
+| `ui.frame.drawing.large` | 107.38 ms | 35.16 ms | **4.75 ms** | 227,559 -> 21,353 | faster / fewer |
+| `ui.frame.reading.long` | 124.08 ms | 34.46 ms | **4.32 ms** | 246,634 -> 42,446 | faster / fewer |
+| `ui.frame.calendar.large` | 17.30 ms | 14.72 ms | **0.82 ms** | 82,658 -> 3,154 | faster / fewer |
+| `ui.frame.social.large` | 39.73 ms | 35.37 ms | **0.81 ms** | 267,283 -> 11,065 | faster / fewer |
+| `ui.frame.math.note` / `tables.note` / `code.note` | 1.15 / 0.99 / 1.41 ms | 0.47 / 0.44 / 0.50 ms | 0.19 / 0.15 / 0.18 ms | about 2,900 -> 800 | faster / fewer |
+| `ui.frame.mail.large` | 2.10 ms | 0.23 ms | 0.23 ms | 2,327 -> 2,327 | ok / ok |
+| `vault.open.large` | 154.94 ms | 144.93 ms | 72.77 ms | 931,321 -> 857,572 | faster / fewer |
+| `vault.rescan.large` | 512.86 ms | 496.77 ms | 8.34 ms | 179,432 -> 100,634 | faster / fewer |
+| `startup.app.large` | 1.25 s | 580.09 ms | 131.05 ms | 7,525,894 -> 1,639,701 | faster / fewer |
+| `worst.startup` | 2.55 s | 1.32 s | 752.32 ms | 9,908,881 -> 4,963,539 | faster / fewer |
+| `worst.frame.idle` | 136.28 ms | 34.55 ms | **1.55 ms** | 220,420 -> 3,919 | faster / fewer |
+| `worst.frame.typing` | 163.29 ms | 127.38 ms | 30.78 ms | 2,852,985 -> 150,425 | faster / fewer |
+| `worst.views.cycle` | 3.67 s | 2.56 s | 140.59 ms | 9,695,705 -> 378,064 | faster / fewer |
+| `worst.memory.growth` (1000 frames, twice) | 561.08 s | 139.88 s | 27.63 s | 1,059 M -> 111 M | faster / fewer |
+
+**Bold** = inside the 16.7 ms budget of a frame at 60 Hz. Still over it: `ui.frame.sidebar.large`
+(17.4 ms, every folder open), `ui.type.editor.long` and `worst.frame.typing` (30 ms: a keystroke
+in a 200 KB note, #375), `ui.frame.graph.large` (25 ms, bounded by the 6 ms budget of the physics
+plus the drawing of 5000 nodes). Overall verdict of the `full` comparison: `regression`
+(exit code 1) by three scenarios (below), 35 scenarios faster, 9 noisy, 1 changed; `worst`:
+`faster` (exit 0), all five.
+
+What the comparison flags, and what it is:
+
+- `ui.frame.graph.small` (+42 % time, +123 % allocations; 1.7 -> 2.4 ms) and `graph.layout.small`
+  (+50 % time and +51 % allocations: 10 steps of 200 notes, 4.1 -> 6.2 ms): a real regression of
+  #382: the new force routine (`graph_tree::forces`) allocates per step even below 300 notes,
+  where the old pair loop did not. Small in absolute terms, a few hundred microseconds a frame.
+- `index.unlinked.large` +79 % peak bytes (112 -> 200 KiB): the per-note cache (#377) keeps its
+  result; the time is 30 % lower and allocations 38 % fewer (inside the spread of the runs, so the
+  time says `noisy`). Accepted.
+- `ui.frame.graph.large` / `graph.layout.large`: more allocations (the quadtree) for 9 to 5 times less
+  time: `tradeoff`, not a regression. `worst.startup`: 5.8 % more peak for half the time.
+- `calendar.occurrences.year.large` is `changed` (version 2, see above) and has no verdict.
+- Noisy (moved over 10 % inside the spread, shared computer): `index.backlinks.large`,
+  `math.typeset.formulas`, `table.parse.long`, `social.index.add.large`, `pdf.export.note.long`
+  (the last two are I/O and compression bound).
+
+A first comparison of `c4918fe` itself (before the harness waited for quiet threads) said 19
+regressions in scenarios nobody touched (`syntax.highlight.long`, `table.parse.long`, ...): a
+background job left behind by a fast graph frame was counted into the following scenarios'
+allocations. See "Quiet threads" above; this is why Y is `4858dc5` and not `c4918fe`.
+
 ## What the baseline says: the weak spots, in the order to fix them
 
 Ranked by what a person feels: a frame over 16.7 ms is a stutter, over 100 ms is a freeze. The
@@ -474,8 +540,14 @@ Smaller things the numbers show:
 
 **Phase 2 (commits after the merge of `origin/main`, 2026-11-19):** the fixes above are in. The benchmark
 scenario `calendar.occurrences.year.large` now shifts its year by a day each iteration, because the
-store keeps the ranges it made and the old scenario would have measured the cache; compare it only
-with results made after that change.
+store keeps the ranges it made and the old scenario would have measured the cache; it is version 2
+now, so a comparison across the change says `changed`.
+
+**Status after phase 2** (see "Before/after"): weak spots 1, 2, 3, 4, 5 (editor cache, #372), 6, 9, 10
+and 12 are fixed; 7 (the vault open waits for the index), 8 (search not on a worker thread), 11
+(`quick_check`, the owner decides) and 14 (PDF compression level) are partly fixed; 13 found no
+growth. Open: a keystroke in a very large note (30 ms, #375), the file list with every folder open
+(17 ms), and the small-graph regression of #382 (issue below).
 
 ### How to use this list
 

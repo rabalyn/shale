@@ -1,0 +1,99 @@
+{
+  "schema": 2,
+  "commit": "c82f6937a015d85e003f00e3833bff21d57e9d1d",
+  "describe": "v0.6.3-9-gc82f693",
+  "date": "2026-11-19T14:02:13Z",
+  "host": {
+    "cpu": "Intel(R) Core(TM) i7-14700KF",
+    "cores": 28,
+    "os": "linux x86_64 7.3.4-1-cachyos",
+    "load": 10.36
+  },
+  "profile": "bench-release",
+  "scenarios": [
+    {
+      "id": "worst.startup",
+      "iters": 3,
+      "median_ns": 1322594425,
+      "p95_ns": 1323073146,
+      "min_ns": 1320323443,
+      "allocs": 9908881,
+      "alloc_bytes": 1442338690,
+      "peak_bytes": 131920671,
+      "retained_bytes": 96,
+      "version": 1,
+      "run_medians_ns": [
+        1329744312,
+        1322594425
+      ]
+    },
+    {
+      "id": "worst.frame.idle",
+      "iters": 60,
+      "median_ns": 34545204,
+      "p95_ns": 35440628,
+      "min_ns": 33790368,
+      "allocs": 220420,
+      "alloc_bytes": 62413339,
+      "peak_bytes": 19365080,
+      "retained_bytes": 1920,
+      "version": 1,
+      "run_medians_ns": [
+        34775699,
+        34545204
+      ]
+    },
+    {
+      "id": "worst.frame.typing",
+      "iters": 30,
+      "median_ns": 127375795,
+      "p95_ns": 128747687,
+      "min_ns": 125013285,
+      "allocs": 2852985,
+      "alloc_bytes": 221968855,
+      "peak_bytes": 22278171,
+      "retained_bytes": 4981429,
+      "version": 1,
+      "run_medians_ns": [
+        128989645,
+        127375795
+      ]
+    },
+    {
+      "id": "worst.views.cycle",
+      "iters": 3,
+      "median_ns": 2560992828,
+      "p95_ns": 2569990509,
+      "min_ns": 2101176081,
+      "allocs": 9695705,
+      "alloc_bytes": 1747013167,
+      "peak_bytes": 232378991,
+      "retained_bytes": 125635847,
+      "version": 1,
+      "run_medians_ns": [
+        2655184859,
+        2560992828
+      ]
+    },
+    {
+      "id": "worst.memory.growth",
+      "iters": 1,
+      "median_ns": 139884495495,
+      "p95_ns": 139884495495,
+      "min_ns": 139884495495,
+      "allocs": 1059421194,
+      "alloc_bytes": 155211869331,
+      "peak_bytes": 192793031,
+      "retained_bytes": 532214,
+      "version": 1,
+      "run_medians_ns": [
+        143051500754,
+        139884495495
+      ]
+    }
+  ],
+  "skipped": [],
+  "run": "worst",
+  "peak_rss_kb": 730768,
+  "repeats": 2
+}

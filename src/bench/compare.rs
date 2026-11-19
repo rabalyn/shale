@@ -393,8 +393,11 @@ pub fn summary_line(c: &Comparison) -> String {
 pub fn busy_note(c: &Comparison) -> Option<String> {
     c.busy.then(|| {
         format!(
-            "note: the computer was busy during a run (load average {:?} for X, {:?} for Y, {} and {} cores): times are less steady (a time regression under {LOW_CONFIDENCE_BELOW_PCT} % has confidence low: run it again with --filter), counts and peaks are not affected",
-            c.x.load, c.y.load, c.x.cores, c.y.cores
+            "note: the computer was busy during a run (load average {} for X, {} for Y, {} and {} cores): times are less steady (a time regression under {LOW_CONFIDENCE_BELOW_PCT} % has confidence low: run it again with --filter), counts and peaks are not affected",
+            c.x.load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
+            c.y.load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
+            c.x.cores,
+            c.y.cores
         )
     })
 }
