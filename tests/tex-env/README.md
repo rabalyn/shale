@@ -27,6 +27,12 @@ The `tex_env` tests share nothing (own work folders, a fresh container per compi
 `.forgejo/scripts/env-tests.sh run` (and so `scripts/land.sh`) uses four test threads, `SHALE_ENV_TESTS_TEX_THREADS`
 sets the number (the demos test starts four compiles itself; #370). `tex_import` and `tex_install` run with one thread.
 
+**A local TeX Live mirror** (DEV-025, #371): `SHALE_TEX_ENV_REPOSITORY=<url of a tlnet mirror>` makes `build` pass
+`--build-arg TL_REPO=<url>` to the engine, and `SHALE_TEX_INSTALL_REPOSITORY=<url>` makes the `tex_install` test install
+from it; both unset keeps the default repository. `scripts/land.sh` sets both for you from `SHALE_TEX_MIRROR` or the first
+line of `<git dir>/land/tex-mirror` (`git rev-parse --git-common-dir`; not committed; the variable wins; `https://` or `http://`,
+for example `https://texlive.example.test/tlnet`). CI does not read it. `scripts/test-tex-env.sh` tests the pass-on.
+
 **Failed compiles keep their log** (#327): `SHALE_TEX_FAILED_LOGS=<folder>` makes every failed compile of the tests (Shale's
 own `compile` and the demos of `tex_env`) copy its full `.log` into that folder as `<pid>-<n>-<name>.log` before its work
 folder is removed, so a failure that does not come again can still be read. `.forgejo/scripts/env-tests.sh run` (and so

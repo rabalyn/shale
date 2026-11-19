@@ -3,6 +3,8 @@
 # replaced by LAND_CHECK_CMD, so the test is about merging, refusing and pushing.
 #   bash scripts/test-land.sh
 set -u
+# the person's own settings must not leak into the test (DEV-025)
+unset SHALE_TEX_MIRROR SHALE_TEX_INSTALL_REPOSITORY SHALE_TEX_ENV_REPOSITORY
 LAND="$(cd "$(dirname "$0")" && pwd)/land.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -130,6 +132,33 @@ branch nocheckout i.txt i
 expect "a local main that is not checked out anywhere moves as a ref" 0 "local main is now" nocheckout
 check "the ref of local main is the landed commit" '[ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ]'
 check "no landing worktree is left behind" '! git worktree list | grep -Fq land/worktree'
+
+# the TeX Live mirror (DEV-025, #371): the check command prints what it sees of the variables
+branch tex1 t1.txt t1
+export LAND_CHECK_CMD='echo "seen install=[${SHALE_TEX_INSTALL_REPOSITORY-unset}] env=[${SHALE_TEX_ENV_REPOSITORY-unset}]"'
+expect "dev_025: no mirror set: the default line is printed and neither variable is exported" 0 "seen install=[unset] env=[unset]" tex1
+check "dev_025: the default line names the variable and the file" 'printf "%s" "$OUT" | grep -Fq "TeX Live: the default repository (no mirror set: SHALE_TEX_MIRROR or $LANDDIR/tex-mirror)"'
+branch tex2 t2.txt t2
+SHALE_TEX_MIRROR=https://texlive.example.test/tlnet/ expect "dev_025: SHALE_TEX_MIRROR is exported as both variables, the trailing / trimmed" 0 "seen install=[https://texlive.example.test/tlnet] env=[https://texlive.example.test/tlnet]" tex2
+check "dev_025: the mirror line says where it is from" 'printf "%s" "$OUT" | grep -Fq "TeX Live: the mirror https://texlive.example.test/tlnet (from SHALE_TEX_MIRROR)"'
+branch tex3 t3.txt t3
+printf '# the homelab\n\n  http://file.example.test/tlnet  \nhttps://second.example.test/tlnet\n' > "$LANDDIR/tex-mirror"
+expect "dev_025: the first line of the file that is no comment is used" 0 "seen install=[http://file.example.test/tlnet] env=[http://file.example.test/tlnet]" tex3
+check "dev_025: the mirror line names the file" 'printf "%s" "$OUT" | grep -Fq "(from $LANDDIR/tex-mirror)"'
+branch tex4 t4.txt t4
+SHALE_TEX_MIRROR=https://var.example.test/tlnet expect "dev_025: the variable wins over the file" 0 "seen install=[https://var.example.test/tlnet]" tex4
+branch tex5 t5.txt t5
+SHALE_TEX_INSTALL_REPOSITORY=https://mine.example.test/x expect "dev_025: a SHALE_TEX_INSTALL_REPOSITORY set by the person is kept and said so" 0 "seen install=[https://mine.example.test/x] env=[http://file.example.test/tlnet]" tex5
+check "dev_025: the kept variable is named" 'printf "%s" "$OUT" | grep -Fq "SHALE_TEX_INSTALL_REPOSITORY is set already, left as it is"'
+branch tex6 t6.txt t6
+SHALE_TEX_ENV_REPOSITORY=https://mine.example.test/y expect "dev_025: a SHALE_TEX_ENV_REPOSITORY set by the person is kept" 0 "seen install=[http://file.example.test/tlnet] env=[https://mine.example.test/y]" tex6
+before=$(git rev-parse origin/main)
+SHALE_TEX_MIRROR=ftp://nope.example.test/tlnet expect "dev_025: a mirror that is no http(s) URL exits 2" 2 "must start with https:// or http://" tex6
+check "dev_025: a bad mirror lands nothing" "main_is $before"
+printf 'texlive.example.test/tlnet\n' > "$LANDDIR/tex-mirror"
+expect "dev_025: a bad mirror in the file exits 2 and names the file" 2 "(from $LANDDIR/tex-mirror) must start" tex6
+rm -f "$LANDDIR/tex-mirror"
+export LAND_CHECK_CMD=true
 
 # the lock held by a release script (FORGE-011, #348): trusted only from the parent that names itself
 LOCK="$(git rev-parse --path-format=absolute --git-common-dir)/land/lock"
