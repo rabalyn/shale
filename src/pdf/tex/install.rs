@@ -43,6 +43,27 @@ pub(super) const MIRROR_TRIES: usize = 3;
 /// the local installation …; please use a different mirror").
 const OLDER_MIRROR: &str = "older than the local installation";
 
+/// What `tlmgr` prints (and still exits 0) for a package it could not take from a mirror that is
+/// being synced: `TLPDB::_install_data: downloading did not succeed (check_file_and_remove failed)
+/// for https://…/archive/xpatch.tar.xz`, after `check_file_and_remove: checksums differ for …`. The
+/// package is skipped, so the install is incomplete although `tlmgr` said nothing is wrong (#362).
+const DAMAGED_DOWNLOAD: &str = "downloading did not succeed";
+const DAMAGED_CHECKSUM: &str = "checksums differ";
+
+/// The start of the error of a run whose mirror handed out damaged packages: what [`step`] gives and
+/// [`tlmgr_on_mirror`] looks for, like [`OLDER_MIRROR`].
+const DAMAGED_MIRROR: &str = "the mirror delivered damaged packages";
+
+/// The package in a `tlmgr` line about a download that did not succeed (`…/archive/xpatch.tar.xz` is
+/// `xpatch`), or a name for a line that only says the checksums differ.
+fn damaged_package(line: &str) -> Option<String> {
+    if !line.contains(DAMAGED_DOWNLOAD) && !line.contains(DAMAGED_CHECKSUM) {
+        return None;
+    }
+    let file = line.split_whitespace().rev().find_map(|w| w.trim_end_matches(':').rsplit('/').next().filter(|f| f.contains(".tar.")))?;
+    Some(file.split(".tar.").next().unwrap_or(file).to_string())
+}
+
 /// The packages of `assets/tex/packages.txt`, one name each.
 pub fn packages() -> Vec<&'static str> {
     PACKAGES.lines().map(|l| l.split('#').next().unwrap_or("").trim()).filter(|l| !l.is_empty()).collect()
@@ -280,7 +301,14 @@ fn add_mirror(mirrors: &mut Vec<String>, m: &str) {
 fn step(handle: &Handle, notify: &dyn Fn(), stage: Stage, what: &str, cmd: Command) -> Result<(), String> {
     handle.stage(stage);
     notify();
+    // every line is looked at, not only the tail kept for the error: the lines about a damaged download come early
+    let mut damaged: Vec<String> = vec![];
     let run = proc::run(cmd, STEP_TIMEOUT, Some(&handle.cancel), |line| {
+        if let Some(p) = damaged_package(line) {
+            if !damaged.contains(&p) {
+                damaged.push(p);
+            }
+        }
         if let Some((done, total, package)) = parse_progress(line) {
             handle.set(|p| *p = Progress { stage, done, total, package });
             notify();
@@ -290,7 +318,10 @@ fn step(handle: &Handle, notify: &dyn Fn(), stage: Stage, what: &str, cmd: Comma
     match run.ending {
         Ending::Cancelled => Err("cancelled".into()),
         Ending::TimedOut => Err(format!("{what} took more than {} minutes and was stopped", STEP_TIMEOUT.as_secs() / 60)),
+        // the exit code is 0 although packages were skipped: that is no success
+        Ending::Exited(Some(0)) if !damaged.is_empty() => Err(format!("{what}: {DAMAGED_MIRROR}, and these packages were skipped: {}", damaged.join(", "))),
         Ending::Exited(Some(0)) => Ok(()),
+        Ending::Exited(_) if !damaged.is_empty() => Err(format!("{what} failed: {DAMAGED_MIRROR}, and these packages were skipped: {}", damaged.join(", "))),
         Ending::Exited(code) => {
             let lines = run.tail.len().saturating_sub(8);
             Err(format!("{what} failed (exit code {}):\n{}", code.map_or_else(|| "none".to_string(), |c| c.to_string()), run.tail[lines..].join("\n")))
@@ -339,16 +370,21 @@ pub(super) fn resolve_mirror(handle: &Handle, repo: &str) -> Result<String, Stri
 }
 
 /// Run `tlmgr` (made by `cmd` for a mirror) on `mirror`. When `tlmgr` finds that mirror older than
-/// the installation, a fresh mirror of `repo` is chosen and tried, [`MIRROR_TRIES`] runs at most (#320).
-/// The mirror the run that worked used is given back.
+/// the installation, or hands out damaged packages (a mirror in the middle of a sync, #362), a fresh
+/// mirror of `repo` is chosen and tried, [`MIRROR_TRIES`] runs at most (#320); a second run installs
+/// (or updates) only what the first one skipped. The mirror the run that worked used is given back; when
+/// the last run still met damaged packages the error names every mirror tried.
 fn tlmgr_on_mirror(handle: &Handle, notify: &dyn Fn(), stage: Stage, repo: &str, mut mirror: String, cmd: impl Fn(&str) -> Command) -> Result<String, String> {
     let mut runs = 1;
+    let mut tried = vec![mirror.clone()];
     loop {
         match step(handle, notify, stage, "tlmgr", cmd(&mirror)) {
-            Err(e) if e.contains(OLDER_MIRROR) && runs < MIRROR_TRIES => {
+            Err(e) if (e.contains(OLDER_MIRROR) || e.contains(DAMAGED_MIRROR)) && runs < MIRROR_TRIES => {
                 runs += 1;
                 mirror = resolve_mirror(handle, repo)?;
+                tried.push(mirror.clone());
             }
+            Err(e) if e.contains(DAMAGED_MIRROR) => return Err(format!("{e} (mirrors tried: {})", tried.join(", "))),
             result => return result.map(|()| mirror),
         }
     }

@@ -710,6 +710,61 @@ wr("$dir/bin/$plat/biber", "#!/bin/sh\nexit 0\n");
         assert_eq!(std::fs::read_to_string(&runs).unwrap().lines().count(), 1);
     }
 
+    /// What `tlmgr` prints for packages a mirror in the middle of a sync gave damaged, and exits 0 (#362).
+    const DAMAGED: &str = "echo 'TeXLive::TLUtils::check_file_and_remove: checksums differ for /tmp/x/xunicode.tar.xz:' >&2\necho 'TLPDB::_install_data: downloading did not succeed (check_file_and_remove failed) for https://mirror.example/tlnet/archive/xpatch.tar.xz' >&2\nexit 0";
+
+    // spec: TEX-002
+    #[test]
+    fn packages_a_mirror_gave_damaged_are_got_from_a_fresh_mirror_though_tlmgr_exits_0() {
+        let data = temp("damaged");
+        let (good, _) = serve(vec![]);
+        let (bad, _) = serve(vec![]);
+        let tlmgr = format!("case \"$*\" in *{good}*) ;; *) {DAMAGED} ;; esac\n{GOOD_TLMGR}");
+        let (first, _) = serve(installer("damaged", &install_tl("", &tlmgr)));
+        let (redirect, _) = redirector(vec![first.clone(), bad, good.clone()]);
+        let done = install(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(done, Done { warning: None, mirrors: vec![first, good.clone()] });
+        let calls = tlmgr_calls(&managed_root(&data));
+        assert_eq!(calls.len(), MIRROR_TRIES, "the first two mirrors were damaged: the list was run again on each next one, which skips what is there");
+        assert!(calls[2].starts_with(&format!("--repository {good} install ")));
+        let _ = std::fs::remove_dir_all(&data);
+        // every mirror damaged: an error that names the packages and the mirrors, and nothing is left
+        let tlmgr = format!("{DAMAGED}\n{GOOD_TLMGR}");
+        let (first, _) = serve(installer("damaged2", &install_tl("", &tlmgr)));
+        let (a, _) = serve(vec![]);
+        let (b, _) = serve(vec![]);
+        let (redirect, _) = redirector(vec![first.clone(), a.clone(), b.clone()]);
+        let e = install(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap_err();
+        assert!(e.contains("the mirror delivered damaged packages") && e.contains("xpatch") && e.contains("xunicode"), "{e}");
+        assert!(e.contains(&first) && e.contains(&a) && e.contains(&b), "all {MIRROR_TRIES} mirrors are named: {e}");
+        assert!(!partial_root(&data).exists() && !managed_root(&data).exists());
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    // spec: TEX-003
+    #[test]
+    fn an_update_and_a_font_repair_leave_a_mirror_with_damaged_packages_too() {
+        let f = Fake::new("update-damaged");
+        let data = f.dir.join("data");
+        let root = managed_root(&data);
+        let bin = root.join("bin").join("x86_64-linux");
+        let (good, _) = serve(vec![]);
+        let (bad, _) = serve(vec![]);
+        script(&bin, "lualatex", &format!("{ROOT_SH}{LUALATEX_OK}"));
+        script(&bin, "luaotfload-tool", &format!("{ROOT_SH}{LUAOTFLOAD_OK}"));
+        script(&bin, "biber", "exit 0");
+        script(&bin, "tlmgr", &format!("{ROOT_SH}echo \"$@\" >> $R/tlmgr.calls\ncase \"$*\" in *{good}*) ;; *) {DAMAGED} ;; esac"));
+        let (redirect, _) = redirector(vec![bad.clone(), good.clone()]);
+        let done = update(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(done, Done { warning: None, mirrors: vec![bad.clone(), good.clone()] }, "the update came from the second mirror");
+        // the repair: the first mirror it gets is damaged again, the next one is good
+        std::fs::write(root.join("fontfail"), "1\n").unwrap();
+        let (redirect, _) = redirector(vec![good.clone(), bad, good.clone()]);
+        let done = update(&env(&data, &redirect), &Handle::default(), &|| {}).unwrap();
+        assert_eq!(done.warning, None);
+        assert!(tlmgr_calls(&root).iter().filter(|c| c.contains("--reinstall")).count() == 2, "{:?}", tlmgr_calls(&root));
+    }
+
     // spec: TEX-002
     #[test]
     fn a_redirect_that_does_not_end_at_a_repository_is_refused() {

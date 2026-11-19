@@ -6,7 +6,9 @@
 # mirrors are not all equally current: install-tl from a newer mirror followed by tlmgr from an older
 # one fails with "… seems to be older than the local installation" (#320). So the repository is
 # resolved ONCE to one concrete mirror, which install-tl and tlmgr both use; when tlmgr still finds
-# its mirror older than the installation, a fresh mirror is chosen, three tlmgr runs at most.
+# its mirror older than the installation, a fresh mirror is chosen, three tlmgr runs at most. A mirror in the
+# middle of a sync makes tlmgr skip packages ("checksums differ", "downloading did not succeed") and exit 0
+# (#362): that is treated like an older mirror, and afterwards every package of the list must be installed.
 # After the packages the font names database of luaotfload is built once, here, and the fonts the templates and
 # the test document stand on are looked up in it (#327, #362): a container of this image runs every compile
 # with a fresh --rm file system, so a database built at run time would be built by every compile again, slowly,
@@ -49,21 +51,43 @@ rm -rf /tmp/install-tl
 # only the folder of this machine's platform exists
 PATH=/opt/texlive/bin/aarch64-linux:/opt/texlive/bin/x86_64-linux:$PATH
 
+# the packages tlmgr skipped, from its log: the archive names of the lines about a download that did not succeed
+damaged_in() {
+  grep -E 'downloading did not succeed|checksums differ' "$1" | grep -oE '[A-Za-z0-9_.+-]+\.tar\.[a-z]+' | sed 's/\.tar\..*//' | sort -u | tr '\n' ' '
+}
+
+mirrors_tried="$mirror"
 run=1
 while :; do
   if sed 's/#.*//' "$packages" | xargs tlmgr --repository "$mirror" install >/tmp/tlmgr.log 2>&1; then
     cat /tmp/tlmgr.log
-    break
+    damaged=$(damaged_in /tmp/tlmgr.log)
+    [ -z "$damaged" ] && break
+    why="that mirror gave damaged packages ($damaged)"
+  else
+    cat /tmp/tlmgr.log
+    grep -q 'older than the local installation' /tmp/tlmgr.log || exit 1
+    why="that mirror is older than the installation"
   fi
-  cat /tmp/tlmgr.log
-  if [ "$run" -ge "$tries" ] || ! grep -q 'older than the local installation' /tmp/tlmgr.log; then
+  if [ "$run" -ge "$tries" ]; then
+    echo "$why; mirrors tried: $mirrors_tried" >&2
     exit 1
   fi
   run=$((run + 1))
   mirror=$(resolve)
-  echo "that mirror is older than the installation: trying $mirror (run $run of $tries)" >&2
+  mirrors_tried="$mirrors_tried $mirror"
+  echo "$why: trying $mirror (run $run of $tries)" >&2
 done
 rm -f /tmp/tlmgr.log
+
+# every package of the list is installed, whatever tlmgr said (#362)
+# shellcheck disable=SC2046
+if ! tlmgr info --only-installed --data name $(sed 's/#.*//' "$packages") >/tmp/installed.log 2>&1; then
+  grep 'not locally' /tmp/installed.log >&2 || cat /tmp/installed.log >&2
+  echo "packages of the list are not installed (the mirror was $mirror)" >&2
+  exit 1
+fi
+rm -f /tmp/installed.log
 
 # the fonts of the templates and of the test document (src/pdf/tex/compile.rs TEST_DOCUMENT): in the names of
 # packages.txt, the packages of fonts are lm lm-math xcharter roboto (install::FONT_PACKAGES)
@@ -87,12 +111,13 @@ reinstall_fonts() {
   while :; do
     echo "installing $font_packages again from $fresh (the packages came from $mirror)" >&2
     # shellcheck disable=SC2086
-    if tlmgr --repository "$fresh" install --reinstall $font_packages >/tmp/tlmgr-fonts.log 2>&1; then
+    if tlmgr --repository "$fresh" install --reinstall $font_packages >/tmp/tlmgr-fonts.log 2>&1 && [ -z "$(damaged_in /tmp/tlmgr-fonts.log)" ]; then
       cat /tmp/tlmgr-fonts.log
       return 0
     fi
     cat /tmp/tlmgr-fonts.log
-    if [ "$fonts_run" -ge "$tries" ] || ! grep -q 'older than the local installation' /tmp/tlmgr-fonts.log; then
+    damaged=$(damaged_in /tmp/tlmgr-fonts.log)
+    if [ "$fonts_run" -ge "$tries" ] || ! { [ -n "$damaged" ] || grep -q 'older than the local installation' /tmp/tlmgr-fonts.log; }; then
       echo "the fonts could not be installed again from $fresh" >&2
       return 1
     fi

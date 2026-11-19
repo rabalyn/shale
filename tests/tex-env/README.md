@@ -71,6 +71,11 @@ upstream `latexmkrc`).
   (`lm lm-math xcharter roboto`) are installed again from a freshly resolved mirror and the database is built again; when
   that does not help the build fails and names the mirrors. `/etc/shale-tex-build` (and `status`) says so. The
   `tex_env` compile test asserts that no run builds the database.
+- **Damaged mirrors**: a mirror in the middle of a sync makes `tlmgr` skip packages ("checksums differ", "downloading did
+  not succeed") and still exit 0 (#362). `install-texlive.sh` greps its log, retries on a fresh mirror (three runs at most,
+  like an older mirror), fails naming the skipped packages and the mirrors, and checks at the end that every package of
+  `packages.txt` is installed. The retry of `env-tests.sh` stays on the font signature only: "package x is missing" is also
+  what a real error in a template looks like, and the image can no longer come out incomplete unnoticed.
 
 ## The first build
 
