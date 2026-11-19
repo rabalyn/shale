@@ -10,6 +10,5 @@ sequenceDiagram
     participant preview
     participant web
     preview->>web: request_page
-    Note over preview: read_page
 ```
 <!-- dataflow:end link_preview -->

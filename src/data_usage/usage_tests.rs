@@ -374,15 +374,25 @@ fn dataflow_data_usage_scan() {
 
 // spec: DEV-031
 #[test]
-fn dataflow_data_usage_cleanup() {
-    let (p, d) = places_with_caches("dataflow-cleanup");
+fn dataflow_data_usage_clear() {
+    let (p, d) = places_with_caches("dataflow-clear");
+    let flow = crate::dataflow::record(|| {
+        assert_eq!(clear(CacheId::SocialPictures, &p, None).map(|f| f.entries), Ok(2));
+    });
+    crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/data-usage.md"), "data_usage_clear", &crate::dataflow::render_mermaid(&flow));
+    let _ = fs::remove_dir_all(&d);
+}
+
+// spec: DEV-031
+#[test]
+fn dataflow_data_usage_prune() {
+    let (p, d) = places_with_caches("dataflow-prune");
     let r = CacheRetention { picture_days: Some(30), ..CacheRetention::default() };
     age(&p.pictures.join("0123456789abcdef.png"), 90);
     let now = crate::calendar::time::now();
     let flow = crate::dataflow::record(|| {
         assert_eq!(prune(CacheId::SocialPictures, &p, &r, now).map(|f| f.entries), Ok(1));
-        assert_eq!(clear(CacheId::SocialPictures, &p, None).map(|f| f.entries), Ok(1));
     });
-    crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/data-usage.md"), "data_usage_cleanup", &crate::dataflow::render_mermaid(&flow));
+    crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/data-usage.md"), "data_usage_prune", &crate::dataflow::render_mermaid(&flow));
     let _ = fs::remove_dir_all(&d);
 }

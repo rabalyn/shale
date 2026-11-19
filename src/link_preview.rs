@@ -161,7 +161,7 @@ pub fn fetch_page(url: &str) -> Result<WebPage, String> {
         return Err(format!("this is not a web page but a file of type {ct}"));
     }
     let html = String::from_utf8_lossy(&r.body);
-    let page = tracing::info_span!("flow.link_preview.read_page", peer = "preview").in_scope(|| parse_page(&html));
+    let page = parse_page(&html);
     if page == WebPage::default() {
         return Err("the page has nothing to show".into());
     }

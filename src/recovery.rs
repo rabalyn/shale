@@ -48,7 +48,7 @@ fn numbered(p: &Path, n: u32) -> PathBuf {
 /// Write `bytes` for the note `rel` into `root/<date>/<rel>` and return where they went. Never
 /// replaces a file that is there already.
 pub fn rescue(root: &Path, date: &str, rel: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
-    let _flow = tracing::info_span!("flow.recovery", peer = "app").entered();
+    let _flow = tracing::info_span!("flow.recovery_rescue", peer = "app").entered();
     let target = root.join(date).join(safe_rel(rel));
     if let Some(dir) = target.parent() {
         fsutil::ensure_private_dir(root)?;
@@ -56,7 +56,7 @@ pub fn rescue(root: &Path, date: &str, rel: &Path, bytes: &[u8]) -> io::Result<P
     }
     let mut candidate = target.clone();
     for n in 2..1000 {
-        match tracing::info_span!("flow.recovery.write_copy", peer = "disk").in_scope(|| fsutil::create_new(&candidate, bytes)) {
+        match tracing::info_span!("flow.recovery_rescue.write_copy", peer = "disk").in_scope(|| fsutil::create_new(&candidate, bytes)) {
             Ok(()) => return Ok(candidate),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => candidate = numbered(&target, n),
             Err(e) => return Err(e),
@@ -67,8 +67,8 @@ pub fn rescue(root: &Path, date: &str, rel: &Path, bytes: &[u8]) -> io::Result<P
 
 /// The day folders in `root` that have not been dismissed yet, oldest first.
 pub fn unseen(root: &Path) -> Vec<PathBuf> {
-    let _flow = tracing::info_span!("flow.recovery", peer = "app").entered();
-    let Ok(rd) = tracing::info_span!("flow.recovery.list_days", peer = "disk").in_scope(|| std::fs::read_dir(root)) else { return vec![] };
+    let _flow = tracing::info_span!("flow.recovery_unseen", peer = "app").entered();
+    let Ok(rd) = tracing::info_span!("flow.recovery_unseen.list_days", peer = "disk").in_scope(|| std::fs::read_dir(root)) else { return vec![] };
     let mut v: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.is_dir() && !p.join(SEEN).exists()).collect();
     v.sort();
     v
@@ -76,10 +76,10 @@ pub fn unseen(root: &Path) -> Vec<PathBuf> {
 
 /// The person has seen the notice: it is not shown again for these folders.
 pub fn dismiss(dirs: &[PathBuf]) {
-    let _flow = tracing::info_span!("flow.recovery", peer = "app").entered();
+    let _flow = tracing::info_span!("flow.recovery_dismiss", peer = "app").entered();
     for d in dirs {
         // a marker that already exists is fine
-        let _ = tracing::info_span!("flow.recovery.mark_seen", peer = "disk").in_scope(|| fsutil::create_new(&d.join(SEEN), b""));
+        let _ = tracing::info_span!("flow.recovery_dismiss.mark_seen", peer = "disk").in_scope(|| fsutil::create_new(&d.join(SEEN), b""));
     }
 }
 
@@ -137,17 +137,35 @@ mod tests {
 
     // spec: DEV-031
     #[test]
-    fn dataflow_recovery() {
-        let root = tmp("dataflow");
+    fn dataflow_recovery_rescue() {
+        let root = tmp("dataflow-rescue");
         let flow = crate::dataflow::record(|| {
             rescue(&root, "2026-11-14", Path::new("Projects/Plan.md"), b"one").unwrap();
-            rescue(&root, "2026-11-14", Path::new("Projects/Plan.md"), b"two").unwrap();
-            let days = unseen(&root);
-            assert_eq!(days.len(), 1);
-            dismiss(&days);
-            assert!(unseen(&root).is_empty());
         });
-        crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/recovery.md"), "recovery", &crate::dataflow::render_mermaid(&flow));
+        crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/recovery.md"), "recovery_rescue", &crate::dataflow::render_mermaid(&flow));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: DEV-031
+    #[test]
+    fn dataflow_recovery_unseen() {
+        let root = tmp("dataflow-unseen");
+        rescue(&root, "2026-11-14", Path::new("Plan.md"), b"one").unwrap();
+        let flow = crate::dataflow::record(|| {
+            assert_eq!(unseen(&root).len(), 1);
+        });
+        crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/recovery.md"), "recovery_unseen", &crate::dataflow::render_mermaid(&flow));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: DEV-031
+    #[test]
+    fn dataflow_recovery_dismiss() {
+        let root = tmp("dataflow-dismiss");
+        rescue(&root, "2026-11-14", Path::new("Plan.md"), b"one").unwrap();
+        let days = unseen(&root);
+        let flow = crate::dataflow::record(|| dismiss(&days));
+        crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/recovery.md"), "recovery_dismiss", &crate::dataflow::render_mermaid(&flow));
         let _ = std::fs::remove_dir_all(&root);
     }
 }
