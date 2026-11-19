@@ -13,6 +13,12 @@
 #     `Closes #N` in the commits since the previous release (the highest `v*` tag without a
 #     pre-release part that is not on HEAD). A pre-release (a check tag, FORGE-013) needs no
 #     section: its notes are not published.
+#   - SHALE_PREV_PUBLISHED=<tag>, when set, names the last release with a published GitHub release
+#     page (the workflows and scripts look it up, BUILD-013). The tags of this repository can be
+#     ahead of it (Forgejo has releases that never reached GitHub), so it replaces the previous
+#     release above, and the notes checked are the ones GitHub publishes: every CHANGELOG.md
+#     section after that release up to the version (.github/release-notes.sh reads the same
+#     variable). It must be an existing tag, else the check fails. Unset (or empty): as above.
 # Without a previous tag the comparisons that need one are skipped.
 set -u
 VERSION="${1#v}"
@@ -70,6 +76,16 @@ if [ -n "$PREV" ] && is_semver "$VERSION"; then
   [ "$(greater "$VERSION" "${PREV#v}")" = 1 ] || fail "version $VERSION is not greater than the previous tag $PREV"
 fi
 
+# the last published release (SHALE_PREV_PUBLISHED) replaces the previous release for the notes
+PUBLISHED="${SHALE_PREV_PUBLISHED:-}"
+if [ -n "$PUBLISHED" ]; then
+  if git rev-parse -q --verify "refs/tags/$PUBLISHED" >/dev/null; then
+    PREV_RELEASE="$PUBLISHED"
+  else
+    fail "SHALE_PREV_PUBLISHED=$PUBLISHED is not a tag of this repository (fetch the tags)"
+  fi
+fi
+
 case "${VERSION%%+*}" in
   *-*) PRE=yes ;;
   *) PRE=no ;;
@@ -77,7 +93,7 @@ esac
 
 if [ "$PRE" = yes ]; then
   : # a pre-release (check tag) publishes no notes
-elif ! NOTES=$(sh "$HERE/release-notes.sh" "$VERSION" ./CHANGELOG.md); then
+elif ! NOTES=$(SHALE_PREV_PUBLISHED="$PUBLISHED" sh "$HERE/release-notes.sh" "$VERSION" ./CHANGELOG.md); then
   FAIL=1
 elif [ -n "$PREV_RELEASE" ]; then
   ISSUES=$(git log "$PREV_RELEASE..HEAD" --format=%B | grep -oiE 'closes +(raba/shale)?#[0-9]+' | grep -oE '[0-9]+$' | sort -un)

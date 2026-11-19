@@ -98,7 +98,21 @@ jobs:
       # and the CHANGELOG.md section is not empty and names every issue closed since the previous tag
       - name: Check the release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
-        run: sh .github/check-release.sh "${GITHUB_REF_NAME#v}"
+        run: |
+          # the last release with a page on GitHub (none yet: unset): the notes GitHub publishes
+          # cover every version since it, and Forgejo's tags can be ahead of it (no jq here yet)
+          if ! body=$(curl -fsS https://api.github.com/repos/rabalyn/shale/releases/latest 2>&1); then
+            if printf '%s' "$body" | grep -q '404'; then
+              body=""
+            else
+              echo "error: could not look up the last published release on GitHub: $body" >&2
+              exit 1
+            fi
+          fi
+          SHALE_PREV_PUBLISHED=$(printf '%s' "$body" | sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
+          export SHALE_PREV_PUBLISHED
+          echo "last published release: ${SHALE_PREV_PUBLISHED:-none}"
+          sh .github/check-release.sh "${GITHUB_REF_NAME#v}"
 
       - name: Test the release and commit checks
         run: |

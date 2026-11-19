@@ -32,6 +32,12 @@ fn forge_013_forge_014_test_release_script_passes() {
     run("scripts/test-release.sh");
 }
 
+// spec: BUILD-013
+#[test]
+fn build_013_test_check_release_script_passes() {
+    run(".github/test-check-release.sh");
+}
+
 // spec: DEV-025
 #[test]
 fn dev_025_test_tex_env_script_passes() {

@@ -29,6 +29,10 @@ case "$1 $2" in
     if [ -n "${GH_HOOK:-}" ] && [ -x "$GH_HOOK" ]; then "$GH_HOOK" < /dev/null; rm -f "$GH_HOOK"; fi
     [ -f "$GH_LOG.made" ] && echo 77
     exit 0 ;;
+  "release view")
+    # the last published release (BUILD-013): GH_RELEASE_FAIL makes gh fail, GH_RELEASE_TAG names the tag
+    [ -z "${GH_RELEASE_FAIL:-}" ] || { echo "gh: no network" >&2; exit 1; }
+    echo "${GH_RELEASE_TAG:-}" ;;
   "issue create") touch "$GH_LOG.made"; echo "https://github.com/rabalyn/shale/issues/77" ;;
 esac
 exit 0
@@ -147,6 +151,8 @@ check "after a failing landing no tag or branch is left" '! remote_tag v0.4.0-rc
 
 # releases (FORGE-014)
 land closes9 src.txt nine "Nine (Closes #9)"
+GH_RELEASE_FAIL=1 expect "a gh that cannot tell the last published release stops the release (BUILD-013)" 1 "could not tell the last published release" make-release.sh
+check "the release check asked for the last published release of the repository" 'grep -Fq "release view -R rabalyn/shale --json tagName -q .tagName" "$GH_LOG"'
 expect "an issue missing from the notes stops the release before landing" 1 "#9" make-release.sh
 check "nothing landed or tagged after the failed check" '! remote_tag v0.4.0 && [ "$(version_on_main)" = 0.4.0-rc.2 ] && ! git rev-parse -q --verify refs/heads/release/v0.4.0 >/dev/null'
 land notes9 docs/changelog-pending/I9.md $'### Fixed\n\n- Nine (#9).'
@@ -266,7 +272,7 @@ expect "--skip-bench leaves the performance step out" 0 "not measured" make-rele
 check "a skipped release has no result" 'remote_tag v0.4.4 && ! git cat-file -e origin/main:docs/perf/results/v0.4.4.json 2>/dev/null'
 land perf3 docs/changelog-pending/I32.md $'### Fixed\n\n- Thirty-two (#32).'
 FAKE_COMPARE_EXIT=2 expect "a failing comparison stops the release too" 1 "the performance step failed" make-release.sh patch
-expect "the next release goes on" 0 "tagged" make-release.sh patch
+GH_RELEASE_TAG=v0.3.0 expect "a release with the last published release named by gh goes on (BUILD-013)" 0 "tagged" make-release.sh patch
 check "it compares with the last release that has a result" 'grep -Fq -- "--bench-compare docs/perf/results/v0.4.3.json docs/perf/results/v0.4.5.json" "$BENCH_LOG"'
 
 [ "$FAILED" = 0 ] && echo "all $N checks passed"
