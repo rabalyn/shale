@@ -91,6 +91,34 @@ prints as before. A key that Shale does not know (a typo such as `print-colour`)
 
 The properties apply to the export of a single note; a book ([[PDF#A folder as one PDF]]) uses the dialog's choices for all its notes.
 
+## Aligned paragraphs
+
+A paragraph or heading between a line `<div align="center">` and a line `</div>` is **centred**; with
+`align="right"` it is flush right and with `align="justify"` it is justified (`align="left"` is read too).
+This is the HTML Obsidian understands, so a note reads the same there. Put a blank line next to each of the two
+lines, as in
+
+```
+<div align="center">
+
+## A centred heading
+
+Some centred text.
+
+</div>
+```
+
+and one wrapper may hold several paragraphs and headings. The reading view, the PDF and the LaTeX export
+(`center` and `flushright`; slides and posters have their own layout and leave it out) show it so; in the editor the two
+lines are dimmed. A heading in a wrapper is still in the outline and the contents. An opening line without
+a `</div>` after it is plain text, and so is a wrapper in a code block or the properties. Lists, quotes, tables and
+pictures in a wrapper stay as they are.
+
+The toolbar buttons **Align left**, **Centre the paragraph** and **Align the paragraph right** (see [[Editor]]) do it
+for the paragraphs under the cursor or the selection: centre and right wrap them, another button changes the
+wrapper, the same button again or left takes it off. A Word document gets a wrapper for every paragraph and heading
+that is not aligned like its body text (see [[Import]]).
+
 ## Page breaks
 
 A line of its own with `<div style="page-break-after: always;"></div>` is a **page break**: the PDF

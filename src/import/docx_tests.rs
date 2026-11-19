@@ -46,9 +46,14 @@ fn month_dir() -> String {
 
 /// Imports the fixture `name` with the real pandoc into a new vault.
 fn import_fixture(tag: &str, name: &str, keep: bool) -> Option<(Vault, Imported)> {
+    import_file(tag, fixture(name), keep)
+}
+
+/// Imports the Word file at `path` with the real pandoc into a new vault.
+fn import_file(tag: &str, path: PathBuf, keep: bool) -> Option<(Vault, Imported)> {
     let pandoc = real_pandoc()?;
     let mut v = temp_vault(tag);
-    let mut items = vec![docx::docx_item(fixture(name), Some(pandoc))];
+    let mut items = vec![docx::docx_item(path, Some(pandoc))];
     // ahead of time, as the dialog does it in its job
     let mut d = dialog::ImportDialog::new(std::mem::take(&mut items), vec![], "In".into(), String::new(), None, false);
     d.keep_docx = keep;
@@ -103,7 +108,7 @@ fn a_word_file_with_text_becomes_a_note_with_the_markdown_of_the_filter() {
     let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
     let (props, body) = split_props(&text);
     assert!(props.contains(&"print-title: false") && !props.iter().any(|p| p.starts_with("source")), "the look is there, the original is not kept: {props:?}");
-    let expected = "# Sample\n\n# Heading one\n\n## Bold heading\n\n\
+    let expected = "<div align=\"center\">\n\n# Sample\n\n</div>\n\n# Heading one\n\n## Bold heading\n\n\
 Plain text with **bold**, *italic*, <u>under</u>, ~~gone~~, H<sub>2</sub>O, x<sup>2</sup> and `code`.\n\n\
 A line\nbreak, small caps and <mark style=\"background: #FFFF00;\">marked</mark> text.\n\n\
 A [web link](https://example.com), a link to the heading and a footnote.[^1]\n\n\
@@ -434,7 +439,7 @@ fn a_note_that_cannot_be_written_takes_the_import_folder_out_again() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// spec: IMP-040, IMP-041, IMP-042, IMP-044, IMP-039
+// spec: IMP-040, IMP-041, IMP-042, IMP-044, IMP-046, IMP-039
 #[test]
 fn a_styled_word_file_keeps_its_page_its_body_its_colours_and_its_title() {
     let Some((v, done)) = import_fixture("styled", "styled.docx", true) else { return };
@@ -448,7 +453,7 @@ print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496
     assert!(text.starts_with(&expected_props), "{text}");
     let body = &text[expected_props.len()..];
     // IMP-042: the title and the subtitle of Word's styles
-    assert!(body.starts_with("# Styled report\n\n*A look to keep*\n\n# Heading one\n"), "{body}");
+    assert!(body.starts_with("<div align=\"center\">\n\n# Styled report\n\n*A look to keep*\n\n</div>\n\n# Heading one\n"), "Word centres Title and Subtitle (IMP-046): {body}");
     // IMP-041
     assert!(body.contains("<span style=\"color: #C00000;\">red text</span>"), "{body}");
     assert!(body.contains("<mark style=\"background: #00FF00;\">green highlight</mark>"), "{body}");
@@ -468,6 +473,58 @@ print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496
     assert_eq!(kept, std::fs::read(fixture("styled.docx")).unwrap());
 }
 
+/// A small Word file in `dir`: a justified body (styles), and `paragraphs` as the XML of the body.
+fn aligned_word_file(dir: &Path, paragraphs: &str) -> PathBuf {
+    const W: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main""#;
+    let parts = dir.join("parts");
+    let styles = format!(
+        r#"<w:styles {W}><w:docDefaults><w:pPrDefault><w:pPr><w:jc w:val="both"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="Centred"><w:name w:val="Centred"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style></w:styles>"#
+    );
+    let parts_xml = [
+        ("[Content_Types].xml", r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>"#.to_string()),
+        ("_rels/.rels", r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#.to_string()),
+        ("word/_rels/document.xml.rels", r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>"#.to_string()),
+        ("word/styles.xml", styles),
+        ("word/document.xml", format!("<w:document {W}><w:body>{paragraphs}</w:body></w:document>")),
+    ];
+    for (name, text) in parts_xml {
+        std::fs::create_dir_all(parts.join(name).parent().unwrap()).unwrap();
+        std::fs::write(parts.join(name), text).unwrap();
+    }
+    let docx = dir.join("aligned.docx");
+    super::docx_look::write_zip(&parts, &docx).unwrap();
+    docx
+}
+
+// spec: IMP-046, IMP-039
+#[test]
+fn centred_right_and_left_paragraphs_of_a_word_file_become_wrappers() {
+    let dir = temp_dir("aligned-src");
+    let p = |ppr: &str, text: &str| format!("<w:p><w:pPr>{ppr}</w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>");
+    let body = [
+        p(r#"<w:pStyle w:val="Heading1"/><w:jc w:val="center"/>"#, "Centred heading"),
+        p(r#"<w:pStyle w:val="Centred"/>"#, "Centred by style"),
+        p(r#"<w:pStyle w:val="Centred"/>"#, "Second centred line"),
+        p("", "Justified like the body."),
+        p(r#"<w:jc w:val="right"/>"#, "Flush right"),
+        p(r#"<w:jc w:val="left"/>"#, "Left in a justified body"),
+        p(r#"<w:pStyle w:val="Heading1"/>"#, "A plain heading"),
+    ]
+    .concat();
+    let docx = aligned_word_file(&dir, &body);
+    let Some((v, done)) = import_file("aligned", docx, false) else { return };
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let (props, body) = split_props(&text);
+    assert!(props.contains(&"print-align: justify"), "{props:?}");
+    let c = "<div align=\"center\">";
+    let expected = format!("{c}\n\n# Centred heading\n\nCentred by style\n\nSecond centred line\n\n</div>\n\nJustified like the body.\n\n<div align=\"right\">\n\nFlush right\n\n</div>\n\n<div align=\"left\">\n\nLeft in a justified body\n\n</div>\n\n# A plain heading\n");
+    assert_eq!(body.trim_start(), expected, "{body}");
+    assert!(!body.chars().any(|c| ('\u{E000}'..='\u{E006}').contains(&c)), "no sentinel is left");
+    assert_eq!(crate::markdown::align_blocks(body).len(), 3);
+    assert_eq!(crate::markdown::find_headings(body).len(), 2, "the headings are headings, wrapped or not");
+}
+
 // spec: IMP-040, IMP-042, IMP-039
 #[test]
 fn a_file_made_by_pandoc_alone_has_its_properties_and_a_heading_for_its_title() {
@@ -478,7 +535,7 @@ fn a_file_made_by_pandoc_alone_has_its_properties_and_a_heading_for_its_title() 
     assert_eq!(props[props.len() - 3..], ["print-title: false", "print-toc: false", "numbered-headings: false"], "{props:?}");
     // the body font is the theme font Aptos (minorHAnsi in the theme of the file), which is sans (#366)
     assert!(props.contains(&"print-font: sans"), "{props:?}");
-    assert!(body.starts_with("# Sample\n\n# Heading one\n"), "the title of the file is a heading: {body}");
+    assert!(body.starts_with("<div align=\"center\">\n\n# Sample\n\n</div>\n\n# Heading one\n"), "the title of the file is a heading, centred as Word has it (IMP-046): {body}");
 }
 
 /// A Word table of contents is not imported as text and an ordinary list of links stays.

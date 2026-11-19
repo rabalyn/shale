@@ -82,7 +82,9 @@ landscape), `print-margins` (top, right, bottom, left in mm), `print-font` (seri
 paragraph), `print-align` (left or justify), `print-heading-color`, `print-heading-weight` (`normal` or `bold`) and `print-heading-sizes` (pt of Heading 1 to 6), `print-break-before` (the heading level that starts a page, when Word's style says so), `print-title` (always `false`, the title
 is in the text) `print-toc` (`false`, left out when the document has a table of contents) and `numbered-headings: false` (Word does not number headings unless the style does). Edit them like any
 property. Page breaks come along: a manual page break, a paragraph with "page break before" and a section break that starts a new page each become a line `<div style="page-break-after: always;"></div>` where the new page begins (a break at the very start or end is left out). When Heading 1 (or Heading 2 …) starts a new page in Word, the note gets `print-break-before: 1` instead of a line before each heading. A Word table of contents (its title and the lines of entries) is not imported as text, because the
-PDF export makes its own contents page. Centred and right-aligned paragraphs are not kept (issue 340).
+PDF export makes its own contents page. A paragraph or heading that is centred, flush right or justified in Word (in itself or by its style) while the body text is not
+becomes a `<div align="center">` … `</div>` wrapper, as does a left-aligned paragraph in a justified document ([[PDF#Aligned paragraphs]]);
+neighbours with the same alignment share one wrapper. Paragraphs in tables and text boxes are left as they are.
 
 Everything one Word file brings goes into one folder, `z_media/<year>/<month>/import_docx_<name>/`, named
 after the file (spaces become `-`; a number is added when the name is taken): the pictures in `media/` and, with

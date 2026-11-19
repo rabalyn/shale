@@ -64,7 +64,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   "Blinking cursor" (on by default) makes it steady when off. The Vim tab (listed under Editor) holds the Vim settings: the switch, the cursor of normal mode, "Esc from insert mode" (the cursor stays after the typing by default, or steps back like Vim) and the link preview size. Exactly one cursor is drawn in every mode.
 - A **formatting toolbar** above the text (Settings → Editor, on by default, button size 80–200 %) has a button for
   everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
-  Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, page breaks, tables, `[[note]]`
+  Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, page breaks, alignment (left, centre, right), tables, `[[note]]`
   and `[text](url)` links, embeds (it opens the `[!` file picker) and "Clear formatting". With a
   selection a button wraps it (or takes the markers off again); with none it puts the markers in and the
   cursor between them; a line button works on every line the selection touches. Each click is one undo
@@ -197,6 +197,14 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   page when the page is empty already or the break is the last thing of the note. The editor's Markdown
   preview and the reading view draw it as a thin dashed rule labelled "Page break" (the line with the
   cursor shows the HTML). The toolbar button "Page break" (Alt+J) inserts the line.
+
+- **Centred, right-aligned and justified paragraphs** (#340): a paragraph or heading between a line
+  `<div align="center">` and a line `</div>` (also `align="right"` and `align="justify"`; the form Obsidian
+  shows too) is aligned that way. The reading view, the built-in PDF export and the LaTeX export
+  (`center` and `flushright`) lay it out so, and the outline still lists a heading in one; the editor shows
+  the two lines dimmed. Three toolbar buttons (left, centre, right) put the paragraphs under the cursor or
+  the selection into a wrapper, change it or take it off. The Word import writes the wrappers for the
+  paragraphs and headings whose alignment differs from the body's.
 
 - **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
   or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
@@ -784,8 +792,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   colours (IMP-041), page breaks (manual, "page break before", section breaks; IMP-044), a Title and Subtitle become a heading and an italic line (IMP-042), and the
   note's properties hold the page setup (`print-paper`, `print-margins`), the body font, size,
   line and paragraph spacing, alignment, the colour, weight and sizes of the headings and, unless Heading 1 is numbered in Word, `numbered-headings: false` (`print-*`, IMP-040, IMP-045), which
-  the PDF export uses (rabalyn/shale#338). Centred and right-aligned paragraphs are not kept
-  (rabalyn/shale#340). A Word table of contents is left out (the export makes its own, IMP-043). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
+  the PDF export uses (rabalyn/shale#338). Centred, right-aligned and justified paragraphs become `<div align>`
+  wrappers (rabalyn/shale#340). A Word table of contents is left out (the export makes its own, IMP-043). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
   without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
 
   ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)

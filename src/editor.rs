@@ -284,6 +284,7 @@ pub(crate) fn highlight_with_math(text: &str, links: &[(LinkSpan, bool)], fonts:
     let mut defined = notes.defined();
     defined.extend(markdown::defined_footnotes_in_scope());
     let mut in_front = false;
+    let wrappers = markdown::align_blocks(text);
     for (li, (off, line)) in markdown::lines_with_offsets(text).into_iter().enumerate() {
         let lr = off..off + line.len();
         // YAML front matter at the top
@@ -333,6 +334,10 @@ pub(crate) fn highlight_with_math(text: &str, links: &[(LinkSpan, bool)], fonts:
                 f.dim = true;
                 f.syn = true
             });
+        }
+        // the lines of an alignment wrapper are markup (PDF-028): dimmed like a rule
+        if markdown::is_align_edge(&wrappers, li) {
+            set(&mut fmts, lr.clone(), |f| f.dim = true);
         }
         if let Some((check, done, _, _)) = markdown::parse_task_line(line) {
             set(&mut fmts, off + indent..off + check + 2, |f| f.marker = true);
@@ -4905,6 +4910,19 @@ mod tests {
         assert_eq!(format_of(&job, text, "log").color, theme::syntax_colour(syntax::Kind::Function));
         assert_eq!(format_of(&job, text, "plain").color, theme::CODE);
         assert_eq!(format_of(&job, text, "\"fooo\"").background, theme::CODE_BG);
+    }
+
+    // spec: EDIT-108
+    #[test]
+    fn the_lines_of_an_alignment_wrapper_are_dimmed_markup_and_the_heading_inside_is_still_a_heading() {
+        let text = "<div align=\"center\">\n\n## Middle\n\ntext\n\n</div>\n\n<div align=\"right\">\nlost\n";
+        let job = highlight(text, &[], 15.0);
+        assert_eq!(format_of(&job, text, "<div align=\"center\">").color, theme::FAINT);
+        assert_eq!(format_of(&job, text, "</div>").color, theme::FAINT);
+        assert_ne!(format_of(&job, text, "text").color, theme::FAINT, "what is inside is text");
+        assert!(format_of(&job, text, "Middle").font_id.size > 15.0, "a heading in a wrapper has its size");
+        assert_ne!(format_of(&job, text, "<div align=\"right\">").color, theme::FAINT, "an opening line without a closing one is text");
+        assert_eq!(crate::markdown::find_headings(text).iter().map(|h| h.2.as_str()).collect::<Vec<_>>(), ["Middle"], "the outline lists it");
     }
 
     // spec: EDIT-029

@@ -170,6 +170,27 @@ fn line_buttons_and_the_heading_menu_work_on_the_lines_of_the_selection() {
     assert_eq!(fx.text(), "- [ ] alpha\n- [ ] beta\n- [ ] gamma\n");
 }
 
+// spec: EDIT-109
+#[test]
+fn the_alignment_buttons_wrap_the_paragraph_under_the_cursor_and_take_the_wrapper_off_again() {
+    let mut fx = Fx::new("align", "alpha\nbeta\n\ngamma\n");
+    fx.select(2, 2);
+    fx.click("Centre the paragraph: <div align=\"center\">");
+    assert_eq!(fx.text(), "<div align=\"center\">\n\nalpha\nbeta\n\n</div>\n\ngamma\n");
+    fx.click("Align the paragraph right: <div align=\"right\">");
+    assert_eq!(fx.text(), "<div align=\"right\">\n\nalpha\nbeta\n\n</div>\n\ngamma\n", "another alignment changes the wrapper");
+    fx.click("Align left: no wrapper");
+    assert_eq!(fx.text(), "alpha\nbeta\n\ngamma\n", "left takes it off");
+    // a selection over two paragraphs is one wrapper
+    fx.select(0, 14);
+    fx.click("Centre the paragraph: <div align=\"center\">");
+    assert_eq!(fx.text(), "<div align=\"center\">\n\nalpha\nbeta\n\ngamma\n\n</div>\n");
+    // each click is a step of the note's history (EDIT-021)
+    let mut text = fx.text();
+    assert!(fx.app.undo.of(Path::new(NOTE)).undo(&mut text).is_some());
+    assert_eq!(text, "alpha\nbeta\n\ngamma\n");
+}
+
 // spec: EDIT-027, EDIT-016
 #[test]
 fn the_buttons_work_with_the_markdown_preview_on() {
@@ -532,6 +553,7 @@ fn while_a_cell_is_edited_the_line_buttons_are_greyed_out_and_do_nothing() {
         "Quote: > text",
         "Code block: ``` fence",
         "Horizontal rule: ---",
+        "Centre the paragraph: <div align=\"center\">",
         "Table: 2 columns, 2 rows",
         "Heading level",
         "Embed a file or picture: opens the file picker (![[file]])",

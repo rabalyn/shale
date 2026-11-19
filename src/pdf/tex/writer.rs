@@ -266,6 +266,8 @@ pub fn write(req: &Request) -> Result<Document, String> {
     // a page break means nothing in slides and boxes, where the frames and boxes are the pages (TEX-037)
     if matches!(family, Family::Beamer | Family::Boxes) {
         blocks.retain(|b| *b != Block::PageBreak);
+        // nor does an alignment wrapper, which could end in another frame than it began in (TEX-039)
+        blocks.retain(|b| !matches!(b, Block::AlignStart(_) | Block::AlignEnd(_)));
     }
     let numbered = markdown::headings_numbered(req.text, req.opts.numbered_headings);
     let has_headings = blocks.iter().any(|b| matches!(b, Block::Heading { .. }));

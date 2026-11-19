@@ -4,6 +4,7 @@
 use crate::format::{self, Cmd};
 use crate::key_badges::Badges;
 use crate::keys::Action;
+use crate::markdown::Align;
 use crate::theme;
 use eframe::egui::{self, text::LayoutJob, Color32, CornerRadius, FontId, Pos2, Rect, Response, Sense, Stroke, TextFormat, Ui, Vec2};
 use std::ops::Range;
@@ -215,6 +216,33 @@ fn draw_page_break(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
     p.extend(egui::Shape::dashed_line(&[Pos2::new(b.left() - 3.0 * s, b.center().y), Pos2::new(b.right() + 3.0 * s, b.center().y)], Stroke::new(1.4 * s, c), 2.5 * s, 1.8 * s));
 }
 
+/// Lines of text hugging the left edge, the middle or the right edge: the alignment buttons.
+fn draw_aligned(p: &egui::Painter, r: Rect, c: Color32, s: f32, a: Align) {
+    let b = Rect::from_center_size(r.center(), Vec2::new(14.0, 11.0) * s);
+    for (k, len) in [14.0, 8.0, 14.0, 8.0].into_iter().enumerate() {
+        let y = b.top() + 1.0 * s + k as f32 * 3.0 * s;
+        let w = len * s;
+        let x0 = match a {
+            Align::Center => b.center().x - w / 2.0,
+            Align::Right => b.right() - w,
+            _ => b.left(),
+        };
+        p.line_segment([Pos2::new(x0, y), Pos2::new(x0 + w, y)], Stroke::new(1.4 * s, c));
+    }
+}
+
+fn draw_align_left(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
+    draw_aligned(p, r, c, s, Align::Left);
+}
+
+fn draw_align_center(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
+    draw_aligned(p, r, c, s, Align::Center);
+}
+
+fn draw_align_right(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
+    draw_aligned(p, r, c, s, Align::Right);
+}
+
 fn draw_table(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
     let b = Rect::from_center_size(r.center(), Vec2::new(14.0, 12.0) * s);
     p.rect_stroke(b, s, Stroke::new(1.2 * s, c), egui::StrokeKind::Inside);
@@ -311,6 +339,10 @@ impl FormatBar {
                 cmds.push(text_cmd(ui, bar, on(Cmd::Numbered), Cmd::Numbered, "1.", Label::default(), "Numbered list: 1. item"));
                 cmds.push(draw_cmd(ui, bar, on(Cmd::Task), Cmd::Task, "Task: - [ ] item", draw_task));
                 cmds.push(draw_cmd(ui, bar, on(Cmd::Quote), Cmd::Quote, "Quote: > text", draw_quote));
+                separator(ui, sc);
+                cmds.push(draw_cmd(ui, bar, on(Cmd::Align(Align::Left)), Cmd::Align(Align::Left), "Align left: no wrapper", draw_align_left));
+                cmds.push(draw_cmd(ui, bar, on(Cmd::Align(Align::Center)), Cmd::Align(Align::Center), "Centre the paragraph: <div align=\"center\">", draw_align_center));
+                cmds.push(draw_cmd(ui, bar, on(Cmd::Align(Align::Right)), Cmd::Align(Align::Right), "Align the paragraph right: <div align=\"right\">", draw_align_right));
                 separator(ui, sc);
                 cmds.push(text_cmd(ui, bar, false, Cmd::CodeBlock, "{ }", mono, "Code block: ``` fence"));
                 cmds.push(draw_cmd(ui, bar, false, Cmd::Rule, "Horizontal rule: ---", draw_rule));

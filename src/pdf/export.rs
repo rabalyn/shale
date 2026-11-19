@@ -762,14 +762,27 @@ impl<'a> Writer<'a> {
     /// [`Writer::paragraph`], justified when `justify` and the note asks for it (PDF-016): the
     /// space left at the end of every line but the last is spread over the gaps between its words.
     pub(super) fn paragraph_aligned(&mut self, pieces: &[Piece], x0: f32, avail: f32, justify: bool) {
+        self.paragraph_in(pieces, x0, avail, justify, None);
+    }
+
+    /// [`Writer::paragraph_aligned`] for a paragraph in an alignment wrapper (PDF-029): each line
+    /// centred or flush right in `avail`, or justified whatever the note says.
+    fn paragraph_in(&mut self, pieces: &[Piece], x0: f32, avail: f32, justify: bool, align: Option<markdown::Align>) {
         let lines = wrap_pieces(pieces, avail);
         let last = lines.len().saturating_sub(1);
         for (n, line) in lines.iter().enumerate() {
             let lh = self.line_height(line);
             self.need(lh);
             let base = self.y + self.line_ascent(line);
-            let gap = if justify && self.opts.justify && n < last { justify_gap(line, avail) } else { 0.0 };
-            self.draw_line_spread(line, x0, base, gap);
+            let forced = align == Some(markdown::Align::Justify);
+            let gap = if (forced || (justify && self.opts.justify && align != Some(markdown::Align::Left))) && n < last { justify_gap(line, avail) } else { 0.0 };
+            let room = (avail - line.iter().map(piece_width).sum::<f32>() + line.last().map_or(0.0, |p| piece_width(p) - trimmed_width(p))).max(0.0);
+            let dx = match align {
+                Some(markdown::Align::Center) => room / 2.0,
+                Some(markdown::Align::Right) => room,
+                _ => 0.0,
+            };
+            self.draw_line_spread(line, x0 + dx, base, gap);
             self.y += lh;
         }
     }
@@ -892,6 +905,8 @@ impl<'a> Writer<'a> {
         let first_jump = self.jumps.len();
         // the page-break markers (PDF-020)
         let breaks = markdown::page_break_lines(text);
+        // the alignment wrappers (PDF-028): their lines are not printed, what they hold is aligned
+        let wrappers = markdown::align_blocks(text);
         // a page break asked for and not yet made: it is made where the next thing is printed, so
         // a marker at the end of the note or at the top of a page makes no empty page (PDF-022)
         let mut pending = false;
@@ -907,7 +922,14 @@ impl<'a> Writer<'a> {
             if notes.def_at(j).is_some() || notes.is_continuation(j) || formulas.iter().any(|m| m.block && m.lines.contains(&j)) {
                 return false;
             }
-            if matches!(t, "---" | "***" | "___") || breaks.contains(&j) || markdown::heading_level(l).is_some() || markdown::parse_task_line(l).is_some() || list_marker(l).is_some() || t.starts_with('>') {
+            if matches!(t, "---" | "***" | "___")
+                || breaks.contains(&j)
+                || markdown::is_align_edge(&wrappers, j)
+                || markdown::heading_level(l).is_some()
+                || markdown::parse_task_line(l).is_some()
+                || list_marker(l).is_some()
+                || t.starts_with('>')
+            {
                 return false;
             }
             let links = markdown::find_links(l);
@@ -930,6 +952,11 @@ impl<'a> Writer<'a> {
             extra = 0;
             if breaks.contains(&i) {
                 pending |= self.y > self.top + 0.5;
+                i += 1;
+                continue;
+            }
+            if markdown::is_align_edge(&wrappers, i) || (lines[i].1.trim().is_empty() && wrappers.iter().any(|b| b.holds(i) && (i == b.open + 1 || i + 1 == b.close))) {
+                // the tag of a wrapper, and the blank line next to it inside, are not printed
                 i += 1;
                 continue;
             }
@@ -1082,7 +1109,7 @@ impl<'a> Writer<'a> {
                 }
                 self.need(base * scale * 2.0);
                 places.insert(i, Dest { page: self.page, y: self.y });
-                self.paragraph(&ps, x0, cw);
+                self.paragraph_in(&ps, x0, cw, false, markdown::align_at(&wrappers, i));
                 self.y += base * 0.2;
             } else if let Some((_, done, rest, indent)) = markdown::parse_task_line(line) {
                 let ind = indent as f32 * 4.0;
@@ -1138,7 +1165,7 @@ impl<'a> Writer<'a> {
                 let (text, n) = gather(i, line, false);
                 extra = n;
                 let ps = self.pieces(vault, rel, &text, base, ink, false);
-                self.paragraph_aligned(&ps, x0, cw, true);
+                self.paragraph_in(&ps, x0, cw, true, markdown::align_at(&wrappers, i));
             }
             let _ = off;
             i += 1 + extra;
@@ -2927,6 +2954,47 @@ pub(crate) mod tests {
         let text = front("print-align: justify", &format!("# {}\n\n```\n{}\n```\n", words(30), words(30)));
         let lines = text_lines(&contents(&export_note(&v, Path::new("Welcome.md"), &text, &plain_options()).unwrap()));
         assert!(lines.iter().take(lines.len() - 1).any(|l| (end(l) - right).abs() > 5.0) || lines.len() < 2);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // spec: PDF-029
+    #[test]
+    fn a_wrapper_centres_or_right_aligns_its_paragraphs_and_prints_no_html_pdf_029() {
+        let (v, d) = vault();
+        let (left, right) = (20.0 * MM, 595.0 - 20.0 * MM);
+        let first_page = |text: &str| contents(&export_note(&v, Path::new("Welcome.md"), text, &plain_options()).unwrap());
+        let x_of = |c: &str, word: &str| drawn(c).into_iter().find(|(_, _, t)| t.trim() == word).unwrap_or_else(|| panic!("{word} is not drawn")).0;
+        let width = |word: &str| crate::pdf::write::text_width(FontKind::Sans, 11.0, word);
+        let c = first_page("Plain\n\n<div align=\"center\">\n\nMiddle\n\n</div>\n\n<div align=\"right\">\n\nFarther\n\n</div>\n\nPlain again\n");
+        let plains: Vec<f32> = drawn(&c).into_iter().filter(|(_, _, t)| t.trim() == "Plain").map(|d| d.0).collect();
+        assert!(plains.len() == 2 && plains.iter().all(|x| (x - left).abs() < 0.01), "outside a wrapper the text is at the left margin: {plains:?}");
+        assert!((x_of(&c, "Middle") - ((left + right) / 2.0 - width("Middle") / 2.0)).abs() < 0.5, "centred: {}", x_of(&c, "Middle"));
+        assert!((x_of(&c, "Farther") + width("Farther") - right).abs() < 0.5, "flush right");
+        assert!(!c.contains(&hex("div")) && !c.contains(&hex("align")), "the HTML is not printed");
+        // the lines of a long paragraph are each centred, and a heading is aligned too
+        let c = first_page(&format!("<div align=\"center\">\n\n# Title\n\n{}\n\n</div>\n", words(60)));
+        let lines = text_lines(&c);
+        assert!(lines.len() > 3);
+        let heading_x = lines[0][0].0;
+        assert!(heading_x > left + 40.0, "the heading is centred: {heading_x}");
+        let last = lines.last().unwrap();
+        assert!(last[0].0 > left + 1.0, "even the last line is centred, not at the margin: {}", last[0].0);
+        // justified in a note that is left: the lines fill the width
+        let c = first_page(&format!("<div align=\"justify\">\n\n{}\n\n</div>\n", words(120)));
+        let lines = text_lines(&c);
+        let end = |l: &Vec<(f32, f32, String)>| {
+            let (x, _, t) = l.last().unwrap();
+            x + width(t.trim_end())
+        };
+        for l in &lines[..lines.len() - 1] {
+            assert!((end(l) - right).abs() < 0.5, "a justified line ends at the margin: {}", end(l));
+        }
+        // and left in a justified note is ragged again
+        let text = front("print-align: justify", &format!("<div align=\"left\">\n\n{}\n\n</div>\n", words(120)));
+        let lines = text_lines(&first_page(&text));
+        assert!(lines[..lines.len() - 1].iter().any(|l| (end(l) - right).abs() > 2.0), "not justified");
+        // a wrapper without a closing line is text
+        assert!(first_page("<div align=\"center\">\n\nx\n").contains(&hex("align")));
         let _ = std::fs::remove_dir_all(&d);
     }
 

@@ -22,6 +22,8 @@ pub enum Cmd {
     Rule,
     /// the page-break marker line (EDIT-066)
     PageBreak,
+    /// wrap the paragraphs under the selection in the alignment wrapper, or take it off (EDIT-109)
+    Align(crate::markdown::Align),
     WikiLink,
     WebLink,
     /// starts the `[!` file picker
@@ -58,6 +60,7 @@ pub fn apply(cmd: Cmd, text: &str, sel: Range<usize>) -> Option<Out> {
         Cmd::CodeBlock => code_block(text, sel),
         Cmd::Rule => rule(text, sel),
         Cmd::PageBreak => Some(block_after(text, sel.end, PAGE_BREAK, None)),
+        Cmd::Align(a) => align(text, sel, a),
         Cmd::Embed => Some(insert(text, sel.end, "[!", 2..2)),
         Cmd::Table => table(text, sel),
         Cmd::Clear => clear(text, sel),
@@ -89,6 +92,13 @@ pub fn is_on(cmd: Cmd, text: &str, sel: Range<usize>) -> bool {
                 Cmd::Numbered => matches!(p.marker, Marker::Numbered),
                 Cmd::Task => matches!(p.marker, Marker::Task(_)),
                 _ => p.quote_end > 0,
+            };
+        }
+        Cmd::Align(a) => {
+            let line = text[..sel.start].matches('\n').count();
+            return match crate::markdown::align_at(&crate::markdown::align_blocks(text), line) {
+                Some(now) => now == a,
+                None => a == crate::markdown::Align::Left,
             };
         }
         _ => return false,
@@ -821,6 +831,109 @@ fn rule(text: &str, sel: Range<usize>) -> Option<Out> {
 /// The marker line of a page break, in the form Obsidian writes (PDF-020).
 const PAGE_BREAK: &str = "<div style=\"page-break-after: always;\"></div>\n";
 
+/// A change of the text: bytes `start..end` become `ins`.
+struct Edit {
+    start: usize,
+    end: usize,
+    ins: String,
+    /// for an insertion: a position at `start` stays before it (the closing line of a wrapper)
+    stays_before: bool,
+}
+
+/// `text` with the (ordered, not overlapping) `edits` made, and `sel` moved along with the text.
+fn splice(text: &str, edits: &[Edit], sel: Range<usize>) -> Out {
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for e in edits {
+        out.push_str(&text[at..e.start]);
+        out.push_str(&e.ins);
+        at = e.end;
+    }
+    out.push_str(&text[at..]);
+    let map = |p: usize| {
+        let mut shift = 0isize;
+        for e in edits {
+            let moved = (e.ins.len() as isize) - (e.end - e.start) as isize;
+            if p >= e.end && !(e.start == e.end && p == e.start && e.stays_before) {
+                shift += moved;
+            } else if p > e.start {
+                return (e.start as isize + shift) as usize;
+            } else {
+                break;
+            }
+        }
+        (p as isize + shift) as usize
+    };
+    (out, map(sel.start)..map(sel.end))
+}
+
+/// The alignment buttons (EDIT-109): the paragraphs the selection touches (a paragraph is the
+/// lines up to the blank ones) go between `<div align="…">` and `</div>` lines, each with a blank
+/// line next to it (the form Obsidian renders as Markdown). Where the selection is in a wrapper
+/// already, the button changes its alignment, or takes the wrapper off when it is the same one
+/// (or left, which is no wrapper).
+fn align(text: &str, sel: Range<usize>, a: crate::markdown::Align) -> Option<Out> {
+    use crate::markdown::{align_blocks, front_matter_lines, is_align_edge, lines_with_offsets};
+    let lines = lines_with_offsets(text);
+    let t = touched(text, &sel);
+    let first_touched = text[..t[0].start].matches('\n').count();
+    let last_touched = first_touched + t.len() - 1;
+    let fenced = crate::markdown::fenced_code_lines(text);
+    if first_touched < front_matter_lines(text) || (first_touched..=last_touched).any(|l| fenced.get(l).copied().unwrap_or(false)) {
+        return None;
+    }
+    let blank = |l: usize| lines[l].1.trim().is_empty();
+    let end_of = |l: usize| if l + 1 < lines.len() { lines[l + 1].0 - 1 } else { text.len() };
+    let blocks = align_blocks(text);
+    if let Some(b) = blocks.iter().find(|b| b.open <= last_touched && b.close >= first_touched) {
+        if a == crate::markdown::Align::Left || a == b.align {
+            // take the wrapper off with the blank line each of its lines has inside
+            let mut gone = vec![b.open, b.close];
+            if b.open + 1 < b.close && blank(b.open + 1) {
+                gone.push(b.open + 1);
+            }
+            if b.close > b.open + 2 && blank(b.close - 1) {
+                gone.push(b.close - 1);
+            }
+            gone.sort_unstable();
+            let edits: Vec<Edit> = gone
+                .iter()
+                .map(|&l| {
+                    // a line goes with its line break
+                    let end = lines.get(l + 1).map_or(text.len(), |n| n.0);
+                    Edit { start: lines[l].0, end, ins: String::new(), stays_before: false }
+                })
+                .collect();
+            return Some(splice(text, &edits, sel));
+        }
+        let (start, end) = (lines[b.open].0, end_of(b.open));
+        return Some(splice(text, &[Edit { start, end, ins: a.open_line(), stays_before: false }], sel));
+    }
+    if a == crate::markdown::Align::Left {
+        return None;
+    }
+    // the paragraphs: out to the blank lines (or the wrapper lines of a neighbour), in from blank ends of the selection
+    let (mut first, mut last) = (first_touched, last_touched);
+    while first < last && blank(first) {
+        first += 1;
+    }
+    while last > first && blank(last) {
+        last -= 1;
+    }
+    if blank(first) {
+        return None;
+    }
+    let front = front_matter_lines(text);
+    while first > front && !blank(first - 1) && !is_align_edge(&blocks, first - 1) {
+        first -= 1;
+    }
+    while last + 1 < lines.len() && !blank(last + 1) && !is_align_edge(&blocks, last + 1) {
+        last += 1;
+    }
+    let edits = [Edit { start: lines[first].0, end: lines[first].0, ins: format!("{}\n\n", a.open_line()), stays_before: false }, Edit { start: end_of(last), end: end_of(last), ins: "\n\n</div>".to_string(), stays_before: true }];
+    Some(splice(text, &edits, sel))
+}
+
 const TABLE: &str = "| Column 1 | Column 2 |\n| --- | --- |\n|  |  |\n|  |  |\n";
 
 fn table(text: &str, sel: Range<usize>) -> Option<Out> {
@@ -1140,6 +1253,46 @@ mod tests {
         assert!(!on(Cmd::Rule, "a|"));
     }
 
+    // spec: EDIT-109
+    #[test]
+    fn an_align_button_wraps_the_paragraphs_under_the_selection_in_a_div() {
+        use crate::markdown::Align::{Center, Left, Right};
+        let o = "<div align=\"center\">";
+        assert_eq!(run(Cmd::Align(Center), "intro\n\nab|c\nde\n\nlast"), format!("intro\n\n{o}\n\nab|c\nde\n\n</div>\n\nlast"), "the whole paragraph, the cursor stays in its text");
+        assert_eq!(run(Cmd::Align(Right), "|# Title"), "<div align=\"right\">\n\n|# Title\n\n</div>");
+        assert_eq!(run(Cmd::Align(Center), "⟦a\n\nb⟧\n\nc"), format!("{o}\n\n⟦a\n\nb⟧\n\n</div>\n\nc"), "two paragraphs in one wrapper");
+        let (t, _) = apply(Cmd::Align(Center), "x\n\nword\n\ny", 4..4).unwrap();
+        assert_eq!(crate::markdown::align_blocks(&t).len(), 1, "Shale reads what it wrote as a wrapper");
+        // nothing to wrap
+        assert_eq!(run(Cmd::Align(Center), "a\n|\nb"), "<none>", "a blank line");
+        assert_eq!(run(Cmd::Align(Left), "a|b"), "<none>", "left is no wrapper");
+        assert_eq!(run(Cmd::Align(Center), "```\nco|de\n```"), "<none>", "code");
+        assert_eq!(run(Cmd::Align(Center), "---\ntitle: x|\n---\nbody"), "<none>", "the front matter");
+        assert!(!works_in_a_cell(Cmd::Align(Center)));
+    }
+
+    // spec: EDIT-109
+    #[test]
+    fn in_a_wrapper_the_buttons_change_the_alignment_or_take_it_off() {
+        use crate::markdown::Align::{Center, Left, Right};
+        let c = "a\n\n<div align=\"center\">\n\nte|xt\n\n</div>\n\nb";
+        assert_eq!(run(Cmd::Align(Right), c), "a\n\n<div align=\"right\">\n\nte|xt\n\n</div>\n\nb");
+        assert_eq!(run(Cmd::Align(Center), c), "a\n\nte|xt\n\nb", "the same button again");
+        assert_eq!(run(Cmd::Align(Left), c), "a\n\nte|xt\n\nb");
+        // without the blank lines, and at the end of the note
+        assert_eq!(run(Cmd::Align(Left), "<div align=\"right\">\nte|xt\n</div>"), "te|xt\n");
+        assert_eq!(run(Cmd::Align(Left), "x\n<div align=\"right\">\n\nte|xt\n\n</div>"), "x\nte|xt\n");
+        // the cursor on the wrapper line itself
+        assert_eq!(run(Cmd::Align(Left), "<div align=\"center\">|\n\ntext\n\n</div>"), "|text\n");
+        // pressed look
+        let (t, sel) = parse_marks(c);
+        assert!(is_on(Cmd::Align(Center), &t, sel.clone()));
+        assert!(!is_on(Cmd::Align(Right), &t, sel.clone()));
+        assert!(!is_on(Cmd::Align(Left), &t, sel));
+        assert!(is_on(Cmd::Align(Left), &t, 0..0));
+        assert!(!is_on(Cmd::Align(Center), &t, 0..0));
+    }
+
     // spec: EDIT-027
     #[test]
     fn odd_selections_never_panic_or_split_a_character() {
@@ -1153,6 +1306,8 @@ mod tests {
             Cmd::CodeBlock,
             Cmd::Rule,
             Cmd::PageBreak,
+            Cmd::Align(crate::markdown::Align::Center),
+            Cmd::Align(crate::markdown::Align::Left),
             Cmd::Table,
             Cmd::WebLink,
             Cmd::WikiLink,
@@ -1199,7 +1354,7 @@ mod tests {
     #[test]
     fn only_the_inline_commands_work_in_a_table_cell() {
         let inline = [Cmd::Bold, Cmd::Italic, Cmd::Strike, Cmd::Highlight, Cmd::Code, Cmd::WikiLink, Cmd::WebLink, Cmd::HighlightColour(None), Cmd::FontColour(Some([1, 2, 3])), Cmd::Clear];
-        let other = [Cmd::Heading(0), Cmd::Heading(2), Cmd::Bullet, Cmd::Numbered, Cmd::Task, Cmd::Quote, Cmd::CodeBlock, Cmd::Rule, Cmd::PageBreak, Cmd::Embed, Cmd::Table];
+        let other = [Cmd::Heading(0), Cmd::Heading(2), Cmd::Bullet, Cmd::Numbered, Cmd::Task, Cmd::Quote, Cmd::CodeBlock, Cmd::Rule, Cmd::PageBreak, Cmd::Align(crate::markdown::Align::Right), Cmd::Embed, Cmd::Table];
         assert!(inline.into_iter().all(works_in_a_cell));
         assert!(!other.into_iter().any(works_in_a_cell));
     }
