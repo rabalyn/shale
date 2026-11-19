@@ -1,0 +1,182 @@
+{
+  "schema": 2,
+  "verdict": "faster",
+  "exit_code": 0,
+  "x": {
+    "commit": "72a1e58636a875178c55ac06cafec27550b3cc0e",
+    "describe": "v0.6.6",
+    "date": "2026-11-19T18:04:33Z",
+    "load": 5.48,
+    "cores": 28,
+    "repeats": 1
+  },
+  "y": {
+    "commit": "fd6bdd29c5d544f61e185b7bada20c97c325934d",
+    "describe": "v0.6.7",
+    "date": "2026-11-19T20:00:55Z",
+    "load": 2.44,
+    "cores": 28,
+    "repeats": 1
+  },
+  "busy": false,
+  "threshold_time_pct": 10.0,
+  "threshold_bytes_pct": 15.0,
+  "threshold_allocs_pct": 10.0,
+  "rows": [
+    {
+      "id": "worst.startup",
+      "status": "both",
+      "x_median_ns": 757407422,
+      "y_median_ns": 757113532,
+      "time_delta_pct": -0.03880210194190571,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        752934459,
+        759206594
+      ],
+      "y_range_ns": [
+        752747779,
+        775395866
+      ],
+      "x_allocs": 5007645,
+      "y_allocs": 5010032,
+      "allocs_delta_pct": 0.047667116978140425,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 183192328,
+      "y_peak_bytes": 183203535,
+      "bytes_delta_pct": 0.006117614270396739,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.idle",
+      "status": "both",
+      "x_median_ns": 2204917,
+      "y_median_ns": 2219463,
+      "time_delta_pct": 0.6597073722049401,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        2131332,
+        2330666
+      ],
+      "y_range_ns": [
+        2144124,
+        2395215
+      ],
+      "x_allocs": 10004,
+      "y_allocs": 10004,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 19367768,
+      "y_peak_bytes": 19367768,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.frame.typing",
+      "status": "both",
+      "x_median_ns": 23599503,
+      "y_median_ns": 23516909,
+      "time_delta_pct": -0.3499819466537071,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        23171399,
+        24799892
+      ],
+      "y_range_ns": [
+        23029002,
+        24184083
+      ],
+      "x_allocs": 145703,
+      "y_allocs": 145703,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 22299293,
+      "y_peak_bytes": 22299293,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.views.cycle",
+      "status": "both",
+      "x_median_ns": 140770868,
+      "y_median_ns": 138667359,
+      "time_delta_pct": -1.4942786315702763,
+      "time_verdict": "ok",
+      "x_range_ns": [
+        139115092,
+        208612615
+      ],
+      "y_range_ns": [
+        138614379,
+        209221616
+      ],
+      "x_allocs": 397966,
+      "y_allocs": 397966,
+      "allocs_delta_pct": 0.0,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 90851292,
+      "y_peak_bytes": 90851292,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    },
+    {
+      "id": "worst.memory.growth",
+      "status": "both",
+      "x_median_ns": 28086995097,
+      "y_median_ns": 26444087485,
+      "time_delta_pct": -5.849353433238861,
+      "time_verdict": "faster",
+      "x_range_ns": [
+        28086995097,
+        28086995097
+      ],
+      "y_range_ns": [
+        26444087485,
+        26444087485
+      ],
+      "x_allocs": 114455585,
+      "y_allocs": 114353813,
+      "allocs_delta_pct": -0.08891833456619876,
+      "allocs_verdict": "ok",
+      "x_peak_bytes": 59368216,
+      "y_peak_bytes": 59368216,
+      "bytes_delta_pct": 0.0,
+      "bytes_verdict": "ok",
+      "x_version": 1,
+      "y_version": 1
+    }
+  ],
+  "regressions": [],
+  "improvements": [
+    {
+      "id": "worst.memory.growth",
+      "metric": "time",
+      "x": 28086995097,
+      "y": 26444087485,
+      "delta_pct": -5.849353433238861,
+      "confidence": "high"
+    }
+  ],
+  "tradeoffs": [],
+  "noisy": [],
+  "changed": [],
+  "skipped": [],
+  "summary": {
+    "compared": 5,
+    "faster": 1,
+    "slower": 0,
+    "regressions": 0,
+    "noisy": 0,
+    "changed": 0,
+    "added": 0,
+    "removed": 0
+  }
+}
