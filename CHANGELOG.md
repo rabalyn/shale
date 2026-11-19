@@ -10,6 +10,12 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-11-19
+
+### Fixed
+
+- **Tests that failed on the Windows and macOS builds** (#415): the Finder `PATH` logic splits on `:` on every platform, and the tests for the GnuPG plan text and for Ctrl+Home / Ctrl+End in the front matter fold use the platform's own path separator and command key. No change to the app.
+
 ## [0.6.5] - 2026-11-19
 
 ### Added
@@ -1708,7 +1714,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.5...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.6...HEAD
+[0.6.6]: https://github.com/rabalyn/shale/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/rabalyn/shale/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/rabalyn/shale/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/rabalyn/shale/compare/v0.6.2...v0.6.3
