@@ -15,6 +15,7 @@
 mod app;
 mod calendar;
 mod caption;
+mod code_box;
 mod colour_tags;
 mod config;
 mod cursor_style;
@@ -24,10 +25,15 @@ mod data_usage;
 mod dialog;
 mod drawing;
 mod editor;
+mod editor_cache;
 mod editor_preview;
 mod embed_size;
 #[cfg(any(test, target_os = "macos"))]
 mod finder_path;
+mod fold;
+mod fold_ui;
+#[cfg(test)]
+mod fold_ui_tests;
 mod fonts;
 #[cfg(test)]
 mod fonts_ui_tests;
@@ -36,6 +42,7 @@ mod format_bar;
 #[cfg(test)]
 mod format_bar_ui_tests;
 mod fsutil;
+mod galley_index;
 mod gitsync;
 mod graph;
 mod import;
