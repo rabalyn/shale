@@ -2720,7 +2720,8 @@ fn mail_236_the_first_click_only_shows_what_gpgconf_will_write_cancel_writes_not
     assert!(!w.has("md:agent-write"), "the plan is closed after the write");
 
     // a failure is said in gpgconf's words and the times stay readable
-    std::fs::write(&conf, "this-is-not-an-option\n").unwrap();
+    // (a home that is not there: an unknown option in the file is accepted by GnuPG 2.2, the CI image's)
+    w.app.mail.gnupg.home = Some(home.dir.join("gone"));
     w.app.mail.write_agent(crate::mail::agent_cache::Choice::Day1);
     w.until("the second write ended", |a| a.mail.agent.written.as_ref().is_some_and(|r| r.is_err()));
     w.settle();
