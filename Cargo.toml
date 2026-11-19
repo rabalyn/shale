@@ -33,6 +33,8 @@ syntect = { version = "5", default-features = false, features = ["parsing", "reg
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
 fontdb = { version = "0.24", default-features = false, features = ["fs", "memmap", "fontconfig"] }
+# spans that mark the steps of a flow (DEV-026); no subscriber is installed outside tests, so they cost nothing
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 [features]
 # The benchmark harness (BUILD-038): `shale --bench`, scenarios, a counting allocator, comparison and
@@ -44,6 +46,8 @@ bench = []
 jiff-tzdb = "1"
 # self-signed certificate for the pretend mail server in tests
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+# the recorder of the dataflow diagrams is a layer of this (DEV-026)
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 
 # Always strict: CI builds with RUSTFLAGS="-D warnings" and runs clippy with -D warnings.
 [lints.rust]

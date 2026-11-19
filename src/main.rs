@@ -26,6 +26,10 @@ mod cursor_style;
 #[cfg(test)]
 mod cursor_ui_tests;
 mod data_usage;
+#[cfg(test)]
+mod dataflow;
+#[cfg(test)]
+mod dataflow_tests;
 mod dialog;
 mod drawing;
 mod editor;

@@ -122,7 +122,7 @@ fn is_unseen(line: &str) -> bool {
     !line.contains("\\Seen")
 }
 
-// spec: MAIL-091, MAIL-092
+// spec: MAIL-091, MAIL-092, DEV-026
 #[test]
 #[ignore = "needs the containers: tests/mail-env/mail-env.sh up"]
 fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server() {
@@ -151,7 +151,11 @@ fn mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server(
     }
     assert_eq!(folder(&found, "Trash").special_use.as_deref(), Some("\\Trash"));
 
-    let summary = sync(&store, "alice", &connector);
+    // the first sync is recorded: its steps are the dataflow diagram of docs/dataflow/mail-sync.md (DEV-026)
+    let mut summary = None;
+    let flow = crate::dataflow::record(|| summary = Some(sync(&store, "alice", &connector)));
+    crate::dataflow::verify(&env_dir().join("../../docs/dataflow/mail-sync.md"), "mail_sync", &crate::dataflow::render_mermaid(&flow));
+    let summary = summary.expect("the sync ran");
     assert!(summary.errors.is_empty(), "{:?}", summary.errors);
     assert_eq!(summary.folders_failed, 0);
     let rows = store.reader().unwrap().folders(Some("alice")).unwrap();
