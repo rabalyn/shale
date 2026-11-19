@@ -147,8 +147,10 @@ pub fn fetch_page(url: &str) -> Result<WebPage, String> {
     if url.to_ascii_lowercase().starts_with("mailto:") {
         return Err("this is a mail address, not a web page".into());
     }
+    let _flow = tracing::info_span!("flow.link_preview", peer = "preview").entered();
     let acct = dav::Account { url: String::new(), username: String::new(), password: crate::secret::Secret::default() };
-    let r = dav::request_bytes("GET", &url, &["Accept: text/html,application/xhtml+xml;q=0.9,text/plain;q=0.5", "User-Agent: Shale link preview"], "", &acct, MAX_PAGE_BYTES)?;
+    let r = tracing::info_span!("flow.link_preview.request_page", peer = "web")
+        .in_scope(|| dav::request_bytes("GET", &url, &["Accept: text/html,application/xhtml+xml;q=0.9,text/plain;q=0.5", "User-Agent: Shale link preview"], "", &acct, MAX_PAGE_BYTES))?;
     match r.status {
         200..=299 => {}
         404 | 410 => return Err(format!("the page was not found ({})", r.status)),
@@ -159,7 +161,7 @@ pub fn fetch_page(url: &str) -> Result<WebPage, String> {
         return Err(format!("this is not a web page but a file of type {ct}"));
     }
     let html = String::from_utf8_lossy(&r.body);
-    let page = parse_page(&html);
+    let page = tracing::info_span!("flow.link_preview.read_page", peer = "preview").in_scope(|| parse_page(&html));
     if page == WebPage::default() {
         return Err("the page has nothing to show".into());
     }
@@ -828,5 +830,25 @@ mod tests {
         assert!(from_heading(&big, None).1.chars().count() <= MAX_NOTE_CHARS + 1);
         assert_eq!(fetchable("www.example.org"), "https://www.example.org");
         assert_eq!(fetchable("http://a.b"), "http://a.b");
+    }
+
+    // spec: DEV-031
+    #[test]
+    fn dataflow_link_preview() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut c, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 2048];
+            let _ = c.read(&mut buf);
+            let body = "<html><head><title>A page</title><meta name=\"description\" content=\"About it\"></head><body><p>Some readable text of the page.</p></body></html>";
+            let _ = write!(c, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        });
+        let mut page = None;
+        let flow = crate::dataflow::record(|| page = Some(fetch_page(&format!("http://127.0.0.1:{port}/")).unwrap()));
+        server.join().unwrap();
+        assert_eq!(page.unwrap().title, "A page");
+        crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/link-preview.md"), "link_preview", &crate::dataflow::render_mermaid(&flow));
     }
 }

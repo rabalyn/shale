@@ -71,7 +71,7 @@ fn walk(root: &Path) -> (Vec<(PathBuf, u64)>, Option<String>) {
     let mut bad = vec![];
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let rd = match std::fs::read_dir(&dir) {
+        let rd = match tracing::info_span!("flow.data_usage_scan.read_folder", peer = "disk").in_scope(|| std::fs::read_dir(&dir)) {
             Ok(rd) => rd,
             Err(e) => {
                 if dir.as_path() != root || e.kind() != std::io::ErrorKind::NotFound {
@@ -159,6 +159,7 @@ pub fn outside(p: &Places) -> Vec<Line> {
 
 /// Everything "Saved" shows (a background job).
 pub fn saved(p: &Places) -> Saved {
+    let _flow = tracing::info_span!("flow.data_usage_scan", peer = "app").entered();
     let (vault, largest_files, largest_folders) = match &p.vault {
         Some(v) => vault(v),
         None => (vec![], vec![], vec![]),

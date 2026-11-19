@@ -144,11 +144,12 @@ pub fn all_hits(ctx: &Ctx, query: &str) -> Vec<Hit> {
     if query.trim().is_empty() {
         return vec![];
     }
-    let mut out = note_hits(ctx.vault, query);
+    let _flow = tracing::info_span!("flow.vault_search", peer = "picker").entered();
+    let mut out = tracing::info_span!("flow.vault_search.search_notes", peer = "vault").in_scope(|| note_hits(ctx.vault, query));
     if let Some(db) = ctx.mail {
-        out.extend(mail_hits(db, query));
+        out.extend(tracing::info_span!("flow.vault_search.search_mail", peer = "mail_index").in_scope(|| mail_hits(db, query)));
     }
-    out.extend(post_hits(ctx.posts, query));
+    out.extend(tracing::info_span!("flow.vault_search.search_posts", peer = "post_index").in_scope(|| post_hits(ctx.posts, query)));
     out
 }
 
@@ -256,6 +257,23 @@ mod tests {
         let db = mail_db_with(&many);
         let ctx = Ctx { vault: &v, mail: Some(&db), posts: &posts };
         assert_eq!(all_hits(&ctx, "banana").iter().filter(|h| h.group == MAIL).count(), GROUP_LIMIT);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: DEV-031
+    #[test]
+    fn dataflow_vault_search() {
+        let (v, dir) = fixture();
+        let db = mail_db_with(&[("Banana order".into(), 10)]);
+        let mut posts = PostIndex::in_memory();
+        let mut p = post("p1", "ada", crate::calendar::time::now() - 3600, None);
+        p.text_markdown = "banana republic".into();
+        posts.add("acct", "home", &[p]);
+        let ctx = Ctx { vault: &v, mail: Some(&db), posts: &posts };
+        let flow = crate::dataflow::record(|| {
+            assert!(!all_hits(&ctx, "banana").is_empty());
+        });
+        crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/vault-search.md"), "vault_search", &crate::dataflow::render_mermaid(&flow));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

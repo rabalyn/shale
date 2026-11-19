@@ -9,3 +9,10 @@ One row per flow, one row per line; the flow is the name in the begin marker of 
 | Flow | Doc | Driving test | Drift checked by |
 | --- | --- | --- | --- |
 | mail_sync | [mail-sync.md](mail-sync.md) | `mail/env_tests.rs::mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server` | mail-env suite (land.sh, when mail code changes) |
+| vault_open | [vault-open.md](vault-open.md) | `app.rs::dataflow_vault_open` | every `cargo test` |
+| vault_check | [vault-check.md](vault-check.md) | `vault_check.rs::dataflow_vault_check` | every `cargo test` |
+| vault_search | [vault-search.md](vault-search.md) | `search_all.rs::dataflow_vault_search` | every `cargo test` |
+| recovery | [recovery.md](recovery.md) | `recovery.rs::dataflow_recovery` | every `cargo test` |
+| data_usage_scan | [data-usage.md](data-usage.md) | `data_usage/usage_tests.rs::dataflow_data_usage_scan` | every `cargo test` |
+| data_usage_cleanup | [data-usage.md](data-usage.md) | `data_usage/usage_tests.rs::dataflow_data_usage_cleanup` | every `cargo test` |
+| link_preview | [link-preview.md](link-preview.md) | `link_preview.rs::dataflow_link_preview` | every `cargo test` |

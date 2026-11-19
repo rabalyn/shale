@@ -358,3 +358,31 @@ fn sizes_and_ages_read_well() {
     assert_eq!(human_age(3_600), "1 hour");
     assert_eq!(human_age(3 * 86_400), "3 days");
 }
+
+// spec: DEV-031
+#[test]
+fn dataflow_data_usage_scan() {
+    let (p, d) = places_with_caches("dataflow-scan");
+    write(&p.vault.clone().unwrap().join("Projects/Plan.md"), b"# plan");
+    write(&p.recovery.join("2026-11-15/Note.md"), b"saved");
+    let flow = crate::dataflow::record(|| {
+        assert!(!scan::saved(&p).vault.is_empty());
+    });
+    crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/data-usage.md"), "data_usage_scan", &crate::dataflow::render_mermaid(&flow));
+    let _ = fs::remove_dir_all(&d);
+}
+
+// spec: DEV-031
+#[test]
+fn dataflow_data_usage_cleanup() {
+    let (p, d) = places_with_caches("dataflow-cleanup");
+    let r = CacheRetention { picture_days: Some(30), ..CacheRetention::default() };
+    age(&p.pictures.join("0123456789abcdef.png"), 90);
+    let now = crate::calendar::time::now();
+    let flow = crate::dataflow::record(|| {
+        assert_eq!(prune(CacheId::SocialPictures, &p, &r, now).map(|f| f.entries), Ok(1));
+        assert_eq!(clear(CacheId::SocialPictures, &p, None).map(|f| f.entries), Ok(1));
+    });
+    crate::dataflow::verify(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/dataflow/data-usage.md"), "data_usage_cleanup", &crate::dataflow::render_mermaid(&flow));
+    let _ = fs::remove_dir_all(&d);
+}

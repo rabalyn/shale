@@ -45,7 +45,7 @@ pub fn remove(files: &[FileEntry]) -> Result<Freed, String> {
     let mut freed = Freed::default();
     let mut first_error = None;
     for f in files {
-        match std::fs::remove_file(&f.path) {
+        match tracing::info_span!("flow.data_usage_cleanup.remove_file", peer = "disk").in_scope(|| std::fs::remove_file(&f.path)) {
             Ok(()) => {
                 freed.bytes += f.bytes;
                 freed.entries += 1;
