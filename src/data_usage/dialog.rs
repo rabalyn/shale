@@ -66,7 +66,7 @@ pub fn sanitize(r: &mut CacheRetention) {
 /// The retention fields of one cache; returns whether one changed.
 pub fn retention_ui(ui: &mut Ui, id: CacheId, r: &mut CacheRetention) -> bool {
     if id.kept_current() {
-        ui.label(muted("Kept current: no retention setting").size(12.0));
+        crate::theme::prose(ui, muted("Kept current: no retention setting").size(12.0));
         return false;
     }
     let mut changed = false;
@@ -111,7 +111,7 @@ fn size_row(ui: &mut Ui, l: &scan::Line) {
 
 fn saved_ui(ui: &mut Ui, u: &DataUsage, out: &mut Vec<Ask>) {
     ui.label(RichText::new("Saved").strong());
-    ui.label(muted("Your notes, files and mail. Nothing here is deleted from this dialog.").size(12.0));
+    crate::theme::prose(ui, muted("Your notes, files and mail. Nothing here is deleted from this dialog.").size(12.0));
     let saved = match &u.saved {
         None => {
             ui.horizontal(|ui| {
@@ -175,7 +175,7 @@ pub fn clear_clicked(u: &mut DataUsage, id: CacheId) -> Option<Ask> {
 
 fn cache_ui(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention, now: i64, out: &mut Vec<Ask>) {
     ui.label(RichText::new("Caches").strong());
-    ui.label(muted("Shale can build these again or fetch them again.").size(12.0));
+    crate::theme::prose(ui, muted("Shale can build these again or fetch them again.").size(12.0));
     for id in CacheId::ALL {
         ui.add_space(6.0);
         ui.group(|ui| {
@@ -193,7 +193,7 @@ fn cache_ui(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention, now: i64, ou
                     }
                 });
             });
-            ui.label(muted(u.places.location(id)).size(11.0));
+            crate::theme::prose(ui, muted(u.places.location(id)).size(11.0));
             let line = match u.stats.get(&id) {
                 None => "counting…".to_string(),
                 Some(Err(e)) => format!("could not count: {e}"),
@@ -209,7 +209,7 @@ fn cache_ui(ui: &mut Ui, u: &mut DataUsage, r: &mut CacheRetention, now: i64, ou
             if retention_ui(ui, id, r) {
                 out.push(Ask::Changed(id));
             }
-            ui.label(muted(u.record.text(id, now)).size(12.0));
+            crate::theme::prose(ui, muted(u.record.text(id, now)).size(12.0));
         });
     }
 }

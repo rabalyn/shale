@@ -280,7 +280,7 @@ fn security_row(ui: &mut Ui, c: &mut Compose, acct: Option<&crate::config::MailA
     ui.horizontal_wrapped(|ui| {
         ui.add_sized([label_w, 20.0], egui::Label::new(muted("Security")));
         if standards.is_empty() {
-            ui.label(muted("To sign or encrypt, choose a key in the account settings (Encryption).").size(12.5));
+            crate::theme::prose(ui, muted("To sign or encrypt, choose a key in the account settings (Encryption).").size(12.5));
             return;
         }
         if !standards.contains(&c.draft.standard) {
@@ -298,7 +298,7 @@ fn security_row(ui: &mut Ui, c: &mut Compose, acct: Option<&crate::config::MailA
                 }
             }
         } else {
-            ui.label(muted(standards[0].label()).size(12.5));
+            crate::theme::prose(ui, muted(standards[0].label()).size(12.5));
         }
         let r = ui.checkbox(&mut c.draft.sign, "Sign");
         rec(rects, "mail:compose:sign", &r);
@@ -343,7 +343,7 @@ fn security_row(ui: &mut Ui, c: &mut Compose, acct: Option<&crate::config::MailA
             } else if !c.draft.bcc.trim().is_empty() {
                 notes.push("Bcc recipients are hidden recipients: the others cannot see their keys.".into());
             }
-            ui.label(muted(notes.join(" ")).size(12.0));
+            crate::theme::hint(ui, notes.join(" "));
         });
     }
 }
@@ -416,7 +416,7 @@ impl MailView {
                 } else {
                     String::new()
                 };
-                ui.label(muted(status).size(12.0));
+                crate::theme::hint(ui, status);
             });
             if let Some(e) = &c.error {
                 ui.label(RichText::new(e.as_str()).color(theme::LINK_MISSING));
@@ -532,7 +532,7 @@ impl MailView {
                             ui.horizontal(|ui| {
                                 ui.add_space(label_w + 4.0);
                                 ui.label(RichText::new(format!("📎 {}", a.name)).color(theme::TEXT));
-                                ui.label(muted(crate::mail::ui::size_text(a.data.len() as u64)).size(12.0));
+                                crate::theme::hint(ui, crate::mail::ui::size_text(a.data.len() as u64));
                                 let r = ui.small_button("Remove");
                                 rec(rects, format!("mail:compose:att-remove:{i}"), &r);
                                 if r.clicked() {
@@ -543,7 +543,7 @@ impl MailView {
                     }
                     ui.horizontal_wrapped(|ui| {
                         ui.add_space(label_w + 4.0);
-                        ui.label(muted("Attach a file:").size(12.0));
+                        crate::theme::hint(ui, "Attach a file:");
                         let r = ui.add(egui::TextEdit::singleline(&mut c.path).desired_width(260.0).hint_text("path of a file on this computer"));
                         rec(rects, "mail:compose:att-path", &r);
                         let go = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
@@ -672,7 +672,7 @@ impl MailView {
             };
             let resp = crate::dialog::Dialog::new("compose-ask", title).width(420.0).non_modal().show(ctx, |ui| match &ask {
                 Ask::Close => {
-                    ui.label(muted("You have written something that is not sent. A kept draft is saved and can be opened from Drafts; a discarded one is moved to the mail trash folder (nothing is deleted)."));
+                    crate::theme::prose(ui, muted("You have written something that is not sent. A kept draft is saved and can be opened from Drafts; a discarded one is moved to the mail trash folder (nothing is deleted)."));
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         let r = ui.button(RichText::new("Keep draft").strong());
@@ -885,7 +885,7 @@ impl MailView {
     pub fn outbox_detail(&mut self, ui: &mut Ui, now: i64, rects: &mut Vec<(String, Rect)>, out: &mut LocalOut) {
         let Some(sel) = self.outbox_sel.clone() else {
             ui.add_space(30.0);
-            ui.label(muted("Select a mail of the outbox to see what happened to it."));
+            crate::theme::prose(ui, muted("Select a mail of the outbox to see what happened to it."));
             return;
         };
         let Some(it) = self.local_items.iter().find(|i| (i.account.clone(), i.id.clone()) == sel).cloned() else {
@@ -896,7 +896,7 @@ impl MailView {
         egui::ScrollArea::vertical().id_salt("mail-outbox-detail").auto_shrink([false, false]).show(ui, |ui| {
             let key = (it.account.clone(), it.id.clone());
             ui.label(RichText::new(if it.subject.trim().is_empty() { "(no subject)" } else { it.subject.as_str() }).size(19.0).color(theme::TEXT_STRONG));
-            ui.label(muted(format!("From {}  ·  to {}", it.from, it.recipients.join(", "))));
+            crate::theme::prose(ui, muted(format!("From {}  ·  to {}", it.from, it.recipients.join(", "))));
             ui.add_space(6.0);
             match it.state {
                 State::Queued => {
@@ -920,7 +920,7 @@ impl MailView {
                 }
                 State::Failed => {
                     ui.label(RichText::new("This mail was not sent.").size(15.0).color(theme::LINK_MISSING));
-                    ui.label(muted(it.error.clone().unwrap_or_default()));
+                    crate::theme::prose(ui, muted(it.error.clone().unwrap_or_default()));
                     ui.horizontal_wrapped(|ui| {
                         for (k, label, slot, action, tip) in [
                             ("mail:outbox:retry", "Retry", 0, KeyAction::MailRetry, self.tip("Send the mail again", KeyAction::MailRetry)),
@@ -943,7 +943,7 @@ impl MailView {
                     ui.label(RichText::new("This mail may have been sent.").size(15.0).color(theme::LINK_MISSING));
                     ui.label(RichText::new("Shale does not know whether the server received it: the connection ended before the server answered. Check your Sent folder (on the server or in another program). If it is there, discard this entry; if it is not, send it again.").color(theme::TEXT));
                     if let Some(e) = &it.error {
-                        ui.label(muted(e.clone()).size(12.0));
+                        crate::theme::hint(ui, e.clone());
                     }
                     ui.horizontal_wrapped(|ui| {
                         for (k, label, slot, action, tip) in [
@@ -969,7 +969,7 @@ impl MailView {
             }
             ui.add_space(6.0);
             ui.separator();
-            ui.label(muted(it.draft.body.clone()).size(13.0));
+            crate::theme::prose(ui, muted(it.draft.body.clone()).size(13.0));
         });
     }
 

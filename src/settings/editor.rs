@@ -1,7 +1,7 @@
 //! The Editor tab: how notes are edited. The Vim keys are on the Vim tab (`vim.rs`).
 
 use super::{section, SettingsTab};
-use crate::app::{muted, ShaleApp};
+use crate::app::ShaleApp;
 use eframe::egui::{self, Ui};
 
 impl ShaleApp {
@@ -11,7 +11,7 @@ impl ShaleApp {
         changed |= cursor_combo(ui, "Cursor while typing", "cursor-shape", &mut self.cfg.cursor_shape);
         changed |= ui.checkbox(&mut self.cfg.cursor_blink, "Blinking cursor").changed();
         ui.horizontal(|ui| {
-            ui.label(muted(format!("Vim-style editing: {} · set it up in the", if self.cfg.vim_mode { "on" } else { "off" })).size(12.0));
+            crate::theme::hint(ui, format!("Vim-style editing: {} · set it up in the", if self.cfg.vim_mode { "on" } else { "off" }));
             if ui.link("Vim tab").clicked() {
                 *tab = SettingsTab::Vim;
             }
@@ -55,7 +55,7 @@ impl ShaleApp {
         });
         changed |= crate::format_bar::preset_editor(ui, "Font colours", &mut self.cfg.font_colours, &crate::config::DEFAULT_FONT_COLOURS);
         changed |= crate::format_bar::preset_editor(ui, "Highlight colours", &mut self.cfg.highlight_colours, &crate::config::DEFAULT_HIGHLIGHT_COLOURS);
-        ui.label(muted("The colours of the toolbar's palettes. Colours are saved in the note as <span style=\"color: #RRGGBB;\"> and <mark style=\"background: #RRGGBB;\">.").size(12.0));
+        crate::theme::hint(ui, "The colours of the toolbar's palettes. Colours are saved in the note as <span style=\"color: #RRGGBB;\"> and <mark style=\"background: #RRGGBB;\">.");
         changed
     }
 }

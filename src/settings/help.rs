@@ -1,7 +1,7 @@
 //! The Help tab: the user guide and the troubleshooting switches.
 
 use super::{section, Asks};
-use crate::app::{muted, ShaleApp};
+use crate::app::ShaleApp;
 use eframe::egui::Ui;
 
 impl ShaleApp {
@@ -20,13 +20,13 @@ impl ShaleApp {
         if self.cfg.input_log {
             let p = crate::config::input_log_path();
             ui.horizontal(|ui| {
-                ui.label(muted(p.to_string_lossy()).size(12.0));
+                crate::theme::hint(ui, p.to_string_lossy());
                 if ui.small_button("Copy path").clicked() {
                     ui.ctx().copy_text(p.to_string_lossy().into_owned());
                 }
             });
         }
-        ui.label(muted(format!("Build {}", crate::config::build_stamp())).size(12.0));
+        crate::theme::hint(ui, format!("Build {}", crate::config::build_stamp()));
         changed
     }
 }

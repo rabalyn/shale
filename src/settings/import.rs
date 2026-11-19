@@ -90,7 +90,7 @@ impl ShaleApp {
                 ui.ctx().request_repaint_after(Duration::from_millis(100));
             }
             (Some(Probe::Found { path, version }), false) => {
-                ui.label(muted(format!("{version}, found at {}", path.display())));
+                crate::theme::prose(ui, muted(format!("{version}, found at {}", path.display())));
             }
             (Some(Probe::Broken { path, error }), false) => {
                 ui.add(egui::Label::new(egui::RichText::new(format!("{} does not work: {error}", path.display())).color(theme::LINK_MISSING)).wrap());
@@ -101,9 +101,9 @@ impl ShaleApp {
         }
         if !matches!(self.word.result, Some(Probe::Found { .. })) && !self.word.running() {
             for (system, how) in docx::INSTALL_HELP {
-                ui.label(muted(format!("{system}: {how}")).size(12.0));
+                crate::theme::hint(ui, format!("{system}: {how}"));
             }
-            ui.label(muted("or see https://pandoc.org/installing.html").size(12.0));
+            crate::theme::hint(ui, "or see https://pandoc.org/installing.html");
         }
         ui.horizontal(|ui| {
             ui.label("pandoc program");
