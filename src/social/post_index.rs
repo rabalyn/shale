@@ -143,8 +143,15 @@ fn write_fts(tx: &rusqlite::Transaction, account: &str, id: i64, p: &Post) -> ru
     for m in &p.media {
         add(&m.alt);
     }
-    tx.execute("DELETE FROM posts_fts WHERE rowid = ?1", [id])?;
-    tx.execute("INSERT INTO posts_fts (rowid, text, author, context, link, date) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![id, text, format!("{} {}", p.author.name(), p.author.handle), context, links.join("\n"), date_text(p.created_at)])?;
+    tx.prepare_cached("DELETE FROM posts_fts WHERE rowid = ?1")?.execute([id])?;
+    tx.prepare_cached("INSERT INTO posts_fts (rowid, text, author, context, link, date) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")?.execute(params![
+        id,
+        text,
+        format!("{} {}", p.author.name(), p.author.handle),
+        context,
+        links.join("\n"),
+        date_text(p.created_at)
+    ])?;
     Ok(())
 }
 
@@ -305,18 +312,18 @@ impl PostIndex {
             let key = super::state::post_key(p);
             let json = serde_json::to_string(p).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
             let (text, _) = searchable(p);
-            let id: i64 = tx.query_row(
-                "INSERT INTO posts (account, key, feed, post_id, author_name, author_handle, created_at, stamp, url, reply_to, snippet, json)
+            let id: i64 = tx
+                .prepare_cached(
+                    "INSERT INTO posts (account, key, feed, post_id, author_name, author_handle, created_at, stamp, url, reply_to, snippet, json)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                  ON CONFLICT (account, key) DO UPDATE SET feed = ?3, author_name = ?5, author_handle = ?6, created_at = ?7, stamp = ?8, url = ?9, reply_to = ?10, snippet = ?11, json = ?12
                  RETURNING id",
-                params![account, key, feed, p.id, p.author.name(), p.author.handle, p.created_at, stamp, p.url, p.reply_to, one_line(&text, 160), json],
-                |r| r.get(0),
-            )?;
+                )?
+                .query_row(params![account, key, feed, p.id, p.author.name(), p.author.handle, p.created_at, stamp, p.url, p.reply_to, one_line(&text, 160), json], |r| r.get(0))?;
             write_fts(&tx, account, id, p)?;
             // the replies already indexed get the (new) text of their parent as context (SOC-038)
             let children: Vec<(i64, String)> = {
-                let mut st = tx.prepare("SELECT id, json FROM posts WHERE account = ?1 AND reply_to = ?2 AND id <> ?3")?;
+                let mut st = tx.prepare_cached("SELECT id, json FROM posts WHERE account = ?1 AND reply_to = ?2 AND id <> ?3")?;
                 let rows = st.query_map(params![account, p.id, id], |r| Ok((r.get(0)?, r.get(1)?)))?;
                 rows.filter_map(Result::ok).collect()
             };

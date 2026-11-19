@@ -47,8 +47,9 @@ impl RowHeights {
         if end == n {
             end_y = total;
         }
+        // (`add_space` adds no spacing after itself, and each row's height has its gap in it)
         if first_y > 0.0 {
-            ui.add_space((first_y - gap).max(0.0));
+            ui.add_space(first_y);
         }
         self.drawn = 0;
         for i in first..end.max(first) {
@@ -57,7 +58,7 @@ impl RowHeights {
             self.drawn += 1;
         }
         if end < n && total - end_y > 0.0 {
-            ui.add_space((total - end_y - gap).max(0.0));
+            ui.add_space(total - end_y);
         }
     }
 

@@ -217,6 +217,9 @@ fn rich_text(ui: &mut Ui, md: &str, size: f32, color: Color32) -> Option<String>
     None
 }
 
+/// How far from the visible part of the list a post is drawn rather than kept as an empty space.
+const FAR: f32 = 600.0;
+
 /// What is needed to draw a post.
 struct Cx<'a> {
     images: &'a ImageCache,
@@ -680,7 +683,10 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
     let mut post_rects: Vec<(String, Rect)> = vec![];
     let mut content_top = 0.0;
     let out = {
-        let SocialState { images, revealed, saving, rects, .. } = st;
+        let SocialState { images, revealed, saving, rects, card_heights, .. } = st;
+        if card_heights.len() > 50_000 {
+            card_heights.clear();
+        }
         let Some(images) = images.as_ref() else { return asks };
         let mut cx = Cx { images, revealed, saving, rects, now: crate::calendar::time::now() };
         let mut area = egui::ScrollArea::vertical().id_salt(("social-scroll", tab.id, &aid, &feed.id)).auto_shrink([false, false]);
@@ -691,12 +697,32 @@ pub fn show(ui: &mut Ui, st: &mut SocialState, accounts: &[SocialAccountEntry], 
             content_top = ui.cursor().min.y;
             column(ui, width, |ui| {
                 ui.spacing_mut().item_spacing.y = 10.0;
+                // a post that is far from the view and was drawn before is not laid out again: its
+                // space and rectangle stay (PERF-006); when it comes near, it is drawn and measured
+                let (near_from, near_to) = (ui.clip_rect().min.y - FAR, ui.clip_rect().max.y + FAR);
+                let gap = ui.spacing().item_spacing.y;
                 for (i, p) in posts.iter().enumerate() {
-                    let (save, rect) = post_card(ui, &mut cx, p, i, width);
-                    if save {
-                        save_post = Some(p.clone());
-                    }
                     let k = post_key(p);
+                    let at = ui.cursor().min;
+                    let kept = card_heights.get(&(k.clone(), width.to_bits())).filter(|(_, steady)| *steady).map(|(h, _)| *h).filter(|h| at.y + h < near_from || at.y > near_to);
+                    let rect = match kept {
+                        Some(h) => {
+                            // (`add_space` adds no spacing after itself; a drawn card is followed by `gap`)
+                            ui.add_space(h);
+                            Rect::from_min_size(at, Vec2::new(width, (h - gap).max(0.0)))
+                        }
+                        None => {
+                            let (save, rect) = post_card(ui, &mut cx, p, i, width);
+                            if save {
+                                save_post = Some(p.clone());
+                            }
+                            // only a height that came out the same twice is trusted: the first frames lay text out differently
+                            let height = ui.cursor().min.y - at.y;
+                            let steady = card_heights.get(&(k.clone(), width.to_bits())).is_some_and(|(before, _)| (before - height).abs() < 0.5);
+                            card_heights.insert((k.clone(), width.to_bits()), (height, steady));
+                            rect
+                        }
+                    };
                     if gaps.contains(&k) {
                         ui.vertical_centered(|ui| {
                             ui.horizontal(|ui| {
