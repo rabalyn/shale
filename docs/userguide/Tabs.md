@@ -27,6 +27,10 @@ features:
   pane, so no key is lost.
 - The panes and the order of all open tabs (notes, drawings and Feeds tabs) and which are pinned, the open tab of each pane, the focused pane and the widths come back at
   the next start (they are kept in `.shale/state.json`, see [[Vault settings]]).
+- Each note also comes back as you left it: the cursor or selection, how far it was scrolled and whether it was in the
+  reading view, in every pane and also for tabs that were not the open one (they get their place when
+  you switch to them). If the note got shorter in the meantime, the cursor goes to its end. Shale writes this every few
+  seconds while you work and when it closes, so even a crash loses at most a few seconds.
 
 Back to [[Start here]]; Feeds tabs are in [[Feeds]].
 

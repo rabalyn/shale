@@ -56,7 +56,7 @@ embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatt
 ## Colours
 
 The **highlight colour** and **font colour** buttons are split buttons. A click on the coloured part
-applies the colour it shows (neon yellow and red at start, then the last colour you picked) to the
+applies the colour it shows (neon yellow and red at first, then the last colour you picked, which Shale remembers in the vault, also after a restart) to the
 selection at once. The small ▾ beside it opens a palette; a colour picked there is applied and becomes
 the button's colour. The highlight palette has four neon colours (yellow, green, cyan, magenta),
 "No highlight", and "Custom colour…" with a colour picker; "No highlight" and "Default colour" take the

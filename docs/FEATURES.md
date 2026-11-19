@@ -42,7 +42,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   sidebars, see Keyboard below), shown as a badge at the button while Alt is held; after a button or key that
   only changes the view, the editor has the keyboard again with the cursor and selection unchanged.
 - **Colours.** The toolbar's highlight and font colour buttons are split buttons: a click on the colour applies the
-  current colour at once, the ▾ beside it opens a palette (four neon highlights, a
+  current colour at once (the colours are remembered in the vault, also after a restart), the ▾ beside it opens a palette (four neon highlights, a
   "No highlight" entry and a colour picker; font colours you set in Settings → Editor) and write plain
   HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
   `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
@@ -271,7 +271,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Drag the border between two panes to resize them (neither gets narrower than 240 points).
   Closing the last tab of a pane (or **Ctrl+Shift+W**) removes the pane; the last pane stays.
 - The panes, their tabs, the open tab of each, the focused pane and the widths come back at the
-  next start. All the keys can be changed in Settings, Keybindings.
+  next start, and each note with its cursor or selection, its scroll position and its reading view; the
+  state is written every few seconds when something changed, and at exit. All the keys can be changed in Settings, Keybindings.
 
 ## Fonts and text sizes
 

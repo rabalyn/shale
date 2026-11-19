@@ -333,6 +333,46 @@ fn no_highlight_and_default_colour_leave_the_current_colour_as_it_was() {
     assert!(fx.has("Font colour: #E53E3E"));
 }
 
+// spec: EDIT-054, NAV-040
+#[test]
+fn the_current_colours_of_the_split_buttons_are_saved_with_the_vault_and_come_back() {
+    let mut fx = Fx::new("split-saved", "one two three\n");
+    fx.select(4, 7);
+    fx.click("Highlight colours…");
+    fx.click("Highlight colour #39FF14");
+    fx.select(8, 13);
+    fx.click("Font colours…");
+    fx.click("Font colour #2F80ED");
+    fx.app.vdata.save().unwrap();
+    let saved = crate::fsutil::read_to_string(crate::vault_state::VaultData::state_path(&fx.dir)).unwrap();
+    assert!(saved.contains("\"highlight_colour\": \"#39FF14\"") && saved.contains("\"font_colour\": \"#2F80ED\""), "{saved}");
+    // a new start of the app on the same vault: the buttons show them and the main part applies them
+    let mut again = ShaleApp::build(Options { screenshot: None, vault: Some(fx.dir.clone()), view: None, keys: None }, false);
+    again.open_vault(&fx.dir.clone());
+    again.open(Path::new(NOTE), false);
+    let mut hl = Headless::new();
+    hl.frames(&mut again, 4);
+    again.notes.get_mut(Path::new(NOTE)).unwrap().text = "one two three\n".into();
+    hl.frames(&mut again, 3);
+    let id = again.tabbar.tabs[again.tabbar.active].editor.id;
+    again.tabbar.tabs[again.tabbar.active].editor.request_focus = true;
+    hl.frames(&mut again, 3);
+    let mut st = egui::text_edit::TextEditState::load(hl.ctx(), id).unwrap_or_default();
+    st.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(4), CCursor::new(7))));
+    st.store(hl.ctx(), id);
+    hl.frames(&mut again, 2);
+    for label in ["Highlight colour: #39FF14", "Font colour: #2F80ED"] {
+        assert!(hl.try_label(&mut again, label).is_some(), "{label}");
+    }
+    let r = hl.find_label(&mut again, "Highlight colour: #39FF14");
+    hl.click(&mut again, r.center(), PointerButton::Primary);
+    hl.frames(&mut again, 3);
+    assert_eq!(again.notes.get(Path::new(NOTE)).unwrap().text, "one <mark style=\"background: #39FF14;\">two</mark> three\n");
+    // an unreadable value gives the default again
+    again.vdata.state.highlight_colour = Some("pink".into());
+    assert_eq!(again.vdata.state.toolbar_colours()[0], crate::vault_state::DEFAULT_HIGHLIGHT);
+}
+
 // spec: EDIT-054, EDIT-030
 #[test]
 fn in_a_cell_the_main_part_of_a_colour_button_colours_the_cell_text() {
