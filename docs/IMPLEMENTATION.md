@@ -342,5 +342,6 @@ Not covered by automated tests yet: drag gestures in the drawing canvas, the gra
 
 - **No warnings policy**: `cargo build`, `cargo build --all-targets` (tests) and `cargo build --release` all build with **zero warnings**, including a from-scratch rebuild of the vendored crates in `vendor/`. Keep it that way. Check with `cargo build --all-targets 2>&1 | grep '^warning'` before finishing any change. Deprecated egui calls use the replacement egui suggests (`Id::unique`, `Ui::scope_id`, `TextEdit::align`). Code that only tests use is marked `#[cfg(test)]`, and unused code is deleted.
 
+- The dev profile and its dependencies keep line tables only (`debug = "line-tables-only"`, BUILD-027, raba/shale#390): backtraces have function names and `file:line`, but `gdb`/`lldb` see no locals or types. For a debugging session: `CARGO_PROFILE_DEV_DEBUG=true cargo build`.
 - Normal build: `cargo build`, linked by the system C compiler (`cc`); no linker is configured. The sandbox-era linker shim (`.toolshim/cc`, set by a local `.cargo/config.toml`) was removed on 2026-11-16: it started a `rustc` that could not reach cargo's jobserver, which rustc 1.100 showed as a `linker_messages` warning on every build (raba/shale#216).
 - To capture views for review: `shale --screenshot shots/x.png --view tasks`.
