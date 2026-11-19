@@ -322,6 +322,13 @@ pub(crate) fn highlight_with_math(text: &str, links: &[(LinkSpan, bool)], fonts:
         if trimmed == "---" || trimmed == "***" || trimmed == "___" {
             set(&mut fmts, lr.clone(), |f| f.dim = true);
         }
+        // a page-break marker is markup all through: the preview hides it for the dashed rule (EDIT-065)
+        if markdown::page_break_line(line) {
+            set(&mut fmts, lr.clone(), |f| {
+                f.dim = true;
+                f.syn = true
+            });
+        }
         if let Some((check, done, _, _)) = markdown::parse_task_line(line) {
             set(&mut fmts, off + indent..off + check + 2, |f| f.marker = true);
             if done {
@@ -559,6 +566,19 @@ fn paint_math(ui: &Ui, marks: &[MathMark], galley: &Galley, pos: Pos2, resp: &eg
                 }
             }
         }
+    }
+}
+
+/// Draw the page-break markers of the preview (EDIT-065) as the dashed rule with its label in the
+/// row their hidden HTML leaves; a marker on a raw line is the HTML as written.
+fn paint_page_breaks(ui: &Ui, galley: &Galley, pos: Pos2, right: f32, raw_lines: Option<&Range<usize>>) {
+    let Some(raw) = raw_lines else { return };
+    let painter = ui.painter().with_clip_rect(ui.clip_rect());
+    let text = &galley.job.text;
+    let lines = markdown::lines_with_offsets(text);
+    for li in markdown::page_break_lines(text).into_iter().filter(|li| !raw.contains(li)) {
+        let r = galley.pos_from_cursor(CCursor::new(markdown::byte_to_char(text, lines[li].0)));
+        crate::reader::paint_page_break(&painter, pos.x, right, pos.y + r.center().y);
     }
 }
 
@@ -1794,6 +1814,7 @@ impl NoteEditor {
         self.last_layout = Some((output.galley.clone(), output.galley_pos));
         paint_numbers(ui, &number_marks.borrow(), &output.galley, output.galley_pos);
         paint_math(ui, &formula_marks.borrow(), &output.galley, output.galley_pos, resp);
+        paint_page_breaks(ui, &output.galley, output.galley_pos, resp.rect.right(), preview.as_ref());
         if let Some(r) = output.cursor_range.filter(|_| resp.has_focus() && self.keep_selection.is_none()) {
             self.last_selection = Some((r.primary.index.0, r.secondary.index.0));
         }

@@ -114,7 +114,7 @@ fn an_article_kind_starts_the_same_structure_at_sections() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-// spec: TEX-035
+// spec: TEX-037
 #[test]
 fn the_department_logo_is_in_a_book_too_when_the_slot_is_filled_and_the_box_is_on() {
     let (v, dir) = handbook("dept");

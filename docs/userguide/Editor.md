@@ -35,7 +35,8 @@ the text unchanged. Text without headings, or with a `#`, is pasted at once.
 A row of buttons centred above the text of a note (not in the reading view): **B**old, *I*talic,
 ~~S~~trikethrough, `==` highlight, `<>` inline code; the highlight colour and font colour
 split buttons (apply the current colour, ▾ for the palette); a **H** menu for headings (Normal text, Heading 1 to 6); bullet list, numbered list,
-task, quote; code block, horizontal rule, table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`
+task, quote; code block, horizontal rule, page break (a dashed rule in the preview and the reading
+view, a new page in the PDF, see [[PDF]]), table; `[[ ]]` note link, `[ ]( )` web link, `![[ ]]`
 embed (it opens the `[!` file picker of [[Notes and links]]); and "Clear formatting".
 
 - With text selected, an inline button wraps it in the markers; click it again and they come
