@@ -16,7 +16,7 @@ Everything needs a build with the cargo feature `bench`; no shipped build has it
 | a minute of it, small data (for development) | `scripts/bench.sh --profile quick` |
 | the worst case (everything loaded at once) | `scripts/bench.sh --profile worst` |
 | only scenarios whose ID contains a text; `=id` for exactly one; several, comma separated | `scripts/bench.sh --filter ui.frame` |
-| flamegraphs of every scenario of the profile (or of `--filter`) into `docs/perf/flamegraphs/` | `scripts/bench.sh --flamegraph` |
+| flamegraphs of every scenario of the profile (or of `--filter`) into `docs/perf/flamegraphs/` (git-ignored: they are made again from any commit, and go with the release as an attachment, #400) | `scripts/bench.sh --flamegraph` |
 | two commits, built and run in temporary worktrees (3 interleaved runs each), then compared | `scripts/bench-compare.sh <old> <new>` |
 | two result files; several runs of one commit as one result | `shale --bench-compare old.json new.json --out dir`; `shale --bench-merge out.json run1.json run2.json` |
 | the page `docs/perf/index.html` | `scripts/bench-report.sh` |
@@ -422,6 +422,11 @@ the second run left behind.
 
 ## Before/after (phase 2)
 
+> **Commit names.** The branch was rewritten before it landed, only to drop the flamegraph SVGs
+> (#400); the code is the same. The results and file names below keep the names they were measured
+> with: `c82f693` is `44413e1` in the history, `4858dc5` is `46136af` and `c4918fe` is `41689dc`
+> (`4ec690f` kept its name). To repeat the comparison: `scripts/bench-compare.sh 44413e1 46136af`.
+
 Three results: the **baseline** (`4ec690f`, above, a single run), **X** = `c82f693` (the harness
 merged with the then-current `main`, before the fixes of #377 to #386; it already had the editor
 cache of #372) and **Y** = `4858dc5` (the fixes, plus the benchmark tooling of BUILD-036/037). X and Y
@@ -489,8 +494,9 @@ allocations. See "Quiet threads" above; this is why Y is `4858dc5` and not `c491
 ## What the baseline says: the weak spots, in the order to fix them
 
 Ranked by what a person feels: a frame over 16.7 ms is a stutter, over 100 ms is a freeze. The
-flamegraph of every scenario is in [`flamegraphs/`](flamegraphs/) (`<id>.svg`; see
-[`index.html`](index.html)); the percentages below are shares of the measured loop of the named
+flamegraph of every scenario was made with `scripts/bench.sh --flamegraph` at `4ec690f`
+(`docs/perf/flamegraphs/<id>.svg`, not kept in git, #400; check out `4ec690f` and run it again to
+see them); the percentages below are shares of the measured loop of the named
 scenario, read from them (`perf`, frame pointers, a software clock; sums over 3 s or more).
 `file:line` is the definition of the function to change.
 
