@@ -7,8 +7,19 @@ use std::path::Path;
 use std::process::Command;
 
 fn run(script: &str) {
+    run_with(script, None);
+}
+
+/// Runs `script`; `prev_published` is what `SHALE_PREV_PUBLISHED` is set to (not set when `None`):
+/// a release that runs `cargo test` must not make its last published release reach these scripts (#406).
+fn run_with(script: &str, prev_published: Option<&str>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let out = Command::new("bash").arg(root.join(script)).current_dir(root).env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").env_remove("LAND_CHECK_CMD").output().expect("bash runs");
+    let mut cmd = Command::new("bash");
+    cmd.arg(root.join(script)).current_dir(root).env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").env_remove("LAND_CHECK_CMD").env_remove("SHALE_PREV_PUBLISHED");
+    if let Some(tag) = prev_published {
+        cmd.env("SHALE_PREV_PUBLISHED", tag);
+    }
+    let out = cmd.output().expect("bash runs");
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(out.status.success(), "{script} failed:\n{text}");
     assert!(!text.contains("not ok"), "{script}:\n{text}");
@@ -30,6 +41,14 @@ fn forge_016_test_dev_metrics_script_passes() {
 #[test]
 fn forge_013_forge_014_test_release_script_passes() {
     run("scripts/test-release.sh");
+}
+
+// spec: BUILD-013, FORGE-014: scripts/test-release.sh unsets the variable itself, so a release that
+// runs land.sh and its cargo test (which has it set in the environment) does not fail (#406)
+#[test]
+fn build_013_forge_014_release_scripts_ignore_inherited_prev_published() {
+    run_with("scripts/test-release.sh", Some("v9.9.9"));
+    run_with(".github/test-check-release.sh", Some("v9.9.9"));
 }
 
 // spec: BUILD-013
