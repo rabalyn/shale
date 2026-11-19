@@ -92,7 +92,7 @@ and `shale-userguide-<version>.pdf`, the same guide as one book to print or read
 | System | Tested | Notes |
 |---|---|---|
 | Linux (Wayland and X11), x86_64 | before every change lands, for every check tag (Forgejo) and for every release | release download: `shale-<version>-linux-x86_64.tar.gz` |
-| macOS (Apple silicon, arm64) | built, linted and tested on GitHub (`macos-latest`) for every release; clippy before every change lands | release download: `shale-<version>-macos-arm64.tar.gz`, not signed (see Download) |
+| macOS (Apple silicon, arm64) | built, linted and tested on GitHub (`macos-latest`) for every release; clippy before every change lands | release download: `shale-<version>-macos-arm64.dmg`, not notarised (see Download) |
 | Windows 10 and 11 (x86_64) | built, linted and tested on GitHub (`windows-latest`) for every release; clippy before every change lands | release download: `shale-<version>-windows-x86_64.zip`, not signed (see Download) |
 
 What differs from Linux:
@@ -102,6 +102,7 @@ What differs from Linux:
   prompt, Shale says so: they are then kept in the settings file, which only you can read, or for this run only.
 - **Signed and encrypted mail** needs GnuPG on your computer (`brew install gnupg` on macOS,
   [Gpg4win](https://www.gpg4win.org) on Windows); without it Shale says so and everything else works.
+- **Programs from Homebrew** (macOS): an app started from Finder or the Dock gets only the system's folders on its `PATH`, so Shale adds `/opt/homebrew/bin`, `/opt/homebrew/sbin` and `/usr/local/bin` after them at start; `git-lfs`, `ffmpeg`, `gpg` and `pandoc` from Homebrew are found without starting Shale from a terminal.
 - **Videos** in notes are played with `ffmpeg` and `ffprobe` on your computer (`brew install ffmpeg` on macOS,
   `winget install ffmpeg` on Windows, your package manager on Linux). Without them a video opens in your
   system's video player and Settings says so; everything else works.
@@ -126,8 +127,8 @@ What differs from Linux:
 
 Released versions are on the [Releases page](https://github.com/rabalyn/shale/releases), each
 with its notes from [CHANGELOG.md](CHANGELOG.md): download `shale-<version>-linux-x86_64.tar.gz`
-(Linux), `shale-<version>-macos-arm64.tar.gz` (macOS, Apple silicon) or `shale-<version>-windows-x86_64.zip` (Windows),
-unpack it and run `./shale/shale` (`shale\shale.exe` on Windows). (The user guide is in the archive as `shale/docs/userguide/`, and
+(Linux), `shale-<version>-macos-arm64.dmg` (macOS, Apple silicon) or `shale-<version>-windows-x86_64.zip` (Windows),
+unpack it and run `./shale/shale` (`shale\shale.exe` on Windows); on macOS open the dmg and drag `Shale` onto the `Applications` link. (The user guide is built into the program, is in the Linux and Windows archives as `shale/docs/userguide/`, and
 alone as `shale-userguide-<version>.zip` and as a PDF, `shale-userguide-<version>.pdf`.) On Linux, `shale/install.sh` installs the program, the app menu entry and the icons (on Wayland the
 taskbar needs the entry to show the icon), on any distribution:
 
@@ -145,11 +146,12 @@ and names libraries your system lacks (with the package names for Arch, Debian a
 no AppImage and no Flatpak: an AppImage needs FUSE 2 and brings no menu entry, and a Flatpak sandbox
 would block your vault folders and the programs Shale starts (git, gpg, ffmpeg, curl, pandoc).
 
-The macOS and Windows downloads are not signed or notarised, so the system warns before the first start:
+The macOS and Windows downloads are not notarised or signed with a developer certificate, so the system warns before the first start:
 
-- **macOS** (Gatekeeper) blocks a downloaded unsigned program. In the folder with the unpacked `shale/`, run
-  `xattr -dr com.apple.quarantine shale/` once (or `xattr -d com.apple.quarantine shale/shale` for the program only),
-  or allow it in System Settings, Privacy & Security.
+- **macOS** (Gatekeeper): `Shale.app` is signed ad hoc only, so macOS says it is from an unidentified developer. Right-click
+  `Shale` in Applications and choose Open (once), or choose Open Anyway in System Settings, Privacy & Security after the first
+  try, or run `xattr -dr com.apple.quarantine /Applications/Shale.app`. The ad-hoc signature changes with every build, so the
+  Keychain may ask again for access to your saved passwords after each update (choose Always Allow).
 - **Windows** (SmartScreen) shows "Windows protected your PC": choose More info, then Run anyway.
 
 Releases are built by GitHub Actions
@@ -158,7 +160,7 @@ version, build it from source (below).
 
 Each download has a `.sha256` file next to it; to check the download, put both files in one folder and run
 `sha256sum -c shale-<version>-linux-x86_64.tar.gz.sha256` (the same for `shale-userguide-<version>.zip` and `shale-userguide-<version>.pdf`).
-On macOS use `shasum -a 256 -c shale-<version>-macos-arm64.tar.gz.sha256`; on Windows run
+On macOS use `shasum -a 256 -c shale-<version>-macos-arm64.dmg.sha256`; on Windows run
 `certutil -hashfile shale-<version>-windows-x86_64.zip SHA256` (or PowerShell `Get-FileHash`) and compare the hash with the
 one in the `.sha256` file.
 This catches a damaged download, not a compromised release page.
@@ -220,7 +222,8 @@ and were imported with their numbers, so `#N` in the history is the issue `#N` h
 merges a branch into `main`, runs fmt, clippy and the tests, and pushes only when they pass
 ([ADR-0016](docs/decisions/0016-local-landing.md)). The Forgejo runner checks again for every tag
 (`.forgejo/workflows/ci.yml`, [ADR-0018](docs/decisions/0018-tag-only-ci.md)); GitHub builds
-release tags (BUILD-012), also on macOS and Windows (BUILD-017).
+release tags (BUILD-012), also on macOS and Windows (BUILD-017). How landings, builds, agents,
+issues and releases are doing is exported for Prometheus and Grafana ([docs/dev-metrics.md](docs/dev-metrics.md)).
 
 ## Build and run
 
@@ -284,7 +287,7 @@ Text editing keys and vim keys are fixed.
 | Drag a tab | Reorder tabs; a marker shows where it lands |
 | Right-click a tab | Pin tab / Unpin tab (pinned tabs sit at the left with a pin and keep their place between starts); Open in split right |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
-| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette, the ▾ part of the split button), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
+| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette, the ▾ part of the split button), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
 | Alt+V, Alt+P, Alt+D, Alt+N | The buttons of the view header and tab bar of a note: edit / reading view, Markdown preview, the ⋯ menu (opens it), New tab |
 | Alt+1, Alt+2, Alt+3, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0 | The ribbon items by position: the first ten icons of the ribbon, as shown (also after you reordered or removed some) |
 | Alt+, / Alt+. | Show or hide the left / right sidebar |

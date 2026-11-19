@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
-const SIZES: [u32; 7] = [16, 32, 48, 64, 128, 256, 512];
+const SIZES: [u32; 8] = [16, 32, 48, 64, 128, 256, 512, 1024];
 
 /// A fresh temp folder with a package (`pkg/`), a `home/` and a `data/` folder.
 struct Env {

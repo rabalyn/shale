@@ -280,6 +280,10 @@ impl ShaleApp {
                     let saved = match &t.view {
                         View::Social(Some(f)) if !f.feed.is_empty() => SavedTab { feed: Some(f.clone()), pinned: t.pinned, ..Default::default() },
                         v => match v.path() {
+                            Some(p) if matches!(v, View::Note(_)) => {
+                                let place = &t.place;
+                                SavedTab { file: Some(rel_to_string(p)), pinned: t.pinned, cursor: place.cursor.map(|(a, b)| [a, b]), scroll: place.scroll.map(|y| y.max(0.0) as u32), reading: t.reading, ..Default::default() }
+                            }
                             Some(p) => SavedTab { file: Some(rel_to_string(p)), pinned: t.pinned, ..Default::default() },
                             None => continue,
                         },

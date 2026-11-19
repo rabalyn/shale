@@ -256,8 +256,49 @@ pub struct VaultState {
     pub recent_tags: Vec<String>,
     /// What the note export dialog had last: the engine and the LaTeX set and kind (TEX-016).
     pub latex_export: LatexExport,
+    /// The current colour of the toolbar's highlight and font colour buttons as `#RRGGBB`
+    /// (EDIT-054, NAV-040); absent or unreadable: the default.
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "text_or_none")]
+    pub highlight_colour: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "text_or_none")]
+    pub font_colour: Option<String>,
     #[serde(flatten)]
     pub other: Map<String, Value>,
+}
+
+/// A text, or none for a value of another kind (a hand-edited colour must not make the state unreadable).
+fn text_or_none<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::String(s) => Some(s),
+        _ => None,
+    })
+}
+
+/// The colour the highlight button starts with: neon yellow (EDIT-054).
+pub const DEFAULT_HIGHLIGHT: [u8; 3] = [255, 255, 0];
+/// The colour the font colour button starts with: red (EDIT-054).
+pub const DEFAULT_FONT: [u8; 3] = [229, 62, 62];
+
+impl VaultState {
+    /// The colours of the highlight and the font colour button: the saved ones, a default for a
+    /// value that is missing or not a `#RRGGBB` colour (NAV-040).
+    pub fn toolbar_colours(&self) -> [[u8; 3]; 2] {
+        let read = |v: &Option<String>, default: [u8; 3]| match v.as_deref().and_then(crate::colour_tags::parse_hex) {
+            Some([r, g, b, 255]) => [r, g, b],
+            _ => default,
+        };
+        [read(&self.highlight_colour, DEFAULT_HIGHLIGHT), read(&self.font_colour, DEFAULT_FONT)]
+    }
+
+    /// Remember the colours of the two buttons (written as `#RRGGBB`); nothing changes when they are
+    /// what is saved already.
+    pub fn set_toolbar_colours(&mut self, colours: [[u8; 3]; 2]) {
+        if colours == self.toolbar_colours() {
+            return;
+        }
+        self.highlight_colour = Some(crate::colour_tags::hex(colours[0]));
+        self.font_colour = Some(crate::colour_tags::hex(colours[1]));
+    }
 }
 
 /// The last choices of the note export dialog in this vault.
@@ -276,7 +317,19 @@ pub struct LatexExport {
 
 impl Default for VaultState {
     fn default() -> Self {
-        VaultState { version: Self::CURRENT, tabs: vec![], panes: vec![], focused_pane: 0, last_import_folder: String::new(), last_social_folder: String::new(), recent_tags: vec![], latex_export: LatexExport::default(), other: Map::new() }
+        VaultState {
+            version: Self::CURRENT,
+            tabs: vec![],
+            panes: vec![],
+            focused_pane: 0,
+            last_import_folder: String::new(),
+            last_social_folder: String::new(),
+            recent_tags: vec![],
+            latex_export: LatexExport::default(),
+            highlight_colour: None,
+            font_colour: None,
+            other: Map::new(),
+        }
     }
 }
 
@@ -298,7 +351,8 @@ impl Default for SavedPane {
 }
 
 /// One saved tab: a note or drawing (`file`, vault-relative, '/' separated) or a Feeds tab
-/// (`feed`), and whether it is pinned.
+/// (`feed`), and whether it is pinned. A note tab also has where the cursor was, how far the view
+/// was scrolled and whether it was in the reading view (NAV-038, NAV-039).
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct SavedTab {
@@ -308,6 +362,17 @@ pub struct SavedTab {
     pub feed: Option<crate::social::FeedRef>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub pinned: bool,
+    /// The selection of the note as two char indices (`[primary, secondary]`, the moving end
+    /// first; equal ones are a cursor), counted in characters of the text, so they are always on a
+    /// character boundary. Absent: no cursor was placed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<[usize; 2]>,
+    /// The scroll offset of the note view in points, rounded down to whole points.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scroll: Option<u32>,
+    /// The note was shown in the reading view.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reading: bool,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
@@ -628,8 +693,46 @@ mod tests {
     // spec: CFG-007
     #[test]
     fn unknown_fields_in_a_saved_tab_are_kept() {
-        let (s, _) = parse::<VaultState>(br#"{"version": 2, "tabs": [{"file": "a.md", "scroll": 4}]}"#).unwrap();
-        assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"scroll\""));
+        let (s, _) = parse::<VaultState>(br#"{"version": 2, "tabs": [{"file": "a.md", "zoom": 4}]}"#).unwrap();
+        assert!(String::from_utf8(to_bytes(&s)).unwrap().contains("\"zoom\""));
+    }
+
+    // spec: NAV-038, NAV-039
+    #[test]
+    fn the_cursor_the_scroll_and_the_reading_view_of_a_tab_round_trip_and_a_file_without_them_loads() {
+        let s = VaultState { tabs: vec![SavedTab { file: Some("a.md".into()), cursor: Some([7, 3]), scroll: Some(240), reading: true, ..SavedTab::default() }, file_tab("b.md", false)], ..VaultState::default() };
+        let text = String::from_utf8(to_bytes(&s)).unwrap();
+        assert!(text.contains("\"scroll\": 240") && text.contains("\"reading\": true"), "{text}");
+        assert_eq!(text.matches("\"cursor\"").count(), 1, "a tab without a cursor writes none: {text}");
+        assert_eq!(text.matches("\"reading\"").count(), 1);
+        let (back, _) = parse::<VaultState>(text.as_bytes()).unwrap();
+        assert_eq!(back, s);
+        // a file from before has none of them, and the tab loads as it was (no version change, CFG-007)
+        let (old, newer) = parse::<VaultState>(br#"{"version": 2, "tabs": [{"file": "a.md", "pinned": true}]}"#).unwrap();
+        assert!(!newer);
+        assert_eq!(old.tabs, vec![file_tab("a.md", true)]);
+        assert_eq!(old.tabs[0].cursor, None);
+        assert_eq!(old.tabs[0].scroll, None);
+        assert!(!old.tabs[0].reading);
+        assert_eq!(old.version, VaultState::CURRENT);
+    }
+
+    // spec: NAV-040
+    #[test]
+    fn the_toolbar_colours_are_saved_as_hex_and_an_unreadable_value_falls_back_to_the_default() {
+        let mut s = VaultState::default();
+        assert_eq!(s.toolbar_colours(), [DEFAULT_HIGHLIGHT, DEFAULT_FONT]);
+        assert!(!String::from_utf8(to_bytes(&s)).unwrap().contains("colour"), "nothing is written until a colour was picked");
+        s.set_toolbar_colours([[0x39, 0xFF, 0x14], DEFAULT_FONT]);
+        let text = String::from_utf8(to_bytes(&s)).unwrap();
+        assert!(text.contains("\"highlight_colour\": \"#39FF14\"") && text.contains("\"font_colour\": \"#E53E3E\""), "{text}");
+        let (back, _) = parse::<VaultState>(text.as_bytes()).unwrap();
+        assert_eq!(back.toolbar_colours(), [[0x39, 0xFF, 0x14], DEFAULT_FONT]);
+        let (bad, _) = parse::<VaultState>(br##"{"version": 2, "highlight_colour": "green", "font_colour": "#12345"}"##).unwrap();
+        assert_eq!(bad.toolbar_colours(), [DEFAULT_HIGHLIGHT, DEFAULT_FONT]);
+        // not a text: the state still loads; a colour with an alpha part is not one of ours
+        let (bad, _) = parse::<VaultState>(br##"{"version": 2, "highlight_colour": 5, "font_colour": "#11223344"}"##).unwrap();
+        assert_eq!(bad.toolbar_colours(), [DEFAULT_HIGHLIGHT, DEFAULT_FONT]);
     }
 
     // spec: CFG-006

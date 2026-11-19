@@ -67,7 +67,7 @@ else
     bindir=$HOME/.local/bin
     datadir=${XDG_DATA_HOME:-$HOME/.local/share}
 fi
-sizes="16 32 48 64 128 256 512"
+sizes="16 32 48 64 128 256 512 1024"
 program=$bindir/shale
 desktop=$datadir/applications/shale.desktop
 svg=$datadir/icons/hicolor/scalable/apps/shale.svg

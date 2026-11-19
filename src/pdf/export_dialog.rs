@@ -72,6 +72,24 @@ fn trim_mm(v: f32) -> String {
     format!("{:.1}", v).trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
+/// The box "Start each # heading on a new page" (PDF-021): on when the note or the dialog has a
+/// level, which it then shows (`#` for 1, `##` for 2, …) as a small field to change; ticking it
+/// on takes level 1. `enabled` false: shown off and greyed (a kind of document without them).
+pub(crate) fn break_before_box(ui: &mut Ui, opts: &mut ExportOptions, enabled: bool, rec: &mut dyn FnMut(&str, egui::Response) -> egui::Response) {
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(enabled, |ui| {
+            let mut on = enabled && opts.break_before > 0;
+            if rec("break-before", ui.checkbox(&mut on, "Start each # heading on a new page")).on_disabled_hover_text("This kind of document has no pages for headings to start").changed() {
+                opts.break_before = u8::from(on);
+            }
+            if on {
+                let level = egui::DragValue::new(&mut opts.break_before).range(1..=6).speed(0.05).custom_formatter(|n, _| format!("to {}", "#".repeat(n as usize)));
+                rec("break-before-level", ui.add(level)).on_hover_text("The deepest heading level that starts a page: # is 1, ## is 2, …");
+            }
+        });
+    });
+}
+
 pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
     d.rects.clear();
     let mut rects: Vec<(String, Rect)> = Vec::new();
@@ -201,6 +219,9 @@ pub fn show(ui: &mut Ui, d: &mut ExportDialog) {
                 rec("toc", ui.checkbox(&mut d.opts.toc, "Table of contents"));
                 if d.book.is_some() {
                     rec("new-page-each", ui.checkbox(&mut d.opts.new_page_each, "Each note on a new page"));
+                }
+                if d.book.is_none() {
+                    break_before_box(ui, &mut d.opts, true, &mut rec);
                 }
                 rec("pagenumbers", ui.checkbox(&mut d.opts.page_numbers, "Page numbers"));
                 rec("embeds", ui.checkbox(&mut d.opts.embeds, "Embedded pictures, drawings, PDFs, videos and sounds"));
@@ -379,5 +400,33 @@ mod tests {
         h.click(&mut d, &format!("paper:{}", Paper::A5.label()));
         assert_eq!((d.opts.paper, d.opts.custom_mm), (Paper::A5, None));
         assert_eq!(d.opts.text_properties_label().as_deref(), Some("serif, justified, line spacing 1.15"));
+    }
+
+    // spec: PDF-021
+    #[test]
+    fn the_dialog_has_a_box_for_starting_headings_on_new_pages_filled_from_the_note_pdf_021() {
+        let has = |d: &ExportDialog, key: &str| d.rects.iter().any(|r| r.0 == key);
+        // a note without the property: off, no level shown; ticking it takes level 1
+        let (mut h, mut d) = setup(false);
+        assert_eq!(d.opts.break_before, 0);
+        assert!(has(&d, "break-before") && !has(&d, "break-before-level"));
+        h.click(&mut d, "break-before");
+        assert_eq!(d.opts.break_before, 1);
+        assert!(has(&d, "break-before-level"), "the level can be changed once it is on");
+        h.click(&mut d, "break-before");
+        assert_eq!(d.opts.break_before, 0);
+        // a note that says 2: the box is on with the level it says
+        let opts = ExportOptions::for_note().with_note_properties("---\nprint-break-before: 2\n---\nx");
+        let mut d = ExportDialog::new(PathBuf::from("x.md"), false, "X".into(), opts, PathBuf::from("/tmp/x.pdf"));
+        let mut h = H { ctx: egui::Context::default(), t: 0.0, last: DialogResult::Open };
+        h.frame(&mut d, vec![]);
+        h.frame(&mut d, vec![]);
+        assert_eq!(d.opts.break_before, 2);
+        assert!(has(&d, "break-before-level"));
+        h.click(&mut d, "break-before");
+        assert_eq!(d.opts.break_before, 0, "unticked: none");
+        // a drawing has no headings, a folder as a book has its own page rules (BOOK-005)
+        let (_, d) = setup(true);
+        assert!(!has(&d, "break-before"));
     }
 }

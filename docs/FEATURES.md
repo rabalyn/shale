@@ -32,7 +32,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   "Blinking cursor" (on by default) makes it steady when off. The Vim tab (listed under Editor) holds the Vim settings: the switch, the cursor of normal mode, "Esc from insert mode" (the cursor stays after the typing by default, or steps back like Vim) and the link preview size. Exactly one cursor is drawn in every mode.
 - A **formatting toolbar** above the text (Settings → Editor, on by default, button size 80–200 %) has a button for
   everything Shale draws: bold, italic, strikethrough, highlight, inline code, headings (a menu from
-  Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, tables, `[[note]]`
+  Normal text to H6), bullet and numbered lists, tasks, quotes, code blocks, rules, page breaks, tables, `[[note]]`
   and `[text](url)` links, embeds (it opens the `[!` file picker) and "Clear formatting". With a
   selection a button wraps it (or takes the markers off again); with none it puts the markers in and the
   cursor between them; a line button works on every line the selection touches. Each click is one undo
@@ -42,7 +42,7 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   sidebars, see Keyboard below), shown as a badge at the button while Alt is held; after a button or key that
   only changes the view, the editor has the keyboard again with the cursor and selection unchanged.
 - **Colours.** The toolbar's highlight and font colour buttons are split buttons: a click on the colour applies the
-  current colour at once, the ▾ beside it opens a palette (four neon highlights, a
+  current colour at once (the colours are remembered in the vault, also after a restart), the ▾ beside it opens a palette (four neon highlights, a
   "No highlight" entry and a colour picker; font colours you set in Settings → Editor) and write plain
   HTML that other markdown apps understand: `<mark style="background: #FFFF00;">text</mark>` and
   `<span style="color: #E53E3E;">text</span>`. They show in the editor (the tags dimmed, or hidden by
@@ -149,6 +149,15 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   - `print-heading-color`: `#RRGGBB`
   - `print-title`: `true` or `false`, the note's name as a title
   - `print-toc`: `true` or `false`, the contents page
+  - `print-break-before`: a heading level 1 to 6; every heading up to that level starts a new page
+    (`1`: every `#`; the dialog has a box "Start each # heading on a new page" for it)
+
+- **Page breaks** (#359): a line `<div style="page-break-after: always;"></div>` (the form Obsidian writes;
+  `page-break-before: always`, `break-after: page` and `break-before: page` work too) is a page break:
+  the built-in PDF export and the LaTeX export (`\newpage`) start a new page there, without an empty
+  page when the page is empty already or the break is the last thing of the note. The editor's Markdown
+  preview and the reading view draw it as a thin dashed rule labelled "Page break" (the line with the
+  cursor shows the HTML). The toolbar button "Page break" (Alt+J) inserts the line.
 
 - **A folder as one PDF, a book** (BOOK, #306): **Export to PDF…** in the menu of a folder in the file list,
   or of the vault (right-click the empty space under the tree), writes the notes of the folder and its
@@ -271,7 +280,8 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
 - Drag the border between two panes to resize them (neither gets narrower than 240 points).
   Closing the last tab of a pane (or **Ctrl+Shift+W**) removes the pane; the last pane stays.
 - The panes, their tabs, the open tab of each, the focused pane and the widths come back at the
-  next start. All the keys can be changed in Settings, Keybindings.
+  next start, and each note with its cursor or selection, its scroll position and its reading view; the
+  state is written every few seconds when something changed, and at exit. All the keys can be changed in Settings, Keybindings.
 
 ## Fonts and text sizes
 
@@ -731,12 +741,12 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   highlights and pictures with their captions come through (IMP-037). Everything one file brings
   goes into one folder, `z_media/YYYY/MM/import_docx_<name>/`: the pictures in `media/` and, when
   "Keep the original .docx" is ticked, the original, which the note names in its properties
-  (IMP-038). Word's look comes along: text and highlight colours become `<span>` and `<mark>`
-  colours (IMP-041), a Title and Subtitle become a heading and an italic line (IMP-042), and the
+  (IMP-038). Word's look comes along: text colours (direct, from character, paragraph and table styles, and theme colours with tint and shade) and highlight colours become `<span>` and `<mark>`
+  colours (IMP-041), page breaks (manual, "page break before", section breaks; IMP-044), a Title and Subtitle become a heading and an italic line (IMP-042), and the
   note's properties hold the page setup (`print-paper`, `print-margins`), the body font, size,
   line and paragraph spacing, alignment and the colour of Heading 1 (`print-*`, IMP-040), which
   the PDF export uses (rabalyn/shale#338). Centred and right-aligned paragraphs are not kept
-  (rabalyn/shale#340). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
+  (rabalyn/shale#340). A Word table of contents is left out (the export makes its own, IMP-043). A file pandoc cannot read leaves nothing behind and the toast says why. Off, or
   without pandoc, a `.docx` is an attachment as before; the dialog says when pandoc is missing.
 
   ![The Import tab of Settings](userguide/z_media/screenshots/settings-import.png)
@@ -942,7 +952,7 @@ Text editing keys and vim keys are fixed.
 | ↓ or Enter in the search box | Browse the results: j / k (or ↓ / ↑) next / previous hit, Ctrl+J / Ctrl+K next / previous file, Enter opens the note at the hit, Esc back to the box |
 | Ctrl+Shift+M | Mail view (its keys are listed below) |
 | Alt+← / Alt+→ | Back / forward (macOS: Cmd+[ / Cmd+], because Option+← / → move by word in text) |
-| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette, the ▾ part of the split button), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
+| Alt+B, Alt+I, Alt+S, Alt+H, Alt+C, Alt+Y, Alt+F, Alt+E, Alt+U, Alt+O, Alt+T, Alt+Q, Alt+K, Alt+R, Alt+J, Alt+A, Alt+L, Alt+W, Alt+M, Alt+X | The buttons of the formatting toolbar of a note, each doing what a click on it does (the keyboard stays in the text and nothing is typed): Bold, Italic, Strikethrough, Highlight, Inline code, Highlight colour and Font colour (open their palette, the ▾ part of the split button), Heading level (opens its menu), Bullet list, Numbered list, Task, Quote, Code block, Horizontal rule, Table, Link to a note, Web link, Embed, Clear formatting. A key whose button is not there (reading view) or is greyed out (in a table cell) does nothing |
 | Alt+V, Alt+P, Alt+D, Alt+N | The buttons of the view header and tab bar of a note: edit / reading view, Markdown preview, the ⋯ menu (opens it), New tab |
 | Alt+1, Alt+2, Alt+3, Alt+4, Alt+5, Alt+6, Alt+7, Alt+8, Alt+9, Alt+0 | The ribbon items by position: the first ten icons of the ribbon, as shown (also after you reordered or removed some) |
 | Alt+, / Alt+. | Show or hide the left / right sidebar |

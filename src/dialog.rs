@@ -157,7 +157,7 @@ impl Dialog {
         let footer_key = id.with("footer-height");
         let footer_room = ctx.data(|d| d.get_temp::<f32>(footer_key)).unwrap_or(FOOTER_ROOM);
         let shown = window.show(ctx, |ui| {
-            // the spacing raster (NAV-038): the content and the footer both inherit it
+            // the spacing raster (NAV-042): the content and the footer both inherit it
             crate::theme::dialog_spacing(ui);
             // The content always sits in the same scroll area (so its widgets keep their state).
             // While measuring, the scroll area may be as tall as the screen allows and shrinks to
@@ -344,9 +344,9 @@ mod tests {
     }
 
     /// What a dialog's content and footer see of the spacing, and what the ui around it sees.
-    // spec: NAV-038
+    // spec: NAV-042
     #[test]
-    fn nav_038_a_dialog_has_the_raster_in_its_content_and_its_footer_and_the_window_around_it_keeps_its_spacing() {
+    fn nav_042_a_dialog_has_the_raster_in_its_content_and_its_footer_and_the_window_around_it_keeps_its_spacing() {
         use crate::theme::{ITEM_GAP, LINE_GAP};
         let ctx = Context::default();
         let (mut outside, mut content, mut footer) = ((0.0, 0.0), (0.0, 0.0), (0.0, 0.0));
@@ -371,9 +371,9 @@ mod tests {
 
     /// Two wrapped paragraphs one below the other in a narrow dialog: the pitch of the rows of
     /// one, and the gap between the two.
-    // spec: NAV-038
+    // spec: NAV-042
     #[test]
-    fn nav_038_in_a_dialog_the_gap_between_two_paragraphs_is_bigger_than_the_gap_between_the_lines_of_one() {
+    fn nav_042_in_a_dialog_the_gap_between_two_paragraphs_is_bigger_than_the_gap_between_the_lines_of_one() {
         use crate::theme::{ITEM_GAP, LINE_GAP};
         const TEXT: &str = "A paragraph that is long enough to wrap over several lines in a narrow dialog.";
         let ctx = Context::default();

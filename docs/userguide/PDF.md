@@ -68,6 +68,7 @@ when you export. Every key is optional, and a value Shale cannot read is ignored
 | `print-heading-color` | `#RRGGBB`, such as `#1F4E79` | black | The colour of the headings. |
 | `print-title` | `true`, `false` | `true` | Whether the note's name is printed as a title. |
 | `print-toc` | `true`, `false` | `true` | Whether a *Contents* page is printed. |
+| `print-break-before` | a heading level, `1` to `6` | none | Every heading up to that level starts a new page: `1` is every `#` heading, `2` every `#` and `##`. The export dialog shows it as the box "Start each # heading on a new page" with the level next to it. |
 
 ```
 ---
@@ -82,6 +83,21 @@ print-heading-color: "#1F4E79"
 ```
 
 The properties apply to the export of a single note; a book ([[PDF#A folder as one PDF]]) uses the dialog's choices for all its notes.
+
+## Page breaks
+
+A line of its own with `<div style="page-break-after: always;"></div>` is a **page break**: the PDF
+goes on at the top of a new page there. This is the line Obsidian writes, and an imported Word
+document gets one wherever Word had a page break (`page-break-before: always`, `break-after: page`
+and `break-before: page` are read the same). It is no page break inside a code block or the
+properties. The toolbar button **Page break** (Alt+J, see [[Editor]]) puts the line in after the line the cursor
+is in. In the editor with the Markdown preview on, and in the reading view, the line is drawn as a thin dashed rule with the
+label "Page break"; the line with the cursor shows the HTML. A page break at the top of a page, or at the end of the note,
+adds no empty page. The LaTeX export writes `\newpage`.
+
+The property `print-break-before` and the box "Start each # heading on a new page" in the export dialog do the same
+before the headings: with `1` every `#` heading starts a new page, but the first thing of the first page does not
+move. It is the same for the LaTeX export of an article or a book (slides, letters and posters have their own pages).
 
 ## A folder as one PDF
 

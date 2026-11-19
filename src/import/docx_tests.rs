@@ -434,7 +434,7 @@ fn a_note_that_cannot_be_written_takes_the_import_folder_out_again() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// spec: IMP-040, IMP-041, IMP-042, IMP-039
+// spec: IMP-040, IMP-041, IMP-042, IMP-044, IMP-039
 #[test]
 fn a_styled_word_file_keeps_its_page_its_body_its_colours_and_its_title() {
     let Some((v, done)) = import_fixture("styled", "styled.docx", true) else { return };
@@ -443,7 +443,7 @@ fn a_styled_word_file_keeps_its_page_its_body_its_colours_and_its_title() {
     let folder = format!("{}/import_docx_styled", month_dir());
     let expected_props = format!(
         "---\nsource: \"[[{folder}/styled.docx]]\"\nprint-paper: Letter\nprint-margins: 20 25 20 30\nprint-font: serif\nprint-font-size: 12\nprint-line-spacing: 1.15\n\
-print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496\"\nprint-title: false\nprint-toc: false\n---\n\n"
+print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496\"\nprint-break-before: 1\nprint-title: false\nprint-toc: false\n---\n\n"
     );
     assert!(text.starts_with(&expected_props), "{text}");
     let body = &text[expected_props.len()..];
@@ -455,7 +455,13 @@ print-paragraph-spacing: 8\nprint-align: justify\nprint-heading-color: \"#2F5496
     assert!(body.contains("a ==yellow highlight=="), "plain yellow stays pandoc's own mark: {body}");
     assert!(body.contains("**<span style=\"color: #0000FF;\">bold blue</span>** and on"), "white space stays outside, so the emphasis works: {body}");
     assert!(body.contains("<span style=\"color: #00B050;\"><mark style=\"background: #FFC000;\">green on orange</mark></span>"), "{body}");
-    assert!(!body.chars().any(|c| ('\u{E000}'..='\u{E003}').contains(&c)), "no sentinel is left");
+    assert!(body.contains("<span style=\"color: #7030A0;\">purple by style</span> and on"), "a colour from a character style: {body}");
+    assert!(body.contains("<span style=\"color: #0F4761;\">shaded accent</span> and <span style=\"color: #E97132;\">plain accent</span>"), "theme colours with and without a shade: {body}");
+    // IMP-044: Heading 1 starts a page by its style (the property), so no line before it; the rest are lines
+    let div = "<div style=\"page-break-after: always;\"></div>";
+    assert!(body.contains(&format!("Before a manual break\n\n{div}\n\nafter it.\n\n{div}\n\nStarts a page by itself.\n\nEnds a section.\n\n{div}\n\nEnds a continuous section.\n\nThe last paragraph.")), "{body}");
+    assert_eq!(body.matches(div).count(), 3, "{body}");
+    assert!(!body.chars().any(|c| ('\u{E000}'..='\u{E004}').contains(&c)), "no sentinel is left");
     // the original is kept as it is, without the tags
     let kept = std::fs::read(v.root.join(format!("{folder}/styled.docx"))).unwrap();
     assert_eq!(kept, std::fs::read(fixture("styled.docx")).unwrap());
@@ -470,6 +476,27 @@ fn a_file_made_by_pandoc_alone_has_its_properties_and_a_heading_for_its_title() 
     assert!(!props.iter().any(|p| p.starts_with("source")), "the block is there although the original is not kept: {props:?}");
     assert_eq!(props[props.len() - 2..], ["print-title: false", "print-toc: false"], "{props:?}");
     assert!(body.starts_with("# Sample\n\n# Heading one\n"), "the title of the file is a heading: {body}");
+}
+
+/// A Word table of contents is not imported as text and an ordinary list of links stays.
+// spec: IMP-043, IMP-037, IMP-039
+#[test]
+fn a_word_table_of_contents_is_dropped_with_its_title_and_headings_stay_but_other_links_stay() {
+    let Some((v, done)) = import_fixture("toc", "toc.docx", false) else { return };
+    assert!(done.errors.is_empty(), "{:?}", done.errors);
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let (props, body) = split_props(&text);
+    assert!(!props.iter().any(|p| p.starts_with("print-toc")), "the export makes its own contents: {props:?}");
+    assert!(!body.contains("Inhaltsverzeichnis"), "no title of the contents: {body}");
+    assert!(!body.contains("Einleitung 2") && !body.contains("Details 2"), "no entries: {body}");
+    assert_eq!(body, "# Einleitung\n\nErster Absatz.\n\n# Details\n\nZweiter Absatz.\n");
+
+    // one link alone, a link in a list: not a contents, so they are kept (as their text)
+    let Some((v, done)) = import_fixture("toclinks", "toclinks.docx", false) else { return };
+    let text = std::fs::read_to_string(v.abs(&done.notes[0])).unwrap();
+    let body = split_props(&text).1;
+    assert!(body.contains("\nAlpha\n\nText between the two links.\n\nBeta\n"), "{body}");
+    assert!(body.contains("- Alpha\n- Beta\n"), "{body}");
 }
 
 /// A real (small) Word file with one red run, as a path in `dir`.

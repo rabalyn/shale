@@ -95,7 +95,7 @@ pub fn set_text_styles(ctx: &egui::Context, font: &AreaFont) {
     ctx.global_style_mut(|s| s.text_styles = text_styles(font));
 }
 
-// ---- the spacing raster of dialogs and Settings (NAV-038, NAV-039)
+// ---- the spacing raster of dialogs and Settings (NAV-042, NAV-043)
 //
 // All on a 4-point grid, and each step clearly bigger than the one below it, so a reader sees
 // what belongs together: the lines of one wrapped paragraph are closest, the items (rows,
@@ -209,9 +209,9 @@ mod tests {
         out.textures_delta.clear();
     }
 
-    // spec: NAV-038
+    // spec: NAV-042
     #[test]
-    fn nav_038_the_raster_is_on_the_grid_and_each_step_is_bigger_than_the_one_below() {
+    fn nav_042_the_raster_is_on_the_grid_and_each_step_is_bigger_than_the_one_below() {
         for gap in [LINE_GAP, ITEM_GAP, SECTION_GAP] {
             assert_eq!(gap % GRID, 0.0, "{gap} is on the {GRID}-point grid");
         }
@@ -219,9 +219,9 @@ mod tests {
         const { assert!(ITEM_GAP >= 2.0 * LINE_GAP, "the gap between items is clearly bigger than the one inside an item") };
     }
 
-    // spec: NAV-038
+    // spec: NAV-042
     #[test]
-    fn nav_038_dialog_spacing_sets_the_item_gap_and_the_line_gap_on_one_ui_only() {
+    fn nav_042_dialog_spacing_sets_the_item_gap_and_the_line_gap_on_one_ui_only() {
         in_ui(300.0, |ui| {
             let before = (ui.spacing().item_spacing.y, ui.spacing().extra_text_line_spacing);
             ui.scope(|ui| {
@@ -240,9 +240,9 @@ mod tests {
         (galley.rows[1].pos.y - galley.rows[0].pos.y, ui.fonts_mut(|f| f.row_height(font)))
     }
 
-    // spec: NAV-039
+    // spec: NAV-043
     #[test]
-    fn nav_039_a_hint_has_the_line_gap_between_its_lines_and_rich_text_without_it_has_none() {
+    fn nav_043_a_hint_has_the_line_gap_between_its_lines_and_rich_text_without_it_has_none() {
         in_ui(200.0, |ui| {
             let font = FontId::proportional(12.0);
             let rich = || RichText::new(LONG).color(MUTED).size(12.0);
@@ -253,9 +253,9 @@ mod tests {
         });
     }
 
-    // spec: NAV-039
+    // spec: NAV-043
     #[test]
-    fn nav_039_hint_and_prose_draw_the_text_taller_by_the_line_gap_of_each_row() {
+    fn nav_043_hint_and_prose_draw_the_text_taller_by_the_line_gap_of_each_row() {
         in_ui(200.0, |ui| {
             let plain = ui.label(RichText::new(LONG).color(MUTED).size(12.0)).rect.height();
             let hint = hint(ui, LONG).rect.height();

@@ -2091,7 +2091,7 @@ fn a_mail_that_may_have_been_sent_waits_for_the_person_and_a_failed_one_can_be_r
 fn the_account_settings_have_the_sending_section_with_presets_and_test_connection_signs_in_to_smtp() {
     let mut w = W::new("smtp-dialog", false);
     // the account form with its Sending section is taller than 900 points since the dialogs have
-    // more room between their items (NAV-038): the window is taller, so its buttons are not scrolled out
+    // more room between their items (NAV-042): the window is taller, so its buttons are not scrolled out
     w.size = Vec2::new(1500.0, 1300.0);
     let smtp = FakeSmtp::start(MailSecurity::ImplicitTls);
     let (settings, user) = {
@@ -2322,7 +2322,7 @@ fn encrypted_mail_needs_the_typed_consent_then_is_decrypted_stored_and_searchabl
     w.frame(vec![]);
     assert!(w.shows("OpenPGP (gpg): gpg (GnuPG)") && w.shows("S/MIME (gpgsm): gpgsm (GnuPG)"), "{:?}", w.texts.iter().map(|t| t.0.clone()).collect::<Vec<_>>());
     assert!(w.shows("Bob <bob@example.org>"), "the secret key of the test home is listed");
-    // with the room between the items of dialogs (NAV-038) the paragraph about bringing keys over
+    // with the room between the items of dialogs (NAV-042) the paragraph about bringing keys over
     // is below the visible part: scroll the dialog down to it, as a reader would
     let over = Pos2::new(w.rect("md:enc-header").center().x, w.size.y / 2.0);
     w.frame(vec![Event::PointerMoved(over)]);

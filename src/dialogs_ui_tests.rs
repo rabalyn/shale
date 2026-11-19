@@ -760,7 +760,7 @@ fn nav_028_export_to_pdf_keeps_export_and_cancel_in_view_in_a_short_window() {
 }
 
 /// The most that may lie between the last line of a dialog's content and its footer's buttons:
-/// the separator with an item gap (NAV-038) on each side, and the line gap of the last line. It
+/// the separator with an item gap (NAV-042) on each side, and the line gap of the last line. It
 /// was 20 points before the raster (4-point item gaps, no line gap).
 const FOOTER_GAP_MAX: f32 = 30.0;
 

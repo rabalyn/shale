@@ -286,9 +286,9 @@ mod tests {
         (auto, keys, appearance)
     }
 
-    // spec: NAV-038
+    // spec: NAV-042
     #[test]
-    fn nav_038_a_section_heading_has_the_section_gap_above_it_and_the_item_gap_below_it() {
+    fn nav_042_a_section_heading_has_the_section_gap_above_it_and_the_item_gap_below_it() {
         let ctx = Context::default();
         let mut gaps = (0.0, 0.0);
         let mut out = ctx.run_ui(RawInput::default(), |ui| {

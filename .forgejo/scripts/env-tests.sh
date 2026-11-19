@@ -21,6 +21,9 @@
 #       uses the given engine (the one the detect step found; detected again when left out),
 #       starts both stacks, builds the TeX image, runs `cargo test -- --ignored calendar::env_tests`,
 #       `… mail_env` and `… tex_env` (the TeX image is built with --refresh when SHALE_ENV_TESTS_TEX_REFRESH=yes, as the weekly run and release tags of the CI job do, not check tags, ADR-0021, so a change of the current TeX Live shows up; `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes and `… tex_import` with SHALE_ENV_TESTS_TEX_IMPORT=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
+#       The suites run with one test thread (CalDAV, mail, `tex_install` and `tex_import` share one stack or
+#       one install); `tex_env` shares nothing and runs with ${SHALE_ENV_TESTS_TEX_THREADS:-4} test threads (a
+#       positive integer, else `run` fails at once with a message; DEV-011, #370)
 set -eu
 cd "$(dirname "$0")/../.."
 
@@ -69,6 +72,12 @@ case "${1:-}" in
     ;;
 
   run)
+    # checked first: a typo must not cost the start of the stacks
+    tex_threads=${SHALE_ENV_TESTS_TEX_THREADS:-4}
+    case $tex_threads in
+      ''|*[!0-9]*|0|0[0-9]*) echo "SHALE_ENV_TESTS_TEX_THREADS must be a positive integer, not '$tex_threads'" >&2; exit 1 ;;
+    esac
+
     # a second `podman info` right after the first can fail where the first worked: trust the
     # engine the detect step found, and let the stacks themselves show a real problem
     engine=${2:-$(sh "$0" detect)}
@@ -115,7 +124,10 @@ case "${1:-}" in
     if [ "${SHALE_ENV_TESTS_TEX_IMPORT:-no}" = yes ]; then suites="$suites tex_import"; fi
     for suite in $suites; do
       log=$(mktemp)
-      cargo test --locked -- --ignored "$suite" --test-threads=1 2>&1 | tee "$log" || status=1
+      # one stack or one install per suite: one thread; the TeX compiles share nothing
+      threads=1
+      if [ "$suite" = tex_env ]; then threads=$tex_threads; fi
+      cargo test --locked -- --ignored "$suite" --test-threads="$threads" 2>&1 | tee "$log" || status=1
       # a filter that matches nothing "passes": make sure the suite really ran
       if ! grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$log"; then
         echo "no $suite test passed" >&2

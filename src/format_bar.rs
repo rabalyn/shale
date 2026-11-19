@@ -27,7 +27,7 @@ pub enum Menu {
 }
 
 /// The buttons that run a command, with their Alt keys (KEY-015).
-pub const BUTTON_KEYS: [(Action, Cmd); 16] = [
+pub const BUTTON_KEYS: [(Action, Cmd); 17] = [
     (Action::NoteBold, Cmd::Bold),
     (Action::NoteItalic, Cmd::Italic),
     (Action::NoteStrike, Cmd::Strike),
@@ -39,6 +39,7 @@ pub const BUTTON_KEYS: [(Action, Cmd); 16] = [
     (Action::NoteQuote, Cmd::Quote),
     (Action::NoteCodeBlock, Cmd::CodeBlock),
     (Action::NoteRule, Cmd::Rule),
+    (Action::NotePageBreak, Cmd::PageBreak),
     (Action::NoteTable, Cmd::Table),
     (Action::NoteWikiLink, Cmd::WikiLink),
     (Action::NoteWebLink, Cmd::WebLink),
@@ -72,7 +73,15 @@ pub struct FormatBar {
 
 impl Default for FormatBar {
     fn default() -> Self {
-        FormatBar { open_request: None, custom_mark: Color32::from_rgb(255, 165, 0), custom_font: Color32::from_rgb(220, 20, 60), last_mark: [255, 255, 0], last_font: [229, 62, 62], picker_open: [false; 2], width: 0.0 }
+        FormatBar {
+            open_request: None,
+            custom_mark: Color32::from_rgb(255, 165, 0),
+            custom_font: Color32::from_rgb(220, 20, 60),
+            last_mark: crate::vault_state::DEFAULT_HIGHLIGHT,
+            last_font: crate::vault_state::DEFAULT_FONT,
+            picker_open: [false; 2],
+            width: 0.0,
+        }
     }
 }
 
@@ -199,6 +208,13 @@ fn draw_rule(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
     p.line_segment([Pos2::new(r.left() + 6.0 * s, r.center().y), Pos2::new(r.right() - 6.0 * s, r.center().y)], Stroke::new(1.6 * s, c));
 }
 
+/// A sheet with a dashed line through it: the page break.
+fn draw_page_break(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
+    let b = Rect::from_center_size(r.center(), Vec2::new(11.0, 14.0) * s);
+    p.rect_stroke(b, s, Stroke::new(1.2 * s, c), egui::StrokeKind::Inside);
+    p.extend(egui::Shape::dashed_line(&[Pos2::new(b.left() - 3.0 * s, b.center().y), Pos2::new(b.right() + 3.0 * s, b.center().y)], Stroke::new(1.4 * s, c), 2.5 * s, 1.8 * s));
+}
+
 fn draw_table(p: &egui::Painter, r: Rect, c: Color32, s: f32) {
     let b = Rect::from_center_size(r.center(), Vec2::new(14.0, 12.0) * s);
     p.rect_stroke(b, s, Stroke::new(1.2 * s, c), egui::StrokeKind::Inside);
@@ -232,6 +248,16 @@ fn separator(ui: &mut Ui, s: f32) {
 }
 
 impl FormatBar {
+    /// The current colours of the highlight and the font colour button (EDIT-054).
+    pub fn colours(&self) -> [[u8; 3]; 2] {
+        [self.last_mark, self.last_font]
+    }
+
+    /// Set the current colours of the two buttons (the ones the vault remembered, NAV-040).
+    pub fn set_colours(&mut self, colours: [[u8; 3]; 2]) {
+        [self.last_mark, self.last_font] = colours;
+    }
+
     /// Open the popup of a button in the next frame (its key, KEY-015).
     pub fn open(&mut self, menu: Menu) {
         self.open_request = Some(menu);
@@ -288,6 +314,7 @@ impl FormatBar {
                 separator(ui, sc);
                 cmds.push(text_cmd(ui, bar, false, Cmd::CodeBlock, "{ }", mono, "Code block: ``` fence"));
                 cmds.push(draw_cmd(ui, bar, false, Cmd::Rule, "Horizontal rule: ---", draw_rule));
+                cmds.push(draw_cmd(ui, bar, false, Cmd::PageBreak, "Page break: a new page in the PDF", draw_page_break));
                 cmds.push(draw_cmd(ui, bar, false, Cmd::Table, "Table: 2 columns, 2 rows", draw_table));
                 separator(ui, sc);
                 cmds.push(text_cmd(ui, bar, false, Cmd::WikiLink, "[[ ]]", mono, "Link to a note: [[Note]]"));
