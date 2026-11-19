@@ -21,6 +21,7 @@ CARGO
 cat > "$TMP/bin/tex-env.sh" <<'TEXENV'
 #!/bin/sh
 echo "$*" >> "$SCENARIO/texenv.calls"
+echo "${SHALE_TEX_ENV_REPOSITORY:-}" >> "$SCENARIO/texenv.repos"
 case "$1" in
   build) [ ! -f "$SCENARIO/build.fails" ] ;;
   status) echo "image shale-tex-env: there (TeX Live 2026 from the fake mirror)" ;;
@@ -67,5 +68,14 @@ scenario "the second run decides: a font failure that stays is a failure" 1 "fai
 scenario "the metric data wording is a font problem too" 0 "from a fresh mirror" 2 "status,build --refresh" "$METRIC" "$OK"
 scenario "an image that cannot be rebuilt is a failure without a second run" 1 "could not be built again" 1 "status,build --refresh" "$FONT" build-fails
 scenario "the second run is not retried again, even when it fails differently" 1 "no tex_env test passed" 2 "status,build --refresh" "$FONT" "$OTHER"
+
+# spec: DEV-025: the mirror variable of the environment reaches the build of the fresh image
+SHALE_TEX_ENV_REPOSITORY=https://mirror.example.test/tlnet scenario "dev_025: SHALE_TEX_ENV_REPOSITORY reaches tex-env.sh build" 0 "from a fresh mirror" 2 "status,build --refresh" "$FONT" "$OK"
+if [ "$(tail -n 1 "$SCENARIO/texenv.repos")" = "https://mirror.example.test/tlnet" ]; then
+  echo "ok - dev_025: the build saw the mirror"
+else
+  echo "not ok - dev_025: the build did not see SHALE_TEX_ENV_REPOSITORY"
+  FAILED=1
+fi
 
 exit "$FAILED"

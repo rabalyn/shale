@@ -20,7 +20,7 @@
 #   env-tests.sh run [podman|docker]
 #       uses the given engine (the one the detect step found; detected again when left out),
 #       starts both stacks, builds the TeX image, runs `cargo test -- --ignored calendar::env_tests`,
-#       `… mail_env` and `… tex_env` (the TeX image is built with --refresh when SHALE_ENV_TESTS_TEX_REFRESH=yes, as the weekly run and release tags of the CI job do, not check tags, ADR-0021, so a change of the current TeX Live shows up; `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes and `… tex_import` with SHALE_ENV_TESTS_TEX_IMPORT=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
+#       `… mail_env` and `… tex_env` (SHALE_TEX_ENV_REPOSITORY and SHALE_TEX_INSTALL_REPOSITORY, when set (the CI job sets them for v* tags from vars.SHALE_TEX_MIRROR, DEV-025), reach the TeX build and the tex_install test through the environment; the TeX image is built with --refresh when SHALE_ENV_TESTS_TEX_REFRESH=yes, as the weekly run and release tags of the CI job do, not check tags, ADR-0021, so a change of the current TeX Live shows up; `… tex_install` with SHALE_ENV_TESTS_TEX_INSTALL=yes and `… tex_import` with SHALE_ENV_TESTS_TEX_IMPORT=yes), and always takes the stacks down again; exits 1 if a stack or a test fails or no test ran
 #       The suites run with one test thread (CalDAV, mail, `tex_install` and `tex_import` share one stack or
 #       one install); `tex_env` shares nothing and runs with ${SHALE_ENV_TESTS_TEX_THREADS:-4} test threads (a
 #       positive integer, else `run` fails at once with a message; DEV-011, #370)
