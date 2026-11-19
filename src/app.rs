@@ -403,6 +403,8 @@ pub struct ShaleApp {
     pub sf: crate::settings_file::SettingsFile,
     /// The fonts of the areas of the window and the installed fonts (CFG-030).
     pub fonts: crate::fonts::FontState,
+    /// The themes there are and the one in use (CFG-062).
+    pub themes: crate::themes::ThemeState,
     /// the scripted input of tests of the real window (BUILD-007)
     script: crate::script::ScriptRun,
     /// where unsaved text is rescued to, and the rescues not dismissed yet (DATA-011)
@@ -487,6 +489,10 @@ impl ShaleApp {
         // screenshots and scripted checks of vim-lite: SHALE_VIM=1 turns it on
         if opts.screenshot.is_some() && std::env::var("SHALE_VIM").as_deref() == Ok("1") {
             cfg.vim_mode = true;
+        }
+        // screenshots only: SHALE_THEME=Catppuccin_Latte picks a theme (a `_` stands for a space)
+        if let (Some(_), Ok(name)) = (&opts.screenshot, std::env::var("SHALE_THEME")) {
+            cfg.theme.name = name.replace('_', " ");
         }
         // Which vault to open: --vault, else (normal start) the last one, else a demo for screenshots.
         let vault_path = match (&opts.vault, &screenshot) {
@@ -596,6 +602,7 @@ impl ShaleApp {
             cfg_error: None,
             sf: crate::settings_file::SettingsFile::new(),
             fonts: crate::fonts::FontState::new(),
+            themes: crate::themes::ThemeState::new(persist),
             script: crate::script::ScriptRun::new(opts.keys.as_deref().inspect(|_| crate::script::collect_hints()).map(|k| crate::script::parse(k).unwrap_or_default().into()).unwrap_or_default()),
             recovery: crate::recovery::RecoveryState { root: recovery_root, notice: vec![] },
             link_preview: Default::default(),
@@ -2806,6 +2813,7 @@ impl ShaleApp {
         self.autosave();
         self.state_tick();
         self.settings_file_tick(ui.ctx());
+        self.themes.sync(ui.ctx(), &self.cfg.theme);
         if let Some(m) = self.fonts.sync(ui.ctx(), &self.cfg.fonts) {
             self.toast(m);
         }

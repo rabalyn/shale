@@ -140,6 +140,73 @@ impl Palette {
     }
 }
 
+/// Names every colour field of [`Palette`] once: the keys of the `[shale]` table of a theme file
+/// (CFG-063) and the way to reach a field by its name.
+macro_rules! palette_slots {
+    ($($field:ident),* $(,)?) => {
+        impl Palette {
+            /// The names of the colour slots (every field but `dark`).
+            pub const SLOTS: &'static [&'static str] = &[$(stringify!($field)),*];
+
+            /// The colour slot with this name.
+            pub fn slot_mut(&mut self, name: &str) -> Option<&mut Color32> {
+                match name {
+                    $(stringify!($field) => Some(&mut self.$field),)*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+palette_slots!(
+    bg_primary,
+    bg_secondary,
+    bg_ribbon,
+    bg_hover,
+    bg_active,
+    border,
+    text,
+    text_strong,
+    muted,
+    faint,
+    accent,
+    link,
+    link_missing,
+    tag,
+    tag_bg,
+    code_bg,
+    code,
+    heading,
+    done,
+    quote,
+    syntax_keyword,
+    syntax_string,
+    syntax_number,
+    syntax_comment,
+    syntax_function,
+    syntax_type,
+    syntax_operator,
+    faint_bg,
+    selection_bg,
+    widget_bg,
+    widget_weak_bg,
+    hover_stroke,
+    highlight_bg,
+    banner_error_bg,
+    banner_notice_bg,
+    ok_text,
+    good,
+    good_bg,
+    warn,
+    warn_bg,
+    bad_bg,
+    graph_edge_dim,
+    graph_edge,
+    graph_node,
+    graph_node_drawing
+);
+
 thread_local! {
     /// The palette of this thread, which is the UI thread: the one that draws. Another thread
     /// (a job, a worker) starts with Shale and must be handed a palette if it needs one.
@@ -308,23 +375,45 @@ pub fn with_palette<T>(palette: Palette, f: impl FnOnce() -> T) -> T {
     f()
 }
 
-/// Switch the UI thread to `palette` and put it into `ctx` (CFG-061).
+/// Switch the UI thread to `palette` and put it into `ctx`, with Shale's fonts and text sizes
+/// (CFG-061). For the start of the app; [`switch_palette`] changes the theme later.
 pub fn use_palette(ctx: &egui::Context, palette: Palette) {
     set_palette(palette);
     apply(ctx);
 }
 
+/// Change the theme of a running window to `palette` (CFG-062): the palette of this thread and
+/// egui's visuals follow; the fonts and text sizes stay as they are.
+pub fn switch_palette(ctx: &egui::Context, palette: Palette) {
+    set_palette(palette);
+    apply_palette(ctx, &palette);
+}
+
 /// Put the colours of the current palette and the fonts and sizes of the style into `ctx`.
 pub fn apply(ctx: &egui::Context) {
     install_fonts(ctx);
+    set_text_styles(ctx, &AreaFont::shale(crate::fonts::UI_SIZE));
     apply_palette(ctx, &palette());
 }
 
-/// Build egui's visuals and style from `p` (CFG-061).
+/// Build egui's visuals and style from `p` (CFG-061). The text styles, the animation settings
+/// and the cursor's blinking of the style in use stay as they are.
+///
+/// egui keeps a dark and a light style and, by default, picks one by the system's mode. That
+/// would swap our visuals for egui's own whenever the system changes its mode, so the choice is
+/// fixed to the one of the palette (CFG-062); the style of the other mode is not used.
 pub fn apply_palette(ctx: &egui::Context, p: &Palette) {
+    let before = ctx.global_style();
+    ctx.set_theme(if p.dark { egui::Theme::Dark } else { egui::Theme::Light });
+    // egui would also set the window's own theme (title bar) by it, which hides the system's
+    // mode from `Context::system_theme`, and "follow the system" needs that
+    ctx.options_mut(|o| o.sync_window_theme = false);
     ctx.set_visuals(if p.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
     let mut style = (*ctx.global_style()).clone();
-    style.text_styles = text_styles(&AreaFont::shale(crate::fonts::UI_SIZE));
+    style.text_styles = before.text_styles.clone();
+    style.animation_time = before.animation_time;
+    style.scroll_animation = before.scroll_animation;
+    style.visuals.text_cursor.blink = before.visuals.text_cursor.blink;
     style.spacing.item_spacing = egui::vec2(6.0, 4.0);
     style.spacing.button_padding = egui::vec2(8.0, 4.0);
     style.spacing.scroll.bar_width = 8.0;

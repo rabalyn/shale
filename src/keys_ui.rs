@@ -302,7 +302,9 @@ mod tests {
             // these tests drive the Linux/Windows defaults; macOS has other keys for six actions (KEY-019)
             app.keymap = crate::keys::Keymap::from_overrides_for(&app.cfg.keybindings, false);
             app.open(Path::new("A.md"), false);
-            let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir, texts: vec![], text_pos: vec![], size: Vec2::new(900.0, 1600.0) };
+            let mut w = W { app, ctx: egui::Context::default(), t: 0.0, dir, texts: vec![], text_pos: vec![], size: Vec2::new(900.0, 2000.0) };
+            // the style of the app: the rows of the dialog are a little taller than egui's own
+            crate::theme::apply(&w.ctx);
             w.frame(vec![]);
             w
         }

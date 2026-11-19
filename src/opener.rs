@@ -116,6 +116,12 @@ pub fn open_recovery_folder(path: &Path, recovery_root: &Path) -> Result<(), Str
     launch(path.as_os_str())
 }
 
+/// Open the themes folder in the file manager; it is made first when it is not there yet.
+pub fn open_themes_folder(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the themes folder: {e}"))?;
+    launch(dir.as_os_str())
+}
+
 /// Save `data` (a mail attachment, say) as `name` in Shale's private temp folder and open that
 /// copy. Each call uses a fresh folder, so same-named attachments never clash.
 pub fn open_temp_copy(name: &str, data: &[u8]) -> Result<(), String> {

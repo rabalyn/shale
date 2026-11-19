@@ -47,6 +47,7 @@ Keeping it safe and tidy:
 - [[Data usage and caches]]: what Shale keeps on disk.
 - [[Settings reference]]: every setting, its default, and where it lives.
 - [[Fonts]]: the font and text size of the editor, dialogs, mail, calendar and feeds.
+- [[Themes]]: light and dark colour themes, your own Alacritty theme files.
 
 ## Where this guide comes from
 

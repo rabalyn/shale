@@ -21,6 +21,9 @@ markdown files. Notes link to each other with `[[wiki links]]`.
   tables and more, and coloured highlights and font colours stored as plain `<mark>` / `<span>` HTML.
 - **Math**: `$E = mc^2$` and `$$…$$` are typeset in the text, the reading view, tables and the PDF export,
   by Shale itself with the bundled font STIX Two Math (no TeX needed).
+- **Themes**: nine built-in light and dark colour themes (Shale, Dracula, Nord, Catppuccin, Gruvbox, Solarized,
+  GitHub), one that follows the system's light or dark mode, and any Alacritty terminal theme file you put into
+  the themes folder.
 - **Suggestions while you type**: type `[[` to get matching note names. Enter or a click picks one, and the
   last entry creates a new note.
 - **Drawings**: hand-drawn style sketches stored as standard `.excalidraw` JSON files.

@@ -255,6 +255,26 @@ fn lenient_normal_shape<'de, D: serde::Deserializer<'de>>(d: D) -> Result<crate:
     Ok(serde_json::from_value(v).unwrap_or(crate::cursor_style::CursorShape::Block))
 }
 
+/// Which theme the window uses (CFG-062).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct ThemeCfg {
+    /// The theme, by name (a built-in one or a file of the themes folder).
+    pub name: String,
+    /// Follow the system's light or dark mode: `light` or `dark` is used instead of `name`.
+    pub follow_system: bool,
+    /// The theme while the system is in light mode (with `follow_system`).
+    pub light: String,
+    /// The theme while the system is in dark mode (with `follow_system`).
+    pub dark: String,
+}
+
+impl Default for ThemeCfg {
+    fn default() -> Self {
+        ThemeCfg { name: crate::themes::SHALE.into(), follow_system: false, light: "Catppuccin Latte".into(), dark: crate::themes::SHALE.into() }
+    }
+}
+
 /// The retention settings of the caches (USE-020). `None` means "forever" for an age and "no
 /// limit" for a size or count.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -306,6 +326,8 @@ pub struct Config {
     pub update_links_on_rename: bool,
     /// Draw on a dark canvas.
     pub dark_canvas: bool,
+    /// The colour theme of the window (CFG-062).
+    pub theme: ThemeCfg,
     /// The font and size of every area of the window (CFG-030).
     pub fonts: crate::fonts::FontsCfg,
     /// Keep the text in a comfortable column instead of the full width.
@@ -450,6 +472,7 @@ impl Default for Config {
             new_notes_next_to_current: false,
             update_links_on_rename: true,
             dark_canvas: true,
+            theme: ThemeCfg::default(),
             fonts: crate::fonts::FontsCfg::default(),
             readable_width: true,
             show_left: true,

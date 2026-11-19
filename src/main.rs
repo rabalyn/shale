@@ -107,6 +107,7 @@ mod table;
 mod table_grid;
 mod table_select;
 mod theme;
+mod themes;
 #[cfg(test)]
 mod ui_test_support;
 mod undo;
