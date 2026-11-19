@@ -138,7 +138,10 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("auto_convert_canvas", "true: opening an Obsidian canvas turns it into an editable drawing without asking."),
     ("docx_import", "true: a Word file (.docx) that is dropped or added in the Import dialog becomes a note, made by pandoc (Settings > Import). false: it is saved as an attachment."),
     ("pandoc_path", "The pandoc program for the Word import. Empty: it is looked for in PATH and the usual places."),
-    ("import_header_list", "true: an imported e-mail or event also gets its properties as a list (From, To, Date, When, Where, ...) below the title. false: the properties are only in the front matter (Settings > Import)."),
+    (
+        "import_header_list",
+        "true: an imported e-mail, event or social post also gets its properties as a list (From, To, Date, When, Where, Author, Source, ...) below the title. false: the properties are only in the front matter (Settings > Import).",
+    ),
     ("social_accounts", "The Mastodon and Bluesky accounts of the feed view. Their tokens are kept in the system keyring when there is one."),
     ("social_accounts.id", "A name that identifies the account, such as \"mastodon:ada@mastodon.social\"."),
     ("social_accounts.network", "\"mastodon\" or \"bluesky\"."),

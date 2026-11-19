@@ -820,7 +820,8 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
   repeat rule, organizer, attendees, status and link are properties, the text is its title and notes.
   The tag list counts the tags too. For programs that do not show properties, the box **Header list
   in the note body** (Import dialog; its start value is in Settings → Import) also writes the old list
-  of From / To / Date / When / Where … below the title (IMP-052).
+  of From / To / Date / When / Where … below the title (IMP-052); a saved post gets Author / Posted /
+  Source … (IMP-058).
 - The text of an imported e-mail is tidied: runs of three or more blank lines become one, trailing
   spaces go, and a long tracking URL (more than 80 characters, with a query string) becomes a short
   link `[host](url)` (IMP-053). A picture among the attachments is an embed 200 points wide
@@ -874,8 +875,9 @@ key or a passphrase, never looks a key up on the network by itself, and tells yo
 - Tick **Include replies from others (N)** to add a "Replies" section with other people's
   answers, nested like a conversation (off by default; Shale remembers your choice). Their
   pictures are linked, not downloaded.
-- The note has the author, the date, a **Source** link back to the post, the text (a thread:
-  every post in order, numbered), the pictures saved in `z_media/` and their descriptions. A post
+- The note has the author, the date and the link back to the post (**Source**) as properties,
+  and the text (a thread: every post in order, numbered); the box **Header list in the note
+  body** also writes them as a list below the title (IMP-058). The pictures are saved in `z_media/`, with their descriptions. A post
   that was saved before, also as part of a thread, is marked "Imported before".
 - Try it without an account: `shale --screenshot out.png --view social` shows made-up posts.
 
