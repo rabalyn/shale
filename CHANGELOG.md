@@ -10,6 +10,21 @@ its section from this file.
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-11-19
+
+### Added
+
+- **Updates from GitHub** (#421, ADR-0023): Shale can look for a new release (a short while after it starts and every 24 hours), check the download against the release's SHA-256 file and, as you choose in **Settings → Updates**, only tell you (**Notify**), download it (**Download**) or install it (**Install**); **Off** makes no request at all, and so does `SHALE_UPDATES=off` in the environment. Until you choose, the first update found asks. The notice has What's new, Skip this version and Later; after an install, **Restart now** saves everything and starts the new version, and the old program is kept as `shale.old` until the new one has run. A Linux folder or an `install.sh` install, a macOS app and a Windows folder update themselves; a package-managed install (AUR `shale-bin`, `/usr/bin`) and a development build are never touched and only get a notice, and a folder you cannot write gets the command to run. The checksum shows a download arrived whole, not who made it (#422).
+
+### Changed
+
+- The TeX Live install and the update check share one download helper (`curl` with a size limit, timeout and cancel).
+- Forgejo CI: `v*` tags (release and check tags) take TeX Live for the TeX image and the install test from the homelab mirror named by the Actions repository variable `SHALE_TEX_MIRROR` (never committed), as the public CTAN mirror answered the runner with 403; the weekly run keeps the public default (#424, #371).
+
+### Fixed
+
+- `scripts/aur-update.sh` no longer uses GNU-only `sed -i`, so it and its tests run on macOS too (#423).
+
 ## [0.6.6] - 2026-11-19
 
 ### Fixed
@@ -1714,7 +1729,8 @@ First public version (published before releases were tagged).
 - Ctrl+Shift+F always focuses the search box and selects the previous search.
 - File names with `#` work in links.
 
-[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.6...HEAD
+[Unreleased]: https://github.com/rabalyn/shale/compare/v0.6.7...HEAD
+[0.6.7]: https://github.com/rabalyn/shale/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/rabalyn/shale/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/rabalyn/shale/compare/v0.6.4...v0.6.5
 [0.6.4]: https://github.com/rabalyn/shale/compare/v0.6.3...v0.6.4
