@@ -43,6 +43,15 @@ expect() {
     FAILED=1
   fi
 }
+# FORGE-015: the history of landings and the file of the running one
+LANDDIR="$TMP/work/.git/land"
+last_hist() { tail -n 1 "$LANDDIR/history.tsv"; }
+# hist_is <result> <branch> <failed step>: the last line of history.tsv says so (start and end are
+# numbers, the load a number or empty) and `current` is gone
+hist_is() {
+  last_hist | awk -F'\t' -v r="$1" -v b="$2" -v f="$3" '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $2 >= $1 && $3 == b && $4 == r && $5 == f && ($6 == "" || $6 ~ /^[0-9.]+$/) { ok = 1 } END { exit !ok }' && [ ! -e "$LANDDIR/current" ] && [ ! -e "$LANDDIR/current.tmp" ]
+}
+hist_has() { last_hist | awk -F'\t' -v s="$1" '{ for (i = 7; i <= NF; i++) if ($i ~ ("^" s "=[0-9]+$")) ok = 1 } END { exit !ok }'; }
 main_is() { git fetch -q origin; [ "$(git rev-parse origin/main)" = "$1" ]; }
 check() {
   N=$((N + 1))
@@ -53,8 +62,10 @@ export LAND_CHECK_CMD=true
 branch feature-b b.txt b
 branch feature-c c.txt c
 expect "two branches land in the order given" 0 "landed feature-c" feature-b feature-c
+check "history: a landing has its steps, merge and push included" 'hist_is landed feature-c "" && hist_has merge && hist_has push'
 check "main holds both, as merge commits" '[ "$(git show origin/main:b.txt)" = b ] && [ "$(git show origin/main:c.txt)" = c ] && git log -1 --format=%s origin/main | grep -Fq "Merge branch '"'"'feature-c'"'"' (landed locally, FORGE-011)"'
 expect "a landed branch is not landed twice" 0 "already on origin/main" feature-b
+check "history: nothing to land is recorded" 'hist_is nothing feature-b ""'
 
 branch clash-1 a.txt left
 git checkout -q -b clash-2 origin/main && printf 'right\n' > a.txt && git commit -qam "clash-2 (Refs #1)" && git checkout -q --detach
@@ -62,15 +73,25 @@ expect "the first of two clashing branches lands" 0 "landed clash-1" clash-1
 before=$(git rev-parse origin/main)
 expect "a conflict is refused and named" 1 "a.txt" clash-2
 check "a conflict leaves main as it was" "main_is $before"
+check "history: a conflict is recorded" 'hist_is conflict clash-2 "" && hist_has merge'
+expect "an unknown name is an error landing" 1 "no branch or commit named nope0" nope0
+check "history: an unknown name is recorded as error" 'hist_is error nope0 ""'
+export LAND_CHECK_CMD='test -f "$(git rev-parse --path-format=absolute --git-common-dir)/land/current"'
+branch running r.txt r
+expect "current exists while the checks run" 0 "landed running" running
+export LAND_CHECK_CMD=true
+before=$(git rev-parse origin/main)
 
 branch broken d.txt d
 export LAND_CHECK_CMD=false
 expect "a failing check pushes nothing" 1 "a check failed for broken" broken
 check "main is unchanged after a failing check" "main_is $before"
+check "history: a failing check names its step" 'hist_is failed broken false && hist_has false'
 # a failing step stops the checks even when a later one passes (the bug that landed a red tree)
 export LAND_CHECK_CMD=$'false\ntrue'
 expect "a failing step is not hidden by a passing one after it" 1 "check failed: false" broken
 check "main is unchanged after a failing step" "main_is $before"
+check "history: only the steps that ran are recorded" 'hist_is failed broken false && ! hist_has true'
 export LAND_CHECK_CMD='test -f d.txt'
 expect "the checks run in the merged tree" 0 "landed broken" broken
 

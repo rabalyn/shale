@@ -1,5 +1,5 @@
 //! The shell tests of the landing and tag scripts run with `cargo test`, so `scripts/land.sh`
-//! checks them before every landing (FORGE-011, FORGE-013, FORGE-014, ADR-0018): Forgejo's CI runs
+//! checks them before every landing (FORGE-011, FORGE-013, FORGE-014, FORGE-016, ADR-0018): Forgejo's CI runs
 //! only for tags now. Linux only: the scripts use GNU `sed -i` and `flock`.
 #![cfg(target_os = "linux")]
 
@@ -18,6 +18,12 @@ fn run(script: &str) {
 #[test]
 fn forge_011_test_land_script_passes() {
     run("scripts/test-land.sh");
+}
+
+// spec: FORGE-016
+#[test]
+fn forge_016_test_dev_metrics_script_passes() {
+    run("scripts/test-dev-metrics.sh");
 }
 
 // spec: FORGE-013, FORGE-014

@@ -72,7 +72,15 @@ pub struct FormatBar {
 
 impl Default for FormatBar {
     fn default() -> Self {
-        FormatBar { open_request: None, custom_mark: Color32::from_rgb(255, 165, 0), custom_font: Color32::from_rgb(220, 20, 60), last_mark: [255, 255, 0], last_font: [229, 62, 62], picker_open: [false; 2], width: 0.0 }
+        FormatBar {
+            open_request: None,
+            custom_mark: Color32::from_rgb(255, 165, 0),
+            custom_font: Color32::from_rgb(220, 20, 60),
+            last_mark: crate::vault_state::DEFAULT_HIGHLIGHT,
+            last_font: crate::vault_state::DEFAULT_FONT,
+            picker_open: [false; 2],
+            width: 0.0,
+        }
     }
 }
 
@@ -232,6 +240,16 @@ fn separator(ui: &mut Ui, s: f32) {
 }
 
 impl FormatBar {
+    /// The current colours of the highlight and the font colour button (EDIT-054).
+    pub fn colours(&self) -> [[u8; 3]; 2] {
+        [self.last_mark, self.last_font]
+    }
+
+    /// Set the current colours of the two buttons (the ones the vault remembered, NAV-040).
+    pub fn set_colours(&mut self, colours: [[u8; 3]; 2]) {
+        [self.last_mark, self.last_font] = colours;
+    }
+
     /// Open the popup of a button in the next frame (its key, KEY-015).
     pub fn open(&mut self, menu: Menu) {
         self.open_request = Some(menu);

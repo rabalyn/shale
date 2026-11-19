@@ -327,6 +327,138 @@ fn panes_with_their_tabs_open_tab_focus_and_widths_come_back() {
     assert_eq!(ids.len(), 4, "unique tab ids after restoring");
 }
 
+impl W {
+    /// Give the notes `rels` a text of 150 lines, saved to their files (a state that is read again from the vault).
+    fn long_notes(&mut self, rels: &[&str]) {
+        for rel in rels {
+            let doc = self.app.notes.get_mut(Path::new(rel)).unwrap();
+            doc.text = (0..150).map(|i| format!("line number {i}\n")).collect();
+            doc.dirty = true;
+        }
+        self.app.flush_all();
+        self.frames(3);
+    }
+
+    /// Select chars `from..to` in the open tab of pane `pane` (the pane gets the focus, the editor the keyboard).
+    fn select_in(&mut self, pane: usize, from: usize, to: usize) {
+        self.app.focus_pane(pane);
+        self.app.tabbar.tabs[self.app.tabbar.active].editor.request_focus = true;
+        self.frames(3);
+        let id = self.app.tabbar.tabs[self.app.tabbar.active].editor.id;
+        let mut st = eframe::egui::text_edit::TextEditState::load(self.hl.ctx(), id).unwrap_or_default();
+        st.cursor.set_char_range(Some(eframe::egui::text::CCursorRange::two(eframe::egui::text::CCursor::new(from), eframe::egui::text::CCursor::new(to))));
+        st.store(self.hl.ctx(), id);
+        self.frames(3);
+    }
+
+    /// Scroll the note of pane `pane` down by `dy` points with the mouse wheel.
+    fn scroll_pane(&mut self, pane: usize, dy: f32) {
+        let at = self.app.panes.rects[pane].center();
+        self.hl.frame(&mut self.app, vec![Event::PointerMoved(at)]);
+        self.hl.frame(
+            &mut self.app,
+            vec![Event::MouseWheel { unit: eframe::egui::MouseWheelUnit::Point, delta: eframe::egui::vec2(0.0, -dy), modifiers: Modifiers::NONE, phase: eframe::egui::TouchPhase::Move, source: eframe::egui::MouseWheelSource::Wheel }],
+        );
+        self.frames(3);
+    }
+}
+
+/// The selection of a restored tab as (from, to), whatever end is the moving one.
+fn ordered((a, b): (usize, usize)) -> (usize, usize) {
+    (a.min(b), a.max(b))
+}
+
+// spec: NAV-038, NAV-039, NAV-041
+#[test]
+fn the_selection_and_scroll_of_notes_in_both_panes_and_the_reading_view_come_back() {
+    let mut w = W::new("place");
+    w.split("Daily log.md");
+    w.long_notes(&["Welcome.md", "Daily log.md", "Ideas.md"]);
+    // pane 0: Welcome with a selection and scrolled, Ideas (not the open tab) with a cursor; pane 1: Daily log
+    w.select_in(0, 10, 25);
+    w.scroll_pane(0, 300.0);
+    w.app.tabbar.active = 1;
+    w.select_in(0, 5, 5);
+    w.app.tabbar.active = 0;
+    w.frames(2);
+    w.select_in(1, 40, 40);
+    w.scroll_pane(1, 500.0);
+    let (s0, s1) = (w.app.pane_bar(0).tabs[0].place.scroll.unwrap(), w.app.pane_bar(1).tabs[0].place.scroll.unwrap());
+    assert!(s0 > 100.0 && s1 > s0, "both panes scrolled: {s0} {s1}");
+    w.app.toggle_reading_view();
+    w.frames(2);
+    w.app.save_config();
+    w.app.vdata.save().unwrap();
+    let saved = &w.app.vdata.state.panes;
+    assert_eq!(saved[0].tabs[0].cursor.map(|[a, b]| ordered((a, b))), Some((10, 25)));
+    assert_eq!(saved[0].tabs[1].cursor.map(|[a, b]| ordered((a, b))), Some((5, 5)), "a tab that is not the open one");
+    assert_eq!(saved[1].tabs[0].cursor.map(|[a, b]| ordered((a, b))), Some((40, 40)));
+    assert!(saved[1].tabs[0].reading && !saved[0].tabs[0].reading);
+
+    let mut again = reopen(&w);
+    let mut hl = Headless::new();
+    hl.frames(&mut again, 4);
+    assert!(again.pane_bar(1).tabs[0].reading && !again.pane_bar(0).tabs[0].reading, "the reading view comes back for that tab only");
+    assert_eq!(again.pane_bar(0).tabs[0].place.cursor.map(ordered), Some((10, 25)));
+    assert_eq!(again.pane_bar(1).tabs[0].place.cursor.map(ordered), Some((40, 40)), "also in the second pane, whose tab is in the reading view");
+    assert_eq!(again.pane_bar(0).tabs[1].place.cursor.map(ordered), Some((5, 5)), "a tab that was never shown keeps its position");
+    let now = again.pane_bar(0).tabs[0].place.scroll.unwrap();
+    assert!((now - s0).abs() <= 1.0, "scrolled where it was: {now} instead of {s0}");
+    let editor = &again.pane_bar(0).tabs[0].editor;
+    assert_eq!(editor.selection_chars(hl.ctx()).map(ordered), Some((10, 25)), "the note opens with its selection");
+    // the tab that was not shown gets its position when it is first shown
+    again.focus_pane(0);
+    again.tabbar.active = 1;
+    hl.frames(&mut again, 3);
+    assert_eq!(again.pane_bar(0).tabs[1].editor.selection_chars(hl.ctx()).map(ordered), Some((5, 5)));
+    // and what the tab bar of the second pane shows is still the reading view: its position waits for the edit view
+    assert!(again.pane_bar(1).tabs[0].place.restore_cursor.is_some());
+    again.focus_pane(1);
+    again.toggle_reading_view();
+    hl.frames(&mut again, 3);
+    assert_eq!(again.pane_bar(1).tabs[0].editor.selection_chars(hl.ctx()).map(ordered), Some((40, 40)));
+}
+
+// spec: NAV-038
+#[test]
+fn a_selection_behind_the_end_of_a_note_that_shrank_on_disk_is_kept_inside_it() {
+    let mut w = W::new("shrunk");
+    w.long_notes(&["Welcome.md"]);
+    w.select_in(0, 200, 300);
+    w.app.save_config();
+    w.app.vdata.save().unwrap();
+    crate::fsutil::write_atomic(&w.dir.join("Welcome.md"), "short \u{e4}\u{f6}\u{fc}\n".as_bytes()).unwrap();
+    let mut again = reopen(&w);
+    let mut hl = Headless::new();
+    hl.frames(&mut again, 4);
+    let n = "short \u{e4}\u{f6}\u{fc}\n".chars().count();
+    assert_eq!(again.pane_bar(0).tabs[0].editor.selection_chars(hl.ctx()).map(ordered), Some((n, n)), "clamped to the end of the text, on a character");
+}
+
+// spec: NAV-041
+#[test]
+fn the_state_is_written_every_few_seconds_only_when_it_changed_and_not_at_every_frame() {
+    let mut w = W::new("tick");
+    w.long_notes(&["Welcome.md"]);
+    let path = crate::vault_state::VaultData::state_path(&w.dir);
+    // (only the state is written here, never the global config: that is what `save_config` does too)
+    w.app.persist_config = true;
+    w.app.vdata.save().unwrap();
+    w.app.state_tick.0 = std::time::Instant::now();
+    w.select_in(0, 12, 12);
+    let on_disk = || crate::fsutil::read_to_string(&path).unwrap();
+    assert!(!on_disk().contains("\"cursor\": [\n"), "frames alone write nothing: {}", on_disk());
+    w.app.state_tick.0 = std::time::Instant::now() - std::time::Duration::from_secs(6);
+    w.frames(1);
+    assert!(on_disk().contains("12"), "a cursor that moved is written after the pause: {}", on_disk());
+    // nothing changed: the file is not touched again, however many frames run
+    let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    w.app.state_tick.0 = std::time::Instant::now() - std::time::Duration::from_secs(6);
+    w.frames(1);
+    assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), stamp);
+}
+
 // spec: NAV-026
 #[test]
 fn a_state_file_with_a_flat_tab_list_loads_as_one_pane_and_gone_panes_are_skipped() {

@@ -59,6 +59,15 @@ also has the guide as `shale-userguide-<version>.zip`, to unpack anywhere and op
 and as one PDF to print or read anywhere, `shale-userguide-<version>.pdf` (made from this vault
 as a book).
 
+## Installing on macOS
+
+Open `shale-<version>-macos-arm64.dmg` (Apple silicon) and drag **Shale** onto the **Applications** link in the window. The first
+start needs one extra step, because the app is not notarised by Apple (it is signed ad hoc): right-click Shale in Applications and
+choose **Open**, then **Open** again; or try to open it once and choose **Open Anyway** in System Settings → Privacy & Security; or
+run `xattr -dr com.apple.quarantine /Applications/Shale.app` in the Terminal. Because the signature changes with every version, the
+Keychain may ask again for access to your saved passwords after an update. Shale finds programs from Homebrew (`git-lfs`, `ffmpeg`,
+`gpg`, `pandoc`) even though Finder starts it with a short search path.
+
 ## Installing on Linux
 
 The Linux download unpacks to a folder `shale/` with an `install.sh`. Run `./install.sh` in it to
