@@ -33,14 +33,14 @@ again from the recipes in `docs/screenshots/recipes.conf`; the pictures live in 
   it (a folded block always shows ▸) to fold it; click the marker or the badge to unfold. Keys (Settings →
   Keybindings → Note view): **Ctrl+Shift+K** fold, **Ctrl+Shift+J** unfold, **Ctrl+Shift+O** fold all,
   **Ctrl+Shift+I** unfold all; with Vim-style editing `za` `zc` `zo` `zM` `zR`. The cursor never stays in hidden
-  text: moving into a fold (or a link or search jumping there) opens it. Folds are kept for the session only and
+  text: moving into a fold (or a link or search jumping there) opens it. Folds are kept per note across restarts (EDIT-079, in the vault's `.shale/state.json`; a fold whose block is gone and a note that is gone are dropped, a renamed or moved note keeps its folds) and
   are never written into the file. Also foldable (EDIT-080 to EDIT-085): **code blocks**, the **front matter** and a
   **signature** (a line `-- ` up to the next heading). A note's front matter starts folded to one muted line
   `▸ Properties · email · Anna Müller · 2026-11-12` (the setting "Properties in the editor": folded or card; raw leaves it
   open); the cursor moving into it opens the YAML and folds it again when it leaves. In a **mail note**
   (`type: email`) the quotes (`… n quoted lines`) and the signature start folded too.
 - **Folding in the reading view** (EDIT-095 to EDIT-099, rabalyn/shale#364): the reading view folds the same blocks with
-  the same folds as the editor of the note (fold in one, it is folded in the other; session only, never written).
+  the same folds as the editor of the note (fold in one, it is folded in the other; kept across restarts, never written into the note).
   Hover a block's first line and click the ▾ marker left of it, or the `… n lines` badge under a folded block (a folded code block is one row with its badge in the box, EDIT-103);
   **Ctrl+Shift+O** / **Ctrl+Shift+I** fold and unfold all there (fold and unfold at the cursor are editor keys). A footnote
   jump or a click in the outline on a heading that a fold hides opens the fold. The front matter card keeps its own toggle.
