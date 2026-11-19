@@ -202,6 +202,27 @@ pub struct Vault {
     pub failed_rewrites: Vec<(PathBuf, String)>,
 }
 
+/// From this many notes on, a vault is parsed on several threads.
+const PARALLEL_FROM: usize = 256;
+
+/// The index of one note's text, made apart from the vault so that notes can be parsed together.
+#[derive(Default)]
+struct Parsed {
+    links: Vec<LinkSpan>,
+    tasks: Vec<Task>,
+    tags: Vec<String>,
+    resolved: Vec<Option<PathBuf>>,
+}
+
+impl Parsed {
+    fn store(self, n: &mut NoteIndex) {
+        n.links = self.links;
+        n.tasks = self.tasks;
+        n.tags = self.tags;
+        n.resolved = self.resolved;
+    }
+}
+
 /// Replace the targets of links in `text`: each (old target text, new target text) pair.
 fn replace_link_targets(text: &str, pairs: &[(String, String)]) -> String {
     let mut out = text.to_string();
@@ -489,9 +510,23 @@ impl Vault {
     }
 
     fn reparse_all(&mut self) {
-        let keys: Vec<PathBuf> = self.notes.keys().cloned().collect();
-        for k in keys {
-            self.reparse(&k);
+        // the notes are independent: many of them are parsed on several threads (PERF-008)
+        let mut keys: Vec<&PathBuf> = self.notes.keys().collect();
+        let threads = if keys.len() >= PARALLEL_FROM { std::thread::available_parallelism().map_or(1, |n| n.get()).min(8) } else { 1 };
+        let chunk = keys.len().div_ceil(threads).max(1);
+        let this = &*self;
+        let parsed: Vec<(PathBuf, Parsed)> = if threads == 1 {
+            keys.iter().map(|k| ((*k).clone(), this.parse_note(k))).collect()
+        } else {
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = keys.chunks_mut(chunk).map(|part| scope.spawn(move || part.iter().map(|k| ((*k).clone(), this.parse_note(k))).collect::<Vec<_>>())).collect();
+                handles.into_iter().flat_map(|h| h.join().expect("a parsing thread")).collect()
+            })
+        };
+        for (rel, p) in parsed {
+            if let Some(n) = self.notes.get_mut(&rel) {
+                p.store(n);
+            }
         }
         let keys: Vec<PathBuf> = self.drawings.keys().cloned().collect();
         for k in keys {
@@ -530,7 +565,16 @@ impl Vault {
     }
 
     fn reparse(&mut self, rel: &Path) {
-        let Some(n) = self.notes.get(rel) else { return };
+        let parsed = self.parse_note(rel);
+        if let Some(n) = self.notes.get_mut(rel) {
+            parsed.store(n);
+        }
+    }
+
+    /// What the index holds of the text of the note `rel`: its links (and what they resolve to),
+    /// tasks and tags.
+    fn parse_note(&self, rel: &Path) -> Parsed {
+        let Some(n) = self.notes.get(rel) else { return Parsed::default() };
         let links = markdown::find_links(&n.text);
         let tasks = markdown::find_tasks(&n.text);
         let mut tags: Vec<String> = markdown::find_tags(&n.text).into_iter().map(|t| t.1).collect();
@@ -538,11 +582,7 @@ impl Vault {
         tags.sort();
         tags.dedup();
         let resolved = links.iter().map(|l| self.resolve(&l.target, Some(rel))).collect();
-        let n = self.notes.get_mut(rel).unwrap();
-        n.links = links;
-        n.tasks = tasks;
-        n.tags = tags;
-        n.resolved = resolved;
+        Parsed { links, tasks, tags, resolved }
     }
 
     /// Update the index from an editor buffer (the file itself is written separately).
@@ -2006,6 +2046,33 @@ mod tests {
         assert_eq!(tasks, [("A.md".to_string(), 0, false), ("b.md".into(), 0, false), ("b.md".into(), 1, true), ("c/D.md".into(), 1, false)]);
         let back: Vec<String> = v.backlinks(Path::new("b.md")).into_iter().map(|(p, _)| rel_to_string(&p)).collect();
         assert_eq!(back, ["c/D.md", "e.md"]);
+        let _ = fs::remove_dir_all(&d);
+    }
+    // spec: PERF-008
+    #[test]
+    fn perf_008_a_big_vault_parsed_on_several_threads_has_the_index_of_one_note_at_a_time() {
+        let n = PARALLEL_FROM * 2 + 7;
+        let files: Vec<(String, String)> = (0..n)
+            .map(|i| (format!("d{}/Note {i}.md", i % 5), format!("---\ntags: [t{}]\n---\n# Note {i}\nSee [[Note {}]] and [[Note {}|x]] #tag{} and [[Missing {i}]]\n- [ ] task {i}\n- [x] done {i}\n", i % 3, (i + 1) % n, (i * 7) % n, i % 11)))
+            .collect();
+        let refs: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
+        let (mut v, d) = vault_with("perf8-parse", &refs);
+        let snapshot = |v: &Vault| {
+            let mut all: Vec<_> =
+                v.notes.iter().map(|(k, n)| (k.clone(), n.links.iter().map(|l| l.target.clone()).collect::<Vec<_>>(), n.resolved.clone(), n.tasks.iter().map(|t| (t.line, t.done)).collect::<Vec<_>>(), n.tags.clone())).collect();
+            all.sort();
+            all
+        };
+        let parallel = snapshot(&v);
+        assert_eq!(parallel.len(), n);
+        assert!(parallel.iter().all(|(_, l, r, t, tags)| l.len() == 3 && r.len() == 3 && t.len() == 2 && !tags.is_empty()));
+        assert!(parallel.iter().all(|(_, _, r, _, _)| r.iter().filter(|x| x.is_none()).count() == 1), "one link of three is to a missing note");
+        // the same index one note at a time
+        let keys: Vec<PathBuf> = v.notes.keys().cloned().collect();
+        for k in &keys {
+            v.reparse(k);
+        }
+        assert_eq!(snapshot(&v), parallel);
         let _ = fs::remove_dir_all(&d);
     }
 }
