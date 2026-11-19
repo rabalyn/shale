@@ -943,8 +943,46 @@ fn large_note_timing() {
     // what the editor's layouter builds for the text when it changes (the link list is empty here)
     let t = text.clone();
     println!("editor::highlight_with_math (the job the layouter builds when the text changes): {:?}", avg(5, Box::new(move || drop(crate::editor::highlight_with_math(&t, &[], &crate::fonts::EditorFonts::uniform(15.0), &[], Some(0..0))))));
+    // the same by blocks (EDIT-109): the first time, after an edit of one character and after the cursor moved to another line
+    let fonts = crate::fonts::EditorFonts::uniform(15.0);
+    let mut formats = crate::editor::FormatCache::default();
+    let s = Instant::now();
+    drop(formats.highlight(&text, &[], &fonts, &[], Some(0..0)));
+    println!("editor::FormatCache::highlight, first time (every block): {:?}", s.elapsed());
+    let (typed, mut flip) = (text.replacen("Some text", "Some  text", 1), false);
+    let mid = text.len() / 2;
+    let typed = format!("{}x{}", &typed[..mid], &typed[mid..]);
+    println!(
+        "editor::FormatCache::highlight, after an edit of one block: {:?}",
+        avg(
+            20,
+            Box::new({
+                let (t, e, fonts) = (text.clone(), typed.clone(), fonts.clone());
+                move || {
+                    flip = !flip;
+                    drop(formats.highlight(if flip { &e } else { &t }, &[], &fonts, &[], Some(0..0)))
+                }
+            })
+        )
+    );
+    let mut formats = crate::editor::FormatCache::default();
+    drop(formats.highlight(&text, &[], &fonts, &[], Some(0..0)));
+    let mut line = 0;
+    println!(
+        "editor::FormatCache::highlight, the cursor moved to another line: {:?}",
+        avg(
+            20,
+            Box::new({
+                let (t, fonts) = (text.clone(), crate::fonts::EditorFonts::uniform(15.0));
+                move || {
+                    line = (line + 9_000) % 20_000;
+                    drop(formats.highlight(&t, &[], &fonts, &[], Some(line..line + 1)))
+                }
+            })
+        )
+    );
     let t = text.clone();
-    println!("syntax::fences alone: {:?}", avg(20, Box::new(move || drop(crate::syntax::fences(&crate::markdown::lines_with_offsets(&t).into_iter().map(|(_, l)| l).collect::<Vec<_>>())))));
+    println!("syntax::fences alone:{:?}", avg(20, Box::new(move || drop(crate::syntax::fences(&crate::markdown::lines_with_offsets(&t).into_iter().map(|(_, l)| l).collect::<Vec<_>>())))));
     // the whole window: the editor and the reading view drawing the note, per frame
     for reading in [false, true] {
         let mut w = W::new("timing", &text, true);
