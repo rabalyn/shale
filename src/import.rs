@@ -11,6 +11,8 @@ use crate::media;
 use crate::vault::{rel_to_string, Vault};
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+mod dataflow_tests;
 pub mod dialog;
 pub mod docx;
 mod docx_look;
@@ -563,7 +565,7 @@ pub fn email_note(mail: &Mail, tags: &[String], attachments: &[PathBuf], origina
         s.push('\n');
     }
     s.push_str("## Message\n\n");
-    s.push_str(&mail_text::tidy(&mail.text));
+    s.push_str(&tracing::info_span!("flow.import_mail_text.tidy", peer = "import").in_scope(|| mail_text::tidy(&mail.text)));
     s.push('\n');
     s
 }
@@ -694,6 +696,8 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
             }
             continue;
         }
+        // the dataflow of an imported e-mail (DEV-030): no span for the other kinds of item
+        let flow = matches!(it.source, Source::Email { .. }).then(|| tracing::info_span!("flow.import_mail_text", peer = "import").entered());
         let title = if safe_title(&it.title).is_empty() { "Imported".to_string() } else { safe_title(&it.title) };
         // contact notes (made when needed) and links to them
         let mut people: Vec<String> = Vec::new();
@@ -715,10 +719,14 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
                     let mut atts = Vec::new();
                     for (a, on) in mail.attachments.iter().zip(&it.att_on) {
                         if *on {
-                            atts.push(media::save_bytes(&root, &a.name, &a.data, date).map_err(|e| format!("could not save “{}”: {e}", a.name))?);
+                            atts.push(tracing::info_span!("flow.import_mail_text.save_attachment", peer = "vault").in_scope(|| media::save_bytes(&root, &a.name, &a.data, date)).map_err(|e| format!("could not save “{}”: {e}", a.name))?);
                         }
                     }
-                    let orig = if o.keep_original { Some(media::save_bytes(&root, &original.0, &original.1, date).map_err(|e| format!("could not save the message file: {e}"))?) } else { None };
+                    let orig = if o.keep_original {
+                        Some(tracing::info_span!("flow.import_mail_text.save_original", peer = "vault").in_scope(|| media::save_bytes(&root, &original.0, &original.1, date)).map_err(|e| format!("could not save the message file: {e}"))?)
+                    } else {
+                        None
+                    };
                     email_note(mail, &o.tags, &atts, orig.as_deref(), &people, o.header_list)
                 }
                 Source::Event { event, calendar, original } => {
@@ -759,7 +767,11 @@ pub fn import(vault: &mut Vault, items: &[Item], o: &Options) -> Imported {
         match result {
             Ok(text) => {
                 let rel = vault.new_note_path_max(&o.folder, &title, crate::fsutil::MADE_NAME_MAX);
-                match vault.create_file(&rel, &text) {
+                let written = match &flow {
+                    Some(_) => tracing::info_span!("flow.import_mail_text.write_note", peer = "vault").in_scope(|| vault.create_file(&rel, &text)),
+                    None => vault.create_file(&rel, &text),
+                };
+                match written {
                     Ok(r) => made.push(r),
                     Err(e) => errors.push(format!("“{title}”: could not write the note: {e}")),
                 }

@@ -9,3 +9,7 @@ One row per flow, one row per line; the flow is the name in the begin marker of 
 | Flow | Doc | Driving test | Drift checked by |
 | --- | --- | --- | --- |
 | mail_sync | [mail-sync.md](mail-sync.md) | `mail/env_tests.rs::mail_env_password_account_syncs_end_to_end_and_changes_nothing_on_the_server` | mail-env suite (land.sh, when mail code changes) |
+| import_docx | [import-docx.md](import-docx.md) | `import/dataflow_tests.rs::dev_030_a_word_import_is_a_dataflow_diagram` | every `cargo test` |
+| import_thunderbird | [import-thunderbird.md](import-thunderbird.md) | `import/tb_store/dataflow_tests.rs::dev_030_a_thunderbird_lookup_is_a_dataflow_diagram` | every `cargo test` |
+| import_mail_text | [import-mail-text.md](import-mail-text.md) | `import/dataflow_tests.rs::dev_030_an_imported_email_is_a_dataflow_diagram` | every `cargo test` |
+| import_programs | [import-programs.md](import-programs.md) | `import/from_programs/dataflow_tests.rs::dev_030_a_drop_from_another_program_is_a_dataflow_diagram` | every `cargo test` |
