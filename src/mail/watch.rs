@@ -123,6 +123,8 @@ impl Watch {
                 tx: self.tx.clone(),
                 checking: self.checking.clone(),
                 ctx: ctx.cloned(),
+                // the thread records in the dispatcher of whoever started it (DEV-026, DEV-028)
+                dispatch: tracing::dispatcher::get_default(|d| d.clone()),
             };
             if std::thread::Builder::new().name("mail-watch".into()).spawn(move || run(job)).is_ok() {
                 self.running.insert(key(w), Running { wanted: w.clone(), stop });
@@ -195,6 +197,7 @@ struct Job {
     tx: Sender<Event>,
     checking: Arc<AtomicUsize>,
     ctx: Option<eframe::egui::Context>,
+    dispatch: tracing::Dispatch,
 }
 
 impl Job {
@@ -235,6 +238,11 @@ enum Ended {
 }
 
 fn run(job: Job) {
+    let dispatch = job.dispatch.clone();
+    tracing::dispatcher::with_default(&dispatch, || run_in(job));
+}
+
+fn run_in(job: Job) {
     let mut pause = job.timing.backoff_first;
     while !job.stopped() {
         let ended = crate::jobs::catch(|| session(&job, &mut pause)).unwrap_or_else(Ended::Broken);
@@ -255,7 +263,8 @@ fn run(job: Job) {
 
 /// One connection: check the folder, wait for a change (or the time to look again), check again.
 fn session(job: &Job, pause: &mut Duration) -> Ended {
-    let mut client = match job.connector.connect() {
+    let _flow = tracing::info_span!("flow.mail_watch", peer = "watch").entered();
+    let mut client = match tracing::info_span!("flow.mail_watch.connect", peer = "imap").in_scope(|| job.connector.connect()) {
         Ok(c) => c,
         Err(ImapError::Auth(m)) => return Ended::SignIn(m),
         Err(e) => return Ended::Broken(e.to_string()),
@@ -268,7 +277,7 @@ fn session(job: &Job, pause: &mut Duration) -> Ended {
         }
         if check {
             job.checking.fetch_add(1, Ordering::SeqCst);
-            let checked = check_folder(&job.store, &mut client, &job.account, &job.folder, &job.opts);
+            let checked = tracing::info_span!("flow.mail_watch.check_folder", peer = "imap").in_scope(|| check_folder(&job.store, &mut client, &job.account, &job.folder, &job.opts));
             job.checking.fetch_sub(1, Ordering::SeqCst);
             match checked {
                 Ok(Some((added, changed))) => {
@@ -284,7 +293,7 @@ fn session(job: &Job, pause: &mut Duration) -> Ended {
         }
         check = true;
         if idle {
-            match client.idle(job.timing.idle_max, &|| job.stopped()) {
+            match tracing::info_span!("flow.mail_watch.idle", peer = "imap").in_scope(|| client.idle(job.timing.idle_max, &|| job.stopped())) {
                 Ok(IdleEnd::Changed) => {}
                 Ok(IdleEnd::Elapsed) => check = false,
                 Ok(IdleEnd::Stopped) => break Ended::Stopped,
